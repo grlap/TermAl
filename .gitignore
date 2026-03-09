@@ -1,0 +1,7 @@
+/target
+/ui/node_modules
+/ui/dist
+/ui/.vite
+/ui/tsconfig.node.tsbuildinfo
+/ui/vite.config.js
+/ui/vite.config.d.ts
