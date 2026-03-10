@@ -1,13 +1,17 @@
 import {
+  memo,
   useEffect,
   useId,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
+  type CSSProperties,
   type ClipboardEvent as ReactClipboardEvent,
   type KeyboardEvent as ReactKeyboardEvent,
   type PointerEvent as ReactPointerEvent,
 } from "react";
+import { createPortal } from "react-dom";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import {
@@ -21,6 +25,7 @@ import {
   submitApproval,
   updateSessionSettings,
 } from "./api";
+import { highlightCode } from "./highlight";
 import type {
   ApprovalDecision,
   ApprovalMessage,
@@ -35,42 +40,39 @@ import type {
   PendingPrompt,
   SandboxMode,
   Session,
+  TextMessage,
   ThinkingMessage,
 } from "./types";
-
-type WorkspacePane = {
-  id: string;
-  sessionIds: string[];
-  activeSessionId: string | null;
-  viewMode: PaneViewMode;
-  sourcePath: string | null;
-};
-
-type WorkspaceNode =
-  | {
-      type: "pane";
-      paneId: string;
-    }
-  | {
-      id: string;
-      type: "split";
-      direction: "row" | "column";
-      ratio: number;
-      first: WorkspaceNode;
-      second: WorkspaceNode;
-    };
-
-type WorkspaceState = {
-  root: WorkspaceNode | null;
-  panes: WorkspacePane[];
-  activePaneId: string | null;
-};
+import {
+  activatePane,
+  closeSessionTab,
+  getSplitRatio,
+  openSessionInWorkspaceState,
+  placeDraggedSession,
+  reconcileWorkspaceState,
+  setPaneSourcePath,
+  setPaneViewMode,
+  splitPane,
+  updateSplitRatio,
+  type PaneViewMode,
+  type TabDropPlacement,
+  type WorkspaceNode,
+  type WorkspacePane,
+  type WorkspaceState,
+} from "./workspace";
+import { reconcileSessions } from "./session-reconcile";
+import {
+  THEMES,
+  applyThemePreference,
+  getStoredThemePreference,
+  persistThemePreference,
+  type ThemeId,
+} from "./themes";
 
 type SessionFlagMap = Record<string, true | undefined>;
-type TabDropPlacement = "left" | "right" | "top" | "bottom" | "tabs";
-type PaneViewMode = "session" | "prompt" | "commands" | "diffs" | "source";
 type SessionSettingsField = "sandboxMode" | "approvalPolicy" | "claudeApprovalMode";
 type SessionSettingsValue = SandboxMode | ApprovalPolicy | ClaudeApprovalMode;
+type PreferencesTabId = "themes" | "claude-approvals";
 type PromptHistoryState = {
   index: number;
   draft: string;
@@ -96,6 +98,34 @@ type SessionConversationItem =
 
 const SUPPORTED_PASTED_IMAGE_TYPES = new Set(["image/png", "image/jpeg", "image/gif", "image/webp"]);
 const MAX_PASTED_IMAGE_BYTES = 5 * 1024 * 1024;
+const NEW_SESSION_AGENT_OPTIONS = [
+  { label: "Claude", value: "Claude" },
+  { label: "Codex", value: "Codex" },
+] as const;
+const SANDBOX_MODE_OPTIONS = [
+  { label: "workspace-write", value: "workspace-write" },
+  { label: "read-only", value: "read-only" },
+  { label: "danger-full-access", value: "danger-full-access" },
+] as const;
+const APPROVAL_POLICY_OPTIONS = [
+  { label: "never", value: "never" },
+  { label: "on-request", value: "on-request" },
+  { label: "untrusted", value: "untrusted" },
+  { label: "on-failure", value: "on-failure" },
+] as const;
+const CLAUDE_APPROVAL_OPTIONS = [
+  { label: "ask", value: "ask" },
+  { label: "auto-approve", value: "auto-approve" },
+] as const;
+const PREFERENCES_TABS: ReadonlyArray<{ id: PreferencesTabId; label: string }> = [
+  { id: "themes", label: "Themes" },
+  { id: "claude-approvals", label: "Claude approvals" },
+];
+
+type ComboboxOption = {
+  label: string;
+  value: string;
+};
 
 export default function App() {
   const [sessions, setSessions] = useState<Session[]>([]);
@@ -118,6 +148,11 @@ export default function App() {
   const [pendingKillSessionId, setPendingKillSessionId] = useState<string | null>(null);
   const [updatingSessionIds, setUpdatingSessionIds] = useState<SessionFlagMap>({});
   const [requestError, setRequestError] = useState<string | null>(null);
+  const [themeId, setThemeId] = useState<ThemeId>(() => getStoredThemePreference());
+  const [defaultClaudeApprovalMode, setDefaultClaudeApprovalMode] =
+    useState<ClaudeApprovalMode>("ask");
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [settingsTab, setSettingsTab] = useState<PreferencesTabId>("themes");
   const [draggedTab, setDraggedTab] = useState<{
     sourcePaneId: string;
     sessionId: string;
@@ -131,6 +166,7 @@ export default function App() {
     size: number;
   } | null>(null);
   const draftAttachmentsRef = useRef<Record<string, DraftImageAttachment[]>>({});
+  const sessionsRef = useRef<Session[]>([]);
 
   const sessionLookup = new Map(sessions.map((session) => [session.id, session]));
   const paneLookup = new Map(workspace.panes.map((pane) => [pane.id, pane]));
@@ -140,16 +176,19 @@ export default function App() {
     ? (sessionLookup.get(activePane.activeSessionId) ?? null)
     : null;
   const openSessionIds = new Set(workspace.panes.flatMap((pane) => pane.sessionIds));
+  const activeTheme = THEMES.find((theme) => theme.id === themeId) ?? THEMES[0];
 
   function adoptSessions(
     nextSessions: Session[],
     options?: { openSessionId?: string; paneId?: string | null },
   ) {
-    const availableSessionIds = new Set(nextSessions.map((session) => session.id));
+    const mergedSessions = reconcileSessions(sessionsRef.current, nextSessions);
+    const availableSessionIds = new Set(mergedSessions.map((session) => session.id));
 
-    setSessions(nextSessions);
+    sessionsRef.current = mergedSessions;
+    setSessions(mergedSessions);
     setWorkspace((current) => {
-      const reconciled = reconcileWorkspaceState(current, nextSessions);
+      const reconciled = reconcileWorkspaceState(current, mergedSessions);
       if (!options?.openSessionId) {
         return reconciled;
       }
@@ -240,6 +279,15 @@ export default function App() {
     }
   }, [activeSession?.id]);
 
+  useLayoutEffect(() => {
+    applyThemePreference(themeId);
+    persistThemePreference(themeId);
+  }, [themeId]);
+
+  useEffect(() => {
+    sessionsRef.current = sessions;
+  }, [sessions]);
+
   useEffect(() => {
     draftAttachmentsRef.current = draftAttachmentsBySessionId;
   }, [draftAttachmentsBySessionId]);
@@ -273,6 +321,24 @@ export default function App() {
       window.removeEventListener("keydown", handleKeyDown);
     };
   }, [pendingKillSessionId]);
+
+  useEffect(() => {
+    if (!isSettingsOpen) {
+      return;
+    }
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        setIsSettingsOpen(false);
+      }
+    }
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [isSettingsOpen]);
 
   useEffect(() => {
     function handlePointerMove(event: PointerEvent) {
@@ -428,6 +494,8 @@ export default function App() {
     try {
       const created = await createSession({
         agent: newSessionAgent,
+        claudeApprovalMode:
+          newSessionAgent === "Claude" ? defaultClaudeApprovalMode : undefined,
         workdir: activeSession?.workdir,
       });
       const state = await fetchState();
@@ -458,7 +526,11 @@ export default function App() {
   }
 
   async function handleCancelQueuedPrompt(sessionId: string, promptId: string) {
-    setSessions((current) => removeQueuedPromptFromSessions(current, sessionId, promptId));
+    setSessions((current) => {
+      const next = removeQueuedPromptFromSessions(current, sessionId, promptId);
+      sessionsRef.current = next;
+      return next;
+    });
     try {
       const state = await cancelQueuedPrompt(sessionId, promptId);
       adoptSessions(state.sessions);
@@ -669,16 +741,14 @@ export default function App() {
             New session
           </label>
           <div className="new-session-row">
-            <select
+            <ThemedCombobox
               id="new-session-agent"
-              className="session-select new-session-agent-select"
+              className="new-session-agent-select"
               value={newSessionAgent}
-              onChange={(event) => setNewSessionAgent(event.target.value as AgentType)}
+              options={NEW_SESSION_AGENT_OPTIONS as readonly ComboboxOption[]}
+              onChange={(nextValue) => setNewSessionAgent(nextValue as AgentType)}
               disabled={isCreating}
-            >
-              <option value="Claude">Claude</option>
-              <option value="Codex">Codex</option>
-            </select>
+            />
             <button
               className="new-session-button"
               type="button"
@@ -689,6 +759,24 @@ export default function App() {
             </button>
           </div>
         </div>
+
+        <button
+          className="settings-launcher"
+          type="button"
+          onClick={() => setIsSettingsOpen(true)}
+          aria-haspopup="dialog"
+          aria-expanded={isSettingsOpen}
+          aria-controls="settings-dialog"
+        >
+            <span className="settings-launcher-copy">
+              <span className="session-control-label">Settings</span>
+              <strong className="settings-launcher-title">Open preferences</strong>
+              <span className="settings-launcher-description">
+                Appearance, themes, and Claude session defaults.
+              </span>
+            </span>
+            <span className="settings-launcher-badge">{activeTheme.name}</span>
+        </button>
 
         <div className="session-list">
           {sessions.map((session) => {
@@ -865,7 +953,636 @@ export default function App() {
           </section>
         </div>
       ) : null}
+
+      {isSettingsOpen ? (
+        <div
+          className="dialog-backdrop"
+          onMouseDown={() => {
+            setIsSettingsOpen(false);
+          }}
+        >
+          <section
+            id="settings-dialog"
+            className="dialog-card panel settings-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="settings-dialog-title"
+            onMouseDown={(event) => {
+              event.stopPropagation();
+            }}
+          >
+            <div className="settings-dialog-header">
+              <div>
+                <div className="card-label">Preferences</div>
+                <h2 id="settings-dialog-title">Settings</h2>
+                <p className="dialog-copy settings-dialog-copy">
+                  Tune the interface without disturbing active sessions.
+                </p>
+              </div>
+
+              <button
+                className="ghost-button settings-dialog-close"
+                type="button"
+                onClick={() => {
+                  setIsSettingsOpen(false);
+                }}
+              >
+                Close
+              </button>
+            </div>
+
+            <div className="settings-dialog-body">
+              <div className="settings-tab-list" role="tablist" aria-label="Preferences sections">
+                {PREFERENCES_TABS.map((tab) => {
+                  const isSelected = settingsTab === tab.id;
+
+                  return (
+                    <button
+                      key={tab.id}
+                      id={`settings-tab-${tab.id}`}
+                      className={`settings-tab ${isSelected ? "selected" : ""}`}
+                      type="button"
+                      role="tab"
+                      aria-selected={isSelected}
+                      aria-controls={`settings-panel-${tab.id}`}
+                      onClick={() => setSettingsTab(tab.id)}
+                    >
+                      {tab.label}
+                    </button>
+                  );
+                })}
+              </div>
+
+              <div
+                id={`settings-panel-${settingsTab}`}
+                className={`settings-tab-panel ${settingsTab === "themes" ? "theme-settings-panel" : ""}`.trim()}
+                role="tabpanel"
+                aria-labelledby={`settings-tab-${settingsTab}`}
+              >
+                {settingsTab === "themes" ? (
+                  <ThemePicker
+                    activeTheme={activeTheme}
+                    themeId={themeId}
+                    onSelectTheme={setThemeId}
+                  />
+                ) : (
+                  <ClaudeApprovalsPreferencesPanel
+                    defaultClaudeApprovalMode={defaultClaudeApprovalMode}
+                    onSelectMode={setDefaultClaudeApprovalMode}
+                  />
+                )}
+              </div>
+            </div>
+          </section>
+        </div>
+      ) : null}
     </div>
+  );
+}
+
+function ThemePicker({
+  activeTheme,
+  themeId,
+  onSelectTheme,
+}: {
+  activeTheme: (typeof THEMES)[number];
+  themeId: ThemeId;
+  onSelectTheme: (themeId: ThemeId) => void;
+}) {
+  const listRef = useRef<HTMLDivElement | null>(null);
+  const dragStateRef = useRef<{
+    pointerId: number;
+    startPointerY: number;
+    startThumbOffset: number;
+  } | null>(null);
+  const [scrollState, setScrollState] = useState({
+    thumbHeight: 0,
+    thumbOffset: 0,
+    visible: false,
+  });
+  const [isDraggingScrollbar, setIsDraggingScrollbar] = useState(false);
+
+  useLayoutEffect(() => {
+    const listElement = listRef.current;
+    if (!listElement) {
+      return;
+    }
+
+    const updateScrollState = () => {
+      const { clientHeight, scrollHeight, scrollTop } = listElement;
+      const hasOverflow = scrollHeight - clientHeight > 1;
+
+      if (!hasOverflow) {
+        setScrollState((current) =>
+          current.visible || current.thumbHeight !== 0 || current.thumbOffset !== 0
+            ? { thumbHeight: 0, thumbOffset: 0, visible: false }
+            : current,
+        );
+        return;
+      }
+
+      const thumbHeight = Math.max((clientHeight * clientHeight) / scrollHeight, 48);
+      const maxThumbOffset = Math.max(clientHeight - thumbHeight, 0);
+      const maxScrollTop = Math.max(scrollHeight - clientHeight, 1);
+      const thumbOffset = (scrollTop / maxScrollTop) * maxThumbOffset;
+
+      setScrollState((current) => {
+        if (
+          current.visible &&
+          Math.abs(current.thumbHeight - thumbHeight) < 0.5 &&
+          Math.abs(current.thumbOffset - thumbOffset) < 0.5
+        ) {
+          return current;
+        }
+
+        return {
+          thumbHeight,
+          thumbOffset,
+          visible: true,
+        };
+      });
+    };
+
+    updateScrollState();
+
+    listElement.addEventListener("scroll", updateScrollState);
+    window.addEventListener("resize", updateScrollState);
+
+    const resizeObserver =
+      typeof ResizeObserver === "undefined"
+        ? null
+        : new ResizeObserver(() => {
+            updateScrollState();
+          });
+
+    resizeObserver?.observe(listElement);
+
+    return () => {
+      listElement.removeEventListener("scroll", updateScrollState);
+      window.removeEventListener("resize", updateScrollState);
+      resizeObserver?.disconnect();
+    };
+  }, []);
+
+  useEffect(() => {
+    function handlePointerMove(event: PointerEvent) {
+      const dragState = dragStateRef.current;
+      const listElement = listRef.current;
+      if (!dragState || !listElement || event.pointerId !== dragState.pointerId) {
+        return;
+      }
+
+      const { clientHeight, scrollHeight } = listElement;
+      const thumbHeight = Math.max((clientHeight * clientHeight) / Math.max(scrollHeight, 1), 48);
+      const maxThumbOffset = Math.max(clientHeight - thumbHeight, 0);
+      const nextThumbOffset = clamp(
+        dragState.startThumbOffset + (event.clientY - dragState.startPointerY),
+        0,
+        maxThumbOffset,
+      );
+      const maxScrollTop = Math.max(scrollHeight - clientHeight, 0);
+
+      listElement.scrollTop =
+        maxThumbOffset > 0 ? (nextThumbOffset / maxThumbOffset) * maxScrollTop : 0;
+    }
+
+    function handlePointerUp(event: PointerEvent) {
+      const dragState = dragStateRef.current;
+      if (!dragState || event.pointerId !== dragState.pointerId) {
+        return;
+      }
+
+      dragStateRef.current = null;
+      setIsDraggingScrollbar(false);
+    }
+
+    window.addEventListener("pointermove", handlePointerMove);
+    window.addEventListener("pointerup", handlePointerUp);
+    window.addEventListener("pointercancel", handlePointerUp);
+
+    return () => {
+      window.removeEventListener("pointermove", handlePointerMove);
+      window.removeEventListener("pointerup", handlePointerUp);
+      window.removeEventListener("pointercancel", handlePointerUp);
+    };
+  }, []);
+
+  function scrollListToThumbOffset(nextThumbOffset: number) {
+    const listElement = listRef.current;
+    if (!listElement) {
+      return;
+    }
+
+    const { clientHeight, scrollHeight } = listElement;
+    const thumbHeight = Math.max((clientHeight * clientHeight) / Math.max(scrollHeight, 1), 48);
+    const maxThumbOffset = Math.max(clientHeight - thumbHeight, 0);
+    const clampedThumbOffset = clamp(nextThumbOffset, 0, maxThumbOffset);
+    const maxScrollTop = Math.max(scrollHeight - clientHeight, 0);
+
+    listElement.scrollTop =
+      maxThumbOffset > 0 ? (clampedThumbOffset / maxThumbOffset) * maxScrollTop : 0;
+  }
+
+  function handleScrollbarThumbPointerDown(event: ReactPointerEvent<HTMLSpanElement>) {
+    event.preventDefault();
+    event.stopPropagation();
+
+    dragStateRef.current = {
+      pointerId: event.pointerId,
+      startPointerY: event.clientY,
+      startThumbOffset: scrollState.thumbOffset,
+    };
+    setIsDraggingScrollbar(true);
+  }
+
+  function handleScrollbarTrackPointerDown(event: ReactPointerEvent<HTMLDivElement>) {
+    event.preventDefault();
+
+    const trackRect = event.currentTarget.getBoundingClientRect();
+    const nextThumbOffset = event.clientY - trackRect.top - scrollState.thumbHeight / 2;
+    const { clientHeight } = event.currentTarget;
+    const clampedThumbOffset = clamp(
+      nextThumbOffset,
+      0,
+      Math.max(clientHeight - scrollState.thumbHeight, 0),
+    );
+
+    scrollListToThumbOffset(clampedThumbOffset);
+    dragStateRef.current = {
+      pointerId: event.pointerId,
+      startPointerY: event.clientY,
+      startThumbOffset: clampedThumbOffset,
+    };
+    setIsDraggingScrollbar(true);
+  }
+
+  return (
+    <section className="theme-panel">
+      <div className="theme-panel-header">
+        <div>
+          <p className="session-control-label">Appearance</p>
+          <p className="theme-panel-copy">{activeTheme.description}</p>
+        </div>
+        <span className="theme-active-badge">{activeTheme.name}</span>
+      </div>
+
+      <div className="theme-option-list-shell">
+        <div ref={listRef} className="theme-option-list" role="radiogroup" aria-label="UI theme">
+          {THEMES.map((theme) => {
+            const isSelected = theme.id === themeId;
+
+            return (
+              <button
+                key={theme.id}
+                className={`theme-option ${isSelected ? "selected" : ""}`}
+                type="button"
+                role="radio"
+                aria-checked={isSelected}
+                onClick={() => onSelectTheme(theme.id)}
+              >
+                <span className="theme-option-main">
+                  <span className="theme-option-title-row">
+                    <strong className="theme-option-title">{theme.name}</strong>
+                    {isSelected ? <span className="theme-option-status">Live</span> : null}
+                  </span>
+                  <span className="theme-option-copy">{theme.description}</span>
+                </span>
+                <span className="theme-option-preview" aria-hidden="true">
+                  {theme.swatches.map((swatch) => (
+                    <span
+                      key={`${theme.id}-${swatch}`}
+                      className="theme-option-swatch"
+                      style={{ background: swatch }}
+                    />
+                  ))}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+        {scrollState.visible ? (
+          <div
+            className={`theme-option-scrollbar ${isDraggingScrollbar ? "dragging" : ""}`}
+            aria-hidden="true"
+            onPointerDown={handleScrollbarTrackPointerDown}
+          >
+            <span
+              className="theme-option-scrollbar-thumb"
+              onPointerDown={handleScrollbarThumbPointerDown}
+              style={{
+                height: `${scrollState.thumbHeight}px`,
+                transform: `translateY(${scrollState.thumbOffset}px)`,
+              }}
+            />
+          </div>
+        ) : null}
+      </div>
+    </section>
+  );
+}
+
+function ClaudeApprovalsPreferencesPanel({
+  defaultClaudeApprovalMode,
+  onSelectMode,
+}: {
+  defaultClaudeApprovalMode: ClaudeApprovalMode;
+  onSelectMode: (mode: ClaudeApprovalMode) => void;
+}) {
+  return (
+    <section className="settings-panel-stack">
+      <div className="settings-panel-intro">
+        <div>
+          <p className="session-control-label">New Claude sessions</p>
+          <p className="settings-panel-copy">
+            Choose the default approval mode for Claude sessions created in this window.
+          </p>
+        </div>
+      </div>
+
+      <article className="message-card prompt-settings-card">
+        <div className="card-label">Session Default</div>
+        <h3>Claude approvals</h3>
+        <div className="prompt-settings-grid">
+          <div className="session-control-group">
+            <label className="session-control-label" htmlFor="default-claude-approval-mode">
+              Default approval mode
+            </label>
+            <ThemedCombobox
+              id="default-claude-approval-mode"
+              className="prompt-settings-select"
+              value={defaultClaudeApprovalMode}
+              options={CLAUDE_APPROVAL_OPTIONS as readonly ComboboxOption[]}
+              onChange={(nextValue) => onSelectMode(nextValue as ClaudeApprovalMode)}
+            />
+          </div>
+          <p className="session-control-hint">
+            This only affects new Claude sessions you create here. Existing sessions keep their
+            current approval mode.
+          </p>
+        </div>
+      </article>
+    </section>
+  );
+}
+
+function ThemedCombobox({
+  className,
+  disabled = false,
+  id,
+  onChange,
+  options,
+  value,
+}: {
+  className?: string;
+  disabled?: boolean;
+  id: string;
+  onChange: (nextValue: string) => void;
+  options: readonly ComboboxOption[];
+  value: string;
+}) {
+  const listboxId = useId();
+  const triggerRef = useRef<HTMLButtonElement | null>(null);
+  const listRef = useRef<HTMLDivElement | null>(null);
+  const [isOpen, setIsOpen] = useState(false);
+  const [activeIndex, setActiveIndex] = useState(() =>
+    Math.max(
+      options.findIndex((option) => option.value === value),
+      0,
+    ),
+  );
+  const [menuStyle, setMenuStyle] = useState<CSSProperties | null>(null);
+
+  const selectedIndex = options.findIndex((option) => option.value === value);
+  const safeSelectedIndex = selectedIndex >= 0 ? selectedIndex : 0;
+  const selectedOption = options[safeSelectedIndex] ?? options[0];
+
+  useEffect(() => {
+    if (!isOpen) {
+      return;
+    }
+
+    setActiveIndex(safeSelectedIndex);
+  }, [isOpen, safeSelectedIndex]);
+
+  useLayoutEffect(() => {
+    if (!isOpen) {
+      return;
+    }
+
+    function updateMenuStyle() {
+      const trigger = triggerRef.current;
+      if (!trigger) {
+        return;
+      }
+
+      const rect = trigger.getBoundingClientRect();
+      const viewportPadding = 12;
+      const estimatedHeight = Math.min(Math.max(options.length * 52 + 12, 120), 280);
+      const availableBelow = window.innerHeight - rect.bottom - viewportPadding;
+      const availableAbove = rect.top - viewportPadding;
+      const openUpward =
+        availableBelow < Math.min(estimatedHeight, 220) && availableAbove > availableBelow;
+      const maxHeight = Math.max(openUpward ? availableAbove : availableBelow, 140);
+
+      setMenuStyle({
+        left: rect.left,
+        width: rect.width,
+        maxHeight,
+        top: openUpward ? undefined : rect.bottom + 8,
+        bottom: openUpward ? window.innerHeight - rect.top + 8 : undefined,
+      });
+    }
+
+    updateMenuStyle();
+    window.addEventListener("resize", updateMenuStyle);
+    window.addEventListener("scroll", updateMenuStyle, true);
+
+    return () => {
+      window.removeEventListener("resize", updateMenuStyle);
+      window.removeEventListener("scroll", updateMenuStyle, true);
+    };
+  }, [isOpen, options.length]);
+
+  useEffect(() => {
+    if (!isOpen) {
+      return;
+    }
+
+    function handlePointerDown(event: PointerEvent) {
+      const target = event.target;
+      if (!(target instanceof Node)) {
+        return;
+      }
+
+      if (triggerRef.current?.contains(target) || listRef.current?.contains(target)) {
+        return;
+      }
+
+      setIsOpen(false);
+    }
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        setIsOpen(false);
+        triggerRef.current?.focus();
+        return;
+      }
+
+      if (event.key === "Tab") {
+        setIsOpen(false);
+        return;
+      }
+
+      if (event.key === "ArrowDown") {
+        event.preventDefault();
+        setActiveIndex((current) => (current + 1) % options.length);
+        return;
+      }
+
+      if (event.key === "ArrowUp") {
+        event.preventDefault();
+        setActiveIndex((current) => (current - 1 + options.length) % options.length);
+        return;
+      }
+
+      if (event.key === "Home") {
+        event.preventDefault();
+        setActiveIndex(0);
+        return;
+      }
+
+      if (event.key === "End") {
+        event.preventDefault();
+        setActiveIndex(options.length - 1);
+        return;
+      }
+
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        const nextOption = options[activeIndex];
+        if (!nextOption) {
+          return;
+        }
+
+        onChange(nextOption.value);
+        setIsOpen(false);
+        triggerRef.current?.focus();
+      }
+    }
+
+    document.addEventListener("pointerdown", handlePointerDown);
+    window.addEventListener("keydown", handleKeyDown);
+
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown);
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [activeIndex, isOpen, onChange, options]);
+
+  useEffect(() => {
+    if (!isOpen) {
+      return;
+    }
+
+    const activeOption = listRef.current?.querySelector<HTMLElement>(
+      `[data-option-index="${activeIndex}"]`,
+    );
+    activeOption?.scrollIntoView({
+      block: "nearest",
+    });
+  }, [activeIndex, isOpen]);
+
+  function handleTriggerKeyDown(event: ReactKeyboardEvent<HTMLButtonElement>) {
+    if (disabled) {
+      return;
+    }
+
+    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      event.preventDefault();
+      setActiveIndex(safeSelectedIndex);
+      setIsOpen(true);
+      return;
+    }
+
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      setActiveIndex(safeSelectedIndex);
+      setIsOpen((current) => !current);
+    }
+  }
+
+  return (
+    <>
+      <button
+        ref={triggerRef}
+        id={id}
+        className={`session-select combo-trigger ${className ?? ""}`.trim()}
+        type="button"
+        role="combobox"
+        aria-controls={listboxId}
+        aria-expanded={isOpen}
+        aria-haspopup="listbox"
+        aria-activedescendant={isOpen ? `${listboxId}-option-${activeIndex}` : undefined}
+        disabled={disabled}
+        onClick={() => {
+          if (!disabled) {
+            setActiveIndex(safeSelectedIndex);
+            setIsOpen((current) => !current);
+          }
+        }}
+        onKeyDown={handleTriggerKeyDown}
+      >
+        <span className="combo-trigger-value">{selectedOption?.label ?? value}</span>
+        <span className={`combo-trigger-caret ${isOpen ? "open" : ""}`} aria-hidden="true">
+          v
+        </span>
+      </button>
+
+      {isOpen && menuStyle
+        ? createPortal(
+            <div
+              ref={listRef}
+              id={listboxId}
+              className="combo-menu"
+              role="listbox"
+              style={menuStyle}
+            >
+              {options.map((option, index) => {
+                const isSelected = option.value === value;
+                const isActive = index === activeIndex;
+
+                return (
+                  <button
+                    key={option.value}
+                    id={`${listboxId}-option-${index}`}
+                    className={`combo-option ${isActive ? "active" : ""} ${isSelected ? "selected" : ""}`}
+                    type="button"
+                    role="option"
+                    aria-selected={isSelected}
+                    data-option-index={index}
+                    onMouseEnter={() => {
+                      setActiveIndex(index);
+                    }}
+                    onClick={() => {
+                      onChange(option.value);
+                      setIsOpen(false);
+                      triggerRef.current?.focus();
+                    }}
+                  >
+                    <span className="combo-option-label">{option.label}</span>
+                    <span
+                      className={`combo-option-indicator ${isSelected ? "visible" : ""}`}
+                      aria-hidden="true"
+                    />
+                  </button>
+                );
+              })}
+            </div>,
+            document.body,
+          )
+        : null}
+    </>
   );
 }
 
@@ -1188,16 +1905,33 @@ function SessionPaneView({
     Record<string, true | undefined>
   >({});
   const showDropOverlay = Boolean(draggedTab) && !(draggedTab?.sourcePaneId === pane.id && sessions.length <= 1);
-  const candidateSourcePaths = activeSession ? collectCandidateSourcePaths(activeSession) : [];
-  const commandMessages = activeSession
-    ? activeSession.messages.filter((message): message is CommandMessage => message.type === "command")
-    : [];
-  const diffMessages = activeSession
-    ? activeSession.messages.filter((message): message is DiffMessage => message.type === "diff")
-    : [];
-  const pendingPrompts = activeSession?.pendingPrompts ?? [];
-  const sessionConversationItems = activeSession ? buildSessionConversationItems(activeSession) : [];
-  const lastUserPrompt = activeSession ? findLastUserPrompt(activeSession) : null;
+  const candidateSourcePaths = useMemo(
+    () => (activeSession ? collectCandidateSourcePaths(activeSession) : []),
+    [activeSession],
+  );
+  const commandMessages = useMemo(
+    () =>
+      activeSession
+        ? activeSession.messages.filter((message): message is CommandMessage => message.type === "command")
+        : [],
+    [activeSession],
+  );
+  const diffMessages = useMemo(
+    () =>
+      activeSession
+        ? activeSession.messages.filter((message): message is DiffMessage => message.type === "diff")
+        : [],
+    [activeSession],
+  );
+  const pendingPrompts = useMemo(() => activeSession?.pendingPrompts ?? [], [activeSession]);
+  const sessionConversationItems = useMemo(
+    () => (activeSession ? buildSessionConversationItems(activeSession) : []),
+    [activeSession],
+  );
+  const lastUserPrompt = useMemo(
+    () => (activeSession ? findLastUserPrompt(activeSession) : null),
+    [activeSession],
+  );
   const isSessionBusy =
     activeSession?.status === "active" || activeSession?.status === "approval";
   const showWaitingIndicator =
@@ -1214,20 +1948,29 @@ function SessionPaneView({
       : `${pane.id}:${pane.viewMode}:${activeSession?.id ?? "empty"}`;
   const defaultScrollToBottom =
     pane.viewMode === "session" || pane.viewMode === "commands" || pane.viewMode === "diffs";
-  const visibleMessages =
-    pane.viewMode === "commands"
-      ? commandMessages
-      : pane.viewMode === "diffs"
-        ? diffMessages
-        : [];
-  const visibleContentSignature =
-    pane.viewMode === "session"
-      ? buildConversationListSignature(sessionConversationItems)
-      : buildMessageListSignature(visibleMessages);
-  const visibleLastMessageAuthor =
-    pane.viewMode === "session"
-      ? activeSession?.messages[activeSession.messages.length - 1]?.author
-      : visibleMessages[visibleMessages.length - 1]?.author;
+  const visibleMessages = useMemo(
+    () =>
+      pane.viewMode === "commands"
+        ? commandMessages
+        : pane.viewMode === "diffs"
+          ? diffMessages
+          : [],
+    [commandMessages, diffMessages, pane.viewMode],
+  );
+  const visibleContentSignature = useMemo(
+    () =>
+      pane.viewMode === "session"
+        ? buildConversationListSignature(sessionConversationItems)
+        : buildMessageListSignature(visibleMessages),
+    [pane.viewMode, sessionConversationItems, visibleMessages],
+  );
+  const visibleLastMessageAuthor = useMemo(
+    () =>
+      pane.viewMode === "session"
+        ? activeSession?.messages[activeSession.messages.length - 1]?.author
+        : visibleMessages[visibleMessages.length - 1]?.author,
+    [activeSession, pane.viewMode, visibleMessages],
+  );
   const showNewResponseIndicator = Boolean(newResponseIndicatorByKey[scrollStateKey]);
 
   function resetPromptHistory(sessionId: string) {
@@ -2049,42 +2792,35 @@ function CodexPromptSettingsCard({
           <label className="session-control-label" htmlFor={`sandbox-mode-${paneId}`}>
             Next prompt sandbox
           </label>
-          <select
+          <ThemedCombobox
             id={`sandbox-mode-${paneId}`}
-            className="session-select"
+            className="prompt-settings-select"
             value={session.sandboxMode ?? "workspace-write"}
+            options={SANDBOX_MODE_OPTIONS as readonly ComboboxOption[]}
             disabled={isUpdating}
-            onChange={(event) =>
-              void onSessionSettingsChange(session.id, "sandboxMode", event.target.value as SandboxMode)
+            onChange={(nextValue) =>
+              void onSessionSettingsChange(session.id, "sandboxMode", nextValue as SandboxMode)
             }
-          >
-            <option value="workspace-write">workspace-write</option>
-            <option value="read-only">read-only</option>
-            <option value="danger-full-access">danger-full-access</option>
-          </select>
+          />
         </div>
         <div className="session-control-group">
           <label className="session-control-label" htmlFor={`approval-policy-${paneId}`}>
             Next prompt approval
           </label>
-          <select
+          <ThemedCombobox
             id={`approval-policy-${paneId}`}
-            className="session-select"
+            className="prompt-settings-select"
             value={session.approvalPolicy ?? "never"}
+            options={APPROVAL_POLICY_OPTIONS as readonly ComboboxOption[]}
             disabled={isUpdating}
-            onChange={(event) =>
+            onChange={(nextValue) =>
               void onSessionSettingsChange(
                 session.id,
                 "approvalPolicy",
-                event.target.value as ApprovalPolicy,
+                nextValue as ApprovalPolicy,
               )
             }
-          >
-            <option value="never">never</option>
-            <option value="on-request">on-request</option>
-            <option value="untrusted">untrusted</option>
-            <option value="on-failure">on-failure</option>
-          </select>
+          />
         </div>
         <p className="session-control-hint">
           Changes apply on the next Codex prompt. If the underlying thread was started with a
@@ -2119,22 +2855,20 @@ function ClaudePromptSettingsCard({
           <label className="session-control-label" htmlFor={`claude-approval-mode-${paneId}`}>
             Claude approval mode
           </label>
-          <select
+          <ThemedCombobox
             id={`claude-approval-mode-${paneId}`}
-            className="session-select"
+            className="prompt-settings-select"
             value={session.claudeApprovalMode ?? "ask"}
+            options={CLAUDE_APPROVAL_OPTIONS as readonly ComboboxOption[]}
             disabled={isUpdating}
-            onChange={(event) =>
+            onChange={(nextValue) =>
               void onSessionSettingsChange(
                 session.id,
                 "claudeApprovalMode",
-                event.target.value as ClaudeApprovalMode,
+                nextValue as ClaudeApprovalMode,
               )
             }
-          >
-            <option value="ask">ask</option>
-            <option value="auto-approve">auto-approve</option>
-          </select>
+          />
         </div>
         <p className="session-control-hint">
           Ask keeps the current approval cards. Auto-approve lets Claude continue without pausing
@@ -2266,14 +3000,18 @@ function SourcePane({
             <span>Source</span>
             <span>{fileState.path}</span>
           </div>
-          <pre className="code-block source-code-block">{fileState.content}</pre>
+          <HighlightedCodeBlock
+            className="code-block source-code-block"
+            code={fileState.content}
+            pathHint={fileState.path}
+          />
         </article>
       ) : null}
     </div>
   );
 }
 
-function MessageCard({
+const MessageCard = memo(function MessageCard({
   message,
   onApprovalDecision,
 }: {
@@ -2281,7 +3019,14 @@ function MessageCard({
   onApprovalDecision: (messageId: string, decision: ApprovalDecision) => void;
 }) {
   switch (message.type) {
-    case "text":
+    case "text": {
+      const connectionRetryNotice =
+        message.author === "assistant" ? parseConnectionRetryNotice(message.text) : null;
+
+      if (connectionRetryNotice) {
+        return <ConnectionRetryCard message={message} notice={connectionRetryNotice} />;
+      }
+
       return (
         <article className={`message-card bubble bubble-${message.author}`}>
           <MessageMeta author={message.author} timestamp={message.timestamp} />
@@ -2297,6 +3042,7 @@ function MessageCard({
           )}
         </article>
       );
+    }
     case "thinking":
       return <ThinkingCard message={message} />;
     case "command":
@@ -2310,9 +3056,9 @@ function MessageCard({
     default:
       return null;
   }
-}
+}, (previous, next) => previous.message === next.message);
 
-function PendingPromptCard({
+const PendingPromptCard = memo(function PendingPromptCard({
   prompt,
   onCancel,
 }: {
@@ -2343,6 +3089,33 @@ function PendingPromptCard({
       )}
     </article>
   );
+}, (previous, next) => previous.prompt === next.prompt);
+
+function ConnectionRetryCard({
+  message,
+  notice,
+}: {
+  message: TextMessage;
+  notice: ConnectionRetryNotice;
+}) {
+  return (
+    <article className="message-card connection-notice-card" role="status" aria-live="polite">
+      <MessageMeta author={message.author} timestamp={message.timestamp} />
+      <div className="connection-notice-body">
+        <div className="activity-spinner connection-notice-spinner" aria-hidden="true" />
+        <div className="connection-notice-copy">
+          <div className="card-label">Connection</div>
+          <div className="connection-notice-heading">
+            <h3>Reconnecting to continue this turn</h3>
+            {notice.attemptLabel ? (
+              <span className="chip chip-status chip-status-active">{notice.attemptLabel}</span>
+            ) : null}
+          </div>
+          <p className="connection-notice-detail">{notice.detail}</p>
+        </div>
+      </div>
+    </article>
+  );
 }
 
 function MessageAttachmentList({ attachments }: { attachments: ImageAttachment[] }) {
@@ -2369,6 +3142,39 @@ function MessageMeta({ author, timestamp }: { author: string; timestamp: string 
   );
 }
 
+function HighlightedCodeBlock({
+  className,
+  code,
+  commandHint,
+  language,
+  pathHint,
+}: {
+  className: string;
+  code: string;
+  commandHint?: string | null;
+  language?: string | null;
+  pathHint?: string | null;
+}) {
+  const highlighted = useMemo(
+    () =>
+      highlightCode(code, {
+        commandHint,
+        language,
+        pathHint,
+      }),
+    [code, commandHint, language, pathHint],
+  );
+
+  return (
+    <pre className={`${className} syntax-block`}>
+      <code
+        className={`hljs${highlighted.language ? ` language-${highlighted.language}` : ""}`}
+        dangerouslySetInnerHTML={{ __html: highlighted.html }}
+      />
+    </pre>
+  );
+}
+
 function ThinkingCard({ message }: { message: ThinkingMessage }) {
   return (
     <article className="message-card reasoning-card">
@@ -2385,47 +3191,253 @@ function ThinkingCard({ message }: { message: ThinkingMessage }) {
 }
 
 function CommandCard({ message }: { message: CommandMessage }) {
-  const [expanded, setExpanded] = useState(message.status !== "running");
+  const [expanded, setExpanded] = useState(false);
+  const [copiedSection, setCopiedSection] = useState<"command" | "output" | null>(null);
+  const hasOutput = message.output.trim().length > 0;
+  const displayOutput = hasOutput
+    ? message.output
+    : message.status === "running"
+      ? "Awaiting output…"
+      : "No output";
+  const canExpandOutput =
+    hasOutput && (message.output.split("\n").length > 10 || message.output.length > 480);
+  const statusTone = mapCommandStatus(message.status);
+
+  useEffect(() => {
+    if (!copiedSection) {
+      return;
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      setCopiedSection(null);
+    }, 1600);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+  }, [copiedSection]);
+
+  async function handleCopy(section: "command" | "output", text: string) {
+    try {
+      await copyTextToClipboard(text);
+      setCopiedSection(section);
+    } catch {
+      setCopiedSection(null);
+    }
+  }
 
   return (
-    <article className="message-card utility-card">
+    <article className="message-card utility-card command-card">
       <MessageMeta author={message.author} timestamp={message.timestamp} />
       <div className="utility-header">
         <div>
           <div className="card-label">Command</div>
-          <pre className="command-text">{message.command}</pre>
         </div>
         <div className="utility-actions">
-          <span className={`chip chip-status chip-status-${mapCommandStatus(message.status)}`}>
+          <span className={`chip chip-status chip-status-${statusTone} command-status-chip`}>
             {message.status}
           </span>
-          <button className="ghost-button" type="button" onClick={() => setExpanded((open) => !open)}>
-            {expanded ? "Collapse" : "View"}
-          </button>
         </div>
       </div>
-      {expanded ? <pre className="code-block">{message.output}</pre> : null}
+
+      <div className="command-panel">
+        <div className="command-row">
+          <div className="command-row-label">IN</div>
+          <div className="command-row-body">
+            <HighlightedCodeBlock
+              className="command-text command-text-input"
+              code={message.command}
+              language="bash"
+            />
+          </div>
+          <div className="command-row-actions">
+            <button
+              className={`command-icon-button${copiedSection === "command" ? " copied" : ""}`}
+              type="button"
+              onClick={() => void handleCopy("command", message.command)}
+              aria-label={copiedSection === "command" ? "Command copied" : "Copy command"}
+              title={copiedSection === "command" ? "Copied" : "Copy command"}
+            >
+              {copiedSection === "command" ? <CheckIcon /> : <CopyIcon />}
+            </button>
+          </div>
+        </div>
+
+        <div className="command-row command-row-output">
+          <div className="command-row-label">OUT</div>
+          <div className="command-row-body">
+            <div
+              className={`command-output-shell ${expanded ? "expanded" : "collapsed"} ${hasOutput ? "has-output" : "empty"}`}
+            >
+              {hasOutput ? (
+              <HighlightedCodeBlock
+                className="command-text command-text-output"
+                code={displayOutput}
+                commandHint={message.output ? message.command : null}
+              />
+              ) : (
+                <pre className="command-text command-text-output command-text-placeholder">
+                  {displayOutput}
+                </pre>
+              )}
+            </div>
+          </div>
+          <div className="command-row-actions">
+            <button
+              className={`command-icon-button${copiedSection === "output" ? " copied" : ""}`}
+              type="button"
+              onClick={() => void handleCopy("output", message.output)}
+              aria-label={copiedSection === "output" ? "Output copied" : "Copy output"}
+              title={copiedSection === "output" ? "Copied" : "Copy output"}
+              disabled={!message.output}
+            >
+              {copiedSection === "output" ? <CheckIcon /> : <CopyIcon />}
+            </button>
+            {canExpandOutput ? (
+              <button
+                className="command-icon-button"
+                type="button"
+                onClick={() => setExpanded((open) => !open)}
+                aria-label={expanded ? "Collapse output" : "Expand output"}
+                aria-pressed={expanded}
+                title={expanded ? "Collapse output" : "Expand output"}
+              >
+                {expanded ? <CollapseIcon /> : <ExpandIcon />}
+              </button>
+            ) : null}
+          </div>
+        </div>
+      </div>
     </article>
   );
 }
 
+function CopyIcon() {
+  return (
+    <svg className="command-icon" viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+      <path
+        d="M5 2.5h6.5A1.5 1.5 0 0 1 13 4v7.5A1.5 1.5 0 0 1 11.5 13H5A1.5 1.5 0 0 1 3.5 11.5V4A1.5 1.5 0 0 1 5 2.5Zm0 1a.5.5 0 0 0-.5.5v7.5a.5.5 0 0 0 .5.5h6.5a.5.5 0 0 0 .5-.5V4a.5.5 0 0 0-.5-.5H5Z"
+        fill="currentColor"
+      />
+      <path
+        d="M2.5 5.5a.5.5 0 0 1 .5.5v6A1.5 1.5 0 0 0 4.5 13.5h5a.5.5 0 0 1 0 1h-5A2.5 2.5 0 0 1 2 12V6a.5.5 0 0 1 .5-.5Z"
+        fill="currentColor"
+      />
+    </svg>
+  );
+}
+
+function CheckIcon() {
+  return (
+    <svg className="command-icon" viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+      <path
+        d="M13.35 4.65a.5.5 0 0 1 0 .7l-6 6a.5.5 0 0 1-.7 0l-3-3a.5.5 0 1 1 .7-.7L7 10.29l5.65-5.64a.5.5 0 0 1 .7 0Z"
+        fill="currentColor"
+      />
+    </svg>
+  );
+}
+
+function ExpandIcon() {
+  return (
+    <svg className="command-icon" viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+      <path
+        d="M2.5 6V2.5H6v1H4.2l2.15 2.15-.7.7L3.5 4.2V6h-1Zm11 0V4.2l-2.15 2.15-.7-.7L12.8 3.5H11v-1h3.5V6h-1ZM6.35 10.35l.7.7L4.2 13.9H6v1H2.5v-3.5h1V12.8l2.85-2.45Zm4.6.7.7-.7 2.85 2.45v-1.4h1v3.5H11v-1h1.8l-2.85-2.85Z"
+        fill="currentColor"
+      />
+    </svg>
+  );
+}
+
+function CollapseIcon() {
+  return (
+    <svg className="command-icon" viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+      <path
+        d="M6.35 6.35 5.65 7.05 3.5 4.9V6h-1V2.5H6v1H4.9l1.45 1.45Zm3.3 0L11.1 4.9H10v-1h3.5V6h-1V4.9l-2.15 2.15-.7-.7Zm-3.3 3.3.7.7L4.9 12.5H6v1H2.5V10h1v1.1l2.15-2.15Zm3.3.7.7-.7 2.15 2.15V10h1v3.5H10v-1h1.1l-1.45-1.45Z"
+        fill="currentColor"
+      />
+    </svg>
+  );
+}
+
 function DiffCard({ message }: { message: DiffMessage }) {
-  const [expanded, setExpanded] = useState(true);
+  const [expanded, setExpanded] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const canExpandDiff = message.diff.split("\n").length > 14 || message.diff.length > 900;
+  const isExpanded = !canExpandDiff || expanded;
+
+  useEffect(() => {
+    if (!copied) {
+      return;
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      setCopied(false);
+    }, 1600);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+  }, [copied]);
+
+  async function handleCopy() {
+    try {
+      await copyTextToClipboard(message.diff);
+      setCopied(true);
+    } catch {
+      setCopied(false);
+    }
+  }
 
   return (
-    <article className="message-card utility-card">
+    <article className="message-card utility-card diff-card">
       <MessageMeta author={message.author} timestamp={message.timestamp} />
-      <div className="utility-header">
-        <div>
-          <div className="card-label">{message.changeType === "create" ? "New file" : "File edit"}</div>
-          <h3>{message.filePath}</h3>
-          <p className="support-copy">{message.summary}</p>
+      <div className="card-label">{message.changeType === "create" ? "New file" : "File edit"}</div>
+      <div className="command-panel diff-panel">
+        <div className="command-row diff-file-row">
+          <div className="command-row-label">FILE</div>
+          <div className="command-row-body">
+            <div className="diff-file-path">{message.filePath}</div>
+            <p className="diff-file-summary">{message.summary}</p>
+          </div>
         </div>
-        <button className="ghost-button" type="button" onClick={() => setExpanded((open) => !open)}>
-          {expanded ? "Collapse" : "View"}
-        </button>
+        <div className="command-row diff-row">
+          <div className="command-row-label">DIFF</div>
+          <div className="command-row-body">
+            <div className={`diff-preview-shell ${isExpanded ? "expanded" : "collapsed"}`}>
+              <HighlightedCodeBlock
+                className="diff-block diff-preview-text"
+                code={message.diff}
+                language="diff"
+                pathHint={message.filePath}
+              />
+            </div>
+          </div>
+          <div className="command-row-actions">
+            <button
+              className={`command-icon-button${copied ? " copied" : ""}`}
+              type="button"
+              onClick={() => void handleCopy()}
+              aria-label={copied ? "Diff copied" : "Copy diff"}
+              title={copied ? "Copied" : "Copy diff"}
+            >
+              {copied ? <CheckIcon /> : <CopyIcon />}
+            </button>
+            {canExpandDiff ? (
+              <button
+                className="command-icon-button"
+                type="button"
+                onClick={() => setExpanded((open) => !open)}
+                aria-label={isExpanded ? "Collapse diff" : "Expand diff"}
+                aria-pressed={isExpanded}
+                title={isExpanded ? "Collapse diff" : "Expand diff"}
+              >
+                {isExpanded ? <CollapseIcon /> : <ExpandIcon />}
+              </button>
+            ) : null}
+          </div>
+        </div>
       </div>
-      {expanded ? <pre className="diff-block">{message.diff}</pre> : null}
     </article>
   );
 }
@@ -2448,41 +3460,45 @@ function ApprovalCard({
   message: ApprovalMessage;
   onApprovalDecision: (messageId: string, decision: ApprovalDecision) => void;
 }) {
+  const decided = message.decision !== "pending";
+  const chosen = (d: ApprovalDecision) => (message.decision === d ? " chosen" : "");
+  const resolvedDecision = message.decision === "pending" ? null : message.decision;
+
   return (
-    <article className="message-card approval-card">
+    <article className={`message-card approval-card${decided ? " decided" : ""}`}>
       <MessageMeta author={message.author} timestamp={message.timestamp} />
       <div className="card-label">Approval</div>
       <h3>{message.title}</h3>
-      <code className="approval-command">{message.command}</code>
+      <HighlightedCodeBlock className="approval-command" code={message.command} language="bash" />
       <p className="support-copy">{message.detail}</p>
       <div className="approval-actions">
         <button
-          className="approval-button"
+          className={`approval-button${chosen("accepted")}`}
           type="button"
           onClick={() => onApprovalDecision(message.id, "accepted")}
-          disabled={message.decision !== "pending"}
+          disabled={decided}
         >
           Approve
         </button>
         <button
-          className="approval-button"
+          className={`approval-button${chosen("acceptedForSession")}`}
           type="button"
           onClick={() => onApprovalDecision(message.id, "acceptedForSession")}
-          disabled={message.decision !== "pending"}
+          disabled={decided}
         >
           Approve for session
         </button>
         <button
-          className="approval-button approval-button-reject"
+          className={`approval-button approval-button-reject${chosen("rejected")}`}
           type="button"
           onClick={() => onApprovalDecision(message.id, "rejected")}
-          disabled={message.decision !== "pending"}
+          disabled={decided}
         >
           Reject
         </button>
       </div>
-      {message.decision !== "pending" ? (
-        <p className="approval-result">Decision: {renderDecision(message.decision)}</p>
+      {resolvedDecision ? (
+        <p className="approval-result">Decision: {renderDecision(resolvedDecision)}</p>
       ) : null}
     </article>
   );
@@ -2501,6 +3517,20 @@ function MarkdownContent({ markdown }: { markdown: string }) {
               rel={href?.startsWith("http") ? "noreferrer" : undefined}
             />
           ),
+          code: ({ children, className, inline, ...props }) => {
+            const language = className?.match(/language-([\w-]+)/)?.[1] ?? null;
+            const code = String(children).replace(/\n$/, "");
+
+            if (inline) {
+              return (
+                <code className={className} {...props}>
+                  {children}
+                </code>
+              );
+            }
+
+            return <HighlightedCodeBlock className="code-block" code={code} language={language} />;
+          },
         }}
         remarkPlugins={[remarkGfm]}
       >
@@ -2566,6 +3596,26 @@ function getErrorMessage(error: unknown) {
   }
 
   return "The request failed.";
+}
+
+type ConnectionRetryNotice = {
+  attemptLabel: string | null;
+  detail: string;
+};
+
+function parseConnectionRetryNotice(text: string): ConnectionRetryNotice | null {
+  const trimmed = text.trim();
+  if (!trimmed.startsWith("Connection dropped before the response finished.")) {
+    return null;
+  }
+
+  const attemptMatch = trimmed.match(/Retrying automatically \(attempt (\d+) of (\d+)\)\.?$/);
+  const attemptLabel = attemptMatch ? `Attempt ${attemptMatch[1]} of ${attemptMatch[2]}` : null;
+
+  return {
+    attemptLabel,
+    detail: trimmed,
+  };
 }
 
 function buildMessageListSignature(messages: Message[]) {
@@ -2662,458 +3712,6 @@ function findLastUserPrompt(session: Session) {
   }
 
   return null;
-}
-
-function reconcileWorkspaceState(current: WorkspaceState, sessions: Session[]): WorkspaceState {
-  const availableSessionIds = new Set(sessions.map((session) => session.id));
-  let panes = current.panes.map((pane) => {
-    const sessionIds = pane.sessionIds.filter((sessionId) => availableSessionIds.has(sessionId));
-    const activeSessionId = sessionIds.includes(pane.activeSessionId ?? "")
-      ? pane.activeSessionId
-      : (sessionIds[0] ?? null);
-
-    return {
-      ...pane,
-      sessionIds,
-      activeSessionId,
-    };
-  });
-
-  let root = pruneWorkspaceNode(current.root, new Set(panes.map((pane) => pane.id)));
-
-  if (!root && panes.length > 0) {
-    root = {
-      type: "pane",
-      paneId: panes[0].id,
-    };
-  }
-
-  if (!root && sessions.length > 0) {
-    const initialPane = createPane(sessions[0].id);
-    panes = [initialPane];
-    root = {
-      type: "pane",
-      paneId: initialPane.id,
-    };
-  }
-
-  if (!root) {
-    return {
-      root: null,
-      panes: [],
-      activePaneId: null,
-    };
-  }
-
-  const activePaneId = panes.some((pane) => pane.id === current.activePaneId)
-    ? current.activePaneId
-    : (panes[0]?.id ?? null);
-
-  return {
-    root,
-    panes,
-    activePaneId,
-  };
-}
-
-function openSessionInWorkspaceState(
-  workspace: WorkspaceState,
-  sessionId: string,
-  preferredPaneId: string | null,
-): WorkspaceState {
-  const existingPane = workspace.panes.find((pane) => pane.sessionIds.includes(sessionId));
-  if (existingPane) {
-    return activatePane(workspace, existingPane.id, sessionId);
-  }
-
-  const targetPaneId = workspace.panes.some((pane) => pane.id === preferredPaneId)
-    ? preferredPaneId
-    : (workspace.activePaneId ?? workspace.panes[0]?.id ?? null);
-
-  if (!targetPaneId) {
-    const pane = createPane(sessionId);
-    return {
-      root: {
-        type: "pane",
-        paneId: pane.id,
-      },
-      panes: [pane],
-      activePaneId: pane.id,
-    };
-  }
-
-  return {
-    ...workspace,
-    panes: workspace.panes.map((pane) => {
-      if (pane.id !== targetPaneId) {
-        return pane;
-      }
-
-      return {
-        ...pane,
-        sessionIds: pane.sessionIds.includes(sessionId) ? pane.sessionIds : [...pane.sessionIds, sessionId],
-        activeSessionId: sessionId,
-      };
-    }),
-    activePaneId: targetPaneId,
-  };
-}
-
-function activatePane(
-  workspace: WorkspaceState,
-  paneId: string,
-  sessionId?: string | null,
-): WorkspaceState {
-  return {
-    ...workspace,
-    panes: workspace.panes.map((pane) => {
-      if (pane.id !== paneId) {
-        return pane;
-      }
-
-      return {
-        ...pane,
-        activeSessionId:
-          sessionId && pane.sessionIds.includes(sessionId)
-            ? sessionId
-            : (pane.activeSessionId ?? pane.sessionIds[0] ?? null),
-      };
-    }),
-    activePaneId: paneId,
-  };
-}
-
-function closeSessionTab(
-  workspace: WorkspaceState,
-  paneId: string,
-  sessionId: string,
-): WorkspaceState {
-  const pane = workspace.panes.find((candidate) => candidate.id === paneId);
-  if (!pane) {
-    return workspace;
-  }
-
-  const nextSessionIds = pane.sessionIds.filter((candidate) => candidate !== sessionId);
-  if (nextSessionIds.length === 0) {
-    const panes = workspace.panes.filter((candidate) => candidate.id !== paneId);
-    const root = removePaneFromTree(workspace.root, paneId);
-
-    return {
-      root,
-      panes,
-      activePaneId:
-        panes.some((candidate) => candidate.id === workspace.activePaneId)
-          ? workspace.activePaneId
-          : (panes[0]?.id ?? null),
-    };
-  }
-
-  return {
-    ...workspace,
-    panes: workspace.panes.map((candidate) => {
-      if (candidate.id !== paneId) {
-        return candidate;
-      }
-
-      return {
-        ...candidate,
-        sessionIds: nextSessionIds,
-        activeSessionId:
-          candidate.activeSessionId === sessionId ? (nextSessionIds[0] ?? null) : candidate.activeSessionId,
-      };
-    }),
-    activePaneId: paneId,
-  };
-}
-
-function splitPane(
-  workspace: WorkspaceState,
-  paneId: string,
-  direction: "row" | "column",
-): WorkspaceState {
-  const pane = workspace.panes.find((candidate) => candidate.id === paneId);
-  if (!pane || !workspace.root) {
-    return workspace;
-  }
-
-  const sessionToMove = pane.sessionIds.length > 1 ? (pane.activeSessionId ?? null) : null;
-  const newPane = createPane(sessionToMove ?? undefined, pane.viewMode, pane.sourcePath);
-  const panes = workspace.panes.map((candidate) => {
-    if (candidate.id !== paneId) {
-      return candidate;
-    }
-
-    if (!sessionToMove) {
-      return candidate;
-    }
-
-    const nextSessionIds = candidate.sessionIds.filter((sessionId) => sessionId !== sessionToMove);
-    return {
-      ...candidate,
-      sessionIds: nextSessionIds,
-      activeSessionId: nextSessionIds[0] ?? null,
-    };
-  });
-
-  return {
-    root: insertPaneAdjacent(workspace.root, paneId, direction, newPane.id, false),
-    panes: [...panes, newPane],
-    activePaneId: newPane.id,
-  };
-}
-
-function placeDraggedSession(
-  workspace: WorkspaceState,
-  sourcePaneId: string,
-  sessionId: string,
-  targetPaneId: string,
-  placement: TabDropPlacement,
-): WorkspaceState {
-  const sourcePane = workspace.panes.find((pane) => pane.id === sourcePaneId);
-  const targetPane = workspace.panes.find((pane) => pane.id === targetPaneId);
-  if (!sourcePane || !targetPane || !sourcePane.sessionIds.includes(sessionId)) {
-    return workspace;
-  }
-
-  if (placement === "tabs") {
-    if (sourcePaneId === targetPaneId) {
-      return activatePane(workspace, targetPaneId, sessionId);
-    }
-
-    const withoutSource = closeSessionTab(workspace, sourcePaneId, sessionId);
-    return addSessionToPane(withoutSource, targetPaneId, sessionId);
-  }
-
-  if (sourcePaneId === targetPaneId && sourcePane.sessionIds.length <= 1) {
-    return workspace;
-  }
-
-  const withoutSource = closeSessionTab(workspace, sourcePaneId, sessionId);
-  if (!withoutSource.root || !withoutSource.panes.some((pane) => pane.id === targetPaneId)) {
-    return workspace;
-  }
-
-  const newPane = createPane(sessionId, targetPane.viewMode, targetPane.sourcePath);
-  const direction = placement === "left" || placement === "right" ? "row" : "column";
-  const placeBefore = placement === "left" || placement === "top";
-
-  return {
-    root: insertPaneAdjacent(withoutSource.root, targetPaneId, direction, newPane.id, placeBefore),
-    panes: [...withoutSource.panes, newPane],
-    activePaneId: newPane.id,
-  };
-}
-
-function updateSplitRatio(
-  workspace: WorkspaceState,
-  splitId: string,
-  ratio: number,
-): WorkspaceState {
-  if (!workspace.root) {
-    return workspace;
-  }
-
-  return {
-    ...workspace,
-    root: updateSplitRatioInNode(workspace.root, splitId, ratio),
-  };
-}
-
-function createPane(
-  sessionId?: string,
-  viewMode: PaneViewMode = "session",
-  sourcePath: string | null = null,
-): WorkspacePane {
-  return {
-    id: crypto.randomUUID(),
-    sessionIds: sessionId ? [sessionId] : [],
-    activeSessionId: sessionId ?? null,
-    viewMode,
-    sourcePath,
-  };
-}
-
-function setPaneViewMode(
-  workspace: WorkspaceState,
-  paneId: string,
-  viewMode: PaneViewMode,
-): WorkspaceState {
-  return {
-    ...workspace,
-    panes: workspace.panes.map((pane) => {
-      if (pane.id !== paneId) {
-        return pane;
-      }
-
-      return {
-        ...pane,
-        viewMode,
-      };
-    }),
-  };
-}
-
-function setPaneSourcePath(
-  workspace: WorkspaceState,
-  paneId: string,
-  sourcePath: string,
-): WorkspaceState {
-  return {
-    ...workspace,
-    panes: workspace.panes.map((pane) => {
-      if (pane.id !== paneId) {
-        return pane;
-      }
-
-      return {
-        ...pane,
-        sourcePath,
-      };
-    }),
-  };
-}
-
-function addSessionToPane(
-  workspace: WorkspaceState,
-  paneId: string,
-  sessionId: string,
-): WorkspaceState {
-  return {
-    ...workspace,
-    panes: workspace.panes.map((pane) => {
-      if (pane.id !== paneId) {
-        return pane;
-      }
-
-      return {
-        ...pane,
-        sessionIds: pane.sessionIds.includes(sessionId) ? pane.sessionIds : [...pane.sessionIds, sessionId],
-        activeSessionId: sessionId,
-      };
-    }),
-    activePaneId: paneId,
-  };
-}
-
-function pruneWorkspaceNode(node: WorkspaceNode | null, availablePaneIds: Set<string>): WorkspaceNode | null {
-  if (!node) {
-    return null;
-  }
-
-  if (node.type === "pane") {
-    return availablePaneIds.has(node.paneId) ? node : null;
-  }
-
-  const first = pruneWorkspaceNode(node.first, availablePaneIds);
-  const second = pruneWorkspaceNode(node.second, availablePaneIds);
-  if (!first && !second) {
-    return null;
-  }
-  if (!first) {
-    return second;
-  }
-  if (!second) {
-    return first;
-  }
-
-  return {
-    ...node,
-    first,
-    second,
-  };
-}
-
-function removePaneFromTree(node: WorkspaceNode | null, paneId: string): WorkspaceNode | null {
-  if (!node) {
-    return null;
-  }
-
-  if (node.type === "pane") {
-    return node.paneId === paneId ? null : node;
-  }
-
-  const first = removePaneFromTree(node.first, paneId);
-  const second = removePaneFromTree(node.second, paneId);
-  if (!first && !second) {
-    return null;
-  }
-  if (!first) {
-    return second;
-  }
-  if (!second) {
-    return first;
-  }
-
-  return {
-    ...node,
-    first,
-    second,
-  };
-}
-
-function insertPaneAdjacent(
-  node: WorkspaceNode,
-  paneId: string,
-  direction: "row" | "column",
-  newPaneId: string,
-  placeBefore: boolean,
-): WorkspaceNode {
-  if (node.type === "pane") {
-    if (node.paneId !== paneId) {
-      return node;
-    }
-
-    const insertedPane: WorkspaceNode = {
-      type: "pane",
-      paneId: newPaneId,
-    };
-
-    return {
-      id: crypto.randomUUID(),
-      type: "split",
-      direction,
-      ratio: 0.5,
-      first: placeBefore ? insertedPane : node,
-      second: placeBefore ? node : insertedPane,
-    };
-  }
-
-  return {
-    ...node,
-    first: insertPaneAdjacent(node.first, paneId, direction, newPaneId, placeBefore),
-    second: insertPaneAdjacent(node.second, paneId, direction, newPaneId, placeBefore),
-  };
-}
-
-function updateSplitRatioInNode(node: WorkspaceNode, splitId: string, ratio: number): WorkspaceNode {
-  if (node.type === "pane") {
-    return node;
-  }
-
-  if (node.id === splitId) {
-    return {
-      ...node,
-      ratio,
-    };
-  }
-
-  return {
-    ...node,
-    first: updateSplitRatioInNode(node.first, splitId, ratio),
-    second: updateSplitRatioInNode(node.second, splitId, ratio),
-  };
-}
-
-function getSplitRatio(node: WorkspaceNode | null, splitId: string): number | null {
-  if (!node || node.type === "pane") {
-    return null;
-  }
-
-  if (node.id === splitId) {
-    return node.ratio;
-  }
-
-  return getSplitRatio(node.first, splitId) ?? getSplitRatio(node.second, splitId);
 }
 
 function setSessionFlag(current: SessionFlagMap, sessionId: string, value: boolean): SessionFlagMap {
@@ -3294,6 +3892,33 @@ function formatByteSize(byteSize: number) {
   }
 
   return `${(byteSize / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+async function copyTextToClipboard(text: string) {
+  if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(text);
+    return;
+  }
+
+  if (typeof document === "undefined") {
+    throw new Error("Clipboard is unavailable.");
+  }
+
+  const textarea = document.createElement("textarea");
+  textarea.value = text;
+  textarea.setAttribute("readonly", "");
+  textarea.style.position = "fixed";
+  textarea.style.opacity = "0";
+  textarea.style.pointerEvents = "none";
+  document.body.appendChild(textarea);
+  textarea.select();
+
+  const didCopy = document.execCommand("copy");
+  document.body.removeChild(textarea);
+
+  if (!didCopy) {
+    throw new Error("Clipboard copy failed.");
+  }
 }
 
 function clamp(value: number, min: number, max: number) {

@@ -1,0 +1,16 @@
+:root {
+  --syntax-plain: var(--code-fg);
+  --syntax-comment: var(--muted);
+  --syntax-keyword: var(--signal-red);
+  --syntax-string: var(--signal-gold);
+  --syntax-function: var(--signal-blue);
+  --syntax-type: var(--signal-green);
+  --syntax-variable: var(--code-fg);
+  --syntax-number: var(--signal-blue);
+  --syntax-operator: var(--muted);
+  --syntax-tag: var(--signal-rose);
+  --syntax-meta: var(--muted);
+  --syntax-emphasis: var(--paper-strong);
+  --syntax-inserted: var(--signal-green);
+  --syntax-deleted: var(--signal-red);
+}

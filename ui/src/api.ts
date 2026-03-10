@@ -21,6 +21,7 @@ type CreateSessionRequest = {
   agent?: AgentType;
   name?: string;
   workdir?: string;
+  claudeApprovalMode?: ClaudeApprovalMode;
 };
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {

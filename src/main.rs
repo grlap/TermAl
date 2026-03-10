@@ -343,10 +343,10 @@ impl AppState {
                     SessionRuntime::None => {
                         let handle = spawn_codex_runtime(self.clone(), record.session.id.clone())
                             .map_err(|err| {
-                                ApiError::internal(format!(
-                                    "failed to start persistent Codex session: {err:#}"
-                                ))
-                            })?;
+                            ApiError::internal(format!(
+                                "failed to start persistent Codex session: {err:#}"
+                            ))
+                        })?;
                         record.runtime = SessionRuntime::Codex(handle.clone());
                         handle
                     }
@@ -395,11 +395,11 @@ impl AppState {
 
         let dispatch = self
             .start_turn_on_record(
-            &mut inner.sessions[index],
-            queued.pending_prompt.id.clone(),
-            queued.pending_prompt.text.clone(),
-            queued.attachments.clone(),
-        )
+                &mut inner.sessions[index],
+                queued.pending_prompt.id.clone(),
+                queued.pending_prompt.text.clone(),
+                queued.attachments.clone(),
+            )
             .map_err(|err| anyhow!("failed to dispatch queued prompt: {}", err.message))?;
         inner.sessions[index].queued_prompts.pop_front();
         sync_pending_prompts(&mut inner.sessions[index]);
@@ -448,12 +448,8 @@ impl AppState {
         }
 
         let message_id = inner.next_message_id();
-        let dispatch = self.start_turn_on_record(
-            &mut inner.sessions[index],
-            message_id,
-            prompt,
-            attachments,
-        )?;
+        let dispatch =
+            self.start_turn_on_record(&mut inner.sessions[index], message_id, prompt, attachments)?;
 
         self.persist_locked(&inner).map_err(|err| {
             ApiError::internal(format!("failed to persist session state: {err:#}"))
@@ -614,11 +610,65 @@ impl AppState {
 
         if should_dispatch_next {
             if let Some(dispatch) = self.dispatch_next_queued_turn(session_id)? {
-                deliver_turn_dispatch(self, dispatch)
-                    .map_err(|err| anyhow!("failed to deliver queued turn dispatch: {}", err.message))?;
+                deliver_turn_dispatch(self, dispatch).map_err(|err| {
+                    anyhow!("failed to deliver queued turn dispatch: {}", err.message)
+                })?;
             }
         }
 
+        Ok(())
+    }
+
+    fn note_turn_retry_if_runtime_matches(
+        &self,
+        session_id: &str,
+        token: &RuntimeToken,
+        detail: &str,
+    ) -> Result<()> {
+        let cleaned = detail.trim();
+        if cleaned.is_empty() {
+            return Ok(());
+        }
+
+        let mut inner = self.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(session_id)
+            .ok_or_else(|| anyhow!("session `{session_id}` not found"))?;
+
+        let duplicate_last_message = {
+            let record = &inner.sessions[index];
+            if !record.runtime.matches_runtime_token(token) {
+                return Ok(());
+            }
+
+            matches!(
+                record.session.messages.last(),
+                Some(Message::Text {
+                    author: Author::Assistant,
+                    text,
+                    ..
+                }) if text.trim() == cleaned
+            )
+        };
+
+        let message_id = (!duplicate_last_message).then(|| inner.next_message_id());
+        let record = &mut inner.sessions[index];
+
+        if let Some(message_id) = message_id {
+            record.session.messages.push(Message::Text {
+                attachments: Vec::new(),
+                id: message_id,
+                timestamp: stamp_now(),
+                author: Author::Assistant,
+                text: cleaned.to_owned(),
+            });
+        }
+
+        if record.session.status != SessionStatus::Approval {
+            record.session.status = SessionStatus::Active;
+        }
+        record.session.preview = make_preview(cleaned);
+        self.persist_locked(&inner)?;
         Ok(())
     }
 
@@ -649,8 +699,9 @@ impl AppState {
 
         if should_dispatch_next {
             if let Some(dispatch) = self.dispatch_next_queued_turn(session_id)? {
-                deliver_turn_dispatch(self, dispatch)
-                    .map_err(|err| anyhow!("failed to deliver queued turn dispatch: {}", err.message))?;
+                deliver_turn_dispatch(self, dispatch).map_err(|err| {
+                    anyhow!("failed to deliver queued turn dispatch: {}", err.message)
+                })?;
             }
         }
 
@@ -684,8 +735,9 @@ impl AppState {
 
         if should_dispatch_next {
             if let Some(dispatch) = self.dispatch_next_queued_turn(session_id)? {
-                deliver_turn_dispatch(self, dispatch)
-                    .map_err(|err| anyhow!("failed to deliver queued turn dispatch: {}", err.message))?;
+                deliver_turn_dispatch(self, dispatch).map_err(|err| {
+                    anyhow!("failed to deliver queued turn dispatch: {}", err.message)
+                })?;
             }
         }
 
@@ -751,8 +803,9 @@ impl AppState {
 
         if should_dispatch_next {
             if let Some(dispatch) = self.dispatch_next_queued_turn(session_id)? {
-                deliver_turn_dispatch(self, dispatch)
-                    .map_err(|err| anyhow!("failed to deliver queued turn dispatch: {}", err.message))?;
+                deliver_turn_dispatch(self, dispatch).map_err(|err| {
+                    anyhow!("failed to deliver queued turn dispatch: {}", err.message)
+                })?;
             }
         }
 
@@ -944,10 +997,9 @@ impl AppState {
         )
         .map_err(|err| ApiError::internal(format!("failed to record stop message: {err:#}")))?;
 
-        if let Some(dispatch) = self
-            .dispatch_next_queued_turn(session_id)
-            .map_err(|err| ApiError::internal(format!("failed to dispatch queued prompt: {err:#}")))?
-        {
+        if let Some(dispatch) = self.dispatch_next_queued_turn(session_id).map_err(|err| {
+            ApiError::internal(format!("failed to dispatch queued prompt: {err:#}"))
+        })? {
             deliver_turn_dispatch(self, dispatch)?;
         }
 
@@ -996,7 +1048,7 @@ impl AppState {
             }
         }
 
-        self.persist_locked(&inner)?;
+        self.publish_state_locked(&inner)?;
         Ok(())
     }
 
@@ -1315,11 +1367,9 @@ impl AppState {
         }
 
         if let Some(dispatch) = self.dispatch_next_queued_turn(session_id)? {
-            deliver_turn_dispatch(
-                self,
-                dispatch,
-            )
-            .map_err(|err| anyhow!("failed to deliver queued turn dispatch: {}", err.message))?;
+            deliver_turn_dispatch(self, dispatch).map_err(|err| {
+                anyhow!("failed to deliver queued turn dispatch: {}", err.message)
+            })?;
         }
         Ok(())
     }
@@ -1610,7 +1660,9 @@ impl SessionRuntime {
             (Self::Claude(handle), RuntimeToken::Claude(runtime_id)) => {
                 handle.runtime_id == *runtime_id
             }
-            (Self::Codex(handle), RuntimeToken::Codex(runtime_id)) => handle.runtime_id == *runtime_id,
+            (Self::Codex(handle), RuntimeToken::Codex(runtime_id)) => {
+                handle.runtime_id == *runtime_id
+            }
             _ => false,
         }
     }
@@ -2104,7 +2156,9 @@ fn spawn_codex_runtime(state: AppState, session_id: String) -> Result<CodexRunti
                 let _ = writer_state.handle_runtime_exit_if_matches(
                     &writer_session_id,
                     &writer_runtime_token,
-                    Some(&format!("failed to initialize Codex app-server session: {err:#}")),
+                    Some(&format!(
+                        "failed to initialize Codex app-server session: {err:#}"
+                    )),
                 );
                 return;
             }
@@ -2134,7 +2188,9 @@ fn spawn_codex_runtime(state: AppState, session_id: String) -> Result<CodexRunti
                     let _ = writer_state.handle_runtime_exit_if_matches(
                         &writer_session_id,
                         &writer_runtime_token,
-                        Some(&format!("failed to communicate with Codex app-server: {err:#}")),
+                        Some(&format!(
+                            "failed to communicate with Codex app-server: {err:#}"
+                        )),
                     );
                     break;
                 }
@@ -2545,11 +2601,14 @@ fn handle_codex_app_server_notification(
         | "thread/realtime/error"
         | "thread/realtime/closed" => {}
         "error" => {
-            let detail = message
-                .get("params")
-                .map(summarize_error)
-                .unwrap_or_else(|| summarize_error(message));
-            state.fail_turn_if_runtime_matches(session_id, runtime_token, &detail)?;
+            let payload = message.get("params").unwrap_or(message);
+            let detail = summarize_error(payload);
+
+            if is_retryable_connectivity_error(payload) {
+                state.note_turn_retry_if_runtime_matches(session_id, runtime_token, &detail)?;
+            } else {
+                state.fail_turn_if_runtime_matches(session_id, runtime_token, &detail)?;
+            }
         }
         _ if method.starts_with("codex/event/") => {}
         _ => {
@@ -3111,8 +3170,10 @@ fn spawn_claude_runtime(
                             );
                         }
                     } else {
-                        let _ = reader_state
-                            .finish_turn_ok_if_runtime_matches(&reader_session_id, &reader_runtime_token);
+                        let _ = reader_state.finish_turn_ok_if_runtime_matches(
+                            &reader_session_id,
+                            &reader_runtime_token,
+                        );
                     }
                 }
             }
@@ -4786,15 +4847,144 @@ fn codex_item_key(message: &Value, command: &str) -> String {
 }
 
 fn summarize_error(value: &Value) -> String {
-    if let Some(message) = value.get("message").and_then(Value::as_str) {
-        return message.to_owned();
+    summarize_structured_error(value).unwrap_or_else(|| {
+        serde_json::to_string_pretty(value).unwrap_or_else(|_| value.to_string())
+    })
+}
+
+fn summarize_structured_error(value: &Value) -> Option<String> {
+    summarize_retryable_connectivity_error(value)
+        .or_else(|| summarize_error_fields(value))
+        .or_else(|| value.get("error").and_then(summarize_error_fields))
+        .or_else(|| {
+            value
+                .get("result")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|result| !result.is_empty())
+                .map(str::to_owned)
+        })
+}
+
+fn summarize_error_fields(value: &Value) -> Option<String> {
+    let message = trimmed_string_field(value, "message");
+    let detail = trimmed_string_field(value, "additionalDetails")
+        .or_else(|| trimmed_string_field(value, "detail"))
+        .or_else(|| trimmed_string_field(value, "details"));
+
+    match (message, detail) {
+        (Some(message), Some(detail)) if contains_ignore_ascii_case(message, detail) => {
+            Some(message.to_owned())
+        }
+        (Some(message), Some(detail)) if contains_ignore_ascii_case(detail, message) => {
+            Some(detail.to_owned())
+        }
+        (Some(message), Some(detail)) => Some(format!("{message} {detail}")),
+        (Some(message), None) => Some(message.to_owned()),
+        (None, Some(detail)) => Some(detail.to_owned()),
+        (None, None) => None,
+    }
+}
+
+fn summarize_retryable_connectivity_error(value: &Value) -> Option<String> {
+    if !is_retryable_connectivity_error(value) {
+        return None;
     }
 
-    if let Some(result) = value.get("result").and_then(Value::as_str) {
-        return result.to_owned();
+    let mut summary = "Connection dropped before the response finished.".to_owned();
+    if let Some(retry_status) = summarize_retry_status(value) {
+        summary.push(' ');
+        summary.push_str(&retry_status);
+    } else {
+        summary.push_str(" Retrying automatically.");
     }
 
-    serde_json::to_string_pretty(value).unwrap_or_else(|_| value.to_string())
+    Some(summary)
+}
+
+fn is_retryable_connectivity_error(value: &Value) -> bool {
+    codex_error_will_retry(value) && has_connectivity_marker(value)
+}
+
+fn codex_error_will_retry(value: &Value) -> bool {
+    value
+        .get("willRetry")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+        || value
+            .get("error")
+            .and_then(|error| error.get("willRetry"))
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+}
+
+fn has_connectivity_marker(value: &Value) -> bool {
+    value
+        .pointer("/error/codexErrorInfo/responseStreamDisconnected")
+        .is_some_and(|marker| !marker.is_null())
+        || [
+            trimmed_string_field(value, "message"),
+            trimmed_string_field(value, "additionalDetails"),
+            value
+                .get("error")
+                .and_then(|error| trimmed_string_field(error, "message")),
+            value
+                .get("error")
+                .and_then(|error| trimmed_string_field(error, "additionalDetails")),
+        ]
+        .into_iter()
+        .flatten()
+        .any(is_connectivity_text)
+}
+
+fn summarize_retry_status(value: &Value) -> Option<String> {
+    let message = trimmed_string_field(value, "message").or_else(|| {
+        value
+            .get("error")
+            .and_then(|error| trimmed_string_field(error, "message"))
+    })?;
+
+    let counts = message
+        .strip_prefix("Reconnecting...")
+        .or_else(|| message.strip_prefix("Reconnecting…"))
+        .map(str::trim);
+
+    let Some(counts) = counts else {
+        return Some("Retrying automatically.".to_owned());
+    };
+
+    let Some((current, total)) = counts.split_once('/') else {
+        return Some("Retrying automatically.".to_owned());
+    };
+
+    let current = current.trim().parse::<usize>().ok()?;
+    let total = total.trim().parse::<usize>().ok()?;
+    Some(format!(
+        "Retrying automatically (attempt {current} of {total})."
+    ))
+}
+
+fn trimmed_string_field<'a>(value: &'a Value, key: &str) -> Option<&'a str> {
+    value
+        .get(key)
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|field| !field.is_empty())
+}
+
+fn contains_ignore_ascii_case(haystack: &str, needle: &str) -> bool {
+    haystack
+        .to_ascii_lowercase()
+        .contains(&needle.to_ascii_lowercase())
+}
+
+fn is_connectivity_text(text: &str) -> bool {
+    let normalized = text.to_ascii_lowercase();
+    normalized.contains("stream disconnected before completion")
+        || normalized.contains("websocket closed by server before response.completed")
+        || normalized.contains("response stream disconnected")
+        || normalized.contains("connection dropped")
+        || normalized.contains("reconnecting")
 }
 
 fn make_preview(text: &str) -> String {
@@ -5639,6 +5829,17 @@ mod tests {
         session_id
     }
 
+    fn test_codex_runtime_handle(runtime_id: &str) -> CodexRuntimeHandle {
+        let child = Command::new("sh").arg("-c").arg("exit 0").spawn().unwrap();
+        let (input_tx, _input_rx) = mpsc::channel();
+
+        CodexRuntimeHandle {
+            runtime_id: runtime_id.to_owned(),
+            input_tx,
+            process: Arc::new(Mutex::new(child)),
+        }
+    }
+
     #[test]
     fn creates_claude_sessions_with_default_ask_mode() {
         let mut inner = StateInner::new();
@@ -5819,7 +6020,10 @@ mod tests {
             .expect("session should reload");
 
         assert_eq!(record.session.pending_prompts.len(), 1);
-        assert_eq!(record.session.pending_prompts[0].text, "queue this follow-up");
+        assert_eq!(
+            record.session.pending_prompts[0].text,
+            "queue this follow-up"
+        );
         assert_eq!(record.queued_prompts.len(), 1);
         assert_eq!(record.queued_prompts[0].attachments.len(), 1);
         assert_eq!(record.queued_prompts[0].attachments[0].data, "aGVsbG8=");
@@ -6369,6 +6573,96 @@ mod tests {
                 )
             ]
         );
+    }
+
+    #[test]
+    fn summarizes_retryable_connectivity_errors_without_dumping_json() {
+        let error = json!({
+            "error": {
+                "additionalDetails": "stream disconnected before completion: websocket closed by server before response.completed",
+                "codexErrorInfo": {
+                    "responseStreamDisconnected": {
+                        "httpStatusCode": null
+                    }
+                },
+                "message": "Reconnecting... 4/5"
+            },
+            "threadId": "thread_123",
+            "turnId": "turn_123",
+            "willRetry": true
+        });
+
+        assert_eq!(
+            summarize_error(&error),
+            "Connection dropped before the response finished. Retrying automatically (attempt 4 of 5)."
+        );
+    }
+
+    #[test]
+    fn retryable_connectivity_notifications_keep_codex_turn_active() {
+        let state = test_app_state();
+        let session_id = test_session_id(&state, Agent::Codex);
+        let runtime_id = "runtime-retry".to_owned();
+        let runtime = test_codex_runtime_handle(&runtime_id);
+        state.set_codex_runtime(&session_id, runtime).unwrap();
+
+        {
+            let mut inner = state.inner.lock().expect("state mutex poisoned");
+            let index = inner.find_session_index(&session_id).unwrap();
+            inner.sessions[index].session.status = SessionStatus::Active;
+            inner.sessions[index].session.preview = "Waiting for activity.".to_owned();
+            state.persist_locked(&inner).unwrap();
+        }
+
+        let notification = json!({
+            "method": "error",
+            "params": {
+                "error": {
+                    "additionalDetails": "stream disconnected before completion: websocket closed by server before response.completed",
+                    "codexErrorInfo": {
+                        "responseStreamDisconnected": {
+                            "httpStatusCode": null
+                        }
+                    },
+                    "message": "Reconnecting... 2/5"
+                },
+                "threadId": "thread_123",
+                "turnId": "turn_123",
+                "willRetry": true
+            }
+        });
+
+        handle_codex_app_server_notification(
+            "error",
+            &notification,
+            &state,
+            &session_id,
+            &RuntimeToken::Codex(runtime_id),
+            &Arc::new(Mutex::new(None)),
+            &mut CodexTurnState::default(),
+            &mut SessionRecorder::new(state.clone(), session_id.clone()),
+        )
+        .unwrap();
+
+        let snapshot = state.snapshot();
+        let session = snapshot
+            .sessions
+            .iter()
+            .find(|session| session.id == session_id)
+            .unwrap();
+
+        assert_eq!(session.status, SessionStatus::Active);
+        assert_eq!(
+            session.preview,
+            make_preview(
+                "Connection dropped before the response finished. Retrying automatically (attempt 2 of 5)."
+            )
+        );
+        assert!(matches!(
+            session.messages.last(),
+            Some(Message::Text { text, .. })
+                if text == "Connection dropped before the response finished. Retrying automatically (attempt 2 of 5)."
+        ));
     }
 
     #[test]

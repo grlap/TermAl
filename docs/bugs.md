@@ -4,6 +4,10 @@ Updated against the current checked-in code in `src/main.rs` and `ui/src/App.tsx
 
 The older entries for "No image paste support", Claude `control_request` fallthrough, "No SSE/WebSocket for real-time updates", and "Codex receive has no streaming" were stale. Those are implemented in the current tree.
 
+The earlier command-card UX issue where `OUT` could render as an empty dark block was also fixed.
+Command messages now use a compact `IN` / `OUT` layout with copy controls, a collapsible output
+view for longer results, and a plain placeholder when there is no command output.
+
 ## Image attachment UX is inconsistent
 
 **Severity:** Low — the transport path works, but the product copy and interaction model lag behind it.
@@ -55,20 +59,62 @@ let home = std::env::var_os("HOME")
 
 Apply the same fallback to `resolve_termal_data_dir()`. Using `%APPDATA%` would be more Windows-native, but `USERPROFILE` is enough to remove the hard failure.
 
-## No runtime preload / pre-warming
+## No runtime pre-warming / session pooling
 
 **Severity:** Medium — first message still pays startup cost.
 
-Runtime processes are still created lazily inside `dispatch_turn()`. When a session has `SessionRuntime::None`, the first message spawns `spawn_claude_runtime()` or `spawn_codex_runtime()`.
+Runtime processes are created lazily inside `dispatch_turn()`. When a session has
+`SessionRuntime::None`, the first message spawns `spawn_claude_runtime()` or
+`spawn_codex_runtime()`. With multi-project support (3–6 projects, each with multiple concurrent
+sessions), naive pre-warming per project does not scale — holding idle processes for every
+project is wasteful.
 
 **Current impact:**
-- No early auth/config sanity check on app startup
-- The first prompt in a session pays process startup plus initialize-handshake latency
-- Selecting a session in the UI does not preload its runtime
+- Every new session pays process startup plus initialize-handshake latency on the first prompt
+- Users running multiple concurrent sessions per project hit the cold start repeatedly
 
-**Possible improvement:**
-1. Probe runtime availability and basic config on app start
-2. Warm the session runtime when the user opens or focuses a session
+**Design: two strategies, split by agent protocol**
+
+**Codex — single shared app-server (no pool needed).**
+The Codex app-server is a long-lived JSON-RPC process. Each conversation is a `thread/start` call
+that accepts its own `cwd`. A single app-server process can serve multiple sessions across
+different projects — just call `thread/start` again with a different working directory. The current
+architecture spawns one app-server per session with a session-scoped `CODEX_HOME`, which is
+unnecessary overhead.
+
+Refactor to:
+1. Spawn one global Codex app-server on first Codex session creation (or on app start).
+2. All Codex sessions share the single app-server process.
+3. Each session calls `thread/start` with its own project `cwd`.
+4. Session creation becomes near-instant — no process spawn, just a JSON-RPC call.
+5. The session-scoped `CODEX_HOME` setup needs to be rethought (shared home, or per-project home
+   instead of per-session).
+
+**Claude — hidden session pool per `(project, agent)` tuple.**
+The Claude protocol has no session reset — each process is one conversation. A process cannot be
+reused for a new session. Pre-warming means spawning spare processes.
+
+The pool strategy:
+1. When the first Claude session spawns in a project directory, also create a **hidden session**
+   for the same `(project, agent)` with a fully initialized runtime (reader threads, writer
+   threads, initialize handshake — everything).
+2. Hidden sessions are real sessions with real runtimes, just not visible in the UI.
+3. When the user creates a new Claude session in that project, **unhide** the spare instead of
+   cold-starting. Session #2 onwards is instant.
+4. After unhiding, spawn the next hidden spare in the background.
+5. Pool size of 1 spare per active `(project, agent)` is enough — the user rarely creates two
+   sessions simultaneously.
+
+Backend changes:
+- Add a `hidden: bool` field to `Session` (or a `SessionVisibility` enum).
+- The server filters hidden sessions from UI-facing API responses.
+- "Create session" checks the pool first, unhides if a match exists, falls back to cold spawn.
+- After any session spawn (visible or hidden), trigger spare creation for the same key.
+- Hidden sessions that sit idle too long can be reaped to avoid unbounded resource use.
+
+**Why not pre-warm on app startup:**
+With 3–6 projects, spawning spares for all of them upfront wastes resources for projects the user
+may not touch. The pool only activates for projects already in use, which is the right trade-off.
 
 ## Legacy/testing Codex REPL path still uses one-shot `codex exec --json`
 
@@ -134,6 +180,112 @@ Server mode already uses `codex app-server` over stdio JSON-RPC with:
 - handling for additional app-server request types beyond command/file approvals
 - mapping for more notifications beyond the current subset
 
+## No model change on running sessions
+
+**Severity:** Medium — model is stored but never used or surfaced.
+
+`Session.model` exists as a `String` field in both the Rust backend and TypeScript frontend, but it
+is hardcoded to a static label (`"claude -p"` / `"codex exec"`) at session creation via
+`Agent::model_label()`. The field is never displayed in the UI and cannot be changed. Sessions
+always start with the agent's default model, which is correct — the missing piece is letting the
+user switch models after a session is running, the way `/model` works inside Claude Code itself.
+
+**What already works:**
+- Claude protocol supports `set_model` control request for mid-session changes (spec lines 196–198)
+- Claude's initialize `control_response` returns available `models` — TermAl ignores this today
+- Codex model is controlled via `config.toml` in the session-scoped `CODEX_HOME` — TermAl already
+  syncs this file but never writes a custom model into it
+- `ClaudeRuntimeCommand` enum already follows the pattern needed (`SetPermissionMode` exists as a
+  template for `SetModel`)
+
+**Model discovery:**
+- **Claude:** Parse the `models` field from the initialize `control_response`. Cache it in
+  `AppState`. Persist to disk so subsequent app launches have the list immediately. Before any
+  session has run, the list is empty — show "Default" only. Once any session initializes, the full
+  list populates and persists.
+- **Codex:** Read from `models_cache.json` in `CODEX_HOME` (already synced by
+  `seed_termal_codex_home_from`).
+
+**Backend tasks (`src/main.rs`):**
+- Add `model: Option<String>` to `UpdateSessionSettingsRequest` (line ~5514)
+- Add `SetModel(String)` variant to `ClaudeRuntimeCommand` (line ~1971) and handle it in the writer
+  thread (line ~3003)
+- Add `write_claude_set_model` following the pattern of `write_claude_set_permission_mode`
+  (line ~3271) — sends a `{"subtype": "set_model", "model": "..."}` control request
+- In `update_session_settings` (line ~465): for Claude, send `SetModel` to the live runtime via
+  `input_tx`; for Codex, write the model into `config.toml` in the session's CODEX_HOME (takes
+  effect on next turn). Update `session.model` in state for both.
+- Parse the `models` list from Claude's initialize `control_response` in the stdout reader thread
+  (line ~3070 area). Store in `AppState` and persist to disk.
+- Read Codex `models_cache.json` on startup or first Codex session creation.
+- Add `GET /api/models` endpoint returning `{ claude: [...], codex: [...] }`.
+
+**Frontend tasks:**
+- Add `model?: string` to the `updateSessionSettings` payload in `api.ts` (line ~88)
+- Add a `fetchModels` API call for `GET /api/models`
+- Add `"model"` to `SessionSettingsField` union and wire through `handleSessionSettingsChange`
+- Add model `ThemedCombobox` to both `ClaudeSessionSettings` and `CodexSessionSettings` components,
+  populated from the models API
+
+**Codex mid-session note:** Codex has no mid-turn protocol for model switching. Changing the model
+updates `config.toml` and takes effect on the next turn. The UI should communicate this.
+
+## No slash command support
+
+**Severity:** Medium — blocks parity with the native Claude Code experience.
+
+Claude Code exposes slash commands (`/review`, `/release-notes`, `/security-review`, `/simplify`,
+`/batch`, `/context`, `/extra-usage`, `/insights`, etc.) through a picker UI triggered by typing `/`
+in the input. TermAl has no equivalent — there is no command discovery, no picker, and no way to
+invoke these commands.
+
+**How it works in the protocol:**
+
+The `system` event with `subtype: "init"` (the initialize response) returns three fields that TermAl
+currently ignores:
+- `commands` — array of available slash commands with metadata (name, description, etc.)
+- `models` — array of available models (covered in the model change item above)
+- `pid` — Claude's process ID
+
+TermAl only extracts `session_id` from this response (line ~4348 in `handle_claude_event`). The
+`commands` and `models` fields are silently dropped.
+
+**How commands are invoked:**
+
+Slash commands are sent as regular user messages. The client provides the autocomplete/picker UI, but
+the actual text (e.g. `/review`) is sent as a normal `user` message over the NDJSON protocol. Claude
+Code handles the command server-side. This means TermAl does not need a special protocol path for
+commands — it only needs:
+1. Discovery: parse the `commands` field from the init response
+2. UI: show a command picker when the user types `/` in the composer
+3. Dispatch: send the selected command text as a regular message
+
+**The screenshot also shows a "Context" section** with items like "Resume conversation". This is a
+separate concept from slash commands — it relates to session resume and context management. This may
+come from the same init response or from a separate protocol field.
+
+**Backend tasks (`src/main.rs`):**
+- In `handle_claude_event` (line ~4348), parse `commands` from the `system` init event alongside
+  `session_id`. Each command likely has at minimum `name` and `description` fields.
+- Store available commands per session in `SessionRecord` or in a shared `AppState` cache (commands
+  are likely the same across all Claude sessions for a given account).
+- Expose commands through the state API so the frontend can read them — either as a field on
+  `Session` or via a dedicated `GET /api/commands` endpoint.
+- Persist to disk alongside the models cache so commands are available on next app launch before any
+  session initializes.
+
+**Frontend tasks:**
+- Add a `SlashCommand` type (e.g. `{ name: string; description: string }`) to `types.ts`
+- Detect `/` at the start of composer input and show a filtered command picker (similar to how
+  Claude Code shows the picker in the screenshot)
+- On selection, either insert the command text into the composer or send it directly as a message
+- The picker should support keyboard navigation and fuzzy filtering (user typed `/re` to filter
+  down to `/review`, `/release-notes`)
+
+**Codex equivalent:** Codex may not have an equivalent slash command system. If it does, it would
+come through the JSON-RPC initialize response. Check `models_cache.json` and the Codex app-server
+init handshake for any command-like metadata.
+
 ## No Gemini CLI integration
 
 **Severity:** Medium — missing a major agent.
@@ -176,6 +328,79 @@ locked until the current turn completes.
 - Add a cancel action on pending prompts so the user can remove them before dispatch
 - Ensure canceling the active turn does not silently discard queued prompts
 
+## Agent replies in diff review comments
+
+**Severity:** Medium — closes the review feedback loop.
+
+When the user leaves review comments on a diff preview and hands them off to an agent, the agent
+currently has no way to reply inline. Comments are one-directional: user writes, agent reads.
+
+**Desired behavior:**
+- When an agent addresses a review comment, it can post a reply on the same anchor
+- Agent replies appear inline in the diff preview alongside the user's original comment
+- Each comment thread shows the back-and-forth (user comment → agent reply → user follow-up)
+- Agent replies set the comment status to `resolved` or leave it `open` with an explanation
+
+**Tasks:**
+- Extend the review comment schema to support threaded replies with an `author` field (`user` or `agent`)
+- Add a backend endpoint or convention for the agent to append replies to an existing review file
+- Update the diff preview UI to render comment threads instead of single comments
+- Update the agent handoff prompt to instruct the agent to write replies, not just resolve silently
+
+## No territory visualization
+
+**Severity:** High — the single biggest coordination gap in a multi-agent workflow.
+
+A developer paired with an agent has immense leverage: one person can drive multiple agents across
+different parts of a codebase simultaneously. But that leverage collapses without coordination
+visibility. Today the user has to hold the full territorial picture in their head — which agent is
+working where, which files are in flight, whether two sessions are about to collide. That mental
+bookkeeping scales badly and is the first thing to break under load.
+
+File edits are buried inside individual conversation streams. There is no cross-session view that
+answers "which agent last touched this file?", "what is each agent working on right now?", or "are
+two sessions about to collide on the same module?" The developer is the sole coordination layer, and
+the tool gives them nothing to coordinate with.
+
+**Why this matters more than most features:**
+- The value of TermAl scales with how many agents the developer can run concurrently
+- Concurrent agents are only useful if the developer can steer them without constant context-switching
+- Territory visualization is the difference between "I'm running three agents" and "I'm effectively
+  managing three agents" — without it, parallelism becomes chaos
+- Conflict detection is not just about preventing git merge pain; it is about preserving the
+  developer's trust that concurrent agents are safe to run
+
+**Desired behavior:**
+- A dedicated territory view (tab or overlay) shows the project tree annotated with agent activity
+- Each file or directory shows which agent(s) have read or written it during the current work session
+- Color-coded ownership makes it obvious at a glance: e.g. blue = Claude, orange = Codex,
+  green = Gemini, striped = contested (multiple agents touched it)
+- Recency matters: recent changes are brighter/bolder, stale activity fades
+- Clicking a file in the territory view jumps to the most recent conversation message where that
+  file was changed
+- A heatmap mode can highlight hotspots — files with the most churn across agents
+- Conflict warnings surface when two active sessions are both editing the same file or overlapping
+  lines
+- A compact summary bar (always visible, not just in the territory tab) shows the live territory
+  status: e.g. "Claude: 4 files · Codex: 7 files · 1 conflict"
+
+**Data sources:**
+- Diff messages already carry `filePath` and `changeType` per agent turn
+- Tool-use events (file reads, writes, command executions) can be tagged with session and agent
+- Git status can supplement the view with uncommitted changes not yet attributed to an agent
+
+**Tasks:**
+- Track file-level read/write activity per session in backend state (agent, session, file, action,
+  timestamp)
+- Add a `/api/territory` endpoint that returns the aggregated activity map
+- Add a territory view tab using the generic workspace tab system
+- Render a project tree with agent-colored annotations and recency decay
+- Add a heatmap toggle that ranks files by cross-agent churn
+- Add conflict detection: warn when two active sessions have pending writes to the same file
+- Add click-through navigation from territory entries to the originating conversation message
+- Add a persistent territory summary bar visible across all tabs
+- Optionally overlay territory indicators in the source view and diff preview tabs
+
 ## Spec drift
 
 **Severity:** Low — documentation only.
@@ -202,9 +427,23 @@ Concrete work implied by the current TermAl parity gaps. Ordered by user impact 
 - [ ] Expand Codex app-server request handling beyond command/file approvals:
   TermAl should not silently fall back to "unhandled request" logging for additional interactive
   request types.
+- [ ] Add territory visualization:
+  track per-session file read/write activity in backend state, expose it through `/api/territory`,
+  render a project-tree view color-coded by agent with recency decay, heatmap mode, conflict
+  warnings, click-through to originating messages, and a persistent summary bar. This is the core
+  coordination surface that makes concurrent agent workflows safe and manageable.
 
 ## P1
 
+- [ ] Add slash command support:
+  parse the `commands` field from Claude's initialize `system` init event, store and expose
+  available commands, and add a `/`-triggered command picker in the composer with fuzzy filtering
+  and keyboard navigation. Commands are sent as regular user messages.
+- [ ] Add model change on running sessions:
+  discover available models dynamically from Claude's initialize `control_response` and Codex's
+  `models_cache.json`, cache and persist the list, expose via `GET /api/models`, send `set_model`
+  control request to Claude and update `config.toml` for Codex, and add a model selector to the
+  session settings UI. Sessions start with the default model — this is about changing it after.
 - [ ] Implement a prompt queueing system:
   allow the user to submit follow-up prompts while an agent turn is running, display pending
   prompts in the conversation, and let the user cancel them before dispatch.
@@ -212,8 +451,14 @@ Concrete work implied by the current TermAl parity gaps. Ordered by user impact 
   and REPL mode share one implementation.
 - [ ] Replace the `try_wait()` polling loops in the Claude and Codex runtime supervisors with
   blocking wait threads or async child handling.
-- [ ] Add runtime warm-up:
-  preflight auth/config on startup and preload runtimes when a session is opened or focused.
+- [ ] Refactor Codex to a single shared app-server:
+  replace per-session app-server spawning with one long-lived process that serves all Codex
+  sessions via `thread/start` with per-session `cwd`. Rethink session-scoped `CODEX_HOME`.
+- [ ] Add Claude hidden session pool:
+  when the first Claude session spawns in a project, create a hidden spare session with a fully
+  initialized runtime for the same `(project, cwd)`. On new session creation, unhide the spare
+  and spawn the next one. Add `hidden` field to `Session`, filter from UI responses, and add
+  idle reaping.
 - [ ] Fix Windows path resolution:
   add `USERPROFILE` fallback for Codex home and TermAl data directory resolution.
 - [ ] Align attachment UX with actual capabilities:
@@ -225,6 +470,9 @@ Concrete work implied by the current TermAl parity gaps. Ordered by user impact 
 - [ ] Add saved review comments on diff previews:
   let the user leave PR-style comments on files or hunks, persist them to disk in a structured
   format, and make them available for later agent turns.
+- [ ] Add agent replies to diff review comments:
+  let the agent post threaded replies on review comment anchors so the diff preview shows a
+  back-and-forth conversation instead of one-directional user comments.
 
 ## P2
 
@@ -556,6 +804,337 @@ Integration:
 - Review comments can be added at change-set, file, hunk, and line scope.
 - Review comments persist to `.termal/reviews/<changeSetId>.json`.
 - A later agent turn can be pointed at that file and identify open comments without ambiguity.
+
+# Implementation Plan: Territory Visualization
+
+This is the concrete delivery plan for the territory visualization feature.
+
+## Core insight
+
+The developer paired with agents is the coordination layer. TermAl's value scales with how many
+agents the developer can run concurrently, but that only works if the tool gives them a live picture
+of who is changing what. Territory visualization is not a dashboard — it is the coordination
+surface.
+
+## Goals
+
+- Maintain a server-side aggregated index of all file-level activity across sessions and agents.
+- Show the developer a live, at-a-glance territorial map of the project.
+- Detect and surface conflicts before they become git merge problems.
+- Catch external changes (editor saves, other tools, remote pushes) so the map stays honest.
+
+## Non-goals for v1
+
+- No line-level or hunk-level territory granularity (file-level is enough to start).
+- No automatic conflict resolution or agent orchestration.
+- No cross-repo territory (single working directory per TermAl instance).
+- No persistent territory history across TermAl restarts in v1 (rebuild from session replay later).
+
+## Data model
+
+### Touch event
+
+Every time an agent reads, writes, creates, or deletes a file, the backend records a touch:
+
+```rust
+struct Touch {
+    file_path: String,
+    session_id: String,
+    agent: Agent,              // Claude, Codex, Gemini
+    action: TouchAction,       // Read, Write, Create, Delete
+    lines_added: u32,
+    lines_removed: u32,
+    message_id: String,        // for click-through to conversation
+    timestamp: DateTime<Utc>,
+}
+
+enum TouchAction {
+    Read,
+    Write,
+    Create,
+    Delete,
+}
+```
+
+Sources:
+- `DiffMessage` on turn completion → `Write` / `Create` / `Delete` with line counts from the diff
+- Tool-use events (file_read, file_write, command execution) → `Read` / `Write`
+- These are already flowing through the session message stream; the territory index just needs to
+  observe them
+
+### File aggregate
+
+The territory index maintains a rolled-up summary per file:
+
+```rust
+struct FileTerritory {
+    file_path: String,
+    touches: Vec<Touch>,        // append-only log
+    dominant_agent: Option<Agent>,
+    agents_involved: HashSet<Agent>,
+    sessions_involved: HashSet<String>,
+    contested: bool,            // true if multiple agents have written
+    total_writes: u32,
+    total_lines_changed: u32,
+    last_write: DateTime<Utc>,
+    last_read: DateTime<Utc>,
+    external_change_detected: bool,
+}
+```
+
+Rules:
+- `dominant_agent` = the agent with the most total `lines_changed` (writes only, reads don't count
+  for dominance)
+- `contested` = true when two or more distinct agents have at least one `Write` / `Create` / `Delete`
+  on the same file
+- `external_change_detected` = true when the git poll finds changes not attributable to any session
+
+### Directory rollup
+
+Aggregate file-level data upward into directories so the tree view can show territory at any depth:
+
+```rust
+struct DirectoryTerritory {
+    dir_path: String,
+    dominant_agent: Option<Agent>,
+    contested: bool,
+    file_count: u32,             // files with any touches under this dir
+    contested_file_count: u32,
+    agents_involved: HashSet<Agent>,
+}
+```
+
+This is computed on demand from the file index, not stored separately.
+
+## Git supplementation
+
+The territory map is only useful if it is honest. Agent-tracked touches cover TermAl activity, but
+the developer also edits files in their editor, runs scripts, pulls from remote, etc. A periodic
+git poll fills that gap.
+
+### Working tree poll
+
+A background task runs on a configurable interval (default: 5 seconds):
+
+1. Run `git status --porcelain` to get the list of modified, added, and deleted files in the
+   working tree.
+2. For each changed file, check whether the territory index already has a recent touch that explains
+   the change (i.e., a TermAl session wrote it within the last poll interval).
+3. Any file that changed but has no matching TermAl touch → mark as `external_change_detected` and
+   record an `External` touch with no session or agent attribution.
+4. Files that were previously marked external but are no longer in `git status` output → clear the
+   external flag (the change was committed or reverted).
+
+### Remote poll
+
+A separate, less frequent background task (default: 60 seconds, configurable):
+
+1. Run `git fetch --quiet` to update remote tracking refs.
+2. Run `git rev-list --count HEAD..@{upstream}` to check if upstream has new commits.
+3. If upstream has diverged, optionally run `git diff --name-only HEAD...@{upstream}` to get the
+   list of files that would change on pull.
+4. Surface these as `upstream` territory entries — files the remote has changed that the developer
+   hasn't pulled yet.
+
+This does NOT auto-pull. It just makes the territory map aware that the ground has shifted.
+
+### Git poll constraints
+
+- Both polls run in a dedicated background thread, not on the main tokio runtime, to avoid blocking
+  async work.
+- Poll intervals should be configurable through the settings API.
+- The working tree poll should debounce: if a TermAl agent is actively writing (a turn is in
+  progress), skip the poll or suppress external attribution for files the active session is known to
+  be editing.
+- The remote poll should be opt-in or off by default if the repo has no configured upstream.
+
+## Conflict detection
+
+Contested files are the highest-signal output of the territory system. The backend should
+proactively detect and categorize conflicts:
+
+**Level 1 — File-level contest:**
+Two or more agents have written to the same file. Low urgency; this is information, not necessarily
+a problem.
+
+**Level 2 — Active collision:**
+Two sessions with active (running) turns are both writing to the same file right now. Higher
+urgency; one of them is likely about to create a merge conflict.
+
+**Level 3 — External desync:**
+An agent wrote a file, and then an external change was detected on the same file before the agent's
+changes were committed. The agent's mental model of that file is now stale.
+
+Each conflict level should surface differently in the UI (color intensity, icon, notification).
+
+## API
+
+### Territory snapshot
+
+`GET /api/territory`
+
+Returns the full territory map:
+
+```json
+{
+  "files": [
+    {
+      "filePath": "src/main.rs",
+      "dominantAgent": "Claude",
+      "agentsInvolved": ["Claude", "Codex"],
+      "sessionsInvolved": ["session-1", "session-4"],
+      "contested": true,
+      "totalWrites": 12,
+      "totalLinesChanged": 347,
+      "lastWrite": "2026-03-10T14:22:00Z",
+      "lastRead": "2026-03-10T14:25:00Z",
+      "externalChangeDetected": false,
+      "conflictLevel": 1
+    }
+  ],
+  "conflicts": [
+    {
+      "filePath": "src/main.rs",
+      "level": 1,
+      "agents": ["Claude", "Codex"],
+      "sessions": ["session-1", "session-4"],
+      "description": "Both Claude and Codex have written to this file"
+    }
+  ],
+  "summary": {
+    "totalTrackedFiles": 23,
+    "byAgent": {
+      "Claude": { "files": 8, "linesChanged": 412 },
+      "Codex": { "files": 17, "linesChanged": 891 }
+    },
+    "contestedFiles": 2,
+    "externalChanges": 1,
+    "activeConflicts": 0
+  },
+  "gitStatus": {
+    "upstreamBehind": 3,
+    "upstreamFiles": ["README.md", "Cargo.toml", "src/lib.rs"]
+  }
+}
+```
+
+### Territory for a single file
+
+`GET /api/territory/{filePath}`
+
+Returns the full touch log for one file, including the click-through `messageId` for each touch.
+Useful for the detail drill-down.
+
+### Territory SSE
+
+Territory updates should piggyback on the existing `/api/events` SSE stream. When the territory
+index changes (new touch, conflict detected, external change found), include a territory delta in
+the next SSE snapshot so the frontend stays live without polling.
+
+## UI
+
+### Territory tab
+
+A new workspace tab type:
+
+```ts
+type WorkspaceTab =
+  | // ... existing types
+  | { id: string; kind: "territory" };
+```
+
+The tab renders a collapsible project tree with:
+- Agent color indicators per file and directory (solid = one agent, striped = contested)
+- Recency decay: bright for recent activity, fading over time
+- Inline metrics: lines changed, write count
+- Conflict badges at each level
+- External change indicators
+- Click any file → opens the most recent conversation message where it was changed
+
+### Summary bar
+
+Always visible across all tabs (in the status area or header):
+
+`Claude: 8 files (412 lines) · Codex: 17 files (891 lines) · 2 contested · 1 external`
+
+Clicking the summary bar opens the territory tab. Conflict counts should pulse or highlight when a
+new conflict is detected.
+
+### Heatmap mode
+
+A toggle in the territory tab that reranks the tree by activity intensity instead of alphabetical
+path order. Files with the most cross-agent churn float to the top. Useful for spotting hotspots
+when the project tree is large.
+
+### Conflict notifications
+
+When a Level 2 (active collision) or Level 3 (external desync) conflict is detected, surface a
+non-blocking toast notification so the developer sees it even if they are not looking at the
+territory tab.
+
+## Implementation phases
+
+### Phase 1: touch tracking and server index
+
+- Add the `Touch` and `FileTerritory` structs to backend state.
+- Hook into `dispatch_turn()` completion to record touches from `DiffMessage` events.
+- Hook into tool-use events for read tracking.
+- Add `GET /api/territory` returning the snapshot.
+- Add territory deltas to the SSE stream.
+
+### Phase 2: territory tab and summary bar
+
+- Add `territory` as a `WorkspaceTab` kind.
+- Render the project tree with agent colors and recency decay.
+- Add the persistent summary bar.
+- Add click-through from territory entries to conversation messages.
+
+### Phase 3: git supplementation
+
+- Add the working tree poll background task.
+- Add external change detection and attribution.
+- Add the remote poll background task (opt-in).
+- Surface upstream divergence in the territory snapshot and UI.
+
+### Phase 4: conflict detection and notifications
+
+- Implement the three conflict levels.
+- Add conflict badges to the territory tree.
+- Add toast notifications for Level 2 and Level 3 conflicts.
+- Add heatmap mode.
+
+## Testing plan
+
+Backend:
+- Touch recording from a simulated turn with diff messages
+- File aggregate computation (dominant agent, contested flag, line counts)
+- Directory rollup correctness
+- External change detection against a mock `git status` output
+- Conflict level classification
+- Territory snapshot API round-trip
+
+Frontend:
+- Territory tab renders file tree with correct agent colors
+- Summary bar updates live from SSE deltas
+- Recency decay visual correctness (mock timestamps)
+- Click-through opens the right session and message
+- Heatmap mode reorders by activity
+- Conflict toast appears on Level 2+ detection
+
+Integration:
+- Two concurrent sessions (Claude + Codex) editing different files → no conflicts, clean territory
+- Two concurrent sessions editing the same file → contested flag, Level 1 conflict
+- External file edit between agent turns → external change detected, Level 3 if agent wrote it
+- Git fetch reveals upstream changes → upstream files surface in territory
+
+## Acceptance criteria
+
+- The territory tab shows a project tree annotated with which agent(s) touched each file.
+- The summary bar is visible across all tabs and shows live agent activity counts.
+- Contested files are visually distinct from single-agent files.
+- External changes (edits outside TermAl) are detected and shown within the poll interval.
+- Clicking a file in the territory view navigates to the conversation message that last changed it.
+- Conflict notifications surface without requiring the developer to check the territory tab.
 
 # Agent Integration Comparison
 
