@@ -13,6 +13,13 @@ export default defineConfig({
     host: "127.0.0.1",
     port: 4173,
     proxy: {
+      "/api/events": {
+        target: "http://127.0.0.1:8787",
+        changeOrigin: true,
+        // Prevent the proxy from closing the long-lived SSE connection.
+        timeout: 0,
+        proxyTimeout: 0,
+      },
       "/api": {
         target: "http://127.0.0.1:8787",
         changeOrigin: true,

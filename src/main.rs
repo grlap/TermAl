@@ -1847,15 +1847,19 @@ fn resolve_source_codex_home_dir() -> Result<PathBuf> {
         return Ok(PathBuf::from(path));
     }
 
-    let home = std::env::var_os("HOME").ok_or_else(|| anyhow!("HOME is not set"))?;
-    Ok(PathBuf::from(home).join(".codex"))
+    let home = resolve_home_dir().ok_or_else(|| anyhow!("could not determine home directory"))?;
+    Ok(home.join(".codex"))
 }
 
 fn resolve_termal_data_dir(default_workdir: &str) -> PathBuf {
-    let base = std::env::var_os("HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from(default_workdir));
+    let base = resolve_home_dir().unwrap_or_else(|| PathBuf::from(default_workdir));
     base.join(".termal")
+}
+
+fn resolve_home_dir() -> Option<PathBuf> {
+    std::env::var_os("HOME")
+        .or_else(|| std::env::var_os("USERPROFILE"))
+        .map(PathBuf::from)
 }
 
 fn resolve_termal_codex_home(default_workdir: &str, scope: &str) -> PathBuf {
@@ -2839,7 +2843,21 @@ fn codex_sandbox_policy_value(mode: CodexSandboxMode) -> Value {
 }
 
 fn codex_command() -> Result<Command> {
-    Ok(Command::new(resolve_codex_executable()?))
+    let exe = resolve_codex_executable()?;
+
+    // On Windows, .cmd/.bat shims (from npm) must be run through cmd.exe.
+    #[cfg(windows)]
+    {
+        if let Some(ext) = exe.extension().and_then(|e| e.to_str()) {
+            if ext.eq_ignore_ascii_case("cmd") || ext.eq_ignore_ascii_case("bat") {
+                let mut cmd = Command::new("cmd.exe");
+                cmd.args(["/C", &exe.to_string_lossy()]);
+                return Ok(cmd);
+            }
+        }
+    }
+
+    Ok(Command::new(exe))
 }
 
 fn resolve_codex_executable() -> Result<PathBuf> {
@@ -2850,10 +2868,19 @@ fn resolve_codex_executable() -> Result<PathBuf> {
 
 fn find_command_on_path(command: &str) -> Option<PathBuf> {
     let path = std::env::var_os("PATH")?;
+
+    #[cfg(windows)]
+    let extensions: &[&str] = &[".exe", ".cmd", ".bat", ""];
+
+    #[cfg(not(windows))]
+    let extensions: &[&str] = &[""];
+
     for dir in std::env::split_paths(&path) {
-        let candidate = dir.join(command);
-        if candidate.is_file() {
-            return Some(candidate);
+        for ext in extensions {
+            let candidate = dir.join(format!("{command}{ext}"));
+            if candidate.is_file() {
+                return Some(candidate);
+            }
         }
     }
     None
