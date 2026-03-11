@@ -710,14 +710,15 @@ textarea {
 .pane-drop-zone-bottom {
   left: 36%;
   right: 36%;
-  height: 26%;
 }
 
 .pane-drop-zone-top {
   top: 3.45rem;
+  bottom: calc(50% - 1px);
 }
 
 .pane-drop-zone-bottom {
+  top: calc(50% - 1px);
   bottom: 0.35rem;
 }
 
@@ -898,6 +899,10 @@ textarea {
   background: var(--tab-active-bg);
 }
 
+.pane-tab-shell.has-status-tooltip {
+  overflow: visible;
+}
+
 .pane-tab {
   display: inline-flex;
   align-items: center;
@@ -934,6 +939,140 @@ textarea {
 
 .pane-tab-close:hover {
   color: var(--ink);
+}
+
+.pane-tab-status-tooltip {
+  position: absolute;
+  left: 0;
+  top: calc(100% + 0.55rem);
+  z-index: 12;
+  min-width: min(32rem, calc(100vw - 3rem));
+  max-width: min(38rem, calc(100vw - 3rem));
+  padding: 0.85rem 0.95rem 0.95rem;
+  border: 1px solid var(--tooltip-border);
+  border-radius: 1rem;
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--tooltip-bg) 96%, white 4%), var(--tooltip-bg));
+  box-shadow: var(--tooltip-shadow);
+  color: var(--tooltip-fg);
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(0.3rem) scale(0.98);
+  transform-origin: left top;
+  transition:
+    opacity 160ms ease,
+    transform 160ms ease;
+}
+
+.pane-tab-status-tooltip::before {
+  content: "";
+  position: absolute;
+  left: 1.4rem;
+  bottom: 100%;
+  border-width: 0 0.45rem 0.45rem;
+  border-style: solid;
+  border-color: transparent transparent var(--tooltip-arrow);
+}
+
+.pane-tab-shell:hover .pane-tab-status-tooltip,
+.pane-tab-shell:focus-visible .pane-tab-status-tooltip,
+.pane-tab-shell:focus-within .pane-tab-status-tooltip {
+  opacity: 1;
+  transform: translateY(0) scale(1);
+}
+
+.pane-tab-status-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 0.55rem;
+}
+
+.pane-tab-status-plan {
+  color: var(--tooltip-label);
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.pane-tab-status-grid {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 0.55rem 0.9rem;
+  align-items: center;
+}
+
+.pane-tab-status-key {
+  color: var(--muted);
+  font-family: var(--code-font);
+  font-size: 0.78rem;
+  white-space: nowrap;
+}
+
+.pane-tab-status-value {
+  min-width: 0;
+}
+
+.pane-tab-status-mono {
+  font-family: var(--code-font);
+  font-size: 0.8rem;
+  overflow-wrap: anywhere;
+}
+
+.codex-limit-row {
+  display: grid;
+  grid-template-columns: minmax(8rem, 1fr) auto;
+  gap: 0.75rem;
+  align-items: center;
+}
+
+.codex-limit-bar {
+  position: relative;
+  height: 0.72rem;
+  overflow: hidden;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--tooltip-fg) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--tooltip-fg) 12%, transparent);
+}
+
+.codex-limit-bar-fill,
+.codex-limit-bar-used {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+}
+
+.codex-limit-bar-fill {
+  left: 0;
+  background: linear-gradient(90deg, var(--tooltip-fg), color-mix(in srgb, var(--tooltip-fg) 84%, transparent));
+}
+
+.codex-limit-bar-used {
+  right: 0;
+  background:
+    repeating-linear-gradient(
+      -45deg,
+      color-mix(in srgb, var(--tooltip-fg) 28%, transparent) 0 3px,
+      transparent 3px 6px
+    ),
+    color-mix(in srgb, var(--tooltip-fg) 16%, transparent);
+}
+
+.codex-limit-meta {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.35rem;
+  white-space: nowrap;
+  font-size: 0.82rem;
+}
+
+.codex-limit-meta strong {
+  font-size: 0.86rem;
+}
+
+.codex-limit-meta span {
+  color: var(--muted);
 }
 
 .brand-block h1,
@@ -1013,6 +1152,36 @@ textarea {
   display: flex;
   flex-wrap: wrap;
   gap: 0.6rem;
+}
+
+.sidebar-status-chip {
+  cursor: pointer;
+  appearance: none;
+  -webkit-appearance: none;
+  font: inherit;
+  transition:
+    background 140ms ease,
+    border-color 140ms ease,
+    color 140ms ease,
+    transform 140ms ease;
+}
+
+.sidebar-status-chip:hover {
+  border-color: var(--view-selected-border);
+  background: var(--surface-white);
+  color: var(--ink);
+}
+
+.sidebar-status-chip.selected {
+  border-color: var(--view-selected-border);
+  background: var(--view-selected-bg);
+  color: var(--ink);
+}
+
+.session-filter-empty {
+  padding: 0.15rem 0.1rem;
+  color: var(--muted);
+  font-size: 0.92rem;
 }
 
 .session-row-shell {
@@ -1336,12 +1505,46 @@ textarea {
   align-content: start;
 }
 
+.session-conversation-page {
+  display: grid;
+  gap: 0.7rem;
+}
+
+.session-conversation-page.is-active,
+.session-conversation-page.is-active .message-card,
+.session-conversation-page.is-active .thread-notice,
+.session-conversation-page.is-active .empty-state {
+  content-visibility: visible;
+  contain-intrinsic-size: auto;
+}
+
+.session-conversation-page[hidden] {
+  display: none;
+}
+
 .message-card {
   background: var(--surface-card);
   border: 1px solid var(--line);
   border-radius: 1.4rem;
   padding: 1rem 1.05rem;
   animation: rise-in 360ms ease-out both;
+}
+
+.session-conversation-page,
+.message-card,
+.thread-notice,
+.empty-state {
+  content-visibility: auto;
+}
+
+.session-conversation-page {
+  contain-intrinsic-size: 1px 1600px;
+}
+
+.message-card,
+.thread-notice,
+.empty-state {
+  contain-intrinsic-size: 1px 240px;
 }
 
 .new-response-indicator {

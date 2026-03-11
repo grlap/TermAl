@@ -1,5 +1,6 @@
 import {
   memo,
+  startTransition,
   useEffect,
   useId,
   useLayoutEffect,
@@ -24,6 +25,7 @@ import {
   sendMessage,
   stopSession,
   submitApproval,
+  type StateResponse,
   updateSessionSettings,
 } from "./api";
 import { highlightCode } from "./highlight";
@@ -34,6 +36,8 @@ import type {
   AgentType,
   ClaudeApprovalMode,
   CommandMessage,
+  CodexRateLimitWindow,
+  CodexState,
   DiffMessage,
   ImageAttachment,
   MarkdownMessage,
@@ -71,9 +75,10 @@ import {
 } from "./themes";
 
 type SessionFlagMap = Record<string, true | undefined>;
+type SessionListFilter = "tiles" | "open" | "all";
 type SessionSettingsField = "sandboxMode" | "approvalPolicy" | "claudeApprovalMode";
 type SessionSettingsValue = SandboxMode | ApprovalPolicy | ClaudeApprovalMode;
-type PreferencesTabId = "themes" | "claude-approvals";
+type PreferencesTabId = "themes" | "codex-prompts" | "claude-approvals";
 type PromptHistoryState = {
   index: number;
   draft: string;
@@ -120,6 +125,7 @@ const CLAUDE_APPROVAL_OPTIONS = [
 ] as const;
 const PREFERENCES_TABS: ReadonlyArray<{ id: PreferencesTabId; label: string }> = [
   { id: "themes", label: "Themes" },
+  { id: "codex-prompts", label: "Codex prompts" },
   { id: "claude-approvals", label: "Claude approvals" },
 ];
 
@@ -130,6 +136,7 @@ type ComboboxOption = {
 
 export default function App() {
   const [sessions, setSessions] = useState<Session[]>([]);
+  const [codexState, setCodexState] = useState<CodexState>({});
   const [workspace, setWorkspace] = useState<WorkspaceState>({
     root: null,
     panes: [],
@@ -149,11 +156,20 @@ export default function App() {
   const [pendingKillSessionId, setPendingKillSessionId] = useState<string | null>(null);
   const [updatingSessionIds, setUpdatingSessionIds] = useState<SessionFlagMap>({});
   const [requestError, setRequestError] = useState<string | null>(null);
+  const [sessionListFilter, setSessionListFilter] = useState<SessionListFilter>("all");
   const [themeId, setThemeId] = useState<ThemeId>(() => getStoredThemePreference());
+  const [defaultCodexSandboxMode, setDefaultCodexSandboxMode] =
+    useState<SandboxMode>("workspace-write");
+  const [defaultCodexApprovalPolicy, setDefaultCodexApprovalPolicy] =
+    useState<ApprovalPolicy>("never");
   const [defaultClaudeApprovalMode, setDefaultClaudeApprovalMode] =
     useState<ClaudeApprovalMode>("ask");
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [settingsTab, setSettingsTab] = useState<PreferencesTabId>("themes");
+  const [pendingScrollToBottomRequest, setPendingScrollToBottomRequest] = useState<{
+    sessionId: string;
+    token: number;
+  } | null>(null);
   const [draggedTab, setDraggedTab] = useState<{
     sourcePaneId: string;
     sessionId: string;
@@ -168,6 +184,11 @@ export default function App() {
   } | null>(null);
   const draftAttachmentsRef = useRef<Record<string, DraftImageAttachment[]>>({});
   const sessionsRef = useRef<Session[]>([]);
+  const paneShouldStickToBottomRef = useRef<Record<string, boolean | undefined>>({});
+  const paneScrollPositionsRef = useRef<
+    Record<string, Record<string, { top: number; shouldStick: boolean }>>
+  >({});
+  const paneContentSignaturesRef = useRef<Record<string, Record<string, string>>>({});
 
   const sessionLookup = new Map(sessions.map((session) => [session.id, session]));
   const paneLookup = new Map(workspace.panes.map((pane) => [pane.id, pane]));
@@ -176,7 +197,28 @@ export default function App() {
   const activeSession = activePane?.activeSessionId
     ? (sessionLookup.get(activePane.activeSessionId) ?? null)
     : null;
-  const openSessionIds = new Set(workspace.panes.flatMap((pane) => pane.sessionIds));
+  const tileSessionIds = useMemo(
+    () =>
+      new Set(
+        workspace.panes.flatMap((pane) => (pane.activeSessionId ? [pane.activeSessionId] : [])),
+      ),
+    [workspace.panes],
+  );
+  const openSessionIds = useMemo(
+    () => new Set(workspace.panes.flatMap((pane) => pane.sessionIds)),
+    [workspace.panes],
+  );
+  const filteredSessions = useMemo(() => {
+    switch (sessionListFilter) {
+      case "tiles":
+        return sessions.filter((session) => tileSessionIds.has(session.id));
+      case "open":
+        return sessions.filter((session) => openSessionIds.has(session.id));
+      case "all":
+      default:
+        return sessions;
+    }
+  }, [openSessionIds, sessionListFilter, sessions, tileSessionIds]);
   const activeTheme = THEMES.find((theme) => theme.id === themeId) ?? THEMES[0];
 
   function adoptSessions(
@@ -212,6 +254,14 @@ export default function App() {
     setUpdatingSessionIds((current) => pruneSessionFlags(current, availableSessionIds));
   }
 
+  function adoptState(
+    nextState: StateResponse,
+    options?: { openSessionId?: string; paneId?: string | null },
+  ) {
+    setCodexState(nextState.codex ?? {});
+    adoptSessions(nextState.sessions, options);
+  }
+
   useEffect(() => {
     let cancelled = false;
     const eventSource = new EventSource("/api/events");
@@ -223,7 +273,7 @@ export default function App() {
           return;
         }
 
-        adoptSessions(state.sessions);
+        adoptState(state);
         setRequestError(null);
       } catch (error) {
         if (cancelled) {
@@ -244,8 +294,8 @@ export default function App() {
       }
 
       try {
-        const state = JSON.parse(event.data) as { sessions: Session[] };
-        adoptSessions(state.sessions);
+        const state = JSON.parse(event.data) as StateResponse;
+        adoptState(state);
         setRequestError(null);
       } catch (error) {
         if (!cancelled) {
@@ -418,7 +468,7 @@ export default function App() {
           mediaType: attachment.mediaType,
         })),
       );
-      adoptSessions(state.sessions);
+      adoptState(state);
       releaseDraftAttachments(attachments);
       setRequestError(null);
     } catch (error) {
@@ -495,12 +545,15 @@ export default function App() {
     try {
       const created = await createSession({
         agent: newSessionAgent,
+        approvalPolicy:
+          newSessionAgent === "Codex" ? defaultCodexApprovalPolicy : undefined,
         claudeApprovalMode:
           newSessionAgent === "Claude" ? defaultClaudeApprovalMode : undefined,
+        sandboxMode: newSessionAgent === "Codex" ? defaultCodexSandboxMode : undefined,
         workdir: activeSession?.workdir,
       });
       const state = await fetchState();
-      adoptSessions(state.sessions, {
+      adoptState(state, {
         openSessionId: created.id,
         paneId: workspace.activePaneId,
       });
@@ -519,7 +572,7 @@ export default function App() {
   ) {
     try {
       const state = await submitApproval(sessionId, messageId, decision);
-      adoptSessions(state.sessions);
+      adoptState(state);
       setRequestError(null);
     } catch (error) {
       setRequestError(getErrorMessage(error));
@@ -534,12 +587,12 @@ export default function App() {
     });
     try {
       const state = await cancelQueuedPrompt(sessionId, promptId);
-      adoptSessions(state.sessions);
+      adoptState(state);
       setRequestError(null);
     } catch (error) {
       try {
         const state = await fetchState();
-        adoptSessions(state.sessions);
+        adoptState(state);
       } catch {
         // Keep the original request error below; state refresh is best-effort.
       }
@@ -551,7 +604,7 @@ export default function App() {
     setStoppingSessionIds((current) => setSessionFlag(current, sessionId, true));
     try {
       const state = await stopSession(sessionId);
-      adoptSessions(state.sessions);
+      adoptState(state);
       setRequestError(null);
     } catch (error) {
       setRequestError(getErrorMessage(error));
@@ -581,7 +634,7 @@ export default function App() {
     setKillingSessionIds((current) => setSessionFlag(current, sessionId, true));
     try {
       const state = await killSession(sessionId);
-      adoptSessions(state.sessions);
+      adoptState(state);
       setRequestError(null);
     } catch (error) {
       setRequestError(getErrorMessage(error));
@@ -624,7 +677,7 @@ export default function App() {
       }
 
       const state = await updateSessionSettings(sessionId, payload);
-      adoptSessions(state.sessions);
+      adoptState(state);
       setRequestError(null);
     } catch (error) {
       setRequestError(getErrorMessage(error));
@@ -635,7 +688,17 @@ export default function App() {
 
   function handleSidebarSessionClick(sessionId: string) {
     setKillRevealSessionId(null);
+    setPendingScrollToBottomRequest({
+      sessionId,
+      token: Date.now(),
+    });
     setWorkspace((current) => openSessionInWorkspaceState(current, sessionId, current.activePaneId));
+  }
+
+  function handleScrollToBottomRequestHandled(token: number) {
+    setPendingScrollToBottomRequest((current) =>
+      current?.token === token ? null : current,
+    );
   }
 
   const pendingKillSession = pendingKillSessionId
@@ -714,17 +777,20 @@ export default function App() {
       return;
     }
 
-    setWorkspace((current) =>
-      placeDraggedSession(
-        current,
-        draggedTab.sourcePaneId,
-        draggedTab.sessionId,
-        targetPaneId,
-        placement,
-        tabIndex,
-      ),
-    );
+    const drop = draggedTab;
     setDraggedTab(null);
+    startTransition(() => {
+      setWorkspace((current) =>
+        placeDraggedSession(
+          current,
+          drop.sourcePaneId,
+          drop.sessionId,
+          targetPaneId,
+          placement,
+          tabIndex,
+        ),
+      );
+    });
   }
 
   function handlePaneViewModeChange(paneId: string, viewMode: PaneViewMode) {
@@ -793,79 +859,106 @@ export default function App() {
         </button>
 
         <div className="session-list">
-          {sessions.map((session) => {
-            const isActive = session.id === activeSession?.id;
-            const isOpen = openSessionIds.has(session.id);
-            const isKilling = Boolean(killingSessionIds[session.id]);
-            const isKillVisible = isKilling || killRevealSessionId === session.id;
+          {filteredSessions.length > 0 ? (
+            filteredSessions.map((session) => {
+              const isActive = session.id === activeSession?.id;
+              const isOpen = openSessionIds.has(session.id);
+              const isKilling = Boolean(killingSessionIds[session.id]);
+              const isKillVisible = isKilling || killRevealSessionId === session.id;
 
-            return (
-              <div
-                key={session.id}
-                className={`session-row-shell ${isActive ? "selected" : ""} ${isOpen ? "open" : ""} ${isKillVisible ? "kill-armed" : ""}`}
-                onMouseLeave={() => {
-                  if (!isKilling) {
-                    setKillRevealSessionId((current) => (current === session.id ? null : current));
-                  }
-                }}
-                onBlur={(event) => {
-                  const nextTarget = event.relatedTarget;
-                  if (
-                    !isKilling &&
-                    (!(nextTarget instanceof Node) || !event.currentTarget.contains(nextTarget))
-                  ) {
-                    setKillRevealSessionId((current) => (current === session.id ? null : current));
-                  }
-                }}
-              >
-                <button
-                  className={`session-row ${isActive ? "selected" : ""} ${isOpen ? "open" : ""}`}
-                  type="button"
-                  onClick={() => handleSidebarSessionClick(session.id)}
+              return (
+                <div
+                  key={session.id}
+                  className={`session-row-shell ${isActive ? "selected" : ""} ${isOpen ? "open" : ""} ${isKillVisible ? "kill-armed" : ""}`}
+                  onMouseLeave={() => {
+                    if (!isKilling) {
+                      setKillRevealSessionId((current) => (current === session.id ? null : current));
+                    }
+                  }}
+                  onBlur={(event) => {
+                    const nextTarget = event.relatedTarget;
+                    if (
+                      !isKilling &&
+                      (!(nextTarget instanceof Node) || !event.currentTarget.contains(nextTarget))
+                    ) {
+                      setKillRevealSessionId((current) => (current === session.id ? null : current));
+                    }
+                  }}
                 >
-                  <div className="session-avatar">{session.emoji}</div>
-                  <div className="session-copy">
-                    <div className="session-title-line">
-                      <strong>{session.name}</strong>
+                  <button
+                    className={`session-row ${isActive ? "selected" : ""} ${isOpen ? "open" : ""}`}
+                    type="button"
+                    onClick={() => handleSidebarSessionClick(session.id)}
+                  >
+                    <div className="session-avatar">{session.emoji}</div>
+                    <div className="session-copy">
+                      <div className="session-title-line">
+                        <strong>{session.name}</strong>
+                      </div>
+                      <div className="session-meta">
+                        {session.agent} <span className="meta-separator">/</span> {session.workdir}
+                      </div>
+                      <div className="session-preview">{session.preview}</div>
                     </div>
-                    <div className="session-meta">
-                      {session.agent} <span className="meta-separator">/</span> {session.workdir}
-                    </div>
-                    <div className="session-preview">{session.preview}</div>
-                  </div>
-                </button>
-                <button
-                  className="session-row-status-button"
-                  type="button"
-                  onClick={() =>
-                    setKillRevealSessionId((current) =>
-                      current === session.id && !isKilling ? null : session.id,
-                    )
-                  }
-                  aria-label={`Show session actions for ${session.name}`}
-                >
-                  <span className={`status-dot status-${session.status}`} />
-                </button>
-                <button
-                  className="ghost-button session-row-kill"
-                  type="button"
-                  onClick={() => void handleKillSession(session.id)}
-                  disabled={isKilling}
-                  aria-label={`Kill ${session.name}`}
-                >
-                  {isKilling ? "Killing" : "Kill"}
-                </button>
-              </div>
-            );
-          })}
+                  </button>
+                  <button
+                    className="session-row-status-button"
+                    type="button"
+                    onClick={() =>
+                      setKillRevealSessionId((current) =>
+                        current === session.id && !isKilling ? null : session.id,
+                      )
+                    }
+                    aria-label={`Show session actions for ${session.name}`}
+                  >
+                    <span className={`status-dot status-${session.status}`} />
+                  </button>
+                  <button
+                    className="ghost-button session-row-kill"
+                    type="button"
+                    onClick={() => void handleKillSession(session.id)}
+                    disabled={isKilling}
+                    aria-label={`Kill ${session.name}`}
+                  >
+                    {isKilling ? "Killing" : "Kill"}
+                  </button>
+                </div>
+              );
+            })
+          ) : (
+            <div className="session-filter-empty">
+              {sessions.length === 0 ? "No sessions yet." : "No sessions match this filter."}
+            </div>
+          )}
         </div>
 
         <section className="sidebar-status" aria-label="Workspace status">
           <div className="session-control-label">Status</div>
           <div className="sidebar-status-chips">
-            <span className="chip">{workspace.panes.length} tiles</span>
-            <span className="chip">{openSessionIds.size} open sessions</span>
-            <span className="chip">{sessions.length} total sessions</span>
+            <button
+              className={`chip sidebar-status-chip ${sessionListFilter === "tiles" ? "selected" : ""}`}
+              type="button"
+              onClick={() => setSessionListFilter("tiles")}
+              aria-pressed={sessionListFilter === "tiles"}
+            >
+              {workspace.panes.length} {workspace.panes.length === 1 ? "tile" : "tiles"}
+            </button>
+            <button
+              className={`chip sidebar-status-chip ${sessionListFilter === "open" ? "selected" : ""}`}
+              type="button"
+              onClick={() => setSessionListFilter("open")}
+              aria-pressed={sessionListFilter === "open"}
+            >
+              {openSessionIds.size} {openSessionIds.size === 1 ? "open session" : "open sessions"}
+            </button>
+            <button
+              className={`chip sidebar-status-chip ${sessionListFilter === "all" ? "selected" : ""}`}
+              type="button"
+              onClick={() => setSessionListFilter("all")}
+              aria-pressed={sessionListFilter === "all"}
+            >
+              {sessions.length} {sessions.length === 1 ? "total session" : "total sessions"}
+            </button>
           </div>
         </section>
       </aside>
@@ -882,6 +975,7 @@ export default function App() {
           {workspace.root ? (
             <WorkspaceNodeView
               node={workspace.root}
+              codexState={codexState}
               paneLookup={paneLookup}
               sessionLookup={sessionLookup}
               activePaneId={workspace.activePaneId}
@@ -892,6 +986,10 @@ export default function App() {
               stoppingSessionIds={stoppingSessionIds}
               killingSessionIds={killingSessionIds}
               updatingSessionIds={updatingSessionIds}
+              paneShouldStickToBottomRef={paneShouldStickToBottomRef}
+              paneScrollPositionsRef={paneScrollPositionsRef}
+              paneContentSignaturesRef={paneContentSignaturesRef}
+              pendingScrollToBottomRequest={pendingScrollToBottomRequest}
               draggedTab={draggedTab}
               onActivatePane={handlePaneActivate}
               onSelectSession={handlePaneSessionSelect}
@@ -912,6 +1010,7 @@ export default function App() {
               onApprovalDecision={handleApprovalDecision}
               onStopSession={handleStopSession}
               onKillSession={handleKillSession}
+              onScrollToBottomRequestHandled={handleScrollToBottomRequestHandled}
               onSessionSettingsChange={handleSessionSettingsChange}
             />
           ) : (
@@ -1038,6 +1137,13 @@ export default function App() {
                     activeTheme={activeTheme}
                     themeId={themeId}
                     onSelectTheme={setThemeId}
+                  />
+                ) : settingsTab === "codex-prompts" ? (
+                  <CodexPromptPreferencesPanel
+                    defaultApprovalPolicy={defaultCodexApprovalPolicy}
+                    defaultSandboxMode={defaultCodexSandboxMode}
+                    onSelectApprovalPolicy={setDefaultCodexApprovalPolicy}
+                    onSelectSandboxMode={setDefaultCodexSandboxMode}
                   />
                 ) : (
                   <ClaudeApprovalsPreferencesPanel
@@ -1339,6 +1445,67 @@ function ClaudeApprovalsPreferencesPanel({
   );
 }
 
+function CodexPromptPreferencesPanel({
+  defaultApprovalPolicy,
+  defaultSandboxMode,
+  onSelectApprovalPolicy,
+  onSelectSandboxMode,
+}: {
+  defaultApprovalPolicy: ApprovalPolicy;
+  defaultSandboxMode: SandboxMode;
+  onSelectApprovalPolicy: (policy: ApprovalPolicy) => void;
+  onSelectSandboxMode: (mode: SandboxMode) => void;
+}) {
+  return (
+    <section className="settings-panel-stack">
+      <div className="settings-panel-intro">
+        <div>
+          <p className="session-control-label">New Codex sessions</p>
+          <p className="settings-panel-copy">
+            Choose the default prompt sandbox and approval policy for Codex sessions created in
+            this window.
+          </p>
+        </div>
+      </div>
+
+      <article className="message-card prompt-settings-card">
+        <div className="card-label">Session Default</div>
+        <h3>Codex prompt settings</h3>
+        <div className="prompt-settings-grid">
+          <div className="session-control-group">
+            <label className="session-control-label" htmlFor="default-codex-sandbox-mode">
+              Default sandbox
+            </label>
+            <ThemedCombobox
+              id="default-codex-sandbox-mode"
+              className="prompt-settings-select"
+              value={defaultSandboxMode}
+              options={SANDBOX_MODE_OPTIONS as readonly ComboboxOption[]}
+              onChange={(nextValue) => onSelectSandboxMode(nextValue as SandboxMode)}
+            />
+          </div>
+          <div className="session-control-group">
+            <label className="session-control-label" htmlFor="default-codex-approval-policy">
+              Default approval policy
+            </label>
+            <ThemedCombobox
+              id="default-codex-approval-policy"
+              className="prompt-settings-select"
+              value={defaultApprovalPolicy}
+              options={APPROVAL_POLICY_OPTIONS as readonly ComboboxOption[]}
+              onChange={(nextValue) => onSelectApprovalPolicy(nextValue as ApprovalPolicy)}
+            />
+          </div>
+          <p className="session-control-hint">
+            This only affects new Codex sessions you create here. Existing sessions keep their
+            current prompt settings.
+          </p>
+        </div>
+      </article>
+    </section>
+  );
+}
+
 function ThemedCombobox({
   className,
   disabled = false,
@@ -1602,6 +1769,7 @@ function ThemedCombobox({
 
 function WorkspaceNodeView({
   node,
+  codexState,
   paneLookup,
   sessionLookup,
   activePaneId,
@@ -1612,6 +1780,10 @@ function WorkspaceNodeView({
   stoppingSessionIds,
   killingSessionIds,
   updatingSessionIds,
+  paneShouldStickToBottomRef,
+  paneScrollPositionsRef,
+  paneContentSignaturesRef,
+  pendingScrollToBottomRequest,
   draggedTab,
   onActivatePane,
   onSelectSession,
@@ -1632,9 +1804,11 @@ function WorkspaceNodeView({
   onApprovalDecision,
   onStopSession,
   onKillSession,
+  onScrollToBottomRequestHandled,
   onSessionSettingsChange,
 }: {
   node: WorkspaceNode;
+  codexState: CodexState;
   paneLookup: Map<string, WorkspacePane>;
   sessionLookup: Map<string, Session>;
   activePaneId: string | null;
@@ -1645,6 +1819,15 @@ function WorkspaceNodeView({
   stoppingSessionIds: SessionFlagMap;
   killingSessionIds: SessionFlagMap;
   updatingSessionIds: SessionFlagMap;
+  paneShouldStickToBottomRef: React.MutableRefObject<Record<string, boolean | undefined>>;
+  paneScrollPositionsRef: React.MutableRefObject<
+    Record<string, Record<string, { top: number; shouldStick: boolean }>>
+  >;
+  paneContentSignaturesRef: React.MutableRefObject<Record<string, Record<string, string>>>;
+  pendingScrollToBottomRequest: {
+    sessionId: string;
+    token: number;
+  } | null;
   draggedTab: {
     sourcePaneId: string;
     sessionId: string;
@@ -1676,6 +1859,7 @@ function WorkspaceNodeView({
   ) => void;
   onStopSession: (sessionId: string) => void;
   onKillSession: (sessionId: string) => void;
+  onScrollToBottomRequestHandled: (token: number) => void;
   onSessionSettingsChange: (
     sessionId: string,
     field: SessionSettingsField,
@@ -1691,6 +1875,7 @@ function WorkspaceNodeView({
     return (
       <SessionPaneView
         pane={pane}
+        codexState={codexState}
         sessions={pane.sessionIds
           .map((sessionId) => sessionLookup.get(sessionId))
           .filter((session): session is Session => session !== undefined)}
@@ -1704,6 +1889,10 @@ function WorkspaceNodeView({
         isStopping={pane.activeSessionId ? Boolean(stoppingSessionIds[pane.activeSessionId]) : false}
         isKilling={pane.activeSessionId ? Boolean(killingSessionIds[pane.activeSessionId]) : false}
         isUpdating={pane.activeSessionId ? Boolean(updatingSessionIds[pane.activeSessionId]) : false}
+        paneShouldStickToBottomRef={paneShouldStickToBottomRef}
+        paneScrollPositionsRef={paneScrollPositionsRef}
+        paneContentSignaturesRef={paneContentSignaturesRef}
+        pendingScrollToBottomRequest={pendingScrollToBottomRequest}
         draggedTab={draggedTab}
         onActivatePane={onActivatePane}
         onSelectSession={onSelectSession}
@@ -1723,6 +1912,7 @@ function WorkspaceNodeView({
         onApprovalDecision={onApprovalDecision}
         onStopSession={onStopSession}
         onKillSession={onKillSession}
+        onScrollToBottomRequestHandled={onScrollToBottomRequestHandled}
         onSessionSettingsChange={onSessionSettingsChange}
       />
     );
@@ -1733,6 +1923,7 @@ function WorkspaceNodeView({
       <div className="tile-branch" style={{ flexGrow: node.ratio, flexBasis: 0 }}>
         <WorkspaceNodeView
           node={node.first}
+          codexState={codexState}
           paneLookup={paneLookup}
           sessionLookup={sessionLookup}
           activePaneId={activePaneId}
@@ -1743,6 +1934,10 @@ function WorkspaceNodeView({
           stoppingSessionIds={stoppingSessionIds}
           killingSessionIds={killingSessionIds}
           updatingSessionIds={updatingSessionIds}
+          paneShouldStickToBottomRef={paneShouldStickToBottomRef}
+          paneScrollPositionsRef={paneScrollPositionsRef}
+          paneContentSignaturesRef={paneContentSignaturesRef}
+          pendingScrollToBottomRequest={pendingScrollToBottomRequest}
           draggedTab={draggedTab}
           onActivatePane={onActivatePane}
           onSelectSession={onSelectSession}
@@ -1763,6 +1958,7 @@ function WorkspaceNodeView({
           onApprovalDecision={onApprovalDecision}
           onStopSession={onStopSession}
           onKillSession={onKillSession}
+          onScrollToBottomRequestHandled={onScrollToBottomRequestHandled}
           onSessionSettingsChange={onSessionSettingsChange}
         />
       </div>
@@ -1775,6 +1971,7 @@ function WorkspaceNodeView({
       <div className="tile-branch" style={{ flexGrow: 1 - node.ratio, flexBasis: 0 }}>
         <WorkspaceNodeView
           node={node.second}
+          codexState={codexState}
           paneLookup={paneLookup}
           sessionLookup={sessionLookup}
           activePaneId={activePaneId}
@@ -1785,6 +1982,10 @@ function WorkspaceNodeView({
           stoppingSessionIds={stoppingSessionIds}
           killingSessionIds={killingSessionIds}
           updatingSessionIds={updatingSessionIds}
+          paneShouldStickToBottomRef={paneShouldStickToBottomRef}
+          paneScrollPositionsRef={paneScrollPositionsRef}
+          paneContentSignaturesRef={paneContentSignaturesRef}
+          pendingScrollToBottomRequest={pendingScrollToBottomRequest}
           draggedTab={draggedTab}
           onActivatePane={onActivatePane}
           onSelectSession={onSelectSession}
@@ -1805,6 +2006,7 @@ function WorkspaceNodeView({
           onApprovalDecision={onApprovalDecision}
           onStopSession={onStopSession}
           onKillSession={onKillSession}
+          onScrollToBottomRequestHandled={onScrollToBottomRequestHandled}
           onSessionSettingsChange={onSessionSettingsChange}
         />
       </div>
@@ -1814,6 +2016,7 @@ function WorkspaceNodeView({
 
 function SessionPaneView({
   pane,
+  codexState,
   sessions,
   isActive,
   isLoading,
@@ -1823,6 +2026,10 @@ function SessionPaneView({
   isStopping,
   isKilling,
   isUpdating,
+  paneShouldStickToBottomRef,
+  paneScrollPositionsRef,
+  paneContentSignaturesRef,
+  pendingScrollToBottomRequest,
   draggedTab,
   onActivatePane,
   onSelectSession,
@@ -1842,9 +2049,11 @@ function SessionPaneView({
   onApprovalDecision,
   onStopSession,
   onKillSession,
+  onScrollToBottomRequestHandled,
   onSessionSettingsChange,
 }: {
   pane: WorkspacePane;
+  codexState: CodexState;
   sessions: Session[];
   isActive: boolean;
   isLoading: boolean;
@@ -1854,6 +2063,15 @@ function SessionPaneView({
   isStopping: boolean;
   isKilling: boolean;
   isUpdating: boolean;
+  paneShouldStickToBottomRef: React.MutableRefObject<Record<string, boolean | undefined>>;
+  paneScrollPositionsRef: React.MutableRefObject<
+    Record<string, Record<string, { top: number; shouldStick: boolean }>>
+  >;
+  paneContentSignaturesRef: React.MutableRefObject<Record<string, Record<string, string>>>;
+  pendingScrollToBottomRequest: {
+    sessionId: string;
+    token: number;
+  } | null;
   draggedTab: {
     sourcePaneId: string;
     sessionId: string;
@@ -1880,6 +2098,7 @@ function SessionPaneView({
   ) => void;
   onStopSession: (sessionId: string) => void;
   onKillSession: (sessionId: string) => void;
+  onScrollToBottomRequestHandled: (token: number) => void;
   onSessionSettingsChange: (
     sessionId: string,
     field: SessionSettingsField,
@@ -1904,9 +2123,6 @@ function SessionPaneView({
   });
   const messageStackRef = useRef<HTMLElement | null>(null);
   const paneTabsRef = useRef<HTMLDivElement | null>(null);
-  const shouldStickToBottomRef = useRef(true);
-  const scrollPositionsRef = useRef<Record<string, { top: number; shouldStick: boolean }>>({});
-  const contentSignaturesRef = useRef<Record<string, string>>({});
   const [tabRailState, setTabRailState] = useState({
     hasOverflow: false,
     canScrollPrev: false,
@@ -1914,6 +2130,7 @@ function SessionPaneView({
   });
   const [activeDropPlacement, setActiveDropPlacement] = useState<Exclude<TabDropPlacement, "tabs"> | null>(null);
   const [activeTabInsertIndex, setActiveTabInsertIndex] = useState<number | null>(null);
+  const [mountedSessionIds, setMountedSessionIds] = useState<Record<string, true | undefined>>({});
   const [newResponseIndicatorByKey, setNewResponseIndicatorByKey] = useState<
     Record<string, true | undefined>
   >({});
@@ -1937,6 +2154,13 @@ function SessionPaneView({
     [activeSession],
   );
   const pendingPrompts = useMemo(() => activeSession?.pendingPrompts ?? [], [activeSession]);
+  const mountedSessions = useMemo(() => {
+    if (!activeSession) {
+      return [];
+    }
+
+    return sessions.filter((session) => mountedSessionIds[session.id] || session.id === activeSession.id);
+  }, [activeSession, mountedSessionIds, sessions]);
   const sessionConversationItems = useMemo(
     () => (activeSession ? buildSessionConversationItems(activeSession) : []),
     [activeSession],
@@ -1985,6 +2209,18 @@ function SessionPaneView({
     [activeSession, pane.viewMode, visibleMessages],
   );
   const showNewResponseIndicator = Boolean(newResponseIndicatorByKey[scrollStateKey]);
+  const paneScrollPositions =
+    paneScrollPositionsRef.current[pane.id] ?? (paneScrollPositionsRef.current[pane.id] = {});
+  const paneContentSignatures =
+    paneContentSignaturesRef.current[pane.id] ?? (paneContentSignaturesRef.current[pane.id] = {});
+
+  function getShouldStickToBottom() {
+    return paneShouldStickToBottomRef.current[pane.id] ?? true;
+  }
+
+  function setShouldStickToBottom(nextValue: boolean) {
+    paneShouldStickToBottomRef.current[pane.id] = nextValue;
+  }
 
   function handleComposerPaste(event: ReactClipboardEvent<HTMLTextAreaElement>) {
     if (!activeSession) {
@@ -2042,12 +2278,98 @@ function SessionPaneView({
       top: node.scrollHeight,
       behavior,
     });
-    shouldStickToBottomRef.current = true;
-    scrollPositionsRef.current[scrollStateKey] = {
+    setShouldStickToBottom(true);
+    paneScrollPositions[scrollStateKey] = {
       top: node.scrollHeight,
       shouldStick: true,
     };
     setNewResponseIndicator(scrollStateKey, false);
+  }
+
+  function scrollMessageStackByPage(direction: -1 | 1) {
+    const node = messageStackRef.current;
+    if (!node) {
+      return;
+    }
+
+    const distance = Math.max(Math.round(node.clientHeight * 0.85), 160);
+    node.scrollBy({
+      top: distance * direction,
+      behavior: "smooth",
+    });
+  }
+
+  function scrollMessageStackToBoundary(boundary: "top" | "bottom") {
+    if (boundary === "bottom") {
+      scrollToLatestMessage("smooth");
+      return;
+    }
+
+    const node = messageStackRef.current;
+    if (!node) {
+      return;
+    }
+
+    node.scrollTo({
+      top: 0,
+      behavior: "smooth",
+    });
+  }
+
+  function handlePaneKeyDown(event: ReactKeyboardEvent<HTMLElement>) {
+    if (event.defaultPrevented) {
+      return;
+    }
+
+    if (event.key !== "PageUp" && event.key !== "PageDown") {
+      return;
+    }
+
+    if (event.altKey || event.ctrlKey || event.metaKey) {
+      return;
+    }
+
+    event.preventDefault();
+    if (event.shiftKey) {
+      scrollMessageStackToBoundary(event.key === "PageUp" ? "top" : "bottom");
+    } else {
+      scrollMessageStackByPage(event.key === "PageUp" ? -1 : 1);
+    }
+  }
+
+  function scheduleSettledScrollToBottom(behavior: ScrollBehavior, maxAttempts = 12) {
+    let frameId = 0;
+    let remainingAttempts = maxAttempts;
+    let previousScrollHeight = -1;
+    let stableFrameCount = 0;
+
+    const tick = () => {
+      scrollToLatestMessage(behavior);
+
+      const node = messageStackRef.current;
+      if (!node) {
+        return;
+      }
+
+      const bottomGap = Math.max(node.scrollHeight - node.clientHeight - node.scrollTop, 0);
+      const heightStable = node.scrollHeight === previousScrollHeight;
+      if (bottomGap <= 4 && heightStable) {
+        stableFrameCount += 1;
+      } else {
+        stableFrameCount = 0;
+      }
+
+      previousScrollHeight = node.scrollHeight;
+      remainingAttempts -= 1;
+      if (remainingAttempts > 0 && stableFrameCount < 2) {
+        frameId = window.requestAnimationFrame(tick);
+      }
+    };
+
+    frameId = window.requestAnimationFrame(tick);
+    return () => {
+      window.cancelAnimationFrame(frameId);
+    };
   }
 
   function updateTabRailState() {
@@ -2171,18 +2493,18 @@ function SessionPaneView({
         return;
       }
 
-      const saved = scrollPositionsRef.current[scrollStateKey];
+      const saved = paneScrollPositions[scrollStateKey];
       if (saved) {
         const maxScrollTop = Math.max(node.scrollHeight - node.clientHeight, 0);
         node.scrollTop = Math.min(saved.top, maxScrollTop);
-        shouldStickToBottomRef.current = saved.shouldStick;
+        setShouldStickToBottom(saved.shouldStick);
         return;
       }
 
       if (defaultScrollToBottom) {
         node.scrollTop = node.scrollHeight;
-        shouldStickToBottomRef.current = true;
-        scrollPositionsRef.current[scrollStateKey] = {
+        setShouldStickToBottom(true);
+        paneScrollPositions[scrollStateKey] = {
           top: node.scrollTop,
           shouldStick: true,
         };
@@ -2190,8 +2512,8 @@ function SessionPaneView({
       }
 
       node.scrollTop = 0;
-      shouldStickToBottomRef.current = false;
-      scrollPositionsRef.current[scrollStateKey] = {
+      setShouldStickToBottom(false);
+      paneScrollPositions[scrollStateKey] = {
         top: 0,
         shouldStick: false,
       };
@@ -2202,20 +2524,65 @@ function SessionPaneView({
     };
   }, [defaultScrollToBottom, scrollStateKey]);
 
+  useLayoutEffect(() => {
+    if (
+      !activeSession ||
+      pane.viewMode !== "session" ||
+      mountedSessionIds[activeSession.id]
+    ) {
+      return;
+    }
+
+    return scheduleSettledScrollToBottom("auto");
+  }, [activeSession, mountedSessionIds, pane.viewMode, scrollStateKey]);
+
+  useEffect(() => {
+    if (!activeSession) {
+      return;
+    }
+
+    setMountedSessionIds((current) =>
+      current[activeSession.id]
+        ? current
+        : {
+            ...current,
+            [activeSession.id]: true,
+          },
+    );
+  }, [activeSession]);
+
+  useEffect(() => {
+    const availableSessionIds = new Set(sessions.map((session) => session.id));
+    setMountedSessionIds((current) => {
+      let changed = false;
+      const nextState: Record<string, true | undefined> = {};
+
+      for (const sessionId of Object.keys(current)) {
+        if (availableSessionIds.has(sessionId)) {
+          nextState[sessionId] = true;
+        } else {
+          changed = true;
+        }
+      }
+
+      return changed ? nextState : current;
+    });
+  }, [sessions]);
+
   useEffect(() => {
     if (!activeSession || pane.viewMode === "source") {
       return;
     }
 
-    const previousSignature = contentSignaturesRef.current[scrollStateKey];
-    contentSignaturesRef.current[scrollStateKey] = visibleContentSignature;
+    const previousSignature = paneContentSignatures[scrollStateKey];
+    paneContentSignatures[scrollStateKey] = visibleContentSignature;
     if (previousSignature === undefined || previousSignature === visibleContentSignature) {
       return;
     }
 
     const shouldScroll =
-      shouldStickToBottomRef.current ||
-      scrollPositionsRef.current[scrollStateKey]?.shouldStick === true ||
+      getShouldStickToBottom() ||
+      paneScrollPositions[scrollStateKey]?.shouldStick === true ||
       visibleLastMessageAuthor === "you";
     if (!shouldScroll) {
       if (pane.viewMode === "session" && visibleLastMessageAuthor === "assistant") {
@@ -2234,6 +2601,35 @@ function SessionPaneView({
       window.cancelAnimationFrame(frameId);
     };
   }, [activeSession, pane.viewMode, scrollStateKey, visibleContentSignature, visibleLastMessageAuthor]);
+
+  useEffect(() => {
+    if (
+      !pendingScrollToBottomRequest ||
+      !isActive ||
+      pane.viewMode !== "session" ||
+      activeSession?.id !== pendingScrollToBottomRequest.sessionId
+    ) {
+      return;
+    }
+
+    const requestToken = pendingScrollToBottomRequest.token;
+    const cancel = scheduleSettledScrollToBottom("auto");
+    const handledFrameId = window.requestAnimationFrame(() => {
+      onScrollToBottomRequestHandled(requestToken);
+    });
+
+    return () => {
+      cancel();
+      window.cancelAnimationFrame(handledFrameId);
+    };
+  }, [
+    activeSession?.id,
+    isActive,
+    onScrollToBottomRequestHandled,
+    pane.viewMode,
+    pendingScrollToBottomRequest,
+    scrollStateKey,
+  ]);
 
   useEffect(() => {
     setSourceDraft(pane.sourcePath ?? "");
@@ -2378,6 +2774,7 @@ function SessionPaneView({
     <section
       className={`workspace-pane thread panel ${isActive ? "active" : ""}`}
       onMouseDown={() => onActivatePane(pane.id)}
+      onKeyDown={handlePaneKeyDown}
     >
       {showDropOverlay ? (
         <div className="pane-drop-overlay">
@@ -2440,16 +2837,23 @@ function SessionPaneView({
                 {sessions.length > 0 ? (
                   sessions.map((session, index) => {
                     const tabActive = session.id === activeSession?.id;
+                    const showCodexStatus =
+                      session.agent === "Codex" &&
+                      Boolean(session.externalSessionId || codexState.rateLimits);
                     const showDropBefore = activeTabInsertIndex === index;
                     const showDropAfter =
                       activeTabInsertIndex === sessions.length && index === sessions.length - 1;
+                    const codexStatusTooltipId = showCodexStatus
+                      ? `codex-status-${pane.id}-${session.id}`
+                      : undefined;
 
                     return (
                       <div
                         key={session.id}
-                        className={`pane-tab-shell ${tabActive ? "active" : ""} ${showDropBefore ? "drop-before" : ""} ${showDropAfter ? "drop-after" : ""}`}
+                        className={`pane-tab-shell ${tabActive ? "active" : ""} ${showCodexStatus ? "has-status-tooltip" : ""} ${showDropBefore ? "drop-before" : ""} ${showDropAfter ? "drop-after" : ""}`}
                         role="tab"
                         aria-selected={tabActive}
+                        aria-describedby={codexStatusTooltipId}
                         tabIndex={0}
                         onClick={() => onSelectSession(pane.id, session.id)}
                         onKeyDown={(event) => {
@@ -2491,6 +2895,13 @@ function SessionPaneView({
                             </span>
                           </span>
                         </span>
+                        {showCodexStatus ? (
+                          <CodexTabStatusTooltip
+                            id={codexStatusTooltipId ?? ""}
+                            session={session}
+                            codexState={codexState}
+                          />
+                        ) : null}
                         <button
                           className="pane-tab-close"
                           type="button"
@@ -2556,8 +2967,8 @@ function SessionPaneView({
         onScroll={(event) => {
           const node = event.currentTarget;
           const shouldStick = node.scrollHeight - node.scrollTop - node.clientHeight < 72;
-          shouldStickToBottomRef.current = shouldStick;
-          scrollPositionsRef.current[scrollStateKey] = {
+          setShouldStickToBottom(shouldStick);
+          paneScrollPositions[scrollStateKey] = {
             top: node.scrollTop,
             shouldStick,
           };
@@ -2566,97 +2977,27 @@ function SessionPaneView({
           }
         }}
       >
-        {activeSession ? (
-          pane.viewMode === "session" ? (
-            activeSession.messages.length > 0 || pendingPrompts.length > 0 || showWaitingIndicator ? (
-              <>
-                {activeSession.messages.map((message) => (
-                  <MessageCard
-                    key={message.id}
-                    message={message}
-                    onApprovalDecision={(messageId, decision) =>
-                      onApprovalDecision(activeSession.id, messageId, decision)
-                    }
-                  />
-                ))}
-
-                {showWaitingIndicator ? (
-                  <RunningIndicator agent={activeSession.agent} lastPrompt={waitingIndicatorPrompt} />
-                ) : null}
-
-                {pendingPrompts.map((prompt) => (
-                  <PendingPromptCard
-                    key={prompt.id}
-                    prompt={prompt}
-                    onCancel={() => onCancelQueuedPrompt(activeSession.id, prompt.id)}
-                  />
-                ))}
-              </>
-            ) : (
-              <EmptyState
-                title={isLoading ? "Connecting to backend" : "Live session is ready"}
-                body={
-                  isLoading
-                    ? "Fetching session state from the Rust backend."
-                    : `Send a prompt to ${activeSession.agent} and this tile will fill with live cards.`
-                }
-              />
-            )
-          ) : pane.viewMode === "prompt" ? (
-            activeSession.agent === "Codex" ? (
-              <CodexPromptSettingsCard
-                paneId={pane.id}
-                session={activeSession}
-                isUpdating={isUpdating}
-                onSessionSettingsChange={onSessionSettingsChange}
-              />
-            ) : activeSession.agent === "Claude" ? (
-              <ClaudePromptSettingsCard
-                paneId={pane.id}
-                session={activeSession}
-                isUpdating={isUpdating}
-                onSessionSettingsChange={onSessionSettingsChange}
-              />
-            ) : (
-              <EmptyState
-                title="No prompt settings"
-                body="Prompt controls are only available for supported agent sessions."
-              />
-            )
-          ) : pane.viewMode === "commands" ? (
-            commandMessages.length > 0 ? (
-              commandMessages.map((message) => <CommandCard key={message.id} message={message} />)
-            ) : (
-              <EmptyState
-                title="No commands yet"
-                body="This tile is filtered to command executions. Send a prompt that runs tools and they will show up here."
-              />
-            )
-          ) : pane.viewMode === "diffs" ? (
-            diffMessages.length > 0 ? (
-              diffMessages.map((message) => <DiffCard key={message.id} message={message} />)
-            ) : (
-              <EmptyState
-                title="No diffs yet"
-                body="This tile is filtered to file changes. When the agent edits or creates files, the diffs will appear here."
-              />
-            )
-          ) : (
-            <SourcePane
-              candidatePaths={candidateSourcePaths}
-              fileState={fileState}
-              sourceDraft={sourceDraft}
-              sourcePath={pane.sourcePath}
-              onDraftChange={setSourceDraft}
-              onOpenPath={(path) => onPaneSourcePathChange(pane.id, path)}
-            />
-          )
-        ) : (
-          <EmptyState
-            title="Ready for a session"
-            body="Click a session on the left to open it in the active tile."
-          />
-        )}
+        <SessionPaneBody
+          paneId={pane.id}
+          viewMode={pane.viewMode}
+          sourcePath={pane.sourcePath}
+          activeSession={activeSession}
+          isLoading={isLoading}
+          isUpdating={isUpdating}
+          showWaitingIndicator={showWaitingIndicator}
+          waitingIndicatorPrompt={waitingIndicatorPrompt}
+          mountedSessions={mountedSessions}
+          candidateSourcePaths={candidateSourcePaths}
+          fileState={fileState}
+          sourceDraft={sourceDraft}
+          commandMessages={commandMessages}
+          diffMessages={diffMessages}
+          onSourceDraftChange={setSourceDraft}
+          onPaneSourcePathChange={onPaneSourcePathChange}
+          onApprovalDecision={onApprovalDecision}
+          onCancelQueuedPrompt={onCancelQueuedPrompt}
+          onSessionSettingsChange={onSessionSettingsChange}
+        />
       </section>
 
       {pane.viewMode === "session" ? (
@@ -2688,6 +3029,266 @@ function SessionPaneView({
     </section>
   );
 }
+
+const SessionPaneBody = memo(function SessionPaneBody({
+  paneId,
+  viewMode,
+  sourcePath,
+  activeSession,
+  isLoading,
+  isUpdating,
+  showWaitingIndicator,
+  waitingIndicatorPrompt,
+  mountedSessions,
+  candidateSourcePaths,
+  fileState,
+  sourceDraft,
+  commandMessages,
+  diffMessages,
+  onSourceDraftChange,
+  onPaneSourcePathChange,
+  onApprovalDecision,
+  onCancelQueuedPrompt,
+  onSessionSettingsChange,
+}: {
+  paneId: string;
+  viewMode: PaneViewMode;
+  sourcePath: string | null;
+  activeSession: Session | null;
+  isLoading: boolean;
+  isUpdating: boolean;
+  showWaitingIndicator: boolean;
+  waitingIndicatorPrompt: string | null;
+  mountedSessions: Session[];
+  candidateSourcePaths: string[];
+  fileState: {
+    status: "idle" | "loading" | "ready" | "error";
+    path: string;
+    content: string;
+    error: string | null;
+    language: string | null;
+  };
+  sourceDraft: string;
+  commandMessages: CommandMessage[];
+  diffMessages: DiffMessage[];
+  onSourceDraftChange: (nextValue: string) => void;
+  onPaneSourcePathChange: (paneId: string, path: string) => void;
+  onApprovalDecision: (
+    sessionId: string,
+    messageId: string,
+    decision: ApprovalDecision,
+  ) => void;
+  onCancelQueuedPrompt: (sessionId: string, promptId: string) => void;
+  onSessionSettingsChange: (
+    sessionId: string,
+    field: SessionSettingsField,
+    value: SessionSettingsValue,
+  ) => void;
+}) {
+  if (!activeSession) {
+    return (
+      <EmptyState
+        title="Ready for a session"
+        body="Click a session on the left to open it in the active tile."
+      />
+    );
+  }
+
+  if (viewMode === "session") {
+    const activePendingPrompts = activeSession.pendingPrompts ?? [];
+    if (activeSession.messages.length === 0 && activePendingPrompts.length === 0 && !showWaitingIndicator) {
+      return (
+        <EmptyState
+          title={isLoading ? "Connecting to backend" : "Live session is ready"}
+          body={
+            isLoading
+              ? "Fetching session state from the Rust backend."
+              : `Send a prompt to ${activeSession.agent} and this tile will fill with live cards.`
+          }
+        />
+      );
+    }
+
+    return (
+      <>
+        {mountedSessions.map((session) => (
+          <SessionConversationPage
+            key={session.id}
+            session={session}
+            isActive={session.id === activeSession.id}
+            isLoading={isLoading && session.id === activeSession.id}
+            showWaitingIndicator={showWaitingIndicator && session.id === activeSession.id}
+            waitingIndicatorPrompt={session.id === activeSession.id ? waitingIndicatorPrompt : null}
+            onApprovalDecision={onApprovalDecision}
+            onCancelQueuedPrompt={onCancelQueuedPrompt}
+          />
+        ))}
+      </>
+    );
+  }
+
+  if (viewMode === "prompt") {
+    if (activeSession.agent === "Codex") {
+      return (
+        <CodexPromptSettingsCard
+          paneId={paneId}
+          session={activeSession}
+          isUpdating={isUpdating}
+          onSessionSettingsChange={onSessionSettingsChange}
+        />
+      );
+    }
+
+    if (activeSession.agent === "Claude") {
+      return (
+        <ClaudePromptSettingsCard
+          paneId={paneId}
+          session={activeSession}
+          isUpdating={isUpdating}
+          onSessionSettingsChange={onSessionSettingsChange}
+        />
+      );
+    }
+
+    return (
+      <EmptyState
+        title="No prompt settings"
+        body="Prompt controls are only available for supported agent sessions."
+      />
+    );
+  }
+
+  if (viewMode === "commands") {
+    return commandMessages.length > 0 ? (
+      <>
+        {commandMessages.map((message) => (
+          <CommandCard key={message.id} message={message} />
+        ))}
+      </>
+    ) : (
+      <EmptyState
+        title="No commands yet"
+        body="This tile is filtered to command executions. Send a prompt that runs tools and they will show up here."
+      />
+    );
+  }
+
+  if (viewMode === "diffs") {
+    return diffMessages.length > 0 ? (
+      <>
+        {diffMessages.map((message) => (
+          <DiffCard key={message.id} message={message} />
+        ))}
+      </>
+    ) : (
+      <EmptyState
+        title="No diffs yet"
+        body="This tile is filtered to file changes. When the agent edits or creates files, the diffs will appear here."
+      />
+    );
+  }
+
+  return (
+    <SourcePane
+      candidatePaths={candidateSourcePaths}
+      fileState={fileState}
+      sourceDraft={sourceDraft}
+      sourcePath={sourcePath}
+      onDraftChange={onSourceDraftChange}
+      onOpenPath={(path) => onPaneSourcePathChange(paneId, path)}
+    />
+  );
+}, (previous, next) =>
+  previous.paneId === next.paneId &&
+  previous.viewMode === next.viewMode &&
+  previous.sourcePath === next.sourcePath &&
+  previous.activeSession === next.activeSession &&
+  previous.isLoading === next.isLoading &&
+  previous.isUpdating === next.isUpdating &&
+  previous.showWaitingIndicator === next.showWaitingIndicator &&
+  previous.waitingIndicatorPrompt === next.waitingIndicatorPrompt &&
+  previous.mountedSessions === next.mountedSessions &&
+  previous.candidateSourcePaths === next.candidateSourcePaths &&
+  previous.fileState === next.fileState &&
+  previous.sourceDraft === next.sourceDraft &&
+  previous.commandMessages === next.commandMessages &&
+  previous.diffMessages === next.diffMessages
+);
+
+const SessionConversationPage = memo(function SessionConversationPage({
+  session,
+  isActive,
+  isLoading,
+  showWaitingIndicator,
+  waitingIndicatorPrompt,
+  onApprovalDecision,
+  onCancelQueuedPrompt,
+}: {
+  session: Session;
+  isActive: boolean;
+  isLoading: boolean;
+  showWaitingIndicator: boolean;
+  waitingIndicatorPrompt: string | null;
+  onApprovalDecision: (
+    sessionId: string,
+    messageId: string,
+    decision: ApprovalDecision,
+  ) => void;
+  onCancelQueuedPrompt: (sessionId: string, promptId: string) => void;
+}) {
+  const pendingPrompts = session.pendingPrompts ?? [];
+
+  if (session.messages.length === 0 && pendingPrompts.length === 0 && !showWaitingIndicator) {
+    return (
+      <div
+        className={`session-conversation-page${isActive ? " is-active" : ""}`}
+        hidden={!isActive}
+      >
+        <EmptyState
+          title={isLoading ? "Connecting to backend" : "Live session is ready"}
+          body={
+            isLoading
+              ? "Fetching session state from the Rust backend."
+              : `Send a prompt to ${session.agent} and this tile will fill with live cards.`
+          }
+        />
+      </div>
+    );
+  }
+
+  return (
+    <div
+      className={`session-conversation-page${isActive ? " is-active" : ""}`}
+      hidden={!isActive}
+    >
+      {session.messages.map((message) => (
+        <MessageCard
+          key={message.id}
+          message={message}
+          onApprovalDecision={(messageId, decision) => onApprovalDecision(session.id, messageId, decision)}
+        />
+      ))}
+
+      {showWaitingIndicator ? (
+        <RunningIndicator agent={session.agent} lastPrompt={waitingIndicatorPrompt} />
+      ) : null}
+
+      {pendingPrompts.map((prompt) => (
+        <PendingPromptCard
+          key={prompt.id}
+          prompt={prompt}
+          onCancel={() => onCancelQueuedPrompt(session.id, prompt.id)}
+        />
+      ))}
+    </div>
+  );
+}, (previous, next) =>
+  previous.session === next.session &&
+  previous.isActive === next.isActive &&
+  previous.isLoading === next.isLoading &&
+  previous.showWaitingIndicator === next.showWaitingIndicator &&
+  previous.waitingIndicatorPrompt === next.waitingIndicatorPrompt
+);
 
 const SessionComposer = memo(function SessionComposer({
   paneId,
@@ -3242,6 +3843,80 @@ function RunningIndicator({
         </div>
       ) : null}
     </article>
+  );
+}
+
+function CodexTabStatusTooltip({
+  codexState,
+  id,
+  session,
+}: {
+  codexState: CodexState;
+  id: string;
+  session: Session;
+}) {
+  const rateLimits = codexState.rateLimits;
+
+  return (
+    <div id={id} className="pane-tab-status-tooltip" role="tooltip">
+      <div className="pane-tab-status-header">
+        <div className="activity-tooltip-label">Status</div>
+        {rateLimits?.planType ? (
+          <span className="pane-tab-status-plan">{rateLimits.planType}</span>
+        ) : null}
+      </div>
+      <div className="pane-tab-status-grid">
+        {session.externalSessionId ? (
+          <>
+            <div className="pane-tab-status-key">Session:</div>
+            <div className="pane-tab-status-value pane-tab-status-mono">
+              {session.externalSessionId}
+            </div>
+          </>
+        ) : null}
+        {rateLimits?.primary ? (
+          <>
+            <div className="pane-tab-status-key">5h limit:</div>
+            <div className="pane-tab-status-value">
+              <CodexRateLimitMeter label="5h limit" window={rateLimits.primary} />
+            </div>
+          </>
+        ) : null}
+        {rateLimits?.secondary ? (
+          <>
+            <div className="pane-tab-status-key">7d limit:</div>
+            <div className="pane-tab-status-value">
+              <CodexRateLimitMeter label="7d limit" window={rateLimits.secondary} />
+            </div>
+          </>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+function CodexRateLimitMeter({
+  label,
+  window,
+}: {
+  label: string;
+  window: CodexRateLimitWindow;
+}) {
+  const usedPercent = clamp(Math.round(window.usedPercent ?? 0), 0, 100);
+  const remainingPercent = clamp(100 - usedPercent, 0, 100);
+  const resetsLabel = formatRateLimitResetLabel(window.resetsAt ?? null, label);
+
+  return (
+    <div className="codex-limit-row">
+      <div className="codex-limit-bar" aria-hidden="true">
+        <div className="codex-limit-bar-fill" style={{ width: `${remainingPercent}%` }} />
+        <div className="codex-limit-bar-used" style={{ width: `${usedPercent}%` }} />
+      </div>
+      <div className="codex-limit-meta">
+        <strong>{remainingPercent}% left</strong>
+        {resetsLabel ? <span>({resetsLabel})</span> : null}
+      </div>
+    </div>
   );
 }
 
@@ -4019,6 +4694,30 @@ function messageChangeMarker(message: Message) {
 
 function pendingPromptChangeMarker(prompt: PendingPrompt) {
   return `${prompt.text.length}:${prompt.attachments?.length ?? 0}`;
+}
+
+function formatRateLimitResetLabel(resetsAt: number | null, label: string) {
+  if (!resetsAt) {
+    return null;
+  }
+
+  const date = new Date(resetsAt * 1000);
+  if (Number.isNaN(date.getTime())) {
+    return null;
+  }
+
+  const formatter =
+    label === "5h limit"
+      ? new Intl.DateTimeFormat(undefined, {
+          hour: "numeric",
+          minute: "2-digit",
+        })
+      : new Intl.DateTimeFormat(undefined, {
+          month: "short",
+          day: "numeric",
+        });
+
+  return `resets ${formatter.format(date)}`;
 }
 
 function collectCandidateSourcePaths(session: Session) {
