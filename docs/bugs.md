@@ -306,18 +306,70 @@ latency issue is the refresh path during live streaming.
 **What improved already:**
 - Draft keystrokes are now local to the composer instead of updating top-level app state on every key
 - Session/message identity is preserved across many SSE updates so unchanged cards do not fully churn
-- Streamed text deltas no longer rewrite persisted session state on every chunk
+- Streamed text and command updates now have a dedicated SSE delta path instead of forcing a full
+  state snapshot for every chunk
 - Active long conversations now use a windowed message list instead of mounting every message card
 - Heavy markdown and code blocks now defer their expensive render work until near the viewport
 - Cached conversation pages per pane are now bounded so hidden long tabs do not grow without limit
 
 **What still happens:**
-- The backend still publishes a full `/api/events` state snapshot for each streamed text delta
-- The frontend still reconciles the full sessions array and reruns pane-level derivations on each snapshot
-- Under concurrent activity, that can still make typing feel slower than it should
+- The mount path still starts `EventSource("/api/events")` and `fetchState()` in parallel, so a
+  late `/api/state` response can overwrite newer delta-applied UI state
+- The UI currently drops delta events when the target message is missing, so once the state drifts
+  there is no immediate self-heal until a later full snapshot arrives
+- Full-state adoption still reruns the broader session reconciliation path whenever a state event
+  does arrive, so concurrent activity can still make typing feel slower than it should
 
 **Tasks:**
 - Profile frontend rerenders during active streaming to identify the remaining hot subtrees
+
+## Delta SSE reconciliation can drift behind live session state
+
+**Severity:** Medium
+
+The new delta stream reduces the amount of work done during live output, but it also introduced a
+correctness risk during initial load and reconnects.
+
+**Current behavior:**
+- The frontend opens `/api/events` and fetches `/api/state` at the same time
+- If a delta event is applied first, a slower `/api/state` response can still replace the newer
+  in-memory session tree
+- Later deltas are ignored when the referenced message is not present in the overwritten state
+- The backend paths for streamed text and command updates now publish deltas without also emitting a
+  matching full state snapshot for each update
+
+**Impact:**
+- In-flight assistant output can temporarily disappear on first load or reconnect
+- Once the UI loses the target message for a delta, subsequent deltas for that message are dropped
+- Users only recover when some later full snapshot happens to realign the session tree
+
+**Fix:**
+- Make initial hydration and SSE ordering explicit: either ignore stale `/api/state` payloads or
+  add a monotonic revision so older state cannot overwrite newer deltas
+- Keep delta reconciliation lossless when a message is missing by falling back to a full refresh or
+  by buffering deltas until the message exists
+
+## Command delta inserts lose timestamps
+
+**Severity:** Low â€” user-visible metadata regression.
+
+The new `commandUpdate` delta event can create command messages in the UI before any later full
+snapshot arrives, but the delta payload does not include a timestamp.
+
+**Current behavior:**
+- The backend creates a real timestamp when it first inserts a command message
+- The delta payload only sends command text, output, language metadata, status, and preview
+- When the frontend receives the first `commandUpdate` for a message it has not seen before, it
+  creates the card with an empty timestamp string
+
+**Impact:**
+- Freshly inserted command cards can render blank message metadata
+- If no later full state event arrives soon after, the blank timestamp persists indefinitely
+
+**Fix:**
+- Include `timestamp` in the `commandUpdate` payload, or keep emitting a full state update when a
+  command message is first inserted
+- Add a frontend regression test for first-seen command deltas
 
 ## Agent replies in diff review comments
 
@@ -354,8 +406,8 @@ Concrete work implied by the current TermAl parity gaps. Ordered by user impact 
   canceled Claude approvals should clear the session out of `Approval`, and resolving one approval
   must not hide other live approvals in the same session.
 - [ ] Remove the startup snapshot race:
-  avoid letting a late `/api/state` response overwrite a newer `/api/events` snapshot, or add a
-  revision field so stale state can be ignored.
+  avoid letting a late `/api/state` response overwrite newer `/api/events` deltas, or add a
+  revision field so stale state can be ignored before it wipes streamed messages from the UI.
 - [ ] Add Gemini as a first-class agent in the backend and UI:
   `Agent` enum, session creation, session rendering, and persistence need to stop assuming the
   world is only Claude or Codex.
@@ -403,6 +455,13 @@ Concrete work implied by the current TermAl parity gaps. Ordered by user impact 
 - [ ] Reduce streaming refresh overhead:
   profile SSE-driven rerenders while another session is active, narrow state adoption for
   unrelated sessions, and only consider incremental events after the frontend hot path is trimmed.
+- [ ] Fix lossless delta reconciliation:
+  make the delta SSE path recover when the UI is missing the referenced message, and add frontend
+  coverage for the interaction between initial `/api/state` hydration and live `/api/events`
+  updates.
+- [ ] Preserve command timestamps in the delta path:
+  include `timestamp` in first-seen `commandUpdate` payloads or force a full state refresh on
+  insert so command cards do not render blank metadata.
 - [ ] Add post-edit diff preview from agent messages:
   when an agent reports that it updated a file, let the user open a new tab with a diff preview of
   those changes and include a link back to the originating conversation or message.
