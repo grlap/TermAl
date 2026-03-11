@@ -1,6 +1,7 @@
 ﻿# Bugs & Known Issues
 
-Updated against the current checked-in code in `src/main.rs` and `ui/src/App.tsx`.
+Updated against the current checked-in code in `src/main.rs`, `ui/src/App.tsx`,
+`ui/package.json`, and `ui/vite.config.ts`.
 
 The older entries for "No image paste support", Claude `control_request` fallthrough, "No SSE/WebSocket for real-time updates", "Codex receive has no streaming", and "No queueing system for prompts" were stale. Those are implemented in the current tree.
 
@@ -156,6 +157,35 @@ the unhandled-event logger.
 ---
 
 
+## Node 24 deprecation warning from the legacy Vite dev proxy
+
+**Severity:** Low - local dev noise only.
+
+The UI toolchain is still on an older Vite stack:
+- `vite` 2.9.18
+- `@vitejs/plugin-react` 1.3.2
+- `vitest` 0.18.1
+
+When the dev server runs on modern Node releases such as Node 24, Vite's bundled `http-proxy`
+path still calls the deprecated `util._extend` helper. TermAl hits that path because
+`ui/vite.config.ts` configures `server.proxy` for `/api` and `/api/events`.
+
+**Current behavior:**
+- `npm run dev` can print `(node:...) [DEP0060] DeprecationWarning: The util._extend API is deprecated`
+- the warning comes from Vite's dev proxy implementation, not from TermAl application code
+- `npm run build` and `npm run test` still pass, so this does not block production output
+
+**Proposal:**
+- upgrade the frontend dev toolchain together instead of patching `node_modules`
+- include at least `vite`, `@vitejs/plugin-react`, and `vitest` in the same refresh
+- verify the dev proxy path after the upgrade on current Node, since the warning is tied to the
+  proxy code path rather than to React or app logic
+- do not spend time replacing the proxy configuration in TermAl just to hide the warning
+
+**Temporary stance:** Until the toolchain refresh is scheduled, treat this as expected local dev
+noise.
+
+---
 ## Feature briefs
 
 - [Session Model Switching](./features/model-switching.md)
@@ -334,6 +364,9 @@ Concrete work implied by the current TermAl parity gaps. Ordered by user impact 
 
 - [ ] Handle Codex `account/rateLimits/updated` explicitly:
   at minimum ignore it as known noise; preferably persist it and expose it in the UI.
+- [ ] Refresh the frontend dev toolchain to remove the Node 24 `util._extend` deprecation from
+  Vite's proxy path; upgrade `vite`, `@vitejs/plugin-react`, and `vitest` together and verify
+  `npm run dev` with the existing `/api` proxy config.
 - [ ] Add unit tests for Codex app-server parsing:
   cover request handling, streaming message assembly, notification filtering, and error paths.
 - [ ] Add HTTP route tests for the axum API:
