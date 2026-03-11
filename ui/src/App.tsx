@@ -77,9 +77,13 @@ import {
   persistThemePreference,
   type ThemeId,
 } from "./themes";
+import {
+  countSessionsByFilter,
+  filterSessionsByListFilter,
+  type SessionListFilter,
+} from "./session-list-filter";
 
 type SessionFlagMap = Record<string, true | undefined>;
-type SessionListFilter = "tiles" | "open" | "all";
 type SessionSettingsField = "sandboxMode" | "approvalPolicy" | "claudeApprovalMode";
 type SessionSettingsValue = SandboxMode | ApprovalPolicy | ClaudeApprovalMode;
 type PreferencesTabId = "themes" | "codex-prompts" | "claude-approvals";
@@ -217,28 +221,14 @@ export default function App() {
   const activeSession = activePane?.activeSessionId
     ? (sessionLookup.get(activePane.activeSessionId) ?? null)
     : null;
-  const tileSessionIds = useMemo(
-    () =>
-      new Set(
-        workspace.panes.flatMap((pane) => (pane.activeSessionId ? [pane.activeSessionId] : [])),
-      ),
-    [workspace.panes],
-  );
   const openSessionIds = useMemo(
     () => new Set(workspace.panes.flatMap((pane) => pane.sessionIds)),
     [workspace.panes],
   );
+  const sessionFilterCounts = useMemo(() => countSessionsByFilter(sessions), [sessions]);
   const filteredSessions = useMemo(() => {
-    switch (sessionListFilter) {
-      case "tiles":
-        return sessions.filter((session) => tileSessionIds.has(session.id));
-      case "open":
-        return sessions.filter((session) => openSessionIds.has(session.id));
-      case "all":
-      default:
-        return sessions;
-    }
-  }, [openSessionIds, sessionListFilter, sessions, tileSessionIds]);
+    return filterSessionsByListFilter(sessions, sessionListFilter);
+  }, [sessionListFilter, sessions]);
   const activeTheme = THEMES.find((theme) => theme.id === themeId) ?? THEMES[0];
 
   function adoptSessions(
@@ -1009,28 +999,36 @@ export default function App() {
           <div className="session-control-label">Status</div>
           <div className="sidebar-status-chips">
             <button
-              className={`chip sidebar-status-chip ${sessionListFilter === "tiles" ? "selected" : ""}`}
-              type="button"
-              onClick={() => setSessionListFilter("tiles")}
-              aria-pressed={sessionListFilter === "tiles"}
-            >
-              {workspace.panes.length} {workspace.panes.length === 1 ? "tile" : "tiles"}
-            </button>
-            <button
-              className={`chip sidebar-status-chip ${sessionListFilter === "open" ? "selected" : ""}`}
-              type="button"
-              onClick={() => setSessionListFilter("open")}
-              aria-pressed={sessionListFilter === "open"}
-            >
-              {openSessionIds.size} {openSessionIds.size === 1 ? "open session" : "open sessions"}
-            </button>
-            <button
               className={`chip sidebar-status-chip ${sessionListFilter === "all" ? "selected" : ""}`}
               type="button"
               onClick={() => setSessionListFilter("all")}
               aria-pressed={sessionListFilter === "all"}
             >
-              {sessions.length} {sessions.length === 1 ? "total session" : "total sessions"}
+              No filter ({sessionFilterCounts.all})
+            </button>
+            <button
+              className={`chip sidebar-status-chip ${sessionListFilter === "working" ? "selected" : ""}`}
+              type="button"
+              onClick={() => setSessionListFilter("working")}
+              aria-pressed={sessionListFilter === "working"}
+            >
+              Working ({sessionFilterCounts.working})
+            </button>
+            <button
+              className={`chip sidebar-status-chip ${sessionListFilter === "asking" ? "selected" : ""}`}
+              type="button"
+              onClick={() => setSessionListFilter("asking")}
+              aria-pressed={sessionListFilter === "asking"}
+            >
+              Asking ({sessionFilterCounts.asking})
+            </button>
+            <button
+              className={`chip sidebar-status-chip ${sessionListFilter === "completed" ? "selected" : ""}`}
+              type="button"
+              onClick={() => setSessionListFilter("completed")}
+              aria-pressed={sessionListFilter === "completed"}
+            >
+              Completed ({sessionFilterCounts.completed})
             </button>
           </div>
         </section>
