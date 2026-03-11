@@ -277,6 +277,7 @@ impl AppState {
 
     fn snapshot_from_inner(inner: &StateInner) -> StateResponse {
         StateResponse {
+            codex: inner.codex.clone(),
             sessions: inner
                 .sessions
                 .iter()
@@ -502,13 +503,7 @@ impl AppState {
         self.persist_locked(&inner).map_err(|err| {
             ApiError::internal(format!("failed to persist session state: {err:#}"))
         })?;
-        Ok(StateResponse {
-            sessions: inner
-                .sessions
-                .iter()
-                .map(|session| session.session.clone())
-                .collect(),
-        })
+        Ok(Self::snapshot_from_inner(&inner))
     }
 
     fn allocate_message_id(&self) -> String {
@@ -521,7 +516,19 @@ impl AppState {
         let index = inner
             .find_session_index(session_id)
             .ok_or_else(|| anyhow!("session `{session_id}` not found"))?;
-        inner.sessions[index].external_session_id = Some(external_session_id);
+        inner.sessions[index].external_session_id = Some(external_session_id.clone());
+        inner.sessions[index].session.external_session_id = Some(external_session_id);
+        self.persist_locked(&inner)?;
+        Ok(())
+    }
+
+    fn note_codex_rate_limits(&self, rate_limits: CodexRateLimits) -> Result<()> {
+        let mut inner = self.inner.lock().expect("state mutex poisoned");
+        if inner.codex.rate_limits.as_ref() == Some(&rate_limits) {
+            return Ok(());
+        }
+
+        inner.codex.rate_limits = Some(rate_limits);
         self.persist_locked(&inner)?;
         Ok(())
     }
@@ -906,13 +913,7 @@ impl AppState {
         self.persist_locked(&inner).map_err(|err| {
             ApiError::internal(format!("failed to persist session state: {err:#}"))
         })?;
-        Ok(StateResponse {
-            sessions: inner
-                .sessions
-                .iter()
-                .map(|record| record.session.clone())
-                .collect(),
-        })
+        Ok(Self::snapshot_from_inner(&inner))
     }
 
     fn cancel_queued_prompt(
@@ -1339,13 +1340,7 @@ impl AppState {
         self.persist_locked(&inner).map_err(|err| {
             ApiError::internal(format!("failed to persist session state: {err:#}"))
         })?;
-        Ok(StateResponse {
-            sessions: inner
-                .sessions
-                .iter()
-                .map(|record| record.session.clone())
-                .collect(),
-        })
+        Ok(Self::snapshot_from_inner(&inner))
     }
 
     fn fail_turn(&self, session_id: &str, error_message: &str) -> Result<()> {
@@ -1403,6 +1398,7 @@ fn codex_approval_result(kind: &CodexApprovalKind, decision: ApprovalDecision) -
 }
 
 struct StateInner {
+    codex: CodexState,
     next_session_number: usize,
     next_message_number: u64,
     sessions: Vec<SessionRecord>,
@@ -1411,6 +1407,7 @@ struct StateInner {
 impl StateInner {
     fn new() -> Self {
         Self {
+            codex: CodexState::default(),
             next_session_number: 1,
             next_message_number: 1,
             sessions: Vec::new(),
@@ -1447,6 +1444,7 @@ impl StateInner {
                 sandbox_mode: None,
                 claude_approval_mode: (agent == Agent::Claude)
                     .then_some(default_claude_approval_mode()),
+                external_session_id: None,
                 status: SessionStatus::Idle,
                 preview: "Ready for a prompt.".to_owned(),
                 messages: Vec::new(),
@@ -1480,6 +1478,8 @@ impl StateInner {
 #[derive(Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct PersistedState {
+    #[serde(default, skip_serializing_if = "CodexState::is_empty")]
+    codex: CodexState,
     next_session_number: usize,
     next_message_number: u64,
     sessions: Vec<PersistedSessionRecord>,
@@ -1488,6 +1488,7 @@ struct PersistedState {
 impl PersistedState {
     fn from_inner(inner: &StateInner) -> Self {
         Self {
+            codex: inner.codex.clone(),
             next_session_number: inner.next_session_number,
             next_message_number: inner.next_message_number,
             sessions: inner
@@ -1500,6 +1501,7 @@ impl PersistedState {
 
     fn into_inner(self) -> StateInner {
         StateInner {
+            codex: self.codex,
             next_session_number: self.next_session_number,
             next_message_number: self.next_message_number,
             sessions: self
@@ -1542,6 +1544,7 @@ impl PersistedSessionRecord {
 
     fn into_record(self) -> SessionRecord {
         let mut session = self.session;
+        session.external_session_id = self.external_session_id.clone();
         if session.agent == Agent::Claude {
             session
                 .claude_approval_mode
@@ -2586,6 +2589,25 @@ fn handle_codex_app_server_notification(
                 .streamed_agent_message_item_ids
                 .insert(item_id.to_owned());
             recorder.text_delta(delta)?;
+        }
+        "account/rateLimits/updated" => {
+            let Some(rate_limits) = message.pointer("/params/rateLimits") else {
+                log_unhandled_codex_event(
+                    "Codex rate limit notification missing params.rateLimits",
+                    message,
+                );
+                return Ok(());
+            };
+
+            match serde_json::from_value::<CodexRateLimits>(rate_limits.clone()) {
+                Ok(rate_limits) => state.note_codex_rate_limits(rate_limits)?,
+                Err(err) => {
+                    log_unhandled_codex_event(
+                        &format!("failed to parse Codex rate limits notification: {err}"),
+                        message,
+                    );
+                }
+            }
         }
         "thread/status/changed"
         | "turn/diff/updated"
@@ -5551,6 +5573,8 @@ struct Session {
     approval_policy: Option<CodexApprovalPolicy>,
     sandbox_mode: Option<CodexSandboxMode>,
     claude_approval_mode: Option<ClaudeApprovalMode>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    external_session_id: Option<String>,
     status: SessionStatus,
     preview: String,
     messages: Vec<Message>,
@@ -5828,9 +5852,52 @@ struct UpdateSessionSettingsRequest {
     claude_approval_mode: Option<ClaudeApprovalMode>,
 }
 
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct CodexState {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    rate_limits: Option<CodexRateLimits>,
+}
+
+impl CodexState {
+    fn is_empty(&self) -> bool {
+        self.rate_limits.is_none()
+    }
+}
+
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct CodexRateLimits {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    credits: Option<Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    limit_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    limit_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    plan_type: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    primary: Option<CodexRateLimitWindow>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    secondary: Option<CodexRateLimitWindow>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct CodexRateLimitWindow {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    resets_at: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    used_percent: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    window_duration_mins: Option<u64>,
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct StateResponse {
+    #[serde(default, skip_serializing_if = "CodexState::is_empty")]
+    codex: CodexState,
     sessions: Vec<Session>,
 }
 
@@ -5973,6 +6040,37 @@ mod tests {
         );
         assert_eq!(record.session.approval_policy, None);
         assert_eq!(record.session.sandbox_mode, None);
+    }
+
+    #[test]
+    fn creates_codex_sessions_with_requested_prompt_defaults() {
+        let state = test_app_state();
+
+        let session = state
+            .create_session(CreateSessionRequest {
+                agent: Some(Agent::Codex),
+                name: Some("Custom Codex".to_owned()),
+                workdir: Some("/tmp".to_owned()),
+                approval_policy: Some(CodexApprovalPolicy::OnRequest),
+                sandbox_mode: Some(CodexSandboxMode::ReadOnly),
+                claude_approval_mode: None,
+            })
+            .unwrap();
+
+        assert_eq!(
+            session.approval_policy,
+            Some(CodexApprovalPolicy::OnRequest)
+        );
+        assert_eq!(session.sandbox_mode, Some(CodexSandboxMode::ReadOnly));
+        assert_eq!(session.claude_approval_mode, None);
+
+        let inner = state.inner.lock().expect("state mutex poisoned");
+        let record = inner
+            .find_session_index(&session.id)
+            .map(|index| &inner.sessions[index]);
+        let record = record.expect("session record should exist");
+        assert_eq!(record.codex_approval_policy, CodexApprovalPolicy::OnRequest);
+        assert_eq!(record.codex_sandbox_mode, CodexSandboxMode::ReadOnly);
     }
 
     #[test]
@@ -6843,6 +6941,67 @@ mod tests {
             Some(Message::Text { text, .. })
                 if text == "Connection dropped before the response finished. Retrying automatically (attempt 2 of 5)."
         ));
+    }
+
+    #[test]
+    fn stores_codex_rate_limits_from_app_server_notifications() {
+        let state = test_app_state();
+        let session_id = test_session_id(&state, Agent::Codex);
+
+        let notification = json!({
+            "method": "account/rateLimits/updated",
+            "params": {
+                "rateLimits": {
+                    "credits": null,
+                    "limitId": "codex",
+                    "limitName": null,
+                    "planType": "plus",
+                    "primary": {
+                        "resetsAt": 1773205300_u64,
+                        "usedPercent": 17_u64,
+                        "windowDurationMins": 300_u64
+                    },
+                    "secondary": {
+                        "resetsAt": 1773736282_u64,
+                        "usedPercent": 29_u64,
+                        "windowDurationMins": 10080_u64
+                    }
+                }
+            }
+        });
+
+        handle_codex_app_server_notification(
+            "account/rateLimits/updated",
+            &notification,
+            &state,
+            &session_id,
+            &RuntimeToken::Codex("runtime-rate-limit".to_owned()),
+            &Arc::new(Mutex::new(None)),
+            &mut CodexTurnState::default(),
+            &mut SessionRecorder::new(state.clone(), session_id.clone()),
+        )
+        .unwrap();
+
+        let snapshot = state.snapshot();
+        assert_eq!(
+            snapshot.codex.rate_limits,
+            Some(CodexRateLimits {
+                credits: None,
+                limit_id: Some("codex".to_owned()),
+                limit_name: None,
+                plan_type: Some("plus".to_owned()),
+                primary: Some(CodexRateLimitWindow {
+                    resets_at: Some(1773205300),
+                    used_percent: Some(17),
+                    window_duration_mins: Some(300),
+                }),
+                secondary: Some(CodexRateLimitWindow {
+                    resets_at: Some(1773736282),
+                    used_percent: Some(29),
+                    window_duration_mins: Some(10080),
+                }),
+            })
+        );
     }
 
     #[test]

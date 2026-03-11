@@ -4,6 +4,25 @@ export type SandboxMode = "read-only" | "workspace-write" | "danger-full-access"
 export type ApprovalPolicy = "untrusted" | "on-failure" | "on-request" | "never";
 export type ClaudeApprovalMode = "ask" | "auto-approve";
 
+export type CodexRateLimitWindow = {
+  resetsAt?: number | null;
+  usedPercent?: number | null;
+  windowDurationMins?: number | null;
+};
+
+export type CodexRateLimits = {
+  credits?: unknown | null;
+  limitId?: string | null;
+  limitName?: string | null;
+  planType?: string | null;
+  primary?: CodexRateLimitWindow | null;
+  secondary?: CodexRateLimitWindow | null;
+};
+
+export type CodexState = {
+  rateLimits?: CodexRateLimits | null;
+};
+
 export type Session = {
   id: string;
   name: string;
@@ -14,6 +33,7 @@ export type Session = {
   approvalPolicy?: ApprovalPolicy | null;
   sandboxMode?: SandboxMode | null;
   claudeApprovalMode?: ClaudeApprovalMode | null;
+  externalSessionId?: string | null;
   status: SessionStatus;
   preview: string;
   messages: Message[];

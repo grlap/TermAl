@@ -38,6 +38,10 @@ describe("theme helpers", () => {
     expect(themeIds).toContain(DEFAULT_THEME_ID);
     expect(themeIds).toEqual(
       expect.arrayContaining([
+        "gallery-white",
+        "porcelain-white",
+        "obsidian-black",
+        "oxide-black",
         "evergreen-night",
         "violet-night",
         "sunset-paper",

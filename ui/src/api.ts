@@ -3,12 +3,14 @@ import type {
   AgentType,
   ApprovalPolicy,
   ClaudeApprovalMode,
+  CodexState,
   ImageAttachment,
   SandboxMode,
   Session,
 } from "./types";
 
 export type StateResponse = {
+  codex?: CodexState;
   sessions: Session[];
 };
 
@@ -22,6 +24,8 @@ type CreateSessionRequest = {
   agent?: AgentType;
   name?: string;
   workdir?: string;
+  approvalPolicy?: ApprovalPolicy;
+  sandboxMode?: SandboxMode;
   claudeApprovalMode?: ClaudeApprovalMode;
 };
 

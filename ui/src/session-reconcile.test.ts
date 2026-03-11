@@ -221,4 +221,21 @@ describe("reconcileSessions", () => {
     expect(merged[0].messages).not.toBe(previous[0].messages);
     expect(merged[0].messages[0]).not.toBe(previous[0].messages[0]);
   });
+
+  it("replaces a session when the external session id changes", () => {
+    const previous = [makeSession("session-a", { externalSessionId: null, preview: "ready" })];
+
+    const next = [
+      makeSession("session-a", {
+        externalSessionId: "019cd7b9-551b-7200-9af4-afa006a74db7",
+        preview: "ready",
+      }),
+    ];
+
+    const merged = reconcileSessions(previous, next);
+
+    expect(merged).not.toBe(previous);
+    expect(merged[0]).not.toBe(previous[0]);
+    expect(merged[0].externalSessionId).toBe("019cd7b9-551b-7200-9af4-afa006a74db7");
+  });
 });

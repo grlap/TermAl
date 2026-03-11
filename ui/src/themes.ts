@@ -8,10 +8,34 @@ export const THEMES = [
     swatches: ["#f4efe4", "#cf9d34", "#2f5f80"],
   },
   {
+    id: "gallery-white",
+    name: "Gallery White",
+    description: "Bright studio whites with cobalt lines and a restrained vermilion edge.",
+    swatches: ["#f8fbff", "#2b6cb0", "#d1573b"],
+  },
+  {
+    id: "porcelain-white",
+    name: "Porcelain White",
+    description: "Polished porcelain surfaces with jade, plum, and brushed-silver accents.",
+    swatches: ["#fcfbf8", "#368873", "#8f5a7a"],
+  },
+  {
     id: "dark",
     name: "Darkroom",
     description: "Charcoal panels with warm copper and steel-blue accents.",
     swatches: ["#1a1a1f", "#e07050", "#5a9ac0"],
+  },
+  {
+    id: "obsidian-black",
+    name: "Obsidian Black",
+    description: "True-black glass with electric cyan, ember orange, and violet highlights.",
+    swatches: ["#080a0d", "#63d2ff", "#ff7a59"],
+  },
+  {
+    id: "oxide-black",
+    name: "Oxide Black",
+    description: "Matte black panels with oxidized rust, brass, and pale mint accents.",
+    swatches: ["#0d0b09", "#d46e43", "#6fc7a1"],
   },
   {
     id: "evergreen-night",

@@ -319,6 +319,9 @@ latency issue is the refresh path during live streaming.
 - Draft keystrokes are now local to the composer instead of updating top-level app state on every key
 - Session/message identity is preserved across many SSE updates so unchanged cards do not fully churn
 - Streamed text deltas no longer rewrite persisted session state on every chunk
+- Active long conversations now use a windowed message list instead of mounting every message card
+- Heavy markdown and code blocks now defer their expensive render work until near the viewport
+- Cached conversation pages per pane are now bounded so hidden long tabs do not grow without limit
 
 **What still happens:**
 - The backend still publishes a full `/api/events` state snapshot for each streamed text delta
@@ -328,6 +331,7 @@ latency issue is the refresh path during live streaming.
 **Tasks:**
 - Profile frontend rerenders during active streaming to identify the remaining hot subtrees
 - Narrow state adoption so unrelated sessions do less work when another session streams
+- Memoize more of the pane tree so tab moves and tab switches do not rerender untouched branches
 - If needed later, move from full-state SSE snapshots to smaller incremental update events
 
 ## Agent replies in diff review comments

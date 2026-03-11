@@ -12,6 +12,8 @@ import {
   type DragEvent as ReactDragEvent,
   type KeyboardEvent as ReactKeyboardEvent,
   type PointerEvent as ReactPointerEvent,
+  type ReactNode,
+  type RefObject,
 } from "react";
 import { createPortal } from "react-dom";
 import ReactMarkdown from "react-markdown";
@@ -104,6 +106,19 @@ type SessionConversationItem =
 
 const SUPPORTED_PASTED_IMAGE_TYPES = new Set(["image/png", "image/jpeg", "image/gif", "image/webp"]);
 const MAX_PASTED_IMAGE_BYTES = 5 * 1024 * 1024;
+const DEFERRED_RENDER_ROOT_MARGIN_PX = 960;
+const HEAVY_CODE_CHARACTER_THRESHOLD = 1400;
+const HEAVY_CODE_LINE_THRESHOLD = 28;
+const HEAVY_MARKDOWN_CHARACTER_THRESHOLD = 1800;
+const HEAVY_MARKDOWN_LINE_THRESHOLD = 24;
+const DEFERRED_PREVIEW_LINE_LIMIT = 12;
+const DEFERRED_PREVIEW_CHARACTER_LIMIT = 720;
+const MAX_DEFERRED_PLACEHOLDER_HEIGHT = 960;
+const MAX_CACHED_SESSION_PAGES_PER_PANE = 3;
+const CONVERSATION_VIRTUALIZATION_MIN_MESSAGES = 80;
+const VIRTUALIZED_MESSAGE_OVERSCAN_PX = 960;
+const VIRTUALIZED_MESSAGE_GAP_PX = 12;
+const DEFAULT_VIRTUALIZED_VIEWPORT_HEIGHT = 720;
 const NEW_SESSION_AGENT_OPTIONS = [
   { label: "Claude", value: "Claude" },
   { label: "Codex", value: "Codex" },
@@ -2130,7 +2145,8 @@ function SessionPaneView({
   });
   const [activeDropPlacement, setActiveDropPlacement] = useState<Exclude<TabDropPlacement, "tabs"> | null>(null);
   const [activeTabInsertIndex, setActiveTabInsertIndex] = useState<number | null>(null);
-  const [mountedSessionIds, setMountedSessionIds] = useState<Record<string, true | undefined>>({});
+  const [visitedSessionIds, setVisitedSessionIds] = useState<Record<string, true | undefined>>({});
+  const [cachedSessionOrder, setCachedSessionOrder] = useState<string[]>([]);
   const [newResponseIndicatorByKey, setNewResponseIndicatorByKey] = useState<
     Record<string, true | undefined>
   >({});
@@ -2159,8 +2175,10 @@ function SessionPaneView({
       return [];
     }
 
-    return sessions.filter((session) => mountedSessionIds[session.id] || session.id === activeSession.id);
-  }, [activeSession, mountedSessionIds, sessions]);
+    const cachedSessionIds = new Set(cachedSessionOrder);
+    cachedSessionIds.add(activeSession.id);
+    return sessions.filter((session) => cachedSessionIds.has(session.id));
+  }, [activeSession, cachedSessionOrder, sessions]);
   const sessionConversationItems = useMemo(
     () => (activeSession ? buildSessionConversationItems(activeSession) : []),
     [activeSession],
@@ -2528,20 +2546,20 @@ function SessionPaneView({
     if (
       !activeSession ||
       pane.viewMode !== "session" ||
-      mountedSessionIds[activeSession.id]
+      visitedSessionIds[activeSession.id]
     ) {
       return;
     }
 
     return scheduleSettledScrollToBottom("auto");
-  }, [activeSession, mountedSessionIds, pane.viewMode, scrollStateKey]);
+  }, [activeSession, pane.viewMode, scrollStateKey, visitedSessionIds]);
 
   useEffect(() => {
-    if (!activeSession) {
+    if (!activeSession?.id) {
       return;
     }
 
-    setMountedSessionIds((current) =>
+    setVisitedSessionIds((current) =>
       current[activeSession.id]
         ? current
         : {
@@ -2549,23 +2567,36 @@ function SessionPaneView({
             [activeSession.id]: true,
           },
     );
-  }, [activeSession]);
+    setCachedSessionOrder((current) => {
+      const nextOrder = [activeSession.id, ...current.filter((sessionId) => sessionId !== activeSession.id)].slice(
+        0,
+        MAX_CACHED_SESSION_PAGES_PER_PANE,
+      );
+
+      if (
+        nextOrder.length === current.length &&
+        nextOrder.every((sessionId, index) => sessionId === current[index])
+      ) {
+        return current;
+      }
+
+      return nextOrder;
+    });
+  }, [activeSession?.id]);
 
   useEffect(() => {
     const availableSessionIds = new Set(sessions.map((session) => session.id));
-    setMountedSessionIds((current) => {
-      let changed = false;
-      const nextState: Record<string, true | undefined> = {};
-
-      for (const sessionId of Object.keys(current)) {
-        if (availableSessionIds.has(sessionId)) {
-          nextState[sessionId] = true;
-        } else {
-          changed = true;
-        }
+    setVisitedSessionIds((current) => pruneSessionFlags(current, availableSessionIds));
+    setCachedSessionOrder((current) => {
+      const nextOrder = current.filter((sessionId) => availableSessionIds.has(sessionId));
+      if (
+        nextOrder.length === current.length &&
+        nextOrder.every((sessionId, index) => sessionId === current[index])
+      ) {
+        return current;
       }
 
-      return changed ? nextState : current;
+      return nextOrder;
     });
   }, [sessions]);
 
@@ -2981,6 +3012,7 @@ function SessionPaneView({
           paneId={pane.id}
           viewMode={pane.viewMode}
           sourcePath={pane.sourcePath}
+          scrollContainerRef={messageStackRef}
           activeSession={activeSession}
           isLoading={isLoading}
           isUpdating={isUpdating}
@@ -3034,6 +3066,7 @@ const SessionPaneBody = memo(function SessionPaneBody({
   paneId,
   viewMode,
   sourcePath,
+  scrollContainerRef,
   activeSession,
   isLoading,
   isUpdating,
@@ -3054,6 +3087,7 @@ const SessionPaneBody = memo(function SessionPaneBody({
   paneId: string;
   viewMode: PaneViewMode;
   sourcePath: string | null;
+  scrollContainerRef: RefObject<HTMLElement | null>;
   activeSession: Session | null;
   isLoading: boolean;
   isUpdating: boolean;
@@ -3115,6 +3149,7 @@ const SessionPaneBody = memo(function SessionPaneBody({
           <SessionConversationPage
             key={session.id}
             session={session}
+            scrollContainerRef={scrollContainerRef}
             isActive={session.id === activeSession.id}
             isLoading={isLoading && session.id === activeSession.id}
             showWaitingIndicator={showWaitingIndicator && session.id === activeSession.id}
@@ -3202,6 +3237,7 @@ const SessionPaneBody = memo(function SessionPaneBody({
   previous.paneId === next.paneId &&
   previous.viewMode === next.viewMode &&
   previous.sourcePath === next.sourcePath &&
+  previous.scrollContainerRef === next.scrollContainerRef &&
   previous.activeSession === next.activeSession &&
   previous.isLoading === next.isLoading &&
   previous.isUpdating === next.isUpdating &&
@@ -3217,6 +3253,7 @@ const SessionPaneBody = memo(function SessionPaneBody({
 
 const SessionConversationPage = memo(function SessionConversationPage({
   session,
+  scrollContainerRef,
   isActive,
   isLoading,
   showWaitingIndicator,
@@ -3225,6 +3262,7 @@ const SessionConversationPage = memo(function SessionConversationPage({
   onCancelQueuedPrompt,
 }: {
   session: Session;
+  scrollContainerRef: RefObject<HTMLElement | null>;
   isActive: boolean;
   isLoading: boolean;
   showWaitingIndicator: boolean;
@@ -3261,13 +3299,13 @@ const SessionConversationPage = memo(function SessionConversationPage({
       className={`session-conversation-page${isActive ? " is-active" : ""}`}
       hidden={!isActive}
     >
-      {session.messages.map((message) => (
-        <MessageCard
-          key={message.id}
-          message={message}
-          onApprovalDecision={(messageId, decision) => onApprovalDecision(session.id, messageId, decision)}
-        />
-      ))}
+      <ConversationMessageList
+        sessionId={session.id}
+        messages={session.messages}
+        scrollContainerRef={scrollContainerRef}
+        isActive={isActive}
+        onApprovalDecision={onApprovalDecision}
+      />
 
       {showWaitingIndicator ? (
         <RunningIndicator agent={session.agent} lastPrompt={waitingIndicatorPrompt} />
@@ -3284,11 +3322,259 @@ const SessionConversationPage = memo(function SessionConversationPage({
   );
 }, (previous, next) =>
   previous.session === next.session &&
+  previous.scrollContainerRef === next.scrollContainerRef &&
   previous.isActive === next.isActive &&
   previous.isLoading === next.isLoading &&
   previous.showWaitingIndicator === next.showWaitingIndicator &&
   previous.waitingIndicatorPrompt === next.waitingIndicatorPrompt
 );
+
+function ConversationMessageList({
+  sessionId,
+  messages,
+  scrollContainerRef,
+  isActive,
+  onApprovalDecision,
+}: {
+  sessionId: string;
+  messages: Message[];
+  scrollContainerRef: RefObject<HTMLElement | null>;
+  isActive: boolean;
+  onApprovalDecision: (
+    sessionId: string,
+    messageId: string,
+    decision: ApprovalDecision,
+  ) => void;
+}) {
+  if (!isActive || messages.length < CONVERSATION_VIRTUALIZATION_MIN_MESSAGES) {
+    return (
+      <>
+        {messages.map((message, index) => (
+          <MessageCard
+            key={message.id}
+            message={message}
+            preferImmediateHeavyRender={isActive && index >= messages.length - 2}
+            onApprovalDecision={(messageId, decision) => onApprovalDecision(sessionId, messageId, decision)}
+          />
+        ))}
+      </>
+    );
+  }
+
+  return (
+    <VirtualizedConversationMessageList
+      sessionId={sessionId}
+      messages={messages}
+      scrollContainerRef={scrollContainerRef}
+      onApprovalDecision={onApprovalDecision}
+    />
+  );
+}
+
+function VirtualizedConversationMessageList({
+  sessionId,
+  messages,
+  scrollContainerRef,
+  onApprovalDecision,
+}: {
+  sessionId: string;
+  messages: Message[];
+  scrollContainerRef: RefObject<HTMLElement | null>;
+  onApprovalDecision: (
+    sessionId: string,
+    messageId: string,
+    decision: ApprovalDecision,
+  ) => void;
+}) {
+  const messageHeightsRef = useRef<Record<string, number>>({});
+  const visibleRangeRef = useRef({
+    startIndex: 0,
+    endIndex: messages.length,
+  });
+  const [viewport, setViewport] = useState({
+    height: DEFAULT_VIRTUALIZED_VIEWPORT_HEIGHT,
+    scrollTop: 0,
+  });
+  const [layoutVersion, setLayoutVersion] = useState(0);
+
+  const messageIndexById = useMemo(
+    () => new Map(messages.map((message, index) => [message.id, index])),
+    [messages],
+  );
+  const messageHeights = useMemo(
+    () =>
+      messages.map(
+        (message) =>
+          messageHeightsRef.current[message.id] ?? estimateConversationMessageHeight(message),
+      ),
+    [layoutVersion, messages],
+  );
+  const layout = useMemo(
+    () => buildVirtualizedMessageLayout(messageHeights),
+    [messageHeights],
+  );
+  const activeViewport = scrollContainerRef.current;
+  const viewportHeight =
+    activeViewport?.clientHeight && activeViewport.clientHeight > 0
+      ? activeViewport.clientHeight
+      : viewport.height;
+  const viewportScrollTop = activeViewport ? activeViewport.scrollTop : viewport.scrollTop;
+  const visibleRange = useMemo(
+    () =>
+      findVirtualizedMessageRange(
+        layout.tops,
+        messageHeights,
+        viewportScrollTop,
+        viewportHeight,
+        VIRTUALIZED_MESSAGE_OVERSCAN_PX,
+      ),
+    [layout.tops, messageHeights, viewportHeight, viewportScrollTop],
+  );
+
+  useEffect(() => {
+    visibleRangeRef.current = visibleRange;
+  }, [visibleRange]);
+
+  useEffect(() => {
+    messageHeightsRef.current = Object.fromEntries(
+      messages
+        .filter((message) => messageHeightsRef.current[message.id] !== undefined)
+        .map((message) => [message.id, messageHeightsRef.current[message.id] as number]),
+    );
+  }, [messages]);
+
+  useLayoutEffect(() => {
+    const node = scrollContainerRef.current;
+    if (!node) {
+      return;
+    }
+
+    const syncViewport = () => {
+      const nextState = {
+        height: node.clientHeight > 0 ? node.clientHeight : DEFAULT_VIRTUALIZED_VIEWPORT_HEIGHT,
+        scrollTop: node.scrollTop,
+      };
+
+      setViewport((current) =>
+        current.height === nextState.height && current.scrollTop === nextState.scrollTop
+          ? current
+          : nextState,
+      );
+    };
+
+    syncViewport();
+    node.addEventListener("scroll", syncViewport, { passive: true });
+    const resizeObserver = new ResizeObserver(syncViewport);
+    resizeObserver.observe(node);
+
+    return () => {
+      node.removeEventListener("scroll", syncViewport);
+      resizeObserver.disconnect();
+    };
+  }, [scrollContainerRef, sessionId]);
+
+  function handleHeightChange(messageId: string, nextHeight: number) {
+    if (!Number.isFinite(nextHeight) || nextHeight <= 0) {
+      return;
+    }
+
+    const previousHeight =
+      messageHeightsRef.current[messageId] ?? estimateConversationMessageHeight(messages[messageIndexById.get(messageId) ?? 0]);
+    if (Math.abs(previousHeight - nextHeight) < 1) {
+      return;
+    }
+
+    messageHeightsRef.current[messageId] = nextHeight;
+
+    const messageIndex = messageIndexById.get(messageId);
+    const node = scrollContainerRef.current;
+    if (
+      node &&
+      messageIndex !== undefined &&
+      messageIndex < visibleRangeRef.current.startIndex
+    ) {
+      node.scrollTop += nextHeight - previousHeight;
+    }
+
+    setLayoutVersion((current) => current + 1);
+  }
+
+  return (
+    <div className="virtualized-message-list" style={{ height: layout.totalHeight }}>
+      {messages
+        .slice(visibleRange.startIndex, visibleRange.endIndex)
+        .map((message, visibleIndex) => {
+          const messageIndex = visibleRange.startIndex + visibleIndex;
+          return (
+            <MeasuredMessageCard
+              key={message.id}
+              message={message}
+              preferImmediateHeavyRender={messageIndex >= messages.length - 2}
+              top={layout.tops[messageIndex] ?? 0}
+              onApprovalDecision={(messageId, decision) => onApprovalDecision(sessionId, messageId, decision)}
+              onHeightChange={handleHeightChange}
+            />
+          );
+        })}
+    </div>
+  );
+}
+
+function MeasuredMessageCard({
+  message,
+  preferImmediateHeavyRender,
+  onApprovalDecision,
+  onHeightChange,
+  top,
+}: {
+  message: Message;
+  preferImmediateHeavyRender: boolean;
+  onApprovalDecision: (messageId: string, decision: ApprovalDecision) => void;
+  onHeightChange: (messageId: string, nextHeight: number) => void;
+  top: number;
+}) {
+  const slotRef = useRef<HTMLDivElement | null>(null);
+
+  useLayoutEffect(() => {
+    const node = slotRef.current;
+    if (!node) {
+      return;
+    }
+
+    let frameId = 0;
+    const measure = () => {
+      frameId = 0;
+      onHeightChange(message.id, node.getBoundingClientRect().height);
+    };
+
+    measure();
+    const resizeObserver = new ResizeObserver(() => {
+      if (frameId !== 0) {
+        return;
+      }
+
+      frameId = window.requestAnimationFrame(measure);
+    });
+    resizeObserver.observe(node);
+
+    return () => {
+      resizeObserver.disconnect();
+      if (frameId !== 0) {
+        window.cancelAnimationFrame(frameId);
+      }
+    };
+  }, [message, onHeightChange]);
+
+  return (
+    <div ref={slotRef} className="virtualized-message-slot" style={{ top }}>
+      <MessageCard
+        message={message}
+        preferImmediateHeavyRender={preferImmediateHeavyRender}
+        onApprovalDecision={onApprovalDecision}
+      />
+    </div>
+  );
+}
 
 const SessionComposer = memo(function SessionComposer({
   paneId,
@@ -4009,7 +4295,7 @@ function SourcePane({
             <span>Source</span>
             <span>{fileState.path}</span>
           </div>
-          <HighlightedCodeBlock
+          <DeferredHighlightedCodeBlock
             className="code-block source-code-block"
             code={fileState.content}
             language={fileState.language}
@@ -4023,9 +4309,11 @@ function SourcePane({
 
 const MessageCard = memo(function MessageCard({
   message,
+  preferImmediateHeavyRender = false,
   onApprovalDecision,
 }: {
   message: Message;
+  preferImmediateHeavyRender?: boolean;
   onApprovalDecision: (messageId: string, decision: ApprovalDecision) => void;
 }) {
   switch (message.type) {
@@ -4044,7 +4332,11 @@ const MessageCard = memo(function MessageCard({
             <MessageAttachmentList attachments={message.attachments} />
           ) : null}
           {message.author === "assistant" ? (
-            <MarkdownContent markdown={message.text} />
+            preferImmediateHeavyRender ? (
+              <MarkdownContent markdown={message.text} />
+            ) : (
+              <DeferredMarkdownContent markdown={message.text} />
+            )
           ) : message.text ? (
             <p className="plain-text-copy">{message.text}</p>
           ) : (
@@ -4066,7 +4358,10 @@ const MessageCard = memo(function MessageCard({
     default:
       return null;
   }
-}, (previous, next) => previous.message === next.message);
+}, (previous, next) =>
+  previous.message === next.message &&
+  previous.preferImmediateHeavyRender === next.preferImmediateHeavyRender
+);
 
 const PendingPromptCard = memo(function PendingPromptCard({
   prompt,
@@ -4149,6 +4444,157 @@ function MessageMeta({ author, timestamp }: { author: string; timestamp: string 
       <span>{author === "you" ? "You" : "Agent"}</span>
       <span>{timestamp}</span>
     </div>
+  );
+}
+
+function DeferredHeavyContent({
+  children,
+  estimatedHeight,
+  placeholder,
+}: {
+  children: ReactNode;
+  estimatedHeight: number;
+  placeholder: ReactNode;
+}) {
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const [isActivated, setIsActivated] = useState(false);
+
+  useLayoutEffect(() => {
+    if (isActivated) {
+      return;
+    }
+
+    const node = containerRef.current;
+    if (!node) {
+      return;
+    }
+
+    const root = resolveDeferredRenderRoot(node);
+    if (isElementNearRenderViewport(node, root, DEFERRED_RENDER_ROOT_MARGIN_PX)) {
+      setIsActivated(true);
+    }
+  }, [isActivated]);
+
+  useEffect(() => {
+    if (isActivated) {
+      return;
+    }
+
+    const node = containerRef.current;
+    if (!node) {
+      return;
+    }
+
+    if (typeof window === "undefined" || typeof window.IntersectionObserver === "undefined") {
+      setIsActivated(true);
+      return;
+    }
+
+    const root = resolveDeferredRenderRoot(node);
+    const observer = new window.IntersectionObserver(
+      (entries) => {
+        if (entries.some((entry) => entry.isIntersecting || entry.intersectionRatio > 0)) {
+          setIsActivated(true);
+        }
+      },
+      {
+        root,
+        rootMargin: `${DEFERRED_RENDER_ROOT_MARGIN_PX}px 0px ${DEFERRED_RENDER_ROOT_MARGIN_PX}px 0px`,
+        threshold: 0.01,
+      },
+    );
+
+    observer.observe(node);
+    return () => {
+      observer.disconnect();
+    };
+  }, [isActivated]);
+
+  return (
+    <div
+      ref={containerRef}
+      className="deferred-heavy-content"
+      style={
+        isActivated
+          ? undefined
+          : ({ "--deferred-min-height": `${estimatedHeight}px` } as CSSProperties)
+      }
+    >
+      {isActivated ? children : placeholder}
+    </div>
+  );
+}
+
+function DeferredHighlightedCodeBlock({
+  className,
+  code,
+  commandHint,
+  language,
+  pathHint,
+}: {
+  className: string;
+  code: string;
+  commandHint?: string | null;
+  language?: string | null;
+  pathHint?: string | null;
+}) {
+  const metrics = useMemo(() => measureTextBlock(code), [code]);
+  const shouldDefer =
+    metrics.lineCount >= HEAVY_CODE_LINE_THRESHOLD || code.length >= HEAVY_CODE_CHARACTER_THRESHOLD;
+
+  if (!shouldDefer) {
+    return (
+      <HighlightedCodeBlock
+        className={className}
+        code={code}
+        commandHint={commandHint}
+        language={language}
+        pathHint={pathHint}
+      />
+    );
+  }
+
+  return (
+    <DeferredHeavyContent
+      estimatedHeight={estimateCodeBlockHeight(metrics.lineCount)}
+      placeholder={
+        <pre className={`${className} syntax-block deferred-code-placeholder`}>
+          <code>{buildDeferredPreviewText(code)}</code>
+        </pre>
+      }
+    >
+      <HighlightedCodeBlock
+        className={className}
+        code={code}
+        commandHint={commandHint}
+        language={language}
+        pathHint={pathHint}
+      />
+    </DeferredHeavyContent>
+  );
+}
+
+function DeferredMarkdownContent({ markdown }: { markdown: string }) {
+  const metrics = useMemo(() => measureTextBlock(markdown), [markdown]);
+  const shouldDefer =
+    metrics.lineCount >= HEAVY_MARKDOWN_LINE_THRESHOLD ||
+    markdown.length >= HEAVY_MARKDOWN_CHARACTER_THRESHOLD;
+
+  if (!shouldDefer) {
+    return <MarkdownContent markdown={markdown} />;
+  }
+
+  return (
+    <DeferredHeavyContent
+      estimatedHeight={estimateMarkdownBlockHeight(metrics.lineCount)}
+      placeholder={
+        <div className="markdown-copy deferred-markdown-placeholder">
+          <p className="plain-text-copy">{buildMarkdownPreviewText(markdown)}</p>
+        </div>
+      }
+    >
+      <MarkdownContent markdown={markdown} />
+    </DeferredHeavyContent>
   );
 }
 
@@ -4254,7 +4700,7 @@ function CommandCard({ message }: { message: CommandMessage }) {
         <div className="command-row">
           <div className="command-row-label">IN</div>
           <div className="command-row-body">
-            <HighlightedCodeBlock
+            <DeferredHighlightedCodeBlock
               className="command-text command-text-input"
               code={message.command}
               language={message.commandLanguage ?? "bash"}
@@ -4280,12 +4726,12 @@ function CommandCard({ message }: { message: CommandMessage }) {
               className={`command-output-shell ${expanded ? "expanded" : "collapsed"} ${hasOutput ? "has-output" : "empty"}`}
             >
               {hasOutput ? (
-              <HighlightedCodeBlock
-                className="command-text command-text-output"
-                code={displayOutput}
-                language={message.outputLanguage ?? null}
-                commandHint={message.output ? message.command : null}
-              />
+                <DeferredHighlightedCodeBlock
+                  className="command-text command-text-output"
+                  code={displayOutput}
+                  language={message.outputLanguage ?? null}
+                  commandHint={message.output ? message.command : null}
+                />
               ) : (
                 <pre className="command-text command-text-output command-text-placeholder">
                   {displayOutput}
@@ -4416,7 +4862,7 @@ function DiffCard({ message }: { message: DiffMessage }) {
           <div className="command-row-label">DIFF</div>
           <div className="command-row-body">
             <div className={`diff-preview-shell ${isExpanded ? "expanded" : "collapsed"}`}>
-              <HighlightedCodeBlock
+              <DeferredHighlightedCodeBlock
                 className="diff-block diff-preview-text"
                 code={message.diff}
                 language={message.language ?? "diff"}
@@ -4459,7 +4905,7 @@ function MarkdownCard({ message }: { message: MarkdownMessage }) {
       <MessageMeta author={message.author} timestamp={message.timestamp} />
       <div className="card-label">Markdown</div>
       <h3>{message.title}</h3>
-      <MarkdownContent markdown={message.markdown} />
+      <DeferredMarkdownContent markdown={message.markdown} />
     </article>
   );
 }
@@ -4480,7 +4926,7 @@ function ApprovalCard({
       <MessageMeta author={message.author} timestamp={message.timestamp} />
       <div className="card-label">Approval</div>
       <h3>{message.title}</h3>
-      <HighlightedCodeBlock
+      <DeferredHighlightedCodeBlock
         className="approval-command"
         code={message.command}
         language={message.commandLanguage ?? "bash"}
@@ -4553,6 +4999,64 @@ function MarkdownContent({ markdown }: { markdown: string }) {
       </ReactMarkdown>
     </div>
   );
+}
+
+function resolveDeferredRenderRoot(node: Element) {
+  const root = node.closest(".message-stack");
+  return root instanceof Element ? root : null;
+}
+
+function isElementNearRenderViewport(
+  node: Element,
+  root: Element | null,
+  marginPx: number,
+) {
+  const nodeRect = node.getBoundingClientRect();
+  const rootRect = root?.getBoundingClientRect() ?? {
+    top: 0,
+    bottom: window.innerHeight,
+  };
+
+  return nodeRect.bottom >= rootRect.top - marginPx && nodeRect.top <= rootRect.bottom + marginPx;
+}
+
+function measureTextBlock(text: string) {
+  return {
+    lineCount: text.length === 0 ? 1 : text.split("\n").length,
+  };
+}
+
+function estimateCodeBlockHeight(lineCount: number) {
+  return Math.min(MAX_DEFERRED_PLACEHOLDER_HEIGHT, Math.max(120, lineCount * 20 + 48));
+}
+
+function estimateMarkdownBlockHeight(lineCount: number) {
+  return Math.min(MAX_DEFERRED_PLACEHOLDER_HEIGHT, Math.max(140, lineCount * 28 + 56));
+}
+
+function buildDeferredPreviewText(text: string) {
+  const preview = text
+    .split("\n")
+    .slice(0, DEFERRED_PREVIEW_LINE_LIMIT)
+    .join("\n")
+    .slice(0, DEFERRED_PREVIEW_CHARACTER_LIMIT)
+    .trimEnd();
+
+  return preview.length < text.length ? `${preview}\n…` : preview;
+}
+
+function buildMarkdownPreviewText(markdown: string) {
+  const preview = markdown
+    .replace(/```[\s\S]*?```/g, "[code block]")
+    .replace(/\[(.*?)\]\((.*?)\)/g, "$1")
+    .replace(/^#{1,6}\s+/gm, "")
+    .replace(/^>\s?/gm, "")
+    .replace(/^[*-]\s+/gm, "")
+    .replace(/`/g, "")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+
+  return buildDeferredPreviewText(preview);
 }
 
 function renderDecision(decision: Exclude<ApprovalDecision, "pending">) {
@@ -4673,6 +5177,84 @@ function buildConversationListSignature(items: SessionConversationItem[]) {
       ? pendingPromptChangeMarker(lastPendingPromptItem.prompt)
       : "empty",
   ].join("|");
+}
+
+function buildVirtualizedMessageLayout(itemHeights: number[]) {
+  const tops = new Array<number>(itemHeights.length);
+  let offset = 0;
+
+  for (let index = 0; index < itemHeights.length; index += 1) {
+    tops[index] = offset;
+    offset += itemHeights[index] + VIRTUALIZED_MESSAGE_GAP_PX;
+  }
+
+  return {
+    tops,
+    totalHeight: Math.max(offset - VIRTUALIZED_MESSAGE_GAP_PX, 0),
+  };
+}
+
+function findVirtualizedMessageRange(
+  tops: number[],
+  itemHeights: number[],
+  scrollTop: number,
+  viewportHeight: number,
+  overscan: number,
+) {
+  if (itemHeights.length === 0) {
+    return {
+      startIndex: 0,
+      endIndex: 0,
+    };
+  }
+
+  const startBoundary = Math.max(scrollTop - overscan, 0);
+  const endBoundary = scrollTop + Math.max(viewportHeight, DEFAULT_VIRTUALIZED_VIEWPORT_HEIGHT) + overscan;
+
+  let startIndex = 0;
+  while (
+    startIndex < itemHeights.length - 1 &&
+    tops[startIndex] + itemHeights[startIndex] < startBoundary
+  ) {
+    startIndex += 1;
+  }
+
+  let endIndex = startIndex;
+  while (endIndex < itemHeights.length && tops[endIndex] < endBoundary) {
+    endIndex += 1;
+  }
+
+  return {
+    startIndex,
+    endIndex: Math.max(startIndex + 1, endIndex),
+  };
+}
+
+function estimateConversationMessageHeight(message: Message) {
+  switch (message.type) {
+    case "text": {
+      const lineCount = measureTextBlock(message.text).lineCount;
+      const attachmentHeight = (message.attachments?.length ?? 0) * 54;
+      return Math.min(1800, Math.max(92, 78 + lineCount * 24 + attachmentHeight));
+    }
+    case "thinking":
+      return Math.min(900, Math.max(140, 112 + message.lines.length * 28));
+    case "command": {
+      const commandLineCount = measureTextBlock(message.command).lineCount;
+      const outputLineCount = message.output ? measureTextBlock(message.output).lineCount : 3;
+      return Math.min(1400, Math.max(180, 152 + commandLineCount * 22 + Math.min(outputLineCount, 14) * 20));
+    }
+    case "diff": {
+      const diffLineCount = measureTextBlock(message.diff).lineCount;
+      return Math.min(1500, Math.max(180, 156 + Math.min(diffLineCount, 20) * 20));
+    }
+    case "markdown": {
+      const markdownLineCount = measureTextBlock(message.markdown).lineCount;
+      return Math.min(1600, Math.max(140, 124 + markdownLineCount * 24));
+    }
+    case "approval":
+      return Math.max(220, 188 + measureTextBlock(message.detail).lineCount * 22);
+  }
 }
 
 function messageChangeMarker(message: Message) {

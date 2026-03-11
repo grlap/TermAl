@@ -45,6 +45,7 @@ function reconcileSession(previous: Session, next: Session): Session {
     previous.approvalPolicy === next.approvalPolicy &&
     previous.sandboxMode === next.sandboxMode &&
     previous.claudeApprovalMode === next.claudeApprovalMode &&
+    previous.externalSessionId === next.externalSessionId &&
     previous.status === next.status &&
     previous.preview === next.preview &&
     messages === previous.messages &&

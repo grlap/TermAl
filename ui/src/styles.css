@@ -1510,6 +1510,17 @@ textarea {
   gap: 0.7rem;
 }
 
+.virtualized-message-list {
+  position: relative;
+  min-height: 1px;
+}
+
+.virtualized-message-slot {
+  position: absolute;
+  left: 0;
+  right: 0;
+}
+
 .session-conversation-page.is-active,
 .session-conversation-page.is-active .message-card,
 .session-conversation-page.is-active .thread-notice,
@@ -2028,6 +2039,24 @@ textarea {
   white-space: pre-wrap;
 }
 
+.deferred-heavy-content {
+  min-height: var(--deferred-min-height, auto);
+}
+
+.deferred-code-placeholder,
+.deferred-markdown-placeholder {
+  min-height: var(--deferred-min-height, auto);
+}
+
+.deferred-code-placeholder {
+  color: color-mix(in srgb, var(--code-fg) 72%, white);
+}
+
+.deferred-code-placeholder code {
+  display: block;
+  white-space: inherit;
+}
+
 .syntax-block code.hljs {
   display: block;
   padding: 0;
@@ -2195,6 +2224,11 @@ textarea {
 .markdown-copy {
   display: grid;
   gap: 0.75rem;
+}
+
+.deferred-markdown-placeholder {
+  align-content: start;
+  color: color-mix(in srgb, var(--ink) 86%, var(--muted));
 }
 
 .plain-text-copy,
