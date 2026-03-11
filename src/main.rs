@@ -189,6 +189,7 @@ struct AppState {
     default_workdir: String,
     persistence_path: Arc<PathBuf>,
     state_events: broadcast::Sender<String>,
+    delta_events: broadcast::Sender<String>,
     inner: Arc<Mutex<StateInner>>,
 }
 
@@ -214,6 +215,7 @@ impl AppState {
             default_workdir,
             persistence_path: Arc::new(persistence_path),
             state_events: broadcast::channel(128).0,
+            delta_events: broadcast::channel(256).0,
             inner: Arc::new(Mutex::new(inner)),
         };
         {
@@ -266,6 +268,16 @@ impl AppState {
 
     fn subscribe_events(&self) -> broadcast::Receiver<String> {
         self.state_events.subscribe()
+    }
+
+    fn subscribe_delta_events(&self) -> broadcast::Receiver<String> {
+        self.delta_events.subscribe()
+    }
+
+    fn publish_delta(&self, event: &DeltaEvent) {
+        if let Ok(payload) = serde_json::to_string(event) {
+            let _ = self.delta_events.send(payload);
+        }
     }
 
     fn publish_state_locked(&self, inner: &StateInner) -> Result<()> {
@@ -1025,31 +1037,45 @@ impl AppState {
     }
 
     fn append_text_delta(&self, session_id: &str, message_id: &str, delta: &str) -> Result<()> {
-        let mut inner = self.inner.lock().expect("state mutex poisoned");
-        let index = inner
-            .find_session_index(session_id)
-            .ok_or_else(|| anyhow!("session `{session_id}` not found"))?;
-        let session = &mut inner.sessions[index].session;
+        let preview = {
+            let mut inner = self.inner.lock().expect("state mutex poisoned");
+            let index = inner
+                .find_session_index(session_id)
+                .ok_or_else(|| anyhow!("session `{session_id}` not found"))?;
+            let session = &mut inner.sessions[index].session;
 
-        let mut updated_text = None;
-        for message in &mut session.messages {
-            if let Message::Text { id, text, .. } = message {
-                if id == message_id {
-                    text.push_str(delta);
-                    updated_text = Some(text.clone());
-                    break;
+            let mut updated_text = None;
+            for message in &mut session.messages {
+                if let Message::Text { id, text, .. } = message {
+                    if id == message_id {
+                        text.push_str(delta);
+                        updated_text = Some(text.clone());
+                        break;
+                    }
                 }
             }
-        }
 
-        if let Some(text) = updated_text {
-            let preview = text.trim();
-            if !preview.is_empty() {
-                session.preview = make_preview(preview);
+            if let Some(text) = updated_text {
+                let trimmed = text.trim();
+                if !trimmed.is_empty() {
+                    let p = make_preview(trimmed);
+                    session.preview = p.clone();
+                    Some(p)
+                } else {
+                    None
+                }
+            } else {
+                None
             }
-        }
+        };
 
-        self.publish_state_locked(&inner)?;
+        self.publish_delta(&DeltaEvent::TextDelta {
+            session_id: session_id.to_owned(),
+            message_id: message_id.to_owned(),
+            delta: delta.to_owned(),
+            preview,
+        });
+
         Ok(())
     }
 
@@ -1063,68 +1089,85 @@ impl AppState {
     ) -> Result<()> {
         let command_language = Some(shell_language().to_owned());
         let output_language = infer_command_output_language(command).map(str::to_owned);
-        let mut inner = self.inner.lock().expect("state mutex poisoned");
-        let index = inner
-            .find_session_index(session_id)
-            .ok_or_else(|| anyhow!("session `{session_id}` not found"))?;
-        let session = &mut inner.sessions[index].session;
 
-        let mut found = false;
-        for message in &mut session.messages {
-            if let Message::Command {
-                id,
-                command: existing_command,
-                command_language: existing_command_language,
-                output: existing_output,
-                output_language: existing_output_language,
-                status: existing_status,
-                ..
-            } = message
-            {
-                if id == message_id {
-                    *existing_command = command.to_owned();
-                    *existing_command_language = command_language.clone();
-                    *existing_output = output.to_owned();
-                    *existing_output_language = output_language.clone();
-                    *existing_status = status;
-                    found = true;
-                    break;
+        let preview = {
+            let mut inner = self.inner.lock().expect("state mutex poisoned");
+            let index = inner
+                .find_session_index(session_id)
+                .ok_or_else(|| anyhow!("session `{session_id}` not found"))?;
+            let session = &mut inner.sessions[index].session;
+
+            let mut found = false;
+            for message in &mut session.messages {
+                if let Message::Command {
+                    id,
+                    command: existing_command,
+                    command_language: existing_command_language,
+                    output: existing_output,
+                    output_language: existing_output_language,
+                    status: existing_status,
+                    ..
+                } = message
+                {
+                    if id == message_id {
+                        *existing_command = command.to_owned();
+                        *existing_command_language = command_language.clone();
+                        *existing_output = output.to_owned();
+                        *existing_output_language = output_language.clone();
+                        *existing_status = status;
+                        found = true;
+                        break;
+                    }
                 }
             }
-        }
 
-        if !found {
-            session.messages.push(Message::Command {
-                id: message_id.to_owned(),
-                timestamp: stamp_now(),
-                author: Author::Assistant,
-                command: command.to_owned(),
-                command_language,
-                output: output.to_owned(),
-                output_language,
-                status,
-            });
-        }
+            if !found {
+                session.messages.push(Message::Command {
+                    id: message_id.to_owned(),
+                    timestamp: stamp_now(),
+                    author: Author::Assistant,
+                    command: command.to_owned(),
+                    command_language: command_language.clone(),
+                    output: output.to_owned(),
+                    output_language: output_language.clone(),
+                    status,
+                });
+            }
 
-        session.preview = match status {
-            CommandStatus::Running => make_preview(&format!("Running {command}")),
-            CommandStatus::Success => {
-                if output.trim().is_empty() {
-                    make_preview(&format!("Completed {command}"))
-                } else {
-                    make_preview(output.trim())
+            let preview = match status {
+                CommandStatus::Running => make_preview(&format!("Running {command}")),
+                CommandStatus::Success => {
+                    if output.trim().is_empty() {
+                        make_preview(&format!("Completed {command}"))
+                    } else {
+                        make_preview(output.trim())
+                    }
                 }
-            }
-            CommandStatus::Error => {
-                if output.trim().is_empty() {
-                    make_preview(&format!("Command failed: {command}"))
-                } else {
-                    make_preview(output.trim())
+                CommandStatus::Error => {
+                    if output.trim().is_empty() {
+                        make_preview(&format!("Command failed: {command}"))
+                    } else {
+                        make_preview(output.trim())
+                    }
                 }
-            }
+            };
+            session.preview = preview.clone();
+
+            persist_state(self.persistence_path.as_path(), &inner)?;
+            preview
         };
 
-        self.persist_locked(&inner)?;
+        self.publish_delta(&DeltaEvent::CommandUpdate {
+            session_id: session_id.to_owned(),
+            message_id: message_id.to_owned(),
+            command: command.to_owned(),
+            command_language,
+            output: output.to_owned(),
+            output_language,
+            status,
+            preview,
+        });
+
         Ok(())
     }
 
@@ -5398,7 +5441,8 @@ async fn read_file(Query(query): Query<FileQuery>) -> Result<Json<FileResponse>,
 async fn state_events(
     State(state): State<AppState>,
 ) -> Sse<impl futures_core::Stream<Item = std::result::Result<Event, Infallible>>> {
-    let mut receiver = state.subscribe_events();
+    let mut state_receiver = state.subscribe_events();
+    let mut delta_receiver = state.subscribe_delta_events();
     let initial_payload =
         serde_json::to_string(&state.snapshot()).unwrap_or_else(|_| "{\"sessions\":[]}".to_owned());
 
@@ -5406,14 +5450,32 @@ async fn state_events(
         yield Ok(Event::default().event("state").data(initial_payload));
 
         loop {
-            match receiver.recv().await {
-                Ok(payload) => yield Ok(Event::default().event("state").data(payload)),
-                Err(broadcast::error::RecvError::Lagged(_)) => {
-                    let payload = serde_json::to_string(&state.snapshot())
-                        .unwrap_or_else(|_| "{\"sessions\":[]}".to_owned());
-                    yield Ok(Event::default().event("state").data(payload));
+            tokio::select! {
+                biased;
+
+                result = state_receiver.recv() => {
+                    match result {
+                        Ok(payload) => yield Ok(Event::default().event("state").data(payload)),
+                        Err(broadcast::error::RecvError::Lagged(_)) => {
+                            let payload = serde_json::to_string(&state.snapshot())
+                                .unwrap_or_else(|_| "{\"sessions\":[]}".to_owned());
+                            yield Ok(Event::default().event("state").data(payload));
+                        }
+                        Err(broadcast::error::RecvError::Closed) => break,
+                    }
                 }
-                Err(broadcast::error::RecvError::Closed) => break,
+
+                result = delta_receiver.recv() => {
+                    match result {
+                        Ok(payload) => yield Ok(Event::default().event("delta").data(payload)),
+                        Err(broadcast::error::RecvError::Lagged(_)) => {
+                            let payload = serde_json::to_string(&state.snapshot())
+                                .unwrap_or_else(|_| "{\"sessions\":[]}".to_owned());
+                            yield Ok(Event::default().event("state").data(payload));
+                        }
+                        Err(broadcast::error::RecvError::Closed) => break,
+                    }
+                }
             }
         }
     };
@@ -5928,6 +5990,34 @@ struct StateResponse {
     sessions: Vec<Session>,
 }
 
+#[derive(Serialize)]
+#[serde(tag = "type", rename_all = "camelCase")]
+enum DeltaEvent {
+    TextDelta {
+        #[serde(rename = "sessionId")]
+        session_id: String,
+        #[serde(rename = "messageId")]
+        message_id: String,
+        delta: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        preview: Option<String>,
+    },
+    CommandUpdate {
+        #[serde(rename = "sessionId")]
+        session_id: String,
+        #[serde(rename = "messageId")]
+        message_id: String,
+        command: String,
+        #[serde(rename = "commandLanguage", skip_serializing_if = "Option::is_none")]
+        command_language: Option<String>,
+        output: String,
+        #[serde(rename = "outputLanguage", skip_serializing_if = "Option::is_none")]
+        output_language: Option<String>,
+        status: CommandStatus,
+        preview: String,
+    },
+}
+
 fn resolve_requested_path(path: &str) -> Result<PathBuf, ApiError> {
     let raw_path = FsPath::new(path);
     let resolved = if raw_path.is_absolute() {
@@ -6032,6 +6122,7 @@ mod tests {
             default_workdir: "/tmp".to_owned(),
             persistence_path: Arc::new(persistence_path),
             state_events: broadcast::channel(16).0,
+            delta_events: broadcast::channel(16).0,
             inner: Arc::new(Mutex::new(StateInner::new())),
         }
     }

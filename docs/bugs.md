@@ -349,6 +349,15 @@ correctness risk during initial load and reconnects.
 - Keep delta reconciliation lossless when a message is missing by falling back to a full refresh or
   by buffering deltas until the message exists
 
+**Likely change locations:**
+- Frontend minimum: `ui/src/App.tsx`
+  `adoptState()` must stop blindly replacing newer in-memory state, the startup `useEffect()` must
+  stop racing `fetchState()` against live SSE updates, and `applyDelta()` must recover when the
+  target message is missing instead of silently dropping the update
+- Backend hardening: `src/main.rs`
+  add a monotonic revision to `StateResponse` and `DeltaEvent`, publish it from `/api/events`, and
+  stamp it on streamed text and command delta events so the frontend can reject stale state
+
 ## Command delta inserts lose timestamps
 
 **Severity:** Low â€” user-visible metadata regression.
@@ -408,6 +417,9 @@ Concrete work implied by the current TermAl parity gaps. Ordered by user impact 
 - [ ] Remove the startup snapshot race:
   avoid letting a late `/api/state` response overwrite newer `/api/events` deltas, or add a
   revision field so stale state can be ignored before it wipes streamed messages from the UI.
+  Frontend touch points: `ui/src/App.tsx` in `adoptState()` and the startup `useEffect()`.
+  Backend hardening if needed: add revision metadata in `src/main.rs` `StateResponse` and
+  `DeltaEvent`.
 - [ ] Add Gemini as a first-class agent in the backend and UI:
   `Agent` enum, session creation, session rendering, and persistence need to stop assuming the
   world is only Claude or Codex.
@@ -458,7 +470,7 @@ Concrete work implied by the current TermAl parity gaps. Ordered by user impact 
 - [ ] Fix lossless delta reconciliation:
   make the delta SSE path recover when the UI is missing the referenced message, and add frontend
   coverage for the interaction between initial `/api/state` hydration and live `/api/events`
-  updates.
+  updates. Primary change point: `ui/src/App.tsx` `applyDelta()`.
 - [ ] Preserve command timestamps in the delta path:
   include `timestamp` in first-seen `commandUpdate` payloads or force a full state refresh on
   insert so command cards do not render blank metadata.

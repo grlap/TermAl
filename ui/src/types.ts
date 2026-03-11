@@ -113,3 +113,25 @@ export type ApprovalMessage = BaseMessage & {
   detail: string;
   decision: ApprovalDecision;
 };
+
+export type TextDeltaEvent = {
+  type: "textDelta";
+  sessionId: string;
+  messageId: string;
+  delta: string;
+  preview?: string | null;
+};
+
+export type CommandUpdateEvent = {
+  type: "commandUpdate";
+  sessionId: string;
+  messageId: string;
+  command: string;
+  commandLanguage?: string | null;
+  output: string;
+  outputLanguage?: string | null;
+  status: "running" | "success" | "error";
+  preview: string;
+};
+
+export type DeltaEvent = TextDeltaEvent | CommandUpdateEvent;

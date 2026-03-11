@@ -31,6 +31,7 @@ import {
   updateSessionSettings,
 } from "./api";
 import { highlightCode } from "./highlight";
+import { applyDeltaToSessions } from "./live-updates";
 import type {
   ApprovalDecision,
   ApprovalMessage,
@@ -40,6 +41,7 @@ import type {
   CommandMessage,
   CodexRateLimitWindow,
   CodexState,
+  DeltaEvent,
   DiffMessage,
   ImageAttachment,
   MarkdownMessage,
@@ -199,6 +201,9 @@ export default function App() {
   } | null>(null);
   const draftAttachmentsRef = useRef<Record<string, DraftImageAttachment[]>>({});
   const sessionsRef = useRef<Session[]>([]);
+  const liveStateEpochRef = useRef(0);
+  const stateResyncInFlightRef = useRef(false);
+  const stateResyncPendingRef = useRef(false);
   const paneShouldStickToBottomRef = useRef<Record<string, boolean | undefined>>({});
   const paneScrollPositionsRef = useRef<
     Record<string, Record<string, { top: number; shouldStick: boolean }>>
@@ -277,30 +282,55 @@ export default function App() {
     adoptSessions(nextState.sessions, options);
   }
 
+
   useEffect(() => {
     let cancelled = false;
     const eventSource = new EventSource("/api/events");
 
-    async function loadInitialState() {
-      try {
-        const state = await fetchState();
-        if (cancelled) {
-          return;
-        }
-
-        adoptState(state);
-        setRequestError(null);
-      } catch (error) {
-        if (cancelled) {
-          return;
-        }
-
-        setRequestError(getErrorMessage(error));
-      } finally {
-        if (!cancelled) {
-          setIsLoading(false);
-        }
+    function requestStateResync() {
+      if (cancelled) {
+        return;
       }
+
+      stateResyncPendingRef.current = true;
+      if (stateResyncInFlightRef.current) {
+        return;
+      }
+
+      stateResyncInFlightRef.current = true;
+      void (async () => {
+        try {
+          while (!cancelled && stateResyncPendingRef.current) {
+            stateResyncPendingRef.current = false;
+            const requestEpoch = liveStateEpochRef.current;
+
+            try {
+              const state = await fetchState();
+              if (cancelled) {
+                return;
+              }
+
+              if (liveStateEpochRef.current !== requestEpoch) {
+                continue;
+              }
+
+              adoptState(state);
+              setRequestError(null);
+            } catch (error) {
+              if (!cancelled) {
+                setRequestError(getErrorMessage(error));
+              }
+              break;
+            } finally {
+              if (!cancelled) {
+                setIsLoading(false);
+              }
+            }
+          }
+        } finally {
+          stateResyncInFlightRef.current = false;
+        }
+      })();
     }
 
     function handleStateEvent(event: MessageEvent<string>) {
@@ -310,6 +340,7 @@ export default function App() {
 
       try {
         const state = JSON.parse(event.data) as StateResponse;
+        liveStateEpochRef.current += 1;
         adoptState(state);
         setRequestError(null);
       } catch (error) {
@@ -323,18 +354,45 @@ export default function App() {
       }
     }
 
+    function handleDeltaEvent(event: MessageEvent<string>) {
+      if (cancelled) {
+        return;
+      }
+
+      try {
+        const delta = JSON.parse(event.data) as DeltaEvent;
+        liveStateEpochRef.current += 1;
+
+        const result = applyDeltaToSessions(sessionsRef.current, delta);
+        if (result.kind === "applied") {
+          sessionsRef.current = result.sessions;
+          startTransition(() => {
+            setSessions(result.sessions);
+          });
+          setRequestError(null);
+          return;
+        }
+
+        requestStateResync();
+      } catch {
+        requestStateResync();
+      }
+    }
+
     eventSource.addEventListener("state", handleStateEvent as EventListener);
+    eventSource.addEventListener("delta", handleDeltaEvent as EventListener);
     eventSource.onopen = () => {
       if (!cancelled) {
         setRequestError(null);
       }
     };
 
-    void loadInitialState();
+    requestStateResync();
 
     return () => {
       cancelled = true;
       eventSource.removeEventListener("state", handleStateEvent as EventListener);
+      eventSource.removeEventListener("delta", handleDeltaEvent as EventListener);
       eventSource.close();
     };
   }, []);
@@ -5560,3 +5618,4 @@ function dropLabelForPlacement(placement: TabDropPlacement) {
       return "Bottom";
   }
 }
+
