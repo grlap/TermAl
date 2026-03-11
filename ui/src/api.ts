@@ -15,6 +15,7 @@ export type StateResponse = {
 export type FileResponse = {
   path: string;
   content: string;
+  language?: string | null;
 };
 
 type CreateSessionRequest = {

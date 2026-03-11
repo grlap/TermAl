@@ -8,6 +8,7 @@ import {
   useState,
   type CSSProperties,
   type ClipboardEvent as ReactClipboardEvent,
+  type DragEvent as ReactDragEvent,
   type KeyboardEvent as ReactKeyboardEvent,
   type PointerEvent as ReactPointerEvent,
 } from "react";
@@ -373,13 +374,13 @@ export default function App() {
     };
   }, []);
 
-  async function handleSend(sessionId: string) {
+  async function handleSend(sessionId: string, draftTextOverride?: string) {
     const session = sessionLookup.get(sessionId);
     if (!session) {
       return;
     }
 
-    const draftText = draftsBySessionId[sessionId] ?? "";
+    const draftText = draftTextOverride ?? draftsBySessionId[sessionId] ?? "";
     const prompt = draftText.trim();
     const attachments = draftAttachmentsBySessionId[sessionId] ?? [];
     if (!prompt && attachments.length === 0) {
@@ -683,10 +684,16 @@ export default function App() {
   }
 
   function handleDraftChange(sessionId: string, nextValue: string) {
-    setDraftsBySessionId((current) => ({
-      ...current,
-      [sessionId]: nextValue,
-    }));
+    setDraftsBySessionId((current) => {
+      if ((current[sessionId] ?? "") === nextValue) {
+        return current;
+      }
+
+      return {
+        ...current,
+        [sessionId]: nextValue,
+      };
+    });
   }
 
   function handleTabDragStart(sourcePaneId: string, sessionId: string) {
@@ -702,13 +709,20 @@ export default function App() {
     setDraggedTab(null);
   }
 
-  function handleTabDrop(targetPaneId: string, placement: TabDropPlacement) {
+  function handleTabDrop(targetPaneId: string, placement: TabDropPlacement, tabIndex?: number) {
     if (!draggedTab) {
       return;
     }
 
     setWorkspace((current) =>
-      placeDraggedSession(current, draggedTab.sourcePaneId, draggedTab.sessionId, targetPaneId, placement),
+      placeDraggedSession(
+        current,
+        draggedTab.sourcePaneId,
+        draggedTab.sessionId,
+        targetPaneId,
+        placement,
+        tabIndex,
+      ),
     );
     setDraggedTab(null);
   }
@@ -845,18 +859,18 @@ export default function App() {
             );
           })}
         </div>
-      </aside>
 
-      <main className="workspace-shell">
-        <section className="workspace-overview panel">
-          <p className="eyebrow workspace-label">Workspace</p>
-          <div className="thread-chips">
+        <section className="sidebar-status" aria-label="Workspace status">
+          <div className="session-control-label">Status</div>
+          <div className="sidebar-status-chips">
             <span className="chip">{workspace.panes.length} tiles</span>
             <span className="chip">{openSessionIds.size} open sessions</span>
             <span className="chip">{sessions.length} total sessions</span>
           </div>
         </section>
+      </aside>
 
+      <main className="workspace-shell">
         {requestError ? (
           <article className="thread-notice workspace-notice">
             <div className="card-label">Backend</div>
@@ -889,7 +903,7 @@ export default function App() {
               onTabDrop={handleTabDrop}
               onPaneViewModeChange={handlePaneViewModeChange}
               onPaneSourcePathChange={handlePaneSourcePathChange}
-              onDraftChange={handleDraftChange}
+              onDraftCommit={handleDraftChange}
               onDraftAttachmentsAdd={handleDraftAttachmentsAdd}
               onDraftAttachmentRemove={handleDraftAttachmentRemove}
               onComposerError={setRequestError}
@@ -1609,7 +1623,7 @@ function WorkspaceNodeView({
   onTabDrop,
   onPaneViewModeChange,
   onPaneSourcePathChange,
-  onDraftChange,
+  onDraftCommit,
   onDraftAttachmentsAdd,
   onDraftAttachmentRemove,
   onComposerError,
@@ -1646,14 +1660,14 @@ function WorkspaceNodeView({
   ) => void;
   onTabDragStart: (sourcePaneId: string, sessionId: string) => void;
   onTabDragEnd: () => void;
-  onTabDrop: (targetPaneId: string, placement: TabDropPlacement) => void;
+  onTabDrop: (targetPaneId: string, placement: TabDropPlacement, tabIndex?: number) => void;
   onPaneViewModeChange: (paneId: string, viewMode: PaneViewMode) => void;
   onPaneSourcePathChange: (paneId: string, path: string) => void;
-  onDraftChange: (sessionId: string, nextValue: string) => void;
+  onDraftCommit: (sessionId: string, nextValue: string) => void;
   onDraftAttachmentsAdd: (sessionId: string, attachments: DraftImageAttachment[]) => void;
   onDraftAttachmentRemove: (sessionId: string, attachmentId: string) => void;
   onComposerError: (message: string | null) => void;
-  onSend: (sessionId: string) => void;
+  onSend: (sessionId: string, draftText?: string) => void;
   onCancelQueuedPrompt: (sessionId: string, promptId: string) => void;
   onApprovalDecision: (
     sessionId: string,
@@ -1700,7 +1714,7 @@ function WorkspaceNodeView({
         onTabDrop={onTabDrop}
         onPaneViewModeChange={onPaneViewModeChange}
         onPaneSourcePathChange={onPaneSourcePathChange}
-        onDraftChange={onDraftChange}
+        onDraftCommit={onDraftCommit}
         onDraftAttachmentsAdd={onDraftAttachmentsAdd}
         onDraftAttachmentRemove={onDraftAttachmentRemove}
         onComposerError={onComposerError}
@@ -1740,7 +1754,7 @@ function WorkspaceNodeView({
           onTabDrop={onTabDrop}
           onPaneViewModeChange={onPaneViewModeChange}
           onPaneSourcePathChange={onPaneSourcePathChange}
-          onDraftChange={onDraftChange}
+          onDraftCommit={onDraftCommit}
           onDraftAttachmentsAdd={onDraftAttachmentsAdd}
           onDraftAttachmentRemove={onDraftAttachmentRemove}
           onComposerError={onComposerError}
@@ -1782,7 +1796,7 @@ function WorkspaceNodeView({
           onTabDrop={onTabDrop}
           onPaneViewModeChange={onPaneViewModeChange}
           onPaneSourcePathChange={onPaneSourcePathChange}
-          onDraftChange={onDraftChange}
+          onDraftCommit={onDraftCommit}
           onDraftAttachmentsAdd={onDraftAttachmentsAdd}
           onDraftAttachmentRemove={onDraftAttachmentRemove}
           onComposerError={onComposerError}
@@ -1819,7 +1833,7 @@ function SessionPaneView({
   onTabDrop,
   onPaneViewModeChange,
   onPaneSourcePathChange,
-  onDraftChange,
+  onDraftCommit,
   onDraftAttachmentsAdd,
   onDraftAttachmentRemove,
   onComposerError,
@@ -1850,14 +1864,14 @@ function SessionPaneView({
   onSplitPane: (paneId: string, direction: "row" | "column") => void;
   onTabDragStart: (sourcePaneId: string, sessionId: string) => void;
   onTabDragEnd: () => void;
-  onTabDrop: (targetPaneId: string, placement: TabDropPlacement) => void;
+  onTabDrop: (targetPaneId: string, placement: TabDropPlacement, tabIndex?: number) => void;
   onPaneViewModeChange: (paneId: string, viewMode: PaneViewMode) => void;
   onPaneSourcePathChange: (paneId: string, path: string) => void;
-  onDraftChange: (sessionId: string, nextValue: string) => void;
+  onDraftCommit: (sessionId: string, nextValue: string) => void;
   onDraftAttachmentsAdd: (sessionId: string, attachments: DraftImageAttachment[]) => void;
   onDraftAttachmentRemove: (sessionId: string, attachmentId: string) => void;
   onComposerError: (message: string | null) => void;
-  onSend: (sessionId: string) => void;
+  onSend: (sessionId: string, draftText?: string) => void;
   onCancelQueuedPrompt: (sessionId: string, promptId: string) => void;
   onApprovalDecision: (
     sessionId: string,
@@ -1880,15 +1894,16 @@ function SessionPaneView({
     path: string;
     content: string;
     error: string | null;
+    language: string | null;
   }>({
     status: "idle",
     path: "",
     content: "",
     error: null,
+    language: null,
   });
   const messageStackRef = useRef<HTMLElement | null>(null);
   const paneTabsRef = useRef<HTMLDivElement | null>(null);
-  const composerInputRef = useRef<HTMLTextAreaElement | null>(null);
   const shouldStickToBottomRef = useRef(true);
   const scrollPositionsRef = useRef<Record<string, { top: number; shouldStick: boolean }>>({});
   const contentSignaturesRef = useRef<Record<string, string>>({});
@@ -1897,10 +1912,8 @@ function SessionPaneView({
     canScrollPrev: false,
     canScrollNext: false,
   });
-  const [activeDropPlacement, setActiveDropPlacement] = useState<TabDropPlacement | null>(null);
-  const [promptHistoryStateBySessionId, setPromptHistoryStateBySessionId] = useState<
-    Record<string, PromptHistoryState | undefined>
-  >({});
+  const [activeDropPlacement, setActiveDropPlacement] = useState<Exclude<TabDropPlacement, "tabs"> | null>(null);
+  const [activeTabInsertIndex, setActiveTabInsertIndex] = useState<number | null>(null);
   const [newResponseIndicatorByKey, setNewResponseIndicatorByKey] = useState<
     Record<string, true | undefined>
   >({});
@@ -1972,114 +1985,6 @@ function SessionPaneView({
     [activeSession, pane.viewMode, visibleMessages],
   );
   const showNewResponseIndicator = Boolean(newResponseIndicatorByKey[scrollStateKey]);
-
-  function resetPromptHistory(sessionId: string) {
-    setPromptHistoryStateBySessionId((current) => {
-      if (!current[sessionId]) {
-        return current;
-      }
-
-      const nextState = { ...current };
-      delete nextState[sessionId];
-      return nextState;
-    });
-  }
-
-  function handleComposerChange(nextValue: string) {
-    if (!activeSession) {
-      return;
-    }
-
-    resetPromptHistory(activeSession.id);
-    onDraftChange(activeSession.id, nextValue);
-  }
-
-  function handleComposerSend() {
-    if (!activeSession) {
-      return;
-    }
-
-    resetPromptHistory(activeSession.id);
-    onSend(activeSession.id);
-    window.requestAnimationFrame(() => {
-      composerInputRef.current?.focus();
-    });
-  }
-
-  function handleComposerKeyDown(event: ReactKeyboardEvent<HTMLTextAreaElement>) {
-    if (!activeSession) {
-      return;
-    }
-
-    if (event.key === "Enter" && !event.shiftKey) {
-      event.preventDefault();
-      handleComposerSend();
-      return;
-    }
-
-    if (event.key !== "ArrowUp" && event.key !== "ArrowDown") {
-      return;
-    }
-
-    if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) {
-      return;
-    }
-
-    const textarea = event.currentTarget;
-    if (textarea.selectionStart !== 0 || textarea.selectionEnd !== 0) {
-      return;
-    }
-
-    const promptHistory = collectUserPromptHistory(activeSession);
-    if (promptHistory.length === 0) {
-      return;
-    }
-
-    const historyState = promptHistoryStateBySessionId[activeSession.id];
-    if (event.key === "ArrowDown" && !historyState) {
-      return;
-    }
-
-    event.preventDefault();
-
-    if (event.key === "ArrowUp") {
-      const nextIndex = historyState ? Math.max(historyState.index - 1, 0) : promptHistory.length - 1;
-      const draftSnapshot = historyState?.draft ?? draft;
-
-      setPromptHistoryStateBySessionId((current) => ({
-        ...current,
-        [activeSession.id]: {
-          index: nextIndex,
-          draft: draftSnapshot,
-        },
-      }));
-      onDraftChange(activeSession.id, promptHistory[nextIndex]);
-    } else {
-      const currentHistoryState = historyState;
-      if (!currentHistoryState) {
-        return;
-      }
-
-      if (currentHistoryState.index >= promptHistory.length - 1) {
-        resetPromptHistory(activeSession.id);
-        onDraftChange(activeSession.id, currentHistoryState.draft);
-      } else {
-        const nextIndex = currentHistoryState.index + 1;
-        setPromptHistoryStateBySessionId((current) => ({
-          ...current,
-          [activeSession.id]: {
-            index: nextIndex,
-            draft: currentHistoryState.draft,
-          },
-        }));
-        onDraftChange(activeSession.id, promptHistory[nextIndex]);
-      }
-    }
-
-    window.requestAnimationFrame(() => {
-      textarea.setSelectionRange(0, 0);
-    });
-  }
 
   function handleComposerPaste(event: ReactClipboardEvent<HTMLTextAreaElement>) {
     if (!activeSession) {
@@ -2187,6 +2092,76 @@ function SessionPaneView({
       left: distance * direction,
       behavior: "smooth",
     });
+  }
+
+  function resolveTabInsertIndex(clientX: number) {
+    const node = paneTabsRef.current;
+    if (!node) {
+      return sessions.length;
+    }
+
+    const tabNodes = Array.from(node.querySelectorAll<HTMLElement>(".pane-tab-shell"));
+    if (tabNodes.length === 0) {
+      return 0;
+    }
+
+    for (let index = 0; index < tabNodes.length; index += 1) {
+      const rect = tabNodes[index].getBoundingClientRect();
+      if (clientX < rect.left + rect.width / 2) {
+        return index;
+      }
+    }
+
+    return tabNodes.length;
+  }
+
+  function maybeAutoScrollTabRail(clientX: number) {
+    const node = paneTabsRef.current;
+    if (!node) {
+      return;
+    }
+
+    const rect = node.getBoundingClientRect();
+    const edgeThreshold = Math.min(56, rect.width / 4);
+    if (clientX < rect.left + edgeThreshold) {
+      node.scrollLeft -= 18;
+    } else if (clientX > rect.right - edgeThreshold) {
+      node.scrollLeft += 18;
+    }
+  }
+
+  function handleTabRailDragOver(event: ReactDragEvent<HTMLDivElement>) {
+    if (!draggedTab) {
+      return;
+    }
+
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "move";
+    maybeAutoScrollTabRail(event.clientX);
+
+    const nextTabInsertIndex = resolveTabInsertIndex(event.clientX);
+    setActiveDropPlacement(null);
+    setActiveTabInsertIndex((current) => (current === nextTabInsertIndex ? current : nextTabInsertIndex));
+  }
+
+  function handleTabRailDragLeave(event: ReactDragEvent<HTMLDivElement>) {
+    const nextTarget = event.relatedTarget;
+    if (nextTarget instanceof Node && event.currentTarget.contains(nextTarget)) {
+      return;
+    }
+
+    setActiveTabInsertIndex(null);
+  }
+
+  function handleTabRailDrop(event: ReactDragEvent<HTMLDivElement>) {
+    if (!draggedTab) {
+      return;
+    }
+
+    event.preventDefault();
+    setActiveDropPlacement(null);
+    setActiveTabInsertIndex(null);
+    onTabDrop(pane.id, "tabs", resolveTabInsertIndex(event.clientX));
   }
 
   useLayoutEffect(() => {
@@ -2339,6 +2314,7 @@ function SessionPaneView({
         path,
         content: "",
         error: null,
+        language: null,
       });
 
       try {
@@ -2352,6 +2328,7 @@ function SessionPaneView({
           path: response.path,
           content: response.content,
           error: null,
+          language: response.language ?? null,
         });
       } catch (error) {
         if (cancelled) {
@@ -2363,6 +2340,7 @@ function SessionPaneView({
           path,
           content: "",
           error: getErrorMessage(error),
+          language: null,
         });
       }
     }
@@ -2375,6 +2353,7 @@ function SessionPaneView({
         path: "",
         content: "",
         error: null,
+        language: null,
       });
     }
 
@@ -2389,6 +2368,12 @@ function SessionPaneView({
     }
   }, [showDropOverlay]);
 
+  useEffect(() => {
+    if (!draggedTab) {
+      setActiveTabInsertIndex(null);
+    }
+  }, [draggedTab]);
+
   return (
     <section
       className={`workspace-pane thread panel ${isActive ? "active" : ""}`}
@@ -2396,16 +2381,18 @@ function SessionPaneView({
     >
       {showDropOverlay ? (
         <div className="pane-drop-overlay">
-          {(["tabs", "left", "top", "right", "bottom"] as TabDropPlacement[]).map((placement) => (
+          {(["left", "top", "right", "bottom"] as Exclude<TabDropPlacement, "tabs">[]).map((placement) => (
             <div
               key={placement}
               className={`pane-drop-zone pane-drop-zone-${placement} ${activeDropPlacement === placement ? "active" : ""}`}
               onDragEnter={() => {
+                setActiveTabInsertIndex(null);
                 setActiveDropPlacement(placement);
               }}
               onDragOver={(event) => {
                 event.preventDefault();
                 event.dataTransfer.dropEffect = "move";
+                setActiveTabInsertIndex(null);
                 if (activeDropPlacement !== placement) {
                   setActiveDropPlacement(placement);
                 }
@@ -2416,6 +2403,7 @@ function SessionPaneView({
               onDrop={(event) => {
                 event.preventDefault();
                 setActiveDropPlacement(null);
+                setActiveTabInsertIndex(null);
                 onTabDrop(pane.id, placement);
               }}
             >
@@ -2440,15 +2428,26 @@ function SessionPaneView({
                   &lt;
                 </button>
               ) : null}
-              <div ref={paneTabsRef} className="pane-tabs" role="tablist" aria-label="Tile sessions">
+              <div
+                ref={paneTabsRef}
+                className={`pane-tabs ${activeTabInsertIndex === 0 && sessions.length === 0 ? "drop-empty" : ""}`}
+                role="tablist"
+                aria-label="Tile sessions"
+                onDragOver={handleTabRailDragOver}
+                onDragLeave={handleTabRailDragLeave}
+                onDrop={handleTabRailDrop}
+              >
                 {sessions.length > 0 ? (
-                  sessions.map((session) => {
+                  sessions.map((session, index) => {
                     const tabActive = session.id === activeSession?.id;
+                    const showDropBefore = activeTabInsertIndex === index;
+                    const showDropAfter =
+                      activeTabInsertIndex === sessions.length && index === sessions.length - 1;
 
                     return (
                       <div
                         key={session.id}
-                        className={`pane-tab-shell ${tabActive ? "active" : ""}`}
+                        className={`pane-tab-shell ${tabActive ? "active" : ""} ${showDropBefore ? "drop-before" : ""} ${showDropAfter ? "drop-after" : ""}`}
                         role="tab"
                         aria-selected={tabActive}
                         tabIndex={0}
@@ -2661,91 +2660,23 @@ function SessionPaneView({
       </section>
 
       {pane.viewMode === "session" ? (
-        <footer className="composer">
-          {showNewResponseIndicator ? (
-            <button
-              className="new-response-indicator"
-              type="button"
-              onClick={() => scrollToLatestMessage("smooth")}
-            >
-              New response
-            </button>
-          ) : null}
-          <label className="composer-label" htmlFor={`prompt-${pane.id}`}>
-            Message {activeSession?.name ?? "session"}
-          </label>
-          {draftAttachments.length > 0 ? (
-            <div className="composer-attachments" aria-label="Draft image attachments">
-              {draftAttachments.map((attachment) => (
-                <article key={attachment.id} className="composer-attachment-card">
-                  <img
-                    className="composer-attachment-preview"
-                    src={attachment.previewUrl}
-                    alt={attachment.fileName}
-                  />
-                  <div className="composer-attachment-copy">
-                    <strong className="composer-attachment-name">{attachment.fileName}</strong>
-                    <span className="composer-attachment-meta">
-                      {formatByteSize(attachment.byteSize)} · {attachment.mediaType}
-                    </span>
-                  </div>
-                  <button
-                    className="composer-attachment-remove"
-                    type="button"
-                    onClick={() => activeSession && onDraftAttachmentRemove(activeSession.id, attachment.id)}
-                    aria-label={`Remove ${attachment.fileName}`}
-                    disabled={composerInputDisabled}
-                  >
-                    Remove
-                  </button>
-                </article>
-              ))}
-            </div>
-          ) : null}
-          <div className="composer-row">
-            <textarea
-              id={`prompt-${pane.id}`}
-              ref={composerInputRef}
-              className="composer-input"
-              value={draft}
-              onChange={(event) => handleComposerChange(event.target.value)}
-              disabled={composerInputDisabled}
-              onKeyDown={handleComposerKeyDown}
-              onPaste={handleComposerPaste}
-              placeholder={activeSession ? `Send a prompt to ${activeSession.agent}...` : "Open a session..."}
-              rows={3}
-            />
-            <div className="composer-actions">
-              {activeSession && (isSessionBusy || isStopping) ? (
-                <button
-                  className="ghost-button composer-stop-button"
-                  type="button"
-                  onClick={() => onStopSession(activeSession.id)}
-                  disabled={isStopping}
-                >
-                  {isStopping ? "Stopping..." : "Stop"}
-                </button>
-              ) : null}
-              <button
-                className="send-button"
-                type="button"
-                onMouseDown={(event) => {
-                  event.preventDefault();
-                }}
-                onClick={handleComposerSend}
-                disabled={composerSendDisabled}
-              >
-                {isSending ? (isSessionBusy ? "Queueing..." : "Sending...") : isSessionBusy ? "Queue" : "Send"}
-              </button>
-            </div>
-          </div>
-          {activeSession ? (
-            <p className="composer-hint">
-              Paste images into the composer to attach them to the next prompt.
-              {isSessionBusy ? " Send will queue a follow-up while this turn is running." : ""}
-            </p>
-          ) : null}
-        </footer>
+        <SessionComposer
+          paneId={pane.id}
+          session={activeSession}
+          committedDraft={draft}
+          draftAttachments={draftAttachments}
+          isSending={isSending}
+          isStopping={isStopping}
+          isSessionBusy={isSessionBusy}
+          showNewResponseIndicator={showNewResponseIndicator}
+          onScrollToLatest={() => scrollToLatestMessage("smooth")}
+          onDraftCommit={onDraftCommit}
+          onDraftAttachmentRemove={onDraftAttachmentRemove}
+          onComposerError={onComposerError}
+          onSend={onSend}
+          onStopSession={onStopSession}
+          onPaste={handleComposerPaste}
+        />
       ) : (
         <footer className="pane-footer-note">
           <p className="composer-hint">
@@ -2757,6 +2688,408 @@ function SessionPaneView({
     </section>
   );
 }
+
+const SessionComposer = memo(function SessionComposer({
+  paneId,
+  session,
+  committedDraft,
+  draftAttachments,
+  isSending,
+  isStopping,
+  isSessionBusy,
+  showNewResponseIndicator,
+  onScrollToLatest,
+  onDraftCommit,
+  onDraftAttachmentRemove,
+  onComposerError,
+  onSend,
+  onStopSession,
+  onPaste,
+}: {
+  paneId: string;
+  session: Session | null;
+  committedDraft: string;
+  draftAttachments: DraftImageAttachment[];
+  isSending: boolean;
+  isStopping: boolean;
+  isSessionBusy: boolean;
+  showNewResponseIndicator: boolean;
+  onScrollToLatest: () => void;
+  onDraftCommit: (sessionId: string, nextValue: string) => void;
+  onDraftAttachmentRemove: (sessionId: string, attachmentId: string) => void;
+  onComposerError: (message: string | null) => void;
+  onSend: (sessionId: string, draftText?: string) => void;
+  onStopSession: (sessionId: string) => void;
+  onPaste: (event: ReactClipboardEvent<HTMLTextAreaElement>) => void;
+}) {
+  const composerInputRef = useRef<HTMLTextAreaElement | null>(null);
+  const localDraftsRef = useRef<Record<string, string>>({});
+  const committedDraftsRef = useRef<Record<string, string>>({});
+  const [localDraftsBySessionId, setLocalDraftsBySessionId] = useState<Record<string, string>>({});
+  const [promptHistoryStateBySessionId, setPromptHistoryStateBySessionId] = useState<
+    Record<string, PromptHistoryState | undefined>
+  >({});
+
+  const activeSessionId = session?.id ?? null;
+  const composerDraft =
+    activeSessionId === null
+      ? ""
+      : (localDraftsBySessionId[activeSessionId] ?? committedDraft);
+  const composerInputDisabled = !session || isStopping;
+  const composerSendDisabled = !session || isSending || isStopping;
+
+  function resizeComposerInput() {
+    const textarea = composerInputRef.current;
+    if (!textarea) {
+      return;
+    }
+
+    const computedStyle = window.getComputedStyle(textarea);
+    const minHeight = parseFloat(computedStyle.minHeight) || 0;
+    const borderHeight =
+      (parseFloat(computedStyle.borderTopWidth) || 0) + (parseFloat(computedStyle.borderBottomWidth) || 0);
+    const panelElement = textarea.closest(".workspace-pane");
+    const panelSlotElement =
+      panelElement instanceof HTMLElement && panelElement.parentElement instanceof HTMLElement
+        ? panelElement.parentElement
+        : null;
+    const availablePanelHeight =
+      panelSlotElement?.clientHeight ?? (panelElement instanceof HTMLElement ? panelElement.clientHeight : 0);
+    const maxHeight = Math.max(
+      minHeight,
+      availablePanelHeight > 0 ? availablePanelHeight * 0.4 : Number.POSITIVE_INFINITY,
+    );
+
+    textarea.style.height = "0px";
+
+    const contentHeight = textarea.scrollHeight + borderHeight;
+    const nextHeight = Math.min(Math.max(contentHeight, minHeight), maxHeight);
+    textarea.style.height = `${nextHeight}px`;
+    textarea.style.overflowY = contentHeight > maxHeight + 1 ? "auto" : "hidden";
+  }
+
+  useLayoutEffect(() => {
+    resizeComposerInput();
+  }, [activeSessionId, composerDraft]);
+
+  useEffect(() => {
+    localDraftsRef.current = localDraftsBySessionId;
+  }, [localDraftsBySessionId]);
+
+  useEffect(() => {
+    const textarea = composerInputRef.current;
+    if (!textarea || typeof ResizeObserver === "undefined") {
+      return;
+    }
+
+    const panelElement = textarea.closest(".workspace-pane");
+    const panelSlotElement =
+      panelElement instanceof HTMLElement && panelElement.parentElement instanceof HTMLElement
+        ? panelElement.parentElement
+        : null;
+    let previousWidth = textarea.getBoundingClientRect().width;
+    let previousAvailablePanelHeight =
+      panelSlotElement?.clientHeight ?? (panelElement instanceof HTMLElement ? panelElement.clientHeight : 0);
+    const resizeObserver = new ResizeObserver((entries) => {
+      const nextWidth =
+        entries.find((entry) => entry.target === textarea)?.contentRect.width ??
+        textarea.getBoundingClientRect().width;
+      const nextAvailablePanelHeight =
+        panelSlotElement?.clientHeight ?? (panelElement instanceof HTMLElement ? panelElement.clientHeight : 0);
+      const widthChanged = Math.abs(nextWidth - previousWidth) >= 1;
+      const panelHeightChanged =
+        Math.abs(nextAvailablePanelHeight - previousAvailablePanelHeight) >= 1;
+
+      if (!widthChanged && !panelHeightChanged) {
+        return;
+      }
+
+      previousWidth = nextWidth;
+      previousAvailablePanelHeight = nextAvailablePanelHeight;
+      resizeComposerInput();
+    });
+
+    resizeObserver.observe(textarea);
+    if (panelSlotElement instanceof HTMLElement) {
+      resizeObserver.observe(panelSlotElement);
+    } else if (panelElement instanceof HTMLElement) {
+      resizeObserver.observe(panelElement);
+    }
+
+    return () => {
+      resizeObserver.disconnect();
+    };
+  }, [activeSessionId]);
+
+  useEffect(() => {
+    if (!activeSessionId) {
+      return;
+    }
+
+    const previousCommitted = committedDraftsRef.current[activeSessionId];
+    const localDraft = localDraftsRef.current[activeSessionId];
+
+    committedDraftsRef.current[activeSessionId] = committedDraft;
+
+    if (localDraft !== undefined && localDraft !== previousCommitted) {
+      return;
+    }
+
+    setLocalDraftsBySessionId((current) => {
+      if ((current[activeSessionId] ?? "") === committedDraft) {
+        return current;
+      }
+
+      return {
+        ...current,
+        [activeSessionId]: committedDraft,
+      };
+    });
+  }, [activeSessionId, committedDraft]);
+
+  useEffect(() => {
+    if (!activeSessionId) {
+      return;
+    }
+
+    return () => {
+      const latestDraft = localDraftsRef.current[activeSessionId];
+      const committed = committedDraftsRef.current[activeSessionId] ?? "";
+      if (latestDraft !== undefined && latestDraft !== committed) {
+        committedDraftsRef.current[activeSessionId] = latestDraft;
+        onDraftCommit(activeSessionId, latestDraft);
+      }
+    };
+  }, [activeSessionId, onDraftCommit]);
+
+  function resetPromptHistory(sessionId: string) {
+    setPromptHistoryStateBySessionId((current) => {
+      if (!current[sessionId]) {
+        return current;
+      }
+
+      const nextState = { ...current };
+      delete nextState[sessionId];
+      return nextState;
+    });
+  }
+
+  function updateLocalDraft(sessionId: string, nextValue: string) {
+    localDraftsRef.current = {
+      ...localDraftsRef.current,
+      [sessionId]: nextValue,
+    };
+
+    setLocalDraftsBySessionId((current) => {
+      if ((current[sessionId] ?? "") === nextValue) {
+        return current;
+      }
+
+      return {
+        ...current,
+        [sessionId]: nextValue,
+      };
+    });
+  }
+
+  function commitDraft(sessionId: string, nextValue: string) {
+    committedDraftsRef.current[sessionId] = nextValue;
+    onDraftCommit(sessionId, nextValue);
+  }
+
+  function handleComposerChange(nextValue: string) {
+    if (!activeSessionId) {
+      return;
+    }
+
+    resetPromptHistory(activeSessionId);
+    updateLocalDraft(activeSessionId, nextValue);
+  }
+
+  function handleComposerBlur() {
+    if (!activeSessionId) {
+      return;
+    }
+
+    commitDraft(activeSessionId, composerDraft);
+  }
+
+  function handleComposerSend() {
+    if (!session) {
+      return;
+    }
+
+    const draftToSend = composerDraft;
+    resetPromptHistory(session.id);
+    updateLocalDraft(session.id, "");
+    commitDraft(session.id, "");
+    onSend(session.id, draftToSend);
+    window.requestAnimationFrame(() => {
+      composerInputRef.current?.focus();
+    });
+  }
+
+  function handleComposerKeyDown(event: ReactKeyboardEvent<HTMLTextAreaElement>) {
+    if (!session) {
+      return;
+    }
+
+    if (event.key === "Enter" && !event.shiftKey) {
+      event.preventDefault();
+      handleComposerSend();
+      return;
+    }
+
+    if (event.key !== "ArrowUp" && event.key !== "ArrowDown") {
+      return;
+    }
+
+    if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) {
+      return;
+    }
+
+    const textarea = event.currentTarget;
+    if (textarea.selectionStart !== 0 || textarea.selectionEnd !== 0) {
+      return;
+    }
+
+    const promptHistory = collectUserPromptHistory(session);
+    if (promptHistory.length === 0) {
+      return;
+    }
+
+    const historyState = promptHistoryStateBySessionId[session.id];
+    if (event.key === "ArrowDown" && !historyState) {
+      return;
+    }
+
+    event.preventDefault();
+
+    if (event.key === "ArrowUp") {
+      const nextIndex = historyState ? Math.max(historyState.index - 1, 0) : promptHistory.length - 1;
+      const draftSnapshot = historyState?.draft ?? composerDraft;
+
+      setPromptHistoryStateBySessionId((current) => ({
+        ...current,
+        [session.id]: {
+          index: nextIndex,
+          draft: draftSnapshot,
+        },
+      }));
+      updateLocalDraft(session.id, promptHistory[nextIndex]);
+    } else {
+      const currentHistoryState = historyState;
+      if (!currentHistoryState) {
+        return;
+      }
+
+      if (currentHistoryState.index >= promptHistory.length - 1) {
+        resetPromptHistory(session.id);
+        updateLocalDraft(session.id, currentHistoryState.draft);
+      } else {
+        const nextIndex = currentHistoryState.index + 1;
+        setPromptHistoryStateBySessionId((current) => ({
+          ...current,
+          [session.id]: {
+            index: nextIndex,
+            draft: currentHistoryState.draft,
+          },
+        }));
+        updateLocalDraft(session.id, promptHistory[nextIndex]);
+      }
+    }
+
+    window.requestAnimationFrame(() => {
+      textarea.setSelectionRange(0, 0);
+    });
+  }
+
+  return (
+    <footer className="composer">
+      {showNewResponseIndicator ? (
+        <button className="new-response-indicator" type="button" onClick={onScrollToLatest}>
+          New response
+        </button>
+      ) : null}
+      {draftAttachments.length > 0 ? (
+        <div className="composer-attachments" aria-label="Draft image attachments">
+          {draftAttachments.map((attachment) => (
+            <article key={attachment.id} className="composer-attachment-card">
+              <img
+                className="composer-attachment-preview"
+                src={attachment.previewUrl}
+                alt={attachment.fileName}
+              />
+              <div className="composer-attachment-copy">
+                <strong className="composer-attachment-name">{attachment.fileName}</strong>
+                <span className="composer-attachment-meta">
+                  {formatByteSize(attachment.byteSize)} · {attachment.mediaType}
+                </span>
+              </div>
+              <button
+                className="composer-attachment-remove"
+                type="button"
+                onClick={() => session && onDraftAttachmentRemove(session.id, attachment.id)}
+                aria-label={`Remove ${attachment.fileName}`}
+                disabled={composerInputDisabled}
+              >
+                Remove
+              </button>
+            </article>
+          ))}
+        </div>
+      ) : null}
+      <div className="composer-row">
+        <textarea
+          id={`prompt-${paneId}`}
+          ref={composerInputRef}
+          className="composer-input"
+          aria-label={session ? `Message ${session.name}` : "Message session"}
+          value={composerDraft}
+          onChange={(event) => handleComposerChange(event.target.value)}
+          onBlur={handleComposerBlur}
+          disabled={composerInputDisabled}
+          onKeyDown={handleComposerKeyDown}
+          onPaste={onPaste}
+          placeholder={session ? `Send a prompt to ${session.agent}...` : "Open a session..."}
+          rows={1}
+        />
+        <div className="composer-actions">
+          {session && (isSessionBusy || isStopping) ? (
+            <button
+              className="ghost-button composer-stop-button"
+              type="button"
+              onClick={() => onStopSession(session.id)}
+              disabled={isStopping}
+            >
+              {isStopping ? "Stopping..." : "Stop"}
+            </button>
+          ) : null}
+          <button
+            className="send-button"
+            type="button"
+            onMouseDown={(event) => {
+              event.preventDefault();
+            }}
+            onClick={handleComposerSend}
+            disabled={composerSendDisabled}
+          >
+            {isSending ? (isSessionBusy ? "Queueing..." : "Sending...") : isSessionBusy ? "Queue" : "Send"}
+          </button>
+        </div>
+      </div>
+    </footer>
+  );
+}, (previous, next) =>
+  previous.paneId === next.paneId &&
+  previous.session === next.session &&
+  previous.committedDraft === next.committedDraft &&
+  previous.draftAttachments === next.draftAttachments &&
+  previous.isSending === next.isSending &&
+  previous.isStopping === next.isStopping &&
+  previous.isSessionBusy === next.isSessionBusy &&
+  previous.showNewResponseIndicator === next.showNewResponseIndicator
+);
 
 function EmptyState({ title, body }: { title: string; body: string }) {
   return (
@@ -2926,6 +3259,7 @@ function SourcePane({
     path: string;
     content: string;
     error: string | null;
+    language: string | null;
   };
   sourceDraft: string;
   sourcePath: string | null;
@@ -3003,6 +3337,7 @@ function SourcePane({
           <HighlightedCodeBlock
             className="code-block source-code-block"
             code={fileState.content}
+            language={fileState.language}
             pathHint={fileState.path}
           />
         </article>
@@ -3247,7 +3582,7 @@ function CommandCard({ message }: { message: CommandMessage }) {
             <HighlightedCodeBlock
               className="command-text command-text-input"
               code={message.command}
-              language="bash"
+              language={message.commandLanguage ?? "bash"}
             />
           </div>
           <div className="command-row-actions">
@@ -3273,6 +3608,7 @@ function CommandCard({ message }: { message: CommandMessage }) {
               <HighlightedCodeBlock
                 className="command-text command-text-output"
                 code={displayOutput}
+                language={message.outputLanguage ?? null}
                 commandHint={message.output ? message.command : null}
               />
               ) : (
@@ -3408,7 +3744,7 @@ function DiffCard({ message }: { message: DiffMessage }) {
               <HighlightedCodeBlock
                 className="diff-block diff-preview-text"
                 code={message.diff}
-                language="diff"
+                language={message.language ?? "diff"}
                 pathHint={message.filePath}
               />
             </div>
@@ -3469,7 +3805,11 @@ function ApprovalCard({
       <MessageMeta author={message.author} timestamp={message.timestamp} />
       <div className="card-label">Approval</div>
       <h3>{message.title}</h3>
-      <HighlightedCodeBlock className="approval-command" code={message.command} language="bash" />
+      <HighlightedCodeBlock
+        className="approval-command"
+        code={message.command}
+        language={message.commandLanguage ?? "bash"}
+      />
       <p className="support-copy">{message.detail}</p>
       <div className="approval-actions">
         <button

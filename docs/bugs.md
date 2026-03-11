@@ -2,7 +2,7 @@
 
 Updated against the current checked-in code in `src/main.rs` and `ui/src/App.tsx`.
 
-The older entries for "No image paste support", Claude `control_request` fallthrough, "No SSE/WebSocket for real-time updates", and "Codex receive has no streaming" were stale. Those are implemented in the current tree.
+The older entries for "No image paste support", Claude `control_request` fallthrough, "No SSE/WebSocket for real-time updates", "Codex receive has no streaming", and "No queueing system for prompts" were stale. Those are implemented in the current tree.
 
 The earlier command-card UX issue where `OUT` could render as an empty dark block was also fixed.
 Command messages now use a compact `IN` / `OUT` layout with copy controls, a collapsible output
@@ -308,25 +308,27 @@ Codex already maintains thread state in `~/.codex/state.db`. TermAl still persis
 
 If thread discovery eventually moves to Codex's database, TermAl could reuse existing metadata instead of maintaining a parallel index.
 
-## No queueing system for prompts
+## Streaming refresh path is still heavier than necessary
 
-**Severity:** Medium — blocks fluid multi-tasking workflows.
+**Severity:** Medium — noticeable when one session is streaming and the user is typing in another.
 
-While an agent is running a turn, the user cannot submit another prompt. The composer is effectively
-locked until the current turn completes.
+Prompt queueing, queued-prompt cancel, and `Stop` are implemented now. The biggest remaining
+latency issue is the refresh path during live streaming.
 
-**Desired behavior:**
-- Allow the user to type and submit a follow-up prompt while an agent turn is in progress
-- Queue the pending prompt and display it visually in the conversation (e.g. as a "pending" bubble)
-- Allow the user to cancel a pending prompt before it is dispatched
-- When the active turn finishes, automatically dispatch the next queued prompt
+**What improved already:**
+- Draft keystrokes are now local to the composer instead of updating top-level app state on every key
+- Session/message identity is preserved across many SSE updates so unchanged cards do not fully churn
+- Streamed text deltas no longer rewrite persisted session state on every chunk
+
+**What still happens:**
+- The backend still publishes a full `/api/events` state snapshot for each streamed text delta
+- The frontend still reconciles the full sessions array and reruns pane-level derivations on each snapshot
+- Under concurrent activity, that can still make typing feel slower than it should
 
 **Tasks:**
-- Add a prompt queue to the backend session state (per-session FIFO)
-- Update `dispatch_turn()` to drain the queue after each turn completes
-- Add a UI indicator for queued/pending prompts in the conversation view
-- Add a cancel action on pending prompts so the user can remove them before dispatch
-- Ensure canceling the active turn does not silently discard queued prompts
+- Profile frontend rerenders during active streaming to identify the remaining hot subtrees
+- Narrow state adoption so unrelated sessions do less work when another session streams
+- If needed later, move from full-state SSE snapshots to smaller incremental update events
 
 ## Agent replies in diff review comments
 
@@ -444,9 +446,6 @@ Concrete work implied by the current TermAl parity gaps. Ordered by user impact 
   `models_cache.json`, cache and persist the list, expose via `GET /api/models`, send `set_model`
   control request to Claude and update `config.toml` for Codex, and add a model selector to the
   session settings UI. Sessions start with the default model — this is about changing it after.
-- [ ] Implement a prompt queueing system:
-  allow the user to submit follow-up prompts while an agent turn is running, display pending
-  prompts in the conversation, and let the user cancel them before dispatch.
 - [ ] Migrate REPL mode off legacy `codex exec --json` and onto the app-server path so server mode
   and REPL mode share one implementation.
 - [ ] Replace the `try_wait()` polling loops in the Claude and Codex runtime supervisors with
@@ -464,6 +463,9 @@ Concrete work implied by the current TermAl parity gaps. Ordered by user impact 
 - [ ] Align attachment UX with actual capabilities:
   show the right composer hint per agent, add drag-and-drop, and keep the docs in sync with the
   implementation.
+- [ ] Reduce streaming refresh overhead:
+  profile SSE-driven rerenders while another session is active, narrow state adoption for
+  unrelated sessions, and only consider incremental events after the frontend hot path is trimmed.
 - [ ] Add post-edit diff preview from agent messages:
   when an agent reports that it updated a file, let the user open a new tab with a diff preview of
   those changes and include a link back to the originating conversation or message.

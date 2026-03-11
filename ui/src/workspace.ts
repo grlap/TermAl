@@ -235,6 +235,7 @@ export function placeDraggedSession(
   sessionId: string,
   targetPaneId: string,
   placement: TabDropPlacement,
+  tabIndex?: number,
 ): WorkspaceState {
   const sourcePane = workspace.panes.find((pane) => pane.id === sourcePaneId);
   const targetPane = workspace.panes.find((pane) => pane.id === targetPaneId);
@@ -243,12 +244,19 @@ export function placeDraggedSession(
   }
 
   if (placement === "tabs") {
+    const requestedTabIndex = tabIndex ?? targetPane.sessionIds.length;
     if (sourcePaneId === targetPaneId) {
-      return activatePane(workspace, targetPaneId, sessionId);
+      const sourceTabIndex = sourcePane.sessionIds.indexOf(sessionId);
+      const adjustedTabIndex =
+        sourceTabIndex >= 0 && requestedTabIndex > sourceTabIndex
+          ? requestedTabIndex - 1
+          : requestedTabIndex;
+
+      return addSessionToPane(workspace, targetPaneId, sessionId, adjustedTabIndex);
     }
 
     const withoutSource = closeSessionTab(workspace, sourcePaneId, sessionId);
-    return addSessionToPane(withoutSource, targetPaneId, sessionId);
+    return addSessionToPane(withoutSource, targetPaneId, sessionId, requestedTabIndex);
   }
 
   if (sourcePaneId === targetPaneId && sourcePane.sessionIds.length <= 1) {
@@ -344,6 +352,7 @@ export function addSessionToPane(
   workspace: WorkspaceState,
   paneId: string,
   sessionId: string,
+  tabIndex?: number,
 ): WorkspaceState {
   return {
     ...workspace,
@@ -354,12 +363,23 @@ export function addSessionToPane(
 
       return {
         ...pane,
-        sessionIds: pane.sessionIds.includes(sessionId) ? pane.sessionIds : [...pane.sessionIds, sessionId],
+        sessionIds: insertSessionIdAtIndex(pane.sessionIds, sessionId, tabIndex ?? pane.sessionIds.length),
         activeSessionId: sessionId,
       };
     }),
     activePaneId: paneId,
   };
+}
+
+function insertSessionIdAtIndex(sessionIds: string[], sessionId: string, tabIndex: number): string[] {
+  const nextSessionIds = sessionIds.filter((candidate) => candidate !== sessionId);
+  const nextTabIndex = clampIndex(tabIndex, 0, nextSessionIds.length);
+  nextSessionIds.splice(nextTabIndex, 0, sessionId);
+  return nextSessionIds;
+}
+
+function clampIndex(value: number, min: number, max: number): number {
+  return Math.min(Math.max(value, min), max);
 }
 
 export function getSplitRatio(node: WorkspaceNode | null, splitId: string): number | null {

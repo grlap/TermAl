@@ -151,7 +151,9 @@ function reconcileCommandMessage(previous: CommandMessage, next: CommandMessage)
     previous.timestamp === next.timestamp &&
     previous.author === next.author &&
     previous.command === next.command &&
+    previous.commandLanguage === next.commandLanguage &&
     previous.output === next.output &&
+    previous.outputLanguage === next.outputLanguage &&
     previous.status === next.status
   ) {
     return previous;
@@ -167,6 +169,7 @@ function reconcileDiffMessage(previous: DiffMessage, next: DiffMessage): DiffMes
     previous.filePath === next.filePath &&
     previous.summary === next.summary &&
     previous.diff === next.diff &&
+    previous.language === next.language &&
     previous.changeType === next.changeType
   ) {
     return previous;
@@ -194,6 +197,7 @@ function reconcileApprovalMessage(previous: ApprovalMessage, next: ApprovalMessa
     previous.author === next.author &&
     previous.title === next.title &&
     previous.command === next.command &&
+    previous.commandLanguage === next.commandLanguage &&
     previous.detail === next.detail &&
     previous.decision === next.decision
   ) {

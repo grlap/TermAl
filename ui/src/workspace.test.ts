@@ -203,6 +203,41 @@ describe("workspace helpers", () => {
     });
   });
 
+  it("placeDraggedSession reorders tabs within a pane when dropped at a specific index", () => {
+    const next = placeDraggedSession(
+      makeSinglePaneWorkspace(makePane("pane-a", ["session-a", "session-b", "session-c"])),
+      "pane-a",
+      "session-a",
+      "pane-a",
+      "tabs",
+      3,
+    );
+
+    expect(next.panes[0]).toMatchObject({
+      id: "pane-a",
+      sessionIds: ["session-b", "session-c", "session-a"],
+      activeSessionId: "session-a",
+    });
+  });
+
+  it("placeDraggedSession inserts a dragged tab into the requested position in another pane", () => {
+    const next = placeDraggedSession(
+      makeSplitWorkspace(makePane("pane-a", ["session-a"]), makePane("pane-b", ["session-b", "session-c"])),
+      "pane-a",
+      "session-a",
+      "pane-b",
+      "tabs",
+      1,
+    );
+
+    expect(next.activePaneId).toBe("pane-b");
+    expect(next.panes[0]).toMatchObject({
+      id: "pane-b",
+      sessionIds: ["session-b", "session-a", "session-c"],
+      activeSessionId: "session-a",
+    });
+  });
+
   it("updateSplitRatio changes the selected split ratio and getSplitRatio reads it back", () => {
     const workspace = makeSplitWorkspace(makePane("pane-a", ["session-a"]), makePane("pane-b", ["session-b"]));
 

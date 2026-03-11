@@ -1060,6 +1060,8 @@ impl AppState {
         output: &str,
         status: CommandStatus,
     ) -> Result<()> {
+        let command_language = Some(shell_language().to_owned());
+        let output_language = infer_command_output_language(command).map(str::to_owned);
         let mut inner = self.inner.lock().expect("state mutex poisoned");
         let index = inner
             .find_session_index(session_id)
@@ -1071,14 +1073,18 @@ impl AppState {
             if let Message::Command {
                 id,
                 command: existing_command,
+                command_language: existing_command_language,
                 output: existing_output,
+                output_language: existing_output_language,
                 status: existing_status,
                 ..
             } = message
             {
                 if id == message_id {
                     *existing_command = command.to_owned();
+                    *existing_command_language = command_language.clone();
                     *existing_output = output.to_owned();
+                    *existing_output_language = output_language.clone();
                     *existing_status = status;
                     found = true;
                     break;
@@ -1092,7 +1098,9 @@ impl AppState {
                 timestamp: stamp_now(),
                 author: Author::Assistant,
                 command: command.to_owned(),
+                command_language,
                 output: output.to_owned(),
+                output_language,
                 status,
             });
         }
@@ -3435,6 +3443,7 @@ impl SessionRecorder {
                 author: Author::Assistant,
                 title: title.to_owned(),
                 command: command.to_owned(),
+                command_language: Some(shell_language().to_owned()),
                 detail: detail.to_owned(),
                 decision: ApprovalDecision::Pending,
             },
@@ -3460,6 +3469,7 @@ impl SessionRecorder {
                 author: Author::Assistant,
                 title: title.to_owned(),
                 command: command.to_owned(),
+                command_language: Some(shell_language().to_owned()),
                 detail: detail.to_owned(),
                 decision: ApprovalDecision::Pending,
             },
@@ -3485,6 +3495,7 @@ impl TurnRecorder for SessionRecorder {
                 author: Author::Assistant,
                 title: title.to_owned(),
                 command: command.to_owned(),
+                command_language: Some(shell_language().to_owned()),
                 detail: detail.to_owned(),
                 decision: ApprovalDecision::Pending,
             },
@@ -3577,6 +3588,7 @@ impl TurnRecorder for SessionRecorder {
                 file_path: file_path.to_owned(),
                 summary: summary.to_owned(),
                 diff: diff.to_owned(),
+                language: Some("diff".to_owned()),
                 change_type,
             },
         )
@@ -5020,6 +5032,92 @@ fn prompt_preview_text(text: &str, attachments: &[MessageImageAttachment]) -> St
     make_preview(&image_attachment_summary(attachments.len()))
 }
 
+fn shell_language() -> &'static str {
+    "bash"
+}
+
+fn infer_language_from_path(path: &FsPath) -> Option<&'static str> {
+    let file_name = path.file_name()?.to_str()?.to_ascii_lowercase();
+    match file_name.as_str() {
+        "dockerfile" => return Some("dockerfile"),
+        "makefile" => return Some("makefile"),
+        _ => {}
+    }
+
+    let extension = path.extension()?.to_str()?.to_ascii_lowercase();
+    match extension.as_str() {
+        "bash" | "sh" | "zsh" => Some("bash"),
+        "cjs" | "js" | "jsx" | "mjs" => Some("javascript"),
+        "css" => Some("css"),
+        "go" => Some("go"),
+        "htm" | "html" | "svg" | "xml" => Some("xml"),
+        "ini" | "toml" => Some("ini"),
+        "json" => Some("json"),
+        "md" | "mdx" => Some("markdown"),
+        "mts" | "ts" | "tsx" => Some("typescript"),
+        "py" => Some("python"),
+        "rs" => Some("rust"),
+        "sql" => Some("sql"),
+        "yaml" | "yml" => Some("yaml"),
+        _ => None,
+    }
+}
+
+fn infer_command_output_language(command: &str) -> Option<&'static str> {
+    let normalized = command.to_ascii_lowercase();
+    if normalized.contains("git diff")
+        || normalized
+            .split(command_token_separator)
+            .any(|token| token == "diff" || token == "patch")
+    {
+        return Some("diff");
+    }
+
+    if !normalized
+        .split(command_token_separator)
+        .any(is_file_viewer_command)
+    {
+        return None;
+    }
+
+    command
+        .split(command_token_separator)
+        .map(clean_command_path_hint)
+        .rev()
+        .find_map(|candidate| infer_language_from_path(FsPath::new(candidate)))
+}
+
+fn command_token_separator(character: char) -> bool {
+    character.is_whitespace() || matches!(character, '"' | '\'' | '`' | '|' | '&' | ';')
+}
+
+fn is_file_viewer_command(token: &str) -> bool {
+    matches!(
+        token,
+        "bat" | "cat" | "head" | "less" | "more" | "sed" | "tail"
+    )
+}
+
+fn clean_command_path_hint(token: &str) -> &str {
+    let trimmed = token.trim_matches(|character: char| {
+        matches!(
+            character,
+            '"' | '\'' | '`' | '(' | ')' | '[' | ']' | '{' | '}' | ',' | ';' | ':'
+        )
+    });
+
+    trimmed
+        .rsplit_once('=')
+        .map(|(_, value)| value)
+        .unwrap_or(trimmed)
+        .trim_matches(|character: char| {
+            matches!(
+                character,
+                '"' | '\'' | '`' | '(' | ')' | '[' | ']' | '{' | '}' | ',' | ';' | ':'
+            )
+        })
+}
+
 fn codex_user_input_items(prompt: &str, attachments: &[PromptImageAttachment]) -> Vec<Value> {
     let mut input = Vec::with_capacity(attachments.len() + usize::from(!prompt.is_empty()));
 
@@ -5244,6 +5342,7 @@ async fn read_file(Query(query): Query<FileQuery>) -> Result<Json<FileResponse>,
     Ok(Json(FileResponse {
         path: resolved_path.to_string_lossy().into_owned(),
         content,
+        language: infer_language_from_path(&resolved_path).map(str::to_owned),
     }))
 }
 
@@ -5598,7 +5697,19 @@ enum Message {
         timestamp: String,
         author: Author,
         command: String,
+        #[serde(
+            default,
+            rename = "commandLanguage",
+            skip_serializing_if = "Option::is_none"
+        )]
+        command_language: Option<String>,
         output: String,
+        #[serde(
+            default,
+            rename = "outputLanguage",
+            skip_serializing_if = "Option::is_none"
+        )]
+        output_language: Option<String>,
         status: CommandStatus,
     },
     Diff {
@@ -5609,6 +5720,8 @@ enum Message {
         file_path: String,
         summary: String,
         diff: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        language: Option<String>,
         #[serde(rename = "changeType")]
         change_type: ChangeType,
     },
@@ -5625,6 +5738,12 @@ enum Message {
         author: Author,
         title: String,
         command: String,
+        #[serde(
+            default,
+            rename = "commandLanguage",
+            skip_serializing_if = "Option::is_none"
+        )]
+        command_language: Option<String>,
         detail: String,
         decision: ApprovalDecision,
     },
@@ -5671,6 +5790,8 @@ struct FileQuery {
 struct FileResponse {
     path: String,
     content: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    language: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -5902,6 +6023,65 @@ mod tests {
                 "url": "data:image/jpeg;base64,d29ybGQ=",
             })]
         );
+    }
+
+    #[test]
+    fn infers_languages_from_paths() {
+        assert_eq!(
+            infer_language_from_path(FsPath::new("ui/src/App.tsx")),
+            Some("typescript")
+        );
+        assert_eq!(
+            infer_language_from_path(FsPath::new("/tmp/Cargo.toml")),
+            Some("ini")
+        );
+        assert_eq!(
+            infer_language_from_path(FsPath::new("Dockerfile")),
+            Some("dockerfile")
+        );
+    }
+
+    #[test]
+    fn infers_command_output_languages_conservatively() {
+        assert_eq!(
+            infer_command_output_language(r#"/bin/zsh -lc "sed -n '1,120p' ui/src/App.tsx""#),
+            Some("typescript")
+        );
+        assert_eq!(
+            infer_command_output_language("git diff -- ui/src/App.tsx"),
+            Some("diff")
+        );
+        assert_eq!(infer_command_output_language("npm test"), None);
+    }
+
+    #[test]
+    fn stores_command_language_metadata_on_messages() {
+        let state = test_app_state();
+        let session_id = test_session_id(&state, Agent::Codex);
+
+        state
+            .upsert_command_message(
+                &session_id,
+                "message-1",
+                r#"/bin/zsh -lc "sed -n '1,120p' ui/src/App.tsx""#,
+                "import { memo } from \"react\";",
+                CommandStatus::Success,
+            )
+            .unwrap();
+
+        let inner = state.inner.lock().expect("state mutex poisoned");
+        let session = &inner.sessions[0].session;
+        match &session.messages[0] {
+            Message::Command {
+                command_language,
+                output_language,
+                ..
+            } => {
+                assert_eq!(command_language.as_deref(), Some("bash"));
+                assert_eq!(output_language.as_deref(), Some("typescript"));
+            }
+            other => panic!("expected command message, found {other:?}"),
+        }
     }
 
     #[test]

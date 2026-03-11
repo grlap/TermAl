@@ -178,4 +178,47 @@ describe("reconcileSessions", () => {
     expect(merged[0]).toBe(previous[0]);
     expect(merged[1]).not.toBe(previous[1]);
   });
+
+  it("replaces messages when language metadata changes", () => {
+    const previous = [
+      makeSession("session-a", {
+        messages: [
+          {
+            id: "message-1",
+            type: "command",
+            timestamp: "10:00",
+            author: "assistant",
+            command: "cat ui/src/App.tsx",
+            output: "const value = 1;",
+            status: "success",
+          },
+        ],
+      }),
+    ];
+
+    const next = [
+      makeSession("session-a", {
+        messages: [
+          {
+            id: "message-1",
+            type: "command",
+            timestamp: "10:00",
+            author: "assistant",
+            command: "cat ui/src/App.tsx",
+            commandLanguage: "bash",
+            output: "const value = 1;",
+            outputLanguage: "typescript",
+            status: "success",
+          },
+        ],
+      }),
+    ];
+
+    const merged = reconcileSessions(previous, next);
+
+    expect(merged).not.toBe(previous);
+    expect(merged[0]).not.toBe(previous[0]);
+    expect(merged[0].messages).not.toBe(previous[0].messages);
+    expect(merged[0].messages[0]).not.toBe(previous[0].messages[0]);
+  });
 });

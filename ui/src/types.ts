@@ -62,7 +62,9 @@ export type ThinkingMessage = BaseMessage & {
 export type CommandMessage = BaseMessage & {
   type: "command";
   command: string;
+  commandLanguage?: string | null;
   output: string;
+  outputLanguage?: string | null;
   status: "running" | "success" | "error";
 };
 
@@ -71,6 +73,7 @@ export type DiffMessage = BaseMessage & {
   filePath: string;
   summary: string;
   diff: string;
+  language?: string | null;
   changeType: "edit" | "create";
 };
 
@@ -86,6 +89,7 @@ export type ApprovalMessage = BaseMessage & {
   type: "approval";
   title: string;
   command: string;
+  commandLanguage?: string | null;
   detail: string;
   decision: ApprovalDecision;
 };
