@@ -3,7 +3,7 @@
 Updated against the current checked-in code in `src/main.rs`, `ui/src/App.tsx`,
 `ui/package.json`, and `ui/vite.config.ts`.
 
-The older entries for "No image paste support", Claude `control_request` fallthrough, "No SSE/WebSocket for real-time updates", "Codex receive has no streaming", and "No queueing system for prompts" were stale. Those are implemented in the current tree.
+The older entries for "No image paste support", Claude `control_request` fallthrough, "No SSE/WebSocket for real-time updates", "Codex receive has no streaming", "No queueing system for prompts", Windows `HOME`-only path resolution, and unhandled Codex rate-limit notifications were stale. Those are implemented in the current tree.
 
 The earlier command-card UX issue where `OUT` could render as an empty dark block was also fixed.
 Command messages now use a compact `IN` / `OUT` layout with copy controls, a collapsible output
@@ -29,6 +29,94 @@ forwards attachments to both Claude and Codex sessions.
 - Add a regression test for Codex attachment submission so the docs do not drift again
 - Implement drag-and-drop attachment support, or explicitly document paste-only behavior in the UI
 
+## Source file reads are not scoped to the active session or workspace
+
+**Severity:** High - source mode can read the wrong file and currently trusts arbitrary absolute paths.
+
+The source viewer sends a raw `path` to `GET /api/file`. The backend accepts any absolute path as-is
+and resolves relative paths against the backend process cwd rather than the session's `workdir`.
+That means source-mode correctness depends on where TermAl was launched, not on the active session.
+
+**Current impact:**
+- Relative diff paths from sessions rooted in another project can resolve to the wrong file
+- The source viewer can read files outside the active project if a diff path or manual entry points there
+- Multi-project behavior is inconsistent because file lookup is not tied to session context
+
+**Affected code (`src/main.rs`, `ui/src/App.tsx`, `ui/src/api.ts`):**
+- `resolve_requested_path()` resolves relative paths against `std::env::current_dir()`
+- `/api/file` does not validate that a requested path stays inside an allowed root
+- `fetchFile()` and the source-view loader forward only a path, with no session/workdir context
+
+**Fix:**
+- Change file reads to resolve relative paths against the requesting session's `workdir`
+- Reject reads outside the allowed project root set instead of accepting arbitrary absolute paths
+- Consider including `sessionId` in the file-read route so validation has the right context
+
+## Claude approval cancel can leave a session stuck in Approval
+
+**Severity:** Medium
+
+When Claude emits `control_cancel_request`, TermAl removes the internal pending-approval entry but
+does not update the approval message, session status, or preview. If the turn then completes
+without another state transition, the session can remain stuck in `Approval`.
+
+**Current impact:**
+- The UI can continue showing a canceled approval as if it were still live
+- Later prompts get queued because `dispatch_turn()` treats `Approval` as busy
+- The session may need to be stopped or restarted to recover
+
+**Affected code (`src/main.rs`):**
+- `clear_claude_pending_approval_by_request()`
+- `control_cancel_request` handling in the Claude reader loop
+- `finish_turn_ok_if_runtime_matches()`, which only transitions `Active -> Idle`
+
+**Fix:**
+- When a Claude approval is canceled, update the corresponding message state and republish session state
+- Recompute session status from the remaining live approvals instead of leaving it at `Approval`
+- Add a regression test for canceled approvals
+
+## Multiple simultaneous approvals are not modeled correctly
+
+**Severity:** Medium
+
+Approval state is effectively treated as a single boolean on the session. `update_approval()`
+answers one approval message and then moves the whole session back to `Active`, even if other
+pending approvals still exist.
+
+**Current impact:**
+- A second live approval can become unanswerable once the first one is resolved
+- Session preview/status can claim the agent is continuing even though another approval is still pending
+- This is fragile against future Codex or Claude protocol changes that emit multiple approvals in flight
+
+**Affected code (`src/main.rs`):**
+- `update_approval()`
+- `pending_claude_approvals` / `pending_codex_approvals` bookkeeping
+
+**Fix:**
+- Base session status on whether any live approvals remain after each decision
+- Keep approval messages independently resolvable instead of gating everything on one session-level `Approval` state
+- Add tests that exercise two concurrent approvals for both agents
+
+## Initial state bootstrapping can apply an older snapshot after a newer SSE update
+
+**Severity:** Medium
+
+The frontend opens `/api/events` and separately calls `/api/state` during initial load. The SSE
+stream already emits an initial snapshot immediately, so a newer SSE payload can arrive before the
+older `/api/state` response and then get overwritten by that stale response.
+
+**Current impact:**
+- The UI can briefly roll back to older session state during startup or reconnect
+- Active-session status, previews, or message lists can flicker backwards before the next SSE event
+
+**Affected code (`src/main.rs`, `ui/src/App.tsx`):**
+- `/api/events` emits an initial `state` event
+- The app boot effect also calls `fetchState()` and unconditionally adopts the result
+
+**Fix:**
+- Use one bootstrap path instead of two, or add a monotonic revision so older snapshots can be ignored
+- Add a frontend regression test that simulates SSE beating the `/api/state` response
+
 ## Polling for process exit
 
 **Severity:** Low
@@ -40,25 +128,6 @@ Both `spawn_claude_runtime()` and `spawn_codex_runtime()` still use a `sleep(100
 - Codex wait thread in `spawn_codex_runtime()`
 
 **Fix:** Replace the polling loop with a dedicated waiter thread that blocks on `child.wait()`, or move runtime supervision to async child handling.
-
-## Codex home & data directory resolution breaks on Windows
-
-**Severity:** Medium â€” blocks Windows support.
-
-`resolve_source_codex_home_dir()` and `resolve_termal_data_dir()` still rely on `$HOME`. On Windows, `%USERPROFILE%` is the common fallback.
-
-**Affected code (`src/main.rs`):**
-- `resolve_source_codex_home_dir()` falls back to `$HOME/.codex` when `CODEX_HOME` is not set
-- `resolve_termal_data_dir()` resolves `$HOME/.termal`
-
-**Fix:** Add a `USERPROFILE` fallback after `HOME`:
-```rust
-let home = std::env::var_os("HOME")
-    .or_else(|| std::env::var_os("USERPROFILE"))
-    .ok_or_else(|| anyhow!("neither HOME nor USERPROFILE is set"))?;
-```
-
-Apply the same fallback to `resolve_termal_data_dir()`. Using `%APPDATA%` would be more Windows-native, but `USERPROFILE` is enough to remove the hard failure.
 
 ## No runtime pre-warming / session pooling
 
@@ -127,32 +196,6 @@ The server path now uses persistent `codex app-server` JSON-RPC with streaming `
 - REPL mode does not share the persistent app-server runtime
 - REPL mode does not share the server approval flow
 - Legacy `handle_codex_event()` and rollout-fallback code still have to be maintained
-
-## Unhandled Codex rate limit notifications
-
-**Severity:** Low â€” harmless, but noisy.
-
-The Codex app-server emits `account/rateLimits/updated` notifications with account-level usage
-data such as `planType`, `primary.usedPercent`, `primary.resetsAt`, `secondary.usedPercent`, and
-`secondary.resetsAt`.
-
-TermAl does not currently handle that notification in
-`handle_codex_app_server_notification()`, so it falls through to
-`log_unhandled_codex_event()` and prints repeated diagnostics like:
-`codex diagnostic> unhandled Codex app-server notification 'account/rateLimits/updated': {...}`
-
-**Impact:**
-- harmless protocol noise shows up in logs during normal Codex usage
-- real unhandled protocol issues are harder to distinguish from expected background events
-- useful rate-limit information is dropped instead of being surfaced anywhere in the app
-
-**Fix:**
-- minimum: add `account/rateLimits/updated` to the known-notification ignore list
-- preferred: parse and persist the rate-limit payload, expose it through the backend state API,
-  and surface it in the UI
-
-**Test coverage:** Add a unit test that verifies `account/rateLimits/updated` no longer reaches
-the unhandled-event logger.
 
 ---
 
@@ -236,11 +279,14 @@ Server mode already uses `codex app-server` over stdio JSON-RPC with:
 **Severity:** Medium - detailed brief:
 - [Gemini CLI Integration](./features/gemini-cli-integration.md)
 
-## No test coverage for Codex app-server parsing or HTTP endpoints
+## Codex app-server and HTTP route coverage is still partial
 
 **Severity:** Medium
 
-There are unit tests for Claude parsing and for the older `handle_codex_event()` parsing path, but there are no tests for the newer Codex app-server message handling (`handle_codex_app_server_message()` and related helpers), and there are no HTTP route tests for the axum handlers.
+There are unit tests for Claude parsing, for the legacy `handle_codex_event()` path, and for a
+small subset of the newer Codex app-server notifications. Coverage is still thin for
+`handle_codex_app_server_message()` request/item parsing, and there are still no HTTP route tests
+for the axum handlers.
 
 ## Codex session discovery is reinvented
 
@@ -301,6 +347,15 @@ Concrete work implied by the current TermAl parity gaps. Ordered by user impact 
 
 ## P0
 
+- [ ] Lock down `/api/file`:
+  resolve relative paths against the requesting session's `workdir`, reject reads outside allowed
+  roots, and stop treating arbitrary absolute paths as valid source-view targets.
+- [ ] Fix approval lifecycle bookkeeping:
+  canceled Claude approvals should clear the session out of `Approval`, and resolving one approval
+  must not hide other live approvals in the same session.
+- [ ] Remove the startup snapshot race:
+  avoid letting a late `/api/state` response overwrite a newer `/api/events` snapshot, or add a
+  revision field so stale state can be ignored.
 - [ ] Add Gemini as a first-class agent in the backend and UI:
   `Agent` enum, session creation, session rendering, and persistence need to stop assuming the
   world is only Claude or Codex.
@@ -342,8 +397,6 @@ Concrete work implied by the current TermAl parity gaps. Ordered by user impact 
   initialized runtime for the same `(project, cwd)`. On new session creation, unhide the spare
   and spawn the next one. Add `hidden` field to `Session`, filter from UI responses, and add
   idle reaping.
-- [ ] Fix Windows path resolution:
-  add `USERPROFILE` fallback for Codex home and TermAl data directory resolution.
 - [ ] Align attachment UX with actual capabilities:
   show the right composer hint per agent, add drag-and-drop, and keep the docs in sync with the
   implementation.
