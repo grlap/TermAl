@@ -24,6 +24,7 @@ import {
   fetchFile,
   fetchState,
   killSession,
+  saveFile,
   sendMessage,
   stopSession,
   submitApproval,
@@ -32,6 +33,11 @@ import {
 } from "./api";
 import { highlightCode } from "./highlight";
 import { applyDeltaToSessions } from "./live-updates";
+import { AgentSessionPanel, AgentSessionPanelFooter } from "./panels/AgentSessionPanel";
+import { FileSystemPanel } from "./panels/FileSystemPanel";
+import { GitStatusPanel } from "./panels/GitStatusPanel";
+import { PaneTabs } from "./panels/PaneTabs";
+import { SourcePanel, type SourceFileState } from "./panels/SourcePanel";
 import type {
   ApprovalDecision,
   ApprovalMessage,
@@ -39,7 +45,6 @@ import type {
   AgentType,
   ClaudeApprovalMode,
   CommandMessage,
-  CodexRateLimitWindow,
   CodexState,
   DeltaEvent,
   DiffMessage,
@@ -54,16 +59,20 @@ import type {
 } from "./types";
 import {
   activatePane,
-  closeSessionTab,
+  closeWorkspaceTab,
   getSplitRatio,
+  openFilesystemInWorkspaceState,
+  openGitStatusInWorkspaceState,
   openSessionInWorkspaceState,
-  placeDraggedSession,
+  openSourceInWorkspaceState,
+  placeDraggedTab,
   reconcileWorkspaceState,
   setPaneSourcePath,
   setPaneViewMode,
   splitPane,
   updateSplitRatio,
   type PaneViewMode,
+  type SessionPaneViewMode,
   type TabDropPlacement,
   type WorkspaceNode,
   type WorkspacePane,
@@ -77,6 +86,7 @@ import {
   persistThemePreference,
   type ThemeId,
 } from "./themes";
+import type { MonacoAppearance } from "./monaco";
 import {
   countSessionsByFilter,
   filterSessionsByListFilter,
@@ -87,10 +97,6 @@ type SessionFlagMap = Record<string, true | undefined>;
 type SessionSettingsField = "sandboxMode" | "approvalPolicy" | "claudeApprovalMode";
 type SessionSettingsValue = SandboxMode | ApprovalPolicy | ClaudeApprovalMode;
 type PreferencesTabId = "themes" | "codex-prompts" | "claude-approvals";
-type PromptHistoryState = {
-  index: number;
-  draft: string;
-};
 type DraftImageAttachment = ImageAttachment & {
   base64Data: string;
   id: string;
@@ -121,10 +127,6 @@ const DEFERRED_PREVIEW_LINE_LIMIT = 12;
 const DEFERRED_PREVIEW_CHARACTER_LIMIT = 720;
 const MAX_DEFERRED_PLACEHOLDER_HEIGHT = 960;
 const MAX_CACHED_SESSION_PAGES_PER_PANE = 3;
-const CONVERSATION_VIRTUALIZATION_MIN_MESSAGES = 80;
-const VIRTUALIZED_MESSAGE_OVERSCAN_PX = 960;
-const VIRTUALIZED_MESSAGE_GAP_PX = 12;
-const DEFAULT_VIRTUALIZED_VIEWPORT_HEIGHT = 720;
 const NEW_SESSION_AGENT_OPTIONS = [
   { label: "Claude", value: "Claude" },
   { label: "Codex", value: "Codex" },
@@ -193,7 +195,7 @@ export default function App() {
   } | null>(null);
   const [draggedTab, setDraggedTab] = useState<{
     sourcePaneId: string;
-    sessionId: string;
+    tabId: string;
   } | null>(null);
   const resizeStateRef = useRef<{
     splitId: string;
@@ -222,7 +224,12 @@ export default function App() {
     ? (sessionLookup.get(activePane.activeSessionId) ?? null)
     : null;
   const openSessionIds = useMemo(
-    () => new Set(workspace.panes.flatMap((pane) => pane.sessionIds)),
+    () =>
+      new Set(
+        workspace.panes.flatMap((pane) =>
+          pane.tabs.flatMap((tab) => (tab.kind === "session" ? [tab.sessionId] : [])),
+        ),
+      ),
     [workspace.panes],
   );
   const sessionFilterCounts = useMemo(() => countSessionsByFilter(sessions), [sessions]);
@@ -230,6 +237,7 @@ export default function App() {
     return filterSessionsByListFilter(sessions, sessionListFilter);
   }, [sessionListFilter, sessions]);
   const activeTheme = THEMES.find((theme) => theme.id === themeId) ?? THEMES[0];
+  const editorAppearance: MonacoAppearance = isHexColorDark(activeTheme.swatches[0]) ? "dark" : "light";
 
   function adoptSessions(
     nextSessions: Session[],
@@ -751,10 +759,7 @@ export default function App() {
 
   function handleSidebarSessionClick(sessionId: string) {
     setKillRevealSessionId(null);
-    setPendingScrollToBottomRequest({
-      sessionId,
-      token: Date.now(),
-    });
+    requestScrollToBottom(sessionId);
     setWorkspace((current) => openSessionInWorkspaceState(current, sessionId, current.activePaneId));
   }
 
@@ -772,12 +777,18 @@ export default function App() {
     setWorkspace((current) => activatePane(current, paneId));
   }
 
-  function handlePaneSessionSelect(paneId: string, sessionId: string) {
-    setWorkspace((current) => activatePane(current, paneId, sessionId));
+  function handlePaneTabSelect(paneId: string, tabId: string) {
+    const pane = paneLookup.get(paneId);
+    const tab = pane?.tabs.find((candidate) => candidate.id === tabId);
+    if (tab?.kind === "session") {
+      requestScrollToBottom(tab.sessionId);
+    }
+
+    setWorkspace((current) => activatePane(current, paneId, tabId));
   }
 
-  function handleCloseTab(paneId: string, sessionId: string) {
-    setWorkspace((current) => closeSessionTab(current, paneId, sessionId));
+  function handleCloseTab(paneId: string, tabId: string) {
+    setWorkspace((current) => closeWorkspaceTab(current, paneId, tabId));
   }
 
   function handleSplitPane(paneId: string, direction: "row" | "column") {
@@ -822,11 +833,11 @@ export default function App() {
     });
   }
 
-  function handleTabDragStart(sourcePaneId: string, sessionId: string) {
+  function handleTabDragStart(sourcePaneId: string, tabId: string) {
     window.requestAnimationFrame(() => {
       setDraggedTab({
         sourcePaneId,
-        sessionId,
+        tabId,
       });
     });
   }
@@ -844,10 +855,10 @@ export default function App() {
     setDraggedTab(null);
     startTransition(() => {
       setWorkspace((current) =>
-        placeDraggedSession(
+        placeDraggedTab(
           current,
           drop.sourcePaneId,
-          drop.sessionId,
+          drop.tabId,
           targetPaneId,
           placement,
           tabIndex,
@@ -856,12 +867,51 @@ export default function App() {
     });
   }
 
-  function handlePaneViewModeChange(paneId: string, viewMode: PaneViewMode) {
+  function handlePaneViewModeChange(paneId: string, viewMode: SessionPaneViewMode) {
+    if (viewMode === "session") {
+      const pane = paneLookup.get(paneId);
+      const activeTab = pane?.tabs.find((candidate) => candidate.id === pane.activeTabId);
+      if (activeTab?.kind === "session") {
+        requestScrollToBottom(activeTab.sessionId);
+      }
+    }
+
     setWorkspace((current) => setPaneViewMode(current, paneId, viewMode));
+  }
+
+  function requestScrollToBottom(sessionId: string) {
+    setPendingScrollToBottomRequest({
+      sessionId,
+      token: Date.now() + Math.random(),
+    });
   }
 
   function handlePaneSourcePathChange(paneId: string, path: string) {
     setWorkspace((current) => setPaneSourcePath(current, paneId, path));
+  }
+
+  function handleOpenSourceTab(paneId: string, path: string | null, originSessionId: string | null) {
+    setWorkspace((current) => openSourceInWorkspaceState(current, path, paneId, originSessionId));
+  }
+
+  function handleOpenFilesystemTab(
+    paneId: string,
+    rootPath: string | null,
+    originSessionId: string | null,
+  ) {
+    setWorkspace((current) =>
+      openFilesystemInWorkspaceState(current, rootPath, paneId, originSessionId),
+    );
+  }
+
+  function handleOpenGitStatusTab(
+    paneId: string,
+    workdir: string | null,
+    originSessionId: string | null,
+  ) {
+    setWorkspace((current) =>
+      openGitStatusInWorkspaceState(current, workdir, paneId, originSessionId),
+    );
   }
 
   return (
@@ -1062,8 +1112,9 @@ export default function App() {
               paneContentSignaturesRef={paneContentSignaturesRef}
               pendingScrollToBottomRequest={pendingScrollToBottomRequest}
               draggedTab={draggedTab}
+              editorAppearance={editorAppearance}
               onActivatePane={handlePaneActivate}
-              onSelectSession={handlePaneSessionSelect}
+              onSelectTab={handlePaneTabSelect}
               onCloseTab={handleCloseTab}
               onSplitPane={handleSplitPane}
               onResizeStart={handleSplitResizeStart}
@@ -1071,6 +1122,9 @@ export default function App() {
               onTabDragEnd={handleTabDragEnd}
               onTabDrop={handleTabDrop}
               onPaneViewModeChange={handlePaneViewModeChange}
+              onOpenSourceTab={handleOpenSourceTab}
+              onOpenFilesystemTab={handleOpenFilesystemTab}
+              onOpenGitStatusTab={handleOpenGitStatusTab}
               onPaneSourcePathChange={handlePaneSourcePathChange}
               onDraftCommit={handleDraftChange}
               onDraftAttachmentsAdd={handleDraftAttachmentsAdd}
@@ -1856,8 +1910,9 @@ function WorkspaceNodeView({
   paneContentSignaturesRef,
   pendingScrollToBottomRequest,
   draggedTab,
+  editorAppearance,
   onActivatePane,
-  onSelectSession,
+  onSelectTab,
   onCloseTab,
   onSplitPane,
   onResizeStart,
@@ -1865,6 +1920,9 @@ function WorkspaceNodeView({
   onTabDragEnd,
   onTabDrop,
   onPaneViewModeChange,
+  onOpenSourceTab,
+  onOpenFilesystemTab,
+  onOpenGitStatusTab,
   onPaneSourcePathChange,
   onDraftCommit,
   onDraftAttachmentsAdd,
@@ -1901,21 +1959,33 @@ function WorkspaceNodeView({
   } | null;
   draggedTab: {
     sourcePaneId: string;
-    sessionId: string;
+    tabId: string;
   } | null;
+  editorAppearance: MonacoAppearance;
   onActivatePane: (paneId: string) => void;
-  onSelectSession: (paneId: string, sessionId: string) => void;
-  onCloseTab: (paneId: string, sessionId: string) => void;
+  onSelectTab: (paneId: string, tabId: string) => void;
+  onCloseTab: (paneId: string, tabId: string) => void;
   onSplitPane: (paneId: string, direction: "row" | "column") => void;
   onResizeStart: (
     splitId: string,
     direction: "row" | "column",
     event: ReactPointerEvent<HTMLDivElement>,
   ) => void;
-  onTabDragStart: (sourcePaneId: string, sessionId: string) => void;
+  onTabDragStart: (sourcePaneId: string, tabId: string) => void;
   onTabDragEnd: () => void;
   onTabDrop: (targetPaneId: string, placement: TabDropPlacement, tabIndex?: number) => void;
-  onPaneViewModeChange: (paneId: string, viewMode: PaneViewMode) => void;
+  onPaneViewModeChange: (paneId: string, viewMode: SessionPaneViewMode) => void;
+  onOpenSourceTab: (paneId: string, path: string | null, originSessionId: string | null) => void;
+  onOpenFilesystemTab: (
+    paneId: string,
+    rootPath: string | null,
+    originSessionId: string | null,
+  ) => void;
+  onOpenGitStatusTab: (
+    paneId: string,
+    workdir: string | null,
+    originSessionId: string | null,
+  ) => void;
   onPaneSourcePathChange: (paneId: string, path: string) => void;
   onDraftCommit: (sessionId: string, nextValue: string) => void;
   onDraftAttachmentsAdd: (sessionId: string, attachments: DraftImageAttachment[]) => void;
@@ -1947,9 +2017,7 @@ function WorkspaceNodeView({
       <SessionPaneView
         pane={pane}
         codexState={codexState}
-        sessions={pane.sessionIds
-          .map((sessionId) => sessionLookup.get(sessionId))
-          .filter((session): session is Session => session !== undefined)}
+        sessionLookup={sessionLookup}
         isActive={pane.id === activePaneId}
         isLoading={isLoading}
         draft={pane.activeSessionId ? draftsBySessionId[pane.activeSessionId] ?? "" : ""}
@@ -1965,14 +2033,18 @@ function WorkspaceNodeView({
         paneContentSignaturesRef={paneContentSignaturesRef}
         pendingScrollToBottomRequest={pendingScrollToBottomRequest}
         draggedTab={draggedTab}
+        editorAppearance={editorAppearance}
         onActivatePane={onActivatePane}
-        onSelectSession={onSelectSession}
+        onSelectTab={onSelectTab}
         onCloseTab={onCloseTab}
         onSplitPane={onSplitPane}
         onTabDragStart={onTabDragStart}
         onTabDragEnd={onTabDragEnd}
         onTabDrop={onTabDrop}
         onPaneViewModeChange={onPaneViewModeChange}
+        onOpenSourceTab={onOpenSourceTab}
+        onOpenFilesystemTab={onOpenFilesystemTab}
+        onOpenGitStatusTab={onOpenGitStatusTab}
         onPaneSourcePathChange={onPaneSourcePathChange}
         onDraftCommit={onDraftCommit}
         onDraftAttachmentsAdd={onDraftAttachmentsAdd}
@@ -2010,8 +2082,9 @@ function WorkspaceNodeView({
           paneContentSignaturesRef={paneContentSignaturesRef}
           pendingScrollToBottomRequest={pendingScrollToBottomRequest}
           draggedTab={draggedTab}
+          editorAppearance={editorAppearance}
           onActivatePane={onActivatePane}
-          onSelectSession={onSelectSession}
+          onSelectTab={onSelectTab}
           onCloseTab={onCloseTab}
           onSplitPane={onSplitPane}
           onResizeStart={onResizeStart}
@@ -2019,6 +2092,9 @@ function WorkspaceNodeView({
           onTabDragEnd={onTabDragEnd}
           onTabDrop={onTabDrop}
           onPaneViewModeChange={onPaneViewModeChange}
+          onOpenSourceTab={onOpenSourceTab}
+          onOpenFilesystemTab={onOpenFilesystemTab}
+          onOpenGitStatusTab={onOpenGitStatusTab}
           onPaneSourcePathChange={onPaneSourcePathChange}
           onDraftCommit={onDraftCommit}
           onDraftAttachmentsAdd={onDraftAttachmentsAdd}
@@ -2058,8 +2134,9 @@ function WorkspaceNodeView({
           paneContentSignaturesRef={paneContentSignaturesRef}
           pendingScrollToBottomRequest={pendingScrollToBottomRequest}
           draggedTab={draggedTab}
+          editorAppearance={editorAppearance}
           onActivatePane={onActivatePane}
-          onSelectSession={onSelectSession}
+          onSelectTab={onSelectTab}
           onCloseTab={onCloseTab}
           onSplitPane={onSplitPane}
           onResizeStart={onResizeStart}
@@ -2067,6 +2144,9 @@ function WorkspaceNodeView({
           onTabDragEnd={onTabDragEnd}
           onTabDrop={onTabDrop}
           onPaneViewModeChange={onPaneViewModeChange}
+          onOpenSourceTab={onOpenSourceTab}
+          onOpenFilesystemTab={onOpenFilesystemTab}
+          onOpenGitStatusTab={onOpenGitStatusTab}
           onPaneSourcePathChange={onPaneSourcePathChange}
           onDraftCommit={onDraftCommit}
           onDraftAttachmentsAdd={onDraftAttachmentsAdd}
@@ -2088,7 +2168,7 @@ function WorkspaceNodeView({
 function SessionPaneView({
   pane,
   codexState,
-  sessions,
+  sessionLookup,
   isActive,
   isLoading,
   draft,
@@ -2102,14 +2182,18 @@ function SessionPaneView({
   paneContentSignaturesRef,
   pendingScrollToBottomRequest,
   draggedTab,
+  editorAppearance,
   onActivatePane,
-  onSelectSession,
+  onSelectTab,
   onCloseTab,
   onSplitPane,
   onTabDragStart,
   onTabDragEnd,
   onTabDrop,
   onPaneViewModeChange,
+  onOpenSourceTab,
+  onOpenFilesystemTab,
+  onOpenGitStatusTab,
   onPaneSourcePathChange,
   onDraftCommit,
   onDraftAttachmentsAdd,
@@ -2125,7 +2209,7 @@ function SessionPaneView({
 }: {
   pane: WorkspacePane;
   codexState: CodexState;
-  sessions: Session[];
+  sessionLookup: Map<string, Session>;
   isActive: boolean;
   isLoading: boolean;
   draft: string;
@@ -2145,16 +2229,28 @@ function SessionPaneView({
   } | null;
   draggedTab: {
     sourcePaneId: string;
-    sessionId: string;
+    tabId: string;
   } | null;
+  editorAppearance: MonacoAppearance;
   onActivatePane: (paneId: string) => void;
-  onSelectSession: (paneId: string, sessionId: string) => void;
-  onCloseTab: (paneId: string, sessionId: string) => void;
+  onSelectTab: (paneId: string, tabId: string) => void;
+  onCloseTab: (paneId: string, tabId: string) => void;
   onSplitPane: (paneId: string, direction: "row" | "column") => void;
-  onTabDragStart: (sourcePaneId: string, sessionId: string) => void;
+  onTabDragStart: (sourcePaneId: string, tabId: string) => void;
   onTabDragEnd: () => void;
   onTabDrop: (targetPaneId: string, placement: TabDropPlacement, tabIndex?: number) => void;
-  onPaneViewModeChange: (paneId: string, viewMode: PaneViewMode) => void;
+  onPaneViewModeChange: (paneId: string, viewMode: SessionPaneViewMode) => void;
+  onOpenSourceTab: (paneId: string, path: string | null, originSessionId: string | null) => void;
+  onOpenFilesystemTab: (
+    paneId: string,
+    rootPath: string | null,
+    originSessionId: string | null,
+  ) => void;
+  onOpenGitStatusTab: (
+    paneId: string,
+    workdir: string | null,
+    originSessionId: string | null,
+  ) => void;
   onPaneSourcePathChange: (paneId: string, path: string) => void;
   onDraftCommit: (sessionId: string, nextValue: string) => void;
   onDraftAttachmentsAdd: (sessionId: string, attachments: DraftImageAttachment[]) => void;
@@ -2176,16 +2272,30 @@ function SessionPaneView({
     value: SessionSettingsValue,
   ) => void;
 }) {
+  const activeTab = pane.tabs.find((tab) => tab.id === pane.activeTabId) ?? pane.tabs[0] ?? null;
+  const activeSourceTab = activeTab?.kind === "source" ? activeTab : null;
+  const activeFilesystemTab = activeTab?.kind === "filesystem" ? activeTab : null;
+  const activeGitStatusTab = activeTab?.kind === "gitStatus" ? activeTab : null;
+  const isSessionTabActive = activeTab?.kind === "session";
+  const sessionTabs = useMemo(
+    () =>
+      pane.tabs.flatMap((tab) => {
+        if (tab.kind !== "session") {
+          return [];
+        }
+
+        const session = sessionLookup.get(tab.sessionId);
+        return session ? [{ tab, session }] : [];
+      }),
+    [pane.tabs, sessionLookup],
+  );
   const activeSession =
-    sessions.find((session) => session.id === pane.activeSessionId) ?? sessions[0] ?? null;
+    (pane.activeSessionId ? sessionLookup.get(pane.activeSessionId) : null) ??
+    sessionTabs[0]?.session ??
+    null;
+  const sessions = useMemo(() => sessionTabs.map(({ session }) => session), [sessionTabs]);
   const [sourceDraft, setSourceDraft] = useState(pane.sourcePath ?? "");
-  const [fileState, setFileState] = useState<{
-    status: "idle" | "loading" | "ready" | "error";
-    path: string;
-    content: string;
-    error: string | null;
-    language: string | null;
-  }>({
+  const [fileState, setFileState] = useState<SourceFileState>({
     status: "idle",
     path: "",
     content: "",
@@ -2193,20 +2303,13 @@ function SessionPaneView({
     language: null,
   });
   const messageStackRef = useRef<HTMLElement | null>(null);
-  const paneTabsRef = useRef<HTMLDivElement | null>(null);
-  const [tabRailState, setTabRailState] = useState({
-    hasOverflow: false,
-    canScrollPrev: false,
-    canScrollNext: false,
-  });
   const [activeDropPlacement, setActiveDropPlacement] = useState<Exclude<TabDropPlacement, "tabs"> | null>(null);
-  const [activeTabInsertIndex, setActiveTabInsertIndex] = useState<number | null>(null);
   const [visitedSessionIds, setVisitedSessionIds] = useState<Record<string, true | undefined>>({});
   const [cachedSessionOrder, setCachedSessionOrder] = useState<string[]>([]);
   const [newResponseIndicatorByKey, setNewResponseIndicatorByKey] = useState<
     Record<string, true | undefined>
   >({});
-  const showDropOverlay = Boolean(draggedTab) && !(draggedTab?.sourcePaneId === pane.id && sessions.length <= 1);
+  const showDropOverlay = Boolean(draggedTab) && !(draggedTab?.sourcePaneId === pane.id && pane.tabs.length <= 1);
   const candidateSourcePaths = useMemo(
     () => (activeSession ? collectCandidateSourcePaths(activeSession) : []),
     [activeSession],
@@ -2246,6 +2349,7 @@ function SessionPaneView({
   const isSessionBusy =
     activeSession?.status === "active" || activeSession?.status === "approval";
   const showWaitingIndicator =
+    isSessionTabActive &&
     pane.viewMode === "session" &&
     Boolean(activeSession) &&
     (activeSession?.status === "active" || (!isSessionBusy && isSending));
@@ -2253,10 +2357,13 @@ function SessionPaneView({
     !isSessionBusy && isSending ? null : lastUserPrompt;
   const composerInputDisabled = !activeSession || isStopping;
   const composerSendDisabled = !activeSession || isSending || isStopping;
-  const scrollStateKey =
-    pane.viewMode === "source"
-      ? `${pane.id}:${pane.viewMode}:${pane.sourcePath ?? "empty"}`
-      : `${pane.id}:${pane.viewMode}:${activeSession?.id ?? "empty"}`;
+  const scrollStateKey = activeSourceTab
+    ? `${pane.id}:source:${activeSourceTab.path ?? "empty"}`
+    : activeFilesystemTab
+      ? `${pane.id}:filesystem:${activeFilesystemTab.rootPath ?? "empty"}`
+      : activeGitStatusTab
+        ? `${pane.id}:gitStatus:${activeGitStatusTab.workdir ?? "empty"}`
+        : `${pane.id}:${pane.viewMode}:${activeSession?.id ?? "empty"}`;
   const defaultScrollToBottom =
     pane.viewMode === "session" || pane.viewMode === "commands" || pane.viewMode === "diffs";
   const visibleMessages = useMemo(
@@ -2323,6 +2430,17 @@ function SessionPaneView({
       .catch((error) => {
         onComposerError(getErrorMessage(error));
       });
+  }
+
+  async function handleSourceFileSave(path: string, content: string) {
+    const response = await saveFile(path, content);
+    setFileState({
+      status: "ready",
+      path: response.path,
+      content: response.content,
+      error: null,
+      language: response.language ?? null,
+    });
   }
 
   function setNewResponseIndicator(key: string, visible: boolean) {
@@ -2411,19 +2529,42 @@ function SessionPaneView({
     }
   }
 
-  function scheduleSettledScrollToBottom(behavior: ScrollBehavior, maxAttempts = 12) {
+  function scheduleSettledScrollToBottom(
+    behavior: ScrollBehavior,
+    options: {
+      maxAttempts?: number;
+      onComplete?: () => void;
+    } = {},
+  ) {
     let frameId = 0;
-    let remainingAttempts = maxAttempts;
+    let cancelled = false;
+    let completed = false;
+    let remainingAttempts = options.maxAttempts ?? 12;
     let previousScrollHeight = -1;
     let stableFrameCount = 0;
 
-    const tick = () => {
-      scrollToLatestMessage(behavior);
-
-      const node = messageStackRef.current;
-      if (!node) {
+    function complete() {
+      if (cancelled || completed) {
         return;
       }
+
+      completed = true;
+      options.onComplete?.();
+    }
+
+    const tick = () => {
+      const node = messageStackRef.current;
+      if (!node) {
+        remainingAttempts -= 1;
+        if (remainingAttempts > 0) {
+          frameId = window.requestAnimationFrame(tick);
+        } else {
+          complete();
+        }
+        return;
+      }
+
+      scrollToLatestMessage(behavior);
 
       const bottomGap = Math.max(node.scrollHeight - node.clientHeight - node.scrollTop, 0);
       const heightStable = node.scrollHeight === previousScrollHeight;
@@ -2437,127 +2578,16 @@ function SessionPaneView({
       remainingAttempts -= 1;
       if (remainingAttempts > 0 && stableFrameCount < 2) {
         frameId = window.requestAnimationFrame(tick);
+      } else {
+        complete();
       }
     };
 
     frameId = window.requestAnimationFrame(tick);
     return () => {
+      cancelled = true;
       window.cancelAnimationFrame(frameId);
     };
-  }
-
-  function updateTabRailState() {
-    const node = paneTabsRef.current;
-    if (!node) {
-      setTabRailState((current) =>
-        current.hasOverflow || current.canScrollPrev || current.canScrollNext
-          ? {
-              hasOverflow: false,
-              canScrollPrev: false,
-              canScrollNext: false,
-            }
-          : current,
-      );
-      return;
-    }
-
-    const maxScrollLeft = Math.max(node.scrollWidth - node.clientWidth, 0);
-    const nextState = {
-      hasOverflow: maxScrollLeft > 2,
-      canScrollPrev: node.scrollLeft > 2,
-      canScrollNext: node.scrollLeft < maxScrollLeft - 2,
-    };
-
-    setTabRailState((current) =>
-      current.hasOverflow === nextState.hasOverflow &&
-      current.canScrollPrev === nextState.canScrollPrev &&
-      current.canScrollNext === nextState.canScrollNext
-        ? current
-        : nextState,
-    );
-  }
-
-  function scrollTabRail(direction: -1 | 1) {
-    const node = paneTabsRef.current;
-    if (!node) {
-      return;
-    }
-
-    const distance = Math.max(Math.round(node.clientWidth * 0.7), 180);
-    node.scrollBy({
-      left: distance * direction,
-      behavior: "smooth",
-    });
-  }
-
-  function resolveTabInsertIndex(clientX: number) {
-    const node = paneTabsRef.current;
-    if (!node) {
-      return sessions.length;
-    }
-
-    const tabNodes = Array.from(node.querySelectorAll<HTMLElement>(".pane-tab-shell"));
-    if (tabNodes.length === 0) {
-      return 0;
-    }
-
-    for (let index = 0; index < tabNodes.length; index += 1) {
-      const rect = tabNodes[index].getBoundingClientRect();
-      if (clientX < rect.left + rect.width / 2) {
-        return index;
-      }
-    }
-
-    return tabNodes.length;
-  }
-
-  function maybeAutoScrollTabRail(clientX: number) {
-    const node = paneTabsRef.current;
-    if (!node) {
-      return;
-    }
-
-    const rect = node.getBoundingClientRect();
-    const edgeThreshold = Math.min(56, rect.width / 4);
-    if (clientX < rect.left + edgeThreshold) {
-      node.scrollLeft -= 18;
-    } else if (clientX > rect.right - edgeThreshold) {
-      node.scrollLeft += 18;
-    }
-  }
-
-  function handleTabRailDragOver(event: ReactDragEvent<HTMLDivElement>) {
-    if (!draggedTab) {
-      return;
-    }
-
-    event.preventDefault();
-    event.dataTransfer.dropEffect = "move";
-    maybeAutoScrollTabRail(event.clientX);
-
-    const nextTabInsertIndex = resolveTabInsertIndex(event.clientX);
-    setActiveDropPlacement(null);
-    setActiveTabInsertIndex((current) => (current === nextTabInsertIndex ? current : nextTabInsertIndex));
-  }
-
-  function handleTabRailDragLeave(event: ReactDragEvent<HTMLDivElement>) {
-    const nextTarget = event.relatedTarget;
-    if (nextTarget instanceof Node && event.currentTarget.contains(nextTarget)) {
-      return;
-    }
-
-    setActiveTabInsertIndex(null);
-  }
-
-  function handleTabRailDrop(event: ReactDragEvent<HTMLDivElement>) {
-    if (!draggedTab) {
-      return;
-    }
-
-    event.preventDefault();
-    setActiveDropPlacement(null);
-    setActiveTabInsertIndex(null);
-    onTabDrop(pane.id, "tabs", resolveTabInsertIndex(event.clientX));
   }
 
   useLayoutEffect(() => {
@@ -2601,6 +2631,7 @@ function SessionPaneView({
   useLayoutEffect(() => {
     if (
       !activeSession ||
+      !isSessionTabActive ||
       pane.viewMode !== "session" ||
       visitedSessionIds[activeSession.id]
     ) {
@@ -2608,7 +2639,7 @@ function SessionPaneView({
     }
 
     return scheduleSettledScrollToBottom("auto");
-  }, [activeSession, pane.viewMode, scrollStateKey, visitedSessionIds]);
+  }, [activeSession, isSessionTabActive, pane.viewMode, scrollStateKey, visitedSessionIds]);
 
   useEffect(() => {
     if (!activeSession?.id) {
@@ -2657,7 +2688,7 @@ function SessionPaneView({
   }, [sessions]);
 
   useEffect(() => {
-    if (!activeSession || pane.viewMode === "source") {
+    if (!activeSession || !isSessionTabActive) {
       return;
     }
 
@@ -2687,7 +2718,14 @@ function SessionPaneView({
     return () => {
       window.cancelAnimationFrame(frameId);
     };
-  }, [activeSession, pane.viewMode, scrollStateKey, visibleContentSignature, visibleLastMessageAuthor]);
+  }, [
+    activeSession,
+    isSessionTabActive,
+    pane.viewMode,
+    scrollStateKey,
+    visibleContentSignature,
+    visibleLastMessageAuthor,
+  ]);
 
   useEffect(() => {
     if (
@@ -2700,15 +2738,11 @@ function SessionPaneView({
     }
 
     const requestToken = pendingScrollToBottomRequest.token;
-    const cancel = scheduleSettledScrollToBottom("auto");
-    const handledFrameId = window.requestAnimationFrame(() => {
-      onScrollToBottomRequestHandled(requestToken);
+    return scheduleSettledScrollToBottom("auto", {
+      onComplete: () => {
+        onScrollToBottomRequestHandled(requestToken);
+      },
     });
-
-    return () => {
-      cancel();
-      window.cancelAnimationFrame(handledFrameId);
-    };
   }, [
     activeSession?.id,
     isActive,
@@ -2721,48 +2755,6 @@ function SessionPaneView({
   useEffect(() => {
     setSourceDraft(pane.sourcePath ?? "");
   }, [pane.id, pane.sourcePath]);
-
-  useLayoutEffect(() => {
-    const frameId = window.requestAnimationFrame(() => {
-      const node = paneTabsRef.current;
-      if (!node) {
-        return;
-      }
-
-      const activeTab = node.querySelector<HTMLElement>('.pane-tab-shell[aria-selected="true"]');
-      activeTab?.scrollIntoView({
-        block: "nearest",
-        inline: "nearest",
-      });
-      updateTabRailState();
-    });
-
-    return () => {
-      window.cancelAnimationFrame(frameId);
-    };
-  }, [activeSession?.id, pane.id, sessions.length]);
-
-  useEffect(() => {
-    const node = paneTabsRef.current;
-    if (!node) {
-      return;
-    }
-
-    const scheduleUpdate = () => {
-      window.requestAnimationFrame(updateTabRailState);
-    };
-
-    scheduleUpdate();
-    node.addEventListener("scroll", scheduleUpdate, { passive: true });
-
-    const resizeObserver = new ResizeObserver(scheduleUpdate);
-    resizeObserver.observe(node);
-
-    return () => {
-      node.removeEventListener("scroll", scheduleUpdate);
-      resizeObserver.disconnect();
-    };
-  }, [pane.id, sessions.length]);
 
   useEffect(() => {
     if (!isSending || pane.viewMode !== "session") {
@@ -2851,12 +2843,6 @@ function SessionPaneView({
     }
   }, [showDropOverlay]);
 
-  useEffect(() => {
-    if (!draggedTab) {
-      setActiveTabInsertIndex(null);
-    }
-  }, [draggedTab]);
-
   return (
     <section
       className={`workspace-pane thread panel ${isActive ? "active" : ""}`}
@@ -2870,13 +2856,11 @@ function SessionPaneView({
               key={placement}
               className={`pane-drop-zone pane-drop-zone-${placement} ${activeDropPlacement === placement ? "active" : ""}`}
               onDragEnter={() => {
-                setActiveTabInsertIndex(null);
                 setActiveDropPlacement(placement);
               }}
               onDragOver={(event) => {
                 event.preventDefault();
                 event.dataTransfer.dropEffect = "move";
-                setActiveTabInsertIndex(null);
                 if (activeDropPlacement !== placement) {
                   setActiveDropPlacement(placement);
                 }
@@ -2887,7 +2871,6 @@ function SessionPaneView({
               onDrop={(event) => {
                 event.preventDefault();
                 setActiveDropPlacement(null);
-                setActiveTabInsertIndex(null);
                 onTabDrop(pane.id, placement);
               }}
             >
@@ -2900,149 +2883,95 @@ function SessionPaneView({
       <div className="pane-top">
         <div className="pane-bar">
           <div className="pane-bar-left">
-            <div className="pane-tabs-shell">
-              {sessions.length > 1 ? (
-                <button
-                  className={`pane-tab-scroll ${tabRailState.canScrollPrev ? "" : "inactive"}`}
-                  type="button"
-                  aria-label="Scroll tabs left"
-                  onClick={() => scrollTabRail(-1)}
-                  aria-disabled={!tabRailState.canScrollPrev}
-                >
-                  &lt;
-                </button>
-              ) : null}
-              <div
-                ref={paneTabsRef}
-                className={`pane-tabs ${activeTabInsertIndex === 0 && sessions.length === 0 ? "drop-empty" : ""}`}
-                role="tablist"
-                aria-label="Tile sessions"
-                onDragOver={handleTabRailDragOver}
-                onDragLeave={handleTabRailDragLeave}
-                onDrop={handleTabRailDrop}
-              >
-                {sessions.length > 0 ? (
-                  sessions.map((session, index) => {
-                    const tabActive = session.id === activeSession?.id;
-                    const showCodexStatus =
-                      session.agent === "Codex" &&
-                      Boolean(session.externalSessionId || codexState.rateLimits);
-                    const showDropBefore = activeTabInsertIndex === index;
-                    const showDropAfter =
-                      activeTabInsertIndex === sessions.length && index === sessions.length - 1;
-                    const codexStatusTooltipId = showCodexStatus
-                      ? `codex-status-${pane.id}-${session.id}`
-                      : undefined;
-
-                    return (
-                      <div
-                        key={session.id}
-                        className={`pane-tab-shell ${tabActive ? "active" : ""} ${showCodexStatus ? "has-status-tooltip" : ""} ${showDropBefore ? "drop-before" : ""} ${showDropAfter ? "drop-after" : ""}`}
-                        role="tab"
-                        aria-selected={tabActive}
-                        aria-describedby={codexStatusTooltipId}
-                        tabIndex={0}
-                        onClick={() => onSelectSession(pane.id, session.id)}
-                        onKeyDown={(event) => {
-                          if (event.key === "Enter" || event.key === " ") {
-                            event.preventDefault();
-                            onSelectSession(pane.id, session.id);
-                          }
-                        }}
-                      >
-                        <button
-                          className="pane-tab-grip"
-                          type="button"
-                          aria-label={`Drag ${session.name}`}
-                          draggable
-                          onMouseDown={(event) => {
-                            event.stopPropagation();
-                          }}
-                          onDragStart={(event) => {
-                            event.dataTransfer.effectAllowed = "move";
-                            event.dataTransfer.setData("text/plain", session.id);
-                            const tabShell = event.currentTarget.closest(".pane-tab-shell");
-                            if (tabShell instanceof HTMLElement) {
-                              const rect = tabShell.getBoundingClientRect();
-                              event.dataTransfer.setDragImage(
-                                tabShell,
-                                Math.max(12, event.clientX - rect.left),
-                                Math.max(12, event.clientY - rect.top),
-                              );
-                            }
-                            onTabDragStart(pane.id, session.id);
-                          }}
-                          onDragEnd={onTabDragEnd}
-                        />
-                        <span className="pane-tab">
-                          <span className="pane-tab-copy">
-                            <span className={`status-dot status-${session.status}`} />
-                            <span className="pane-tab-label">
-                              {session.emoji} {session.name}
-                            </span>
-                          </span>
-                        </span>
-                        {showCodexStatus ? (
-                          <CodexTabStatusTooltip
-                            id={codexStatusTooltipId ?? ""}
-                            session={session}
-                            codexState={codexState}
-                          />
-                        ) : null}
-                        <button
-                          className="pane-tab-close"
-                          type="button"
-                          draggable={false}
-                          aria-label={`Remove ${session.name} from this tile`}
-                          onMouseDown={(event) => {
-                            event.stopPropagation();
-                          }}
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            onCloseTab(pane.id, session.id);
-                          }}
-                        >
-                          ×
-                        </button>
-                      </div>
-                    );
-                  })
-                ) : (
-                  <div className="pane-empty-label">Empty tile</div>
-                )}
-              </div>
-              {sessions.length > 1 ? (
-                <button
-                  className={`pane-tab-scroll ${tabRailState.canScrollNext ? "" : "inactive"}`}
-                  type="button"
-                  aria-label="Scroll tabs right"
-                  onClick={() => scrollTabRail(1)}
-                  aria-disabled={!tabRailState.canScrollNext}
-                >
-                  &gt;
-                </button>
-              ) : null}
-            </div>
+            <PaneTabs
+              paneId={pane.id}
+              tabs={pane.tabs}
+              activeTabId={activeTab?.id ?? null}
+              codexState={codexState}
+              sessionLookup={sessionLookup}
+              draggedTab={draggedTab}
+              onSelectTab={onSelectTab}
+              onCloseTab={onCloseTab}
+              onTabDragStart={onTabDragStart}
+              onTabDragEnd={onTabDragEnd}
+              onTabDrop={onTabDrop}
+            />
           </div>
 
         </div>
 
         <div className="pane-view-strip">
-          <div className="pane-view-strip-left">
-            {(["session", "prompt", "commands", "diffs", "source"] as PaneViewMode[]).map((viewMode) => (
+          {activeTab?.kind === "session" ? (
+            <div className="pane-view-strip-left">
+              {(["session", "prompt", "commands", "diffs"] as SessionPaneViewMode[]).map((viewMode) => (
+                <button
+                  key={viewMode}
+                  className={`pane-view-button ${pane.viewMode === viewMode ? "selected" : ""}`}
+                  type="button"
+                  onClick={() => onPaneViewModeChange(pane.id, viewMode)}
+                >
+                  {labelForPaneViewMode(viewMode)}
+                </button>
+              ))}
               <button
-                key={viewMode}
-                className={`pane-view-button ${pane.viewMode === viewMode ? "selected" : ""}`}
+                className="pane-view-button"
                 type="button"
-                onClick={() => onPaneViewModeChange(pane.id, viewMode)}
+                onClick={() =>
+                  onOpenSourceTab(pane.id, candidateSourcePaths[0] ?? null, activeSession?.id ?? null)
+                }
               >
-                {labelForPaneViewMode(viewMode)}
+                File
               </button>
-            ))}
-          </div>
+              <button
+                className="pane-view-button"
+                type="button"
+                onClick={() =>
+                  onOpenFilesystemTab(
+                    pane.id,
+                    activeSession?.workdir ?? null,
+                    activeSession?.id ?? null,
+                  )
+                }
+              >
+                Files
+              </button>
+              <button
+                className="pane-view-button"
+                type="button"
+                onClick={() =>
+                  onOpenGitStatusTab(
+                    pane.id,
+                    activeSession?.workdir ?? null,
+                    activeSession?.id ?? null,
+                  )
+                }
+              >
+                Git
+              </button>
+            </div>
+          ) : (
+            <div className="pane-view-strip-left">
+              <span className="chip">
+                {activeTab?.kind === "source"
+                  ? "File viewer"
+                  : activeTab?.kind === "filesystem"
+                    ? "File browser"
+                    : activeTab?.kind === "gitStatus"
+                      ? "Git status"
+                      : "Panel"}
+              </span>
+            </div>
+          )}
           {activeSession ? (
             <div className="thread-chips">
               <span className="chip">{activeSession.workdir}</span>
+              {activeSourceTab?.path ? <span className="chip">{activeSourceTab.path}</span> : null}
+              {activeFilesystemTab?.rootPath ? (
+                <span className="chip">{activeFilesystemTab.rootPath}</span>
+              ) : null}
+              {activeGitStatusTab?.workdir ? (
+                <span className="chip">{activeGitStatusTab.workdir}</span>
+              ) : null}
             </div>
           ) : null}
         </div>
@@ -3064,975 +2993,110 @@ function SessionPaneView({
           }
         }}
       >
-        <SessionPaneBody
+        {activeSourceTab ? (
+          <SourcePanel
+            candidatePaths={candidateSourcePaths}
+            editorAppearance={editorAppearance}
+            fileState={fileState}
+            sourceDraft={sourceDraft}
+            sourcePath={activeSourceTab.path}
+            onDraftChange={setSourceDraft}
+            onOpenPath={(path) => onPaneSourcePathChange(pane.id, path)}
+            onSaveFile={handleSourceFileSave}
+          />
+        ) : activeFilesystemTab ? (
+          <FileSystemPanel
+            rootPath={activeFilesystemTab.rootPath}
+            onOpenPath={(path) => onOpenSourceTab(pane.id, path, activeSession?.id ?? null)}
+            onOpenRootPath={(path) =>
+              onOpenFilesystemTab(pane.id, path, activeSession?.id ?? null)
+            }
+          />
+        ) : activeGitStatusTab ? (
+          <GitStatusPanel
+            workdir={activeGitStatusTab.workdir}
+            onOpenPath={(path) => onOpenSourceTab(pane.id, path, activeSession?.id ?? null)}
+            onOpenWorkdir={(path) =>
+              onOpenGitStatusTab(pane.id, path, activeSession?.id ?? null)
+            }
+          />
+        ) : (
+          <AgentSessionPanel
+            paneId={pane.id}
+            viewMode={pane.viewMode}
+            scrollContainerRef={messageStackRef}
+            activeSession={activeSession}
+            isLoading={isLoading}
+            isUpdating={isUpdating}
+            showWaitingIndicator={showWaitingIndicator}
+            waitingIndicatorPrompt={waitingIndicatorPrompt}
+            mountedSessions={mountedSessions}
+            commandMessages={commandMessages}
+            diffMessages={diffMessages}
+            onApprovalDecision={onApprovalDecision}
+            onCancelQueuedPrompt={onCancelQueuedPrompt}
+            onSessionSettingsChange={onSessionSettingsChange}
+            renderCommandCard={(message) => <CommandCard message={message} />}
+            renderDiffCard={(message) => <DiffCard message={message} />}
+            renderMessageCard={(message, preferImmediateHeavyRender, handleDecision) => (
+              <MessageCard
+                message={message}
+                preferImmediateHeavyRender={preferImmediateHeavyRender}
+                onApprovalDecision={handleDecision}
+              />
+            )}
+            renderPromptSettings={(panelPaneId, session, panelIsUpdating, handleSettingsChange) => {
+              if (session.agent === "Codex") {
+                return (
+                  <CodexPromptSettingsCard
+                    paneId={panelPaneId}
+                    session={session}
+                    isUpdating={panelIsUpdating}
+                    onSessionSettingsChange={handleSettingsChange}
+                  />
+                );
+              }
+
+              if (session.agent === "Claude") {
+                return (
+                  <ClaudePromptSettingsCard
+                    paneId={panelPaneId}
+                    session={session}
+                    isUpdating={panelIsUpdating}
+                    onSessionSettingsChange={handleSettingsChange}
+                  />
+                );
+              }
+
+              return null;
+            }}
+          />
+        )}
+      </section>
+      {activeSourceTab || activeFilesystemTab || activeGitStatusTab ? null : (
+        <AgentSessionPanelFooter
           paneId={pane.id}
           viewMode={pane.viewMode}
-          sourcePath={pane.sourcePath}
-          scrollContainerRef={messageStackRef}
           activeSession={activeSession}
-          isLoading={isLoading}
-          isUpdating={isUpdating}
-          showWaitingIndicator={showWaitingIndicator}
-          waitingIndicatorPrompt={waitingIndicatorPrompt}
-          mountedSessions={mountedSessions}
-          candidateSourcePaths={candidateSourcePaths}
-          fileState={fileState}
-          sourceDraft={sourceDraft}
-          commandMessages={commandMessages}
-          diffMessages={diffMessages}
-          onSourceDraftChange={setSourceDraft}
-          onPaneSourcePathChange={onPaneSourcePathChange}
-          onApprovalDecision={onApprovalDecision}
-          onCancelQueuedPrompt={onCancelQueuedPrompt}
-          onSessionSettingsChange={onSessionSettingsChange}
-        />
-      </section>
-
-      {pane.viewMode === "session" ? (
-        <SessionComposer
-          paneId={pane.id}
-          session={activeSession}
           committedDraft={draft}
           draftAttachments={draftAttachments}
+          formatByteSize={formatByteSize}
           isSending={isSending}
           isStopping={isStopping}
           isSessionBusy={isSessionBusy}
           showNewResponseIndicator={showNewResponseIndicator}
+          footerModeLabel={labelForPaneViewMode(pane.viewMode)}
           onScrollToLatest={() => scrollToLatestMessage("smooth")}
           onDraftCommit={onDraftCommit}
           onDraftAttachmentRemove={onDraftAttachmentRemove}
-          onComposerError={onComposerError}
           onSend={onSend}
           onStopSession={onStopSession}
           onPaste={handleComposerPaste}
         />
-      ) : (
-        <footer className="pane-footer-note">
-          <p className="composer-hint">
-            This tile is in {labelForPaneViewMode(pane.viewMode).toLowerCase()} mode. Use the
-            Session tab to send prompts.
-          </p>
-        </footer>
       )}
     </section>
   );
 }
-
-const SessionPaneBody = memo(function SessionPaneBody({
-  paneId,
-  viewMode,
-  sourcePath,
-  scrollContainerRef,
-  activeSession,
-  isLoading,
-  isUpdating,
-  showWaitingIndicator,
-  waitingIndicatorPrompt,
-  mountedSessions,
-  candidateSourcePaths,
-  fileState,
-  sourceDraft,
-  commandMessages,
-  diffMessages,
-  onSourceDraftChange,
-  onPaneSourcePathChange,
-  onApprovalDecision,
-  onCancelQueuedPrompt,
-  onSessionSettingsChange,
-}: {
-  paneId: string;
-  viewMode: PaneViewMode;
-  sourcePath: string | null;
-  scrollContainerRef: RefObject<HTMLElement | null>;
-  activeSession: Session | null;
-  isLoading: boolean;
-  isUpdating: boolean;
-  showWaitingIndicator: boolean;
-  waitingIndicatorPrompt: string | null;
-  mountedSessions: Session[];
-  candidateSourcePaths: string[];
-  fileState: {
-    status: "idle" | "loading" | "ready" | "error";
-    path: string;
-    content: string;
-    error: string | null;
-    language: string | null;
-  };
-  sourceDraft: string;
-  commandMessages: CommandMessage[];
-  diffMessages: DiffMessage[];
-  onSourceDraftChange: (nextValue: string) => void;
-  onPaneSourcePathChange: (paneId: string, path: string) => void;
-  onApprovalDecision: (
-    sessionId: string,
-    messageId: string,
-    decision: ApprovalDecision,
-  ) => void;
-  onCancelQueuedPrompt: (sessionId: string, promptId: string) => void;
-  onSessionSettingsChange: (
-    sessionId: string,
-    field: SessionSettingsField,
-    value: SessionSettingsValue,
-  ) => void;
-}) {
-  if (!activeSession) {
-    return (
-      <EmptyState
-        title="Ready for a session"
-        body="Click a session on the left to open it in the active tile."
-      />
-    );
-  }
-
-  if (viewMode === "session") {
-    const activePendingPrompts = activeSession.pendingPrompts ?? [];
-    if (activeSession.messages.length === 0 && activePendingPrompts.length === 0 && !showWaitingIndicator) {
-      return (
-        <EmptyState
-          title={isLoading ? "Connecting to backend" : "Live session is ready"}
-          body={
-            isLoading
-              ? "Fetching session state from the Rust backend."
-              : `Send a prompt to ${activeSession.agent} and this tile will fill with live cards.`
-          }
-        />
-      );
-    }
-
-    return (
-      <>
-        {mountedSessions.map((session) => (
-          <SessionConversationPage
-            key={session.id}
-            session={session}
-            scrollContainerRef={scrollContainerRef}
-            isActive={session.id === activeSession.id}
-            isLoading={isLoading && session.id === activeSession.id}
-            showWaitingIndicator={showWaitingIndicator && session.id === activeSession.id}
-            waitingIndicatorPrompt={session.id === activeSession.id ? waitingIndicatorPrompt : null}
-            onApprovalDecision={onApprovalDecision}
-            onCancelQueuedPrompt={onCancelQueuedPrompt}
-          />
-        ))}
-      </>
-    );
-  }
-
-  if (viewMode === "prompt") {
-    if (activeSession.agent === "Codex") {
-      return (
-        <CodexPromptSettingsCard
-          paneId={paneId}
-          session={activeSession}
-          isUpdating={isUpdating}
-          onSessionSettingsChange={onSessionSettingsChange}
-        />
-      );
-    }
-
-    if (activeSession.agent === "Claude") {
-      return (
-        <ClaudePromptSettingsCard
-          paneId={paneId}
-          session={activeSession}
-          isUpdating={isUpdating}
-          onSessionSettingsChange={onSessionSettingsChange}
-        />
-      );
-    }
-
-    return (
-      <EmptyState
-        title="No prompt settings"
-        body="Prompt controls are only available for supported agent sessions."
-      />
-    );
-  }
-
-  if (viewMode === "commands") {
-    return commandMessages.length > 0 ? (
-      <>
-        {commandMessages.map((message) => (
-          <CommandCard key={message.id} message={message} />
-        ))}
-      </>
-    ) : (
-      <EmptyState
-        title="No commands yet"
-        body="This tile is filtered to command executions. Send a prompt that runs tools and they will show up here."
-      />
-    );
-  }
-
-  if (viewMode === "diffs") {
-    return diffMessages.length > 0 ? (
-      <>
-        {diffMessages.map((message) => (
-          <DiffCard key={message.id} message={message} />
-        ))}
-      </>
-    ) : (
-      <EmptyState
-        title="No diffs yet"
-        body="This tile is filtered to file changes. When the agent edits or creates files, the diffs will appear here."
-      />
-    );
-  }
-
-  return (
-    <SourcePane
-      candidatePaths={candidateSourcePaths}
-      fileState={fileState}
-      sourceDraft={sourceDraft}
-      sourcePath={sourcePath}
-      onDraftChange={onSourceDraftChange}
-      onOpenPath={(path) => onPaneSourcePathChange(paneId, path)}
-    />
-  );
-}, (previous, next) =>
-  previous.paneId === next.paneId &&
-  previous.viewMode === next.viewMode &&
-  previous.sourcePath === next.sourcePath &&
-  previous.scrollContainerRef === next.scrollContainerRef &&
-  previous.activeSession === next.activeSession &&
-  previous.isLoading === next.isLoading &&
-  previous.isUpdating === next.isUpdating &&
-  previous.showWaitingIndicator === next.showWaitingIndicator &&
-  previous.waitingIndicatorPrompt === next.waitingIndicatorPrompt &&
-  previous.mountedSessions === next.mountedSessions &&
-  previous.candidateSourcePaths === next.candidateSourcePaths &&
-  previous.fileState === next.fileState &&
-  previous.sourceDraft === next.sourceDraft &&
-  previous.commandMessages === next.commandMessages &&
-  previous.diffMessages === next.diffMessages
-);
-
-const SessionConversationPage = memo(function SessionConversationPage({
-  session,
-  scrollContainerRef,
-  isActive,
-  isLoading,
-  showWaitingIndicator,
-  waitingIndicatorPrompt,
-  onApprovalDecision,
-  onCancelQueuedPrompt,
-}: {
-  session: Session;
-  scrollContainerRef: RefObject<HTMLElement | null>;
-  isActive: boolean;
-  isLoading: boolean;
-  showWaitingIndicator: boolean;
-  waitingIndicatorPrompt: string | null;
-  onApprovalDecision: (
-    sessionId: string,
-    messageId: string,
-    decision: ApprovalDecision,
-  ) => void;
-  onCancelQueuedPrompt: (sessionId: string, promptId: string) => void;
-}) {
-  const pendingPrompts = session.pendingPrompts ?? [];
-
-  if (session.messages.length === 0 && pendingPrompts.length === 0 && !showWaitingIndicator) {
-    return (
-      <div
-        className={`session-conversation-page${isActive ? " is-active" : ""}`}
-        hidden={!isActive}
-      >
-        <EmptyState
-          title={isLoading ? "Connecting to backend" : "Live session is ready"}
-          body={
-            isLoading
-              ? "Fetching session state from the Rust backend."
-              : `Send a prompt to ${session.agent} and this tile will fill with live cards.`
-          }
-        />
-      </div>
-    );
-  }
-
-  return (
-    <div
-      className={`session-conversation-page${isActive ? " is-active" : ""}`}
-      hidden={!isActive}
-    >
-      <ConversationMessageList
-        sessionId={session.id}
-        messages={session.messages}
-        scrollContainerRef={scrollContainerRef}
-        isActive={isActive}
-        onApprovalDecision={onApprovalDecision}
-      />
-
-      {showWaitingIndicator ? (
-        <RunningIndicator agent={session.agent} lastPrompt={waitingIndicatorPrompt} />
-      ) : null}
-
-      {pendingPrompts.map((prompt) => (
-        <PendingPromptCard
-          key={prompt.id}
-          prompt={prompt}
-          onCancel={() => onCancelQueuedPrompt(session.id, prompt.id)}
-        />
-      ))}
-    </div>
-  );
-}, (previous, next) =>
-  previous.session === next.session &&
-  previous.scrollContainerRef === next.scrollContainerRef &&
-  previous.isActive === next.isActive &&
-  previous.isLoading === next.isLoading &&
-  previous.showWaitingIndicator === next.showWaitingIndicator &&
-  previous.waitingIndicatorPrompt === next.waitingIndicatorPrompt
-);
-
-function ConversationMessageList({
-  sessionId,
-  messages,
-  scrollContainerRef,
-  isActive,
-  onApprovalDecision,
-}: {
-  sessionId: string;
-  messages: Message[];
-  scrollContainerRef: RefObject<HTMLElement | null>;
-  isActive: boolean;
-  onApprovalDecision: (
-    sessionId: string,
-    messageId: string,
-    decision: ApprovalDecision,
-  ) => void;
-}) {
-  if (!isActive || messages.length < CONVERSATION_VIRTUALIZATION_MIN_MESSAGES) {
-    return (
-      <>
-        {messages.map((message, index) => (
-          <MessageCard
-            key={message.id}
-            message={message}
-            preferImmediateHeavyRender={isActive && index >= messages.length - 2}
-            onApprovalDecision={(messageId, decision) => onApprovalDecision(sessionId, messageId, decision)}
-          />
-        ))}
-      </>
-    );
-  }
-
-  return (
-    <VirtualizedConversationMessageList
-      sessionId={sessionId}
-      messages={messages}
-      scrollContainerRef={scrollContainerRef}
-      onApprovalDecision={onApprovalDecision}
-    />
-  );
-}
-
-function VirtualizedConversationMessageList({
-  sessionId,
-  messages,
-  scrollContainerRef,
-  onApprovalDecision,
-}: {
-  sessionId: string;
-  messages: Message[];
-  scrollContainerRef: RefObject<HTMLElement | null>;
-  onApprovalDecision: (
-    sessionId: string,
-    messageId: string,
-    decision: ApprovalDecision,
-  ) => void;
-}) {
-  const messageHeightsRef = useRef<Record<string, number>>({});
-  const visibleRangeRef = useRef({
-    startIndex: 0,
-    endIndex: messages.length,
-  });
-  const [viewport, setViewport] = useState({
-    height: DEFAULT_VIRTUALIZED_VIEWPORT_HEIGHT,
-    scrollTop: 0,
-  });
-  const [layoutVersion, setLayoutVersion] = useState(0);
-
-  const messageIndexById = useMemo(
-    () => new Map(messages.map((message, index) => [message.id, index])),
-    [messages],
-  );
-  const messageHeights = useMemo(
-    () =>
-      messages.map(
-        (message) =>
-          messageHeightsRef.current[message.id] ?? estimateConversationMessageHeight(message),
-      ),
-    [layoutVersion, messages],
-  );
-  const layout = useMemo(
-    () => buildVirtualizedMessageLayout(messageHeights),
-    [messageHeights],
-  );
-  const activeViewport = scrollContainerRef.current;
-  const viewportHeight =
-    activeViewport?.clientHeight && activeViewport.clientHeight > 0
-      ? activeViewport.clientHeight
-      : viewport.height;
-  const viewportScrollTop = activeViewport ? activeViewport.scrollTop : viewport.scrollTop;
-  const visibleRange = useMemo(
-    () =>
-      findVirtualizedMessageRange(
-        layout.tops,
-        messageHeights,
-        viewportScrollTop,
-        viewportHeight,
-        VIRTUALIZED_MESSAGE_OVERSCAN_PX,
-      ),
-    [layout.tops, messageHeights, viewportHeight, viewportScrollTop],
-  );
-
-  useEffect(() => {
-    visibleRangeRef.current = visibleRange;
-  }, [visibleRange]);
-
-  useEffect(() => {
-    messageHeightsRef.current = Object.fromEntries(
-      messages
-        .filter((message) => messageHeightsRef.current[message.id] !== undefined)
-        .map((message) => [message.id, messageHeightsRef.current[message.id] as number]),
-    );
-  }, [messages]);
-
-  useLayoutEffect(() => {
-    const node = scrollContainerRef.current;
-    if (!node) {
-      return;
-    }
-
-    const syncViewport = () => {
-      const nextState = {
-        height: node.clientHeight > 0 ? node.clientHeight : DEFAULT_VIRTUALIZED_VIEWPORT_HEIGHT,
-        scrollTop: node.scrollTop,
-      };
-
-      setViewport((current) =>
-        current.height === nextState.height && current.scrollTop === nextState.scrollTop
-          ? current
-          : nextState,
-      );
-    };
-
-    syncViewport();
-    node.addEventListener("scroll", syncViewport, { passive: true });
-    const resizeObserver = new ResizeObserver(syncViewport);
-    resizeObserver.observe(node);
-
-    return () => {
-      node.removeEventListener("scroll", syncViewport);
-      resizeObserver.disconnect();
-    };
-  }, [scrollContainerRef, sessionId]);
-
-  function handleHeightChange(messageId: string, nextHeight: number) {
-    if (!Number.isFinite(nextHeight) || nextHeight <= 0) {
-      return;
-    }
-
-    const previousHeight =
-      messageHeightsRef.current[messageId] ?? estimateConversationMessageHeight(messages[messageIndexById.get(messageId) ?? 0]);
-    if (Math.abs(previousHeight - nextHeight) < 1) {
-      return;
-    }
-
-    messageHeightsRef.current[messageId] = nextHeight;
-
-    const messageIndex = messageIndexById.get(messageId);
-    const node = scrollContainerRef.current;
-    if (
-      node &&
-      messageIndex !== undefined &&
-      messageIndex < visibleRangeRef.current.startIndex
-    ) {
-      node.scrollTop += nextHeight - previousHeight;
-    }
-
-    setLayoutVersion((current) => current + 1);
-  }
-
-  return (
-    <div className="virtualized-message-list" style={{ height: layout.totalHeight }}>
-      {messages
-        .slice(visibleRange.startIndex, visibleRange.endIndex)
-        .map((message, visibleIndex) => {
-          const messageIndex = visibleRange.startIndex + visibleIndex;
-          return (
-            <MeasuredMessageCard
-              key={message.id}
-              message={message}
-              preferImmediateHeavyRender={messageIndex >= messages.length - 2}
-              top={layout.tops[messageIndex] ?? 0}
-              onApprovalDecision={(messageId, decision) => onApprovalDecision(sessionId, messageId, decision)}
-              onHeightChange={handleHeightChange}
-            />
-          );
-        })}
-    </div>
-  );
-}
-
-function MeasuredMessageCard({
-  message,
-  preferImmediateHeavyRender,
-  onApprovalDecision,
-  onHeightChange,
-  top,
-}: {
-  message: Message;
-  preferImmediateHeavyRender: boolean;
-  onApprovalDecision: (messageId: string, decision: ApprovalDecision) => void;
-  onHeightChange: (messageId: string, nextHeight: number) => void;
-  top: number;
-}) {
-  const slotRef = useRef<HTMLDivElement | null>(null);
-
-  useLayoutEffect(() => {
-    const node = slotRef.current;
-    if (!node) {
-      return;
-    }
-
-    let frameId = 0;
-    const measure = () => {
-      frameId = 0;
-      onHeightChange(message.id, node.getBoundingClientRect().height);
-    };
-
-    measure();
-    const resizeObserver = new ResizeObserver(() => {
-      if (frameId !== 0) {
-        return;
-      }
-
-      frameId = window.requestAnimationFrame(measure);
-    });
-    resizeObserver.observe(node);
-
-    return () => {
-      resizeObserver.disconnect();
-      if (frameId !== 0) {
-        window.cancelAnimationFrame(frameId);
-      }
-    };
-  }, [message, onHeightChange]);
-
-  return (
-    <div ref={slotRef} className="virtualized-message-slot" style={{ top }}>
-      <MessageCard
-        message={message}
-        preferImmediateHeavyRender={preferImmediateHeavyRender}
-        onApprovalDecision={onApprovalDecision}
-      />
-    </div>
-  );
-}
-
-const SessionComposer = memo(function SessionComposer({
-  paneId,
-  session,
-  committedDraft,
-  draftAttachments,
-  isSending,
-  isStopping,
-  isSessionBusy,
-  showNewResponseIndicator,
-  onScrollToLatest,
-  onDraftCommit,
-  onDraftAttachmentRemove,
-  onComposerError,
-  onSend,
-  onStopSession,
-  onPaste,
-}: {
-  paneId: string;
-  session: Session | null;
-  committedDraft: string;
-  draftAttachments: DraftImageAttachment[];
-  isSending: boolean;
-  isStopping: boolean;
-  isSessionBusy: boolean;
-  showNewResponseIndicator: boolean;
-  onScrollToLatest: () => void;
-  onDraftCommit: (sessionId: string, nextValue: string) => void;
-  onDraftAttachmentRemove: (sessionId: string, attachmentId: string) => void;
-  onComposerError: (message: string | null) => void;
-  onSend: (sessionId: string, draftText?: string) => void;
-  onStopSession: (sessionId: string) => void;
-  onPaste: (event: ReactClipboardEvent<HTMLTextAreaElement>) => void;
-}) {
-  const composerInputRef = useRef<HTMLTextAreaElement | null>(null);
-  const localDraftsRef = useRef<Record<string, string>>({});
-  const committedDraftsRef = useRef<Record<string, string>>({});
-  const [localDraftsBySessionId, setLocalDraftsBySessionId] = useState<Record<string, string>>({});
-  const [promptHistoryStateBySessionId, setPromptHistoryStateBySessionId] = useState<
-    Record<string, PromptHistoryState | undefined>
-  >({});
-
-  const activeSessionId = session?.id ?? null;
-  const composerDraft =
-    activeSessionId === null
-      ? ""
-      : (localDraftsBySessionId[activeSessionId] ?? committedDraft);
-  const composerInputDisabled = !session || isStopping;
-  const composerSendDisabled = !session || isSending || isStopping;
-
-  function resizeComposerInput() {
-    const textarea = composerInputRef.current;
-    if (!textarea) {
-      return;
-    }
-
-    const computedStyle = window.getComputedStyle(textarea);
-    const minHeight = parseFloat(computedStyle.minHeight) || 0;
-    const borderHeight =
-      (parseFloat(computedStyle.borderTopWidth) || 0) + (parseFloat(computedStyle.borderBottomWidth) || 0);
-    const panelElement = textarea.closest(".workspace-pane");
-    const panelSlotElement =
-      panelElement instanceof HTMLElement && panelElement.parentElement instanceof HTMLElement
-        ? panelElement.parentElement
-        : null;
-    const availablePanelHeight =
-      panelSlotElement?.clientHeight ?? (panelElement instanceof HTMLElement ? panelElement.clientHeight : 0);
-    const maxHeight = Math.max(
-      minHeight,
-      availablePanelHeight > 0 ? availablePanelHeight * 0.4 : Number.POSITIVE_INFINITY,
-    );
-
-    textarea.style.height = "0px";
-
-    const contentHeight = textarea.scrollHeight + borderHeight;
-    const nextHeight = Math.min(Math.max(contentHeight, minHeight), maxHeight);
-    textarea.style.height = `${nextHeight}px`;
-    textarea.style.overflowY = contentHeight > maxHeight + 1 ? "auto" : "hidden";
-  }
-
-  useLayoutEffect(() => {
-    resizeComposerInput();
-  }, [activeSessionId, composerDraft]);
-
-  useEffect(() => {
-    localDraftsRef.current = localDraftsBySessionId;
-  }, [localDraftsBySessionId]);
-
-  useEffect(() => {
-    const textarea = composerInputRef.current;
-    if (!textarea || typeof ResizeObserver === "undefined") {
-      return;
-    }
-
-    const panelElement = textarea.closest(".workspace-pane");
-    const panelSlotElement =
-      panelElement instanceof HTMLElement && panelElement.parentElement instanceof HTMLElement
-        ? panelElement.parentElement
-        : null;
-    let previousWidth = textarea.getBoundingClientRect().width;
-    let previousAvailablePanelHeight =
-      panelSlotElement?.clientHeight ?? (panelElement instanceof HTMLElement ? panelElement.clientHeight : 0);
-    const resizeObserver = new ResizeObserver((entries) => {
-      const nextWidth =
-        entries.find((entry) => entry.target === textarea)?.contentRect.width ??
-        textarea.getBoundingClientRect().width;
-      const nextAvailablePanelHeight =
-        panelSlotElement?.clientHeight ?? (panelElement instanceof HTMLElement ? panelElement.clientHeight : 0);
-      const widthChanged = Math.abs(nextWidth - previousWidth) >= 1;
-      const panelHeightChanged =
-        Math.abs(nextAvailablePanelHeight - previousAvailablePanelHeight) >= 1;
-
-      if (!widthChanged && !panelHeightChanged) {
-        return;
-      }
-
-      previousWidth = nextWidth;
-      previousAvailablePanelHeight = nextAvailablePanelHeight;
-      resizeComposerInput();
-    });
-
-    resizeObserver.observe(textarea);
-    if (panelSlotElement instanceof HTMLElement) {
-      resizeObserver.observe(panelSlotElement);
-    } else if (panelElement instanceof HTMLElement) {
-      resizeObserver.observe(panelElement);
-    }
-
-    return () => {
-      resizeObserver.disconnect();
-    };
-  }, [activeSessionId]);
-
-  useEffect(() => {
-    if (!activeSessionId) {
-      return;
-    }
-
-    const previousCommitted = committedDraftsRef.current[activeSessionId];
-    const localDraft = localDraftsRef.current[activeSessionId];
-
-    committedDraftsRef.current[activeSessionId] = committedDraft;
-
-    if (localDraft !== undefined && localDraft !== previousCommitted) {
-      return;
-    }
-
-    setLocalDraftsBySessionId((current) => {
-      if ((current[activeSessionId] ?? "") === committedDraft) {
-        return current;
-      }
-
-      return {
-        ...current,
-        [activeSessionId]: committedDraft,
-      };
-    });
-  }, [activeSessionId, committedDraft]);
-
-  useEffect(() => {
-    if (!activeSessionId) {
-      return;
-    }
-
-    return () => {
-      const latestDraft = localDraftsRef.current[activeSessionId];
-      const committed = committedDraftsRef.current[activeSessionId] ?? "";
-      if (latestDraft !== undefined && latestDraft !== committed) {
-        committedDraftsRef.current[activeSessionId] = latestDraft;
-        onDraftCommit(activeSessionId, latestDraft);
-      }
-    };
-  }, [activeSessionId, onDraftCommit]);
-
-  function resetPromptHistory(sessionId: string) {
-    setPromptHistoryStateBySessionId((current) => {
-      if (!current[sessionId]) {
-        return current;
-      }
-
-      const nextState = { ...current };
-      delete nextState[sessionId];
-      return nextState;
-    });
-  }
-
-  function updateLocalDraft(sessionId: string, nextValue: string) {
-    localDraftsRef.current = {
-      ...localDraftsRef.current,
-      [sessionId]: nextValue,
-    };
-
-    setLocalDraftsBySessionId((current) => {
-      if ((current[sessionId] ?? "") === nextValue) {
-        return current;
-      }
-
-      return {
-        ...current,
-        [sessionId]: nextValue,
-      };
-    });
-  }
-
-  function commitDraft(sessionId: string, nextValue: string) {
-    committedDraftsRef.current[sessionId] = nextValue;
-    onDraftCommit(sessionId, nextValue);
-  }
-
-  function handleComposerChange(nextValue: string) {
-    if (!activeSessionId) {
-      return;
-    }
-
-    resetPromptHistory(activeSessionId);
-    updateLocalDraft(activeSessionId, nextValue);
-  }
-
-  function handleComposerBlur() {
-    if (!activeSessionId) {
-      return;
-    }
-
-    commitDraft(activeSessionId, composerDraft);
-  }
-
-  function handleComposerSend() {
-    if (!session) {
-      return;
-    }
-
-    const draftToSend = composerDraft;
-    resetPromptHistory(session.id);
-    updateLocalDraft(session.id, "");
-    commitDraft(session.id, "");
-    onSend(session.id, draftToSend);
-    window.requestAnimationFrame(() => {
-      composerInputRef.current?.focus();
-    });
-  }
-
-  function handleComposerKeyDown(event: ReactKeyboardEvent<HTMLTextAreaElement>) {
-    if (!session) {
-      return;
-    }
-
-    if (event.key === "Enter" && !event.shiftKey) {
-      event.preventDefault();
-      handleComposerSend();
-      return;
-    }
-
-    if (event.key !== "ArrowUp" && event.key !== "ArrowDown") {
-      return;
-    }
-
-    if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) {
-      return;
-    }
-
-    const textarea = event.currentTarget;
-    if (textarea.selectionStart !== 0 || textarea.selectionEnd !== 0) {
-      return;
-    }
-
-    const promptHistory = collectUserPromptHistory(session);
-    if (promptHistory.length === 0) {
-      return;
-    }
-
-    const historyState = promptHistoryStateBySessionId[session.id];
-    if (event.key === "ArrowDown" && !historyState) {
-      return;
-    }
-
-    event.preventDefault();
-
-    if (event.key === "ArrowUp") {
-      const nextIndex = historyState ? Math.max(historyState.index - 1, 0) : promptHistory.length - 1;
-      const draftSnapshot = historyState?.draft ?? composerDraft;
-
-      setPromptHistoryStateBySessionId((current) => ({
-        ...current,
-        [session.id]: {
-          index: nextIndex,
-          draft: draftSnapshot,
-        },
-      }));
-      updateLocalDraft(session.id, promptHistory[nextIndex]);
-    } else {
-      const currentHistoryState = historyState;
-      if (!currentHistoryState) {
-        return;
-      }
-
-      if (currentHistoryState.index >= promptHistory.length - 1) {
-        resetPromptHistory(session.id);
-        updateLocalDraft(session.id, currentHistoryState.draft);
-      } else {
-        const nextIndex = currentHistoryState.index + 1;
-        setPromptHistoryStateBySessionId((current) => ({
-          ...current,
-          [session.id]: {
-            index: nextIndex,
-            draft: currentHistoryState.draft,
-          },
-        }));
-        updateLocalDraft(session.id, promptHistory[nextIndex]);
-      }
-    }
-
-    window.requestAnimationFrame(() => {
-      textarea.setSelectionRange(0, 0);
-    });
-  }
-
-  return (
-    <footer className="composer">
-      {showNewResponseIndicator ? (
-        <button className="new-response-indicator" type="button" onClick={onScrollToLatest}>
-          New response
-        </button>
-      ) : null}
-      {draftAttachments.length > 0 ? (
-        <div className="composer-attachments" aria-label="Draft image attachments">
-          {draftAttachments.map((attachment) => (
-            <article key={attachment.id} className="composer-attachment-card">
-              <img
-                className="composer-attachment-preview"
-                src={attachment.previewUrl}
-                alt={attachment.fileName}
-              />
-              <div className="composer-attachment-copy">
-                <strong className="composer-attachment-name">{attachment.fileName}</strong>
-                <span className="composer-attachment-meta">
-                  {formatByteSize(attachment.byteSize)} · {attachment.mediaType}
-                </span>
-              </div>
-              <button
-                className="composer-attachment-remove"
-                type="button"
-                onClick={() => session && onDraftAttachmentRemove(session.id, attachment.id)}
-                aria-label={`Remove ${attachment.fileName}`}
-                disabled={composerInputDisabled}
-              >
-                Remove
-              </button>
-            </article>
-          ))}
-        </div>
-      ) : null}
-      <div className="composer-row">
-        <textarea
-          id={`prompt-${paneId}`}
-          ref={composerInputRef}
-          className="composer-input"
-          aria-label={session ? `Message ${session.name}` : "Message session"}
-          value={composerDraft}
-          onChange={(event) => handleComposerChange(event.target.value)}
-          onBlur={handleComposerBlur}
-          disabled={composerInputDisabled}
-          onKeyDown={handleComposerKeyDown}
-          onPaste={onPaste}
-          placeholder={session ? `Send a prompt to ${session.agent}...` : "Open a session..."}
-          rows={1}
-        />
-        <div className="composer-actions">
-          {session && (isSessionBusy || isStopping) ? (
-            <button
-              className="ghost-button composer-stop-button"
-              type="button"
-              onClick={() => onStopSession(session.id)}
-              disabled={isStopping}
-            >
-              {isStopping ? "Stopping..." : "Stop"}
-            </button>
-          ) : null}
-          <button
-            className="send-button"
-            type="button"
-            onMouseDown={(event) => {
-              event.preventDefault();
-            }}
-            onClick={handleComposerSend}
-            disabled={composerSendDisabled}
-          >
-            {isSending ? (isSessionBusy ? "Queueing..." : "Sending...") : isSessionBusy ? "Queue" : "Send"}
-          </button>
-        </div>
-      </div>
-    </footer>
-  );
-}, (previous, next) =>
-  previous.paneId === next.paneId &&
-  previous.session === next.session &&
-  previous.committedDraft === next.committedDraft &&
-  previous.draftAttachments === next.draftAttachments &&
-  previous.isSending === next.isSending &&
-  previous.isStopping === next.isStopping &&
-  previous.isSessionBusy === next.isSessionBusy &&
-  previous.showNewResponseIndicator === next.showNewResponseIndicator
-);
 
 function EmptyState({ title, body }: { title: string; body: string }) {
   return (
@@ -4155,214 +3219,6 @@ function ClaudePromptSettingsCard({
   );
 }
 
-function RunningIndicator({
-  agent,
-  lastPrompt,
-}: {
-  agent: Session["agent"];
-  lastPrompt: string | null;
-}) {
-  const tooltipId = useId();
-
-  return (
-    <article
-      className={`activity-card activity-card-live ${lastPrompt ? "has-tooltip" : ""}`}
-      role="status"
-      aria-live="polite"
-      aria-describedby={lastPrompt ? tooltipId : undefined}
-      tabIndex={lastPrompt ? 0 : undefined}
-    >
-      <div className="activity-spinner" aria-hidden="true" />
-      <div>
-        <div className="card-label">Live turn</div>
-        <h3>{agent} is working</h3>
-        <p>Waiting for the next chunk of output...</p>
-      </div>
-      {lastPrompt ? (
-        <div id={tooltipId} className="activity-tooltip" role="tooltip">
-          <div className="activity-tooltip-label">Last prompt</div>
-          <p>{lastPrompt}</p>
-        </div>
-      ) : null}
-    </article>
-  );
-}
-
-function CodexTabStatusTooltip({
-  codexState,
-  id,
-  session,
-}: {
-  codexState: CodexState;
-  id: string;
-  session: Session;
-}) {
-  const rateLimits = codexState.rateLimits;
-
-  return (
-    <div id={id} className="pane-tab-status-tooltip" role="tooltip">
-      <div className="pane-tab-status-header">
-        <div className="activity-tooltip-label">Status</div>
-        {rateLimits?.planType ? (
-          <span className="pane-tab-status-plan">{rateLimits.planType}</span>
-        ) : null}
-      </div>
-      <div className="pane-tab-status-grid">
-        {session.externalSessionId ? (
-          <>
-            <div className="pane-tab-status-key">Session:</div>
-            <div className="pane-tab-status-value pane-tab-status-mono">
-              {session.externalSessionId}
-            </div>
-          </>
-        ) : null}
-        {rateLimits?.primary ? (
-          <>
-            <div className="pane-tab-status-key">5h limit:</div>
-            <div className="pane-tab-status-value">
-              <CodexRateLimitMeter label="5h limit" window={rateLimits.primary} />
-            </div>
-          </>
-        ) : null}
-        {rateLimits?.secondary ? (
-          <>
-            <div className="pane-tab-status-key">7d limit:</div>
-            <div className="pane-tab-status-value">
-              <CodexRateLimitMeter label="7d limit" window={rateLimits.secondary} />
-            </div>
-          </>
-        ) : null}
-      </div>
-    </div>
-  );
-}
-
-function CodexRateLimitMeter({
-  label,
-  window,
-}: {
-  label: string;
-  window: CodexRateLimitWindow;
-}) {
-  const usedPercent = clamp(Math.round(window.usedPercent ?? 0), 0, 100);
-  const remainingPercent = clamp(100 - usedPercent, 0, 100);
-  const resetsLabel = formatRateLimitResetLabel(window.resetsAt ?? null, label);
-
-  return (
-    <div className="codex-limit-row">
-      <div className="codex-limit-bar" aria-hidden="true">
-        <div className="codex-limit-bar-fill" style={{ width: `${remainingPercent}%` }} />
-        <div className="codex-limit-bar-used" style={{ width: `${usedPercent}%` }} />
-      </div>
-      <div className="codex-limit-meta">
-        <strong>{remainingPercent}% left</strong>
-        {resetsLabel ? <span>({resetsLabel})</span> : null}
-      </div>
-    </div>
-  );
-}
-
-function SourcePane({
-  candidatePaths,
-  fileState,
-  sourceDraft,
-  sourcePath,
-  onDraftChange,
-  onOpenPath,
-}: {
-  candidatePaths: string[];
-  fileState: {
-    status: "idle" | "loading" | "ready" | "error";
-    path: string;
-    content: string;
-    error: string | null;
-    language: string | null;
-  };
-  sourceDraft: string;
-  sourcePath: string | null;
-  onDraftChange: (nextValue: string) => void;
-  onOpenPath: (path: string) => void;
-}) {
-  return (
-    <div className="source-pane">
-      <div className="source-toolbar">
-        <div className="source-path-row">
-          <input
-            className="source-path-input"
-            type="text"
-            value={sourceDraft}
-            onChange={(event) => onDraftChange(event.target.value)}
-            placeholder="/absolute/path/to/file.rs"
-          />
-          <button
-            className="ghost-button"
-            type="button"
-            onClick={() => onOpenPath(sourceDraft.trim())}
-            disabled={!sourceDraft.trim()}
-          >
-            Open
-          </button>
-        </div>
-
-        {candidatePaths.length > 0 ? (
-          <div className="source-chip-row">
-            {candidatePaths.map((path) => (
-              <button
-                key={path}
-                className={`chip source-chip ${path === sourcePath ? "selected" : ""}`}
-                type="button"
-                onClick={() => onOpenPath(path)}
-              >
-                {path}
-              </button>
-            ))}
-          </div>
-        ) : null}
-      </div>
-
-      {fileState.status === "idle" ? (
-        <EmptyState
-          title="No source file selected"
-          body="Pick a touched file above or enter a path manually to open the source in this tile."
-        />
-      ) : null}
-
-      {fileState.status === "loading" ? (
-        <article className="activity-card">
-          <div className="activity-spinner" aria-hidden="true" />
-          <div>
-            <div className="card-label">Source</div>
-            <h3>Loading file</h3>
-            <p>{fileState.path}</p>
-          </div>
-        </article>
-      ) : null}
-
-      {fileState.status === "error" ? (
-        <article className="thread-notice">
-          <div className="card-label">Source</div>
-          <p>{fileState.error}</p>
-        </article>
-      ) : null}
-
-      {fileState.status === "ready" ? (
-        <article className="message-card source-file-card">
-          <div className="message-meta">
-            <span>Source</span>
-            <span>{fileState.path}</span>
-          </div>
-          <DeferredHighlightedCodeBlock
-            className="code-block source-code-block"
-            code={fileState.content}
-            language={fileState.language}
-            pathHint={fileState.path}
-          />
-        </article>
-      ) : null}
-    </div>
-  );
-}
-
 const MessageCard = memo(function MessageCard({
   message,
   preferImmediateHeavyRender = false,
@@ -4418,39 +3274,6 @@ const MessageCard = memo(function MessageCard({
   previous.message === next.message &&
   previous.preferImmediateHeavyRender === next.preferImmediateHeavyRender
 );
-
-const PendingPromptCard = memo(function PendingPromptCard({
-  prompt,
-  onCancel,
-}: {
-  prompt: PendingPrompt;
-  onCancel: () => void;
-}) {
-  return (
-    <article className="message-card bubble bubble-you pending-prompt-card">
-      <div className="pending-prompt-header">
-        <MessageMeta author="you" timestamp={prompt.timestamp} />
-        <button
-          className="pending-prompt-dismiss"
-          type="button"
-          onClick={onCancel}
-          aria-label="Cancel queued prompt"
-          title="Cancel queued prompt"
-        >
-          ×
-        </button>
-      </div>
-      {prompt.attachments && prompt.attachments.length > 0 ? (
-        <MessageAttachmentList attachments={prompt.attachments} />
-      ) : null}
-      {prompt.text ? (
-        <p className="plain-text-copy">{prompt.text}</p>
-      ) : (
-        <p className="support-copy">{imageAttachmentSummaryLabel(prompt.attachments?.length ?? 0)}</p>
-      )}
-    </article>
-  );
-}, (previous, next) => previous.prompt === next.prompt);
 
 function ConnectionRetryCard({
   message,
@@ -5151,7 +3974,24 @@ function labelForPaneViewMode(viewMode: PaneViewMode) {
       return "Diffs";
     case "source":
       return "Source";
+    case "filesystem":
+      return "Files";
+    case "gitStatus":
+      return "Git status";
   }
+}
+
+function isHexColorDark(value: string) {
+  const hex = value.trim().replace(/^#/, "");
+  if (hex.length !== 6) {
+    return false;
+  }
+
+  const red = Number.parseInt(hex.slice(0, 2), 16);
+  const green = Number.parseInt(hex.slice(2, 4), 16);
+  const blue = Number.parseInt(hex.slice(4, 6), 16);
+  const luminance = (red * 299 + green * 587 + blue * 114) / 1000;
+  return luminance < 148;
 }
 
 function mapCommandStatus(status: CommandMessage["status"]): Session["status"] {
@@ -5235,84 +4075,6 @@ function buildConversationListSignature(items: SessionConversationItem[]) {
   ].join("|");
 }
 
-function buildVirtualizedMessageLayout(itemHeights: number[]) {
-  const tops = new Array<number>(itemHeights.length);
-  let offset = 0;
-
-  for (let index = 0; index < itemHeights.length; index += 1) {
-    tops[index] = offset;
-    offset += itemHeights[index] + VIRTUALIZED_MESSAGE_GAP_PX;
-  }
-
-  return {
-    tops,
-    totalHeight: Math.max(offset - VIRTUALIZED_MESSAGE_GAP_PX, 0),
-  };
-}
-
-function findVirtualizedMessageRange(
-  tops: number[],
-  itemHeights: number[],
-  scrollTop: number,
-  viewportHeight: number,
-  overscan: number,
-) {
-  if (itemHeights.length === 0) {
-    return {
-      startIndex: 0,
-      endIndex: 0,
-    };
-  }
-
-  const startBoundary = Math.max(scrollTop - overscan, 0);
-  const endBoundary = scrollTop + Math.max(viewportHeight, DEFAULT_VIRTUALIZED_VIEWPORT_HEIGHT) + overscan;
-
-  let startIndex = 0;
-  while (
-    startIndex < itemHeights.length - 1 &&
-    tops[startIndex] + itemHeights[startIndex] < startBoundary
-  ) {
-    startIndex += 1;
-  }
-
-  let endIndex = startIndex;
-  while (endIndex < itemHeights.length && tops[endIndex] < endBoundary) {
-    endIndex += 1;
-  }
-
-  return {
-    startIndex,
-    endIndex: Math.max(startIndex + 1, endIndex),
-  };
-}
-
-function estimateConversationMessageHeight(message: Message) {
-  switch (message.type) {
-    case "text": {
-      const lineCount = measureTextBlock(message.text).lineCount;
-      const attachmentHeight = (message.attachments?.length ?? 0) * 54;
-      return Math.min(1800, Math.max(92, 78 + lineCount * 24 + attachmentHeight));
-    }
-    case "thinking":
-      return Math.min(900, Math.max(140, 112 + message.lines.length * 28));
-    case "command": {
-      const commandLineCount = measureTextBlock(message.command).lineCount;
-      const outputLineCount = message.output ? measureTextBlock(message.output).lineCount : 3;
-      return Math.min(1400, Math.max(180, 152 + commandLineCount * 22 + Math.min(outputLineCount, 14) * 20));
-    }
-    case "diff": {
-      const diffLineCount = measureTextBlock(message.diff).lineCount;
-      return Math.min(1500, Math.max(180, 156 + Math.min(diffLineCount, 20) * 20));
-    }
-    case "markdown": {
-      const markdownLineCount = measureTextBlock(message.markdown).lineCount;
-      return Math.min(1600, Math.max(140, 124 + markdownLineCount * 24));
-    }
-    case "approval":
-      return Math.max(220, 188 + measureTextBlock(message.detail).lineCount * 22);
-  }
-}
-
 function messageChangeMarker(message: Message) {
   switch (message.type) {
     case "text":
@@ -5334,47 +4096,12 @@ function pendingPromptChangeMarker(prompt: PendingPrompt) {
   return `${prompt.text.length}:${prompt.attachments?.length ?? 0}`;
 }
 
-function formatRateLimitResetLabel(resetsAt: number | null, label: string) {
-  if (!resetsAt) {
-    return null;
-  }
-
-  const date = new Date(resetsAt * 1000);
-  if (Number.isNaN(date.getTime())) {
-    return null;
-  }
-
-  const formatter =
-    label === "5h limit"
-      ? new Intl.DateTimeFormat(undefined, {
-          hour: "numeric",
-          minute: "2-digit",
-        })
-      : new Intl.DateTimeFormat(undefined, {
-          month: "short",
-          day: "numeric",
-        });
-
-  return `resets ${formatter.format(date)}`;
-}
-
 function collectCandidateSourcePaths(session: Session) {
   const paths = session.messages
     .filter((message): message is DiffMessage => message.type === "diff")
     .map((message) => message.filePath);
 
   return Array.from(new Set(paths));
-}
-
-function collectUserPromptHistory(session: Session) {
-  return session.messages.flatMap((message) => {
-    if (message.type !== "text" || message.author !== "you") {
-      return [];
-    }
-
-    const prompt = message.text.trim();
-    return prompt ? [prompt] : [];
-  });
 }
 
 function findLastUserPrompt(session: Session) {
@@ -5616,4 +4343,3 @@ function dropLabelForPlacement(placement: TabDropPlacement) {
       return "Bottom";
   }
 }
-

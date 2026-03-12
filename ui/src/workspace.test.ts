@@ -1,16 +1,21 @@
 import type { Session } from "./types";
 import {
-  addSessionToPane,
-  closeSessionTab,
+  addWorkspaceTabToPane,
+  closeWorkspaceTab,
   createPane,
   getSplitRatio,
+  openFilesystemInWorkspaceState,
+  openGitStatusInWorkspaceState,
   openSessionInWorkspaceState,
-  placeDraggedSession,
+  openSourceInWorkspaceState,
+  placeDraggedTab,
   reconcileWorkspaceState,
+  setPaneSourcePath,
   splitPane,
   updateSplitRatio,
   type WorkspacePane,
   type WorkspaceState,
+  type WorkspaceTab,
 } from "./workspace";
 
 function makeSession(id: string): Session {
@@ -27,17 +32,68 @@ function makeSession(id: string): Session {
   };
 }
 
+function makeSessionTab(id: string, sessionId: string): WorkspaceTab {
+  return {
+    id,
+    kind: "session",
+    sessionId,
+  };
+}
+
+function makeSourceTab(id: string, path: string | null, originSessionId: string | null): WorkspaceTab {
+  return {
+    id,
+    kind: "source",
+    path,
+    originSessionId,
+  };
+}
+
+function makeFilesystemTab(
+  id: string,
+  rootPath: string | null,
+  originSessionId: string | null,
+): WorkspaceTab {
+  return {
+    id,
+    kind: "filesystem",
+    rootPath,
+    originSessionId,
+  };
+}
+
+function makeGitStatusTab(
+  id: string,
+  workdir: string | null,
+  originSessionId: string | null,
+): WorkspaceTab {
+  return {
+    id,
+    kind: "gitStatus",
+    workdir,
+    originSessionId,
+  };
+}
+
 function makePane(
   id: string,
-  sessionIds: string[],
-  activeSessionId: string | null = sessionIds[0] ?? null,
+  tabs: WorkspaceTab[],
+  options?: {
+    activeTabId?: string | null;
+    activeSessionId?: string | null;
+    viewMode?: WorkspacePane["viewMode"];
+    lastSessionViewMode?: WorkspacePane["lastSessionViewMode"];
+    sourcePath?: string | null;
+  },
 ): WorkspacePane {
   return {
     id,
-    sessionIds,
-    activeSessionId,
-    viewMode: "session",
-    sourcePath: null,
+    tabs,
+    activeTabId: options?.activeTabId ?? tabs[0]?.id ?? null,
+    activeSessionId: options?.activeSessionId ?? firstSessionId(tabs),
+    viewMode: options?.viewMode ?? "session",
+    lastSessionViewMode: options?.lastSessionViewMode ?? "session",
+    sourcePath: options?.sourcePath ?? null,
   };
 }
 
@@ -77,11 +133,22 @@ function makeSplitWorkspace(
   };
 }
 
+function firstSessionId(tabs: WorkspaceTab[]) {
+  for (const tab of tabs) {
+    if (tab.kind === "session") {
+      return tab.sessionId;
+    }
+  }
+
+  return null;
+}
+
 describe("workspace helpers", () => {
   it("createPane returns an empty pane by default", () => {
     const pane = createPane();
 
-    expect(pane.sessionIds).toEqual([]);
+    expect(pane.tabs).toEqual([]);
+    expect(pane.activeTabId).toBeNull();
     expect(pane.activeSessionId).toBeNull();
     expect(pane.viewMode).toBe("session");
     expect(pane.sourcePath).toBeNull();
@@ -101,7 +168,12 @@ describe("workspace helpers", () => {
     );
 
     expect(next.panes).toHaveLength(1);
-    expect(next.panes[0].sessionIds).toEqual(["session-a"]);
+    expect(next.panes[0].tabs).toEqual([
+      expect.objectContaining({
+        kind: "session",
+        sessionId: "session-a",
+      }),
+    ]);
     expect(next.panes[0].activeSessionId).toBe("session-a");
     expect(next.activePaneId).toBe(next.panes[0].id);
     expect(next.root).toEqual({
@@ -110,9 +182,9 @@ describe("workspace helpers", () => {
     });
   });
 
-  it("openSessionInWorkspaceState focuses the existing pane instead of duplicating the session", () => {
-    const paneA = makePane("pane-a", ["session-a"]);
-    const paneB = makePane("pane-b", ["session-b"]);
+  it("openSessionInWorkspaceState focuses the existing session tab instead of duplicating it", () => {
+    const paneA = makePane("pane-a", [makeSessionTab("tab-a", "session-a")]);
+    const paneB = makePane("pane-b", [makeSessionTab("tab-b", "session-b")]);
 
     const next = openSessionInWorkspaceState(
       makeSplitWorkspace(paneA, paneB, paneB.id),
@@ -121,42 +193,214 @@ describe("workspace helpers", () => {
     );
 
     expect(next.activePaneId).toBe("pane-a");
-    expect(next.panes.find((pane) => pane.id === "pane-a")?.sessionIds).toEqual(["session-a"]);
-    expect(next.panes.find((pane) => pane.id === "pane-b")?.sessionIds).toEqual(["session-b"]);
+    expect(next.panes.find((pane) => pane.id === "pane-a")?.activeTabId).toBe("tab-a");
+    expect(next.panes.find((pane) => pane.id === "pane-b")?.tabs).toEqual([makeSessionTab("tab-b", "session-b")]);
   });
 
-  it("addSessionToPane appends and activates without duplicating", () => {
-    const next = addSessionToPane(makeSinglePaneWorkspace(makePane("pane-a", ["session-a"])), "pane-a", "session-b");
-    const deduped = addSessionToPane(next, "pane-a", "session-b");
+  it("addWorkspaceTabToPane appends and activates without duplicating by tab id", () => {
+    const initial = makeSinglePaneWorkspace(makePane("pane-a", [makeSessionTab("tab-a", "session-a")]));
+    const next = addWorkspaceTabToPane(initial, "pane-a", makeSessionTab("tab-b", "session-b"));
+    const deduped = addWorkspaceTabToPane(next, "pane-a", next.panes[0].tabs[1]);
 
-    expect(next.panes[0].sessionIds).toEqual(["session-a", "session-b"]);
+    expect(next.panes[0].tabs.map((tab) => tab.id)).toEqual(["tab-a", "tab-b"]);
     expect(next.panes[0].activeSessionId).toBe("session-b");
-    expect(deduped.panes[0].sessionIds).toEqual(["session-a", "session-b"]);
+    expect(deduped.panes[0].tabs.map((tab) => tab.id)).toEqual(["tab-a", "tab-b"]);
   });
 
-  it("closeSessionTab removes a session and selects the next tab", () => {
-    const next = closeSessionTab(
-      makeSinglePaneWorkspace(makePane("pane-a", ["session-a", "session-b"], "session-a")),
+  it("closeWorkspaceTab removes a tab and selects the next one", () => {
+    const next = closeWorkspaceTab(
+      makeSinglePaneWorkspace(
+        makePane("pane-a", [makeSessionTab("tab-a", "session-a"), makeSessionTab("tab-b", "session-b")], {
+          activeTabId: "tab-a",
+          activeSessionId: "session-a",
+        }),
+      ),
       "pane-a",
-      "session-a",
+      "tab-a",
     );
 
-    expect(next.panes[0].sessionIds).toEqual(["session-b"]);
+    expect(next.panes[0].tabs.map((tab) => tab.id)).toEqual(["tab-b"]);
+    expect(next.panes[0].activeTabId).toBe("tab-b");
     expect(next.panes[0].activeSessionId).toBe("session-b");
     expect(next.activePaneId).toBe("pane-a");
   });
 
-  it("closeSessionTab removes the pane when its last session closes", () => {
-    const next = closeSessionTab(makeSinglePaneWorkspace(makePane("pane-a", ["session-a"])), "pane-a", "session-a");
+  it("closeWorkspaceTab removes the pane when its last tab closes", () => {
+    const next = closeWorkspaceTab(
+      makeSinglePaneWorkspace(makePane("pane-a", [makeSessionTab("tab-a", "session-a")])),
+      "pane-a",
+      "tab-a",
+    );
 
     expect(next.root).toBeNull();
     expect(next.panes).toEqual([]);
     expect(next.activePaneId).toBeNull();
   });
 
+  it("openSourceInWorkspaceState creates a source tab and switches the pane to source mode", () => {
+    const next = openSourceInWorkspaceState(
+      makeSinglePaneWorkspace(makePane("pane-a", [makeSessionTab("tab-a", "session-a")])),
+      "/tmp/app.ts",
+      "pane-a",
+      "session-a",
+    );
+
+    expect(next.panes[0].tabs).toHaveLength(2);
+    expect(next.panes[0].tabs[1]).toEqual({
+      id: expect.any(String),
+      kind: "source",
+      path: "/tmp/app.ts",
+      originSessionId: "session-a",
+    });
+    expect(next.panes[0].viewMode).toBe("source");
+    expect(next.panes[0].sourcePath).toBe("/tmp/app.ts");
+    expect(next.panes[0].activeSessionId).toBe("session-a");
+  });
+
+  it("openSourceInWorkspaceState focuses an existing source tab for the same path", () => {
+    const paneA = makePane("pane-a", [makeSourceTab("source-a", "/tmp/app.ts", "session-a")], {
+      activeTabId: "source-a",
+      activeSessionId: "session-a",
+      viewMode: "source",
+      sourcePath: "/tmp/app.ts",
+    });
+    const paneB = makePane("pane-b", [makeSessionTab("tab-b", "session-b")]);
+
+    const next = openSourceInWorkspaceState(
+      makeSplitWorkspace(paneA, paneB, paneB.id),
+      "/tmp/app.ts",
+      paneB.id,
+      "session-b",
+    );
+
+    expect(next.activePaneId).toBe("pane-a");
+    expect(next.panes.find((pane) => pane.id === "pane-a")?.activeTabId).toBe("source-a");
+  });
+
+  it("openFilesystemInWorkspaceState creates a filesystem tab and switches the pane mode", () => {
+    const next = openFilesystemInWorkspaceState(
+      makeSinglePaneWorkspace(makePane("pane-a", [makeSessionTab("tab-a", "session-a")])),
+      "/tmp/project",
+      "pane-a",
+      "session-a",
+    );
+
+    expect(next.panes[0].tabs).toHaveLength(2);
+    expect(next.panes[0].tabs[1]).toEqual({
+      id: expect.any(String),
+      kind: "filesystem",
+      rootPath: "/tmp/project",
+      originSessionId: "session-a",
+    });
+    expect(next.panes[0].viewMode).toBe("filesystem");
+    expect(next.panes[0].activeSessionId).toBe("session-a");
+  });
+
+  it("openFilesystemInWorkspaceState focuses an existing filesystem tab for the same root", () => {
+    const paneA = makePane("pane-a", [makeFilesystemTab("fs-a", "/tmp/project", "session-a")], {
+      activeTabId: "fs-a",
+      activeSessionId: "session-a",
+      viewMode: "filesystem",
+    });
+    const paneB = makePane("pane-b", [makeSessionTab("tab-b", "session-b")]);
+
+    const next = openFilesystemInWorkspaceState(
+      makeSplitWorkspace(paneA, paneB, paneB.id),
+      "/tmp/project",
+      paneB.id,
+      "session-b",
+    );
+
+    expect(next.activePaneId).toBe("pane-a");
+    expect(next.panes.find((pane) => pane.id === "pane-a")?.activeTabId).toBe("fs-a");
+  });
+
+  it("openGitStatusInWorkspaceState creates a git status tab and switches the pane mode", () => {
+    const next = openGitStatusInWorkspaceState(
+      makeSinglePaneWorkspace(makePane("pane-a", [makeSessionTab("tab-a", "session-a")])),
+      "/tmp/project",
+      "pane-a",
+      "session-a",
+    );
+
+    expect(next.panes[0].tabs).toHaveLength(2);
+    expect(next.panes[0].tabs[1]).toEqual({
+      id: expect.any(String),
+      kind: "gitStatus",
+      workdir: "/tmp/project",
+      originSessionId: "session-a",
+    });
+    expect(next.panes[0].viewMode).toBe("gitStatus");
+    expect(next.panes[0].activeSessionId).toBe("session-a");
+  });
+
+  it("openGitStatusInWorkspaceState focuses an existing git status tab for the same workdir", () => {
+    const paneA = makePane("pane-a", [makeGitStatusTab("git-a", "/tmp/project", "session-a")], {
+      activeTabId: "git-a",
+      activeSessionId: "session-a",
+      viewMode: "gitStatus",
+    });
+    const paneB = makePane("pane-b", [makeSessionTab("tab-b", "session-b")]);
+
+    const next = openGitStatusInWorkspaceState(
+      makeSplitWorkspace(paneA, paneB, paneB.id),
+      "/tmp/project",
+      paneB.id,
+      "session-b",
+    );
+
+    expect(next.activePaneId).toBe("pane-a");
+    expect(next.panes.find((pane) => pane.id === "pane-a")?.activeTabId).toBe("git-a");
+  });
+
+  it("setPaneSourcePath updates the active source tab path", () => {
+    const workspace = makeSinglePaneWorkspace(
+      makePane("pane-a", [makeSourceTab("source-a", null, "session-a")], {
+        activeTabId: "source-a",
+        activeSessionId: "session-a",
+        viewMode: "source",
+      }),
+    );
+
+    const next = setPaneSourcePath(workspace, "pane-a", "/tmp/next.ts");
+    const sourceTab = next.panes[0].tabs[0];
+
+    expect(sourceTab).toEqual({
+      id: "source-a",
+      kind: "source",
+      path: "/tmp/next.ts",
+      originSessionId: "session-a",
+    });
+    expect(next.panes[0].sourcePath).toBe("/tmp/next.ts");
+  });
+
+  it("setPaneSourcePath focuses an existing source tab for the same path instead of duplicating it", () => {
+    const workspace = makeSinglePaneWorkspace(
+      makePane(
+        "pane-a",
+        [makeSourceTab("source-a", "/tmp/app.ts", "session-a"), makeSourceTab("source-b", null, "session-a")],
+        {
+          activeTabId: "source-b",
+          activeSessionId: "session-a",
+          viewMode: "source",
+        },
+      ),
+    );
+
+    const next = setPaneSourcePath(workspace, "pane-a", "/tmp/app.ts");
+
+    expect(next.panes[0].activeTabId).toBe("source-a");
+    expect(next.panes[0].sourcePath).toBe("/tmp/app.ts");
+  });
+
   it("splitPane creates an adjacent pane and moves the active tab into it", () => {
     const next = splitPane(
-      makeSinglePaneWorkspace(makePane("pane-a", ["session-a", "session-b"], "session-b")),
+      makeSinglePaneWorkspace(
+        makePane("pane-a", [makeSessionTab("tab-a", "session-a"), makeSessionTab("tab-b", "session-b")], {
+          activeTabId: "tab-b",
+          activeSessionId: "session-b",
+        }),
+      ),
       "pane-a",
       "row",
     );
@@ -164,11 +408,11 @@ describe("workspace helpers", () => {
     expect(next.panes).toHaveLength(2);
     expect(next.activePaneId).not.toBe("pane-a");
     expect(next.panes.find((pane) => pane.id === "pane-a")).toMatchObject({
-      sessionIds: ["session-a"],
+      tabs: [makeSessionTab("tab-a", "session-a")],
       activeSessionId: "session-a",
     });
     expect(next.panes.find((pane) => pane.id !== "pane-a")).toMatchObject({
-      sessionIds: ["session-b"],
+      tabs: [makeSessionTab("tab-b", "session-b")],
       activeSessionId: "session-b",
     });
     expect(next.root).toMatchObject({
@@ -181,50 +425,14 @@ describe("workspace helpers", () => {
     });
   });
 
-  it("placeDraggedSession moves a tab between panes without creating duplicates", () => {
-    const next = placeDraggedSession(
-      makeSplitWorkspace(makePane("pane-a", ["session-a"]), makePane("pane-b", ["session-b", "session-a"])),
+  it("placeDraggedTab moves a tab between panes without creating duplicates", () => {
+    const next = placeDraggedTab(
+      makeSplitWorkspace(
+        makePane("pane-a", [makeSessionTab("tab-a", "session-a")]),
+        makePane("pane-b", [makeSessionTab("tab-b", "session-b"), makeSessionTab("tab-c", "session-c")]),
+      ),
       "pane-a",
-      "session-a",
-      "pane-b",
-      "tabs",
-    );
-
-    expect(next.panes).toHaveLength(1);
-    expect(next.activePaneId).toBe("pane-b");
-    expect(next.panes[0]).toMatchObject({
-      id: "pane-b",
-      sessionIds: ["session-b", "session-a"],
-      activeSessionId: "session-a",
-    });
-    expect(next.root).toEqual({
-      type: "pane",
-      paneId: "pane-b",
-    });
-  });
-
-  it("placeDraggedSession reorders tabs within a pane when dropped at a specific index", () => {
-    const next = placeDraggedSession(
-      makeSinglePaneWorkspace(makePane("pane-a", ["session-a", "session-b", "session-c"])),
-      "pane-a",
-      "session-a",
-      "pane-a",
-      "tabs",
-      3,
-    );
-
-    expect(next.panes[0]).toMatchObject({
-      id: "pane-a",
-      sessionIds: ["session-b", "session-c", "session-a"],
-      activeSessionId: "session-a",
-    });
-  });
-
-  it("placeDraggedSession inserts a dragged tab into the requested position in another pane", () => {
-    const next = placeDraggedSession(
-      makeSplitWorkspace(makePane("pane-a", ["session-a"]), makePane("pane-b", ["session-b", "session-c"])),
-      "pane-a",
-      "session-a",
+      "tab-a",
       "pane-b",
       "tabs",
       1,
@@ -233,26 +441,44 @@ describe("workspace helpers", () => {
     expect(next.activePaneId).toBe("pane-b");
     expect(next.panes[0]).toMatchObject({
       id: "pane-b",
-      sessionIds: ["session-b", "session-a", "session-c"],
+      tabs: [makeSessionTab("tab-b", "session-b"), makeSessionTab("tab-a", "session-a"), makeSessionTab("tab-c", "session-c")],
       activeSessionId: "session-a",
     });
   });
 
   it("updateSplitRatio changes the selected split ratio and getSplitRatio reads it back", () => {
-    const workspace = makeSplitWorkspace(makePane("pane-a", ["session-a"]), makePane("pane-b", ["session-b"]));
+    const workspace = makeSplitWorkspace(
+      makePane("pane-a", [makeSessionTab("tab-a", "session-a")]),
+      makePane("pane-b", [makeSessionTab("tab-b", "session-b")]),
+    );
 
     const next = updateSplitRatio(workspace, "split-1", 0.75);
 
     expect(getSplitRatio(next.root, "split-1")).toBe(0.75);
   });
 
-  it("reconcileWorkspaceState prunes missing sessions and recreates an initial pane when needed", () => {
+  it("reconcileWorkspaceState prunes missing session tabs, keeps source tabs, and recreates an initial pane when needed", () => {
     const pruned = reconcileWorkspaceState(
-      makeSinglePaneWorkspace(makePane("pane-a", ["session-a", "session-b"], "session-b")),
+      makeSinglePaneWorkspace(
+        makePane(
+          "pane-a",
+          [makeSessionTab("tab-a", "session-a"), makeSessionTab("tab-b", "session-b"), makeSourceTab("source-a", "/tmp/a.ts", "session-b")],
+          {
+            activeTabId: "source-a",
+            activeSessionId: "session-b",
+            viewMode: "source",
+            sourcePath: "/tmp/a.ts",
+          },
+        ),
+      ),
       [makeSession("session-a")],
     );
 
-    expect(pruned.panes[0].sessionIds).toEqual(["session-a"]);
+    expect(pruned.panes[0].tabs).toEqual([
+      makeSessionTab("tab-a", "session-a"),
+      makeSourceTab("source-a", "/tmp/a.ts", null),
+    ]);
+    expect(pruned.panes[0].activeTabId).toBe("source-a");
     expect(pruned.panes[0].activeSessionId).toBe("session-a");
 
     const rebuilt = reconcileWorkspaceState(
@@ -265,7 +491,12 @@ describe("workspace helpers", () => {
     );
 
     expect(rebuilt.panes).toHaveLength(1);
-    expect(rebuilt.panes[0].sessionIds).toEqual(["session-c"]);
+    expect(rebuilt.panes[0].tabs).toEqual([
+      expect.objectContaining({
+        kind: "session",
+        sessionId: "session-c",
+      }),
+    ]);
     expect(rebuilt.root).toEqual({
       type: "pane",
       paneId: rebuilt.panes[0].id,

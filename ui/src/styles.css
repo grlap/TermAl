@@ -1975,9 +1975,24 @@ textarea {
   gap: 0.75rem;
 }
 
+.source-editor-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.source-editor-status,
+.source-editor-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem;
+}
+
 .source-path-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) auto auto;
   gap: 0.75rem;
 }
 
@@ -2014,8 +2029,136 @@ textarea {
   max-width: 100%;
 }
 
+.source-editor-shell {
+  margin-top: 0.85rem;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 1rem;
+}
+
+.source-editor-loading {
+  display: grid;
+  place-items: center;
+  min-height: 24rem;
+  color: var(--muted);
+  background: var(--surface-white);
+}
+
+.monaco-code-editor {
+  min-height: 24rem;
+}
+
+.monaco-code-editor .monaco-editor,
+.monaco-code-editor .monaco-editor .overflow-guard {
+  border-radius: 1rem;
+}
+
+.source-editor-hint {
+  margin-top: 0.75rem;
+}
+
 .source-code-block {
   min-height: 18rem;
+}
+
+.filesystem-card,
+.git-status-card {
+  max-width: 100%;
+}
+
+.filesystem-tree {
+  display: grid;
+  gap: 0.3rem;
+  margin-top: 0.5rem;
+}
+
+.filesystem-node {
+  display: grid;
+  gap: 0.3rem;
+}
+
+.filesystem-row,
+.git-status-row {
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 0.95rem;
+  background: var(--surface-white);
+  color: var(--ink);
+  text-align: left;
+}
+
+.filesystem-row {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  padding: 0.65rem 0.8rem;
+}
+
+.filesystem-row:hover,
+.git-status-row:hover {
+  border-color: var(--accent-blue-border);
+  background: color-mix(in srgb, var(--surface-white) 88%, var(--accent-blue-bg));
+}
+
+.filesystem-toggle {
+  width: 0.9rem;
+  color: var(--muted);
+  text-align: center;
+  flex-shrink: 0;
+}
+
+.filesystem-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.filesystem-children {
+  display: grid;
+  gap: 0.3rem;
+  padding-left: 1rem;
+  border-left: 1px solid var(--line);
+  margin-left: 0.45rem;
+}
+
+.git-status-list {
+  display: grid;
+  gap: 0.55rem;
+  margin-top: 0.75rem;
+}
+
+.git-status-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 0.85rem;
+  align-items: start;
+  padding: 0.75rem 0.85rem;
+}
+
+.git-status-code {
+  font-family: var(--code-font);
+  font-size: 0.82rem;
+  color: var(--muted);
+}
+
+.git-status-path-group {
+  display: grid;
+  gap: 0.2rem;
+  min-width: 0;
+}
+
+.git-status-path,
+.git-status-old-path {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.git-status-old-path {
+  color: var(--muted);
+  font-size: 0.82rem;
 }
 
 .command-text {

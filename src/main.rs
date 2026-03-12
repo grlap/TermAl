@@ -62,7 +62,9 @@ async fn run_server() -> Result<()> {
     let state = AppState::new(cwd.clone())?;
     let app = Router::new()
         .route("/api/health", get(health))
-        .route("/api/file", get(read_file))
+        .route("/api/file", get(read_file).put(write_file))
+        .route("/api/fs", get(read_directory))
+        .route("/api/git/status", get(read_git_status))
         .route("/api/state", get(get_state))
         .route("/api/events", get(state_events))
         .route("/api/sessions", post(create_session))
@@ -5438,6 +5440,205 @@ async fn read_file(Query(query): Query<FileQuery>) -> Result<Json<FileResponse>,
     }))
 }
 
+async fn write_file(Json(request): Json<WriteFileRequest>) -> Result<Json<FileResponse>, ApiError> {
+    let resolved_path = resolve_requested_path(&request.path)?;
+    if let Some(parent) = resolved_path.parent() {
+        fs::create_dir_all(parent).map_err(|err| {
+            ApiError::internal(format!(
+                "failed to create parent directory for {}: {err}",
+                resolved_path.display()
+            ))
+        })?;
+    }
+
+    fs::write(&resolved_path, request.content.as_bytes()).map_err(|err| {
+        ApiError::internal(format!("failed to write file {}: {err}", resolved_path.display()))
+    })?;
+
+    Ok(Json(FileResponse {
+        path: resolved_path.to_string_lossy().into_owned(),
+        content: request.content,
+        language: infer_language_from_path(&resolved_path).map(str::to_owned),
+    }))
+}
+
+async fn read_directory(Query(query): Query<FileQuery>) -> Result<Json<DirectoryResponse>, ApiError> {
+    let resolved_path = resolve_requested_path(&query.path)?;
+    let metadata = fs::metadata(&resolved_path).map_err(|err| match err.kind() {
+        io::ErrorKind::NotFound => {
+            ApiError::bad_request(format!("path not found: {}", resolved_path.display()))
+        }
+        _ => ApiError::internal(format!(
+            "failed to stat path {}: {err}",
+            resolved_path.display()
+        )),
+    })?;
+
+    if !metadata.is_dir() {
+        return Err(ApiError::bad_request(format!(
+            "path is not a directory: {}",
+            resolved_path.display()
+        )));
+    }
+
+    let mut entries = fs::read_dir(&resolved_path)
+        .map_err(|err| {
+            ApiError::internal(format!(
+                "failed to read directory {}: {err}",
+                resolved_path.display()
+            ))
+        })?
+        .map(|entry| {
+            let entry = entry.map_err(|err| {
+                ApiError::internal(format!(
+                    "failed to read directory entry in {}: {err}",
+                    resolved_path.display()
+                ))
+            })?;
+            let path = entry.path();
+            let metadata = entry.metadata().map_err(|err| {
+                ApiError::internal(format!(
+                    "failed to stat directory entry {}: {err}",
+                    path.display()
+                ))
+            })?;
+            let name = entry.file_name().to_string_lossy().into_owned();
+
+            Ok(DirectoryEntry {
+                kind: if metadata.is_dir() {
+                    FileSystemEntryKind::Directory
+                } else {
+                    FileSystemEntryKind::File
+                },
+                name,
+                path: path.to_string_lossy().into_owned(),
+            })
+        })
+        .collect::<Result<Vec<_>, ApiError>>()?;
+
+    entries.sort_by(|left, right| {
+        let kind_order = match (&left.kind, &right.kind) {
+            (FileSystemEntryKind::Directory, FileSystemEntryKind::File) => std::cmp::Ordering::Less,
+            (FileSystemEntryKind::File, FileSystemEntryKind::Directory) => std::cmp::Ordering::Greater,
+            _ => std::cmp::Ordering::Equal,
+        };
+
+        if kind_order == std::cmp::Ordering::Equal {
+            left.name
+                .to_ascii_lowercase()
+                .cmp(&right.name.to_ascii_lowercase())
+        } else {
+            kind_order
+        }
+    });
+
+    Ok(Json(DirectoryResponse {
+        name: resolved_path
+            .file_name()
+            .and_then(|value| value.to_str())
+            .map(str::to_owned)
+            .unwrap_or_else(|| resolved_path.to_string_lossy().into_owned()),
+        path: resolved_path.to_string_lossy().into_owned(),
+        entries,
+    }))
+}
+
+async fn read_git_status(Query(query): Query<FileQuery>) -> Result<Json<GitStatusResponse>, ApiError> {
+    let workdir = resolve_requested_path(&query.path)?;
+    let workdir = if workdir.is_dir() {
+        workdir
+    } else {
+        workdir
+            .parent()
+            .map(FsPath::to_path_buf)
+            .ok_or_else(|| ApiError::bad_request("cannot inspect git status for a root file path"))?
+    };
+
+    let Some(repo_root) = resolve_git_repo_root(&workdir)? else {
+        return Ok(Json(GitStatusResponse {
+            ahead: 0,
+            behind: 0,
+            branch: None,
+            files: Vec::new(),
+            is_clean: true,
+            repo_root: None,
+            upstream: None,
+            workdir: workdir.to_string_lossy().into_owned(),
+        }));
+    };
+
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(&repo_root)
+        .args(["status", "--porcelain=v1", "--branch", "-uall"])
+        .output()
+        .map_err(|err| ApiError::internal(format!("failed to run git status: {err}")))?;
+
+    if !output.status.success() {
+        return Err(ApiError::internal(format!(
+            "git status failed: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        )));
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let mut branch = None;
+    let mut upstream = None;
+    let mut ahead = 0;
+    let mut behind = 0;
+    let mut files = Vec::new();
+
+    for line in stdout.lines() {
+        if let Some(branch_info) = line.strip_prefix("## ") {
+            let parsed = parse_git_branch_status(branch_info);
+            branch = parsed.branch;
+            upstream = parsed.upstream;
+            ahead = parsed.ahead;
+            behind = parsed.behind;
+            continue;
+        }
+
+        if line.len() < 3 {
+            continue;
+        }
+
+        let status = &line[..2];
+        let path_payload = line[3..].trim();
+        let (original_path, path) = match path_payload.split_once(" -> ") {
+            Some((from, to)) => (Some(from.trim().to_owned()), to.trim().to_owned()),
+            None => (None, path_payload.to_owned()),
+        };
+        let index_status = status
+            .chars()
+            .next()
+            .and_then(normalize_git_status_code);
+        let worktree_status = status
+            .chars()
+            .nth(1)
+            .and_then(normalize_git_status_code);
+
+        files.push(GitStatusFile {
+            index_status,
+            original_path,
+            path,
+            worktree_status,
+        });
+    }
+
+    let is_clean = files.is_empty();
+
+    Ok(Json(GitStatusResponse {
+        ahead,
+        behind,
+        branch,
+        files,
+        is_clean,
+        repo_root: Some(repo_root.to_string_lossy().into_owned()),
+        upstream,
+        workdir: workdir.to_string_lossy().into_owned(),
+    }))
+}
+
 async fn state_events(
     State(state): State<AppState>,
 ) -> Sse<impl futures_core::Stream<Item = std::result::Result<Event, Infallible>>> {
@@ -5899,12 +6100,69 @@ struct FileQuery {
     path: String,
 }
 
+#[derive(Deserialize)]
+struct WriteFileRequest {
+    path: String,
+    content: String,
+}
+
 #[derive(Serialize)]
 struct FileResponse {
     path: String,
     content: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     language: Option<String>,
+}
+
+#[derive(Clone, Copy, Serialize)]
+#[serde(rename_all = "camelCase")]
+enum FileSystemEntryKind {
+    Directory,
+    File,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DirectoryEntry {
+    kind: FileSystemEntryKind,
+    name: String,
+    path: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DirectoryResponse {
+    entries: Vec<DirectoryEntry>,
+    name: String,
+    path: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct GitStatusFile {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    index_status: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    original_path: Option<String>,
+    path: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    worktree_status: Option<String>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct GitStatusResponse {
+    ahead: usize,
+    behind: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    branch: Option<String>,
+    files: Vec<GitStatusFile>,
+    is_clean: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    repo_root: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    upstream: Option<String>,
+    workdir: String,
 }
 
 #[derive(Serialize)]
@@ -6029,6 +6287,85 @@ fn resolve_requested_path(path: &str) -> Result<PathBuf, ApiError> {
     };
 
     Ok(resolved)
+}
+
+struct ParsedGitBranchStatus {
+    ahead: usize,
+    behind: usize,
+    branch: Option<String>,
+    upstream: Option<String>,
+}
+
+fn resolve_git_repo_root(workdir: &FsPath) -> Result<Option<PathBuf>, ApiError> {
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(workdir)
+        .args(["rev-parse", "--show-toplevel"])
+        .output()
+        .map_err(|err| ApiError::internal(format!("failed to run git rev-parse: {err}")))?;
+
+    if output.status.success() {
+        let repo_root = String::from_utf8_lossy(&output.stdout).trim().to_owned();
+        return Ok((!repo_root.is_empty()).then(|| PathBuf::from(repo_root)));
+    }
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let trimmed = stderr.trim();
+    if trimmed.contains("not a git repository") {
+        return Ok(None);
+    }
+
+    Err(ApiError::internal(format!("git rev-parse failed: {trimmed}")))
+}
+
+fn parse_git_branch_status(line: &str) -> ParsedGitBranchStatus {
+    let mut branch = None;
+    let mut upstream = None;
+    let mut ahead = 0;
+    let mut behind = 0;
+
+    let (head_segment, counts_segment) = match line.split_once(" [") {
+        Some((head, counts)) => (head, Some(counts.trim_end_matches(']'))),
+        None => (line, None),
+    };
+
+    if let Some((local_branch, upstream_branch)) = head_segment.split_once("...") {
+        branch = Some(local_branch.trim().to_owned());
+        let upstream_name = upstream_branch.trim();
+        if !upstream_name.is_empty() {
+            upstream = Some(upstream_name.to_owned());
+        }
+    } else {
+        let trimmed = head_segment.trim();
+        if !trimmed.is_empty() {
+            branch = Some(trimmed.to_owned());
+        }
+    }
+
+    if let Some(counts_segment) = counts_segment {
+        for item in counts_segment.split(',') {
+            let trimmed = item.trim();
+            if let Some(value) = trimmed.strip_prefix("ahead ") {
+                ahead = value.parse::<usize>().unwrap_or(0);
+            } else if let Some(value) = trimmed.strip_prefix("behind ") {
+                behind = value.parse::<usize>().unwrap_or(0);
+            }
+        }
+    }
+
+    ParsedGitBranchStatus {
+        ahead,
+        behind,
+        branch,
+        upstream,
+    }
+}
+
+fn normalize_git_status_code(code: char) -> Option<String> {
+    match code {
+        ' ' => None,
+        other => Some(other.to_string()),
+    }
 }
 
 #[cfg(test)]

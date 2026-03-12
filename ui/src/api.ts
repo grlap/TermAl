@@ -20,6 +20,36 @@ export type FileResponse = {
   language?: string | null;
 };
 
+export type DirectoryEntry = {
+  kind: "directory" | "file";
+  name: string;
+  path: string;
+};
+
+export type DirectoryResponse = {
+  entries: DirectoryEntry[];
+  name: string;
+  path: string;
+};
+
+export type GitStatusFile = {
+  indexStatus?: string | null;
+  originalPath?: string | null;
+  path: string;
+  worktreeStatus?: string | null;
+};
+
+export type GitStatusResponse = {
+  ahead: number;
+  behind: number;
+  branch?: string | null;
+  files: GitStatusFile[];
+  isClean: boolean;
+  repoRoot?: string | null;
+  upstream?: string | null;
+  workdir: string;
+};
+
 type CreateSessionRequest = {
   agent?: AgentType;
   name?: string;
@@ -118,6 +148,21 @@ export function stopSession(sessionId: string) {
 
 export function fetchFile(path: string) {
   return request<FileResponse>(`/api/file?path=${encodeURIComponent(path)}`);
+}
+
+export function saveFile(path: string, content: string) {
+  return request<FileResponse>("/api/file", {
+    method: "PUT",
+    body: JSON.stringify({ path, content }),
+  });
+}
+
+export function fetchDirectory(path: string) {
+  return request<DirectoryResponse>(`/api/fs?path=${encodeURIComponent(path)}`);
+}
+
+export function fetchGitStatus(path: string) {
+  return request<GitStatusResponse>(`/api/git/status?path=${encodeURIComponent(path)}`);
 }
 
 function extractError(raw: string, status: number) {
