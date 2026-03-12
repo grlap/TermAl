@@ -23,12 +23,19 @@ export type CodexState = {
   rateLimits?: CodexRateLimits | null;
 };
 
+export type Project = {
+  id: string;
+  name: string;
+  rootPath: string;
+};
+
 export type Session = {
   id: string;
   name: string;
   emoji: string;
   agent: AgentType;
   workdir: string;
+  projectId?: string | null;
   model: string;
   approvalPolicy?: ApprovalPolicy | null;
   sandboxMode?: SandboxMode | null;

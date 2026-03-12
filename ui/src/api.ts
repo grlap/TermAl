@@ -5,6 +5,7 @@ import type {
   ClaudeApprovalMode,
   CodexState,
   ImageAttachment,
+  Project,
   SandboxMode,
   Session,
 } from "./types";
@@ -12,12 +13,22 @@ import type {
 export type StateResponse = {
   revision: number;
   codex?: CodexState;
+  projects: Project[];
   sessions: Session[];
 };
 
 export type CreateSessionResponse = {
   sessionId: string;
   state: StateResponse;
+};
+
+export type CreateProjectResponse = {
+  projectId: string;
+  state: StateResponse;
+};
+
+export type PickProjectRootResponse = {
+  path?: string | null;
 };
 
 export type FileResponse = {
@@ -60,9 +71,15 @@ type CreateSessionRequest = {
   agent?: AgentType;
   name?: string;
   workdir?: string;
+  projectId?: string;
   approvalPolicy?: ApprovalPolicy;
   sandboxMode?: SandboxMode;
   claudeApprovalMode?: ClaudeApprovalMode;
+};
+
+type CreateProjectRequest = {
+  name?: string;
+  rootPath: string;
 };
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -98,6 +115,19 @@ export function createSession(payload: CreateSessionRequest) {
   return request<CreateSessionResponse>("/api/sessions", {
     method: "POST",
     body: JSON.stringify(payload),
+  });
+}
+
+export function createProject(payload: CreateProjectRequest) {
+  return request<CreateProjectResponse>("/api/projects", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function pickProjectRoot() {
+  return request<PickProjectRootResponse>("/api/projects/pick", {
+    method: "POST",
   });
 }
 

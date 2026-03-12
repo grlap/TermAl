@@ -20,10 +20,12 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import {
   cancelQueuedPrompt,
+  createProject,
   createSession,
   fetchFile,
   fetchState,
   killSession,
+  pickProjectRoot,
   saveFile,
   sendMessage,
   stopSession,
@@ -54,6 +56,7 @@ import type {
   MarkdownMessage,
   Message,
   PendingPrompt,
+  Project,
   SandboxMode,
   Session,
   TextMessage,
@@ -162,6 +165,7 @@ const PREFERENCES_TABS: ReadonlyArray<{ id: PreferencesTabId; label: string }> =
   { id: "codex-prompts", label: "Codex prompts" },
   { id: "claude-approvals", label: "Claude approvals" },
 ];
+const ALL_PROJECTS_FILTER_ID = "__all__";
 
 type ComboboxOption = {
   label: string;
@@ -169,6 +173,7 @@ type ComboboxOption = {
 };
 
 export default function App() {
+  const [projects, setProjects] = useState<Project[]>([]);
   const [sessions, setSessions] = useState<Session[]>([]);
   const [codexState, setCodexState] = useState<CodexState>({});
   const [workspace, setWorkspace] = useState<WorkspaceState>({
@@ -191,6 +196,9 @@ export default function App() {
   const [updatingSessionIds, setUpdatingSessionIds] = useState<SessionFlagMap>({});
   const [requestError, setRequestError] = useState<string | null>(null);
   const [sessionListFilter, setSessionListFilter] = useState<SessionListFilter>("all");
+  const [selectedProjectId, setSelectedProjectId] = useState<string>(ALL_PROJECTS_FILTER_ID);
+  const [newProjectRootPath, setNewProjectRootPath] = useState("");
+  const [isCreatingProject, setIsCreatingProject] = useState(false);
   const [themeId, setThemeId] = useState<ThemeId>(() => getStoredThemePreference());
   const [defaultCodexSandboxMode, setDefaultCodexSandboxMode] =
     useState<SandboxMode>("workspace-write");
@@ -228,8 +236,18 @@ export default function App() {
   >({});
   const paneContentSignaturesRef = useRef<Record<string, Record<string, string>>>({});
 
-  const sessionLookup = new Map(sessions.map((session) => [session.id, session]));
-  const paneLookup = new Map(workspace.panes.map((pane) => [pane.id, pane]));
+  const projectLookup = useMemo(
+    () => new Map(projects.map((project) => [project.id, project])),
+    [projects],
+  );
+  const sessionLookup = useMemo(
+    () => new Map(sessions.map((session) => [session.id, session])),
+    [sessions],
+  );
+  const paneLookup = useMemo(
+    () => new Map(workspace.panes.map((pane) => [pane.id, pane])),
+    [workspace.panes],
+  );
   const activePane =
     workspace.panes.find((pane) => pane.id === workspace.activePaneId) ?? workspace.panes[0] ?? null;
   const activeSession = activePane?.activeSessionId
@@ -244,10 +262,34 @@ export default function App() {
       ),
     [workspace.panes],
   );
-  const sessionFilterCounts = useMemo(() => countSessionsByFilter(sessions), [sessions]);
+  const selectedProject =
+    selectedProjectId === ALL_PROJECTS_FILTER_ID
+      ? null
+      : (projectLookup.get(selectedProjectId) ?? null);
+  const projectScopedSessions = useMemo(() => {
+    if (!selectedProject) {
+      return sessions;
+    }
+
+    return sessions.filter((session) => session.projectId === selectedProject.id);
+  }, [selectedProject, sessions]);
+  const sessionFilterCounts = useMemo(
+    () => countSessionsByFilter(projectScopedSessions),
+    [projectScopedSessions],
+  );
   const filteredSessions = useMemo(() => {
-    return filterSessionsByListFilter(sessions, sessionListFilter);
-  }, [sessionListFilter, sessions]);
+    return filterSessionsByListFilter(projectScopedSessions, sessionListFilter);
+  }, [projectScopedSessions, sessionListFilter]);
+  const projectSessionCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const session of sessions) {
+      if (!session.projectId) {
+        continue;
+      }
+      counts.set(session.projectId, (counts.get(session.projectId) ?? 0) + 1);
+    }
+    return counts;
+  }, [sessions]);
   const activeTheme = THEMES.find((theme) => theme.id === themeId) ?? THEMES[0];
   const editorAppearance: MonacoAppearance = isHexColorDark(activeTheme.swatches[0]) ? "dark" : "light";
   const activeDraggedTab = draggedTab ?? externalDraggedTab;
@@ -299,7 +341,12 @@ export default function App() {
 
     latestStateRevisionRef.current = nextState.revision;
     setCodexState(nextState.codex ?? {});
+    setProjects(nextState.projects ?? []);
     adoptSessions(nextState.sessions, options);
+    if (options?.openSessionId) {
+      const openedSession = nextState.sessions.find((session) => session.id === options.openSessionId);
+      setSelectedProjectId(openedSession?.projectId ?? ALL_PROJECTS_FILTER_ID);
+    }
     return true;
   }
 
@@ -426,6 +473,27 @@ export default function App() {
       eventSource.close();
     };
   }, []);
+
+  useEffect(() => {
+    setSelectedProjectId((current) => {
+      if (current === ALL_PROJECTS_FILTER_ID) {
+        return current;
+      }
+
+      if (projects.some((project) => project.id === current)) {
+        return current;
+      }
+
+      if (
+        activeSession?.projectId &&
+        projects.some((project) => project.id === activeSession.projectId)
+      ) {
+        return activeSession.projectId;
+      }
+
+      return projects[0]?.id ?? ALL_PROJECTS_FILTER_ID;
+    });
+  }, [activeSession?.projectId, projects]);
 
   useEffect(() => {
     if (activeSession) {
@@ -694,6 +762,10 @@ export default function App() {
   async function handleNewSession() {
     setIsCreating(true);
     try {
+      const targetProjectId =
+        selectedProjectId === ALL_PROJECTS_FILTER_ID
+          ? (activeSession?.projectId ?? projects[0]?.id ?? null)
+          : selectedProjectId;
       const created = await createSession({
         agent: newSessionAgent,
         approvalPolicy:
@@ -701,7 +773,8 @@ export default function App() {
         claudeApprovalMode:
           newSessionAgent === "Claude" ? defaultClaudeApprovalMode : undefined,
         sandboxMode: newSessionAgent === "Codex" ? defaultCodexSandboxMode : undefined,
-        workdir: activeSession?.workdir,
+        projectId: targetProjectId ?? undefined,
+        workdir: targetProjectId ? undefined : activeSession?.workdir,
       });
       const adopted = adoptState(created.state, {
         openSessionId: created.sessionId,
@@ -717,6 +790,42 @@ export default function App() {
       setRequestError(getErrorMessage(error));
     } finally {
       setIsCreating(false);
+    }
+  }
+
+  async function handleCreateProject() {
+    const rootPath = newProjectRootPath.trim();
+    if (!rootPath) {
+      setRequestError("Enter a project root path.");
+      return;
+    }
+
+    setIsCreatingProject(true);
+    try {
+      const created = await createProject({ rootPath });
+      adoptState(created.state);
+      setSelectedProjectId(created.projectId);
+      setNewProjectRootPath("");
+      setRequestError(null);
+    } catch (error) {
+      setRequestError(getErrorMessage(error));
+    } finally {
+      setIsCreatingProject(false);
+    }
+  }
+
+  async function handlePickProjectRoot() {
+    setIsCreatingProject(true);
+    try {
+      const response = await pickProjectRoot();
+      if (response.path) {
+        setNewProjectRootPath(response.path);
+        setRequestError(null);
+      }
+    } catch (error) {
+      setRequestError(getErrorMessage(error));
+    } finally {
+      setIsCreatingProject(false);
     }
   }
 
@@ -842,7 +951,9 @@ export default function App() {
   }
 
   function handleSidebarSessionClick(sessionId: string) {
+    const session = sessionLookup.get(sessionId);
     setKillRevealSessionId(null);
+    setSelectedProjectId(session?.projectId ?? ALL_PROJECTS_FILTER_ID);
     requestScrollToBottom(sessionId);
     setWorkspace((current) => openSessionInWorkspaceState(current, sessionId, current.activePaneId));
   }
@@ -1076,6 +1187,11 @@ export default function App() {
           <label className="session-control-label" htmlFor="new-session-agent">
             New session
           </label>
+          <p className="session-control-hint">
+            {selectedProject
+              ? `Creates in ${selectedProject.name}.`
+              : "Creates in the selected project or the active session workspace."}
+          </p>
           <div className="new-session-row">
             <ThemedCombobox
               id="new-session-agent"
@@ -1096,6 +1212,79 @@ export default function App() {
           </div>
         </div>
 
+        <section className="project-controls" aria-label="Projects">
+          <div className="project-controls-header">
+            <label className="session-control-label" htmlFor="new-project-root">
+              Projects
+            </label>
+            <span className="project-count-badge">{projects.length}</span>
+          </div>
+          <div className="project-create-row">
+            <input
+              id="new-project-root"
+              className="themed-input project-root-input"
+              type="text"
+              value={newProjectRootPath}
+              placeholder="/path/to/project"
+              onChange={(event) => setNewProjectRootPath(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") {
+                  event.preventDefault();
+                  void handleCreateProject();
+                }
+              }}
+              disabled={isCreatingProject}
+            />
+            <button
+              className="ghost-button project-create-button"
+              type="button"
+              onClick={() => void handlePickProjectRoot()}
+              disabled={isCreatingProject}
+            >
+              Choose Folder
+            </button>
+            <button
+              className="ghost-button project-create-button"
+              type="button"
+              onClick={() => void handleCreateProject()}
+              disabled={isCreatingProject}
+            >
+              {isCreatingProject ? "Adding..." : "Add"}
+            </button>
+          </div>
+          <div className="project-list" role="list">
+            <button
+              className={`project-row ${selectedProjectId === ALL_PROJECTS_FILTER_ID ? "selected" : ""}`}
+              type="button"
+              onClick={() => setSelectedProjectId(ALL_PROJECTS_FILTER_ID)}
+            >
+              <span className="project-row-copy">
+                <strong>All projects</strong>
+                <span className="project-row-path">Show every session in this window.</span>
+              </span>
+              <span className="project-row-count">{sessions.length}</span>
+            </button>
+            {projects.map((project) => {
+              const isSelected = project.id === selectedProjectId;
+
+              return (
+                <button
+                  key={project.id}
+                  className={`project-row ${isSelected ? "selected" : ""}`}
+                  type="button"
+                  onClick={() => setSelectedProjectId(project.id)}
+                >
+                  <span className="project-row-copy">
+                    <strong>{project.name}</strong>
+                    <span className="project-row-path">{project.rootPath}</span>
+                  </span>
+                  <span className="project-row-count">{projectSessionCounts.get(project.id) ?? 0}</span>
+                </button>
+              );
+            })}
+          </div>
+        </section>
+
         <button
           className="settings-launcher"
           type="button"
@@ -1115,6 +1304,12 @@ export default function App() {
         </button>
 
         <div className="session-list">
+          <div className="session-list-header">
+            <span className="session-control-label">Sessions</span>
+            <span className="session-list-scope">
+              {selectedProject ? selectedProject.name : "All projects"}
+            </span>
+          </div>
           {filteredSessions.length > 0 ? (
             filteredSessions.map((session) => {
               const isActive = session.id === activeSession?.id;
@@ -1183,7 +1378,11 @@ export default function App() {
             })
           ) : (
             <div className="session-filter-empty">
-              {sessions.length === 0 ? "No sessions yet." : "No sessions match this filter."}
+              {sessions.length === 0
+                ? "No sessions yet."
+                : selectedProject
+                  ? `No ${sessionListFilter === "all" ? "" : `${sessionListFilter} `}sessions in ${selectedProject.name}.`
+                  : "No sessions match this filter."}
             </div>
           )}
         </div>

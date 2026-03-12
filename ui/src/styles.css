@@ -38,6 +38,7 @@ textarea {
 .theme-panel,
 .theme-option,
 .settings-launcher,
+.project-row,
 .session-row,
 .pane-bar,
 .pane-view-button,
@@ -49,6 +50,7 @@ textarea {
 .ghost-button,
 .chip,
 .composer,
+.themed-input,
 .session-select,
 .source-path-input,
 .composer-input,
@@ -71,6 +73,94 @@ textarea {
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 0.7rem;
   align-items: center;
+}
+
+.project-controls {
+  display: grid;
+  gap: 0.7rem;
+}
+
+.project-controls-header,
+.session-list-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.8rem;
+}
+
+.project-count-badge,
+.session-list-scope {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 0.28rem 0.68rem;
+  border: 1px solid var(--line);
+  background: var(--surface-white-soft);
+  color: var(--muted);
+  font-size: 0.75rem;
+  white-space: nowrap;
+}
+
+.project-create-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 0.7rem;
+  align-items: center;
+}
+
+.project-create-button {
+  white-space: nowrap;
+}
+
+.project-list {
+  display: grid;
+  gap: 0.55rem;
+}
+
+.project-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.9rem;
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 1rem;
+  background: var(--surface-white-soft);
+  padding: 0.85rem 0.95rem;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.project-row:hover {
+  border-color: var(--accent-blue-border);
+  background: var(--surface-white);
+}
+
+.project-row.selected {
+  border-color: var(--accent-blue-border);
+  background: var(--surface-warm);
+  box-shadow: inset 0 0 0 1px var(--accent-blue-border);
+}
+
+.project-row-copy {
+  display: grid;
+  gap: 0.2rem;
+  min-width: 0;
+}
+
+.project-row-path {
+  color: var(--muted);
+  font-size: 0.8rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.project-row-count {
+  flex: none;
+  color: var(--muted);
+  font-size: 0.78rem;
 }
 
 .theme-panel {
@@ -1137,6 +1227,14 @@ textarea {
   padding-right: 0.2rem;
 }
 
+.session-list-header {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding-bottom: 0.1rem;
+  background: linear-gradient(180deg, var(--surface-white-soft) 70%, transparent);
+}
+
 .sidebar-status {
   display: grid;
   gap: 0.7rem;
@@ -1365,6 +1463,7 @@ textarea {
   color: var(--muted);
 }
 
+.themed-input,
 .session-select {
   width: 100%;
   border: 1px solid var(--line);
@@ -2769,6 +2868,7 @@ textarea {
 }
 
 .composer-input:focus,
+.themed-input:focus,
 .source-path-input:focus,
 .session-select:focus,
 .new-session-button:focus,
@@ -2779,6 +2879,7 @@ textarea {
 .pending-prompt-dismiss:focus,
 .composer-attachment-remove:focus,
 .session-row:focus,
+.project-row:focus,
 .session-row-status-button:focus,
 .pane-tab-scroll:focus,
 .pane-tab-shell:focus,
@@ -2809,6 +2910,7 @@ textarea {
 .ghost-button:disabled,
 .composer-attachment-remove:disabled,
 .composer-input:disabled,
+.themed-input:disabled,
 .session-select:disabled {
   cursor: not-allowed;
   opacity: 0.62;

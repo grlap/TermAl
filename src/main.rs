@@ -67,6 +67,8 @@ async fn run_server() -> Result<()> {
         .route("/api/git/status", get(read_git_status))
         .route("/api/state", get(get_state))
         .route("/api/events", get(state_events))
+        .route("/api/projects", post(create_project))
+        .route("/api/projects/pick", post(pick_project_root))
         .route("/api/sessions", post(create_session))
         .route("/api/sessions/{id}/settings", post(update_session_settings))
         .route("/api/sessions/{id}/messages", post(send_message))
@@ -200,15 +202,18 @@ impl AppState {
         let persistence_path = resolve_persistence_path(&default_workdir);
         let inner = load_state(&persistence_path)?.unwrap_or_else(|| {
             let mut inner = StateInner::new();
+            let default_project = inner.create_project(None, default_workdir.clone());
             inner.create_session(
                 Agent::Codex,
                 Some("Codex Live".to_owned()),
                 default_workdir.clone(),
+                Some(default_project.id.clone()),
             );
             inner.create_session(
                 Agent::Claude,
                 Some("Claude Live".to_owned()),
                 default_workdir.clone(),
+                Some(default_project.id.clone()),
             );
             inner
         });
@@ -232,14 +237,45 @@ impl AppState {
         Self::snapshot_from_inner(&inner)
     }
 
-    fn create_session(&self, request: CreateSessionRequest) -> Result<CreateSessionResponse> {
+    fn create_session(
+        &self,
+        request: CreateSessionRequest,
+    ) -> Result<CreateSessionResponse, ApiError> {
         let mut inner = self.inner.lock().expect("state mutex poisoned");
+        let requested_workdir = request
+            .workdir
+            .as_deref()
+            .map(resolve_session_workdir)
+            .transpose()?;
+        let project =
+            if let Some(project_id) = request.project_id.as_deref() {
+                Some(inner.find_project(project_id).cloned().ok_or_else(|| {
+                    ApiError::bad_request(format!("unknown project `{project_id}`"))
+                })?)
+            } else {
+                requested_workdir
+                    .as_deref()
+                    .and_then(|workdir| inner.find_project_for_workdir(workdir).cloned())
+            };
+        let workdir = requested_workdir.unwrap_or_else(|| {
+            project
+                .as_ref()
+                .map(|entry| entry.root_path.clone())
+                .unwrap_or_else(|| self.default_workdir.clone())
+        });
+        if let Some(project) = project.as_ref() {
+            if !path_contains(&project.root_path, FsPath::new(&workdir)) {
+                return Err(ApiError::bad_request(format!(
+                    "session workdir `{workdir}` must stay inside project `{}`",
+                    project.name
+                )));
+            }
+        }
         let mut record = inner.create_session(
             request.agent.unwrap_or(Agent::Codex),
             request.name,
-            request
-                .workdir
-                .unwrap_or_else(|| self.default_workdir.clone()),
+            workdir,
+            project.as_ref().map(|entry| entry.id.clone()),
         );
         if record.session.agent == Agent::Codex {
             if let Some(sandbox_mode) = request.sandbox_mode {
@@ -259,9 +295,28 @@ impl AppState {
         {
             *slot = record.clone();
         }
-        self.commit_locked(&mut inner)?;
+        self.commit_locked(&mut inner)
+            .map_err(|err| ApiError::internal(format!("failed to persist session: {err:#}")))?;
         Ok(CreateSessionResponse {
             session_id: record.session.id,
+            state: Self::snapshot_from_inner(&inner),
+        })
+    }
+
+    fn create_project(
+        &self,
+        request: CreateProjectRequest,
+    ) -> Result<CreateProjectResponse, ApiError> {
+        let mut inner = self.inner.lock().expect("state mutex poisoned");
+        let root_path = resolve_project_root_path(&request.root_path)?;
+        let existing_len = inner.projects.len();
+        let project = inner.create_project(request.name, root_path);
+        if inner.projects.len() != existing_len {
+            self.commit_locked(&mut inner)
+                .map_err(|err| ApiError::internal(format!("failed to persist project: {err:#}")))?;
+        }
+        Ok(CreateProjectResponse {
+            project_id: project.id,
             state: Self::snapshot_from_inner(&inner),
         })
     }
@@ -314,6 +369,7 @@ impl AppState {
         StateResponse {
             revision: inner.revision,
             codex: inner.codex.clone(),
+            projects: inner.projects.clone(),
             sessions: inner
                 .sessions
                 .iter()
@@ -1466,8 +1522,10 @@ fn codex_approval_result(kind: &CodexApprovalKind, decision: ApprovalDecision) -
 struct StateInner {
     codex: CodexState,
     revision: u64,
+    next_project_number: usize,
     next_session_number: usize,
     next_message_number: u64,
+    projects: Vec<Project>,
     sessions: Vec<SessionRecord>,
 }
 
@@ -1476,10 +1534,34 @@ impl StateInner {
         Self {
             codex: CodexState::default(),
             revision: 0,
+            next_project_number: 1,
             next_session_number: 1,
             next_message_number: 1,
+            projects: Vec::new(),
             sessions: Vec::new(),
         }
+    }
+
+    fn create_project(&mut self, name: Option<String>, root_path: String) -> Project {
+        if let Some(existing) = self
+            .projects
+            .iter()
+            .find(|project| project.root_path == root_path)
+            .cloned()
+        {
+            return existing;
+        }
+
+        let number = self.next_project_number;
+        self.next_project_number += 1;
+        let base_name = name.unwrap_or_else(|| default_project_name(&root_path));
+        let project = Project {
+            id: format!("project-{number}"),
+            name: dedupe_project_name(&self.projects, &base_name),
+            root_path,
+        };
+        self.projects.push(project.clone());
+        project
     }
 
     fn create_session(
@@ -1487,6 +1569,7 @@ impl StateInner {
         agent: Agent,
         name: Option<String>,
         workdir: String,
+        project_id: Option<String>,
     ) -> SessionRecord {
         let number = self.next_session_number;
         self.next_session_number += 1;
@@ -1507,6 +1590,7 @@ impl StateInner {
                 emoji: agent.avatar().to_owned(),
                 agent,
                 workdir,
+                project_id,
                 model: agent.model_label().to_owned(),
                 approval_policy: None,
                 sandbox_mode: None,
@@ -1541,6 +1625,56 @@ impl StateInner {
             .iter()
             .position(|record| record.session.id == session_id)
     }
+
+    fn find_project(&self, project_id: &str) -> Option<&Project> {
+        self.projects
+            .iter()
+            .find(|project| project.id == project_id)
+    }
+
+    fn find_project_for_workdir(&self, workdir: &str) -> Option<&Project> {
+        let target = FsPath::new(workdir);
+        self.projects
+            .iter()
+            .filter(|project| path_contains(&project.root_path, target))
+            .max_by_key(|project| project.root_path.len())
+    }
+
+    fn ensure_projects_consistent(&mut self) {
+        let highest_project_number = self
+            .projects
+            .iter()
+            .filter_map(|project| {
+                project
+                    .id
+                    .strip_prefix("project-")
+                    .and_then(|value| value.parse::<usize>().ok())
+            })
+            .max()
+            .unwrap_or(0);
+        self.next_project_number = self
+            .next_project_number
+            .max(highest_project_number.saturating_add(1))
+            .max(1);
+
+        for index in 0..self.sessions.len() {
+            let existing_project_id = self.sessions[index].session.project_id.clone();
+            if existing_project_id
+                .as_deref()
+                .and_then(|project_id| self.find_project(project_id))
+                .is_some()
+            {
+                continue;
+            }
+
+            let workdir = self.sessions[index].session.workdir.clone();
+            let project_id = self
+                .find_project_for_workdir(&workdir)
+                .map(|project| project.id.clone())
+                .unwrap_or_else(|| self.create_project(None, workdir).id);
+            self.sessions[index].session.project_id = Some(project_id);
+        }
+    }
 }
 
 #[derive(Deserialize, Serialize)]
@@ -1550,8 +1684,12 @@ struct PersistedState {
     codex: CodexState,
     #[serde(default)]
     revision: u64,
+    #[serde(default)]
+    next_project_number: usize,
     next_session_number: usize,
     next_message_number: u64,
+    #[serde(default)]
+    projects: Vec<Project>,
     sessions: Vec<PersistedSessionRecord>,
 }
 
@@ -1560,8 +1698,10 @@ impl PersistedState {
         Self {
             codex: inner.codex.clone(),
             revision: inner.revision,
+            next_project_number: inner.next_project_number,
             next_session_number: inner.next_session_number,
             next_message_number: inner.next_message_number,
+            projects: inner.projects.clone(),
             sessions: inner
                 .sessions
                 .iter()
@@ -1571,17 +1711,21 @@ impl PersistedState {
     }
 
     fn into_inner(self) -> StateInner {
-        StateInner {
+        let mut inner = StateInner {
             codex: self.codex,
             revision: self.revision,
+            next_project_number: self.next_project_number.max(1),
             next_session_number: self.next_session_number,
             next_message_number: self.next_message_number,
+            projects: self.projects,
             sessions: self
                 .sessions
                 .into_iter()
                 .map(PersistedSessionRecord::into_record)
                 .collect(),
-        }
+        };
+        inner.ensure_projects_consistent();
+        inner
     }
 }
 
@@ -5674,7 +5818,7 @@ async fn state_events(
     let mut state_receiver = state.subscribe_events();
     let mut delta_receiver = state.subscribe_delta_events();
     let initial_payload = serde_json::to_string(&state.snapshot())
-        .unwrap_or_else(|_| "{\"revision\":0,\"sessions\":[]}".to_owned());
+        .unwrap_or_else(|_| "{\"revision\":0,\"projects\":[],\"sessions\":[]}".to_owned());
 
     let stream = async_stream::stream! {
         yield Ok(Event::default().event("state").data(initial_payload));
@@ -5688,7 +5832,7 @@ async fn state_events(
                         Ok(payload) => yield Ok(Event::default().event("state").data(payload)),
                         Err(broadcast::error::RecvError::Lagged(_)) => {
                             let payload = serde_json::to_string(&state.snapshot())
-                                .unwrap_or_else(|_| "{\"revision\":0,\"sessions\":[]}".to_owned());
+                                .unwrap_or_else(|_| "{\"revision\":0,\"projects\":[],\"sessions\":[]}".to_owned());
                             yield Ok(Event::default().event("state").data(payload));
                         }
                         Err(broadcast::error::RecvError::Closed) => break,
@@ -5700,7 +5844,7 @@ async fn state_events(
                         Ok(payload) => yield Ok(Event::default().event("delta").data(payload)),
                         Err(broadcast::error::RecvError::Lagged(_)) => {
                             let payload = serde_json::to_string(&state.snapshot())
-                                .unwrap_or_else(|_| "{\"revision\":0,\"sessions\":[]}".to_owned());
+                                .unwrap_or_else(|_| "{\"revision\":0,\"projects\":[],\"sessions\":[]}".to_owned());
                             yield Ok(Event::default().event("state").data(payload));
                         }
                         Err(broadcast::error::RecvError::Closed) => break,
@@ -5717,10 +5861,26 @@ async fn create_session(
     State(state): State<AppState>,
     Json(request): Json<CreateSessionRequest>,
 ) -> Result<(StatusCode, Json<CreateSessionResponse>), ApiError> {
-    let response = state
-        .create_session(request)
-        .map_err(|err| ApiError::internal(format!("failed to create session: {err:#}")))?;
+    let response = state.create_session(request)?;
     Ok((StatusCode::CREATED, Json(response)))
+}
+
+async fn create_project(
+    State(state): State<AppState>,
+    Json(request): Json<CreateProjectRequest>,
+) -> Result<(StatusCode, Json<CreateProjectResponse>), ApiError> {
+    let response = state.create_project(request)?;
+    Ok((StatusCode::CREATED, Json(response)))
+}
+
+async fn pick_project_root(
+    State(state): State<AppState>,
+) -> Result<Json<PickProjectRootResponse>, ApiError> {
+    let default_workdir = state.default_workdir.clone();
+    let path = tokio::task::spawn_blocking(move || pick_project_root_path(&default_workdir))
+        .await
+        .map_err(|err| ApiError::internal(format!("folder picker task failed: {err}")))??;
+    Ok(Json(PickProjectRootResponse { path }))
 }
 
 async fn update_session_settings(
@@ -5882,12 +6042,22 @@ impl Agent {
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
+struct Project {
+    id: String,
+    name: String,
+    root_path: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
 struct Session {
     id: String,
     name: String,
     emoji: String,
     agent: Agent,
     workdir: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    project_id: Option<String>,
     model: String,
     approval_policy: Option<CodexApprovalPolicy>,
     sandbox_mode: Option<CodexSandboxMode>,
@@ -6119,9 +6289,17 @@ struct CreateSessionRequest {
     agent: Option<Agent>,
     name: Option<String>,
     workdir: Option<String>,
+    project_id: Option<String>,
     approval_policy: Option<CodexApprovalPolicy>,
     sandbox_mode: Option<CodexSandboxMode>,
     claude_approval_mode: Option<ClaudeApprovalMode>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CreateProjectRequest {
+    name: Option<String>,
+    root_path: String,
 }
 
 #[derive(Deserialize)]
@@ -6275,6 +6453,8 @@ struct StateResponse {
     revision: u64,
     #[serde(default, skip_serializing_if = "CodexState::is_empty")]
     codex: CodexState,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    projects: Vec<Project>,
     sessions: Vec<Session>,
 }
 
@@ -6283,6 +6463,19 @@ struct StateResponse {
 struct CreateSessionResponse {
     session_id: String,
     state: StateResponse,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct CreateProjectResponse {
+    project_id: String,
+    state: StateResponse,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PickProjectRootResponse {
+    path: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -6326,6 +6519,133 @@ fn resolve_requested_path(path: &str) -> Result<PathBuf, ApiError> {
     };
 
     Ok(resolved)
+}
+
+fn resolve_directory_path(path: &str, label: &str) -> Result<String, ApiError> {
+    let trimmed = path.trim();
+    if trimmed.is_empty() {
+        return Err(ApiError::bad_request(format!("{label} cannot be empty")));
+    }
+
+    let resolved = resolve_requested_path(trimmed)?;
+    let directory = if resolved.is_dir() {
+        resolved
+    } else {
+        return Err(ApiError::bad_request(format!(
+            "`{}` is not a directory",
+            trimmed
+        )));
+    };
+    let canonical = fs::canonicalize(&directory).unwrap_or(directory);
+    Ok(canonical.to_string_lossy().into_owned())
+}
+
+fn resolve_project_root_path(path: &str) -> Result<String, ApiError> {
+    resolve_directory_path(path, "project root path")
+}
+
+fn resolve_session_workdir(path: &str) -> Result<String, ApiError> {
+    resolve_directory_path(path, "session workdir")
+}
+
+fn pick_project_root_path(default_workdir: &str) -> Result<Option<String>, ApiError> {
+    #[cfg(target_os = "macos")]
+    {
+        let output = Command::new("osascript")
+            .arg("-e")
+            .arg("on run argv")
+            .arg("-e")
+            .arg("set defaultLocation to POSIX file (item 1 of argv)")
+            .arg("-e")
+            .arg("try")
+            .arg("-e")
+            .arg(
+                "set chosenFolder to choose folder with prompt \"Choose a folder for this project\" default location defaultLocation",
+            )
+            .arg("-e")
+            .arg("return POSIX path of chosenFolder")
+            .arg("-e")
+            .arg("on error number -128")
+            .arg("-e")
+            .arg("return \"\"")
+            .arg("-e")
+            .arg("end try")
+            .arg("-e")
+            .arg("end run")
+            .arg(default_workdir)
+            .output()
+            .map_err(|err| ApiError::internal(format!("failed to open folder picker: {err}")))?;
+
+        if !output.status.success() {
+            let detail = String::from_utf8_lossy(&output.stderr).trim().to_owned();
+            let message = if detail.is_empty() {
+                "folder picker failed".to_owned()
+            } else {
+                format!("folder picker failed: {detail}")
+            };
+            return Err(ApiError::internal(message));
+        }
+
+        let selected = String::from_utf8_lossy(&output.stdout).trim().to_owned();
+        if selected.is_empty() {
+            return Ok(None);
+        }
+
+        return resolve_project_root_path(&selected).map(Some);
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = default_workdir;
+        Err(ApiError::bad_request(
+            "Folder picker is unavailable on this platform. Enter the path manually.",
+        ))
+    }
+}
+
+fn default_project_name(root_path: &str) -> String {
+    let path = FsPath::new(root_path);
+    path.file_name()
+        .and_then(|value| value.to_str())
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned)
+        .unwrap_or_else(|| root_path.to_owned())
+}
+
+fn dedupe_project_name(existing: &[Project], base_name: &str) -> String {
+    let existing_names = existing
+        .iter()
+        .map(|project| project.name.as_str())
+        .collect::<HashSet<_>>();
+    if !existing_names.contains(base_name) {
+        return base_name.to_owned();
+    }
+
+    let mut suffix = 2usize;
+    loop {
+        let candidate = format!("{base_name} {suffix}");
+        if !existing_names.contains(candidate.as_str()) {
+            return candidate;
+        }
+        suffix += 1;
+    }
+}
+
+fn path_contains(root_path: &str, candidate_path: &FsPath) -> bool {
+    let root = normalize_path_best_effort(FsPath::new(root_path));
+    let candidate = normalize_path_best_effort(candidate_path);
+    candidate == root || candidate.starts_with(root)
+}
+
+fn normalize_path_best_effort(path: &FsPath) -> PathBuf {
+    let resolved = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        std::env::current_dir()
+            .map(|cwd| cwd.join(path))
+            .unwrap_or_else(|_| path.to_path_buf())
+    };
+    fs::canonicalize(&resolved).unwrap_or(resolved)
 }
 
 struct ParsedGitBranchStatus {
@@ -6507,7 +6827,7 @@ mod tests {
 
     fn test_session_id(state: &AppState, agent: Agent) -> String {
         let mut inner = state.inner.lock().expect("state mutex poisoned");
-        let record = inner.create_session(agent, Some("Test".to_owned()), "/tmp".to_owned());
+        let record = inner.create_session(agent, Some("Test".to_owned()), "/tmp".to_owned(), None);
         let session_id = record.session.id.clone();
         state.commit_locked(&mut inner).unwrap();
         session_id
@@ -6528,7 +6848,7 @@ mod tests {
     fn creates_claude_sessions_with_default_ask_mode() {
         let mut inner = StateInner::new();
 
-        let record = inner.create_session(Agent::Claude, None, "/tmp".to_owned());
+        let record = inner.create_session(Agent::Claude, None, "/tmp".to_owned(), None);
 
         assert_eq!(
             record.session.claude_approval_mode,
@@ -6547,6 +6867,7 @@ mod tests {
                 agent: Some(Agent::Codex),
                 name: Some("Custom Codex".to_owned()),
                 workdir: Some("/tmp".to_owned()),
+                project_id: None,
                 approval_policy: Some(CodexApprovalPolicy::OnRequest),
                 sandbox_mode: Some(CodexSandboxMode::ReadOnly),
                 claude_approval_mode: None,
@@ -6584,6 +6905,7 @@ mod tests {
                 agent: Some(Agent::Codex),
                 name: Some("Revision Test".to_owned()),
                 workdir: Some("/tmp".to_owned()),
+                project_id: None,
                 approval_policy: None,
                 sandbox_mode: None,
                 claude_approval_mode: None,
@@ -6602,6 +6924,121 @@ mod tests {
             )
             .unwrap();
         assert_eq!(updated.revision, 2);
+    }
+
+    #[test]
+    fn creates_projects_and_assigns_sessions_to_them() {
+        let state = test_app_state();
+        let expected_root = resolve_project_root_path("/tmp").unwrap();
+
+        let project = state
+            .create_project(CreateProjectRequest {
+                name: None,
+                root_path: "/tmp".to_owned(),
+            })
+            .unwrap();
+        assert_eq!(project.state.projects.len(), 1);
+
+        let created = state
+            .create_session(CreateSessionRequest {
+                agent: Some(Agent::Codex),
+                name: Some("Project Session".to_owned()),
+                workdir: None,
+                project_id: Some(project.project_id.clone()),
+                approval_policy: None,
+                sandbox_mode: None,
+                claude_approval_mode: None,
+            })
+            .unwrap();
+        let session = created
+            .state
+            .sessions
+            .iter()
+            .find(|session| session.id == created.session_id)
+            .expect("created session should be present");
+
+        assert_eq!(
+            session.project_id.as_deref(),
+            Some(project.project_id.as_str())
+        );
+        assert_eq!(session.workdir, expected_root);
+    }
+
+    #[test]
+    fn rejects_session_workdirs_outside_the_selected_project() {
+        let state = test_app_state();
+        let project = state
+            .create_project(CreateProjectRequest {
+                name: Some("Project".to_owned()),
+                root_path: "/tmp".to_owned(),
+            })
+            .unwrap();
+
+        let result = state.create_session(CreateSessionRequest {
+            agent: Some(Agent::Codex),
+            name: Some("Out of Bounds".to_owned()),
+            workdir: Some("/Users".to_owned()),
+            project_id: Some(project.project_id),
+            approval_policy: None,
+            sandbox_mode: None,
+            claude_approval_mode: None,
+        });
+
+        let error = match result {
+            Ok(_) => panic!("session workdir outside project should fail"),
+            Err(error) => error,
+        };
+        assert_eq!(error.status, StatusCode::BAD_REQUEST);
+        assert!(error.message.contains("must stay inside project"));
+    }
+
+    #[test]
+    fn rejects_empty_project_roots() {
+        let state = test_app_state();
+
+        let result = state.create_project(CreateProjectRequest {
+            name: None,
+            root_path: "   ".to_owned(),
+        });
+        let error = match result {
+            Ok(_) => panic!("empty project path should fail"),
+            Err(error) => error,
+        };
+
+        assert_eq!(error.status, StatusCode::BAD_REQUEST);
+        assert_eq!(error.message, "project root path cannot be empty");
+    }
+
+    #[test]
+    fn persisted_state_without_projects_migrates_cleanly() {
+        let path =
+            std::env::temp_dir().join(format!("termal-project-migrate-{}.json", Uuid::new_v4()));
+        let mut inner = StateInner::new();
+        inner.create_session(
+            Agent::Codex,
+            Some("Migrated".to_owned()),
+            "/tmp".to_owned(),
+            None,
+        );
+        persist_state(&path, &inner).unwrap();
+
+        let mut encoded: Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+        let object = encoded
+            .as_object_mut()
+            .expect("persisted state should be an object");
+        object.remove("projects");
+        object.remove("nextProjectNumber");
+        fs::write(&path, serde_json::to_vec(&encoded).unwrap()).unwrap();
+
+        let loaded = load_state(&path).unwrap().expect("state should load");
+        assert_eq!(loaded.projects.len(), 1);
+        assert_eq!(loaded.projects[0].root_path, "/tmp");
+        assert_eq!(
+            loaded.sessions[0].session.project_id.as_deref(),
+            Some(loaded.projects[0].id.as_str())
+        );
+
+        let _ = fs::remove_file(path);
     }
 
     #[test]
