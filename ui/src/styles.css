@@ -2,6 +2,14 @@
   box-sizing: border-box;
 }
 
+:root {
+  /* Keep control shapes theme-driven without letting softer themes turn every button into a pill. */
+  --control-radius: min(var(--button-radius), 1rem);
+  --control-radius-tight: min(var(--button-radius-tight), 0.78rem);
+  --control-radius-large: min(var(--button-radius-large), 1rem);
+  --control-radius-pill: min(var(--button-radius-tight), 0.72rem);
+}
+
 html,
 body,
 #root {
@@ -92,7 +100,7 @@ textarea {
 .session-list-scope {
   display: inline-flex;
   align-items: center;
-  border-radius: 999px;
+  border-radius: var(--control-radius-pill);
   padding: 0.28rem 0.68rem;
   border: 1px solid var(--line);
   background: var(--surface-white-soft);
@@ -124,7 +132,7 @@ textarea {
   gap: 0.9rem;
   width: 100%;
   border: 1px solid var(--line);
-  border-radius: 1rem;
+  border-radius: var(--control-radius-large);
   background: var(--surface-white-soft);
   padding: 0.85rem 0.95rem;
   color: inherit;
@@ -189,7 +197,7 @@ textarea {
 .theme-active-badge {
   display: inline-flex;
   align-items: center;
-  border-radius: 999px;
+  border-radius: var(--control-radius-pill);
   padding: 0.4rem 0.7rem;
   border: 1px solid var(--accent-blue-border);
   background: var(--surface-white-soft);
@@ -249,7 +257,7 @@ textarea {
   align-items: center;
   width: 100%;
   border: 1px solid var(--line);
-  border-radius: var(--button-radius-large);
+  border-radius: var(--control-radius-large);
   background: var(--surface-white-strong);
   color: var(--ink);
   padding: 0.8rem 0.9rem;
@@ -285,7 +293,7 @@ textarea {
   display: inline-flex;
   align-items: center;
   padding: 0.22rem 0.48rem;
-  border-radius: 999px;
+  border-radius: var(--control-radius-pill);
   background: var(--accent-blue-bg);
   color: var(--signal-blue);
   font-family: var(--code-font);
@@ -322,7 +330,7 @@ textarea {
   width: 100%;
   padding: 0.95rem 1rem;
   border: 1px solid var(--line);
-  border-radius: var(--button-radius-large);
+  border-radius: var(--control-radius-large);
   background: var(--surface-warm);
   color: var(--ink);
   cursor: pointer;
@@ -354,7 +362,7 @@ textarea {
 .settings-launcher-badge {
   display: inline-flex;
   align-items: center;
-  border-radius: 999px;
+  border-radius: var(--control-radius-pill);
   padding: 0.46rem 0.75rem;
   border: 1px solid var(--accent-blue-border);
   background: var(--surface-white-soft);
@@ -536,7 +544,7 @@ textarea {
 
 .settings-tab {
   border: 1px solid var(--line);
-  border-radius: var(--button-radius);
+  border-radius: var(--control-radius);
   background: var(--surface-white);
   color: var(--muted);
   padding: 0.58rem 0.95rem;
@@ -862,7 +870,7 @@ textarea {
 
 .pane-view-button {
   border: 1px solid var(--line);
-  border-radius: var(--button-radius-tight);
+  border-radius: var(--control-radius-tight);
   background: var(--surface-white-strong);
   color: var(--muted);
   padding: 0.4rem 0.78rem;
@@ -908,7 +916,7 @@ textarea {
 
 .pane-tabs.drop-empty {
   min-height: 2.7rem;
-  border-radius: var(--button-radius-tight);
+  border-radius: var(--control-radius-tight);
   background: var(--drop-active-bg);
   box-shadow: inset 0 0 0 1px var(--drop-active-border);
 }
@@ -922,7 +930,7 @@ textarea {
   width: 2rem;
   height: 2rem;
   border: 1px solid var(--line);
-  border-radius: var(--button-radius-tight);
+  border-radius: var(--control-radius-tight);
   background: var(--surface-white);
   color: var(--ink);
   font-family: var(--code-font);
@@ -944,7 +952,7 @@ textarea {
   min-width: 0;
   padding-left: 0.35rem;
   border: 1px solid transparent;
-  border-radius: var(--button-radius-tight);
+  border-radius: var(--control-radius-tight);
   background: var(--surface-white-strong);
   cursor: pointer;
   user-select: none;
@@ -977,7 +985,7 @@ textarea {
   border: 0;
   padding: 0;
   align-self: stretch;
-  border-radius: var(--button-radius-tight);
+  border-radius: var(--control-radius-tight);
   cursor: grab;
   appearance: none;
   -webkit-appearance: none;
@@ -1035,7 +1043,7 @@ textarea {
 
 .pane-tab-close {
   border: 0;
-  border-radius: var(--button-radius-tight);
+  border-radius: var(--control-radius-tight);
   background: transparent;
   color: var(--muted);
   cursor: pointer;
@@ -1201,7 +1209,7 @@ textarea {
 .approval-button,
 .ghost-button {
   border: 0;
-  border-radius: var(--button-radius);
+  border-radius: var(--control-radius);
   cursor: pointer;
   transition: transform 160ms ease, box-shadow 160ms ease, background 160ms ease;
 }
@@ -1312,7 +1320,7 @@ textarea {
   width: 100%;
   border: 1px solid transparent;
   background: var(--surface-warm);
-  border-radius: var(--button-radius-large);
+  border-radius: var(--control-radius-large);
   padding: 0.85rem 4.3rem 0.85rem 0.85rem;
   text-align: left;
   cursor: pointer;
@@ -1341,7 +1349,7 @@ textarea {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border-radius: var(--button-radius-tight);
+  border-radius: var(--control-radius-tight);
   transition:
     opacity 140ms ease,
     transform 140ms ease,
@@ -1387,6 +1395,48 @@ textarea {
   transform: translateY(0);
 }
 
+.session-kill-popover-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 23;
+  background: transparent;
+}
+
+.session-kill-popover {
+  position: fixed;
+  left: 0;
+  top: 0;
+  z-index: 24;
+  width: max-content;
+  max-width: calc(100vw - 1.5rem);
+  padding: 0.34rem;
+  border-radius: 1rem;
+  background: var(--panel-strong);
+  box-shadow:
+    var(--shadow),
+    0 0 0 1px color-mix(in srgb, var(--line) 88%, transparent);
+}
+
+.session-kill-popover::after {
+  display: none;
+}
+
+.session-kill-popover-actions {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 0.38rem;
+  white-space: nowrap;
+}
+
+.session-kill-popover-cancel,
+.session-kill-popover-confirm {
+  min-width: 3.9rem;
+  padding: 0.34rem 0.62rem;
+  font-size: 0.84rem;
+  line-height: 1.2;
+}
+
 .session-avatar {
   display: grid;
   place-items: center;
@@ -1413,7 +1463,7 @@ textarea {
 .session-search-count {
   display: inline-flex;
   align-items: center;
-  border-radius: 999px;
+  border-radius: var(--control-radius-pill);
   padding: 0.2rem 0.55rem;
   background: var(--surface-white-soft);
   border: 1px solid var(--line);
@@ -1565,7 +1615,7 @@ textarea {
   gap: 0.8rem;
   width: 100%;
   border: 0;
-  border-radius: var(--button-radius-tight);
+  border-radius: var(--control-radius-tight);
   background: transparent;
   color: var(--ink);
   cursor: pointer;
@@ -1628,7 +1678,7 @@ textarea {
   max-width: 100%;
   padding: 0.28rem 0.36rem;
   border: 1px solid var(--line);
-  border-radius: calc(var(--button-radius-tight) + 0.15rem);
+  border-radius: calc(var(--control-radius-tight) + 0.15rem);
   background: var(--surface-white-strong);
 }
 
@@ -1658,7 +1708,7 @@ textarea {
 
 .session-find-button {
   border: 1px solid var(--line);
-  border-radius: var(--button-radius-tight);
+  border-radius: var(--control-radius-tight);
   background: var(--surface-white-soft);
   color: var(--ink);
   padding: 0.36rem 0.62rem;
@@ -1687,7 +1737,7 @@ textarea {
 .chip {
   display: inline-flex;
   align-items: center;
-  border-radius: 999px;
+  border-radius: var(--control-radius-pill);
   padding: 0.42rem 0.8rem;
   border: 1px solid var(--line);
   background: var(--surface-white-soft);
@@ -1779,7 +1829,7 @@ textarea {
   width: fit-content;
   margin: 0 auto 0.85rem;
   border: 0;
-  border-radius: var(--button-radius);
+  border-radius: var(--control-radius);
   padding: 0.62rem 0.95rem;
   background: var(--new-response-bg);
   box-shadow: 0 16px 28px var(--new-response-shadow);
@@ -2113,7 +2163,7 @@ textarea {
   height: 2rem;
   padding: 0;
   border: 1px solid var(--line);
-  border-radius: var(--button-radius-tight);
+  border-radius: var(--control-radius-tight);
   background: var(--surface-white);
   color: var(--muted);
   cursor: pointer;
@@ -2396,7 +2446,7 @@ textarea {
 .git-status-row {
   width: 100%;
   border: 1px solid var(--line);
-  border-radius: 0.95rem;
+  border-radius: var(--control-radius-large);
   background: var(--surface-white);
   color: var(--ink);
   text-align: left;
@@ -2921,7 +2971,7 @@ textarea {
   width: 1.7rem;
   height: 1.7rem;
   border: 1px solid var(--pending-dismiss-border);
-  border-radius: var(--button-radius-tight);
+  border-radius: var(--control-radius-tight);
   background: var(--pending-dismiss-bg);
   color: var(--pending-dismiss-fg);
   cursor: pointer;
@@ -2996,7 +3046,7 @@ textarea {
 
 .composer-attachment-remove {
   border: 1px solid var(--line);
-  border-radius: var(--button-radius-tight);
+  border-radius: var(--control-radius-tight);
   background: var(--surface-white);
   color: var(--ink);
   padding: 0.45rem 0.75rem;
@@ -3192,6 +3242,10 @@ textarea {
   .workspace-empty {
     min-height: auto;
   }
+
+  .session-kill-popover {
+    max-width: calc(100vw - 1.5rem);
+  }
 }
 
 @media (max-width: 640px) {
@@ -3282,6 +3336,10 @@ textarea {
   .composer-stop-button,
   .send-button {
     width: 100%;
+  }
+
+  .session-kill-popover {
+    padding: 0.45rem;
   }
 
   .pane-tab {

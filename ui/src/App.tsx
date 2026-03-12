@@ -131,6 +131,9 @@ type DraftImageAttachment = ImageAttachment & {
   id: string;
   previewUrl: string;
 };
+
+const PENDING_KILL_CLOSE_DELAY_MS = 180;
+
 type SessionConversationItem =
   | {
       author: Message["author"];
@@ -224,6 +227,9 @@ export default function App() {
     useState<ClaudeApprovalMode>("ask");
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [settingsTab, setSettingsTab] = useState<PreferencesTabId>("themes");
+  const [pendingKillPopoverStyle, setPendingKillPopoverStyle] = useState<CSSProperties | null>(
+    null,
+  );
   const [pendingScrollToBottomRequest, setPendingScrollToBottomRequest] = useState<{
     sessionId: string;
     token: number;
@@ -243,6 +249,10 @@ export default function App() {
   const dragChannelRef = useRef<BroadcastChannel | null>(null);
   const draggedTabRef = useRef<WorkspaceTabDrag | null>(null);
   const sessionListSearchInputRef = useRef<HTMLInputElement>(null);
+  const pendingKillTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const pendingKillPopoverRef = useRef<HTMLDivElement | null>(null);
+  const pendingKillConfirmButtonRef = useRef<HTMLButtonElement | null>(null);
+  const pendingKillCloseTimeoutRef = useRef<number | null>(null);
   const sessionsRef = useRef<Session[]>([]);
   const latestStateRevisionRef = useRef<number | null>(null);
   const stateResyncInFlightRef = useRef(false);
@@ -644,26 +654,84 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    return () => {
+      clearPendingKillCloseTimeout();
+    };
+  }, []);
+
+  useEffect(() => {
     if (!pendingKillSessionId) {
+      clearPendingKillCloseTimeout();
       return;
     }
+
+    const focusFrameId = window.requestAnimationFrame(() => {
+      pendingKillConfirmButtonRef.current?.focus();
+    });
 
     function handleKeyDown(event: KeyboardEvent) {
       if (event.key === "Escape") {
         event.preventDefault();
-        setPendingKillSessionId(null);
-        return;
-      }
-
-      if (event.key === "Enter" && !event.repeat) {
-        event.preventDefault();
-        void confirmKillSession();
+        closePendingKillConfirmation(true);
       }
     }
 
     window.addEventListener("keydown", handleKeyDown);
     return () => {
+      window.cancelAnimationFrame(focusFrameId);
       window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [pendingKillSessionId]);
+
+  useLayoutEffect(() => {
+    if (!pendingKillSessionId) {
+      setPendingKillPopoverStyle(null);
+      return;
+    }
+
+    setPendingKillPopoverStyle({
+      left: 0,
+      top: 0,
+      visibility: "hidden",
+    });
+
+    function updatePendingKillPopoverStyle() {
+      const trigger = pendingKillTriggerRef.current;
+      const popover = pendingKillPopoverRef.current;
+      if (!trigger || !popover) {
+        return;
+      }
+
+      const triggerRect = trigger.getBoundingClientRect();
+      const popoverRect = popover.getBoundingClientRect();
+      const viewportPadding = 12;
+      const preferredLeft = triggerRect.left + triggerRect.width / 2 - popoverRect.width / 2;
+      const left = clamp(
+        preferredLeft,
+        viewportPadding,
+        window.innerWidth - popoverRect.width - viewportPadding,
+      );
+      const preferredTop = triggerRect.top - 10;
+      const top = clamp(
+        preferredTop,
+        viewportPadding,
+        window.innerHeight - popoverRect.height - viewportPadding,
+      );
+
+      setPendingKillPopoverStyle({
+        left,
+        top,
+      });
+    }
+
+    const frameId = window.requestAnimationFrame(updatePendingKillPopoverStyle);
+    window.addEventListener("resize", updatePendingKillPopoverStyle);
+    window.addEventListener("scroll", updatePendingKillPopoverStyle, true);
+
+    return () => {
+      window.cancelAnimationFrame(frameId);
+      window.removeEventListener("resize", updatePendingKillPopoverStyle);
+      window.removeEventListener("scroll", updatePendingKillPopoverStyle, true);
     };
   }, [pendingKillSessionId]);
 
@@ -978,13 +1046,15 @@ export default function App() {
     }
   }
 
-  async function handleKillSession(sessionId: string) {
+  function handleKillSession(sessionId: string, trigger?: HTMLButtonElement | null) {
     const session = sessionLookup.get(sessionId);
     if (!session) {
       return;
     }
 
-    setPendingKillSessionId(sessionId);
+    clearPendingKillCloseTimeout();
+    pendingKillTriggerRef.current = trigger ?? null;
+    setPendingKillSessionId((current) => (current === sessionId ? null : sessionId));
   }
 
   async function confirmKillSession() {
@@ -1005,6 +1075,45 @@ export default function App() {
       setRequestError(getErrorMessage(error));
     } finally {
       setKillingSessionIds((current) => setSessionFlag(current, sessionId, false));
+    }
+  }
+
+  function focusPendingKillTrigger() {
+    window.requestAnimationFrame(() => {
+      pendingKillTriggerRef.current?.focus();
+    });
+  }
+
+  function clearPendingKillCloseTimeout() {
+    if (pendingKillCloseTimeoutRef.current === null) {
+      return;
+    }
+
+    window.clearTimeout(pendingKillCloseTimeoutRef.current);
+    pendingKillCloseTimeoutRef.current = null;
+  }
+
+  function schedulePendingKillConfirmationClose() {
+    clearPendingKillCloseTimeout();
+
+    const sessionId = pendingKillSessionId;
+    if (!sessionId) {
+      return;
+    }
+
+    pendingKillCloseTimeoutRef.current = window.setTimeout(() => {
+      pendingKillCloseTimeoutRef.current = null;
+      setPendingKillSessionId((current) => (current === sessionId ? null : current));
+      setPendingKillPopoverStyle(null);
+    }, PENDING_KILL_CLOSE_DELAY_MS);
+  }
+
+  function closePendingKillConfirmation(restoreFocus = false) {
+    clearPendingKillCloseTimeout();
+    setPendingKillSessionId(null);
+    setPendingKillPopoverStyle(null);
+    if (restoreFocus) {
+      focusPendingKillTrigger();
     }
   }
 
@@ -1064,10 +1173,6 @@ export default function App() {
       current?.token === token ? null : current,
     );
   }
-
-  const pendingKillSession = pendingKillSessionId
-    ? (sessionLookup.get(pendingKillSessionId) ?? null)
-    : null;
 
   function handlePaneActivate(paneId: string) {
     setWorkspace((current) => activatePane(current, paneId));
@@ -1446,7 +1551,9 @@ export default function App() {
               const isActive = session.id === activeSession?.id;
               const isOpen = openSessionIds.has(session.id);
               const isKilling = Boolean(killingSessionIds[session.id]);
-              const isKillVisible = isKilling || killRevealSessionId === session.id;
+              const isKillConfirmationOpen = pendingKillSessionId === session.id;
+              const isKillVisible =
+                isKilling || isKillConfirmationOpen || killRevealSessionId === session.id;
               const searchResult = sessionListSearchResults.get(session.id);
 
               return (
@@ -1454,7 +1561,7 @@ export default function App() {
                   key={session.id}
                   className={`session-row-shell ${isActive ? "selected" : ""} ${isOpen ? "open" : ""} ${isKillVisible ? "kill-armed" : ""}`}
                   onMouseLeave={() => {
-                    if (!isKilling) {
+                    if (!isKilling && !isKillConfirmationOpen) {
                       setKillRevealSessionId((current) => (current === session.id ? null : current));
                     }
                   }}
@@ -1462,6 +1569,7 @@ export default function App() {
                     const nextTarget = event.relatedTarget;
                     if (
                       !isKilling &&
+                      !isKillConfirmationOpen &&
                       (!(nextTarget instanceof Node) || !event.currentTarget.contains(nextTarget))
                     ) {
                       setKillRevealSessionId((current) => (current === session.id ? null : current));
@@ -1509,12 +1617,73 @@ export default function App() {
                   <button
                     className="ghost-button session-row-kill"
                     type="button"
-                    onClick={() => void handleKillSession(session.id)}
+                    onClick={(event) => {
+                      handleKillSession(session.id, event.currentTarget);
+                    }}
                     disabled={isKilling}
+                    aria-expanded={isKillConfirmationOpen}
+                    aria-controls={isKillConfirmationOpen ? `kill-session-popover-${session.id}` : undefined}
                     aria-label={`Kill ${session.name}`}
                   >
                     {isKilling ? "Killing" : "Kill"}
                   </button>
+                  {isKillConfirmationOpen && typeof document !== "undefined"
+                    ? createPortal(
+                        <>
+                          <div
+                            className="session-kill-popover-backdrop"
+                            onPointerMove={() => {
+                              schedulePendingKillConfirmationClose();
+                            }}
+                            onPointerDown={(event) => {
+                              event.preventDefault();
+                              closePendingKillConfirmation();
+                            }}
+                          />
+                          <div
+                            ref={pendingKillPopoverRef}
+                            id={`kill-session-popover-${session.id}`}
+                            className="session-kill-popover panel"
+                            style={
+                              pendingKillPopoverStyle ?? {
+                                left: 0,
+                                top: 0,
+                                visibility: "hidden",
+                              }
+                            }
+                            role="dialog"
+                            aria-label={`Confirm killing ${session.name}`}
+                            onPointerEnter={() => {
+                              clearPendingKillCloseTimeout();
+                            }}
+                            onPointerLeave={() => {
+                              schedulePendingKillConfirmationClose();
+                            }}
+                          >
+                            <div className="session-kill-popover-actions">
+                              <button
+                                className="ghost-button session-kill-popover-cancel"
+                                type="button"
+                                onClick={() => {
+                                  closePendingKillConfirmation(true);
+                                }}
+                              >
+                                Cancel
+                              </button>
+                              <button
+                                ref={pendingKillConfirmButtonRef}
+                                className="send-button session-kill-popover-confirm"
+                                type="button"
+                                onClick={() => void confirmKillSession()}
+                              >
+                                Kill
+                              </button>
+                            </div>
+                          </div>
+                        </>,
+                        document.body,
+                      )
+                    : null}
                 </div>
               );
             })
@@ -1642,46 +1811,6 @@ export default function App() {
           )}
         </section>
       </main>
-
-      {pendingKillSession ? (
-        <div
-          className="dialog-backdrop"
-          onMouseDown={() => {
-            setPendingKillSessionId(null);
-          }}
-        >
-          <section
-            className="dialog-card panel"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="kill-dialog-title"
-            onMouseDown={(event) => {
-              event.stopPropagation();
-            }}
-          >
-            <div className="card-label">Confirm</div>
-            <h2 id="kill-dialog-title">Kill {pendingKillSession.name}?</h2>
-            <p className="dialog-copy">
-              The current process will stop and the session will be removed from the list.
-            </p>
-            <div className="dialog-actions">
-              <button
-                className="ghost-button"
-                type="button"
-                onClick={() => {
-                  setPendingKillSessionId(null);
-                }}
-              >
-                Cancel
-              </button>
-              <button className="send-button dialog-danger-button" type="button" onClick={() => void confirmKillSession()}>
-                Kill Session
-              </button>
-            </div>
-          </section>
-        </div>
-      ) : null}
-
       {isSettingsOpen ? (
         <div
           className="dialog-backdrop"
