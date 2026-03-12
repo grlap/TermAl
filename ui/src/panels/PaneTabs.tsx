@@ -415,7 +415,11 @@ function formatTabLabel(tab: WorkspaceTab, session: Session | null) {
     return `Files: ${formatPathTabLabel(tab.rootPath, "Workspace")}`;
   }
 
-  return `Git: ${formatPathTabLabel(tab.workdir, "Workspace")}`;
+  if (tab.kind === "gitStatus") {
+    return `Git: ${formatPathTabLabel(tab.workdir, "Workspace")}`;
+  }
+
+  return `Diff: ${formatPathTabLabel(tab.filePath, "Preview")}`;
 }
 
 function formatPathTabLabel(path: string | null, fallback: string) {

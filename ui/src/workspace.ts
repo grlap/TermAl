@@ -1,7 +1,12 @@
-import type { Session } from "./types";
+import type { DiffMessage, Session } from "./types";
 
 export type SessionPaneViewMode = "session" | "prompt" | "commands" | "diffs";
-export type PaneViewMode = SessionPaneViewMode | "source" | "filesystem" | "gitStatus";
+export type PaneViewMode =
+  | SessionPaneViewMode
+  | "source"
+  | "filesystem"
+  | "gitStatus"
+  | "diffPreview";
 
 export type WorkspaceSessionTab = {
   id: string;
@@ -30,11 +35,24 @@ export type WorkspaceGitStatusTab = {
   originSessionId: string | null;
 };
 
+export type WorkspaceDiffPreviewTab = {
+  id: string;
+  kind: "diffPreview";
+  changeType: DiffMessage["changeType"];
+  diff: string;
+  diffMessageId: string;
+  filePath: string | null;
+  language?: string | null;
+  originSessionId: string | null;
+  summary: string;
+};
+
 export type WorkspaceTab =
   | WorkspaceSessionTab
   | WorkspaceSourceTab
   | WorkspaceFilesystemTab
-  | WorkspaceGitStatusTab;
+  | WorkspaceGitStatusTab
+  | WorkspaceDiffPreviewTab;
 
 export type WorkspacePane = {
   id: string;
@@ -112,6 +130,36 @@ export function createGitStatusTab(
   };
 }
 
+export function createDiffPreviewTab({
+  changeType,
+  diff,
+  diffMessageId,
+  filePath = null,
+  language = null,
+  originSessionId = null,
+  summary,
+}: {
+  changeType: DiffMessage["changeType"];
+  diff: string;
+  diffMessageId: string;
+  filePath?: string | null;
+  language?: string | null;
+  originSessionId?: string | null;
+  summary: string;
+}): WorkspaceDiffPreviewTab {
+  return {
+    id: crypto.randomUUID(),
+    kind: "diffPreview",
+    changeType,
+    diff,
+    diffMessageId,
+    filePath: normalizeWorkspacePath(filePath),
+    language,
+    originSessionId,
+    summary,
+  };
+}
+
 export function reconcileWorkspaceState(current: WorkspaceState, sessions: Session[]): WorkspaceState {
   const availableSessionIds = new Set(sessions.map((session) => session.id));
   let panes = current.panes.map((pane) => {
@@ -146,11 +194,21 @@ export function reconcileWorkspaceState(current: WorkspaceState, sessions: Sessi
           ];
         }
 
+        if (tab.kind === "gitStatus") {
+          return [
+            {
+              ...tab,
+              originSessionId,
+              workdir: normalizeWorkspacePath(tab.workdir),
+            },
+          ];
+        }
+
         return [
           {
             ...tab,
             originSessionId,
-            workdir: normalizeWorkspacePath(tab.workdir),
+            filePath: normalizeWorkspacePath(tab.filePath),
           },
         ];
       });
@@ -231,37 +289,19 @@ export function openSourceInWorkspaceState(
   originSessionId: string | null,
 ): WorkspaceState {
   const normalizedPath = normalizeWorkspacePath(path);
+  const nextTab = createSourceTab(normalizedPath, originSessionId);
   if (normalizedPath) {
     const existing = findSourceTab(workspace, normalizedPath);
-    if (existing) {
-      return activatePane(workspace, existing.paneId, existing.tab.id);
-    }
-  }
-
-  const targetPaneId = findSourceTargetPaneId(workspace, preferredPaneId, originSessionId);
-  if (targetPaneId) {
-    return openTabInWorkspaceState(
+    return openContextualTabInWorkspaceState(
       workspace,
-      createSourceTab(normalizedPath, originSessionId),
-      targetPaneId,
+      nextTab,
+      existing,
+      preferredPaneId,
+      originSessionId,
     );
   }
 
-  if (shouldOpenSourceInAdjacentPane(workspace, preferredPaneId)) {
-    return openTabInAdjacentPane(
-      workspace,
-      preferredPaneId!,
-      createSourceTab(normalizedPath, originSessionId),
-      "row",
-      false,
-    );
-  }
-
-  return openTabInWorkspaceState(
-    workspace,
-    createSourceTab(normalizedPath, originSessionId),
-    preferredPaneId,
-  );
+  return openContextualTabInWorkspaceState(workspace, nextTab, null, preferredPaneId, originSessionId);
 }
 
 export function openFilesystemInWorkspaceState(
@@ -303,6 +343,30 @@ export function openGitStatusInWorkspaceState(
     workspace,
     createGitStatusTab(normalizedWorkdir, originSessionId),
     preferredPaneId,
+  );
+}
+
+export function openDiffPreviewInWorkspaceState(
+  workspace: WorkspaceState,
+  tab: {
+    changeType: DiffMessage["changeType"];
+    diff: string;
+    diffMessageId: string;
+    filePath: string | null;
+    language?: string | null;
+    originSessionId: string | null;
+    summary: string;
+  },
+  preferredPaneId: string | null,
+): WorkspaceState {
+  const nextTab = createDiffPreviewTab(tab);
+  const existing = findDiffPreviewTab(workspace, tab.diffMessageId, tab.originSessionId);
+  return openContextualTabInWorkspaceState(
+    workspace,
+    nextTab,
+    existing,
+    preferredPaneId,
+    tab.originSessionId,
   );
 }
 
@@ -635,6 +699,34 @@ function openTabInAdjacentPane(
   };
 }
 
+function openContextualTabInWorkspaceState<T extends WorkspaceTab>(
+  workspace: WorkspaceState,
+  tab: T,
+  existing: { paneId: string; tab: T } | null,
+  preferredPaneId: string | null,
+  originSessionId: string | null,
+): WorkspaceState {
+  if (existing) {
+    return activatePane(workspace, existing.paneId, existing.tab.id);
+  }
+
+  const targetPaneId = findContextualTargetPaneId(
+    workspace,
+    preferredPaneId,
+    originSessionId,
+    tab.kind,
+  );
+  if (targetPaneId) {
+    return openTabInWorkspaceState(workspace, tab, targetPaneId);
+  }
+
+  if (shouldOpenTabInAdjacentPane(workspace, preferredPaneId, tab.kind)) {
+    return openTabInAdjacentPane(workspace, preferredPaneId!, tab, "row", false);
+  }
+
+  return openTabInWorkspaceState(workspace, tab, preferredPaneId);
+}
+
 function syncPaneState(pane: WorkspacePane): WorkspacePane {
   const activeTab = pane.tabs.find((tab) => tab.id === pane.activeTabId) ?? pane.tabs[0] ?? null;
   if (!activeTab) {
@@ -684,7 +776,7 @@ function syncPaneState(pane: WorkspacePane): WorkspacePane {
     ...pane,
     activeTabId: activeTab.id,
     activeSessionId: resolveOriginSessionId(activeTab.originSessionId, pane.activeSessionId, pane.tabs),
-    viewMode: "gitStatus",
+    viewMode: activeTab.kind === "gitStatus" ? "gitStatus" : "diffPreview",
     sourcePath: null,
   };
 }
@@ -760,6 +852,26 @@ function findGitStatusTab(workspace: WorkspaceState, workdir: string) {
   return null;
 }
 
+function findDiffPreviewTab(
+  workspace: WorkspaceState,
+  diffMessageId: string,
+  originSessionId: string | null,
+) {
+  for (const pane of workspace.panes) {
+    const tab = pane.tabs.find(
+      (candidate): candidate is WorkspaceDiffPreviewTab =>
+        candidate.kind === "diffPreview" &&
+        candidate.diffMessageId === diffMessageId &&
+        candidate.originSessionId === originSessionId,
+    );
+    if (tab) {
+      return { paneId: pane.id, tab };
+    }
+  }
+
+  return null;
+}
+
 function insertTabAtIndex(tabs: WorkspaceTab[], tab: WorkspaceTab, tabIndex: number): WorkspaceTab[] {
   const nextTabs = tabs.filter((candidate) => candidate.id !== tab.id);
   const nextTabIndex = clampIndex(tabIndex, 0, nextTabs.length);
@@ -767,9 +879,10 @@ function insertTabAtIndex(tabs: WorkspaceTab[], tab: WorkspaceTab, tabIndex: num
   return nextTabs;
 }
 
-function shouldOpenSourceInAdjacentPane(
+function shouldOpenTabInAdjacentPane(
   workspace: WorkspaceState,
   preferredPaneId: string | null,
+  tabKind: WorkspaceTab["kind"],
 ) {
   if (!preferredPaneId) {
     return false;
@@ -781,20 +894,21 @@ function shouldOpenSourceInAdjacentPane(
   }
 
   const activeTab = getActiveTab(preferredPane);
-  return activeTab !== null && activeTab.kind !== "source";
+  return activeTab !== null && activeTab.kind !== tabKind;
 }
 
-function findSourceTargetPaneId(
+function findContextualTargetPaneId(
   workspace: WorkspaceState,
   preferredPaneId: string | null,
   originSessionId: string | null,
+  tabKind: WorkspaceTab["kind"],
 ) {
   const preferredPane = preferredPaneId
     ? workspace.panes.find((pane) => pane.id === preferredPaneId) ?? null
     : null;
   const preferredActiveTab = preferredPane ? getActiveTab(preferredPane) : null;
 
-  if (preferredActiveTab?.kind === "source") {
+  if (preferredActiveTab?.kind === tabKind) {
     return preferredPane!.id;
   }
 
@@ -803,7 +917,7 @@ function findSourceTargetPaneId(
       (pane) =>
         pane.id !== preferredPaneId &&
         pane.activeSessionId === originSessionId &&
-        pane.tabs.some((tab) => tab.kind === "source"),
+        pane.tabs.some((tab) => tab.kind === tabKind),
     );
     if (relatedPane) {
       return relatedPane.id;

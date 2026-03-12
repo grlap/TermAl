@@ -35,6 +35,7 @@ import { highlightCode } from "./highlight";
 import { applyDeltaToSessions } from "./live-updates";
 import { resolvePaneScrollCommand } from "./pane-keyboard";
 import { AgentSessionPanel, AgentSessionPanelFooter } from "./panels/AgentSessionPanel";
+import { DiffPanel } from "./panels/DiffPanel";
 import { FileSystemPanel } from "./panels/FileSystemPanel";
 import { GitStatusPanel } from "./panels/GitStatusPanel";
 import { PaneTabs } from "./panels/PaneTabs";
@@ -62,6 +63,7 @@ import {
   activatePane,
   closeWorkspaceTab,
   getSplitRatio,
+  openDiffPreviewInWorkspaceState,
   openFilesystemInWorkspaceState,
   openGitStatusInWorkspaceState,
   openSessionInWorkspaceState,
@@ -895,6 +897,28 @@ export default function App() {
     setWorkspace((current) => openSourceInWorkspaceState(current, path, paneId, originSessionId));
   }
 
+  function handleOpenDiffPreviewTab(
+    paneId: string,
+    message: DiffMessage,
+    originSessionId: string | null,
+  ) {
+    setWorkspace((current) =>
+      openDiffPreviewInWorkspaceState(
+        current,
+        {
+          changeType: message.changeType,
+          diff: message.diff,
+          diffMessageId: message.id,
+          filePath: message.filePath,
+          language: message.language ?? null,
+          originSessionId,
+          summary: message.summary,
+        },
+        paneId,
+      ),
+    );
+  }
+
   function handleOpenFilesystemTab(
     paneId: string,
     rootPath: string | null,
@@ -1124,6 +1148,7 @@ export default function App() {
               onTabDrop={handleTabDrop}
               onPaneViewModeChange={handlePaneViewModeChange}
               onOpenSourceTab={handleOpenSourceTab}
+              onOpenDiffPreviewTab={handleOpenDiffPreviewTab}
               onOpenFilesystemTab={handleOpenFilesystemTab}
               onOpenGitStatusTab={handleOpenGitStatusTab}
               onPaneSourcePathChange={handlePaneSourcePathChange}
@@ -1922,6 +1947,7 @@ function WorkspaceNodeView({
   onTabDrop,
   onPaneViewModeChange,
   onOpenSourceTab,
+  onOpenDiffPreviewTab,
   onOpenFilesystemTab,
   onOpenGitStatusTab,
   onPaneSourcePathChange,
@@ -1977,6 +2003,11 @@ function WorkspaceNodeView({
   onTabDrop: (targetPaneId: string, placement: TabDropPlacement, tabIndex?: number) => void;
   onPaneViewModeChange: (paneId: string, viewMode: SessionPaneViewMode) => void;
   onOpenSourceTab: (paneId: string, path: string | null, originSessionId: string | null) => void;
+  onOpenDiffPreviewTab: (
+    paneId: string,
+    message: DiffMessage,
+    originSessionId: string | null,
+  ) => void;
   onOpenFilesystemTab: (
     paneId: string,
     rootPath: string | null,
@@ -2044,6 +2075,7 @@ function WorkspaceNodeView({
         onTabDrop={onTabDrop}
         onPaneViewModeChange={onPaneViewModeChange}
         onOpenSourceTab={onOpenSourceTab}
+        onOpenDiffPreviewTab={onOpenDiffPreviewTab}
         onOpenFilesystemTab={onOpenFilesystemTab}
         onOpenGitStatusTab={onOpenGitStatusTab}
         onPaneSourcePathChange={onPaneSourcePathChange}
@@ -2094,6 +2126,7 @@ function WorkspaceNodeView({
           onTabDrop={onTabDrop}
           onPaneViewModeChange={onPaneViewModeChange}
           onOpenSourceTab={onOpenSourceTab}
+          onOpenDiffPreviewTab={onOpenDiffPreviewTab}
           onOpenFilesystemTab={onOpenFilesystemTab}
           onOpenGitStatusTab={onOpenGitStatusTab}
           onPaneSourcePathChange={onPaneSourcePathChange}
@@ -2146,6 +2179,7 @@ function WorkspaceNodeView({
           onTabDrop={onTabDrop}
           onPaneViewModeChange={onPaneViewModeChange}
           onOpenSourceTab={onOpenSourceTab}
+          onOpenDiffPreviewTab={onOpenDiffPreviewTab}
           onOpenFilesystemTab={onOpenFilesystemTab}
           onOpenGitStatusTab={onOpenGitStatusTab}
           onPaneSourcePathChange={onPaneSourcePathChange}
@@ -2193,6 +2227,7 @@ function SessionPaneView({
   onTabDrop,
   onPaneViewModeChange,
   onOpenSourceTab,
+  onOpenDiffPreviewTab,
   onOpenFilesystemTab,
   onOpenGitStatusTab,
   onPaneSourcePathChange,
@@ -2242,6 +2277,11 @@ function SessionPaneView({
   onTabDrop: (targetPaneId: string, placement: TabDropPlacement, tabIndex?: number) => void;
   onPaneViewModeChange: (paneId: string, viewMode: SessionPaneViewMode) => void;
   onOpenSourceTab: (paneId: string, path: string | null, originSessionId: string | null) => void;
+  onOpenDiffPreviewTab: (
+    paneId: string,
+    message: DiffMessage,
+    originSessionId: string | null,
+  ) => void;
   onOpenFilesystemTab: (
     paneId: string,
     rootPath: string | null,
@@ -2277,6 +2317,7 @@ function SessionPaneView({
   const activeSourceTab = activeTab?.kind === "source" ? activeTab : null;
   const activeFilesystemTab = activeTab?.kind === "filesystem" ? activeTab : null;
   const activeGitStatusTab = activeTab?.kind === "gitStatus" ? activeTab : null;
+  const activeDiffPreviewTab = activeTab?.kind === "diffPreview" ? activeTab : null;
   const isSessionTabActive = activeTab?.kind === "session";
   const sessionTabs = useMemo(
     () =>
@@ -2364,6 +2405,8 @@ function SessionPaneView({
       ? `${pane.id}:filesystem:${activeFilesystemTab.rootPath ?? "empty"}`
       : activeGitStatusTab
         ? `${pane.id}:gitStatus:${activeGitStatusTab.workdir ?? "empty"}`
+        : activeDiffPreviewTab
+          ? `${pane.id}:diffPreview:${activeDiffPreviewTab.diffMessageId}`
         : `${pane.id}:${pane.viewMode}:${activeSession?.id ?? "empty"}`;
   const defaultScrollToBottom =
     pane.viewMode === "session" || pane.viewMode === "commands" || pane.viewMode === "diffs";
@@ -2970,6 +3013,8 @@ function SessionPaneView({
                     ? "File browser"
                     : activeTab?.kind === "gitStatus"
                       ? "Git status"
+                      : activeTab?.kind === "diffPreview"
+                        ? "Diff preview"
                       : "Panel"}
               </span>
             </div>
@@ -2983,6 +3028,9 @@ function SessionPaneView({
               ) : null}
               {activeGitStatusTab?.workdir ? (
                 <span className="chip">{activeGitStatusTab.workdir}</span>
+              ) : null}
+              {activeDiffPreviewTab?.filePath ? (
+                <span className="chip">{activeDiffPreviewTab.filePath}</span>
               ) : null}
             </div>
           ) : null}
@@ -3032,6 +3080,17 @@ function SessionPaneView({
               onOpenGitStatusTab(pane.id, path, activeSession?.id ?? null)
             }
           />
+        ) : activeDiffPreviewTab ? (
+          <DiffPanel
+            appearance={editorAppearance}
+            changeType={activeDiffPreviewTab.changeType}
+            diff={activeDiffPreviewTab.diff}
+            diffMessageId={activeDiffPreviewTab.diffMessageId}
+            filePath={activeDiffPreviewTab.filePath}
+            language={activeDiffPreviewTab.language ?? null}
+            onOpenPath={(path) => onOpenSourceTab(pane.id, path, activeSession?.id ?? null)}
+            summary={activeDiffPreviewTab.summary}
+          />
         ) : (
           <AgentSessionPanel
             paneId={pane.id}
@@ -3049,10 +3108,20 @@ function SessionPaneView({
             onCancelQueuedPrompt={onCancelQueuedPrompt}
             onSessionSettingsChange={onSessionSettingsChange}
             renderCommandCard={(message) => <CommandCard message={message} />}
-            renderDiffCard={(message) => <DiffCard message={message} />}
+            renderDiffCard={(message) => (
+              <DiffCard
+                message={message}
+                onOpenPreview={() =>
+                  onOpenDiffPreviewTab(pane.id, message, activeSession?.id ?? null)
+                }
+              />
+            )}
             renderMessageCard={(message, preferImmediateHeavyRender, handleDecision) => (
               <MessageCard
                 message={message}
+                onOpenDiffPreview={(diffMessage) =>
+                  onOpenDiffPreviewTab(pane.id, diffMessage, activeSession?.id ?? null)
+                }
                 preferImmediateHeavyRender={preferImmediateHeavyRender}
                 onApprovalDecision={handleDecision}
               />
@@ -3085,7 +3154,7 @@ function SessionPaneView({
           />
         )}
       </section>
-      {activeSourceTab || activeFilesystemTab || activeGitStatusTab ? null : (
+      {activeSourceTab || activeFilesystemTab || activeGitStatusTab || activeDiffPreviewTab ? null : (
         <AgentSessionPanelFooter
           paneId={pane.id}
           viewMode={pane.viewMode}
@@ -3233,10 +3302,12 @@ function ClaudePromptSettingsCard({
 
 const MessageCard = memo(function MessageCard({
   message,
+  onOpenDiffPreview,
   preferImmediateHeavyRender = false,
   onApprovalDecision,
 }: {
   message: Message;
+  onOpenDiffPreview?: (message: DiffMessage) => void;
   preferImmediateHeavyRender?: boolean;
   onApprovalDecision: (messageId: string, decision: ApprovalDecision) => void;
 }) {
@@ -3274,7 +3345,7 @@ const MessageCard = memo(function MessageCard({
     case "command":
       return <CommandCard message={message} />;
     case "diff":
-      return <DiffCard message={message} />;
+      return <DiffCard message={message} onOpenPreview={() => onOpenDiffPreview?.(message)} />;
     case "markdown":
       return <MarkdownCard message={message} />;
     case "approval":
@@ -3284,6 +3355,7 @@ const MessageCard = memo(function MessageCard({
   }
 }, (previous, next) =>
   previous.message === next.message &&
+  previous.onOpenDiffPreview === next.onOpenDiffPreview &&
   previous.preferImmediateHeavyRender === next.preferImmediateHeavyRender
 );
 
@@ -3708,7 +3780,13 @@ function CollapseIcon() {
   );
 }
 
-function DiffCard({ message }: { message: DiffMessage }) {
+function DiffCard({
+  message,
+  onOpenPreview,
+}: {
+  message: DiffMessage;
+  onOpenPreview: () => void;
+}) {
   const [expanded, setExpanded] = useState(false);
   const [copied, setCopied] = useState(false);
   const canExpandDiff = message.diff.split("\n").length > 14 || message.diff.length > 900;
@@ -3763,6 +3841,15 @@ function DiffCard({ message }: { message: DiffMessage }) {
           </div>
           <div className="command-row-actions">
             <button
+              className="command-icon-button"
+              type="button"
+              onClick={onOpenPreview}
+              aria-label="Open diff preview"
+              title="Open diff preview"
+            >
+              <PreviewIcon />
+            </button>
+            <button
               className={`command-icon-button${copied ? " copied" : ""}`}
               type="button"
               onClick={() => void handleCopy()}
@@ -3787,6 +3874,17 @@ function DiffCard({ message }: { message: DiffMessage }) {
         </div>
       </div>
     </article>
+  );
+}
+
+function PreviewIcon() {
+  return (
+    <svg className="command-icon" viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+      <path
+        d="M8 3c3.38 0 6.18 2.35 7 5-.82 2.65-3.62 5-7 5S1.82 10.65 1 8c.82-2.65 3.62-5 7-5Zm0 1C5.2 4 2.82 5.82 2.05 8 2.82 10.18 5.2 12 8 12s5.18-1.82 5.95-4C13.18 5.82 10.8 4 8 4Zm0 1.5A2.5 2.5 0 1 1 5.5 8 2.5 2.5 0 0 1 8 5.5Zm0 1A1.5 1.5 0 1 0 9.5 8 1.5 1.5 0 0 0 8 6.5Z"
+        fill="currentColor"
+      />
+    </svg>
   );
 }
 
@@ -3990,6 +4088,8 @@ function labelForPaneViewMode(viewMode: PaneViewMode) {
       return "Files";
     case "gitStatus":
       return "Git status";
+    case "diffPreview":
+      return "Diff preview";
   }
 }
 

@@ -2039,6 +2039,13 @@ textarea {
   border-radius: 1rem;
 }
 
+.diff-editor-shell {
+  margin-top: 0.85rem;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 1rem;
+}
+
 .source-editor-loading {
   display: grid;
   place-items: center;
@@ -2051,12 +2058,42 @@ textarea {
   min-height: 24rem;
 }
 
+.monaco-diff-editor {
+  min-height: 28rem;
+}
+
 .monaco-code-editor .monaco-editor,
-.monaco-code-editor .monaco-editor .overflow-guard {
+.monaco-code-editor .monaco-editor .overflow-guard,
+.monaco-diff-editor .monaco-editor,
+.monaco-diff-editor .monaco-editor .overflow-guard {
   border-radius: 1rem;
 }
 
 .source-editor-hint {
+  margin-top: 0.75rem;
+}
+
+.diff-preview-actions {
+  justify-content: flex-end;
+}
+
+.diff-preview-toggle.selected {
+  border-color: var(--accent-blue-border);
+  background: color-mix(in srgb, var(--surface-white) 82%, var(--accent-blue-bg));
+  color: var(--signal-blue);
+}
+
+.diff-preview-card {
+  max-width: 100%;
+}
+
+.diff-preview-raw {
+  min-height: 14rem;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.diff-preview-note {
   margin-top: 0.75rem;
 }
 
