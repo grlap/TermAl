@@ -1693,6 +1693,12 @@ textarea {
   max-width: min(42rem, 90%);
 }
 
+@supports selector(:has(*)) {
+  .bubble-assistant:has(.markdown-copy pre) {
+    max-width: min(58rem, 96%);
+  }
+}
+
 .connection-notice-card {
   max-width: min(42rem, 90%);
   background: var(--activity-bg);
@@ -1746,6 +1752,18 @@ textarea {
   color: var(--muted);
 }
 
+.message-meta-end {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.message-meta-end {
+  justify-content: flex-end;
+}
+
 .card-label {
   margin-bottom: 0.4rem;
   font-family: var(--code-font);
@@ -1766,7 +1784,13 @@ textarea {
 }
 
 .command-card {
+  width: fit-content;
   max-width: 100%;
+  justify-self: start;
+}
+
+.command-card-label {
+  margin-bottom: 0.3rem;
 }
 
 .utility-header {
@@ -1795,6 +1819,10 @@ textarea {
   border-radius: 1rem;
   background: var(--surface-white-soft);
   overflow: hidden;
+}
+
+.command-card .command-panel {
+  margin-top: 0.55rem;
 }
 
 .command-row {
@@ -2519,6 +2547,8 @@ textarea {
   color: var(--code-fg);
   padding: 1rem;
   overflow: auto;
+  max-width: 100%;
+  white-space: pre;
 }
 
 .markdown-copy pre code {

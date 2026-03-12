@@ -3421,11 +3421,22 @@ function MessageAttachmentList({ attachments }: { attachments: ImageAttachment[]
   );
 }
 
-function MessageMeta({ author, timestamp }: { author: string; timestamp: string }) {
+function MessageMeta({
+  author,
+  timestamp,
+  trailing,
+}: {
+  author: string;
+  timestamp: string;
+  trailing?: ReactNode;
+}) {
   return (
     <div className="message-meta">
       <span>{author === "you" ? "You" : "Agent"}</span>
-      <span>{timestamp}</span>
+      <span className="message-meta-end">
+        {trailing}
+        <span>{timestamp}</span>
+      </span>
     </div>
   );
 }
@@ -3667,17 +3678,16 @@ function CommandCard({ message }: { message: CommandMessage }) {
 
   return (
     <article className="message-card utility-card command-card">
-      <MessageMeta author={message.author} timestamp={message.timestamp} />
-      <div className="utility-header">
-        <div>
-          <div className="card-label">Command</div>
-        </div>
-        <div className="utility-actions">
+      <MessageMeta
+        author={message.author}
+        timestamp={message.timestamp}
+        trailing={
           <span className={`chip chip-status chip-status-${statusTone} command-status-chip`}>
             {message.status}
           </span>
-        </div>
-      </div>
+        }
+      />
+      <div className="card-label command-card-label">Command</div>
 
       <div className="command-panel">
         <div className="command-row">
