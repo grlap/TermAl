@@ -34,6 +34,7 @@ describe("applyDeltaToSessions", () => {
     ];
     const delta: DeltaEvent = {
       type: "textDelta",
+      revision: 2,
       sessionId: "session-a",
       messageId: "message-1",
       delta: " there",
@@ -60,6 +61,7 @@ describe("applyDeltaToSessions", () => {
     const sessions = [makeSession("session-a")];
     const delta: DeltaEvent = {
       type: "textDelta",
+      revision: 2,
       sessionId: "session-a",
       messageId: "missing-message",
       delta: "hello",
@@ -87,6 +89,7 @@ describe("applyDeltaToSessions", () => {
     ];
     const delta: DeltaEvent = {
       type: "commandUpdate",
+      revision: 3,
       sessionId: "session-a",
       messageId: "command-1",
       command: "pwd",
@@ -116,6 +119,7 @@ describe("applyDeltaToSessions", () => {
     const sessions = [makeSession("session-a")];
     const delta: DeltaEvent = {
       type: "commandUpdate",
+      revision: 3,
       sessionId: "session-a",
       messageId: "command-1",
       command: "pwd",

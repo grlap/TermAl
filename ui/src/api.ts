@@ -10,8 +10,14 @@ import type {
 } from "./types";
 
 export type StateResponse = {
+  revision: number;
   codex?: CodexState;
   sessions: Session[];
+};
+
+export type CreateSessionResponse = {
+  sessionId: string;
+  state: StateResponse;
 };
 
 export type FileResponse = {
@@ -89,7 +95,7 @@ export function fetchState() {
 }
 
 export function createSession(payload: CreateSessionRequest) {
-  return request<Session>("/api/sessions", {
+  return request<CreateSessionResponse>("/api/sessions", {
     method: "POST",
     body: JSON.stringify(payload),
   });

@@ -95,6 +95,7 @@ import {
   filterSessionsByListFilter,
   type SessionListFilter,
 } from "./session-list-filter";
+import { decideDeltaRevisionAction, shouldAdoptStateRevision } from "./state-revision";
 
 type SessionFlagMap = Record<string, true | undefined>;
 type SessionSettingsField = "sandboxMode" | "approvalPolicy" | "claudeApprovalMode";
@@ -210,7 +211,7 @@ export default function App() {
   } | null>(null);
   const draftAttachmentsRef = useRef<Record<string, DraftImageAttachment[]>>({});
   const sessionsRef = useRef<Session[]>([]);
-  const liveStateEpochRef = useRef(0);
+  const latestStateRevisionRef = useRef<number | null>(null);
   const stateResyncInFlightRef = useRef(false);
   const stateResyncPendingRef = useRef(false);
   const paneShouldStickToBottomRef = useRef<Record<string, boolean | undefined>>({});
@@ -279,8 +280,14 @@ export default function App() {
     nextState: StateResponse,
     options?: { openSessionId?: string; paneId?: string | null },
   ) {
+    if (!shouldAdoptStateRevision(latestStateRevisionRef.current, nextState.revision)) {
+      return false;
+    }
+
+    latestStateRevisionRef.current = nextState.revision;
     setCodexState(nextState.codex ?? {});
     adoptSessions(nextState.sessions, options);
+    return true;
   }
 
 
@@ -303,16 +310,11 @@ export default function App() {
         try {
           while (!cancelled && stateResyncPendingRef.current) {
             stateResyncPendingRef.current = false;
-            const requestEpoch = liveStateEpochRef.current;
 
             try {
               const state = await fetchState();
               if (cancelled) {
                 return;
-              }
-
-              if (liveStateEpochRef.current !== requestEpoch) {
-                continue;
               }
 
               adoptState(state);
@@ -341,7 +343,6 @@ export default function App() {
 
       try {
         const state = JSON.parse(event.data) as StateResponse;
-        liveStateEpochRef.current += 1;
         adoptState(state);
         setRequestError(null);
       } catch (error) {
@@ -362,10 +363,22 @@ export default function App() {
 
       try {
         const delta = JSON.parse(event.data) as DeltaEvent;
-        liveStateEpochRef.current += 1;
+        const revisionAction = decideDeltaRevisionAction(
+          latestStateRevisionRef.current,
+          delta.revision,
+        );
+        if (revisionAction === "ignore") {
+          setRequestError(null);
+          return;
+        }
+        if (revisionAction === "resync") {
+          requestStateResync();
+          return;
+        }
 
         const result = applyDeltaToSessions(sessionsRef.current, delta);
         if (result.kind === "applied") {
+          latestStateRevisionRef.current = delta.revision;
           sessionsRef.current = result.sessions;
           startTransition(() => {
             setSessions(result.sessions);
@@ -387,8 +400,11 @@ export default function App() {
         setRequestError(null);
       }
     };
-
-    requestStateResync();
+    eventSource.onerror = () => {
+      if (!cancelled && latestStateRevisionRef.current === null) {
+        requestStateResync();
+      }
+    };
 
     return () => {
       cancelled = true;
@@ -626,11 +642,15 @@ export default function App() {
         sandboxMode: newSessionAgent === "Codex" ? defaultCodexSandboxMode : undefined,
         workdir: activeSession?.workdir,
       });
-      const state = await fetchState();
-      adoptState(state, {
-        openSessionId: created.id,
+      const adopted = adoptState(created.state, {
+        openSessionId: created.sessionId,
         paneId: workspace.activePaneId,
       });
+      if (!adopted) {
+        setWorkspace((current) =>
+          openSessionInWorkspaceState(current, created.sessionId, workspace.activePaneId),
+        );
+      }
       setRequestError(null);
     } catch (error) {
       setRequestError(getErrorMessage(error));

@@ -116,6 +116,7 @@ export type ApprovalMessage = BaseMessage & {
 
 export type TextDeltaEvent = {
   type: "textDelta";
+  revision: number;
   sessionId: string;
   messageId: string;
   delta: string;
@@ -124,6 +125,7 @@ export type TextDeltaEvent = {
 
 export type CommandUpdateEvent = {
   type: "commandUpdate";
+  revision: number;
   sessionId: string;
   messageId: string;
   command: string;

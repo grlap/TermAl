@@ -222,7 +222,7 @@ impl AppState {
         };
         {
             let inner = state.inner.lock().expect("state mutex poisoned");
-            state.persist_locked(&inner)?;
+            state.persist_internal_locked(&inner)?;
         }
         Ok(state)
     }
@@ -232,7 +232,7 @@ impl AppState {
         Self::snapshot_from_inner(&inner)
     }
 
-    fn create_session(&self, request: CreateSessionRequest) -> Result<Session> {
+    fn create_session(&self, request: CreateSessionRequest) -> Result<CreateSessionResponse> {
         let mut inner = self.inner.lock().expect("state mutex poisoned");
         let mut record = inner.create_session(
             request.agent.unwrap_or(Agent::Codex),
@@ -259,13 +259,34 @@ impl AppState {
         {
             *slot = record.clone();
         }
-        self.persist_locked(&inner)?;
-        Ok(record.session)
+        self.commit_locked(&mut inner)?;
+        Ok(CreateSessionResponse {
+            session_id: record.session.id,
+            state: Self::snapshot_from_inner(&inner),
+        })
     }
 
-    fn persist_locked(&self, inner: &StateInner) -> Result<()> {
-        persist_state(self.persistence_path.as_path(), inner)?;
-        self.publish_state_locked(inner)
+    fn commit_locked(&self, inner: &mut StateInner) -> Result<u64> {
+        let revision = self.bump_revision_and_persist_locked(inner)?;
+        self.publish_state_locked(inner)?;
+        Ok(revision)
+    }
+
+    // Internal bookkeeping changes should be persisted without advancing the client-visible revision.
+    fn persist_internal_locked(&self, inner: &StateInner) -> Result<()> {
+        persist_state(self.persistence_path.as_path(), inner)
+    }
+
+    // Delta-producing changes advance the revision without publishing a full snapshot; the delta event
+    // carries the new revision instead.
+    fn commit_delta_locked(&self, inner: &mut StateInner) -> Result<u64> {
+        self.bump_revision_and_persist_locked(inner)
+    }
+
+    fn bump_revision_and_persist_locked(&self, inner: &mut StateInner) -> Result<u64> {
+        inner.revision += 1;
+        self.persist_internal_locked(inner)?;
+        Ok(inner.revision)
     }
 
     fn subscribe_events(&self) -> broadcast::Receiver<String> {
@@ -291,6 +312,7 @@ impl AppState {
 
     fn snapshot_from_inner(inner: &StateInner) -> StateResponse {
         StateResponse {
+            revision: inner.revision,
             codex: inner.codex.clone(),
             sessions: inner
                 .sessions
@@ -404,7 +426,6 @@ impl AppState {
         let queued = inner.sessions[index].queued_prompts.front().cloned();
 
         let Some(queued) = queued else {
-            self.persist_locked(&inner)?;
             return Ok(None);
         };
 
@@ -418,7 +439,7 @@ impl AppState {
             .map_err(|err| anyhow!("failed to dispatch queued prompt: {}", err.message))?;
         inner.sessions[index].queued_prompts.pop_front();
         sync_pending_prompts(&mut inner.sessions[index]);
-        self.persist_locked(&inner)?;
+        self.commit_locked(&mut inner)?;
         Ok(Some(dispatch))
     }
 
@@ -456,7 +477,7 @@ impl AppState {
                 },
                 attachments,
             );
-            self.persist_locked(&inner).map_err(|err| {
+            self.commit_locked(&mut inner).map_err(|err| {
                 ApiError::internal(format!("failed to persist session state: {err:#}"))
             })?;
             return Ok(DispatchTurnResult::Queued);
@@ -466,7 +487,7 @@ impl AppState {
         let dispatch =
             self.start_turn_on_record(&mut inner.sessions[index], message_id, prompt, attachments)?;
 
-        self.persist_locked(&inner).map_err(|err| {
+        self.commit_locked(&mut inner).map_err(|err| {
             ApiError::internal(format!("failed to persist session state: {err:#}"))
         })?;
 
@@ -514,7 +535,7 @@ impl AppState {
             }
         }
 
-        self.persist_locked(&inner).map_err(|err| {
+        self.commit_locked(&mut inner).map_err(|err| {
             ApiError::internal(format!("failed to persist session state: {err:#}"))
         })?;
         Ok(Self::snapshot_from_inner(&inner))
@@ -532,7 +553,7 @@ impl AppState {
             .ok_or_else(|| anyhow!("session `{session_id}` not found"))?;
         inner.sessions[index].external_session_id = Some(external_session_id.clone());
         inner.sessions[index].session.external_session_id = Some(external_session_id);
-        self.persist_locked(&inner)?;
+        self.commit_locked(&mut inner)?;
         Ok(())
     }
 
@@ -543,7 +564,7 @@ impl AppState {
         }
 
         inner.codex.rate_limits = Some(rate_limits);
-        self.persist_locked(&inner)?;
+        self.commit_locked(&mut inner)?;
         Ok(())
     }
 
@@ -559,7 +580,7 @@ impl AppState {
             .ok_or_else(|| anyhow!("session `{session_id}` not found"))?;
         inner.sessions[index].active_codex_sandbox_mode = Some(sandbox_mode);
         inner.sessions[index].active_codex_approval_policy = Some(approval_policy);
-        self.persist_locked(&inner)?;
+        self.persist_internal_locked(&inner)?;
         Ok(())
     }
 
@@ -591,7 +612,6 @@ impl AppState {
         inner.sessions[index].runtime = SessionRuntime::None;
         inner.sessions[index].pending_claude_approvals.clear();
         inner.sessions[index].pending_codex_approvals.clear();
-        self.persist_locked(&inner)?;
         Ok(())
     }
 
@@ -625,7 +645,7 @@ impl AppState {
 
             record.session.status = SessionStatus::Error;
             record.session.preview = make_preview(cleaned);
-            self.persist_locked(&inner)?;
+            self.commit_locked(&mut inner)?;
             true
         };
 
@@ -689,7 +709,7 @@ impl AppState {
             record.session.status = SessionStatus::Active;
         }
         record.session.preview = make_preview(cleaned);
-        self.persist_locked(&inner)?;
+        self.commit_locked(&mut inner)?;
         Ok(())
     }
 
@@ -714,7 +734,7 @@ impl AppState {
             if !cleaned.is_empty() {
                 record.session.preview = make_preview(cleaned);
             }
-            self.persist_locked(&inner)?;
+            self.commit_locked(&mut inner)?;
             true
         };
 
@@ -750,7 +770,7 @@ impl AppState {
             if record.session.preview.trim().is_empty() {
                 record.session.preview = "Turn completed.".to_owned();
             }
-            self.persist_locked(&inner)?;
+            self.commit_locked(&mut inner)?;
             true
         };
 
@@ -818,7 +838,7 @@ impl AppState {
             }
 
             let has_queued_prompts = !record.queued_prompts.is_empty();
-            self.persist_locked(&inner)?;
+            self.commit_locked(&mut inner)?;
             has_queued_prompts
         };
 
@@ -846,7 +866,6 @@ impl AppState {
         inner.sessions[index]
             .pending_claude_approvals
             .insert(message_id, approval);
-        self.persist_locked(&inner)?;
         Ok(())
     }
 
@@ -863,7 +882,6 @@ impl AppState {
         inner.sessions[index]
             .pending_codex_approvals
             .insert(message_id, approval);
-        self.persist_locked(&inner)?;
         Ok(())
     }
 
@@ -904,7 +922,7 @@ impl AppState {
             {
                 record.session.status = SessionStatus::Idle;
                 record.session.preview = "Stopping session…".to_owned();
-                self.persist_locked(&inner).map_err(|err| {
+                self.commit_locked(&mut inner).map_err(|err| {
                     ApiError::internal(format!("failed to persist session state: {err:#}"))
                 })?;
             }
@@ -924,7 +942,7 @@ impl AppState {
             .ok_or_else(|| ApiError::not_found("session not found"))?;
         inner.sessions.remove(index);
 
-        self.persist_locked(&inner).map_err(|err| {
+        self.commit_locked(&mut inner).map_err(|err| {
             ApiError::internal(format!("failed to persist session state: {err:#}"))
         })?;
         Ok(Self::snapshot_from_inner(&inner))
@@ -949,7 +967,7 @@ impl AppState {
         }
         sync_pending_prompts(record);
 
-        self.persist_locked(&inner).map_err(|err| {
+        self.commit_locked(&mut inner).map_err(|err| {
             ApiError::internal(format!("failed to persist session state: {err:#}"))
         })?;
         Ok(Self::snapshot_from_inner(&inner))
@@ -988,7 +1006,7 @@ impl AppState {
 
             record.session.status = SessionStatus::Idle;
             record.session.preview = "Stopping turn…".to_owned();
-            self.persist_locked(&inner).map_err(|err| {
+            self.commit_locked(&mut inner).map_err(|err| {
                 ApiError::internal(format!("failed to persist session state: {err:#}"))
             })?;
 
@@ -1034,12 +1052,12 @@ impl AppState {
             session.status = SessionStatus::Approval;
         }
         session.messages.push(message);
-        self.persist_locked(&inner)?;
+        self.commit_locked(&mut inner)?;
         Ok(())
     }
 
     fn append_text_delta(&self, session_id: &str, message_id: &str, delta: &str) -> Result<()> {
-        let preview = {
+        let (preview, revision) = {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
             let index = inner
                 .find_session_index(session_id)
@@ -1057,7 +1075,7 @@ impl AppState {
                 }
             }
 
-            if let Some(text) = updated_text {
+            let preview = if let Some(text) = updated_text {
                 let trimmed = text.trim();
                 if !trimmed.is_empty() {
                     let p = make_preview(trimmed);
@@ -1068,10 +1086,13 @@ impl AppState {
                 }
             } else {
                 None
-            }
+            };
+            let revision = self.commit_delta_locked(&mut inner)?;
+            (preview, revision)
         };
 
         self.publish_delta(&DeltaEvent::TextDelta {
+            revision,
             session_id: session_id.to_owned(),
             message_id: message_id.to_owned(),
             delta: delta.to_owned(),
@@ -1092,7 +1113,7 @@ impl AppState {
         let command_language = Some(shell_language().to_owned());
         let output_language = infer_command_output_language(command).map(str::to_owned);
 
-        let preview = {
+        let (preview, revision) = {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
             let index = inner
                 .find_session_index(session_id)
@@ -1154,12 +1175,12 @@ impl AppState {
                 }
             };
             session.preview = preview.clone();
-
-            persist_state(self.persistence_path.as_path(), &inner)?;
-            preview
+            let revision = self.commit_delta_locked(&mut inner)?;
+            (preview, revision)
         };
 
         self.publish_delta(&DeltaEvent::CommandUpdate {
+            revision,
             session_id: session_id.to_owned(),
             message_id: message_id.to_owned(),
             command: command.to_owned(),
@@ -1382,7 +1403,7 @@ impl AppState {
             }
         }
 
-        self.persist_locked(&inner).map_err(|err| {
+        self.commit_locked(&mut inner).map_err(|err| {
             ApiError::internal(format!("failed to persist session state: {err:#}"))
         })?;
         Ok(Self::snapshot_from_inner(&inner))
@@ -1411,7 +1432,7 @@ impl AppState {
             let session = &mut inner.sessions[index].session;
             session.status = SessionStatus::Error;
             session.preview = make_preview(cleaned);
-            self.persist_locked(&inner)?;
+            self.commit_locked(&mut inner)?;
         }
 
         if let Some(dispatch) = self.dispatch_next_queued_turn(session_id)? {
@@ -1444,6 +1465,7 @@ fn codex_approval_result(kind: &CodexApprovalKind, decision: ApprovalDecision) -
 
 struct StateInner {
     codex: CodexState,
+    revision: u64,
     next_session_number: usize,
     next_message_number: u64,
     sessions: Vec<SessionRecord>,
@@ -1453,6 +1475,7 @@ impl StateInner {
     fn new() -> Self {
         Self {
             codex: CodexState::default(),
+            revision: 0,
             next_session_number: 1,
             next_message_number: 1,
             sessions: Vec::new(),
@@ -1525,6 +1548,8 @@ impl StateInner {
 struct PersistedState {
     #[serde(default, skip_serializing_if = "CodexState::is_empty")]
     codex: CodexState,
+    #[serde(default)]
+    revision: u64,
     next_session_number: usize,
     next_message_number: u64,
     sessions: Vec<PersistedSessionRecord>,
@@ -1534,6 +1559,7 @@ impl PersistedState {
     fn from_inner(inner: &StateInner) -> Self {
         Self {
             codex: inner.codex.clone(),
+            revision: inner.revision,
             next_session_number: inner.next_session_number,
             next_message_number: inner.next_message_number,
             sessions: inner
@@ -1547,6 +1573,7 @@ impl PersistedState {
     fn into_inner(self) -> StateInner {
         StateInner {
             codex: self.codex,
+            revision: self.revision,
             next_session_number: self.next_session_number,
             next_message_number: self.next_message_number,
             sessions: self
@@ -5452,7 +5479,10 @@ async fn write_file(Json(request): Json<WriteFileRequest>) -> Result<Json<FileRe
     }
 
     fs::write(&resolved_path, request.content.as_bytes()).map_err(|err| {
-        ApiError::internal(format!("failed to write file {}: {err}", resolved_path.display()))
+        ApiError::internal(format!(
+            "failed to write file {}: {err}",
+            resolved_path.display()
+        ))
     })?;
 
     Ok(Json(FileResponse {
@@ -5462,7 +5492,9 @@ async fn write_file(Json(request): Json<WriteFileRequest>) -> Result<Json<FileRe
     }))
 }
 
-async fn read_directory(Query(query): Query<FileQuery>) -> Result<Json<DirectoryResponse>, ApiError> {
+async fn read_directory(
+    Query(query): Query<FileQuery>,
+) -> Result<Json<DirectoryResponse>, ApiError> {
     let resolved_path = resolve_requested_path(&query.path)?;
     let metadata = fs::metadata(&resolved_path).map_err(|err| match err.kind() {
         io::ErrorKind::NotFound => {
@@ -5519,7 +5551,9 @@ async fn read_directory(Query(query): Query<FileQuery>) -> Result<Json<Directory
     entries.sort_by(|left, right| {
         let kind_order = match (&left.kind, &right.kind) {
             (FileSystemEntryKind::Directory, FileSystemEntryKind::File) => std::cmp::Ordering::Less,
-            (FileSystemEntryKind::File, FileSystemEntryKind::Directory) => std::cmp::Ordering::Greater,
+            (FileSystemEntryKind::File, FileSystemEntryKind::Directory) => {
+                std::cmp::Ordering::Greater
+            }
             _ => std::cmp::Ordering::Equal,
         };
 
@@ -5543,15 +5577,16 @@ async fn read_directory(Query(query): Query<FileQuery>) -> Result<Json<Directory
     }))
 }
 
-async fn read_git_status(Query(query): Query<FileQuery>) -> Result<Json<GitStatusResponse>, ApiError> {
+async fn read_git_status(
+    Query(query): Query<FileQuery>,
+) -> Result<Json<GitStatusResponse>, ApiError> {
     let workdir = resolve_requested_path(&query.path)?;
     let workdir = if workdir.is_dir() {
         workdir
     } else {
-        workdir
-            .parent()
-            .map(FsPath::to_path_buf)
-            .ok_or_else(|| ApiError::bad_request("cannot inspect git status for a root file path"))?
+        workdir.parent().map(FsPath::to_path_buf).ok_or_else(|| {
+            ApiError::bad_request("cannot inspect git status for a root file path")
+        })?
     };
 
     let Some(repo_root) = resolve_git_repo_root(&workdir)? else {
@@ -5608,14 +5643,8 @@ async fn read_git_status(Query(query): Query<FileQuery>) -> Result<Json<GitStatu
             Some((from, to)) => (Some(from.trim().to_owned()), to.trim().to_owned()),
             None => (None, path_payload.to_owned()),
         };
-        let index_status = status
-            .chars()
-            .next()
-            .and_then(normalize_git_status_code);
-        let worktree_status = status
-            .chars()
-            .nth(1)
-            .and_then(normalize_git_status_code);
+        let index_status = status.chars().next().and_then(normalize_git_status_code);
+        let worktree_status = status.chars().nth(1).and_then(normalize_git_status_code);
 
         files.push(GitStatusFile {
             index_status,
@@ -5644,8 +5673,8 @@ async fn state_events(
 ) -> Sse<impl futures_core::Stream<Item = std::result::Result<Event, Infallible>>> {
     let mut state_receiver = state.subscribe_events();
     let mut delta_receiver = state.subscribe_delta_events();
-    let initial_payload =
-        serde_json::to_string(&state.snapshot()).unwrap_or_else(|_| "{\"sessions\":[]}".to_owned());
+    let initial_payload = serde_json::to_string(&state.snapshot())
+        .unwrap_or_else(|_| "{\"revision\":0,\"sessions\":[]}".to_owned());
 
     let stream = async_stream::stream! {
         yield Ok(Event::default().event("state").data(initial_payload));
@@ -5659,7 +5688,7 @@ async fn state_events(
                         Ok(payload) => yield Ok(Event::default().event("state").data(payload)),
                         Err(broadcast::error::RecvError::Lagged(_)) => {
                             let payload = serde_json::to_string(&state.snapshot())
-                                .unwrap_or_else(|_| "{\"sessions\":[]}".to_owned());
+                                .unwrap_or_else(|_| "{\"revision\":0,\"sessions\":[]}".to_owned());
                             yield Ok(Event::default().event("state").data(payload));
                         }
                         Err(broadcast::error::RecvError::Closed) => break,
@@ -5671,7 +5700,7 @@ async fn state_events(
                         Ok(payload) => yield Ok(Event::default().event("delta").data(payload)),
                         Err(broadcast::error::RecvError::Lagged(_)) => {
                             let payload = serde_json::to_string(&state.snapshot())
-                                .unwrap_or_else(|_| "{\"sessions\":[]}".to_owned());
+                                .unwrap_or_else(|_| "{\"revision\":0,\"sessions\":[]}".to_owned());
                             yield Ok(Event::default().event("state").data(payload));
                         }
                         Err(broadcast::error::RecvError::Closed) => break,
@@ -5687,11 +5716,11 @@ async fn state_events(
 async fn create_session(
     State(state): State<AppState>,
     Json(request): Json<CreateSessionRequest>,
-) -> Result<(StatusCode, Json<Session>), ApiError> {
-    let session = state
+) -> Result<(StatusCode, Json<CreateSessionResponse>), ApiError> {
+    let response = state
         .create_session(request)
         .map_err(|err| ApiError::internal(format!("failed to create session: {err:#}")))?;
-    Ok((StatusCode::CREATED, Json(session)))
+    Ok((StatusCode::CREATED, Json(response)))
 }
 
 async fn update_session_settings(
@@ -6243,15 +6272,24 @@ struct CodexRateLimitWindow {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct StateResponse {
+    revision: u64,
     #[serde(default, skip_serializing_if = "CodexState::is_empty")]
     codex: CodexState,
     sessions: Vec<Session>,
 }
 
 #[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct CreateSessionResponse {
+    session_id: String,
+    state: StateResponse,
+}
+
+#[derive(Serialize)]
 #[serde(tag = "type", rename_all = "camelCase")]
 enum DeltaEvent {
     TextDelta {
+        revision: u64,
         #[serde(rename = "sessionId")]
         session_id: String,
         #[serde(rename = "messageId")]
@@ -6261,6 +6299,7 @@ enum DeltaEvent {
         preview: Option<String>,
     },
     CommandUpdate {
+        revision: u64,
         #[serde(rename = "sessionId")]
         session_id: String,
         #[serde(rename = "messageId")]
@@ -6315,7 +6354,9 @@ fn resolve_git_repo_root(workdir: &FsPath) -> Result<Option<PathBuf>, ApiError> 
         return Ok(None);
     }
 
-    Err(ApiError::internal(format!("git rev-parse failed: {trimmed}")))
+    Err(ApiError::internal(format!(
+        "git rev-parse failed: {trimmed}"
+    )))
 }
 
 fn parse_git_branch_status(line: &str) -> ParsedGitBranchStatus {
@@ -6468,7 +6509,7 @@ mod tests {
         let mut inner = state.inner.lock().expect("state mutex poisoned");
         let record = inner.create_session(agent, Some("Test".to_owned()), "/tmp".to_owned());
         let session_id = record.session.id.clone();
-        state.persist_locked(&inner).unwrap();
+        state.commit_locked(&mut inner).unwrap();
         session_id
     }
 
@@ -6501,7 +6542,7 @@ mod tests {
     fn creates_codex_sessions_with_requested_prompt_defaults() {
         let state = test_app_state();
 
-        let session = state
+        let response = state
             .create_session(CreateSessionRequest {
                 agent: Some(Agent::Codex),
                 name: Some("Custom Codex".to_owned()),
@@ -6511,6 +6552,12 @@ mod tests {
                 claude_approval_mode: None,
             })
             .unwrap();
+        let session = response
+            .state
+            .sessions
+            .iter()
+            .find(|session| session.id == response.session_id)
+            .expect("created session should be present");
 
         assert_eq!(
             session.approval_policy,
@@ -6521,11 +6568,108 @@ mod tests {
 
         let inner = state.inner.lock().expect("state mutex poisoned");
         let record = inner
-            .find_session_index(&session.id)
+            .find_session_index(&response.session_id)
             .map(|index| &inner.sessions[index]);
         let record = record.expect("session record should exist");
         assert_eq!(record.codex_approval_policy, CodexApprovalPolicy::OnRequest);
         assert_eq!(record.codex_sandbox_mode, CodexSandboxMode::ReadOnly);
+    }
+
+    #[test]
+    fn revisions_increase_for_visible_state_changes() {
+        let state = test_app_state();
+
+        let created = state
+            .create_session(CreateSessionRequest {
+                agent: Some(Agent::Codex),
+                name: Some("Revision Test".to_owned()),
+                workdir: Some("/tmp".to_owned()),
+                approval_policy: None,
+                sandbox_mode: None,
+                claude_approval_mode: None,
+            })
+            .unwrap();
+        assert_eq!(created.state.revision, 1);
+
+        let updated = state
+            .update_session_settings(
+                &created.session_id,
+                UpdateSessionSettingsRequest {
+                    sandbox_mode: Some(CodexSandboxMode::ReadOnly),
+                    approval_policy: None,
+                    claude_approval_mode: None,
+                },
+            )
+            .unwrap();
+        assert_eq!(updated.revision, 2);
+    }
+
+    #[test]
+    fn delta_events_include_monotonic_revisions() {
+        let state = test_app_state();
+        let session_id = test_session_id(&state, Agent::Codex);
+        let mut delta_events = state.subscribe_delta_events();
+
+        state
+            .push_message(
+                &session_id,
+                Message::Text {
+                    attachments: Vec::new(),
+                    id: "message-1".to_owned(),
+                    timestamp: stamp_now(),
+                    author: Author::Assistant,
+                    text: "Hi".to_owned(),
+                },
+            )
+            .unwrap();
+        let baseline = state.snapshot().revision;
+
+        state
+            .append_text_delta(&session_id, "message-1", " there")
+            .unwrap();
+
+        let payload = delta_events.try_recv().expect("delta payload should exist");
+        let event: Value = serde_json::from_str(&payload).expect("delta should be valid json");
+
+        assert_eq!(event["type"], "textDelta");
+        assert_eq!(event["revision"], json!(baseline + 1));
+        assert_eq!(state.snapshot().revision, baseline + 1);
+    }
+
+    #[test]
+    fn internal_runtime_config_persistence_does_not_advance_revision() {
+        let state = test_app_state();
+        let session_id = test_session_id(&state, Agent::Codex);
+        let baseline = state.snapshot().revision;
+
+        state
+            .record_codex_runtime_config(
+                &session_id,
+                CodexSandboxMode::ReadOnly,
+                CodexApprovalPolicy::OnRequest,
+            )
+            .unwrap();
+
+        assert_eq!(state.snapshot().revision, baseline);
+
+        let reloaded = load_state(state.persistence_path.as_path())
+            .unwrap()
+            .expect("persisted state should exist");
+        let record = reloaded
+            .sessions
+            .iter()
+            .find(|record| record.session.id == session_id)
+            .expect("session should reload");
+
+        assert_eq!(
+            record.active_codex_sandbox_mode,
+            Some(CodexSandboxMode::ReadOnly)
+        );
+        assert_eq!(
+            record.active_codex_approval_policy,
+            Some(CodexApprovalPolicy::OnRequest)
+        );
+        assert_eq!(reloaded.revision, baseline);
     }
 
     #[test]
@@ -6646,7 +6790,7 @@ mod tests {
             let mut inner = state.inner.lock().expect("state mutex poisoned");
             let index = inner.find_session_index(&session_id).unwrap();
             inner.sessions[index].session.status = SessionStatus::Active;
-            state.persist_locked(&inner).unwrap();
+            state.commit_locked(&mut inner).unwrap();
         }
 
         let result = state
@@ -6700,7 +6844,7 @@ mod tests {
                 },
                 Vec::new(),
             );
-            state.persist_locked(&inner).unwrap();
+            state.commit_locked(&mut inner).unwrap();
         }
 
         let response = state.cancel_queued_prompt(&session_id, "queued-1").unwrap();
@@ -6724,7 +6868,7 @@ mod tests {
             let mut inner = state.inner.lock().expect("state mutex poisoned");
             let index = inner.find_session_index(&session_id).unwrap();
             inner.sessions[index].session.status = SessionStatus::Active;
-            state.persist_locked(&inner).unwrap();
+            state.commit_locked(&mut inner).unwrap();
         }
 
         let result = state
@@ -7344,7 +7488,7 @@ mod tests {
             let index = inner.find_session_index(&session_id).unwrap();
             inner.sessions[index].session.status = SessionStatus::Active;
             inner.sessions[index].session.preview = "Waiting for activity.".to_owned();
-            state.persist_locked(&inner).unwrap();
+            state.commit_locked(&mut inner).unwrap();
         }
 
         let notification = json!({
