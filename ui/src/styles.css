@@ -2352,6 +2352,18 @@ textarea {
   white-space: pre-wrap;
 }
 
+.syntax-block.copyable {
+  position: relative;
+  padding-top: 2.8rem;
+}
+
+.syntax-copy-button {
+  position: absolute;
+  top: 0.7rem;
+  right: 0.7rem;
+  z-index: 1;
+}
+
 .deferred-heavy-content {
   min-height: var(--deferred-min-height, auto);
 }

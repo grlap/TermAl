@@ -33,6 +33,7 @@ import {
   type StateResponse,
   updateSessionSettings,
 } from "./api";
+import { copyTextToClipboard } from "./clipboard";
 import { highlightCode } from "./highlight";
 import { applyDeltaToSessions } from "./live-updates";
 import { resolvePaneScrollCommand } from "./pane-keyboard";
@@ -3902,13 +3903,16 @@ function HighlightedCodeBlock({
   commandHint,
   language,
   pathHint,
+  showCopyButton = false,
 }: {
   className: string;
   code: string;
   commandHint?: string | null;
   language?: string | null;
   pathHint?: string | null;
+  showCopyButton?: boolean;
 }) {
+  const [copied, setCopied] = useState(false);
   const highlighted = useMemo(
     () =>
       highlightCode(code, {
@@ -3919,8 +3923,46 @@ function HighlightedCodeBlock({
     [code, commandHint, language, pathHint],
   );
 
+  useEffect(() => {
+    if (!copied) {
+      return;
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      setCopied(false);
+    }, 1600);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+  }, [copied]);
+
+  async function handleCopy() {
+    try {
+      await copyTextToClipboard(code);
+      setCopied(true);
+    } catch {
+      setCopied(false);
+    }
+  }
+
   return (
-    <pre className={`${className} syntax-block`}>
+    <pre className={`${className} syntax-block${showCopyButton ? " copyable" : ""}`}>
+      {showCopyButton ? (
+        <button
+          className={`command-icon-button syntax-copy-button${copied ? " copied" : ""}`}
+          type="button"
+          onMouseDown={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+          }}
+          onClick={() => void handleCopy()}
+          aria-label={copied ? "Code copied" : "Copy code"}
+          title={copied ? "Copied" : "Copy code"}
+        >
+          {copied ? <CheckIcon /> : <CopyIcon />}
+        </button>
+      ) : null}
       <code
         className={`hljs${highlighted.language ? ` language-${highlighted.language}` : ""}`}
         dangerouslySetInnerHTML={{ __html: highlighted.html }}
@@ -4313,7 +4355,14 @@ function MarkdownContent({ markdown }: { markdown: string }) {
               );
             }
 
-            return <HighlightedCodeBlock className="code-block" code={code} language={language} />;
+            return (
+              <HighlightedCodeBlock
+                className="code-block"
+                code={code}
+                language={language}
+                showCopyButton
+              />
+            );
           },
         }}
         remarkPlugins={[remarkGfm]}
@@ -4742,33 +4791,6 @@ function formatByteSize(byteSize: number) {
   }
 
   return `${(byteSize / (1024 * 1024)).toFixed(1)} MB`;
-}
-
-async function copyTextToClipboard(text: string) {
-  if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
-    await navigator.clipboard.writeText(text);
-    return;
-  }
-
-  if (typeof document === "undefined") {
-    throw new Error("Clipboard is unavailable.");
-  }
-
-  const textarea = document.createElement("textarea");
-  textarea.value = text;
-  textarea.setAttribute("readonly", "");
-  textarea.style.position = "fixed";
-  textarea.style.opacity = "0";
-  textarea.style.pointerEvents = "none";
-  document.body.appendChild(textarea);
-  textarea.select();
-
-  const didCopy = document.execCommand("copy");
-  document.body.removeChild(textarea);
-
-  if (!didCopy) {
-    throw new Error("Clipboard copy failed.");
-  }
 }
 
 function clamp(value: number, min: number, max: number) {
