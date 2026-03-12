@@ -67,7 +67,12 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     ...init,
   });
 
+  const contentType = response.headers.get("content-type") ?? "";
   const raw = await response.text();
+  if (looksLikeHtmlResponse(raw, contentType)) {
+    throw new Error(formatUnavailableApiMessage(path, response.status));
+  }
+
   if (!response.ok) {
     throw new Error(extractError(raw, response.status));
   }
@@ -180,4 +185,19 @@ function extractError(raw: string, status: number) {
   }
 
   return `Request failed with status ${status}.`;
+}
+
+function looksLikeHtmlResponse(raw: string, contentType: string) {
+  if (contentType.toLowerCase().includes("text/html")) {
+    return true;
+  }
+
+  const trimmed = raw.trimStart().toLowerCase();
+  return trimmed.startsWith("<!doctype html") || trimmed.startsWith("<html");
+}
+
+function formatUnavailableApiMessage(path: string, status: number) {
+  const endpoint = path.split("?")[0] ?? path;
+  const statusSuffix = status > 0 ? ` (HTTP ${status})` : "";
+  return `The running backend does not expose ${endpoint}${statusSuffix}. Restart TermAl so the latest API routes are loaded.`;
 }

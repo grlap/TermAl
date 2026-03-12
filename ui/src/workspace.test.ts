@@ -237,7 +237,7 @@ describe("workspace helpers", () => {
     expect(next.activePaneId).toBeNull();
   });
 
-  it("openSourceInWorkspaceState creates a source tab and switches the pane to source mode", () => {
+  it("openSourceInWorkspaceState opens a source tab in a new pane to the right of a session pane", () => {
     const next = openSourceInWorkspaceState(
       makeSinglePaneWorkspace(makePane("pane-a", [makeSessionTab("tab-a", "session-a")])),
       "/tmp/app.ts",
@@ -245,16 +245,115 @@ describe("workspace helpers", () => {
       "session-a",
     );
 
-    expect(next.panes[0].tabs).toHaveLength(2);
-    expect(next.panes[0].tabs[1]).toEqual({
-      id: expect.any(String),
-      kind: "source",
-      path: "/tmp/app.ts",
-      originSessionId: "session-a",
+    expect(next.panes).toHaveLength(2);
+    expect(next.activePaneId).not.toBe("pane-a");
+    expect(next.panes.find((pane) => pane.id === "pane-a")).toMatchObject({
+      tabs: [makeSessionTab("tab-a", "session-a")],
+      activeTabId: "tab-a",
+      activeSessionId: "session-a",
+      viewMode: "session",
+      sourcePath: null,
     });
-    expect(next.panes[0].viewMode).toBe("source");
-    expect(next.panes[0].sourcePath).toBe("/tmp/app.ts");
-    expect(next.panes[0].activeSessionId).toBe("session-a");
+    expect(next.root).toMatchObject({
+      type: "split",
+      direction: "row",
+      first: {
+        type: "pane",
+        paneId: "pane-a",
+      },
+    });
+    expect(next.panes.find((pane) => pane.id !== "pane-a")).toMatchObject({
+      tabs: [
+        {
+          id: expect.any(String),
+          kind: "source",
+          path: "/tmp/app.ts",
+          originSessionId: "session-a",
+        },
+      ],
+      viewMode: "source",
+      sourcePath: "/tmp/app.ts",
+      activeSessionId: "session-a",
+    });
+  });
+
+  it("openSourceInWorkspaceState reuses the existing source pane for subsequent file opens", () => {
+    const next = openSourceInWorkspaceState(
+      makeSplitWorkspace(
+        makePane("pane-a", [makeSessionTab("tab-a", "session-a")]),
+        makePane("pane-b", [makeSourceTab("source-a", "/tmp/app.ts", "session-a")], {
+          activeTabId: "source-a",
+          activeSessionId: "session-a",
+          viewMode: "source",
+          sourcePath: "/tmp/app.ts",
+        }),
+      ),
+      "/tmp/next.ts",
+      "pane-a",
+      "session-a",
+    );
+
+    expect(next.activePaneId).toBe("pane-b");
+    expect(next.panes.find((pane) => pane.id === "pane-a")).toMatchObject({
+      tabs: [makeSessionTab("tab-a", "session-a")],
+      activeTabId: "tab-a",
+      viewMode: "session",
+    });
+    expect(next.panes.find((pane) => pane.id === "pane-b")?.tabs).toEqual([
+      {
+        id: "source-a",
+        kind: "source",
+        path: "/tmp/app.ts",
+        originSessionId: "session-a",
+      },
+      {
+        id: expect.any(String),
+        kind: "source",
+        path: "/tmp/next.ts",
+        originSessionId: "session-a",
+      },
+    ]);
+    expect(next.panes.find((pane) => pane.id === "pane-b")).toMatchObject({
+      viewMode: "source",
+      sourcePath: "/tmp/next.ts",
+      activeSessionId: "session-a",
+    });
+  });
+
+  it("openSourceInWorkspaceState opens a file from a filesystem pane in a separate source pane", () => {
+    const next = openSourceInWorkspaceState(
+      makeSinglePaneWorkspace(
+        makePane("pane-a", [makeFilesystemTab("fs-a", "/tmp/project", "session-a")], {
+          activeTabId: "fs-a",
+          activeSessionId: "session-a",
+          viewMode: "filesystem",
+        }),
+      ),
+      "/tmp/project/src/app.ts",
+      "pane-a",
+      "session-a",
+    );
+
+    expect(next.panes).toHaveLength(2);
+    expect(next.panes.find((pane) => pane.id === "pane-a")).toMatchObject({
+      tabs: [makeFilesystemTab("fs-a", "/tmp/project", "session-a")],
+      activeTabId: "fs-a",
+      viewMode: "filesystem",
+      activeSessionId: "session-a",
+    });
+    expect(next.panes.find((pane) => pane.id !== "pane-a")).toMatchObject({
+      tabs: [
+        {
+          id: expect.any(String),
+          kind: "source",
+          path: "/tmp/project/src/app.ts",
+          originSessionId: "session-a",
+        },
+      ],
+      viewMode: "source",
+      sourcePath: "/tmp/project/src/app.ts",
+      activeSessionId: "session-a",
+    });
   });
 
   it("openSourceInWorkspaceState focuses an existing source tab for the same path", () => {

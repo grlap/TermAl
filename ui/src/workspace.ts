@@ -238,6 +238,25 @@ export function openSourceInWorkspaceState(
     }
   }
 
+  const targetPaneId = findSourceTargetPaneId(workspace, preferredPaneId, originSessionId);
+  if (targetPaneId) {
+    return openTabInWorkspaceState(
+      workspace,
+      createSourceTab(normalizedPath, originSessionId),
+      targetPaneId,
+    );
+  }
+
+  if (shouldOpenSourceInAdjacentPane(workspace, preferredPaneId)) {
+    return openTabInAdjacentPane(
+      workspace,
+      preferredPaneId!,
+      createSourceTab(normalizedPath, originSessionId),
+      "row",
+      false,
+    );
+  }
+
   return openTabInWorkspaceState(
     workspace,
     createSourceTab(normalizedPath, originSessionId),
@@ -596,6 +615,26 @@ function openTabInWorkspaceState(
   return addWorkspaceTabToPane(workspace, targetPaneId, tab);
 }
 
+function openTabInAdjacentPane(
+  workspace: WorkspaceState,
+  paneId: string,
+  tab: WorkspaceTab,
+  direction: "row" | "column",
+  placeBefore: boolean,
+): WorkspaceState {
+  const referencePane = workspace.panes.find((pane) => pane.id === paneId);
+  if (!referencePane || !workspace.root) {
+    return openTabInWorkspaceState(workspace, tab, paneId);
+  }
+
+  const newPane = createPane(tab, referencePane.lastSessionViewMode);
+  return {
+    root: insertPaneAdjacent(workspace.root, paneId, direction, newPane.id, placeBefore),
+    panes: [...workspace.panes, newPane],
+    activePaneId: newPane.id,
+  };
+}
+
 function syncPaneState(pane: WorkspacePane): WorkspacePane {
   const activeTab = pane.tabs.find((tab) => tab.id === pane.activeTabId) ?? pane.tabs[0] ?? null;
   if (!activeTab) {
@@ -726,6 +765,56 @@ function insertTabAtIndex(tabs: WorkspaceTab[], tab: WorkspaceTab, tabIndex: num
   const nextTabIndex = clampIndex(tabIndex, 0, nextTabs.length);
   nextTabs.splice(nextTabIndex, 0, tab);
   return nextTabs;
+}
+
+function shouldOpenSourceInAdjacentPane(
+  workspace: WorkspaceState,
+  preferredPaneId: string | null,
+) {
+  if (!preferredPaneId) {
+    return false;
+  }
+
+  const preferredPane = workspace.panes.find((pane) => pane.id === preferredPaneId);
+  if (!preferredPane) {
+    return false;
+  }
+
+  const activeTab = getActiveTab(preferredPane);
+  return activeTab !== null && activeTab.kind !== "source";
+}
+
+function findSourceTargetPaneId(
+  workspace: WorkspaceState,
+  preferredPaneId: string | null,
+  originSessionId: string | null,
+) {
+  const preferredPane = preferredPaneId
+    ? workspace.panes.find((pane) => pane.id === preferredPaneId) ?? null
+    : null;
+  const preferredActiveTab = preferredPane ? getActiveTab(preferredPane) : null;
+
+  if (preferredActiveTab?.kind === "source") {
+    return preferredPane!.id;
+  }
+
+  if (originSessionId) {
+    const relatedPane = workspace.panes.find(
+      (pane) =>
+        pane.id !== preferredPaneId &&
+        pane.activeSessionId === originSessionId &&
+        pane.tabs.some((tab) => tab.kind === "source"),
+    );
+    if (relatedPane) {
+      return relatedPane.id;
+    }
+  }
+
+  return null;
+}
+
+function getActiveTab(pane: WorkspacePane) {
+  return pane.tabs.find((tab) => tab.id === pane.activeTabId) ?? pane.tabs[0] ?? null;
 }
 
 function normalizeWorkspacePath(path: string | null | undefined) {
