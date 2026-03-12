@@ -3,6 +3,7 @@ import type { DiffMessage, Session } from "./types";
 export type SessionPaneViewMode = "session" | "prompt" | "commands" | "diffs";
 export type PaneViewMode =
   | SessionPaneViewMode
+  | "controlPanel"
   | "source"
   | "filesystem"
   | "gitStatus"
@@ -35,6 +36,12 @@ export type WorkspaceGitStatusTab = {
   originSessionId: string | null;
 };
 
+export type WorkspaceControlPanelTab = {
+  id: string;
+  kind: "controlPanel";
+  originSessionId: string | null;
+};
+
 export type WorkspaceDiffPreviewTab = {
   id: string;
   kind: "diffPreview";
@@ -52,6 +59,7 @@ export type WorkspaceTab =
   | WorkspaceSourceTab
   | WorkspaceFilesystemTab
   | WorkspaceGitStatusTab
+  | WorkspaceControlPanelTab
   | WorkspaceDiffPreviewTab;
 
 export type WorkspacePane = {
@@ -130,6 +138,16 @@ export function createGitStatusTab(
   };
 }
 
+export function createControlPanelTab(
+  originSessionId: string | null = null,
+): WorkspaceControlPanelTab {
+  return {
+    id: crypto.randomUUID(),
+    kind: "controlPanel",
+    originSessionId,
+  };
+}
+
 export function createDiffPreviewTab({
   changeType,
   diff,
@@ -200,6 +218,15 @@ export function reconcileWorkspaceState(current: WorkspaceState, sessions: Sessi
               ...tab,
               originSessionId,
               workdir: normalizeWorkspacePath(tab.workdir),
+            },
+          ];
+        }
+
+        if (tab.kind === "controlPanel") {
+          return [
+            {
+              ...tab,
+              originSessionId,
             },
           ];
         }
@@ -275,11 +302,7 @@ export function openSessionInWorkspaceState(
     return activatePane(workspace, existing.paneId, existing.tab.id);
   }
 
-  return openTabInWorkspaceState(
-    workspace,
-    createSessionTab(sessionId),
-    preferredPaneId,
-  );
+  return openTabInWorkspaceState(workspace, createSessionTab(sessionId), preferredPaneId);
 }
 
 export function openSourceInWorkspaceState(
@@ -344,6 +367,67 @@ export function openGitStatusInWorkspaceState(
     createGitStatusTab(normalizedWorkdir, originSessionId),
     preferredPaneId,
   );
+}
+
+export function openControlPanelInWorkspaceState(
+  workspace: WorkspaceState,
+  preferredPaneId: string | null,
+  originSessionId: string | null,
+): WorkspaceState {
+  const existing = findControlPanelTab(workspace);
+  if (existing) {
+    return activatePane(workspace, existing.paneId, existing.tab.id);
+  }
+
+  return openTabInWorkspaceState(
+    workspace,
+    createControlPanelTab(originSessionId),
+    preferredPaneId,
+  );
+}
+
+export function ensureControlPanelInWorkspaceState(workspace: WorkspaceState): WorkspaceState {
+  if (findControlPanelTab(workspace)) {
+    return workspace;
+  }
+
+  return openTabInWorkspaceState(
+    workspace,
+    createControlPanelTab(null),
+    findDefaultControlPanelAnchorPaneId(workspace),
+  );
+}
+
+export function dockControlPanelAtWorkspaceEdge(
+  workspace: WorkspaceState,
+  side: "left" | "right",
+): WorkspaceState {
+  const controlPanel = findControlPanelTab(workspace);
+  if (!controlPanel || !workspace.root) {
+    return workspace;
+  }
+
+  const contentRoot = removePaneFromTree(workspace.root, controlPanel.paneId);
+  if (!contentRoot) {
+    return workspace;
+  }
+
+  const controlPanelNode: WorkspaceNode = {
+    type: "pane",
+    paneId: controlPanel.paneId,
+  };
+
+  return {
+    ...workspace,
+    root: {
+      id: crypto.randomUUID(),
+      type: "split",
+      direction: "row",
+      ratio: side === "left" ? 0.24 : 0.76,
+      first: side === "left" ? controlPanelNode : contentRoot,
+      second: side === "left" ? contentRoot : controlPanelNode,
+    },
+  };
 }
 
 export function openDiffPreviewInWorkspaceState(
@@ -489,6 +573,10 @@ export function placeDraggedTab(
     return workspace;
   }
 
+  if (!isAllowedControlPanelPlacement(targetPane, draggedTab, placement)) {
+    return workspace;
+  }
+
   if (placement === "tabs") {
     const requestedTabIndex = tabIndex ?? targetPane.tabs.length;
     if (sourcePaneId === targetPaneId) {
@@ -541,6 +629,10 @@ export function placeExternalTab(
   const targetPane = workspace.panes.find((pane) => pane.id === targetPaneId);
   if (!targetPane || !workspace.root) {
     return openTabInWorkspaceState(workspace, transferredTab, targetPaneId, tabIndex);
+  }
+
+  if (!isAllowedControlPanelPlacement(targetPane, transferredTab, placement)) {
+    return workspace;
   }
 
   const newPane = createPane(transferredTab, targetPane.lastSessionViewMode);
@@ -706,6 +798,20 @@ function openTabInWorkspaceState(
     };
   }
 
+  const targetPane = workspace.panes.find((pane) => pane.id === targetPaneId) ?? null;
+  if (targetPane && tab.kind !== "controlPanel" && paneContainsControlPanel(targetPane)) {
+    const alternatePaneId = findNonControlPanelPaneId(workspace, targetPane.id);
+    if (alternatePaneId) {
+      return addWorkspaceTabToPane(workspace, alternatePaneId, tab, tabIndex);
+    }
+
+    return openTabInAdjacentPane(workspace, targetPane.id, tab, "row", false);
+  }
+
+  if (targetPane && tab.kind === "controlPanel" && !paneContainsControlPanel(targetPane)) {
+    return openTabInAdjacentPane(workspace, targetPane.id, tab, "row", true);
+  }
+
   return addWorkspaceTabToPane(workspace, targetPaneId, tab, tabIndex);
 }
 
@@ -802,6 +908,16 @@ function syncPaneState(pane: WorkspacePane): WorkspacePane {
     };
   }
 
+  if (activeTab.kind === "controlPanel") {
+    return {
+      ...pane,
+      activeTabId: activeTab.id,
+      activeSessionId: resolveOriginSessionId(activeTab.originSessionId, pane.activeSessionId, pane.tabs),
+      viewMode: "controlPanel",
+      sourcePath: null,
+    };
+  }
+
   return {
     ...pane,
     activeTabId: activeTab.id,
@@ -880,6 +996,60 @@ function findGitStatusTab(workspace: WorkspaceState, workdir: string) {
   }
 
   return null;
+}
+
+function findControlPanelTab(workspace: WorkspaceState) {
+  for (const pane of workspace.panes) {
+    const tab = pane.tabs.find(
+      (candidate): candidate is WorkspaceControlPanelTab => candidate.kind === "controlPanel",
+    );
+    if (tab) {
+      return { paneId: pane.id, tab };
+    }
+  }
+
+  return null;
+}
+
+function findDefaultControlPanelAnchorPaneId(workspace: WorkspaceState) {
+  return (
+    findNonControlPanelPaneId(workspace, null) ??
+    workspace.activePaneId ??
+    workspace.panes[0]?.id ??
+    null
+  );
+}
+
+function findNonControlPanelPaneId(workspace: WorkspaceState, excludePaneId: string | null) {
+  const activePane =
+    workspace.activePaneId && workspace.activePaneId !== excludePaneId
+      ? workspace.panes.find((pane) => pane.id === workspace.activePaneId) ?? null
+      : null;
+  if (activePane && !paneContainsControlPanel(activePane)) {
+    return activePane.id;
+  }
+
+  return (
+    workspace.panes.find(
+      (pane) => pane.id !== excludePaneId && !paneContainsControlPanel(pane),
+    )?.id ?? null
+  );
+}
+
+function paneContainsControlPanel(pane: WorkspacePane) {
+  return pane.tabs.some((tab) => tab.kind === "controlPanel");
+}
+
+function isAllowedControlPanelPlacement(
+  targetPane: WorkspacePane,
+  tab: WorkspaceTab,
+  placement: TabDropPlacement,
+) {
+  if (tab.kind === "controlPanel" || paneContainsControlPanel(targetPane)) {
+    return placement === "left" || placement === "right";
+  }
+
+  return true;
 }
 
 function findDiffPreviewTab(

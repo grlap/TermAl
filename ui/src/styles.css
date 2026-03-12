@@ -9,6 +9,7 @@
   --control-radius-button: min(var(--button-radius-tight), 0.66rem);
   --control-radius-large: min(var(--button-radius-large), 1rem);
   --control-radius-pill: min(var(--button-radius-tight), 0.72rem);
+  --control-panel-pane-width: 23rem;
 }
 
 html,
@@ -82,6 +83,16 @@ textarea {
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 0.7rem;
   align-items: center;
+}
+
+.brand-block {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.control-panel-launcher {
+  justify-self: start;
+  margin-top: 0.05rem;
 }
 
 .project-controls {
@@ -376,7 +387,7 @@ textarea {
 .shell {
   position: relative;
   display: grid;
-  grid-template-columns: minmax(18rem, 24rem) minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr);
   align-items: stretch;
   gap: 1.25rem;
   height: 100vh;
@@ -427,6 +438,16 @@ textarea {
   overflow: hidden;
 }
 
+.sidebar.sidebar-panel {
+  position: relative;
+  top: auto;
+  align-self: stretch;
+  height: 100%;
+  min-height: 0;
+  padding: 1rem;
+  overflow: hidden;
+}
+
 .workspace-shell {
   display: flex;
   flex-direction: column;
@@ -448,6 +469,21 @@ textarea {
   height: 100%;
   min-height: 0;
   overflow: hidden;
+}
+
+.workspace-stage.workspace-stage-control-panel-only {
+  justify-content: flex-start;
+}
+
+.workspace-stage.workspace-stage-control-panel-only.workspace-stage-control-panel-only-right {
+  justify-content: flex-end;
+}
+
+.workspace-stage.workspace-stage-control-panel-only > * {
+  flex: 0 0 var(--control-panel-pane-width);
+  width: var(--control-panel-pane-width);
+  min-width: var(--control-panel-pane-width);
+  max-width: var(--control-panel-pane-width);
 }
 
 .workspace-stage > * {
@@ -699,6 +735,17 @@ textarea {
   min-height: 0;
 }
 
+.tile-branch.control-panel-branch {
+  flex: 0 0 var(--control-panel-pane-width);
+  width: var(--control-panel-pane-width);
+  min-width: var(--control-panel-pane-width);
+  max-width: var(--control-panel-pane-width);
+}
+
+.tile-branch.flexible-branch {
+  flex: 1 1 0;
+}
+
 .tile-divider {
   position: relative;
   flex: none;
@@ -736,6 +783,10 @@ textarea {
   top: 50%;
   height: 3px;
   transform: translateY(-50%);
+}
+
+.tile-divider.fixed {
+  pointer-events: none;
 }
 
 .pane-empty-label {
@@ -1187,7 +1238,7 @@ textarea {
 }
 
 .brand-block h1 {
-  font-size: clamp(2rem, 4vw, 3.5rem);
+  font-size: clamp(1.8rem, 3vw, 2.6rem);
 }
 
 .eyebrow {
@@ -1793,6 +1844,11 @@ textarea {
   display: grid;
   gap: 0.7rem;
   align-content: start;
+}
+
+.message-stack.control-panel-stack {
+  padding: 0;
+  overflow: hidden;
 }
 
 .session-conversation-page {
@@ -3247,6 +3303,17 @@ textarea {
     overflow: visible;
   }
 
+  .workspace-stage.workspace-stage-control-panel-only {
+    justify-content: stretch;
+  }
+
+  .workspace-stage.workspace-stage-control-panel-only > * {
+    flex: 1 1 auto;
+    width: auto;
+    min-width: 0;
+    max-width: none;
+  }
+
   .workspace-stage > *,
   .tile-branch {
     height: auto;
@@ -3254,6 +3321,14 @@ textarea {
 
   .tile-split {
     flex-direction: column;
+  }
+
+  .tile-branch.control-panel-branch,
+  .tile-branch.flexible-branch {
+    flex: 1 1 auto;
+    width: auto;
+    min-width: 0;
+    max-width: none;
   }
 
   .workspace-pane,

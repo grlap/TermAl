@@ -793,6 +793,7 @@ const SessionComposer = memo(function SessionComposer({
   const composerInputRef = useRef<HTMLTextAreaElement | null>(null);
   const localDraftsRef = useRef<Record<string, string>>({});
   const committedDraftsRef = useRef<Record<string, string>>({});
+  const onDraftCommitRef = useRef(onDraftCommit);
   const [localDraftsBySessionId, setLocalDraftsBySessionId] = useState<Record<string, string>>({});
   const [promptHistoryStateBySessionId, setPromptHistoryStateBySessionId] = useState<
     Record<string, PromptHistoryState | undefined>
@@ -843,6 +844,10 @@ const SessionComposer = memo(function SessionComposer({
   useEffect(() => {
     localDraftsRef.current = localDraftsBySessionId;
   }, [localDraftsBySessionId]);
+
+  useEffect(() => {
+    onDraftCommitRef.current = onDraftCommit;
+  }, [onDraftCommit]);
 
   useEffect(() => {
     const textarea = composerInputRef.current;
@@ -927,10 +932,10 @@ const SessionComposer = memo(function SessionComposer({
       const committed = committedDraftsRef.current[activeSessionId] ?? "";
       if (latestDraft !== undefined && latestDraft !== committed) {
         committedDraftsRef.current[activeSessionId] = latestDraft;
-        onDraftCommit(activeSessionId, latestDraft);
+        onDraftCommitRef.current(activeSessionId, latestDraft);
       }
     };
-  }, [activeSessionId, onDraftCommit]);
+  }, [activeSessionId]);
 
   function resetPromptHistory(sessionId: string) {
     setPromptHistoryStateBySessionId((current) => {
@@ -967,6 +972,10 @@ const SessionComposer = memo(function SessionComposer({
     onDraftCommit(sessionId, nextValue);
   }
 
+  function getComposerDraftValue() {
+    return composerInputRef.current?.value ?? composerDraft;
+  }
+
   function handleComposerChange(nextValue: string) {
     if (!activeSessionId) {
       return;
@@ -981,7 +990,7 @@ const SessionComposer = memo(function SessionComposer({
       return;
     }
 
-    commitDraft(activeSessionId, composerDraft);
+    commitDraft(activeSessionId, getComposerDraftValue());
   }
 
   function handleComposerSend() {
@@ -989,7 +998,7 @@ const SessionComposer = memo(function SessionComposer({
       return;
     }
 
-    const draftToSend = composerDraft;
+    const draftToSend = getComposerDraftValue();
     resetPromptHistory(session.id);
     updateLocalDraft(session.id, "");
     commitDraft(session.id, "");
@@ -1039,7 +1048,7 @@ const SessionComposer = memo(function SessionComposer({
       const nextIndex = historyState
         ? Math.max(historyState.index - 1, 0)
         : promptHistory.length - 1;
-      const draftSnapshot = historyState?.draft ?? composerDraft;
+      const draftSnapshot = historyState?.draft ?? getComposerDraftValue();
 
       setPromptHistoryStateBySessionId((current) => ({
         ...current,

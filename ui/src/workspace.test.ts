@@ -3,6 +3,8 @@ import {
   addWorkspaceTabToPane,
   closeWorkspaceTab,
   createPane,
+  ensureControlPanelInWorkspaceState,
+  openControlPanelInWorkspaceState,
   getSplitRatio,
   openDiffPreviewInWorkspaceState,
   openFilesystemInWorkspaceState,
@@ -73,6 +75,14 @@ function makeGitStatusTab(
     id,
     kind: "gitStatus",
     workdir,
+    originSessionId,
+  };
+}
+
+function makeControlPanelTab(id: string, originSessionId: string | null): WorkspaceTab {
+  return {
+    id,
+    kind: "controlPanel",
     originSessionId,
   };
 }
@@ -473,6 +483,117 @@ describe("workspace helpers", () => {
     expect(next.panes.find((pane) => pane.id === "pane-a")?.activeTabId).toBe("git-a");
   });
 
+  it("openControlPanelInWorkspaceState creates a control panel pane and preserves session context", () => {
+    const next = openControlPanelInWorkspaceState(
+      makeSinglePaneWorkspace(makePane("pane-a", [makeSessionTab("tab-a", "session-a")])),
+      "pane-a",
+      "session-a",
+    );
+
+    expect(next.panes).toHaveLength(2);
+    expect(next.panes.find((pane) => pane.id === "pane-a")).toMatchObject({
+      tabs: [makeSessionTab("tab-a", "session-a")],
+      activeTabId: "tab-a",
+      activeSessionId: "session-a",
+      viewMode: "session",
+    });
+    expect(next.panes.find((pane) => pane.id !== "pane-a")).toMatchObject({
+      tabs: [
+        {
+          id: expect.any(String),
+          kind: "controlPanel",
+          originSessionId: "session-a",
+        },
+      ],
+      viewMode: "controlPanel",
+      activeSessionId: "session-a",
+    });
+    expect(next.root).toMatchObject({
+      type: "split",
+      direction: "row",
+    });
+  });
+
+  it("openControlPanelInWorkspaceState focuses the existing control panel instead of duplicating it", () => {
+    const paneA = makePane("pane-a", [makeControlPanelTab("control-a", "session-a")], {
+      activeTabId: "control-a",
+      activeSessionId: "session-a",
+      viewMode: "controlPanel",
+    });
+    const paneB = makePane("pane-b", [makeSessionTab("tab-b", "session-b")]);
+
+    const next = openControlPanelInWorkspaceState(
+      makeSplitWorkspace(paneA, paneB, paneB.id),
+      paneB.id,
+      "session-b",
+    );
+
+    expect(next.activePaneId).toBe("pane-a");
+    expect(next.panes.find((pane) => pane.id === "pane-a")?.activeTabId).toBe("control-a");
+    expect(next.panes.find((pane) => pane.id === "pane-b")?.tabs).toEqual([
+      makeSessionTab("tab-b", "session-b"),
+    ]);
+  });
+
+  it("ensureControlPanelInWorkspaceState creates a control panel pane for an empty workspace", () => {
+    const next = ensureControlPanelInWorkspaceState({
+      root: null,
+      panes: [],
+      activePaneId: null,
+    });
+
+    expect(next.panes).toHaveLength(1);
+    expect(next.panes[0]).toMatchObject({
+      tabs: [
+        {
+          kind: "controlPanel",
+          originSessionId: null,
+        },
+      ],
+      viewMode: "controlPanel",
+      activeSessionId: null,
+    });
+    expect(next.activePaneId).toBe(next.panes[0].id);
+  });
+
+  it("openSessionInWorkspaceState opens beside the control panel instead of inside it", () => {
+    const next = openSessionInWorkspaceState(
+      makeSinglePaneWorkspace(makePane("pane-a", [makeControlPanelTab("control-a", null)], {
+        activeTabId: "control-a",
+        activeSessionId: null,
+        viewMode: "controlPanel",
+      })),
+      "session-a",
+      "pane-a",
+    );
+
+    expect(next.panes).toHaveLength(2);
+    expect(next.panes.find((pane) => pane.id === "pane-a")).toMatchObject({
+      tabs: [makeControlPanelTab("control-a", null)],
+      activeTabId: "control-a",
+      viewMode: "controlPanel",
+      activeSessionId: null,
+    });
+    expect(next.panes.find((pane) => pane.id !== "pane-a")).toMatchObject({
+      tabs: [
+        {
+          kind: "session",
+          sessionId: "session-a",
+        },
+      ],
+      activeSessionId: "session-a",
+      viewMode: "session",
+    });
+    expect(next.root).toMatchObject({
+      type: "split",
+      direction: "row",
+      first: {
+        type: "pane",
+        paneId: "pane-a",
+      },
+    });
+  });
+
   it("openDiffPreviewInWorkspaceState opens a diff preview in a new pane to the right", () => {
     const next = openDiffPreviewInWorkspaceState(
       makeSinglePaneWorkspace(makePane("pane-a", [makeSessionTab("tab-a", "session-a")])),
@@ -639,6 +760,49 @@ describe("workspace helpers", () => {
       tabs: [makeSessionTab("tab-b", "session-b"), makeSessionTab("tab-a", "session-a"), makeSessionTab("tab-c", "session-c")],
       activeSessionId: "session-a",
     });
+  });
+
+  it("placeDraggedTab rejects vertical control panel placement", () => {
+    const workspace = makeSplitWorkspace(
+      makePane("pane-a", [makeControlPanelTab("control-a", null)], {
+        activeTabId: "control-a",
+        activeSessionId: null,
+        viewMode: "controlPanel",
+      }),
+      makePane("pane-b", [makeSessionTab("tab-b", "session-b")]),
+    );
+
+    const next = placeDraggedTab(
+      workspace,
+      "pane-a",
+      "control-a",
+      "pane-b",
+      "top",
+    );
+
+    expect(next).toEqual(workspace);
+  });
+
+  it("placeDraggedTab rejects tab-stacking into the control panel pane", () => {
+    const workspace = makeSplitWorkspace(
+      makePane("pane-a", [makeControlPanelTab("control-a", null)], {
+        activeTabId: "control-a",
+        activeSessionId: null,
+        viewMode: "controlPanel",
+      }),
+      makePane("pane-b", [makeSessionTab("tab-b", "session-b")]),
+    );
+
+    const next = placeDraggedTab(
+      workspace,
+      "pane-b",
+      "tab-b",
+      "pane-a",
+      "tabs",
+      1,
+    );
+
+    expect(next).toEqual(workspace);
   });
 
   it("placeExternalTab clones a dropped tab into the target pane", () => {

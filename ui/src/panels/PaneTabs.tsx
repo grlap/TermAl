@@ -57,6 +57,10 @@ export function PaneTabs({
 }) {
   const paneTabsRef = useRef<HTMLDivElement | null>(null);
   const activeCodexTooltipAnchorRef = useRef<HTMLElement | null>(null);
+  const paneHasControlPanel = tabs.some((tab) => tab.kind === "controlPanel");
+  const canDropInTabRail = draggedTab !== null &&
+    draggedTab.tab.kind !== "controlPanel" &&
+    !paneHasControlPanel;
   const [tabRailState, setTabRailState] = useState({
     hasOverflow: false,
     canScrollPrev: false,
@@ -177,7 +181,8 @@ export function PaneTabs({
   }
 
   function handleTabRailDragOver(event: ReactDragEvent<HTMLDivElement>) {
-    if (!draggedTab) {
+    if (!draggedTab || !canDropInTabRail) {
+      setActiveTabInsertIndex(null);
       return;
     }
 
@@ -199,7 +204,7 @@ export function PaneTabs({
   }
 
   function handleTabRailDrop(event: ReactDragEvent<HTMLDivElement>) {
-    if (!draggedTab) {
+    if (!draggedTab || !canDropInTabRail) {
       return;
     }
 
@@ -387,6 +392,7 @@ export function PaneTabs({
                   className="pane-tab-grip"
                   type="button"
                   aria-label={`Drag ${tabLabel}`}
+                  title={`Drag ${tabLabel} to move or split`}
                   draggable
                   onMouseDown={(event) => {
                     event.stopPropagation();
@@ -414,21 +420,23 @@ export function PaneTabs({
                     <span className="pane-tab-label">{tabLabel}</span>
                   </span>
                 </span>
-                <button
-                  className="pane-tab-close"
-                  type="button"
-                  draggable={false}
-                  aria-label={`Remove ${tabLabel} from this tile`}
-                  onMouseDown={(event) => {
-                    event.stopPropagation();
-                  }}
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    onCloseTab(paneId, tab.id);
-                  }}
-                >
-                  &times;
-                </button>
+                {tab.kind === "controlPanel" ? null : (
+                  <button
+                    className="pane-tab-close"
+                    type="button"
+                    draggable={false}
+                    aria-label={`Remove ${tabLabel} from this tile`}
+                    onMouseDown={(event) => {
+                      event.stopPropagation();
+                    }}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      onCloseTab(paneId, tab.id);
+                    }}
+                  >
+                    &times;
+                  </button>
+                )}
               </div>
             );
           })
@@ -551,6 +559,10 @@ function formatTabLabel(tab: WorkspaceTab, session: Session | null) {
 
   if (tab.kind === "gitStatus") {
     return `Git: ${formatPathTabLabel(tab.workdir, "Workspace")}`;
+  }
+
+  if (tab.kind === "controlPanel") {
+    return "Control panel";
   }
 
   return `Diff: ${formatPathTabLabel(tab.filePath, "Preview")}`;

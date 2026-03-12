@@ -81,6 +81,8 @@ import type {
 import {
   activatePane,
   closeWorkspaceTab,
+  dockControlPanelAtWorkspaceEdge,
+  ensureControlPanelInWorkspaceState,
   getSplitRatio,
   openDiffPreviewInWorkspaceState,
   openFilesystemInWorkspaceState,
@@ -202,11 +204,14 @@ export default function App() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [sessions, setSessions] = useState<Session[]>([]);
   const [codexState, setCodexState] = useState<CodexState>({});
-  const [workspace, setWorkspace] = useState<WorkspaceState>({
-    root: null,
-    panes: [],
-    activePaneId: null,
-  });
+  const [controlPanelSide, setControlPanelSide] = useState<"left" | "right">("left");
+  const [workspace, setWorkspace] = useState<WorkspaceState>(() =>
+    ensureControlPanelInWorkspaceState({
+      root: null,
+      panes: [],
+      activePaneId: null,
+    }),
+  );
   const [draftsBySessionId, setDraftsBySessionId] = useState<Record<string, string>>({});
   const [draftAttachmentsBySessionId, setDraftAttachmentsBySessionId] = useState<
     Record<string, DraftImageAttachment[]>
@@ -309,6 +314,13 @@ export default function App() {
       ),
     [workspace.panes],
   );
+  const workspaceHasOnlyControlPanel = useMemo(
+    () =>
+      workspace.panes.length === 1 &&
+      workspace.panes[0]?.tabs.length === 1 &&
+      workspace.panes[0]?.tabs[0]?.kind === "controlPanel",
+    [workspace.panes],
+  );
   const selectedProject =
     selectedProjectId === ALL_PROJECTS_FILTER_ID
       ? null
@@ -403,6 +415,16 @@ export default function App() {
     dragChannelRef.current?.postMessage(message);
   }
 
+  function applyControlPanelLayout(
+    nextWorkspace: WorkspaceState,
+    side: "left" | "right" = controlPanelSide,
+  ) {
+    return dockControlPanelAtWorkspaceEdge(
+      ensureControlPanelInWorkspaceState(nextWorkspace),
+      side,
+    );
+  }
+
   function adoptSessions(
     nextSessions: Session[],
     options?: { openSessionId?: string; paneId?: string | null },
@@ -413,7 +435,7 @@ export default function App() {
     sessionsRef.current = mergedSessions;
     setSessions(mergedSessions);
     setWorkspace((current) => {
-      const reconciled = reconcileWorkspaceState(current, mergedSessions);
+      const reconciled = applyControlPanelLayout(reconcileWorkspaceState(current, mergedSessions));
       if (!options?.openSessionId) {
         return reconciled;
       }
@@ -656,7 +678,7 @@ export default function App() {
           }
           setDraggedTab((current) => (current?.dragId === message.dragId ? null : current));
           setWorkspace((current) =>
-            closeWorkspaceTab(current, message.sourcePaneId, message.tabId),
+            applyControlPanelLayout(closeWorkspaceTab(current, message.sourcePaneId, message.tabId)),
           );
           break;
       }
@@ -1032,9 +1054,10 @@ export default function App() {
     });
   }
 
-  async function handleNewSession() {
+  async function handleNewSession(preferredPaneId: string | null = null) {
     setIsCreating(true);
     try {
+      const targetPaneId = preferredPaneId ?? workspace.activePaneId;
       const targetProjectId =
         selectedProjectId === ALL_PROJECTS_FILTER_ID
           ? (activeSession?.projectId ?? projects[0]?.id ?? null)
@@ -1051,11 +1074,11 @@ export default function App() {
       });
       const adopted = adoptState(created.state, {
         openSessionId: created.sessionId,
-        paneId: workspace.activePaneId,
+        paneId: targetPaneId,
       });
       if (!adopted) {
         setWorkspace((current) =>
-          openSessionInWorkspaceState(current, created.sessionId, workspace.activePaneId),
+          applyControlPanelLayout(openSessionInWorkspaceState(current, created.sessionId, targetPaneId)),
         );
       }
       setRequestError(null);
@@ -1375,13 +1398,17 @@ export default function App() {
     }
   }
 
-  function handleSidebarSessionClick(sessionId: string) {
+  function handleSidebarSessionClick(sessionId: string, preferredPaneId: string | null = null) {
     const session = sessionLookup.get(sessionId);
     closePendingSessionRename();
     setKillRevealSessionId(null);
     setSelectedProjectId(session?.projectId ?? ALL_PROJECTS_FILTER_ID);
     requestScrollToBottom(sessionId);
-    setWorkspace((current) => openSessionInWorkspaceState(current, sessionId, current.activePaneId));
+    setWorkspace((current) =>
+      applyControlPanelLayout(
+        openSessionInWorkspaceState(current, sessionId, preferredPaneId ?? current.activePaneId),
+      ),
+    );
   }
 
   function handleScrollToBottomRequestHandled(token: number) {
@@ -1397,6 +1424,9 @@ export default function App() {
   const isPendingSessionRenameSubmitting = pendingSessionRenameSession
     ? Boolean(updatingSessionIds[pendingSessionRenameSession.id])
     : false;
+  const pendingKillSession = pendingKillSessionId
+    ? (sessionLookup.get(pendingKillSessionId) ?? null)
+    : null;
 
   function handlePaneActivate(paneId: string) {
     setWorkspace((current) => activatePane(current, paneId));
@@ -1413,11 +1443,11 @@ export default function App() {
   }
 
   function handleCloseTab(paneId: string, tabId: string) {
-    setWorkspace((current) => closeWorkspaceTab(current, paneId, tabId));
+    setWorkspace((current) => applyControlPanelLayout(closeWorkspaceTab(current, paneId, tabId)));
   }
 
   function handleSplitPane(paneId: string, direction: "row" | "column") {
-    setWorkspace((current) => splitPane(current, paneId, direction));
+    setWorkspace((current) => applyControlPanelLayout(splitPane(current, paneId, direction)));
   }
 
   function handleSplitResizeStart(
@@ -1487,15 +1517,25 @@ export default function App() {
       const drop = draggedTab;
       draggedTabRef.current = null;
       setDraggedTab(null);
+      const nextControlPanelSide =
+        drop.tab.kind === "controlPanel" && (placement === "left" || placement === "right")
+          ? placement
+          : controlPanelSide;
+      if (nextControlPanelSide !== controlPanelSide) {
+        setControlPanelSide(nextControlPanelSide);
+      }
       startTransition(() => {
         setWorkspace((current) =>
-          placeDraggedTab(
-            current,
-            drop.sourcePaneId,
-            drop.tabId,
-            targetPaneId,
-            placement,
-            tabIndex,
+          applyControlPanelLayout(
+            placeDraggedTab(
+              current,
+              drop.sourcePaneId,
+              drop.tabId,
+              targetPaneId,
+              placement,
+              tabIndex,
+            ),
+            nextControlPanelSide,
           ),
         );
       });
@@ -1508,10 +1548,20 @@ export default function App() {
 
     const drop = externalDraggedTab;
     setExternalDraggedTab((current) => (current?.dragId === drop.dragId ? null : current));
+    const nextControlPanelSide =
+      drop.tab.kind === "controlPanel" && (placement === "left" || placement === "right")
+        ? placement
+        : controlPanelSide;
+    if (nextControlPanelSide !== controlPanelSide) {
+      setControlPanelSide(nextControlPanelSide);
+    }
     // Only ask the source window to remove its tab after this window has applied the drop.
     flushSync(() => {
       setWorkspace((current) =>
-        placeExternalTab(current, drop.tab, targetPaneId, placement, tabIndex),
+        applyControlPanelLayout(
+          placeExternalTab(current, drop.tab, targetPaneId, placement, tabIndex),
+          nextControlPanelSide,
+        ),
       );
     });
     broadcastTabDragMessage({
@@ -1553,7 +1603,9 @@ export default function App() {
   }
 
   function handleOpenSourceTab(paneId: string, path: string | null, originSessionId: string | null) {
-    setWorkspace((current) => openSourceInWorkspaceState(current, path, paneId, originSessionId));
+    setWorkspace((current) =>
+      applyControlPanelLayout(openSourceInWorkspaceState(current, path, paneId, originSessionId)),
+    );
   }
 
   function handleOpenDiffPreviewTab(
@@ -1562,18 +1614,20 @@ export default function App() {
     originSessionId: string | null,
   ) {
     setWorkspace((current) =>
-      openDiffPreviewInWorkspaceState(
-        current,
-        {
-          changeType: message.changeType,
-          diff: message.diff,
-          diffMessageId: message.id,
-          filePath: message.filePath,
-          language: message.language ?? null,
-          originSessionId,
-          summary: message.summary,
-        },
-        paneId,
+      applyControlPanelLayout(
+        openDiffPreviewInWorkspaceState(
+          current,
+          {
+            changeType: message.changeType,
+            diff: message.diff,
+            diffMessageId: message.id,
+            filePath: message.filePath,
+            language: message.language ?? null,
+            originSessionId,
+            summary: message.summary,
+          },
+          paneId,
+        ),
       ),
     );
   }
@@ -1584,7 +1638,9 @@ export default function App() {
     originSessionId: string | null,
   ) {
     setWorkspace((current) =>
-      openFilesystemInWorkspaceState(current, rootPath, paneId, originSessionId),
+      applyControlPanelLayout(
+        openFilesystemInWorkspaceState(current, rootPath, paneId, originSessionId),
+      ),
     );
   }
 
@@ -1594,27 +1650,25 @@ export default function App() {
     originSessionId: string | null,
   ) {
     setWorkspace((current) =>
-      openGitStatusInWorkspaceState(current, workdir, paneId, originSessionId),
+      applyControlPanelLayout(
+        openGitStatusInWorkspaceState(current, workdir, paneId, originSessionId),
+      ),
     );
   }
 
-  return (
-    <div className="shell">
-      <div className="background-orbit background-orbit-left" />
-      <div className="background-orbit background-orbit-right" />
+  function renderWorkspaceControlSurface(paneId: string): JSX.Element {
+    const surfaceId = paneId;
+    const newSessionAgentId = `new-session-agent-${surfaceId}`;
+    const newProjectRootId = `new-project-root-${surfaceId}`;
 
-      <aside className="sidebar panel">
+    const content = (
+      <>
         <div className="brand-block">
-          <p className="eyebrow">Terminal meets AI</p>
           <h1>TermAl</h1>
-          <p className="brand-copy">
-            A local control room for AI coding sessions with semantic cards instead of raw terminal
-            noise.
-          </p>
         </div>
 
         <div className="new-session-controls">
-          <label className="session-control-label" htmlFor="new-session-agent">
+          <label className="session-control-label" htmlFor={newSessionAgentId}>
             New session
           </label>
           <p className="session-control-hint">
@@ -1624,7 +1678,7 @@ export default function App() {
           </p>
           <div className="new-session-row">
             <ThemedCombobox
-              id="new-session-agent"
+              id={newSessionAgentId}
               className="new-session-agent-select"
               value={newSessionAgent}
               options={NEW_SESSION_AGENT_OPTIONS as readonly ComboboxOption[]}
@@ -1634,7 +1688,7 @@ export default function App() {
             <button
               className="new-session-button"
               type="button"
-              onClick={handleNewSession}
+              onClick={() => void handleNewSession(paneId)}
               disabled={isCreating}
             >
               {isCreating ? "Creating..." : "New Session"}
@@ -1644,14 +1698,14 @@ export default function App() {
 
         <section className="project-controls" aria-label="Projects">
           <div className="project-controls-header">
-            <label className="session-control-label" htmlFor="new-project-root">
+            <label className="session-control-label" htmlFor={newProjectRootId}>
               Projects
             </label>
             <span className="project-count-badge">{projects.length}</span>
           </div>
           <div className="project-create-row">
             <input
-              id="new-project-root"
+              id={newProjectRootId}
               className="themed-input project-root-input"
               type="text"
               value={newProjectRootPath}
@@ -1723,14 +1777,14 @@ export default function App() {
           aria-expanded={isSettingsOpen}
           aria-controls="settings-dialog"
         >
-            <span className="settings-launcher-copy">
-              <span className="session-control-label">Settings</span>
-              <strong className="settings-launcher-title">Open preferences</strong>
-              <span className="settings-launcher-description">
-                Appearance, themes, and Claude session defaults.
-              </span>
+          <span className="settings-launcher-copy">
+            <span className="session-control-label">Settings</span>
+            <strong className="settings-launcher-title">Open preferences</strong>
+            <span className="settings-launcher-description">
+              Appearance, themes, and Claude session defaults.
             </span>
-            <span className="settings-launcher-badge">{activeTheme.name}</span>
+          </span>
+          <span className="settings-launcher-badge">{activeTheme.name}</span>
         </button>
 
         <div className="session-list">
@@ -1782,7 +1836,7 @@ export default function App() {
 
               return (
                 <div
-                  key={session.id}
+                  key={`${surfaceId}-${session.id}`}
                   className={`session-row-shell ${isActive ? "selected" : ""} ${isOpen ? "open" : ""} ${isKillVisible ? "kill-armed" : ""}`}
                   onMouseLeave={() => {
                     if (!isKilling && !isKillConfirmationOpen) {
@@ -1803,7 +1857,7 @@ export default function App() {
                   <button
                     className={`session-row ${isActive ? "selected" : ""} ${isOpen ? "open" : ""}`}
                     type="button"
-                    onClick={() => handleSidebarSessionClick(session.id)}
+                    onClick={() => handleSidebarSessionClick(session.id, paneId)}
                     onContextMenu={(event) => {
                       event.preventDefault();
                       handleSessionRenameRequest(
@@ -1860,63 +1914,6 @@ export default function App() {
                   >
                     {isKilling ? "Killing" : "Kill"}
                   </button>
-                  {isKillConfirmationOpen && typeof document !== "undefined"
-                    ? createPortal(
-                        <>
-                          <div
-                            className="session-kill-popover-backdrop"
-                            onPointerMove={() => {
-                              schedulePendingKillConfirmationClose();
-                            }}
-                            onPointerDown={(event) => {
-                              event.preventDefault();
-                              closePendingKillConfirmation();
-                            }}
-                          />
-                          <div
-                            ref={pendingKillPopoverRef}
-                            id={`kill-session-popover-${session.id}`}
-                            className="session-kill-popover panel"
-                            style={
-                              pendingKillPopoverStyle ?? {
-                                left: 0,
-                                top: 0,
-                                visibility: "hidden",
-                              }
-                            }
-                            role="dialog"
-                            aria-label={`Confirm killing ${session.name}`}
-                            onPointerEnter={() => {
-                              clearPendingKillCloseTimeout();
-                            }}
-                            onPointerLeave={() => {
-                              schedulePendingKillConfirmationClose();
-                            }}
-                          >
-                            <div className="session-kill-popover-actions">
-                              <button
-                                className="ghost-button session-kill-popover-cancel"
-                                type="button"
-                                onClick={() => {
-                                  closePendingKillConfirmation(true);
-                                }}
-                              >
-                                Cancel
-                              </button>
-                              <button
-                                ref={pendingKillConfirmButtonRef}
-                                className="send-button session-kill-popover-confirm"
-                                type="button"
-                                onClick={() => void confirmKillSession()}
-                              >
-                                Kill
-                              </button>
-                            </div>
-                          </div>
-                        </>,
-                        document.body,
-                      )
-                    : null}
                 </div>
               );
             })
@@ -1928,9 +1925,9 @@ export default function App() {
                   ? selectedProject
                     ? `No sessions match this search in ${selectedProject.name}.`
                     : "No sessions match this search."
-                : selectedProject
-                  ? `No ${sessionListFilter === "all" ? "" : `${sessionListFilter} `}sessions in ${selectedProject.name}.`
-                  : "No sessions match this filter."}
+                  : selectedProject
+                    ? `No ${sessionListFilter === "all" ? "" : `${sessionListFilter} `}sessions in ${selectedProject.name}.`
+                    : "No sessions match this filter."}
             </div>
           )}
         </div>
@@ -1972,7 +1969,15 @@ export default function App() {
             </button>
           </div>
         </section>
-      </aside>
+      </>
+    );
+    return <div className="sidebar sidebar-panel">{content}</div>;
+  }
+
+  return (
+    <div className="shell">
+      <div className="background-orbit background-orbit-left" />
+      <div className="background-orbit background-orbit-right" />
 
       <main className="workspace-shell">
         {requestError ? (
@@ -1982,7 +1987,13 @@ export default function App() {
           </article>
         ) : null}
 
-        <section className="workspace-stage">
+        <section
+          className={`workspace-stage${
+            workspaceHasOnlyControlPanel
+              ? ` workspace-stage-control-panel-only workspace-stage-control-panel-only-${controlPanelSide}`
+              : ""
+          }`}
+        >
           {workspace.root ? (
             <WorkspaceNodeView
               node={workspace.root}
@@ -2030,6 +2041,7 @@ export default function App() {
               onRenameSessionRequest={handleSessionRenameRequest}
               onScrollToBottomRequestHandled={handleScrollToBottomRequestHandled}
               onSessionSettingsChange={handleSessionSettingsChange}
+              renderControlPanel={(paneId) => renderWorkspaceControlSurface(paneId)}
             />
           ) : (
             <div className="workspace-empty panel">
@@ -2045,6 +2057,63 @@ export default function App() {
           )}
         </section>
       </main>
+      {pendingKillSession && typeof document !== "undefined"
+        ? createPortal(
+            <>
+              <div
+                className="session-kill-popover-backdrop"
+                onPointerMove={() => {
+                  schedulePendingKillConfirmationClose();
+                }}
+                onPointerDown={(event) => {
+                  event.preventDefault();
+                  closePendingKillConfirmation();
+                }}
+              />
+              <div
+                ref={pendingKillPopoverRef}
+                id={`kill-session-popover-${pendingKillSession.id}`}
+                className="session-kill-popover panel"
+                style={
+                  pendingKillPopoverStyle ?? {
+                    left: 0,
+                    top: 0,
+                    visibility: "hidden",
+                  }
+                }
+                role="dialog"
+                aria-label={`Confirm killing ${pendingKillSession.name}`}
+                onPointerEnter={() => {
+                  clearPendingKillCloseTimeout();
+                }}
+                onPointerLeave={() => {
+                  schedulePendingKillConfirmationClose();
+                }}
+              >
+                <div className="session-kill-popover-actions">
+                  <button
+                    className="ghost-button session-kill-popover-cancel"
+                    type="button"
+                    onClick={() => {
+                      closePendingKillConfirmation(true);
+                    }}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    ref={pendingKillConfirmButtonRef}
+                    className="send-button session-kill-popover-confirm"
+                    type="button"
+                    onClick={() => void confirmKillSession()}
+                  >
+                    Kill
+                  </button>
+                </div>
+              </div>
+            </>,
+            document.body,
+          )
+        : null}
       {pendingSessionRenameSession && typeof document !== "undefined"
         ? createPortal(
             <>
@@ -2865,6 +2934,7 @@ function WorkspaceNodeView({
   onRenameSessionRequest,
   onScrollToBottomRequestHandled,
   onSessionSettingsChange,
+  renderControlPanel,
 }: {
   node: WorkspaceNode;
   codexState: CodexState;
@@ -2945,6 +3015,7 @@ function WorkspaceNodeView({
     field: SessionSettingsField,
     value: SessionSettingsValue,
   ) => void;
+  renderControlPanel: (paneId: string) => JSX.Element;
 }) {
   if (node.type === "pane") {
     const pane = paneLookup.get(node.paneId);
@@ -2999,13 +3070,28 @@ function WorkspaceNodeView({
         onRenameSessionRequest={onRenameSessionRequest}
         onScrollToBottomRequestHandled={onScrollToBottomRequestHandled}
         onSessionSettingsChange={onSessionSettingsChange}
+        renderControlPanel={renderControlPanel}
       />
     );
   }
 
+  const firstContainsControlPanel = workspaceNodeContainsControlPanel(node.first, paneLookup);
+  const secondContainsControlPanel = workspaceNodeContainsControlPanel(node.second, paneLookup);
+  const shouldPinControlPanelBranch =
+    node.direction === "row" && firstContainsControlPanel !== secondContainsControlPanel;
+  const firstBranchClassName = shouldPinControlPanelBranch
+    ? `tile-branch ${firstContainsControlPanel ? "control-panel-branch" : "flexible-branch"}`
+    : "tile-branch";
+  const secondBranchClassName = shouldPinControlPanelBranch
+    ? `tile-branch ${secondContainsControlPanel ? "control-panel-branch" : "flexible-branch"}`
+    : "tile-branch";
+
   return (
     <div className={`tile-split tile-split-${node.direction}`}>
-      <div className="tile-branch" style={{ flexGrow: node.ratio, flexBasis: 0 }}>
+      <div
+        className={firstBranchClassName}
+        style={shouldPinControlPanelBranch ? undefined : { flexGrow: node.ratio, flexBasis: 0 }}
+      >
         <WorkspaceNodeView
           node={node.first}
           codexState={codexState}
@@ -3052,15 +3138,23 @@ function WorkspaceNodeView({
           onRenameSessionRequest={onRenameSessionRequest}
           onScrollToBottomRequestHandled={onScrollToBottomRequestHandled}
           onSessionSettingsChange={onSessionSettingsChange}
+          renderControlPanel={renderControlPanel}
         />
       </div>
 
       <div
-        className={`tile-divider tile-divider-${node.direction}`}
-        onPointerDown={(event) => onResizeStart(node.id, node.direction, event)}
+        className={`tile-divider tile-divider-${node.direction}${shouldPinControlPanelBranch ? " fixed" : ""}`}
+        onPointerDown={
+          shouldPinControlPanelBranch
+            ? undefined
+            : (event) => onResizeStart(node.id, node.direction, event)
+        }
       />
 
-      <div className="tile-branch" style={{ flexGrow: 1 - node.ratio, flexBasis: 0 }}>
+      <div
+        className={secondBranchClassName}
+        style={shouldPinControlPanelBranch ? undefined : { flexGrow: 1 - node.ratio, flexBasis: 0 }}
+      >
         <WorkspaceNodeView
           node={node.second}
           codexState={codexState}
@@ -3107,6 +3201,7 @@ function WorkspaceNodeView({
           onRenameSessionRequest={onRenameSessionRequest}
           onScrollToBottomRequestHandled={onScrollToBottomRequestHandled}
           onSessionSettingsChange={onSessionSettingsChange}
+          renderControlPanel={renderControlPanel}
         />
       </div>
     </div>
@@ -3157,6 +3252,7 @@ function SessionPaneView({
   onRenameSessionRequest,
   onScrollToBottomRequestHandled,
   onSessionSettingsChange,
+  renderControlPanel,
 }: {
   pane: WorkspacePane;
   codexState: CodexState;
@@ -3231,8 +3327,10 @@ function SessionPaneView({
     field: SessionSettingsField,
     value: SessionSettingsValue,
   ) => void;
+  renderControlPanel: (paneId: string) => JSX.Element;
 }) {
   const activeTab = pane.tabs.find((tab) => tab.id === pane.activeTabId) ?? pane.tabs[0] ?? null;
+  const activeControlPanelTab = activeTab?.kind === "controlPanel" ? activeTab : null;
   const activeSourceTab = activeTab?.kind === "source" ? activeTab : null;
   const activeFilesystemTab = activeTab?.kind === "filesystem" ? activeTab : null;
   const activeGitStatusTab = activeTab?.kind === "gitStatus" ? activeTab : null;
@@ -3275,6 +3373,17 @@ function SessionPaneView({
   const [sessionFindActiveIndex, setSessionFindActiveIndex] = useState(0);
   const sessionFindInputRef = useRef<HTMLInputElement>(null);
   const sessionSearchItemRefsRef = useRef<Record<string, HTMLElement | null>>({});
+  const paneHasControlPanel = useMemo(
+    () => pane.tabs.some((tab) => tab.kind === "controlPanel"),
+    [pane.tabs],
+  );
+  const allowedDropPlacements = useMemo<Exclude<TabDropPlacement, "tabs">[]>(
+    () =>
+      draggedTab && (draggedTab.tab.kind === "controlPanel" || paneHasControlPanel)
+        ? ["left", "right"]
+        : ["left", "top", "right", "bottom"],
+    [draggedTab, paneHasControlPanel],
+  );
   const showDropOverlay = Boolean(draggedTab) && !(
     draggedTab?.sourceWindowId === windowId &&
     draggedTab?.sourcePaneId === pane.id &&
@@ -3993,7 +4102,7 @@ function SessionPaneView({
     >
       {showDropOverlay ? (
         <div className="pane-drop-overlay">
-          {(["left", "top", "right", "bottom"] as Exclude<TabDropPlacement, "tabs">[]).map((placement) => (
+          {allowedDropPlacements.map((placement) => (
             <div
               key={placement}
               className={`pane-drop-zone pane-drop-zone-${placement} ${activeDropPlacement === placement ? "active" : ""}`}
@@ -4103,7 +4212,7 @@ function SessionPaneView({
                   </button>
                 ) : null}
             </div>
-          ) : (
+          ) : activeTab?.kind === "controlPanel" ? null : (
             <div className="pane-view-strip-left">
               <span className="chip">
                 {activeTab?.kind === "source"
@@ -4112,6 +4221,8 @@ function SessionPaneView({
                     ? "File browser"
                     : activeTab?.kind === "gitStatus"
                       ? "Git status"
+                      : activeTab?.kind === "controlPanel"
+                        ? "Control panel"
                       : activeTab?.kind === "diffPreview"
                         ? "Diff preview"
                       : "Panel"}
@@ -4131,7 +4242,7 @@ function SessionPaneView({
                 onClose={closeSessionFind}
               />
             ) : null}
-            {activeSession ? (
+            {activeSession && !activeControlPanelTab ? (
               <div className="thread-chips">
                 <span className="chip">{activeSession.workdir}</span>
                 {activeSourceTab?.path ? <span className="chip">{activeSourceTab.path}</span> : null}
@@ -4152,7 +4263,7 @@ function SessionPaneView({
 
       <section
         ref={messageStackRef}
-        className="message-stack"
+        className={`message-stack${activeControlPanelTab ? " control-panel-stack" : ""}`}
         onScroll={(event) => {
           const node = event.currentTarget;
           const shouldStick = node.scrollHeight - node.scrollTop - node.clientHeight < 72;
@@ -4166,7 +4277,9 @@ function SessionPaneView({
           }
         }}
       >
-        {activeSourceTab ? (
+        {activeControlPanelTab ? (
+          renderControlPanel(pane.id)
+        ) : activeSourceTab ? (
           <SourcePanel
             candidatePaths={candidateSourcePaths}
             editorAppearance={editorAppearance}
@@ -4277,7 +4390,7 @@ function SessionPaneView({
           />
         )}
       </section>
-      {activeSourceTab || activeFilesystemTab || activeGitStatusTab || activeDiffPreviewTab ? null : (
+      {activeControlPanelTab || activeSourceTab || activeFilesystemTab || activeGitStatusTab || activeDiffPreviewTab ? null : (
         <AgentSessionPanelFooter
           paneId={pane.id}
           viewMode={pane.viewMode}
@@ -4309,6 +4422,20 @@ function EmptyState({ title, body }: { title: string; body: string }) {
       <h3>{title}</h3>
       <p>{body}</p>
     </article>
+  );
+}
+
+function workspaceNodeContainsControlPanel(
+  node: WorkspaceNode,
+  paneLookup: Map<string, WorkspacePane>,
+): boolean {
+  if (node.type === "pane") {
+    return paneLookup.get(node.paneId)?.tabs.some((tab) => tab.kind === "controlPanel") ?? false;
+  }
+
+  return (
+    workspaceNodeContainsControlPanel(node.first, paneLookup) ||
+    workspaceNodeContainsControlPanel(node.second, paneLookup)
   );
 }
 
@@ -5565,6 +5692,8 @@ function labelForPaneViewMode(viewMode: PaneViewMode) {
       return "Commands";
     case "diffs":
       return "Diffs";
+    case "controlPanel":
+      return "Control panel";
     case "source":
       return "Source";
     case "filesystem":
