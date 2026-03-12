@@ -1765,6 +1765,10 @@ textarea {
   max-width: min(48rem, 94%);
 }
 
+.command-card {
+  max-width: 100%;
+}
+
 .utility-header {
   display: flex;
   align-items: flex-start;
