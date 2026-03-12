@@ -6,6 +6,7 @@
   /* Keep control shapes theme-driven without letting softer themes turn every button into a pill. */
   --control-radius: min(var(--button-radius), 1rem);
   --control-radius-tight: min(var(--button-radius-tight), 0.78rem);
+  --control-radius-button: min(var(--button-radius-tight), 0.66rem);
   --control-radius-large: min(var(--button-radius-large), 1rem);
   --control-radius-pill: min(var(--button-radius-tight), 0.72rem);
 }
@@ -544,7 +545,7 @@ textarea {
 
 .settings-tab {
   border: 1px solid var(--line);
-  border-radius: var(--control-radius);
+  border-radius: var(--control-radius-button);
   background: var(--surface-white);
   color: var(--muted);
   padding: 0.58rem 0.95rem;
@@ -870,7 +871,7 @@ textarea {
 
 .pane-view-button {
   border: 1px solid var(--line);
-  border-radius: var(--control-radius-tight);
+  border-radius: var(--control-radius-button);
   background: var(--surface-white-strong);
   color: var(--muted);
   padding: 0.4rem 0.78rem;
@@ -930,7 +931,7 @@ textarea {
   width: 2rem;
   height: 2rem;
   border: 1px solid var(--line);
-  border-radius: var(--control-radius-tight);
+  border-radius: var(--control-radius-button);
   background: var(--surface-white);
   color: var(--ink);
   font-family: var(--code-font);
@@ -952,7 +953,7 @@ textarea {
   min-width: 0;
   padding-left: 0.35rem;
   border: 1px solid transparent;
-  border-radius: var(--control-radius-tight);
+  border-radius: var(--control-radius-button);
   background: var(--surface-white-strong);
   cursor: pointer;
   user-select: none;
@@ -1043,7 +1044,7 @@ textarea {
 
 .pane-tab-close {
   border: 0;
-  border-radius: var(--control-radius-tight);
+  border-radius: var(--control-radius-button);
   background: transparent;
   color: var(--muted);
   cursor: pointer;
@@ -1209,7 +1210,7 @@ textarea {
 .approval-button,
 .ghost-button {
   border: 0;
-  border-radius: var(--control-radius);
+  border-radius: var(--control-radius-button);
   cursor: pointer;
   transition: transform 160ms ease, box-shadow 160ms ease, background 160ms ease;
 }
@@ -1349,7 +1350,7 @@ textarea {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border-radius: var(--control-radius-tight);
+  border-radius: var(--control-radius-button);
   transition:
     opacity 140ms ease,
     transform 140ms ease,
@@ -1615,7 +1616,7 @@ textarea {
   gap: 0.8rem;
   width: 100%;
   border: 0;
-  border-radius: var(--control-radius-tight);
+  border-radius: var(--control-radius-button);
   background: transparent;
   color: var(--ink);
   cursor: pointer;
@@ -1708,7 +1709,7 @@ textarea {
 
 .session-find-button {
   border: 1px solid var(--line);
-  border-radius: var(--control-radius-tight);
+  border-radius: var(--control-radius-button);
   background: var(--surface-white-soft);
   color: var(--ink);
   padding: 0.36rem 0.62rem;
@@ -1829,7 +1830,7 @@ textarea {
   width: fit-content;
   margin: 0 auto 0.85rem;
   border: 0;
-  border-radius: var(--control-radius);
+  border-radius: var(--control-radius-button);
   padding: 0.62rem 0.95rem;
   background: var(--new-response-bg);
   box-shadow: 0 16px 28px var(--new-response-shadow);
@@ -2163,7 +2164,7 @@ textarea {
   height: 2rem;
   padding: 0;
   border: 1px solid var(--line);
-  border-radius: var(--control-radius-tight);
+  border-radius: var(--control-radius-button);
   background: var(--surface-white);
   color: var(--muted);
   cursor: pointer;
@@ -2971,7 +2972,7 @@ textarea {
   width: 1.7rem;
   height: 1.7rem;
   border: 1px solid var(--pending-dismiss-border);
-  border-radius: var(--control-radius-tight);
+  border-radius: var(--control-radius-button);
   background: var(--pending-dismiss-bg);
   color: var(--pending-dismiss-fg);
   cursor: pointer;
@@ -3046,7 +3047,7 @@ textarea {
 
 .composer-attachment-remove {
   border: 1px solid var(--line);
-  border-radius: var(--control-radius-tight);
+  border-radius: var(--control-radius-button);
   background: var(--surface-white);
   color: var(--ink);
   padding: 0.45rem 0.75rem;
