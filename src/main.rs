@@ -568,7 +568,26 @@ impl AppState {
                         "Claude approval mode can only be changed for Claude sessions",
                     ));
                 }
+            }
+            Agent::Claude => {
+                if request.sandbox_mode.is_some() || request.approval_policy.is_some() {
+                    return Err(ApiError::bad_request(
+                        "Claude sessions only support approval mode settings",
+                    ));
+                }
+            }
+        }
 
+        if let Some(name) = request.name.as_deref() {
+            let trimmed = name.trim();
+            if trimmed.is_empty() {
+                return Err(ApiError::bad_request("session name cannot be empty"));
+            }
+            record.session.name = trimmed.to_owned();
+        }
+
+        match record.session.agent {
+            Agent::Codex => {
                 if let Some(sandbox_mode) = request.sandbox_mode {
                     record.codex_sandbox_mode = sandbox_mode;
                     record.session.sandbox_mode = Some(sandbox_mode);
@@ -579,12 +598,6 @@ impl AppState {
                 }
             }
             Agent::Claude => {
-                if request.sandbox_mode.is_some() || request.approval_policy.is_some() {
-                    return Err(ApiError::bad_request(
-                        "Claude sessions only support approval mode settings",
-                    ));
-                }
-
                 if let Some(claude_approval_mode) = request.claude_approval_mode {
                     record.session.claude_approval_mode = Some(claude_approval_mode);
                 }
@@ -6401,6 +6414,7 @@ struct SendMessageAttachmentRequest {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct UpdateSessionSettingsRequest {
+    name: Option<String>,
     approval_policy: Option<CodexApprovalPolicy>,
     sandbox_mode: Option<CodexSandboxMode>,
     claude_approval_mode: Option<ClaudeApprovalMode>,
@@ -6917,6 +6931,7 @@ mod tests {
             .update_session_settings(
                 &created.session_id,
                 UpdateSessionSettingsRequest {
+                    name: None,
                     sandbox_mode: Some(CodexSandboxMode::ReadOnly),
                     approval_policy: None,
                     claude_approval_mode: None,
@@ -6924,6 +6939,42 @@ mod tests {
             )
             .unwrap();
         assert_eq!(updated.revision, 2);
+    }
+
+    #[test]
+    fn renames_sessions_via_settings_updates() {
+        let state = test_app_state();
+
+        let created = state
+            .create_session(CreateSessionRequest {
+                agent: Some(Agent::Codex),
+                name: Some("Old Name".to_owned()),
+                workdir: Some("/tmp".to_owned()),
+                project_id: None,
+                approval_policy: None,
+                sandbox_mode: None,
+                claude_approval_mode: None,
+            })
+            .unwrap();
+
+        let updated = state
+            .update_session_settings(
+                &created.session_id,
+                UpdateSessionSettingsRequest {
+                    name: Some("New Name".to_owned()),
+                    sandbox_mode: None,
+                    approval_policy: None,
+                    claude_approval_mode: None,
+                },
+            )
+            .unwrap();
+
+        let renamed = updated
+            .sessions
+            .iter()
+            .find(|session| session.id == created.session_id)
+            .expect("renamed session should be present");
+        assert_eq!(renamed.name, "New Name");
     }
 
     #[test]

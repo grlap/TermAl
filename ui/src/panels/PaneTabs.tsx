@@ -34,6 +34,7 @@ export function PaneTabs({
   onTabDragStart,
   onTabDragEnd,
   onTabDrop,
+  onRenameSessionRequest,
 }: {
   paneId: string;
   windowId: string;
@@ -47,6 +48,12 @@ export function PaneTabs({
   onTabDragStart: (drag: WorkspaceTabDrag) => void;
   onTabDragEnd: () => void;
   onTabDrop: (targetPaneId: string, placement: TabDropPlacement, tabIndex?: number) => void;
+  onRenameSessionRequest: (
+    sessionId: string,
+    clientX: number,
+    clientY: number,
+    trigger?: HTMLElement | null,
+  ) => void;
 }) {
   const paneTabsRef = useRef<HTMLDivElement | null>(null);
   const activeCodexTooltipAnchorRef = useRef<HTMLElement | null>(null);
@@ -362,6 +369,19 @@ export function PaneTabs({
                     onSelectTab(paneId, tab.id);
                   }
                 }}
+                onContextMenu={(event) => {
+                  if (!session) {
+                    return;
+                  }
+
+                  event.preventDefault();
+                  onRenameSessionRequest(
+                    session.id,
+                    event.clientX,
+                    event.clientY,
+                    event.currentTarget,
+                  );
+                }}
               >
                 <button
                   className="pane-tab-grip"
@@ -578,4 +598,3 @@ function formatRateLimitResetLabel(resetsAt: number | null, label: string) {
 function clamp(value: number, min: number, max: number) {
   return Math.min(Math.max(value, min), max);
 }
-

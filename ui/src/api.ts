@@ -175,6 +175,13 @@ export function updateSessionSettings(
   });
 }
 
+export function renameSession(sessionId: string, name: string) {
+  return request<StateResponse>(`/api/sessions/${encodeURIComponent(sessionId)}/settings`, {
+    method: "POST",
+    body: JSON.stringify({ name }),
+  });
+}
+
 export function killSession(sessionId: string) {
   return request<StateResponse>(`/api/sessions/${encodeURIComponent(sessionId)}/kill`, {
     method: "POST",
