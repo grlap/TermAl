@@ -4545,7 +4545,8 @@ function CommandCard({
   searchQuery?: string;
   searchHighlightTone?: SearchHighlightTone;
 }) {
-  const [expanded, setExpanded] = useState(false);
+  const [inputExpanded, setInputExpanded] = useState(false);
+  const [outputExpanded, setOutputExpanded] = useState(false);
   const [copiedSection, setCopiedSection] = useState<"command" | "output" | null>(null);
   const hasOutput = message.output.trim().length > 0;
   const displayOutput = hasOutput
@@ -4553,11 +4554,14 @@ function CommandCard({
     : message.status === "running"
       ? "Awaiting output…"
       : "No output";
+  const canExpandCommand =
+    message.command.split("\n").length > 10 || message.command.length > 480;
   const canExpandOutput =
     hasOutput && (message.output.split("\n").length > 10 || message.output.length > 480);
   const statusTone = mapCommandStatus(message.status);
   const isSearchExpanded = searchQuery.trim().length > 0;
-  const isExpanded = expanded || isSearchExpanded;
+  const isInputExpanded = inputExpanded || isSearchExpanded;
+  const isOutputExpanded = outputExpanded || isSearchExpanded;
 
   useEffect(() => {
     if (!copiedSection) {
@@ -4599,13 +4603,15 @@ function CommandCard({
         <div className="command-row">
           <div className="command-row-label">IN</div>
           <div className="command-row-body">
-            <DeferredHighlightedCodeBlock
-              className="command-text command-text-input"
-              code={message.command}
-              language={message.commandLanguage ?? "bash"}
-              searchQuery={searchQuery}
-              searchHighlightTone={searchHighlightTone}
-            />
+            <div className={`command-input-shell ${isInputExpanded ? "expanded" : "collapsed"}`}>
+              <DeferredHighlightedCodeBlock
+                className="command-text command-text-input"
+                code={message.command}
+                language={message.commandLanguage ?? "bash"}
+                searchQuery={searchQuery}
+                searchHighlightTone={searchHighlightTone}
+              />
+            </div>
           </div>
           <div className="command-row-actions">
             <button
@@ -4617,6 +4623,18 @@ function CommandCard({
             >
               {copiedSection === "command" ? <CheckIcon /> : <CopyIcon />}
             </button>
+            {canExpandCommand ? (
+              <button
+                className="command-icon-button"
+                type="button"
+                onClick={() => setInputExpanded((open) => !open)}
+                aria-label={isInputExpanded ? "Collapse command" : "Expand command"}
+                aria-pressed={isInputExpanded}
+                title={isInputExpanded ? "Collapse command" : "Expand command"}
+              >
+                {isInputExpanded ? <CollapseIcon /> : <ExpandIcon />}
+              </button>
+            ) : null}
           </div>
         </div>
 
@@ -4624,7 +4642,7 @@ function CommandCard({
           <div className="command-row-label">OUT</div>
           <div className="command-row-body">
             <div
-              className={`command-output-shell ${isExpanded ? "expanded" : "collapsed"} ${hasOutput ? "has-output" : "empty"}`}
+              className={`command-output-shell ${isOutputExpanded ? "expanded" : "collapsed"} ${hasOutput ? "has-output" : "empty"}`}
             >
               {hasOutput ? (
                 <DeferredHighlightedCodeBlock
@@ -4657,12 +4675,12 @@ function CommandCard({
               <button
                 className="command-icon-button"
                 type="button"
-                onClick={() => setExpanded((open) => !open)}
-                aria-label={isExpanded ? "Collapse output" : "Expand output"}
-                aria-pressed={isExpanded}
-                title={isExpanded ? "Collapse output" : "Expand output"}
+                onClick={() => setOutputExpanded((open) => !open)}
+                aria-label={isOutputExpanded ? "Collapse output" : "Expand output"}
+                aria-pressed={isOutputExpanded}
+                title={isOutputExpanded ? "Collapse output" : "Expand output"}
               >
-                {isExpanded ? <CollapseIcon /> : <ExpandIcon />}
+                {isOutputExpanded ? <CollapseIcon /> : <ExpandIcon />}
               </button>
             ) : null}
           </div>

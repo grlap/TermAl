@@ -2154,6 +2154,32 @@ textarea {
   word-break: break-word;
 }
 
+.command-input-shell {
+  position: relative;
+  width: 100%;
+}
+
+.command-input-shell.collapsed {
+  max-height: 8.5rem;
+  overflow: hidden;
+}
+
+.command-input-shell.collapsed::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 2.6rem;
+  background: linear-gradient(180deg, transparent, var(--surface-card));
+  pointer-events: none;
+}
+
+.command-input-shell.expanded {
+  max-height: min(18rem, 45vh);
+  overflow: auto;
+}
+
 .command-output-shell {
   position: relative;
   border-radius: 1rem;
