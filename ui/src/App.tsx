@@ -27,6 +27,7 @@ import {
   fetchState,
   killSession,
   pickProjectRoot,
+  renameSession,
   saveFile,
   sendMessage,
   stopSession,
@@ -132,7 +133,14 @@ type DraftImageAttachment = ImageAttachment & {
   previewUrl: string;
 };
 
+type PendingSessionRename = {
+  clientX: number;
+  clientY: number;
+  sessionId: string;
+};
+
 const PENDING_KILL_CLOSE_DELAY_MS = 180;
+const PENDING_SESSION_RENAME_CLOSE_DELAY_MS = 300;
 
 type SessionConversationItem =
   | {
@@ -227,6 +235,13 @@ export default function App() {
     useState<ClaudeApprovalMode>("ask");
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [settingsTab, setSettingsTab] = useState<PreferencesTabId>("themes");
+  const [pendingSessionRename, setPendingSessionRename] = useState<PendingSessionRename | null>(
+    null,
+  );
+  const [pendingSessionRenameDraft, setPendingSessionRenameDraft] = useState("");
+  const [pendingSessionRenameStyle, setPendingSessionRenameStyle] = useState<CSSProperties | null>(
+    null,
+  );
   const [pendingKillPopoverStyle, setPendingKillPopoverStyle] = useState<CSSProperties | null>(
     null,
   );
@@ -249,10 +264,15 @@ export default function App() {
   const dragChannelRef = useRef<BroadcastChannel | null>(null);
   const draggedTabRef = useRef<WorkspaceTabDrag | null>(null);
   const sessionListSearchInputRef = useRef<HTMLInputElement>(null);
+  const pendingSessionRenameTriggerRef = useRef<HTMLElement | null>(null);
+  const pendingSessionRenamePopoverRef = useRef<HTMLFormElement | null>(null);
+  const pendingSessionRenameInputRef = useRef<HTMLInputElement | null>(null);
+  const pendingSessionRenameCloseTimeoutRef = useRef<number | null>(null);
   const pendingKillTriggerRef = useRef<HTMLButtonElement | null>(null);
   const pendingKillPopoverRef = useRef<HTMLDivElement | null>(null);
   const pendingKillConfirmButtonRef = useRef<HTMLButtonElement | null>(null);
   const pendingKillCloseTimeoutRef = useRef<number | null>(null);
+  const isMountedRef = useRef(true);
   const sessionsRef = useRef<Session[]>([]);
   const latestStateRevisionRef = useRef<number | null>(null);
   const stateResyncInFlightRef = useRef(false);
@@ -412,6 +432,9 @@ export default function App() {
     );
     setPendingKillSessionId((current) =>
       current && availableSessionIds.has(current) ? current : null,
+    );
+    setPendingSessionRename((current) =>
+      current && availableSessionIds.has(current.sessionId) ? current : null,
     );
     setUpdatingSessionIds((current) => pruneSessionFlags(current, availableSessionIds));
   }
@@ -648,6 +671,13 @@ export default function App() {
   }, [windowId]);
 
   useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
+
+  useEffect(() => {
     return () => {
       releaseDraftAttachments(Object.values(draftAttachmentsRef.current).flat());
     };
@@ -656,6 +686,7 @@ export default function App() {
   useEffect(() => {
     return () => {
       clearPendingKillCloseTimeout();
+      clearPendingSessionRenameCloseTimeout();
     };
   }, []);
 
@@ -734,6 +765,79 @@ export default function App() {
       window.removeEventListener("scroll", updatePendingKillPopoverStyle, true);
     };
   }, [pendingKillSessionId]);
+
+  useEffect(() => {
+    if (!pendingSessionRename) {
+      clearPendingSessionRenameCloseTimeout();
+      return;
+    }
+
+    const focusFrameId = window.requestAnimationFrame(() => {
+      pendingSessionRenameInputRef.current?.focus();
+      pendingSessionRenameInputRef.current?.select();
+    });
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        closePendingSessionRename(true);
+      }
+    }
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      window.cancelAnimationFrame(focusFrameId);
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [pendingSessionRename]);
+
+  useLayoutEffect(() => {
+    if (!pendingSessionRename) {
+      setPendingSessionRenameStyle(null);
+      return;
+    }
+
+    const renameAnchor = pendingSessionRename;
+
+    setPendingSessionRenameStyle({
+      left: 0,
+      top: 0,
+      visibility: "hidden",
+    });
+
+    function updatePendingSessionRenameStyle() {
+      const popover = pendingSessionRenamePopoverRef.current;
+      if (!popover) {
+        return;
+      }
+
+      const popoverRect = popover.getBoundingClientRect();
+      const viewportPadding = 12;
+      const left = clamp(
+        renameAnchor.clientX - popoverRect.width / 2,
+        viewportPadding,
+        window.innerWidth - popoverRect.width - viewportPadding,
+      );
+      const top = clamp(
+        renameAnchor.clientY - 18,
+        viewportPadding,
+        window.innerHeight - popoverRect.height - viewportPadding,
+      );
+
+      setPendingSessionRenameStyle({
+        left,
+        top,
+      });
+    }
+
+    const frameId = window.requestAnimationFrame(updatePendingSessionRenameStyle);
+    window.addEventListener("resize", updatePendingSessionRenameStyle);
+
+    return () => {
+      window.cancelAnimationFrame(frameId);
+      window.removeEventListener("resize", updatePendingSessionRenameStyle);
+    };
+  }, [pendingSessionRename]);
 
   useEffect(() => {
     if (!isSettingsOpen) {
@@ -1052,6 +1156,7 @@ export default function App() {
       return;
     }
 
+    closePendingSessionRename();
     clearPendingKillCloseTimeout();
     pendingKillTriggerRef.current = trigger ?? null;
     setPendingKillSessionId((current) => (current === sessionId ? null : sessionId));
@@ -1117,6 +1222,116 @@ export default function App() {
     }
   }
 
+  function clearPendingSessionRenameCloseTimeout() {
+    if (pendingSessionRenameCloseTimeoutRef.current === null) {
+      return;
+    }
+
+    window.clearTimeout(pendingSessionRenameCloseTimeoutRef.current);
+    pendingSessionRenameCloseTimeoutRef.current = null;
+  }
+
+  function schedulePendingSessionRenameClose() {
+    clearPendingSessionRenameCloseTimeout();
+
+    const pendingRename = pendingSessionRename;
+    if (!pendingRename) {
+      return;
+    }
+    if (pendingSessionRenameInputRef.current === document.activeElement) {
+      return;
+    }
+
+    pendingSessionRenameCloseTimeoutRef.current = window.setTimeout(() => {
+      pendingSessionRenameCloseTimeoutRef.current = null;
+      setPendingSessionRename((current) =>
+        current?.sessionId === pendingRename.sessionId ? null : current,
+      );
+      setPendingSessionRenameDraft("");
+      setPendingSessionRenameStyle(null);
+    }, PENDING_SESSION_RENAME_CLOSE_DELAY_MS);
+  }
+
+  function handleSessionRenameRequest(
+    sessionId: string,
+    clientX: number,
+    clientY: number,
+    trigger?: HTMLElement | null,
+  ) {
+    const session = sessionLookup.get(sessionId);
+    if (!session) {
+      return;
+    }
+
+    closePendingKillConfirmation();
+    clearPendingSessionRenameCloseTimeout();
+    pendingSessionRenameTriggerRef.current = trigger ?? null;
+    setPendingSessionRenameDraft(session.name);
+    setPendingSessionRename({
+      sessionId,
+      clientX,
+      clientY,
+    });
+  }
+
+  function focusPendingSessionRenameTrigger() {
+    window.requestAnimationFrame(() => {
+      pendingSessionRenameTriggerRef.current?.focus();
+    });
+  }
+
+  function closePendingSessionRename(restoreFocus = false) {
+    clearPendingSessionRenameCloseTimeout();
+    setPendingSessionRename(null);
+    setPendingSessionRenameDraft("");
+    setPendingSessionRenameStyle(null);
+    if (restoreFocus) {
+      focusPendingSessionRenameTrigger();
+    }
+  }
+
+  async function confirmSessionRename() {
+    if (!pendingSessionRename) {
+      return;
+    }
+
+    const session = sessionLookup.get(pendingSessionRename.sessionId);
+    const nextName = pendingSessionRenameDraft.trim();
+    if (!session) {
+      closePendingSessionRename();
+      return;
+    }
+    if (!nextName) {
+      return;
+    }
+    if (nextName === session.name.trim()) {
+      closePendingSessionRename(true);
+      return;
+    }
+
+    setUpdatingSessionIds((current) => setSessionFlag(current, session.id, true));
+    try {
+      const state = await renameSession(session.id, nextName);
+      if (!isMountedRef.current) {
+        return;
+      }
+
+      adoptState(state);
+      setRequestError(null);
+      closePendingSessionRename();
+    } catch (error) {
+      if (!isMountedRef.current) {
+        return;
+      }
+
+      setRequestError(getErrorMessage(error));
+    } finally {
+      if (isMountedRef.current) {
+        setUpdatingSessionIds((current) => setSessionFlag(current, session.id, false));
+      }
+    }
+  }
+
   async function handleSessionSettingsChange(
     sessionId: string,
     field: SessionSettingsField,
@@ -1162,6 +1377,7 @@ export default function App() {
 
   function handleSidebarSessionClick(sessionId: string) {
     const session = sessionLookup.get(sessionId);
+    closePendingSessionRename();
     setKillRevealSessionId(null);
     setSelectedProjectId(session?.projectId ?? ALL_PROJECTS_FILTER_ID);
     requestScrollToBottom(sessionId);
@@ -1173,6 +1389,14 @@ export default function App() {
       current?.token === token ? null : current,
     );
   }
+
+  const pendingSessionRenameSession = pendingSessionRename
+    ? (sessionLookup.get(pendingSessionRename.sessionId) ?? null)
+    : null;
+  const pendingSessionRenameValue = pendingSessionRenameDraft.trim();
+  const isPendingSessionRenameSubmitting = pendingSessionRenameSession
+    ? Boolean(updatingSessionIds[pendingSessionRenameSession.id])
+    : false;
 
   function handlePaneActivate(paneId: string) {
     setWorkspace((current) => activatePane(current, paneId));
@@ -1580,6 +1804,15 @@ export default function App() {
                     className={`session-row ${isActive ? "selected" : ""} ${isOpen ? "open" : ""}`}
                     type="button"
                     onClick={() => handleSidebarSessionClick(session.id)}
+                    onContextMenu={(event) => {
+                      event.preventDefault();
+                      handleSessionRenameRequest(
+                        session.id,
+                        event.clientX,
+                        event.clientY,
+                        event.currentTarget,
+                      );
+                    }}
                   >
                     <div className="session-avatar">{session.emoji}</div>
                     <div className="session-copy">
@@ -1794,6 +2027,7 @@ export default function App() {
               onApprovalDecision={handleApprovalDecision}
               onStopSession={handleStopSession}
               onKillSession={handleKillSession}
+              onRenameSessionRequest={handleSessionRenameRequest}
               onScrollToBottomRequestHandled={handleScrollToBottomRequestHandled}
               onSessionSettingsChange={handleSessionSettingsChange}
             />
@@ -1811,6 +2045,80 @@ export default function App() {
           )}
         </section>
       </main>
+      {pendingSessionRenameSession && typeof document !== "undefined"
+        ? createPortal(
+            <>
+              <div
+                className="session-rename-popover-backdrop"
+                onPointerMove={() => {
+                  schedulePendingSessionRenameClose();
+                }}
+                onPointerDown={(event) => {
+                  event.preventDefault();
+                  closePendingSessionRename();
+                }}
+              />
+              <form
+                ref={pendingSessionRenamePopoverRef}
+                className="session-rename-popover panel"
+                style={
+                  pendingSessionRenameStyle ?? {
+                    left: 0,
+                    top: 0,
+                    visibility: "hidden",
+                  }
+                }
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  void confirmSessionRename();
+                }}
+                onPointerEnter={() => {
+                  clearPendingSessionRenameCloseTimeout();
+                }}
+                onPointerLeave={() => {
+                  schedulePendingSessionRenameClose();
+                }}
+              >
+                <input
+                  ref={pendingSessionRenameInputRef}
+                  className="themed-input session-rename-input"
+                  type="text"
+                  value={pendingSessionRenameDraft}
+                  maxLength={120}
+                  spellCheck={false}
+                  aria-label="Session name"
+                  placeholder="Session name"
+                  onFocus={() => {
+                    clearPendingSessionRenameCloseTimeout();
+                  }}
+                  onChange={(event) => {
+                    clearPendingSessionRenameCloseTimeout();
+                    setPendingSessionRenameDraft(event.currentTarget.value);
+                  }}
+                />
+                <div className="session-rename-actions">
+                  <button
+                    className="ghost-button session-rename-cancel"
+                    type="button"
+                    onClick={() => {
+                      closePendingSessionRename(true);
+                    }}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    className="send-button session-rename-save"
+                    type="submit"
+                    disabled={!pendingSessionRenameValue || isPendingSessionRenameSubmitting}
+                  >
+                    {isPendingSessionRenameSubmitting ? "Saving" : "Save"}
+                  </button>
+                </div>
+              </form>
+            </>,
+            document.body,
+          )
+        : null}
       {isSettingsOpen ? (
         <div
           className="dialog-backdrop"
@@ -2554,6 +2862,7 @@ function WorkspaceNodeView({
   onApprovalDecision,
   onStopSession,
   onKillSession,
+  onRenameSessionRequest,
   onScrollToBottomRequestHandled,
   onSessionSettingsChange,
 }: {
@@ -2624,6 +2933,12 @@ function WorkspaceNodeView({
   ) => void;
   onStopSession: (sessionId: string) => void;
   onKillSession: (sessionId: string) => void;
+  onRenameSessionRequest: (
+    sessionId: string,
+    clientX: number,
+    clientY: number,
+    trigger?: HTMLElement | null,
+  ) => void;
   onScrollToBottomRequestHandled: (token: number) => void;
   onSessionSettingsChange: (
     sessionId: string,
@@ -2681,6 +2996,7 @@ function WorkspaceNodeView({
         onApprovalDecision={onApprovalDecision}
         onStopSession={onStopSession}
         onKillSession={onKillSession}
+        onRenameSessionRequest={onRenameSessionRequest}
         onScrollToBottomRequestHandled={onScrollToBottomRequestHandled}
         onSessionSettingsChange={onSessionSettingsChange}
       />
@@ -2733,6 +3049,7 @@ function WorkspaceNodeView({
           onApprovalDecision={onApprovalDecision}
           onStopSession={onStopSession}
           onKillSession={onKillSession}
+          onRenameSessionRequest={onRenameSessionRequest}
           onScrollToBottomRequestHandled={onScrollToBottomRequestHandled}
           onSessionSettingsChange={onSessionSettingsChange}
         />
@@ -2787,6 +3104,7 @@ function WorkspaceNodeView({
           onApprovalDecision={onApprovalDecision}
           onStopSession={onStopSession}
           onKillSession={onKillSession}
+          onRenameSessionRequest={onRenameSessionRequest}
           onScrollToBottomRequestHandled={onScrollToBottomRequestHandled}
           onSessionSettingsChange={onSessionSettingsChange}
         />
@@ -2836,6 +3154,7 @@ function SessionPaneView({
   onApprovalDecision,
   onStopSession,
   onKillSession,
+  onRenameSessionRequest,
   onScrollToBottomRequestHandled,
   onSessionSettingsChange,
 }: {
@@ -2900,6 +3219,12 @@ function SessionPaneView({
   ) => void;
   onStopSession: (sessionId: string) => void;
   onKillSession: (sessionId: string) => void;
+  onRenameSessionRequest: (
+    sessionId: string,
+    clientX: number,
+    clientY: number,
+    trigger?: HTMLElement | null,
+  ) => void;
   onScrollToBottomRequestHandled: (token: number) => void;
   onSessionSettingsChange: (
     sessionId: string,
@@ -3713,6 +4038,7 @@ function SessionPaneView({
               onTabDragStart={onTabDragStart}
               onTabDragEnd={onTabDragEnd}
               onTabDrop={onTabDrop}
+              onRenameSessionRequest={onRenameSessionRequest}
             />
           </div>
 

@@ -1438,6 +1438,45 @@ textarea {
   line-height: 1.2;
 }
 
+.session-rename-popover-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 23;
+  background: transparent;
+}
+
+.session-rename-popover {
+  position: fixed;
+  left: 0;
+  top: 0;
+  z-index: 24;
+  width: min(18rem, calc(100vw - 1.5rem));
+  display: grid;
+  gap: 0.55rem;
+  padding: 0.72rem;
+  border-radius: 1rem;
+  background: var(--panel-strong);
+  box-shadow:
+    var(--shadow),
+    0 0 0 1px color-mix(in srgb, var(--line) 88%, transparent);
+}
+
+.session-rename-input {
+  min-width: 0;
+}
+
+.session-rename-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.45rem;
+}
+
+.session-rename-cancel,
+.session-rename-save {
+  min-width: 4.4rem;
+  padding: 0.42rem 0.72rem;
+}
+
 .session-avatar {
   display: grid;
   place-items: center;
