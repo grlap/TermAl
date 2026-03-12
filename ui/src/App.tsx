@@ -15,7 +15,7 @@ import {
   type ReactNode,
   type RefObject,
 } from "react";
-import { createPortal } from "react-dom";
+import { createPortal, flushSync } from "react-dom";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import {
@@ -69,6 +69,7 @@ import {
   openSessionInWorkspaceState,
   openSourceInWorkspaceState,
   placeDraggedTab,
+  placeExternalTab,
   reconcileWorkspaceState,
   setPaneSourcePath,
   setPaneViewMode,
@@ -96,6 +97,12 @@ import {
   type SessionListFilter,
 } from "./session-list-filter";
 import { decideDeltaRevisionAction, shouldAdoptStateRevision } from "./state-revision";
+import {
+  TAB_DRAG_CHANNEL_NAME,
+  isWorkspaceTabDragChannelMessage,
+  type WorkspaceTabDrag,
+  type WorkspaceTabDragChannelMessage,
+} from "./tab-drag";
 
 type SessionFlagMap = Record<string, true | undefined>;
 type SessionSettingsField = "sandboxMode" | "approvalPolicy" | "claudeApprovalMode";
@@ -197,10 +204,9 @@ export default function App() {
     sessionId: string;
     token: number;
   } | null>(null);
-  const [draggedTab, setDraggedTab] = useState<{
-    sourcePaneId: string;
-    tabId: string;
-  } | null>(null);
+  const [windowId] = useState(() => crypto.randomUUID());
+  const [draggedTab, setDraggedTab] = useState<WorkspaceTabDrag | null>(null);
+  const [externalDraggedTab, setExternalDraggedTab] = useState<WorkspaceTabDrag | null>(null);
   const resizeStateRef = useRef<{
     splitId: string;
     direction: "row" | "column";
@@ -210,6 +216,8 @@ export default function App() {
     size: number;
   } | null>(null);
   const draftAttachmentsRef = useRef<Record<string, DraftImageAttachment[]>>({});
+  const dragChannelRef = useRef<BroadcastChannel | null>(null);
+  const draggedTabRef = useRef<WorkspaceTabDrag | null>(null);
   const sessionsRef = useRef<Session[]>([]);
   const latestStateRevisionRef = useRef<number | null>(null);
   const stateResyncInFlightRef = useRef(false);
@@ -242,6 +250,11 @@ export default function App() {
   }, [sessionListFilter, sessions]);
   const activeTheme = THEMES.find((theme) => theme.id === themeId) ?? THEMES[0];
   const editorAppearance: MonacoAppearance = isHexColorDark(activeTheme.swatches[0]) ? "dark" : "light";
+  const activeDraggedTab = draggedTab ?? externalDraggedTab;
+
+  function broadcastTabDragMessage(message: WorkspaceTabDragChannelMessage) {
+    dragChannelRef.current?.postMessage(message);
+  }
 
   function adoptSessions(
     nextSessions: Session[],
@@ -432,6 +445,54 @@ export default function App() {
   useEffect(() => {
     draftAttachmentsRef.current = draftAttachmentsBySessionId;
   }, [draftAttachmentsBySessionId]);
+
+  useEffect(() => {
+    if (typeof BroadcastChannel === "undefined") {
+      return;
+    }
+
+    const channel = new BroadcastChannel(TAB_DRAG_CHANNEL_NAME);
+    dragChannelRef.current = channel;
+    channel.onmessage = (event: MessageEvent<unknown>) => {
+      const message = event.data;
+      if (!isWorkspaceTabDragChannelMessage(message)) {
+        return;
+      }
+
+      switch (message.type) {
+        case "drag-start":
+          if (message.payload.sourceWindowId !== windowId) {
+            setExternalDraggedTab(message.payload);
+          }
+          break;
+        case "drag-end":
+          setExternalDraggedTab((current) =>
+            current?.dragId === message.dragId ? null : current,
+          );
+          break;
+        case "drop-commit":
+          if (message.sourceWindowId !== windowId) {
+            break;
+          }
+
+          if (draggedTabRef.current?.dragId === message.dragId) {
+            draggedTabRef.current = null;
+          }
+          setDraggedTab((current) => (current?.dragId === message.dragId ? null : current));
+          setWorkspace((current) =>
+            closeWorkspaceTab(current, message.sourcePaneId, message.tabId),
+          );
+          break;
+      }
+    };
+
+    return () => {
+      channel.close();
+      if (dragChannelRef.current === channel) {
+        dragChannelRef.current = null;
+      }
+    };
+  }, [windowId]);
 
   useEffect(() => {
     return () => {
@@ -856,37 +917,74 @@ export default function App() {
     });
   }
 
-  function handleTabDragStart(sourcePaneId: string, tabId: string) {
-    window.requestAnimationFrame(() => {
-      setDraggedTab({
-        sourcePaneId,
-        tabId,
-      });
+  function handleTabDragStart(drag: WorkspaceTabDrag) {
+    draggedTabRef.current = drag;
+    setDraggedTab(drag);
+    broadcastTabDragMessage({
+      type: "drag-start",
+      payload: drag,
     });
   }
 
   function handleTabDragEnd() {
+    const endedDrag = draggedTabRef.current;
+    draggedTabRef.current = null;
     setDraggedTab(null);
-  }
-
-  function handleTabDrop(targetPaneId: string, placement: TabDropPlacement, tabIndex?: number) {
-    if (!draggedTab) {
+    if (!endedDrag) {
       return;
     }
 
-    const drop = draggedTab;
-    setDraggedTab(null);
-    startTransition(() => {
+    broadcastTabDragMessage({
+      type: "drag-end",
+      dragId: endedDrag.dragId,
+      sourceWindowId: endedDrag.sourceWindowId,
+    });
+  }
+
+  function handleTabDrop(targetPaneId: string, placement: TabDropPlacement, tabIndex?: number) {
+    if (draggedTab) {
+      const drop = draggedTab;
+      draggedTabRef.current = null;
+      setDraggedTab(null);
+      startTransition(() => {
+        setWorkspace((current) =>
+          placeDraggedTab(
+            current,
+            drop.sourcePaneId,
+            drop.tabId,
+            targetPaneId,
+            placement,
+            tabIndex,
+          ),
+        );
+      });
+      return;
+    }
+
+    if (!externalDraggedTab) {
+      return;
+    }
+
+    const drop = externalDraggedTab;
+    setExternalDraggedTab((current) => (current?.dragId === drop.dragId ? null : current));
+    // Only ask the source window to remove its tab after this window has applied the drop.
+    flushSync(() => {
       setWorkspace((current) =>
-        placeDraggedTab(
-          current,
-          drop.sourcePaneId,
-          drop.tabId,
-          targetPaneId,
-          placement,
-          tabIndex,
-        ),
+        placeExternalTab(current, drop.tab, targetPaneId, placement, tabIndex),
       );
+    });
+    broadcastTabDragMessage({
+      type: "drop-commit",
+      dragId: drop.dragId,
+      sourceWindowId: drop.sourceWindowId,
+      sourcePaneId: drop.sourcePaneId,
+      tabId: drop.tabId,
+      targetWindowId: windowId,
+    });
+    broadcastTabDragMessage({
+      type: "drag-end",
+      dragId: drop.dragId,
+      sourceWindowId: drop.sourceWindowId,
     });
   }
 
@@ -1156,7 +1254,8 @@ export default function App() {
               paneScrollPositionsRef={paneScrollPositionsRef}
               paneContentSignaturesRef={paneContentSignaturesRef}
               pendingScrollToBottomRequest={pendingScrollToBottomRequest}
-              draggedTab={draggedTab}
+              windowId={windowId}
+              draggedTab={activeDraggedTab}
               editorAppearance={editorAppearance}
               onActivatePane={handlePaneActivate}
               onSelectTab={handlePaneTabSelect}
@@ -1955,6 +2054,7 @@ function WorkspaceNodeView({
   paneScrollPositionsRef,
   paneContentSignaturesRef,
   pendingScrollToBottomRequest,
+  windowId,
   draggedTab,
   editorAppearance,
   onActivatePane,
@@ -2004,10 +2104,8 @@ function WorkspaceNodeView({
     sessionId: string;
     token: number;
   } | null;
-  draggedTab: {
-    sourcePaneId: string;
-    tabId: string;
-  } | null;
+  windowId: string;
+  draggedTab: WorkspaceTabDrag | null;
   editorAppearance: MonacoAppearance;
   onActivatePane: (paneId: string) => void;
   onSelectTab: (paneId: string, tabId: string) => void;
@@ -2018,7 +2116,7 @@ function WorkspaceNodeView({
     direction: "row" | "column",
     event: ReactPointerEvent<HTMLDivElement>,
   ) => void;
-  onTabDragStart: (sourcePaneId: string, tabId: string) => void;
+  onTabDragStart: (drag: WorkspaceTabDrag) => void;
   onTabDragEnd: () => void;
   onTabDrop: (targetPaneId: string, placement: TabDropPlacement, tabIndex?: number) => void;
   onPaneViewModeChange: (paneId: string, viewMode: SessionPaneViewMode) => void;
@@ -2084,6 +2182,7 @@ function WorkspaceNodeView({
         paneScrollPositionsRef={paneScrollPositionsRef}
         paneContentSignaturesRef={paneContentSignaturesRef}
         pendingScrollToBottomRequest={pendingScrollToBottomRequest}
+        windowId={windowId}
         draggedTab={draggedTab}
         editorAppearance={editorAppearance}
         onActivatePane={onActivatePane}
@@ -2134,6 +2233,7 @@ function WorkspaceNodeView({
           paneScrollPositionsRef={paneScrollPositionsRef}
           paneContentSignaturesRef={paneContentSignaturesRef}
           pendingScrollToBottomRequest={pendingScrollToBottomRequest}
+          windowId={windowId}
           draggedTab={draggedTab}
           editorAppearance={editorAppearance}
           onActivatePane={onActivatePane}
@@ -2187,6 +2287,7 @@ function WorkspaceNodeView({
           paneScrollPositionsRef={paneScrollPositionsRef}
           paneContentSignaturesRef={paneContentSignaturesRef}
           pendingScrollToBottomRequest={pendingScrollToBottomRequest}
+          windowId={windowId}
           draggedTab={draggedTab}
           editorAppearance={editorAppearance}
           onActivatePane={onActivatePane}
@@ -2236,6 +2337,7 @@ function SessionPaneView({
   paneScrollPositionsRef,
   paneContentSignaturesRef,
   pendingScrollToBottomRequest,
+  windowId,
   draggedTab,
   editorAppearance,
   onActivatePane,
@@ -2283,16 +2385,14 @@ function SessionPaneView({
     sessionId: string;
     token: number;
   } | null;
-  draggedTab: {
-    sourcePaneId: string;
-    tabId: string;
-  } | null;
+  windowId: string;
+  draggedTab: WorkspaceTabDrag | null;
   editorAppearance: MonacoAppearance;
   onActivatePane: (paneId: string) => void;
   onSelectTab: (paneId: string, tabId: string) => void;
   onCloseTab: (paneId: string, tabId: string) => void;
   onSplitPane: (paneId: string, direction: "row" | "column") => void;
-  onTabDragStart: (sourcePaneId: string, tabId: string) => void;
+  onTabDragStart: (drag: WorkspaceTabDrag) => void;
   onTabDragEnd: () => void;
   onTabDrop: (targetPaneId: string, placement: TabDropPlacement, tabIndex?: number) => void;
   onPaneViewModeChange: (paneId: string, viewMode: SessionPaneViewMode) => void;
@@ -2371,7 +2471,11 @@ function SessionPaneView({
   const [newResponseIndicatorByKey, setNewResponseIndicatorByKey] = useState<
     Record<string, true | undefined>
   >({});
-  const showDropOverlay = Boolean(draggedTab) && !(draggedTab?.sourcePaneId === pane.id && pane.tabs.length <= 1);
+  const showDropOverlay = Boolean(draggedTab) && !(
+    draggedTab?.sourceWindowId === windowId &&
+    draggedTab?.sourcePaneId === pane.id &&
+    pane.tabs.length <= 1
+  );
   const candidateSourcePaths = useMemo(
     () => (activeSession ? collectCandidateSourcePaths(activeSession) : []),
     [activeSession],
@@ -2960,6 +3064,7 @@ function SessionPaneView({
           <div className="pane-bar-left">
             <PaneTabs
               paneId={pane.id}
+              windowId={windowId}
               tabs={pane.tabs}
               activeTabId={activeTab?.id ?? null}
               codexState={codexState}

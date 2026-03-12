@@ -10,6 +10,7 @@ import {
   openSessionInWorkspaceState,
   openSourceInWorkspaceState,
   placeDraggedTab,
+  placeExternalTab,
   reconcileWorkspaceState,
   setPaneSourcePath,
   splitPane,
@@ -638,6 +639,62 @@ describe("workspace helpers", () => {
       tabs: [makeSessionTab("tab-b", "session-b"), makeSessionTab("tab-a", "session-a"), makeSessionTab("tab-c", "session-c")],
       activeSessionId: "session-a",
     });
+  });
+
+  it("placeExternalTab clones a dropped tab into the target pane", () => {
+    const externalTab = makeSourceTab("source-external", "/tmp/external.ts", "session-a");
+    const next = placeExternalTab(
+      makeSplitWorkspace(
+        makePane("pane-a", [makeSessionTab("tab-a", "session-a")]),
+        makePane("pane-b", [makeSessionTab("tab-b", "session-b")]),
+      ),
+      externalTab,
+      "pane-b",
+      "tabs",
+      0,
+    );
+
+    const targetPane = next.panes.find((pane) => pane.id === "pane-b");
+    const insertedTab = targetPane?.tabs[0];
+
+    expect(next.activePaneId).toBe("pane-b");
+    expect(insertedTab).toMatchObject({
+      kind: "source",
+      path: "/tmp/external.ts",
+      originSessionId: "session-a",
+    });
+    expect(insertedTab?.id).not.toBe("source-external");
+    expect(targetPane?.activeTabId).toBe(insertedTab?.id ?? null);
+  });
+
+  it("placeExternalTab creates an adjacent pane for side drops", () => {
+    const externalTab = makeSessionTab("tab-external", "session-c");
+    const next = placeExternalTab(
+      makeSplitWorkspace(
+        makePane("pane-a", [makeSessionTab("tab-a", "session-a")]),
+        makePane("pane-b", [makeSessionTab("tab-b", "session-b")]),
+      ),
+      externalTab,
+      "pane-b",
+      "left",
+    );
+
+    const importedPane = next.panes.find(
+      (pane) => pane.id !== "pane-a" && pane.id !== "pane-b",
+    );
+
+    expect(next.panes).toHaveLength(3);
+    expect(next.activePaneId).toBe(importedPane?.id ?? null);
+    expect(importedPane).toMatchObject({
+      tabs: [
+        {
+          kind: "session",
+          sessionId: "session-c",
+        },
+      ],
+      activeSessionId: "session-c",
+    });
+    expect(importedPane?.tabs[0]?.id).not.toBe("tab-external");
   });
 
   it("updateSplitRatio changes the selected split ratio and getSplitRatio reads it back", () => {

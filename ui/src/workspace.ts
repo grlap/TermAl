@@ -525,6 +525,35 @@ export function placeDraggedTab(
   };
 }
 
+export function placeExternalTab(
+  workspace: WorkspaceState,
+  tab: WorkspaceTab,
+  targetPaneId: string,
+  placement: TabDropPlacement,
+  tabIndex?: number,
+): WorkspaceState {
+  const transferredTab = cloneWorkspaceTab(tab);
+
+  if (placement === "tabs") {
+    return openTabInWorkspaceState(workspace, transferredTab, targetPaneId, tabIndex);
+  }
+
+  const targetPane = workspace.panes.find((pane) => pane.id === targetPaneId);
+  if (!targetPane || !workspace.root) {
+    return openTabInWorkspaceState(workspace, transferredTab, targetPaneId, tabIndex);
+  }
+
+  const newPane = createPane(transferredTab, targetPane.lastSessionViewMode);
+  const direction = placement === "left" || placement === "right" ? "row" : "column";
+  const placeBefore = placement === "left" || placement === "top";
+
+  return {
+    root: insertPaneAdjacent(workspace.root, targetPaneId, direction, newPane.id, placeBefore),
+    panes: [...workspace.panes, newPane],
+    activePaneId: newPane.id,
+  };
+}
+
 export function updateSplitRatio(
   workspace: WorkspaceState,
   splitId: string,
@@ -659,6 +688,7 @@ function openTabInWorkspaceState(
   workspace: WorkspaceState,
   tab: WorkspaceTab,
   preferredPaneId: string | null,
+  tabIndex?: number,
 ): WorkspaceState {
   const targetPaneId = workspace.panes.some((pane) => pane.id === preferredPaneId)
     ? preferredPaneId
@@ -676,7 +706,7 @@ function openTabInWorkspaceState(
     };
   }
 
-  return addWorkspaceTabToPane(workspace, targetPaneId, tab);
+  return addWorkspaceTabToPane(workspace, targetPaneId, tab, tabIndex);
 }
 
 function openTabInAdjacentPane(
@@ -870,6 +900,13 @@ function findDiffPreviewTab(
   }
 
   return null;
+}
+
+function cloneWorkspaceTab(tab: WorkspaceTab): WorkspaceTab {
+  return {
+    ...tab,
+    id: crypto.randomUUID(),
+  };
 }
 
 function insertTabAtIndex(tabs: WorkspaceTab[], tab: WorkspaceTab, tabIndex: number): WorkspaceTab[] {

@@ -3,13 +3,27 @@ import {
   useLayoutEffect,
   useRef,
   useState,
+  type CSSProperties,
   type DragEvent as ReactDragEvent,
 } from "react";
+import { createPortal } from "react-dom";
+import {
+  attachWorkspaceTabDragData,
+  createWorkspaceTabDrag,
+  type WorkspaceTabDrag,
+} from "../tab-drag";
+import { measurePaneTabStatusTooltipPosition } from "../pane-tab-status-tooltip";
 import type { CodexRateLimitWindow, CodexState, Session } from "../types";
 import type { TabDropPlacement, WorkspaceTab } from "../workspace";
 
+type ActiveCodexTooltipState = {
+  id: string;
+  sessionId: string;
+};
+
 export function PaneTabs({
   paneId,
+  windowId,
   tabs,
   activeTabId,
   codexState,
@@ -22,27 +36,58 @@ export function PaneTabs({
   onTabDrop,
 }: {
   paneId: string;
+  windowId: string;
   tabs: WorkspaceTab[];
   activeTabId: string | null;
   codexState: CodexState;
   sessionLookup: Map<string, Session>;
-  draggedTab: {
-    sourcePaneId: string;
-    tabId: string;
-  } | null;
+  draggedTab: WorkspaceTabDrag | null;
   onSelectTab: (paneId: string, tabId: string) => void;
   onCloseTab: (paneId: string, tabId: string) => void;
-  onTabDragStart: (sourcePaneId: string, tabId: string) => void;
+  onTabDragStart: (drag: WorkspaceTabDrag) => void;
   onTabDragEnd: () => void;
   onTabDrop: (targetPaneId: string, placement: TabDropPlacement, tabIndex?: number) => void;
 }) {
   const paneTabsRef = useRef<HTMLDivElement | null>(null);
+  const activeCodexTooltipAnchorRef = useRef<HTMLElement | null>(null);
   const [tabRailState, setTabRailState] = useState({
     hasOverflow: false,
     canScrollPrev: false,
     canScrollNext: false,
   });
   const [activeTabInsertIndex, setActiveTabInsertIndex] = useState<number | null>(null);
+  const [activeCodexTooltip, setActiveCodexTooltip] = useState<ActiveCodexTooltipState | null>(null);
+  const [activeCodexTooltipStyle, setActiveCodexTooltipStyle] = useState<CSSProperties | null>(null);
+
+  function updateActiveCodexTooltipPosition(anchor = activeCodexTooltipAnchorRef.current) {
+    if (!anchor || typeof window === "undefined") {
+      setActiveCodexTooltipStyle(null);
+      return;
+    }
+
+    const position = measurePaneTabStatusTooltipPosition(anchor.getBoundingClientRect(), window.innerWidth);
+    const nextStyle = {
+      left: `${position.left}px`,
+      top: `${position.top}px`,
+      width: `${position.width}px`,
+      ["--pane-tab-status-arrow-left"]: `${position.arrowLeft}px`,
+    } as CSSProperties;
+    setActiveCodexTooltipStyle(nextStyle);
+  }
+
+  function openCodexStatusTooltip(id: string, sessionId: string, anchor: HTMLElement) {
+    activeCodexTooltipAnchorRef.current = anchor;
+    setActiveCodexTooltip((current) =>
+      current?.id === id && current.sessionId === sessionId ? current : { id, sessionId },
+    );
+    updateActiveCodexTooltipPosition(anchor);
+  }
+
+  function closeCodexStatusTooltip() {
+    activeCodexTooltipAnchorRef.current = null;
+    setActiveCodexTooltip(null);
+    setActiveCodexTooltipStyle(null);
+  }
 
   function updateTabRailState() {
     const node = paneTabsRef.current;
@@ -204,6 +249,47 @@ export function PaneTabs({
     }
   }, [draggedTab]);
 
+  useLayoutEffect(() => {
+    if (!activeCodexTooltip) {
+      return;
+    }
+
+    const updateTooltipPosition = () => {
+      const anchor = activeCodexTooltipAnchorRef.current;
+      if (!anchor || !anchor.isConnected) {
+        closeCodexStatusTooltip();
+        return;
+      }
+
+      updateActiveCodexTooltipPosition(anchor);
+    };
+
+    updateTooltipPosition();
+
+    const node = paneTabsRef.current;
+    window.addEventListener("resize", updateTooltipPosition);
+    window.addEventListener("scroll", updateTooltipPosition, true);
+    node?.addEventListener("scroll", updateTooltipPosition, { passive: true });
+
+    return () => {
+      window.removeEventListener("resize", updateTooltipPosition);
+      window.removeEventListener("scroll", updateTooltipPosition, true);
+      node?.removeEventListener("scroll", updateTooltipPosition);
+    };
+  }, [activeCodexTooltip, activeTabId, tabs.length]);
+
+  useEffect(() => {
+    if (!activeCodexTooltip || sessionLookup.has(activeCodexTooltip.sessionId)) {
+      return;
+    }
+
+    closeCodexStatusTooltip();
+  }, [activeCodexTooltip, sessionLookup]);
+
+  const activeCodexTooltipSession = activeCodexTooltip
+    ? (sessionLookup.get(activeCodexTooltip.sessionId) ?? null)
+    : null;
+
   return (
     <div className="pane-tabs-shell">
       {tabs.length > 1 ? (
@@ -246,8 +332,29 @@ export function PaneTabs({
                 className={`pane-tab-shell ${tabActive ? "active" : ""} ${showCodexStatus ? "has-status-tooltip" : ""} ${showDropBefore ? "drop-before" : ""} ${showDropAfter ? "drop-after" : ""}`}
                 role="tab"
                 aria-selected={tabActive}
-                aria-describedby={codexStatusTooltipId}
+                aria-describedby={activeCodexTooltip?.id === codexStatusTooltipId ? codexStatusTooltipId : undefined}
                 tabIndex={0}
+                onMouseEnter={(event) => {
+                  if (showCodexStatus && session && codexStatusTooltipId) {
+                    openCodexStatusTooltip(codexStatusTooltipId, session.id, event.currentTarget);
+                  }
+                }}
+                onMouseLeave={() => {
+                  closeCodexStatusTooltip();
+                }}
+                onFocus={(event) => {
+                  if (showCodexStatus && session && codexStatusTooltipId) {
+                    openCodexStatusTooltip(codexStatusTooltipId, session.id, event.currentTarget);
+                  }
+                }}
+                onBlur={(event) => {
+                  const nextTarget = event.relatedTarget;
+                  if (nextTarget instanceof Node && event.currentTarget.contains(nextTarget)) {
+                    return;
+                  }
+
+                  closeCodexStatusTooltip();
+                }}
                 onClick={() => onSelectTab(paneId, tab.id)}
                 onKeyDown={(event) => {
                   if (event.key === "Enter" || event.key === " ") {
@@ -265,8 +372,9 @@ export function PaneTabs({
                     event.stopPropagation();
                   }}
                   onDragStart={(event) => {
+                    const drag = createWorkspaceTabDrag(windowId, paneId, tab);
                     event.dataTransfer.effectAllowed = "move";
-                    event.dataTransfer.setData("text/plain", tab.id);
+                    attachWorkspaceTabDragData(event.dataTransfer, drag);
                     const tabShell = event.currentTarget.closest(".pane-tab-shell");
                     if (tabShell instanceof HTMLElement) {
                       const rect = tabShell.getBoundingClientRect();
@@ -276,7 +384,7 @@ export function PaneTabs({
                         Math.max(12, event.clientY - rect.top),
                       );
                     }
-                    onTabDragStart(paneId, tab.id);
+                    onTabDragStart(drag);
                   }}
                   onDragEnd={onTabDragEnd}
                 />
@@ -286,13 +394,6 @@ export function PaneTabs({
                     <span className="pane-tab-label">{tabLabel}</span>
                   </span>
                 </span>
-                {showCodexStatus && session ? (
-                  <CodexTabStatusTooltip
-                    id={codexStatusTooltipId ?? ""}
-                    session={session}
-                    codexState={codexState}
-                  />
-                ) : null}
                 <button
                   className="pane-tab-close"
                   type="button"
@@ -306,7 +407,7 @@ export function PaneTabs({
                     onCloseTab(paneId, tab.id);
                   }}
                 >
-                  ×
+                  &times;
                 </button>
               </div>
             );
@@ -326,6 +427,17 @@ export function PaneTabs({
           &gt;
         </button>
       ) : null}
+      {activeCodexTooltip && activeCodexTooltipStyle && activeCodexTooltipSession
+        ? createPortal(
+            <CodexTabStatusTooltip
+              id={activeCodexTooltip.id}
+              session={activeCodexTooltipSession}
+              codexState={codexState}
+              style={activeCodexTooltipStyle}
+            />,
+            document.body,
+          )
+        : null}
     </div>
   );
 }
@@ -334,15 +446,17 @@ function CodexTabStatusTooltip({
   codexState,
   id,
   session,
+  style,
 }: {
   codexState: CodexState;
   id: string;
   session: Session;
+  style: CSSProperties;
 }) {
   const rateLimits = codexState.rateLimits;
 
   return (
-    <div id={id} className="pane-tab-status-tooltip" role="tooltip">
+    <div id={id} className="pane-tab-status-tooltip" role="tooltip" style={style}>
       <div className="pane-tab-status-header">
         <div className="activity-tooltip-label">Status</div>
         {rateLimits?.planType ? <span className="pane-tab-status-plan">{rateLimits.planType}</span> : null}
@@ -464,3 +578,4 @@ function formatRateLimitResetLabel(resetsAt: number | null, label: string) {
 function clamp(value: number, min: number, max: number) {
   return Math.min(Math.max(value, min), max);
 }
+

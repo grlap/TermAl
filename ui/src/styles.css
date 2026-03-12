@@ -740,18 +740,26 @@ textarea {
 .pane-view-strip {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: 0.75rem;
+  min-width: 0;
   padding: 0.7rem 1rem;
   border-bottom: 1px solid var(--line);
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+}
+
+.pane-view-strip::-webkit-scrollbar {
+  display: none;
 }
 
 .pane-view-strip-left {
   display: flex;
   align-items: center;
   gap: 0.55rem;
-  min-width: 0;
-  flex-wrap: wrap;
+  min-width: max-content;
+  flex: 0 0 auto;
+  flex-wrap: nowrap;
 }
 
 .pane-view-button {
@@ -792,7 +800,8 @@ textarea {
   gap: 0.55rem;
   flex: 1 1 auto;
   min-width: 0;
-  overflow: auto;
+  overflow-x: auto;
+  overflow-y: hidden;
   padding-bottom: 0.15rem;
   padding-right: 0.25rem;
   scrollbar-width: none;
@@ -942,12 +951,12 @@ textarea {
 }
 
 .pane-tab-status-tooltip {
-  position: absolute;
+  --pane-tab-status-arrow-left: 1.4rem;
+  position: fixed;
   left: 0;
-  top: calc(100% + 0.55rem);
+  top: 0;
   z-index: 12;
-  min-width: min(32rem, calc(100vw - 3rem));
-  max-width: min(38rem, calc(100vw - 3rem));
+  width: min(38rem, calc(100vw - 1.5rem));
   padding: 0.85rem 0.95rem 0.95rem;
   border: 1px solid var(--tooltip-border);
   border-radius: 1rem;
@@ -955,30 +964,17 @@ textarea {
     linear-gradient(180deg, color-mix(in srgb, var(--tooltip-bg) 96%, white 4%), var(--tooltip-bg));
   box-shadow: var(--tooltip-shadow);
   color: var(--tooltip-fg);
-  opacity: 0;
   pointer-events: none;
-  transform: translateY(0.3rem) scale(0.98);
-  transform-origin: left top;
-  transition:
-    opacity 160ms ease,
-    transform 160ms ease;
 }
 
 .pane-tab-status-tooltip::before {
   content: "";
   position: absolute;
-  left: 1.4rem;
+  left: var(--pane-tab-status-arrow-left);
   bottom: 100%;
   border-width: 0 0.45rem 0.45rem;
   border-style: solid;
   border-color: transparent transparent var(--tooltip-arrow);
-}
-
-.pane-tab-shell:hover .pane-tab-status-tooltip,
-.pane-tab-shell:focus-visible .pane-tab-status-tooltip,
-.pane-tab-shell:focus-within .pane-tab-status-tooltip {
-  opacity: 1;
-  transform: translateY(0) scale(1);
 }
 
 .pane-tab-status-header {
@@ -1479,9 +1475,12 @@ textarea {
 
 .thread-chips {
   display: flex;
-  flex-wrap: wrap;
+  flex: 0 0 auto;
+  flex-wrap: nowrap;
   justify-content: flex-end;
   gap: 0.6rem;
+  min-width: max-content;
+  margin-left: auto;
 }
 
 .chip {
@@ -2957,8 +2956,7 @@ textarea {
   }
 
   .pane-view-strip {
-    align-items: flex-start;
-    flex-direction: column;
+    align-items: center;
   }
 
   .theme-panel-header,
