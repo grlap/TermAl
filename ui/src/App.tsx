@@ -33,6 +33,7 @@ import {
 } from "./api";
 import { highlightCode } from "./highlight";
 import { applyDeltaToSessions } from "./live-updates";
+import { resolvePaneScrollCommand } from "./pane-keyboard";
 import { AgentSessionPanel, AgentSessionPanelFooter } from "./panels/AgentSessionPanel";
 import { FileSystemPanel } from "./panels/FileSystemPanel";
 import { GitStatusPanel } from "./panels/GitStatusPanel";
@@ -2504,8 +2505,13 @@ function SessionPaneView({
 
     node.scrollTo({
       top: 0,
-      behavior: "smooth",
+      behavior: "auto",
     });
+    setShouldStickToBottom(false);
+    paneScrollPositions[scrollStateKey] = {
+      top: 0,
+      shouldStick: false,
+    };
   }
 
   function handlePaneKeyDown(event: ReactKeyboardEvent<HTMLElement>) {
@@ -2513,19 +2519,25 @@ function SessionPaneView({
       return;
     }
 
-    if (event.key !== "PageUp" && event.key !== "PageDown") {
-      return;
-    }
-
-    if (event.altKey || event.ctrlKey || event.metaKey) {
+    const command = resolvePaneScrollCommand(
+      {
+        altKey: event.altKey,
+        ctrlKey: event.ctrlKey,
+        key: event.key,
+        metaKey: event.metaKey,
+        shiftKey: event.shiftKey,
+      },
+      event.target,
+    );
+    if (!command) {
       return;
     }
 
     event.preventDefault();
-    if (event.shiftKey) {
-      scrollMessageStackToBoundary(event.key === "PageUp" ? "top" : "bottom");
+    if (command.kind === "boundary") {
+      scrollMessageStackToBoundary(command.direction === "up" ? "top" : "bottom");
     } else {
-      scrollMessageStackByPage(event.key === "PageUp" ? -1 : 1);
+      scrollMessageStackByPage(command.direction === "up" ? -1 : 1);
     }
   }
 

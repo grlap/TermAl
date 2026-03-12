@@ -1800,9 +1800,9 @@ textarea {
 .command-row {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
-  gap: 0.75rem;
+  gap: 0.65rem;
   align-items: start;
-  padding: 0.85rem 0.95rem;
+  padding: 0.68rem 0.85rem;
 }
 
 .command-row + .command-row {
@@ -1810,17 +1810,20 @@ textarea {
 }
 
 .command-row-label {
-  padding-top: 0.08rem;
+  padding-top: 0;
   color: var(--muted);
   font-family: var(--code-font);
   font-size: 0.76rem;
   font-weight: 700;
+  line-height: 1.35;
   letter-spacing: 0.08em;
   text-transform: uppercase;
 }
 
 .command-row-body {
   min-width: 0;
+  display: flex;
+  align-items: flex-start;
 }
 
 .command-row-actions {
@@ -1945,16 +1948,16 @@ textarea {
 
 .command-text-output {
   margin: 0;
-  padding: 0.9rem 1rem;
+  padding: 0.72rem 0.9rem;
   color: var(--code-fg);
-  min-height: 3.2rem;
+  min-height: 2.6rem;
   word-break: break-word;
 }
 
 .command-text-placeholder {
   color: var(--muted);
   min-height: 0;
-  padding: 0.78rem 1rem;
+  padding: 0.62rem 0.9rem;
 }
 
 
@@ -2162,7 +2165,7 @@ textarea {
 }
 
 .command-text {
-  margin: 0.25rem 0 0;
+  margin: 0;
   font-family: var(--code-font);
   font-size: 0.85rem;
   line-height: 1.4;
@@ -2316,25 +2319,29 @@ textarea {
 
 .diff-file-row .command-row-body {
   grid-column: 2 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.32rem;
 }
 
 .diff-file-path {
   font-family: var(--code-font);
   font-size: 0.88rem;
   font-weight: 600;
-  line-height: 1.45;
+  line-height: 1.3;
   word-break: break-all;
   color: var(--ink);
 }
 
 .diff-file-summary {
-  margin: 0.35rem 0 0;
+  margin: 0;
   color: var(--muted);
-  line-height: 1.45;
+  line-height: 1.3;
 }
 
 .diff-preview-shell.collapsed {
-  max-height: 12rem;
+  max-height: 10.5rem;
   overflow: hidden;
 }
 
@@ -2356,9 +2363,10 @@ textarea {
 
 .diff-preview-text {
   margin: 0;
-  min-height: 3.5rem;
+  min-height: 2.8rem;
   border-radius: 0;
   background: transparent;
+  padding: 0.78rem 0.9rem;
 }
 
 .plain-list {
@@ -2899,12 +2907,11 @@ textarea {
   }
 
   .command-row {
-    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-columns: auto minmax(0, 1fr) auto;
   }
 
   .command-row-label {
-    grid-column: 1 / -1;
-    padding-top: 0;
+    grid-column: auto;
   }
 
   .command-row-actions {
