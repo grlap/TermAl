@@ -1,0 +1,193 @@
+import { describe, expect, it } from "vitest";
+
+import {
+  buildSessionListSearchResultFromIndex,
+  buildSessionSearchIndex,
+  buildSessionListSearchResult,
+  buildSessionSearchMatches,
+  buildSessionSearchMatchesFromIndex,
+  sessionSearchItemKey,
+} from "./session-find";
+import type { Session } from "./types";
+
+function createSession(overrides?: Partial<Session>): Session {
+  return {
+    id: "session-1",
+    name: "Search Session",
+    emoji: "S",
+    agent: "Codex",
+    workdir: "/repo",
+    model: "gpt-5",
+    status: "idle",
+    preview: "Preview",
+    messages: [],
+    ...overrides,
+  };
+}
+
+describe("session find helpers", () => {
+  it("finds matches across mixed session message content in conversation order", () => {
+    const session = createSession({
+      messages: [
+        {
+          id: "message-text",
+          type: "text",
+          author: "assistant",
+          timestamp: "09:00",
+          text: "Search the repo for the widget controller.",
+        },
+        {
+          id: "message-command",
+          type: "command",
+          author: "assistant",
+          timestamp: "09:01",
+          command: "rg -n widget ui/src",
+          output: "ui/src/App.tsx:42: const widgetController = true;",
+          status: "success",
+        },
+        {
+          id: "message-diff",
+          type: "diff",
+          author: "assistant",
+          timestamp: "09:02",
+          filePath: "ui/src/widget.ts",
+          summary: "Add widget search wiring",
+          diff: "+ export const widgetController = createController();",
+          changeType: "edit",
+        },
+      ],
+      pendingPrompts: [
+        {
+          id: "prompt-1",
+          timestamp: "09:03",
+          text: "Double-check the widget controller edge cases.",
+          attachments: [
+            {
+              fileName: "widget-screenshot.png",
+              mediaType: "image/png",
+              byteSize: 128,
+            },
+          ],
+        },
+      ],
+    });
+
+    expect(buildSessionSearchMatches(session, "widget")).toEqual([
+      expect.objectContaining({
+        itemId: "message-text",
+        itemKey: sessionSearchItemKey("message", "message-text"),
+        itemKind: "message",
+      }),
+      expect.objectContaining({
+        itemId: "message-command",
+        itemKey: sessionSearchItemKey("message", "message-command"),
+        itemKind: "message",
+      }),
+      expect.objectContaining({
+        itemId: "message-diff",
+        itemKey: sessionSearchItemKey("message", "message-diff"),
+        itemKind: "message",
+      }),
+      expect.objectContaining({
+        itemId: "prompt-1",
+        itemKey: sessionSearchItemKey("pendingPrompt", "prompt-1"),
+        itemKind: "pendingPrompt",
+      }),
+    ]);
+  });
+
+  it("returns no results for blank queries", () => {
+    const session = createSession({
+      messages: [
+        {
+          id: "message-1",
+          type: "text",
+          author: "assistant",
+          timestamp: "09:00",
+          text: "Nothing to see here.",
+        },
+      ],
+    });
+
+    expect(buildSessionSearchMatches(session, "")).toEqual([]);
+    expect(buildSessionSearchMatches(session, "   ")).toEqual([]);
+  });
+
+  it("includes attachment metadata and builds compact snippets", () => {
+    const session = createSession({
+      pendingPrompts: [
+        {
+          id: "prompt-1",
+          timestamp: "09:03",
+          text: "",
+          attachments: [
+            {
+              fileName: "error-shot.webp",
+              mediaType: "image/webp",
+              byteSize: 256,
+            },
+          ],
+        },
+      ],
+    });
+
+    expect(buildSessionSearchMatches(session, "webp")).toEqual([
+      expect.objectContaining({
+        itemId: "prompt-1",
+        itemKey: sessionSearchItemKey("pendingPrompt", "prompt-1"),
+        snippet: "error-shot.webp image/webp",
+      }),
+    ]);
+  });
+
+  it("builds cross-session search summaries from metadata or conversation hits", () => {
+    const metadataSession = createSession({
+      name: "Release automation",
+      preview: "Queued",
+    });
+    const conversationSession = createSession({
+      messages: [
+        {
+          id: "message-1",
+          type: "text",
+          author: "assistant",
+          timestamp: "09:00",
+          text: "Investigate the flaky deploy gate in CI.",
+        },
+      ],
+    });
+
+    expect(buildSessionListSearchResult(metadataSession, "release")).toEqual({
+      matchCount: 1,
+      snippet: "Release automation",
+    });
+    expect(buildSessionListSearchResult(conversationSession, "deploy")).toEqual({
+      matchCount: 1,
+      snippet: "Investigate the flaky deploy gate in CI.",
+    });
+    expect(buildSessionListSearchResult(conversationSession, "missing")).toBeNull();
+  });
+
+  it("reuses prebuilt indexes for conversation and session-list search", () => {
+    const session = createSession({
+      name: "Deploy checks",
+      messages: [
+        {
+          id: "message-1",
+          type: "text",
+          author: "assistant",
+          timestamp: "09:00",
+          text: "Track the deploy blocker in staging.",
+        },
+      ],
+    });
+    const searchIndex = buildSessionSearchIndex(session);
+
+    expect(buildSessionSearchMatchesFromIndex(searchIndex, "deploy")).toEqual(
+      buildSessionSearchMatches(session, "deploy"),
+    );
+    expect(buildSessionListSearchResultFromIndex(searchIndex, "checks")).toEqual(
+      buildSessionListSearchResult(session, "checks"),
+    );
+  });
+});

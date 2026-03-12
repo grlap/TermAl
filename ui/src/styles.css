@@ -852,6 +852,14 @@ textarea {
   flex-wrap: nowrap;
 }
 
+.pane-view-strip-right {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  min-width: 0;
+  margin-left: auto;
+}
+
 .pane-view-button {
   border: 1px solid var(--line);
   border-radius: var(--button-radius-tight);
@@ -1235,6 +1243,20 @@ textarea {
   background: linear-gradient(180deg, var(--surface-white-soft) 70%, transparent);
 }
 
+.session-list-tools {
+  display: grid;
+  gap: 0.45rem;
+}
+
+.session-list-search-input {
+  padding-right: 1rem;
+}
+
+.session-list-search-meta {
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
 .sidebar-status {
   display: grid;
   gap: 0.7rem;
@@ -1388,6 +1410,19 @@ textarea {
   gap: 0.6rem;
 }
 
+.session-search-count {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 0.2rem 0.55rem;
+  background: var(--surface-white-soft);
+  border: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 0.74rem;
+  font-family: var(--code-font);
+  white-space: nowrap;
+}
+
 .status-dot {
   position: relative;
   display: inline-block;
@@ -1434,6 +1469,10 @@ textarea {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.session-preview-search-result {
+  color: var(--ink);
 }
 
 .meta-separator {
@@ -1579,7 +1618,70 @@ textarea {
   justify-content: flex-end;
   gap: 0.6rem;
   min-width: max-content;
-  margin-left: auto;
+}
+
+.session-find-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  min-width: min(24rem, 100%);
+  max-width: 100%;
+  padding: 0.28rem 0.36rem;
+  border: 1px solid var(--line);
+  border-radius: calc(var(--button-radius-tight) + 0.15rem);
+  background: var(--surface-white-strong);
+}
+
+.session-find-input {
+  min-width: 8rem;
+  width: 100%;
+  flex: 1 1 10rem;
+  border: none;
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+}
+
+.session-find-input::placeholder {
+  color: var(--muted);
+}
+
+.session-find-input:focus {
+  outline: none;
+}
+
+.session-find-count {
+  color: var(--muted);
+  font-size: 0.82rem;
+  white-space: nowrap;
+}
+
+.session-find-button {
+  border: 1px solid var(--line);
+  border-radius: var(--button-radius-tight);
+  background: var(--surface-white-soft);
+  color: var(--ink);
+  padding: 0.36rem 0.62rem;
+  cursor: pointer;
+  font: inherit;
+}
+
+.session-find-close {
+  color: var(--muted);
+}
+
+.search-highlight {
+  border-radius: 0.35rem;
+  padding: 0.02rem 0.16rem;
+  background: color-mix(in srgb, var(--signal-gold) 26%, white);
+  color: inherit;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+}
+
+.search-highlight.is-active {
+  background: color-mix(in srgb, var(--signal-blue) 22%, white);
+  box-shadow: 0 0 0 1px var(--accent-blue-border);
 }
 
 .chip {
@@ -1606,6 +1708,22 @@ textarea {
 .session-conversation-page {
   display: grid;
   gap: 0.7rem;
+}
+
+.message-slot {
+  display: block;
+}
+
+.message-slot.session-search-hit > .message-card {
+  border-color: var(--view-selected-border);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--view-selected-border) 58%, transparent);
+}
+
+.message-slot.session-search-hit-active > .message-card {
+  border-color: var(--signal-blue);
+  box-shadow:
+    0 0 0 1px var(--accent-blue-border),
+    0 0 0 0.3rem var(--accent-blue-soft);
 }
 
 .virtualized-message-list {
@@ -1884,6 +2002,11 @@ textarea {
 .command-card {
   width: fit-content;
   max-width: 100%;
+  justify-self: start;
+}
+
+.diff-card {
+  width: fit-content;
   justify-self: start;
 }
 
@@ -2897,6 +3020,7 @@ textarea {
 .pane-tab-shell:focus,
 .pane-tab-close:focus,
 .pane-view-button:focus,
+.session-find-button:focus,
 .settings-launcher:focus,
 .settings-tab:focus,
 .theme-option:focus,
@@ -2923,7 +3047,8 @@ textarea {
 .composer-attachment-remove:disabled,
 .composer-input:disabled,
 .themed-input:disabled,
-.session-select:disabled {
+.session-select:disabled,
+.session-find-button:disabled {
   cursor: not-allowed;
   opacity: 0.62;
   transform: none;
@@ -2934,7 +3059,8 @@ textarea {
 .send-button:hover,
 .approval-button:hover,
 .ghost-button:hover,
-.composer-attachment-remove:hover {
+.composer-attachment-remove:hover,
+.session-find-button:hover {
   transform: translateY(-1px);
 }
 
@@ -3071,6 +3197,18 @@ textarea {
 
   .pane-view-strip {
     align-items: center;
+  }
+
+  .pane-view-strip-right {
+    width: 100%;
+    flex-wrap: wrap;
+    justify-content: flex-start;
+  }
+
+  .session-find-bar {
+    min-width: 0;
+    width: 100%;
+    flex-wrap: wrap;
   }
 
   .theme-panel-header,

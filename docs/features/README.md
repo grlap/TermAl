@@ -12,5 +12,6 @@ Use the files here for the detailed feature design and implementation notes.
 - [Slash Commands](./slash-commands.md)
 - [Gemini CLI Integration](./gemini-cli-integration.md)
 - [Diff Review Workflow](./diff-review-workflow.md)
+- [Concurrent Session Link Cards](./concurrent-session-link-cards.md)
 - [Territory Visualization](./territory-visualization.md)
 - [Agent Integration Comparison](./agent-integration-comparison.md)

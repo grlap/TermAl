@@ -1,6 +1,7 @@
 import {
   memo,
   startTransition,
+  useDeferredValue,
   useEffect,
   useId,
   useLayoutEffect,
@@ -43,6 +44,19 @@ import { FileSystemPanel } from "./panels/FileSystemPanel";
 import { GitStatusPanel } from "./panels/GitStatusPanel";
 import { PaneTabs } from "./panels/PaneTabs";
 import { SourcePanel, type SourceFileState } from "./panels/SourcePanel";
+import {
+  containsSearchMatch,
+  highlightReactNodeText,
+  renderHighlightedText,
+  type SearchHighlightTone,
+} from "./search-highlight";
+import {
+  buildSessionListSearchResultFromIndex,
+  buildSessionSearchIndex,
+  buildSessionSearchMatchesFromIndex,
+  type SessionListSearchResult,
+  type SessionSearchMatch,
+} from "./session-find";
 import type {
   ApprovalDecision,
   ApprovalMessage,
@@ -197,6 +211,7 @@ export default function App() {
   const [updatingSessionIds, setUpdatingSessionIds] = useState<SessionFlagMap>({});
   const [requestError, setRequestError] = useState<string | null>(null);
   const [sessionListFilter, setSessionListFilter] = useState<SessionListFilter>("all");
+  const [sessionListSearchQuery, setSessionListSearchQuery] = useState("");
   const [selectedProjectId, setSelectedProjectId] = useState<string>(ALL_PROJECTS_FILTER_ID);
   const [newProjectRootPath, setNewProjectRootPath] = useState("");
   const [isCreatingProject, setIsCreatingProject] = useState(false);
@@ -227,6 +242,7 @@ export default function App() {
   const draftAttachmentsRef = useRef<Record<string, DraftImageAttachment[]>>({});
   const dragChannelRef = useRef<BroadcastChannel | null>(null);
   const draggedTabRef = useRef<WorkspaceTabDrag | null>(null);
+  const sessionListSearchInputRef = useRef<HTMLInputElement>(null);
   const sessionsRef = useRef<Session[]>([]);
   const latestStateRevisionRef = useRef<number | null>(null);
   const stateResyncInFlightRef = useRef(false);
@@ -278,9 +294,53 @@ export default function App() {
     () => countSessionsByFilter(projectScopedSessions),
     [projectScopedSessions],
   );
-  const filteredSessions = useMemo(() => {
+  const statusFilteredSessions = useMemo(() => {
     return filterSessionsByListFilter(projectScopedSessions, sessionListFilter);
   }, [projectScopedSessions, sessionListFilter]);
+  const sessionListSearchIndex = useMemo(
+    () =>
+      new Map(
+        projectScopedSessions.map((session) => [session.id, buildSessionSearchIndex(session)] as const),
+      ),
+    [projectScopedSessions],
+  );
+  const trimmedSessionListSearchQuery = sessionListSearchQuery.trim();
+  const deferredSessionListSearchQuery = useDeferredValue(trimmedSessionListSearchQuery);
+  const effectiveSessionListSearchQuery =
+    trimmedSessionListSearchQuery.length === 0 ? "" : deferredSessionListSearchQuery;
+  const hasSessionListSearch = effectiveSessionListSearchQuery.length > 0;
+  const sessionListSearchResults = useMemo(() => {
+    if (!hasSessionListSearch) {
+      return new Map<string, SessionListSearchResult>();
+    }
+
+    return new Map(
+      statusFilteredSessions.flatMap((session) => {
+        const searchIndex = sessionListSearchIndex.get(session.id);
+        if (!searchIndex) {
+          return [];
+        }
+
+        const result = buildSessionListSearchResultFromIndex(
+          searchIndex,
+          effectiveSessionListSearchQuery,
+        );
+        return result ? ([[session.id, result]] as const) : [];
+      }),
+    );
+  }, [
+    effectiveSessionListSearchQuery,
+    hasSessionListSearch,
+    sessionListSearchIndex,
+    statusFilteredSessions,
+  ]);
+  const filteredSessions = useMemo(() => {
+    if (!hasSessionListSearch) {
+      return statusFilteredSessions;
+    }
+
+    return statusFilteredSessions.filter((session) => sessionListSearchResults.has(session.id));
+  }, [hasSessionListSearch, sessionListSearchResults, statusFilteredSessions]);
   const projectSessionCounts = useMemo(() => {
     const counts = new Map<string, number>();
     for (const session of sessions) {
@@ -294,6 +354,20 @@ export default function App() {
   const activeTheme = THEMES.find((theme) => theme.id === themeId) ?? THEMES[0];
   const editorAppearance: MonacoAppearance = isHexColorDark(activeTheme.swatches[0]) ? "dark" : "light";
   const activeDraggedTab = draggedTab ?? externalDraggedTab;
+
+  function focusSessionListSearch(selectAll = false) {
+    window.requestAnimationFrame(() => {
+      const input = sessionListSearchInputRef.current;
+      if (!input) {
+        return;
+      }
+
+      input.focus();
+      if (selectAll) {
+        input.select();
+      }
+    });
+  }
 
   function broadcastTabDragMessage(message: WorkspaceTabDragChannelMessage) {
     dragChannelRef.current?.postMessage(message);
@@ -610,6 +684,32 @@ export default function App() {
       window.removeEventListener("keydown", handleKeyDown);
     };
   }, [isSettingsOpen]);
+
+  useEffect(() => {
+    function handleKeyDown(event: KeyboardEvent) {
+      const key = event.key.toLowerCase();
+      const hasPrimaryModifier = event.metaKey || event.ctrlKey;
+      if (
+        event.defaultPrevented ||
+        key !== "f" ||
+        !hasPrimaryModifier ||
+        !event.shiftKey ||
+        event.altKey ||
+        isSettingsOpen ||
+        pendingKillSessionId
+      ) {
+        return;
+      }
+
+      event.preventDefault();
+      focusSessionListSearch(true);
+    }
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [isSettingsOpen, pendingKillSessionId]);
 
   useEffect(() => {
     function handlePointerMove(event: PointerEvent) {
@@ -1311,12 +1411,43 @@ export default function App() {
               {selectedProject ? selectedProject.name : "All projects"}
             </span>
           </div>
+          <div className="session-list-tools">
+            <input
+              ref={sessionListSearchInputRef}
+              className="themed-input session-list-search-input"
+              type="search"
+              value={sessionListSearchQuery}
+              placeholder="Search sessions"
+              spellCheck={false}
+              aria-label="Search sessions"
+              title={`Search across visible sessions (${primaryModifierLabel()}+Shift+F)`}
+              onChange={(event) => setSessionListSearchQuery(event.currentTarget.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Escape") {
+                  event.preventDefault();
+                  if (sessionListSearchQuery) {
+                    setSessionListSearchQuery("");
+                  } else {
+                    event.currentTarget.blur();
+                  }
+                }
+              }}
+            />
+            {hasSessionListSearch ? (
+              <div className="session-list-search-meta" aria-live="polite">
+                {filteredSessions.length === 1
+                  ? "1 matching session"
+                  : `${filteredSessions.length} matching sessions`}
+              </div>
+            ) : null}
+          </div>
           {filteredSessions.length > 0 ? (
             filteredSessions.map((session) => {
               const isActive = session.id === activeSession?.id;
               const isOpen = openSessionIds.has(session.id);
               const isKilling = Boolean(killingSessionIds[session.id]);
               const isKillVisible = isKilling || killRevealSessionId === session.id;
+              const searchResult = sessionListSearchResults.get(session.id);
 
               return (
                 <div
@@ -1346,11 +1477,21 @@ export default function App() {
                     <div className="session-copy">
                       <div className="session-title-line">
                         <strong>{session.name}</strong>
+                        {searchResult ? (
+                          <span className="session-search-count">
+                            {searchResult.matchCount} hit{searchResult.matchCount === 1 ? "" : "s"}
+                          </span>
+                        ) : null}
                       </div>
                       <div className="session-meta">
                         {session.agent} <span className="meta-separator">/</span> {session.workdir}
                       </div>
-                      <div className="session-preview">{session.preview}</div>
+                      <div
+                        className={`session-preview${searchResult ? " session-preview-search-result" : ""}`}
+                        title={searchResult?.snippet ?? session.preview}
+                      >
+                        {searchResult?.snippet ?? session.preview}
+                      </div>
                     </div>
                   </button>
                   <button
@@ -1381,6 +1522,10 @@ export default function App() {
             <div className="session-filter-empty">
               {sessions.length === 0
                 ? "No sessions yet."
+                : hasSessionListSearch
+                  ? selectedProject
+                    ? `No sessions match this search in ${selectedProject.name}.`
+                    : "No sessions match this search."
                 : selectedProject
                   ? `No ${sessionListFilter === "all" ? "" : `${sessionListFilter} `}sessions in ${selectedProject.name}.`
                   : "No sessions match this filter."}
@@ -2671,6 +2816,11 @@ function SessionPaneView({
   const [newResponseIndicatorByKey, setNewResponseIndicatorByKey] = useState<
     Record<string, true | undefined>
   >({});
+  const [isSessionFindOpen, setIsSessionFindOpen] = useState(false);
+  const [sessionFindQuery, setSessionFindQuery] = useState("");
+  const [sessionFindActiveIndex, setSessionFindActiveIndex] = useState(0);
+  const sessionFindInputRef = useRef<HTMLInputElement>(null);
+  const sessionSearchItemRefsRef = useRef<Record<string, HTMLElement | null>>({});
   const showDropOverlay = Boolean(draggedTab) && !(
     draggedTab?.sourceWindowId === windowId &&
     draggedTab?.sourcePaneId === pane.id &&
@@ -2719,6 +2869,33 @@ function SessionPaneView({
     pane.viewMode === "session" &&
     Boolean(activeSession) &&
     (activeSession?.status === "active" || (!isSessionBusy && isSending));
+  const canFindInSession =
+    isSessionTabActive &&
+    pane.viewMode === "session" &&
+    Boolean(activeSession);
+  const activeSessionFindSearchIndex = useMemo(
+    () => (activeSession ? buildSessionSearchIndex(activeSession) : null),
+    [activeSession],
+  );
+  const sessionSearchMatches = useMemo(
+    () =>
+      canFindInSession && activeSessionFindSearchIndex
+        ? buildSessionSearchMatchesFromIndex(activeSessionFindSearchIndex, sessionFindQuery)
+        : [],
+    [activeSessionFindSearchIndex, canFindInSession, sessionFindQuery],
+  );
+  const hasSessionFindQuery = sessionFindQuery.trim().length > 0;
+  const sessionSearchMatchedItemKeys = useMemo(
+    () => new Set(sessionSearchMatches.map((match) => match.itemKey)),
+    [sessionSearchMatches],
+  );
+  const activeSessionSearchMatch =
+    sessionSearchMatches.length > 0
+      ? sessionSearchMatches[Math.min(sessionFindActiveIndex, sessionSearchMatches.length - 1)] ?? null
+      : null;
+  const activeSessionSearchMatchIndex = activeSessionSearchMatch
+    ? Math.min(sessionFindActiveIndex, sessionSearchMatches.length - 1)
+    : -1;
   const waitingIndicatorPrompt =
     !isSessionBusy && isSending ? null : lastUserPrompt;
   const composerInputDisabled = !activeSession || isStopping;
@@ -2828,6 +3005,57 @@ function SessionPaneView({
     });
   }
 
+  function handleConversationSearchItemMount(itemKey: string, node: HTMLElement | null) {
+    if (node) {
+      sessionSearchItemRefsRef.current[itemKey] = node;
+      return;
+    }
+
+    delete sessionSearchItemRefsRef.current[itemKey];
+  }
+
+  function focusSessionFindInput(selectAll = false) {
+    window.requestAnimationFrame(() => {
+      const input = sessionFindInputRef.current;
+      if (!input) {
+        return;
+      }
+
+      input.focus();
+      if (selectAll) {
+        input.select();
+      }
+    });
+  }
+
+  function openSessionFind(selectAll = true) {
+    if (!canFindInSession) {
+      return;
+    }
+
+    setIsSessionFindOpen(true);
+    focusSessionFindInput(selectAll);
+  }
+
+  function closeSessionFind() {
+    setIsSessionFindOpen(false);
+    setSessionFindQuery("");
+    setSessionFindActiveIndex(0);
+    sessionSearchItemRefsRef.current = {};
+  }
+
+  function stepSessionFind(direction: -1 | 1) {
+    if (sessionSearchMatches.length === 0) {
+      return;
+    }
+
+    setSessionFindActiveIndex((current) => {
+      const safeCurrent =
+        current >= 0 && current < sessionSearchMatches.length ? current : 0;
+      return (safeCurrent + direction + sessionSearchMatches.length) % sessionSearchMatches.length;
+    });
+  }
+
   function scrollToLatestMessage(behavior: ScrollBehavior) {
     const node = messageStackRef.current;
     if (!node) {
@@ -2907,6 +3135,50 @@ function SessionPaneView({
       scrollMessageStackByPage(command.direction === "up" ? -1 : 1);
     }
   }
+
+  useEffect(() => {
+    if (canFindInSession) {
+      return;
+    }
+
+    closeSessionFind();
+  }, [canFindInSession]);
+
+  useEffect(() => {
+    closeSessionFind();
+  }, [activeSession?.id]);
+
+  useEffect(() => {
+    setSessionFindActiveIndex(0);
+  }, [sessionFindQuery]);
+
+  useEffect(() => {
+    if (!isActive || !canFindInSession) {
+      return;
+    }
+
+    function handleWindowKeyDown(event: KeyboardEvent) {
+      const key = event.key.toLowerCase();
+      const hasPrimaryModifier = event.metaKey || event.ctrlKey;
+      if (
+        event.defaultPrevented ||
+        key !== "f" ||
+        !hasPrimaryModifier ||
+        event.altKey ||
+        event.shiftKey
+      ) {
+        return;
+      }
+
+      event.preventDefault();
+      openSessionFind();
+    }
+
+    window.addEventListener("keydown", handleWindowKeyDown);
+    return () => {
+      window.removeEventListener("keydown", handleWindowKeyDown);
+    };
+  }, [canFindInSession, isActive]);
 
   function scheduleSettledScrollToBottom(
     behavior: ScrollBehavior,
@@ -3008,6 +3280,34 @@ function SessionPaneView({
   }, [defaultScrollToBottom, scrollStateKey]);
 
   useLayoutEffect(() => {
+    if (!hasSessionFindQuery || !activeSessionSearchMatch) {
+      return;
+    }
+
+    const node = sessionSearchItemRefsRef.current[activeSessionSearchMatch.itemKey];
+    if (!node) {
+      return;
+    }
+
+    setShouldStickToBottom(false);
+    node.scrollIntoView({
+      block: "center",
+      behavior: "auto",
+    });
+
+    const container = messageStackRef.current;
+    if (!container) {
+      return;
+    }
+
+    paneScrollPositions[scrollStateKey] = {
+      top: container.scrollTop,
+      shouldStick: false,
+    };
+    setNewResponseIndicator(scrollStateKey, false);
+  }, [activeSessionSearchMatch, hasSessionFindQuery, paneScrollPositions, scrollStateKey]);
+
+  useLayoutEffect(() => {
     if (
       !activeSession ||
       !isSessionTabActive ||
@@ -3077,6 +3377,14 @@ function SessionPaneView({
       return;
     }
 
+    if (hasSessionFindQuery) {
+      setShouldStickToBottom(false);
+      if (pane.viewMode === "session" && visibleLastMessageAuthor === "assistant") {
+        setNewResponseIndicator(scrollStateKey, true);
+      }
+      return;
+    }
+
     const shouldScroll =
       getShouldStickToBottom() ||
       paneScrollPositions[scrollStateKey]?.shouldStick === true ||
@@ -3099,6 +3407,7 @@ function SessionPaneView({
     };
   }, [
     activeSession,
+    hasSessionFindQuery,
     isSessionTabActive,
     pane.viewMode,
     scrollStateKey,
@@ -3325,9 +3634,19 @@ function SessionPaneView({
                     activeSession?.id ?? null,
                   )
                 }
-              >
-                Git
-              </button>
+                >
+                  Git
+                </button>
+                {canFindInSession ? (
+                  <button
+                    className={`pane-view-button${isSessionFindOpen ? " selected" : ""}`}
+                    type="button"
+                    onClick={() => openSessionFind(!isSessionFindOpen)}
+                    title={`Find in session (${primaryModifierLabel()}+F)`}
+                  >
+                    Find
+                  </button>
+                ) : null}
             </div>
           ) : (
             <div className="pane-view-strip-left">
@@ -3344,21 +3663,35 @@ function SessionPaneView({
               </span>
             </div>
           )}
-          {activeSession ? (
-            <div className="thread-chips">
-              <span className="chip">{activeSession.workdir}</span>
-              {activeSourceTab?.path ? <span className="chip">{activeSourceTab.path}</span> : null}
-              {activeFilesystemTab?.rootPath ? (
-                <span className="chip">{activeFilesystemTab.rootPath}</span>
-              ) : null}
-              {activeGitStatusTab?.workdir ? (
-                <span className="chip">{activeGitStatusTab.workdir}</span>
-              ) : null}
-              {activeDiffPreviewTab?.filePath ? (
-                <span className="chip">{activeDiffPreviewTab.filePath}</span>
-              ) : null}
-            </div>
-          ) : null}
+          <div className="pane-view-strip-right">
+            {canFindInSession && isSessionFindOpen ? (
+              <SessionFindBar
+                inputRef={sessionFindInputRef}
+                query={sessionFindQuery}
+                activeIndex={activeSessionSearchMatchIndex}
+                matches={sessionSearchMatches}
+                onChange={(nextValue) => setSessionFindQuery(nextValue)}
+                onNext={() => stepSessionFind(1)}
+                onPrevious={() => stepSessionFind(-1)}
+                onClose={closeSessionFind}
+              />
+            ) : null}
+            {activeSession ? (
+              <div className="thread-chips">
+                <span className="chip">{activeSession.workdir}</span>
+                {activeSourceTab?.path ? <span className="chip">{activeSourceTab.path}</span> : null}
+                {activeFilesystemTab?.rootPath ? (
+                  <span className="chip">{activeFilesystemTab.rootPath}</span>
+                ) : null}
+                {activeGitStatusTab?.workdir ? (
+                  <span className="chip">{activeGitStatusTab.workdir}</span>
+                ) : null}
+                {activeDiffPreviewTab?.filePath ? (
+                  <span className="chip">{activeDiffPreviewTab.filePath}</span>
+                ) : null}
+              </div>
+            ) : null}
+          </div>
         </div>
       </div>
 
@@ -3432,6 +3765,10 @@ function SessionPaneView({
             onApprovalDecision={onApprovalDecision}
             onCancelQueuedPrompt={onCancelQueuedPrompt}
             onSessionSettingsChange={onSessionSettingsChange}
+            conversationSearchQuery={hasSessionFindQuery ? sessionFindQuery : ""}
+            conversationSearchMatchedItemKeys={sessionSearchMatchedItemKeys}
+            conversationSearchActiveItemKey={activeSessionSearchMatch?.itemKey ?? null}
+            onConversationSearchItemMount={handleConversationSearchItemMount}
             renderCommandCard={(message) => <CommandCard message={message} />}
             renderDiffCard={(message) => (
               <DiffCard
@@ -3449,6 +3786,12 @@ function SessionPaneView({
                 }
                 preferImmediateHeavyRender={preferImmediateHeavyRender}
                 onApprovalDecision={handleDecision}
+                searchQuery={
+                  activeSessionSearchMatch?.itemKey === `message:${message.id}` ? sessionFindQuery : ""
+                }
+                searchHighlightTone={
+                  activeSessionSearchMatch?.itemKey === `message:${message.id}` ? "active" : "match"
+                }
               />
             )}
             renderPromptSettings={(panelPaneId, session, panelIsUpdating, handleSettingsChange) => {
@@ -3511,6 +3854,91 @@ function EmptyState({ title, body }: { title: string; body: string }) {
       <h3>{title}</h3>
       <p>{body}</p>
     </article>
+  );
+}
+
+function SessionFindBar({
+  inputRef,
+  query,
+  activeIndex,
+  matches,
+  onChange,
+  onNext,
+  onPrevious,
+  onClose,
+}: {
+  inputRef: RefObject<HTMLInputElement>;
+  query: string;
+  activeIndex: number;
+  matches: SessionSearchMatch[];
+  onChange: (nextValue: string) => void;
+  onNext: () => void;
+  onPrevious: () => void;
+  onClose: () => void;
+}) {
+  const hasQuery = query.trim().length > 0;
+  const hasMatches = matches.length > 0;
+  const currentMatch = hasMatches && activeIndex >= 0 ? matches[activeIndex] ?? null : null;
+  const countLabel = !hasQuery
+    ? "Type to search"
+    : hasMatches
+      ? `${activeIndex + 1} of ${matches.length}`
+      : "No matches";
+
+  return (
+    <div className="session-find-bar" role="search" aria-label="Find in session">
+      <input
+        ref={inputRef}
+        className="session-find-input"
+        type="search"
+        value={query}
+        placeholder="Find in session"
+        spellCheck={false}
+        onChange={(event) => onChange(event.currentTarget.value)}
+        onKeyDown={(event) => {
+          if (event.key === "Enter") {
+            event.preventDefault();
+            if (event.shiftKey) {
+              onPrevious();
+            } else {
+              onNext();
+            }
+            return;
+          }
+
+          if (event.key === "Escape") {
+            event.preventDefault();
+            onClose();
+          }
+        }}
+      />
+      <span
+        className="session-find-count"
+        aria-live="polite"
+        title={currentMatch?.snippet ?? undefined}
+      >
+        {countLabel}
+      </span>
+      <button
+        className="session-find-button"
+        type="button"
+        onClick={onPrevious}
+        disabled={!hasMatches}
+      >
+        Prev
+      </button>
+      <button
+        className="session-find-button"
+        type="button"
+        onClick={onNext}
+        disabled={!hasMatches}
+      >
+        Next
+      </button>
+      <button className="session-find-button session-find-close" type="button" onClick={onClose}>
+        Close
+      </button>
+    </div>
   );
 }
 
@@ -3630,11 +4058,15 @@ const MessageCard = memo(function MessageCard({
   onOpenDiffPreview,
   preferImmediateHeavyRender = false,
   onApprovalDecision,
+  searchQuery = "",
+  searchHighlightTone = "match",
 }: {
   message: Message;
   onOpenDiffPreview?: (message: DiffMessage) => void;
   preferImmediateHeavyRender?: boolean;
   onApprovalDecision: (messageId: string, decision: ApprovalDecision) => void;
+  searchQuery?: string;
+  searchHighlightTone?: SearchHighlightTone;
 }) {
   switch (message.type) {
     case "text": {
@@ -3642,23 +4074,44 @@ const MessageCard = memo(function MessageCard({
         message.author === "assistant" ? parseConnectionRetryNotice(message.text) : null;
 
       if (connectionRetryNotice) {
-        return <ConnectionRetryCard message={message} notice={connectionRetryNotice} />;
+        return (
+          <ConnectionRetryCard
+            message={message}
+            notice={connectionRetryNotice}
+            searchQuery={searchQuery}
+            searchHighlightTone={searchHighlightTone}
+          />
+        );
       }
 
       return (
         <article className={`message-card bubble bubble-${message.author}`}>
           <MessageMeta author={message.author} timestamp={message.timestamp} />
           {message.attachments && message.attachments.length > 0 ? (
-            <MessageAttachmentList attachments={message.attachments} />
+            <MessageAttachmentList
+              attachments={message.attachments}
+              searchQuery={searchQuery}
+              searchHighlightTone={searchHighlightTone}
+            />
           ) : null}
           {message.author === "assistant" ? (
             preferImmediateHeavyRender ? (
-              <MarkdownContent markdown={message.text} />
+              <MarkdownContent
+                markdown={message.text}
+                searchQuery={searchQuery}
+                searchHighlightTone={searchHighlightTone}
+              />
             ) : (
-              <DeferredMarkdownContent markdown={message.text} />
+              <DeferredMarkdownContent
+                markdown={message.text}
+                searchQuery={searchQuery}
+                searchHighlightTone={searchHighlightTone}
+              />
             )
           ) : message.text ? (
-            <p className="plain-text-copy">{message.text}</p>
+            <p className="plain-text-copy">
+              {renderHighlightedText(message.text, searchQuery, searchHighlightTone)}
+            </p>
           ) : (
             <p className="support-copy">{imageAttachmentSummaryLabel(message.attachments?.length ?? 0)}</p>
           )}
@@ -3666,30 +4119,68 @@ const MessageCard = memo(function MessageCard({
       );
     }
     case "thinking":
-      return <ThinkingCard message={message} />;
+      return (
+        <ThinkingCard
+          message={message}
+          searchQuery={searchQuery}
+          searchHighlightTone={searchHighlightTone}
+        />
+      );
     case "command":
-      return <CommandCard message={message} />;
+      return (
+        <CommandCard
+          message={message}
+          searchQuery={searchQuery}
+          searchHighlightTone={searchHighlightTone}
+        />
+      );
     case "diff":
-      return <DiffCard message={message} onOpenPreview={() => onOpenDiffPreview?.(message)} />;
+      return (
+        <DiffCard
+          message={message}
+          onOpenPreview={() => onOpenDiffPreview?.(message)}
+          searchQuery={searchQuery}
+          searchHighlightTone={searchHighlightTone}
+        />
+      );
     case "markdown":
-      return <MarkdownCard message={message} />;
+      return (
+        <MarkdownCard
+          message={message}
+          searchQuery={searchQuery}
+          searchHighlightTone={searchHighlightTone}
+        />
+      );
     case "approval":
-      return <ApprovalCard message={message} onApprovalDecision={onApprovalDecision} />;
+      return (
+        <ApprovalCard
+          message={message}
+          onApprovalDecision={onApprovalDecision}
+          searchQuery={searchQuery}
+          searchHighlightTone={searchHighlightTone}
+        />
+      );
     default:
       return null;
   }
 }, (previous, next) =>
   previous.message === next.message &&
   previous.onOpenDiffPreview === next.onOpenDiffPreview &&
-  previous.preferImmediateHeavyRender === next.preferImmediateHeavyRender
+  previous.preferImmediateHeavyRender === next.preferImmediateHeavyRender &&
+  previous.searchQuery === next.searchQuery &&
+  previous.searchHighlightTone === next.searchHighlightTone
 );
 
 function ConnectionRetryCard({
   message,
   notice,
+  searchQuery,
+  searchHighlightTone,
 }: {
   message: TextMessage;
   notice: ConnectionRetryNotice;
+  searchQuery: string;
+  searchHighlightTone: SearchHighlightTone;
 }) {
   return (
     <article className="message-card connection-notice-card" role="status" aria-live="polite">
@@ -3704,21 +4195,34 @@ function ConnectionRetryCard({
               <span className="chip chip-status chip-status-active">{notice.attemptLabel}</span>
             ) : null}
           </div>
-          <p className="connection-notice-detail">{notice.detail}</p>
+          <p className="connection-notice-detail">
+            {renderHighlightedText(notice.detail, searchQuery, searchHighlightTone)}
+          </p>
         </div>
       </div>
     </article>
   );
 }
 
-function MessageAttachmentList({ attachments }: { attachments: ImageAttachment[] }) {
+function MessageAttachmentList({
+  attachments,
+  searchQuery = "",
+  searchHighlightTone = "match",
+}: {
+  attachments: ImageAttachment[];
+  searchQuery?: string;
+  searchHighlightTone?: SearchHighlightTone;
+}) {
   return (
     <div className="message-attachment-list">
       {attachments.map((attachment, index) => (
         <div key={`${attachment.fileName}-${attachment.byteSize}-${index}`} className="message-attachment-chip">
-          <strong className="message-attachment-name">{attachment.fileName}</strong>
+          <strong className="message-attachment-name">
+            {renderHighlightedText(attachment.fileName, searchQuery, searchHighlightTone)}
+          </strong>
           <span className="message-attachment-meta">
-            {formatByteSize(attachment.byteSize)} · {attachment.mediaType}
+            {formatByteSize(attachment.byteSize)} ·{" "}
+            {renderHighlightedText(attachment.mediaType, searchQuery, searchHighlightTone)}
           </span>
         </div>
       ))}
@@ -3830,16 +4334,22 @@ function DeferredHighlightedCodeBlock({
   commandHint,
   language,
   pathHint,
+  searchQuery,
+  searchHighlightTone = "match",
 }: {
   className: string;
   code: string;
   commandHint?: string | null;
   language?: string | null;
   pathHint?: string | null;
+  searchQuery?: string;
+  searchHighlightTone?: SearchHighlightTone;
 }) {
   const metrics = useMemo(() => measureTextBlock(code), [code]);
+  const showSearchHighlight = containsSearchMatch(code, searchQuery ?? "");
   const shouldDefer =
-    metrics.lineCount >= HEAVY_CODE_LINE_THRESHOLD || code.length >= HEAVY_CODE_CHARACTER_THRESHOLD;
+    !showSearchHighlight &&
+    (metrics.lineCount >= HEAVY_CODE_LINE_THRESHOLD || code.length >= HEAVY_CODE_CHARACTER_THRESHOLD);
 
   if (!shouldDefer) {
     return (
@@ -3849,6 +4359,8 @@ function DeferredHighlightedCodeBlock({
         commandHint={commandHint}
         language={language}
         pathHint={pathHint}
+        searchQuery={searchQuery}
+        searchHighlightTone={searchHighlightTone}
       />
     );
   }
@@ -3868,19 +4380,37 @@ function DeferredHighlightedCodeBlock({
         commandHint={commandHint}
         language={language}
         pathHint={pathHint}
+        searchQuery={searchQuery}
+        searchHighlightTone={searchHighlightTone}
       />
     </DeferredHeavyContent>
   );
 }
 
-function DeferredMarkdownContent({ markdown }: { markdown: string }) {
+function DeferredMarkdownContent({
+  markdown,
+  searchQuery = "",
+  searchHighlightTone = "match",
+}: {
+  markdown: string;
+  searchQuery?: string;
+  searchHighlightTone?: SearchHighlightTone;
+}) {
   const metrics = useMemo(() => measureTextBlock(markdown), [markdown]);
+  const showSearchHighlight = containsSearchMatch(markdown, searchQuery);
   const shouldDefer =
-    metrics.lineCount >= HEAVY_MARKDOWN_LINE_THRESHOLD ||
-    markdown.length >= HEAVY_MARKDOWN_CHARACTER_THRESHOLD;
+    !showSearchHighlight &&
+    (metrics.lineCount >= HEAVY_MARKDOWN_LINE_THRESHOLD ||
+      markdown.length >= HEAVY_MARKDOWN_CHARACTER_THRESHOLD);
 
   if (!shouldDefer) {
-    return <MarkdownContent markdown={markdown} />;
+    return (
+      <MarkdownContent
+        markdown={markdown}
+        searchQuery={searchQuery}
+        searchHighlightTone={searchHighlightTone}
+      />
+    );
   }
 
   return (
@@ -3892,7 +4422,11 @@ function DeferredMarkdownContent({ markdown }: { markdown: string }) {
         </div>
       }
     >
-      <MarkdownContent markdown={markdown} />
+      <MarkdownContent
+        markdown={markdown}
+        searchQuery={searchQuery}
+        searchHighlightTone={searchHighlightTone}
+      />
     </DeferredHeavyContent>
   );
 }
@@ -3904,6 +4438,8 @@ function HighlightedCodeBlock({
   language,
   pathHint,
   showCopyButton = false,
+  searchQuery = "",
+  searchHighlightTone = "match",
 }: {
   className: string;
   code: string;
@@ -3911,8 +4447,11 @@ function HighlightedCodeBlock({
   language?: string | null;
   pathHint?: string | null;
   showCopyButton?: boolean;
+  searchQuery?: string;
+  searchHighlightTone?: SearchHighlightTone;
 }) {
   const [copied, setCopied] = useState(false);
+  const showSearchHighlight = containsSearchMatch(code, searchQuery);
   const highlighted = useMemo(
     () =>
       highlightCode(code, {
@@ -3963,30 +4502,49 @@ function HighlightedCodeBlock({
           {copied ? <CheckIcon /> : <CopyIcon />}
         </button>
       ) : null}
-      <code
-        className={`hljs${highlighted.language ? ` language-${highlighted.language}` : ""}`}
-        dangerouslySetInnerHTML={{ __html: highlighted.html }}
-      />
+      <code className={`hljs${highlighted.language ? ` language-${highlighted.language}` : ""}`}>
+        {showSearchHighlight
+          ? renderHighlightedText(code, searchQuery, searchHighlightTone)
+          : (
+            <span dangerouslySetInnerHTML={{ __html: highlighted.html }} />
+          )}
+      </code>
     </pre>
   );
 }
 
-function ThinkingCard({ message }: { message: ThinkingMessage }) {
+function ThinkingCard({
+  message,
+  searchQuery = "",
+  searchHighlightTone = "match",
+}: {
+  message: ThinkingMessage;
+  searchQuery?: string;
+  searchHighlightTone?: SearchHighlightTone;
+}) {
   return (
     <article className="message-card reasoning-card">
       <MessageMeta author={message.author} timestamp={message.timestamp} />
       <div className="card-label">Thinking</div>
-      <h3>{message.title}</h3>
+      <h3>{renderHighlightedText(message.title, searchQuery, searchHighlightTone)}</h3>
       <ul className="plain-list">
         {message.lines.map((line) => (
-          <li key={line}>{line}</li>
+          <li key={line}>{renderHighlightedText(line, searchQuery, searchHighlightTone)}</li>
         ))}
       </ul>
     </article>
   );
 }
 
-function CommandCard({ message }: { message: CommandMessage }) {
+function CommandCard({
+  message,
+  searchQuery = "",
+  searchHighlightTone = "match",
+}: {
+  message: CommandMessage;
+  searchQuery?: string;
+  searchHighlightTone?: SearchHighlightTone;
+}) {
   const [expanded, setExpanded] = useState(false);
   const [copiedSection, setCopiedSection] = useState<"command" | "output" | null>(null);
   const hasOutput = message.output.trim().length > 0;
@@ -3998,6 +4556,8 @@ function CommandCard({ message }: { message: CommandMessage }) {
   const canExpandOutput =
     hasOutput && (message.output.split("\n").length > 10 || message.output.length > 480);
   const statusTone = mapCommandStatus(message.status);
+  const isSearchExpanded = searchQuery.trim().length > 0;
+  const isExpanded = expanded || isSearchExpanded;
 
   useEffect(() => {
     if (!copiedSection) {
@@ -4043,6 +4603,8 @@ function CommandCard({ message }: { message: CommandMessage }) {
               className="command-text command-text-input"
               code={message.command}
               language={message.commandLanguage ?? "bash"}
+              searchQuery={searchQuery}
+              searchHighlightTone={searchHighlightTone}
             />
           </div>
           <div className="command-row-actions">
@@ -4062,7 +4624,7 @@ function CommandCard({ message }: { message: CommandMessage }) {
           <div className="command-row-label">OUT</div>
           <div className="command-row-body">
             <div
-              className={`command-output-shell ${expanded ? "expanded" : "collapsed"} ${hasOutput ? "has-output" : "empty"}`}
+              className={`command-output-shell ${isExpanded ? "expanded" : "collapsed"} ${hasOutput ? "has-output" : "empty"}`}
             >
               {hasOutput ? (
                 <DeferredHighlightedCodeBlock
@@ -4070,6 +4632,8 @@ function CommandCard({ message }: { message: CommandMessage }) {
                   code={displayOutput}
                   language={message.outputLanguage ?? null}
                   commandHint={message.output ? message.command : null}
+                  searchQuery={searchQuery}
+                  searchHighlightTone={searchHighlightTone}
                 />
               ) : (
                 <pre className="command-text command-text-output command-text-placeholder">
@@ -4094,11 +4658,11 @@ function CommandCard({ message }: { message: CommandMessage }) {
                 className="command-icon-button"
                 type="button"
                 onClick={() => setExpanded((open) => !open)}
-                aria-label={expanded ? "Collapse output" : "Expand output"}
-                aria-pressed={expanded}
-                title={expanded ? "Collapse output" : "Expand output"}
+                aria-label={isExpanded ? "Collapse output" : "Expand output"}
+                aria-pressed={isExpanded}
+                title={isExpanded ? "Collapse output" : "Expand output"}
               >
-                {expanded ? <CollapseIcon /> : <ExpandIcon />}
+                {isExpanded ? <CollapseIcon /> : <ExpandIcon />}
               </button>
             ) : null}
           </div>
@@ -4159,14 +4723,18 @@ function CollapseIcon() {
 function DiffCard({
   message,
   onOpenPreview,
+  searchQuery = "",
+  searchHighlightTone = "match",
 }: {
   message: DiffMessage;
   onOpenPreview: () => void;
+  searchQuery?: string;
+  searchHighlightTone?: SearchHighlightTone;
 }) {
   const [expanded, setExpanded] = useState(false);
   const [copied, setCopied] = useState(false);
   const canExpandDiff = message.diff.split("\n").length > 14 || message.diff.length > 900;
-  const isExpanded = !canExpandDiff || expanded;
+  const isExpanded = !canExpandDiff || expanded || searchQuery.trim().length > 0;
 
   useEffect(() => {
     if (!copied) {
@@ -4199,8 +4767,12 @@ function DiffCard({
         <div className="command-row diff-file-row">
           <div className="command-row-label">FILE</div>
           <div className="command-row-body">
-            <div className="diff-file-path">{message.filePath}</div>
-            <p className="diff-file-summary">{message.summary}</p>
+            <div className="diff-file-path">
+              {renderHighlightedText(message.filePath, searchQuery, searchHighlightTone)}
+            </div>
+            <p className="diff-file-summary">
+              {renderHighlightedText(message.summary, searchQuery, searchHighlightTone)}
+            </p>
           </div>
         </div>
         <div className="command-row diff-row">
@@ -4212,6 +4784,8 @@ function DiffCard({
                 code={message.diff}
                 language={message.language ?? "diff"}
                 pathHint={message.filePath}
+                searchQuery={searchQuery}
+                searchHighlightTone={searchHighlightTone}
               />
             </div>
           </div>
@@ -4264,13 +4838,25 @@ function PreviewIcon() {
   );
 }
 
-function MarkdownCard({ message }: { message: MarkdownMessage }) {
+function MarkdownCard({
+  message,
+  searchQuery = "",
+  searchHighlightTone = "match",
+}: {
+  message: MarkdownMessage;
+  searchQuery?: string;
+  searchHighlightTone?: SearchHighlightTone;
+}) {
   return (
     <article className="message-card markdown-card">
       <MessageMeta author={message.author} timestamp={message.timestamp} />
       <div className="card-label">Markdown</div>
-      <h3>{message.title}</h3>
-      <DeferredMarkdownContent markdown={message.markdown} />
+      <h3>{renderHighlightedText(message.title, searchQuery, searchHighlightTone)}</h3>
+      <DeferredMarkdownContent
+        markdown={message.markdown}
+        searchQuery={searchQuery}
+        searchHighlightTone={searchHighlightTone}
+      />
     </article>
   );
 }
@@ -4278,9 +4864,13 @@ function MarkdownCard({ message }: { message: MarkdownMessage }) {
 function ApprovalCard({
   message,
   onApprovalDecision,
+  searchQuery = "",
+  searchHighlightTone = "match",
 }: {
   message: ApprovalMessage;
   onApprovalDecision: (messageId: string, decision: ApprovalDecision) => void;
+  searchQuery?: string;
+  searchHighlightTone?: SearchHighlightTone;
 }) {
   const decided = message.decision !== "pending";
   const chosen = (d: ApprovalDecision) => (message.decision === d ? " chosen" : "");
@@ -4290,13 +4880,17 @@ function ApprovalCard({
     <article className={`message-card approval-card${decided ? " decided" : ""}`}>
       <MessageMeta author={message.author} timestamp={message.timestamp} />
       <div className="card-label">Approval</div>
-      <h3>{message.title}</h3>
+      <h3>{renderHighlightedText(message.title, searchQuery, searchHighlightTone)}</h3>
       <DeferredHighlightedCodeBlock
         className="approval-command"
         code={message.command}
         language={message.commandLanguage ?? "bash"}
+        searchQuery={searchQuery}
+        searchHighlightTone={searchHighlightTone}
       />
-      <p className="support-copy">{message.detail}</p>
+      <p className="support-copy">
+        {renderHighlightedText(message.detail, searchQuery, searchHighlightTone)}
+      </p>
       <div className="approval-actions">
         <button
           className={`approval-button${chosen("accepted")}`}
@@ -4330,18 +4924,31 @@ function ApprovalCard({
   );
 }
 
-function MarkdownContent({ markdown }: { markdown: string }) {
+function MarkdownContent({
+  markdown,
+  searchQuery = "",
+  searchHighlightTone = "match",
+}: {
+  markdown: string;
+  searchQuery?: string;
+  searchHighlightTone?: SearchHighlightTone;
+}) {
+  const highlightChildren = (children: ReactNode) =>
+    highlightReactNodeText(children, searchQuery, searchHighlightTone);
+
   return (
     <div className="markdown-copy">
       <ReactMarkdown
         components={{
-          a: ({ href, ...props }) => (
+          a: ({ href, children, ...props }) => (
             <a
               {...props}
               href={href}
               target={href?.startsWith("http") ? "_blank" : undefined}
               rel={href?.startsWith("http") ? "noreferrer" : undefined}
-            />
+            >
+              {highlightChildren(children)}
+            </a>
           ),
           code: ({ children, className, inline, ...props }) => {
             const language = className?.match(/language-([\w-]+)/)?.[1] ?? null;
@@ -4350,7 +4957,7 @@ function MarkdownContent({ markdown }: { markdown: string }) {
             if (inline) {
               return (
                 <code className={className} {...props}>
-                  {children}
+                  {highlightChildren(children)}
                 </code>
               );
             }
@@ -4361,9 +4968,29 @@ function MarkdownContent({ markdown }: { markdown: string }) {
                 code={code}
                 language={language}
                 showCopyButton
+                searchQuery={searchQuery}
+                searchHighlightTone={searchHighlightTone}
               />
             );
           },
+          p: ({ children, ...props }) => <p {...props}>{highlightChildren(children)}</p>,
+          li: ({ children, ...props }) => <li {...props}>{highlightChildren(children)}</li>,
+          blockquote: ({ children, ...props }) => (
+            <blockquote {...props}>{highlightChildren(children)}</blockquote>
+          ),
+          h1: ({ children, ...props }) => <h1 {...props}>{highlightChildren(children)}</h1>,
+          h2: ({ children, ...props }) => <h2 {...props}>{highlightChildren(children)}</h2>,
+          h3: ({ children, ...props }) => <h3 {...props}>{highlightChildren(children)}</h3>,
+          h4: ({ children, ...props }) => <h4 {...props}>{highlightChildren(children)}</h4>,
+          h5: ({ children, ...props }) => <h5 {...props}>{highlightChildren(children)}</h5>,
+          h6: ({ children, ...props }) => <h6 {...props}>{highlightChildren(children)}</h6>,
+          strong: ({ children, ...props }) => (
+            <strong {...props}>{highlightChildren(children)}</strong>
+          ),
+          em: ({ children, ...props }) => <em {...props}>{highlightChildren(children)}</em>,
+          del: ({ children, ...props }) => <del {...props}>{highlightChildren(children)}</del>,
+          td: ({ children, ...props }) => <td {...props}>{highlightChildren(children)}</td>,
+          th: ({ children, ...props }) => <th {...props}>{highlightChildren(children)}</th>,
         }}
         remarkPlugins={[remarkGfm]}
       >
@@ -4506,6 +5133,14 @@ function getErrorMessage(error: unknown) {
   }
 
   return "The request failed.";
+}
+
+function primaryModifierLabel() {
+  if (typeof navigator === "undefined") {
+    return "Ctrl";
+  }
+
+  return navigator.platform.toLowerCase().includes("mac") ? "Cmd" : "Ctrl";
 }
 
 type ConnectionRetryNotice = {

@@ -9,6 +9,10 @@ import {
   type ReactNode,
   type RefObject,
 } from "react";
+import {
+  renderHighlightedText,
+  type SearchHighlightTone,
+} from "../search-highlight";
 import type {
   ApprovalDecision,
   ApprovalPolicy,
@@ -41,6 +45,7 @@ const CONVERSATION_VIRTUALIZATION_MIN_MESSAGES = 80;
 const VIRTUALIZED_MESSAGE_OVERSCAN_PX = 960;
 const VIRTUALIZED_MESSAGE_GAP_PX = 12;
 const DEFAULT_VIRTUALIZED_VIEWPORT_HEIGHT = 720;
+const EMPTY_MATCHED_ITEM_KEYS = new Set<string>();
 
 export function AgentSessionPanel({
   paneId,
@@ -57,6 +62,10 @@ export function AgentSessionPanel({
   onApprovalDecision,
   onCancelQueuedPrompt,
   onSessionSettingsChange,
+  conversationSearchQuery,
+  conversationSearchMatchedItemKeys,
+  conversationSearchActiveItemKey,
+  onConversationSearchItemMount,
   renderCommandCard,
   renderDiffCard,
   renderMessageCard,
@@ -80,6 +89,10 @@ export function AgentSessionPanel({
       field: SessionSettingsField,
       value: SessionSettingsValue,
     ) => void;
+  conversationSearchQuery: string;
+  conversationSearchMatchedItemKeys: ReadonlySet<string>;
+  conversationSearchActiveItemKey: string | null;
+  onConversationSearchItemMount: (itemKey: string, node: HTMLElement | null) => void;
   renderCommandCard: (message: CommandMessage) => JSX.Element | null;
   renderDiffCard: (message: DiffMessage) => JSX.Element | null;
   renderMessageCard: (
@@ -114,6 +127,10 @@ export function AgentSessionPanel({
       onApprovalDecision={onApprovalDecision}
       onCancelQueuedPrompt={onCancelQueuedPrompt}
       onSessionSettingsChange={onSessionSettingsChange}
+      conversationSearchQuery={conversationSearchQuery}
+      conversationSearchMatchedItemKeys={conversationSearchMatchedItemKeys}
+      conversationSearchActiveItemKey={conversationSearchActiveItemKey}
+      onConversationSearchItemMount={onConversationSearchItemMount}
       renderCommandCard={renderCommandCard}
       renderDiffCard={renderDiffCard}
       renderMessageCard={renderMessageCard}
@@ -205,6 +222,10 @@ const SessionBody = memo(function SessionBody({
   onApprovalDecision,
   onCancelQueuedPrompt,
   onSessionSettingsChange,
+  conversationSearchQuery,
+  conversationSearchMatchedItemKeys,
+  conversationSearchActiveItemKey,
+  onConversationSearchItemMount,
   renderCommandCard,
   renderDiffCard,
   renderMessageCard,
@@ -228,6 +249,10 @@ const SessionBody = memo(function SessionBody({
     field: SessionSettingsField,
     value: SessionSettingsValue,
   ) => void;
+  conversationSearchQuery: string;
+  conversationSearchMatchedItemKeys: ReadonlySet<string>;
+  conversationSearchActiveItemKey: string | null;
+  onConversationSearchItemMount: (itemKey: string, node: HTMLElement | null) => void;
   renderCommandCard: (message: CommandMessage) => JSX.Element | null;
   renderDiffCard: (message: DiffMessage) => JSX.Element | null;
   renderMessageCard: (
@@ -284,6 +309,14 @@ const SessionBody = memo(function SessionBody({
             waitingIndicatorPrompt={session.id === activeSession.id ? waitingIndicatorPrompt : null}
             onApprovalDecision={onApprovalDecision}
             onCancelQueuedPrompt={onCancelQueuedPrompt}
+            conversationSearchQuery={session.id === activeSession.id ? conversationSearchQuery : ""}
+            conversationSearchMatchedItemKeys={
+              session.id === activeSession.id ? conversationSearchMatchedItemKeys : EMPTY_MATCHED_ITEM_KEYS
+            }
+            conversationSearchActiveItemKey={
+              session.id === activeSession.id ? conversationSearchActiveItemKey : null
+            }
+            onConversationSearchItemMount={onConversationSearchItemMount}
           />
         ))}
       </>
@@ -342,6 +375,10 @@ const SessionBody = memo(function SessionBody({
   previous.mountedSessions === next.mountedSessions &&
   previous.commandMessages === next.commandMessages &&
   previous.diffMessages === next.diffMessages &&
+  previous.conversationSearchQuery === next.conversationSearchQuery &&
+  previous.conversationSearchMatchedItemKeys === next.conversationSearchMatchedItemKeys &&
+  previous.conversationSearchActiveItemKey === next.conversationSearchActiveItemKey &&
+  previous.onConversationSearchItemMount === next.onConversationSearchItemMount &&
   previous.renderCommandCard === next.renderCommandCard &&
   previous.renderDiffCard === next.renderDiffCard &&
   previous.renderMessageCard === next.renderMessageCard &&
@@ -358,6 +395,10 @@ const SessionConversationPage = memo(function SessionConversationPage({
   waitingIndicatorPrompt,
   onApprovalDecision,
   onCancelQueuedPrompt,
+  conversationSearchQuery,
+  conversationSearchMatchedItemKeys,
+  conversationSearchActiveItemKey,
+  onConversationSearchItemMount,
 }: {
   renderMessageCard: (
     message: Message,
@@ -372,6 +413,10 @@ const SessionConversationPage = memo(function SessionConversationPage({
   waitingIndicatorPrompt: string | null;
   onApprovalDecision: (sessionId: string, messageId: string, decision: ApprovalDecision) => void;
   onCancelQueuedPrompt: (sessionId: string, promptId: string) => void;
+  conversationSearchQuery: string;
+  conversationSearchMatchedItemKeys: ReadonlySet<string>;
+  conversationSearchActiveItemKey: string | null;
+  onConversationSearchItemMount: (itemKey: string, node: HTMLElement | null) => void;
 }) {
   const pendingPrompts = session.pendingPrompts ?? [];
 
@@ -399,18 +444,36 @@ const SessionConversationPage = memo(function SessionConversationPage({
         scrollContainerRef={scrollContainerRef}
         isActive={isActive}
         onApprovalDecision={onApprovalDecision}
+        conversationSearchQuery={conversationSearchQuery}
+        conversationSearchMatchedItemKeys={conversationSearchMatchedItemKeys}
+        conversationSearchActiveItemKey={conversationSearchActiveItemKey}
+        onConversationSearchItemMount={onConversationSearchItemMount}
       />
 
       {showWaitingIndicator ? (
         <RunningIndicator agent={session.agent} lastPrompt={waitingIndicatorPrompt} />
       ) : null}
 
+      {/* Only the active mounted page exposes find anchors so cached hidden pages cannot hijack scroll targets. */}
       {pendingPrompts.map((prompt) => (
-        <PendingPromptCard
+        <MessageSlot
           key={prompt.id}
-          prompt={prompt}
-          onCancel={() => onCancelQueuedPrompt(session.id, prompt.id)}
-        />
+          itemKey={isActive ? `pendingPrompt:${prompt.id}` : undefined}
+          isSearchMatch={conversationSearchMatchedItemKeys.has(`pendingPrompt:${prompt.id}`)}
+          isSearchActive={conversationSearchActiveItemKey === `pendingPrompt:${prompt.id}`}
+          onSearchItemMount={onConversationSearchItemMount}
+        >
+          <PendingPromptCard
+            prompt={prompt}
+            onCancel={() => onCancelQueuedPrompt(session.id, prompt.id)}
+            searchQuery={
+              conversationSearchActiveItemKey === `pendingPrompt:${prompt.id}` ? conversationSearchQuery : ""
+            }
+            searchHighlightTone={
+              conversationSearchActiveItemKey === `pendingPrompt:${prompt.id}` ? "active" : "match"
+            }
+          />
+        </MessageSlot>
       ))}
     </div>
   );
@@ -421,7 +484,11 @@ const SessionConversationPage = memo(function SessionConversationPage({
   previous.isActive === next.isActive &&
   previous.isLoading === next.isLoading &&
   previous.showWaitingIndicator === next.showWaitingIndicator &&
-  previous.waitingIndicatorPrompt === next.waitingIndicatorPrompt
+  previous.waitingIndicatorPrompt === next.waitingIndicatorPrompt &&
+  previous.conversationSearchQuery === next.conversationSearchQuery &&
+  previous.conversationSearchMatchedItemKeys === next.conversationSearchMatchedItemKeys &&
+  previous.conversationSearchActiveItemKey === next.conversationSearchActiveItemKey &&
+  previous.onConversationSearchItemMount === next.onConversationSearchItemMount
 );
 
 function ConversationMessageList({
@@ -431,6 +498,10 @@ function ConversationMessageList({
   scrollContainerRef,
   isActive,
   onApprovalDecision,
+  conversationSearchQuery,
+  conversationSearchMatchedItemKeys,
+  conversationSearchActiveItemKey,
+  onConversationSearchItemMount,
 }: {
   renderMessageCard: (
     message: Message,
@@ -442,12 +513,25 @@ function ConversationMessageList({
   scrollContainerRef: RefObject<HTMLElement | null>;
   isActive: boolean;
   onApprovalDecision: (sessionId: string, messageId: string, decision: ApprovalDecision) => void;
+  conversationSearchQuery: string;
+  conversationSearchMatchedItemKeys: ReadonlySet<string>;
+  conversationSearchActiveItemKey: string | null;
+  onConversationSearchItemMount: (itemKey: string, node: HTMLElement | null) => void;
 }) {
-  if (!isActive || messages.length < CONVERSATION_VIRTUALIZATION_MIN_MESSAGES) {
+  const hasConversationSearch = conversationSearchQuery.trim().length > 0;
+
+  if (hasConversationSearch || !isActive || messages.length < CONVERSATION_VIRTUALIZATION_MIN_MESSAGES) {
     return (
       <>
+        {/* Only the active mounted page exposes find anchors so cached hidden pages cannot hijack scroll targets. */}
         {messages.map((message, index) => (
-          <MessageSlot key={message.id}>
+          <MessageSlot
+            key={message.id}
+            itemKey={isActive ? `message:${message.id}` : undefined}
+            isSearchMatch={conversationSearchMatchedItemKeys.has(`message:${message.id}`)}
+            isSearchActive={conversationSearchActiveItemKey === `message:${message.id}`}
+            onSearchItemMount={onConversationSearchItemMount}
+          >
             {renderMessageCard(
               message,
               isActive && index >= messages.length - 2,
@@ -1118,9 +1202,13 @@ function RunningIndicator({
 const PendingPromptCard = memo(function PendingPromptCard({
   prompt,
   onCancel,
+  searchQuery = "",
+  searchHighlightTone = "match",
 }: {
   prompt: PendingPrompt;
   onCancel: () => void;
+  searchQuery?: string;
+  searchHighlightTone?: SearchHighlightTone;
 }) {
   return (
     <article className="message-card bubble bubble-you pending-prompt-card">
@@ -1137,16 +1225,26 @@ const PendingPromptCard = memo(function PendingPromptCard({
         </button>
       </div>
       {prompt.attachments && prompt.attachments.length > 0 ? (
-        <MessageAttachmentList attachments={prompt.attachments} />
+        <MessageAttachmentList
+          attachments={prompt.attachments}
+          searchQuery={searchQuery}
+          searchHighlightTone={searchHighlightTone}
+        />
       ) : null}
       {prompt.text ? (
-        <p className="plain-text-copy">{prompt.text}</p>
+        <p className="plain-text-copy">
+          {renderHighlightedText(prompt.text, searchQuery, searchHighlightTone)}
+        </p>
       ) : (
         <p className="support-copy">{imageAttachmentSummaryLabel(prompt.attachments?.length ?? 0)}</p>
       )}
     </article>
   );
-}, (previous, next) => previous.prompt === next.prompt);
+}, (previous, next) =>
+  previous.prompt === next.prompt &&
+  previous.searchQuery === next.searchQuery &&
+  previous.searchHighlightTone === next.searchHighlightTone
+);
 
 function MessageMeta({ author, timestamp }: { author: string; timestamp: string }) {
   return (
@@ -1157,7 +1255,15 @@ function MessageMeta({ author, timestamp }: { author: string; timestamp: string 
   );
 }
 
-function MessageAttachmentList({ attachments }: { attachments: ImageAttachment[] }) {
+function MessageAttachmentList({
+  attachments,
+  searchQuery = "",
+  searchHighlightTone = "match",
+}: {
+  attachments: ImageAttachment[];
+  searchQuery?: string;
+  searchHighlightTone?: SearchHighlightTone;
+}) {
   return (
     <div className="message-attachment-list">
       {attachments.map((attachment, index) => (
@@ -1165,9 +1271,12 @@ function MessageAttachmentList({ attachments }: { attachments: ImageAttachment[]
           key={`${attachment.fileName}-${attachment.byteSize}-${index}`}
           className="message-attachment-chip"
         >
-          <strong className="message-attachment-name">{attachment.fileName}</strong>
+          <strong className="message-attachment-name">
+            {renderHighlightedText(attachment.fileName, searchQuery, searchHighlightTone)}
+          </strong>
           <span className="message-attachment-meta">
-            {formatByteSize(attachment.byteSize)} · {attachment.mediaType}
+            {formatByteSize(attachment.byteSize)} ·{" "}
+            {renderHighlightedText(attachment.mediaType, searchQuery, searchHighlightTone)}
           </span>
         </div>
       ))}
@@ -1175,8 +1284,34 @@ function MessageAttachmentList({ attachments }: { attachments: ImageAttachment[]
   );
 }
 
-function MessageSlot({ children }: { children: ReactNode }) {
-  return <>{children}</>;
+function MessageSlot({
+  children,
+  itemKey,
+  isSearchMatch = false,
+  isSearchActive = false,
+  onSearchItemMount,
+}: {
+  children: ReactNode;
+  itemKey?: string;
+  isSearchMatch?: boolean;
+  isSearchActive?: boolean;
+  onSearchItemMount?: (itemKey: string, node: HTMLElement | null) => void;
+}) {
+  if (!itemKey) {
+    return <>{children}</>;
+  }
+
+  return (
+    <div
+      className={`message-slot${isSearchMatch ? " session-search-hit" : ""}${isSearchActive ? " session-search-hit-active" : ""}`}
+      data-session-search-item-key={itemKey}
+      ref={(node) => {
+        onSearchItemMount?.(itemKey, node);
+      }}
+    >
+      {children}
+    </div>
+  );
 }
 
 function PanelEmptyState({ title, body }: { title: string; body: string }) {
