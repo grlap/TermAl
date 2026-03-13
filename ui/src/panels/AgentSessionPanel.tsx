@@ -60,6 +60,210 @@ const VIRTUALIZED_MESSAGE_OVERSCAN_PX = 960;
 const VIRTUALIZED_MESSAGE_GAP_PX = 12;
 const DEFAULT_VIRTUALIZED_VIEWPORT_HEIGHT = 720;
 const EMPTY_MATCHED_ITEM_KEYS = new Set<string>();
+const STATIC_MODEL_OPTIONS: Readonly<Record<Session["agent"], readonly { label: string; value: string }[]>> = {
+  Claude: [
+    { label: "Sonnet", value: "sonnet" },
+    { label: "Opus", value: "opus" },
+  ],
+  Codex: [
+    { label: "GPT-5", value: "gpt-5" },
+    { label: "GPT-5 mini", value: "gpt-5-mini" },
+    { label: "o3", value: "o3" },
+  ],
+  Cursor: [{ label: "Auto", value: "auto" }],
+  Gemini: [{ label: "Auto", value: "auto" }],
+};
+const SLASH_COMMANDS = [
+  {
+    command: "/model",
+    detail: "Change the model for this session",
+    label: "/model",
+  },
+] as const;
+
+type SessionModelChoice = {
+  label: string;
+  value: string;
+};
+
+type SlashPaletteItem =
+  | {
+      command: string;
+      detail: string;
+      key: string;
+      kind: "command";
+      label: string;
+    }
+  | {
+      detail: string;
+      isCurrent: boolean;
+      key: string;
+      kind: "model";
+      label: string;
+      value: string;
+    };
+
+type SlashPaletteState =
+  | {
+      kind: "none";
+    }
+  | {
+      defaultActiveIndex: number;
+      emptyMessage: string;
+      hint: string;
+      items: readonly SlashPaletteItem[];
+      kind: "command";
+      resetKey: string;
+      title: string;
+    }
+  | {
+      defaultActiveIndex: number;
+      emptyMessage: string;
+      hint: string;
+      isRefreshing: boolean;
+      items: readonly SlashPaletteItem[];
+      kind: "model";
+      resetKey: string;
+      supportsLiveRefresh: boolean;
+      title: string;
+    };
+
+function formatSessionModelLabel(model: string): string {
+  return model === "auto" ? "Auto" : model;
+}
+
+function supportsLiveSessionModelOptions(session: Session): boolean {
+  return session.agent === "Cursor" || session.agent === "Gemini";
+}
+
+function ensureCurrentSessionModelChoice(
+  options: readonly SessionModelChoice[],
+  currentModel: string,
+): SessionModelChoice[] {
+  if (options.some((option) => option.value === currentModel)) {
+    return [...options];
+  }
+
+  return [
+    {
+      label: formatSessionModelLabel(currentModel),
+      value: currentModel,
+    },
+    ...options,
+  ];
+}
+
+function sessionModelChoicesForSlashCommand(session: Session): SessionModelChoice[] {
+  const baseOptions =
+    session.agent === "Cursor" || session.agent === "Gemini"
+      ? session.modelOptions?.length
+        ? session.modelOptions.map((option) => ({
+            label: option.label,
+            value: option.value,
+          }))
+        : STATIC_MODEL_OPTIONS[session.agent]
+      : STATIC_MODEL_OPTIONS[session.agent];
+
+  return ensureCurrentSessionModelChoice(baseOptions, session.model);
+}
+
+function buildSlashPaletteState(
+  session: Session | null,
+  draft: string,
+  isRefreshingModelOptions: boolean,
+): SlashPaletteState {
+  if (!session || !draft.startsWith("/")) {
+    return { kind: "none" };
+  }
+
+  const commandMatch = /^\/(\S*)(?:\s+(.*))?$/.exec(draft);
+  if (!commandMatch) {
+    return { kind: "none" };
+  }
+
+  const commandQuery = (commandMatch[1] ?? "").toLowerCase();
+  const modelQuery = (commandMatch[2] ?? "").trim().toLowerCase();
+  const showCommandList = commandQuery.length === 0 || ("model".startsWith(commandQuery) && commandQuery !== "model");
+
+  if (showCommandList) {
+    const items = SLASH_COMMANDS.filter((item) =>
+      commandQuery.length === 0 ? true : item.label.slice(1).toLowerCase().includes(commandQuery),
+    ).map<SlashPaletteItem>((item) => ({
+      command: item.command,
+      detail: item.detail,
+      key: item.command,
+      kind: "command",
+      label: item.label,
+    }));
+
+    return {
+      defaultActiveIndex: 0,
+      emptyMessage: `No slash commands match "/${commandQuery}".`,
+      hint: "Enter to expand a session command. Esc clears the command line.",
+      items,
+      kind: "command",
+      resetKey: `command:${commandQuery}`,
+      title: "Slash commands",
+    };
+  }
+
+  if (commandQuery === "model") {
+    const supportsLiveRefresh = supportsLiveSessionModelOptions(session);
+    const hasLiveModelList = (session.modelOptions?.length ?? 0) > 0;
+    const items = sessionModelChoicesForSlashCommand(session)
+      .filter((option) => {
+        if (modelQuery.length === 0) {
+          return true;
+        }
+
+        const label = option.label.toLowerCase();
+        const value = option.value.toLowerCase();
+        return label.includes(modelQuery) || value.includes(modelQuery);
+      })
+      .map<SlashPaletteItem>((option) => ({
+        detail: option.value,
+        isCurrent: option.value === session.model,
+        key: `model:${option.value}`,
+        kind: "model",
+        label: option.label,
+        value: option.value,
+      }));
+    const defaultActiveIndex = Math.max(
+      items.findIndex((item) => item.kind === "model" && item.value === session.model),
+      0,
+    );
+
+    return {
+      defaultActiveIndex,
+      emptyMessage:
+        modelQuery.length > 0
+          ? `No ${session.agent} models match "${commandMatch[2] ?? ""}".`
+          : `No ${session.agent} models are available right now.`,
+      hint:
+        supportsLiveRefresh && !hasLiveModelList
+          ? isRefreshingModelOptions
+            ? `Loading ${session.agent}'s live model list for this session.`
+            : `Fetching ${session.agent}'s live model list for this session.`
+          : "Enter to apply a model. Esc clears the command line.",
+      isRefreshing: isRefreshingModelOptions,
+      items,
+      kind: "model",
+      resetKey: `model:${session.id}:${session.model}:${modelQuery}:${items.map((item) => item.key).join("|")}`,
+      supportsLiveRefresh,
+      title: `${session.agent} models`,
+    };
+  }
+
+  return {
+    defaultActiveIndex: 0,
+    emptyMessage: `No slash commands match "/${commandQuery}".`,
+    hint: "Slash commands currently support session model changes.",
+    items: [],
+    kind: "command",
+    resetKey: `command:${commandQuery}`,
+    title: "Slash commands",
+  };
+}
 
 export function AgentSessionPanel({
   paneId,
@@ -168,7 +372,10 @@ export function AgentSessionPanelFooter({
   onScrollToLatest,
   onDraftCommit,
   onDraftAttachmentRemove,
+  isRefreshingModelOptions,
+  onRefreshSessionModelOptions,
   onSend,
+  onSessionSettingsChange,
   onStopSession,
   onPaste,
 }: {
@@ -186,7 +393,14 @@ export function AgentSessionPanelFooter({
   onScrollToLatest: () => void;
   onDraftCommit: (sessionId: string, nextValue: string) => void;
   onDraftAttachmentRemove: (sessionId: string, attachmentId: string) => void;
+  isRefreshingModelOptions: boolean;
+  onRefreshSessionModelOptions: (sessionId: string) => void;
   onSend: (sessionId: string, draftText?: string) => void;
+  onSessionSettingsChange: (
+    sessionId: string,
+    field: SessionSettingsField,
+    value: SessionSettingsValue,
+  ) => void;
   onStopSession: (sessionId: string) => void;
   onPaste: (event: ReactClipboardEvent<HTMLTextAreaElement>) => void;
 }): JSX.Element {
@@ -205,7 +419,10 @@ export function AgentSessionPanelFooter({
         onScrollToLatest={onScrollToLatest}
         onDraftCommit={onDraftCommit}
         onDraftAttachmentRemove={onDraftAttachmentRemove}
+        isRefreshingModelOptions={isRefreshingModelOptions}
+        onRefreshSessionModelOptions={onRefreshSessionModelOptions}
         onSend={onSend}
+        onSessionSettingsChange={onSessionSettingsChange}
         onStopSession={onStopSession}
         onPaste={onPaste}
       />
@@ -780,11 +997,14 @@ const SessionComposer = memo(function SessionComposer({
   isSending,
   isStopping,
   isSessionBusy,
+  isRefreshingModelOptions,
   showNewResponseIndicator,
   onScrollToLatest,
   onDraftCommit,
   onDraftAttachmentRemove,
+  onRefreshSessionModelOptions,
   onSend,
+  onSessionSettingsChange,
   onStopSession,
   onPaste,
 }: {
@@ -796,11 +1016,18 @@ const SessionComposer = memo(function SessionComposer({
   isSending: boolean;
   isStopping: boolean;
   isSessionBusy: boolean;
+  isRefreshingModelOptions: boolean;
   showNewResponseIndicator: boolean;
   onScrollToLatest: () => void;
   onDraftCommit: (sessionId: string, nextValue: string) => void;
   onDraftAttachmentRemove: (sessionId: string, attachmentId: string) => void;
+  onRefreshSessionModelOptions: (sessionId: string) => void;
   onSend: (sessionId: string, draftText?: string) => void;
+  onSessionSettingsChange: (
+    sessionId: string,
+    field: SessionSettingsField,
+    value: SessionSettingsValue,
+  ) => void;
   onStopSession: (sessionId: string) => void;
   onPaste: (event: ReactClipboardEvent<HTMLTextAreaElement>) => void;
 }) {
@@ -808,16 +1035,31 @@ const SessionComposer = memo(function SessionComposer({
   const localDraftsRef = useRef<Record<string, string>>({});
   const committedDraftsRef = useRef<Record<string, string>>({});
   const onDraftCommitRef = useRef(onDraftCommit);
+  const requestedSlashModelOptionsRef = useRef<string | null>(null);
   const [localDraftsBySessionId, setLocalDraftsBySessionId] = useState<Record<string, string>>({});
   const [promptHistoryStateBySessionId, setPromptHistoryStateBySessionId] = useState<
     Record<string, PromptHistoryState | undefined>
   >({});
+  const [slashActiveIndex, setSlashActiveIndex] = useState(0);
 
   const activeSessionId = session?.id ?? null;
   const composerDraft =
     activeSessionId === null ? "" : (localDraftsBySessionId[activeSessionId] ?? committedDraft);
+  const slashPalette = useMemo(
+    () => buildSlashPaletteState(session, composerDraft, isRefreshingModelOptions),
+    [composerDraft, isRefreshingModelOptions, session],
+  );
+  const slashPaletteResetKey = slashPalette.kind === "none" ? "none" : slashPalette.resetKey;
+  const activeSlashItem =
+    slashPalette.kind === "none" || slashPalette.items.length === 0
+      ? null
+      : (slashPalette.items[Math.min(slashActiveIndex, slashPalette.items.length - 1)] ?? null);
   const composerInputDisabled = !session || isStopping;
-  const composerSendDisabled = !session || isSending || isStopping;
+  const composerSendDisabled =
+    !session ||
+    isSending ||
+    isStopping ||
+    (slashPalette.kind !== "none" && slashPalette.items.length === 0);
 
   function resizeComposerInput() {
     const textarea = composerInputRef.current;
@@ -862,6 +1104,36 @@ const SessionComposer = memo(function SessionComposer({
   useEffect(() => {
     onDraftCommitRef.current = onDraftCommit;
   }, [onDraftCommit]);
+
+  useEffect(() => {
+    setSlashActiveIndex(slashPalette.kind === "none" ? 0 : slashPalette.defaultActiveIndex);
+  }, [activeSessionId, slashPaletteResetKey]);
+
+  useEffect(() => {
+    if (!session || slashPalette.kind !== "model" || !supportsLiveSessionModelOptions(session)) {
+      return;
+    }
+
+    if (session.modelOptions?.length) {
+      requestedSlashModelOptionsRef.current = session.id;
+      return;
+    }
+
+    if (
+      isRefreshingModelOptions ||
+      requestedSlashModelOptionsRef.current === session.id
+    ) {
+      return;
+    }
+
+    requestedSlashModelOptionsRef.current = session.id;
+    void onRefreshSessionModelOptions(session.id);
+  }, [
+    isRefreshingModelOptions,
+    onRefreshSessionModelOptions,
+    session,
+    slashPalette.kind,
+  ]);
 
   useEffect(() => {
     const textarea = composerInputRef.current;
@@ -990,6 +1262,19 @@ const SessionComposer = memo(function SessionComposer({
     return composerInputRef.current?.value ?? composerDraft;
   }
 
+  function focusComposerInput(selectionStart?: number) {
+    window.requestAnimationFrame(() => {
+      const textarea = composerInputRef.current;
+      if (!textarea) {
+        return;
+      }
+
+      const nextSelectionStart = selectionStart ?? textarea.value.length;
+      textarea.focus();
+      textarea.setSelectionRange(nextSelectionStart, nextSelectionStart);
+    });
+  }
+
   function handleComposerChange(nextValue: string) {
     if (!activeSessionId) {
       return;
@@ -1007,8 +1292,35 @@ const SessionComposer = memo(function SessionComposer({
     commitDraft(activeSessionId, getComposerDraftValue());
   }
 
+  function applySlashPaletteItem(item: SlashPaletteItem) {
+    if (!session || isSending || isStopping) {
+      return;
+    }
+
+    resetPromptHistory(session.id);
+
+    if (item.kind === "command") {
+      const nextDraft = `${item.command} `;
+      updateLocalDraft(session.id, nextDraft);
+      focusComposerInput(nextDraft.length);
+      return;
+    }
+
+    updateLocalDraft(session.id, "");
+    commitDraft(session.id, "");
+    void onSessionSettingsChange(session.id, "model", item.value);
+    focusComposerInput(0);
+  }
+
   function handleComposerSend() {
-    if (!session) {
+    if (!session || isSending || isStopping) {
+      return;
+    }
+
+    if (slashPalette.kind !== "none") {
+      if (activeSlashItem) {
+        applySlashPaletteItem(activeSlashItem);
+      }
       return;
     }
 
@@ -1017,14 +1329,50 @@ const SessionComposer = memo(function SessionComposer({
     updateLocalDraft(session.id, "");
     commitDraft(session.id, "");
     onSend(session.id, draftToSend);
-    window.requestAnimationFrame(() => {
-      composerInputRef.current?.focus();
-    });
+    focusComposerInput();
   }
 
   function handleComposerKeyDown(event: React.KeyboardEvent<HTMLTextAreaElement>) {
     if (!session) {
       return;
+    }
+
+    if (slashPalette.kind !== "none") {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        resetPromptHistory(session.id);
+        updateLocalDraft(session.id, "");
+        commitDraft(session.id, "");
+        return;
+      }
+
+      if ((event.key === "Enter" && !event.shiftKey) || event.key === "Tab") {
+        event.preventDefault();
+        handleComposerSend();
+        return;
+      }
+
+      if (
+        (event.key === "ArrowUp" || event.key === "ArrowDown") &&
+        !event.altKey &&
+        !event.ctrlKey &&
+        !event.metaKey &&
+        !event.shiftKey
+      ) {
+        event.preventDefault();
+        if (slashPalette.items.length === 0) {
+          return;
+        }
+
+        setSlashActiveIndex((current) => {
+          if (event.key === "ArrowUp") {
+            return current <= 0 ? slashPalette.items.length - 1 : current - 1;
+          }
+
+          return current >= slashPalette.items.length - 1 ? 0 : current + 1;
+        });
+        return;
+      }
     }
 
     if (event.key === "Enter" && !event.shiftKey) {
@@ -1179,6 +1527,53 @@ const SessionComposer = memo(function SessionComposer({
           </button>
         </div>
       </div>
+      {session && slashPalette.kind !== "none" ? (
+        <div className="composer-slash-menu" role="listbox" aria-label={slashPalette.title}>
+          <div className="composer-slash-header">
+            <strong className="composer-slash-title">{slashPalette.title}</strong>
+            <span className="composer-slash-hint">{slashPalette.hint}</span>
+          </div>
+          {slashPalette.items.length > 0 ? (
+            <div className="composer-slash-options">
+              {slashPalette.items.map((item, index) => {
+                const isActive = activeSlashItem?.key === item.key && index === slashActiveIndex;
+
+                return (
+                  <button
+                    key={item.key}
+                    className={`composer-slash-option${isActive ? " active" : ""}`}
+                    type="button"
+                    role="option"
+                    aria-selected={isActive}
+                    onMouseDown={(event) => {
+                      event.preventDefault();
+                    }}
+                    onMouseEnter={() => setSlashActiveIndex(index)}
+                    onClick={() => applySlashPaletteItem(item)}
+                  >
+                    <span className="composer-slash-option-copy">
+                      <span className="composer-slash-option-label">{item.label}</span>
+                      <span className="composer-slash-option-detail">{item.detail}</span>
+                    </span>
+                    {item.kind === "model" && item.isCurrent ? (
+                      <span className="composer-slash-option-badge">Current</span>
+                    ) : null}
+                  </button>
+                );
+              })}
+            </div>
+          ) : (
+            <p className="composer-slash-empty">
+              {slashPalette.emptyMessage}
+              {slashPalette.kind === "model" &&
+              slashPalette.supportsLiveRefresh &&
+              slashPalette.isRefreshing
+                ? " Live options will appear here as soon as they load."
+                : null}
+            </p>
+          )}
+        </div>
+      ) : null}
     </footer>
   );
 }, (previous, next) =>
@@ -1190,6 +1585,7 @@ const SessionComposer = memo(function SessionComposer({
   previous.isSending === next.isSending &&
   previous.isStopping === next.isStopping &&
   previous.isSessionBusy === next.isSessionBusy &&
+  previous.isRefreshingModelOptions === next.isRefreshingModelOptions &&
   previous.showNewResponseIndicator === next.showNewResponseIndicator
 );
 

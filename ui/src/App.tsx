@@ -5226,7 +5226,10 @@ function SessionPaneView({
           onScrollToLatest={() => scrollToLatestMessage("smooth")}
           onDraftCommit={onDraftCommit}
           onDraftAttachmentRemove={onDraftAttachmentRemove}
+          isRefreshingModelOptions={isRefreshingModelOptions}
+          onRefreshSessionModelOptions={onRefreshSessionModelOptions}
           onSend={onSend}
+          onSessionSettingsChange={onSessionSettingsChange}
           onStopSession={onStopSession}
           onPaste={handleComposerPaste}
         />

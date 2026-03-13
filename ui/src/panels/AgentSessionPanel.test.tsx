@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import { AgentSessionPanelFooter } from "./AgentSessionPanel";
@@ -23,10 +23,16 @@ function renderFooter({
   session,
   committedDraft = "",
   onDraftCommit = vi.fn(),
+  onRefreshSessionModelOptions = vi.fn(),
+  onSend = vi.fn(),
+  onSessionSettingsChange = vi.fn(),
 }: {
   session: Session | null;
   committedDraft?: string;
   onDraftCommit?: (sessionId: string, nextValue: string) => void;
+  onRefreshSessionModelOptions?: (sessionId: string) => void;
+  onSend?: (sessionId: string, draftText?: string) => void;
+  onSessionSettingsChange?: (sessionId: string, field: string, value: string) => void;
 }) {
   return (
     <AgentSessionPanelFooter
@@ -44,7 +50,10 @@ function renderFooter({
       onScrollToLatest={() => {}}
       onDraftCommit={onDraftCommit}
       onDraftAttachmentRemove={() => {}}
-      onSend={() => {}}
+      isRefreshingModelOptions={false}
+      onRefreshSessionModelOptions={onRefreshSessionModelOptions}
+      onSend={onSend}
+      onSessionSettingsChange={onSessionSettingsChange}
       onStopSession={() => {}}
       onPaste={() => {}}
     />
@@ -99,5 +108,74 @@ describe("AgentSessionPanelFooter", () => {
     );
 
     expect(onDraftCommit).toHaveBeenCalledWith("session-a", "carry this draft");
+  });
+
+  it("expands /model from the slash command menu", () => {
+    render(
+      renderFooter({
+        session: makeSession("session-a", {
+          agent: "Claude",
+          model: "sonnet",
+        }),
+      }),
+    );
+
+    const textarea = screen.getByLabelText("Message session-a");
+    fireEvent.change(textarea, { target: { value: "/" } });
+
+    expect(screen.getByRole("option", { name: /\/model/i })).toBeInTheDocument();
+
+    fireEvent.keyDown(textarea, { key: "Enter" });
+
+    expect(screen.getByLabelText("Message session-a")).toHaveValue("/model ");
+  });
+
+  it("applies a model slash command with keyboard navigation instead of sending a prompt", () => {
+    const onSend = vi.fn();
+    const onSessionSettingsChange = vi.fn();
+
+    render(
+      renderFooter({
+        onSend,
+        onSessionSettingsChange,
+        session: makeSession("session-a", {
+          agent: "Codex",
+          model: "gpt-5",
+        }),
+      }),
+    );
+
+    const textarea = screen.getByLabelText("Message session-a");
+    fireEvent.change(textarea, { target: { value: "/model" } });
+    fireEvent.keyDown(textarea, { key: "ArrowDown" });
+    fireEvent.keyDown(textarea, { key: "Enter" });
+
+    expect(onSessionSettingsChange).toHaveBeenCalledWith("session-a", "model", "gpt-5-mini");
+    expect(onSend).not.toHaveBeenCalled();
+    expect(screen.getByLabelText("Message session-a")).toHaveValue("");
+  });
+
+  it("requests live Cursor model options when /model opens", async () => {
+    const onRefreshSessionModelOptions = vi.fn();
+
+    render(
+      renderFooter({
+        onRefreshSessionModelOptions,
+        session: makeSession("session-a", {
+          agent: "Cursor",
+          cursorMode: "agent",
+          model: "auto",
+          modelOptions: undefined,
+        }),
+      }),
+    );
+
+    fireEvent.change(screen.getByLabelText("Message session-a"), {
+      target: { value: "/model" },
+    });
+
+    await waitFor(() => {
+      expect(onRefreshSessionModelOptions).toHaveBeenCalledWith("session-a");
+    });
   });
 });

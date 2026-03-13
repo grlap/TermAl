@@ -3746,6 +3746,86 @@ textarea {
   color: var(--ink);
 }
 
+.composer-slash-menu {
+  display: grid;
+  gap: 0.55rem;
+  margin-top: 0.8rem;
+  padding: 0.7rem;
+  border: 1px solid var(--line);
+  border-radius: 1.05rem;
+  background: var(--surface-white);
+}
+
+.composer-slash-header {
+  display: grid;
+  gap: 0.15rem;
+}
+
+.composer-slash-title {
+  font-size: 0.92rem;
+}
+
+.composer-slash-hint {
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.composer-slash-options {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.composer-slash-option {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.75rem;
+  align-items: center;
+  width: 100%;
+  padding: 0.72rem 0.8rem;
+  border: 1px solid transparent;
+  border-radius: 0.9rem;
+  background: var(--surface-white-soft);
+  color: var(--ink);
+  cursor: pointer;
+  text-align: left;
+}
+
+.composer-slash-option:hover,
+.composer-slash-option.active {
+  border-color: var(--line-strong);
+  background: var(--surface-composer);
+}
+
+.composer-slash-option-copy {
+  display: grid;
+  min-width: 0;
+  gap: 0.15rem;
+}
+
+.composer-slash-option-label {
+  font-weight: 700;
+}
+
+.composer-slash-option-detail {
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
+.composer-slash-option-badge {
+  padding: 0.2rem 0.5rem;
+  border-radius: 999px;
+  background: var(--surface-white);
+  color: var(--muted);
+  font-size: 0.74rem;
+  font-weight: 700;
+}
+
+.composer-slash-empty {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.88rem;
+}
+
 .composer-input:focus,
 .themed-input:focus,
 .source-path-input:focus,
@@ -3761,6 +3841,7 @@ textarea {
 .git-status-tree-open-button:focus,
 .git-status-tree-directory-toggle:focus,
 .git-status-tree-row:focus,
+.composer-slash-option:focus,
 .pending-prompt-dismiss:focus,
 .composer-attachment-remove:focus,
 .session-row:focus,
