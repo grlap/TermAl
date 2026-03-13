@@ -35,11 +35,17 @@ import {
   type StateResponse,
   updateSessionSettings,
 } from "./api";
+import { AgentIcon } from "./agent-icon";
 import { copyTextToClipboard } from "./clipboard";
 import { highlightCode } from "./highlight";
 import { applyDeltaToSessions } from "./live-updates";
 import { resolvePaneScrollCommand } from "./pane-keyboard";
 import { AgentSessionPanel, AgentSessionPanelFooter } from "./panels/AgentSessionPanel";
+import {
+  ControlPanelSurface,
+  type ControlPanelSectionId,
+  type ControlPanelSurfaceHandle,
+} from "./panels/ControlPanelSurface";
 import { DiffPanel } from "./panels/DiffPanel";
 import { FileSystemPanel } from "./panels/FileSystemPanel";
 import { GitStatusPanel } from "./panels/GitStatusPanel";
@@ -141,6 +147,11 @@ type PendingSessionRename = {
   sessionId: string;
 };
 
+type ComboboxOption = {
+  label: string;
+  value: string;
+};
+
 const PENDING_KILL_CLOSE_DELAY_MS = 180;
 const PENDING_SESSION_RENAME_CLOSE_DELAY_MS = 300;
 
@@ -173,6 +184,17 @@ const NEW_SESSION_AGENT_OPTIONS = [
   { label: "Claude", value: "Claude" },
   { label: "Codex", value: "Codex" },
 ] as const;
+const NEW_SESSION_MODEL_OPTIONS: Readonly<Record<AgentType, readonly ComboboxOption[]>> = {
+  Claude: [
+    { label: "Sonnet", value: "sonnet" },
+    { label: "Opus", value: "opus" },
+  ],
+  Codex: [
+    { label: "GPT-5", value: "gpt-5" },
+    { label: "GPT-5 mini", value: "gpt-5-mini" },
+    { label: "o3", value: "o3" },
+  ],
+};
 const SANDBOX_MODE_OPTIONS = [
   { label: "workspace-write", value: "workspace-write" },
   { label: "read-only", value: "read-only" },
@@ -194,11 +216,11 @@ const PREFERENCES_TABS: ReadonlyArray<{ id: PreferencesTabId; label: string }> =
   { id: "claude-approvals", label: "Claude approvals" },
 ];
 const ALL_PROJECTS_FILTER_ID = "__all__";
+const CREATE_SESSION_WORKSPACE_ID = "__workspace__";
 
-type ComboboxOption = {
-  label: string;
-  value: string;
-};
+function defaultNewSessionModel(agent: AgentType): string {
+  return NEW_SESSION_MODEL_OPTIONS[agent][0]?.value ?? "";
+}
 
 export default function App() {
   const [projects, setProjects] = useState<Project[]>([]);
@@ -217,6 +239,12 @@ export default function App() {
     Record<string, DraftImageAttachment[]>
   >({});
   const [newSessionAgent, setNewSessionAgent] = useState<AgentType>("Codex");
+  const [newSessionModelByAgent, setNewSessionModelByAgent] = useState<Record<AgentType, string>>(
+    () => ({
+      Claude: defaultNewSessionModel("Claude"),
+      Codex: defaultNewSessionModel("Codex"),
+    }),
+  );
   const [isLoading, setIsLoading] = useState(true);
   const [isCreating, setIsCreating] = useState(false);
   const [sendingSessionIds, setSendingSessionIds] = useState<SessionFlagMap>({});
@@ -238,6 +266,13 @@ export default function App() {
     useState<ApprovalPolicy>("never");
   const [defaultClaudeApprovalMode, setDefaultClaudeApprovalMode] =
     useState<ClaudeApprovalMode>("ask");
+  const [isCreateSessionOpen, setIsCreateSessionOpen] = useState(false);
+  const [createSessionPaneId, setCreateSessionPaneId] = useState<string | null>(null);
+  const [createSessionProjectId, setCreateSessionProjectId] = useState<string>(
+    CREATE_SESSION_WORKSPACE_ID,
+  );
+  const [isCreateProjectOpen, setIsCreateProjectOpen] = useState(false);
+  const [controlPanelGitWorkdir, setControlPanelGitWorkdir] = useState<string | null>(null);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [settingsTab, setSettingsTab] = useState<PreferencesTabId>("themes");
   const [pendingSessionRename, setPendingSessionRename] = useState<PendingSessionRename | null>(
@@ -278,6 +313,8 @@ export default function App() {
   const pendingKillConfirmButtonRef = useRef<HTMLButtonElement | null>(null);
   const pendingKillCloseTimeoutRef = useRef<number | null>(null);
   const isMountedRef = useRef(true);
+  const controlPanelSurfaceRef = useRef<ControlPanelSurfaceHandle | null>(null);
+  const lastDerivedControlPanelGitWorkdirRef = useRef<string | null>(null);
   const sessionsRef = useRef<Session[]>([]);
   const latestStateRevisionRef = useRef<number | null>(null);
   const stateResyncInFlightRef = useRef(false);
@@ -325,6 +362,31 @@ export default function App() {
     selectedProjectId === ALL_PROJECTS_FILTER_ID
       ? null
       : (projectLookup.get(selectedProjectId) ?? null);
+  const newSessionModelOptions = NEW_SESSION_MODEL_OPTIONS[newSessionAgent];
+  const newSessionModel =
+    newSessionModelByAgent[newSessionAgent] ?? defaultNewSessionModel(newSessionAgent);
+  const createSessionSelectedProject =
+    createSessionProjectId === CREATE_SESSION_WORKSPACE_ID
+      ? null
+      : (projectLookup.get(createSessionProjectId) ?? null);
+  const createSessionProjectOptions = useMemo<readonly ComboboxOption[]>(() => {
+    const workspaceLabel = activeSession?.workdir ? "Current workspace" : "Default workspace";
+
+    return [
+      { label: workspaceLabel, value: CREATE_SESSION_WORKSPACE_ID },
+      ...projects.map((project) => ({
+        label: project.name,
+        value: project.id,
+      })),
+    ];
+  }, [activeSession?.workdir, projects]);
+  const createSessionProjectHint = createSessionSelectedProject
+    ? createSessionSelectedProject.rootPath
+    : activeSession?.workdir
+      ? `Uses ${activeSession.workdir}`
+      : "Uses the app default workspace.";
+  const derivedControlPanelGitWorkdir =
+    selectedProject?.rootPath ?? activeSession?.workdir ?? sessions[0]?.workdir ?? null;
   const projectScopedSessions = useMemo(() => {
     if (!selectedProject) {
       return sessions;
@@ -351,6 +413,29 @@ export default function App() {
   const effectiveSessionListSearchQuery =
     trimmedSessionListSearchQuery.length === 0 ? "" : deferredSessionListSearchQuery;
   const hasSessionListSearch = effectiveSessionListSearchQuery.length > 0;
+
+  useEffect(() => {
+    if (
+      createSessionProjectId !== CREATE_SESSION_WORKSPACE_ID &&
+      !projectLookup.has(createSessionProjectId)
+    ) {
+      setCreateSessionProjectId(CREATE_SESSION_WORKSPACE_ID);
+    }
+  }, [createSessionProjectId, projectLookup]);
+
+  useEffect(() => {
+    const previousDerived = lastDerivedControlPanelGitWorkdirRef.current?.trim() ?? "";
+    lastDerivedControlPanelGitWorkdirRef.current = derivedControlPanelGitWorkdir;
+
+    setControlPanelGitWorkdir((current) => {
+      const trimmedCurrent = current?.trim() ?? "";
+      if (!trimmedCurrent || trimmedCurrent === previousDerived) {
+        return derivedControlPanelGitWorkdir;
+      }
+      return current;
+    });
+  }, [derivedControlPanelGitWorkdir]);
+
   const sessionListSearchResults = useMemo(() => {
     if (!hasSessionListSearch) {
       return new Map<string, SessionListSearchResult>();
@@ -398,6 +483,7 @@ export default function App() {
   const activeDraggedTab = draggedTab ?? externalDraggedTab;
 
   function focusSessionListSearch(selectAll = false) {
+    controlPanelSurfaceRef.current?.selectSection("sessions");
     window.requestAnimationFrame(() => {
       const input = sessionListSearchInputRef.current;
       if (!input) {
@@ -1054,21 +1140,50 @@ export default function App() {
     });
   }
 
-  async function handleNewSession(preferredPaneId: string | null = null) {
+  function openCreateSessionDialog(preferredPaneId: string | null = null) {
+    const defaultProjectId =
+      selectedProjectId !== ALL_PROJECTS_FILTER_ID && projectLookup.has(selectedProjectId)
+        ? selectedProjectId
+        : activeSession?.projectId && projectLookup.has(activeSession.projectId)
+          ? activeSession.projectId
+          : CREATE_SESSION_WORKSPACE_ID;
+
+    setCreateSessionPaneId(preferredPaneId ?? workspace.activePaneId);
+    setCreateSessionProjectId(defaultProjectId);
+    setRequestError(null);
+    setIsCreateSessionOpen(true);
+  }
+
+  async function handleNewSession({
+    agent,
+    model,
+    preferredPaneId = null,
+    projectSelectionId = CREATE_SESSION_WORKSPACE_ID,
+  }: {
+    agent: AgentType;
+    model: string;
+    preferredPaneId?: string | null;
+    projectSelectionId?: string;
+  }) {
+    const trimmedModel = model.trim();
+    if (!trimmedModel) {
+      setRequestError("Choose a model.");
+      return false;
+    }
+
     setIsCreating(true);
     try {
       const targetPaneId = preferredPaneId ?? workspace.activePaneId;
       const targetProjectId =
-        selectedProjectId === ALL_PROJECTS_FILTER_ID
-          ? (activeSession?.projectId ?? projects[0]?.id ?? null)
-          : selectedProjectId;
+        projectSelectionId === CREATE_SESSION_WORKSPACE_ID ? null : projectSelectionId;
       const created = await createSession({
-        agent: newSessionAgent,
+        agent,
+        model: trimmedModel,
         approvalPolicy:
-          newSessionAgent === "Codex" ? defaultCodexApprovalPolicy : undefined,
+          agent === "Codex" ? defaultCodexApprovalPolicy : undefined,
         claudeApprovalMode:
-          newSessionAgent === "Claude" ? defaultClaudeApprovalMode : undefined,
-        sandboxMode: newSessionAgent === "Codex" ? defaultCodexSandboxMode : undefined,
+          agent === "Claude" ? defaultClaudeApprovalMode : undefined,
+        sandboxMode: agent === "Codex" ? defaultCodexSandboxMode : undefined,
         projectId: targetProjectId ?? undefined,
         workdir: targetProjectId ? undefined : activeSession?.workdir,
       });
@@ -1082,18 +1197,38 @@ export default function App() {
         );
       }
       setRequestError(null);
+      return true;
     } catch (error) {
       setRequestError(getErrorMessage(error));
+      return false;
     } finally {
       setIsCreating(false);
     }
+  }
+
+  async function handleCreateSessionDialogSubmit() {
+    const created = await handleNewSession({
+      agent: newSessionAgent,
+      model: newSessionModel,
+      preferredPaneId: createSessionPaneId,
+      projectSelectionId: createSessionProjectId,
+    });
+
+    if (created) {
+      setIsCreateSessionOpen(false);
+    }
+  }
+
+  function openCreateProjectDialog() {
+    setRequestError(null);
+    setIsCreateProjectOpen(true);
   }
 
   async function handleCreateProject() {
     const rootPath = newProjectRootPath.trim();
     if (!rootPath) {
       setRequestError("Enter a project root path.");
-      return;
+      return false;
     }
 
     setIsCreatingProject(true);
@@ -1103,8 +1238,10 @@ export default function App() {
       setSelectedProjectId(created.projectId);
       setNewProjectRootPath("");
       setRequestError(null);
+      return true;
     } catch (error) {
       setRequestError(getErrorMessage(error));
+      return false;
     } finally {
       setIsCreatingProject(false);
     }
@@ -1658,320 +1795,298 @@ export default function App() {
 
   function renderWorkspaceControlSurface(paneId: string): JSX.Element {
     const surfaceId = paneId;
-    const newSessionAgentId = `new-session-agent-${surfaceId}`;
-    const newProjectRootId = `new-project-root-${surfaceId}`;
 
-    const content = (
-      <>
-        <div className="brand-block">
-          <h1>TermAl</h1>
-        </div>
+    function renderControlPanelSection(sectionId: ControlPanelSectionId) {
+      switch (sectionId) {
+        case "git":
+          return (
+            <section className="control-panel-section-stack control-panel-section-git" aria-label="Git status">
+              <GitStatusPanel
+                workdir={controlPanelGitWorkdir}
+                onOpenPath={(path) => handleOpenSourceTab(paneId, path, activeSession?.id ?? null)}
+                onOpenWorkdir={(path) => setControlPanelGitWorkdir(path.trim() || null)}
+              />
+            </section>
+          );
 
-        <div className="new-session-controls">
-          <label className="session-control-label" htmlFor={newSessionAgentId}>
-            New session
-          </label>
-          <p className="session-control-hint">
-            {selectedProject
-              ? `Creates in ${selectedProject.name}.`
-              : "Creates in the selected project or the active session workspace."}
-          </p>
-          <div className="new-session-row">
-            <ThemedCombobox
-              id={newSessionAgentId}
-              className="new-session-agent-select"
-              value={newSessionAgent}
-              options={NEW_SESSION_AGENT_OPTIONS as readonly ComboboxOption[]}
-              onChange={(nextValue) => setNewSessionAgent(nextValue as AgentType)}
-              disabled={isCreating}
-            />
-            <button
-              className="new-session-button"
-              type="button"
-              onClick={() => void handleNewSession(paneId)}
-              disabled={isCreating}
-            >
-              {isCreating ? "Creating..." : "New Session"}
-            </button>
-          </div>
-        </div>
-
-        <section className="project-controls" aria-label="Projects">
-          <div className="project-controls-header">
-            <label className="session-control-label" htmlFor={newProjectRootId}>
-              Projects
-            </label>
-            <span className="project-count-badge">{projects.length}</span>
-          </div>
-          <div className="project-create-row">
-            <input
-              id={newProjectRootId}
-              className="themed-input project-root-input"
-              type="text"
-              value={newProjectRootPath}
-              placeholder="/path/to/project"
-              onChange={(event) => setNewProjectRootPath(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === "Enter") {
-                  event.preventDefault();
-                  void handleCreateProject();
-                }
-              }}
-              disabled={isCreatingProject}
-            />
-            <button
-              className="ghost-button project-create-button"
-              type="button"
-              onClick={() => void handlePickProjectRoot()}
-              disabled={isCreatingProject}
-            >
-              Choose Folder
-            </button>
-            <button
-              className="ghost-button project-create-button"
-              type="button"
-              onClick={() => void handleCreateProject()}
-              disabled={isCreatingProject}
-            >
-              {isCreatingProject ? "Adding..." : "Add"}
-            </button>
-          </div>
-          <div className="project-list" role="list">
-            <button
-              className={`project-row ${selectedProjectId === ALL_PROJECTS_FILTER_ID ? "selected" : ""}`}
-              type="button"
-              onClick={() => setSelectedProjectId(ALL_PROJECTS_FILTER_ID)}
-            >
-              <span className="project-row-copy">
-                <strong>All projects</strong>
-                <span className="project-row-path">Show every session in this window.</span>
-              </span>
-              <span className="project-row-count">{sessions.length}</span>
-            </button>
-            {projects.map((project) => {
-              const isSelected = project.id === selectedProjectId;
-
-              return (
+        case "projects":
+          return (
+            <section className="control-panel-section-stack" aria-label="Projects">
+              <section className="project-controls" aria-label="Projects">
+                <div className="project-controls-header">
+                  <div className="session-control-label">Projects</div>
+                  <span className="project-count-badge">{projects.length}</span>
+                </div>
                 <button
-                  key={project.id}
-                  className={`project-row ${isSelected ? "selected" : ""}`}
+                  className="ghost-button project-create-launch"
                   type="button"
-                  onClick={() => setSelectedProjectId(project.id)}
+                  onClick={openCreateProjectDialog}
+                  aria-haspopup="dialog"
+                  aria-expanded={isCreateProjectOpen}
+                  aria-controls="create-project-dialog"
+                  disabled={isCreatingProject}
                 >
-                  <span className="project-row-copy">
-                    <strong>{project.name}</strong>
-                    <span className="project-row-path">{project.rootPath}</span>
-                  </span>
-                  <span className="project-row-count">{projectSessionCounts.get(project.id) ?? 0}</span>
+                  {isCreatingProject ? "Adding..." : "Add project"}
                 </button>
-              );
-            })}
-          </div>
-        </section>
-
-        <button
-          className="settings-launcher"
-          type="button"
-          onClick={() => setIsSettingsOpen(true)}
-          aria-haspopup="dialog"
-          aria-expanded={isSettingsOpen}
-          aria-controls="settings-dialog"
-        >
-          <span className="settings-launcher-copy">
-            <span className="session-control-label">Settings</span>
-            <strong className="settings-launcher-title">Open preferences</strong>
-            <span className="settings-launcher-description">
-              Appearance, themes, and Claude session defaults.
-            </span>
-          </span>
-          <span className="settings-launcher-badge">{activeTheme.name}</span>
-        </button>
-
-        <div className="session-list">
-          <div className="session-list-header">
-            <span className="session-control-label">Sessions</span>
-            <span className="session-list-scope">
-              {selectedProject ? selectedProject.name : "All projects"}
-            </span>
-          </div>
-          <div className="session-list-tools">
-            <input
-              ref={sessionListSearchInputRef}
-              className="themed-input session-list-search-input"
-              type="search"
-              value={sessionListSearchQuery}
-              placeholder="Search sessions"
-              spellCheck={false}
-              aria-label="Search sessions"
-              title={`Search across visible sessions (${primaryModifierLabel()}+Shift+F)`}
-              onChange={(event) => setSessionListSearchQuery(event.currentTarget.value)}
-              onKeyDown={(event) => {
-                if (event.key === "Escape") {
-                  event.preventDefault();
-                  if (sessionListSearchQuery) {
-                    setSessionListSearchQuery("");
-                  } else {
-                    event.currentTarget.blur();
-                  }
-                }
-              }}
-            />
-            {hasSessionListSearch ? (
-              <div className="session-list-search-meta" aria-live="polite">
-                {filteredSessions.length === 1
-                  ? "1 matching session"
-                  : `${filteredSessions.length} matching sessions`}
-              </div>
-            ) : null}
-          </div>
-          {filteredSessions.length > 0 ? (
-            filteredSessions.map((session) => {
-              const isActive = session.id === activeSession?.id;
-              const isOpen = openSessionIds.has(session.id);
-              const isKilling = Boolean(killingSessionIds[session.id]);
-              const isKillConfirmationOpen = pendingKillSessionId === session.id;
-              const isKillVisible =
-                isKilling || isKillConfirmationOpen || killRevealSessionId === session.id;
-              const searchResult = sessionListSearchResults.get(session.id);
-
-              return (
-                <div
-                  key={`${surfaceId}-${session.id}`}
-                  className={`session-row-shell ${isActive ? "selected" : ""} ${isOpen ? "open" : ""} ${isKillVisible ? "kill-armed" : ""}`}
-                  onMouseLeave={() => {
-                    if (!isKilling && !isKillConfirmationOpen) {
-                      setKillRevealSessionId((current) => (current === session.id ? null : current));
-                    }
-                  }}
-                  onBlur={(event) => {
-                    const nextTarget = event.relatedTarget;
-                    if (
-                      !isKilling &&
-                      !isKillConfirmationOpen &&
-                      (!(nextTarget instanceof Node) || !event.currentTarget.contains(nextTarget))
-                    ) {
-                      setKillRevealSessionId((current) => (current === session.id ? null : current));
-                    }
-                  }}
-                >
+                <div className="project-list" role="list">
                   <button
-                    className={`session-row ${isActive ? "selected" : ""} ${isOpen ? "open" : ""}`}
+                    className={`project-row ${selectedProjectId === ALL_PROJECTS_FILTER_ID ? "selected" : ""}`}
                     type="button"
-                    onClick={() => handleSidebarSessionClick(session.id, paneId)}
-                    onContextMenu={(event) => {
-                      event.preventDefault();
-                      handleSessionRenameRequest(
-                        session.id,
-                        event.clientX,
-                        event.clientY,
-                        event.currentTarget,
-                      );
-                    }}
+                    onClick={() => setSelectedProjectId(ALL_PROJECTS_FILTER_ID)}
                   >
-                    <div className="session-avatar">{session.emoji}</div>
-                    <div className="session-copy">
-                      <div className="session-title-line">
-                        <strong>{session.name}</strong>
-                        {searchResult ? (
-                          <span className="session-search-count">
-                            {searchResult.matchCount} hit{searchResult.matchCount === 1 ? "" : "s"}
-                          </span>
-                        ) : null}
-                      </div>
-                      <div className="session-meta">
-                        {session.agent} <span className="meta-separator">/</span> {session.workdir}
-                      </div>
-                      <div
-                        className={`session-preview${searchResult ? " session-preview-search-result" : ""}`}
-                        title={searchResult?.snippet ?? session.preview}
+                    <span className="project-row-copy">
+                      <strong>All projects</strong>
+                      <span className="project-row-path">Show every session in this window.</span>
+                    </span>
+                    <span className="project-row-count">{sessions.length}</span>
+                  </button>
+                  {projects.map((project) => {
+                    const isSelected = project.id === selectedProjectId;
+
+                    return (
+                      <button
+                        key={project.id}
+                        className={`project-row ${isSelected ? "selected" : ""}`}
+                        type="button"
+                        onClick={() => setSelectedProjectId(project.id)}
                       >
-                        {searchResult?.snippet ?? session.preview}
-                      </div>
-                    </div>
+                        <span className="project-row-copy">
+                          <strong>{project.name}</strong>
+                          <span className="project-row-path">{project.rootPath}</span>
+                        </span>
+                        <span className="project-row-count">{projectSessionCounts.get(project.id) ?? 0}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </section>
+            </section>
+          );
+
+        case "sessions":
+        default:
+          return (
+            <section className="control-panel-section-stack control-panel-section-sessions" aria-label="Sessions">
+              <div className="new-session-controls">
+                <div className="session-control-label">New session</div>
+                <p className="session-control-hint">
+                  Choose the assistant, model, and project in a dedicated window before starting.
+                </p>
+                <button
+                  className="new-session-button new-session-launch-button"
+                  type="button"
+                  onClick={() => openCreateSessionDialog(paneId)}
+                  aria-haspopup="dialog"
+                  aria-expanded={isCreateSessionOpen}
+                  aria-controls="create-session-dialog"
+                  disabled={isCreating}
+                >
+                  {isCreating ? "Creating..." : "New Session"}
+                </button>
+              </div>
+
+              <section className="sidebar-status" aria-label="Session filters">
+                <div className="session-control-label">Status</div>
+                <div className="sidebar-status-chips">
+                  <button
+                    className={`chip sidebar-status-chip ${sessionListFilter === "all" ? "selected" : ""}`}
+                    type="button"
+                    onClick={() => setSessionListFilter("all")}
+                    aria-pressed={sessionListFilter === "all"}
+                  >
+                    No filter ({sessionFilterCounts.all})
                   </button>
                   <button
-                    className="session-row-status-button"
+                    className={`chip sidebar-status-chip ${sessionListFilter === "working" ? "selected" : ""}`}
                     type="button"
-                    onClick={() =>
-                      setKillRevealSessionId((current) =>
-                        current === session.id && !isKilling ? null : session.id,
-                      )
-                    }
-                    aria-label={`Show session actions for ${session.name}`}
+                    onClick={() => setSessionListFilter("working")}
+                    aria-pressed={sessionListFilter === "working"}
                   >
-                    <span className={`status-dot status-${session.status}`} />
+                    Working ({sessionFilterCounts.working})
                   </button>
                   <button
-                    className="ghost-button session-row-kill"
+                    className={`chip sidebar-status-chip ${sessionListFilter === "asking" ? "selected" : ""}`}
                     type="button"
-                    onClick={(event) => {
-                      handleKillSession(session.id, event.currentTarget);
-                    }}
-                    disabled={isKilling}
-                    aria-expanded={isKillConfirmationOpen}
-                    aria-controls={isKillConfirmationOpen ? `kill-session-popover-${session.id}` : undefined}
-                    aria-label={`Kill ${session.name}`}
+                    onClick={() => setSessionListFilter("asking")}
+                    aria-pressed={sessionListFilter === "asking"}
                   >
-                    {isKilling ? "Killing" : "Kill"}
+                    Asking ({sessionFilterCounts.asking})
+                  </button>
+                  <button
+                    className={`chip sidebar-status-chip ${sessionListFilter === "completed" ? "selected" : ""}`}
+                    type="button"
+                    onClick={() => setSessionListFilter("completed")}
+                    aria-pressed={sessionListFilter === "completed"}
+                  >
+                    Completed ({sessionFilterCounts.completed})
                   </button>
                 </div>
-              );
-            })
-          ) : (
-            <div className="session-filter-empty">
-              {sessions.length === 0
-                ? "No sessions yet."
-                : hasSessionListSearch
-                  ? selectedProject
-                    ? `No sessions match this search in ${selectedProject.name}.`
-                    : "No sessions match this search."
-                  : selectedProject
-                    ? `No ${sessionListFilter === "all" ? "" : `${sessionListFilter} `}sessions in ${selectedProject.name}.`
-                    : "No sessions match this filter."}
-            </div>
-          )}
-        </div>
+              </section>
 
-        <section className="sidebar-status" aria-label="Workspace status">
-          <div className="session-control-label">Status</div>
-          <div className="sidebar-status-chips">
-            <button
-              className={`chip sidebar-status-chip ${sessionListFilter === "all" ? "selected" : ""}`}
-              type="button"
-              onClick={() => setSessionListFilter("all")}
-              aria-pressed={sessionListFilter === "all"}
-            >
-              No filter ({sessionFilterCounts.all})
-            </button>
-            <button
-              className={`chip sidebar-status-chip ${sessionListFilter === "working" ? "selected" : ""}`}
-              type="button"
-              onClick={() => setSessionListFilter("working")}
-              aria-pressed={sessionListFilter === "working"}
-            >
-              Working ({sessionFilterCounts.working})
-            </button>
-            <button
-              className={`chip sidebar-status-chip ${sessionListFilter === "asking" ? "selected" : ""}`}
-              type="button"
-              onClick={() => setSessionListFilter("asking")}
-              aria-pressed={sessionListFilter === "asking"}
-            >
-              Asking ({sessionFilterCounts.asking})
-            </button>
-            <button
-              className={`chip sidebar-status-chip ${sessionListFilter === "completed" ? "selected" : ""}`}
-              type="button"
-              onClick={() => setSessionListFilter("completed")}
-              aria-pressed={sessionListFilter === "completed"}
-            >
-              Completed ({sessionFilterCounts.completed})
-            </button>
-          </div>
-        </section>
-      </>
+              <section className="session-list-shell" aria-label="Sessions">
+                <div className="session-list-header">
+                  <span className="session-control-label">Sessions</span>
+                  <span className="session-list-scope">
+                    {selectedProject ? selectedProject.name : "All projects"}
+                  </span>
+                </div>
+                <div className="session-list-tools">
+                  <input
+                    ref={sessionListSearchInputRef}
+                    className="themed-input session-list-search-input"
+                    type="search"
+                    value={sessionListSearchQuery}
+                    placeholder="Search sessions"
+                    spellCheck={false}
+                    aria-label="Search sessions"
+                    title={`Search across visible sessions (${primaryModifierLabel()}+Shift+F)`}
+                    onChange={(event) => setSessionListSearchQuery(event.currentTarget.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Escape") {
+                        event.preventDefault();
+                        if (sessionListSearchQuery) {
+                          setSessionListSearchQuery("");
+                        } else {
+                          event.currentTarget.blur();
+                        }
+                      }
+                    }}
+                  />
+                  {hasSessionListSearch ? (
+                    <div className="session-list-search-meta" aria-live="polite">
+                      {filteredSessions.length === 1
+                        ? "1 matching session"
+                        : `${filteredSessions.length} matching sessions`}
+                    </div>
+                  ) : null}
+                </div>
+                <div className="session-list">
+                  {filteredSessions.length > 0 ? (
+                    filteredSessions.map((session) => {
+                      const isActive = session.id === activeSession?.id;
+                      const isOpen = openSessionIds.has(session.id);
+                      const isKilling = Boolean(killingSessionIds[session.id]);
+                      const isKillConfirmationOpen = pendingKillSessionId === session.id;
+                      const isKillVisible =
+                        isKilling || isKillConfirmationOpen || killRevealSessionId === session.id;
+                      const searchResult = sessionListSearchResults.get(session.id);
+
+                      return (
+                        <div
+                          key={`${surfaceId}-${session.id}`}
+                          className={`session-row-shell ${isActive ? "selected" : ""} ${isOpen ? "open" : ""} ${isKillVisible ? "kill-armed" : ""}`}
+                          onMouseLeave={() => {
+                            if (!isKilling && !isKillConfirmationOpen) {
+                              setKillRevealSessionId((current) => (current === session.id ? null : current));
+                            }
+                          }}
+                          onBlur={(event) => {
+                            const nextTarget = event.relatedTarget;
+                            if (
+                              !isKilling &&
+                              !isKillConfirmationOpen &&
+                              (!(nextTarget instanceof Node) || !event.currentTarget.contains(nextTarget))
+                            ) {
+                              setKillRevealSessionId((current) => (current === session.id ? null : current));
+                            }
+                          }}
+                        >
+                          <button
+                            className={`session-row ${isActive ? "selected" : ""} ${isOpen ? "open" : ""}`}
+                            type="button"
+                            onClick={() => handleSidebarSessionClick(session.id, paneId)}
+                            title={`${session.agent} / ${session.workdir}`}
+                            onContextMenu={(event) => {
+                              event.preventDefault();
+                              handleSessionRenameRequest(
+                                session.id,
+                                event.clientX,
+                                event.clientY,
+                                event.currentTarget,
+                              );
+                            }}
+                          >
+                            <div className="session-copy">
+                              <div className="session-title-line">
+                                <strong>{session.name}</strong>
+                                {searchResult ? (
+                                  <span className="session-search-count">
+                                    {searchResult.matchCount} hit{searchResult.matchCount === 1 ? "" : "s"}
+                                  </span>
+                                ) : null}
+                              </div>
+                              <div
+                                className={`session-preview${searchResult ? " session-preview-search-result" : ""}`}
+                                title={searchResult?.snippet ?? session.preview}
+                              >
+                                {searchResult?.snippet ?? session.preview}
+                              </div>
+                            </div>
+                          </button>
+                          <button
+                            className="session-row-status-button"
+                            type="button"
+                            onClick={() =>
+                              setKillRevealSessionId((current) =>
+                                current === session.id && !isKilling ? null : session.id,
+                              )
+                            }
+                            aria-label={`Show session actions for ${session.name}`}
+                          >
+                            <span className="status-agent-badge session-row-status-badge" data-status={session.status}>
+                              <AgentIcon agent={session.agent} className="session-row-status-icon" />
+                            </span>
+                          </button>
+                          <button
+                            className="ghost-button session-row-kill"
+                            type="button"
+                            onClick={(event) => {
+                              handleKillSession(session.id, event.currentTarget);
+                            }}
+                            disabled={isKilling}
+                            aria-expanded={isKillConfirmationOpen}
+                            aria-controls={
+                              isKillConfirmationOpen ? `kill-session-popover-${session.id}` : undefined
+                            }
+                            aria-label={`Kill ${session.name}`}
+                          >
+                            {isKilling ? "Killing" : "Kill"}
+                          </button>
+                        </div>
+                      );
+                    })
+                  ) : (
+                    <div className="session-filter-empty">
+                      {sessions.length === 0
+                        ? "No sessions yet."
+                        : hasSessionListSearch
+                          ? selectedProject
+                            ? `No sessions match this search in ${selectedProject.name}.`
+                            : "No sessions match this search."
+                          : selectedProject
+                            ? `No ${sessionListFilter === "all" ? "" : `${sessionListFilter} `}sessions in ${selectedProject.name}.`
+                            : "No sessions match this filter."}
+                    </div>
+                  )}
+                </div>
+              </section>
+            </section>
+          );
+      }
+    }
+
+    return (
+      <div className="sidebar sidebar-panel">
+        <ControlPanelSurface
+          ref={controlPanelSurfaceRef}
+          isPreferencesOpen={isSettingsOpen}
+          onOpenPreferences={() => setIsSettingsOpen(true)}
+          projectCount={projects.length}
+          sessionCount={projectScopedSessions.length}
+          renderSection={renderControlPanelSection}
+        />
+      </div>
     );
-    return <div className="sidebar sidebar-panel">{content}</div>;
   }
 
   return (
@@ -2188,6 +2303,231 @@ export default function App() {
             document.body,
           )
         : null}
+      {isCreateSessionOpen ? (
+        <div
+          className="dialog-backdrop"
+          onMouseDown={() => {
+            if (!isCreating) {
+              setRequestError(null);
+              setIsCreateSessionOpen(false);
+            }
+          }}
+        >
+          <section
+            id="create-session-dialog"
+            className="dialog-card panel create-session-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="create-session-dialog-title"
+            onMouseDown={(event) => {
+              event.stopPropagation();
+            }}
+          >
+            <div className="create-session-dialog-header">
+              <div>
+                <div className="card-label">Session</div>
+                <h2 id="create-session-dialog-title">New session</h2>
+                <p className="dialog-copy">
+                  Pick the assistant, model, and project before opening the session.
+                </p>
+              </div>
+
+              <button
+                className="ghost-button settings-dialog-close"
+                type="button"
+                onClick={() => {
+                  setRequestError(null);
+                  setIsCreateSessionOpen(false);
+                }}
+                disabled={isCreating}
+              >
+                Close
+              </button>
+            </div>
+
+            <form
+              className="create-session-dialog-body"
+              onSubmit={(event) => {
+                event.preventDefault();
+                void handleCreateSessionDialogSubmit();
+              }}
+            >
+              {requestError ? (
+                <article className="thread-notice create-session-dialog-error">
+                  <div className="card-label">Backend</div>
+                  <p>{requestError}</p>
+                </article>
+              ) : null}
+
+              <div className="create-session-field">
+                <label className="session-control-label" htmlFor="create-session-agent">
+                  Assistant
+                </label>
+                <ThemedCombobox
+                  id="create-session-agent"
+                  value={newSessionAgent}
+                  options={NEW_SESSION_AGENT_OPTIONS as readonly ComboboxOption[]}
+                  onChange={(nextValue) => setNewSessionAgent(nextValue as AgentType)}
+                  disabled={isCreating}
+                />
+              </div>
+
+              <div className="create-session-field">
+                <label className="session-control-label" htmlFor="create-session-model">
+                  Model
+                </label>
+                <ThemedCombobox
+                  id="create-session-model"
+                  value={newSessionModel}
+                  options={newSessionModelOptions}
+                  onChange={(nextValue) =>
+                    setNewSessionModelByAgent((current) => ({
+                      ...current,
+                      [newSessionAgent]: nextValue,
+                    }))
+                  }
+                  disabled={isCreating}
+                />
+              </div>
+
+              <div className="create-session-field">
+                <label className="session-control-label" htmlFor="create-session-project">
+                  Project
+                </label>
+                <ThemedCombobox
+                  id="create-session-project"
+                  value={createSessionProjectId}
+                  options={createSessionProjectOptions}
+                  onChange={setCreateSessionProjectId}
+                  disabled={isCreating}
+                />
+                <p className="create-session-field-hint">{createSessionProjectHint}</p>
+              </div>
+
+              <div className="dialog-actions create-session-dialog-actions">
+                <button
+                  className="ghost-button"
+                  type="button"
+                  onClick={() => {
+                    setRequestError(null);
+                    setIsCreateSessionOpen(false);
+                  }}
+                  disabled={isCreating}
+                >
+                  Cancel
+                </button>
+                <button className="send-button create-session-submit" type="submit" disabled={isCreating}>
+                  {isCreating ? "Creating..." : "Create session"}
+                </button>
+              </div>
+            </form>
+          </section>
+        </div>
+      ) : null}
+      {isCreateProjectOpen ? (
+        <div
+          className="dialog-backdrop"
+          onMouseDown={() => {
+            if (!isCreatingProject) {
+              setRequestError(null);
+              setIsCreateProjectOpen(false);
+            }
+          }}
+        >
+          <section
+            id="create-project-dialog"
+            className="dialog-card panel create-project-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="create-project-dialog-title"
+            onMouseDown={(event) => {
+              event.stopPropagation();
+            }}
+          >
+            <div className="create-project-dialog-header">
+              <div>
+                <div className="card-label">Project</div>
+                <h2 id="create-project-dialog-title">Add project</h2>
+                <p className="dialog-copy">
+                  Pick a folder to add it as a project and scope sessions to it.
+                </p>
+              </div>
+
+              <button
+                className="ghost-button settings-dialog-close"
+                type="button"
+                onClick={() => {
+                  setRequestError(null);
+                  setIsCreateProjectOpen(false);
+                }}
+                disabled={isCreatingProject}
+              >
+                Close
+              </button>
+            </div>
+
+            <form
+              className="create-project-dialog-body"
+              onSubmit={(event) => {
+                event.preventDefault();
+                void (async () => {
+                  const created = await handleCreateProject();
+                  if (created) {
+                    setIsCreateProjectOpen(false);
+                  }
+                })();
+              }}
+            >
+              {requestError ? (
+                <article className="thread-notice create-project-dialog-error">
+                  <div className="card-label">Backend</div>
+                  <p>{requestError}</p>
+                </article>
+              ) : null}
+
+              <div className="create-project-field">
+                <label className="session-control-label" htmlFor="create-project-root">
+                  Folder
+                </label>
+                <input
+                  id="create-project-root"
+                  className="themed-input project-root-input"
+                  type="text"
+                  value={newProjectRootPath}
+                  placeholder="/path/to/project"
+                  onChange={(event) => setNewProjectRootPath(event.target.value)}
+                  disabled={isCreatingProject}
+                />
+              </div>
+
+              <div className="dialog-actions create-project-dialog-actions">
+                <button
+                  className="ghost-button"
+                  type="button"
+                  onClick={() => void handlePickProjectRoot()}
+                  disabled={isCreatingProject}
+                >
+                  Choose folder
+                </button>
+                <button
+                  className="ghost-button"
+                  type="button"
+                  onClick={() => {
+                    setRequestError(null);
+                    setIsCreateProjectOpen(false);
+                  }}
+                  disabled={isCreatingProject}
+                >
+                  Cancel
+                </button>
+                <button className="send-button create-project-submit" type="submit" disabled={isCreatingProject}>
+                  {isCreatingProject ? "Adding..." : "Add project"}
+                </button>
+              </div>
+            </form>
+          </section>
+        </div>
+      ) : null}
       {isSettingsOpen ? (
         <div
           className="dialog-backdrop"
@@ -4097,7 +4437,11 @@ function SessionPaneView({
   return (
     <section
       className={`workspace-pane thread panel ${isActive ? "active" : ""}`}
-      onMouseDown={() => onActivatePane(pane.id)}
+      onMouseDown={() => {
+        if (!isActive) {
+          onActivatePane(pane.id);
+        }
+      }}
       onKeyDown={handlePaneKeyDown}
     >
       {showDropOverlay ? (
@@ -4221,8 +4565,6 @@ function SessionPaneView({
                     ? "File browser"
                     : activeTab?.kind === "gitStatus"
                       ? "Git status"
-                      : activeTab?.kind === "controlPanel"
-                        ? "Control panel"
                       : activeTab?.kind === "diffPreview"
                         ? "Diff preview"
                       : "Panel"}
@@ -5524,7 +5866,7 @@ function ApprovalCard({
   );
 }
 
-function MarkdownContent({
+export function MarkdownContent({
   markdown,
   searchQuery = "",
   searchHighlightTone = "match",
@@ -5589,6 +5931,11 @@ function MarkdownContent({
           ),
           em: ({ children, ...props }) => <em {...props}>{highlightChildren(children)}</em>,
           del: ({ children, ...props }) => <del {...props}>{highlightChildren(children)}</del>,
+          table: ({ children, ...props }) => (
+            <div className="markdown-table-scroll">
+              <table {...props}>{children}</table>
+            </div>
+          ),
           td: ({ children, ...props }) => <td {...props}>{highlightChildren(children)}</td>,
           th: ({ children, ...props }) => <th {...props}>{highlightChildren(children)}</th>,
         }}

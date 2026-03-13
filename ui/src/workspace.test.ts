@@ -1,6 +1,7 @@
 import type { Session } from "./types";
 import {
   addWorkspaceTabToPane,
+  activatePane,
   closeWorkspaceTab,
   createPane,
   ensureControlPanelInWorkspaceState,
@@ -185,6 +186,17 @@ describe("workspace helpers", () => {
     expect(pane.sourcePath).toBeNull();
     expect(typeof pane.id).toBe("string");
     expect(pane.id.length).toBeGreaterThan(0);
+  });
+
+  it("activatePane is a no-op when the pane and tab are already active", () => {
+    const pane = makePane("pane-a", [makeSessionTab("tab-a", "session-a")], {
+      activeTabId: "tab-a",
+    });
+    const workspace = makeSinglePaneWorkspace(pane);
+
+    const next = activatePane(workspace, "pane-a");
+
+    expect(next).toBe(workspace);
   });
 
   it("openSessionInWorkspaceState creates the first pane for an empty workspace", () => {

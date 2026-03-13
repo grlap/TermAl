@@ -7,6 +7,7 @@ import {
   type DragEvent as ReactDragEvent,
 } from "react";
 import { createPortal } from "react-dom";
+import { AgentIcon } from "../agent-icon";
 import {
   attachWorkspaceTabDragData,
   createWorkspaceTabDrag,
@@ -416,7 +417,14 @@ export function PaneTabs({
                 />
                 <span className="pane-tab">
                   <span className="pane-tab-copy">
-                    {session ? <span className={`status-dot status-${session.status}`} /> : null}
+                    {session ? (
+                      <span
+                        className="status-agent-badge pane-tab-agent-badge"
+                        data-status={session.status}
+                      >
+                        <AgentIcon agent={session.agent} className="pane-tab-agent-icon" />
+                      </span>
+                    ) : null}
                     <span className="pane-tab-label">{tabLabel}</span>
                   </span>
                 </span>
@@ -546,7 +554,7 @@ function CodexRateLimitMeter({
 
 function formatTabLabel(tab: WorkspaceTab, session: Session | null) {
   if (tab.kind === "session") {
-    return `${session?.emoji ?? ""} ${session?.name ?? tab.sessionId}`.trim();
+    return session?.name ?? tab.sessionId;
   }
 
   if (tab.kind === "source") {

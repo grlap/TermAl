@@ -65,6 +65,7 @@ async fn run_server() -> Result<()> {
         .route("/api/file", get(read_file).put(write_file))
         .route("/api/fs", get(read_directory))
         .route("/api/git/status", get(read_git_status))
+        .route("/api/git/file", post(apply_git_file_action))
         .route("/api/state", get(get_state))
         .route("/api/events", get(state_events))
         .route("/api/projects", post(create_project))
@@ -158,6 +159,7 @@ fn run_repl(agent: Agent) -> Result<()> {
                 codex_sandbox_mode: Some(default_codex_sandbox_mode()),
                 agent,
                 cwd: cwd.clone(),
+                model: agent.default_model().to_owned(),
                 prompt: prompt.to_owned(),
                 external_session_id: external_session_id.clone(),
             },
@@ -208,12 +210,14 @@ impl AppState {
                 Some("Codex Live".to_owned()),
                 default_workdir.clone(),
                 Some(default_project.id.clone()),
+                None,
             );
             inner.create_session(
                 Agent::Claude,
                 Some("Claude Live".to_owned()),
                 default_workdir.clone(),
                 Some(default_project.id.clone()),
+                None,
             );
             inner
         });
@@ -276,6 +280,12 @@ impl AppState {
             request.name,
             workdir,
             project.as_ref().map(|entry| entry.id.clone()),
+            request
+                .model
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(str::to_owned),
         );
         if record.session.agent == Agent::Codex {
             if let Some(sandbox_mode) = request.sandbox_mode {
@@ -404,6 +414,7 @@ impl AppState {
                             self.clone(),
                             record.session.id.clone(),
                             record.session.workdir.clone(),
+                            record.session.model.clone(),
                             record.external_session_id.clone(),
                         )
                         .map_err(|err| {
@@ -434,7 +445,11 @@ impl AppState {
                         ));
                     }
                     SessionRuntime::None => {
-                        let handle = spawn_codex_runtime(self.clone(), record.session.id.clone())
+                        let handle = spawn_codex_runtime(
+                            self.clone(),
+                            record.session.id.clone(),
+                            record.session.model.clone(),
+                        )
                             .map_err(|err| {
                             ApiError::internal(format!(
                                 "failed to start persistent Codex session: {err:#}"
@@ -1583,6 +1598,7 @@ impl StateInner {
         name: Option<String>,
         workdir: String,
         project_id: Option<String>,
+        model: Option<String>,
     ) -> SessionRecord {
         let number = self.next_session_number;
         self.next_session_number += 1;
@@ -1604,7 +1620,7 @@ impl StateInner {
                 agent,
                 workdir,
                 project_id,
-                model: agent.model_label().to_owned(),
+                model: model.unwrap_or_else(|| agent.default_model().to_owned()),
                 approval_policy: None,
                 sandbox_mode: None,
                 claude_approval_mode: (agent == Agent::Claude)
@@ -2311,6 +2327,7 @@ struct TurnConfig {
     codex_sandbox_mode: Option<CodexSandboxMode>,
     agent: Agent,
     cwd: String,
+    model: String,
     prompt: String,
     external_session_id: Option<String>,
 }
@@ -2341,11 +2358,12 @@ struct CodexTurnState {
     streamed_agent_message_item_ids: HashSet<String>,
 }
 
-fn spawn_codex_runtime(state: AppState, session_id: String) -> Result<CodexRuntimeHandle> {
+fn spawn_codex_runtime(state: AppState, session_id: String, model: String) -> Result<CodexRuntimeHandle> {
     let codex_home = prepare_termal_codex_home(&state.default_workdir, &session_id)?;
     let runtime_id = Uuid::new_v4().to_string();
     let mut command = codex_command()?;
     command
+        .args(["-m", &model])
         .arg("app-server")
         .env("CODEX_HOME", &codex_home)
         .stdin(Stdio::piped())
@@ -3231,11 +3249,14 @@ fn spawn_claude_runtime(
     state: AppState,
     session_id: String,
     cwd: String,
+    model: String,
     resume_session_id: Option<String>,
 ) -> Result<ClaudeRuntimeHandle> {
     let runtime_id = Uuid::new_v4().to_string();
     let mut command = Command::new("claude");
     command.current_dir(&cwd).args([
+        "--model",
+        &model,
         "-p",
         "--verbose",
         "--output-format",
@@ -3644,6 +3665,7 @@ fn run_turn_blocking(config: TurnConfig, recorder: &mut dyn TurnRecorder) -> Res
             None,
             &config.cwd,
             config.external_session_id.as_deref(),
+            &config.model,
             config
                 .codex_sandbox_mode
                 .unwrap_or_else(default_codex_sandbox_mode),
@@ -3656,6 +3678,7 @@ fn run_turn_blocking(config: TurnConfig, recorder: &mut dyn TurnRecorder) -> Res
         Agent::Claude => run_claude_turn(
             &config.cwd,
             config.external_session_id.as_deref(),
+            &config.model,
             &config.prompt,
             recorder,
         ),
@@ -4033,6 +4056,7 @@ fn run_codex_turn(
     runtime_session_id: Option<&str>,
     cwd: &str,
     external_session_id: Option<&str>,
+    model: &str,
     sandbox_mode: CodexSandboxMode,
     approval_policy: CodexApprovalPolicy,
     prompt: &str,
@@ -4040,7 +4064,7 @@ fn run_codex_turn(
 ) -> Result<String> {
     let codex_home = prepare_termal_codex_home(cwd, runtime_session_id.unwrap_or("repl"))?;
     let mut command = codex_command()?;
-    command.env("CODEX_HOME", &codex_home);
+    command.env("CODEX_HOME", &codex_home).args(["-m", model]);
 
     match external_session_id {
         Some(session_id) => {
@@ -4429,11 +4453,14 @@ fn log_unhandled_codex_event(context: &str, message: &Value) {
 fn run_claude_turn(
     cwd: &str,
     session_id: Option<&str>,
+    model: &str,
     prompt: &str,
     recorder: &mut dyn TurnRecorder,
 ) -> Result<String> {
     let mut command = Command::new("claude");
     command.current_dir(cwd).args([
+        "--model",
+        model,
         "-p",
         "--verbose",
         "--output-format",
@@ -5738,16 +5765,56 @@ async fn read_git_status(
     Query(query): Query<FileQuery>,
 ) -> Result<Json<GitStatusResponse>, ApiError> {
     let workdir = resolve_requested_path(&query.path)?;
-    let workdir = if workdir.is_dir() {
-        workdir
-    } else {
-        workdir.parent().map(FsPath::to_path_buf).ok_or_else(|| {
-            ApiError::bad_request("cannot inspect git status for a root file path")
-        })?
+    Ok(Json(load_git_status_for_path(&workdir)?))
+}
+
+async fn apply_git_file_action(
+    Json(request): Json<GitFileActionRequest>,
+) -> Result<Json<GitStatusResponse>, ApiError> {
+    let workdir = resolve_requested_path(&request.workdir)?;
+    let workdir = normalize_git_workdir_path(&workdir)?;
+    let Some(repo_root) = resolve_git_repo_root(&workdir)? else {
+        return Err(ApiError::bad_request("no git repository found"));
     };
 
+    let current_path = normalize_git_repo_relative_path(&request.path)?;
+    let original_path = request
+        .original_path
+        .as_deref()
+        .map(normalize_git_repo_relative_path)
+        .transpose()?;
+
+    match request.action {
+        GitFileAction::Stage => {
+            let pathspecs = collect_git_pathspecs(&current_path, original_path.as_deref());
+            run_git_pathspec_command(&repo_root, &["add", "-A"], &pathspecs, "failed to stage git changes")?;
+        }
+        GitFileAction::Unstage => {
+            let pathspecs = collect_git_pathspecs(&current_path, original_path.as_deref());
+            run_git_pathspec_command(
+                &repo_root,
+                &["restore", "--staged"],
+                &pathspecs,
+                "failed to unstage git changes",
+            )?;
+        }
+        GitFileAction::Revert => {
+            revert_git_file_action(
+                &repo_root,
+                &current_path,
+                original_path.as_deref(),
+                request.status_code.as_deref(),
+            )?;
+        }
+    }
+
+    Ok(Json(load_git_status_for_path(&workdir)?))
+}
+
+fn load_git_status_for_path(path: &FsPath) -> Result<GitStatusResponse, ApiError> {
+    let workdir = normalize_git_workdir_path(path)?;
     let Some(repo_root) = resolve_git_repo_root(&workdir)? else {
-        return Ok(Json(GitStatusResponse {
+        return Ok(GitStatusResponse {
             ahead: 0,
             behind: 0,
             branch: None,
@@ -5756,7 +5823,7 @@ async fn read_git_status(
             repo_root: None,
             upstream: None,
             workdir: workdir.to_string_lossy().into_owned(),
-        }));
+        });
     };
 
     let output = Command::new("git")
@@ -5813,7 +5880,7 @@ async fn read_git_status(
 
     let is_clean = files.is_empty();
 
-    Ok(Json(GitStatusResponse {
+    Ok(GitStatusResponse {
         ahead,
         behind,
         branch,
@@ -5822,7 +5889,109 @@ async fn read_git_status(
         repo_root: Some(repo_root.to_string_lossy().into_owned()),
         upstream,
         workdir: workdir.to_string_lossy().into_owned(),
-    }))
+    })
+}
+
+fn normalize_git_workdir_path(path: &FsPath) -> Result<PathBuf, ApiError> {
+    if path.is_dir() {
+        return Ok(path.to_path_buf());
+    }
+
+    path.parent()
+        .map(FsPath::to_path_buf)
+        .ok_or_else(|| ApiError::bad_request("cannot inspect git status for a root file path"))
+}
+
+fn normalize_git_repo_relative_path(path: &str) -> Result<String, ApiError> {
+    let trimmed = path.trim();
+    if trimmed.is_empty() {
+        return Err(ApiError::bad_request("git file path cannot be empty"));
+    }
+
+    if FsPath::new(trimmed).is_absolute() {
+        return Err(ApiError::bad_request(
+            "git file actions require repository-relative paths",
+        ));
+    }
+
+    if trimmed.contains('\0') {
+        return Err(ApiError::bad_request("git file path contains invalid characters"));
+    }
+
+    Ok(trimmed.to_owned())
+}
+
+fn collect_git_pathspecs(current_path: &str, original_path: Option<&str>) -> Vec<String> {
+    let mut pathspecs = Vec::new();
+    if let Some(original_path) = original_path.filter(|original| *original != current_path) {
+        pathspecs.push(original_path.to_owned());
+    }
+    pathspecs.push(current_path.to_owned());
+    pathspecs
+}
+
+fn revert_git_file_action(
+    repo_root: &FsPath,
+    current_path: &str,
+    original_path: Option<&str>,
+    status_code: Option<&str>,
+) -> Result<(), ApiError> {
+    if let Some(original_path) = original_path.filter(|original| *original != current_path) {
+        run_git_pathspec_command(
+            repo_root,
+            &["restore", "--worktree", "--source=HEAD"],
+            &[original_path.to_owned()],
+            "failed to restore the original git path",
+        )?;
+    }
+
+    if status_code.is_some_and(|status| status.trim() == "?") {
+        run_git_pathspec_command(
+            repo_root,
+            &["clean", "-f"],
+            &[current_path.to_owned()],
+            "failed to remove untracked git path",
+        )?;
+    } else {
+        run_git_pathspec_command(
+            repo_root,
+            &["restore", "--worktree", "--source=HEAD"],
+            &[current_path.to_owned()],
+            "failed to revert git changes",
+        )?;
+    }
+
+    Ok(())
+}
+
+fn run_git_pathspec_command(
+    repo_root: &FsPath,
+    args: &[&str],
+    pathspecs: &[String],
+    error_context: &str,
+) -> Result<(), ApiError> {
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(repo_root)
+        .args(args)
+        .arg("--")
+        .args(pathspecs)
+        .output()
+        .map_err(|err| ApiError::internal(format!("{error_context}: {err}")))?;
+
+    if output.status.success() {
+        return Ok(());
+    }
+
+    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_owned();
+    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_owned();
+    let detail = if stderr.is_empty() { stdout } else { stderr };
+
+    if detail.is_empty() {
+        Err(ApiError::internal(error_context))
+    } else {
+        Err(ApiError::internal(format!("{error_context}: {detail}")))
+    }
 }
 
 async fn state_events(
@@ -6045,10 +6214,10 @@ impl Agent {
         }
     }
 
-    fn model_label(self) -> &'static str {
+    fn default_model(self) -> &'static str {
         match self {
-            Self::Codex => "codex exec",
-            Self::Claude => "claude -p",
+            Self::Codex => "gpt-5",
+            Self::Claude => "sonnet",
         }
     }
 }
@@ -6303,6 +6472,7 @@ struct CreateSessionRequest {
     name: Option<String>,
     workdir: Option<String>,
     project_id: Option<String>,
+    model: Option<String>,
     approval_policy: Option<CodexApprovalPolicy>,
     sandbox_mode: Option<CodexSandboxMode>,
     claude_approval_mode: Option<ClaudeApprovalMode>,
@@ -6382,6 +6552,26 @@ struct GitStatusResponse {
     repo_root: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     upstream: Option<String>,
+    workdir: String,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+enum GitFileAction {
+    Stage,
+    Unstage,
+    Revert,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct GitFileActionRequest {
+    action: GitFileAction,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    original_path: Option<String>,
+    path: String,
+    #[serde(default)]
+    status_code: Option<String>,
     workdir: String,
 }
 
@@ -6841,7 +7031,7 @@ mod tests {
 
     fn test_session_id(state: &AppState, agent: Agent) -> String {
         let mut inner = state.inner.lock().expect("state mutex poisoned");
-        let record = inner.create_session(agent, Some("Test".to_owned()), "/tmp".to_owned(), None);
+        let record = inner.create_session(agent, Some("Test".to_owned()), "/tmp".to_owned(), None, None);
         let session_id = record.session.id.clone();
         state.commit_locked(&mut inner).unwrap();
         session_id
@@ -6862,7 +7052,7 @@ mod tests {
     fn creates_claude_sessions_with_default_ask_mode() {
         let mut inner = StateInner::new();
 
-        let record = inner.create_session(Agent::Claude, None, "/tmp".to_owned(), None);
+        let record = inner.create_session(Agent::Claude, None, "/tmp".to_owned(), None, None);
 
         assert_eq!(
             record.session.claude_approval_mode,
@@ -6882,6 +7072,7 @@ mod tests {
                 name: Some("Custom Codex".to_owned()),
                 workdir: Some("/tmp".to_owned()),
                 project_id: None,
+                model: Some("gpt-5-mini".to_owned()),
                 approval_policy: Some(CodexApprovalPolicy::OnRequest),
                 sandbox_mode: Some(CodexSandboxMode::ReadOnly),
                 claude_approval_mode: None,
@@ -6898,6 +7089,7 @@ mod tests {
             session.approval_policy,
             Some(CodexApprovalPolicy::OnRequest)
         );
+        assert_eq!(session.model, "gpt-5-mini");
         assert_eq!(session.sandbox_mode, Some(CodexSandboxMode::ReadOnly));
         assert_eq!(session.claude_approval_mode, None);
 
@@ -6920,6 +7112,7 @@ mod tests {
                 name: Some("Revision Test".to_owned()),
                 workdir: Some("/tmp".to_owned()),
                 project_id: None,
+                model: None,
                 approval_policy: None,
                 sandbox_mode: None,
                 claude_approval_mode: None,
@@ -6951,6 +7144,7 @@ mod tests {
                 name: Some("Old Name".to_owned()),
                 workdir: Some("/tmp".to_owned()),
                 project_id: None,
+                model: None,
                 approval_policy: None,
                 sandbox_mode: None,
                 claude_approval_mode: None,
@@ -6996,6 +7190,7 @@ mod tests {
                 name: Some("Project Session".to_owned()),
                 workdir: None,
                 project_id: Some(project.project_id.clone()),
+                model: None,
                 approval_policy: None,
                 sandbox_mode: None,
                 claude_approval_mode: None,
@@ -7030,6 +7225,7 @@ mod tests {
             name: Some("Out of Bounds".to_owned()),
             workdir: Some("/Users".to_owned()),
             project_id: Some(project.project_id),
+            model: None,
             approval_policy: None,
             sandbox_mode: None,
             claude_approval_mode: None,
@@ -7069,6 +7265,7 @@ mod tests {
             Agent::Codex,
             Some("Migrated".to_owned()),
             "/tmp".to_owned(),
+            None,
             None,
         );
         persist_state(&path, &inner).unwrap();
@@ -8118,5 +8315,92 @@ mod tests {
         );
 
         fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn git_file_actions_stage_and_unstage_modified_files() {
+        let repo_root = create_test_git_repo();
+        let file_path = repo_root.join("tracked.txt");
+        fs::write(&file_path, "changed\n").unwrap();
+
+        run_git_pathspec_command(
+            &repo_root,
+            &["add", "-A"],
+            &["tracked.txt".to_owned()],
+            "failed to stage git changes",
+        )
+        .unwrap();
+
+        let staged_status = load_git_status_for_path(&repo_root).unwrap();
+        let staged_file = staged_status
+            .files
+            .iter()
+            .find(|file| file.path == "tracked.txt")
+            .unwrap();
+        assert_eq!(staged_file.index_status.as_deref(), Some("M"));
+        assert_eq!(staged_file.worktree_status.as_deref(), None);
+
+        run_git_pathspec_command(
+            &repo_root,
+            &["restore", "--staged"],
+            &["tracked.txt".to_owned()],
+            "failed to unstage git changes",
+        )
+        .unwrap();
+
+        let unstaged_status = load_git_status_for_path(&repo_root).unwrap();
+        let unstaged_file = unstaged_status
+            .files
+            .iter()
+            .find(|file| file.path == "tracked.txt")
+            .unwrap();
+        assert_eq!(unstaged_file.index_status.as_deref(), None);
+        assert_eq!(unstaged_file.worktree_status.as_deref(), Some("M"));
+
+        fs::remove_dir_all(repo_root).unwrap();
+    }
+
+    #[test]
+    fn git_file_actions_revert_untracked_files() {
+        let repo_root = create_test_git_repo();
+        let file_path = repo_root.join("scratch.txt");
+        fs::write(&file_path, "temp\n").unwrap();
+
+        revert_git_file_action(&repo_root, "scratch.txt", None, Some("?")).unwrap();
+
+        assert!(!file_path.exists());
+        let status = load_git_status_for_path(&repo_root).unwrap();
+        assert!(status.files.is_empty());
+
+        fs::remove_dir_all(repo_root).unwrap();
+    }
+
+    fn create_test_git_repo() -> PathBuf {
+        let repo_root = std::env::temp_dir().join(format!("termal-git-action-{}", Uuid::new_v4()));
+        fs::create_dir_all(&repo_root).unwrap();
+        run_git_test_command(&repo_root, &["init", "-q"]);
+        run_git_test_command(&repo_root, &["config", "user.email", "test@example.com"]);
+        run_git_test_command(&repo_root, &["config", "user.name", "TermAl Test"]);
+        fs::write(repo_root.join("tracked.txt"), "base\n").unwrap();
+        run_git_test_command(&repo_root, &["add", "tracked.txt"]);
+        run_git_test_command(&repo_root, &["commit", "-q", "-m", "init"]);
+        repo_root
+    }
+
+    fn run_git_test_command(repo_root: &FsPath, args: &[&str]) {
+        let output = Command::new("git")
+            .arg("-C")
+            .arg(repo_root)
+            .args(args)
+            .output()
+            .unwrap();
+
+        if !output.status.success() {
+            panic!(
+                "git {:?} failed: {}",
+                args,
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
     }
 }

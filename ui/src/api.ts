@@ -67,8 +67,11 @@ export type GitStatusResponse = {
   workdir: string;
 };
 
+export type GitFileAction = "revert" | "stage" | "unstage";
+
 type CreateSessionRequest = {
   agent?: AgentType;
+  model?: string;
   name?: string;
   workdir?: string;
   projectId?: string;
@@ -211,6 +214,19 @@ export function fetchDirectory(path: string) {
 
 export function fetchGitStatus(path: string) {
   return request<GitStatusResponse>(`/api/git/status?path=${encodeURIComponent(path)}`);
+}
+
+export function applyGitFileAction(payload: {
+  action: GitFileAction;
+  originalPath?: string | null;
+  path: string;
+  statusCode?: string | null;
+  workdir: string;
+}) {
+  return request<GitStatusResponse>("/api/git/file", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
 }
 
 function extractError(raw: string, status: number) {

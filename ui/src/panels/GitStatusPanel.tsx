@@ -1,5 +1,19 @@
 import { useEffect, useMemo, useState } from "react";
-import { fetchGitStatus, type GitStatusFile, type GitStatusResponse } from "../api";
+import {
+  applyGitFileAction,
+  fetchGitStatus,
+  type GitFileAction,
+  type GitStatusResponse,
+} from "../api";
+import {
+  buildGitStatusTree,
+  gitStatusTone,
+  type GitStatusSectionId,
+  type GitStatusTreeDirectoryNode,
+  type GitStatusTreeFileNode,
+  type GitStatusTreeNode,
+  type GitStatusTreeSection,
+} from "./git-status-tree";
 
 export function GitStatusPanel({
   onOpenPath,
@@ -14,12 +28,20 @@ export function GitStatusPanel({
   const [status, setStatus] = useState<GitStatusResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [pendingActionKey, setPendingActionKey] = useState<string | null>(null);
+  const [treeExpansionByKey, setTreeExpansionByKey] = useState<Record<string, boolean>>({});
   const normalizedWorkdir = workdir?.trim() ?? "";
   const changedFiles = status?.files ?? [];
+  const sections = useMemo(() => buildGitStatusTree(changedFiles), [changedFiles]);
 
   useEffect(() => {
     setWorkdirDraft(workdir ?? "");
   }, [workdir]);
+
+  useEffect(() => {
+    setPendingActionKey(null);
+    setTreeExpansionByKey({});
+  }, [normalizedWorkdir]);
 
   useEffect(() => {
     if (!normalizedWorkdir) {
@@ -43,6 +65,47 @@ export function GitStatusPanel({
     } finally {
       setIsLoading(false);
     }
+  }
+
+  async function handleFileAction(
+    sectionId: GitStatusSectionId,
+    node: GitStatusTreeFileNode,
+    action: GitFileAction,
+  ) {
+    const activeWorkdir = status?.workdir ?? normalizedWorkdir;
+    if (!activeWorkdir) {
+      return;
+    }
+
+    const actionKey = gitFileActionKey(sectionId, node.path, action);
+    setPendingActionKey(actionKey);
+    setError(null);
+
+    try {
+      const response = await applyGitFileAction({
+        action,
+        originalPath: node.originalPath,
+        path: node.path,
+        statusCode: node.statusCode,
+        workdir: activeWorkdir,
+      });
+      setStatus(response);
+    } catch (nextError) {
+      setError(getErrorMessage(nextError));
+    } finally {
+      setPendingActionKey((current) => (current === actionKey ? null : current));
+    }
+  }
+
+  function isTreeItemExpanded(key: string, defaultValue: boolean) {
+    return treeExpansionByKey[key] ?? defaultValue;
+  }
+
+  function toggleTreeItem(key: string, defaultValue: boolean) {
+    setTreeExpansionByKey((current) => ({
+      ...current,
+      [key]: !(current[key] ?? defaultValue),
+    }));
   }
 
   const branchSummary = useMemo(() => {
@@ -86,7 +149,7 @@ export function GitStatusPanel({
             className="ghost-button"
             type="button"
             onClick={() => normalizedWorkdir && void loadStatus(normalizedWorkdir)}
-            disabled={!normalizedWorkdir}
+            disabled={!normalizedWorkdir || isLoading}
           >
             Refresh
           </button>
@@ -127,30 +190,34 @@ export function GitStatusPanel({
 
       {status?.repoRoot ? (
         <article className="message-card git-status-card">
-          <div className="message-meta">
-            <span>Git</span>
-            <span>{status.repoRoot}</span>
+          <div className="git-status-meta">
+            <span className="git-status-meta-label">Git</span>
+            <span className="git-status-meta-path" title={status.repoRoot}>
+              {status.repoRoot}
+            </span>
           </div>
-          {branchSummary ? <p className="support-copy">{branchSummary}</p> : null}
+          {branchSummary ? (
+            <p className="git-status-branch-summary support-copy" title={branchSummary}>
+              {branchSummary}
+            </p>
+          ) : null}
           {status.isClean ? (
-            <p className="support-copy">Working tree clean.</p>
+            <p className="support-copy git-status-empty-copy">Working tree clean.</p>
           ) : (
-            <div className="git-status-list">
-              {changedFiles.map((file) => (
-                <button
-                  key={`${file.originalPath ?? ""}:${file.path}`}
-                  className="git-status-row"
-                  type="button"
-                  onClick={() => onOpenPath(resolveGitFilePath(status.repoRoot ?? "", file.path))}
-                >
-                  <span className="git-status-code">{formatGitFileStatus(file)}</span>
-                  <span className="git-status-path-group">
-                    <span className="git-status-path">{file.path}</span>
-                    {file.originalPath ? (
-                      <span className="git-status-old-path">from {file.originalPath}</span>
-                    ) : null}
-                  </span>
-                </button>
+            <div className="git-status-sections">
+              {sections.map((section) => (
+                <GitStatusSection
+                  key={section.id}
+                  isExpanded={isTreeItemExpanded(sectionExpansionKey(section.id), section.fileCount > 0)}
+                  onFileAction={handleFileAction}
+                  onOpenPath={onOpenPath}
+                  onToggle={(defaultValue) => toggleTreeItem(sectionExpansionKey(section.id), defaultValue)}
+                  onTreeToggle={toggleTreeItem}
+                  pendingActionKey={pendingActionKey}
+                  repoRoot={status.repoRoot ?? ""}
+                  section={section}
+                  treeExpansionByKey={treeExpansionByKey}
+                />
               ))}
             </div>
           )}
@@ -160,10 +227,251 @@ export function GitStatusPanel({
   );
 }
 
-function formatGitFileStatus(file: GitStatusFile) {
-  const indexStatus = file.indexStatus?.trim() || ".";
-  const worktreeStatus = file.worktreeStatus?.trim() || ".";
-  return `${indexStatus}${worktreeStatus}`;
+function GitStatusSection({
+  isExpanded,
+  onFileAction,
+  onOpenPath,
+  onToggle,
+  onTreeToggle,
+  pendingActionKey,
+  repoRoot,
+  section,
+  treeExpansionByKey,
+}: {
+  isExpanded: boolean;
+  onFileAction: (sectionId: GitStatusSectionId, node: GitStatusTreeFileNode, action: GitFileAction) => void;
+  onOpenPath: (path: string) => void;
+  onToggle: (defaultValue: boolean) => void;
+  onTreeToggle: (key: string, defaultValue: boolean) => void;
+  pendingActionKey: string | null;
+  repoRoot: string;
+  section: GitStatusTreeSection;
+  treeExpansionByKey: Record<string, boolean>;
+}) {
+  return (
+    <section className="git-status-section">
+      <button
+        className="git-status-section-toggle"
+        type="button"
+        aria-expanded={isExpanded}
+        onClick={() => onToggle(section.fileCount > 0)}
+      >
+        <span className="git-tree-toggle" aria-hidden="true">
+          <ChevronIcon expanded={isExpanded} />
+        </span>
+        <span className="git-status-section-label">{section.label}</span>
+        <span className="git-status-section-count" aria-hidden="true">
+          {section.fileCount}
+        </span>
+      </button>
+
+      {isExpanded ? (
+        section.fileCount > 0 ? (
+          <GitStatusTree
+            nodes={section.nodes}
+            onFileAction={onFileAction}
+            onOpenPath={onOpenPath}
+            onTreeToggle={onTreeToggle}
+            pendingActionKey={pendingActionKey}
+            repoRoot={repoRoot}
+            sectionId={section.id}
+            treeExpansionByKey={treeExpansionByKey}
+          />
+        ) : (
+          <p className="support-copy git-status-empty-copy">No {section.label.toLowerCase()} changes.</p>
+        )
+      ) : null}
+    </section>
+  );
+}
+
+function GitStatusTree({
+  nodes,
+  onFileAction,
+  onOpenPath,
+  onTreeToggle,
+  pendingActionKey,
+  repoRoot,
+  sectionId,
+  treeExpansionByKey,
+}: {
+  nodes: GitStatusTreeNode[];
+  onFileAction: (sectionId: GitStatusSectionId, node: GitStatusTreeFileNode, action: GitFileAction) => void;
+  onOpenPath: (path: string) => void;
+  onTreeToggle: (key: string, defaultValue: boolean) => void;
+  pendingActionKey: string | null;
+  repoRoot: string;
+  sectionId: GitStatusSectionId;
+  treeExpansionByKey: Record<string, boolean>;
+}) {
+  return (
+    <div className="git-status-tree">
+      {nodes.map((node) =>
+        node.kind === "directory" ? (
+          <GitStatusDirectoryNode
+            key={`${sectionId}:${node.path}`}
+            node={node}
+            onFileAction={onFileAction}
+            onOpenPath={onOpenPath}
+            onTreeToggle={onTreeToggle}
+            pendingActionKey={pendingActionKey}
+            repoRoot={repoRoot}
+            sectionId={sectionId}
+            treeExpansionByKey={treeExpansionByKey}
+          />
+        ) : (
+          <GitStatusFileRow
+            key={`${sectionId}:${node.path}`}
+            isPending={pendingActionKey !== null && pendingActionKey.startsWith(`${sectionId}:${node.path}:`)}
+            node={node}
+            onAction={onFileAction}
+            onOpenPath={onOpenPath}
+            repoRoot={repoRoot}
+            sectionId={sectionId}
+          />
+        ),
+      )}
+    </div>
+  );
+}
+
+function GitStatusDirectoryNode({
+  node,
+  onFileAction,
+  onOpenPath,
+  onTreeToggle,
+  pendingActionKey,
+  repoRoot,
+  sectionId,
+  treeExpansionByKey,
+}: {
+  node: GitStatusTreeDirectoryNode;
+  onFileAction: (sectionId: GitStatusSectionId, node: GitStatusTreeFileNode, action: GitFileAction) => void;
+  onOpenPath: (path: string) => void;
+  onTreeToggle: (key: string, defaultValue: boolean) => void;
+  pendingActionKey: string | null;
+  repoRoot: string;
+  sectionId: GitStatusSectionId;
+  treeExpansionByKey: Record<string, boolean>;
+}) {
+  const expansionKey = directoryExpansionKey(sectionId, node.path);
+  const isExpanded = treeExpansionByKey[expansionKey] ?? true;
+
+  return (
+    <div className="git-status-node">
+      <button
+        className="git-status-tree-row git-status-tree-directory-row"
+        type="button"
+        aria-expanded={isExpanded}
+        onClick={() => onTreeToggle(expansionKey, true)}
+      >
+        <span className="git-tree-toggle" aria-hidden="true">
+          <ChevronIcon expanded={isExpanded} />
+        </span>
+        <span className="git-status-tree-label-group">
+          <span className="git-status-tree-name">{node.name}</span>
+        </span>
+        <span className="git-status-tree-count" aria-hidden="true">
+          {node.fileCount}
+        </span>
+      </button>
+
+      {isExpanded ? (
+        <div className="git-status-tree-children">
+          <GitStatusTree
+            nodes={node.children}
+            onFileAction={onFileAction}
+            onOpenPath={onOpenPath}
+            onTreeToggle={onTreeToggle}
+            pendingActionKey={pendingActionKey}
+            repoRoot={repoRoot}
+            sectionId={sectionId}
+            treeExpansionByKey={treeExpansionByKey}
+          />
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function GitStatusFileRow({
+  isPending,
+  node,
+  onAction,
+  onOpenPath,
+  repoRoot,
+  sectionId,
+}: {
+  isPending: boolean;
+  node: GitStatusTreeFileNode;
+  onAction: (sectionId: GitStatusSectionId, node: GitStatusTreeFileNode, action: GitFileAction) => void;
+  onOpenPath: (path: string) => void;
+  repoRoot: string;
+  sectionId: GitStatusSectionId;
+}) {
+  const tone = gitStatusTone(node.statusCode);
+  const isStaged = sectionId === "staged";
+
+  return (
+    <div className={`git-status-tree-row git-status-tree-file-row${isPending ? " pending" : ""}`}>
+      <button
+        className="git-status-tree-open-button"
+        type="button"
+        onClick={() => onOpenPath(resolveGitFilePath(repoRoot, node.path))}
+      >
+        <span className="git-tree-toggle git-tree-toggle-placeholder" aria-hidden="true" />
+        <span className="git-status-tree-label-group">
+          <span className="git-status-tree-name">{node.name}</span>
+          {node.originalPath ? <span className="git-status-tree-detail">from {node.originalPath}</span> : null}
+        </span>
+      </button>
+
+      <div className="git-status-file-actions">
+        {!isStaged ? (
+          <button
+            className="git-status-action-button"
+            type="button"
+            onClick={() => onAction(sectionId, node, "revert")}
+            aria-label={`Revert ${node.name}`}
+            title={`Revert ${node.name}`}
+            disabled={isPending}
+          >
+            <RevertIcon />
+          </button>
+        ) : null}
+        <button
+          className="git-status-action-button"
+          type="button"
+          onClick={() => onAction(sectionId, node, isStaged ? "unstage" : "stage")}
+          aria-label={isStaged ? `Move ${node.name} to unstaged` : `Stage ${node.name}`}
+          title={isStaged ? `Move ${node.name} to unstaged` : `Stage ${node.name}`}
+          disabled={isPending}
+        >
+          {isStaged ? <UnstageIcon /> : <StageIcon />}
+        </button>
+      </div>
+
+      <span
+        className={`git-status-tree-status git-status-tree-status-${tone}`}
+        title={node.statusLabel}
+        aria-label={node.statusLabel}
+      >
+        {node.statusCode}
+      </span>
+    </div>
+  );
+}
+
+function sectionExpansionKey(sectionId: GitStatusSectionId) {
+  return `section:${sectionId}`;
+}
+
+function directoryExpansionKey(sectionId: GitStatusSectionId, path: string) {
+  return `directory:${sectionId}:${path}`;
+}
+
+function gitFileActionKey(sectionId: GitStatusSectionId, path: string, action: GitFileAction) {
+  return `${sectionId}:${path}:${action}`;
 }
 
 function resolveGitFilePath(repoRoot: string, relativePath: string) {
@@ -181,6 +489,83 @@ function EmptyState({ title, body }: { title: string; body: string }) {
       <h3>{title}</h3>
       <p>{body}</p>
     </article>
+  );
+}
+
+function ChevronIcon({ expanded }: { expanded: boolean }) {
+  return (
+    <svg className="git-tree-chevron" viewBox="0 0 12 12" aria-hidden="true" focusable="false">
+      {expanded ? (
+        <path
+          d="M2.5 4.25 6 7.75l3.5-3.5"
+          fill="none"
+          stroke="currentColor"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          strokeWidth="1.5"
+        />
+      ) : (
+        <path
+          d="m4.25 2.5 3.5 3.5-3.5 3.5"
+          fill="none"
+          stroke="currentColor"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          strokeWidth="1.5"
+        />
+      )}
+    </svg>
+  );
+}
+
+function StageIcon() {
+  return (
+    <svg className="git-status-action-icon" viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+      <path
+        d="M8 3.25v9.5M3.25 8h9.5"
+        fill="none"
+        stroke="currentColor"
+        strokeLinecap="round"
+        strokeWidth="1.6"
+      />
+    </svg>
+  );
+}
+
+function UnstageIcon() {
+  return (
+    <svg className="git-status-action-icon" viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+      <path
+        d="M3.25 8h9.5"
+        fill="none"
+        stroke="currentColor"
+        strokeLinecap="round"
+        strokeWidth="1.6"
+      />
+    </svg>
+  );
+}
+
+function RevertIcon() {
+  return (
+    <svg className="git-status-action-icon" viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+      <path
+        d="M6.1 4.1 3.6 6.6l2.5 2.5"
+        fill="none"
+        stroke="currentColor"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth="1.45"
+      />
+      <path
+        d="M4.1 6.6h4.7a3.15 3.15 0 1 1 0 6.3H7.45"
+        fill="none"
+        stroke="currentColor"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth="1.45"
+      />
+    </svg>
   );
 }
 

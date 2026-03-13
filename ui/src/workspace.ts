@@ -459,6 +459,21 @@ export function activatePane(
   paneId: string,
   tabId?: string | null,
 ): WorkspaceState {
+  const targetPane = workspace.panes.find((pane) => pane.id === paneId) ?? null;
+  const targetActiveTabId =
+    targetPane &&
+    (tabId && targetPane.tabs.some((tab) => tab.id === tabId)
+      ? tabId
+      : (targetPane.activeTabId ?? targetPane.tabs[0]?.id ?? null));
+
+  if (
+    targetPane &&
+    workspace.activePaneId === paneId &&
+    targetPane.activeTabId === targetActiveTabId
+  ) {
+    return workspace;
+  }
+
   return {
     ...workspace,
     panes: workspace.panes.map((pane) => {
