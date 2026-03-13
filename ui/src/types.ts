@@ -1,8 +1,24 @@
-export type AgentType = "Claude" | "Codex";
+export type AgentType = "Claude" | "Codex" | "Cursor" | "Gemini";
 export type SessionStatus = "active" | "idle" | "approval" | "error";
 export type SandboxMode = "read-only" | "workspace-write" | "danger-full-access";
 export type ApprovalPolicy = "untrusted" | "on-failure" | "on-request" | "never";
-export type ClaudeApprovalMode = "ask" | "auto-approve";
+export type ClaudeApprovalMode = "ask" | "auto-approve" | "plan";
+export type CursorMode = "agent" | "plan" | "ask";
+export type GeminiApprovalMode = "default" | "auto_edit" | "yolo" | "plan";
+export type AgentReadinessStatus = "ready" | "missing" | "needsSetup";
+
+export type AgentReadiness = {
+  agent: AgentType;
+  status: AgentReadinessStatus;
+  blocking: boolean;
+  detail: string;
+  commandPath?: string | null;
+};
+
+export type SessionModelOption = {
+  label: string;
+  value: string;
+};
 
 export type CodexRateLimitWindow = {
   resetsAt?: number | null;
@@ -37,9 +53,12 @@ export type Session = {
   workdir: string;
   projectId?: string | null;
   model: string;
+  modelOptions?: SessionModelOption[];
   approvalPolicy?: ApprovalPolicy | null;
   sandboxMode?: SandboxMode | null;
+  cursorMode?: CursorMode | null;
   claudeApprovalMode?: ClaudeApprovalMode | null;
+  geminiApprovalMode?: GeminiApprovalMode | null;
   externalSessionId?: string | null;
   status: SessionStatus;
   preview: string;

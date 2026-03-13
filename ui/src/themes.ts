@@ -1,4 +1,8 @@
 export const THEME_STORAGE_KEY = "termal-ui-theme";
+export const FONT_SIZE_STORAGE_KEY = "termal-ui-font-size";
+export const DEFAULT_FONT_SIZE_PX = 16;
+export const MIN_FONT_SIZE_PX = 13;
+export const MAX_FONT_SIZE_PX = 20;
 
 export const THEMES = [
   {
@@ -124,4 +128,44 @@ export function applyThemePreference(themeId: ThemeId) {
   }
 
   document.documentElement.dataset.theme = themeId;
+}
+
+export function clampFontSizePreference(value: number): number {
+  if (!Number.isFinite(value)) {
+    return DEFAULT_FONT_SIZE_PX;
+  }
+
+  return Math.min(MAX_FONT_SIZE_PX, Math.max(MIN_FONT_SIZE_PX, Math.round(value)));
+}
+
+export function getStoredFontSizePreference(): number {
+  if (typeof window === "undefined") {
+    return DEFAULT_FONT_SIZE_PX;
+  }
+
+  const storedFontSize = window.localStorage.getItem(FONT_SIZE_STORAGE_KEY);
+  if (!storedFontSize) {
+    return DEFAULT_FONT_SIZE_PX;
+  }
+
+  return clampFontSizePreference(Number.parseInt(storedFontSize, 10));
+}
+
+export function persistFontSizePreference(fontSizePx: number) {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  window.localStorage.setItem(
+    FONT_SIZE_STORAGE_KEY,
+    clampFontSizePreference(fontSizePx).toString(),
+  );
+}
+
+export function applyFontSizePreference(fontSizePx: number) {
+  if (typeof document === "undefined") {
+    return;
+  }
+
+  document.documentElement.style.fontSize = `${clampFontSizePreference(fontSizePx)}px`;
 }

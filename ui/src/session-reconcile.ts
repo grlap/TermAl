@@ -42,9 +42,12 @@ function reconcileSession(previous: Session, next: Session): Session {
     previous.agent === next.agent &&
     previous.workdir === next.workdir &&
     previous.model === next.model &&
+    sameModelOptions(previous.modelOptions, next.modelOptions) &&
     previous.approvalPolicy === next.approvalPolicy &&
     previous.sandboxMode === next.sandboxMode &&
+    previous.cursorMode === next.cursorMode &&
     previous.claudeApprovalMode === next.claudeApprovalMode &&
+    previous.geminiApprovalMode === next.geminiApprovalMode &&
     previous.externalSessionId === next.externalSessionId &&
     previous.status === next.status &&
     previous.preview === next.preview &&
@@ -67,6 +70,23 @@ function reconcileSession(previous: Session, next: Session): Session {
     ...rest,
     messages,
   };
+}
+
+function sameModelOptions(previous?: Session["modelOptions"], next?: Session["modelOptions"]) {
+  if (previous === next) {
+    return true;
+  }
+  if (!previous?.length && !next?.length) {
+    return true;
+  }
+  if (!previous || !next || previous.length !== next.length) {
+    return false;
+  }
+
+  return previous.every((option, index) => {
+    const nextOption = next[index];
+    return nextOption?.label === option.label && nextOption.value === option.value;
+  });
 }
 
 function reconcileMessages(previous: Message[], next: Message[]): Message[] {

@@ -72,6 +72,10 @@ async fn run_server() -> Result<()> {
         .route("/api/projects/pick", post(pick_project_root))
         .route("/api/sessions", post(create_session))
         .route("/api/sessions/{id}/settings", post(update_session_settings))
+        .route(
+            "/api/sessions/{id}/model-options/refresh",
+            post(refresh_session_model_options),
+        )
         .route("/api/sessions/{id}/messages", post(send_message))
         .route(
             "/api/sessions/{id}/queued-prompts/{prompt_id}/cancel",
@@ -158,6 +162,7 @@ fn run_repl(agent: Agent) -> Result<()> {
                 codex_approval_policy: Some(default_codex_approval_policy()),
                 codex_sandbox_mode: Some(default_codex_sandbox_mode()),
                 agent,
+                claude_approval_mode: Some(default_claude_approval_mode()),
                 cwd: cwd.clone(),
                 model: agent.default_model().to_owned(),
                 prompt: prompt.to_owned(),
@@ -238,7 +243,7 @@ impl AppState {
 
     fn snapshot(&self) -> StateResponse {
         let inner = self.inner.lock().expect("state mutex poisoned");
-        Self::snapshot_from_inner(&inner)
+        self.snapshot_from_inner(&inner)
     }
 
     fn create_session(
@@ -275,8 +280,11 @@ impl AppState {
                 )));
             }
         }
+        let agent = request.agent.unwrap_or(Agent::Codex);
+        validate_agent_session_setup(agent, &workdir)
+            .map_err(|message| ApiError::bad_request(message))?;
         let mut record = inner.create_session(
-            request.agent.unwrap_or(Agent::Codex),
+            agent,
             request.name,
             workdir,
             project.as_ref().map(|entry| entry.id.clone()),
@@ -287,7 +295,7 @@ impl AppState {
                 .filter(|value| !value.is_empty())
                 .map(str::to_owned),
         );
-        if record.session.agent == Agent::Codex {
+        if record.session.agent.supports_codex_prompt_settings() {
             if let Some(sandbox_mode) = request.sandbox_mode {
                 record.codex_sandbox_mode = sandbox_mode;
                 record.session.sandbox_mode = Some(sandbox_mode);
@@ -296,8 +304,64 @@ impl AppState {
                 record.codex_approval_policy = approval_policy;
                 record.session.approval_policy = Some(approval_policy);
             }
-        } else if let Some(claude_approval_mode) = request.claude_approval_mode {
-            record.session.claude_approval_mode = Some(claude_approval_mode);
+        } else if record.session.agent.supports_claude_approval_mode() {
+            if let Some(claude_approval_mode) = request.claude_approval_mode {
+                record.session.claude_approval_mode = Some(claude_approval_mode);
+            }
+        } else if record.session.agent.supports_cursor_mode() {
+            if let Some(cursor_mode) = request.cursor_mode {
+                record.session.cursor_mode = Some(cursor_mode);
+            }
+        } else if record.session.agent.supports_gemini_approval_mode() {
+            if let Some(gemini_approval_mode) = request.gemini_approval_mode {
+                record.session.gemini_approval_mode = Some(gemini_approval_mode);
+            }
+        }
+        match record.session.agent {
+            agent if agent.supports_codex_prompt_settings() => {
+                if request.claude_approval_mode.is_some()
+                    || request.cursor_mode.is_some()
+                    || request.gemini_approval_mode.is_some()
+                {
+                    return Err(ApiError::bad_request(
+                        "Codex sessions only support model, sandbox, and approval policy settings",
+                    ));
+                }
+            }
+            agent if agent.supports_claude_approval_mode() => {
+                if request.sandbox_mode.is_some()
+                    || request.approval_policy.is_some()
+                    || request.cursor_mode.is_some()
+                    || request.gemini_approval_mode.is_some()
+                {
+                    return Err(ApiError::bad_request(
+                        "Claude sessions only support model and mode settings",
+                    ));
+                }
+            }
+            agent if agent.supports_cursor_mode() => {
+                if request.sandbox_mode.is_some()
+                    || request.approval_policy.is_some()
+                    || request.claude_approval_mode.is_some()
+                    || request.gemini_approval_mode.is_some()
+                {
+                    return Err(ApiError::bad_request(
+                        "Cursor sessions only support mode settings",
+                    ));
+                }
+            }
+            agent if agent.supports_gemini_approval_mode() => {
+                if request.sandbox_mode.is_some()
+                    || request.approval_policy.is_some()
+                    || request.claude_approval_mode.is_some()
+                    || request.cursor_mode.is_some()
+                {
+                    return Err(ApiError::bad_request(
+                        "Gemini sessions only support approval mode settings",
+                    ));
+                }
+            }
+            _ => {}
         }
         if let Some(slot) = inner
             .find_session_index(&record.session.id)
@@ -309,7 +373,7 @@ impl AppState {
             .map_err(|err| ApiError::internal(format!("failed to persist session: {err:#}")))?;
         Ok(CreateSessionResponse {
             session_id: record.session.id,
-            state: Self::snapshot_from_inner(&inner),
+            state: self.snapshot_from_inner(&inner),
         })
     }
 
@@ -327,7 +391,7 @@ impl AppState {
         }
         Ok(CreateProjectResponse {
             project_id: project.id,
-            state: Self::snapshot_from_inner(&inner),
+            state: self.snapshot_from_inner(&inner),
         })
     }
 
@@ -369,16 +433,17 @@ impl AppState {
     }
 
     fn publish_state_locked(&self, inner: &StateInner) -> Result<()> {
-        let payload = serde_json::to_string(&Self::snapshot_from_inner(inner))
+        let payload = serde_json::to_string(&self.snapshot_from_inner(inner))
             .context("failed to serialize session snapshot")?;
         let _ = self.state_events.send(payload);
         Ok(())
     }
 
-    fn snapshot_from_inner(inner: &StateInner) -> StateResponse {
+    fn snapshot_from_inner(&self, inner: &StateInner) -> StateResponse {
         StateResponse {
             revision: inner.revision,
             codex: inner.codex.clone(),
+            agent_readiness: collect_agent_readiness(&self.default_workdir),
             projects: inner.projects.clone(),
             sessions: inner
                 .sessions
@@ -402,11 +467,29 @@ impl AppState {
 
         let dispatch = match record.session.agent {
             Agent::Claude => {
+                if record.runtime_reset_required {
+                    if let SessionRuntime::Claude(handle) = &record.runtime {
+                        handle.kill().map_err(|err| {
+                            ApiError::internal(format!(
+                                "failed to restart Claude session runtime: {err:#}"
+                            ))
+                        })?;
+                    }
+                    record.runtime = SessionRuntime::None;
+                    record.pending_claude_approvals.clear();
+                    record.runtime_reset_required = false;
+                }
+
                 let handle = match &record.runtime {
                     SessionRuntime::Claude(handle) => handle.clone(),
                     SessionRuntime::Codex(_) => {
                         return Err(ApiError::internal(
                             "unexpected Codex runtime attached to Claude session",
+                        ));
+                    }
+                    SessionRuntime::Acp(_) => {
+                        return Err(ApiError::internal(
+                            "unexpected ACP runtime attached to Claude session",
                         ));
                     }
                     SessionRuntime::None => {
@@ -415,6 +498,10 @@ impl AppState {
                             record.session.id.clone(),
                             record.session.workdir.clone(),
                             record.session.model.clone(),
+                            record
+                                .session
+                                .claude_approval_mode
+                                .unwrap_or_else(default_claude_approval_mode),
                             record.external_session_id.clone(),
                         )
                         .map_err(|err| {
@@ -437,11 +524,29 @@ impl AppState {
                 }
             }
             Agent::Codex => {
+                if record.runtime_reset_required {
+                    if let SessionRuntime::Codex(handle) = &record.runtime {
+                        handle.kill().map_err(|err| {
+                            ApiError::internal(format!(
+                                "failed to restart Codex session runtime: {err:#}"
+                            ))
+                        })?;
+                    }
+                    record.runtime = SessionRuntime::None;
+                    record.pending_codex_approvals.clear();
+                    record.runtime_reset_required = false;
+                }
+
                 let handle = match &record.runtime {
                     SessionRuntime::Codex(handle) => handle.clone(),
                     SessionRuntime::Claude(_) => {
                         return Err(ApiError::internal(
                             "unexpected Claude runtime attached to Codex session",
+                        ));
+                    }
+                    SessionRuntime::Acp(_) => {
+                        return Err(ApiError::internal(
+                            "unexpected ACP runtime attached to Codex session",
                         ));
                     }
                     SessionRuntime::None => {
@@ -450,7 +555,7 @@ impl AppState {
                             record.session.id.clone(),
                             record.session.model.clone(),
                         )
-                            .map_err(|err| {
+                        .map_err(|err| {
                             ApiError::internal(format!(
                                 "failed to start persistent Codex session: {err:#}"
                             ))
@@ -468,6 +573,81 @@ impl AppState {
                         prompt: prompt.to_owned(),
                         resume_thread_id: record.external_session_id.clone(),
                         sandbox_mode: record.codex_sandbox_mode,
+                    },
+                    sender: handle.input_tx,
+                    session_id: record.session.id.clone(),
+                }
+            }
+            agent @ (Agent::Cursor | Agent::Gemini) => {
+                if !attachments.is_empty() {
+                    return Err(ApiError::bad_request(format!(
+                        "{} sessions do not support image attachments yet",
+                        agent.name()
+                    )));
+                }
+
+                if record.runtime_reset_required {
+                    if let SessionRuntime::Acp(handle) = &record.runtime {
+                        handle.kill().map_err(|err| {
+                            ApiError::internal(format!(
+                                "failed to restart {} session runtime: {err:#}",
+                                agent.name()
+                            ))
+                        })?;
+                    }
+                    record.runtime = SessionRuntime::None;
+                    record.pending_acp_approvals.clear();
+                    record.runtime_reset_required = false;
+                }
+
+                let expected_acp_agent = agent
+                    .acp_runtime()
+                    .ok_or_else(|| ApiError::internal("missing ACP runtime config"))?;
+                let handle = match &record.runtime {
+                    SessionRuntime::Acp(handle) if handle.agent == expected_acp_agent => {
+                        handle.clone()
+                    }
+                    SessionRuntime::Acp(_) => {
+                        return Err(ApiError::internal(
+                            "unexpected ACP runtime attached to session",
+                        ));
+                    }
+                    SessionRuntime::Claude(_) => {
+                        return Err(ApiError::internal(
+                            "unexpected Claude runtime attached to ACP session",
+                        ));
+                    }
+                    SessionRuntime::Codex(_) => {
+                        return Err(ApiError::internal(
+                            "unexpected Codex runtime attached to ACP session",
+                        ));
+                    }
+                    SessionRuntime::None => {
+                        let handle = spawn_acp_runtime(
+                            self.clone(),
+                            record.session.id.clone(),
+                            record.session.workdir.clone(),
+                            expected_acp_agent,
+                            record.session.gemini_approval_mode,
+                        )
+                        .map_err(|err| {
+                            ApiError::internal(format!(
+                                "failed to start persistent {} session: {err:#}",
+                                agent.name()
+                            ))
+                        })?;
+                        record.runtime = SessionRuntime::Acp(handle.clone());
+                        handle
+                    }
+                };
+
+                TurnDispatch::PersistentAcp {
+                    command: AcpPromptCommand {
+                        cwd: record.session.workdir.clone(),
+                        cursor_mode: record.session.cursor_mode,
+                        model: record.session.model.clone(),
+                        prompt: prompt.to_owned(),
+                        resume_session_id: record.external_session_id.clone(),
                     },
                     sender: handle.input_tx,
                     session_id: record.session.id.clone(),
@@ -575,20 +755,69 @@ impl AppState {
             .find_session_index(session_id)
             .ok_or_else(|| ApiError::not_found("session not found"))?;
         let record = &mut inner.sessions[index];
+        let mut claude_permission_mode_update: Option<(ClaudeRuntimeHandle, String)> = None;
+        let mut acp_model_update: Option<(AcpRuntimeHandle, Value)> = None;
 
         match record.session.agent {
-            Agent::Codex => {
+            agent if agent.supports_codex_prompt_settings() => {
                 if request.claude_approval_mode.is_some() {
                     return Err(ApiError::bad_request(
                         "Claude approval mode can only be changed for Claude sessions",
                     ));
                 }
-            }
-            Agent::Claude => {
-                if request.sandbox_mode.is_some() || request.approval_policy.is_some() {
+                if request.cursor_mode.is_some()
+                    || request.gemini_approval_mode.is_some()
+                {
                     return Err(ApiError::bad_request(
-                        "Claude sessions only support approval mode settings",
+                        "Codex sessions do not support Cursor or Gemini settings",
                     ));
+                }
+            }
+            agent if agent.supports_claude_approval_mode() => {
+                if request.sandbox_mode.is_some()
+                    || request.approval_policy.is_some()
+                    || request.cursor_mode.is_some()
+                    || request.gemini_approval_mode.is_some()
+                {
+                    return Err(ApiError::bad_request(
+                        "Claude sessions only support model and mode settings",
+                    ));
+                }
+            }
+            agent if agent.supports_cursor_mode() => {
+                if request.sandbox_mode.is_some()
+                    || request.approval_policy.is_some()
+                    || request.claude_approval_mode.is_some()
+                    || request.gemini_approval_mode.is_some()
+                {
+                    return Err(ApiError::bad_request(
+                        "Cursor sessions only support model and mode settings",
+                    ));
+                }
+            }
+            agent if agent.supports_gemini_approval_mode() => {
+                if request.sandbox_mode.is_some()
+                    || request.approval_policy.is_some()
+                    || request.claude_approval_mode.is_some()
+                    || request.cursor_mode.is_some()
+                {
+                    return Err(ApiError::bad_request(
+                        "Gemini sessions only support model and approval mode settings",
+                    ));
+                }
+            }
+            agent => {
+                if request.model.is_some()
+                    || request.sandbox_mode.is_some()
+                    || request.approval_policy.is_some()
+                    || request.claude_approval_mode.is_some()
+                    || request.cursor_mode.is_some()
+                    || request.gemini_approval_mode.is_some()
+                {
+                    return Err(ApiError::bad_request(format!(
+                        "{} sessions do not support prompt settings yet",
+                        agent.name()
+                    )));
                 }
             }
         }
@@ -601,8 +830,22 @@ impl AppState {
             record.session.name = trimmed.to_owned();
         }
 
+        if let Some(model) = request.model.as_deref() {
+            let trimmed = model.trim();
+            if trimmed.is_empty() {
+                return Err(ApiError::bad_request("session model cannot be empty"));
+            }
+        }
+
         match record.session.agent {
-            Agent::Codex => {
+            agent if agent.supports_codex_prompt_settings() => {
+                if let Some(model) = request.model.as_deref() {
+                    let trimmed = model.trim().to_owned();
+                    if record.session.model != trimmed {
+                        record.session.model = trimmed;
+                        record.runtime_reset_required = true;
+                    }
+                }
                 if let Some(sandbox_mode) = request.sandbox_mode {
                     record.codex_sandbox_mode = sandbox_mode;
                     record.session.sandbox_mode = Some(sandbox_mode);
@@ -612,17 +855,194 @@ impl AppState {
                     record.session.approval_policy = Some(approval_policy);
                 }
             }
-            Agent::Claude => {
+            agent if agent.supports_claude_approval_mode() => {
+                let mut model_changed = false;
+                if let Some(model) = request.model.as_deref() {
+                    let trimmed = model.trim().to_owned();
+                    if record.session.model != trimmed {
+                        record.session.model = trimmed;
+                        record.runtime_reset_required = true;
+                        model_changed = true;
+                    }
+                }
                 if let Some(claude_approval_mode) = request.claude_approval_mode {
                     record.session.claude_approval_mode = Some(claude_approval_mode);
+                    if !model_changed {
+                        if let SessionRuntime::Claude(handle) = &record.runtime {
+                            claude_permission_mode_update = Some((
+                                handle.clone(),
+                                claude_approval_mode
+                                    .session_cli_permission_mode()
+                                    .to_owned(),
+                            ));
+                        }
+                    }
                 }
             }
+            agent if agent.supports_cursor_mode() => {
+                if let Some(model) = request.model.as_deref() {
+                    let trimmed = model.trim().to_owned();
+                    record.session.model = trimmed.clone();
+                    if let (SessionRuntime::Acp(handle), Some(external_session_id)) =
+                        (&record.runtime, record.external_session_id.as_deref())
+                    {
+                        acp_model_update = Some((
+                            handle.clone(),
+                            json!({
+                                "id": Uuid::new_v4().to_string(),
+                                "method": "session/set_config_option",
+                                "params": {
+                                    "sessionId": external_session_id,
+                                    "optionId": "model",
+                                    "value": trimmed,
+                                }
+                            }),
+                        ));
+                    }
+                }
+                if let Some(cursor_mode) = request.cursor_mode {
+                    record.session.cursor_mode = Some(cursor_mode);
+                }
+            }
+            agent if agent.supports_gemini_approval_mode() => {
+                if let Some(model) = request.model.as_deref() {
+                    record.session.model = model.trim().to_owned();
+                }
+                if let Some(gemini_approval_mode) = request.gemini_approval_mode {
+                    if record.session.gemini_approval_mode != Some(gemini_approval_mode) {
+                        record.runtime_reset_required = true;
+                    }
+                    record.session.gemini_approval_mode = Some(gemini_approval_mode);
+                }
+            }
+            _ => {}
         }
 
         self.commit_locked(&mut inner).map_err(|err| {
             ApiError::internal(format!("failed to persist session state: {err:#}"))
         })?;
-        Ok(Self::snapshot_from_inner(&inner))
+        let snapshot = self.snapshot_from_inner(&inner);
+        drop(inner);
+
+        if let Some((handle, permission_mode)) = claude_permission_mode_update {
+            let _ = handle
+                .input_tx
+                .send(ClaudeRuntimeCommand::SetPermissionMode(permission_mode));
+        }
+        if let Some((handle, request)) = acp_model_update {
+            let _ = handle
+                .input_tx
+                .send(AcpRuntimeCommand::JsonRpcMessage(request));
+        }
+
+        Ok(snapshot)
+    }
+
+    fn refresh_session_model_options(
+        &self,
+        session_id: &str,
+    ) -> std::result::Result<StateResponse, ApiError> {
+        let mut inner = self.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(session_id)
+            .ok_or_else(|| ApiError::not_found("session not found"))?;
+        let record = &mut inner.sessions[index];
+        let agent = record.session.agent;
+        let expected_acp_agent = agent.acp_runtime().ok_or_else(|| {
+            ApiError::bad_request(format!(
+                "{} sessions do not expose live model options",
+                agent.name()
+            ))
+        })?;
+
+        if record.runtime_reset_required {
+            if let SessionRuntime::Acp(handle) = &record.runtime {
+                handle.kill().map_err(|err| {
+                    ApiError::internal(format!(
+                        "failed to restart {} session runtime: {err:#}",
+                        agent.name()
+                    ))
+                })?;
+            }
+            record.runtime = SessionRuntime::None;
+            record.pending_acp_approvals.clear();
+            record.runtime_reset_required = false;
+        }
+
+        let handle = match &record.runtime {
+            SessionRuntime::Acp(handle) if handle.agent == expected_acp_agent => handle.clone(),
+            SessionRuntime::Acp(_) => {
+                return Err(ApiError::internal(
+                    "unexpected ACP runtime attached to session",
+                ));
+            }
+            SessionRuntime::Claude(_) => {
+                return Err(ApiError::internal(
+                    "unexpected Claude runtime attached to ACP session",
+                ));
+            }
+            SessionRuntime::Codex(_) => {
+                return Err(ApiError::internal(
+                    "unexpected Codex runtime attached to ACP session",
+                ));
+            }
+            SessionRuntime::None => {
+                let handle = spawn_acp_runtime(
+                    self.clone(),
+                    record.session.id.clone(),
+                    record.session.workdir.clone(),
+                    expected_acp_agent,
+                    record.session.gemini_approval_mode,
+                )
+                .map_err(|err| {
+                    ApiError::internal(format!(
+                        "failed to start persistent {} session: {err:#}",
+                        agent.name()
+                    ))
+                })?;
+                record.runtime = SessionRuntime::Acp(handle.clone());
+                handle
+            }
+        };
+
+        let command = AcpPromptCommand {
+            cwd: record.session.workdir.clone(),
+            cursor_mode: record.session.cursor_mode,
+            model: record.session.model.clone(),
+            prompt: String::new(),
+            resume_session_id: record.external_session_id.clone(),
+        };
+        drop(inner);
+
+        let (response_tx, response_rx) = mpsc::channel::<std::result::Result<(), String>>();
+        handle
+            .input_tx
+            .send(AcpRuntimeCommand::RefreshSessionConfig {
+                command,
+                response_tx,
+            })
+            .map_err(|err| {
+                ApiError::internal(format!(
+                    "failed to queue {} model refresh: {err}",
+                    agent.name()
+                ))
+            })?;
+
+        match response_rx.recv_timeout(Duration::from_secs(30)) {
+            Ok(Ok(())) => Ok(self.snapshot()),
+            Ok(Err(detail)) => Err(ApiError::internal(format!(
+                "failed to refresh {} model options: {detail}",
+                agent.name()
+            ))),
+            Err(mpsc::RecvTimeoutError::Timeout) => Err(ApiError::internal(format!(
+                "timed out refreshing {} model options",
+                agent.name()
+            ))),
+            Err(mpsc::RecvTimeoutError::Disconnected) => Err(ApiError::internal(format!(
+                "{} model refresh did not return a result",
+                agent.name()
+            ))),
+        }
     }
 
     fn allocate_message_id(&self) -> String {
@@ -638,6 +1058,39 @@ impl AppState {
         inner.sessions[index].external_session_id = Some(external_session_id.clone());
         inner.sessions[index].session.external_session_id = Some(external_session_id);
         self.commit_locked(&mut inner)?;
+        Ok(())
+    }
+
+    fn sync_acp_model_config(
+        &self,
+        session_id: &str,
+        current_model: Option<String>,
+        model_options: Vec<SessionModelOption>,
+    ) -> Result<()> {
+        let mut inner = self.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(session_id)
+            .ok_or_else(|| anyhow!("session `{session_id}` not found"))?;
+        let session = &mut inner.sessions[index].session;
+
+        let mut changed = false;
+        if let Some(current_model) = current_model
+            .map(|value| value.trim().to_owned())
+            .filter(|value| !value.is_empty())
+        {
+            if session.model != current_model {
+                session.model = current_model;
+                changed = true;
+            }
+        }
+        if session.model_options != model_options {
+            session.model_options = model_options;
+            changed = true;
+        }
+
+        if changed {
+            self.commit_locked(&mut inner)?;
+        }
         Ok(())
     }
 
@@ -694,8 +1147,10 @@ impl AppState {
             .find_session_index(session_id)
             .ok_or_else(|| anyhow!("session `{session_id}` not found"))?;
         inner.sessions[index].runtime = SessionRuntime::None;
+        inner.sessions[index].runtime_reset_required = false;
         inner.sessions[index].pending_claude_approvals.clear();
         inner.sessions[index].pending_codex_approvals.clear();
+        inner.sessions[index].pending_acp_approvals.clear();
         Ok(())
     }
 
@@ -892,8 +1347,10 @@ impl AppState {
             let message_id = (was_busy || !cleaned.is_empty()).then(|| inner.next_message_id());
             let record = &mut inner.sessions[index];
             record.runtime = SessionRuntime::None;
+            record.runtime_reset_required = false;
             record.pending_claude_approvals.clear();
             record.pending_codex_approvals.clear();
+            record.pending_acp_approvals.clear();
 
             if !cleaned.is_empty() || was_busy {
                 let detail = if !cleaned.is_empty() {
@@ -905,6 +1362,9 @@ impl AppState {
                         }
                         RuntimeToken::Codex(_) => {
                             "Codex session exited before the active turn completed".to_owned()
+                        }
+                        RuntimeToken::Acp(_) => {
+                            "Agent session exited before the active turn completed".to_owned()
                         }
                     }
                 };
@@ -969,6 +1429,22 @@ impl AppState {
         Ok(())
     }
 
+    fn register_acp_pending_approval(
+        &self,
+        session_id: &str,
+        message_id: String,
+        approval: AcpPendingApproval,
+    ) -> Result<()> {
+        let mut inner = self.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(session_id)
+            .ok_or_else(|| anyhow!("session `{session_id}` not found"))?;
+        inner.sessions[index]
+            .pending_acp_approvals
+            .insert(message_id, approval);
+        Ok(())
+    }
+
     fn clear_claude_pending_approval_by_request(
         &self,
         session_id: &str,
@@ -995,6 +1471,7 @@ impl AppState {
             let runtime = match &record.runtime {
                 SessionRuntime::Claude(handle) => Some(KillableRuntime::Claude(handle.clone())),
                 SessionRuntime::Codex(handle) => Some(KillableRuntime::Codex(handle.clone())),
+                SessionRuntime::Acp(handle) => Some(KillableRuntime::Acp(handle.clone())),
                 SessionRuntime::None => None,
             };
 
@@ -1029,7 +1506,7 @@ impl AppState {
         self.commit_locked(&mut inner).map_err(|err| {
             ApiError::internal(format!("failed to persist session state: {err:#}"))
         })?;
-        Ok(Self::snapshot_from_inner(&inner))
+        Ok(self.snapshot_from_inner(&inner))
     }
 
     fn cancel_queued_prompt(
@@ -1054,7 +1531,7 @@ impl AppState {
         self.commit_locked(&mut inner).map_err(|err| {
             ApiError::internal(format!("failed to persist session state: {err:#}"))
         })?;
-        Ok(Self::snapshot_from_inner(&inner))
+        Ok(self.snapshot_from_inner(&inner))
     }
 
     fn stop_session(&self, session_id: &str) -> std::result::Result<StateResponse, ApiError> {
@@ -1083,6 +1560,7 @@ impl AppState {
             let runtime = match &record.runtime {
                 SessionRuntime::Claude(handle) => KillableRuntime::Claude(handle.clone()),
                 SessionRuntime::Codex(handle) => KillableRuntime::Codex(handle.clone()),
+                SessionRuntime::Acp(handle) => KillableRuntime::Acp(handle.clone()),
                 SessionRuntime::None => {
                     return Err(ApiError::conflict("session is not currently running"));
                 }
@@ -1286,6 +1764,7 @@ impl AppState {
     ) -> std::result::Result<StateResponse, ApiError> {
         let mut claude_runtime_action: Option<(ClaudeRuntimeHandle, ClaudePendingApproval)> = None;
         let mut codex_runtime_action: Option<(CodexRuntimeHandle, CodexPendingApproval)> = None;
+        let mut acp_runtime_action: Option<(AcpRuntimeHandle, AcpPendingApproval)> = None;
         let mut inner = self.inner.lock().expect("state mutex poisoned");
         let index = inner
             .find_session_index(session_id)
@@ -1323,6 +1802,11 @@ impl AppState {
                         "Claude session is not currently running",
                     ));
                 }
+                SessionRuntime::Acp(_) => {
+                    return Err(ApiError::conflict(
+                        "Claude session is not currently running",
+                    ));
+                }
             };
             claude_runtime_action = Some((handle, pending));
         } else if session.agent == Agent::Codex
@@ -1340,11 +1824,31 @@ impl AppState {
                 .ok_or_else(|| ApiError::conflict("approval request is no longer live"))?;
             let handle = match &record.runtime {
                 SessionRuntime::Codex(handle) => handle.clone(),
-                SessionRuntime::Claude(_) | SessionRuntime::None => {
+                SessionRuntime::Claude(_) | SessionRuntime::None | SessionRuntime::Acp(_) => {
                     return Err(ApiError::conflict("Codex session is not currently running"));
                 }
             };
             codex_runtime_action = Some((handle, pending));
+        } else if matches!(session.agent, Agent::Cursor | Agent::Gemini)
+            && matches!(
+                decision,
+                ApprovalDecision::Accepted
+                    | ApprovalDecision::AcceptedForSession
+                    | ApprovalDecision::Rejected
+            )
+        {
+            let pending = record
+                .pending_acp_approvals
+                .get(message_id)
+                .cloned()
+                .ok_or_else(|| ApiError::conflict("approval request is no longer live"))?;
+            let handle = match &record.runtime {
+                SessionRuntime::Acp(handle) => handle.clone(),
+                SessionRuntime::Claude(_) | SessionRuntime::Codex(_) | SessionRuntime::None => {
+                    return Err(ApiError::conflict("agent session is not currently running"));
+                }
+            };
+            acp_runtime_action = Some((handle, pending));
         }
 
         drop(inner);
@@ -1401,6 +1905,46 @@ impl AppState {
                     ))
                 })?;
         }
+        if let Some((handle, pending)) = acp_runtime_action {
+            let option_id = match decision {
+                ApprovalDecision::Accepted => pending
+                    .allow_once_option_id
+                    .clone()
+                    .or_else(|| pending.allow_always_option_id.clone())
+                    .or_else(|| pending.reject_option_id.clone()),
+                ApprovalDecision::AcceptedForSession => pending
+                    .allow_always_option_id
+                    .clone()
+                    .or_else(|| pending.allow_once_option_id.clone())
+                    .or_else(|| pending.reject_option_id.clone()),
+                ApprovalDecision::Rejected => pending
+                    .reject_option_id
+                    .clone()
+                    .or_else(|| pending.allow_once_option_id.clone())
+                    .or_else(|| pending.allow_always_option_id.clone()),
+                ApprovalDecision::Pending => None,
+            }
+            .ok_or_else(|| {
+                ApiError::conflict("no approval option is available for this request")
+            })?;
+
+            handle
+                .input_tx
+                .send(AcpRuntimeCommand::JsonRpcMessage(json!({
+                    "id": pending.request_id.clone(),
+                    "result": {
+                        "outcome": {
+                            "outcome": "selected",
+                            "optionId": option_id,
+                        }
+                    }
+                })))
+                .map_err(|err| {
+                    ApiError::internal(format!(
+                        "failed to deliver approval response to agent session: {err}"
+                    ))
+                })?;
+        }
 
         let mut inner = self.inner.lock().expect("state mutex poisoned");
         let index = inner
@@ -1433,64 +1977,38 @@ impl AppState {
             return Err(ApiError::not_found("approval message not found"));
         }
 
-        if session.agent == Agent::Claude {
-            if decision != ApprovalDecision::Pending {
-                record.pending_claude_approvals.remove(message_id);
-            }
-            if session.status == SessionStatus::Approval {
-                session.status = if decision == ApprovalDecision::Pending {
-                    SessionStatus::Approval
-                } else {
-                    SessionStatus::Active
-                };
-            }
-            if session.status == SessionStatus::Approval || session.status == SessionStatus::Active
-            {
-                session.preview = match decision {
-                    ApprovalDecision::Pending => "Approval pending.".to_owned(),
-                    ApprovalDecision::Accepted => {
-                        "Approval granted. Claude is continuing…".to_owned()
-                    }
-                    ApprovalDecision::AcceptedForSession => {
-                        "Approval granted for this session. Claude is continuing…".to_owned()
-                    }
-                    ApprovalDecision::Rejected => {
-                        "Approval rejected. Claude is continuing…".to_owned()
-                    }
-                };
-            }
-        } else {
-            if decision != ApprovalDecision::Pending {
-                record.pending_codex_approvals.remove(message_id);
-            }
-            if session.status == SessionStatus::Approval {
-                session.status = if decision == ApprovalDecision::Pending {
-                    SessionStatus::Approval
-                } else {
-                    SessionStatus::Active
-                };
-            }
-            if session.status == SessionStatus::Approval || session.status == SessionStatus::Active
-            {
-                session.preview = match decision {
-                    ApprovalDecision::Pending => "Approval pending.".to_owned(),
-                    ApprovalDecision::Accepted => {
-                        "Approval granted. Codex is continuing…".to_owned()
-                    }
-                    ApprovalDecision::AcceptedForSession => {
-                        "Approval granted for this session. Codex is continuing…".to_owned()
-                    }
-                    ApprovalDecision::Rejected => {
-                        "Approval rejected. Codex is continuing…".to_owned()
-                    }
-                };
-            }
+        if decision != ApprovalDecision::Pending {
+            record.pending_claude_approvals.remove(message_id);
+            record.pending_codex_approvals.remove(message_id);
+            record.pending_acp_approvals.remove(message_id);
+        }
+        if session.status == SessionStatus::Approval {
+            session.status = if decision == ApprovalDecision::Pending {
+                SessionStatus::Approval
+            } else {
+                SessionStatus::Active
+            };
+        }
+        if session.status == SessionStatus::Approval || session.status == SessionStatus::Active {
+            let agent_name = session.agent.name();
+            session.preview = match decision {
+                ApprovalDecision::Pending => "Approval pending.".to_owned(),
+                ApprovalDecision::Accepted => {
+                    format!("Approval granted. {agent_name} is continuing…")
+                }
+                ApprovalDecision::AcceptedForSession => {
+                    format!("Approval granted for this session. {agent_name} is continuing…")
+                }
+                ApprovalDecision::Rejected => {
+                    format!("Approval rejected. {agent_name} is continuing…")
+                }
+            };
         }
 
         self.commit_locked(&mut inner).map_err(|err| {
             ApiError::internal(format!("failed to persist session state: {err:#}"))
         })?;
-        Ok(Self::snapshot_from_inner(&inner))
+        Ok(self.snapshot_from_inner(&inner))
     }
 
     fn fail_turn(&self, session_id: &str, error_message: &str) -> Result<()> {
@@ -1611,8 +2129,10 @@ impl StateInner {
             external_session_id: None,
             pending_claude_approvals: HashMap::new(),
             pending_codex_approvals: HashMap::new(),
+            pending_acp_approvals: HashMap::new(),
             queued_prompts: VecDeque::new(),
             runtime: SessionRuntime::None,
+            runtime_reset_required: false,
             session: Session {
                 id: format!("session-{number}"),
                 name: name.unwrap_or_else(|| format!("{} {}", agent.name(), number)),
@@ -1621,10 +2141,18 @@ impl StateInner {
                 workdir,
                 project_id,
                 model: model.unwrap_or_else(|| agent.default_model().to_owned()),
+                model_options: Vec::new(),
                 approval_policy: None,
                 sandbox_mode: None,
-                claude_approval_mode: (agent == Agent::Claude)
+                cursor_mode: agent
+                    .supports_cursor_mode()
+                    .then_some(default_cursor_mode()),
+                claude_approval_mode: agent
+                    .supports_claude_approval_mode()
                     .then_some(default_claude_approval_mode()),
+                gemini_approval_mode: agent
+                    .supports_gemini_approval_mode()
+                    .then_some(default_gemini_approval_mode()),
                 external_session_id: None,
                 status: SessionStatus::Idle,
                 preview: "Ready for a prompt.".to_owned(),
@@ -1634,7 +2162,7 @@ impl StateInner {
         };
 
         let mut record = record;
-        if record.session.agent == Agent::Codex {
+        if record.session.agent.supports_codex_prompt_settings() {
             record.session.approval_policy = Some(record.codex_approval_policy);
             record.session.sandbox_mode = Some(record.codex_sandbox_mode);
         }
@@ -1790,12 +2318,27 @@ impl PersistedSessionRecord {
     fn into_record(self) -> SessionRecord {
         let mut session = self.session;
         session.external_session_id = self.external_session_id.clone();
-        if session.agent == Agent::Claude {
+        if session.agent.acp_runtime().is_none() {
+            session.model_options.clear();
+        }
+        if session.agent.supports_cursor_mode() {
+            session.cursor_mode.get_or_insert_with(default_cursor_mode);
+        } else {
+            session.cursor_mode = None;
+        }
+        if session.agent.supports_claude_approval_mode() {
             session
                 .claude_approval_mode
                 .get_or_insert_with(default_claude_approval_mode);
         } else {
             session.claude_approval_mode = None;
+        }
+        if session.agent.supports_gemini_approval_mode() {
+            session
+                .gemini_approval_mode
+                .get_or_insert_with(default_gemini_approval_mode);
+        } else {
+            session.gemini_approval_mode = None;
         }
         session.pending_prompts.clear();
 
@@ -1807,8 +2350,10 @@ impl PersistedSessionRecord {
             external_session_id: self.external_session_id,
             pending_claude_approvals: HashMap::new(),
             pending_codex_approvals: HashMap::new(),
+            pending_acp_approvals: HashMap::new(),
             queued_prompts: self.queued_prompts,
             runtime: SessionRuntime::None,
+            runtime_reset_required: false,
             session,
         };
         sync_pending_prompts(&mut record);
@@ -1825,8 +2370,10 @@ struct SessionRecord {
     external_session_id: Option<String>,
     pending_claude_approvals: HashMap<String, ClaudePendingApproval>,
     pending_codex_approvals: HashMap<String, CodexPendingApproval>,
+    pending_acp_approvals: HashMap<String, AcpPendingApproval>,
     queued_prompts: VecDeque<QueuedPromptRecord>,
     runtime: SessionRuntime,
+    runtime_reset_required: bool,
     session: Session,
 }
 
@@ -1861,6 +2408,7 @@ enum SessionRuntime {
     None,
     Claude(ClaudeRuntimeHandle),
     Codex(CodexRuntimeHandle),
+    Acp(AcpRuntimeHandle),
 }
 
 #[derive(Clone)]
@@ -1889,10 +2437,66 @@ impl CodexRuntimeHandle {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum AcpAgent {
+    Cursor,
+    Gemini,
+}
+
+impl AcpAgent {
+    fn agent(self) -> Agent {
+        match self {
+            Self::Cursor => Agent::Cursor,
+            Self::Gemini => Agent::Gemini,
+        }
+    }
+
+    fn command(self, launch_options: AcpLaunchOptions) -> Result<Command> {
+        match self {
+            Self::Cursor => {
+                let exe = find_command_on_path("cursor-agent")
+                    .ok_or_else(|| anyhow!("`cursor-agent` was not found on PATH"))?;
+                let mut command = Command::new(exe);
+                command.arg("acp");
+                Ok(command)
+            }
+            Self::Gemini => {
+                let exe = find_command_on_path("gemini")
+                    .ok_or_else(|| anyhow!("`gemini` was not found on PATH"))?;
+                let mut command = Command::new(exe);
+                command.arg("--acp");
+                if let Some(approval_mode) = launch_options.gemini_approval_mode {
+                    command.args(["--approval-mode", approval_mode.as_cli_value()]);
+                }
+                Ok(command)
+            }
+        }
+    }
+
+    fn label(self) -> &'static str {
+        self.agent().name()
+    }
+}
+
+#[derive(Clone)]
+struct AcpRuntimeHandle {
+    agent: AcpAgent,
+    runtime_id: String,
+    input_tx: Sender<AcpRuntimeCommand>,
+    process: Arc<Mutex<Child>>,
+}
+
+impl AcpRuntimeHandle {
+    fn kill(&self) -> Result<()> {
+        kill_child_process(&self.process, self.agent.label())
+    }
+}
+
 #[derive(Clone)]
 enum KillableRuntime {
     Claude(ClaudeRuntimeHandle),
     Codex(CodexRuntimeHandle),
+    Acp(AcpRuntimeHandle),
 }
 
 impl KillableRuntime {
@@ -1900,6 +2504,7 @@ impl KillableRuntime {
         match self {
             Self::Claude(handle) => handle.kill(),
             Self::Codex(handle) => handle.kill(),
+            Self::Acp(handle) => handle.kill(),
         }
     }
 }
@@ -1908,6 +2513,7 @@ impl KillableRuntime {
 enum RuntimeToken {
     Claude(String),
     Codex(String),
+    Acp(String),
 }
 
 impl SessionRuntime {
@@ -1919,6 +2525,7 @@ impl SessionRuntime {
             (Self::Codex(handle), RuntimeToken::Codex(runtime_id)) => {
                 handle.runtime_id == *runtime_id
             }
+            (Self::Acp(handle), RuntimeToken::Acp(runtime_id)) => handle.runtime_id == *runtime_id,
             _ => false,
         }
     }
@@ -2322,10 +2929,55 @@ enum ClaudeControlRequestAction {
 }
 
 #[derive(Clone)]
+enum AcpRuntimeCommand {
+    Prompt(AcpPromptCommand),
+    JsonRpcMessage(Value),
+    RefreshSessionConfig {
+        command: AcpPromptCommand,
+        response_tx: Sender<std::result::Result<(), String>>,
+    },
+}
+
+#[derive(Clone, Copy, Default)]
+struct AcpLaunchOptions {
+    gemini_approval_mode: Option<GeminiApprovalMode>,
+}
+
+#[derive(Clone)]
+struct AcpPromptCommand {
+    cwd: String,
+    cursor_mode: Option<CursorMode>,
+    model: String,
+    prompt: String,
+    resume_session_id: Option<String>,
+}
+
+#[derive(Clone)]
+struct AcpPendingApproval {
+    allow_once_option_id: Option<String>,
+    allow_always_option_id: Option<String>,
+    reject_option_id: Option<String>,
+    request_id: Value,
+}
+
+#[derive(Default)]
+struct AcpRuntimeState {
+    current_session_id: Option<String>,
+    is_loading_history: bool,
+}
+
+#[derive(Default)]
+struct AcpTurnState {
+    current_agent_message_id: Option<String>,
+    thinking_buffer: String,
+}
+
+#[derive(Clone)]
 struct TurnConfig {
     codex_approval_policy: Option<CodexApprovalPolicy>,
     codex_sandbox_mode: Option<CodexSandboxMode>,
     agent: Agent,
+    claude_approval_mode: Option<ClaudeApprovalMode>,
     cwd: String,
     model: String,
     prompt: String,
@@ -2343,6 +2995,11 @@ enum TurnDispatch {
         sender: Sender<CodexRuntimeCommand>,
         session_id: String,
     },
+    PersistentAcp {
+        command: AcpPromptCommand,
+        sender: Sender<AcpRuntimeCommand>,
+        session_id: String,
+    },
 }
 
 enum DispatchTurnResult {
@@ -2352,13 +3009,1075 @@ enum DispatchTurnResult {
 
 type CodexPendingRequestMap =
     Arc<Mutex<HashMap<String, Sender<std::result::Result<Value, String>>>>>;
+type AcpPendingRequestMap = Arc<Mutex<HashMap<String, Sender<std::result::Result<Value, String>>>>>;
 
 #[derive(Default)]
 struct CodexTurnState {
     streamed_agent_message_item_ids: HashSet<String>,
 }
 
-fn spawn_codex_runtime(state: AppState, session_id: String, model: String) -> Result<CodexRuntimeHandle> {
+fn spawn_acp_runtime(
+    state: AppState,
+    session_id: String,
+    cwd: String,
+    agent: AcpAgent,
+    gemini_approval_mode: Option<GeminiApprovalMode>,
+) -> Result<AcpRuntimeHandle> {
+    let runtime_id = Uuid::new_v4().to_string();
+    let mut command = agent.command(AcpLaunchOptions {
+        gemini_approval_mode,
+    })?;
+    command
+        .current_dir(&cwd)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+
+    let mut child = command
+        .spawn()
+        .with_context(|| format!("failed to start {} ACP runtime in `{cwd}`", agent.label()))?;
+    let stdin = child
+        .stdin
+        .take()
+        .with_context(|| format!("failed to capture {} ACP stdin", agent.label()))?;
+    let stdout = child
+        .stdout
+        .take()
+        .with_context(|| format!("failed to capture {} ACP stdout", agent.label()))?;
+    let stderr = child
+        .stderr
+        .take()
+        .with_context(|| format!("failed to capture {} ACP stderr", agent.label()))?;
+    let process = Arc::new(Mutex::new(child));
+    let (input_tx, input_rx) = mpsc::channel::<AcpRuntimeCommand>();
+    let pending_requests: AcpPendingRequestMap = Arc::new(Mutex::new(HashMap::new()));
+    let runtime_state = Arc::new(Mutex::new(AcpRuntimeState::default()));
+
+    {
+        let writer_session_id = session_id.clone();
+        let writer_state = state.clone();
+        let writer_pending_requests = pending_requests.clone();
+        let writer_runtime_state = runtime_state.clone();
+        let writer_runtime_token = RuntimeToken::Acp(runtime_id.clone());
+        std::thread::spawn(move || {
+            let mut stdin = stdin;
+            let initialize_result = send_acp_json_rpc_request(
+                &mut stdin,
+                &writer_pending_requests,
+                "initialize",
+                json!({
+                    "protocolVersion": 1,
+                    "clientInfo": {
+                        "name": "termal",
+                        "version": env!("CARGO_PKG_VERSION"),
+                    },
+                    "clientCapabilities": {},
+                }),
+                Duration::from_secs(15),
+                agent,
+            )
+            .and_then(|result| {
+                maybe_authenticate_acp_runtime(&mut stdin, &writer_pending_requests, &result, agent)
+            });
+
+            if let Err(err) = initialize_result {
+                let _ = writer_state.handle_runtime_exit_if_matches(
+                    &writer_session_id,
+                    &writer_runtime_token,
+                    Some(&format!(
+                        "failed to initialize {} ACP session: {err:#}",
+                        agent.label()
+                    )),
+                );
+                return;
+            }
+
+            while let Ok(command) = input_rx.recv() {
+                let command_result = match command {
+                    AcpRuntimeCommand::Prompt(prompt) => handle_acp_prompt_command(
+                        &mut stdin,
+                        &writer_pending_requests,
+                        &writer_state,
+                        &writer_session_id,
+                        &writer_runtime_state,
+                        &writer_runtime_token,
+                        agent,
+                        prompt,
+                    ),
+                    AcpRuntimeCommand::JsonRpcMessage(message) => {
+                        write_acp_json_rpc_message(&mut stdin, &message, agent)
+                    }
+                    AcpRuntimeCommand::RefreshSessionConfig {
+                        command,
+                        response_tx,
+                    } => {
+                        let refresh_result = handle_acp_session_config_refresh(
+                            &mut stdin,
+                            &writer_pending_requests,
+                            &writer_state,
+                            &writer_session_id,
+                            &writer_runtime_state,
+                            agent,
+                            command,
+                        )
+                        .map_err(|err| format!("{err:#}"));
+                        match refresh_result {
+                            Ok(()) => {
+                                let _ = response_tx.send(Ok(()));
+                                Ok(())
+                            }
+                            Err(detail) => {
+                                let _ = response_tx.send(Err(detail.clone()));
+                                Err(anyhow!(detail))
+                            }
+                        }
+                    }
+                };
+
+                if let Err(err) = command_result {
+                    let _ = writer_state.handle_runtime_exit_if_matches(
+                        &writer_session_id,
+                        &writer_runtime_token,
+                        Some(&format!(
+                            "failed to communicate with {} ACP runtime: {err:#}",
+                            agent.label()
+                        )),
+                    );
+                    break;
+                }
+            }
+        });
+    }
+
+    {
+        let reader_session_id = session_id.clone();
+        let reader_state = state.clone();
+        let reader_pending_requests = pending_requests.clone();
+        let reader_runtime_state = runtime_state.clone();
+        let reader_input_tx = input_tx.clone();
+        let reader_runtime_token = RuntimeToken::Acp(runtime_id.clone());
+        std::thread::spawn(move || {
+            let mut reader = BufReader::new(stdout);
+            let mut raw_line = String::new();
+            let mut turn_state = AcpTurnState::default();
+            let mut recorder =
+                SessionRecorder::new(reader_state.clone(), reader_session_id.clone());
+
+            loop {
+                raw_line.clear();
+                let bytes_read = match reader.read_line(&mut raw_line) {
+                    Ok(bytes_read) => bytes_read,
+                    Err(err) => {
+                        let _ = reader_state.fail_turn_if_runtime_matches(
+                            &reader_session_id,
+                            &reader_runtime_token,
+                            &format!(
+                                "failed to read stdout from {} ACP runtime: {err}",
+                                agent.label()
+                            ),
+                        );
+                        break;
+                    }
+                };
+
+                if bytes_read == 0 {
+                    break;
+                }
+
+                let message: Value = match serde_json::from_str(raw_line.trim_end()) {
+                    Ok(message) => message,
+                    Err(err) => {
+                        let _ = reader_state.fail_turn_if_runtime_matches(
+                            &reader_session_id,
+                            &reader_runtime_token,
+                            &format!("failed to parse {} ACP JSON line: {err}", agent.label()),
+                        );
+                        break;
+                    }
+                };
+
+                if let Err(err) = handle_acp_message(
+                    &message,
+                    &reader_state,
+                    &reader_session_id,
+                    &reader_runtime_token,
+                    &reader_pending_requests,
+                    &reader_runtime_state,
+                    &reader_input_tx,
+                    &mut turn_state,
+                    &mut recorder,
+                    agent,
+                ) {
+                    let _ = reader_state.fail_turn_if_runtime_matches(
+                        &reader_session_id,
+                        &reader_runtime_token,
+                        &format!("failed to handle {} ACP event: {err:#}", agent.label()),
+                    );
+                    break;
+                }
+            }
+
+            let _ = finish_acp_turn_state(&mut recorder, &mut turn_state, agent);
+            let _ = recorder.finish_streaming_text();
+        });
+    }
+
+    {
+        std::thread::spawn(move || {
+            let reader = BufReader::new(stderr);
+            for line in reader.lines().map_while(Result::ok) {
+                eprintln!("{} stderr> {line}", agent.label().to_lowercase());
+            }
+        });
+    }
+
+    {
+        let wait_session_id = session_id.clone();
+        let wait_state = state.clone();
+        let wait_process = process.clone();
+        let wait_runtime_token = RuntimeToken::Acp(runtime_id.clone());
+        std::thread::spawn(move || {
+            loop {
+                let status = {
+                    let mut child = wait_process.lock().expect("ACP process mutex poisoned");
+                    child.try_wait()
+                };
+
+                match status {
+                    Ok(Some(status)) if status.success() => {
+                        let _ = wait_state.handle_runtime_exit_if_matches(
+                            &wait_session_id,
+                            &wait_runtime_token,
+                            None,
+                        );
+                        break;
+                    }
+                    Ok(Some(status)) => {
+                        let _ = wait_state.handle_runtime_exit_if_matches(
+                            &wait_session_id,
+                            &wait_runtime_token,
+                            Some(&format!(
+                                "{} session exited with status {status}",
+                                agent.label()
+                            )),
+                        );
+                        break;
+                    }
+                    Ok(None) => std::thread::sleep(Duration::from_millis(100)),
+                    Err(err) => {
+                        let _ = wait_state.handle_runtime_exit_if_matches(
+                            &wait_session_id,
+                            &wait_runtime_token,
+                            Some(&format!(
+                                "failed waiting for {} session: {err}",
+                                agent.label()
+                            )),
+                        );
+                        break;
+                    }
+                }
+            }
+        });
+    }
+
+    Ok(AcpRuntimeHandle {
+        agent,
+        runtime_id,
+        input_tx,
+        process,
+    })
+}
+
+fn maybe_authenticate_acp_runtime(
+    writer: &mut impl Write,
+    pending_requests: &AcpPendingRequestMap,
+    initialize_result: &Value,
+    agent: AcpAgent,
+) -> Result<()> {
+    let Some(method_id) = select_acp_auth_method(initialize_result, agent) else {
+        return Ok(());
+    };
+
+    send_acp_json_rpc_request(
+        writer,
+        pending_requests,
+        "authenticate",
+        json!({ "methodId": method_id }),
+        Duration::from_secs(30),
+        agent,
+    )?;
+    Ok(())
+}
+
+fn select_acp_auth_method(initialize_result: &Value, agent: AcpAgent) -> Option<String> {
+    let methods = initialize_result
+        .get("authMethods")
+        .and_then(Value::as_array)?;
+
+    let has_method = |target: &str| {
+        methods.iter().any(|method| {
+            method
+                .get("id")
+                .and_then(Value::as_str)
+                .map(|id| id == target)
+                .unwrap_or(false)
+        })
+    };
+
+    match agent {
+        AcpAgent::Cursor => has_method("cursor_login").then_some("cursor_login".to_owned()),
+        AcpAgent::Gemini => {
+            if std::env::var_os("GEMINI_API_KEY").is_some() && has_method("gemini-api-key") {
+                Some("gemini-api-key".to_owned())
+            } else if (std::env::var_os("GOOGLE_GENAI_USE_VERTEXAI").is_some()
+                || std::env::var_os("GOOGLE_GENAI_USE_GCA").is_some())
+                && has_method("vertex-ai")
+            {
+                Some("vertex-ai".to_owned())
+            } else {
+                None
+            }
+        }
+    }
+}
+
+fn handle_acp_prompt_command(
+    writer: &mut impl Write,
+    pending_requests: &AcpPendingRequestMap,
+    state: &AppState,
+    session_id: &str,
+    runtime_state: &Arc<Mutex<AcpRuntimeState>>,
+    runtime_token: &RuntimeToken,
+    agent: AcpAgent,
+    command: AcpPromptCommand,
+) -> Result<()> {
+    let external_session_id = ensure_acp_session_ready(
+        writer,
+        pending_requests,
+        state,
+        session_id,
+        runtime_state,
+        agent,
+        &command,
+    )?;
+
+    send_acp_json_rpc_request(
+        writer,
+        pending_requests,
+        "session/prompt",
+        json!({
+            "sessionId": external_session_id,
+            "prompt": [
+                {
+                    "type": "text",
+                    "text": command.prompt,
+                }
+            ],
+        }),
+        Duration::from_secs(60),
+        agent,
+    )?;
+
+    state.finish_turn_ok_if_runtime_matches(session_id, runtime_token)?;
+    Ok(())
+}
+
+fn handle_acp_session_config_refresh(
+    writer: &mut impl Write,
+    pending_requests: &AcpPendingRequestMap,
+    state: &AppState,
+    session_id: &str,
+    runtime_state: &Arc<Mutex<AcpRuntimeState>>,
+    agent: AcpAgent,
+    command: AcpPromptCommand,
+) -> Result<()> {
+    ensure_acp_session_ready(
+        writer,
+        pending_requests,
+        state,
+        session_id,
+        runtime_state,
+        agent,
+        &command,
+    )?;
+    Ok(())
+}
+
+fn ensure_acp_session_ready(
+    writer: &mut impl Write,
+    pending_requests: &AcpPendingRequestMap,
+    state: &AppState,
+    session_id: &str,
+    runtime_state: &Arc<Mutex<AcpRuntimeState>>,
+    agent: AcpAgent,
+    command: &AcpPromptCommand,
+) -> Result<String> {
+    if let Some(existing_session_id) = runtime_state
+        .lock()
+        .expect("ACP runtime state mutex poisoned")
+        .current_session_id
+        .clone()
+    {
+        return Ok(existing_session_id);
+    }
+
+    let session_result = if let Some(resume_session_id) = command.resume_session_id.as_deref() {
+        {
+            let mut state = runtime_state
+                .lock()
+                .expect("ACP runtime state mutex poisoned");
+            state.is_loading_history = true;
+        }
+        let result = send_acp_json_rpc_request(
+            writer,
+            pending_requests,
+            "session/load",
+            json!({
+                "sessionId": resume_session_id,
+                "cwd": command.cwd,
+                "mcpServers": [],
+            }),
+            Duration::from_secs(30),
+            agent,
+        );
+        {
+            let mut state = runtime_state
+                .lock()
+                .expect("ACP runtime state mutex poisoned");
+            state.is_loading_history = false;
+        }
+        result.map(|value| (resume_session_id.to_owned(), value))?
+    } else {
+        let result = send_acp_json_rpc_request(
+            writer,
+            pending_requests,
+            "session/new",
+            json!({
+                "cwd": command.cwd,
+                "mcpServers": [],
+            }),
+            Duration::from_secs(30),
+            agent,
+        )?;
+        let created_session_id = result
+            .get("sessionId")
+            .and_then(Value::as_str)
+            .ok_or_else(|| {
+                anyhow!(
+                    "{} ACP session/new did not return a session id",
+                    agent.label()
+                )
+            })?
+            .to_owned();
+        (created_session_id, result)
+    };
+
+    let (external_session_id, session_config) = session_result;
+    configure_acp_session(
+        writer,
+        pending_requests,
+        agent,
+        &external_session_id,
+        &command.model,
+        command.cursor_mode,
+        &session_config,
+    )?;
+    state.sync_acp_model_config(
+        session_id,
+        current_acp_config_option_value(&session_config, "model").or_else(|| {
+            let requested = command.model.trim();
+            (!requested.is_empty()).then(|| requested.to_owned())
+        }),
+        acp_model_options(&session_config),
+    )?;
+    state.set_external_session_id(session_id, external_session_id.clone())?;
+    runtime_state
+        .lock()
+        .expect("ACP runtime state mutex poisoned")
+        .current_session_id = Some(external_session_id.clone());
+    Ok(external_session_id)
+}
+
+fn configure_acp_session(
+    writer: &mut impl Write,
+    pending_requests: &AcpPendingRequestMap,
+    agent: AcpAgent,
+    session_id: &str,
+    requested_model: &str,
+    requested_cursor_mode: Option<CursorMode>,
+    config_result: &Value,
+) -> Result<()> {
+    if let Some(model_value) =
+        matching_acp_config_option_value(config_result, "model", requested_model)
+    {
+        let current_value = current_acp_config_option_value(config_result, "model");
+        if current_value.as_deref() != Some(model_value.as_str()) {
+            send_acp_json_rpc_request(
+                writer,
+                pending_requests,
+                "session/set_config_option",
+                json!({
+                    "sessionId": session_id,
+                    "optionId": "model",
+                    "value": model_value,
+                }),
+                Duration::from_secs(15),
+                agent,
+            )?;
+        }
+    }
+
+    if agent == AcpAgent::Cursor {
+        let requested_mode = requested_cursor_mode.unwrap_or_else(default_cursor_mode);
+        if let Some(mode_value) =
+            matching_acp_config_option_value(config_result, "mode", requested_mode.as_acp_value())
+        {
+            let current_value = current_acp_config_option_value(config_result, "mode");
+            if current_value.as_deref() != Some(mode_value.as_str()) {
+                send_acp_json_rpc_request(
+                    writer,
+                    pending_requests,
+                    "session/set_config_option",
+                    json!({
+                        "sessionId": session_id,
+                        "optionId": "mode",
+                        "value": mode_value,
+                    }),
+                    Duration::from_secs(15),
+                    agent,
+                )?;
+            }
+        }
+    }
+    Ok(())
+}
+
+fn current_acp_config_option_value(config_result: &Value, option_id: &str) -> Option<String> {
+    acp_config_options(config_result)?
+        .iter()
+        .find(|entry| entry.get("id").and_then(Value::as_str) == Some(option_id))
+        .and_then(|entry| entry.get("currentValue").and_then(Value::as_str))
+        .map(str::to_owned)
+}
+
+fn matching_acp_config_option_value(
+    config_result: &Value,
+    option_id: &str,
+    requested_value: &str,
+) -> Option<String> {
+    let requested = requested_value.trim();
+    if requested.is_empty() {
+        return None;
+    }
+    let requested_normalized = requested.to_ascii_lowercase();
+    let option = acp_config_options(config_result)?
+        .iter()
+        .find(|entry| entry.get("id").and_then(Value::as_str) == Some(option_id))?;
+    let options = option.get("options").and_then(Value::as_array)?;
+    options.iter().find_map(|entry| {
+        let value = entry.get("value").and_then(Value::as_str)?;
+        let name = entry
+            .get("name")
+            .or_else(|| entry.get("label"))
+            .and_then(Value::as_str)
+            .unwrap_or("");
+        let value_normalized = value.to_ascii_lowercase();
+        let name_normalized = name.to_ascii_lowercase();
+        if value_normalized == requested_normalized || name_normalized == requested_normalized {
+            Some(value.to_owned())
+        } else {
+            None
+        }
+    })
+}
+
+fn acp_model_options(config_result: &Value) -> Vec<SessionModelOption> {
+    let Some(option) = acp_config_options(config_result).and_then(|entries| {
+        entries
+            .iter()
+            .find(|entry| entry.get("id").and_then(Value::as_str) == Some("model"))
+    }) else {
+        return Vec::new();
+    };
+
+    option
+        .get("options")
+        .and_then(Value::as_array)
+        .map(|entries| {
+            entries
+                .iter()
+                .filter_map(|entry| {
+                    let value = entry.get("value").and_then(Value::as_str)?.trim();
+                    if value.is_empty() {
+                        return None;
+                    }
+                    let label = entry
+                        .get("name")
+                        .or_else(|| entry.get("label"))
+                        .and_then(Value::as_str)
+                        .map(str::trim)
+                        .filter(|label| !label.is_empty())
+                        .unwrap_or(value);
+                    Some(SessionModelOption {
+                        label: label.to_owned(),
+                        value: value.to_owned(),
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn acp_config_options(config_result: &Value) -> Option<&Vec<Value>> {
+    config_result
+        .get("configOptions")
+        .or_else(|| config_result.get("config_options"))
+        .and_then(Value::as_array)
+}
+
+fn handle_acp_message(
+    message: &Value,
+    state: &AppState,
+    session_id: &str,
+    runtime_token: &RuntimeToken,
+    pending_requests: &AcpPendingRequestMap,
+    runtime_state: &Arc<Mutex<AcpRuntimeState>>,
+    input_tx: &Sender<AcpRuntimeCommand>,
+    turn_state: &mut AcpTurnState,
+    recorder: &mut SessionRecorder,
+    agent: AcpAgent,
+) -> Result<()> {
+    if let Some(response_id) = message.get("id") {
+        if message.get("result").is_some() || message.get("error").is_some() {
+            let key = acp_request_id_key(response_id);
+            let sender = pending_requests
+                .lock()
+                .expect("ACP pending requests mutex poisoned")
+                .remove(&key);
+            if let Some(sender) = sender {
+                let response = if let Some(result) = message.get("result") {
+                    Ok(result.clone())
+                } else {
+                    Err(summarize_acp_json_rpc_error(
+                        message.get("error").unwrap_or(&Value::Null),
+                    ))
+                };
+                let _ = sender.send(response);
+            }
+            return Ok(());
+        }
+    }
+
+    let Some(method) = message.get("method").and_then(Value::as_str) else {
+        log_unhandled_acp_event(agent, "ACP message missing method", message);
+        return Ok(());
+    };
+
+    if message.get("id").is_some() {
+        return handle_acp_request(message, input_tx, recorder, agent);
+    }
+
+    handle_acp_notification(
+        method,
+        message,
+        state,
+        session_id,
+        runtime_token,
+        runtime_state,
+        turn_state,
+        recorder,
+        agent,
+    )
+}
+
+fn handle_acp_request(
+    message: &Value,
+    input_tx: &Sender<AcpRuntimeCommand>,
+    recorder: &mut SessionRecorder,
+    agent: AcpAgent,
+) -> Result<()> {
+    let request_id = message
+        .get("id")
+        .cloned()
+        .ok_or_else(|| anyhow!("ACP request missing id"))?;
+    let method = message
+        .get("method")
+        .and_then(Value::as_str)
+        .ok_or_else(|| anyhow!("ACP request missing method"))?;
+    let params = message.get("params").unwrap_or(&Value::Null);
+
+    match method {
+        "session/request_permission" => {
+            let tool_name = params
+                .get("toolName")
+                .and_then(Value::as_str)
+                .unwrap_or("Tool");
+            let description = params
+                .get("description")
+                .and_then(Value::as_str)
+                .unwrap_or(tool_name);
+            let options = params
+                .get("options")
+                .and_then(Value::as_array)
+                .cloned()
+                .unwrap_or_default();
+
+            recorder.push_acp_approval(
+                &format!("{} needs approval", agent.label()),
+                description,
+                &format!("{} requested approval for `{tool_name}`.", agent.label()),
+                AcpPendingApproval {
+                    allow_once_option_id: find_acp_permission_option(
+                        &options,
+                        &["allow-once", "allow_once", "allow"],
+                    ),
+                    allow_always_option_id: find_acp_permission_option(
+                        &options,
+                        &["allow-always", "allow_always", "always", "acceptForSession"],
+                    ),
+                    reject_option_id: find_acp_permission_option(
+                        &options,
+                        &["reject-once", "reject_once", "reject", "deny", "decline"],
+                    ),
+                    request_id,
+                },
+            )?;
+        }
+        _ => {
+            let _ = input_tx.send(AcpRuntimeCommand::JsonRpcMessage(json!({
+                "id": request_id,
+                "error": {
+                    "code": -32601,
+                    "message": format!("unsupported ACP request `{method}`"),
+                }
+            })));
+            log_unhandled_acp_event(agent, &format!("unhandled ACP request `{method}`"), message);
+        }
+    }
+
+    Ok(())
+}
+
+fn handle_acp_notification(
+    method: &str,
+    message: &Value,
+    state: &AppState,
+    session_id: &str,
+    runtime_token: &RuntimeToken,
+    runtime_state: &Arc<Mutex<AcpRuntimeState>>,
+    turn_state: &mut AcpTurnState,
+    recorder: &mut SessionRecorder,
+    agent: AcpAgent,
+) -> Result<()> {
+    match method {
+        "session/update" => {
+            if runtime_state
+                .lock()
+                .expect("ACP runtime state mutex poisoned")
+                .is_loading_history
+            {
+                return Ok(());
+            }
+
+            let Some(update) = message.pointer("/params/update") else {
+                log_unhandled_acp_event(agent, "ACP session/update missing params.update", message);
+                return Ok(());
+            };
+            handle_acp_session_update(update, state, session_id, turn_state, recorder, agent)?;
+        }
+        "error" => {
+            let payload = message.get("params").unwrap_or(message);
+            let detail = summarize_error(payload);
+            state.fail_turn_if_runtime_matches(session_id, runtime_token, &detail)?;
+        }
+        _ => {
+            log_unhandled_acp_event(
+                agent,
+                &format!("unhandled ACP notification `{method}`"),
+                message,
+            );
+        }
+    }
+
+    Ok(())
+}
+
+fn handle_acp_session_update(
+    update: &Value,
+    state: &AppState,
+    session_id: &str,
+    turn_state: &mut AcpTurnState,
+    recorder: &mut SessionRecorder,
+    agent: AcpAgent,
+) -> Result<()> {
+    let Some(update_type) = update.get("sessionUpdate").and_then(Value::as_str) else {
+        return Ok(());
+    };
+
+    match update_type {
+        "agent_thought_chunk" => {
+            if let Some(text) = update.pointer("/content/text").and_then(Value::as_str) {
+                turn_state.thinking_buffer.push_str(text);
+            }
+        }
+        "agent_message_chunk" => {
+            finish_acp_thinking(recorder, turn_state, agent)?;
+            let next_message_id = update
+                .get("messageId")
+                .and_then(Value::as_str)
+                .map(str::to_owned);
+            if turn_state.current_agent_message_id != next_message_id {
+                recorder.finish_streaming_text()?;
+                turn_state.current_agent_message_id = next_message_id;
+            }
+            if let Some(text) = update.pointer("/content/text").and_then(Value::as_str) {
+                recorder.text_delta(text)?;
+            }
+        }
+        "tool_call" => {
+            finish_acp_thinking(recorder, turn_state, agent)?;
+            recorder.finish_streaming_text()?;
+            if let Some((key, command)) = acp_tool_identity(update) {
+                recorder.command_started(&key, &command)?;
+            }
+        }
+        "tool_call_update" => {
+            finish_acp_thinking(recorder, turn_state, agent)?;
+            if let Some((key, command)) = acp_tool_identity(update) {
+                match update.get("status").and_then(Value::as_str) {
+                    Some("pending") | Some("in_progress") => {
+                        recorder.command_started(&key, &command)?;
+                    }
+                    Some("completed") | Some("failed") | Some("error") => {
+                        recorder.command_completed(
+                            &key,
+                            &command,
+                            &summarize_acp_tool_output(update),
+                            acp_tool_status(update),
+                        )?;
+                    }
+                    _ => {}
+                }
+            }
+        }
+        "config_options_update" | "config_update" => {
+            state.sync_acp_model_config(
+                session_id,
+                current_acp_config_option_value(update, "model"),
+                acp_model_options(update),
+            )?;
+        }
+        "available_commands_update" | "mode_update" => {}
+        other => {
+            log_unhandled_acp_event(
+                agent,
+                &format!("unhandled ACP session/update `{other}`"),
+                update,
+            );
+        }
+    }
+
+    Ok(())
+}
+
+fn finish_acp_turn_state(
+    recorder: &mut SessionRecorder,
+    turn_state: &mut AcpTurnState,
+    agent: AcpAgent,
+) -> Result<()> {
+    finish_acp_thinking(recorder, turn_state, agent)?;
+    recorder.finish_streaming_text()
+}
+
+fn finish_acp_thinking(
+    recorder: &mut SessionRecorder,
+    turn_state: &mut AcpTurnState,
+    agent: AcpAgent,
+) -> Result<()> {
+    if turn_state.thinking_buffer.trim().is_empty() {
+        turn_state.thinking_buffer.clear();
+        return Ok(());
+    }
+
+    let lines = turn_state
+        .thinking_buffer
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .map(str::to_owned)
+        .collect::<Vec<_>>();
+    turn_state.thinking_buffer.clear();
+    if lines.is_empty() {
+        return Ok(());
+    }
+    recorder.push_thinking(&format!("{} is thinking", agent.label()), lines)
+}
+
+fn acp_tool_identity(update: &Value) -> Option<(String, String)> {
+    let key = update.get("toolCallId").and_then(Value::as_str)?.to_owned();
+    let command = update
+        .pointer("/rawInput/command")
+        .and_then(Value::as_str)
+        .map(str::to_owned)
+        .or_else(|| {
+            let title = update.get("title").and_then(Value::as_str)?;
+            let kind = update.get("kind").and_then(Value::as_str);
+            Some(match kind {
+                Some(kind) => format!("{title} ({kind})"),
+                None => title.to_owned(),
+            })
+        })
+        .unwrap_or_else(|| "Tool call".to_owned());
+    Some((key, command))
+}
+
+fn summarize_acp_tool_output(update: &Value) -> String {
+    let Some(raw_output) = update.get("rawOutput") else {
+        return String::new();
+    };
+
+    let stdout = raw_output
+        .get("stdout")
+        .and_then(Value::as_str)
+        .unwrap_or("");
+    let stderr = raw_output
+        .get("stderr")
+        .and_then(Value::as_str)
+        .unwrap_or("");
+    if !stdout.is_empty() || !stderr.is_empty() {
+        if stdout.is_empty() {
+            return stderr.to_owned();
+        }
+        if stderr.is_empty() {
+            return stdout.to_owned();
+        }
+        return format!("{stdout}\n{stderr}");
+    }
+
+    serde_json::to_string_pretty(raw_output).unwrap_or_else(|_| raw_output.to_string())
+}
+
+fn acp_tool_status(update: &Value) -> CommandStatus {
+    match update.get("status").and_then(Value::as_str) {
+        Some("completed") => {
+            if update
+                .pointer("/rawOutput/exitCode")
+                .and_then(Value::as_i64)
+                == Some(0)
+            {
+                CommandStatus::Success
+            } else {
+                CommandStatus::Error
+            }
+        }
+        Some("failed") | Some("error") => CommandStatus::Error,
+        _ => CommandStatus::Running,
+    }
+}
+
+fn find_acp_permission_option(options: &[Value], hints: &[&str]) -> Option<String> {
+    options.iter().find_map(|option| {
+        let option_id = option
+            .get("optionId")
+            .or_else(|| option.get("id"))
+            .and_then(Value::as_str)?;
+        let normalized = option_id.to_ascii_lowercase();
+        hints
+            .iter()
+            .any(|hint| normalized.contains(&hint.to_ascii_lowercase()))
+            .then_some(option_id.to_owned())
+    })
+}
+
+fn send_acp_json_rpc_request(
+    writer: &mut impl Write,
+    pending_requests: &AcpPendingRequestMap,
+    method: &str,
+    params: Value,
+    timeout: Duration,
+    agent: AcpAgent,
+) -> Result<Value> {
+    let request_id = Uuid::new_v4().to_string();
+    let (tx, rx) = mpsc::channel();
+    pending_requests
+        .lock()
+        .expect("ACP pending requests mutex poisoned")
+        .insert(request_id.clone(), tx);
+
+    if let Err(err) = write_acp_json_rpc_message(
+        writer,
+        &json!({
+            "jsonrpc": "2.0",
+            "id": request_id,
+            "method": method,
+            "params": params,
+        }),
+        agent,
+    ) {
+        pending_requests
+            .lock()
+            .expect("ACP pending requests mutex poisoned")
+            .remove(&request_id);
+        return Err(err);
+    }
+
+    match rx.recv_timeout(timeout) {
+        Ok(Ok(result)) => Ok(result),
+        Ok(Err(err)) => Err(anyhow!(err)),
+        Err(err) => {
+            pending_requests
+                .lock()
+                .expect("ACP pending requests mutex poisoned")
+                .remove(&request_id);
+            Err(anyhow!(
+                "timed out waiting for {} ACP response to `{method}`: {err}",
+                agent.label()
+            ))
+        }
+    }
+}
+
+fn write_acp_json_rpc_message(
+    writer: &mut impl Write,
+    message: &Value,
+    agent: AcpAgent,
+) -> Result<()> {
+    serde_json::to_writer(&mut *writer, message)
+        .with_context(|| format!("failed to encode {} ACP message", agent.label()))?;
+    writer
+        .write_all(b"\n")
+        .with_context(|| format!("failed to write {} ACP message delimiter", agent.label()))?;
+    writer
+        .flush()
+        .with_context(|| format!("failed to flush {} ACP stdin", agent.label()))
+}
+
+fn acp_request_id_key(id: &Value) -> String {
+    id.as_str()
+        .map(str::to_owned)
+        .unwrap_or_else(|| id.to_string())
+}
+
+fn summarize_acp_json_rpc_error(error: &Value) -> String {
+    if let Some(message) = error.get("message").and_then(Value::as_str) {
+        return message.to_owned();
+    }
+
+    summarize_error(error)
+}
+
+fn log_unhandled_acp_event(agent: AcpAgent, context: &str, message: &Value) {
+    eprintln!(
+        "{} acp diagnostic> {context}: {message}",
+        agent.label().to_lowercase()
+    );
+}
+
+fn spawn_codex_runtime(
+    state: AppState,
+    session_id: String,
+    model: String,
+) -> Result<CodexRuntimeHandle> {
     let codex_home = prepare_termal_codex_home(&state.default_workdir, &session_id)?;
     let runtime_id = Uuid::new_v4().to_string();
     let mut command = codex_command()?;
@@ -3133,6 +4852,410 @@ fn find_command_on_path(command: &str) -> Option<PathBuf> {
     None
 }
 
+fn collect_agent_readiness(default_workdir: &str) -> Vec<AgentReadiness> {
+    vec![
+        agent_readiness_for(Agent::Cursor, default_workdir),
+        agent_readiness_for(Agent::Gemini, default_workdir),
+    ]
+}
+
+fn validate_agent_session_setup(agent: Agent, workdir: &str) -> std::result::Result<(), String> {
+    let readiness = agent_readiness_for(agent, workdir);
+    if readiness.blocking {
+        return Err(readiness.detail);
+    }
+    Ok(())
+}
+
+fn agent_readiness_for(agent: Agent, workdir: &str) -> AgentReadiness {
+    match agent {
+        Agent::Cursor => cursor_agent_readiness(),
+        Agent::Gemini => gemini_agent_readiness(workdir),
+        _ => AgentReadiness {
+            agent,
+            status: AgentReadinessStatus::Ready,
+            blocking: false,
+            detail: format!("{} is managed by its local CLI runtime.", agent.name()),
+            command_path: None,
+        },
+    }
+}
+
+fn cursor_agent_readiness() -> AgentReadiness {
+    let command_path = find_command_on_path("cursor-agent").map(|path| path.display().to_string());
+    match command_path {
+        Some(command_path) => AgentReadiness {
+            agent: Agent::Cursor,
+            status: AgentReadinessStatus::Ready,
+            blocking: false,
+            detail: format!("Cursor Agent is available at `{command_path}`."),
+            command_path: Some(command_path),
+        },
+        None => AgentReadiness {
+            agent: Agent::Cursor,
+            status: AgentReadinessStatus::Missing,
+            blocking: true,
+            detail: "Install `cursor-agent` and make sure it is on PATH before creating Cursor sessions."
+                .to_owned(),
+            command_path: None,
+        },
+    }
+}
+
+fn gemini_agent_readiness(workdir: &str) -> AgentReadiness {
+    let command_path = match find_command_on_path("gemini") {
+        Some(path) => path,
+        None => {
+            return AgentReadiness {
+                agent: Agent::Gemini,
+                status: AgentReadinessStatus::Missing,
+                blocking: true,
+                detail: "Install the `gemini` CLI and make sure it is on PATH before creating Gemini sessions."
+                    .to_owned(),
+                command_path: None,
+            };
+        }
+    };
+    let command_path_display = command_path.display().to_string();
+
+    if let Some(source) = gemini_api_key_source(workdir) {
+        return AgentReadiness {
+            agent: Agent::Gemini,
+            status: AgentReadinessStatus::Ready,
+            blocking: false,
+            detail: format!("Gemini CLI is ready with a Gemini API key from {source}."),
+            command_path: Some(command_path_display),
+        };
+    }
+
+    let selected_auth_type = gemini_selected_auth_type(workdir);
+    if selected_auth_type.as_deref() == Some("oauth-personal") {
+        if let Some(path) = gemini_oauth_credentials_path().filter(|path| path.is_file()) {
+            return AgentReadiness {
+                agent: Agent::Gemini,
+                status: AgentReadinessStatus::Ready,
+                blocking: false,
+                detail: format!(
+                    "Gemini CLI is ready with Google login credentials from {}.",
+                    display_path_for_user(&path)
+                ),
+                command_path: Some(command_path_display),
+            };
+        }
+        return AgentReadiness {
+            agent: Agent::Gemini,
+            status: AgentReadinessStatus::NeedsSetup,
+            blocking: true,
+            detail: format!(
+                "Gemini is configured for Google login, but {} is missing.",
+                gemini_oauth_credentials_path()
+                    .as_deref()
+                    .map(display_path_for_user)
+                    .unwrap_or_else(|| "~/.gemini/oauth_creds.json".to_owned())
+            ),
+            command_path: Some(command_path_display),
+        };
+    }
+
+    if selected_auth_type.as_deref() == Some("gemini-api-key") {
+        return AgentReadiness {
+            agent: Agent::Gemini,
+            status: AgentReadinessStatus::NeedsSetup,
+            blocking: true,
+            detail: gemini_api_key_missing_detail(workdir),
+            command_path: Some(command_path_display),
+        };
+    }
+
+    if selected_auth_type.as_deref() == Some("vertex-ai") {
+        if let Some(source) = gemini_vertex_auth_source(workdir) {
+            return AgentReadiness {
+                agent: Agent::Gemini,
+                status: AgentReadinessStatus::Ready,
+                blocking: false,
+                detail: format!("Gemini CLI is ready with Vertex AI credentials from {source}."),
+                command_path: Some(command_path_display),
+            };
+        }
+        return AgentReadiness {
+            agent: Agent::Gemini,
+            status: AgentReadinessStatus::NeedsSetup,
+            blocking: true,
+            detail: "Gemini is configured for Vertex AI, but the required credentials are missing. Set `GOOGLE_API_KEY`, or set both `GOOGLE_CLOUD_PROJECT` and `GOOGLE_CLOUD_LOCATION`."
+                .to_owned(),
+            command_path: Some(command_path_display),
+        };
+    }
+
+    if selected_auth_type.as_deref() == Some("compute-default-credentials") {
+        if let Some(source) = gemini_adc_source() {
+            return AgentReadiness {
+                agent: Agent::Gemini,
+                status: AgentReadinessStatus::Ready,
+                blocking: false,
+                detail: format!(
+                    "Gemini CLI is ready with application default credentials from {source}."
+                ),
+                command_path: Some(command_path_display),
+            };
+        }
+        return AgentReadiness {
+            agent: Agent::Gemini,
+            status: AgentReadinessStatus::NeedsSetup,
+            blocking: true,
+            detail: "Gemini is configured for application default credentials, but no ADC file was found. Set `GOOGLE_APPLICATION_CREDENTIALS` or run `gcloud auth application-default login`."
+                .to_owned(),
+            command_path: Some(command_path_display),
+        };
+    }
+
+    if let Some(source) = gemini_vertex_auth_source(workdir) {
+        return AgentReadiness {
+            agent: Agent::Gemini,
+            status: AgentReadinessStatus::Ready,
+            blocking: false,
+            detail: format!("Gemini CLI is ready with Vertex AI credentials from {source}."),
+            command_path: Some(command_path_display),
+        };
+    }
+
+    AgentReadiness {
+        agent: Agent::Gemini,
+        status: AgentReadinessStatus::NeedsSetup,
+        blocking: true,
+        detail: "Gemini CLI needs auth before TermAl can create sessions. Set `GEMINI_API_KEY`, configure Vertex AI env vars, or choose an auth type in `.gemini/settings.json`."
+            .to_owned(),
+        command_path: Some(command_path_display),
+    }
+}
+
+fn gemini_api_key_missing_detail(workdir: &str) -> String {
+    let env_file = find_gemini_env_file(workdir)
+        .map(|path| display_path_for_user(&path))
+        .unwrap_or_else(|| ".env".to_owned());
+    format!(
+        "Gemini is configured for an API key, but `GEMINI_API_KEY` was not found in the process environment or in {env_file}."
+    )
+}
+
+fn gemini_api_key_source(workdir: &str) -> Option<String> {
+    env_var_source("GEMINI_API_KEY").or_else(|| dotenv_var_source(workdir, "GEMINI_API_KEY"))
+}
+
+fn gemini_vertex_auth_source(workdir: &str) -> Option<String> {
+    let vertex_enabled = env_var_present("GOOGLE_GENAI_USE_VERTEXAI")
+        || env_var_present("GOOGLE_GENAI_USE_GCA")
+        || dotenv_var_present(workdir, "GOOGLE_GENAI_USE_VERTEXAI")
+        || dotenv_var_present(workdir, "GOOGLE_GENAI_USE_GCA");
+    if !vertex_enabled && gemini_selected_auth_type(workdir).as_deref() != Some("vertex-ai") {
+        return None;
+    }
+
+    if let Some(source) =
+        env_var_source("GOOGLE_API_KEY").or_else(|| dotenv_var_source(workdir, "GOOGLE_API_KEY"))
+    {
+        return Some(source);
+    }
+
+    let has_project = env_var_present("GOOGLE_CLOUD_PROJECT")
+        || dotenv_var_present(workdir, "GOOGLE_CLOUD_PROJECT");
+    let has_location = env_var_present("GOOGLE_CLOUD_LOCATION")
+        || dotenv_var_present(workdir, "GOOGLE_CLOUD_LOCATION");
+    if has_project && has_location {
+        return Some(
+            env_var_source("GOOGLE_CLOUD_PROJECT")
+                .or_else(|| dotenv_var_source(workdir, "GOOGLE_CLOUD_PROJECT"))
+                .unwrap_or_else(|| "workspace configuration".to_owned()),
+        );
+    }
+
+    None
+}
+
+fn gemini_adc_source() -> Option<String> {
+    if let Some(path) = std::env::var_os("GOOGLE_APPLICATION_CREDENTIALS")
+        .map(PathBuf::from)
+        .filter(|path| path.is_file())
+    {
+        return Some(display_path_for_user(&path));
+    }
+
+    let home = home_dir()?;
+    let default_path = if cfg!(windows) {
+        std::env::var_os("APPDATA").map(PathBuf::from).map(|path| {
+            path.join("gcloud")
+                .join("application_default_credentials.json")
+        })
+    } else {
+        Some(
+            home.join(".config")
+                .join("gcloud")
+                .join("application_default_credentials.json"),
+        )
+    }?;
+    default_path
+        .is_file()
+        .then(|| display_path_for_user(&default_path))
+}
+
+fn gemini_selected_auth_type(workdir: &str) -> Option<String> {
+    let workspace_settings = PathBuf::from(workdir).join(".gemini").join("settings.json");
+    for path in [
+        Some(workspace_settings),
+        gemini_user_settings_path(),
+        gemini_system_settings_path(),
+    ]
+    .into_iter()
+    .flatten()
+    {
+        if let Some(selected_type) = gemini_selected_auth_type_from_settings_file(&path) {
+            return Some(selected_type);
+        }
+    }
+    None
+}
+
+fn gemini_selected_auth_type_from_settings_file(path: &FsPath) -> Option<String> {
+    let raw = fs::read_to_string(path).ok()?;
+    if raw.trim().is_empty() {
+        return None;
+    }
+    if let Ok(parsed) = serde_json::from_str::<Value>(&raw) {
+        return parsed
+            .pointer("/security/auth/selectedType")
+            .and_then(Value::as_str)
+            .map(str::to_owned);
+    }
+    [
+        "oauth-personal",
+        "gemini-api-key",
+        "vertex-ai",
+        "compute-default-credentials",
+    ]
+    .iter()
+    .find_map(|candidate| raw.contains(candidate).then_some((*candidate).to_owned()))
+}
+
+fn find_gemini_env_file(workdir: &str) -> Option<PathBuf> {
+    let mut current = PathBuf::from(workdir);
+    loop {
+        let gemini_env_path = current.join(".gemini").join(".env");
+        if gemini_env_path.is_file() {
+            return Some(gemini_env_path);
+        }
+        let env_path = current.join(".env");
+        if env_path.is_file() {
+            return Some(env_path);
+        }
+
+        let Some(parent) = current.parent() else {
+            break;
+        };
+        if parent == current {
+            break;
+        }
+        current = parent.to_path_buf();
+    }
+
+    let home = home_dir()?;
+    let home_gemini_env = home.join(".gemini").join(".env");
+    if home_gemini_env.is_file() {
+        return Some(home_gemini_env);
+    }
+    let home_env = home.join(".env");
+    home_env.is_file().then_some(home_env)
+}
+
+fn dotenv_var_source(workdir: &str, key: &str) -> Option<String> {
+    let path = find_gemini_env_file(workdir)?;
+    dotenv_file_var_present(&path, key).then(|| display_path_for_user(&path))
+}
+
+fn dotenv_var_present(workdir: &str, key: &str) -> bool {
+    find_gemini_env_file(workdir)
+        .as_deref()
+        .map(|path| dotenv_file_var_present(path, key))
+        .unwrap_or(false)
+}
+
+fn dotenv_file_var_present(path: &FsPath, key: &str) -> bool {
+    let Ok(raw) = fs::read_to_string(path) else {
+        return false;
+    };
+    raw.lines().any(|line| {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            return false;
+        }
+        let trimmed = trimmed.strip_prefix("export ").unwrap_or(trimmed);
+        let Some((name, value)) = trimmed.split_once('=') else {
+            return false;
+        };
+        if name.trim() != key {
+            return false;
+        }
+        !value
+            .trim()
+            .trim_matches(|ch| ch == '"' || ch == '\'')
+            .is_empty()
+    })
+}
+
+fn env_var_source(key: &str) -> Option<String> {
+    env_var_present(key).then(|| format!("the `{key}` environment variable"))
+}
+
+fn env_var_present(key: &str) -> bool {
+    std::env::var(key)
+        .map(|value| !value.trim().is_empty())
+        .unwrap_or(false)
+}
+
+fn gemini_oauth_credentials_path() -> Option<PathBuf> {
+    home_dir().map(|home| home.join(".gemini").join("oauth_creds.json"))
+}
+
+fn gemini_user_settings_path() -> Option<PathBuf> {
+    home_dir().map(|home| home.join(".gemini").join("settings.json"))
+}
+
+fn gemini_system_settings_path() -> Option<PathBuf> {
+    if let Some(path) = std::env::var_os("GEMINI_CLI_SYSTEM_SETTINGS_PATH") {
+        return Some(PathBuf::from(path));
+    }
+    Some(if cfg!(target_os = "macos") {
+        PathBuf::from("/Library/Application Support/GeminiCli/settings.json")
+    } else if cfg!(windows) {
+        PathBuf::from("C:\\ProgramData\\gemini-cli\\settings.json")
+    } else {
+        PathBuf::from("/etc/gemini-cli/settings.json")
+    })
+}
+
+fn home_dir() -> Option<PathBuf> {
+    #[cfg(windows)]
+    {
+        std::env::var_os("USERPROFILE").map(PathBuf::from)
+    }
+    #[cfg(not(windows))]
+    {
+        std::env::var_os("HOME").map(PathBuf::from)
+    }
+}
+
+fn display_path_for_user(path: &FsPath) -> String {
+    if let Some(home) = home_dir() {
+        if let Ok(relative) = path.strip_prefix(&home) {
+            return if relative.as_os_str().is_empty() {
+                "~".to_owned()
+            } else {
+                format!("~/{}", relative.display())
+            };
+        }
+    }
+    path.display().to_string()
+}
+
 fn resolve_codex_native_binary(launcher: &PathBuf) -> Option<PathBuf> {
     let launcher = fs::canonicalize(launcher)
         .ok()
@@ -3250,6 +5373,7 @@ fn spawn_claude_runtime(
     session_id: String,
     cwd: String,
     model: String,
+    approval_mode: ClaudeApprovalMode,
     resume_session_id: Option<String>,
 ) -> Result<ClaudeRuntimeHandle> {
     let runtime_id = Uuid::new_v4().to_string();
@@ -3267,6 +5391,9 @@ fn spawn_claude_runtime(
         "--permission-prompt-tool",
         "stdio",
     ]);
+    if let Some(permission_mode) = approval_mode.initial_cli_permission_mode() {
+        command.args(["--permission-mode", permission_mode]);
+    }
     command.env("CLAUDE_CODE_ENTRYPOINT", "termal");
     if let Some(resume_session_id) = resume_session_id {
         command.args(["--resume", &resume_session_id]);
@@ -3679,6 +5806,25 @@ fn run_turn_blocking(config: TurnConfig, recorder: &mut dyn TurnRecorder) -> Res
             &config.cwd,
             config.external_session_id.as_deref(),
             &config.model,
+            config
+                .claude_approval_mode
+                .unwrap_or_else(default_claude_approval_mode),
+            &config.prompt,
+            recorder,
+        ),
+        Agent::Cursor => run_acp_turn(
+            AcpAgent::Cursor,
+            &config.cwd,
+            config.external_session_id.as_deref(),
+            &config.model,
+            &config.prompt,
+            recorder,
+        ),
+        Agent::Gemini => run_acp_turn(
+            AcpAgent::Gemini,
+            &config.cwd,
+            config.external_session_id.as_deref(),
+            &config.model,
             &config.prompt,
             recorder,
         ),
@@ -3777,6 +5923,32 @@ impl SessionRecorder {
         )?;
         self.state
             .register_codex_pending_approval(&self.session_id, message_id, approval)
+    }
+
+    fn push_acp_approval(
+        &mut self,
+        title: &str,
+        command: &str,
+        detail: &str,
+        approval: AcpPendingApproval,
+    ) -> Result<()> {
+        self.finish_streaming_text()?;
+        let message_id = self.state.allocate_message_id();
+        self.state.push_message(
+            &self.session_id,
+            Message::Approval {
+                id: message_id.clone(),
+                timestamp: stamp_now(),
+                author: Author::Assistant,
+                title: title.to_owned(),
+                command: command.to_owned(),
+                command_language: Some(shell_language().to_owned()),
+                detail: detail.to_owned(),
+                decision: ApprovalDecision::Pending,
+            },
+        )?;
+        self.state
+            .register_acp_pending_approval(&self.session_id, message_id, approval)
     }
 }
 
@@ -4051,6 +6223,17 @@ impl TurnRecorder for ReplPrinter {
     }
 }
 
+fn run_acp_turn(
+    agent: AcpAgent,
+    _cwd: &str,
+    _external_session_id: Option<&str>,
+    _model: &str,
+    _prompt: &str,
+    _recorder: &mut dyn TurnRecorder,
+) -> Result<String> {
+    bail!("{} REPL mode is not supported yet", agent.label())
+}
+
 fn run_codex_turn(
     state: Option<&AppState>,
     runtime_session_id: Option<&str>,
@@ -4247,6 +6430,14 @@ fn default_codex_approval_policy() -> CodexApprovalPolicy {
 
 fn default_claude_approval_mode() -> ClaudeApprovalMode {
     ClaudeApprovalMode::Ask
+}
+
+fn default_cursor_mode() -> CursorMode {
+    CursorMode::Agent
+}
+
+fn default_gemini_approval_mode() -> GeminiApprovalMode {
+    GeminiApprovalMode::Default
 }
 
 fn handle_codex_event(
@@ -4454,6 +6645,7 @@ fn run_claude_turn(
     cwd: &str,
     session_id: Option<&str>,
     model: &str,
+    approval_mode: ClaudeApprovalMode,
     prompt: &str,
     recorder: &mut dyn TurnRecorder,
 ) -> Result<String> {
@@ -4467,6 +6659,9 @@ fn run_claude_turn(
         "stream-json",
         "--include-partial-messages",
     ]);
+    if let Some(permission_mode) = approval_mode.initial_cli_permission_mode() {
+        command.args(["--permission-mode", permission_mode]);
+    }
 
     let expected_session_id = match session_id {
         Some(session_id) => {
@@ -4600,6 +6795,13 @@ fn classify_claude_control_request(
             ClaudeControlRequestAction::Respond(ClaudePermissionDecision::Allow {
                 request_id: request.request_id,
                 updated_input: request.tool_input,
+            })
+        }
+        ClaudeApprovalMode::Plan => {
+            ClaudeControlRequestAction::Respond(ClaudePermissionDecision::Deny {
+                request_id: request.request_id,
+                message: "TermAl denied this tool request because Claude is in plan mode."
+                    .to_owned(),
             })
         }
     }))
@@ -5602,6 +7804,22 @@ fn deliver_turn_dispatch(state: &AppState, dispatch: TurnDispatch) -> Result<(),
                 ));
             }
         }
+        TurnDispatch::PersistentAcp {
+            command,
+            sender,
+            session_id,
+        } => {
+            if let Err(err) = sender.send(AcpRuntimeCommand::Prompt(command)) {
+                let _ = state.clear_runtime(&session_id);
+                let _ = state.fail_turn(
+                    &session_id,
+                    &format!("failed to queue prompt for ACP session: {err}"),
+                );
+                return Err(ApiError::internal(
+                    "failed to queue prompt for agent session",
+                ));
+            }
+        }
     }
 
     Ok(())
@@ -5787,7 +8005,12 @@ async fn apply_git_file_action(
     match request.action {
         GitFileAction::Stage => {
             let pathspecs = collect_git_pathspecs(&current_path, original_path.as_deref());
-            run_git_pathspec_command(&repo_root, &["add", "-A"], &pathspecs, "failed to stage git changes")?;
+            run_git_pathspec_command(
+                &repo_root,
+                &["add", "-A"],
+                &pathspecs,
+                "failed to stage git changes",
+            )?;
         }
         GitFileAction::Unstage => {
             let pathspecs = collect_git_pathspecs(&current_path, original_path.as_deref());
@@ -5915,7 +8138,9 @@ fn normalize_git_repo_relative_path(path: &str) -> Result<String, ApiError> {
     }
 
     if trimmed.contains('\0') {
-        return Err(ApiError::bad_request("git file path contains invalid characters"));
+        return Err(ApiError::bad_request(
+            "git file path contains invalid characters",
+        ));
     }
 
     Ok(trimmed.to_owned())
@@ -6074,6 +8299,14 @@ async fn update_session_settings(
     Ok(Json(response))
 }
 
+async fn refresh_session_model_options(
+    AxumPath(session_id): AxumPath<String>,
+    State(state): State<AppState>,
+) -> Result<Json<StateResponse>, ApiError> {
+    let response = state.refresh_session_model_options(&session_id)?;
+    Ok(Json(response))
+}
+
 async fn send_message(
     AxumPath(session_id): AxumPath<String>,
     State(state): State<AppState>,
@@ -6172,6 +8405,8 @@ impl IntoResponse for ApiError {
 enum Agent {
     Codex,
     Claude,
+    Cursor,
+    Gemini,
 }
 
 impl Agent {
@@ -6185,6 +8420,8 @@ impl Agent {
                 }
                 "codex" => return Ok(Self::Codex),
                 "claude" => return Ok(Self::Claude),
+                "cursor" | "cursor-agent" => return Ok(Self::Cursor),
+                "gemini" | "gemini-cli" => return Ok(Self::Gemini),
                 other => bail!("unknown argument `{other}`"),
             }
         }
@@ -6196,7 +8433,11 @@ impl Agent {
         match value {
             "codex" => Ok(Self::Codex),
             "claude" => Ok(Self::Claude),
-            other => bail!("unknown agent `{other}`; expected `codex` or `claude`"),
+            "cursor" | "cursor-agent" => Ok(Self::Cursor),
+            "gemini" | "gemini-cli" => Ok(Self::Gemini),
+            other => {
+                bail!("unknown agent `{other}`; expected `codex`, `claude`, `cursor`, or `gemini`")
+            }
         }
     }
 
@@ -6204,6 +8445,8 @@ impl Agent {
         match self {
             Self::Codex => "Codex",
             Self::Claude => "Claude",
+            Self::Cursor => "Cursor",
+            Self::Gemini => "Gemini",
         }
     }
 
@@ -6211,6 +8454,8 @@ impl Agent {
         match self {
             Self::Codex => "CX",
             Self::Claude => "CL",
+            Self::Cursor => "CR",
+            Self::Gemini => "GM",
         }
     }
 
@@ -6218,6 +8463,32 @@ impl Agent {
         match self {
             Self::Codex => "gpt-5",
             Self::Claude => "sonnet",
+            Self::Cursor => "auto",
+            Self::Gemini => "auto",
+        }
+    }
+
+    fn supports_codex_prompt_settings(self) -> bool {
+        matches!(self, Self::Codex)
+    }
+
+    fn supports_claude_approval_mode(self) -> bool {
+        matches!(self, Self::Claude)
+    }
+
+    fn supports_cursor_mode(self) -> bool {
+        matches!(self, Self::Cursor)
+    }
+
+    fn supports_gemini_approval_mode(self) -> bool {
+        matches!(self, Self::Gemini)
+    }
+
+    fn acp_runtime(self) -> Option<AcpAgent> {
+        match self {
+            Self::Cursor => Some(AcpAgent::Cursor),
+            Self::Gemini => Some(AcpAgent::Gemini),
+            _ => None,
         }
     }
 }
@@ -6241,9 +8512,15 @@ struct Session {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     project_id: Option<String>,
     model: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    model_options: Vec<SessionModelOption>,
     approval_policy: Option<CodexApprovalPolicy>,
     sandbox_mode: Option<CodexSandboxMode>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    cursor_mode: Option<CursorMode>,
     claude_approval_mode: Option<ClaudeApprovalMode>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    gemini_approval_mode: Option<GeminiApprovalMode>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     external_session_id: Option<String>,
     status: SessionStatus,
@@ -6296,6 +8573,61 @@ impl CodexSandboxMode {
 enum ClaudeApprovalMode {
     Ask,
     AutoApprove,
+    Plan,
+}
+
+impl ClaudeApprovalMode {
+    fn initial_cli_permission_mode(self) -> Option<&'static str> {
+        match self {
+            Self::Plan => Some("plan"),
+            Self::Ask | Self::AutoApprove => None,
+        }
+    }
+
+    fn session_cli_permission_mode(self) -> &'static str {
+        match self {
+            Self::Plan => "plan",
+            Self::Ask | Self::AutoApprove => "default",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+enum CursorMode {
+    Agent,
+    Plan,
+    Ask,
+}
+
+impl CursorMode {
+    fn as_acp_value(self) -> &'static str {
+        match self {
+            Self::Agent => "agent",
+            Self::Plan => "plan",
+            Self::Ask => "ask",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+enum GeminiApprovalMode {
+    Default,
+    AutoEdit,
+    Yolo,
+    Plan,
+}
+
+impl GeminiApprovalMode {
+    fn as_cli_value(self) -> &'static str {
+        match self {
+            Self::Default => "default",
+            Self::AutoEdit => "auto_edit",
+            Self::Yolo => "yolo",
+            Self::Plan => "plan",
+        }
+    }
 }
 
 #[allow(dead_code)]
@@ -6475,7 +8807,9 @@ struct CreateSessionRequest {
     model: Option<String>,
     approval_policy: Option<CodexApprovalPolicy>,
     sandbox_mode: Option<CodexSandboxMode>,
+    cursor_mode: Option<CursorMode>,
     claude_approval_mode: Option<ClaudeApprovalMode>,
+    gemini_approval_mode: Option<GeminiApprovalMode>,
 }
 
 #[derive(Deserialize)]
@@ -6605,9 +8939,19 @@ struct SendMessageAttachmentRequest {
 #[serde(rename_all = "camelCase")]
 struct UpdateSessionSettingsRequest {
     name: Option<String>,
+    model: Option<String>,
     approval_policy: Option<CodexApprovalPolicy>,
     sandbox_mode: Option<CodexSandboxMode>,
+    cursor_mode: Option<CursorMode>,
     claude_approval_mode: Option<ClaudeApprovalMode>,
+    gemini_approval_mode: Option<GeminiApprovalMode>,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SessionModelOption {
+    label: String,
+    value: String,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
@@ -6651,12 +8995,33 @@ struct CodexRateLimitWindow {
     window_duration_mins: Option<u64>,
 }
 
+#[derive(Clone, Copy, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+enum AgentReadinessStatus {
+    Ready,
+    Missing,
+    NeedsSetup,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AgentReadiness {
+    agent: Agent,
+    status: AgentReadinessStatus,
+    blocking: bool,
+    detail: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    command_path: Option<String>,
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct StateResponse {
     revision: u64,
     #[serde(default, skip_serializing_if = "CodexState::is_empty")]
     codex: CodexState,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    agent_readiness: Vec<AgentReadiness>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     projects: Vec<Project>,
     sessions: Vec<Session>,
@@ -7031,7 +9396,13 @@ mod tests {
 
     fn test_session_id(state: &AppState, agent: Agent) -> String {
         let mut inner = state.inner.lock().expect("state mutex poisoned");
-        let record = inner.create_session(agent, Some("Test".to_owned()), "/tmp".to_owned(), None, None);
+        let record = inner.create_session(
+            agent,
+            Some("Test".to_owned()),
+            "/tmp".to_owned(),
+            None,
+            None,
+        );
         let session_id = record.session.id.clone();
         state.commit_locked(&mut inner).unwrap();
         session_id
@@ -7063,6 +9434,34 @@ mod tests {
     }
 
     #[test]
+    fn creates_claude_sessions_with_requested_plan_mode() {
+        let state = test_app_state();
+
+        let response = state
+            .create_session(CreateSessionRequest {
+                agent: Some(Agent::Claude),
+                name: Some("Plan Claude".to_owned()),
+                workdir: Some("/tmp".to_owned()),
+                project_id: None,
+                model: None,
+                approval_policy: None,
+                sandbox_mode: None,
+                cursor_mode: None,
+                claude_approval_mode: Some(ClaudeApprovalMode::Plan),
+                gemini_approval_mode: None,
+            })
+            .unwrap();
+        let session = response
+            .state
+            .sessions
+            .iter()
+            .find(|session| session.id == response.session_id)
+            .expect("created session should be present");
+
+        assert_eq!(session.claude_approval_mode, Some(ClaudeApprovalMode::Plan));
+    }
+
+    #[test]
     fn creates_codex_sessions_with_requested_prompt_defaults() {
         let state = test_app_state();
 
@@ -7075,7 +9474,9 @@ mod tests {
                 model: Some("gpt-5-mini".to_owned()),
                 approval_policy: Some(CodexApprovalPolicy::OnRequest),
                 sandbox_mode: Some(CodexSandboxMode::ReadOnly),
+                cursor_mode: None,
                 claude_approval_mode: None,
+                gemini_approval_mode: None,
             })
             .unwrap();
         let session = response
@@ -7103,6 +9504,256 @@ mod tests {
     }
 
     #[test]
+    fn updates_cursor_session_model_settings() {
+        let state = test_app_state();
+
+        let created = state
+            .create_session(CreateSessionRequest {
+                agent: Some(Agent::Cursor),
+                name: Some("Cursor Model".to_owned()),
+                workdir: Some("/tmp".to_owned()),
+                project_id: None,
+                model: Some("auto".to_owned()),
+                approval_policy: None,
+                sandbox_mode: None,
+                cursor_mode: Some(CursorMode::Agent),
+                claude_approval_mode: None,
+                gemini_approval_mode: None,
+            })
+            .unwrap();
+
+        let updated = state
+            .update_session_settings(
+                &created.session_id,
+                UpdateSessionSettingsRequest {
+                    name: None,
+                    model: Some("gpt-5.3-codex".to_owned()),
+                    sandbox_mode: None,
+                    approval_policy: None,
+                    cursor_mode: None,
+                    claude_approval_mode: None,
+                    gemini_approval_mode: None,
+                },
+            )
+            .unwrap();
+
+        let session = updated
+            .sessions
+            .iter()
+            .find(|session| session.id == created.session_id)
+            .expect("updated Cursor session should be present");
+        assert_eq!(session.model, "gpt-5.3-codex");
+    }
+
+    #[test]
+    fn updates_codex_session_model_settings_and_flags_restart() {
+        let state = test_app_state();
+
+        let created = state
+            .create_session(CreateSessionRequest {
+                agent: Some(Agent::Codex),
+                name: Some("Codex Model".to_owned()),
+                workdir: Some("/tmp".to_owned()),
+                project_id: None,
+                model: Some("gpt-5".to_owned()),
+                approval_policy: None,
+                sandbox_mode: None,
+                cursor_mode: None,
+                claude_approval_mode: None,
+                gemini_approval_mode: None,
+            })
+            .unwrap();
+
+        let updated = state
+            .update_session_settings(
+                &created.session_id,
+                UpdateSessionSettingsRequest {
+                    name: None,
+                    model: Some("gpt-5-mini".to_owned()),
+                    sandbox_mode: None,
+                    approval_policy: None,
+                    cursor_mode: None,
+                    claude_approval_mode: None,
+                    gemini_approval_mode: None,
+                },
+            )
+            .unwrap();
+
+        let session = updated
+            .sessions
+            .iter()
+            .find(|session| session.id == created.session_id)
+            .expect("updated Codex session should be present");
+        assert_eq!(session.model, "gpt-5-mini");
+
+        let inner = state.inner.lock().expect("state mutex poisoned");
+        let record = inner
+            .sessions
+            .iter()
+            .find(|record| record.session.id == created.session_id)
+            .expect("Codex session should exist");
+        assert!(record.runtime_reset_required);
+    }
+
+    #[test]
+    fn updates_claude_session_model_settings_and_flags_restart() {
+        let state = test_app_state();
+
+        let created = state
+            .create_session(CreateSessionRequest {
+                agent: Some(Agent::Claude),
+                name: Some("Claude Model".to_owned()),
+                workdir: Some("/tmp".to_owned()),
+                project_id: None,
+                model: Some("sonnet".to_owned()),
+                approval_policy: None,
+                sandbox_mode: None,
+                cursor_mode: None,
+                claude_approval_mode: Some(ClaudeApprovalMode::Ask),
+                gemini_approval_mode: None,
+            })
+            .unwrap();
+
+        let updated = state
+            .update_session_settings(
+                &created.session_id,
+                UpdateSessionSettingsRequest {
+                    name: None,
+                    model: Some("opus".to_owned()),
+                    sandbox_mode: None,
+                    approval_policy: None,
+                    cursor_mode: None,
+                    claude_approval_mode: None,
+                    gemini_approval_mode: None,
+                },
+            )
+            .unwrap();
+
+        let session = updated
+            .sessions
+            .iter()
+            .find(|session| session.id == created.session_id)
+            .expect("updated Claude session should be present");
+        assert_eq!(session.model, "opus");
+
+        let inner = state.inner.lock().expect("state mutex poisoned");
+        let record = inner
+            .sessions
+            .iter()
+            .find(|record| record.session.id == created.session_id)
+            .expect("Claude session should exist");
+        assert!(record.runtime_reset_required);
+    }
+
+    #[test]
+    fn rejects_model_option_refresh_for_non_acp_sessions() {
+        let state = test_app_state();
+
+        let created = state
+            .create_session(CreateSessionRequest {
+                agent: Some(Agent::Codex),
+                name: Some("Codex Refresh".to_owned()),
+                workdir: Some("/tmp".to_owned()),
+                project_id: None,
+                model: None,
+                approval_policy: None,
+                sandbox_mode: None,
+                cursor_mode: None,
+                claude_approval_mode: None,
+                gemini_approval_mode: None,
+            })
+            .unwrap();
+
+        let error = match state.refresh_session_model_options(&created.session_id) {
+            Ok(_) => panic!("Codex sessions should reject live model refreshes"),
+            Err(error) => error,
+        };
+        assert_eq!(error.status, StatusCode::BAD_REQUEST);
+        assert_eq!(
+            error.message,
+            "Codex sessions do not expose live model options"
+        );
+    }
+
+    #[test]
+    fn syncs_cursor_model_options_from_acp_config() {
+        let state = test_app_state();
+
+        let created = state
+            .create_session(CreateSessionRequest {
+                agent: Some(Agent::Cursor),
+                name: Some("Cursor ACP".to_owned()),
+                workdir: Some("/tmp".to_owned()),
+                project_id: None,
+                model: Some("auto".to_owned()),
+                approval_policy: None,
+                sandbox_mode: None,
+                cursor_mode: Some(CursorMode::Agent),
+                claude_approval_mode: None,
+                gemini_approval_mode: None,
+            })
+            .unwrap();
+
+        let model_options = vec![
+            SessionModelOption {
+                label: "Auto".to_owned(),
+                value: "auto".to_owned(),
+            },
+            SessionModelOption {
+                label: "GPT-5.3 Codex".to_owned(),
+                value: "gpt-5.3-codex".to_owned(),
+            },
+        ];
+        state
+            .sync_acp_model_config(
+                &created.session_id,
+                Some("gpt-5.3-codex".to_owned()),
+                model_options.clone(),
+            )
+            .unwrap();
+
+        let inner = state.inner.lock().expect("state mutex poisoned");
+        let session = inner
+            .sessions
+            .iter()
+            .find(|record| record.session.id == created.session_id)
+            .map(|record| &record.session)
+            .expect("Cursor session should exist");
+        assert_eq!(session.model, "gpt-5.3-codex");
+        assert_eq!(session.model_options, model_options);
+    }
+
+    #[test]
+    fn matches_acp_model_options_by_name_or_label() {
+        let config = json!({
+            "configOptions": [
+                {
+                    "id": "model",
+                    "options": [
+                        {
+                            "value": "auto",
+                            "name": "Auto"
+                        },
+                        {
+                            "value": "gpt-5.3-codex-high-fast",
+                            "label": "GPT-5.3 Codex High Fast"
+                        }
+                    ]
+                }
+            ]
+        });
+
+        assert_eq!(
+            matching_acp_config_option_value(&config, "model", "Auto"),
+            Some("auto".to_owned())
+        );
+        assert_eq!(
+            matching_acp_config_option_value(&config, "model", "GPT-5.3 Codex High Fast"),
+            Some("gpt-5.3-codex-high-fast".to_owned())
+        );
+    }
+
+    #[test]
     fn revisions_increase_for_visible_state_changes() {
         let state = test_app_state();
 
@@ -7115,7 +9766,9 @@ mod tests {
                 model: None,
                 approval_policy: None,
                 sandbox_mode: None,
+                cursor_mode: None,
                 claude_approval_mode: None,
+                gemini_approval_mode: None,
             })
             .unwrap();
         assert_eq!(created.state.revision, 1);
@@ -7125,9 +9778,12 @@ mod tests {
                 &created.session_id,
                 UpdateSessionSettingsRequest {
                     name: None,
+                    model: None,
                     sandbox_mode: Some(CodexSandboxMode::ReadOnly),
                     approval_policy: None,
+                    cursor_mode: None,
                     claude_approval_mode: None,
+                    gemini_approval_mode: None,
                 },
             )
             .unwrap();
@@ -7147,7 +9803,9 @@ mod tests {
                 model: None,
                 approval_policy: None,
                 sandbox_mode: None,
+                cursor_mode: None,
                 claude_approval_mode: None,
+                gemini_approval_mode: None,
             })
             .unwrap();
 
@@ -7156,9 +9814,12 @@ mod tests {
                 &created.session_id,
                 UpdateSessionSettingsRequest {
                     name: Some("New Name".to_owned()),
+                    model: None,
                     sandbox_mode: None,
                     approval_policy: None,
+                    cursor_mode: None,
                     claude_approval_mode: None,
+                    gemini_approval_mode: None,
                 },
             )
             .unwrap();
@@ -7193,7 +9854,9 @@ mod tests {
                 model: None,
                 approval_policy: None,
                 sandbox_mode: None,
+                cursor_mode: None,
                 claude_approval_mode: None,
+                gemini_approval_mode: None,
             })
             .unwrap();
         let session = created
@@ -7228,7 +9891,9 @@ mod tests {
             model: None,
             approval_policy: None,
             sandbox_mode: None,
+            cursor_mode: None,
             claude_approval_mode: None,
+            gemini_approval_mode: None,
         });
 
         let error = match result {
@@ -7974,6 +10639,48 @@ mod tests {
             }
             ClaudeControlRequestAction::Respond(ClaudePermissionDecision::Deny { .. }) => {
                 panic!("expected Claude auto mode to allow the request");
+            }
+        }
+    }
+
+    #[test]
+    fn denies_claude_control_requests_in_plan_mode() {
+        let message = json!({
+            "type": "control_request",
+            "request_id": "req-plan",
+            "request": {
+                "subtype": "can_use_tool",
+                "tool_name": "Write",
+                "input": {
+                    "file_path": "/tmp/plan.txt",
+                    "content": "hi\n"
+                },
+                "decision_reason": "Write requires approval"
+            }
+        });
+        let mut state = ClaudeTurnState::default();
+
+        let action =
+            classify_claude_control_request(&message, &mut state, ClaudeApprovalMode::Plan)
+                .unwrap()
+                .unwrap();
+
+        match action {
+            ClaudeControlRequestAction::Respond(ClaudePermissionDecision::Deny {
+                request_id,
+                message,
+            }) => {
+                assert_eq!(request_id, "req-plan");
+                assert_eq!(
+                    message,
+                    "TermAl denied this tool request because Claude is in plan mode."
+                );
+            }
+            ClaudeControlRequestAction::QueueApproval { .. } => {
+                panic!("expected Claude plan mode to deny the request");
+            }
+            ClaudeControlRequestAction::Respond(ClaudePermissionDecision::Allow { .. }) => {
+                panic!("expected Claude plan mode to deny the request");
             }
         }
     }

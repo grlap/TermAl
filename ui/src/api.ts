@@ -1,9 +1,12 @@
 import type {
   ApprovalDecision,
   AgentType,
+  AgentReadiness,
   ApprovalPolicy,
   ClaudeApprovalMode,
   CodexState,
+  CursorMode,
+  GeminiApprovalMode,
   ImageAttachment,
   Project,
   SandboxMode,
@@ -13,6 +16,7 @@ import type {
 export type StateResponse = {
   revision: number;
   codex?: CodexState;
+  agentReadiness?: AgentReadiness[];
   projects: Project[];
   sessions: Session[];
 };
@@ -77,7 +81,9 @@ type CreateSessionRequest = {
   projectId?: string;
   approvalPolicy?: ApprovalPolicy;
   sandboxMode?: SandboxMode;
+  cursorMode?: CursorMode;
   claudeApprovalMode?: ClaudeApprovalMode;
+  geminiApprovalMode?: GeminiApprovalMode;
 };
 
 type CreateProjectRequest = {
@@ -167,15 +173,27 @@ export function submitApproval(sessionId: string, messageId: string, decision: A
 export function updateSessionSettings(
   sessionId: string,
   payload: {
+    model?: string;
     sandboxMode?: SandboxMode;
     approvalPolicy?: ApprovalPolicy;
+    cursorMode?: CursorMode;
     claudeApprovalMode?: ClaudeApprovalMode;
+    geminiApprovalMode?: GeminiApprovalMode;
   },
 ) {
   return request<StateResponse>(`/api/sessions/${encodeURIComponent(sessionId)}/settings`, {
     method: "POST",
     body: JSON.stringify(payload),
   });
+}
+
+export function refreshSessionModelOptions(sessionId: string) {
+  return request<StateResponse>(
+    `/api/sessions/${encodeURIComponent(sessionId)}/model-options/refresh`,
+    {
+      method: "POST",
+    },
+  );
 }
 
 export function renameSession(sessionId: string, name: string) {

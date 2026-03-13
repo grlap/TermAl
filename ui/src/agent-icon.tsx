@@ -19,7 +19,15 @@ export function AgentIcon({
 
   return (
     <span className={classNames.join(" ")} data-agent={agent.toLowerCase()} aria-hidden="true">
-      {agent === "Codex" ? <OpenAiIcon /> : <ClaudeIcon />}
+      {agent === "Codex" ? (
+        <OpenAiIcon />
+      ) : agent === "Claude" ? (
+        <ClaudeIcon />
+      ) : agent === "Cursor" ? (
+        <MonogramIcon label="C" />
+      ) : (
+        <MonogramIcon label="G" />
+      )}
     </span>
   );
 }
@@ -40,4 +48,8 @@ function ClaudeIcon() {
       style={{ "--agent-icon-mask": `url(${CLAUDE_SYMBOL_URL})` } as CSSProperties}
     />
   );
+}
+
+function MonogramIcon({ label }: { label: string }) {
+  return <span className="agent-icon-monogram">{label}</span>;
 }

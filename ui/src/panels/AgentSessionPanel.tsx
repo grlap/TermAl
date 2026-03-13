@@ -18,7 +18,9 @@ import type {
   ApprovalPolicy,
   ClaudeApprovalMode,
   CommandMessage,
+  CursorMode,
   DiffMessage,
+  GeminiApprovalMode,
   ImageAttachment,
   Message,
   PendingPrompt,
@@ -38,8 +40,20 @@ type PromptHistoryState = {
   draft: string;
 };
 
-type SessionSettingsField = "sandboxMode" | "approvalPolicy" | "claudeApprovalMode";
-type SessionSettingsValue = SandboxMode | ApprovalPolicy | ClaudeApprovalMode;
+type SessionSettingsField =
+  | "model"
+  | "sandboxMode"
+  | "approvalPolicy"
+  | "claudeApprovalMode"
+  | "cursorMode"
+  | "geminiApprovalMode";
+type SessionSettingsValue =
+  | string
+  | SandboxMode
+  | ApprovalPolicy
+  | ClaudeApprovalMode
+  | CursorMode
+  | GeminiApprovalMode;
 
 const CONVERSATION_VIRTUALIZATION_MIN_MESSAGES = 80;
 const VIRTUALIZED_MESSAGE_OVERSCAN_PX = 960;

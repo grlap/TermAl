@@ -27,6 +27,7 @@ import {
   fetchState,
   killSession,
   pickProjectRoot,
+  refreshSessionModelOptions,
   renameSession,
   saveFile,
   sendMessage,
@@ -68,12 +69,15 @@ import type {
   ApprovalDecision,
   ApprovalMessage,
   ApprovalPolicy,
+  AgentReadiness,
   AgentType,
   ClaudeApprovalMode,
   CommandMessage,
   CodexState,
+  CursorMode,
   DeltaEvent,
   DiffMessage,
+  GeminiApprovalMode,
   ImageAttachment,
   MarkdownMessage,
   Message,
@@ -112,8 +116,15 @@ import {
 } from "./workspace";
 import { reconcileSessions } from "./session-reconcile";
 import {
+  clampFontSizePreference,
+  DEFAULT_FONT_SIZE_PX,
+  MAX_FONT_SIZE_PX,
+  MIN_FONT_SIZE_PX,
+  applyFontSizePreference,
   THEMES,
+  getStoredFontSizePreference,
   applyThemePreference,
+  persistFontSizePreference,
   getStoredThemePreference,
   persistThemePreference,
   type ThemeId,
@@ -133,8 +144,20 @@ import {
 } from "./tab-drag";
 
 type SessionFlagMap = Record<string, true | undefined>;
-type SessionSettingsField = "sandboxMode" | "approvalPolicy" | "claudeApprovalMode";
-type SessionSettingsValue = SandboxMode | ApprovalPolicy | ClaudeApprovalMode;
+type SessionSettingsField =
+  | "model"
+  | "sandboxMode"
+  | "approvalPolicy"
+  | "claudeApprovalMode"
+  | "cursorMode"
+  | "geminiApprovalMode";
+type SessionSettingsValue =
+  | string
+  | SandboxMode
+  | ApprovalPolicy
+  | ClaudeApprovalMode
+  | CursorMode
+  | GeminiApprovalMode;
 type PreferencesTabId = "themes" | "codex-prompts" | "claude-approvals";
 type DraftImageAttachment = ImageAttachment & {
   base64Data: string;
@@ -184,6 +207,8 @@ const MAX_CACHED_SESSION_PAGES_PER_PANE = 3;
 const NEW_SESSION_AGENT_OPTIONS = [
   { label: "Claude", value: "Claude" },
   { label: "Codex", value: "Codex" },
+  { label: "Cursor", value: "Cursor" },
+  { label: "Gemini", value: "Gemini" },
 ] as const;
 const NEW_SESSION_MODEL_OPTIONS: Readonly<Record<AgentType, readonly ComboboxOption[]>> = {
   Claude: [
@@ -195,6 +220,8 @@ const NEW_SESSION_MODEL_OPTIONS: Readonly<Record<AgentType, readonly ComboboxOpt
     { label: "GPT-5 mini", value: "gpt-5-mini" },
     { label: "o3", value: "o3" },
   ],
+  Cursor: [{ label: "Auto", value: "auto" }],
+  Gemini: [{ label: "Auto", value: "auto" }],
 };
 const SANDBOX_MODE_OPTIONS = [
   { label: "workspace-write", value: "workspace-write" },
@@ -210,6 +237,18 @@ const APPROVAL_POLICY_OPTIONS = [
 const CLAUDE_APPROVAL_OPTIONS = [
   { label: "ask", value: "ask" },
   { label: "auto-approve", value: "auto-approve" },
+  { label: "plan", value: "plan" },
+] as const;
+const CURSOR_MODE_OPTIONS = [
+  { label: "agent", value: "agent" },
+  { label: "plan", value: "plan" },
+  { label: "ask", value: "ask" },
+] as const;
+const GEMINI_APPROVAL_OPTIONS = [
+  { label: "default", value: "default" },
+  { label: "auto_edit", value: "auto_edit" },
+  { label: "yolo", value: "yolo" },
+  { label: "plan", value: "plan" },
 ] as const;
 const PREFERENCES_TABS: ReadonlyArray<{ id: PreferencesTabId; label: string }> = [
   { id: "themes", label: "Themes" },
@@ -218,15 +257,49 @@ const PREFERENCES_TABS: ReadonlyArray<{ id: PreferencesTabId; label: string }> =
 ];
 const ALL_PROJECTS_FILTER_ID = "__all__";
 const CREATE_SESSION_WORKSPACE_ID = "__workspace__";
+const SESSION_SCOPED_MODEL_AGENTS = new Set<AgentType>(["Claude", "Codex", "Cursor", "Gemini"]);
 
 function defaultNewSessionModel(agent: AgentType): string {
   return NEW_SESSION_MODEL_OPTIONS[agent][0]?.value ?? "";
+}
+
+function usesSessionModelPicker(agent: AgentType): boolean {
+  return SESSION_SCOPED_MODEL_AGENTS.has(agent);
+}
+
+function createSessionModelHint(agent: AgentType): string {
+  switch (agent) {
+    case "Claude":
+      return "Claude model selection lives on the session itself. New Claude sessions start on Sonnet.";
+    case "Codex":
+      return "Codex model selection lives on the session itself. New Codex sessions start on GPT-5.";
+    case "Cursor":
+      return "Cursor model selection lives on the session itself, like Cursor Agent's /model flow. New Cursor sessions start on Auto.";
+    case "Gemini":
+      return "Gemini model selection lives on the session itself. TermAl asks Gemini for its live model list after the session opens. New Gemini sessions start on Auto.";
+  }
+}
+
+function staticSessionModelOptions(agent: AgentType, currentModel: string): ComboboxOption[] {
+  const options = [...NEW_SESSION_MODEL_OPTIONS[agent]];
+  if (options.some((option) => option.value === currentModel)) {
+    return options;
+  }
+
+  return [
+    ...options,
+    {
+      label: currentModel === "auto" ? "Auto" : currentModel,
+      value: currentModel,
+    },
+  ];
 }
 
 export default function App() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [sessions, setSessions] = useState<Session[]>([]);
   const [codexState, setCodexState] = useState<CodexState>({});
+  const [agentReadiness, setAgentReadiness] = useState<AgentReadiness[]>([]);
   const [controlPanelSide, setControlPanelSide] = useState<"left" | "right">("left");
   const [workspace, setWorkspace] = useState<WorkspaceState>(() =>
     ensureControlPanelInWorkspaceState({
@@ -244,6 +317,8 @@ export default function App() {
     () => ({
       Claude: defaultNewSessionModel("Claude"),
       Codex: defaultNewSessionModel("Codex"),
+      Cursor: defaultNewSessionModel("Cursor"),
+      Gemini: defaultNewSessionModel("Gemini"),
     }),
   );
   const [isLoading, setIsLoading] = useState(true);
@@ -254,6 +329,8 @@ export default function App() {
   const [killRevealSessionId, setKillRevealSessionId] = useState<string | null>(null);
   const [pendingKillSessionId, setPendingKillSessionId] = useState<string | null>(null);
   const [updatingSessionIds, setUpdatingSessionIds] = useState<SessionFlagMap>({});
+  const [refreshingSessionModelOptionIds, setRefreshingSessionModelOptionIds] =
+    useState<SessionFlagMap>({});
   const [requestError, setRequestError] = useState<string | null>(null);
   const [sessionListFilter, setSessionListFilter] = useState<SessionListFilter>("all");
   const [sessionListSearchQuery, setSessionListSearchQuery] = useState("");
@@ -261,12 +338,16 @@ export default function App() {
   const [newProjectRootPath, setNewProjectRootPath] = useState("");
   const [isCreatingProject, setIsCreatingProject] = useState(false);
   const [themeId, setThemeId] = useState<ThemeId>(() => getStoredThemePreference());
+  const [fontSizePx, setFontSizePx] = useState<number>(() => getStoredFontSizePreference());
   const [defaultCodexSandboxMode, setDefaultCodexSandboxMode] =
     useState<SandboxMode>("workspace-write");
   const [defaultCodexApprovalPolicy, setDefaultCodexApprovalPolicy] =
     useState<ApprovalPolicy>("never");
   const [defaultClaudeApprovalMode, setDefaultClaudeApprovalMode] =
     useState<ClaudeApprovalMode>("ask");
+  const [defaultCursorMode, setDefaultCursorMode] = useState<CursorMode>("agent");
+  const [defaultGeminiApprovalMode, setDefaultGeminiApprovalMode] =
+    useState<GeminiApprovalMode>("default");
   const [isCreateSessionOpen, setIsCreateSessionOpen] = useState(false);
   const [createSessionPaneId, setCreateSessionPaneId] = useState<string | null>(null);
   const [createSessionProjectId, setCreateSessionProjectId] = useState<string>(
@@ -330,6 +411,10 @@ export default function App() {
     () => new Map(projects.map((project) => [project.id, project])),
     [projects],
   );
+  const agentReadinessByAgent = useMemo(
+    () => new Map(agentReadiness.map((entry) => [entry.agent, entry])),
+    [agentReadiness],
+  );
   const sessionLookup = useMemo(
     () => new Map(sessions.map((session) => [session.id, session])),
     [sessions],
@@ -386,6 +471,9 @@ export default function App() {
     : activeSession?.workdir
       ? `Uses ${activeSession.workdir}`
       : "Uses the app default workspace.";
+  const createSessionUsesSessionModelPicker = usesSessionModelPicker(newSessionAgent);
+  const createSessionAgentReadiness = agentReadinessByAgent.get(newSessionAgent) ?? null;
+  const createSessionBlocked = createSessionAgentReadiness?.blocking ?? false;
   const derivedControlPanelGitWorkdir =
     selectedProject?.rootPath ?? activeSession?.workdir ?? sessions[0]?.workdir ?? null;
   const projectScopedSessions = useMemo(() => {
@@ -558,6 +646,7 @@ export default function App() {
 
     latestStateRevisionRef.current = nextState.revision;
     setCodexState(nextState.codex ?? {});
+    setAgentReadiness(nextState.agentReadiness ?? []);
     setProjects(nextState.projects ?? []);
     adoptSessions(nextState.sessions, options);
     if (options?.openSessionId) {
@@ -722,6 +811,11 @@ export default function App() {
     applyThemePreference(themeId);
     persistThemePreference(themeId);
   }, [themeId]);
+
+  useLayoutEffect(() => {
+    applyFontSizePreference(fontSizePx);
+    persistFontSizePreference(fontSizePx);
+  }, [fontSizePx]);
 
   useEffect(() => {
     sessionsRef.current = sessions;
@@ -1171,6 +1265,11 @@ export default function App() {
       setRequestError("Choose a model.");
       return false;
     }
+    const readiness = agentReadinessByAgent.get(agent);
+    if (readiness?.blocking) {
+      setRequestError(readiness.detail);
+      return false;
+    }
 
     setIsCreating(true);
     try {
@@ -1182,8 +1281,11 @@ export default function App() {
         model: trimmedModel,
         approvalPolicy:
           agent === "Codex" ? defaultCodexApprovalPolicy : undefined,
+        cursorMode: agent === "Cursor" ? defaultCursorMode : undefined,
         claudeApprovalMode:
           agent === "Claude" ? defaultClaudeApprovalMode : undefined,
+        geminiApprovalMode:
+          agent === "Gemini" ? defaultGeminiApprovalMode : undefined,
         sandboxMode: agent === "Codex" ? defaultCodexSandboxMode : undefined,
         projectId: targetProjectId ?? undefined,
         workdir: targetProjectId ? undefined : activeSession?.workdir,
@@ -1196,6 +1298,9 @@ export default function App() {
         setWorkspace((current) =>
           applyControlPanelLayout(openSessionInWorkspaceState(current, created.sessionId, targetPaneId)),
         );
+      }
+      if (agent === "Cursor" || agent === "Gemini") {
+        await handleRefreshSessionModelOptions(created.sessionId);
       }
       setRequestError(null);
       return true;
@@ -1528,9 +1633,15 @@ export default function App() {
           session.agent === "Codex"
             ? (session.approvalPolicy ?? defaultCodexApprovalPolicy)
             : undefined,
+        cursorMode:
+          session.agent === "Cursor" ? (session.cursorMode ?? defaultCursorMode) : undefined,
         claudeApprovalMode:
           session.agent === "Claude"
             ? (session.claudeApprovalMode ?? defaultClaudeApprovalMode)
+            : undefined,
+        geminiApprovalMode:
+          session.agent === "Gemini"
+            ? (session.geminiApprovalMode ?? defaultGeminiApprovalMode)
             : undefined,
         sandboxMode:
           session.agent === "Codex"
@@ -1551,6 +1662,9 @@ export default function App() {
         setWorkspace((current) =>
           applyControlPanelLayout(openSessionInWorkspaceState(current, created.sessionId, targetPaneId)),
         );
+      }
+      if (session.agent === "Cursor" || session.agent === "Gemini") {
+        await handleRefreshSessionModelOptions(created.sessionId);
       }
       setRequestError(null);
       closePendingSessionRename();
@@ -1597,21 +1711,51 @@ export default function App() {
     try {
       const payload =
         session.agent === "Codex"
-          ? {
-              sandboxMode:
-                field === "sandboxMode"
-                  ? (value as SandboxMode)
-                  : (session.sandboxMode ?? "workspace-write"),
-              approvalPolicy:
-                field === "approvalPolicy"
-                  ? (value as ApprovalPolicy)
-                  : (session.approvalPolicy ?? "never"),
-            }
-          : field === "claudeApprovalMode"
+          ? field === "model"
             ? {
-                claudeApprovalMode: value as ClaudeApprovalMode,
+                model: value as string,
               }
-            : null;
+            : {
+                sandboxMode:
+                  field === "sandboxMode"
+                    ? (value as SandboxMode)
+                    : (session.sandboxMode ?? "workspace-write"),
+                approvalPolicy:
+                  field === "approvalPolicy"
+                    ? (value as ApprovalPolicy)
+                    : (session.approvalPolicy ?? "never"),
+              }
+          : session.agent === "Cursor"
+            ? field === "model"
+              ? {
+                  model: value as string,
+                }
+              : field === "cursorMode"
+              ? {
+                  cursorMode: value as CursorMode,
+                }
+              : null
+          : session.agent === "Claude"
+            ? field === "model"
+              ? {
+                  model: value as string,
+                }
+              : field === "claudeApprovalMode"
+                ? {
+                    claudeApprovalMode: value as ClaudeApprovalMode,
+                  }
+                : null
+            : session.agent === "Gemini"
+              ? field === "model"
+                ? {
+                    model: value as string,
+                  }
+                : field === "geminiApprovalMode"
+                  ? {
+                      geminiApprovalMode: value as GeminiApprovalMode,
+                    }
+                  : null
+              : null;
       if (!payload) {
         return;
       }
@@ -1623,6 +1767,30 @@ export default function App() {
       setRequestError(getErrorMessage(error));
     } finally {
       setUpdatingSessionIds((current) => setSessionFlag(current, sessionId, false));
+    }
+  }
+
+  async function handleRefreshSessionModelOptions(sessionId: string) {
+    let started = false;
+    setRefreshingSessionModelOptionIds((current) => {
+      if (current[sessionId]) {
+        return current;
+      }
+      started = true;
+      return setSessionFlag(current, sessionId, true);
+    });
+    if (!started) {
+      return;
+    }
+
+    try {
+      const state = await refreshSessionModelOptions(sessionId);
+      adoptState(state);
+      setRequestError(null);
+    } catch (error) {
+      setRequestError(getErrorMessage(error));
+    } finally {
+      setRefreshingSessionModelOptionIds((current) => setSessionFlag(current, sessionId, false));
     }
   }
 
@@ -2218,6 +2386,7 @@ export default function App() {
               stoppingSessionIds={stoppingSessionIds}
               killingSessionIds={killingSessionIds}
               updatingSessionIds={updatingSessionIds}
+              refreshingSessionModelOptionIds={refreshingSessionModelOptionIds}
               paneShouldStickToBottomRef={paneShouldStickToBottomRef}
               paneScrollPositionsRef={paneScrollPositionsRef}
               paneContentSignaturesRef={paneContentSignaturesRef}
@@ -2251,6 +2420,7 @@ export default function App() {
               onRenameSessionRequest={handleSessionRenameRequest}
               onScrollToBottomRequestHandled={handleScrollToBottomRequestHandled}
               onSessionSettingsChange={handleSessionSettingsChange}
+              onRefreshSessionModelOptions={handleRefreshSessionModelOptions}
               renderControlPanel={(paneId) => renderWorkspaceControlSurface(paneId)}
             />
           ) : (
@@ -2461,7 +2631,8 @@ export default function App() {
                 <div className="card-label">Session</div>
                 <h2 id="create-session-dialog-title">New session</h2>
                 <p className="dialog-copy">
-                  Pick the assistant, model, and project before opening the session.
+                  Pick the assistant, project, and any startup settings before opening the
+                  session. Session-specific controls stay with the session after it starts.
                 </p>
               </div>
 
@@ -2505,23 +2676,71 @@ export default function App() {
                 />
               </div>
 
-              <div className="create-session-field">
-                <label className="session-control-label" htmlFor="create-session-model">
-                  Model
-                </label>
-                <ThemedCombobox
-                  id="create-session-model"
-                  value={newSessionModel}
-                  options={newSessionModelOptions}
-                  onChange={(nextValue) =>
-                    setNewSessionModelByAgent((current) => ({
-                      ...current,
-                      [newSessionAgent]: nextValue,
-                    }))
-                  }
-                  disabled={isCreating}
-                />
-              </div>
+              {createSessionUsesSessionModelPicker ? (
+                <div className="create-session-field">
+                  <label className="session-control-label">Model</label>
+                  <p className="create-session-field-hint">
+                    {createSessionModelHint(newSessionAgent)}
+                  </p>
+                </div>
+              ) : (
+                <div className="create-session-field">
+                  <label className="session-control-label" htmlFor="create-session-model">
+                    Model
+                  </label>
+                  <ThemedCombobox
+                    id="create-session-model"
+                    value={newSessionModel}
+                    options={newSessionModelOptions}
+                    onChange={(nextValue) =>
+                      setNewSessionModelByAgent((current) => ({
+                        ...current,
+                        [newSessionAgent]: nextValue,
+                      }))
+                    }
+                    disabled={isCreating}
+                  />
+                </div>
+              )}
+
+              {newSessionAgent === "Cursor" ? (
+                <div className="create-session-field">
+                  <label className="session-control-label" htmlFor="create-session-cursor-mode">
+                    Cursor mode
+                  </label>
+                  <ThemedCombobox
+                    id="create-session-cursor-mode"
+                    value={defaultCursorMode}
+                    options={CURSOR_MODE_OPTIONS as readonly ComboboxOption[]}
+                    onChange={(nextValue) => setDefaultCursorMode(nextValue as CursorMode)}
+                    disabled={isCreating}
+                  />
+                  <p className="create-session-field-hint">
+                    Agent can edit, Plan stays read-only, and Ask keeps the session in Q&A mode.
+                  </p>
+                </div>
+              ) : null}
+
+              {newSessionAgent === "Gemini" ? (
+                <div className="create-session-field">
+                  <label className="session-control-label" htmlFor="create-session-gemini-mode">
+                    Gemini approvals
+                  </label>
+                  <ThemedCombobox
+                    id="create-session-gemini-mode"
+                    value={defaultGeminiApprovalMode}
+                    options={GEMINI_APPROVAL_OPTIONS as readonly ComboboxOption[]}
+                    onChange={(nextValue) =>
+                      setDefaultGeminiApprovalMode(nextValue as GeminiApprovalMode)
+                    }
+                    disabled={isCreating}
+                  />
+                  <p className="create-session-field-hint">
+                    Default prompts for approval, Auto edit approves edit tools, YOLO approves all
+                    tools, and Plan keeps Gemini read-only.
+                  </p>
+                </div>
+              ) : null}
 
               <div className="create-session-field">
                 <label className="session-control-label" htmlFor="create-session-project">
@@ -2537,6 +2756,20 @@ export default function App() {
                 <p className="create-session-field-hint">{createSessionProjectHint}</p>
               </div>
 
+              {createSessionAgentReadiness ? (
+                <article className="thread-notice create-session-readiness">
+                  <div className="card-label">
+                    {createSessionAgentReadiness.blocking ? "Setup Required" : "Ready"}
+                  </div>
+                  <p>{createSessionAgentReadiness.detail}</p>
+                  {createSessionAgentReadiness.commandPath ? (
+                    <p className="create-session-field-hint">
+                      Binary: {createSessionAgentReadiness.commandPath}
+                    </p>
+                  ) : null}
+                </article>
+              ) : null}
+
               <div className="dialog-actions create-session-dialog-actions">
                 <button
                   className="ghost-button"
@@ -2549,7 +2782,11 @@ export default function App() {
                 >
                   Cancel
                 </button>
-                <button className="send-button create-session-submit" type="submit" disabled={isCreating}>
+                <button
+                  className="send-button create-session-submit"
+                  type="submit"
+                  disabled={isCreating || createSessionBlocked}
+                >
                   {isCreating ? "Creating..." : "Create session"}
                 </button>
               </div>
@@ -2729,7 +2966,11 @@ export default function App() {
                 {settingsTab === "themes" ? (
                   <ThemePicker
                     activeTheme={activeTheme}
+                    fontSizePx={fontSizePx}
                     themeId={themeId}
+                    onSelectFontSize={(nextValue) =>
+                      setFontSizePx(clampFontSizePreference(nextValue))
+                    }
                     onSelectTheme={setThemeId}
                   />
                 ) : settingsTab === "codex-prompts" ? (
@@ -2756,11 +2997,15 @@ export default function App() {
 
 function ThemePicker({
   activeTheme,
+  fontSizePx,
   themeId,
+  onSelectFontSize,
   onSelectTheme,
 }: {
   activeTheme: (typeof THEMES)[number];
+  fontSizePx: number;
   themeId: ThemeId;
+  onSelectFontSize: (fontSizePx: number) => void;
   onSelectTheme: (themeId: ThemeId) => void;
 }) {
   const listRef = useRef<HTMLDivElement | null>(null);
@@ -2775,6 +3020,8 @@ function ThemePicker({
     visible: false,
   });
   const [isDraggingScrollbar, setIsDraggingScrollbar] = useState(false);
+  const canDecreaseFontSize = fontSizePx > MIN_FONT_SIZE_PX;
+  const canIncreaseFontSize = fontSizePx < MAX_FONT_SIZE_PX;
 
   useLayoutEffect(() => {
     const listElement = listRef.current;
@@ -2931,66 +3178,122 @@ function ThemePicker({
   }
 
   return (
-    <section className="theme-panel">
-      <div className="theme-panel-header">
-        <div>
-          <p className="session-control-label">Appearance</p>
-          <p className="theme-panel-copy">{activeTheme.description}</p>
-        </div>
-        <span className="theme-active-badge">{activeTheme.name}</span>
-      </div>
-
-      <div className="theme-option-list-shell">
-        <div ref={listRef} className="theme-option-list" role="radiogroup" aria-label="UI theme">
-          {THEMES.map((theme) => {
-            const isSelected = theme.id === themeId;
-
-            return (
+    <section className="settings-panel-stack">
+      <article className="message-card prompt-settings-card appearance-settings-card">
+        <div className="card-label">Interface</div>
+        <h3>Font size</h3>
+        <div className="prompt-settings-grid appearance-settings-grid">
+          <div className="session-control-group">
+            <label className="session-control-label" htmlFor="font-size-decrease">
+              Scale
+            </label>
+            <div className="font-size-controls" role="group" aria-label="UI font size controls">
               <button
-                key={theme.id}
-                className={`theme-option ${isSelected ? "selected" : ""}`}
+                id="font-size-decrease"
+                className="ghost-button font-size-stepper"
                 type="button"
-                role="radio"
-                aria-checked={isSelected}
-                onClick={() => onSelectTheme(theme.id)}
+                onClick={() => onSelectFontSize(fontSizePx - 1)}
+                disabled={!canDecreaseFontSize}
               >
-                <span className="theme-option-main">
-                  <span className="theme-option-title-row">
-                    <strong className="theme-option-title">{theme.name}</strong>
-                    {isSelected ? <span className="theme-option-status">Live</span> : null}
-                  </span>
-                  <span className="theme-option-copy">{theme.description}</span>
-                </span>
-                <span className="theme-option-preview" aria-hidden="true">
-                  {theme.swatches.map((swatch) => (
-                    <span
-                      key={`${theme.id}-${swatch}`}
-                      className="theme-option-swatch"
-                      style={{ background: swatch }}
-                    />
-                  ))}
-                </span>
+                A-
               </button>
-            );
-          })}
-        </div>
-        {scrollState.visible ? (
-          <div
-            className={`theme-option-scrollbar ${isDraggingScrollbar ? "dragging" : ""}`}
-            aria-hidden="true"
-            onPointerDown={handleScrollbarTrackPointerDown}
-          >
-            <span
-              className="theme-option-scrollbar-thumb"
-              onPointerDown={handleScrollbarThumbPointerDown}
-              style={{
-                height: `${scrollState.thumbHeight}px`,
-                transform: `translateY(${scrollState.thumbOffset}px)`,
-              }}
-            />
+              <div className="font-size-readout" aria-live="polite">
+                <strong className="font-size-readout-value">{fontSizePx}px</strong>
+                <span className="font-size-readout-copy">
+                  {fontSizePx === DEFAULT_FONT_SIZE_PX ? "Default" : "Live"}
+                </span>
+              </div>
+              <button
+                className="ghost-button font-size-stepper"
+                type="button"
+                onClick={() => onSelectFontSize(fontSizePx + 1)}
+                disabled={!canIncreaseFontSize}
+              >
+                A+
+              </button>
+            </div>
           </div>
-        ) : null}
-      </div>
+          <div className="session-control-group">
+            <label className="session-control-label" htmlFor="font-size-reset">
+              Reset
+            </label>
+            <button
+              id="font-size-reset"
+              className="ghost-button font-size-reset"
+              type="button"
+              onClick={() => onSelectFontSize(DEFAULT_FONT_SIZE_PX)}
+              disabled={fontSizePx === DEFAULT_FONT_SIZE_PX}
+            >
+              Use default
+            </button>
+          </div>
+          <p className="session-control-hint">
+            Changes apply immediately across the interface and are saved in this browser.
+          </p>
+        </div>
+      </article>
+
+      <section className="theme-panel">
+        <div className="theme-panel-header">
+          <div>
+            <p className="session-control-label">Appearance</p>
+            <p className="theme-panel-copy">{activeTheme.description}</p>
+          </div>
+          <span className="theme-active-badge">{activeTheme.name}</span>
+        </div>
+
+        <div className="theme-option-list-shell">
+          <div ref={listRef} className="theme-option-list" role="radiogroup" aria-label="UI theme">
+            {THEMES.map((theme) => {
+              const isSelected = theme.id === themeId;
+
+              return (
+                <button
+                  key={theme.id}
+                  className={`theme-option ${isSelected ? "selected" : ""}`}
+                  type="button"
+                  role="radio"
+                  aria-checked={isSelected}
+                  onClick={() => onSelectTheme(theme.id)}
+                >
+                  <span className="theme-option-main">
+                    <span className="theme-option-title-row">
+                      <strong className="theme-option-title">{theme.name}</strong>
+                      {isSelected ? <span className="theme-option-status">Live</span> : null}
+                    </span>
+                    <span className="theme-option-copy">{theme.description}</span>
+                  </span>
+                  <span className="theme-option-preview" aria-hidden="true">
+                    {theme.swatches.map((swatch) => (
+                      <span
+                        key={`${theme.id}-${swatch}`}
+                        className="theme-option-swatch"
+                        style={{ background: swatch }}
+                      />
+                    ))}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+          {scrollState.visible ? (
+            <div
+              className={`theme-option-scrollbar ${isDraggingScrollbar ? "dragging" : ""}`}
+              aria-hidden="true"
+              onPointerDown={handleScrollbarTrackPointerDown}
+            >
+              <span
+                className="theme-option-scrollbar-thumb"
+                onPointerDown={handleScrollbarThumbPointerDown}
+                style={{
+                  height: `${scrollState.thumbHeight}px`,
+                  transform: `translateY(${scrollState.thumbOffset}px)`,
+                }}
+              />
+            </div>
+          ) : null}
+        </div>
+      </section>
     </section>
   );
 }
@@ -3008,18 +3311,18 @@ function ClaudeApprovalsPreferencesPanel({
         <div>
           <p className="session-control-label">New Claude sessions</p>
           <p className="settings-panel-copy">
-            Choose the default approval mode for Claude sessions created in this window.
+            Choose the default Claude mode for sessions created in this window.
           </p>
         </div>
       </div>
 
       <article className="message-card prompt-settings-card">
         <div className="card-label">Session Default</div>
-        <h3>Claude approvals</h3>
+        <h3>Claude mode</h3>
         <div className="prompt-settings-grid">
           <div className="session-control-group">
             <label className="session-control-label" htmlFor="default-claude-approval-mode">
-              Default approval mode
+              Default Claude mode
             </label>
             <ThemedCombobox
               id="default-claude-approval-mode"
@@ -3030,8 +3333,8 @@ function ClaudeApprovalsPreferencesPanel({
             />
           </div>
           <p className="session-control-hint">
-            This only affects new Claude sessions you create here. Existing sessions keep their
-            current approval mode.
+            Ask keeps approval cards, Auto-approve continues through tool requests, and Plan keeps
+            Claude read-only. Existing sessions keep their current mode.
           </p>
         </div>
       </article>
@@ -3374,6 +3677,7 @@ function WorkspaceNodeView({
   stoppingSessionIds,
   killingSessionIds,
   updatingSessionIds,
+  refreshingSessionModelOptionIds,
   paneShouldStickToBottomRef,
   paneScrollPositionsRef,
   paneContentSignaturesRef,
@@ -3407,6 +3711,7 @@ function WorkspaceNodeView({
   onRenameSessionRequest,
   onScrollToBottomRequestHandled,
   onSessionSettingsChange,
+  onRefreshSessionModelOptions,
   renderControlPanel,
 }: {
   node: WorkspaceNode;
@@ -3421,6 +3726,7 @@ function WorkspaceNodeView({
   stoppingSessionIds: SessionFlagMap;
   killingSessionIds: SessionFlagMap;
   updatingSessionIds: SessionFlagMap;
+  refreshingSessionModelOptionIds: SessionFlagMap;
   paneShouldStickToBottomRef: React.MutableRefObject<Record<string, boolean | undefined>>;
   paneScrollPositionsRef: React.MutableRefObject<
     Record<string, Record<string, { top: number; shouldStick: boolean }>>
@@ -3488,6 +3794,7 @@ function WorkspaceNodeView({
     field: SessionSettingsField,
     value: SessionSettingsValue,
   ) => void;
+  onRefreshSessionModelOptions: (sessionId: string) => void;
   renderControlPanel: (paneId: string) => JSX.Element;
 }) {
   if (node.type === "pane") {
@@ -3511,6 +3818,9 @@ function WorkspaceNodeView({
         isStopping={pane.activeSessionId ? Boolean(stoppingSessionIds[pane.activeSessionId]) : false}
         isKilling={pane.activeSessionId ? Boolean(killingSessionIds[pane.activeSessionId]) : false}
         isUpdating={pane.activeSessionId ? Boolean(updatingSessionIds[pane.activeSessionId]) : false}
+        isRefreshingModelOptions={
+          pane.activeSessionId ? Boolean(refreshingSessionModelOptionIds[pane.activeSessionId]) : false
+        }
         paneShouldStickToBottomRef={paneShouldStickToBottomRef}
         paneScrollPositionsRef={paneScrollPositionsRef}
         paneContentSignaturesRef={paneContentSignaturesRef}
@@ -3543,6 +3853,7 @@ function WorkspaceNodeView({
         onRenameSessionRequest={onRenameSessionRequest}
         onScrollToBottomRequestHandled={onScrollToBottomRequestHandled}
         onSessionSettingsChange={onSessionSettingsChange}
+        onRefreshSessionModelOptions={onRefreshSessionModelOptions}
         renderControlPanel={renderControlPanel}
       />
     );
@@ -3578,6 +3889,7 @@ function WorkspaceNodeView({
           stoppingSessionIds={stoppingSessionIds}
           killingSessionIds={killingSessionIds}
           updatingSessionIds={updatingSessionIds}
+          refreshingSessionModelOptionIds={refreshingSessionModelOptionIds}
           paneShouldStickToBottomRef={paneShouldStickToBottomRef}
           paneScrollPositionsRef={paneScrollPositionsRef}
           paneContentSignaturesRef={paneContentSignaturesRef}
@@ -3611,6 +3923,7 @@ function WorkspaceNodeView({
           onRenameSessionRequest={onRenameSessionRequest}
           onScrollToBottomRequestHandled={onScrollToBottomRequestHandled}
           onSessionSettingsChange={onSessionSettingsChange}
+          onRefreshSessionModelOptions={onRefreshSessionModelOptions}
           renderControlPanel={renderControlPanel}
         />
       </div>
@@ -3641,6 +3954,7 @@ function WorkspaceNodeView({
           stoppingSessionIds={stoppingSessionIds}
           killingSessionIds={killingSessionIds}
           updatingSessionIds={updatingSessionIds}
+          refreshingSessionModelOptionIds={refreshingSessionModelOptionIds}
           paneShouldStickToBottomRef={paneShouldStickToBottomRef}
           paneScrollPositionsRef={paneScrollPositionsRef}
           paneContentSignaturesRef={paneContentSignaturesRef}
@@ -3674,6 +3988,7 @@ function WorkspaceNodeView({
           onRenameSessionRequest={onRenameSessionRequest}
           onScrollToBottomRequestHandled={onScrollToBottomRequestHandled}
           onSessionSettingsChange={onSessionSettingsChange}
+          onRefreshSessionModelOptions={onRefreshSessionModelOptions}
           renderControlPanel={renderControlPanel}
         />
       </div>
@@ -3693,6 +4008,7 @@ function SessionPaneView({
   isStopping,
   isKilling,
   isUpdating,
+  isRefreshingModelOptions,
   paneShouldStickToBottomRef,
   paneScrollPositionsRef,
   paneContentSignaturesRef,
@@ -3725,6 +4041,7 @@ function SessionPaneView({
   onRenameSessionRequest,
   onScrollToBottomRequestHandled,
   onSessionSettingsChange,
+  onRefreshSessionModelOptions,
   renderControlPanel,
 }: {
   pane: WorkspacePane;
@@ -3738,6 +4055,7 @@ function SessionPaneView({
   isStopping: boolean;
   isKilling: boolean;
   isUpdating: boolean;
+  isRefreshingModelOptions: boolean;
   paneShouldStickToBottomRef: React.MutableRefObject<Record<string, boolean | undefined>>;
   paneScrollPositionsRef: React.MutableRefObject<
     Record<string, Record<string, { top: number; shouldStick: boolean }>>
@@ -3800,6 +4118,7 @@ function SessionPaneView({
     field: SessionSettingsField,
     value: SessionSettingsValue,
   ) => void;
+  onRefreshSessionModelOptions: (sessionId: string) => void;
   renderControlPanel: (paneId: string) => JSX.Element;
 }) {
   const activeTab = pane.tabs.find((tab) => tab.id === pane.activeTabId) ?? pane.tabs[0] ?? null;
@@ -4860,6 +5179,32 @@ function SessionPaneView({
                 );
               }
 
+              if (session.agent === "Cursor") {
+                return (
+                  <CursorPromptSettingsCard
+                    paneId={panelPaneId}
+                    session={session}
+                    isUpdating={panelIsUpdating}
+                    isRefreshingModelOptions={isRefreshingModelOptions}
+                    onRequestModelOptions={onRefreshSessionModelOptions}
+                    onSessionSettingsChange={handleSettingsChange}
+                  />
+                );
+              }
+
+              if (session.agent === "Gemini") {
+                return (
+                  <GeminiPromptSettingsCard
+                    paneId={panelPaneId}
+                    session={session}
+                    isUpdating={panelIsUpdating}
+                    isRefreshingModelOptions={isRefreshingModelOptions}
+                    onRequestModelOptions={onRefreshSessionModelOptions}
+                    onSessionSettingsChange={handleSettingsChange}
+                  />
+                );
+              }
+
               return null;
             }}
           />
@@ -5014,11 +5359,26 @@ function CodexPromptSettingsCard({
     value: SessionSettingsValue,
   ) => void;
 }) {
+  const modelOptions = staticSessionModelOptions("Codex", session.model);
+
   return (
     <article className="message-card prompt-settings-card">
-      <div className="card-label">Next Prompt</div>
-      <h3>Prompt permissions</h3>
+      <div className="card-label">Session Settings</div>
+      <h3>Codex session</h3>
       <div className="prompt-settings-grid">
+        <div className="session-control-group">
+          <label className="session-control-label" htmlFor={`codex-model-${paneId}`}>
+            Codex model
+          </label>
+          <ThemedCombobox
+            id={`codex-model-${paneId}`}
+            className="prompt-settings-select"
+            value={session.model}
+            options={modelOptions}
+            disabled={isUpdating}
+            onChange={(nextValue) => void onSessionSettingsChange(session.id, "model", nextValue)}
+          />
+        </div>
         <div className="session-control-group">
           <label className="session-control-label" htmlFor={`sandbox-mode-${paneId}`}>
             Next prompt sandbox
@@ -5054,8 +5414,8 @@ function CodexPromptSettingsCard({
           />
         </div>
         <p className="session-control-hint">
-          Changes apply on the next Codex prompt. If the underlying thread was started with a
-          different sandbox, TermAl starts a fresh Codex thread for the next turn.
+          Model, sandbox, and approval changes apply on the next Codex prompt. If the model or
+          sandbox changed, TermAl restarts the Codex runtime for the next turn.
         </p>
       </div>
     </article>
@@ -5077,14 +5437,29 @@ function ClaudePromptSettingsCard({
     value: SessionSettingsValue,
   ) => void;
 }) {
+  const modelOptions = staticSessionModelOptions("Claude", session.model);
+
   return (
     <article className="message-card prompt-settings-card">
-      <div className="card-label">Session Mode</div>
-      <h3>Claude approvals</h3>
+      <div className="card-label">Session Settings</div>
+      <h3>Claude session</h3>
       <div className="prompt-settings-grid">
         <div className="session-control-group">
+          <label className="session-control-label" htmlFor={`claude-model-${paneId}`}>
+            Claude model
+          </label>
+          <ThemedCombobox
+            id={`claude-model-${paneId}`}
+            className="prompt-settings-select"
+            value={session.model}
+            options={modelOptions}
+            disabled={isUpdating}
+            onChange={(nextValue) => void onSessionSettingsChange(session.id, "model", nextValue)}
+          />
+        </div>
+        <div className="session-control-group">
           <label className="session-control-label" htmlFor={`claude-approval-mode-${paneId}`}>
-            Claude approval mode
+            Claude mode
           </label>
           <ThemedCombobox
             id={`claude-approval-mode-${paneId}`}
@@ -5102,8 +5477,196 @@ function ClaudePromptSettingsCard({
           />
         </div>
         <p className="session-control-hint">
-          Ask keeps the current approval cards. Auto-approve lets Claude continue without pausing
-          when it requests tool permission.
+          Model and mode changes apply on the next Claude prompt. If the model changed, TermAl
+          restarts the Claude runtime for the next turn. Ask keeps approval cards, Auto-approve
+          continues through tool requests, and Plan keeps Claude in read-only analysis mode.
+        </p>
+      </div>
+    </article>
+  );
+}
+
+function CursorPromptSettingsCard({
+  paneId,
+  session,
+  isUpdating,
+  isRefreshingModelOptions,
+  onRequestModelOptions,
+  onSessionSettingsChange,
+}: {
+  paneId: string;
+  session: Session;
+  isUpdating: boolean;
+  isRefreshingModelOptions: boolean;
+  onRequestModelOptions: (sessionId: string) => void;
+  onSessionSettingsChange: (
+    sessionId: string,
+    field: SessionSettingsField,
+    value: SessionSettingsValue,
+  ) => void;
+}) {
+  const requestedSessionIdRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (session.modelOptions?.length) {
+      requestedSessionIdRef.current = session.id;
+      return;
+    }
+    if (isRefreshingModelOptions || requestedSessionIdRef.current === session.id) {
+      return;
+    }
+
+    requestedSessionIdRef.current = session.id;
+    void onRequestModelOptions(session.id);
+  }, [isRefreshingModelOptions, onRequestModelOptions, session.id, session.modelOptions]);
+
+  const modelOptions =
+    session.modelOptions?.length
+      ? session.modelOptions.map((option) => ({
+          label: option.label,
+          value: option.value,
+        }))
+      : [{ label: session.model === "auto" ? "Auto" : session.model, value: session.model }];
+  const canChangeModel = (session.modelOptions?.length ?? 0) > 0;
+
+  return (
+    <article className="message-card prompt-settings-card">
+      <div className="card-label">Session Mode</div>
+      <h3>Cursor session</h3>
+      <div className="prompt-settings-grid">
+        <div className="session-control-group">
+          <label className="session-control-label" htmlFor={`cursor-model-${paneId}`}>
+            Cursor model
+          </label>
+          <ThemedCombobox
+            id={`cursor-model-${paneId}`}
+            className="prompt-settings-select"
+            value={session.model}
+            options={modelOptions}
+            disabled={isUpdating || !canChangeModel}
+            onChange={(nextValue) =>
+              void onSessionSettingsChange(session.id, "model", nextValue)
+            }
+          />
+        </div>
+        <div className="session-control-group">
+          <label className="session-control-label" htmlFor={`cursor-mode-${paneId}`}>
+            Cursor mode
+          </label>
+          <ThemedCombobox
+            id={`cursor-mode-${paneId}`}
+            className="prompt-settings-select"
+            value={session.cursorMode ?? "agent"}
+            options={CURSOR_MODE_OPTIONS as readonly ComboboxOption[]}
+            disabled={isUpdating}
+            onChange={(nextValue) =>
+              void onSessionSettingsChange(session.id, "cursorMode", nextValue as CursorMode)
+            }
+          />
+        </div>
+        <p className="session-control-hint">
+          {isRefreshingModelOptions
+            ? "Loading Cursor's live model list for this session."
+            : canChangeModel
+              ? "Model and mode changes apply to the live Cursor session."
+              : "TermAl asks Cursor for its live model list when this session opens. New sessions begin on Auto."}{" "}
+          Agent can edit, Plan stays read-only, and Ask keeps the session focused on explanation.
+        </p>
+      </div>
+    </article>
+  );
+}
+
+function GeminiPromptSettingsCard({
+  paneId,
+  session,
+  isUpdating,
+  isRefreshingModelOptions,
+  onRequestModelOptions,
+  onSessionSettingsChange,
+}: {
+  paneId: string;
+  session: Session;
+  isUpdating: boolean;
+  isRefreshingModelOptions: boolean;
+  onRequestModelOptions: (sessionId: string) => void;
+  onSessionSettingsChange: (
+    sessionId: string,
+    field: SessionSettingsField,
+    value: SessionSettingsValue,
+  ) => void;
+}) {
+  const requestedSessionIdRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (session.modelOptions?.length) {
+      requestedSessionIdRef.current = session.id;
+      return;
+    }
+    if (isRefreshingModelOptions || requestedSessionIdRef.current === session.id) {
+      return;
+    }
+
+    requestedSessionIdRef.current = session.id;
+    void onRequestModelOptions(session.id);
+  }, [isRefreshingModelOptions, onRequestModelOptions, session.id, session.modelOptions]);
+
+  const modelOptions =
+    session.modelOptions?.length
+      ? session.modelOptions.map((option) => ({
+          label: option.label,
+          value: option.value,
+        }))
+      : [{ label: session.model === "auto" ? "Auto" : session.model, value: session.model }];
+  const canChangeModel = (session.modelOptions?.length ?? 0) > 0;
+
+  return (
+    <article className="message-card prompt-settings-card">
+      <div className="card-label">Session Settings</div>
+      <h3>Gemini session</h3>
+      <div className="prompt-settings-grid">
+        <div className="session-control-group">
+          <label className="session-control-label" htmlFor={`gemini-model-${paneId}`}>
+            Gemini model
+          </label>
+          <ThemedCombobox
+            id={`gemini-model-${paneId}`}
+            className="prompt-settings-select"
+            value={session.model}
+            options={modelOptions}
+            disabled={isUpdating || !canChangeModel}
+            onChange={(nextValue) =>
+              void onSessionSettingsChange(session.id, "model", nextValue)
+            }
+          />
+        </div>
+        <div className="session-control-group">
+          <label className="session-control-label" htmlFor={`gemini-approval-mode-${paneId}`}>
+            Gemini approval mode
+          </label>
+          <ThemedCombobox
+            id={`gemini-approval-mode-${paneId}`}
+            className="prompt-settings-select"
+            value={session.geminiApprovalMode ?? "default"}
+            options={GEMINI_APPROVAL_OPTIONS as readonly ComboboxOption[]}
+            disabled={isUpdating}
+            onChange={(nextValue) =>
+              void onSessionSettingsChange(
+                session.id,
+                "geminiApprovalMode",
+                nextValue as GeminiApprovalMode,
+              )
+            }
+          />
+        </div>
+        <p className="session-control-hint">
+          {isRefreshingModelOptions
+            ? "Loading Gemini's live model list for this session."
+            : canChangeModel
+              ? "Model changes apply to the live Gemini session."
+              : "TermAl asks Gemini for its live model list when this session opens. New sessions begin on Auto."}{" "}
+          Default prompts for approval, Auto edit approves edit tools, YOLO approves all tools,
+          and Plan stays read-only. Approval-mode changes apply on the next Gemini prompt.
         </p>
       </div>
     </article>
@@ -6069,8 +6632,12 @@ export function MarkdownContent({
               <table {...props}>{children}</table>
             </div>
           ),
-          td: ({ children, ...props }) => <td {...props}>{highlightChildren(children)}</td>,
-          th: ({ children, ...props }) => <th {...props}>{highlightChildren(children)}</th>,
+          td: ({ children, isHeader: _isHeader, ...props }) => (
+            <td {...props}>{highlightChildren(children)}</td>
+          ),
+          th: ({ children, isHeader: _isHeader, ...props }) => (
+            <th {...props}>{highlightChildren(children)}</th>
+          ),
         }}
         remarkPlugins={[remarkGfm]}
       >
