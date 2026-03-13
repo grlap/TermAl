@@ -15,6 +15,12 @@ import {
   type GitStatusTreeSection,
 } from "./git-status-tree";
 
+type GitActionTarget = {
+  originalPath?: string | null;
+  path: string;
+  statusCode?: string | null;
+};
+
 export function GitStatusPanel({
   onOpenPath,
   onOpenWorkdir,
@@ -72,26 +78,57 @@ export function GitStatusPanel({
     node: GitStatusTreeFileNode,
     action: GitFileAction,
   ) {
+    await handleTreeAction(sectionId, node.path, [toGitActionTarget(node)], action);
+  }
+
+  async function handleDirectoryAction(
+    sectionId: GitStatusSectionId,
+    node: GitStatusTreeDirectoryNode,
+    action: GitFileAction,
+  ) {
+    await handleTreeAction(sectionId, node.path, collectDirectoryTargets(node), action);
+  }
+
+  async function handleTreeAction(
+    sectionId: GitStatusSectionId,
+    actionPath: string,
+    targets: GitActionTarget[],
+    action: GitFileAction,
+  ) {
     const activeWorkdir = status?.workdir ?? normalizedWorkdir;
-    if (!activeWorkdir) {
+    if (!activeWorkdir || targets.length === 0) {
       return;
     }
 
-    const actionKey = gitFileActionKey(sectionId, node.path, action);
+    const actionKey = gitFileActionKey(sectionId, actionPath, action);
     setPendingActionKey(actionKey);
     setError(null);
 
     try {
-      const response = await applyGitFileAction({
-        action,
-        originalPath: node.originalPath,
-        path: node.path,
-        statusCode: node.statusCode,
-        workdir: activeWorkdir,
-      });
-      setStatus(response);
+      let response: GitStatusResponse | null = null;
+
+      for (const target of targets) {
+        response = await applyGitFileAction({
+          action,
+          originalPath: target.originalPath,
+          path: target.path,
+          statusCode: target.statusCode,
+          workdir: activeWorkdir,
+        });
+      }
+
+      if (response) {
+        setStatus(response);
+      }
     } catch (nextError) {
       setError(getErrorMessage(nextError));
+      if (targets.length > 1) {
+        try {
+          setStatus(await fetchGitStatus(activeWorkdir));
+        } catch {
+          // Keep the action error visible if the follow-up refresh also fails.
+        }
+      }
     } finally {
       setPendingActionKey((current) => (current === actionKey ? null : current));
     }
@@ -209,6 +246,7 @@ export function GitStatusPanel({
                 <GitStatusSection
                   key={section.id}
                   isExpanded={isTreeItemExpanded(sectionExpansionKey(section.id), section.fileCount > 0)}
+                  onDirectoryAction={handleDirectoryAction}
                   onFileAction={handleFileAction}
                   onOpenPath={onOpenPath}
                   onToggle={(defaultValue) => toggleTreeItem(sectionExpansionKey(section.id), defaultValue)}
@@ -229,6 +267,7 @@ export function GitStatusPanel({
 
 function GitStatusSection({
   isExpanded,
+  onDirectoryAction,
   onFileAction,
   onOpenPath,
   onToggle,
@@ -239,6 +278,11 @@ function GitStatusSection({
   treeExpansionByKey,
 }: {
   isExpanded: boolean;
+  onDirectoryAction: (
+    sectionId: GitStatusSectionId,
+    node: GitStatusTreeDirectoryNode,
+    action: GitFileAction,
+  ) => void;
   onFileAction: (sectionId: GitStatusSectionId, node: GitStatusTreeFileNode, action: GitFileAction) => void;
   onOpenPath: (path: string) => void;
   onToggle: (defaultValue: boolean) => void;
@@ -269,6 +313,7 @@ function GitStatusSection({
         section.fileCount > 0 ? (
           <GitStatusTree
             nodes={section.nodes}
+            onDirectoryAction={onDirectoryAction}
             onFileAction={onFileAction}
             onOpenPath={onOpenPath}
             onTreeToggle={onTreeToggle}
@@ -287,6 +332,7 @@ function GitStatusSection({
 
 function GitStatusTree({
   nodes,
+  onDirectoryAction,
   onFileAction,
   onOpenPath,
   onTreeToggle,
@@ -296,6 +342,11 @@ function GitStatusTree({
   treeExpansionByKey,
 }: {
   nodes: GitStatusTreeNode[];
+  onDirectoryAction: (
+    sectionId: GitStatusSectionId,
+    node: GitStatusTreeDirectoryNode,
+    action: GitFileAction,
+  ) => void;
   onFileAction: (sectionId: GitStatusSectionId, node: GitStatusTreeFileNode, action: GitFileAction) => void;
   onOpenPath: (path: string) => void;
   onTreeToggle: (key: string, defaultValue: boolean) => void;
@@ -311,6 +362,7 @@ function GitStatusTree({
           <GitStatusDirectoryNode
             key={`${sectionId}:${node.path}`}
             node={node}
+            onDirectoryAction={onDirectoryAction}
             onFileAction={onFileAction}
             onOpenPath={onOpenPath}
             onTreeToggle={onTreeToggle}
@@ -337,6 +389,7 @@ function GitStatusTree({
 
 function GitStatusDirectoryNode({
   node,
+  onDirectoryAction,
   onFileAction,
   onOpenPath,
   onTreeToggle,
@@ -346,6 +399,11 @@ function GitStatusDirectoryNode({
   treeExpansionByKey,
 }: {
   node: GitStatusTreeDirectoryNode;
+  onDirectoryAction: (
+    sectionId: GitStatusSectionId,
+    node: GitStatusTreeDirectoryNode,
+    action: GitFileAction,
+  ) => void;
   onFileAction: (sectionId: GitStatusSectionId, node: GitStatusTreeFileNode, action: GitFileAction) => void;
   onOpenPath: (path: string) => void;
   onTreeToggle: (key: string, defaultValue: boolean) => void;
@@ -356,30 +414,49 @@ function GitStatusDirectoryNode({
 }) {
   const expansionKey = directoryExpansionKey(sectionId, node.path);
   const isExpanded = treeExpansionByKey[expansionKey] ?? true;
+  const isStaged = sectionId === "staged";
+  const action: GitFileAction = isStaged ? "unstage" : "stage";
+  const actionLabel = formatGitStageActionLabel(node.name, isStaged);
+  const isPending = pendingActionKey === gitFileActionKey(sectionId, node.path, action);
 
   return (
     <div className="git-status-node">
-      <button
-        className="git-status-tree-row git-status-tree-directory-row"
-        type="button"
-        aria-expanded={isExpanded}
-        onClick={() => onTreeToggle(expansionKey, true)}
-      >
-        <span className="git-tree-toggle" aria-hidden="true">
-          <ChevronIcon expanded={isExpanded} />
-        </span>
-        <span className="git-status-tree-label-group">
-          <span className="git-status-tree-name">{node.name}</span>
-        </span>
+      <div className={`git-status-tree-row git-status-tree-directory-row${isPending ? " pending" : ""}`}>
+        <button
+          className="git-status-tree-directory-toggle"
+          type="button"
+          aria-expanded={isExpanded}
+          onClick={() => onTreeToggle(expansionKey, true)}
+        >
+          <span className="git-tree-toggle" aria-hidden="true">
+            <ChevronIcon expanded={isExpanded} />
+          </span>
+          <span className="git-status-tree-label-group">
+            <span className="git-status-tree-name">{node.name}</span>
+          </span>
+        </button>
+        <div className="git-status-tree-actions">
+          <button
+            className="git-status-action-button"
+            type="button"
+            onClick={() => onDirectoryAction(sectionId, node, action)}
+            aria-label={actionLabel}
+            title={actionLabel}
+            disabled={isPending}
+          >
+            {isStaged ? <UnstageIcon /> : <StageIcon />}
+          </button>
+        </div>
         <span className="git-status-tree-count" aria-hidden="true">
           {node.fileCount}
         </span>
-      </button>
+      </div>
 
       {isExpanded ? (
         <div className="git-status-tree-children">
           <GitStatusTree
             nodes={node.children}
+            onDirectoryAction={onDirectoryAction}
             onFileAction={onFileAction}
             onOpenPath={onOpenPath}
             onTreeToggle={onTreeToggle}
@@ -411,6 +488,7 @@ function GitStatusFileRow({
 }) {
   const tone = gitStatusTone(node.statusCode);
   const isStaged = sectionId === "staged";
+  const stageActionLabel = formatGitStageActionLabel(node.name, isStaged);
 
   return (
     <div className={`git-status-tree-row git-status-tree-file-row${isPending ? " pending" : ""}`}>
@@ -426,7 +504,7 @@ function GitStatusFileRow({
         </span>
       </button>
 
-      <div className="git-status-file-actions">
+      <div className="git-status-tree-actions">
         {!isStaged ? (
           <button
             className="git-status-action-button"
@@ -443,8 +521,8 @@ function GitStatusFileRow({
           className="git-status-action-button"
           type="button"
           onClick={() => onAction(sectionId, node, isStaged ? "unstage" : "stage")}
-          aria-label={isStaged ? `Move ${node.name} to unstaged` : `Stage ${node.name}`}
-          title={isStaged ? `Move ${node.name} to unstaged` : `Stage ${node.name}`}
+          aria-label={stageActionLabel}
+          title={stageActionLabel}
           disabled={isPending}
         >
           {isStaged ? <UnstageIcon /> : <StageIcon />}
@@ -460,6 +538,28 @@ function GitStatusFileRow({
       </span>
     </div>
   );
+}
+
+function toGitActionTarget(node: GitStatusTreeFileNode): GitActionTarget {
+  return {
+    originalPath: node.originalPath,
+    path: node.path,
+    statusCode: node.statusCode,
+  };
+}
+
+function collectDirectoryTargets(node: GitStatusTreeDirectoryNode) {
+  return collectGitActionTargets(node.children);
+}
+
+function collectGitActionTargets(nodes: GitStatusTreeNode[]): GitActionTarget[] {
+  return nodes.flatMap((node) =>
+    node.kind === "directory" ? collectGitActionTargets(node.children) : [toGitActionTarget(node)],
+  );
+}
+
+function formatGitStageActionLabel(name: string, isStaged: boolean) {
+  return isStaged ? `Move ${name} to unstaged` : `Stage ${name}`;
 }
 
 function sectionExpansionKey(sectionId: GitStatusSectionId) {

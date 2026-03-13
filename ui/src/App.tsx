@@ -89,6 +89,7 @@ import {
   closeWorkspaceTab,
   dockControlPanelAtWorkspaceEdge,
   ensureControlPanelInWorkspaceState,
+  findWorkspacePaneIdForSession,
   getSplitRatio,
   openDiffPreviewInWorkspaceState,
   openFilesystemInWorkspaceState,
@@ -1322,6 +1323,29 @@ export default function App() {
     setPendingKillSessionId((current) => (current === sessionId ? null : sessionId));
   }
 
+  async function executeKillSession(sessionId: string) {
+    setKillingSessionIds((current) => setSessionFlag(current, sessionId, true));
+    try {
+      const state = await killSession(sessionId);
+      if (!isMountedRef.current) {
+        return;
+      }
+
+      adoptState(state);
+      setRequestError(null);
+    } catch (error) {
+      if (!isMountedRef.current) {
+        return;
+      }
+
+      setRequestError(getErrorMessage(error));
+    } finally {
+      if (isMountedRef.current) {
+        setKillingSessionIds((current) => setSessionFlag(current, sessionId, false));
+      }
+    }
+  }
+
   async function confirmKillSession() {
     if (!pendingKillSessionId) {
       return;
@@ -1331,16 +1355,7 @@ export default function App() {
     setPendingKillSessionId(null);
     setKillRevealSessionId(null);
 
-    setKillingSessionIds((current) => setSessionFlag(current, sessionId, true));
-    try {
-      const state = await killSession(sessionId);
-      adoptState(state);
-      setRequestError(null);
-    } catch (error) {
-      setRequestError(getErrorMessage(error));
-    } finally {
-      setKillingSessionIds((current) => setSessionFlag(current, sessionId, false));
-    }
+    await executeKillSession(sessionId);
   }
 
   function focusPendingKillTrigger() {
@@ -1492,6 +1507,82 @@ export default function App() {
     }
   }
 
+  async function handlePendingSessionRenameNew() {
+    if (!pendingSessionRename) {
+      return;
+    }
+
+    const session = sessionLookup.get(pendingSessionRename.sessionId);
+    if (!session) {
+      closePendingSessionRename();
+      return;
+    }
+
+    setIsCreating(true);
+    try {
+      const targetPaneId = findWorkspacePaneIdForSession(workspace, session.id) ?? workspace.activePaneId;
+      const created = await createSession({
+        agent: session.agent,
+        model: session.model,
+        approvalPolicy:
+          session.agent === "Codex"
+            ? (session.approvalPolicy ?? defaultCodexApprovalPolicy)
+            : undefined,
+        claudeApprovalMode:
+          session.agent === "Claude"
+            ? (session.claudeApprovalMode ?? defaultClaudeApprovalMode)
+            : undefined,
+        sandboxMode:
+          session.agent === "Codex"
+            ? (session.sandboxMode ?? defaultCodexSandboxMode)
+            : undefined,
+        projectId: session.projectId && projectLookup.has(session.projectId) ? session.projectId : undefined,
+        workdir: session.workdir,
+      });
+      if (!isMountedRef.current) {
+        return;
+      }
+
+      const adopted = adoptState(created.state, {
+        openSessionId: created.sessionId,
+        paneId: targetPaneId,
+      });
+      if (!adopted) {
+        setWorkspace((current) =>
+          applyControlPanelLayout(openSessionInWorkspaceState(current, created.sessionId, targetPaneId)),
+        );
+      }
+      setRequestError(null);
+      closePendingSessionRename();
+    } catch (error) {
+      if (!isMountedRef.current) {
+        return;
+      }
+
+      setRequestError(getErrorMessage(error));
+    } finally {
+      if (isMountedRef.current) {
+        setIsCreating(false);
+      }
+    }
+  }
+
+  async function handlePendingSessionRenameKill() {
+    if (!pendingSessionRename) {
+      return;
+    }
+
+    const session = sessionLookup.get(pendingSessionRename.sessionId);
+    if (!session) {
+      closePendingSessionRename();
+      return;
+    }
+
+    closePendingSessionRename();
+    setKillRevealSessionId(null);
+    await executeKillSession(session.id);
+  }
+
   async function handleSessionSettingsChange(
     sessionId: string,
     field: SessionSettingsField,
@@ -1560,6 +1651,10 @@ export default function App() {
   const pendingSessionRenameValue = pendingSessionRenameDraft.trim();
   const isPendingSessionRenameSubmitting = pendingSessionRenameSession
     ? Boolean(updatingSessionIds[pendingSessionRenameSession.id])
+    : false;
+  const isPendingSessionRenameCreating = pendingSessionRenameSession ? isCreating : false;
+  const isPendingSessionRenameKilling = pendingSessionRenameSession
+    ? Boolean(killingSessionIds[pendingSessionRenameSession.id])
     : false;
   const pendingKillSession = pendingKillSessionId
     ? (sessionLookup.get(pendingKillSessionId) ?? null)
@@ -2282,18 +2377,56 @@ export default function App() {
                 />
                 <div className="session-rename-actions">
                   <button
+                    className="ghost-button session-rename-new"
+                    type="button"
+                    onClick={() => {
+                      void handlePendingSessionRenameNew();
+                    }}
+                    disabled={
+                      isPendingSessionRenameCreating ||
+                      isPendingSessionRenameSubmitting ||
+                      isPendingSessionRenameKilling
+                    }
+                  >
+                    {isPendingSessionRenameCreating ? "Creating" : "New"}
+                  </button>
+                  <button
+                    className="ghost-button session-rename-kill"
+                    type="button"
+                    onClick={() => {
+                      void handlePendingSessionRenameKill();
+                    }}
+                    disabled={
+                      isPendingSessionRenameCreating ||
+                      isPendingSessionRenameSubmitting ||
+                      isPendingSessionRenameKilling
+                    }
+                  >
+                    {isPendingSessionRenameKilling ? "Killing" : "Kill"}
+                  </button>
+                  <button
                     className="ghost-button session-rename-cancel"
                     type="button"
                     onClick={() => {
                       closePendingSessionRename(true);
                     }}
+                    disabled={
+                      isPendingSessionRenameCreating ||
+                      isPendingSessionRenameSubmitting ||
+                      isPendingSessionRenameKilling
+                    }
                   >
                     Cancel
                   </button>
                   <button
                     className="send-button session-rename-save"
                     type="submit"
-                    disabled={!pendingSessionRenameValue || isPendingSessionRenameSubmitting}
+                    disabled={
+                      !pendingSessionRenameValue ||
+                      isPendingSessionRenameCreating ||
+                      isPendingSessionRenameSubmitting ||
+                      isPendingSessionRenameKilling
+                    }
                   >
                     {isPendingSessionRenameSubmitting ? "Saving" : "Save"}
                   </button>

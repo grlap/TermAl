@@ -292,6 +292,10 @@ export function reconcileWorkspaceState(current: WorkspaceState, sessions: Sessi
   };
 }
 
+export function findWorkspacePaneIdForSession(workspace: WorkspaceState, sessionId: string) {
+  return findSessionTab(workspace, sessionId)?.paneId ?? null;
+}
+
 export function openSessionInWorkspaceState(
   workspace: WorkspaceState,
   sessionId: string,
@@ -312,16 +316,26 @@ export function openSourceInWorkspaceState(
   originSessionId: string | null,
 ): WorkspaceState {
   const normalizedPath = normalizeWorkspacePath(path);
+  const targetPaneId = findContextualTargetPaneId(
+    workspace,
+    preferredPaneId,
+    originSessionId,
+    "source",
+  );
   const nextTab = createSourceTab(normalizedPath, originSessionId);
   if (normalizedPath) {
     const existing = findSourceTab(workspace, normalizedPath);
-    return openContextualTabInWorkspaceState(
-      workspace,
-      nextTab,
-      existing,
-      preferredPaneId,
-      originSessionId,
-    );
+    if (existing) {
+      if (targetPaneId && existing.paneId !== targetPaneId) {
+        return moveWorkspaceTabToPane(workspace, existing.paneId, existing.tab.id, targetPaneId);
+      }
+
+      return activatePane(workspace, existing.paneId, existing.tab.id);
+    }
+  }
+
+  if (targetPaneId) {
+    return openTabInWorkspaceState(workspace, nextTab, targetPaneId);
   }
 
   return openContextualTabInWorkspaceState(workspace, nextTab, null, preferredPaneId, originSessionId);
@@ -779,6 +793,30 @@ export function addWorkspaceTabToPane(
   };
 }
 
+function moveWorkspaceTabToPane(
+  workspace: WorkspaceState,
+  sourcePaneId: string,
+  tabId: string,
+  targetPaneId: string,
+) {
+  if (sourcePaneId === targetPaneId) {
+    return activatePane(workspace, sourcePaneId, tabId);
+  }
+
+  const sourcePane = workspace.panes.find((pane) => pane.id === sourcePaneId);
+  const targetPane = workspace.panes.find((pane) => pane.id === targetPaneId);
+  const tab = sourcePane?.tabs.find((candidate) => candidate.id === tabId);
+  if (!sourcePane || !targetPane || !tab) {
+    return workspace;
+  }
+
+  const withoutSource = closeWorkspaceTab(workspace, sourcePaneId, tabId);
+  if (!withoutSource.panes.some((pane) => pane.id === targetPaneId)) {
+    return workspace;
+  }
+
+  return addWorkspaceTabToPane(withoutSource, targetPaneId, tab);
+}
 export function getSplitRatio(node: WorkspaceNode | null, splitId: string): number | null {
   if (!node || node.type === "pane") {
     return null;
@@ -1044,13 +1082,23 @@ function findNonControlPanelPaneId(workspace: WorkspaceState, excludePaneId: str
     return activePane.id;
   }
 
+  const sessionPane = workspace.panes.find((pane) => {
+    if (pane.id === excludePaneId || paneContainsControlPanel(pane)) {
+      return false;
+    }
+
+    return getActiveTab(pane)?.kind === "session";
+  });
+  if (sessionPane) {
+    return sessionPane.id;
+  }
+
   return (
     workspace.panes.find(
       (pane) => pane.id !== excludePaneId && !paneContainsControlPanel(pane),
     )?.id ?? null
   );
 }
-
 function paneContainsControlPanel(pane: WorkspacePane) {
   return pane.tabs.some((tab) => tab.kind === "controlPanel");
 }
@@ -1134,6 +1182,24 @@ function findContextualTargetPaneId(
     return preferredPane!.id;
   }
 
+  if (tabKind === "source") {
+    if (preferredActiveTab?.kind === "session") {
+      return preferredPane!.id;
+    }
+
+    const originSessionPaneId = originSessionId ? findSessionTab(workspace, originSessionId)?.paneId ?? null : null;
+    if (originSessionPaneId) {
+      return originSessionPaneId;
+    }
+
+    if (preferredPane && paneContainsControlPanel(preferredPane)) {
+      const nonControlPanelPaneId = findNonControlPanelPaneId(workspace, preferredPane.id);
+      if (nonControlPanelPaneId) {
+        return nonControlPanelPaneId;
+      }
+    }
+  }
+
   if (originSessionId) {
     const relatedPane = workspace.panes.find(
       (pane) =>
@@ -1148,7 +1214,6 @@ function findContextualTargetPaneId(
 
   return null;
 }
-
 function getActiveTab(pane: WorkspacePane) {
   return pane.tabs.find((tab) => tab.id === pane.activeTabId) ?? pane.tabs[0] ?? null;
 }

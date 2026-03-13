@@ -1819,15 +1819,30 @@ textarea {
 }
 
 .session-rename-actions {
-  display: flex;
-  justify-content: flex-end;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 0.45rem;
 }
 
+.session-rename-new,
+.session-rename-kill,
 .session-rename-cancel,
 .session-rename-save {
-  min-width: 4.4rem;
+  width: 100%;
+  min-width: 0;
   padding: 0.42rem 0.72rem;
+}
+
+.session-rename-kill {
+  border-color: var(--accent-rose-border);
+  background: var(--accent-rose-bg);
+  color: var(--signal-rose);
+}
+
+.session-rename-kill:hover {
+  border-color: var(--accent-rose-border);
+  background: color-mix(in srgb, var(--accent-rose-bg) 84%, var(--surface-white));
+  color: var(--signal-rose);
 }
 
 .session-copy {
@@ -2923,11 +2938,13 @@ textarea {
   gap: 0.02rem;
 }
 
-.git-status-tree-file-row {
+.git-status-tree-file-row,
+.git-status-tree-directory-row {
   grid-template-columns: minmax(0, 1fr) auto auto;
 }
 
-.git-status-tree-open-button {
+.git-status-tree-open-button,
+.git-status-tree-directory-toggle {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
   gap: 0.42rem;
@@ -2995,7 +3012,7 @@ textarea {
   font-size: 0.8rem;
 }
 
-.git-status-file-actions {
+.git-status-tree-actions {
   display: inline-flex;
   align-items: center;
   gap: 0.08rem;
@@ -3004,9 +3021,12 @@ textarea {
   transition: opacity 140ms ease;
 }
 
-.git-status-tree-file-row:hover .git-status-file-actions,
-.git-status-tree-file-row:focus-within .git-status-file-actions,
-.git-status-tree-file-row.pending .git-status-file-actions {
+.git-status-tree-file-row:hover .git-status-tree-actions,
+.git-status-tree-file-row:focus-within .git-status-tree-actions,
+.git-status-tree-file-row.pending .git-status-tree-actions,
+.git-status-tree-directory-row:hover .git-status-tree-actions,
+.git-status-tree-directory-row:focus-within .git-status-tree-actions,
+.git-status-tree-directory-row.pending .git-status-tree-actions {
   opacity: 1;
   pointer-events: auto;
 }
@@ -3041,7 +3061,8 @@ textarea {
   height: 0.92rem;
 }
 
-.git-status-tree-file-row.pending {
+.git-status-tree-file-row.pending,
+.git-status-tree-directory-row.pending {
   opacity: 0.72;
 }
 
@@ -3653,6 +3674,7 @@ textarea {
 .git-status-section-toggle:focus,
 .git-status-action-button:focus,
 .git-status-tree-open-button:focus,
+.git-status-tree-directory-toggle:focus,
 .git-status-tree-row:focus,
 .pending-prompt-dismiss:focus,
 .composer-attachment-remove:focus,

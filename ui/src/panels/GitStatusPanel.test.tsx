@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { applyGitFileAction, fetchGitStatus } from "../api";
+import { applyGitFileAction, fetchGitStatus, type GitStatusFile, type GitStatusResponse } from "../api";
 import { GitStatusPanel } from "./GitStatusPanel";
 
 vi.mock("../api", async () => {
@@ -23,11 +23,8 @@ describe("GitStatusPanel", () => {
   });
 
   it("renders staged and unstaged trees and opens files relative to the repo root", async () => {
-    fetchGitStatusMock.mockResolvedValue({
-      ahead: 0,
-      behind: 0,
-      branch: "main",
-      files: [
+    fetchGitStatusMock.mockResolvedValue(
+      makeStatusResponse([
         {
           indexStatus: "M",
           path: "ui/src/App.tsx",
@@ -42,12 +39,8 @@ describe("GitStatusPanel", () => {
           path: "ui/src/agent-icon.tsx",
           worktreeStatus: "?",
         },
-      ],
-      isClean: false,
-      repoRoot: "/repo",
-      upstream: "origin/main",
-      workdir: "/repo",
-    });
+      ]),
+    );
 
     const onOpenPath = vi.fn();
 
@@ -72,37 +65,23 @@ describe("GitStatusPanel", () => {
   });
 
   it("applies git file actions from file rows and refreshes the tree state", async () => {
-    fetchGitStatusMock.mockResolvedValue({
-      ahead: 0,
-      behind: 0,
-      branch: "main",
-      files: [
+    fetchGitStatusMock.mockResolvedValue(
+      makeStatusResponse([
         {
           indexStatus: "?",
           path: "scratch.txt",
           worktreeStatus: "?",
         },
-      ],
-      isClean: false,
-      repoRoot: "/repo",
-      upstream: "origin/main",
-      workdir: "/repo",
-    });
-    applyGitFileActionMock.mockResolvedValue({
-      ahead: 0,
-      behind: 0,
-      branch: "main",
-      files: [
+      ]),
+    );
+    applyGitFileActionMock.mockResolvedValue(
+      makeStatusResponse([
         {
           indexStatus: "A",
           path: "scratch.txt",
         },
-      ],
-      isClean: false,
-      repoRoot: "/repo",
-      upstream: "origin/main",
-      workdir: "/repo",
-    });
+      ]),
+    );
 
     render(<GitStatusPanel workdir="/repo" onOpenPath={() => {}} onOpenWorkdir={() => {}} />);
 
@@ -122,4 +101,135 @@ describe("GitStatusPanel", () => {
 
     expect(await screen.findByRole("button", { name: /Move scratch\.txt to unstaged/i })).toBeInTheDocument();
   });
+
+  it("applies git actions from folder rows by forwarding each descendant file", async () => {
+    fetchGitStatusMock.mockResolvedValue(
+      makeStatusResponse([
+        {
+          path: "ui/src/App.tsx",
+          worktreeStatus: "M",
+        },
+        {
+          originalPath: "legacy/Widget.tsx",
+          path: "ui/src/Widget.tsx",
+          worktreeStatus: "R",
+        },
+      ]),
+    );
+    applyGitFileActionMock.mockResolvedValue(
+      makeStatusResponse([
+        {
+          indexStatus: "M",
+          path: "ui/src/App.tsx",
+        },
+        {
+          indexStatus: "R",
+          originalPath: "legacy/Widget.tsx",
+          path: "ui/src/Widget.tsx",
+        },
+      ]),
+    );
+
+    render(<GitStatusPanel workdir="/repo" onOpenPath={() => {}} onOpenWorkdir={() => {}} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /Stage ui/i }));
+
+    await waitFor(() => {
+      expect(applyGitFileActionMock).toHaveBeenCalledTimes(2);
+    });
+
+    const payloads = applyGitFileActionMock.mock.calls.map(([payload]) => payload);
+    expect(payloads).toEqual(
+      expect.arrayContaining([
+        {
+          action: "stage",
+          originalPath: undefined,
+          path: "ui/src/App.tsx",
+          statusCode: "M",
+          workdir: "/repo",
+        },
+        {
+          action: "stage",
+          originalPath: "legacy/Widget.tsx",
+          path: "ui/src/Widget.tsx",
+          statusCode: "R",
+          workdir: "/repo",
+        },
+      ]),
+    );
+
+    expect(await screen.findByRole("button", { name: /Move ui to unstaged/i })).toBeInTheDocument();
+  });
+
+  it("applies git actions from staged folder rows and moves the folder back to unstaged", async () => {
+    fetchGitStatusMock.mockResolvedValue(
+      makeStatusResponse([
+        {
+          indexStatus: "M",
+          path: "ui/src/App.tsx",
+        },
+        {
+          indexStatus: "R",
+          originalPath: "legacy/Widget.tsx",
+          path: "ui/src/Widget.tsx",
+        },
+      ]),
+    );
+    applyGitFileActionMock.mockResolvedValue(
+      makeStatusResponse([
+        {
+          path: "ui/src/App.tsx",
+          worktreeStatus: "M",
+        },
+        {
+          originalPath: "legacy/Widget.tsx",
+          path: "ui/src/Widget.tsx",
+          worktreeStatus: "R",
+        },
+      ]),
+    );
+
+    render(<GitStatusPanel workdir="/repo" onOpenPath={() => {}} onOpenWorkdir={() => {}} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /Move ui to unstaged/i }));
+
+    await waitFor(() => {
+      expect(applyGitFileActionMock).toHaveBeenCalledTimes(2);
+    });
+
+    const payloads = applyGitFileActionMock.mock.calls.map(([payload]) => payload);
+    expect(payloads).toEqual(
+      expect.arrayContaining([
+        {
+          action: "unstage",
+          originalPath: undefined,
+          path: "ui/src/App.tsx",
+          statusCode: "M",
+          workdir: "/repo",
+        },
+        {
+          action: "unstage",
+          originalPath: "legacy/Widget.tsx",
+          path: "ui/src/Widget.tsx",
+          statusCode: "R",
+          workdir: "/repo",
+        },
+      ]),
+    );
+
+    expect(await screen.findByRole("button", { name: /Stage ui/i })).toBeInTheDocument();
+  });
 });
+
+function makeStatusResponse(files: GitStatusFile[]): GitStatusResponse {
+  return {
+    ahead: 0,
+    behind: 0,
+    branch: "main",
+    files,
+    isClean: files.length === 0,
+    repoRoot: "/repo",
+    upstream: "origin/main",
+    workdir: "/repo",
+  };
+}
