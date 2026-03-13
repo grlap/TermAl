@@ -588,6 +588,15 @@ textarea {
   min-width: 8rem;
 }
 
+.session-model-refresh-button {
+  justify-self: start;
+  padding: 0.55rem 0.78rem;
+  background: var(--surface-white);
+  color: var(--ink);
+  box-shadow: inset 0 0 0 1px var(--line);
+  font-size: 0.82rem;
+}
+
 .control-panel-action-button {
   background: var(--surface-white-soft);
   color: var(--ink);

@@ -5486,7 +5486,55 @@ function ClaudePromptSettingsCard({
   );
 }
 
-function CursorPromptSettingsCard({
+function useSessionModelOptionsAutoRefresh({
+  isRefreshingModelOptions,
+  onRequestModelOptions,
+  session,
+}: {
+  isRefreshingModelOptions: boolean;
+  onRequestModelOptions: (sessionId: string) => void;
+  session: Session;
+}) {
+  const requestedSessionIdRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (session.modelOptions?.length) {
+      requestedSessionIdRef.current = session.id;
+      return;
+    }
+    if (isRefreshingModelOptions || requestedSessionIdRef.current === session.id) {
+      return;
+    }
+
+    requestedSessionIdRef.current = session.id;
+    void onRequestModelOptions(session.id);
+  }, [isRefreshingModelOptions, onRequestModelOptions, session.id, session.modelOptions]);
+}
+
+function SessionModelRefreshAction({
+  disabled,
+  isRefreshing,
+  sessionId,
+  onRequestModelOptions,
+}: {
+  disabled: boolean;
+  isRefreshing: boolean;
+  sessionId: string;
+  onRequestModelOptions: (sessionId: string) => void;
+}) {
+  return (
+    <button
+      className="ghost-button session-model-refresh-button"
+      type="button"
+      onClick={() => void onRequestModelOptions(sessionId)}
+      disabled={disabled}
+    >
+      {isRefreshing ? "Refreshing models..." : "Refresh models"}
+    </button>
+  );
+}
+
+export function CursorPromptSettingsCard({
   paneId,
   session,
   isUpdating,
@@ -5505,20 +5553,11 @@ function CursorPromptSettingsCard({
     value: SessionSettingsValue,
   ) => void;
 }) {
-  const requestedSessionIdRef = useRef<string | null>(null);
-
-  useEffect(() => {
-    if (session.modelOptions?.length) {
-      requestedSessionIdRef.current = session.id;
-      return;
-    }
-    if (isRefreshingModelOptions || requestedSessionIdRef.current === session.id) {
-      return;
-    }
-
-    requestedSessionIdRef.current = session.id;
-    void onRequestModelOptions(session.id);
-  }, [isRefreshingModelOptions, onRequestModelOptions, session.id, session.modelOptions]);
+  useSessionModelOptionsAutoRefresh({
+    isRefreshingModelOptions,
+    onRequestModelOptions,
+    session,
+  });
 
   const modelOptions =
     session.modelOptions?.length
@@ -5547,6 +5586,12 @@ function CursorPromptSettingsCard({
             onChange={(nextValue) =>
               void onSessionSettingsChange(session.id, "model", nextValue)
             }
+          />
+          <SessionModelRefreshAction
+            disabled={isUpdating || isRefreshingModelOptions}
+            isRefreshing={isRefreshingModelOptions}
+            sessionId={session.id}
+            onRequestModelOptions={onRequestModelOptions}
           />
         </div>
         <div className="session-control-group">
@@ -5577,7 +5622,7 @@ function CursorPromptSettingsCard({
   );
 }
 
-function GeminiPromptSettingsCard({
+export function GeminiPromptSettingsCard({
   paneId,
   session,
   isUpdating,
@@ -5596,20 +5641,11 @@ function GeminiPromptSettingsCard({
     value: SessionSettingsValue,
   ) => void;
 }) {
-  const requestedSessionIdRef = useRef<string | null>(null);
-
-  useEffect(() => {
-    if (session.modelOptions?.length) {
-      requestedSessionIdRef.current = session.id;
-      return;
-    }
-    if (isRefreshingModelOptions || requestedSessionIdRef.current === session.id) {
-      return;
-    }
-
-    requestedSessionIdRef.current = session.id;
-    void onRequestModelOptions(session.id);
-  }, [isRefreshingModelOptions, onRequestModelOptions, session.id, session.modelOptions]);
+  useSessionModelOptionsAutoRefresh({
+    isRefreshingModelOptions,
+    onRequestModelOptions,
+    session,
+  });
 
   const modelOptions =
     session.modelOptions?.length
@@ -5638,6 +5674,12 @@ function GeminiPromptSettingsCard({
             onChange={(nextValue) =>
               void onSessionSettingsChange(session.id, "model", nextValue)
             }
+          />
+          <SessionModelRefreshAction
+            disabled={isUpdating || isRefreshingModelOptions}
+            isRefreshing={isRefreshingModelOptions}
+            sessionId={session.id}
+            onRequestModelOptions={onRequestModelOptions}
           />
         </div>
         <div className="session-control-group">
