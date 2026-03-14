@@ -1399,6 +1399,7 @@ const SessionComposer = memo(function SessionComposer({
     Record<string, PromptHistoryState | undefined>
   >({});
   const [slashActiveIndex, setSlashActiveIndex] = useState(0);
+  const [slashNavModality, setSlashNavModality] = useState<"keyboard" | "mouse">("keyboard");
 
   const activeSessionId = session?.id ?? null;
   const composerDraft =
@@ -1744,6 +1745,7 @@ const SessionComposer = memo(function SessionComposer({
         !event.shiftKey
       ) {
         event.preventDefault();
+        setSlashNavModality("keyboard");
         if (slashPalette.items.length === 0) {
           return;
         }
@@ -1850,7 +1852,7 @@ const SessionComposer = memo(function SessionComposer({
               <div className="composer-attachment-copy">
                 <strong className="composer-attachment-name">{attachment.fileName}</strong>
                 <span className="composer-attachment-meta">
-                  {formatByteSize(attachment.byteSize)} Â· {attachment.mediaType}
+                  {formatByteSize(attachment.byteSize)} · {attachment.mediaType}
                 </span>
               </div>
               <button
@@ -1946,7 +1948,7 @@ const SessionComposer = memo(function SessionComposer({
             </div>
           ) : null}
           {slashPalette.items.length > 0 ? (
-            <div className="composer-slash-options">
+            <div className={`composer-slash-options modality-${slashNavModality}`}>
               {slashPalette.items.map((item, index) => {
                 const isActive = activeSlashItem?.key === item.key && index === slashActiveIndex;
 
@@ -1960,7 +1962,12 @@ const SessionComposer = memo(function SessionComposer({
                     onMouseDown={(event) => {
                       event.preventDefault();
                     }}
-                    onMouseEnter={() => setSlashActiveIndex(index)}
+                    onMouseMove={() => {
+                      setSlashNavModality("mouse");
+                      if (slashActiveIndex !== index) {
+                        setSlashActiveIndex(index);
+                      }
+                    }}
                     onClick={() => applySlashPaletteItem(item)}
                   >
                     <span className="composer-slash-option-copy">
@@ -2107,7 +2114,7 @@ function MessageAttachmentList({
             {renderHighlightedText(attachment.fileName, searchQuery, searchHighlightTone)}
           </strong>
           <span className="message-attachment-meta">
-            {formatByteSize(attachment.byteSize)} Â·{" "}
+            {formatByteSize(attachment.byteSize)} ·{" "}
             {renderHighlightedText(attachment.mediaType, searchQuery, searchHighlightTone)}
           </span>
         </div>
@@ -2265,3 +2272,4 @@ function formatByteSize(byteSize: number) {
 
   return `${(byteSize / (1024 * 1024)).toFixed(1)} MB`;
 }
+

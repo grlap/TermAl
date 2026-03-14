@@ -4301,3 +4301,19 @@ textarea {
     max-width: 100%;
   }
 }
+
+.composer-slash-options.modality-keyboard .composer-slash-option:hover {
+  border-color: transparent;
+  background: var(--surface-white-soft);
+}
+
+.composer-slash-options.modality-mouse .composer-slash-option.active {
+  border-color: transparent;
+  background: var(--surface-white-soft);
+}
+
+.composer-slash-options.modality-keyboard .composer-slash-option.active {
+  border-color: var(--line-strong);
+  background: var(--surface-composer);
+}
+

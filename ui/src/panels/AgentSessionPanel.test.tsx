@@ -172,6 +172,7 @@ describe("AgentSessionPanelFooter", () => {
         session: makeSession("session-a", {
           agent: "Claude",
           model: "sonnet",
+
         }),
       }),
     );
@@ -182,6 +183,38 @@ describe("AgentSessionPanelFooter", () => {
     await waitFor(() => {
       expect(onRefreshSessionModelOptions).toHaveBeenCalledWith("session-a");
     });
+  });
+
+  it("keeps the current /model option selected until the pointer moves", () => {
+    render(
+      renderFooter({
+        session: makeSession("session-a", {
+          agent: "Claude",
+          model: "sonnet",
+          modelOptions: [
+            { label: "Sonnet", value: "sonnet" },
+            { label: "Opus", value: "opus" },
+          ],
+        }),
+      }),
+    );
+
+    fireEvent.change(screen.getByLabelText("Message session-a"), {
+      target: { value: "/model" },
+    });
+
+    const currentOption = screen.getByRole("option", { name: /Sonnet/i });
+    const otherOption = screen.getByRole("option", { name: /Opus/i });
+    expect(currentOption).toHaveAttribute("aria-selected", "true");
+    expect(otherOption).toHaveAttribute("aria-selected", "false");
+
+    fireEvent.mouseEnter(otherOption);
+    expect(currentOption).toHaveAttribute("aria-selected", "true");
+    expect(otherOption).toHaveAttribute("aria-selected", "false");
+
+    fireEvent.mouseMove(otherOption);
+    expect(currentOption).toHaveAttribute("aria-selected", "false");
+    expect(otherOption).toHaveAttribute("aria-selected", "true");
   });
 
   it("applies Claude mode changes from /mode", () => {
