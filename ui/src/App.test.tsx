@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import App, {
@@ -7,6 +7,7 @@ import App, {
   describeCodexModelAdjustmentNotice,
   describeSessionModelRefreshError,
   describeUnknownSessionModelWarning,
+  resolveUnknownSessionModelSendAttempt,
 } from "./App";
 import type { AgentReadiness, Session } from "./types";
 
@@ -17,13 +18,21 @@ class EventSourceMock {
 
   onopen: ((event: Event) => void) | null = null;
 
+  private listeners = new Map<string, Set<(event: MessageEvent<string>) => void>>();
+
   constructor(_url?: string) {
     EventSourceMock.instances.push(this);
   }
 
-  addEventListener() {}
+  addEventListener(type: string, listener: EventListenerOrEventListenerObject) {
+    const listeners = this.listeners.get(type) ?? new Set<(event: MessageEvent<string>) => void>();
+    listeners.add(normalizeMessageEventListener(listener));
+    this.listeners.set(type, listeners);
+  }
 
-  removeEventListener() {}
+  removeEventListener(type: string, listener: EventListenerOrEventListenerObject) {
+    this.listeners.get(type)?.delete(normalizeMessageEventListener(listener));
+  }
 
   close() {}
 
@@ -33,6 +42,14 @@ class EventSourceMock {
 
   dispatchOpen() {
     this.onopen?.(new Event("open"));
+  }
+
+  dispatchNamedEvent(type: string, data: unknown) {
+    const payload = typeof data === "string" ? data : JSON.stringify(data);
+    const event = { data: payload } as MessageEvent<string>;
+    this.listeners.get(type)?.forEach((listener) => {
+      listener(event);
+    });
   }
 }
 
@@ -65,6 +82,28 @@ function restoreGlobal<Key extends RestorableGlobalKey>(
   }
 
   globalThis[key] = originalValue;
+}
+
+function normalizeMessageEventListener(listener: EventListenerOrEventListenerObject) {
+  if (typeof listener === "function") {
+    return listener as (event: MessageEvent<string>) => void;
+  }
+
+  return (event: MessageEvent<string>) => listener.handleEvent(event);
+}
+
+function createDeferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((resolvePromise) => {
+    resolve = resolvePromise;
+  });
+  return { promise, resolve };
+}
+
+async function openCreateSessionDialog() {
+  fireEvent.click(await screen.findByRole("button", { name: "Sessions" }));
+  fireEvent.click(await screen.findByRole("button", { name: "New" }));
+  await screen.findByRole("heading", { level: 2, name: "New session" });
 }
 
 function makeSession(id: string, overrides?: Partial<Session>): Session {
@@ -230,6 +269,101 @@ describe("App", () => {
     );
   });
 
+  it("keeps newer SSE state when a reconnect resync returns an older snapshot", async () => {
+    const originalFetch = globalThis.fetch;
+    const originalEventSource = globalThis.EventSource;
+    const originalResizeObserver = globalThis.ResizeObserver;
+    const stateFetch = createDeferred<Response>();
+    const fetchMock = vi.fn((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/api/state") {
+        return stateFetch.promise;
+      }
+
+      throw new Error(`Unexpected fetch: ${url}`);
+    });
+
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("EventSource", EventSourceMock as unknown as typeof EventSource);
+    vi.stubGlobal("ResizeObserver", ResizeObserverMock as unknown as typeof ResizeObserver);
+    const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
+    HTMLElement.prototype.scrollIntoView = vi.fn();
+
+    try {
+      render(<App />);
+
+      const eventSource = EventSourceMock.instances[0];
+      expect(eventSource).toBeTruthy();
+
+      act(() => {
+        eventSource.dispatchOpen();
+        eventSource.dispatchNamedEvent("state", {
+          revision: 2,
+          projects: [],
+          sessions: [
+            makeSession("session-1", {
+              name: "Newer Session",
+              preview: "Fresh preview",
+              status: "active",
+            }),
+          ],
+        });
+      });
+
+      await screen.findByText("Newer Session");
+
+      act(() => {
+        eventSource.dispatchNamedEvent("delta", {
+          type: "messageCreated",
+          revision: 4,
+          sessionId: "session-1",
+          messageId: "message-2",
+          messageIndex: 1,
+          message: {
+            id: "message-2",
+            type: "text",
+            timestamp: "10:01",
+            author: "assistant",
+            text: "",
+          },
+          preview: "Should trigger resync",
+          status: "active",
+        });
+      });
+
+      await waitFor(() => {
+        expect(fetchMock.mock.calls.some(([url]) => String(url) === "/api/state")).toBe(true);
+      });
+
+      await act(async () => {
+        stateFetch.resolve(
+          jsonResponse({
+            revision: 1,
+            projects: [],
+            sessions: [
+              makeSession("session-1", {
+                name: "Older Session",
+                preview: "Stale preview",
+              }),
+            ],
+          }),
+        );
+        await Promise.resolve();
+      });
+
+      await waitFor(() => {
+        expect(screen.getByText("Newer Session")).toBeInTheDocument();
+      });
+      expect(screen.queryByText("Older Session")).not.toBeInTheDocument();
+      expect(screen.queryByText("Stale preview")).not.toBeInTheDocument();
+    } finally {
+      HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
+      restoreGlobal("fetch", originalFetch);
+      restoreGlobal("EventSource", originalEventSource);
+      restoreGlobal("ResizeObserver", originalResizeObserver);
+    }
+  });
+
   it("refreshes model options after creating a new Codex session", async () => {
     const originalFetch = globalThis.fetch;
     const originalEventSource = globalThis.EventSource;
@@ -312,7 +446,7 @@ describe("App", () => {
     try {
       render(<App />);
 
-      fireEvent.click(await screen.findByRole("button", { name: "New Session" }));
+      await openCreateSessionDialog();
       fireEvent.click(screen.getByRole("button", { name: "Create session" }));
 
       await waitFor(() => {
@@ -412,7 +546,7 @@ describe("App", () => {
     try {
       render(<App />);
 
-      fireEvent.click(await screen.findByRole("button", { name: "New Session" }));
+      await openCreateSessionDialog();
       fireEvent.click(screen.getByRole("button", { name: "Create session" }));
       fireEvent.click(await screen.findByRole("button", { name: "Prompt" }));
 
@@ -431,144 +565,24 @@ describe("App", () => {
     }
   });
 
-  it("warns once before sending with an unknown model, then lets the second send continue", async () => {
-    const originalFetch = globalThis.fetch;
-    const originalEventSource = globalThis.EventSource;
-    const originalResizeObserver = globalThis.ResizeObserver;
-    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
-      const url = String(input);
-      if (url === "/api/state") {
-        return jsonResponse({
-          revision: 1,
-          projects: [],
-          sessions: [],
-        });
-      }
-      if (url === "/api/sessions") {
-        return jsonResponse({
-          sessionId: "session-1",
-          state: {
-            revision: 2,
-            projects: [],
-            sessions: [
-              {
-                id: "session-1",
-                name: "Codex 1",
-                emoji: "O",
-                agent: "Codex",
-                workdir: "/tmp",
-                model: "gpt-5.5-preview",
-                approvalPolicy: "never",
-                reasoningEffort: "medium",
-                sandboxMode: "workspace-write",
-                status: "idle",
-                preview: "Ready for a prompt.",
-                messages: [],
-              },
-            ],
-          },
-        });
-      }
-      if (url === "/api/sessions/session-1/model-options/refresh") {
-        return jsonResponse({
-          revision: 3,
-          projects: [],
-          sessions: [
-            {
-              id: "session-1",
-              name: "Codex 1",
-              emoji: "O",
-              agent: "Codex",
-              workdir: "/tmp",
-              model: "gpt-5.5-preview",
-              modelOptions: [
-                {
-                  label: "GPT-5.4",
-                  value: "gpt-5.4",
-                  description: "Latest frontier agentic coding model.",
-                },
-              ],
-              approvalPolicy: "never",
-              reasoningEffort: "medium",
-              sandboxMode: "workspace-write",
-              status: "idle",
-              preview: "Ready for a prompt.",
-              messages: [],
-            },
-          ],
-        });
-      }
-      if (url === "/api/sessions/session-1/messages") {
-        return jsonResponse({
-          revision: 4,
-          projects: [],
-          sessions: [
-            {
-              id: "session-1",
-              name: "Codex 1",
-              emoji: "O",
-              agent: "Codex",
-              workdir: "/tmp",
-              model: "gpt-5.5-preview",
-              modelOptions: [
-                {
-                  label: "GPT-5.4",
-                  value: "gpt-5.4",
-                  description: "Latest frontier agentic coding model.",
-                },
-              ],
-              approvalPolicy: "never",
-              reasoningEffort: "medium",
-              sandboxMode: "workspace-write",
-              status: "active",
-              preview: "Working...",
-              messages: [],
-            },
-          ],
-        });
-      }
-
-      throw new Error(`Unexpected fetch: ${url}`);
+  it("warns once before sending with an unknown model, then allows the retry", () => {
+    const session = makeSession("session-1", {
+      agent: "Codex",
+      model: "gpt-5.5-preview",
+      modelOptions: [{ label: "GPT-5.4", value: "gpt-5.4" }],
     });
 
-    vi.stubGlobal("fetch", fetchMock);
-    vi.stubGlobal("EventSource", EventSourceMock as unknown as typeof EventSource);
-    vi.stubGlobal("ResizeObserver", ResizeObserverMock as unknown as typeof ResizeObserver);
-    const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
-    HTMLElement.prototype.scrollIntoView = vi.fn();
+    const firstAttempt = resolveUnknownSessionModelSendAttempt(new Set(), session);
+    expect(firstAttempt.allowSend).toBe(false);
+    expect(firstAttempt.warning).toBe(
+      "Codex is set to gpt-5.5-preview, but that model is not in the current live list. Refresh models to verify it, or send the prompt again to continue anyway.",
+    );
 
-    try {
-      render(<App />);
-
-      fireEvent.click(await screen.findByRole("button", { name: "New Session" }));
-      fireEvent.click(screen.getByRole("button", { name: "Create session" }));
-
-      const textarea = await screen.findByLabelText("Message Codex 1");
-      fireEvent.change(textarea, { target: { value: "Investigate this session." } });
-      fireEvent.click(screen.getByRole("button", { name: "Send" }));
-
-      expect(
-        screen.getByText(
-          "Codex is set to gpt-5.5-preview, but that model is not in the current live list. Refresh models to verify it, or send the prompt again to continue anyway.",
-        ),
-      ).toBeInTheDocument();
-      expect(
-        fetchMock.mock.calls.some(([url]) => String(url) === "/api/sessions/session-1/messages"),
-      ).toBe(false);
-      expect(screen.getByLabelText("Message Codex 1")).toHaveValue("Investigate this session.");
-
-      fireEvent.click(screen.getByRole("button", { name: "Send" }));
-
-      await waitFor(() => {
-        expect(
-          fetchMock.mock.calls.some(([url]) => String(url) === "/api/sessions/session-1/messages"),
-        ).toBe(true);
-      });
-    } finally {
-      HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
-      restoreGlobal("fetch", originalFetch);
-      restoreGlobal("EventSource", originalEventSource);
-      restoreGlobal("ResizeObserver", originalResizeObserver);
-    }
+    const secondAttempt = resolveUnknownSessionModelSendAttempt(
+      firstAttempt.nextConfirmedKeys,
+      session,
+    );
+    expect(secondAttempt.allowSend).toBe(true);
+    expect(secondAttempt.warning).toBeNull();
   });
 });

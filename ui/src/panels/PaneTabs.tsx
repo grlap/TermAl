@@ -222,10 +222,12 @@ export function PaneTabs({
       }
 
       const activeTab = node.querySelector<HTMLElement>('.pane-tab-shell[aria-selected="true"]');
-      activeTab?.scrollIntoView({
-        block: "nearest",
-        inline: "nearest",
-      });
+      if (typeof activeTab?.scrollIntoView === "function") {
+        activeTab.scrollIntoView({
+          block: "nearest",
+          inline: "nearest",
+        });
+      }
       updateTabRailState();
     });
 

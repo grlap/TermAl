@@ -20,3 +20,14 @@ if (typeof document !== "undefined" && typeof document.queryCommandSupported !==
     configurable: true,
   });
 }
+
+if (
+  typeof HTMLElement !== "undefined" &&
+  typeof HTMLElement.prototype.scrollIntoView !== "function"
+) {
+  Object.defineProperty(HTMLElement.prototype, "scrollIntoView", {
+    value: () => {},
+    configurable: true,
+    writable: true,
+  });
+}

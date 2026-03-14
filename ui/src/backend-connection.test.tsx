@@ -86,7 +86,7 @@ describe("Backend connection state", () => {
 
       expect(screen.getByText("Connecting")).toBeInTheDocument();
 
-      const eventSource = EventSourceMock.instances.at(-1);
+      const eventSource = EventSourceMock.instances[EventSourceMock.instances.length - 1];
       expect(eventSource).toBeDefined();
 
       act(() => {
@@ -136,7 +136,7 @@ describe("Backend connection state", () => {
       if (ownNavigatorOnlineDescriptor) {
         Object.defineProperty(window.navigator, "onLine", ownNavigatorOnlineDescriptor);
       } else {
-        delete (window.navigator as Navigator & { onLine?: boolean }).onLine;
+        Reflect.deleteProperty(window.navigator, "onLine");
       }
       restoreGlobal("fetch", originalFetch);
       restoreGlobal("EventSource", originalEventSource);

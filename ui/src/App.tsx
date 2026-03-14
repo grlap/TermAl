@@ -605,6 +605,39 @@ export function describeUnknownSessionModelWarning(session: Session) {
   return `${session.agent} is set to ${session.model}, but that model is not in the current live list. Refresh models to verify it, or send the prompt again to continue anyway.`;
 }
 
+export function resolveUnknownSessionModelSendAttempt(
+  confirmedKeys: ReadonlySet<string>,
+  session: Session,
+) {
+  const warning = describeUnknownSessionModelWarning(session);
+  const confirmationKey = unknownSessionModelConfirmationKey(session.id, session.model);
+  const nextConfirmedKeys = new Set(confirmedKeys);
+
+  if (!warning) {
+    nextConfirmedKeys.delete(confirmationKey);
+    return {
+      allowSend: true,
+      nextConfirmedKeys,
+      warning: null,
+    };
+  }
+
+  if (nextConfirmedKeys.has(confirmationKey)) {
+    return {
+      allowSend: true,
+      nextConfirmedKeys,
+      warning: null,
+    };
+  }
+
+  nextConfirmedKeys.add(confirmationKey);
+  return {
+    allowSend: false,
+    nextConfirmedKeys,
+    warning,
+  };
+}
+
 export function describeSessionModelRefreshError(
   agent: AgentType,
   rawError: string,
@@ -939,18 +972,20 @@ export default function App() {
   const statusFilteredSessions = useMemo(() => {
     return filterSessionsByListFilter(projectScopedSessions, sessionListFilter);
   }, [projectScopedSessions, sessionListFilter]);
-  const sessionListSearchIndex = useMemo(
-    () =>
-      new Map(
-        projectScopedSessions.map((session) => [session.id, buildSessionSearchIndex(session)] as const),
-      ),
-    [projectScopedSessions],
-  );
   const trimmedSessionListSearchQuery = sessionListSearchQuery.trim();
   const deferredSessionListSearchQuery = useDeferredValue(trimmedSessionListSearchQuery);
   const effectiveSessionListSearchQuery =
     trimmedSessionListSearchQuery.length === 0 ? "" : deferredSessionListSearchQuery;
   const hasSessionListSearch = effectiveSessionListSearchQuery.length > 0;
+  const sessionListSearchIndex = useMemo(() => {
+    if (!hasSessionListSearch) {
+      return null;
+    }
+
+    return new Map(
+      statusFilteredSessions.map((session) => [session.id, buildSessionSearchIndex(session)] as const),
+    );
+  }, [hasSessionListSearch, statusFilteredSessions]);
 
   useEffect(() => {
     if (
@@ -1016,7 +1051,7 @@ export default function App() {
   }, [controlPanelGitWorkdir]);
 
   const sessionListSearchResults = useMemo(() => {
-    if (!hasSessionListSearch) {
+    if (!hasSessionListSearch || !sessionListSearchIndex) {
       return new Map<string, SessionListSearchResult>();
     }
 
@@ -1877,16 +1912,14 @@ export default function App() {
     if (!prompt && attachments.length === 0) {
       return false;
     }
-    const unknownModelWarning = describeUnknownSessionModelWarning(session);
-    const unknownModelKey = unknownSessionModelConfirmationKey(sessionId, session.model);
-    if (unknownModelWarning) {
-      if (!confirmedUnknownModelSendsRef.current.has(unknownModelKey)) {
-        confirmedUnknownModelSendsRef.current.add(unknownModelKey);
-        setRequestError(unknownModelWarning);
-        return false;
-      }
-    } else {
-      confirmedUnknownModelSendsRef.current.delete(unknownModelKey);
+    const unknownModelAttempt = resolveUnknownSessionModelSendAttempt(
+      confirmedUnknownModelSendsRef.current,
+      session,
+    );
+    confirmedUnknownModelSendsRef.current = unknownModelAttempt.nextConfirmedKeys;
+    if (!unknownModelAttempt.allowSend) {
+      setRequestError(unknownModelAttempt.warning);
+      return false;
     }
 
     setSendingSessionIds((current) => setSessionFlag(current, sessionId, true));
@@ -5303,17 +5336,17 @@ function SessionPaneView({
   );
   const commandMessages = useMemo(
     () =>
-      activeSession
+      pane.viewMode === "commands" && activeSession
         ? activeSession.messages.filter((message): message is CommandMessage => message.type === "command")
         : [],
-    [activeSession],
+    [activeSession, pane.viewMode],
   );
   const diffMessages = useMemo(
     () =>
-      activeSession
+      pane.viewMode === "diffs" && activeSession
         ? activeSession.messages.filter((message): message is DiffMessage => message.type === "diff")
         : [],
-    [activeSession],
+    [activeSession, pane.viewMode],
   );
   const pendingPrompts = useMemo(() => activeSession?.pendingPrompts ?? [], [activeSession]);
   const mountedSessions = useMemo(() => {
@@ -5325,9 +5358,12 @@ function SessionPaneView({
     cachedSessionIds.add(activeSession.id);
     return sessions.filter((session) => cachedSessionIds.has(session.id));
   }, [activeSession, cachedSessionOrder, sessions]);
-  const sessionConversationItems = useMemo(
-    () => (activeSession ? buildSessionConversationItems(activeSession) : []),
-    [activeSession],
+  const sessionConversationSignature = useMemo(
+    () =>
+      pane.viewMode === "session" && activeSession
+        ? buildSessionConversationSignature(activeSession)
+        : "",
+    [activeSession, pane.viewMode],
   );
   const lastUserPrompt = useMemo(
     () => (activeSession ? findLastUserPrompt(activeSession) : null),
@@ -5344,18 +5380,21 @@ function SessionPaneView({
     isSessionTabActive &&
     pane.viewMode === "session" &&
     Boolean(activeSession);
+  const hasSessionFindQuery = canFindInSession && sessionFindQuery.trim().length > 0;
   const activeSessionFindSearchIndex = useMemo(
-    () => (activeSession ? buildSessionSearchIndex(activeSession) : null),
-    [activeSession],
+    () =>
+      canFindInSession && hasSessionFindQuery && activeSession
+        ? buildSessionSearchIndex(activeSession)
+        : null,
+    [activeSession, canFindInSession, hasSessionFindQuery],
   );
   const sessionSearchMatches = useMemo(
     () =>
-      canFindInSession && activeSessionFindSearchIndex
+      activeSessionFindSearchIndex
         ? buildSessionSearchMatchesFromIndex(activeSessionFindSearchIndex, sessionFindQuery)
         : [],
-    [activeSessionFindSearchIndex, canFindInSession, sessionFindQuery],
+    [activeSessionFindSearchIndex, sessionFindQuery],
   );
-  const hasSessionFindQuery = sessionFindQuery.trim().length > 0;
   const sessionSearchMatchedItemKeys = useMemo(
     () => new Set(sessionSearchMatches.map((match) => match.itemKey)),
     [sessionSearchMatches],
@@ -5394,9 +5433,9 @@ function SessionPaneView({
   const visibleContentSignature = useMemo(
     () =>
       pane.viewMode === "session"
-        ? buildConversationListSignature(sessionConversationItems)
+        ? sessionConversationSignature
         : buildMessageListSignature(visibleMessages),
-    [pane.viewMode, sessionConversationItems, visibleMessages],
+    [pane.viewMode, sessionConversationSignature, visibleMessages],
   );
   const visibleLastMessageAuthor = useMemo(
     () =>
@@ -8423,35 +8462,18 @@ function buildMessageListSignature(messages: Message[]) {
   ].join("|");
 }
 
-function buildSessionConversationItems(session: Session): SessionConversationItem[] {
-  return [
-    ...session.messages.map((message) => ({
-      author: message.author,
-      id: message.id,
-      kind: "message" as const,
-      message,
-    })),
-    ...(session.pendingPrompts ?? []).map((prompt) => ({
-      author: "you" as const,
-      id: prompt.id,
-      kind: "pendingPrompt" as const,
-      prompt,
-    })),
-  ];
-}
-
-function buildConversationListSignature(items: SessionConversationItem[]) {
-  const lastMessageItem = [...items].reverse().find((item) => item.kind === "message");
-  const lastPendingPromptItem = [...items].reverse().find((item) => item.kind === "pendingPrompt");
+function buildSessionConversationSignature(session: Session) {
+  const messages = session.messages;
+  const pendingPrompts = session.pendingPrompts ?? [];
+  const lastMessage = messages[messages.length - 1];
+  const lastPendingPrompt = pendingPrompts[pendingPrompts.length - 1];
 
   return [
-    items.length.toString(),
-    lastMessageItem?.id ?? "no-message",
-    lastMessageItem?.kind === "message" ? messageChangeMarker(lastMessageItem.message) : "empty",
-    lastPendingPromptItem?.id ?? "no-pending-prompt",
-    lastPendingPromptItem?.kind === "pendingPrompt"
-      ? pendingPromptChangeMarker(lastPendingPromptItem.prompt)
-      : "empty",
+    (messages.length + pendingPrompts.length).toString(),
+    lastMessage?.id ?? "no-message",
+    lastMessage ? messageChangeMarker(lastMessage) : "empty",
+    lastPendingPrompt?.id ?? "no-pending-prompt",
+    lastPendingPrompt ? pendingPromptChangeMarker(lastPendingPrompt) : "empty",
   ].join("|");
 }
 
@@ -8765,4 +8787,3 @@ function dropLabelForPlacement(placement: TabDropPlacement) {
       return "Bottom";
   }
 }
-

@@ -3,7 +3,7 @@
 Updated against the current checked-in code in `src/main.rs`, `ui/src/App.tsx`,
 `ui/package.json`, and `ui/vite.config.ts`.
 
-The older entries for "No image paste support", Claude `control_request` fallthrough, "No SSE/WebSocket for real-time updates", "Codex receive has no streaming", "No queueing system for prompts", Windows `HOME`-only path resolution, and unhandled Codex rate-limit notifications were stale. Those are implemented in the current tree.
+The older entries for "No image paste support", Claude `control_request` fallthrough, "No SSE/WebSocket for real-time updates", "Codex receive has no streaming", "No queueing system for prompts", the stale `/api/state`-after-SSE bootstrap race, Windows `HOME`-only path resolution, and unhandled Codex rate-limit notifications were stale. Those are implemented in the current tree.
 
 The earlier command-card UX issue where `OUT` could render as an empty dark block was also fixed.
 Command messages now use a compact `IN` / `OUT` layout with copy controls, a collapsible output
@@ -96,26 +96,6 @@ pending approvals still exist.
 - Base session status on whether any live approvals remain after each decision
 - Keep approval messages independently resolvable instead of gating everything on one session-level `Approval` state
 - Add tests that exercise two concurrent approvals for both agents
-
-## Initial state bootstrapping can apply an older snapshot after a newer SSE update
-
-**Severity:** Medium
-
-The frontend opens `/api/events` and separately calls `/api/state` during initial load. The SSE
-stream already emits an initial snapshot immediately, so a newer SSE payload can arrive before the
-older `/api/state` response and then get overwritten by that stale response.
-
-**Current impact:**
-- The UI can briefly roll back to older session state during startup or reconnect
-- Active-session status, previews, or message lists can flicker backwards before the next SSE event
-
-**Affected code (`src/main.rs`, `ui/src/App.tsx`):**
-- `/api/events` emits an initial `state` event
-- The app boot effect also calls `fetchState()` and unconditionally adopts the result
-
-**Fix:**
-- Use one bootstrap path instead of two, or add a monotonic revision so older snapshots can be ignored
-- Add a frontend regression test that simulates SSE beating the `/api/state` response
 
 ## Polling for process exit
 

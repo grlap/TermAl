@@ -1,33 +1,8 @@
 import { render, screen } from "@testing-library/react";
-import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
+import { MessageCard } from "./App";
 import type { TextMessage } from "./types";
-
-let MessageCard: typeof import("./App").MessageCard;
-let originalQueryCommandSupported: typeof document.queryCommandSupported | undefined;
-
-beforeAll(async () => {
-  originalQueryCommandSupported = document.queryCommandSupported;
-  Object.defineProperty(document, "queryCommandSupported", {
-    configurable: true,
-    value: vi.fn(() => false),
-  });
-  ({ MessageCard } = await import("./App"));
-});
-
-afterAll(() => {
-  if (originalQueryCommandSupported === undefined) {
-    delete (document as Partial<Document> & {
-      queryCommandSupported?: typeof document.queryCommandSupported;
-    }).queryCommandSupported;
-    return;
-  }
-
-  Object.defineProperty(document, "queryCommandSupported", {
-    configurable: true,
-    value: originalQueryCommandSupported,
-  });
-});
 
 describe("MessageCard", () => {
   it("shows a command badge for slash-expanded prompts", () => {
