@@ -3858,7 +3858,7 @@ function CodexPromptPreferencesPanel({
   );
 }
 
-function ThemedCombobox({
+export function ThemedCombobox({
   className,
   disabled = false,
   id,
@@ -3991,7 +3991,7 @@ function ThemedCombobox({
         return;
       }
 
-      if (event.key === "Enter" || event.key === " ") {
+      if (event.key === " " || event.key === "Enter") {
         event.preventDefault();
         const nextOption = options[activeIndex];
         if (!nextOption) {
@@ -3999,8 +3999,10 @@ function ThemedCombobox({
         }
 
         onChange(nextOption.value);
-        setIsOpen(false);
-        triggerRef.current?.focus();
+        if (event.key === "Enter") {
+          setIsOpen(false);
+          triggerRef.current?.focus();
+        }
       }
     }
 
@@ -4040,8 +4042,10 @@ function ThemedCombobox({
 
     if (event.key === "Enter" || event.key === " ") {
       event.preventDefault();
-      setActiveIndex(safeSelectedIndex);
-      setIsOpen((current) => !current);
+      if (!isOpen) {
+        setActiveIndex(safeSelectedIndex);
+        setIsOpen(true);
+      }
     }
   }
 

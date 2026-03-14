@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import App, {
   MarkdownContent,
+  ThemedCombobox,
   describeCodexModelAdjustmentNotice,
   describeSessionModelRefreshError,
   describeUnknownSessionModelWarning,
@@ -87,6 +88,42 @@ describe("MarkdownContent", () => {
 });
 
 describe("App", () => {
+  it("applies the active combobox option on space without closing the menu", () => {
+    const onChange = vi.fn();
+    const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
+    HTMLElement.prototype.scrollIntoView = vi.fn();
+
+    try {
+      render(
+        <ThemedCombobox
+          id="test-combobox"
+          value="gpt-5"
+          options={[
+            { label: "GPT-5", value: "gpt-5" },
+            { label: "GPT-5 mini", value: "gpt-5-mini" },
+          ]}
+          onChange={onChange}
+        />,
+      );
+
+      fireEvent.click(screen.getByRole("combobox"));
+      fireEvent.keyDown(window, { key: "ArrowDown" });
+      fireEvent.keyDown(window, { key: " " });
+
+      expect(onChange).toHaveBeenCalledTimes(1);
+      expect(onChange).toHaveBeenCalledWith("gpt-5-mini");
+      expect(screen.getByRole("listbox")).toBeInTheDocument();
+
+      fireEvent.keyDown(window, { key: "Enter" });
+
+      expect(onChange).toHaveBeenCalledTimes(2);
+      expect(onChange).toHaveBeenLastCalledWith("gpt-5-mini");
+      expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+    } finally {
+      HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
+    }
+  });
+
   it("describes when a Codex model switch resets reasoning effort", () => {
     expect(
       describeCodexModelAdjustmentNotice(
