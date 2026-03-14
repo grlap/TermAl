@@ -1,6 +1,7 @@
 import hljs from "highlight.js/lib/core";
 import bash from "highlight.js/lib/languages/bash";
 import css from "highlight.js/lib/languages/css";
+import dart from "highlight.js/lib/languages/dart";
 import diff from "highlight.js/lib/languages/diff";
 import dockerfile from "highlight.js/lib/languages/dockerfile";
 import go from "highlight.js/lib/languages/go";
@@ -19,6 +20,7 @@ import yaml from "highlight.js/lib/languages/yaml";
 
 hljs.registerLanguage("bash", bash);
 hljs.registerLanguage("css", css);
+hljs.registerLanguage("dart", dart);
 hljs.registerLanguage("diff", diff);
 hljs.registerLanguage("dockerfile", dockerfile);
 hljs.registerLanguage("go", go);
@@ -39,6 +41,7 @@ const LANGUAGE_ALIASES: Record<string, string> = {
   bash: "bash",
   cjs: "javascript",
   css: "css",
+  dart: "dart",
   diff: "diff",
   dockerfile: "dockerfile",
   go: "go",

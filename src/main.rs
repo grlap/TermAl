@@ -9193,6 +9193,7 @@ fn infer_language_from_path(path: &FsPath) -> Option<&'static str> {
         "bash" | "sh" | "zsh" => Some("bash"),
         "cjs" | "js" | "jsx" | "mjs" => Some("javascript"),
         "css" => Some("css"),
+        "dart" => Some("dart"),
         "go" => Some("go"),
         "htm" | "html" | "svg" | "xml" => Some("xml"),
         "ini" | "toml" => Some("ini"),
@@ -12761,6 +12762,10 @@ Use the active agent's tools.
         assert_eq!(
             infer_language_from_path(FsPath::new("Dockerfile")),
             Some("dockerfile")
+        );
+        assert_eq!(
+            infer_language_from_path(FsPath::new("lib/main.dart")),
+            Some("dart")
         );
     }
 

@@ -2537,7 +2537,7 @@ export function RunningIndicator({
       aria-live="polite"
     >
       <div className="activity-spinner" aria-hidden="true" />
-      <div>
+      <div className="activity-card-copy">
         <div className="activity-card-heading">
           <div className="card-label">Live turn</div>
           {isCommand ? <span className="message-meta-tag">Command</span> : null}

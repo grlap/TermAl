@@ -2654,7 +2654,37 @@ textarea {
 .activity-card-live {
   position: relative;
   overflow: visible;
+  gap: 0.72rem;
+  padding: 0.68rem 0.95rem;
 }
+
+.activity-card-live .activity-spinner {
+  width: 1.9rem;
+  height: 1.9rem;
+  border-width: 2.25px;
+}
+
+.activity-card-copy {
+  display: grid;
+  gap: 0.08rem;
+  min-width: 0;
+}
+
+.activity-card-live h3 {
+  font-size: 0.92rem;
+  line-height: 1.08;
+}
+
+.activity-card-live p {
+  font-size: 0.92rem;
+  line-height: 1.08;
+}
+
+.activity-card-live .card-label {
+  font-size: 0.66rem;
+  line-height: 1;
+}
+
 
 .activity-card-live.has-tooltip {
   cursor: help;
@@ -2706,9 +2736,11 @@ textarea {
 .activity-card-heading {
   display: inline-flex;
   align-items: center;
-  gap: 0.5rem;
+  gap: 0.45rem;
   flex-wrap: wrap;
+  margin-bottom: 0.04rem;
 }
+
 
 .activity-tooltip-label {
   margin-bottom: 0.35rem;

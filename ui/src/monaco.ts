@@ -8,6 +8,7 @@ import "monaco-editor/esm/vs/language/css/monaco.contribution";
 import "monaco-editor/esm/vs/language/html/monaco.contribution";
 import "monaco-editor/esm/vs/language/json/monaco.contribution";
 import "monaco-editor/esm/vs/language/typescript/monaco.contribution";
+import "monaco-editor/esm/vs/basic-languages/dart/dart.contribution";
 import "monaco-editor/esm/vs/basic-languages/dockerfile/dockerfile.contribution";
 import "monaco-editor/esm/vs/basic-languages/go/go.contribution";
 import "monaco-editor/esm/vs/basic-languages/ini/ini.contribution";
@@ -47,6 +48,7 @@ export function resolveMonacoLanguage(language?: string | null, path?: string | 
     case "bash":
       return "shell";
     case "css":
+    case "dart":
     case "dockerfile":
     case "go":
     case "html":
@@ -149,6 +151,9 @@ function inferLanguageFromPath(path?: string | null) {
 
   if (normalized.endsWith(".css")) {
     return "css";
+  }
+  if (normalized.endsWith(".dart")) {
+    return "dart";
   }
   if (
     normalized.endsWith(".js") ||
