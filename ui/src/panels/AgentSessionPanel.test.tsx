@@ -23,6 +23,7 @@ function renderFooter({
   session,
   committedDraft = "",
   onDraftCommit = vi.fn(),
+  modelOptionsError = null,
   onRefreshSessionModelOptions = vi.fn(),
   onSend = vi.fn(),
   onSessionSettingsChange = vi.fn(),
@@ -30,6 +31,7 @@ function renderFooter({
   session: Session | null;
   committedDraft?: string;
   onDraftCommit?: (sessionId: string, nextValue: string) => void;
+  modelOptionsError?: string | null;
   onRefreshSessionModelOptions?: (sessionId: string) => void;
   onSend?: (sessionId: string, draftText?: string) => void;
   onSessionSettingsChange?: (sessionId: string, field: string, value: string) => void;
@@ -51,6 +53,7 @@ function renderFooter({
       onDraftCommit={onDraftCommit}
       onDraftAttachmentRemove={() => {}}
       isRefreshingModelOptions={false}
+      modelOptionsError={modelOptionsError}
       onRefreshSessionModelOptions={onRefreshSessionModelOptions}
       onSend={onSend}
       onSessionSettingsChange={onSessionSettingsChange}
@@ -121,9 +124,10 @@ describe("AgentSessionPanelFooter", () => {
     );
 
     const textarea = screen.getByLabelText("Message session-a");
-    fireEvent.change(textarea, { target: { value: "/" } });
+    fireEvent.change(textarea, { target: { value: "/m" } });
 
-    expect(screen.getByRole("option", { name: /\/model/i })).toBeInTheDocument();
+    expect(screen.getByText("/model")).toBeInTheDocument();
+    expect(screen.getByText("/mode")).toBeInTheDocument();
 
     fireEvent.keyDown(textarea, { key: "Enter" });
 
@@ -155,6 +159,127 @@ describe("AgentSessionPanelFooter", () => {
     expect(screen.getByLabelText("Message session-a")).toHaveValue("");
   });
 
+  it("applies Claude mode changes from /mode", () => {
+    const onSessionSettingsChange = vi.fn();
+
+    render(
+      renderFooter({
+        onSessionSettingsChange,
+        session: makeSession("session-a", {
+          agent: "Claude",
+          claudeApprovalMode: "ask",
+          model: "sonnet",
+        }),
+      }),
+    );
+
+    const textarea = screen.getByLabelText("Message session-a");
+    fireEvent.change(textarea, { target: { value: "/mode" } });
+    fireEvent.keyDown(textarea, { key: "ArrowDown" });
+    fireEvent.keyDown(textarea, { key: "ArrowDown" });
+    fireEvent.keyDown(textarea, { key: "Enter" });
+
+    expect(onSessionSettingsChange).toHaveBeenCalledWith(
+      "session-a",
+      "claudeApprovalMode",
+      "plan",
+    );
+  });
+
+  it("applies Codex approval and sandbox slash commands", () => {
+    const onSessionSettingsChange = vi.fn();
+
+    render(
+      renderFooter({
+        onSessionSettingsChange,
+        session: makeSession("session-a", {
+          agent: "Codex",
+          approvalPolicy: "never",
+          sandboxMode: "workspace-write",
+          model: "gpt-5",
+        }),
+      }),
+    );
+
+    const textarea = screen.getByLabelText("Message session-a");
+    fireEvent.change(textarea, { target: { value: "/approvals" } });
+    fireEvent.keyDown(textarea, { key: "ArrowDown" });
+    fireEvent.keyDown(textarea, { key: "Enter" });
+
+    expect(onSessionSettingsChange).toHaveBeenCalledWith(
+      "session-a",
+      "approvalPolicy",
+      "on-request",
+    );
+
+    fireEvent.change(screen.getByLabelText("Message session-a"), {
+      target: { value: "/sandbox" },
+    });
+    fireEvent.keyDown(screen.getByLabelText("Message session-a"), { key: "ArrowDown" });
+    fireEvent.keyDown(screen.getByLabelText("Message session-a"), { key: "Enter" });
+
+    expect(onSessionSettingsChange).toHaveBeenCalledWith(
+      "session-a",
+      "sandboxMode",
+      "read-only",
+    );
+  });
+
+  it("applies Codex reasoning effort changes from /effort", () => {
+    const onSessionSettingsChange = vi.fn();
+
+    render(
+      renderFooter({
+        onSessionSettingsChange,
+        session: makeSession("session-a", {
+          agent: "Codex",
+          approvalPolicy: "never",
+          reasoningEffort: "medium",
+          sandboxMode: "workspace-write",
+          model: "gpt-5",
+        }),
+      }),
+    );
+
+    const textarea = screen.getByLabelText("Message session-a");
+    fireEvent.change(textarea, { target: { value: "/effort" } });
+    fireEvent.keyDown(textarea, { key: "ArrowDown" });
+    fireEvent.keyDown(textarea, { key: "Enter" });
+
+    expect(onSessionSettingsChange).toHaveBeenCalledWith(
+      "session-a",
+      "reasoningEffort",
+      "high",
+    );
+  });
+
+  it("applies Gemini mode changes from /mode", () => {
+    const onSessionSettingsChange = vi.fn();
+
+    render(
+      renderFooter({
+        onSessionSettingsChange,
+        session: makeSession("session-a", {
+          agent: "Gemini",
+          geminiApprovalMode: "default",
+          model: "auto",
+        }),
+      }),
+    );
+
+    const textarea = screen.getByLabelText("Message session-a");
+    fireEvent.change(textarea, { target: { value: "/mode" } });
+    fireEvent.keyDown(textarea, { key: "ArrowDown" });
+    fireEvent.keyDown(textarea, { key: "ArrowDown" });
+    fireEvent.keyDown(textarea, { key: "Enter" });
+
+    expect(onSessionSettingsChange).toHaveBeenCalledWith(
+      "session-a",
+      "geminiApprovalMode",
+      "yolo",
+    );
+  });
+
   it("requests live Cursor model options when /model opens", async () => {
     const onRefreshSessionModelOptions = vi.fn();
 
@@ -177,5 +302,31 @@ describe("AgentSessionPanelFooter", () => {
     await waitFor(() => {
       expect(onRefreshSessionModelOptions).toHaveBeenCalledWith("session-a");
     });
+  });
+
+  it("shows inline model refresh errors and retries from the slash menu", () => {
+    const onRefreshSessionModelOptions = vi.fn();
+
+    render(
+      renderFooter({
+        modelOptionsError: "Cursor auth is not configured.",
+        onRefreshSessionModelOptions,
+        session: makeSession("session-a", {
+          agent: "Cursor",
+          cursorMode: "agent",
+          model: "auto",
+        }),
+      }),
+    );
+
+    fireEvent.change(screen.getByLabelText("Message session-a"), {
+      target: { value: "/model" },
+    });
+
+    expect(screen.getByRole("alert")).toHaveTextContent("Cursor auth is not configured.");
+
+    fireEvent.click(screen.getByRole("button", { name: "Retry live models" }));
+
+    expect(onRefreshSessionModelOptions).toHaveBeenCalledWith("session-a");
   });
 });

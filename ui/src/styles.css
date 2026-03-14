@@ -3761,6 +3761,14 @@ textarea {
   gap: 0.15rem;
 }
 
+.composer-slash-status {
+  display: flex;
+  gap: 0.75rem;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+}
+
 .composer-slash-title {
   font-size: 0.92rem;
 }
@@ -3768,6 +3776,20 @@ textarea {
 .composer-slash-hint {
   color: var(--muted);
   font-size: 0.8rem;
+}
+
+.composer-slash-status-text,
+.composer-slash-error {
+  margin: 0;
+  font-size: 0.82rem;
+}
+
+.composer-slash-status-text {
+  color: var(--muted);
+}
+
+.composer-slash-error {
+  color: var(--danger-ink);
 }
 
 .composer-slash-options {
@@ -3824,6 +3846,10 @@ textarea {
   margin: 0;
   color: var(--muted);
   font-size: 0.88rem;
+}
+
+.composer-slash-refresh-button {
+  white-space: nowrap;
 }
 
 .composer-input:focus,

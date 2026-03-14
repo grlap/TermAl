@@ -73,6 +73,7 @@ import type {
   AgentType,
   ClaudeApprovalMode,
   CommandMessage,
+  CodexReasoningEffort,
   CodexState,
   CursorMode,
   DeltaEvent,
@@ -148,6 +149,7 @@ type SessionSettingsField =
   | "model"
   | "sandboxMode"
   | "approvalPolicy"
+  | "reasoningEffort"
   | "claudeApprovalMode"
   | "cursorMode"
   | "geminiApprovalMode";
@@ -155,9 +157,11 @@ type SessionSettingsValue =
   | string
   | SandboxMode
   | ApprovalPolicy
+  | CodexReasoningEffort
   | ClaudeApprovalMode
   | CursorMode
   | GeminiApprovalMode;
+type SessionErrorMap = Record<string, string | undefined>;
 type PreferencesTabId = "themes" | "codex-prompts" | "claude-approvals";
 type DraftImageAttachment = ImageAttachment & {
   base64Data: string;
@@ -233,6 +237,14 @@ const APPROVAL_POLICY_OPTIONS = [
   { label: "on-request", value: "on-request" },
   { label: "untrusted", value: "untrusted" },
   { label: "on-failure", value: "on-failure" },
+] as const;
+const CODEX_REASONING_EFFORT_OPTIONS = [
+  { label: "none", value: "none" },
+  { label: "minimal", value: "minimal" },
+  { label: "low", value: "low" },
+  { label: "medium", value: "medium" },
+  { label: "high", value: "high" },
+  { label: "xhigh", value: "xhigh" },
 ] as const;
 const CLAUDE_APPROVAL_OPTIONS = [
   { label: "ask", value: "ask" },
@@ -331,6 +343,7 @@ export default function App() {
   const [updatingSessionIds, setUpdatingSessionIds] = useState<SessionFlagMap>({});
   const [refreshingSessionModelOptionIds, setRefreshingSessionModelOptionIds] =
     useState<SessionFlagMap>({});
+  const [sessionModelOptionErrors, setSessionModelOptionErrors] = useState<SessionErrorMap>({});
   const [requestError, setRequestError] = useState<string | null>(null);
   const [sessionListFilter, setSessionListFilter] = useState<SessionListFilter>("all");
   const [sessionListSearchQuery, setSessionListSearchQuery] = useState("");
@@ -1633,6 +1646,10 @@ export default function App() {
           session.agent === "Codex"
             ? (session.approvalPolicy ?? defaultCodexApprovalPolicy)
             : undefined,
+        reasoningEffort:
+          session.agent === "Codex"
+            ? (session.reasoningEffort ?? "medium")
+            : undefined,
         cursorMode:
           session.agent === "Cursor" ? (session.cursorMode ?? defaultCursorMode) : undefined,
         claudeApprovalMode:
@@ -1716,6 +1733,10 @@ export default function App() {
                 model: value as string,
               }
             : {
+                reasoningEffort:
+                  field === "reasoningEffort"
+                    ? (value as CodexReasoningEffort)
+                    : (session.reasoningEffort ?? "medium"),
                 sandboxMode:
                   field === "sandboxMode"
                     ? (value as SandboxMode)
@@ -1783,12 +1804,27 @@ export default function App() {
       return;
     }
 
+    setSessionModelOptionErrors((current) => {
+      if (!current[sessionId]) {
+        return current;
+      }
+
+      const nextState = { ...current };
+      delete nextState[sessionId];
+      return nextState;
+    });
+
     try {
       const state = await refreshSessionModelOptions(sessionId);
       adoptState(state);
       setRequestError(null);
     } catch (error) {
-      setRequestError(getErrorMessage(error));
+      const message = getErrorMessage(error);
+      setSessionModelOptionErrors((current) => ({
+        ...current,
+        [sessionId]: message,
+      }));
+      setRequestError(message);
     } finally {
       setRefreshingSessionModelOptionIds((current) => setSessionFlag(current, sessionId, false));
     }
@@ -2387,6 +2423,7 @@ export default function App() {
               killingSessionIds={killingSessionIds}
               updatingSessionIds={updatingSessionIds}
               refreshingSessionModelOptionIds={refreshingSessionModelOptionIds}
+              sessionModelOptionErrors={sessionModelOptionErrors}
               paneShouldStickToBottomRef={paneShouldStickToBottomRef}
               paneScrollPositionsRef={paneScrollPositionsRef}
               paneContentSignaturesRef={paneContentSignaturesRef}
@@ -3678,6 +3715,7 @@ function WorkspaceNodeView({
   killingSessionIds,
   updatingSessionIds,
   refreshingSessionModelOptionIds,
+  sessionModelOptionErrors,
   paneShouldStickToBottomRef,
   paneScrollPositionsRef,
   paneContentSignaturesRef,
@@ -3727,6 +3765,7 @@ function WorkspaceNodeView({
   killingSessionIds: SessionFlagMap;
   updatingSessionIds: SessionFlagMap;
   refreshingSessionModelOptionIds: SessionFlagMap;
+  sessionModelOptionErrors: SessionErrorMap;
   paneShouldStickToBottomRef: React.MutableRefObject<Record<string, boolean | undefined>>;
   paneScrollPositionsRef: React.MutableRefObject<
     Record<string, Record<string, { top: number; shouldStick: boolean }>>
@@ -3821,6 +3860,9 @@ function WorkspaceNodeView({
         isRefreshingModelOptions={
           pane.activeSessionId ? Boolean(refreshingSessionModelOptionIds[pane.activeSessionId]) : false
         }
+        modelOptionsError={
+          pane.activeSessionId ? (sessionModelOptionErrors[pane.activeSessionId] ?? null) : null
+        }
         paneShouldStickToBottomRef={paneShouldStickToBottomRef}
         paneScrollPositionsRef={paneScrollPositionsRef}
         paneContentSignaturesRef={paneContentSignaturesRef}
@@ -3890,6 +3932,7 @@ function WorkspaceNodeView({
           killingSessionIds={killingSessionIds}
           updatingSessionIds={updatingSessionIds}
           refreshingSessionModelOptionIds={refreshingSessionModelOptionIds}
+          sessionModelOptionErrors={sessionModelOptionErrors}
           paneShouldStickToBottomRef={paneShouldStickToBottomRef}
           paneScrollPositionsRef={paneScrollPositionsRef}
           paneContentSignaturesRef={paneContentSignaturesRef}
@@ -3955,6 +3998,7 @@ function WorkspaceNodeView({
           killingSessionIds={killingSessionIds}
           updatingSessionIds={updatingSessionIds}
           refreshingSessionModelOptionIds={refreshingSessionModelOptionIds}
+          sessionModelOptionErrors={sessionModelOptionErrors}
           paneShouldStickToBottomRef={paneShouldStickToBottomRef}
           paneScrollPositionsRef={paneScrollPositionsRef}
           paneContentSignaturesRef={paneContentSignaturesRef}
@@ -4009,6 +4053,7 @@ function SessionPaneView({
   isKilling,
   isUpdating,
   isRefreshingModelOptions,
+  modelOptionsError,
   paneShouldStickToBottomRef,
   paneScrollPositionsRef,
   paneContentSignaturesRef,
@@ -4056,6 +4101,7 @@ function SessionPaneView({
   isKilling: boolean;
   isUpdating: boolean;
   isRefreshingModelOptions: boolean;
+  modelOptionsError: string | null;
   paneShouldStickToBottomRef: React.MutableRefObject<Record<string, boolean | undefined>>;
   paneScrollPositionsRef: React.MutableRefObject<
     Record<string, Record<string, { top: number; shouldStick: boolean }>>
@@ -5227,6 +5273,7 @@ function SessionPaneView({
           onDraftCommit={onDraftCommit}
           onDraftAttachmentRemove={onDraftAttachmentRemove}
           isRefreshingModelOptions={isRefreshingModelOptions}
+          modelOptionsError={modelOptionsError}
           onRefreshSessionModelOptions={onRefreshSessionModelOptions}
           onSend={onSend}
           onSessionSettingsChange={onSessionSettingsChange}
@@ -5416,9 +5463,28 @@ function CodexPromptSettingsCard({
             }
           />
         </div>
+        <div className="session-control-group">
+          <label className="session-control-label" htmlFor={`reasoning-effort-${paneId}`}>
+            Reasoning effort
+          </label>
+          <ThemedCombobox
+            id={`reasoning-effort-${paneId}`}
+            className="prompt-settings-select"
+            value={session.reasoningEffort ?? "medium"}
+            options={CODEX_REASONING_EFFORT_OPTIONS as readonly ComboboxOption[]}
+            disabled={isUpdating}
+            onChange={(nextValue) =>
+              void onSessionSettingsChange(
+                session.id,
+                "reasoningEffort",
+                nextValue as CodexReasoningEffort,
+              )
+            }
+          />
+        </div>
         <p className="session-control-hint">
-          Model, sandbox, and approval changes apply on the next Codex prompt. If the model or
-          sandbox changed, TermAl restarts the Codex runtime for the next turn.
+          Model, reasoning, sandbox, and approval changes apply on the next Codex prompt. If the
+          model or sandbox changed, TermAl restarts the Codex runtime for the next turn.
         </p>
       </div>
     </article>

@@ -44,6 +44,7 @@ function reconcileSession(previous: Session, next: Session): Session {
     previous.model === next.model &&
     sameModelOptions(previous.modelOptions, next.modelOptions) &&
     previous.approvalPolicy === next.approvalPolicy &&
+    previous.reasoningEffort === next.reasoningEffort &&
     previous.sandboxMode === next.sandboxMode &&
     previous.cursorMode === next.cursorMode &&
     previous.claudeApprovalMode === next.claudeApprovalMode &&

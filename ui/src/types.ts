@@ -3,6 +3,7 @@ export type SessionStatus = "active" | "idle" | "approval" | "error";
 export type SandboxMode = "read-only" | "workspace-write" | "danger-full-access";
 export type ApprovalPolicy = "untrusted" | "on-failure" | "on-request" | "never";
 export type ClaudeApprovalMode = "ask" | "auto-approve" | "plan";
+export type CodexReasoningEffort = "none" | "minimal" | "low" | "medium" | "high" | "xhigh";
 export type CursorMode = "agent" | "plan" | "ask";
 export type GeminiApprovalMode = "default" | "auto_edit" | "yolo" | "plan";
 export type AgentReadinessStatus = "ready" | "missing" | "needsSetup";
@@ -55,6 +56,7 @@ export type Session = {
   model: string;
   modelOptions?: SessionModelOption[];
   approvalPolicy?: ApprovalPolicy | null;
+  reasoningEffort?: CodexReasoningEffort | null;
   sandboxMode?: SandboxMode | null;
   cursorMode?: CursorMode | null;
   claudeApprovalMode?: ClaudeApprovalMode | null;

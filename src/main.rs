@@ -160,6 +160,7 @@ fn run_repl(agent: Agent) -> Result<()> {
         let next_session_id = run_turn_blocking(
             TurnConfig {
                 codex_approval_policy: Some(default_codex_approval_policy()),
+                codex_reasoning_effort: Some(default_codex_reasoning_effort()),
                 codex_sandbox_mode: Some(default_codex_sandbox_mode()),
                 agent,
                 claude_approval_mode: Some(default_claude_approval_mode()),
@@ -304,6 +305,10 @@ impl AppState {
                 record.codex_approval_policy = approval_policy;
                 record.session.approval_policy = Some(approval_policy);
             }
+            if let Some(reasoning_effort) = request.reasoning_effort {
+                record.codex_reasoning_effort = reasoning_effort;
+                record.session.reasoning_effort = Some(reasoning_effort);
+            }
         } else if record.session.agent.supports_claude_approval_mode() {
             if let Some(claude_approval_mode) = request.claude_approval_mode {
                 record.session.claude_approval_mode = Some(claude_approval_mode);
@@ -324,13 +329,14 @@ impl AppState {
                     || request.gemini_approval_mode.is_some()
                 {
                     return Err(ApiError::bad_request(
-                        "Codex sessions only support model, sandbox, and approval policy settings",
+                        "Codex sessions only support model, sandbox, approval policy, and reasoning effort settings",
                     ));
                 }
             }
             agent if agent.supports_claude_approval_mode() => {
                 if request.sandbox_mode.is_some()
                     || request.approval_policy.is_some()
+                    || request.reasoning_effort.is_some()
                     || request.cursor_mode.is_some()
                     || request.gemini_approval_mode.is_some()
                 {
@@ -342,6 +348,7 @@ impl AppState {
             agent if agent.supports_cursor_mode() => {
                 if request.sandbox_mode.is_some()
                     || request.approval_policy.is_some()
+                    || request.reasoning_effort.is_some()
                     || request.claude_approval_mode.is_some()
                     || request.gemini_approval_mode.is_some()
                 {
@@ -353,6 +360,7 @@ impl AppState {
             agent if agent.supports_gemini_approval_mode() => {
                 if request.sandbox_mode.is_some()
                     || request.approval_policy.is_some()
+                    || request.reasoning_effort.is_some()
                     || request.claude_approval_mode.is_some()
                     || request.cursor_mode.is_some()
                 {
@@ -571,6 +579,7 @@ impl AppState {
                         attachments,
                         cwd: record.session.workdir.clone(),
                         prompt: prompt.to_owned(),
+                        reasoning_effort: record.codex_reasoning_effort,
                         resume_thread_id: record.external_session_id.clone(),
                         sandbox_mode: record.codex_sandbox_mode,
                     },
@@ -776,6 +785,7 @@ impl AppState {
             agent if agent.supports_claude_approval_mode() => {
                 if request.sandbox_mode.is_some()
                     || request.approval_policy.is_some()
+                    || request.reasoning_effort.is_some()
                     || request.cursor_mode.is_some()
                     || request.gemini_approval_mode.is_some()
                 {
@@ -787,6 +797,7 @@ impl AppState {
             agent if agent.supports_cursor_mode() => {
                 if request.sandbox_mode.is_some()
                     || request.approval_policy.is_some()
+                    || request.reasoning_effort.is_some()
                     || request.claude_approval_mode.is_some()
                     || request.gemini_approval_mode.is_some()
                 {
@@ -798,6 +809,7 @@ impl AppState {
             agent if agent.supports_gemini_approval_mode() => {
                 if request.sandbox_mode.is_some()
                     || request.approval_policy.is_some()
+                    || request.reasoning_effort.is_some()
                     || request.claude_approval_mode.is_some()
                     || request.cursor_mode.is_some()
                 {
@@ -810,6 +822,7 @@ impl AppState {
                 if request.model.is_some()
                     || request.sandbox_mode.is_some()
                     || request.approval_policy.is_some()
+                    || request.reasoning_effort.is_some()
                     || request.claude_approval_mode.is_some()
                     || request.cursor_mode.is_some()
                     || request.gemini_approval_mode.is_some()
@@ -853,6 +866,10 @@ impl AppState {
                 if let Some(approval_policy) = request.approval_policy {
                     record.codex_approval_policy = approval_policy;
                     record.session.approval_policy = Some(approval_policy);
+                }
+                if let Some(reasoning_effort) = request.reasoning_effort {
+                    record.codex_reasoning_effort = reasoning_effort;
+                    record.session.reasoning_effort = Some(reasoning_effort);
                 }
             }
             agent if agent.supports_claude_approval_mode() => {
@@ -1110,6 +1127,7 @@ impl AppState {
         session_id: &str,
         sandbox_mode: CodexSandboxMode,
         approval_policy: CodexApprovalPolicy,
+        reasoning_effort: CodexReasoningEffort,
     ) -> Result<()> {
         let mut inner = self.inner.lock().expect("state mutex poisoned");
         let index = inner
@@ -1117,6 +1135,7 @@ impl AppState {
             .ok_or_else(|| anyhow!("session `{session_id}` not found"))?;
         inner.sessions[index].active_codex_sandbox_mode = Some(sandbox_mode);
         inner.sessions[index].active_codex_approval_policy = Some(approval_policy);
+        inner.sessions[index].active_codex_reasoning_effort = Some(reasoning_effort);
         self.persist_internal_locked(&inner)?;
         Ok(())
     }
@@ -2123,8 +2142,10 @@ impl StateInner {
 
         let record = SessionRecord {
             active_codex_approval_policy: None,
+            active_codex_reasoning_effort: None,
             active_codex_sandbox_mode: None,
             codex_approval_policy: default_codex_approval_policy(),
+            codex_reasoning_effort: default_codex_reasoning_effort(),
             codex_sandbox_mode: default_codex_sandbox_mode(),
             external_session_id: None,
             pending_claude_approvals: HashMap::new(),
@@ -2143,6 +2164,7 @@ impl StateInner {
                 model: model.unwrap_or_else(|| agent.default_model().to_owned()),
                 model_options: Vec::new(),
                 approval_policy: None,
+                reasoning_effort: None,
                 sandbox_mode: None,
                 cursor_mode: agent
                     .supports_cursor_mode()
@@ -2164,6 +2186,7 @@ impl StateInner {
         let mut record = record;
         if record.session.agent.supports_codex_prompt_settings() {
             record.session.approval_policy = Some(record.codex_approval_policy);
+            record.session.reasoning_effort = Some(record.codex_reasoning_effort);
             record.session.sandbox_mode = Some(record.codex_sandbox_mode);
         }
 
@@ -2290,8 +2313,12 @@ impl PersistedState {
 #[serde(rename_all = "camelCase")]
 struct PersistedSessionRecord {
     active_codex_approval_policy: Option<CodexApprovalPolicy>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    active_codex_reasoning_effort: Option<CodexReasoningEffort>,
     active_codex_sandbox_mode: Option<CodexSandboxMode>,
     codex_approval_policy: CodexApprovalPolicy,
+    #[serde(default = "default_codex_reasoning_effort")]
+    codex_reasoning_effort: CodexReasoningEffort,
     codex_sandbox_mode: CodexSandboxMode,
     external_session_id: Option<String>,
     #[serde(default, skip_serializing_if = "VecDeque::is_empty")]
@@ -2306,8 +2333,10 @@ impl PersistedSessionRecord {
 
         Self {
             active_codex_approval_policy: record.active_codex_approval_policy,
+            active_codex_reasoning_effort: record.active_codex_reasoning_effort,
             active_codex_sandbox_mode: record.active_codex_sandbox_mode,
             codex_approval_policy: record.codex_approval_policy,
+            codex_reasoning_effort: record.codex_reasoning_effort,
             codex_sandbox_mode: record.codex_sandbox_mode,
             external_session_id: record.external_session_id.clone(),
             queued_prompts: record.queued_prompts.clone(),
@@ -2340,12 +2369,21 @@ impl PersistedSessionRecord {
         } else {
             session.gemini_approval_mode = None;
         }
+        if session.agent.supports_codex_prompt_settings() {
+            session
+                .reasoning_effort
+                .get_or_insert_with(default_codex_reasoning_effort);
+        } else {
+            session.reasoning_effort = None;
+        }
         session.pending_prompts.clear();
 
         let mut record = SessionRecord {
             active_codex_approval_policy: self.active_codex_approval_policy,
+            active_codex_reasoning_effort: self.active_codex_reasoning_effort,
             active_codex_sandbox_mode: self.active_codex_sandbox_mode,
             codex_approval_policy: self.codex_approval_policy,
+            codex_reasoning_effort: self.codex_reasoning_effort,
             codex_sandbox_mode: self.codex_sandbox_mode,
             external_session_id: self.external_session_id,
             pending_claude_approvals: HashMap::new(),
@@ -2364,8 +2402,10 @@ impl PersistedSessionRecord {
 #[derive(Clone)]
 struct SessionRecord {
     active_codex_approval_policy: Option<CodexApprovalPolicy>,
+    active_codex_reasoning_effort: Option<CodexReasoningEffort>,
     active_codex_sandbox_mode: Option<CodexSandboxMode>,
     codex_approval_policy: CodexApprovalPolicy,
+    codex_reasoning_effort: CodexReasoningEffort,
     codex_sandbox_mode: CodexSandboxMode,
     external_session_id: Option<String>,
     pending_claude_approvals: HashMap<String, ClaudePendingApproval>,
@@ -2858,6 +2898,7 @@ struct CodexPromptCommand {
     attachments: Vec<PromptImageAttachment>,
     cwd: String,
     prompt: String,
+    reasoning_effort: CodexReasoningEffort,
     resume_thread_id: Option<String>,
     sandbox_mode: CodexSandboxMode,
 }
@@ -2975,6 +3016,7 @@ struct AcpTurnState {
 #[derive(Clone)]
 struct TurnConfig {
     codex_approval_policy: Option<CodexApprovalPolicy>,
+    codex_reasoning_effort: Option<CodexReasoningEffort>,
     codex_sandbox_mode: Option<CodexSandboxMode>,
     agent: Agent,
     claude_approval_mode: Option<ClaudeApprovalMode>,
@@ -4357,7 +4399,12 @@ fn handle_codex_prompt_command(
         }
     };
 
-    state.record_codex_runtime_config(session_id, command.sandbox_mode, command.approval_policy)?;
+    state.record_codex_runtime_config(
+        session_id,
+        command.sandbox_mode,
+        command.approval_policy,
+        command.reasoning_effort,
+    )?;
 
     send_codex_json_rpc_request(
         writer,
@@ -4367,6 +4414,7 @@ fn handle_codex_prompt_command(
             "threadId": thread_id,
             "cwd": command.cwd,
             "approvalPolicy": command.approval_policy.as_cli_value(),
+            "effort": command.reasoning_effort.as_api_value(),
             "sandboxPolicy": codex_sandbox_policy_value(command.sandbox_mode),
             "input": codex_user_input_items(&command.prompt, &command.attachments),
         }),
@@ -5799,6 +5847,9 @@ fn run_turn_blocking(config: TurnConfig, recorder: &mut dyn TurnRecorder) -> Res
             config
                 .codex_approval_policy
                 .unwrap_or_else(default_codex_approval_policy),
+            config
+                .codex_reasoning_effort
+                .unwrap_or_else(default_codex_reasoning_effort),
             &config.prompt,
             recorder,
         ),
@@ -6242,12 +6293,19 @@ fn run_codex_turn(
     model: &str,
     sandbox_mode: CodexSandboxMode,
     approval_policy: CodexApprovalPolicy,
+    reasoning_effort: CodexReasoningEffort,
     prompt: &str,
     recorder: &mut dyn TurnRecorder,
 ) -> Result<String> {
     let codex_home = prepare_termal_codex_home(cwd, runtime_session_id.unwrap_or("repl"))?;
     let mut command = codex_command()?;
-    command.env("CODEX_HOME", &codex_home).args(["-m", model]);
+    command
+        .env("CODEX_HOME", &codex_home)
+        .args(["-m", model, "-c"])
+        .arg(format!(
+            "model_reasoning_effort=\"{}\"",
+            reasoning_effort.as_api_value()
+        ));
 
     match external_session_id {
         Some(session_id) => {
@@ -6425,6 +6483,20 @@ fn default_codex_approval_policy() -> CodexApprovalPolicy {
         Some("on-request") => CodexApprovalPolicy::OnRequest,
         Some("on-failure") => CodexApprovalPolicy::OnFailure,
         _ => CodexApprovalPolicy::Never,
+    }
+}
+
+fn default_codex_reasoning_effort() -> CodexReasoningEffort {
+    match std::env::var("TERMAL_CODEX_REASONING_EFFORT")
+        .ok()
+        .as_deref()
+    {
+        Some("none") => CodexReasoningEffort::None,
+        Some("minimal") => CodexReasoningEffort::Minimal,
+        Some("low") => CodexReasoningEffort::Low,
+        Some("high") => CodexReasoningEffort::High,
+        Some("xhigh") => CodexReasoningEffort::XHigh,
+        _ => CodexReasoningEffort::Medium,
     }
 }
 
@@ -8515,6 +8587,8 @@ struct Session {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     model_options: Vec<SessionModelOption>,
     approval_policy: Option<CodexApprovalPolicy>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    reasoning_effort: Option<CodexReasoningEffort>,
     sandbox_mode: Option<CodexSandboxMode>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     cursor_mode: Option<CursorMode>,
@@ -8564,6 +8638,31 @@ impl CodexSandboxMode {
             Self::ReadOnly => "read-only",
             Self::WorkspaceWrite => "workspace-write",
             Self::DangerFullAccess => "danger-full-access",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+enum CodexReasoningEffort {
+    None,
+    Minimal,
+    Low,
+    Medium,
+    High,
+    #[serde(rename = "xhigh")]
+    XHigh,
+}
+
+impl CodexReasoningEffort {
+    fn as_api_value(self) -> &'static str {
+        match self {
+            Self::None => "none",
+            Self::Minimal => "minimal",
+            Self::Low => "low",
+            Self::Medium => "medium",
+            Self::High => "high",
+            Self::XHigh => "xhigh",
         }
     }
 }
@@ -8806,6 +8905,7 @@ struct CreateSessionRequest {
     project_id: Option<String>,
     model: Option<String>,
     approval_policy: Option<CodexApprovalPolicy>,
+    reasoning_effort: Option<CodexReasoningEffort>,
     sandbox_mode: Option<CodexSandboxMode>,
     cursor_mode: Option<CursorMode>,
     claude_approval_mode: Option<ClaudeApprovalMode>,
@@ -8941,6 +9041,7 @@ struct UpdateSessionSettingsRequest {
     name: Option<String>,
     model: Option<String>,
     approval_policy: Option<CodexApprovalPolicy>,
+    reasoning_effort: Option<CodexReasoningEffort>,
     sandbox_mode: Option<CodexSandboxMode>,
     cursor_mode: Option<CursorMode>,
     claude_approval_mode: Option<ClaudeApprovalMode>,
@@ -9445,6 +9546,7 @@ mod tests {
                 project_id: None,
                 model: None,
                 approval_policy: None,
+                reasoning_effort: None,
                 sandbox_mode: None,
                 cursor_mode: None,
                 claude_approval_mode: Some(ClaudeApprovalMode::Plan),
@@ -9473,6 +9575,7 @@ mod tests {
                 project_id: None,
                 model: Some("gpt-5-mini".to_owned()),
                 approval_policy: Some(CodexApprovalPolicy::OnRequest),
+                reasoning_effort: Some(CodexReasoningEffort::High),
                 sandbox_mode: Some(CodexSandboxMode::ReadOnly),
                 cursor_mode: None,
                 claude_approval_mode: None,
@@ -9491,6 +9594,7 @@ mod tests {
             Some(CodexApprovalPolicy::OnRequest)
         );
         assert_eq!(session.model, "gpt-5-mini");
+        assert_eq!(session.reasoning_effort, Some(CodexReasoningEffort::High));
         assert_eq!(session.sandbox_mode, Some(CodexSandboxMode::ReadOnly));
         assert_eq!(session.claude_approval_mode, None);
 
@@ -9500,6 +9604,7 @@ mod tests {
             .map(|index| &inner.sessions[index]);
         let record = record.expect("session record should exist");
         assert_eq!(record.codex_approval_policy, CodexApprovalPolicy::OnRequest);
+        assert_eq!(record.codex_reasoning_effort, CodexReasoningEffort::High);
         assert_eq!(record.codex_sandbox_mode, CodexSandboxMode::ReadOnly);
     }
 
@@ -9515,6 +9620,7 @@ mod tests {
                 project_id: None,
                 model: Some("auto".to_owned()),
                 approval_policy: None,
+                reasoning_effort: None,
                 sandbox_mode: None,
                 cursor_mode: Some(CursorMode::Agent),
                 claude_approval_mode: None,
@@ -9530,6 +9636,7 @@ mod tests {
                     model: Some("gpt-5.3-codex".to_owned()),
                     sandbox_mode: None,
                     approval_policy: None,
+                    reasoning_effort: None,
                     cursor_mode: None,
                     claude_approval_mode: None,
                     gemini_approval_mode: None,
@@ -9557,6 +9664,7 @@ mod tests {
                 project_id: None,
                 model: Some("gpt-5".to_owned()),
                 approval_policy: None,
+                reasoning_effort: None,
                 sandbox_mode: None,
                 cursor_mode: None,
                 claude_approval_mode: None,
@@ -9572,6 +9680,7 @@ mod tests {
                     model: Some("gpt-5-mini".to_owned()),
                     sandbox_mode: None,
                     approval_policy: None,
+                    reasoning_effort: None,
                     cursor_mode: None,
                     claude_approval_mode: None,
                     gemini_approval_mode: None,
@@ -9596,6 +9705,59 @@ mod tests {
     }
 
     #[test]
+    fn updates_codex_reasoning_effort_without_restarting_runtime() {
+        let state = test_app_state();
+
+        let created = state
+            .create_session(CreateSessionRequest {
+                agent: Some(Agent::Codex),
+                name: Some("Codex Effort".to_owned()),
+                workdir: Some("/tmp".to_owned()),
+                project_id: None,
+                model: Some("gpt-5".to_owned()),
+                approval_policy: None,
+                reasoning_effort: Some(CodexReasoningEffort::Medium),
+                sandbox_mode: None,
+                cursor_mode: None,
+                claude_approval_mode: None,
+                gemini_approval_mode: None,
+            })
+            .unwrap();
+
+        let updated = state
+            .update_session_settings(
+                &created.session_id,
+                UpdateSessionSettingsRequest {
+                    name: None,
+                    model: None,
+                    sandbox_mode: None,
+                    approval_policy: None,
+                    reasoning_effort: Some(CodexReasoningEffort::High),
+                    cursor_mode: None,
+                    claude_approval_mode: None,
+                    gemini_approval_mode: None,
+                },
+            )
+            .unwrap();
+
+        let session = updated
+            .sessions
+            .iter()
+            .find(|session| session.id == created.session_id)
+            .expect("updated Codex session should be present");
+        assert_eq!(session.reasoning_effort, Some(CodexReasoningEffort::High));
+
+        let inner = state.inner.lock().expect("state mutex poisoned");
+        let record = inner
+            .sessions
+            .iter()
+            .find(|record| record.session.id == created.session_id)
+            .expect("Codex session should exist");
+        assert_eq!(record.codex_reasoning_effort, CodexReasoningEffort::High);
+        assert!(!record.runtime_reset_required);
+    }
+
+    #[test]
     fn updates_claude_session_model_settings_and_flags_restart() {
         let state = test_app_state();
 
@@ -9607,6 +9769,7 @@ mod tests {
                 project_id: None,
                 model: Some("sonnet".to_owned()),
                 approval_policy: None,
+                reasoning_effort: None,
                 sandbox_mode: None,
                 cursor_mode: None,
                 claude_approval_mode: Some(ClaudeApprovalMode::Ask),
@@ -9622,6 +9785,7 @@ mod tests {
                     model: Some("opus".to_owned()),
                     sandbox_mode: None,
                     approval_policy: None,
+                    reasoning_effort: None,
                     cursor_mode: None,
                     claude_approval_mode: None,
                     gemini_approval_mode: None,
@@ -9657,6 +9821,7 @@ mod tests {
                 project_id: None,
                 model: None,
                 approval_policy: None,
+                reasoning_effort: None,
                 sandbox_mode: None,
                 cursor_mode: None,
                 claude_approval_mode: None,
@@ -9687,6 +9852,7 @@ mod tests {
                 project_id: None,
                 model: Some("auto".to_owned()),
                 approval_policy: None,
+                reasoning_effort: None,
                 sandbox_mode: None,
                 cursor_mode: Some(CursorMode::Agent),
                 claude_approval_mode: None,
@@ -9765,6 +9931,7 @@ mod tests {
                 project_id: None,
                 model: None,
                 approval_policy: None,
+                reasoning_effort: None,
                 sandbox_mode: None,
                 cursor_mode: None,
                 claude_approval_mode: None,
@@ -9781,6 +9948,7 @@ mod tests {
                     model: None,
                     sandbox_mode: Some(CodexSandboxMode::ReadOnly),
                     approval_policy: None,
+                    reasoning_effort: None,
                     cursor_mode: None,
                     claude_approval_mode: None,
                     gemini_approval_mode: None,
@@ -9802,6 +9970,7 @@ mod tests {
                 project_id: None,
                 model: None,
                 approval_policy: None,
+                reasoning_effort: None,
                 sandbox_mode: None,
                 cursor_mode: None,
                 claude_approval_mode: None,
@@ -9817,6 +9986,7 @@ mod tests {
                     model: None,
                     sandbox_mode: None,
                     approval_policy: None,
+                    reasoning_effort: None,
                     cursor_mode: None,
                     claude_approval_mode: None,
                     gemini_approval_mode: None,
@@ -9853,6 +10023,7 @@ mod tests {
                 project_id: Some(project.project_id.clone()),
                 model: None,
                 approval_policy: None,
+                reasoning_effort: None,
                 sandbox_mode: None,
                 cursor_mode: None,
                 claude_approval_mode: None,
@@ -9890,6 +10061,7 @@ mod tests {
             project_id: Some(project.project_id),
             model: None,
             approval_policy: None,
+            reasoning_effort: None,
             sandbox_mode: None,
             cursor_mode: None,
             claude_approval_mode: None,
@@ -9997,6 +10169,7 @@ mod tests {
                 &session_id,
                 CodexSandboxMode::ReadOnly,
                 CodexApprovalPolicy::OnRequest,
+                CodexReasoningEffort::High,
             )
             .unwrap();
 
@@ -10018,6 +10191,10 @@ mod tests {
         assert_eq!(
             record.active_codex_approval_policy,
             Some(CodexApprovalPolicy::OnRequest)
+        );
+        assert_eq!(
+            record.active_codex_reasoning_effort,
+            Some(CodexReasoningEffort::High)
         );
         assert_eq!(reloaded.revision, baseline);
     }

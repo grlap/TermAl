@@ -18,6 +18,7 @@ import type {
   ApprovalPolicy,
   ClaudeApprovalMode,
   CommandMessage,
+  CodexReasoningEffort,
   CursorMode,
   DiffMessage,
   GeminiApprovalMode,
@@ -44,6 +45,7 @@ type SessionSettingsField =
   | "model"
   | "sandboxMode"
   | "approvalPolicy"
+  | "reasoningEffort"
   | "claudeApprovalMode"
   | "cursorMode"
   | "geminiApprovalMode";
@@ -51,6 +53,7 @@ type SessionSettingsValue =
   | string
   | SandboxMode
   | ApprovalPolicy
+  | CodexReasoningEffort
   | ClaudeApprovalMode
   | CursorMode
   | GeminiApprovalMode;
@@ -73,11 +76,85 @@ const STATIC_MODEL_OPTIONS: Readonly<Record<Session["agent"], readonly { label: 
   Cursor: [{ label: "Auto", value: "auto" }],
   Gemini: [{ label: "Auto", value: "auto" }],
 };
-const SLASH_COMMANDS = [
+const SANDBOX_SLASH_OPTIONS = [
+  { detail: "Write inside the workspace", label: "workspace-write", value: "workspace-write" },
+  { detail: "Read without editing files", label: "read-only", value: "read-only" },
+  { detail: "Allow unrestricted file access", label: "danger-full-access", value: "danger-full-access" },
+] as const;
+const APPROVAL_POLICY_SLASH_OPTIONS = [
+  { detail: "Never ask before tools run", label: "never", value: "never" },
+  { detail: "Ask whenever a tool needs approval", label: "on-request", value: "on-request" },
+  { detail: "Approve trusted commands, ask for the rest", label: "untrusted", value: "untrusted" },
+  { detail: "Only ask after failures", label: "on-failure", value: "on-failure" },
+] as const;
+const CODEX_REASONING_EFFORT_SLASH_OPTIONS = [
+  { detail: "Disable reasoning for speed-sensitive turns", label: "none", value: "none" },
+  { detail: "Use the lightest reasoning pass", label: "minimal", value: "minimal" },
+  { detail: "Keep reasoning light", label: "low", value: "low" },
+  { detail: "Use the standard reasoning depth", label: "medium", value: "medium" },
+  { detail: "Use deeper reasoning for harder prompts", label: "high", value: "high" },
+  { detail: "Use the maximum reasoning depth", label: "xhigh", value: "xhigh" },
+] as const;
+const CLAUDE_MODE_SLASH_OPTIONS = [
+  { detail: "Ask before tool use", label: "ask", value: "ask" },
+  { detail: "Continue through tool requests", label: "auto-approve", value: "auto-approve" },
+  { detail: "Stay read-only and plan", label: "plan", value: "plan" },
+] as const;
+const CURSOR_MODE_SLASH_OPTIONS = [
+  { detail: "Allow edits and tool use", label: "agent", value: "agent" },
+  { detail: "Stay read-only and plan", label: "plan", value: "plan" },
+  { detail: "Focus on explanation", label: "ask", value: "ask" },
+] as const;
+const GEMINI_MODE_SLASH_OPTIONS = [
+  { detail: "Ask before tool use", label: "default", value: "default" },
+  { detail: "Auto-approve edit tools", label: "auto_edit", value: "auto_edit" },
+  { detail: "Approve every tool", label: "yolo", value: "yolo" },
+  { detail: "Stay read-only and plan", label: "plan", value: "plan" },
+] as const;
+
+type SlashCommandId = "model" | "mode" | "sandbox" | "approvals" | "effort";
+
+const SLASH_COMMANDS: ReadonlyArray<{
+  command: string;
+  detail: string;
+  id: SlashCommandId;
+  label: string;
+  supports: readonly Session["agent"][];
+}> = [
   {
     command: "/model",
     detail: "Change the model for this session",
+    id: "model",
     label: "/model",
+    supports: ["Claude", "Codex", "Cursor", "Gemini"],
+  },
+  {
+    command: "/mode",
+    detail: "Change the session mode for this agent",
+    id: "mode",
+    label: "/mode",
+    supports: ["Claude", "Cursor", "Gemini"],
+  },
+  {
+    command: "/sandbox",
+    detail: "Change Codex sandbox for the next prompt",
+    id: "sandbox",
+    label: "/sandbox",
+    supports: ["Codex"],
+  },
+  {
+    command: "/approvals",
+    detail: "Change Codex approval policy for the next prompt",
+    id: "approvals",
+    label: "/approvals",
+    supports: ["Codex"],
+  },
+  {
+    command: "/effort",
+    detail: "Change Codex reasoning effort for the next prompt",
+    id: "effort",
+    label: "/effort",
+    supports: ["Codex"],
   },
 ] as const;
 
@@ -96,9 +173,10 @@ type SlashPaletteItem =
     }
   | {
       detail: string;
+      field: SessionSettingsField;
       isCurrent: boolean;
       key: string;
-      kind: "model";
+      kind: "choice";
       label: string;
       value: string;
     };
@@ -119,17 +197,40 @@ type SlashPaletteState =
   | {
       defaultActiveIndex: number;
       emptyMessage: string;
+      errorMessage?: string | null;
       hint: string;
       isRefreshing: boolean;
       items: readonly SlashPaletteItem[];
-      kind: "model";
+      kind: "choice";
+      refreshActionLabel?: string;
       resetKey: string;
       supportsLiveRefresh: boolean;
       title: string;
     };
 
+type SlashChoiceDefinition = {
+  detail: string;
+  label: string;
+  value: string;
+};
+
+type SlashChoiceState = {
+  emptyMessage: string;
+  errorMessage?: string | null;
+  hint: string;
+  isRefreshing?: boolean;
+  items: SlashPaletteItem[];
+  refreshActionLabel?: string;
+  supportsLiveRefresh?: boolean;
+  title: string;
+};
+
 function formatSessionModelLabel(model: string): string {
   return model === "auto" ? "Auto" : model;
+}
+
+function slashCommandsForSession(session: Session) {
+  return SLASH_COMMANDS.filter((command) => command.supports.includes(session.agent));
 }
 
 function supportsLiveSessionModelOptions(session: Session): boolean {
@@ -167,10 +268,174 @@ function sessionModelChoicesForSlashCommand(session: Session): SessionModelChoic
   return ensureCurrentSessionModelChoice(baseOptions, session.model);
 }
 
+function matchSlashCommand(commandLabel: string, query: string) {
+  return commandLabel.slice(1).toLowerCase().includes(query);
+}
+
+function matchSlashChoice(choice: SlashChoiceDefinition, query: string) {
+  if (query.length === 0) {
+    return true;
+  }
+
+  const normalizedQuery = query.toLowerCase();
+  return (
+    choice.label.toLowerCase().includes(normalizedQuery) ||
+    choice.value.toLowerCase().includes(normalizedQuery) ||
+    choice.detail.toLowerCase().includes(normalizedQuery)
+  );
+}
+
+function makeSlashChoices(
+  definitions: readonly SlashChoiceDefinition[],
+  field: SessionSettingsField,
+  currentValue: string,
+  query: string,
+) {
+  return definitions
+    .filter((choice) => matchSlashChoice(choice, query))
+    .map<SlashPaletteItem>((choice) => ({
+      detail: choice.detail,
+      field,
+      isCurrent: choice.value === currentValue,
+      key: `${field}:${choice.value}`,
+      kind: "choice",
+      label: choice.label,
+      value: choice.value,
+    }));
+}
+
+function sessionModeSlashState(session: Session, query: string): SlashChoiceState | null {
+  switch (session.agent) {
+    case "Claude": {
+      const currentMode = session.claudeApprovalMode ?? "ask";
+      return {
+        emptyMessage: `No Claude modes match "${query}".`,
+        hint: "Enter to apply a Claude mode to this session.",
+        items: makeSlashChoices(
+          CLAUDE_MODE_SLASH_OPTIONS,
+          "claudeApprovalMode",
+          currentMode,
+          query,
+        ),
+        title: "Claude modes",
+      };
+    }
+    case "Cursor": {
+      const currentMode = session.cursorMode ?? "agent";
+      return {
+        emptyMessage: `No Cursor modes match "${query}".`,
+        hint: "Enter to apply a live Cursor mode.",
+        items: makeSlashChoices(CURSOR_MODE_SLASH_OPTIONS, "cursorMode", currentMode, query),
+        title: "Cursor modes",
+      };
+    }
+    case "Gemini": {
+      const currentMode = session.geminiApprovalMode ?? "default";
+      return {
+        emptyMessage: `No Gemini modes match "${query}".`,
+        hint: "Enter to apply a Gemini approval mode.",
+        items: makeSlashChoices(
+          GEMINI_MODE_SLASH_OPTIONS,
+          "geminiApprovalMode",
+          currentMode,
+          query,
+        ),
+        title: "Gemini modes",
+      };
+    }
+    case "Codex":
+      return null;
+  }
+}
+
+function codexSandboxSlashState(query: string, currentValue: SandboxMode): SlashChoiceState {
+  return {
+    emptyMessage: `No sandbox modes match "${query}".`,
+    hint: "Enter to set the next Codex prompt sandbox.",
+    items: makeSlashChoices(SANDBOX_SLASH_OPTIONS, "sandboxMode", currentValue, query),
+    title: "Codex sandbox",
+  };
+}
+
+function codexApprovalSlashState(query: string, currentValue: ApprovalPolicy): SlashChoiceState {
+  return {
+    emptyMessage: `No approval policies match "${query}".`,
+    hint: "Enter to set the next Codex prompt approval policy.",
+    items: makeSlashChoices(APPROVAL_POLICY_SLASH_OPTIONS, "approvalPolicy", currentValue, query),
+    title: "Codex approvals",
+  };
+}
+
+function codexReasoningEffortSlashState(
+  query: string,
+  currentValue: CodexReasoningEffort,
+): SlashChoiceState {
+  return {
+    emptyMessage: `No reasoning effort options match "${query}".`,
+    hint: "Enter to set the next Codex prompt reasoning effort.",
+    items: makeSlashChoices(
+      CODEX_REASONING_EFFORT_SLASH_OPTIONS,
+      "reasoningEffort",
+      currentValue,
+      query,
+    ),
+    title: "Codex reasoning effort",
+  };
+}
+
+function sessionModelSlashState(
+  session: Session,
+  query: string,
+  isRefreshingModelOptions: boolean,
+  modelOptionsError: string | null,
+): SlashChoiceState {
+  const supportsLiveRefresh = supportsLiveSessionModelOptions(session);
+  const hasLiveModelList = (session.modelOptions?.length ?? 0) > 0;
+  const items = sessionModelChoicesForSlashCommand(session)
+    .filter((option) =>
+      query.length === 0
+        ? true
+        : option.label.toLowerCase().includes(query) || option.value.toLowerCase().includes(query),
+    )
+    .map<SlashPaletteItem>((option) => ({
+      detail: option.value,
+      field: "model",
+      isCurrent: option.value === session.model,
+      key: `model:${option.value}`,
+      kind: "choice",
+      label: option.label,
+      value: option.value,
+    }));
+
+  let hint = "Enter to apply a model. Esc clears the command line.";
+  if (supportsLiveRefresh && !hasLiveModelList) {
+    hint = isRefreshingModelOptions
+      ? `Loading ${session.agent}'s live model list for this session.`
+      : modelOptionsError
+        ? `Could not load ${session.agent}'s live model list. Retry to fetch the full list.`
+        : `Fetching ${session.agent}'s live model list for this session.`;
+  }
+
+  return {
+    emptyMessage:
+      query.length > 0
+        ? `No ${session.agent} models match "${query}".`
+        : `No ${session.agent} models are available right now.`,
+    errorMessage: modelOptionsError,
+    hint,
+    isRefreshing: isRefreshingModelOptions,
+    items,
+    refreshActionLabel: modelOptionsError ? "Retry live models" : "Refresh live models",
+    supportsLiveRefresh,
+    title: `${session.agent} models`,
+  };
+}
+
 function buildSlashPaletteState(
   session: Session | null,
   draft: string,
   isRefreshingModelOptions: boolean,
+  modelOptionsError: string | null,
 ): SlashPaletteState {
   if (!session || !draft.startsWith("/")) {
     return { kind: "none" };
@@ -182,12 +447,18 @@ function buildSlashPaletteState(
   }
 
   const commandQuery = (commandMatch[1] ?? "").toLowerCase();
-  const modelQuery = (commandMatch[2] ?? "").trim().toLowerCase();
-  const showCommandList = commandQuery.length === 0 || ("model".startsWith(commandQuery) && commandQuery !== "model");
+  const optionQuery = (commandMatch[2] ?? "").trim().toLowerCase();
+  const rawOptionQuery = (commandMatch[2] ?? "").trim();
+  const availableCommands = slashCommandsForSession(session);
+  const activeCommand =
+    commandQuery.length === 0
+      ? null
+      : (availableCommands.find((command) => command.label.slice(1).toLowerCase() === commandQuery) ??
+          null);
 
-  if (showCommandList) {
-    const items = SLASH_COMMANDS.filter((item) =>
-      commandQuery.length === 0 ? true : item.label.slice(1).toLowerCase().includes(commandQuery),
+  if (!activeCommand) {
+    const items = availableCommands.filter((item) =>
+      commandQuery.length === 0 ? true : matchSlashCommand(item.label, commandQuery),
     ).map<SlashPaletteItem>((item) => ({
       command: item.command,
       detail: item.detail,
@@ -207,61 +478,54 @@ function buildSlashPaletteState(
     };
   }
 
-  if (commandQuery === "model") {
-    const supportsLiveRefresh = supportsLiveSessionModelOptions(session);
-    const hasLiveModelList = (session.modelOptions?.length ?? 0) > 0;
-    const items = sessionModelChoicesForSlashCommand(session)
-      .filter((option) => {
-        if (modelQuery.length === 0) {
-          return true;
-        }
+  const choiceState =
+    activeCommand.id === "model"
+      ? sessionModelSlashState(session, optionQuery, isRefreshingModelOptions, modelOptionsError)
+      : activeCommand.id === "mode"
+        ? sessionModeSlashState(session, rawOptionQuery)
+        : activeCommand.id === "sandbox"
+          ? session.agent === "Codex"
+            ? codexSandboxSlashState(rawOptionQuery, session.sandboxMode ?? "workspace-write")
+            : null
+          : activeCommand.id === "approvals"
+            ? session.agent === "Codex"
+              ? codexApprovalSlashState(rawOptionQuery, session.approvalPolicy ?? "never")
+              : null
+            : activeCommand.id === "effort"
+              ? session.agent === "Codex"
+                ? codexReasoningEffortSlashState(rawOptionQuery, session.reasoningEffort ?? "medium")
+                : null
+            : null;
 
-        const label = option.label.toLowerCase();
-        const value = option.value.toLowerCase();
-        return label.includes(modelQuery) || value.includes(modelQuery);
-      })
-      .map<SlashPaletteItem>((option) => ({
-        detail: option.value,
-        isCurrent: option.value === session.model,
-        key: `model:${option.value}`,
-        kind: "model",
-        label: option.label,
-        value: option.value,
-      }));
-    const defaultActiveIndex = Math.max(
-      items.findIndex((item) => item.kind === "model" && item.value === session.model),
-      0,
-    );
-
+  if (!choiceState) {
     return {
-      defaultActiveIndex,
-      emptyMessage:
-        modelQuery.length > 0
-          ? `No ${session.agent} models match "${commandMatch[2] ?? ""}".`
-          : `No ${session.agent} models are available right now.`,
-      hint:
-        supportsLiveRefresh && !hasLiveModelList
-          ? isRefreshingModelOptions
-            ? `Loading ${session.agent}'s live model list for this session.`
-            : `Fetching ${session.agent}'s live model list for this session.`
-          : "Enter to apply a model. Esc clears the command line.",
-      isRefreshing: isRefreshingModelOptions,
-      items,
-      kind: "model",
-      resetKey: `model:${session.id}:${session.model}:${modelQuery}:${items.map((item) => item.key).join("|")}`,
-      supportsLiveRefresh,
-      title: `${session.agent} models`,
+      defaultActiveIndex: 0,
+      emptyMessage: `${activeCommand.label} is not available for ${session.agent}.`,
+      hint: "Choose a different slash command for this session.",
+      items: [],
+      kind: "command",
+      resetKey: `command:${commandQuery}`,
+      title: "Slash commands",
     };
   }
 
+  const defaultActiveIndex = Math.max(
+    choiceState.items.findIndex((item) => item.kind === "choice" && item.isCurrent),
+    0,
+  );
+
   return {
-    defaultActiveIndex: 0,
-    emptyMessage: `No slash commands match "/${commandQuery}".`,
-    hint: "Slash commands currently support session model changes.",
-    items: [],
-    kind: "command",
-    resetKey: `command:${commandQuery}`,
-    title: "Slash commands",
+    defaultActiveIndex,
+    emptyMessage: choiceState.emptyMessage,
+    errorMessage: choiceState.errorMessage,
+    hint: choiceState.hint,
+    isRefreshing: choiceState.isRefreshing ?? false,
+    items: choiceState.items,
+    kind: "choice",
+    refreshActionLabel: choiceState.refreshActionLabel,
+    resetKey: `${activeCommand.id}:${session.id}:${optionQuery}:${choiceState.items.map((item) => item.key).join("|")}:${choiceState.errorMessage ?? ""}:${choiceState.isRefreshing ? "loading" : "ready"}`,
+    supportsLiveRefresh: choiceState.supportsLiveRefresh ?? false,
+    title: choiceState.title,
   };
 }
 
@@ -373,6 +637,7 @@ export function AgentSessionPanelFooter({
   onDraftCommit,
   onDraftAttachmentRemove,
   isRefreshingModelOptions,
+  modelOptionsError,
   onRefreshSessionModelOptions,
   onSend,
   onSessionSettingsChange,
@@ -394,6 +659,7 @@ export function AgentSessionPanelFooter({
   onDraftCommit: (sessionId: string, nextValue: string) => void;
   onDraftAttachmentRemove: (sessionId: string, attachmentId: string) => void;
   isRefreshingModelOptions: boolean;
+  modelOptionsError: string | null;
   onRefreshSessionModelOptions: (sessionId: string) => void;
   onSend: (sessionId: string, draftText?: string) => void;
   onSessionSettingsChange: (
@@ -420,6 +686,7 @@ export function AgentSessionPanelFooter({
         onDraftCommit={onDraftCommit}
         onDraftAttachmentRemove={onDraftAttachmentRemove}
         isRefreshingModelOptions={isRefreshingModelOptions}
+        modelOptionsError={modelOptionsError}
         onRefreshSessionModelOptions={onRefreshSessionModelOptions}
         onSend={onSend}
         onSessionSettingsChange={onSessionSettingsChange}
@@ -998,6 +1265,7 @@ const SessionComposer = memo(function SessionComposer({
   isStopping,
   isSessionBusy,
   isRefreshingModelOptions,
+  modelOptionsError,
   showNewResponseIndicator,
   onScrollToLatest,
   onDraftCommit,
@@ -1017,6 +1285,7 @@ const SessionComposer = memo(function SessionComposer({
   isStopping: boolean;
   isSessionBusy: boolean;
   isRefreshingModelOptions: boolean;
+  modelOptionsError: string | null;
   showNewResponseIndicator: boolean;
   onScrollToLatest: () => void;
   onDraftCommit: (sessionId: string, nextValue: string) => void;
@@ -1046,10 +1315,18 @@ const SessionComposer = memo(function SessionComposer({
   const composerDraft =
     activeSessionId === null ? "" : (localDraftsBySessionId[activeSessionId] ?? committedDraft);
   const slashPalette = useMemo(
-    () => buildSlashPaletteState(session, composerDraft, isRefreshingModelOptions),
-    [composerDraft, isRefreshingModelOptions, session],
+    () =>
+      buildSlashPaletteState(
+        session,
+        composerDraft,
+        isRefreshingModelOptions,
+        modelOptionsError,
+      ),
+    [composerDraft, isRefreshingModelOptions, modelOptionsError, session],
   );
   const slashPaletteResetKey = slashPalette.kind === "none" ? "none" : slashPalette.resetKey;
+  const slashPaletteSupportsLiveRefresh =
+    slashPalette.kind === "choice" && slashPalette.supportsLiveRefresh;
   const activeSlashItem =
     slashPalette.kind === "none" || slashPalette.items.length === 0
       ? null
@@ -1110,7 +1387,12 @@ const SessionComposer = memo(function SessionComposer({
   }, [activeSessionId, slashPaletteResetKey]);
 
   useEffect(() => {
-    if (!session || slashPalette.kind !== "model" || !supportsLiveSessionModelOptions(session)) {
+    if (
+      !session ||
+      slashPalette.kind !== "choice" ||
+      !slashPaletteSupportsLiveRefresh ||
+      !supportsLiveSessionModelOptions(session)
+    ) {
       return;
     }
 
@@ -1126,13 +1408,13 @@ const SessionComposer = memo(function SessionComposer({
       return;
     }
 
-    requestedSlashModelOptionsRef.current = session.id;
-    void onRefreshSessionModelOptions(session.id);
+    requestSlashModelOptions();
   }, [
     isRefreshingModelOptions,
     onRefreshSessionModelOptions,
     session,
     slashPalette.kind,
+    slashPaletteSupportsLiveRefresh,
   ]);
 
   useEffect(() => {
@@ -1275,6 +1557,19 @@ const SessionComposer = memo(function SessionComposer({
     });
   }
 
+  function requestSlashModelOptions(force = false) {
+    if (!session || !supportsLiveSessionModelOptions(session)) {
+      return;
+    }
+
+    if (!force && requestedSlashModelOptionsRef.current === session.id) {
+      return;
+    }
+
+    requestedSlashModelOptionsRef.current = session.id;
+    void onRefreshSessionModelOptions(session.id);
+  }
+
   function handleComposerChange(nextValue: string) {
     if (!activeSessionId) {
       return;
@@ -1308,7 +1603,7 @@ const SessionComposer = memo(function SessionComposer({
 
     updateLocalDraft(session.id, "");
     commitDraft(session.id, "");
-    void onSessionSettingsChange(session.id, "model", item.value);
+    void onSessionSettingsChange(session.id, item.field, item.value);
     focusComposerInput(0);
   }
 
@@ -1533,6 +1828,34 @@ const SessionComposer = memo(function SessionComposer({
             <strong className="composer-slash-title">{slashPalette.title}</strong>
             <span className="composer-slash-hint">{slashPalette.hint}</span>
           </div>
+          {slashPalette.kind === "choice" &&
+          (slashPalette.supportsLiveRefresh || slashPalette.errorMessage) ? (
+            <div className="composer-slash-status">
+              {slashPalette.errorMessage ? (
+                <p className="composer-slash-error" role="alert">
+                  {slashPalette.errorMessage}
+                </p>
+              ) : (
+                <p className="composer-slash-status-text" aria-live="polite">
+                  {slashPalette.isRefreshing
+                    ? "Loading live model options..."
+                    : "Refresh live models to update this list from the active session."}
+                </p>
+              )}
+              {slashPalette.supportsLiveRefresh ? (
+                <button
+                  className="ghost-button composer-slash-refresh-button"
+                  type="button"
+                  onClick={() => requestSlashModelOptions(true)}
+                  disabled={isRefreshingModelOptions}
+                >
+                  {slashPalette.isRefreshing
+                    ? "Loading..."
+                    : (slashPalette.refreshActionLabel ?? "Refresh live models")}
+                </button>
+              ) : null}
+            </div>
+          ) : null}
           {slashPalette.items.length > 0 ? (
             <div className="composer-slash-options">
               {slashPalette.items.map((item, index) => {
@@ -1555,7 +1878,7 @@ const SessionComposer = memo(function SessionComposer({
                       <span className="composer-slash-option-label">{item.label}</span>
                       <span className="composer-slash-option-detail">{item.detail}</span>
                     </span>
-                    {item.kind === "model" && item.isCurrent ? (
+                    {item.kind === "choice" && item.isCurrent ? (
                       <span className="composer-slash-option-badge">Current</span>
                     ) : null}
                   </button>
@@ -1565,7 +1888,7 @@ const SessionComposer = memo(function SessionComposer({
           ) : (
             <p className="composer-slash-empty">
               {slashPalette.emptyMessage}
-              {slashPalette.kind === "model" &&
+              {slashPalette.kind === "choice" &&
               slashPalette.supportsLiveRefresh &&
               slashPalette.isRefreshing
                 ? " Live options will appear here as soon as they load."
@@ -1586,6 +1909,7 @@ const SessionComposer = memo(function SessionComposer({
   previous.isStopping === next.isStopping &&
   previous.isSessionBusy === next.isSessionBusy &&
   previous.isRefreshingModelOptions === next.isRefreshingModelOptions &&
+  previous.modelOptionsError === next.modelOptionsError &&
   previous.showNewResponseIndicator === next.showNewResponseIndicator
 );
 

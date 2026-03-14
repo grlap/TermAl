@@ -4,6 +4,7 @@ import type {
   AgentReadiness,
   ApprovalPolicy,
   ClaudeApprovalMode,
+  CodexReasoningEffort,
   CodexState,
   CursorMode,
   GeminiApprovalMode,
@@ -80,6 +81,7 @@ type CreateSessionRequest = {
   workdir?: string;
   projectId?: string;
   approvalPolicy?: ApprovalPolicy;
+  reasoningEffort?: CodexReasoningEffort;
   sandboxMode?: SandboxMode;
   cursorMode?: CursorMode;
   claudeApprovalMode?: ClaudeApprovalMode;
@@ -176,6 +178,7 @@ export function updateSessionSettings(
     model?: string;
     sandboxMode?: SandboxMode;
     approvalPolicy?: ApprovalPolicy;
+    reasoningEffort?: CodexReasoningEffort;
     cursorMode?: CursorMode;
     claudeApprovalMode?: ClaudeApprovalMode;
     geminiApprovalMode?: GeminiApprovalMode;
