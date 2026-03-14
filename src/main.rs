@@ -76,6 +76,10 @@ async fn run_server() -> Result<()> {
             "/api/sessions/{id}/model-options/refresh",
             post(refresh_session_model_options),
         )
+        .route(
+            "/api/sessions/{id}/agent-commands",
+            get(list_agent_commands),
+        )
         .route("/api/sessions/{id}/messages", post(send_message))
         .route(
             "/api/sessions/{id}/queued-prompts/{prompt_id}/cancel",
@@ -164,6 +168,7 @@ fn run_repl(agent: Agent) -> Result<()> {
                 codex_sandbox_mode: Some(default_codex_sandbox_mode()),
                 agent,
                 claude_approval_mode: Some(default_claude_approval_mode()),
+                claude_effort: Some(default_claude_effort()),
                 cwd: cwd.clone(),
                 model: agent.default_model().to_owned(),
                 prompt: prompt.to_owned(),
@@ -247,6 +252,23 @@ impl AppState {
         self.snapshot_from_inner(&inner)
     }
 
+    fn list_agent_commands(
+        &self,
+        session_id: &str,
+    ) -> std::result::Result<AgentCommandsResponse, ApiError> {
+        let session = {
+            let inner = self.inner.lock().expect("state mutex poisoned");
+            let index = inner
+                .find_session_index(session_id)
+                .ok_or_else(|| ApiError::not_found("session not found"))?;
+            inner.sessions[index].session.clone()
+        };
+
+        Ok(AgentCommandsResponse {
+            commands: read_claude_agent_commands(FsPath::new(&session.workdir))?,
+        })
+    }
+
     fn create_session(
         &self,
         request: CreateSessionRequest,
@@ -313,6 +335,9 @@ impl AppState {
             if let Some(claude_approval_mode) = request.claude_approval_mode {
                 record.session.claude_approval_mode = Some(claude_approval_mode);
             }
+            if let Some(claude_effort) = request.claude_effort {
+                record.session.claude_effort = Some(claude_effort);
+            }
         } else if record.session.agent.supports_cursor_mode() {
             if let Some(cursor_mode) = request.cursor_mode {
                 record.session.cursor_mode = Some(cursor_mode);
@@ -325,6 +350,7 @@ impl AppState {
         match record.session.agent {
             agent if agent.supports_codex_prompt_settings() => {
                 if request.claude_approval_mode.is_some()
+                    || request.claude_effort.is_some()
                     || request.cursor_mode.is_some()
                     || request.gemini_approval_mode.is_some()
                 {
@@ -341,7 +367,7 @@ impl AppState {
                     || request.gemini_approval_mode.is_some()
                 {
                     return Err(ApiError::bad_request(
-                        "Claude sessions only support model and mode settings",
+                        "Claude sessions only support model, mode, and effort settings",
                     ));
                 }
             }
@@ -350,6 +376,7 @@ impl AppState {
                     || request.approval_policy.is_some()
                     || request.reasoning_effort.is_some()
                     || request.claude_approval_mode.is_some()
+                    || request.claude_effort.is_some()
                     || request.gemini_approval_mode.is_some()
                 {
                     return Err(ApiError::bad_request(
@@ -362,6 +389,7 @@ impl AppState {
                     || request.approval_policy.is_some()
                     || request.reasoning_effort.is_some()
                     || request.claude_approval_mode.is_some()
+                    || request.claude_effort.is_some()
                     || request.cursor_mode.is_some()
                 {
                     return Err(ApiError::bad_request(
@@ -467,11 +495,20 @@ impl AppState {
         message_id: String,
         prompt: String,
         attachments: Vec<PromptImageAttachment>,
+        expanded_prompt: Option<String>,
     ) -> std::result::Result<TurnDispatch, ApiError> {
         let message_attachments = attachments
             .iter()
             .map(|attachment| attachment.metadata.clone())
             .collect::<Vec<_>>();
+        let expanded_prompt = expanded_prompt
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty() && *value != prompt)
+            .map(str::to_owned);
+        let runtime_prompt = expanded_prompt
+            .clone()
+            .unwrap_or_else(|| prompt.clone());
 
         let dispatch = match record.session.agent {
             Agent::Claude => {
@@ -510,6 +547,10 @@ impl AppState {
                                 .session
                                 .claude_approval_mode
                                 .unwrap_or_else(default_claude_approval_mode),
+                            record
+                                .session
+                                .claude_effort
+                                .unwrap_or_else(default_claude_effort),
                             record.external_session_id.clone(),
                             None,
                         )
@@ -526,7 +567,7 @@ impl AppState {
                 TurnDispatch::PersistentClaude {
                     command: ClaudePromptCommand {
                         attachments: attachments.clone(),
-                        text: prompt.clone(),
+                        text: runtime_prompt.clone(),
                     },
                     sender: handle.input_tx,
                     session_id: record.session.id.clone(),
@@ -580,7 +621,7 @@ impl AppState {
                         attachments,
                         cwd: record.session.workdir.clone(),
                         model: record.session.model.clone(),
-                        prompt: prompt.to_owned(),
+                        prompt: runtime_prompt.to_owned(),
                         reasoning_effort: record.codex_reasoning_effort,
                         resume_thread_id: record.external_session_id.clone(),
                         sandbox_mode: record.codex_sandbox_mode,
@@ -657,7 +698,7 @@ impl AppState {
                         cwd: record.session.workdir.clone(),
                         cursor_mode: record.session.cursor_mode,
                         model: record.session.model.clone(),
-                        prompt: prompt.to_owned(),
+                        prompt: runtime_prompt.to_owned(),
                         resume_session_id: record.external_session_id.clone(),
                     },
                     sender: handle.input_tx,
@@ -672,6 +713,7 @@ impl AppState {
             timestamp: stamp_now(),
             author: Author::You,
             text: prompt.clone(),
+            expanded_text: expanded_prompt,
         });
         record.session.status = SessionStatus::Active;
         record.session.preview = prompt_preview_text(&prompt, &message_attachments);
@@ -697,6 +739,7 @@ impl AppState {
                 queued.pending_prompt.id.clone(),
                 queued.pending_prompt.text.clone(),
                 queued.attachments.clone(),
+                queued.pending_prompt.expanded_text.clone(),
             )
             .map_err(|err| anyhow!("failed to dispatch queued prompt: {}", err.message))?;
         inner.sessions[index].queued_prompts.pop_front();
@@ -716,6 +759,12 @@ impl AppState {
             .ok_or_else(|| ApiError::not_found("session not found"))?;
 
         let prompt = request.text.trim().to_owned();
+        let expanded_prompt = request
+            .expanded_text
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty() && *value != prompt)
+            .map(str::to_owned);
         let attachments = parse_prompt_image_attachments(&request.attachments)?;
         if prompt.is_empty() && attachments.is_empty() {
             return Err(ApiError::bad_request("prompt cannot be empty"));
@@ -736,6 +785,7 @@ impl AppState {
                     id: message_id,
                     timestamp: stamp_now(),
                     text: prompt,
+                    expanded_text: expanded_prompt.clone(),
                 },
                 attachments,
             );
@@ -746,8 +796,13 @@ impl AppState {
         }
 
         let message_id = inner.next_message_id();
-        let dispatch =
-            self.start_turn_on_record(&mut inner.sessions[index], message_id, prompt, attachments)?;
+        let dispatch = self.start_turn_on_record(
+            &mut inner.sessions[index],
+            message_id,
+            prompt,
+            attachments,
+            expanded_prompt,
+        )?;
 
         self.commit_locked(&mut inner).map_err(|err| {
             ApiError::internal(format!("failed to persist session state: {err:#}"))
@@ -772,14 +827,12 @@ impl AppState {
 
         match record.session.agent {
             agent if agent.supports_codex_prompt_settings() => {
-                if request.claude_approval_mode.is_some() {
+                if request.claude_approval_mode.is_some() || request.claude_effort.is_some() {
                     return Err(ApiError::bad_request(
-                        "Claude approval mode can only be changed for Claude sessions",
+                        "Claude mode and effort can only be changed for Claude sessions",
                     ));
                 }
-                if request.cursor_mode.is_some()
-                    || request.gemini_approval_mode.is_some()
-                {
+                if request.cursor_mode.is_some() || request.gemini_approval_mode.is_some() {
                     return Err(ApiError::bad_request(
                         "Codex sessions do not support Cursor or Gemini settings",
                     ));
@@ -793,7 +846,7 @@ impl AppState {
                     || request.gemini_approval_mode.is_some()
                 {
                     return Err(ApiError::bad_request(
-                        "Claude sessions only support model and mode settings",
+                        "Claude sessions only support model, mode, and effort settings",
                     ));
                 }
             }
@@ -802,6 +855,7 @@ impl AppState {
                     || request.approval_policy.is_some()
                     || request.reasoning_effort.is_some()
                     || request.claude_approval_mode.is_some()
+                    || request.claude_effort.is_some()
                     || request.gemini_approval_mode.is_some()
                 {
                     return Err(ApiError::bad_request(
@@ -814,6 +868,7 @@ impl AppState {
                     || request.approval_policy.is_some()
                     || request.reasoning_effort.is_some()
                     || request.claude_approval_mode.is_some()
+                    || request.claude_effort.is_some()
                     || request.cursor_mode.is_some()
                 {
                     return Err(ApiError::bad_request(
@@ -827,6 +882,7 @@ impl AppState {
                     || request.approval_policy.is_some()
                     || request.reasoning_effort.is_some()
                     || request.claude_approval_mode.is_some()
+                    || request.claude_effort.is_some()
                     || request.cursor_mode.is_some()
                     || request.gemini_approval_mode.is_some()
                 {
@@ -867,8 +923,9 @@ impl AppState {
                 let next_model = requested_model
                     .clone()
                     .unwrap_or_else(|| record.session.model.clone());
-                let next_reasoning_effort =
-                    request.reasoning_effort.unwrap_or(record.codex_reasoning_effort);
+                let next_reasoning_effort = request
+                    .reasoning_effort
+                    .unwrap_or(record.codex_reasoning_effort);
                 let normalized_reasoning_effort = normalized_codex_reasoning_effort(
                     &next_model,
                     next_reasoning_effort,
@@ -916,10 +973,19 @@ impl AppState {
                 }
             }
             agent if agent.supports_claude_approval_mode() => {
+                let should_restart_for_effort =
+                    request.claude_effort.is_some_and(|claude_effort| {
+                        record.session.claude_effort != Some(claude_effort)
+                    });
+                if should_restart_for_effort {
+                    record.runtime_reset_required = true;
+                }
                 if let Some(model) = requested_model.as_deref() {
                     if record.session.model != model {
                         record.session.model = model.to_owned();
-                        if let SessionRuntime::Claude(handle) = &record.runtime {
+                        if should_restart_for_effort {
+                            record.runtime_reset_required = true;
+                        } else if let SessionRuntime::Claude(handle) = &record.runtime {
                             claude_model_update = Some((handle.clone(), model.to_owned()));
                         }
                     }
@@ -934,6 +1000,9 @@ impl AppState {
                                 .to_owned(),
                         ));
                     }
+                }
+                if let Some(claude_effort) = request.claude_effort {
+                    record.session.claude_effort = Some(claude_effort);
                 }
             }
             agent if agent.supports_cursor_mode() => {
@@ -1055,6 +1124,10 @@ impl AppState {
                     .session
                     .claude_approval_mode
                     .unwrap_or_else(default_claude_approval_mode),
+                record
+                    .session
+                    .claude_effort
+                    .unwrap_or_else(default_claude_effort),
                 record.external_session_id.clone(),
                 Some(response_tx),
             )
@@ -1416,6 +1489,7 @@ impl AppState {
                     timestamp: stamp_now(),
                     author: Author::Assistant,
                     text: format!("Turn failed: {cleaned}"),
+                    expanded_text: None,
                 });
             }
 
@@ -1478,6 +1552,7 @@ impl AppState {
                 timestamp: stamp_now(),
                 author: Author::Assistant,
                 text: cleaned.to_owned(),
+                expanded_text: None,
             });
         }
 
@@ -1612,6 +1687,7 @@ impl AppState {
                         timestamp: stamp_now(),
                         author: Author::Assistant,
                         text: format!("Turn failed: {detail}"),
+                        expanded_text: None,
                     });
                 }
                 record.session.status = SessionStatus::Error;
@@ -1825,6 +1901,7 @@ impl AppState {
                 timestamp: stamp_now(),
                 author: Author::Assistant,
                 text: "Turn stopped by user.".to_owned(),
+                expanded_text: None,
             },
         )
         .map_err(|err| ApiError::internal(format!("failed to record stop message: {err:#}")))?;
@@ -2259,6 +2336,7 @@ impl AppState {
                     timestamp: stamp_now(),
                     author: Author::Assistant,
                     text: format!("Turn failed: {cleaned}"),
+                    expanded_text: None,
                 },
             )?;
         }
@@ -2390,6 +2468,9 @@ impl StateInner {
                 claude_approval_mode: agent
                     .supports_claude_approval_mode()
                     .then_some(default_claude_approval_mode()),
+                claude_effort: agent
+                    .supports_claude_approval_mode()
+                    .then_some(default_claude_effort()),
                 gemini_approval_mode: agent
                     .supports_gemini_approval_mode()
                     .then_some(default_gemini_approval_mode()),
@@ -2406,6 +2487,8 @@ impl StateInner {
             record.session.approval_policy = Some(record.codex_approval_policy);
             record.session.reasoning_effort = Some(record.codex_reasoning_effort);
             record.session.sandbox_mode = Some(record.codex_sandbox_mode);
+        } else if record.session.agent.supports_claude_approval_mode() {
+            record.session.claude_effort = Some(default_claude_effort());
         }
 
         self.sessions.push(record.clone());
@@ -2577,8 +2660,12 @@ impl PersistedSessionRecord {
             session
                 .claude_approval_mode
                 .get_or_insert_with(default_claude_approval_mode);
+            session
+                .claude_effort
+                .get_or_insert_with(default_claude_effort);
         } else {
             session.claude_approval_mode = None;
+            session.claude_effort = None;
         }
         if session.agent.supports_gemini_approval_mode() {
             session
@@ -3243,6 +3330,7 @@ struct TurnConfig {
     codex_sandbox_mode: Option<CodexSandboxMode>,
     agent: Agent,
     claude_approval_mode: Option<ClaudeApprovalMode>,
+    claude_effort: Option<ClaudeEffortLevel>,
     cwd: String,
     model: String,
     prompt: String,
@@ -3894,6 +3982,7 @@ fn acp_model_options(config_result: &Value) -> Vec<SessionModelOption> {
                         value: value.to_owned(),
                         description,
                         badges: Vec::new(),
+                        supported_claude_effort_levels: Vec::new(),
                         default_reasoning_effort: None,
                         supported_reasoning_efforts: Vec::new(),
                     })
@@ -4438,11 +4527,9 @@ fn spawn_codex_runtime(
                         )
                     }
                     CodexRuntimeCommand::RefreshModelList { response_tx } => {
-                        let refresh_result = handle_codex_model_list_refresh(
-                            &mut stdin,
-                            &writer_pending_requests,
-                        )
-                        .map_err(|err| format!("{err:#}"));
+                        let refresh_result =
+                            handle_codex_model_list_refresh(&mut stdin, &writer_pending_requests)
+                                .map_err(|err| format!("{err:#}"));
                         match refresh_result {
                             Ok(model_options) => {
                                 let _ = response_tx.send(Ok(model_options));
@@ -5133,6 +5220,17 @@ fn claude_model_options(message: &Value) -> Option<Vec<SessionModelOption>> {
                     value,
                     description,
                     badges: claude_model_badges(entry),
+                    supported_claude_effort_levels: entry
+                        .get("supportedEffortLevels")
+                        .and_then(Value::as_array)
+                        .map(|levels| {
+                            levels
+                                .iter()
+                                .filter_map(Value::as_str)
+                                .filter_map(parse_claude_effort_level)
+                                .collect::<Vec<_>>()
+                        })
+                        .unwrap_or_default(),
                     default_reasoning_effort: None,
                     supported_reasoning_efforts: Vec::new(),
                 })
@@ -5179,6 +5277,17 @@ fn claude_model_badges(entry: &Value) -> Vec<String> {
         badges.push("Fast".to_owned());
     }
     badges
+}
+
+fn parse_claude_effort_level(value: &str) -> Option<ClaudeEffortLevel> {
+    match value.trim() {
+        "default" => Some(ClaudeEffortLevel::Default),
+        "low" => Some(ClaudeEffortLevel::Low),
+        "medium" => Some(ClaudeEffortLevel::Medium),
+        "high" => Some(ClaudeEffortLevel::High),
+        "max" => Some(ClaudeEffortLevel::Max),
+        _ => None,
+    }
 }
 
 fn parse_codex_reasoning_effort(value: &str) -> Option<CodexReasoningEffort> {
@@ -5318,6 +5427,7 @@ fn codex_model_options(model_list_result: &Value) -> Vec<SessionModelOption> {
                 value,
                 description,
                 badges: Vec::new(),
+                supported_claude_effort_levels: Vec::new(),
                 default_reasoning_effort,
                 supported_reasoning_efforts,
             })
@@ -5930,6 +6040,7 @@ fn spawn_claude_runtime(
     cwd: String,
     model: String,
     approval_mode: ClaudeApprovalMode,
+    effort: ClaudeEffortLevel,
     resume_session_id: Option<String>,
     model_options_tx: Option<Sender<std::result::Result<Vec<SessionModelOption>, String>>>,
 ) -> Result<ClaudeRuntimeHandle> {
@@ -5950,6 +6061,9 @@ fn spawn_claude_runtime(
     ]);
     if let Some(permission_mode) = approval_mode.initial_cli_permission_mode() {
         command.args(["--permission-mode", permission_mode]);
+    }
+    if let Some(effort) = effort.as_cli_value() {
+        command.args(["--effort", effort]);
     }
     command.env("CLAUDE_CODE_ENTRYPOINT", "termal");
     if let Some(resume_session_id) = resume_session_id {
@@ -6042,7 +6156,8 @@ fn spawn_claude_runtime(
                     Ok(bytes_read) => bytes_read,
                     Err(err) => {
                         if let Some(tx) = initialize_model_options_tx.take() {
-                            let _ = tx.send(Err(format!("failed to read stdout from Claude: {err}")));
+                            let _ =
+                                tx.send(Err(format!("failed to read stdout from Claude: {err}")));
                         }
                         let _ = reader_state.fail_turn_if_runtime_matches(
                             &reader_session_id,
@@ -6061,9 +6176,8 @@ fn spawn_claude_runtime(
                     Ok(message) => message,
                     Err(err) => {
                         if let Some(tx) = initialize_model_options_tx.take() {
-                            let _ = tx.send(Err(format!(
-                                "failed to parse Claude JSON line: {err}"
-                            )));
+                            let _ =
+                                tx.send(Err(format!("failed to parse Claude JSON line: {err}")));
                         }
                         let _ = reader_state.fail_turn_if_runtime_matches(
                             &reader_session_id,
@@ -6089,9 +6203,8 @@ fn spawn_claude_runtime(
                         model_options.clone(),
                     ) {
                         if let Some(tx) = initialize_model_options_tx.take() {
-                            let _ = tx.send(Err(format!(
-                                "failed to sync Claude model options: {err:#}"
-                            )));
+                            let _ = tx
+                                .send(Err(format!("failed to sync Claude model options: {err:#}")));
                         }
                         let _ = reader_state.fail_turn_if_runtime_matches(
                             &reader_session_id,
@@ -6206,7 +6319,9 @@ fn spawn_claude_runtime(
             }
 
             if let Some(tx) = initialize_model_options_tx.take() {
-                let _ = tx.send(Err("Claude exited before reporting model options".to_owned()));
+                let _ = tx.send(Err(
+                    "Claude exited before reporting model options".to_owned()
+                ));
             }
             let _ = recorder.finish_streaming_text();
         });
@@ -6422,6 +6537,7 @@ fn run_turn_blocking(config: TurnConfig, recorder: &mut dyn TurnRecorder) -> Res
             config
                 .claude_approval_mode
                 .unwrap_or_else(default_claude_approval_mode),
+            config.claude_effort.unwrap_or_else(default_claude_effort),
             &config.prompt,
             recorder,
         ),
@@ -6603,6 +6719,7 @@ impl TurnRecorder for SessionRecorder {
                 timestamp: stamp_now(),
                 author: Author::Assistant,
                 text: trimmed.to_owned(),
+                expanded_text: None,
             },
         )
     }
@@ -6624,6 +6741,7 @@ impl TurnRecorder for SessionRecorder {
                         timestamp: stamp_now(),
                         author: Author::Assistant,
                         text: String::new(),
+                        expanded_text: None,
                     },
                 )?;
                 self.streaming_text_message_id = Some(message_id.clone());
@@ -6733,6 +6851,7 @@ impl TurnRecorder for SessionRecorder {
                 timestamp: stamp_now(),
                 author: Author::Assistant,
                 text: format!("Error: {cleaned}"),
+                expanded_text: None,
             },
         )
     }
@@ -7066,6 +7185,10 @@ fn default_claude_approval_mode() -> ClaudeApprovalMode {
     ClaudeApprovalMode::Ask
 }
 
+fn default_claude_effort() -> ClaudeEffortLevel {
+    ClaudeEffortLevel::Default
+}
+
 fn default_cursor_mode() -> CursorMode {
     CursorMode::Agent
 }
@@ -7280,6 +7403,7 @@ fn run_claude_turn(
     session_id: Option<&str>,
     model: &str,
     approval_mode: ClaudeApprovalMode,
+    effort: ClaudeEffortLevel,
     prompt: &str,
     recorder: &mut dyn TurnRecorder,
 ) -> Result<String> {
@@ -7295,6 +7419,9 @@ fn run_claude_turn(
     ]);
     if let Some(permission_mode) = approval_mode.initial_cli_permission_mode() {
         command.args(["--permission-mode", permission_mode]);
+    }
+    if let Some(effort) = effort.as_cli_value() {
+        command.args(["--effort", effort]);
     }
 
     let expected_session_id = match session_id {
@@ -8613,6 +8740,81 @@ async fn read_directory(
     }))
 }
 
+async fn list_agent_commands(
+    AxumPath(session_id): AxumPath<String>,
+    State(state): State<AppState>,
+) -> Result<Json<AgentCommandsResponse>, ApiError> {
+    let response = state.list_agent_commands(&session_id)?;
+    Ok(Json(response))
+}
+
+fn read_claude_agent_commands(workdir: &FsPath) -> Result<Vec<AgentCommand>, ApiError> {
+    let commands_dir = workdir.join(".claude").join("commands");
+    let entries = match fs::read_dir(&commands_dir) {
+        Ok(entries) => entries,
+        Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(err) => {
+            return Err(ApiError::internal(format!(
+                "failed to read agent commands in {}: {err}",
+                commands_dir.display()
+            )));
+        }
+    };
+
+    let mut commands = Vec::new();
+    for entry in entries {
+        let entry = entry.map_err(|err| {
+            ApiError::internal(format!(
+                "failed to read agent command entry in {}: {err}",
+                commands_dir.display()
+            ))
+        })?;
+        let path = entry.path();
+        let metadata = entry.metadata().map_err(|err| {
+            ApiError::internal(format!(
+                "failed to stat agent command {}: {err}",
+                path.display()
+            ))
+        })?;
+        if !metadata.is_file() {
+            continue;
+        }
+        if path.extension().and_then(|value| value.to_str()) != Some("md") {
+            continue;
+        }
+
+        let content = fs::read_to_string(&path).map_err(|err| {
+            ApiError::internal(format!(
+                "failed to read agent command {}: {err}",
+                path.display()
+            ))
+        })?;
+        let Some(stem) = path.file_stem().and_then(|value| value.to_str()) else {
+            continue;
+        };
+        let description = content
+            .lines()
+            .map(str::trim)
+            .find(|line| !line.is_empty())
+            .unwrap_or("")
+            .to_owned();
+
+        commands.push(AgentCommand {
+            name: stem.to_owned(),
+            description,
+            content,
+            source: format!(".claude/commands/{}.md", stem),
+        });
+    }
+
+    commands.sort_by(|left, right| {
+        left.name
+            .to_ascii_lowercase()
+            .cmp(&right.name.to_ascii_lowercase())
+    });
+    Ok(commands)
+}
+
 async fn read_git_status(
     Query(query): Query<FileQuery>,
 ) -> Result<Json<GitStatusResponse>, ApiError> {
@@ -9154,6 +9356,8 @@ struct Session {
     sandbox_mode: Option<CodexSandboxMode>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     cursor_mode: Option<CursorMode>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    claude_effort: Option<ClaudeEffortLevel>,
     claude_approval_mode: Option<ClaudeApprovalMode>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     gemini_approval_mode: Option<GeminiApprovalMode>,
@@ -9235,6 +9439,28 @@ enum ClaudeApprovalMode {
     Ask,
     AutoApprove,
     Plan,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+enum ClaudeEffortLevel {
+    Default,
+    Low,
+    Medium,
+    High,
+    Max,
+}
+
+impl ClaudeEffortLevel {
+    fn as_cli_value(self) -> Option<&'static str> {
+        match self {
+            Self::Default => None,
+            Self::Low => Some("low"),
+            Self::Medium => Some("medium"),
+            Self::High => Some("high"),
+            Self::Max => Some("max"),
+        }
+    }
 }
 
 impl ClaudeApprovalMode {
@@ -9359,6 +9585,8 @@ struct PendingPrompt {
     id: String,
     timestamp: String,
     text: String,
+    #[serde(default, rename = "expandedText", skip_serializing_if = "Option::is_none")]
+    expanded_text: Option<String>,
 }
 
 #[allow(dead_code)]
@@ -9372,6 +9600,8 @@ enum Message {
         timestamp: String,
         author: Author,
         text: String,
+        #[serde(default, rename = "expandedText", skip_serializing_if = "Option::is_none")]
+        expanded_text: Option<String>,
     },
     Thinking {
         id: String,
@@ -9471,6 +9701,7 @@ struct CreateSessionRequest {
     sandbox_mode: Option<CodexSandboxMode>,
     cursor_mode: Option<CursorMode>,
     claude_approval_mode: Option<ClaudeApprovalMode>,
+    claude_effort: Option<ClaudeEffortLevel>,
     gemini_approval_mode: Option<GeminiApprovalMode>,
 }
 
@@ -9585,6 +9816,8 @@ struct HealthResponse {
 #[derive(Deserialize)]
 struct SendMessageRequest {
     text: String,
+    #[serde(default, rename = "expandedText")]
+    expanded_text: Option<String>,
     #[serde(default)]
     attachments: Vec<SendMessageAttachmentRequest>,
 }
@@ -9607,6 +9840,7 @@ struct UpdateSessionSettingsRequest {
     sandbox_mode: Option<CodexSandboxMode>,
     cursor_mode: Option<CursorMode>,
     claude_approval_mode: Option<ClaudeApprovalMode>,
+    claude_effort: Option<ClaudeEffortLevel>,
     gemini_approval_mode: Option<GeminiApprovalMode>,
 }
 
@@ -9619,6 +9853,8 @@ struct SessionModelOption {
     description: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     badges: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    supported_claude_effort_levels: Vec<ClaudeEffortLevel>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     default_reasoning_effort: Option<CodexReasoningEffort>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -9633,6 +9869,7 @@ impl SessionModelOption {
             value: value.into(),
             description: None,
             badges: Vec::new(),
+            supported_claude_effort_levels: Vec::new(),
             default_reasoning_effort: None,
             supported_reasoning_efforts: Vec::new(),
         }
@@ -9724,6 +9961,21 @@ struct CreateSessionResponse {
 struct CreateProjectResponse {
     project_id: String,
     state: StateResponse,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AgentCommand {
+    name: String,
+    description: String,
+    content: String,
+    source: String,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AgentCommandsResponse {
+    commands: Vec<AgentCommand>,
 }
 
 #[derive(Serialize)]
@@ -10093,8 +10345,16 @@ mod tests {
         session_id
     }
 
+    fn test_exit_success_child() -> Child {
+        if cfg!(windows) {
+            Command::new("cmd").args(["/C", "exit 0"]).spawn().unwrap()
+        } else {
+            Command::new("sh").arg("-c").arg("exit 0").spawn().unwrap()
+        }
+    }
+
     fn test_codex_runtime_handle(runtime_id: &str) -> CodexRuntimeHandle {
-        let child = Command::new("sh").arg("-c").arg("exit 0").spawn().unwrap();
+        let child = test_exit_success_child();
         let (input_tx, _input_rx) = mpsc::channel();
 
         CodexRuntimeHandle {
@@ -10102,6 +10362,128 @@ mod tests {
             input_tx,
             process: Arc::new(Mutex::new(child)),
         }
+    }
+
+    #[test]
+    fn reads_claude_agent_commands_from_markdown_files() {
+        let root = std::env::temp_dir().join(format!("termal-agent-commands-{}", Uuid::new_v4()));
+        let commands_dir = root.join(".claude").join("commands");
+
+        fs::create_dir_all(commands_dir.join("nested")).unwrap();
+        fs::write(
+            commands_dir.join("review-local.md"),
+            "Review local changes.
+
+## Step 1
+Inspect diffs.
+",
+        )
+        .unwrap();
+        fs::write(
+            commands_dir.join("fix-bug.md"),
+            "
+Fix a bug from docs/bugs.md by number.
+
+$ARGUMENTS
+",
+        )
+        .unwrap();
+        fs::write(commands_dir.join("notes.txt"), "ignore").unwrap();
+        fs::write(commands_dir.join("nested").join("ignored.md"), "ignore").unwrap();
+
+        let commands = read_claude_agent_commands(&root).unwrap();
+
+        assert_eq!(
+            commands,
+            vec![
+                AgentCommand {
+                    name: "fix-bug".to_owned(),
+                    description: "Fix a bug from docs/bugs.md by number.".to_owned(),
+                    content: "
+Fix a bug from docs/bugs.md by number.
+
+$ARGUMENTS
+"
+                    .to_owned(),
+                    source: ".claude/commands/fix-bug.md".to_owned(),
+                },
+                AgentCommand {
+                    name: "review-local".to_owned(),
+                    description: "Review local changes.".to_owned(),
+                    content: "Review local changes.
+
+## Step 1
+Inspect diffs.
+"
+                    .to_owned(),
+                    source: ".claude/commands/review-local.md".to_owned(),
+                },
+            ]
+        );
+
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn returns_empty_agent_commands_when_commands_directory_is_missing() {
+        let root =
+            std::env::temp_dir().join(format!("termal-agent-commands-missing-{}", Uuid::new_v4()));
+        fs::create_dir_all(&root).unwrap();
+
+        let commands = read_claude_agent_commands(&root).unwrap();
+        assert!(commands.is_empty());
+
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn returns_agent_commands_for_non_claude_sessions() {
+        let root =
+            std::env::temp_dir().join(format!("termal-agent-commands-codex-{}", Uuid::new_v4()));
+        let commands_dir = root.join(".claude").join("commands");
+        fs::create_dir_all(&commands_dir).unwrap();
+        fs::write(
+            commands_dir.join("review-local.md"),
+            "Review local changes.
+
+Use the active agent's tools.
+",
+        )
+        .unwrap();
+
+        let state = test_app_state();
+        let created = state
+            .create_session(CreateSessionRequest {
+                agent: Some(Agent::Codex),
+                name: Some("Codex Session".to_owned()),
+                workdir: Some(root.to_string_lossy().into_owned()),
+                project_id: None,
+                model: None,
+                approval_policy: None,
+                reasoning_effort: None,
+                sandbox_mode: None,
+                cursor_mode: None,
+                claude_approval_mode: None,
+                claude_effort: None,
+                gemini_approval_mode: None,
+            })
+            .unwrap();
+
+        let response = state.list_agent_commands(&created.session_id).unwrap();
+        assert_eq!(response.commands.len(), 1);
+        assert_eq!(response.commands[0].name, "review-local");
+        assert_eq!(response.commands[0].description, "Review local changes.");
+
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn returns_not_found_for_missing_agent_command_session() {
+        let state = test_app_state();
+        let error = state.list_agent_commands("missing-session").unwrap_err();
+
+        assert_eq!(error.status, StatusCode::NOT_FOUND);
+        assert_eq!(error.message, "session not found");
     }
 
     #[test]
@@ -10113,6 +10495,10 @@ mod tests {
         assert_eq!(
             record.session.claude_approval_mode,
             Some(ClaudeApprovalMode::Ask)
+        );
+        assert_eq!(
+            record.session.claude_effort,
+            Some(ClaudeEffortLevel::Default)
         );
         assert_eq!(record.session.approval_policy, None);
         assert_eq!(record.session.sandbox_mode, None);
@@ -10134,6 +10520,7 @@ mod tests {
                 sandbox_mode: None,
                 cursor_mode: None,
                 claude_approval_mode: Some(ClaudeApprovalMode::Plan),
+                claude_effort: Some(ClaudeEffortLevel::High),
                 gemini_approval_mode: None,
             })
             .unwrap();
@@ -10145,6 +10532,7 @@ mod tests {
             .expect("created session should be present");
 
         assert_eq!(session.claude_approval_mode, Some(ClaudeApprovalMode::Plan));
+        assert_eq!(session.claude_effort, Some(ClaudeEffortLevel::High));
     }
 
     #[test]
@@ -10163,6 +10551,7 @@ mod tests {
                 sandbox_mode: Some(CodexSandboxMode::ReadOnly),
                 cursor_mode: None,
                 claude_approval_mode: None,
+                claude_effort: None,
                 gemini_approval_mode: None,
             })
             .unwrap();
@@ -10208,6 +10597,7 @@ mod tests {
                 sandbox_mode: None,
                 cursor_mode: Some(CursorMode::Agent),
                 claude_approval_mode: None,
+                claude_effort: None,
                 gemini_approval_mode: None,
             })
             .unwrap();
@@ -10223,6 +10613,7 @@ mod tests {
                     reasoning_effort: None,
                     cursor_mode: None,
                     claude_approval_mode: None,
+                    claude_effort: None,
                     gemini_approval_mode: None,
                 },
             )
@@ -10252,6 +10643,7 @@ mod tests {
                 sandbox_mode: None,
                 cursor_mode: None,
                 claude_approval_mode: None,
+                claude_effort: None,
                 gemini_approval_mode: None,
             })
             .unwrap();
@@ -10267,6 +10659,7 @@ mod tests {
                     reasoning_effort: None,
                     cursor_mode: None,
                     claude_approval_mode: None,
+                    claude_effort: None,
                     gemini_approval_mode: None,
                 },
             )
@@ -10304,6 +10697,7 @@ mod tests {
                 sandbox_mode: None,
                 cursor_mode: None,
                 claude_approval_mode: None,
+                claude_effort: None,
                 gemini_approval_mode: None,
             })
             .unwrap();
@@ -10319,6 +10713,7 @@ mod tests {
                     reasoning_effort: Some(CodexReasoningEffort::High),
                     cursor_mode: None,
                     claude_approval_mode: None,
+                    claude_effort: None,
                     gemini_approval_mode: None,
                 },
             )
@@ -10357,6 +10752,7 @@ mod tests {
                 sandbox_mode: None,
                 cursor_mode: None,
                 claude_approval_mode: None,
+                claude_effort: None,
                 gemini_approval_mode: None,
             })
             .unwrap();
@@ -10371,6 +10767,7 @@ mod tests {
                         value: "gpt-5".to_owned(),
                         description: Some("Frontier agentic coding model.".to_owned()),
                         badges: Vec::new(),
+                        supported_claude_effort_levels: Vec::new(),
                         default_reasoning_effort: Some(CodexReasoningEffort::Medium),
                         supported_reasoning_efforts: vec![
                             CodexReasoningEffort::Minimal,
@@ -10383,10 +10780,10 @@ mod tests {
                         label: "GPT-5 Codex Mini".to_owned(),
                         value: "gpt-5-codex-mini".to_owned(),
                         description: Some(
-                            "Optimized for codex. Cheaper, faster, but less capable."
-                                .to_owned(),
+                            "Optimized for codex. Cheaper, faster, but less capable.".to_owned(),
                         ),
                         badges: Vec::new(),
+                        supported_claude_effort_levels: Vec::new(),
                         default_reasoning_effort: Some(CodexReasoningEffort::Medium),
                         supported_reasoning_efforts: vec![
                             CodexReasoningEffort::Medium,
@@ -10408,6 +10805,7 @@ mod tests {
                     reasoning_effort: None,
                     cursor_mode: None,
                     claude_approval_mode: None,
+                    claude_effort: None,
                     gemini_approval_mode: None,
                 },
             )
@@ -10446,6 +10844,7 @@ mod tests {
                 sandbox_mode: None,
                 cursor_mode: None,
                 claude_approval_mode: None,
+                claude_effort: None,
                 gemini_approval_mode: None,
             })
             .unwrap();
@@ -10458,9 +10857,10 @@ mod tests {
                     label: "GPT-5 Codex Mini".to_owned(),
                     value: "gpt-5-codex-mini".to_owned(),
                     description: Some(
-                        "Optimized for codex. Cheaper, faster, but less capable.".to_owned()
+                        "Optimized for codex. Cheaper, faster, but less capable.".to_owned(),
                     ),
                     badges: Vec::new(),
+                    supported_claude_effort_levels: Vec::new(),
                     default_reasoning_effort: Some(CodexReasoningEffort::Medium),
                     supported_reasoning_efforts: vec![
                         CodexReasoningEffort::Medium,
@@ -10480,6 +10880,7 @@ mod tests {
                 reasoning_effort: Some(CodexReasoningEffort::Low),
                 cursor_mode: None,
                 claude_approval_mode: None,
+                claude_effort: None,
                 gemini_approval_mode: None,
             },
         ) {
@@ -10510,11 +10911,12 @@ mod tests {
                 sandbox_mode: None,
                 cursor_mode: None,
                 claude_approval_mode: Some(ClaudeApprovalMode::Ask),
+                claude_effort: None,
                 gemini_approval_mode: None,
             })
             .unwrap();
 
-        let child = Command::new("sh").arg("-c").arg("exit 0").spawn().unwrap();
+        let child = test_exit_success_child();
         let (input_tx, input_rx) = mpsc::channel();
         let runtime = ClaudeRuntimeHandle {
             runtime_id: "claude-model-update".to_owned(),
@@ -10541,6 +10943,7 @@ mod tests {
                     reasoning_effort: None,
                     cursor_mode: None,
                     claude_approval_mode: None,
+                    claude_effort: None,
                     gemini_approval_mode: None,
                 },
             )
@@ -10571,6 +10974,82 @@ mod tests {
     }
 
     #[test]
+    fn updates_claude_effort_and_marks_runtime_for_restart() {
+        let state = test_app_state();
+
+        let created = state
+            .create_session(CreateSessionRequest {
+                agent: Some(Agent::Claude),
+                name: Some("Claude Effort".to_owned()),
+                workdir: Some("/tmp".to_owned()),
+                project_id: None,
+                model: Some("sonnet".to_owned()),
+                approval_policy: None,
+                reasoning_effort: None,
+                sandbox_mode: None,
+                cursor_mode: None,
+                claude_approval_mode: Some(ClaudeApprovalMode::Ask),
+                claude_effort: Some(ClaudeEffortLevel::Default),
+                gemini_approval_mode: None,
+            })
+            .unwrap();
+
+        let child = test_exit_success_child();
+        let (input_tx, input_rx) = mpsc::channel();
+        let runtime = ClaudeRuntimeHandle {
+            runtime_id: "claude-effort-update".to_owned(),
+            input_tx,
+            process: Arc::new(Mutex::new(child)),
+        };
+
+        {
+            let mut inner = state.inner.lock().expect("state mutex poisoned");
+            let index = inner
+                .find_session_index(&created.session_id)
+                .expect("Claude session should exist");
+            inner.sessions[index].runtime = SessionRuntime::Claude(runtime);
+        }
+
+        let updated = state
+            .update_session_settings(
+                &created.session_id,
+                UpdateSessionSettingsRequest {
+                    name: None,
+                    model: None,
+                    sandbox_mode: None,
+                    approval_policy: None,
+                    reasoning_effort: None,
+                    cursor_mode: None,
+                    claude_approval_mode: None,
+                    claude_effort: Some(ClaudeEffortLevel::High),
+                    gemini_approval_mode: None,
+                },
+            )
+            .unwrap();
+
+        let session = updated
+            .sessions
+            .iter()
+            .find(|session| session.id == created.session_id)
+            .expect("updated Claude session should be present");
+        assert_eq!(session.claude_effort, Some(ClaudeEffortLevel::High));
+
+        let inner = state.inner.lock().expect("state mutex poisoned");
+        let record = inner
+            .sessions
+            .iter()
+            .find(|record| record.session.id == created.session_id)
+            .expect("Claude session should exist");
+        assert!(record.runtime_reset_required);
+
+        match input_rx.recv_timeout(Duration::from_millis(100)) {
+            Err(mpsc::RecvTimeoutError::Timeout) => {}
+            Ok(_) => panic!("Claude effort changes should not send a live runtime command"),
+            Err(err) => panic!("unexpected channel error: {err}"),
+        }
+    }
+
+    #[test]
     fn syncs_claude_model_options_into_session_state() {
         let state = test_app_state();
 
@@ -10586,6 +11065,7 @@ mod tests {
                 sandbox_mode: None,
                 cursor_mode: None,
                 claude_approval_mode: None,
+                claude_effort: None,
                 gemini_approval_mode: None,
             })
             .unwrap();
@@ -10625,11 +11105,12 @@ mod tests {
                 sandbox_mode: None,
                 cursor_mode: None,
                 claude_approval_mode: None,
+                claude_effort: None,
                 gemini_approval_mode: None,
             })
             .unwrap();
 
-        let child = Command::new("sh").arg("-c").arg("exit 0").spawn().unwrap();
+        let child = test_exit_success_child();
         let (input_tx, input_rx) = mpsc::channel();
         let runtime = CodexRuntimeHandle {
             runtime_id: "codex-model-refresh".to_owned(),
@@ -10646,7 +11127,9 @@ mod tests {
         }
 
         std::thread::spawn(move || {
-            let command = input_rx.recv().expect("Codex refresh command should arrive");
+            let command = input_rx
+                .recv()
+                .expect("Codex refresh command should arrive");
             match command {
                 CodexRuntimeCommand::RefreshModelList { response_tx } => {
                     let _ = response_tx.send(Ok(vec![
@@ -10692,6 +11175,7 @@ mod tests {
                 sandbox_mode: None,
                 cursor_mode: Some(CursorMode::Agent),
                 claude_approval_mode: None,
+                claude_effort: None,
                 gemini_approval_mode: None,
             })
             .unwrap();
@@ -10765,6 +11249,7 @@ mod tests {
                 sandbox_mode: None,
                 cursor_mode: None,
                 claude_approval_mode: None,
+                claude_effort: None,
                 gemini_approval_mode: None,
             })
             .unwrap();
@@ -10788,6 +11273,7 @@ mod tests {
                     reasoning_effort: None,
                     cursor_mode: None,
                     claude_approval_mode: None,
+                    claude_effort: None,
                     gemini_approval_mode: None,
                 },
             )
@@ -10817,6 +11303,7 @@ mod tests {
                 sandbox_mode: None,
                 cursor_mode: None,
                 claude_approval_mode: None,
+                claude_effort: None,
                 gemini_approval_mode: None,
             })
             .unwrap();
@@ -10833,6 +11320,7 @@ mod tests {
                     reasoning_effort: None,
                     cursor_mode: None,
                     claude_approval_mode: None,
+                    claude_effort: None,
                     gemini_approval_mode: None,
                 },
             )
@@ -10856,6 +11344,7 @@ mod tests {
                 sandbox_mode: None,
                 cursor_mode: None,
                 claude_approval_mode: None,
+                claude_effort: None,
                 gemini_approval_mode: None,
             })
             .unwrap();
@@ -10871,6 +11360,7 @@ mod tests {
                     reasoning_effort: None,
                     cursor_mode: None,
                     claude_approval_mode: None,
+                    claude_effort: None,
                     gemini_approval_mode: None,
                 },
             )
@@ -10909,6 +11399,7 @@ mod tests {
                 sandbox_mode: None,
                 cursor_mode: None,
                 claude_approval_mode: None,
+                claude_effort: None,
                 gemini_approval_mode: None,
             })
             .unwrap();
@@ -10947,6 +11438,7 @@ mod tests {
             sandbox_mode: None,
             cursor_mode: None,
             claude_approval_mode: None,
+            claude_effort: None,
             gemini_approval_mode: None,
         });
 
@@ -11023,6 +11515,7 @@ mod tests {
                     timestamp: stamp_now(),
                     author: Author::Assistant,
                     text: "Hi".to_owned(),
+                    expanded_text: None,
                 },
             )
             .unwrap();
@@ -11207,6 +11700,7 @@ mod tests {
                 &session_id,
                 SendMessageRequest {
                     text: "queue this follow-up".to_owned(),
+                    expanded_text: None,
                     attachments: Vec::new(),
                 },
             )
@@ -11225,6 +11719,66 @@ mod tests {
     }
 
     #[test]
+    fn dispatches_expanded_prompts_but_keeps_original_user_text() {
+        let state = test_app_state();
+        let session_id = test_session_id(&state, Agent::Claude);
+
+        let child = test_exit_success_child();
+        let (input_tx, _input_rx) = mpsc::channel();
+        let runtime = ClaudeRuntimeHandle {
+            runtime_id: "expanded-prompt-dispatch".to_owned(),
+            input_tx,
+            process: Arc::new(Mutex::new(child)),
+        };
+
+        {
+            let mut inner = state.inner.lock().expect("state mutex poisoned");
+            let index = inner.find_session_index(&session_id).unwrap();
+            inner.sessions[index].runtime = SessionRuntime::Claude(runtime);
+        }
+
+        let result = state
+            .dispatch_turn(
+                &session_id,
+                SendMessageRequest {
+                    text: "/review-local staged changes".to_owned(),
+                    expanded_text: Some("Review staged changes using the project reviewers.".to_owned()),
+                    attachments: Vec::new(),
+                },
+            )
+            .unwrap();
+
+        match result {
+            DispatchTurnResult::Dispatched(TurnDispatch::PersistentClaude { command, .. }) => {
+                assert_eq!(command.text, "Review staged changes using the project reviewers.");
+            }
+            DispatchTurnResult::Dispatched(_) => panic!("expected Claude dispatch"),
+            DispatchTurnResult::Queued => panic!("expected dispatched turn"),
+        }
+
+        let snapshot = state.snapshot();
+        let session = snapshot
+            .sessions
+            .iter()
+            .find(|session| session.id == session_id)
+            .unwrap();
+        match &session.messages[0] {
+            Message::Text {
+                text,
+                expanded_text,
+                ..
+            } => {
+                assert_eq!(text, "/review-local staged changes");
+                assert_eq!(
+                    expanded_text.as_deref(),
+                    Some("Review staged changes using the project reviewers."),
+                );
+            }
+            other => panic!("expected text message, found {other:?}"),
+        }
+    }
+
+    #[test]
     fn cancels_queued_prompts_without_touching_other_items() {
         let state = test_app_state();
         let session_id = test_session_id(&state, Agent::Claude);
@@ -11240,6 +11794,7 @@ mod tests {
                     id: "queued-1".to_owned(),
                     timestamp: stamp_now(),
                     text: "first".to_owned(),
+                    expanded_text: None,
                 },
                 Vec::new(),
             );
@@ -11250,6 +11805,7 @@ mod tests {
                     id: "queued-2".to_owned(),
                     timestamp: stamp_now(),
                     text: "second".to_owned(),
+                    expanded_text: None,
                 },
                 Vec::new(),
             );
@@ -11285,6 +11841,7 @@ mod tests {
                 &session_id,
                 SendMessageRequest {
                     text: "queue this follow-up".to_owned(),
+                    expanded_text: Some("Review queued changes in detail.".to_owned()),
                     attachments: vec![SendMessageAttachmentRequest {
                         data: "aGVsbG8=".to_owned(),
                         file_name: Some("pasted.png".to_owned()),
@@ -11309,6 +11866,10 @@ mod tests {
         assert_eq!(
             record.session.pending_prompts[0].text,
             "queue this follow-up"
+        );
+        assert_eq!(
+            record.session.pending_prompts[0].expanded_text.as_deref(),
+            Some("Review queued changes in detail."),
         );
         assert_eq!(record.queued_prompts.len(), 1);
         assert_eq!(record.queued_prompts[0].attachments.len(), 1);
@@ -11758,6 +12319,7 @@ mod tests {
                             "displayName": "Default (recommended)",
                             "description": "Opus 4.6 · Most capable for complex work",
                             "supportsEffort": true,
+                            "supportedEffortLevels": ["low", "medium", "high", "max"],
                             "supportsAdaptiveThinking": true,
                             "supportsFastMode": true
                         },
@@ -11765,7 +12327,8 @@ mod tests {
                             "value": "sonnet",
                             "displayName": "Sonnet",
                             "description": "Sonnet 4.6 · Best for everyday tasks",
-                            "supportsEffort": true
+                            "supportsEffort": true,
+                            "supportedEffortLevels": ["low", "medium", "high"]
                         }
                     ]
                 }
@@ -11785,6 +12348,12 @@ mod tests {
                         "Adaptive".to_owned(),
                         "Fast".to_owned(),
                     ],
+                    supported_claude_effort_levels: vec![
+                        ClaudeEffortLevel::Low,
+                        ClaudeEffortLevel::Medium,
+                        ClaudeEffortLevel::High,
+                        ClaudeEffortLevel::Max,
+                    ],
                     default_reasoning_effort: None,
                     supported_reasoning_efforts: Vec::new(),
                 },
@@ -11793,6 +12362,11 @@ mod tests {
                     value: "sonnet".to_owned(),
                     description: Some("Sonnet 4.6 · Best for everyday tasks".to_owned()),
                     badges: vec!["Effort".to_owned()],
+                    supported_claude_effort_levels: vec![
+                        ClaudeEffortLevel::Low,
+                        ClaudeEffortLevel::Medium,
+                        ClaudeEffortLevel::High,
+                    ],
                     default_reasoning_effort: None,
                     supported_reasoning_efforts: Vec::new(),
                 },
@@ -11832,6 +12406,7 @@ mod tests {
                     "Optimized for codex. Cheaper, faster, but less capable.".to_owned()
                 ),
                 badges: Vec::new(),
+                supported_claude_effort_levels: Vec::new(),
                 default_reasoning_effort: Some(CodexReasoningEffort::Medium),
                 supported_reasoning_efforts: vec![
                     CodexReasoningEffort::Medium,

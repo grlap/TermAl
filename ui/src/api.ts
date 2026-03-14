@@ -2,8 +2,10 @@ import type {
   ApprovalDecision,
   AgentType,
   AgentReadiness,
+  AgentCommand,
   ApprovalPolicy,
   ClaudeApprovalMode,
+  ClaudeEffortLevel,
   CodexReasoningEffort,
   CodexState,
   CursorMode,
@@ -81,6 +83,7 @@ type CreateSessionRequest = {
   workdir?: string;
   projectId?: string;
   approvalPolicy?: ApprovalPolicy;
+  claudeEffort?: ClaudeEffortLevel;
   reasoningEffort?: CodexReasoningEffort;
   sandboxMode?: SandboxMode;
   cursorMode?: CursorMode;
@@ -91,6 +94,10 @@ type CreateSessionRequest = {
 type CreateProjectRequest = {
   name?: string;
   rootPath: string;
+};
+
+export type AgentCommandsResponse = {
+  commands: AgentCommand[];
 };
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -146,10 +153,15 @@ type SendMessageAttachmentInput = Pick<ImageAttachment, "fileName" | "mediaType"
   data: string;
 };
 
-export function sendMessage(sessionId: string, text: string, attachments: SendMessageAttachmentInput[]) {
+export function sendMessage(
+  sessionId: string,
+  text: string,
+  attachments: SendMessageAttachmentInput[],
+  expandedText?: string | null,
+) {
   return request<StateResponse>(`/api/sessions/${encodeURIComponent(sessionId)}/messages`, {
     method: "POST",
-    body: JSON.stringify({ text, attachments }),
+    body: JSON.stringify({ text, attachments, expandedText }),
   });
 }
 
@@ -178,6 +190,7 @@ export function updateSessionSettings(
     model?: string;
     sandboxMode?: SandboxMode;
     approvalPolicy?: ApprovalPolicy;
+    claudeEffort?: ClaudeEffortLevel;
     reasoningEffort?: CodexReasoningEffort;
     cursorMode?: CursorMode;
     claudeApprovalMode?: ClaudeApprovalMode;
@@ -196,6 +209,12 @@ export function refreshSessionModelOptions(sessionId: string) {
     {
       method: "POST",
     },
+  );
+}
+
+export function fetchAgentCommands(sessionId: string) {
+  return request<AgentCommandsResponse>(
+    `/api/sessions/${encodeURIComponent(sessionId)}/agent-commands`,
   );
 }
 

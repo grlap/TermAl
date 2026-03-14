@@ -9,14 +9,17 @@ import {
   type ReactNode,
   type RefObject,
 } from "react";
+import { ExpandedPromptPanel } from "../ExpandedPromptPanel";
 import {
   renderHighlightedText,
   type SearchHighlightTone,
 } from "../search-highlight";
 import type {
   ApprovalDecision,
+  AgentCommand,
   ApprovalPolicy,
   ClaudeApprovalMode,
+  ClaudeEffortLevel,
   CommandMessage,
   CodexReasoningEffort,
   CursorMode,
@@ -47,12 +50,14 @@ type SessionSettingsField =
   | "approvalPolicy"
   | "reasoningEffort"
   | "claudeApprovalMode"
+  | "claudeEffort"
   | "cursorMode"
   | "geminiApprovalMode";
 type SessionSettingsValue =
   | string
   | SandboxMode
   | ApprovalPolicy
+  | ClaudeEffortLevel
   | CodexReasoningEffort
   | ClaudeApprovalMode
   | CursorMode
@@ -92,6 +97,13 @@ const CLAUDE_MODE_SLASH_OPTIONS = [
   { detail: "Ask before tool use", label: "ask", value: "ask" },
   { detail: "Continue through tool requests", label: "auto-approve", value: "auto-approve" },
   { detail: "Stay read-only and plan", label: "plan", value: "plan" },
+] as const;
+const CLAUDE_EFFORT_SLASH_OPTIONS = [
+  { detail: "Use Claude's default effort for this session", label: "default", value: "default" },
+  { detail: "Keep reasoning light", label: "low", value: "low" },
+  { detail: "Use the standard effort level", label: "medium", value: "medium" },
+  { detail: "Use deeper reasoning for harder prompts", label: "high", value: "high" },
+  { detail: "Use the highest available effort", label: "max", value: "max" },
 ] as const;
 const CURSOR_MODE_SLASH_OPTIONS = [
   { detail: "Allow edits and tool use", label: "agent", value: "agent" },
@@ -144,10 +156,10 @@ const SLASH_COMMANDS: ReadonlyArray<{
   },
   {
     command: "/effort",
-    detail: "Change Codex reasoning effort for the next prompt",
+    detail: "Change the effort for the next prompt",
     id: "effort",
     label: "/effort",
-    supports: ["Codex"],
+    supports: ["Claude", "Codex"],
   },
 ] as const;
 
@@ -164,6 +176,17 @@ type SlashPaletteItem =
       key: string;
       kind: "command";
       label: string;
+      sectionLabel?: string;
+    }
+  | {
+      content: string;
+      detail: string;
+      hasArguments: boolean;
+      key: string;
+      kind: "agent-command";
+      label: string;
+      name: string;
+      sectionLabel?: string;
     }
   | {
       detail: string;
@@ -172,6 +195,7 @@ type SlashPaletteItem =
       key: string;
       kind: "choice";
       label: string;
+      sectionLabel?: string;
       value: string;
     };
 
@@ -182,10 +206,15 @@ type SlashPaletteState =
   | {
       defaultActiveIndex: number;
       emptyMessage: string;
+      errorMessage?: string | null;
       hint: string;
+      isRefreshing?: boolean;
       items: readonly SlashPaletteItem[];
       kind: "command";
+      refreshActionLabel?: string;
       resetKey: string;
+      statusText?: string;
+      supportsRefresh?: boolean;
       title: string;
     }
   | {
@@ -248,10 +277,22 @@ function isSpaceKey(event: {
 const ALL_CODEX_REASONING_EFFORTS = CODEX_REASONING_EFFORT_SLASH_OPTIONS.map(
   (option) => option.value,
 ) as CodexReasoningEffort[];
+const DEFAULT_CLAUDE_EFFORT: ClaudeEffortLevel = "default";
+const FALLBACK_CLAUDE_EFFORTS = ["low", "medium", "high"] as ClaudeEffortLevel[];
 
 function codexReasoningEffortChoice(effort: CodexReasoningEffort) {
   return (
     CODEX_REASONING_EFFORT_SLASH_OPTIONS.find((option) => option.value === effort) ?? {
+      detail: effort,
+      label: effort,
+      value: effort,
+    }
+  );
+}
+
+function claudeEffortChoice(effort: ClaudeEffortLevel) {
+  return (
+    CLAUDE_EFFORT_SLASH_OPTIONS.find((option) => option.value === effort) ?? {
       detail: effort,
       label: effort,
       value: effort,
@@ -294,6 +335,45 @@ function defaultCodexReasoningEffort(session: Session) {
   return supportedEfforts[0] ?? "medium";
 }
 
+function currentClaudeEffort(session: Session): ClaudeEffortLevel {
+  return session.claudeEffort ?? DEFAULT_CLAUDE_EFFORT;
+}
+
+function supportedClaudeEffortLevels(session: Session) {
+  const option = currentSessionModelCapabilities(session);
+  const currentEffort = currentClaudeEffort(session);
+  if (option?.supportedClaudeEffortLevels?.length) {
+    return option.supportedClaudeEffortLevels;
+  }
+
+  const supportsEffort = option?.badges?.includes("Effort") ?? false;
+  if (!option || supportsEffort) {
+    return currentEffort === "max"
+      ? [...FALLBACK_CLAUDE_EFFORTS, "max"]
+      : [...FALLBACK_CLAUDE_EFFORTS];
+  }
+
+  return currentEffort === "max" ? ["max"] : [];
+}
+
+function claudeEffortChoices(session: Session): SlashChoiceDefinition[] {
+  const currentModel = currentSessionModelCapabilities(session);
+  const levels = supportedClaudeEffortLevels(session);
+  return ([DEFAULT_CLAUDE_EFFORT, ...levels] as ClaudeEffortLevel[]).map((effort) => {
+    const option = claudeEffortChoice(effort);
+    return {
+      detail:
+        effort === DEFAULT_CLAUDE_EFFORT
+          ? option.detail
+          : currentModel
+            ? `${option.detail} | ${currentModel.label}`
+            : option.detail,
+      label: option.label,
+      value: option.value,
+    };
+  });
+}
+
 function codexReasoningEffortChoices(session: Session): SlashChoiceDefinition[] {
   const currentModel = currentSessionModelCapabilities(session);
   const defaultEffort = defaultCodexReasoningEffort(session);
@@ -320,6 +400,9 @@ function sessionModelChoiceDetail(
   if (option.badges?.length) {
     detailParts.push(option.badges.join(" | "));
   }
+  if (option.supportedClaudeEffortLevels?.length) {
+    detailParts.push(`Effort ${option.supportedClaudeEffortLevels.join(", ")}`);
+  }
   if (option.supportedReasoningEfforts?.length) {
     const defaultEffort =
       option.defaultReasoningEffort &&
@@ -338,6 +421,39 @@ function sessionModelChoiceDetail(
 
 function slashCommandsForSession(session: Session) {
   return SLASH_COMMANDS.filter((command) => command.supports.includes(session.agent));
+}
+
+function supportsAgentSlashCommands(_session: Session): boolean {
+  return true;
+}
+
+function agentCommandLabel(command: AgentCommand) {
+  return `/${command.name}`;
+}
+
+function matchAgentCommand(command: AgentCommand, query: string) {
+  if (query.length === 0) {
+    return true;
+  }
+
+  const normalizedQuery = query.toLowerCase();
+  return (
+    command.name.toLowerCase().includes(normalizedQuery) ||
+    command.description.toLowerCase().includes(normalizedQuery) ||
+    command.source.toLowerCase().includes(normalizedQuery)
+  );
+}
+
+function parseAgentCommandDraft(draft: string) {
+  const match = /^\/(\S+)(?:\s([\s\S]*))?$/.exec(draft);
+  if (!match) {
+    return null;
+  }
+
+  return {
+    argumentsText: match[2] ?? "",
+    commandName: match[1] ?? "",
+  };
 }
 
 function supportsLiveSessionModelOptions(session: Session): boolean {
@@ -532,6 +648,21 @@ function codexReasoningEffortSlashState(session: Session, query: string): SlashC
   };
 }
 
+function claudeEffortSlashState(session: Session, query: string): SlashChoiceState {
+  const currentValue = currentClaudeEffort(session);
+  const currentModel = currentSessionModelCapabilities(session);
+  const supportedEfforts = supportedClaudeEffortLevels(session);
+  const currentModelSupportHint = supportedEfforts.length
+    ? ` ${currentModel?.label ?? "This model"} supports ${supportedEfforts.join(", ")}.`
+    : "";
+  return {
+    emptyMessage: `No Claude effort options match "${query}".`,
+    hint: `Enter to restart Claude with a different effort on the next prompt.${currentModelSupportHint}`,
+    items: makeSlashChoices(claudeEffortChoices(session), "claudeEffort", currentValue, query),
+    title: "Claude effort",
+  };
+}
+
 function sessionModelSlashState(
   session: Session,
   query: string,
@@ -593,6 +724,10 @@ function buildSlashPaletteState(
   draft: string,
   isRefreshingModelOptions: boolean,
   modelOptionsError: string | null,
+  agentCommands: readonly AgentCommand[],
+  hasLoadedAgentCommands: boolean,
+  isRefreshingAgentCommands: boolean,
+  agentCommandsError: string | null,
 ): SlashPaletteState {
   if (!session || !draft.startsWith("/")) {
     return { kind: "none" };
@@ -614,23 +749,62 @@ function buildSlashPaletteState(
           null);
 
   if (!activeCommand) {
-    const items = availableCommands.filter((item) =>
-      commandQuery.length === 0 ? true : matchSlashCommand(item.label, commandQuery),
-    ).map<SlashPaletteItem>((item) => ({
-      command: item.command,
-      detail: item.detail,
-      key: item.command,
-      kind: "command",
-      label: item.label,
-    }));
+    const supportsAgentCommands = supportsAgentSlashCommands(session);
+    const agentCommandItems = supportsAgentCommands
+      ? agentCommands
+          .filter((command) => matchAgentCommand(command, commandQuery))
+          .map<SlashPaletteItem>((command, index) => ({
+            content: command.content,
+            detail: command.description || command.source,
+            hasArguments: command.content.includes("$ARGUMENTS"),
+            key: `agent:${command.name}`,
+            kind: "agent-command",
+            label: agentCommandLabel(command),
+            name: command.name,
+            sectionLabel: index === 0 ? "Agent Commands" : undefined,
+          }))
+      : [];
+    const sessionCommandItems = availableCommands
+      .filter((item) => (commandQuery.length === 0 ? true : matchSlashCommand(item.label, commandQuery)))
+      .map<SlashPaletteItem>((item, index) => ({
+        command: item.command,
+        detail: item.detail,
+        key: item.command,
+        kind: "command",
+        label: item.label,
+        sectionLabel: index === 0 ? "Session Controls" : undefined,
+      }));
+    const items = [...agentCommandItems, ...sessionCommandItems];
+    const statusText = supportsAgentCommands
+      ? isRefreshingAgentCommands
+        ? "Loading project agent commands from .claude/commands."
+        : !hasLoadedAgentCommands
+          ? "Load project agent commands from .claude/commands for this session."
+          : agentCommands.length === 0
+            ? "No project agent commands found in .claude/commands."
+            : undefined
+      : undefined;
 
     return {
       defaultActiveIndex: 0,
       emptyMessage: `No slash commands match "/${commandQuery}".`,
-      hint: "Enter to expand a session command. Esc clears the command line.",
+      errorMessage: agentCommandsError,
+      hint: supportsAgentCommands
+        ? "Enter to expand a session control or run an agent command. Esc clears the command line."
+        : "Enter to expand a session command. Esc clears the command line.",
+      isRefreshing: isRefreshingAgentCommands,
       items,
       kind: "command",
-      resetKey: `command:${commandQuery}`,
+      refreshActionLabel: supportsAgentCommands
+        ? agentCommandsError
+          ? "Retry agent commands"
+          : hasLoadedAgentCommands
+            ? "Refresh agent commands"
+            : "Load agent commands"
+        : undefined,
+      resetKey: `command:${session.id}:${commandQuery}:${items.map((item) => item.key).join("|")}:${agentCommandsError ?? ""}:${isRefreshingAgentCommands ? "loading" : hasLoadedAgentCommands ? "loaded" : "idle"}`,
+      statusText,
+      supportsRefresh: supportsAgentCommands,
       title: "Slash commands",
     };
   }
@@ -657,7 +831,9 @@ function buildSlashPaletteState(
             : activeCommand.id === "effort"
               ? session.agent === "Codex"
                 ? codexReasoningEffortSlashState(session, rawOptionQuery)
-                : null
+                : session.agent === "Claude"
+                  ? claudeEffortSlashState(session, rawOptionQuery)
+                  : null
             : null;
 
   if (!choiceState) {
@@ -799,6 +975,7 @@ export function AgentSessionPanelFooter({
   isSending,
   isStopping,
   isSessionBusy,
+  isUpdating,
   showNewResponseIndicator,
   footerModeLabel,
   onScrollToLatest,
@@ -806,7 +983,12 @@ export function AgentSessionPanelFooter({
   onDraftAttachmentRemove,
   isRefreshingModelOptions,
   modelOptionsError,
+  agentCommands,
+  hasLoadedAgentCommands,
+  isRefreshingAgentCommands,
+  agentCommandsError,
   onRefreshSessionModelOptions,
+  onRefreshAgentCommands,
   onSend,
   onSessionSettingsChange,
   onStopSession,
@@ -822,6 +1004,7 @@ export function AgentSessionPanelFooter({
   isSending: boolean;
   isStopping: boolean;
   isSessionBusy: boolean;
+  isUpdating: boolean;
   showNewResponseIndicator: boolean;
   footerModeLabel: string;
   onScrollToLatest: () => void;
@@ -829,8 +1012,13 @@ export function AgentSessionPanelFooter({
   onDraftAttachmentRemove: (sessionId: string, attachmentId: string) => void;
   isRefreshingModelOptions: boolean;
   modelOptionsError: string | null;
+  agentCommands: AgentCommand[];
+  hasLoadedAgentCommands: boolean;
+  isRefreshingAgentCommands: boolean;
+  agentCommandsError: string | null;
   onRefreshSessionModelOptions: (sessionId: string) => void;
-  onSend: (sessionId: string, draftText?: string) => boolean;
+  onRefreshAgentCommands: (sessionId: string) => void;
+  onSend: (sessionId: string, draftText?: string, expandedText?: string | null) => boolean;
   onSessionSettingsChange: (
     sessionId: string,
     field: SessionSettingsField,
@@ -851,13 +1039,19 @@ export function AgentSessionPanelFooter({
         isSending={isSending}
         isStopping={isStopping}
         isSessionBusy={isSessionBusy}
+        isUpdating={isUpdating}
         showNewResponseIndicator={showNewResponseIndicator}
         onScrollToLatest={onScrollToLatest}
         onDraftCommit={onDraftCommit}
         onDraftAttachmentRemove={onDraftAttachmentRemove}
         isRefreshingModelOptions={isRefreshingModelOptions}
         modelOptionsError={modelOptionsError}
+        agentCommands={agentCommands}
+        hasLoadedAgentCommands={hasLoadedAgentCommands}
+        isRefreshingAgentCommands={isRefreshingAgentCommands}
+        agentCommandsError={agentCommandsError}
         onRefreshSessionModelOptions={onRefreshSessionModelOptions}
+        onRefreshAgentCommands={onRefreshAgentCommands}
         onSend={onSend}
         onSessionSettingsChange={onSessionSettingsChange}
         onStopSession={onStopSession}
@@ -1435,13 +1629,19 @@ const SessionComposer = memo(function SessionComposer({
   isSending,
   isStopping,
   isSessionBusy,
+  isUpdating,
   isRefreshingModelOptions,
   modelOptionsError,
+  agentCommands,
+  hasLoadedAgentCommands,
+  isRefreshingAgentCommands,
+  agentCommandsError,
   showNewResponseIndicator,
   onScrollToLatest,
   onDraftCommit,
   onDraftAttachmentRemove,
   onRefreshSessionModelOptions,
+  onRefreshAgentCommands,
   onSend,
   onSessionSettingsChange,
   onStopSession,
@@ -1456,14 +1656,20 @@ const SessionComposer = memo(function SessionComposer({
   isSending: boolean;
   isStopping: boolean;
   isSessionBusy: boolean;
+  isUpdating: boolean;
   isRefreshingModelOptions: boolean;
   modelOptionsError: string | null;
+  agentCommands: AgentCommand[];
+  hasLoadedAgentCommands: boolean;
+  isRefreshingAgentCommands: boolean;
+  agentCommandsError: string | null;
   showNewResponseIndicator: boolean;
   onScrollToLatest: () => void;
   onDraftCommit: (sessionId: string, nextValue: string) => void;
   onDraftAttachmentRemove: (sessionId: string, attachmentId: string) => void;
   onRefreshSessionModelOptions: (sessionId: string) => void;
-  onSend: (sessionId: string, draftText?: string) => boolean;
+  onRefreshAgentCommands: (sessionId: string) => void;
+  onSend: (sessionId: string, draftText?: string, expandedText?: string | null) => boolean;
   onSessionSettingsChange: (
     sessionId: string,
     field: SessionSettingsField,
@@ -1477,6 +1683,7 @@ const SessionComposer = memo(function SessionComposer({
   const committedDraftsRef = useRef<Record<string, string>>({});
   const onDraftCommitRef = useRef(onDraftCommit);
   const requestedSlashModelOptionsRef = useRef<string | null>(null);
+  const requestedSlashAgentCommandsRef = useRef<string | null>(null);
   const [localDraftsBySessionId, setLocalDraftsBySessionId] = useState<Record<string, string>>({});
   const [promptHistoryStateBySessionId, setPromptHistoryStateBySessionId] = useState<
     Record<string, PromptHistoryState | undefined>
@@ -1494,12 +1701,27 @@ const SessionComposer = memo(function SessionComposer({
         composerDraft,
         isRefreshingModelOptions,
         modelOptionsError,
+        agentCommands,
+        hasLoadedAgentCommands,
+        isRefreshingAgentCommands,
+        agentCommandsError,
       ),
-    [composerDraft, isRefreshingModelOptions, modelOptionsError, session],
+    [
+      agentCommands,
+      agentCommandsError,
+      composerDraft,
+      hasLoadedAgentCommands,
+      isRefreshingAgentCommands,
+      isRefreshingModelOptions,
+      modelOptionsError,
+      session,
+    ],
   );
   const slashPaletteResetKey = slashPalette.kind === "none" ? "none" : slashPalette.resetKey;
-  const slashPaletteSupportsLiveRefresh =
+  const slashPaletteSupportsModelRefresh =
     slashPalette.kind === "choice" && slashPalette.supportsLiveRefresh;
+  const slashPaletteSupportsAgentRefresh =
+    slashPalette.kind === "command" && Boolean(slashPalette.supportsRefresh);
   const activeSlashItem =
     slashPalette.kind === "none" || slashPalette.items.length === 0
       ? null
@@ -1509,6 +1731,7 @@ const SessionComposer = memo(function SessionComposer({
     !session ||
     isSending ||
     isStopping ||
+    isUpdating ||
     (slashPalette.kind !== "none" && slashPalette.items.length === 0);
 
   function resizeComposerInput() {
@@ -1563,7 +1786,7 @@ const SessionComposer = memo(function SessionComposer({
     if (
       !session ||
       slashPalette.kind !== "choice" ||
-      !slashPaletteSupportsLiveRefresh ||
+      !slashPaletteSupportsModelRefresh ||
       !supportsLiveSessionModelOptions(session)
     ) {
       return;
@@ -1574,10 +1797,7 @@ const SessionComposer = memo(function SessionComposer({
       return;
     }
 
-    if (
-      isRefreshingModelOptions ||
-      requestedSlashModelOptionsRef.current === session.id
-    ) {
+    if (isRefreshingModelOptions || requestedSlashModelOptionsRef.current === session.id) {
       return;
     }
 
@@ -1587,7 +1807,42 @@ const SessionComposer = memo(function SessionComposer({
     onRefreshSessionModelOptions,
     session,
     slashPalette.kind,
-    slashPaletteSupportsLiveRefresh,
+    slashPaletteSupportsModelRefresh,
+  ]);
+
+  useEffect(() => {
+    if (
+      !session ||
+      slashPalette.kind !== "command" ||
+      !slashPaletteSupportsAgentRefresh ||
+      !supportsAgentSlashCommands(session)
+    ) {
+      return;
+    }
+
+    const requestKey = `${session.id}:${session.workdir}`;
+    if (hasLoadedAgentCommands) {
+      requestedSlashAgentCommandsRef.current = requestKey;
+      return;
+    }
+
+    if (
+      isRefreshingAgentCommands ||
+      agentCommandsError ||
+      requestedSlashAgentCommandsRef.current === requestKey
+    ) {
+      return;
+    }
+
+    requestSlashAgentCommands();
+  }, [
+    agentCommandsError,
+    hasLoadedAgentCommands,
+    isRefreshingAgentCommands,
+    onRefreshAgentCommands,
+    session,
+    slashPalette.kind,
+    slashPaletteSupportsAgentRefresh,
   ]);
 
   useEffect(() => {
@@ -1751,6 +2006,20 @@ const SessionComposer = memo(function SessionComposer({
     void onRefreshSessionModelOptions(session.id);
   }
 
+  function requestSlashAgentCommands(force = false) {
+    if (!session || !supportsAgentSlashCommands(session)) {
+      return;
+    }
+
+    const requestKey = `${session.id}:${session.workdir}`;
+    if (!force && requestedSlashAgentCommandsRef.current === requestKey) {
+      return;
+    }
+
+    requestedSlashAgentCommandsRef.current = requestKey;
+    void onRefreshAgentCommands(session.id);
+  }
+
   function handleComposerChange(nextValue: string) {
     if (!activeSessionId) {
       return;
@@ -1773,18 +2042,59 @@ const SessionComposer = memo(function SessionComposer({
       return;
     }
 
-    resetPromptHistory(session.id);
-
     if (item.kind === "command") {
+      resetPromptHistory(session.id);
       const nextDraft = `${item.command} `;
       updateLocalDraft(session.id, nextDraft);
       focusComposerInput(nextDraft.length);
       return;
     }
 
+    if (item.kind === "agent-command") {
+      if (isUpdating) {
+        focusComposerInput(getComposerDraftValue().length);
+        return;
+      }
+
+      const parsedDraft = parseAgentCommandDraft(getComposerDraftValue());
+      const matchesSelectedCommand =
+        parsedDraft?.commandName.toLowerCase() === item.name.toLowerCase();
+      if (item.hasArguments && !matchesSelectedCommand) {
+        resetPromptHistory(session.id);
+        const nextDraft = `/${item.name} `;
+        updateLocalDraft(session.id, nextDraft);
+        focusComposerInput(nextDraft.length);
+        return;
+      }
+
+      const prompt = item.content.split("$ARGUMENTS").join(
+        matchesSelectedCommand ? (parsedDraft?.argumentsText ?? "") : "",
+      );
+      const visiblePrompt = matchesSelectedCommand
+        ? getComposerDraftValue().trim()
+        : `/${item.name}`;
+      const accepted = onSend(session.id, visiblePrompt, prompt);
+      if (!accepted) {
+        focusComposerInput();
+        return;
+      }
+
+      resetPromptHistory(session.id);
+      updateLocalDraft(session.id, "");
+      commitDraft(session.id, "");
+      focusComposerInput();
+      return;
+    }
+
+    if (isUpdating) {
+      focusComposerInput(getComposerDraftValue().length);
+      return;
+    }
+
+    resetPromptHistory(session.id);
     void onSessionSettingsChange(session.id, item.field, item.value);
     if (keepPaletteOpen) {
-      focusComposerInput(composerDraft.length);
+      focusComposerInput(getComposerDraftValue().length);
     } else {
       updateLocalDraft(session.id, "");
       commitDraft(session.id, "");
@@ -1799,8 +2109,17 @@ const SessionComposer = memo(function SessionComposer({
 
     if (slashPalette.kind !== "none") {
       if (activeSlashItem) {
+        if (activeSlashItem.kind === "choice" && isUpdating) {
+          focusComposerInput(getComposerDraftValue().length);
+          return;
+        }
         applySlashPaletteItem(activeSlashItem);
       }
+      return;
+    }
+
+    if (isUpdating) {
+      focusComposerInput(getComposerDraftValue().length);
       return;
     }
 
@@ -1951,6 +2270,29 @@ const SessionComposer = memo(function SessionComposer({
     });
   }
 
+  const slashPaletteErrorMessage =
+    slashPalette.kind === "none" ? null : (slashPalette.errorMessage ?? null);
+  const slashPaletteIsRefreshing =
+    slashPalette.kind === "none" ? false : Boolean(slashPalette.isRefreshing);
+  const slashPaletteRefreshActionLabel =
+    slashPalette.kind === "none" ? null : (slashPalette.refreshActionLabel ?? null);
+  const slashPaletteSupportsRefresh =
+    slashPalette.kind === "choice"
+      ? slashPalette.supportsLiveRefresh
+      : slashPalette.kind === "command"
+        ? Boolean(slashPalette.supportsRefresh)
+        : false;
+  const slashPaletteStatusText =
+    slashPalette.kind === "command" ? (slashPalette.statusText ?? null) : null;
+  const showSlashPaletteStatus =
+    slashPalette.kind !== "none" &&
+    (
+      slashPaletteSupportsRefresh ||
+      Boolean(slashPaletteErrorMessage) ||
+      Boolean(slashPaletteStatusText) ||
+      (slashPalette.kind === "choice" && isUpdating)
+    );
+
   return (
     <footer className="composer">
       {showNewResponseIndicator ? (
@@ -2037,30 +2379,60 @@ const SessionComposer = memo(function SessionComposer({
             <strong className="composer-slash-title">{slashPalette.title}</strong>
             <span className="composer-slash-hint">{slashPalette.hint}</span>
           </div>
-          {slashPalette.kind === "choice" &&
-          (slashPalette.supportsLiveRefresh || slashPalette.errorMessage) ? (
+          {showSlashPaletteStatus ? (
             <div className="composer-slash-status">
-              {slashPalette.errorMessage ? (
+              {slashPaletteErrorMessage ? (
                 <p className="composer-slash-error" role="alert">
-                  {slashPalette.errorMessage}
+                  {slashPaletteErrorMessage}
                 </p>
-              ) : (
+              ) : slashPalette.kind === "choice" ? (
                 <p className="composer-slash-status-text" aria-live="polite">
-                  {slashPalette.isRefreshing
-                    ? "Loading live model options..."
-                    : "Refresh live models to update this list from the active session."}
+                  {isUpdating ? (
+                    <span className="composer-slash-status-inline">
+                      <span className="composer-slash-status-spinner" aria-hidden="true" />
+                      Applying setting...
+                    </span>
+                  ) : slashPalette.isRefreshing ? (
+                    "Loading live model options..."
+                  ) : slashPalette.supportsLiveRefresh ? (
+                    "Refresh live models to update this list from the active session."
+                  ) : null}
                 </p>
-              )}
-              {slashPalette.supportsLiveRefresh ? (
+              ) : slashPaletteStatusText ? (
+                <p className="composer-slash-status-text" aria-live="polite">
+                  {slashPaletteIsRefreshing ? (
+                    <span className="composer-slash-status-inline">
+                      <span className="composer-slash-status-spinner" aria-hidden="true" />
+                      {slashPaletteStatusText}
+                    </span>
+                  ) : (
+                    slashPaletteStatusText
+                  )}
+                </p>
+              ) : null}
+              {slashPaletteSupportsRefresh ? (
                 <button
                   className="ghost-button composer-slash-refresh-button"
                   type="button"
-                  onClick={() => requestSlashModelOptions(true)}
-                  disabled={isRefreshingModelOptions}
+                  onClick={() => {
+                    if (slashPalette.kind === "choice") {
+                      requestSlashModelOptions(true);
+                    } else {
+                      requestSlashAgentCommands(true);
+                    }
+                  }}
+                  disabled={
+                    (slashPalette.kind === "choice"
+                      ? isRefreshingModelOptions
+                      : isRefreshingAgentCommands) || isUpdating
+                  }
                 >
-                  {slashPalette.isRefreshing
+                  {slashPaletteIsRefreshing
                     ? "Loading..."
-                    : (slashPalette.refreshActionLabel ?? "Refresh live models")}
+                    : (slashPaletteRefreshActionLabel ??
+                        (slashPalette.kind === "choice"
+                          ? "Refresh live models"
+                          : "Refresh agent commands"))}
                 </button>
               ) : null}
             </div>
@@ -2071,31 +2443,45 @@ const SessionComposer = memo(function SessionComposer({
                 const isActive = activeSlashItem?.key === item.key && index === slashActiveIndex;
 
                 return (
-                  <button
-                    key={item.key}
-                    className={`composer-slash-option${isActive ? " active" : ""}`}
-                    type="button"
-                    role="option"
-                    aria-selected={isActive}
-                    onMouseDown={(event) => {
-                      event.preventDefault();
-                    }}
-                    onMouseMove={() => {
-                      setSlashNavModality("mouse");
-                      if (slashActiveIndex !== index) {
-                        setSlashActiveIndex(index);
-                      }
-                    }}
-                    onClick={() => applySlashPaletteItem(item)}
-                  >
-                    <span className="composer-slash-option-copy">
-                      <span className="composer-slash-option-label">{item.label}</span>
-                      <span className="composer-slash-option-detail">{item.detail}</span>
-                    </span>
-                    {item.kind === "choice" && item.isCurrent ? (
-                      <span className="composer-slash-option-badge">Current</span>
+                  <div key={item.key} className="composer-slash-option-group">
+                    {item.sectionLabel ? (
+                      <div className="composer-slash-section-label">{item.sectionLabel}</div>
                     ) : null}
-                  </button>
+                    <button
+                      className={`composer-slash-option${isActive ? " active" : ""}`}
+                      type="button"
+                      role="option"
+                      aria-selected={isActive}
+                      onMouseDown={(event) => {
+                        event.preventDefault();
+                      }}
+                      onMouseMove={() => {
+                        setSlashNavModality("mouse");
+                        if (slashActiveIndex !== index) {
+                          setSlashActiveIndex(index);
+                        }
+                      }}
+                      onClick={() => applySlashPaletteItem(item)}
+                      disabled={(item.kind === "choice" || item.kind === "agent-command") && isUpdating}
+                    >
+                      <span className="composer-slash-option-copy">
+                        <span className="composer-slash-option-label">{item.label}</span>
+                        <span className="composer-slash-option-detail">{item.detail}</span>
+                      </span>
+                      {item.kind === "choice" && item.isCurrent ? (
+                        isUpdating ? (
+                          <span className="composer-slash-option-badge pending">
+                            <span className="composer-slash-option-spinner" aria-hidden="true" />
+                            Applying
+                          </span>
+                        ) : (
+                          <span className="composer-slash-option-badge">Current</span>
+                        )
+                      ) : item.kind === "agent-command" ? (
+                        <span className="composer-slash-option-badge">Agent</span>
+                      ) : null}
+                    </button>
+                  </div>
                 );
               })}
             </div>
@@ -2106,7 +2492,9 @@ const SessionComposer = memo(function SessionComposer({
               slashPalette.supportsLiveRefresh &&
               slashPalette.isRefreshing
                 ? " Live options will appear here as soon as they load."
-                : null}
+                : slashPalette.kind === "command" && slashPaletteIsRefreshing
+                  ? " Agent commands will appear here as soon as they load."
+                  : null}
             </p>
           )}
         </div>
@@ -2123,18 +2511,25 @@ const SessionComposer = memo(function SessionComposer({
   previous.isSending === next.isSending &&
   previous.isStopping === next.isStopping &&
   previous.isSessionBusy === next.isSessionBusy &&
+  previous.isUpdating === next.isUpdating &&
   previous.isRefreshingModelOptions === next.isRefreshingModelOptions &&
   previous.modelOptionsError === next.modelOptionsError &&
+  previous.agentCommands === next.agentCommands &&
+  previous.hasLoadedAgentCommands === next.hasLoadedAgentCommands &&
+  previous.isRefreshingAgentCommands === next.isRefreshingAgentCommands &&
+  previous.agentCommandsError === next.agentCommandsError &&
   previous.showNewResponseIndicator === next.showNewResponseIndicator
 );
 
-function RunningIndicator({
+export function RunningIndicator({
   agent,
   lastPrompt,
 }: {
   agent: Session["agent"];
   lastPrompt: string | null;
 }) {
+  const isCommand = Boolean(lastPrompt?.trim().startsWith("/"));
+
   return (
     <article
       className={`activity-card activity-card-live ${lastPrompt ? "has-tooltip" : ""}`}
@@ -2143,13 +2538,16 @@ function RunningIndicator({
     >
       <div className="activity-spinner" aria-hidden="true" />
       <div>
-        <div className="card-label">Live turn</div>
+        <div className="activity-card-heading">
+          <div className="card-label">Live turn</div>
+          {isCommand ? <span className="message-meta-tag">Command</span> : null}
+        </div>
         <h3>{agent} is working</h3>
-        <p>Waiting for the next chunk of output...</p>
+        <p>{isCommand ? "Executing a command..." : "Waiting for the next chunk of output..."}</p>
       </div>
       {lastPrompt ? (
         <div className="activity-tooltip" role="tooltip">
-          <div className="activity-tooltip-label">Last prompt</div>
+          <div className="activity-tooltip-label">{isCommand ? "Command" : "Last prompt"}</div>
           <p>{lastPrompt}</p>
         </div>
       ) : null}
@@ -2168,10 +2566,18 @@ const PendingPromptCard = memo(function PendingPromptCard({
   searchQuery?: string;
   searchHighlightTone?: SearchHighlightTone;
 }) {
+  const commandLabel = promptCommandMetaLabel(prompt.text, prompt.expandedText);
+
   return (
     <article className="message-card bubble bubble-you pending-prompt-card">
       <div className="pending-prompt-header">
-        <MessageMeta author="you" timestamp={prompt.timestamp} />
+        <MessageMeta
+          author="you"
+          timestamp={prompt.timestamp}
+          trailing={
+            commandLabel ? <span className="message-meta-tag">{commandLabel}</span> : undefined
+          }
+        />
         <button
           className="pending-prompt-dismiss"
           type="button"
@@ -2190,9 +2596,18 @@ const PendingPromptCard = memo(function PendingPromptCard({
         />
       ) : null}
       {prompt.text ? (
-        <p className="plain-text-copy">
-          {renderHighlightedText(prompt.text, searchQuery, searchHighlightTone)}
-        </p>
+        <>
+          <p className="plain-text-copy">
+            {renderHighlightedText(prompt.text, searchQuery, searchHighlightTone)}
+          </p>
+          {prompt.expandedText ? (
+            <ExpandedPromptPanel
+              expandedText={prompt.expandedText}
+              searchQuery={searchQuery}
+              searchHighlightTone={searchHighlightTone}
+            />
+          ) : null}
+        </>
       ) : (
         <p className="support-copy">{imageAttachmentSummaryLabel(prompt.attachments?.length ?? 0)}</p>
       )}
@@ -2204,11 +2619,26 @@ const PendingPromptCard = memo(function PendingPromptCard({
   previous.searchHighlightTone === next.searchHighlightTone
 );
 
-function MessageMeta({ author, timestamp }: { author: string; timestamp: string }) {
+function promptCommandMetaLabel(text: string, expandedText?: string | null) {
+  return expandedText && text.trim().startsWith("/") ? "Command" : null;
+}
+
+function MessageMeta({
+  author,
+  timestamp,
+  trailing,
+}: {
+  author: string;
+  timestamp: string;
+  trailing?: ReactNode;
+}) {
   return (
     <div className="message-meta">
       <span>{author === "you" ? "You" : "Agent"}</span>
-      <span>{timestamp}</span>
+      <span className="message-meta-end">
+        {trailing}
+        <span>{timestamp}</span>
+      </span>
     </div>
   );
 }

@@ -44,6 +44,7 @@ function reconcileSession(previous: Session, next: Session): Session {
     previous.model === next.model &&
     sameModelOptions(previous.modelOptions, next.modelOptions) &&
     previous.approvalPolicy === next.approvalPolicy &&
+    previous.claudeEffort === next.claudeEffort &&
     previous.reasoningEffort === next.reasoningEffort &&
     previous.sandboxMode === next.sandboxMode &&
     previous.cursorMode === next.cursorMode &&
@@ -88,6 +89,8 @@ function sameModelOptions(previous?: Session["modelOptions"], next?: Session["mo
     const nextOption = next[index];
     const previousBadges = option.badges ?? [];
     const nextBadges = nextOption?.badges ?? [];
+    const previousSupportedClaudeEfforts = option.supportedClaudeEffortLevels ?? [];
+    const nextSupportedClaudeEfforts = nextOption?.supportedClaudeEffortLevels ?? [];
     const previousSupportedReasoningEfforts = option.supportedReasoningEfforts ?? [];
     const nextSupportedReasoningEfforts = nextOption?.supportedReasoningEfforts ?? [];
     return (
@@ -97,6 +100,10 @@ function sameModelOptions(previous?: Session["modelOptions"], next?: Session["mo
       (nextOption.defaultReasoningEffort ?? null) === (option.defaultReasoningEffort ?? null) &&
       previousBadges.length === nextBadges.length &&
       previousBadges.every((badge, badgeIndex) => nextBadges[badgeIndex] === badge) &&
+      previousSupportedClaudeEfforts.length === nextSupportedClaudeEfforts.length &&
+      previousSupportedClaudeEfforts.every(
+        (effort, effortIndex) => nextSupportedClaudeEfforts[effortIndex] === effort,
+      ) &&
       previousSupportedReasoningEfforts.length === nextSupportedReasoningEfforts.length &&
       previousSupportedReasoningEfforts.every(
         (effort, effortIndex) => nextSupportedReasoningEfforts[effortIndex] === effort,

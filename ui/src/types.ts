@@ -3,6 +3,7 @@ export type SessionStatus = "active" | "idle" | "approval" | "error";
 export type SandboxMode = "read-only" | "workspace-write" | "danger-full-access";
 export type ApprovalPolicy = "untrusted" | "on-failure" | "on-request" | "never";
 export type ClaudeApprovalMode = "ask" | "auto-approve" | "plan";
+export type ClaudeEffortLevel = "default" | "low" | "medium" | "high" | "max";
 export type CodexReasoningEffort = "none" | "minimal" | "low" | "medium" | "high" | "xhigh";
 export type CursorMode = "agent" | "plan" | "ask";
 export type GeminiApprovalMode = "default" | "auto_edit" | "yolo" | "plan";
@@ -16,11 +17,19 @@ export type AgentReadiness = {
   commandPath?: string | null;
 };
 
+export type AgentCommand = {
+  name: string;
+  description: string;
+  content: string;
+  source: string;
+};
+
 export type SessionModelOption = {
   label: string;
   value: string;
   description?: string | null;
   badges?: string[];
+  supportedClaudeEffortLevels?: ClaudeEffortLevel[];
   defaultReasoningEffort?: CodexReasoningEffort | null;
   supportedReasoningEfforts?: CodexReasoningEffort[];
 };
@@ -60,6 +69,7 @@ export type Session = {
   model: string;
   modelOptions?: SessionModelOption[];
   approvalPolicy?: ApprovalPolicy | null;
+  claudeEffort?: ClaudeEffortLevel | null;
   reasoningEffort?: CodexReasoningEffort | null;
   sandboxMode?: SandboxMode | null;
   cursorMode?: CursorMode | null;
@@ -90,6 +100,7 @@ export type PendingPrompt = {
   id: string;
   timestamp: string;
   text: string;
+  expandedText?: string | null;
   attachments?: ImageAttachment[];
 };
 
@@ -103,6 +114,7 @@ export type TextMessage = BaseMessage & {
   type: "text";
   attachments?: ImageAttachment[];
   text: string;
+  expandedText?: string | null;
 };
 
 export type ThinkingMessage = BaseMessage & {

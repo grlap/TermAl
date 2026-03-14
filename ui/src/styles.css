@@ -73,11 +73,6 @@ textarea {
     box-shadow 180ms ease;
 }
 
-.new-session-controls {
-  display: grid;
-  gap: 0.45rem;
-}
-
 .control-panel-shell {
   display: grid;
   flex: 1 1 auto;
@@ -299,6 +294,21 @@ textarea {
   background: linear-gradient(180deg, var(--surface-white-soft), transparent);
 }
 
+.control-panel-header-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.7rem;
+  flex-wrap: wrap;
+}
+
+.control-panel-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  margin-left: auto;
+}
+
 .control-panel-body {
   display: grid;
   align-content: start;
@@ -313,6 +323,10 @@ textarea {
   overflow: hidden;
 }
 
+.control-panel-body[data-section="files"] {
+  align-content: stretch;
+}
+
 .control-panel-section-stack {
   display: grid;
   gap: 0.75rem;
@@ -322,13 +336,15 @@ textarea {
 .control-panel-section-sessions {
   min-height: 0;
   height: 100%;
-  grid-template-rows: auto auto minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr) auto;
 }
 
 .control-panel-section-sessions .session-list-shell {
   min-height: 0;
+  height: 100%;
 }
 
+.control-panel-section-files,
 .control-panel-section-git {
   min-height: 0;
 }
@@ -710,6 +726,43 @@ textarea {
   min-height: 0;
 }
 
+.workspace-status-strip {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  min-width: 0;
+}
+
+.workspace-connection-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+  min-width: 0;
+}
+
+.workspace-connection-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.38rem 0.72rem;
+  font-weight: 700;
+}
+
+.workspace-connection-dot {
+  width: 0.55rem;
+  height: 0.55rem;
+  border-radius: 999px;
+  background: currentColor;
+  flex: none;
+}
+
+.workspace-connection-spinner {
+  width: 0.8rem;
+  height: 0.8rem;
+  border-width: 2px;
+  flex: none;
+}
+
 .workspace-notice {
   max-width: none;
 }
@@ -785,7 +838,20 @@ textarea {
 }
 
 .settings-dialog-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   flex: none;
+  width: 2.35rem;
+  height: 2.35rem;
+  padding: 0;
+  border-radius: 0.82rem;
+  line-height: 1;
+}
+
+.settings-dialog-close svg {
+  width: 0.95rem;
+  height: 0.95rem;
 }
 
 .settings-dialog-body {
@@ -1697,6 +1763,85 @@ textarea {
   justify-self: start;
 }
 
+.control-panel-header-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  appearance: none;
+  border: 1px solid var(--status-green-ring);
+  border-radius: var(--control-radius-pill);
+  background: color-mix(in srgb, var(--status-green-glow) 55%, var(--surface-white));
+  color: var(--ink);
+  padding: 0.42rem 0.72rem;
+  font-size: 0.8rem;
+  font-weight: 600;
+  line-height: 1;
+  cursor: pointer;
+  transition:
+    transform 160ms ease,
+    box-shadow 160ms ease,
+    background 160ms ease,
+    border-color 160ms ease,
+    color 160ms ease;
+}
+
+.control-panel-header-action-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 0.95rem;
+  height: 0.95rem;
+  color: var(--signal-green);
+}
+
+.control-panel-header-action-icon svg {
+  width: 100%;
+  height: 100%;
+}
+
+.control-panel-header-open-button {
+  border-color: var(--accent-blue-border);
+  background: color-mix(in srgb, var(--accent-blue-bg) 62%, var(--surface-white));
+}
+
+.control-panel-header-open-button .control-panel-header-action-icon {
+  color: var(--signal-blue);
+}
+
+.control-panel-header-open-button:hover {
+  border-color: var(--signal-blue);
+  background: color-mix(in srgb, var(--accent-blue-bg) 82%, var(--surface-white));
+  box-shadow: 0 10px 18px color-mix(in srgb, var(--accent-blue-soft) 88%, transparent);
+  transform: translateY(-1px);
+}
+
+.control-panel-header-open-button:focus-visible {
+  outline: none;
+  border-color: var(--signal-blue);
+  box-shadow: 0 0 0 0.22rem var(--accent-blue-soft);
+}
+
+.control-panel-header-action:disabled {
+  cursor: default;
+  opacity: 0.64;
+  transform: none;
+  box-shadow: none;
+}
+
+.control-panel-header-new-session-button:hover {
+  border-color: var(--status-green-ring-bright);
+  background: color-mix(in srgb, var(--status-green-glow) 78%, var(--surface-white));
+  box-shadow: 0 10px 18px color-mix(in srgb, var(--status-green-glow) 80%, transparent);
+  transform: translateY(-1px);
+}
+
+.control-panel-header-new-session-button:focus-visible {
+  outline: none;
+  border-color: var(--status-green-ring-bright);
+  box-shadow: 0 0 0 0.22rem var(--status-green-glow);
+}
+
+
 .session-list-shell {
   display: grid;
   grid-template-rows: auto auto minmax(0, 1fr);
@@ -2558,6 +2703,13 @@ textarea {
   transform: translateY(0) scale(1);
 }
 
+.activity-card-heading {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
 .activity-tooltip-label {
   margin-bottom: 0.35rem;
   font-family: var(--code-font);
@@ -2670,6 +2822,20 @@ textarea {
 
 .message-meta-end {
   justify-content: flex-end;
+}
+
+.message-meta-tag {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.14rem 0.45rem;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--signal-blue) 14%, transparent);
+  color: var(--signal-blue);
+  font-family: var(--code-font);
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
 }
 
 .card-label {
@@ -3277,15 +3443,49 @@ textarea {
   white-space: nowrap;
 }
 
+.filesystem-explorer {
+  display: grid;
+  gap: 0.42rem;
+  min-width: 0;
+}
+
+.filesystem-root-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.1rem 0.25rem 0.15rem;
+}
+
+.filesystem-root-copy {
+  display: grid;
+  gap: 0.14rem;
+  min-width: 0;
+}
+
+.filesystem-root-name {
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.filesystem-root-path {
+  color: var(--muted);
+  font-size: 0.74rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .filesystem-tree {
   display: grid;
-  gap: 0.3rem;
-  margin-top: 0.5rem;
+  gap: 0.04rem;
 }
 
 .filesystem-node {
   display: grid;
-  gap: 0.3rem;
+  gap: 0.04rem;
 }
 
 .filesystem-row,
@@ -3293,17 +3493,19 @@ textarea {
 .git-status-section-toggle {
   width: 100%;
   border: 0;
-  border-radius: 0.45rem;
+  border-radius: 0.5rem;
   background: transparent;
   color: var(--ink);
   text-align: left;
 }
 
 .filesystem-row {
-  display: flex;
+  display: grid;
+  grid-template-columns: auto auto minmax(0, 1fr) auto;
+  gap: 0.42rem;
   align-items: center;
-  gap: 0.7rem;
-  padding: 0.65rem 0.8rem;
+  min-height: 1.65rem;
+  padding: 0.12rem 0.32rem;
 }
 
 .git-status-section-toggle,
@@ -3323,10 +3525,53 @@ textarea {
 }
 
 .filesystem-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   width: 0.9rem;
+  height: 0.9rem;
   color: var(--muted);
-  text-align: center;
-  flex-shrink: 0;
+  flex: none;
+}
+
+.filesystem-toggle-placeholder {
+  opacity: 0;
+}
+
+.filesystem-chevron {
+  width: 0.78rem;
+  height: 0.78rem;
+  transition: transform 160ms ease;
+}
+
+.filesystem-chevron.expanded {
+  transform: rotate(90deg);
+}
+
+.filesystem-entry-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 0.95rem;
+  height: 0.95rem;
+  flex: none;
+}
+
+.filesystem-entry-icon svg {
+  width: 100%;
+  height: 100%;
+}
+
+.filesystem-entry-icon-directory {
+  color: color-mix(in srgb, var(--signal-gold) 82%, var(--ink));
+}
+
+.filesystem-entry-icon-directory.open {
+  color: var(--signal-gold);
+}
+
+.filesystem-entry-icon-file {
+  color: color-mix(in srgb, var(--muted) 82%, var(--ink));
 }
 
 .filesystem-name {
@@ -3334,14 +3579,87 @@ textarea {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  font-size: 0.84rem;
+  line-height: 1.35;
+}
+
+.filesystem-directory-row.expanded .filesystem-name {
+  color: var(--ink);
 }
 
 .filesystem-children {
   display: grid;
-  gap: 0.3rem;
-  padding-left: 1rem;
-  border-left: 1px solid var(--line);
-  margin-left: 0.45rem;
+  gap: 0.04rem;
+  padding-left: 0.92rem;
+  border-left: 1px solid color-mix(in srgb, var(--line) 80%, transparent);
+  margin-left: 0.44rem;
+}
+
+.filesystem-git-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.1rem;
+  height: 1.05rem;
+  padding: 0 0.32rem;
+  border-radius: 999px;
+  font-family: var(--code-font);
+  font-size: 0.68rem;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.filesystem-git-badge-added {
+  background: color-mix(in srgb, var(--signal-green) 16%, transparent);
+  color: var(--signal-green);
+}
+
+.filesystem-git-badge-renamed {
+  background: color-mix(in srgb, var(--signal-blue) 14%, transparent);
+  color: var(--signal-blue);
+}
+
+.filesystem-git-badge-modified {
+  background: color-mix(in srgb, var(--signal-gold) 18%, transparent);
+  color: color-mix(in srgb, var(--signal-gold) 76%, var(--ink));
+}
+
+.filesystem-git-badge-deleted,
+.filesystem-git-badge-conflict {
+  background: color-mix(in srgb, var(--signal-red) 14%, transparent);
+  color: var(--signal-red);
+}
+
+.filesystem-git-dot {
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 999px;
+  flex: none;
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--panel) 82%, transparent);
+}
+
+.filesystem-git-dot-added {
+  background: var(--signal-green);
+}
+
+.filesystem-git-dot-renamed {
+  background: var(--signal-blue);
+}
+
+.filesystem-git-dot-modified {
+  background: var(--signal-gold);
+}
+
+.filesystem-git-dot-deleted,
+.filesystem-git-dot-conflict {
+  background: var(--signal-red);
+}
+
+.filesystem-support-copy {
+  margin: 0;
+  padding-left: 2rem;
+  color: var(--muted);
+  font-size: 0.78rem;
 }
 
 .git-status-sections {
@@ -3803,6 +4121,36 @@ textarea {
   white-space: pre-wrap;
 }
 
+.prompt-expansion {
+  display: grid;
+  gap: 0.55rem;
+  margin-top: 0.7rem;
+}
+
+.prompt-expansion-toggle {
+  justify-self: start;
+  padding: 0.45rem 0.75rem;
+  font-size: 0.82rem;
+}
+
+.prompt-expansion-shell {
+  display: grid;
+  gap: 0.45rem;
+  padding: 0.75rem 0.85rem;
+  border: 1px solid var(--line);
+  border-radius: 0.9rem;
+  background: var(--surface-white-soft);
+}
+
+.prompt-expansion-copy {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: var(--code-font);
+  font-size: 0.83rem;
+  line-height: 1.5;
+}
+
 .markdown-copy > * {
   margin: 0;
 }
@@ -4142,6 +4490,21 @@ textarea {
   color: var(--muted);
 }
 
+.composer-slash-status-inline {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.composer-slash-status-spinner {
+  width: 0.82rem;
+  height: 0.82rem;
+  border: 2px solid var(--spinner-track);
+  border-top-color: var(--signal-blue);
+  border-radius: 999px;
+  animation: spin 0.8s linear infinite;
+}
+
 .composer-slash-error {
   color: var(--danger-ink);
 }
@@ -4149,6 +4512,20 @@ textarea {
 .composer-slash-options {
   display: grid;
   gap: 0.35rem;
+}
+
+.composer-slash-option-group {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.composer-slash-section-label {
+  padding: 0 0.15rem;
+  color: var(--muted);
+  font-size: 0.74rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
 }
 
 .composer-slash-option {
@@ -4188,12 +4565,28 @@ textarea {
 }
 
 .composer-slash-option-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
   padding: 0.2rem 0.5rem;
   border-radius: 999px;
   background: var(--surface-white);
   color: var(--muted);
   font-size: 0.74rem;
   font-weight: 700;
+}
+
+.composer-slash-option-badge.pending {
+  color: var(--signal-blue);
+}
+
+.composer-slash-option-spinner {
+  width: 0.72rem;
+  height: 0.72rem;
+  border: 2px solid var(--spinner-track);
+  border-top-color: currentColor;
+  border-radius: 999px;
+  animation: spin 0.8s linear infinite;
 }
 
 .composer-slash-empty {
@@ -4221,6 +4614,8 @@ textarea {
 .git-status-tree-open-button:focus,
 .git-status-tree-directory-toggle:focus,
 .git-status-tree-row:focus,
+.filesystem-row:focus,
+.control-panel-header-action:focus,
 .composer-slash-option:focus,
 .pending-prompt-dismiss:focus,
 .composer-attachment-remove:focus,
@@ -4256,6 +4651,7 @@ textarea {
 .ghost-button:disabled,
 .composer-attachment-remove:disabled,
 .composer-input:disabled,
+.composer-slash-option:disabled,
 .themed-input:disabled,
 .session-select:disabled,
 .session-find-button:disabled {
@@ -4534,8 +4930,21 @@ textarea {
   }
 
   .settings-dialog-close {
-    justify-self: start;
-  }
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 2.35rem;
+  height: 2.35rem;
+  padding: 0;
+  border-radius: 0.82rem;
+  line-height: 1;
+}
+
+.settings-dialog-close svg {
+  width: 0.95rem;
+  height: 0.95rem;
+}
 
   .thread-chips {
     justify-content: flex-start;

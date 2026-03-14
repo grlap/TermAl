@@ -9,20 +9,29 @@ import {
   type ReactNode,
 } from "react";
 
-export type ControlPanelSectionId = "sessions" | "projects" | "git";
+export type ControlPanelSectionId = "files" | "sessions" | "projects" | "git";
 
 const DEFAULT_CONTROL_PANEL_SECTION_ORDER: readonly ControlPanelSectionId[] = [
   "projects",
   "sessions",
+  "files",
   "git",
 ];
-const CONTROL_PANEL_SECTION_ORDER_STORAGE_KEY = "termal-control-panel-section-order";
+const CONTROL_PANEL_SECTION_ORDER_STORAGE_KEY = "termal-control-panel-section-order-v2";
+const LEGACY_CONTROL_PANEL_SECTION_ORDER_STORAGE_KEY = "termal-control-panel-section-order";
+const LEGACY_FILES_FIRST_CONTROL_PANEL_SECTION_ORDER: readonly ControlPanelSectionId[] = [
+  "files",
+  "projects",
+  "sessions",
+  "git",
+];
 
 type ControlPanelSurfaceProps = {
   gitStatusCount: number;
   isPreferencesOpen: boolean;
   onOpenPreferences: () => void;
   projectCount: number;
+  renderHeaderActions?: (sectionId: ControlPanelSectionId) => ReactNode;
   renderSection: (sectionId: ControlPanelSectionId) => ReactNode;
   sessionCount: number;
 };
@@ -62,6 +71,7 @@ export const ControlPanelSurface = forwardRef<ControlPanelSurfaceHandle, Control
   isPreferencesOpen,
   onOpenPreferences,
   projectCount,
+  renderHeaderActions,
   renderSection,
   sessionCount,
 }, ref): JSX.Element {
@@ -71,6 +81,11 @@ export const ControlPanelSurface = forwardRef<ControlPanelSurfaceHandle, Control
   const [dropTarget, setDropTarget] = useState<DockDropTarget | null>(null);
   const bodyRef = useRef<HTMLDivElement | null>(null);
   const sectionDefinitionLookup: Record<ControlPanelSectionId, ControlPanelSectionDefinition> = {
+    files: {
+      id: "files",
+      label: "Files",
+      icon: <FilesIcon />,
+    },
     sessions: {
       badgeCount: sessionCount,
       id: "sessions",
@@ -93,6 +108,7 @@ export const ControlPanelSurface = forwardRef<ControlPanelSurfaceHandle, Control
   const sectionDefinitions = sectionOrder.map((sectionId) => sectionDefinitionLookup[sectionId]);
   const activeSectionDefinition =
     sectionDefinitions.find((definition) => definition.id === activeSection) ?? sectionDefinitions[0];
+  const headerActions = renderHeaderActions?.(activeSectionDefinition.id) ?? null;
 
   useImperativeHandle(ref, () => ({
     selectSection(sectionId) {
@@ -186,7 +202,10 @@ export const ControlPanelSurface = forwardRef<ControlPanelSurfaceHandle, Control
 
       <section className="control-panel-content">
         <header className="control-panel-header">
-          <h2>{activeSectionDefinition.label}</h2>
+          <div className="control-panel-header-row">
+            <h2>{activeSectionDefinition.label}</h2>
+            {headerActions ? <div className="control-panel-header-actions">{headerActions}</div> : null}
+          </div>
         </header>
         <div ref={bodyRef} className="control-panel-body" data-section={activeSection}>
           {renderSection(activeSection)}
@@ -338,23 +357,84 @@ function getStoredControlPanelSectionOrder(): ControlPanelSectionId[] {
     return [...DEFAULT_CONTROL_PANEL_SECTION_ORDER];
   }
 
-  const stored = window.localStorage.getItem(CONTROL_PANEL_SECTION_ORDER_STORAGE_KEY);
-  if (!stored) {
-    return [...DEFAULT_CONTROL_PANEL_SECTION_ORDER];
+  const stored = parseStoredControlPanelSectionOrder(
+    window.localStorage.getItem(CONTROL_PANEL_SECTION_ORDER_STORAGE_KEY),
+  );
+  if (stored) {
+    return normalizeControlPanelSectionOrder(stored);
+  }
+
+  const legacyStored = parseStoredControlPanelSectionOrder(
+    window.localStorage.getItem(LEGACY_CONTROL_PANEL_SECTION_ORDER_STORAGE_KEY),
+  );
+  if (legacyStored) {
+    return migrateLegacyControlPanelSectionOrder(legacyStored);
+  }
+
+  return [...DEFAULT_CONTROL_PANEL_SECTION_ORDER];
+}
+
+function parseStoredControlPanelSectionOrder(
+  rawValue: string | null,
+): ControlPanelSectionId[] | null {
+  if (!rawValue) {
+    return null;
   }
 
   try {
-    const parsed = JSON.parse(stored);
+    const parsed = JSON.parse(rawValue);
     if (!Array.isArray(parsed)) {
-      return [...DEFAULT_CONTROL_PANEL_SECTION_ORDER];
+      return null;
     }
 
-    return normalizeControlPanelSectionOrder(
-      parsed.filter((value): value is ControlPanelSectionId => isControlPanelSectionId(value)),
-    );
+    return parsed.filter((value): value is ControlPanelSectionId => isControlPanelSectionId(value));
   } catch {
+    return null;
+  }
+}
+
+function migrateLegacyControlPanelSectionOrder(
+  order: readonly ControlPanelSectionId[],
+): ControlPanelSectionId[] {
+  const normalized = normalizeControlPanelSectionOrder(order);
+
+  if (matchesControlPanelSectionOrder(normalized, LEGACY_FILES_FIRST_CONTROL_PANEL_SECTION_ORDER)) {
     return [...DEFAULT_CONTROL_PANEL_SECTION_ORDER];
   }
+
+  if (!normalized.includes("git")) {
+    return normalized;
+  }
+
+  if (!normalized.includes("files")) {
+    const gitIndex = normalized.indexOf("git");
+    return [
+      ...normalized.slice(0, gitIndex),
+      "files",
+      ...normalized.slice(gitIndex),
+    ];
+  }
+
+  const filesIndex = normalized.indexOf("files");
+  const gitIndex = normalized.indexOf("git");
+  if (filesIndex > gitIndex) {
+    const withoutFiles = normalized.filter((sectionId) => sectionId !== "files");
+    const nextGitIndex = withoutFiles.indexOf("git");
+    return [
+      ...withoutFiles.slice(0, nextGitIndex),
+      "files",
+      ...withoutFiles.slice(nextGitIndex),
+    ];
+  }
+
+  return normalized;
+}
+
+function matchesControlPanelSectionOrder(
+  left: readonly ControlPanelSectionId[],
+  right: readonly ControlPanelSectionId[],
+) {
+  return left.length === right.length && left.every((sectionId, index) => sectionId === right[index]);
 }
 
 function persistControlPanelSectionOrder(order: readonly ControlPanelSectionId[]) {
@@ -385,6 +465,28 @@ function SessionsIcon() {
         stroke="currentColor"
         strokeLinecap="round"
         strokeLinejoin="round"
+        strokeWidth="1.5"
+      />
+    </svg>
+  );
+}
+
+function FilesIcon() {
+  return (
+    <svg viewBox="0 0 20 20" focusable="false" aria-hidden="true">
+      <path
+        d="M5 3.5h6l3 3v9A1.5 1.5 0 0 1 12.5 17h-7A1.5 1.5 0 0 1 4 15.5V5A1.5 1.5 0 0 1 5.5 3.5Z"
+        fill="none"
+        stroke="currentColor"
+        strokeLinejoin="round"
+        strokeWidth="1.5"
+      />
+      <path d="M11 3.75v3.1h3.1" fill="none" stroke="currentColor" strokeWidth="1.5" />
+      <path
+        d="M6.5 9.25h1.75M6.5 12h5.75M6.5 14.75h5.75"
+        fill="none"
+        stroke="currentColor"
+        strokeLinecap="round"
         strokeWidth="1.5"
       />
     </svg>

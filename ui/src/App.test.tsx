@@ -11,11 +11,29 @@ import App, {
 import type { AgentReadiness, Session } from "./types";
 
 class EventSourceMock {
+  static instances: EventSourceMock[] = [];
+
+  onerror: ((event: Event) => void) | null = null;
+
+  onopen: ((event: Event) => void) | null = null;
+
+  constructor(_url?: string) {
+    EventSourceMock.instances.push(this);
+  }
+
   addEventListener() {}
 
   removeEventListener() {}
 
   close() {}
+
+  dispatchError() {
+    this.onerror?.(new Event("error"));
+  }
+
+  dispatchOpen() {
+    this.onopen?.(new Event("open"));
+  }
 }
 
 class ResizeObserverMock {
@@ -33,6 +51,20 @@ function jsonResponse(body: unknown) {
     },
     status: 200,
   });
+}
+
+type RestorableGlobalKey = "fetch" | "EventSource" | "ResizeObserver";
+
+function restoreGlobal<Key extends RestorableGlobalKey>(
+  key: Key,
+  originalValue: (typeof globalThis)[Key] | undefined,
+) {
+  if (originalValue === undefined) {
+    delete (globalThis as Partial<typeof globalThis>)[key];
+    return;
+  }
+
+  globalThis[key] = originalValue;
 }
 
 function makeSession(id: string, overrides?: Partial<Session>): Session {
@@ -91,7 +123,8 @@ describe("App", () => {
   const originalScrollTo = HTMLElement.prototype.scrollTo;
 
   beforeEach(() => {
-    HTMLElement.prototype.scrollTo = vi.fn();
+    HTMLElement.prototype.scrollTo = vi.fn() as unknown as typeof HTMLElement.prototype.scrollTo;
+    EventSourceMock.instances = [];
   });
 
   afterEach(() => {
@@ -198,6 +231,9 @@ describe("App", () => {
   });
 
   it("refreshes model options after creating a new Codex session", async () => {
+    const originalFetch = globalThis.fetch;
+    const originalEventSource = globalThis.EventSource;
+    const originalResizeObserver = globalThis.ResizeObserver;
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
       if (url === "/api/state") {
@@ -288,11 +324,16 @@ describe("App", () => {
       });
     } finally {
       HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
-      vi.unstubAllGlobals();
+      restoreGlobal("fetch", originalFetch);
+      restoreGlobal("EventSource", originalEventSource);
+      restoreGlobal("ResizeObserver", originalResizeObserver);
     }
   });
 
   it("shows a Codex notice when live model refresh resets reasoning effort after session creation", async () => {
+    const originalFetch = globalThis.fetch;
+    const originalEventSource = globalThis.EventSource;
+    const originalResizeObserver = globalThis.ResizeObserver;
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
       if (url === "/api/state") {
@@ -384,11 +425,16 @@ describe("App", () => {
       });
     } finally {
       HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
-      vi.unstubAllGlobals();
+      restoreGlobal("fetch", originalFetch);
+      restoreGlobal("EventSource", originalEventSource);
+      restoreGlobal("ResizeObserver", originalResizeObserver);
     }
   });
 
   it("warns once before sending with an unknown model, then lets the second send continue", async () => {
+    const originalFetch = globalThis.fetch;
+    const originalEventSource = globalThis.EventSource;
+    const originalResizeObserver = globalThis.ResizeObserver;
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
       if (url === "/api/state") {
@@ -520,7 +566,9 @@ describe("App", () => {
       });
     } finally {
       HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
-      vi.unstubAllGlobals();
+      restoreGlobal("fetch", originalFetch);
+      restoreGlobal("EventSource", originalEventSource);
+      restoreGlobal("ResizeObserver", originalResizeObserver);
     }
   });
 });

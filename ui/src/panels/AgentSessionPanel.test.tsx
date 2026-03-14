@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
-import { AgentSessionPanelFooter } from "./AgentSessionPanel";
+import { AgentSessionPanelFooter, RunningIndicator } from "./AgentSessionPanel";
 import type { Session } from "../types";
 
 function makeSession(id: string, overrides?: Partial<Session>): Session {
@@ -23,19 +23,36 @@ function renderFooter({
   isPaneActive = true,
   session,
   committedDraft = "",
+  isUpdating = false,
   onDraftCommit = vi.fn(),
   modelOptionsError = null,
+  agentCommands = [],
+  hasLoadedAgentCommands = true,
+  isRefreshingAgentCommands = false,
+  agentCommandsError = null,
   onRefreshSessionModelOptions = vi.fn(),
+  onRefreshAgentCommands = vi.fn(),
   onSend = vi.fn(() => true),
   onSessionSettingsChange = vi.fn(),
 }: {
   isPaneActive?: boolean;
   session: Session | null;
   committedDraft?: string;
+  isUpdating?: boolean;
   onDraftCommit?: (sessionId: string, nextValue: string) => void;
   modelOptionsError?: string | null;
+  agentCommands?: {
+    name: string;
+    description: string;
+    content: string;
+    source: string;
+  }[];
+  hasLoadedAgentCommands?: boolean;
+  isRefreshingAgentCommands?: boolean;
+  agentCommandsError?: string | null;
   onRefreshSessionModelOptions?: (sessionId: string) => void;
-  onSend?: (sessionId: string, draftText?: string) => boolean;
+  onRefreshAgentCommands?: (sessionId: string) => void;
+  onSend?: (sessionId: string, draftText?: string, expandedText?: string | null) => boolean;
   onSessionSettingsChange?: (sessionId: string, field: string, value: string) => void;
 }) {
   return (
@@ -50,6 +67,7 @@ function renderFooter({
       isSending={false}
       isStopping={false}
       isSessionBusy={false}
+      isUpdating={isUpdating}
       showNewResponseIndicator={false}
       footerModeLabel="Session"
       onScrollToLatest={() => {}}
@@ -57,7 +75,12 @@ function renderFooter({
       onDraftAttachmentRemove={() => {}}
       isRefreshingModelOptions={false}
       modelOptionsError={modelOptionsError}
+      agentCommands={agentCommands}
+      hasLoadedAgentCommands={hasLoadedAgentCommands}
+      isRefreshingAgentCommands={isRefreshingAgentCommands}
+      agentCommandsError={agentCommandsError}
       onRefreshSessionModelOptions={onRefreshSessionModelOptions}
+      onRefreshAgentCommands={onRefreshAgentCommands}
       onSend={onSend}
       onSessionSettingsChange={onSessionSettingsChange}
       onStopSession={() => {}}
@@ -67,6 +90,20 @@ function renderFooter({
 }
 
 describe("AgentSessionPanelFooter", () => {
+  it("shows a command badge in the live turn card for slash commands", () => {
+    render(<RunningIndicator agent="Codex" lastPrompt="/review-local" />);
+
+    expect(screen.getAllByText("Command")).toHaveLength(2);
+    expect(screen.getByText("Executing a command...")).toBeInTheDocument();
+  });
+
+  it("does not show a command badge in the live turn card for regular prompts", () => {
+    render(<RunningIndicator agent="Codex" lastPrompt="Review the staged diff" />);
+
+    expect(screen.queryByText("Command")).not.toBeInTheDocument();
+    expect(screen.getByText("Waiting for the next chunk of output...")).toBeInTheDocument();
+  });
+
   it("does not commit a draft during unrelated session rerenders", () => {
     const initialCommit = vi.fn();
     const nextCommit = vi.fn();
@@ -173,6 +210,178 @@ describe("AgentSessionPanelFooter", () => {
     fireEvent.keyDown(textarea, { key: "Enter" });
 
     expect(screen.getByLabelText("Message session-a")).toHaveValue("/model ");
+  });
+
+  it("expands /effort from the Claude slash command menu", () => {
+    render(
+      renderFooter({
+        session: makeSession("session-a", {
+          agent: "Claude",
+          model: "sonnet",
+        }),
+      }),
+    );
+
+    const textarea = screen.getByLabelText("Message session-a");
+    fireEvent.change(textarea, { target: { value: "/ef" } });
+
+    expect(screen.getByText("/effort")).toBeInTheDocument();
+
+    fireEvent.keyDown(textarea, { key: "Enter" });
+
+    expect(screen.getByLabelText("Message session-a")).toHaveValue("/effort ");
+  });
+
+  it("requests Claude agent commands when slash menu opens", async () => {
+    const onRefreshAgentCommands = vi.fn();
+
+    render(
+      renderFooter({
+        onRefreshAgentCommands,
+        hasLoadedAgentCommands: false,
+        session: makeSession("session-a", {
+          agent: "Claude",
+          model: "sonnet",
+        }),
+      }),
+    );
+
+    fireEvent.change(screen.getByLabelText("Message session-a"), {
+      target: { value: "/" },
+    });
+
+    await waitFor(() => {
+      expect(onRefreshAgentCommands).toHaveBeenCalledWith("session-a");
+    });
+  });
+
+  it("requests project agent commands for Codex when slash menu opens", async () => {
+    const onRefreshAgentCommands = vi.fn();
+
+    render(
+      renderFooter({
+        onRefreshAgentCommands,
+        hasLoadedAgentCommands: false,
+        session: makeSession("session-a", {
+          agent: "Codex",
+          model: "gpt-5",
+        }),
+      }),
+    );
+
+    fireEvent.change(screen.getByLabelText("Message session-a"), {
+      target: { value: "/" },
+    });
+
+    await waitFor(() => {
+      expect(onRefreshAgentCommands).toHaveBeenCalledWith("session-a");
+    });
+  });
+
+  it("shows agent commands alongside session controls", () => {
+    render(
+      renderFooter({
+        session: makeSession("session-a", {
+          agent: "Claude",
+          model: "sonnet",
+        }),
+        agentCommands: [
+          {
+            name: "review-local",
+            description: "Review staged and unstaged changes.",
+            content: "Review staged and unstaged changes.",
+            source: ".claude/commands/review-local.md",
+          },
+        ],
+      }),
+    );
+
+    fireEvent.change(screen.getByLabelText("Message session-a"), {
+      target: { value: "/" },
+    });
+
+    expect(screen.getByText("Agent Commands")).toBeInTheDocument();
+    expect(screen.getByText("Session Controls")).toBeInTheDocument();
+    expect(screen.getByText("/review-local")).toBeInTheDocument();
+    expect(screen.getByText("/model")).toBeInTheDocument();
+  });
+
+  it("sends a no-argument agent command directly from the slash menu", () => {
+    const onSend = vi.fn(() => true);
+
+    render(
+      renderFooter({
+        onSend,
+        session: makeSession("session-a", {
+          agent: "Claude",
+          model: "sonnet",
+        }),
+        agentCommands: [
+          {
+            name: "review-local",
+            description: "Review staged and unstaged changes.",
+            content: "Review staged and unstaged changes.",
+            source: ".claude/commands/review-local.md",
+          },
+        ],
+      }),
+    );
+
+    const textarea = screen.getByLabelText("Message session-a");
+    fireEvent.change(textarea, { target: { value: "/rev" } });
+    fireEvent.keyDown(textarea, { key: "Enter" });
+
+    expect(onSend).toHaveBeenCalledWith(
+      "session-a",
+      "/review-local",
+      "Review staged and unstaged changes.",
+    );
+    expect(textarea).toHaveValue("");
+  });
+
+  it("expands an agent command with $ARGUMENTS and sends the substituted prompt", () => {
+    const onSend = vi.fn(() => true);
+
+    render(
+      renderFooter({
+        onSend,
+        session: makeSession("session-a", {
+          agent: "Claude",
+          model: "sonnet",
+        }),
+        agentCommands: [
+          {
+            name: "fix-bug",
+            description: "Fix a bug from docs/bugs.md by number.",
+            content: `Fix the requested bug:
+
+$ARGUMENTS
+
+Verify the fix.`,
+            source: ".claude/commands/fix-bug.md",
+          },
+        ],
+      }),
+    );
+
+    const textarea = screen.getByLabelText("Message session-a");
+    fireEvent.change(textarea, { target: { value: "/fix" } });
+    fireEvent.keyDown(textarea, { key: "Enter" });
+    expect(textarea).toHaveValue("/fix-bug ");
+
+    fireEvent.change(textarea, { target: { value: "/fix-bug 3" } });
+    fireEvent.keyDown(textarea, { key: "Enter" });
+
+    expect(onSend).toHaveBeenCalledWith(
+      "session-a",
+      "/fix-bug 3",
+      `Fix the requested bug:
+
+3
+
+Verify the fix.`,
+    );
+    expect(textarea).toHaveValue("");
   });
 
   it("applies a model slash command with keyboard navigation instead of sending a prompt", () => {
@@ -385,6 +594,40 @@ describe("AgentSessionPanelFooter", () => {
     );
   });
 
+  it("applies Claude effort changes from /effort", () => {
+    const onSessionSettingsChange = vi.fn();
+
+    render(
+      renderFooter({
+        onSessionSettingsChange,
+        session: makeSession("session-a", {
+          agent: "Claude",
+          claudeEffort: "default",
+          model: "sonnet",
+          modelOptions: [
+            {
+              label: "Sonnet",
+              value: "sonnet",
+              badges: ["Effort"],
+              supportedClaudeEffortLevels: ["low", "medium", "high"],
+            },
+          ],
+        }),
+      }),
+    );
+
+    const textarea = screen.getByLabelText("Message session-a");
+    fireEvent.change(textarea, { target: { value: "/effort" } });
+    fireEvent.keyDown(textarea, { key: "ArrowDown" });
+    fireEvent.keyDown(textarea, { key: "Enter" });
+
+    expect(onSessionSettingsChange).toHaveBeenCalledWith(
+      "session-a",
+      "claudeEffort",
+      "low",
+    );
+  });
+
   it("applies Codex approval and sandbox slash commands", () => {
     const onSessionSettingsChange = vi.fn();
 
@@ -480,6 +723,26 @@ describe("AgentSessionPanelFooter", () => {
     );
     expect(screen.getByLabelText("Message session-a")).toHaveValue("/effort");
     expect(screen.getByRole("listbox", { name: "Codex reasoning effort" })).toBeInTheDocument();
+  });
+
+  it("shows a pending slash state while session settings are applying", () => {
+    render(
+      renderFooter({
+        isUpdating: true,
+        committedDraft: "/effort",
+        session: makeSession("session-a", {
+          agent: "Codex",
+          approvalPolicy: "never",
+          reasoningEffort: "high",
+          sandboxMode: "workspace-write",
+          model: "gpt-5.4",
+        }),
+      }),
+    );
+
+    expect(screen.getByText("Applying setting...")).toBeInTheDocument();
+    expect(screen.getByText("Applying")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Send" })).toBeDisabled();
   });
 
   it("resets the slash selection to the current model after the session model changes", async () => {

@@ -21,7 +21,7 @@ Supported commands:
 - `/mode` for `Claude`, `Cursor`, and `Gemini`
 - `/sandbox` for `Codex`
 - `/approvals` for `Codex`
-- `/effort` for `Codex`
+- `/effort` for `Claude` and `Codex`
 
 ## Behavior
 

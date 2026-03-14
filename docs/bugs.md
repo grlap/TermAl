@@ -370,6 +370,53 @@ correctness risk during initial load and reconnects.
   add a monotonic revision to `StateResponse` and `DeltaEvent`, publish it from `/api/events`, and
   stamp it on streamed text and command delta events so the frontend can reject stale state
 
+## Backend persists full state on every streaming text delta
+
+**Severity:** High – primary cause of responses getting progressively slower over time.
+
+`append_text_delta()` is called for every streaming text chunk (hundreds per response). Each
+invocation acquires the mutex, does a linear scan of all session messages to find the target,
+clones the accumulated text, then calls `commit_delta_locked()` which serializes the **entire**
+`StateInner` as pretty-printed JSON and writes it to disk via `fs::write()`. The mutex is held
+for the full duration of the I/O.
+
+As sessions accumulate messages the serialization payload grows, so each delta takes longer to
+persist. A long conversation with 50+ messages and a streaming response producing 500 deltas
+results in 500 full-state disk writes — each one larger than the last.
+
+**Contributing factors:**
+- **Linear message scan per delta** (`main.rs` ~line 1944): `for message in &mut session.messages`
+  iterates all messages to find the target by ID. O(N) per delta, O(N×M) total for M deltas.
+- **Full text clone per delta** (~line 1948): `text.clone()` copies the entire accumulated
+  assistant response on every chunk just to derive a preview string.
+- **`collect_agent_readiness` on every snapshot** (~line 482): `snapshot_from_inner()` calls
+  `find_command_on_path()` which walks every PATH directory looking for executables. This runs
+  on every `commit_locked()` call and every SSE lag-recovery fallback — not on deltas directly,
+  but still on every full-state publish event.
+- **Broadcast lag forces full reserialization** (~line 9076): when the broadcast channel
+  (capacity 128 state / 256 delta) overflows, the SSE handler calls `state.snapshot()` which
+  re-serializes everything and re-runs `collect_agent_readiness`.
+
+**Affected code (`src/main.rs`):**
+- `append_text_delta()` → `commit_delta_locked()` → `bump_revision_and_persist_locked()` →
+  `persist_state()`
+- `upsert_command_message()` follows the same persist-per-update pattern
+- `snapshot_from_inner()` unconditionally calls `collect_agent_readiness()`
+- `find_session_index()` is O(N) and called on every mutation
+
+**Fix (ordered by impact):**
+1. **Debounce delta persistence** – accumulate deltas in memory and flush to disk on a timer
+   (e.g. every 500 ms) or when the turn finishes, instead of writing after every chunk. The
+   in-memory state is already authoritative; disk is only needed for crash recovery.
+2. **Index messages by ID** – replace the linear `for message in &mut session.messages` scan
+   with a `HashMap<String, usize>` side-index so message lookup is O(1).
+3. **Cache `collect_agent_readiness`** – compute it once on startup and invalidate on a TTL
+   or explicit event, instead of re-scanning PATH on every snapshot.
+4. **Avoid cloning the full text per delta** – derive the preview from the delta or a trailing
+   slice instead of cloning the entire accumulated string.
+5. **Move disk I/O outside the mutex** – serialize and write after releasing the lock so other
+   operations are not blocked on file system latency.
+
 ## Command delta inserts lose timestamps
 
 **Severity:** Low â€” user-visible metadata regression.
@@ -475,6 +522,11 @@ Concrete work implied by the current TermAl parity gaps. Ordered by user impact 
 - [ ] Align attachment UX with actual capabilities:
   show the right composer hint per agent, add drag-and-drop, and keep the docs in sync with the
   implementation.
+- [ ] Debounce delta persistence:
+  stop writing the full state to disk on every streaming text chunk. Accumulate deltas in memory
+  and flush periodically (e.g. 500 ms) or on turn completion. Index messages by ID for O(1)
+  lookup. Cache `collect_agent_readiness` instead of re-scanning PATH on every snapshot. Move
+  disk I/O outside the mutex lock.
 - [ ] Reduce streaming refresh overhead:
   profile SSE-driven rerenders while another session is active, narrow state adoption for
   unrelated sessions, and only consider incremental events after the frontend hot path is trimmed.

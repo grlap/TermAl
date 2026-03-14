@@ -5,6 +5,11 @@ import { buildDiffPreviewModel } from "./diff-preview";
 describe("buildDiffPreviewModel", () => {
   it("builds a minimal preview from simple add/remove lines", () => {
     expect(buildDiffPreviewModel("-hello\n+goodbye", "edit")).toEqual({
+      changeSummary: {
+        addedLineCount: 0,
+        changedLineCount: 1,
+        removedLineCount: 0,
+      },
       hasStructuredPreview: true,
       modifiedText: "goodbye",
       note: null,
@@ -28,6 +33,11 @@ describe("buildDiffPreviewModel", () => {
         "edit",
       ),
     ).toEqual({
+      changeSummary: {
+        addedLineCount: 0,
+        changedLineCount: 2,
+        removedLineCount: 0,
+      },
       hasStructuredPreview: true,
       modifiedText: ["alpha", "bravo", "...", "charlie", "echo"].join("\n"),
       note: "Preview reconstructed from the patch. Unchanged regions outside shown hunks are omitted.",
@@ -46,10 +56,36 @@ describe("buildDiffPreviewModel", () => {
         "create",
       ),
     ).toEqual({
+      changeSummary: {
+        addedLineCount: 2,
+        changedLineCount: 0,
+        removedLineCount: 0,
+      },
       hasStructuredPreview: true,
       modifiedText: "first line\nsecond line",
       note: "Preview reconstructed from the patch. Unchanged regions outside shown hunks are omitted.",
       originalText: "",
+    });
+  });
+
+  it("separates changed lines from extra additions and removals", () => {
+    expect(
+      buildDiffPreviewModel(
+        [
+          "@@ -1,3 +1,4 @@",
+          "-before",
+          "+after",
+          " shared",
+          "+extra",
+          " shared-again",
+          "-deleted",
+        ].join("\n"),
+        "edit",
+      ).changeSummary,
+    ).toEqual({
+      addedLineCount: 1,
+      changedLineCount: 1,
+      removedLineCount: 1,
     });
   });
 });

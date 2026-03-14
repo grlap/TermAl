@@ -13,3 +13,10 @@ if (typeof globalThis.crypto.randomUUID !== "function") {
     configurable: true,
   });
 }
+
+if (typeof document !== "undefined" && typeof document.queryCommandSupported !== "function") {
+  Object.defineProperty(document, "queryCommandSupported", {
+    value: () => false,
+    configurable: true,
+  });
+}

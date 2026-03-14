@@ -24,6 +24,7 @@ import {
   cancelQueuedPrompt,
   createProject,
   createSession,
+  fetchAgentCommands,
   fetchFile,
   fetchGitStatus,
   fetchState,
@@ -39,6 +40,7 @@ import {
   updateSessionSettings,
 } from "./api";
 import { AgentIcon } from "./agent-icon";
+import { ExpandedPromptPanel } from "./ExpandedPromptPanel";
 import { copyTextToClipboard } from "./clipboard";
 import { highlightCode } from "./highlight";
 import { applyDeltaToSessions } from "./live-updates";
@@ -71,9 +73,11 @@ import type {
   ApprovalDecision,
   ApprovalMessage,
   ApprovalPolicy,
+  AgentCommand,
   AgentReadiness,
   AgentType,
   ClaudeApprovalMode,
+  ClaudeEffortLevel,
   CommandMessage,
   CodexReasoningEffort,
   CodexState,
@@ -161,18 +165,22 @@ type SessionSettingsField =
   | "approvalPolicy"
   | "reasoningEffort"
   | "claudeApprovalMode"
+  | "claudeEffort"
   | "cursorMode"
   | "geminiApprovalMode";
 type SessionSettingsValue =
   | string
   | SandboxMode
   | ApprovalPolicy
+  | ClaudeEffortLevel
   | CodexReasoningEffort
   | ClaudeApprovalMode
   | CursorMode
   | GeminiApprovalMode;
 type SessionErrorMap = Record<string, string | undefined>;
 type SessionNoticeMap = Record<string, string | undefined>;
+type BackendConnectionState = "connecting" | "connected" | "reconnecting" | "offline";
+type SessionAgentCommandMap = Record<string, AgentCommand[] | undefined>;
 type PreferencesTabId = "themes" | "codex-prompts" | "claude-approvals";
 type DraftImageAttachment = ImageAttachment & {
   base64Data: string;
@@ -258,6 +266,17 @@ const CLAUDE_APPROVAL_OPTIONS = [
   { label: "ask", value: "ask" },
   { label: "auto-approve", value: "auto-approve" },
   { label: "plan", value: "plan" },
+] as const;
+const CLAUDE_EFFORT_OPTIONS = [
+  {
+    label: "default",
+    value: "default",
+    description: "Use Claude's default effort for this session",
+  },
+  { label: "low", value: "low", description: "Keep reasoning light" },
+  { label: "medium", value: "medium", description: "Use the standard effort level" },
+  { label: "high", value: "high", description: "Use deeper reasoning for harder prompts" },
+  { label: "max", value: "max", description: "Use the highest available effort" },
 ] as const;
 const CURSOR_MODE_OPTIONS = [
   { label: "agent", value: "agent" },
@@ -376,6 +395,8 @@ function currentSessionModelOption(session: Session) {
 const ALL_CODEX_REASONING_EFFORTS = CODEX_REASONING_EFFORT_OPTIONS.map(
   (option) => option.value,
 ) as CodexReasoningEffort[];
+const DEFAULT_CLAUDE_EFFORT: ClaudeEffortLevel = "default";
+const FALLBACK_CLAUDE_EFFORTS = ["low", "medium", "high"] as ClaudeEffortLevel[];
 
 function codexReasoningEffortOption(
   effort: CodexReasoningEffort,
@@ -413,6 +434,62 @@ function currentCodexModelOption(session: Session) {
   }
 
   return currentSessionModelOption(session);
+}
+
+function currentClaudeEffort(session: Session): ClaudeEffortLevel {
+  return session.claudeEffort ?? DEFAULT_CLAUDE_EFFORT;
+}
+
+function claudeEffortOption(effort: ClaudeEffortLevel): ComboboxOption {
+  return (
+    CLAUDE_EFFORT_OPTIONS.find((option) => option.value === effort) ?? {
+      label: effort,
+      value: effort,
+      description: undefined,
+    }
+  );
+}
+
+function supportedClaudeEffortLevelsForModelOption(
+  option: SessionModelOption | null,
+  currentEffort: ClaudeEffortLevel,
+): ClaudeEffortLevel[] {
+  if (option?.supportedClaudeEffortLevels?.length) {
+    return option.supportedClaudeEffortLevels;
+  }
+
+  const supportsEffort = option?.badges?.includes("Effort") ?? false;
+  if (!option || supportsEffort) {
+    return currentEffort === "max"
+      ? [...FALLBACK_CLAUDE_EFFORTS, "max"]
+      : [...FALLBACK_CLAUDE_EFFORTS];
+  }
+
+  return currentEffort === "max" ? ["max"] : [];
+}
+
+function claudeEffortComboboxOptions(session: Session) {
+  const currentModelOption = currentSessionModelOption(session);
+  const currentEffort = currentClaudeEffort(session);
+  const levels = supportedClaudeEffortLevelsForModelOption(currentModelOption, currentEffort);
+
+  return [claudeEffortOption(DEFAULT_CLAUDE_EFFORT), ...levels.map(claudeEffortOption)];
+}
+
+function claudeEffortHint(session: Session) {
+  const currentModelOption = currentSessionModelOption(session);
+  const levels = supportedClaudeEffortLevelsForModelOption(
+    currentModelOption,
+    currentClaudeEffort(session),
+  );
+
+  if (!levels.length) {
+    return currentModelOption?.badges?.includes("Effort") === false
+      ? `${currentModelOption.label} does not advertise Claude effort controls in the live model list.`
+      : "Claude effort applies when the session starts or restarts.";
+  }
+
+  return `${currentModelOption?.label ?? "This model"} supports ${levels.join(", ")} effort.`;
 }
 
 function normalizedCodexReasoningEffort(
@@ -459,19 +536,27 @@ function codexReasoningEffortHint(session: Session, model: string = session.mode
 }
 
 function sessionModelCapabilitySummary(option: SessionModelOption | null) {
-  if (!option?.supportedReasoningEfforts?.length) {
-    return null;
+  const parts = [];
+
+  if (option?.supportedClaudeEffortLevels?.length) {
+    parts.push(`Effort: ${option.supportedClaudeEffortLevels.join(", ")}.`);
   }
 
-  const supported = option.supportedReasoningEfforts.join(", ");
-  const defaultEffort =
-    option.defaultReasoningEffort &&
-    option.supportedReasoningEfforts.includes(option.defaultReasoningEffort)
-      ? option.defaultReasoningEffort
-      : null;
-  return defaultEffort
-    ? `Reasoning: ${supported}. Default ${defaultEffort}.`
-    : `Reasoning: ${supported}.`;
+  if (option?.supportedReasoningEfforts?.length) {
+    const supported = option.supportedReasoningEfforts.join(", ");
+    const defaultEffort =
+      option.defaultReasoningEffort &&
+      option.supportedReasoningEfforts.includes(option.defaultReasoningEffort)
+        ? option.defaultReasoningEffort
+        : null;
+    parts.push(
+      defaultEffort
+        ? `Reasoning: ${supported}. Default ${defaultEffort}.`
+        : `Reasoning: ${supported}.`,
+    );
+  }
+
+  return parts.length > 0 ? parts.join(" ") : null;
 }
 
 function sessionModelOptionDescription(option: SessionModelOption | null) {
@@ -678,8 +763,16 @@ export default function App() {
   const [refreshingSessionModelOptionIds, setRefreshingSessionModelOptionIds] =
     useState<SessionFlagMap>({});
   const [sessionModelOptionErrors, setSessionModelOptionErrors] = useState<SessionErrorMap>({});
+  const [agentCommandsBySessionId, setAgentCommandsBySessionId] =
+    useState<SessionAgentCommandMap>({});
+  const [refreshingAgentCommandSessionIds, setRefreshingAgentCommandSessionIds] =
+    useState<SessionFlagMap>({});
+  const [agentCommandErrors, setAgentCommandErrors] = useState<SessionErrorMap>({});
   const [sessionSettingNotices, setSessionSettingNotices] = useState<SessionNoticeMap>({});
   const [requestError, setRequestError] = useState<string | null>(null);
+  const [backendConnectionState, setBackendConnectionState] = useState<BackendConnectionState>(() =>
+    readNavigatorOnline() ? "connecting" : "offline",
+  );
   const [sessionListFilter, setSessionListFilter] = useState<SessionListFilter>("all");
   const [sessionListSearchQuery, setSessionListSearchQuery] = useState("");
   const [selectedProjectId, setSelectedProjectId] = useState<string>(ALL_PROJECTS_FILTER_ID);
@@ -702,6 +795,7 @@ export default function App() {
     CREATE_SESSION_WORKSPACE_ID,
   );
   const [isCreateProjectOpen, setIsCreateProjectOpen] = useState(false);
+  const [controlPanelFilesystemRoot, setControlPanelFilesystemRoot] = useState<string | null>(null);
   const [controlPanelGitWorkdir, setControlPanelGitWorkdir] = useState<string | null>(null);
   const [controlPanelGitStatusCount, setControlPanelGitStatusCount] = useState(0);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
@@ -746,7 +840,9 @@ export default function App() {
   const isMountedRef = useRef(true);
   const confirmedUnknownModelSendsRef = useRef<Set<string>>(new Set());
   const refreshingSessionModelOptionIdsRef = useRef<SessionFlagMap>({});
+  const refreshingAgentCommandSessionIdsRef = useRef<SessionFlagMap>({});
   const controlPanelSurfaceRef = useRef<ControlPanelSurfaceHandle | null>(null);
+  const lastDerivedControlPanelFilesystemRootRef = useRef<string | null>(null);
   const lastDerivedControlPanelGitWorkdirRef = useRef<string | null>(null);
   const sessionsRef = useRef<Session[]>([]);
   const latestStateRevisionRef = useRef<number | null>(null);
@@ -825,8 +921,10 @@ export default function App() {
   const createSessionUsesSessionModelPicker = usesSessionModelPicker(newSessionAgent);
   const createSessionAgentReadiness = agentReadinessByAgent.get(newSessionAgent) ?? null;
   const createSessionBlocked = createSessionAgentReadiness?.blocking ?? false;
-  const derivedControlPanelGitWorkdir =
+  const derivedControlPanelWorkspaceRoot =
     selectedProject?.rootPath ?? activeSession?.workdir ?? sessions[0]?.workdir ?? null;
+  const derivedControlPanelFilesystemRoot = derivedControlPanelWorkspaceRoot;
+  const derivedControlPanelGitWorkdir = derivedControlPanelWorkspaceRoot;
   const projectScopedSessions = useMemo(() => {
     if (!selectedProject) {
       return sessions;
@@ -862,6 +960,19 @@ export default function App() {
       setCreateSessionProjectId(CREATE_SESSION_WORKSPACE_ID);
     }
   }, [createSessionProjectId, projectLookup]);
+
+  useEffect(() => {
+    const previousDerived = lastDerivedControlPanelFilesystemRootRef.current?.trim() ?? "";
+    lastDerivedControlPanelFilesystemRootRef.current = derivedControlPanelFilesystemRoot;
+
+    setControlPanelFilesystemRoot((current) => {
+      const trimmedCurrent = current?.trim() ?? "";
+      if (!trimmedCurrent || trimmedCurrent === previousDerived) {
+        return derivedControlPanelFilesystemRoot;
+      }
+      return current;
+    });
+  }, [derivedControlPanelFilesystemRoot]);
 
   useEffect(() => {
     const previousDerived = lastDerivedControlPanelGitWorkdirRef.current?.trim() ?? "";
@@ -983,8 +1094,16 @@ export default function App() {
     nextSessions: Session[],
     options?: { openSessionId?: string; paneId?: string | null },
   ) {
-    const mergedSessions = reconcileSessions(sessionsRef.current, nextSessions);
+    const previousSessions = sessionsRef.current;
+    const previousSessionsById = new Map(previousSessions.map((session) => [session.id, session]));
+    const mergedSessions = reconcileSessions(previousSessions, nextSessions);
     const availableSessionIds = new Set(mergedSessions.map((session) => session.id));
+    const sessionsWithChangedWorkdir = new Set(
+      mergedSessions.flatMap((session) => {
+        const previousSession = previousSessionsById.get(session.id);
+        return previousSession && previousSession.workdir !== session.workdir ? [session.id] : [];
+      }),
+    );
 
     sessionsRef.current = mergedSessions;
     setSessions(mergedSessions);
@@ -1013,6 +1132,20 @@ export default function App() {
       current && availableSessionIds.has(current.sessionId) ? current : null,
     );
     setUpdatingSessionIds((current) => pruneSessionFlags(current, availableSessionIds));
+    setAgentCommandsBySessionId((current) =>
+      pruneSessionCommandValues(current, availableSessionIds, sessionsWithChangedWorkdir),
+    );
+    setRefreshingAgentCommandSessionIds((current) =>
+      pruneSessionFlagsWithInvalidation(current, availableSessionIds, sessionsWithChangedWorkdir),
+    );
+    refreshingAgentCommandSessionIdsRef.current = pruneSessionFlagsWithInvalidation(
+      refreshingAgentCommandSessionIdsRef.current,
+      availableSessionIds,
+      sessionsWithChangedWorkdir,
+    );
+    setAgentCommandErrors((current) =>
+      pruneSessionValues(current, availableSessionIds, sessionsWithChangedWorkdir),
+    );
     setSessionSettingNotices((current) => pruneSessionValues(current, availableSessionIds));
     const availableUnknownModelKeys = new Set(
       mergedSessions
@@ -1022,6 +1155,184 @@ export default function App() {
     confirmedUnknownModelSendsRef.current = new Set(
       [...confirmedUnknownModelSendsRef.current].filter((key) => availableUnknownModelKeys.has(key)),
     );
+  }
+
+  function updateSessionLocally(
+    sessionId: string,
+    update: (session: Session) => Session,
+  ) {
+    const nextSessions = sessionsRef.current.map((entry) => {
+      if (entry.id !== sessionId) {
+        return entry;
+      }
+
+      return update(entry);
+    });
+    const hasChanged = nextSessions.some((entry, index) => entry !== sessionsRef.current[index]);
+    if (!hasChanged) {
+      return;
+    }
+
+    sessionsRef.current = nextSessions;
+    setSessions(nextSessions);
+    setWorkspace((current) =>
+      applyControlPanelLayout(reconcileWorkspaceState(current, nextSessions)),
+    );
+  }
+
+  function buildOptimisticSessionSettingsUpdate(
+    session: Session,
+    field: SessionSettingsField,
+    value: SessionSettingsValue,
+  ) {
+    const normalizedModelValue =
+      field === "model" ? normalizedRequestedSessionModel(session, value as string) : null;
+
+    switch (session.agent) {
+      case "Codex": {
+        const nextModel = normalizedModelValue ?? session.model;
+        const nextReasoningEffort =
+          field === "reasoningEffort"
+            ? (value as CodexReasoningEffort)
+            : normalizedCodexReasoningEffort(session, nextModel);
+        const nextSandboxMode =
+          field === "sandboxMode" ? (value as SandboxMode) : session.sandboxMode;
+        const nextApprovalPolicy =
+          field === "approvalPolicy" ? (value as ApprovalPolicy) : session.approvalPolicy;
+
+        if (
+          nextModel === session.model &&
+          nextReasoningEffort === session.reasoningEffort &&
+          nextSandboxMode === session.sandboxMode &&
+          nextApprovalPolicy === session.approvalPolicy
+        ) {
+          return session;
+        }
+
+        return {
+          ...session,
+          model: nextModel,
+          reasoningEffort: nextReasoningEffort,
+          sandboxMode: nextSandboxMode,
+          approvalPolicy: nextApprovalPolicy,
+        };
+      }
+      case "Cursor": {
+        const nextModel = normalizedModelValue ?? session.model;
+        const nextCursorMode =
+          field === "cursorMode" ? (value as CursorMode) : session.cursorMode;
+
+        if (nextModel === session.model && nextCursorMode === session.cursorMode) {
+          return session;
+        }
+
+        return {
+          ...session,
+          model: nextModel,
+          cursorMode: nextCursorMode,
+        };
+      }
+      case "Claude": {
+        const nextModel = normalizedModelValue ?? session.model;
+        const nextClaudeApprovalMode =
+          field === "claudeApprovalMode"
+            ? (value as ClaudeApprovalMode)
+            : session.claudeApprovalMode;
+        const nextClaudeEffort =
+          field === "claudeEffort" ? (value as ClaudeEffortLevel) : session.claudeEffort;
+
+        if (
+          nextModel === session.model &&
+          nextClaudeApprovalMode === session.claudeApprovalMode &&
+          nextClaudeEffort === session.claudeEffort
+        ) {
+          return session;
+        }
+
+        return {
+          ...session,
+          model: nextModel,
+          claudeApprovalMode: nextClaudeApprovalMode,
+          claudeEffort: nextClaudeEffort,
+        };
+      }
+      case "Gemini": {
+        const nextModel = normalizedModelValue ?? session.model;
+        const nextGeminiApprovalMode =
+          field === "geminiApprovalMode"
+            ? (value as GeminiApprovalMode)
+            : session.geminiApprovalMode;
+
+        if (nextModel === session.model && nextGeminiApprovalMode === session.geminiApprovalMode) {
+          return session;
+        }
+
+        return {
+          ...session,
+          model: nextModel,
+          geminiApprovalMode: nextGeminiApprovalMode,
+        };
+      }
+    }
+  }
+
+  function rollbackOptimisticSessionSettingsUpdate(
+    currentSession: Session,
+    previousSession: Session,
+    optimisticSession: Session,
+  ) {
+    let changed = false;
+    const nextSession = { ...currentSession };
+
+    if (currentSession.model === optimisticSession.model && currentSession.model !== previousSession.model) {
+      nextSession.model = previousSession.model;
+      changed = true;
+    }
+    if (
+      currentSession.approvalPolicy === optimisticSession.approvalPolicy &&
+      currentSession.approvalPolicy !== previousSession.approvalPolicy
+    ) {
+      nextSession.approvalPolicy = previousSession.approvalPolicy;
+      changed = true;
+    }
+    if (
+      currentSession.reasoningEffort === optimisticSession.reasoningEffort &&
+      currentSession.reasoningEffort !== previousSession.reasoningEffort
+    ) {
+      nextSession.reasoningEffort = previousSession.reasoningEffort;
+      changed = true;
+    }
+    if (
+      currentSession.sandboxMode === optimisticSession.sandboxMode &&
+      currentSession.sandboxMode !== previousSession.sandboxMode
+    ) {
+      nextSession.sandboxMode = previousSession.sandboxMode;
+      changed = true;
+    }
+    if (currentSession.cursorMode === optimisticSession.cursorMode && currentSession.cursorMode !== previousSession.cursorMode) {
+      nextSession.cursorMode = previousSession.cursorMode;
+      changed = true;
+    }
+    if (
+      currentSession.claudeApprovalMode === optimisticSession.claudeApprovalMode &&
+      currentSession.claudeApprovalMode !== previousSession.claudeApprovalMode
+    ) {
+      nextSession.claudeApprovalMode = previousSession.claudeApprovalMode;
+      changed = true;
+    }
+    if (currentSession.claudeEffort === optimisticSession.claudeEffort && currentSession.claudeEffort !== previousSession.claudeEffort) {
+      nextSession.claudeEffort = previousSession.claudeEffort;
+      changed = true;
+    }
+    if (
+      currentSession.geminiApprovalMode === optimisticSession.geminiApprovalMode &&
+      currentSession.geminiApprovalMode !== previousSession.geminiApprovalMode
+    ) {
+      nextSession.geminiApprovalMode = previousSession.geminiApprovalMode;
+      changed = true;
+    }
+
+    return changed ? nextSession : currentSession;
   }
 
   function adoptState(
@@ -1044,6 +1355,28 @@ export default function App() {
     return true;
   }
 
+
+  useEffect(() => {
+    function handleBrowserOnline() {
+      setBackendConnectionState((current) => {
+        if (current === "connected") {
+          return current;
+        }
+        return latestStateRevisionRef.current === null ? "connecting" : "reconnecting";
+      });
+    }
+
+    function handleBrowserOffline() {
+      setBackendConnectionState("offline");
+    }
+
+    window.addEventListener("online", handleBrowserOnline);
+    window.addEventListener("offline", handleBrowserOffline);
+    return () => {
+      window.removeEventListener("online", handleBrowserOnline);
+      window.removeEventListener("offline", handleBrowserOffline);
+    };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -1151,11 +1484,23 @@ export default function App() {
     eventSource.addEventListener("delta", handleDeltaEvent as EventListener);
     eventSource.onopen = () => {
       if (!cancelled) {
+        setBackendConnectionState("connected");
         setRequestError(null);
       }
     };
     eventSource.onerror = () => {
-      if (!cancelled && latestStateRevisionRef.current === null) {
+      if (cancelled) {
+        return;
+      }
+
+      setBackendConnectionState(
+        readNavigatorOnline()
+          ? latestStateRevisionRef.current === null
+            ? "connecting"
+            : "reconnecting"
+          : "offline",
+      );
+      if (latestStateRevisionRef.current === null) {
         requestStateResync();
       }
     };
@@ -1514,7 +1859,11 @@ export default function App() {
     };
   }, []);
 
-  function handleSend(sessionId: string, draftTextOverride?: string) {
+  function handleSend(
+    sessionId: string,
+    draftTextOverride?: string,
+    expandedTextOverride?: string | null,
+  ) {
     const session = sessionLookup.get(sessionId);
     if (!session) {
       return false;
@@ -1522,6 +1871,8 @@ export default function App() {
 
     const draftText = draftTextOverride ?? draftsBySessionId[sessionId] ?? "";
     const prompt = draftText.trim();
+    const expandedText = expandedTextOverride?.trim() || null;
+    const normalizedExpandedText = expandedText && expandedText !== prompt ? expandedText : null;
     const attachments = draftAttachmentsBySessionId[sessionId] ?? [];
     if (!prompt && attachments.length === 0) {
       return false;
@@ -1569,6 +1920,7 @@ export default function App() {
             fileName: attachment.fileName,
             mediaType: attachment.mediaType,
           })),
+          normalizedExpandedText,
         );
         adoptState(state);
         releaseDraftAttachments(attachments);
@@ -2053,6 +2405,10 @@ export default function App() {
           session.agent === "Claude"
             ? (session.claudeApprovalMode ?? defaultClaudeApprovalMode)
             : undefined,
+        claudeEffort:
+          session.agent === "Claude"
+            ? (session.claudeEffort ?? DEFAULT_CLAUDE_EFFORT)
+            : undefined,
         geminiApprovalMode:
           session.agent === "Gemini"
             ? (session.geminiApprovalMode ?? defaultGeminiApprovalMode)
@@ -2127,37 +2483,34 @@ export default function App() {
     }
     const normalizedModelValue =
       field === "model" ? normalizedRequestedSessionModel(session, value as string) : null;
-
-    setUpdatingSessionIds((current) => setSessionFlag(current, sessionId, true));
-    try {
-      const payload =
-        session.agent === "Codex"
-          ? {
-              ...(field === "model" ? { model: normalizedModelValue ?? (value as string) } : {}),
-              reasoningEffort:
-                field === "reasoningEffort"
-                  ? (value as CodexReasoningEffort)
-                  : normalizedCodexReasoningEffort(
-                      session,
-                      field === "model"
-                        ? (normalizedModelValue ?? (value as string))
-                        : session.model,
-                    ),
-              sandboxMode:
-                field === "sandboxMode"
-                  ? (value as SandboxMode)
-                  : (session.sandboxMode ?? "workspace-write"),
-              approvalPolicy:
-                field === "approvalPolicy"
-                  ? (value as ApprovalPolicy)
-                  : (session.approvalPolicy ?? "never"),
-            }
-          : session.agent === "Cursor"
-            ? field === "model"
-              ? {
-                  model: normalizedModelValue ?? (value as string),
-                }
-              : field === "cursorMode"
+    const payload =
+      session.agent === "Codex"
+        ? {
+            ...(field === "model" ? { model: normalizedModelValue ?? (value as string) } : {}),
+            reasoningEffort:
+              field === "reasoningEffort"
+                ? (value as CodexReasoningEffort)
+                : normalizedCodexReasoningEffort(
+                    session,
+                    field === "model"
+                      ? (normalizedModelValue ?? (value as string))
+                      : session.model,
+                  ),
+            sandboxMode:
+              field === "sandboxMode"
+                ? (value as SandboxMode)
+                : (session.sandboxMode ?? "workspace-write"),
+            approvalPolicy:
+              field === "approvalPolicy"
+                ? (value as ApprovalPolicy)
+                : (session.approvalPolicy ?? "never"),
+          }
+        : session.agent === "Cursor"
+          ? field === "model"
+            ? {
+                model: normalizedModelValue ?? (value as string),
+              }
+            : field === "cursorMode"
               ? {
                   cursorMode: value as CursorMode,
                 }
@@ -2171,7 +2524,11 @@ export default function App() {
                 ? {
                     claudeApprovalMode: value as ClaudeApprovalMode,
                   }
-                : null
+                : field === "claudeEffort"
+                  ? {
+                      claudeEffort: value as ClaudeEffortLevel,
+                    }
+                  : null
             : session.agent === "Gemini"
               ? field === "model"
                 ? {
@@ -2183,10 +2540,19 @@ export default function App() {
                     }
                   : null
               : null;
-      if (!payload) {
-        return;
-      }
+    if (!payload) {
+      return;
+    }
 
+    const optimisticSession = buildOptimisticSessionSettingsUpdate(session, field, value);
+    const hasOptimisticUpdate = optimisticSession !== session;
+
+    setRequestError(null);
+    if (hasOptimisticUpdate) {
+      updateSessionLocally(sessionId, () => optimisticSession);
+    }
+    setUpdatingSessionIds((current) => setSessionFlag(current, sessionId, true));
+    try {
       const state = await updateSessionSettings(sessionId, payload);
       adoptState(state);
       const updatedSession =
@@ -2212,6 +2578,11 @@ export default function App() {
       });
       setRequestError(null);
     } catch (error) {
+      if (hasOptimisticUpdate) {
+        updateSessionLocally(sessionId, (current) =>
+          rollbackOptimisticSessionSettingsUpdate(current, session, optimisticSession),
+        );
+      }
       setRequestError(getErrorMessage(error));
     } finally {
       setUpdatingSessionIds((current) => setSessionFlag(current, sessionId, false));
@@ -2280,6 +2651,51 @@ export default function App() {
       );
       refreshingSessionModelOptionIdsRef.current = nextRefreshingSessionIds;
       setRefreshingSessionModelOptionIds(nextRefreshingSessionIds);
+    }
+  }
+
+  async function handleRefreshAgentCommands(sessionId: string) {
+    if (refreshingAgentCommandSessionIdsRef.current[sessionId]) {
+      return;
+    }
+
+    const nextRefreshingSessionIds = setSessionFlag(
+      refreshingAgentCommandSessionIdsRef.current,
+      sessionId,
+      true,
+    );
+    refreshingAgentCommandSessionIdsRef.current = nextRefreshingSessionIds;
+    setRefreshingAgentCommandSessionIds(nextRefreshingSessionIds);
+    setAgentCommandErrors((current) => {
+      if (!current[sessionId]) {
+        return current;
+      }
+
+      const nextState = { ...current };
+      delete nextState[sessionId];
+      return nextState;
+    });
+
+    try {
+      const response = await fetchAgentCommands(sessionId);
+      setAgentCommandsBySessionId((current) => ({
+        ...current,
+        [sessionId]: response.commands,
+      }));
+    } catch (error) {
+      const message = getErrorMessage(error);
+      setAgentCommandErrors((current) => ({
+        ...current,
+        [sessionId]: message,
+      }));
+    } finally {
+      const nextRefreshingSessionIds = setSessionFlag(
+        refreshingAgentCommandSessionIdsRef.current,
+        sessionId,
+        false,
+      );
+      refreshingAgentCommandSessionIdsRef.current = nextRefreshingSessionIds;
+      setRefreshingAgentCommandSessionIds(nextRefreshingSessionIds);
     }
   }
 
@@ -2609,8 +3025,78 @@ export default function App() {
   function renderWorkspaceControlSurface(paneId: string): JSX.Element {
     const surfaceId = paneId;
 
+    function renderControlPanelHeaderActions(sectionId: ControlPanelSectionId) {
+      switch (sectionId) {
+        case "files":
+          return (
+            <button
+              className="control-panel-header-action control-panel-header-open-button"
+              type="button"
+              onClick={() => handleOpenFilesystemTab(paneId, controlPanelFilesystemRoot, activeSession?.id ?? null)}
+              disabled={!(controlPanelFilesystemRoot?.trim() ?? "")}
+            >
+              <span className="control-panel-header-action-icon" aria-hidden="true">
+                <svg viewBox="0 0 16 16" focusable="false" aria-hidden="true">
+                  <path
+                    d="M3.5 4.25h4l1.15 1.25h4A1.25 1.25 0 0 1 13.9 6.75v5.5a1.25 1.25 0 0 1-1.25 1.25H3.5A1.25 1.25 0 0 1 2.25 12.25v-6.75A1.25 1.25 0 0 1 3.5 4.25Z"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth="1.35"
+                  />
+                  <path
+                    d="M8.75 3.25v4.5M6.5 5.5h4.5"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeLinecap="round"
+                    strokeWidth="1.35"
+                  />
+                </svg>
+              </span>
+              <span>Open tab</span>
+            </button>
+          );
+
+        case "sessions":
+          return (
+            <button
+              className="control-panel-header-action control-panel-header-new-session-button"
+              type="button"
+              onClick={() => openCreateSessionDialog(paneId)}
+              aria-haspopup="dialog"
+              aria-expanded={isCreateSessionOpen}
+              aria-controls="create-session-dialog"
+              disabled={isCreating}
+            >
+              <span className="control-panel-header-action-icon control-panel-header-action-icon-play" aria-hidden="true">
+                <svg viewBox="0 0 16 16" focusable="false" aria-hidden="true">
+                  <path d="M5 3.5 12.25 8 5 12.5Z" fill="currentColor" />
+                </svg>
+              </span>
+              <span>{isCreating ? "Creating" : "New"}</span>
+            </button>
+          );
+
+        default:
+          return null;
+      }
+    }
+
     function renderControlPanelSection(sectionId: ControlPanelSectionId) {
       switch (sectionId) {
+        case "files":
+          return (
+            <section className="control-panel-section-stack control-panel-section-files" aria-label="Files">
+              <FileSystemPanel
+                rootPath={controlPanelFilesystemRoot}
+                showPathControls={false}
+                onOpenPath={(path) => handleOpenSourceTab(paneId, path, activeSession?.id ?? null)}
+                onOpenRootPath={(path) => setControlPanelFilesystemRoot(path.trim() || null)}
+              />
+            </section>
+          );
+
         case "git":
           return (
             <section className="control-panel-section-stack control-panel-section-git" aria-label="Git status">
@@ -2681,62 +3167,6 @@ export default function App() {
         default:
           return (
             <section className="control-panel-section-stack control-panel-section-sessions" aria-label="Sessions">
-              <div className="new-session-controls">
-                <div className="session-control-label">New session</div>
-                <p className="session-control-hint">
-                  Choose the assistant, model, and project in a dedicated window before starting.
-                </p>
-                <button
-                  className="new-session-button new-session-launch-button"
-                  type="button"
-                  onClick={() => openCreateSessionDialog(paneId)}
-                  aria-haspopup="dialog"
-                  aria-expanded={isCreateSessionOpen}
-                  aria-controls="create-session-dialog"
-                  disabled={isCreating}
-                >
-                  {isCreating ? "Creating..." : "New Session"}
-                </button>
-              </div>
-
-              <section className="sidebar-status" aria-label="Session filters">
-                <div className="session-control-label">Status</div>
-                <div className="sidebar-status-chips">
-                  <button
-                    className={`chip sidebar-status-chip ${sessionListFilter === "all" ? "selected" : ""}`}
-                    type="button"
-                    onClick={() => setSessionListFilter("all")}
-                    aria-pressed={sessionListFilter === "all"}
-                  >
-                    No filter ({sessionFilterCounts.all})
-                  </button>
-                  <button
-                    className={`chip sidebar-status-chip ${sessionListFilter === "working" ? "selected" : ""}`}
-                    type="button"
-                    onClick={() => setSessionListFilter("working")}
-                    aria-pressed={sessionListFilter === "working"}
-                  >
-                    Working ({sessionFilterCounts.working})
-                  </button>
-                  <button
-                    className={`chip sidebar-status-chip ${sessionListFilter === "asking" ? "selected" : ""}`}
-                    type="button"
-                    onClick={() => setSessionListFilter("asking")}
-                    aria-pressed={sessionListFilter === "asking"}
-                  >
-                    Asking ({sessionFilterCounts.asking})
-                  </button>
-                  <button
-                    className={`chip sidebar-status-chip ${sessionListFilter === "completed" ? "selected" : ""}`}
-                    type="button"
-                    onClick={() => setSessionListFilter("completed")}
-                    aria-pressed={sessionListFilter === "completed"}
-                  >
-                    Completed ({sessionFilterCounts.completed})
-                  </button>
-                </div>
-              </section>
-
               <section className="session-list-shell" aria-label="Sessions">
                 <div className="session-list-header">
                   <span className="session-control-label">Sessions</span>
@@ -2884,6 +3314,44 @@ export default function App() {
                   )}
                 </div>
               </section>
+
+              <section className="sidebar-status" aria-label="Session filters">
+                <div className="session-control-label">Status</div>
+                <div className="sidebar-status-chips">
+                  <button
+                    className={`chip sidebar-status-chip ${sessionListFilter === "all" ? "selected" : ""}`}
+                    type="button"
+                    onClick={() => setSessionListFilter("all")}
+                    aria-pressed={sessionListFilter === "all"}
+                  >
+                    No filter ({sessionFilterCounts.all})
+                  </button>
+                  <button
+                    className={`chip sidebar-status-chip ${sessionListFilter === "working" ? "selected" : ""}`}
+                    type="button"
+                    onClick={() => setSessionListFilter("working")}
+                    aria-pressed={sessionListFilter === "working"}
+                  >
+                    Working ({sessionFilterCounts.working})
+                  </button>
+                  <button
+                    className={`chip sidebar-status-chip ${sessionListFilter === "asking" ? "selected" : ""}`}
+                    type="button"
+                    onClick={() => setSessionListFilter("asking")}
+                    aria-pressed={sessionListFilter === "asking"}
+                  >
+                    Asking ({sessionFilterCounts.asking})
+                  </button>
+                  <button
+                    className={`chip sidebar-status-chip ${sessionListFilter === "completed" ? "selected" : ""}`}
+                    type="button"
+                    onClick={() => setSessionListFilter("completed")}
+                    aria-pressed={sessionListFilter === "completed"}
+                  >
+                    Completed ({sessionFilterCounts.completed})
+                  </button>
+                </div>
+              </section>
             </section>
           );
       }
@@ -2898,6 +3366,7 @@ export default function App() {
           onOpenPreferences={() => setIsSettingsOpen(true)}
           projectCount={projects.length}
           sessionCount={projectScopedSessions.length}
+          renderHeaderActions={renderControlPanelHeaderActions}
           renderSection={renderControlPanelSection}
         />
       </div>
@@ -2910,6 +3379,10 @@ export default function App() {
       <div className="background-orbit background-orbit-right" />
 
       <main className="workspace-shell">
+        <div className="workspace-status-strip">
+          <BackendConnectionStatus state={backendConnectionState} />
+        </div>
+
         {requestError ? (
           <article className="thread-notice workspace-notice">
             <div className="card-label">Backend</div>
@@ -2940,6 +3413,9 @@ export default function App() {
               updatingSessionIds={updatingSessionIds}
               refreshingSessionModelOptionIds={refreshingSessionModelOptionIds}
               sessionModelOptionErrors={sessionModelOptionErrors}
+              agentCommandsBySessionId={agentCommandsBySessionId}
+              refreshingAgentCommandSessionIds={refreshingAgentCommandSessionIds}
+              agentCommandErrors={agentCommandErrors}
               sessionSettingNotices={sessionSettingNotices}
               paneShouldStickToBottomRef={paneShouldStickToBottomRef}
               paneScrollPositionsRef={paneScrollPositionsRef}
@@ -2975,6 +3451,7 @@ export default function App() {
               onScrollToBottomRequestHandled={handleScrollToBottomRequestHandled}
               onSessionSettingsChange={handleSessionSettingsChange}
               onRefreshSessionModelOptions={handleRefreshSessionModelOptions}
+              onRefreshAgentCommands={handleRefreshAgentCommands}
               renderControlPanel={(paneId) => renderWorkspaceControlSurface(paneId)}
             />
           ) : (
@@ -3193,13 +3670,15 @@ export default function App() {
               <button
                 className="ghost-button settings-dialog-close"
                 type="button"
+                aria-label="Close dialog"
+                title="Close"
                 onClick={() => {
                   setRequestError(null);
                   setIsCreateSessionOpen(false);
                 }}
                 disabled={isCreating}
               >
-                Close
+                <DialogCloseIcon />
               </button>
             </div>
 
@@ -3380,13 +3859,15 @@ export default function App() {
               <button
                 className="ghost-button settings-dialog-close"
                 type="button"
+                aria-label="Close dialog"
+                title="Close"
                 onClick={() => {
                   setRequestError(null);
                   setIsCreateProjectOpen(false);
                 }}
                 disabled={isCreatingProject}
               >
-                Close
+                <DialogCloseIcon />
               </button>
             </div>
 
@@ -3481,11 +3962,13 @@ export default function App() {
               <button
                 className="ghost-button settings-dialog-close"
                 type="button"
+                aria-label="Close dialog"
+                title="Close"
                 onClick={() => {
                   setIsSettingsOpen(false);
                 }}
               >
-                Close
+                <DialogCloseIcon />
               </button>
             </div>
 
@@ -4251,6 +4734,9 @@ function WorkspaceNodeView({
   updatingSessionIds,
   refreshingSessionModelOptionIds,
   sessionModelOptionErrors,
+  agentCommandsBySessionId,
+  refreshingAgentCommandSessionIds,
+  agentCommandErrors,
   sessionSettingNotices,
   paneShouldStickToBottomRef,
   paneScrollPositionsRef,
@@ -4286,6 +4772,7 @@ function WorkspaceNodeView({
   onScrollToBottomRequestHandled,
   onSessionSettingsChange,
   onRefreshSessionModelOptions,
+  onRefreshAgentCommands,
   renderControlPanel,
 }: {
   node: WorkspaceNode;
@@ -4302,6 +4789,9 @@ function WorkspaceNodeView({
   updatingSessionIds: SessionFlagMap;
   refreshingSessionModelOptionIds: SessionFlagMap;
   sessionModelOptionErrors: SessionErrorMap;
+  agentCommandsBySessionId: SessionAgentCommandMap;
+  refreshingAgentCommandSessionIds: SessionFlagMap;
+  agentCommandErrors: SessionErrorMap;
   sessionSettingNotices: SessionNoticeMap;
   paneShouldStickToBottomRef: React.MutableRefObject<Record<string, boolean | undefined>>;
   paneScrollPositionsRef: React.MutableRefObject<
@@ -4349,7 +4839,7 @@ function WorkspaceNodeView({
   onDraftAttachmentsAdd: (sessionId: string, attachments: DraftImageAttachment[]) => void;
   onDraftAttachmentRemove: (sessionId: string, attachmentId: string) => void;
   onComposerError: (message: string | null) => void;
-  onSend: (sessionId: string, draftText?: string) => boolean;
+  onSend: (sessionId: string, draftText?: string, expandedText?: string | null) => boolean;
   onCancelQueuedPrompt: (sessionId: string, promptId: string) => void;
   onApprovalDecision: (
     sessionId: string,
@@ -4371,6 +4861,7 @@ function WorkspaceNodeView({
     value: SessionSettingsValue,
   ) => void;
   onRefreshSessionModelOptions: (sessionId: string) => void;
+  onRefreshAgentCommands: (sessionId: string) => void;
   renderControlPanel: (paneId: string) => JSX.Element;
 }) {
   if (node.type === "pane") {
@@ -4399,6 +4890,22 @@ function WorkspaceNodeView({
         }
         modelOptionsError={
           pane.activeSessionId ? (sessionModelOptionErrors[pane.activeSessionId] ?? null) : null
+        }
+        agentCommands={
+          pane.activeSessionId && Object.prototype.hasOwnProperty.call(agentCommandsBySessionId, pane.activeSessionId)
+            ? (agentCommandsBySessionId[pane.activeSessionId] ?? [])
+            : []
+        }
+        hasLoadedAgentCommands={
+          pane.activeSessionId
+            ? Object.prototype.hasOwnProperty.call(agentCommandsBySessionId, pane.activeSessionId)
+            : false
+        }
+        isRefreshingAgentCommands={
+          pane.activeSessionId ? Boolean(refreshingAgentCommandSessionIds[pane.activeSessionId]) : false
+        }
+        agentCommandsError={
+          pane.activeSessionId ? (agentCommandErrors[pane.activeSessionId] ?? null) : null
         }
         sessionSettingNotice={
           pane.activeSessionId ? (sessionSettingNotices[pane.activeSessionId] ?? null) : null
@@ -4436,6 +4943,7 @@ function WorkspaceNodeView({
         onScrollToBottomRequestHandled={onScrollToBottomRequestHandled}
         onSessionSettingsChange={onSessionSettingsChange}
         onRefreshSessionModelOptions={onRefreshSessionModelOptions}
+        onRefreshAgentCommands={onRefreshAgentCommands}
         renderControlPanel={renderControlPanel}
       />
     );
@@ -4473,6 +4981,9 @@ function WorkspaceNodeView({
           updatingSessionIds={updatingSessionIds}
           refreshingSessionModelOptionIds={refreshingSessionModelOptionIds}
           sessionModelOptionErrors={sessionModelOptionErrors}
+          agentCommandsBySessionId={agentCommandsBySessionId}
+          refreshingAgentCommandSessionIds={refreshingAgentCommandSessionIds}
+          agentCommandErrors={agentCommandErrors}
           sessionSettingNotices={sessionSettingNotices}
           paneShouldStickToBottomRef={paneShouldStickToBottomRef}
           paneScrollPositionsRef={paneScrollPositionsRef}
@@ -4508,6 +5019,7 @@ function WorkspaceNodeView({
           onScrollToBottomRequestHandled={onScrollToBottomRequestHandled}
           onSessionSettingsChange={onSessionSettingsChange}
           onRefreshSessionModelOptions={onRefreshSessionModelOptions}
+          onRefreshAgentCommands={onRefreshAgentCommands}
           renderControlPanel={renderControlPanel}
         />
       </div>
@@ -4540,6 +5052,9 @@ function WorkspaceNodeView({
           updatingSessionIds={updatingSessionIds}
           refreshingSessionModelOptionIds={refreshingSessionModelOptionIds}
           sessionModelOptionErrors={sessionModelOptionErrors}
+          agentCommandsBySessionId={agentCommandsBySessionId}
+          refreshingAgentCommandSessionIds={refreshingAgentCommandSessionIds}
+          agentCommandErrors={agentCommandErrors}
           sessionSettingNotices={sessionSettingNotices}
           paneShouldStickToBottomRef={paneShouldStickToBottomRef}
           paneScrollPositionsRef={paneScrollPositionsRef}
@@ -4575,6 +5090,7 @@ function WorkspaceNodeView({
           onScrollToBottomRequestHandled={onScrollToBottomRequestHandled}
           onSessionSettingsChange={onSessionSettingsChange}
           onRefreshSessionModelOptions={onRefreshSessionModelOptions}
+          onRefreshAgentCommands={onRefreshAgentCommands}
           renderControlPanel={renderControlPanel}
         />
       </div>
@@ -4596,6 +5112,10 @@ function SessionPaneView({
   isUpdating,
   isRefreshingModelOptions,
   modelOptionsError,
+  agentCommands,
+  hasLoadedAgentCommands,
+  isRefreshingAgentCommands,
+  agentCommandsError,
   sessionSettingNotice,
   paneShouldStickToBottomRef,
   paneScrollPositionsRef,
@@ -4630,6 +5150,7 @@ function SessionPaneView({
   onScrollToBottomRequestHandled,
   onSessionSettingsChange,
   onRefreshSessionModelOptions,
+  onRefreshAgentCommands,
   renderControlPanel,
 }: {
   pane: WorkspacePane;
@@ -4645,6 +5166,10 @@ function SessionPaneView({
   isUpdating: boolean;
   isRefreshingModelOptions: boolean;
   modelOptionsError: string | null;
+  agentCommands: AgentCommand[];
+  hasLoadedAgentCommands: boolean;
+  isRefreshingAgentCommands: boolean;
+  agentCommandsError: string | null;
   sessionSettingNotice: string | null;
   paneShouldStickToBottomRef: React.MutableRefObject<Record<string, boolean | undefined>>;
   paneScrollPositionsRef: React.MutableRefObject<
@@ -4687,7 +5212,7 @@ function SessionPaneView({
   onDraftAttachmentsAdd: (sessionId: string, attachments: DraftImageAttachment[]) => void;
   onDraftAttachmentRemove: (sessionId: string, attachmentId: string) => void;
   onComposerError: (message: string | null) => void;
-  onSend: (sessionId: string, draftText?: string) => boolean;
+  onSend: (sessionId: string, draftText?: string, expandedText?: string | null) => boolean;
   onCancelQueuedPrompt: (sessionId: string, promptId: string) => void;
   onApprovalDecision: (
     sessionId: string,
@@ -4709,6 +5234,7 @@ function SessionPaneView({
     value: SessionSettingsValue,
   ) => void;
   onRefreshSessionModelOptions: (sessionId: string) => void;
+  onRefreshAgentCommands: (sessionId: string) => void;
   renderControlPanel: (paneId: string) => JSX.Element;
 }) {
   const activeTab = pane.tabs.find((tab) => tab.id === pane.activeTabId) ?? pane.tabs[0] ?? null;
@@ -5855,6 +6381,7 @@ function SessionPaneView({
           isSending={isSending}
           isStopping={isStopping}
           isSessionBusy={isSessionBusy}
+          isUpdating={isUpdating}
           showNewResponseIndicator={showNewResponseIndicator}
           footerModeLabel={labelForPaneViewMode(pane.viewMode)}
           onScrollToLatest={() => scrollToLatestMessage("smooth")}
@@ -5862,7 +6389,12 @@ function SessionPaneView({
           onDraftAttachmentRemove={onDraftAttachmentRemove}
           isRefreshingModelOptions={isRefreshingModelOptions}
           modelOptionsError={modelOptionsError}
+          agentCommands={agentCommands}
+          hasLoadedAgentCommands={hasLoadedAgentCommands}
+          isRefreshingAgentCommands={isRefreshingAgentCommands}
+          agentCommandsError={agentCommandsError}
           onRefreshSessionModelOptions={onRefreshSessionModelOptions}
+          onRefreshAgentCommands={onRefreshAgentCommands}
           onSend={onSend}
           onSessionSettingsChange={onSessionSettingsChange}
           onStopSession={onStopSession}
@@ -6150,6 +6682,9 @@ export function ClaudePromptSettingsCard({
 
   const modelOptions = sessionModelComboboxOptions(session.modelOptions, session.model);
   const currentModelOption = currentSessionModelOption(session);
+  const currentClaudeEffortValue = currentClaudeEffort(session);
+  const claudeEffortOptions = claudeEffortComboboxOptions(session);
+  const modelCapabilityHint = claudeEffortHint(session);
 
   return (
     <article className="message-card prompt-settings-card">
@@ -6206,12 +6741,32 @@ export function ClaudePromptSettingsCard({
             }
           />
         </div>
+        <div className="session-control-group">
+          <label className="session-control-label" htmlFor={`claude-effort-${paneId}`}>
+            Claude effort
+          </label>
+          <ThemedCombobox
+            id={`claude-effort-${paneId}`}
+            className="prompt-settings-select"
+            value={currentClaudeEffortValue}
+            options={claudeEffortOptions}
+            disabled={isUpdating}
+            onChange={(nextValue) =>
+              void onSessionSettingsChange(
+                session.id,
+                "claudeEffort",
+                nextValue as ClaudeEffortLevel,
+              )
+            }
+          />
+        </div>
         <p className="session-control-hint">
           {isRefreshingModelOptions
             ? "Refreshing Claude's live model list from the session."
             : session.modelOptions?.length
-              ? "Claude exposes its live model list during session initialization. Model changes are applied live to the session, and you can still paste a full model id if you need something outside the current list. Ask keeps approval cards, Auto-approve continues through tool requests, and Plan keeps Claude in read-only analysis mode."
+              ? "Claude exposes its live model list during session initialization. Model changes are applied live to the session, and you can still paste a full model id if you need something outside the current list. Ask keeps approval cards, Auto-approve continues through tool requests, Plan keeps Claude in read-only analysis mode, and effort changes restart Claude before the next prompt."
               : "Start the Claude session once to load its live model list. New Claude sessions begin on Sonnet, and you can still paste a full Claude model id manually."}
+          {modelCapabilityHint ? ` ${modelCapabilityHint}` : ""}
         </p>
       </div>
     </article>
@@ -6623,7 +7178,7 @@ export function GeminiPromptSettingsCard({
   );
 }
 
-const MessageCard = memo(function MessageCard({
+export const MessageCard = memo(function MessageCard({
   message,
   onOpenDiffPreview,
   preferImmediateHeavyRender = false,
@@ -6642,6 +7197,10 @@ const MessageCard = memo(function MessageCard({
     case "text": {
       const connectionRetryNotice =
         message.author === "assistant" ? parseConnectionRetryNotice(message.text) : null;
+      const commandLabel =
+        message.author === "you"
+          ? promptCommandMetaLabel(message.text, message.expandedText)
+          : null;
 
       if (connectionRetryNotice) {
         return (
@@ -6656,7 +7215,13 @@ const MessageCard = memo(function MessageCard({
 
       return (
         <article className={`message-card bubble bubble-${message.author}`}>
-          <MessageMeta author={message.author} timestamp={message.timestamp} />
+          <MessageMeta
+            author={message.author}
+            timestamp={message.timestamp}
+            trailing={
+              commandLabel ? <span className="message-meta-tag">{commandLabel}</span> : undefined
+            }
+          />
           {message.attachments && message.attachments.length > 0 ? (
             <MessageAttachmentList
               attachments={message.attachments}
@@ -6679,9 +7244,18 @@ const MessageCard = memo(function MessageCard({
               />
             )
           ) : message.text ? (
-            <p className="plain-text-copy">
-              {renderHighlightedText(message.text, searchQuery, searchHighlightTone)}
-            </p>
+            <>
+              <p className="plain-text-copy">
+                {renderHighlightedText(message.text, searchQuery, searchHighlightTone)}
+              </p>
+              {message.expandedText ? (
+                <ExpandedPromptPanel
+                  expandedText={message.expandedText}
+                  searchQuery={searchQuery}
+                  searchHighlightTone={searchHighlightTone}
+                />
+              ) : null}
+            </>
           ) : (
             <p className="support-copy">{imageAttachmentSummaryLabel(message.attachments?.length ?? 0)}</p>
           )}
@@ -6740,6 +7314,10 @@ const MessageCard = memo(function MessageCard({
   previous.searchQuery === next.searchQuery &&
   previous.searchHighlightTone === next.searchHighlightTone
 );
+
+function promptCommandMetaLabel(text: string, expandedText?: string | null) {
+  return expandedText && text.trim().startsWith("/") ? "Command" : null;
+}
 
 function ConnectionRetryCard({
   message,
@@ -7415,6 +7993,20 @@ function DiffCard({
   );
 }
 
+function DialogCloseIcon() {
+  return (
+    <svg viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+      <path
+        d="M4.25 4.25 11.75 11.75M11.75 4.25 4.25 11.75"
+        fill="none"
+        stroke="currentColor"
+        strokeLinecap="round"
+        strokeWidth="1.6"
+      />
+    </svg>
+  );
+}
+
 function PreviewIcon() {
   return (
     <svg className="command-icon" viewBox="0 0 16 16" aria-hidden="true" focusable="false">
@@ -7734,6 +8326,65 @@ function getErrorMessage(error: unknown) {
   return "The request failed.";
 }
 
+function readNavigatorOnline() {
+  if (typeof navigator === "undefined") {
+    return true;
+  }
+
+  return navigator.onLine !== false;
+}
+
+function describeBackendConnectionState(state: BackendConnectionState) {
+  switch (state) {
+    case "connecting":
+      return {
+        detail: "Connecting to the TermAl backend.",
+        label: "Connecting",
+        showSpinner: true,
+        tone: "active" as const,
+      };
+    case "connected":
+      return {
+        detail: "Live updates are connected.",
+        label: "Connected",
+        showSpinner: false,
+        tone: "idle" as const,
+      };
+    case "reconnecting":
+      return {
+        detail: "Waiting for the backend connection to recover.",
+        label: "Reconnecting",
+        showSpinner: true,
+        tone: "active" as const,
+      };
+    case "offline":
+      return {
+        detail: "The browser is offline or cannot reach the backend.",
+        label: "Offline",
+        showSpinner: false,
+        tone: "error" as const,
+      };
+  }
+}
+
+function BackendConnectionStatus({ state }: { state: BackendConnectionState }) {
+  const descriptor = describeBackendConnectionState(state);
+
+  return (
+    <div className="workspace-connection-status" role="status" aria-live="polite" title={descriptor.detail}>
+      <span className="card-label">Backend</span>
+      <span className={`chip chip-status chip-status-${descriptor.tone} workspace-connection-chip`}>
+        {descriptor.showSpinner ? (
+          <span className="activity-spinner workspace-connection-spinner" aria-hidden="true" />
+        ) : (
+          <span className="workspace-connection-dot" aria-hidden="true" />
+        )}
+        <span>{descriptor.label}</span>
+      </span>
+    </div>
+  );
+}
+
 function primaryModifierLabel() {
   if (typeof navigator === "undefined") {
     return "Ctrl";
@@ -7864,12 +8515,23 @@ function setSessionFlag(current: SessionFlagMap, sessionId: string, value: boole
   return next;
 }
 
-function pruneSessionValues<T extends string | undefined>(
+function pruneSessionValues<T>(
   current: Record<string, T>,
   availableSessionIds: Set<string>,
+  invalidSessionIds?: Set<string>,
 ): Record<string, T> {
-  const nextEntries = Object.entries(current).filter(([sessionId]) => availableSessionIds.has(sessionId));
+  const nextEntries = Object.entries(current).filter(([sessionId]) => {
+    return availableSessionIds.has(sessionId) && !invalidSessionIds?.has(sessionId);
+  });
   return Object.fromEntries(nextEntries) as Record<string, T>;
+}
+
+function pruneSessionCommandValues(
+  current: SessionAgentCommandMap,
+  availableSessionIds: Set<string>,
+  invalidSessionIds: Set<string>,
+): SessionAgentCommandMap {
+  return pruneSessionValues(current, availableSessionIds, invalidSessionIds);
 }
 
 function pruneSessionAttachmentValues(
@@ -7888,6 +8550,17 @@ function pruneSessionAttachmentValues(
 
 function pruneSessionFlags(current: SessionFlagMap, availableSessionIds: Set<string>): SessionFlagMap {
   const nextEntries = Object.entries(current).filter(([sessionId]) => availableSessionIds.has(sessionId));
+  return Object.fromEntries(nextEntries);
+}
+
+function pruneSessionFlagsWithInvalidation(
+  current: SessionFlagMap,
+  availableSessionIds: Set<string>,
+  invalidSessionIds: Set<string>,
+): SessionFlagMap {
+  const nextEntries = Object.entries(current).filter(([sessionId]) => {
+    return availableSessionIds.has(sessionId) && !invalidSessionIds.has(sessionId);
+  });
   return Object.fromEntries(nextEntries);
 }
 

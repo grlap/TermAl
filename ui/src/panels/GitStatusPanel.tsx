@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   applyGitFileAction,
   fetchGitStatus,
@@ -38,9 +38,14 @@ export function GitStatusPanel({
   const [isLoading, setIsLoading] = useState(false);
   const [pendingActionKey, setPendingActionKey] = useState<string | null>(null);
   const [treeExpansionByKey, setTreeExpansionByKey] = useState<Record<string, boolean>>({});
+  const onStatusChangeRef = useRef(onStatusChange);
   const normalizedWorkdir = workdir?.trim() ?? "";
   const changedFiles = status?.files ?? [];
   const sections = useMemo(() => buildGitStatusTree(changedFiles), [changedFiles]);
+
+  useEffect(() => {
+    onStatusChangeRef.current = onStatusChange;
+  }, [onStatusChange]);
 
   useEffect(() => {
     setWorkdirDraft(workdir ?? "");
@@ -55,12 +60,12 @@ export function GitStatusPanel({
     if (!normalizedWorkdir) {
       setStatus(null);
       setError(null);
-      onStatusChange?.(null);
+      onStatusChangeRef.current?.(null);
       return;
     }
 
     void loadStatus(normalizedWorkdir);
-  }, [normalizedWorkdir, onStatusChange]);
+  }, [normalizedWorkdir]);
 
   async function loadStatus(path: string) {
     setIsLoading(true);
@@ -68,11 +73,11 @@ export function GitStatusPanel({
     try {
       const response = await fetchGitStatus(path);
       setStatus(response);
-      onStatusChange?.(response);
+      onStatusChangeRef.current?.(response);
     } catch (nextError) {
       setStatus(null);
       setError(getErrorMessage(nextError));
-      onStatusChange?.(null);
+      onStatusChangeRef.current?.(null);
     } finally {
       setIsLoading(false);
     }
@@ -124,7 +129,7 @@ export function GitStatusPanel({
 
       if (response) {
         setStatus(response);
-        onStatusChange?.(response);
+        onStatusChangeRef.current?.(response);
       }
     } catch (nextError) {
       setError(getErrorMessage(nextError));
@@ -132,7 +137,7 @@ export function GitStatusPanel({
         try {
           const refreshedStatus = await fetchGitStatus(activeWorkdir);
           setStatus(refreshedStatus);
-          onStatusChange?.(refreshedStatus);
+          onStatusChangeRef.current?.(refreshedStatus);
         } catch {
           // Keep the action error visible if the follow-up refresh also fails.
         }

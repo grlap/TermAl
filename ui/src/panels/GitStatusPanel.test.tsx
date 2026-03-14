@@ -102,6 +102,43 @@ describe("GitStatusPanel", () => {
     });
   });
 
+  it("does not refetch git status when only the callback prop changes", async () => {
+    fetchGitStatusMock.mockResolvedValue(
+      makeStatusResponse([
+        {
+          indexStatus: "M",
+          path: "src/main.rs",
+          worktreeStatus: "M",
+        },
+      ]),
+    );
+
+    const { rerender } = render(
+      <GitStatusPanel
+        workdir="/repo"
+        onStatusChange={() => {}}
+        onOpenPath={() => {}}
+        onOpenWorkdir={() => {}}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getAllByText("main.rs").length).toBeGreaterThan(0);
+    });
+    expect(fetchGitStatusMock).toHaveBeenCalledTimes(1);
+
+    rerender(
+      <GitStatusPanel
+        workdir="/repo"
+        onStatusChange={() => {}}
+        onOpenPath={() => {}}
+        onOpenWorkdir={() => {}}
+      />,
+    );
+
+    expect(fetchGitStatusMock).toHaveBeenCalledTimes(1);
+  });
+
   it("applies git file actions from file rows and refreshes the tree state", async () => {
     fetchGitStatusMock.mockResolvedValue(
       makeStatusResponse([

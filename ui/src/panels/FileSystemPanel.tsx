@@ -1,24 +1,72 @@
 import { useEffect, useState } from "react";
-import { fetchDirectory, type DirectoryEntry, type DirectoryResponse } from "../api";
+import {
+  fetchDirectory,
+  fetchGitStatus,
+  type DirectoryEntry,
+  type DirectoryResponse,
+  type GitStatusFile,
+  type GitStatusResponse,
+} from "../api";
+import { gitStatusTone } from "./git-status-tree";
+
+type GitDecorationTone = ReturnType<typeof gitStatusTone>;
+
+type FileDecoration = {
+  label: string;
+  statusLabel: string;
+  tone: GitDecorationTone;
+};
+
+type FileSystemGitDecorations = {
+  directoriesByPath: Record<string, GitDecorationTone | undefined>;
+  filesByPath: Record<string, FileDecoration | undefined>;
+};
+
+const GIT_STATUS_LABELS: Record<string, string> = {
+  "?": "Untracked",
+  A: "Added",
+  C: "Copied",
+  D: "Deleted",
+  M: "Modified",
+  R: "Renamed",
+  T: "Type changed",
+  U: "Unmerged",
+};
+
+const GIT_TONE_PRIORITY: Record<GitDecorationTone, number> = {
+  added: 1,
+  renamed: 2,
+  modified: 3,
+  deleted: 4,
+  conflict: 5,
+};
 
 export function FileSystemPanel({
   onOpenPath,
   onOpenRootPath,
   rootPath,
+  showPathControls = true,
 }: {
   onOpenPath: (path: string) => void;
   onOpenRootPath: (path: string) => void;
   rootPath: string | null;
+  showPathControls?: boolean;
 }) {
   const [rootDraft, setRootDraft] = useState(rootPath ?? "");
   const [directoriesByPath, setDirectoriesByPath] = useState<Record<string, DirectoryResponse | undefined>>({});
   const [errorsByPath, setErrorsByPath] = useState<Record<string, string | undefined>>({});
   const [expandedPaths, setExpandedPaths] = useState<Record<string, true | undefined>>({});
   const [loadingPaths, setLoadingPaths] = useState<Record<string, true | undefined>>({});
+  const [gitDecorations, setGitDecorations] = useState<FileSystemGitDecorations>(createEmptyGitDecorations());
   const normalizedRootPath = rootPath?.trim() ?? "";
   const rootDirectory = normalizedRootPath ? directoriesByPath[normalizedRootPath] ?? null : null;
   const rootError = normalizedRootPath ? errorsByPath[normalizedRootPath] ?? null : null;
   const isRootLoading = Boolean(normalizedRootPath && loadingPaths[normalizedRootPath]);
+  const normalizedRootDecorationPath = normalizePath(normalizedRootPath);
+  const rootTone = normalizedRootDecorationPath
+    ? gitDecorations.directoriesByPath[normalizedRootDecorationPath] ?? null
+    : null;
+  const rootDisplayName = rootDirectory?.name || pathBaseName(normalizedRootPath) || normalizedRootPath;
 
   useEffect(() => {
     setRootDraft(rootPath ?? "");
@@ -38,6 +86,35 @@ export function FileSystemPanel({
           },
     );
     void loadDirectory(normalizedRootPath, true);
+  }, [normalizedRootPath]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    if (!normalizedRootPath) {
+      setGitDecorations(createEmptyGitDecorations());
+      return;
+    }
+
+    void fetchGitStatus(normalizedRootPath)
+      .then((status) => {
+        if (cancelled) {
+          return;
+        }
+
+        setGitDecorations(buildGitDecorations(status, normalizedRootPath));
+      })
+      .catch(() => {
+        if (cancelled) {
+          return;
+        }
+
+        setGitDecorations(createEmptyGitDecorations());
+      });
+
+    return () => {
+      cancelled = true;
+    };
   }, [normalizedRootPath]);
 
   async function loadDirectory(path: string, force = false) {
@@ -101,34 +178,36 @@ export function FileSystemPanel({
   }
 
   return (
-    <div className="source-pane filesystem-panel">
-      <div className="source-toolbar">
-        <div className="source-path-row">
-          <input
-            className="source-path-input"
-            type="text"
-            value={rootDraft}
-            onChange={(event) => setRootDraft(event.target.value)}
-            placeholder="/absolute/path/to/folder"
-          />
-          <button
-            className="ghost-button"
-            type="button"
-            onClick={() => onOpenRootPath(rootDraft.trim())}
-            disabled={!rootDraft.trim()}
-          >
-            Open
-          </button>
-          <button
-            className="ghost-button"
-            type="button"
-            onClick={() => normalizedRootPath && void loadDirectory(normalizedRootPath, true)}
-            disabled={!normalizedRootPath}
-          >
-            Refresh
-          </button>
+    <div className={`source-pane filesystem-panel${rootDirectory ? " has-filetree" : ""}`}>
+      {showPathControls ? (
+        <div className="source-toolbar">
+          <div className="source-path-row">
+            <input
+              className="source-path-input"
+              type="text"
+              value={rootDraft}
+              onChange={(event) => setRootDraft(event.target.value)}
+              placeholder="/absolute/path/to/folder"
+            />
+            <button
+              className="ghost-button"
+              type="button"
+              onClick={() => onOpenRootPath(rootDraft.trim())}
+              disabled={!rootDraft.trim()}
+            >
+              Open
+            </button>
+            <button
+              className="ghost-button"
+              type="button"
+              onClick={() => normalizedRootPath && void loadDirectory(normalizedRootPath, true)}
+              disabled={!normalizedRootPath}
+            >
+              Refresh
+            </button>
+          </div>
         </div>
-      </div>
+      ) : null}
 
       {!normalizedRootPath ? (
         <EmptyState
@@ -156,10 +235,17 @@ export function FileSystemPanel({
       ) : null}
 
       {rootDirectory ? (
-        <article className="message-card filesystem-card">
-          <div className="message-meta">
-            <span>Files</span>
-            <span>{rootDirectory.path}</span>
+        <section className="filesystem-explorer" aria-label="Files">
+          <div className="filesystem-root-header">
+            <div className="filesystem-root-copy">
+              <span className="filesystem-root-name">{rootDisplayName}</span>
+              <span className="filesystem-root-path" title={rootDirectory.path}>
+                {rootDirectory.path}
+              </span>
+            </div>
+            {rootTone ? (
+              <span className={`filesystem-git-dot filesystem-git-dot-${rootTone}`} aria-hidden="true" />
+            ) : null}
           </div>
           {rootDirectory.entries.length > 0 ? (
             <DirectoryTree
@@ -167,14 +253,15 @@ export function FileSystemPanel({
               entries={rootDirectory.entries}
               errorsByPath={errorsByPath}
               expandedPaths={expandedPaths}
+              gitDecorations={gitDecorations}
               loadingPaths={loadingPaths}
               onDirectoryToggle={handleDirectoryToggle}
               onOpenPath={onOpenPath}
             />
           ) : (
-            <p className="support-copy">This folder is empty.</p>
+            <p className="support-copy filesystem-support-copy">This folder is empty.</p>
           )}
-        </article>
+        </section>
       ) : null}
     </div>
   );
@@ -185,6 +272,7 @@ function DirectoryTree({
   entries,
   errorsByPath,
   expandedPaths,
+  gitDecorations,
   loadingPaths,
   onDirectoryToggle,
   onOpenPath,
@@ -193,6 +281,7 @@ function DirectoryTree({
   entries: DirectoryEntry[];
   errorsByPath: Record<string, string | undefined>;
   expandedPaths: Record<string, true | undefined>;
+  gitDecorations: FileSystemGitDecorations;
   loadingPaths: Record<string, true | undefined>;
   onDirectoryToggle: (path: string) => void;
   onOpenPath: (path: string) => void;
@@ -205,19 +294,35 @@ function DirectoryTree({
         const directory = isDirectory ? directoriesByPath[entry.path] : undefined;
         const isLoading = Boolean(loadingPaths[entry.path]);
         const error = errorsByPath[entry.path];
+        const normalizedEntryPath = normalizePath(entry.path);
+        const directoryTone = isDirectory
+          ? gitDecorations.directoriesByPath[normalizedEntryPath] ?? null
+          : null;
+        const fileDecoration = isDirectory
+          ? null
+          : gitDecorations.filesByPath[normalizedEntryPath] ?? null;
 
         return (
           <div key={entry.path} className="filesystem-node">
             {isDirectory ? (
               <button
-                className="filesystem-row filesystem-directory-row"
+                className={`filesystem-row filesystem-directory-row${isExpanded ? " expanded" : ""}`}
                 type="button"
                 onClick={() => onDirectoryToggle(entry.path)}
               >
-                <span className="filesystem-toggle" aria-hidden="true">
-                  {isExpanded ? "v" : ">"}
+                <span className={`filesystem-toggle${isExpanded ? " expanded" : ""}`} aria-hidden="true">
+                  <ChevronIcon expanded={isExpanded} />
+                </span>
+                <span
+                  className={`filesystem-entry-icon filesystem-entry-icon-directory${isExpanded ? " open" : ""}`}
+                  aria-hidden="true"
+                >
+                  <FolderIcon open={isExpanded} />
                 </span>
                 <span className="filesystem-name">{entry.name}</span>
+                {directoryTone ? (
+                  <span className={`filesystem-git-dot filesystem-git-dot-${directoryTone}`} aria-hidden="true" />
+                ) : null}
               </button>
             ) : (
               <button
@@ -225,30 +330,42 @@ function DirectoryTree({
                 type="button"
                 onClick={() => onOpenPath(entry.path)}
               >
-                <span className="filesystem-toggle" aria-hidden="true">
-                  -
+                <span className="filesystem-toggle filesystem-toggle-placeholder" aria-hidden="true">
+                  <ChevronIcon expanded={false} />
+                </span>
+                <span className="filesystem-entry-icon filesystem-entry-icon-file" aria-hidden="true">
+                  <FileIcon />
                 </span>
                 <span className="filesystem-name">{entry.name}</span>
+                {fileDecoration ? (
+                  <span
+                    className={`filesystem-git-badge filesystem-git-badge-${fileDecoration.tone}`}
+                    title={fileDecoration.statusLabel}
+                  >
+                    {fileDecoration.label}
+                  </span>
+                ) : null}
               </button>
             )}
 
             {isDirectory && isExpanded ? (
               <div className="filesystem-children">
-                {isLoading ? <p className="support-copy">Loading...</p> : null}
-                {error ? <p className="support-copy">{error}</p> : null}
+                {isLoading ? <p className="support-copy filesystem-support-copy">Loading...</p> : null}
+                {error ? <p className="support-copy filesystem-support-copy">{error}</p> : null}
                 {directory && directory.entries.length > 0 ? (
                   <DirectoryTree
                     directoriesByPath={directoriesByPath}
                     entries={directory.entries}
                     errorsByPath={errorsByPath}
                     expandedPaths={expandedPaths}
+                    gitDecorations={gitDecorations}
                     loadingPaths={loadingPaths}
                     onDirectoryToggle={onDirectoryToggle}
                     onOpenPath={onOpenPath}
                   />
                 ) : null}
                 {directory && directory.entries.length === 0 && !isLoading && !error ? (
-                  <p className="support-copy">Empty folder.</p>
+                  <p className="support-copy filesystem-support-copy">Empty folder.</p>
                 ) : null}
               </div>
             ) : null}
@@ -267,6 +384,176 @@ function EmptyState({ title, body }: { title: string; body: string }) {
       <p>{body}</p>
     </article>
   );
+}
+
+function ChevronIcon({ expanded }: { expanded: boolean }) {
+  return (
+    <svg
+      className={`filesystem-chevron${expanded ? " expanded" : ""}`}
+      viewBox="0 0 12 12"
+      focusable="false"
+      aria-hidden="true"
+    >
+      <path
+        d="M4 2.75 7.75 6 4 9.25"
+        fill="none"
+        stroke="currentColor"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth="1.5"
+      />
+    </svg>
+  );
+}
+
+function FolderIcon({ open }: { open: boolean }) {
+  return open ? (
+    <svg viewBox="0 0 16 16" focusable="false" aria-hidden="true">
+      <path
+        d="M2.5 5.5A1.5 1.5 0 0 1 4 4h2.7l1 1.15H13A1.5 1.5 0 0 1 14.5 6.7l-.55 5.55A1.5 1.5 0 0 1 12.45 13.6H3.6A1.5 1.5 0 0 1 2.1 12.1V5.5Z"
+        fill="none"
+        stroke="currentColor"
+        strokeLinejoin="round"
+        strokeWidth="1.35"
+      />
+      <path d="M2.7 6.25h11" fill="none" stroke="currentColor" strokeWidth="1.35" />
+    </svg>
+  ) : (
+    <svg viewBox="0 0 16 16" focusable="false" aria-hidden="true">
+      <path
+        d="M2.5 5.4A1.4 1.4 0 0 1 3.9 4h2.55l.95 1.1h4.7a1.4 1.4 0 0 1 1.4 1.4v5.6a1.4 1.4 0 0 1-1.4 1.4H3.9a1.4 1.4 0 0 1-1.4-1.4V5.4Z"
+        fill="none"
+        stroke="currentColor"
+        strokeLinejoin="round"
+        strokeWidth="1.35"
+      />
+      <path d="M2.5 6.45h11" fill="none" stroke="currentColor" strokeWidth="1.35" />
+    </svg>
+  );
+}
+
+function FileIcon() {
+  return (
+    <svg viewBox="0 0 16 16" focusable="false" aria-hidden="true">
+      <path
+        d="M4 2.4h5l3 3v8.2A1.4 1.4 0 0 1 10.6 15H4A1.4 1.4 0 0 1 2.6 13.6V3.8A1.4 1.4 0 0 1 4 2.4Z"
+        fill="none"
+        stroke="currentColor"
+        strokeLinejoin="round"
+        strokeWidth="1.35"
+      />
+      <path d="M9 2.75v3.1h3.1" fill="none" stroke="currentColor" strokeWidth="1.35" />
+    </svg>
+  );
+}
+
+function createEmptyGitDecorations(): FileSystemGitDecorations {
+  return {
+    directoriesByPath: {},
+    filesByPath: {},
+  };
+}
+
+function buildGitDecorations(status: GitStatusResponse, rootPath: string): FileSystemGitDecorations {
+  if (!status.repoRoot) {
+    return createEmptyGitDecorations();
+  }
+
+  const normalizedRoot = normalizePath(rootPath);
+  const filesByPath: Record<string, FileDecoration | undefined> = {};
+  const directoriesByPath: Record<string, GitDecorationTone | undefined> = {};
+
+  for (const file of status.files) {
+    const statusCode = resolveGitStatusCode(file);
+    if (!statusCode) {
+      continue;
+    }
+
+    const absolutePath = joinNormalizedPath(status.repoRoot, file.path);
+    if (!isPathWithinRoot(absolutePath, normalizedRoot)) {
+      continue;
+    }
+
+    const tone = gitStatusTone(statusCode);
+    filesByPath[absolutePath] = {
+      label: statusCode,
+      statusLabel: GIT_STATUS_LABELS[statusCode] ?? "Changed",
+      tone,
+    };
+
+    for (let ancestor = parentPath(absolutePath); ancestor && isPathWithinRoot(ancestor, normalizedRoot); ancestor = parentPath(ancestor)) {
+      directoriesByPath[ancestor] = strongerTone(directoriesByPath[ancestor], tone);
+      if (ancestor === normalizedRoot) {
+        break;
+      }
+    }
+  }
+
+  return {
+    directoriesByPath,
+    filesByPath,
+  };
+}
+
+function resolveGitStatusCode(file: GitStatusFile) {
+  return normalizeGitStatus(file.worktreeStatus) ?? normalizeGitStatus(file.indexStatus);
+}
+
+function normalizeGitStatus(status?: string | null) {
+  const normalized = status?.trim().toUpperCase() ?? "";
+  if (!normalized || normalized === ".") {
+    return null;
+  }
+
+  return normalized[0] ?? null;
+}
+
+function strongerTone(
+  currentTone: GitDecorationTone | undefined,
+  nextTone: GitDecorationTone,
+): GitDecorationTone {
+  if (!currentTone) {
+    return nextTone;
+  }
+
+  return GIT_TONE_PRIORITY[nextTone] > GIT_TONE_PRIORITY[currentTone] ? nextTone : currentTone;
+}
+
+function isPathWithinRoot(path: string, root: string) {
+  return path === root || path.startsWith(`${root}/`);
+}
+
+function parentPath(path: string) {
+  const lastSlashIndex = path.lastIndexOf("/");
+  if (lastSlashIndex <= 0) {
+    return null;
+  }
+
+  const parent = path.slice(0, lastSlashIndex);
+  return /^[a-z]:$/i.test(parent) ? `${parent}/` : parent;
+}
+
+function joinNormalizedPath(basePath: string, relativePath: string) {
+  const normalizedBase = normalizePath(basePath);
+  const normalizedRelative = relativePath.trim().split(/[\\/]+/).filter(Boolean).join("/");
+  return normalizePath(`${normalizedBase}/${normalizedRelative}`);
+}
+
+function normalizePath(path: string) {
+  const normalized = path.trim().replace(/\\+/g, "/").replace(/\/+/g, "/");
+  if (!normalized) {
+    return "";
+  }
+
+  if (/^[a-z]:\/$/i.test(normalized)) {
+    return normalized;
+  }
+
+  return normalized.endsWith("/") ? normalized.slice(0, -1) : normalized;
+}
+
+function pathBaseName(path: string) {
+  return path.trim().split(/[\\/]+/).filter(Boolean).pop() ?? "";
 }
 
 function getErrorMessage(error: unknown) {

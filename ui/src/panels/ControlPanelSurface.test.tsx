@@ -14,6 +14,11 @@ describe("ControlPanelSurface", () => {
     expect(screen.getByRole("heading", { level: 2, name: "Sessions" })).toBeInTheDocument();
     expect(screen.getByTestId("section-body")).toHaveTextContent("sessions");
 
+    fireEvent.click(screen.getByRole("button", { name: "Files" }));
+
+    expect(screen.getByRole("heading", { level: 2, name: "Files" })).toBeInTheDocument();
+    expect(screen.getByTestId("section-body")).toHaveTextContent("files");
+
     fireEvent.click(screen.getByRole("button", { name: "Projects" }));
 
     expect(screen.getByRole("heading", { level: 2, name: "Projects" })).toBeInTheDocument();
@@ -43,10 +48,33 @@ describe("ControlPanelSurface", () => {
     expect(screen.getByRole("button", { name: "Git status" })).toHaveTextContent("11");
   });
 
-  it("uses Projects, Sessions, Git status as the default dock order", () => {
+  it("renders header actions for the active section", () => {
+    renderSurface({
+      renderHeaderActions: (sectionId) =>
+        sectionId === "sessions" ? <button type="button">New</button> : null,
+    });
+
+    expect(screen.getByRole("button", { name: "New" })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Files" }));
+    expect(screen.queryByRole("button", { name: "New" })).not.toBeInTheDocument();
+  });
+
+  it("uses Projects, Sessions, Files, Git status as the default dock order", () => {
     renderSurface();
 
-    expect(getDockSectionLabels()).toEqual(["Projects", "Sessions", "Git status"]);
+    expect(getDockSectionLabels()).toEqual(["Projects", "Sessions", "Files", "Git status"]);
+  });
+
+  it("migrates the legacy dock order so Files lands directly above Git status", () => {
+    window.localStorage.setItem(
+      "termal-control-panel-section-order",
+      JSON.stringify(["projects", "sessions", "git", "files"]),
+    );
+
+    renderSurface();
+
+    expect(getDockSectionLabels()).toEqual(["Projects", "Sessions", "Files", "Git status"]);
   });
 
   it("reorders the dock sections by drag and drop and restores that order on remount", () => {
@@ -58,16 +86,16 @@ describe("ControlPanelSurface", () => {
     mockButtonBounds(projectsButton, { top: 0, height: 40 });
 
     fireEvent.dragStart(gitButton, { dataTransfer });
-    fireEvent.dragOver(projectsButton, { clientY: 4, dataTransfer });
-    fireEvent.drop(projectsButton, { clientY: 4, dataTransfer });
+    fireEvent.dragOver(projectsButton, { clientY: 36, dataTransfer });
+    fireEvent.drop(projectsButton, { clientY: 36, dataTransfer });
     fireEvent.dragEnd(gitButton, { dataTransfer });
 
-    expect(getDockSectionLabels()).toEqual(["Projects", "Git status", "Sessions"]);
+    expect(getDockSectionLabels()).toEqual(["Projects", "Git status", "Sessions", "Files"]);
 
     unmount();
     renderSurface();
 
-    expect(getDockSectionLabels()).toEqual(["Projects", "Git status", "Sessions"]);
+    expect(getDockSectionLabels()).toEqual(["Projects", "Git status", "Sessions", "Files"]);
   });
 });
 
@@ -123,4 +151,3 @@ function mockButtonBounds(button: HTMLElement, bounds: { top: number; height: nu
     }),
   });
 }
-
