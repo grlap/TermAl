@@ -5,10 +5,18 @@ import {
   useRef,
   useState,
   type CSSProperties,
+  type DragEvent as ReactDragEvent,
   type ReactNode,
 } from "react";
 
 export type ControlPanelSectionId = "sessions" | "projects" | "git";
+
+const DEFAULT_CONTROL_PANEL_SECTION_ORDER: readonly ControlPanelSectionId[] = [
+  "projects",
+  "sessions",
+  "git",
+];
+const CONTROL_PANEL_SECTION_ORDER_STORAGE_KEY = "termal-control-panel-section-order";
 
 type ControlPanelSurfaceProps = {
   gitStatusCount: number;
@@ -35,6 +43,13 @@ type ControlPanelActionDefinition = {
   label: string;
 };
 
+type DockDropPosition = "before" | "after";
+
+type DockDropTarget = {
+  position: DockDropPosition;
+  sectionId: ControlPanelSectionId;
+};
+
 const GITHUB_MARK_URL = "https://upload.wikimedia.org/wikipedia/commons/9/91/Octicons-mark-github.svg";
 
 const PREFERENCES_ACTION: ControlPanelActionDefinition = {
@@ -51,27 +66,31 @@ export const ControlPanelSurface = forwardRef<ControlPanelSurfaceHandle, Control
   sessionCount,
 }, ref): JSX.Element {
   const [activeSection, setActiveSection] = useState<ControlPanelSectionId>("sessions");
+  const [sectionOrder, setSectionOrder] = useState<ControlPanelSectionId[]>(() => getStoredControlPanelSectionOrder());
+  const [draggedSectionId, setDraggedSectionId] = useState<ControlPanelSectionId | null>(null);
+  const [dropTarget, setDropTarget] = useState<DockDropTarget | null>(null);
   const bodyRef = useRef<HTMLDivElement | null>(null);
-  const sectionDefinitions: ReadonlyArray<ControlPanelSectionDefinition> = [
-    {
+  const sectionDefinitionLookup: Record<ControlPanelSectionId, ControlPanelSectionDefinition> = {
+    sessions: {
       badgeCount: sessionCount,
       id: "sessions",
       label: "Sessions",
       icon: <SessionsIcon />,
     },
-    {
+    projects: {
       badgeCount: projectCount,
       id: "projects",
       label: "Projects",
       icon: <ProjectsIcon />,
     },
-    {
+    git: {
       badgeCount: gitStatusCount,
       id: "git",
       label: "Git status",
       icon: <GitStatusIcon />,
     },
-  ];
+  };
+  const sectionDefinitions = sectionOrder.map((sectionId) => sectionDefinitionLookup[sectionId]);
   const activeSectionDefinition =
     sectionDefinitions.find((definition) => definition.id === activeSection) ?? sectionDefinitions[0];
 
@@ -82,10 +101,59 @@ export const ControlPanelSurface = forwardRef<ControlPanelSurfaceHandle, Control
   }));
 
   useEffect(() => {
+    persistControlPanelSectionOrder(sectionOrder);
+  }, [sectionOrder]);
+
+  useEffect(() => {
     if (bodyRef.current) {
       bodyRef.current.scrollTop = 0;
     }
   }, [activeSection]);
+
+  function clearDragState() {
+    setDraggedSectionId(null);
+    setDropTarget(null);
+  }
+
+  function handleSectionDragStart(event: ReactDragEvent<HTMLButtonElement>, sectionId: ControlPanelSectionId) {
+    setDraggedSectionId(sectionId);
+    setDropTarget(null);
+    event.dataTransfer?.setData("text/plain", sectionId);
+    if (event.dataTransfer) {
+      event.dataTransfer.effectAllowed = "move";
+    }
+  }
+
+  function handleSectionDragOver(event: ReactDragEvent<HTMLButtonElement>, sectionId: ControlPanelSectionId) {
+    if (!draggedSectionId || draggedSectionId === sectionId) {
+      setDropTarget(null);
+      return;
+    }
+
+    event.preventDefault();
+    if (event.dataTransfer) {
+      event.dataTransfer.dropEffect = "move";
+    }
+
+    const position = resolveDockDropPosition(event);
+    setDropTarget((current) =>
+      current?.sectionId === sectionId && current.position === position
+        ? current
+        : { sectionId, position },
+    );
+  }
+
+  function handleSectionDrop(event: ReactDragEvent<HTMLButtonElement>, sectionId: ControlPanelSectionId) {
+    if (!draggedSectionId) {
+      clearDragState();
+      return;
+    }
+
+    event.preventDefault();
+    const position = resolveDockDropPosition(event);
+    setSectionOrder((current) => moveSectionOrder(current, draggedSectionId, sectionId, position));
+    clearDragState();
+  }
 
   return (
     <div className="control-panel-shell">
@@ -95,7 +163,13 @@ export const ControlPanelSurface = forwardRef<ControlPanelSurfaceHandle, Control
             <ControlPanelActivityButton
               key={definition.id}
               definition={definition}
+              dropPosition={dropTarget?.sectionId === definition.id ? dropTarget.position : null}
               isActive={activeSection === definition.id}
+              isDragging={draggedSectionId === definition.id}
+              onDragEnd={clearDragState}
+              onDragOver={handleSectionDragOver}
+              onDragStart={handleSectionDragStart}
+              onDrop={handleSectionDrop}
               onSelect={setActiveSection}
             />
           ))}
@@ -126,11 +200,23 @@ ControlPanelSurface.displayName = "ControlPanelSurface";
 
 function ControlPanelActivityButton({
   definition,
+  dropPosition,
   isActive,
+  isDragging,
+  onDragEnd,
+  onDragOver,
+  onDragStart,
+  onDrop,
   onSelect,
 }: {
   definition: ControlPanelSectionDefinition;
+  dropPosition: DockDropPosition | null;
   isActive: boolean;
+  isDragging: boolean;
+  onDragEnd: () => void;
+  onDragOver: (event: ReactDragEvent<HTMLButtonElement>, sectionId: ControlPanelSectionId) => void;
+  onDragStart: (event: ReactDragEvent<HTMLButtonElement>, sectionId: ControlPanelSectionId) => void;
+  onDrop: (event: ReactDragEvent<HTMLButtonElement>, sectionId: ControlPanelSectionId) => void;
   onSelect: (sectionId: ControlPanelSectionId) => void;
 }) {
   const showBadge = Number.isFinite(definition.badgeCount) && (definition.badgeCount ?? 0) > 0;
@@ -138,12 +224,17 @@ function ControlPanelActivityButton({
 
   return (
     <button
-      className={`control-panel-activity-button${isActive ? " selected" : ""}`}
+      className={`control-panel-activity-button control-panel-section-button${isActive ? " selected" : ""}${isDragging ? " dragging" : ""}${dropPosition ? ` drop-${dropPosition}` : ""}`}
       type="button"
+      draggable
       aria-label={definition.label}
       aria-pressed={isActive}
-      title={definition.label}
+      title={`${definition.label} (drag to reorder)`}
       onClick={() => onSelect(definition.id)}
+      onDragEnd={onDragEnd}
+      onDragOver={(event) => onDragOver(event, definition.id)}
+      onDragStart={(event) => onDragStart(event, definition.id)}
+      onDrop={(event) => onDrop(event, definition.id)}
     >
       <span className="control-panel-activity-icon" aria-hidden="true">
         {definition.icon}
@@ -181,6 +272,99 @@ function ControlPanelActionButton({
         {definition.icon}
       </span>
     </button>
+  );
+}
+
+function resolveDockDropPosition(event: ReactDragEvent<HTMLButtonElement>): DockDropPosition {
+  const bounds = event.currentTarget.getBoundingClientRect();
+  return event.clientY < bounds.top + bounds.height / 2 ? "before" : "after";
+}
+
+function moveSectionOrder(
+  currentOrder: readonly ControlPanelSectionId[],
+  draggedSectionId: ControlPanelSectionId,
+  targetSectionId: ControlPanelSectionId,
+  position: DockDropPosition,
+): ControlPanelSectionId[] {
+  const normalizedOrder = normalizeControlPanelSectionOrder(currentOrder);
+  if (draggedSectionId === targetSectionId) {
+    return normalizedOrder;
+  }
+
+  const withoutDragged = normalizedOrder.filter((sectionId) => sectionId !== draggedSectionId);
+  const targetIndex = withoutDragged.indexOf(targetSectionId);
+  if (targetIndex === -1) {
+    return normalizedOrder;
+  }
+
+  const insertIndex = position === "before" ? targetIndex : targetIndex + 1;
+  return [
+    ...withoutDragged.slice(0, insertIndex),
+    draggedSectionId,
+    ...withoutDragged.slice(insertIndex),
+  ];
+}
+
+function normalizeControlPanelSectionOrder(order: readonly ControlPanelSectionId[]): ControlPanelSectionId[] {
+  const seen = new Set<ControlPanelSectionId>();
+  const normalized: ControlPanelSectionId[] = [];
+
+  for (const sectionId of order) {
+    if (!isControlPanelSectionId(sectionId) || seen.has(sectionId)) {
+      continue;
+    }
+
+    normalized.push(sectionId);
+    seen.add(sectionId);
+  }
+
+  for (const sectionId of DEFAULT_CONTROL_PANEL_SECTION_ORDER) {
+    if (seen.has(sectionId)) {
+      continue;
+    }
+
+    normalized.push(sectionId);
+  }
+
+  return normalized;
+}
+
+function isControlPanelSectionId(value: unknown): value is ControlPanelSectionId {
+  return DEFAULT_CONTROL_PANEL_SECTION_ORDER.includes(value as ControlPanelSectionId);
+}
+
+function getStoredControlPanelSectionOrder(): ControlPanelSectionId[] {
+  if (typeof window === "undefined") {
+    return [...DEFAULT_CONTROL_PANEL_SECTION_ORDER];
+  }
+
+  const stored = window.localStorage.getItem(CONTROL_PANEL_SECTION_ORDER_STORAGE_KEY);
+  if (!stored) {
+    return [...DEFAULT_CONTROL_PANEL_SECTION_ORDER];
+  }
+
+  try {
+    const parsed = JSON.parse(stored);
+    if (!Array.isArray(parsed)) {
+      return [...DEFAULT_CONTROL_PANEL_SECTION_ORDER];
+    }
+
+    return normalizeControlPanelSectionOrder(
+      parsed.filter((value): value is ControlPanelSectionId => isControlPanelSectionId(value)),
+    );
+  } catch {
+    return [...DEFAULT_CONTROL_PANEL_SECTION_ORDER];
+  }
+}
+
+function persistControlPanelSectionOrder(order: readonly ControlPanelSectionId[]) {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  window.localStorage.setItem(
+    CONTROL_PANEL_SECTION_ORDER_STORAGE_KEY,
+    JSON.stringify(normalizeControlPanelSectionOrder(order)),
   );
 }
 

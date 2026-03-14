@@ -118,6 +118,11 @@ import {
   type WorkspacePane,
   type WorkspaceState,
 } from "./workspace";
+import {
+  getStoredWorkspaceLayout,
+  persistWorkspaceLayout,
+  type ControlPanelSide,
+} from "./workspace-storage";
 import { reconcileSessions } from "./session-reconcile";
 
 const TAB_DRAG_STALE_TIMEOUT_MS = 15000;
@@ -613,19 +618,42 @@ export function describeCodexModelAdjustmentNotice(previousSession: Session, nex
   return `${currentModelLabel} reset Codex reasoning effort from ${previousEffort} to ${nextEffort}.`;
 }
 
+function createInitialWorkspaceBootstrap() {
+  const storedLayout = getStoredWorkspaceLayout();
+  const controlPanelSide: ControlPanelSide = storedLayout?.controlPanelSide ?? "left";
+  const workspace = dockControlPanelAtWorkspaceEdge(
+    ensureControlPanelInWorkspaceState(
+      storedLayout?.workspace ?? {
+        root: null,
+        panes: [],
+        activePaneId: null,
+      },
+    ),
+    controlPanelSide,
+  );
+
+  return {
+    controlPanelSide,
+    workspace,
+  };
+}
+
 export default function App() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [sessions, setSessions] = useState<Session[]>([]);
   const [codexState, setCodexState] = useState<CodexState>({});
   const [agentReadiness, setAgentReadiness] = useState<AgentReadiness[]>([]);
-  const [controlPanelSide, setControlPanelSide] = useState<"left" | "right">("left");
-  const [workspace, setWorkspace] = useState<WorkspaceState>(() =>
-    ensureControlPanelInWorkspaceState({
-      root: null,
-      panes: [],
-      activePaneId: null,
-    }),
+  const initialWorkspaceBootstrapRef = useRef<ReturnType<typeof createInitialWorkspaceBootstrap> | null>(
+    null,
   );
+  if (!initialWorkspaceBootstrapRef.current) {
+    initialWorkspaceBootstrapRef.current = createInitialWorkspaceBootstrap();
+  }
+  const initialWorkspaceBootstrap = initialWorkspaceBootstrapRef.current!;
+  const [controlPanelSide, setControlPanelSide] = useState<ControlPanelSide>(
+    initialWorkspaceBootstrap.controlPanelSide,
+  );
+  const [workspace, setWorkspace] = useState<WorkspaceState>(initialWorkspaceBootstrap.workspace);
   const [draftsBySessionId, setDraftsBySessionId] = useState<Record<string, string>>({});
   const [draftAttachmentsBySessionId, setDraftAttachmentsBySessionId] = useState<
     Record<string, DraftImageAttachment[]>
@@ -1176,6 +1204,13 @@ export default function App() {
     applyFontSizePreference(fontSizePx);
     persistFontSizePreference(fontSizePx);
   }, [fontSizePx]);
+
+  useEffect(() => {
+    persistWorkspaceLayout({
+      controlPanelSide,
+      workspace: applyControlPanelLayout(workspace, controlPanelSide),
+    });
+  }, [controlPanelSide, workspace]);
 
   useEffect(() => {
     sessionsRef.current = sessions;
@@ -5645,7 +5680,7 @@ function SessionPaneView({
 
       <section
         ref={messageStackRef}
-        className={`message-stack${activeControlPanelTab ? " control-panel-stack" : ""}`}
+        className={`message-stack${activeControlPanelTab ? " control-panel-stack" : ""}${activeSourceTab || activeDiffPreviewTab ? " editor-panel-stack" : ""}`}
         onWheel={handleMessageStackWheel}
         onScroll={(event) => {
           const node = event.currentTarget;
@@ -8057,3 +8092,4 @@ function dropLabelForPlacement(placement: TabDropPlacement) {
       return "Bottom";
   }
 }
+

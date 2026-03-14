@@ -11,6 +11,14 @@ import {
   type MonacoModule,
 } from "./monaco";
 
+export type MonacoCodeEditorStatus = {
+  line: number;
+  column: number;
+  tabSize: number;
+  insertSpaces: boolean;
+  endOfLine: "LF" | "CRLF";
+};
+
 type MonacoCodeEditorProps = {
   appearance: MonacoAppearance;
   ariaLabel: string;
@@ -20,6 +28,7 @@ type MonacoCodeEditorProps = {
   value: string;
   onChange?: (value: string) => void;
   onSave?: () => void;
+  onStatusChange?: (status: MonacoCodeEditorStatus) => void;
 };
 
 export function MonacoCodeEditor({
@@ -31,20 +40,25 @@ export function MonacoCodeEditor({
   value,
   onChange,
   onSave,
+  onStatusChange,
 }: MonacoCodeEditorProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const editorRef = useRef<MonacoEditor.IStandaloneCodeEditor | null>(null);
   const modelRef = useRef<MonacoEditor.ITextModel | null>(null);
   const monacoRef = useRef<MonacoModule | null>(null);
   const modelSubscriptionRef = useRef<IDisposable | null>(null);
+  const cursorSubscriptionRef = useRef<IDisposable | null>(null);
+  const resizeObserverRef = useRef<ResizeObserver | null>(null);
   const changeHandlerRef = useRef(onChange);
   const saveHandlerRef = useRef(onSave);
+  const statusHandlerRef = useRef(onStatusChange);
   const isApplyingExternalValueRef = useRef(false);
-  const untitledUriRef = useRef(`inmemory://termal/${crypto.randomUUID()}`);
+  const untitledUriRef = useRef(`inmemory://termal/source/${crypto.randomUUID()}`);
   const modelDescriptorRef = useRef("");
 
   changeHandlerRef.current = onChange;
   saveHandlerRef.current = onSave;
+  statusHandlerRef.current = onStatusChange;
 
   useLayoutEffect(() => {
     const container = containerRef.current;
@@ -59,18 +73,51 @@ export function MonacoCodeEditor({
     const editor = monaco.editor.create(container, {
       ariaLabel,
       automaticLayout: true,
+      bracketPairColorization: { enabled: true },
       fontFamily: resolveEditorFontFamily(),
       fontSize: 13,
+      guides: {
+        bracketPairs: true,
+        bracketPairsHorizontal: "active",
+        highlightActiveBracketPair: true,
+        highlightActiveIndentation: "always",
+        indentation: true,
+      },
+      insertSpaces: true,
       lineNumbersMinChars: 4,
+      matchBrackets: "always",
       minimap: { enabled: false },
-      padding: { top: 14, bottom: 14 },
+      occurrencesHighlight: "singleFile",
+      padding: { top: 8, bottom: 8 },
       readOnly,
       roundedSelection: false,
       scrollBeyondLastLine: false,
+      stickyScroll: { enabled: false },
       tabSize: 2,
       wordWrap: "off",
     });
     editorRef.current = editor;
+
+    cursorSubscriptionRef.current = editor.onDidChangeCursorPosition(() => {
+      emitStatus();
+    });
+
+    resizeObserverRef.current = new ResizeObserver(() => {
+      window.requestAnimationFrame(layoutEditor);
+    });
+    resizeObserverRef.current.observe(container);
+    if (container.parentElement) {
+      resizeObserverRef.current.observe(container.parentElement);
+    }
+
+    window.requestAnimationFrame(() => {
+      layoutEditor();
+      emitStatus();
+      window.requestAnimationFrame(() => {
+        layoutEditor();
+        emitStatus();
+      });
+    });
 
     replaceModel(value, path, language);
     editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => {
@@ -80,6 +127,10 @@ export function MonacoCodeEditor({
     });
 
     return () => {
+      resizeObserverRef.current?.disconnect();
+      resizeObserverRef.current = null;
+      cursorSubscriptionRef.current?.dispose();
+      cursorSubscriptionRef.current = null;
       modelSubscriptionRef.current?.dispose();
       modelSubscriptionRef.current = null;
       editorRef.current?.dispose();
@@ -98,17 +149,25 @@ export function MonacoCodeEditor({
     }
 
     monaco.editor.setTheme(monacoThemeName(appearance));
+    layoutEditor();
+    emitStatus();
   }, [appearance]);
 
   useEffect(() => {
     editorRef.current?.updateOptions({ readOnly });
+    layoutEditor();
+    emitStatus();
   }, [readOnly]);
 
   useEffect(() => {
     const nextDescriptor = describeModel(path, language);
     if (modelDescriptorRef.current !== nextDescriptor) {
       replaceModel(modelRef.current?.getValue() ?? value, path, language);
+      return;
     }
+
+    layoutEditor();
+    emitStatus();
   }, [language, path, value]);
 
   useEffect(() => {
@@ -120,7 +179,43 @@ export function MonacoCodeEditor({
     isApplyingExternalValueRef.current = true;
     model.setValue(value);
     isApplyingExternalValueRef.current = false;
+    layoutEditor();
+    emitStatus();
   }, [value]);
+
+  function layoutEditor() {
+    const editor = editorRef.current;
+    const container = containerRef.current;
+    if (!editor || !container) {
+      return;
+    }
+
+    const width = container.clientWidth;
+    const height = container.clientHeight;
+    if (width <= 0 || height <= 0) {
+      return;
+    }
+
+    editor.layout({ width, height });
+  }
+
+  function emitStatus() {
+    const editor = editorRef.current;
+    const model = modelRef.current;
+    if (!editor || !model) {
+      return;
+    }
+
+    const position = editor.getPosition();
+    const options = model.getOptions();
+    statusHandlerRef.current?.({
+      line: position?.lineNumber ?? 1,
+      column: position?.column ?? 1,
+      tabSize: options.tabSize,
+      insertSpaces: options.insertSpaces,
+      endOfLine: model.getEOL() === "\r\n" ? "CRLF" : "LF",
+    });
+  }
 
   function replaceModel(nextValue: string, nextPath?: string | null, nextLanguage?: string | null) {
     const monaco = monacoRef.current;
@@ -144,25 +239,33 @@ export function MonacoCodeEditor({
 
     modelSubscriptionRef.current?.dispose();
     modelSubscriptionRef.current = nextModel.onDidChangeContent(() => {
-      if (isApplyingExternalValueRef.current) {
-        return;
+      if (!isApplyingExternalValueRef.current) {
+        changeHandlerRef.current?.(nextModel.getValue());
       }
 
-      changeHandlerRef.current?.(nextModel.getValue());
+      emitStatus();
     });
 
     editor.setModel(nextModel);
     previousModel?.dispose();
     modelRef.current = nextModel;
     modelDescriptorRef.current = describeModel(nextPath, nextLanguage);
+    layoutEditor();
+    emitStatus();
   }
 
   return <div ref={containerRef} className="monaco-code-editor" />;
 }
 
-function buildModelUri(monaco: MonacoModule, path: string | null | undefined, untitledUri: string) {
+function buildModelUri(monaco: MonacoModule, path: string | null | undefined, baseUri: string) {
   const normalizedPath = path?.trim();
-  return normalizedPath ? monaco.Uri.file(normalizedPath) : monaco.Uri.parse(untitledUri);
+  if (!normalizedPath) {
+    return monaco.Uri.parse(`${baseUri}/untitled.txt`);
+  }
+
+  const segments = normalizedPath.split(/[/\\]+/).filter(Boolean);
+  const fileName = segments[segments.length - 1] ?? "file.txt";
+  return monaco.Uri.parse(`${baseUri}/${encodeURIComponent(fileName)}?path=${encodeURIComponent(normalizedPath)}`);
 }
 
 function describeModel(path: string | null | undefined, language: string | null | undefined) {
@@ -177,3 +280,4 @@ function resolveEditorFontFamily() {
   const configured = window.getComputedStyle(document.documentElement).getPropertyValue("--code-font").trim();
   return configured || "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace";
 }
+

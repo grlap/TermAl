@@ -30,6 +30,7 @@ export function MonacoDiffEditor({
   const monacoRef = useRef<MonacoModule | null>(null);
   const originalModelRef = useRef<MonacoEditor.ITextModel | null>(null);
   const modifiedModelRef = useRef<MonacoEditor.ITextModel | null>(null);
+  const resizeObserverRef = useRef<ResizeObserver | null>(null);
   const untitledUriRef = useRef(`inmemory://termal-diff/${crypto.randomUUID()}`);
   const modelDescriptorRef = useRef("");
 
@@ -46,26 +47,58 @@ export function MonacoDiffEditor({
     const editor = monaco.editor.createDiffEditor(container, {
       ariaLabel,
       automaticLayout: true,
+      bracketPairColorization: { enabled: true },
       diffCodeLens: false,
+      diffWordWrap: "off",
       fontFamily: resolveEditorFontFamily(),
       fontSize: 13,
+      guides: {
+        bracketPairs: true,
+        bracketPairsHorizontal: "active",
+        highlightActiveBracketPair: true,
+        highlightActiveIndentation: "always",
+        indentation: true,
+      },
+      hideUnchangedRegions: {
+        enabled: false,
+      },
       ignoreTrimWhitespace: false,
       lineNumbersMinChars: 4,
+      matchBrackets: "always",
       minimap: {
         enabled: false,
       },
       originalEditable: false,
+      padding: { top: 8, bottom: 8 },
       readOnly: true,
       renderIndicators: true,
+      renderSideBySide: true,
       roundedSelection: false,
       scrollBeyondLastLine: false,
+      stickyScroll: { enabled: false },
+      useInlineViewWhenSpaceIsLimited: false,
       wordWrap: "off",
     });
     diffEditorRef.current = editor;
 
+    resizeObserverRef.current = new ResizeObserver(() => {
+      window.requestAnimationFrame(layoutEditor);
+    });
+    resizeObserverRef.current.observe(container);
+    if (container.parentElement) {
+      resizeObserverRef.current.observe(container.parentElement);
+    }
+
+    window.requestAnimationFrame(() => {
+      layoutEditor();
+      window.requestAnimationFrame(layoutEditor);
+    });
+
     replaceModels(originalValue, modifiedValue, path, language);
 
     return () => {
+      resizeObserverRef.current?.disconnect();
+      resizeObserverRef.current = null;
       diffEditorRef.current?.dispose();
       diffEditorRef.current = null;
       originalModelRef.current?.dispose();
@@ -84,6 +117,7 @@ export function MonacoDiffEditor({
     }
 
     monaco.editor.setTheme(monacoThemeName(appearance));
+    layoutEditor();
   }, [appearance]);
 
   useEffect(() => {
@@ -91,6 +125,7 @@ export function MonacoDiffEditor({
     if (modelDescriptorRef.current !== nextDescriptor) {
       replaceModels(originalValue, modifiedValue, path, language);
     }
+    layoutEditor();
   }, [language, modifiedValue, originalValue, path]);
 
   useEffect(() => {
@@ -103,7 +138,25 @@ export function MonacoDiffEditor({
     if (modifiedModel && modifiedModel.getValue() !== modifiedValue) {
       modifiedModel.setValue(modifiedValue);
     }
+
+    layoutEditor();
   }, [modifiedValue, originalValue]);
+
+  function layoutEditor() {
+    const editor = diffEditorRef.current;
+    const container = containerRef.current;
+    if (!editor || !container) {
+      return;
+    }
+
+    const width = container.clientWidth;
+    const height = container.clientHeight;
+    if (width <= 0 || height <= 0) {
+      return;
+    }
+
+    editor.layout({ width, height });
+  }
 
   function replaceModels(
     nextOriginalValue: string,
@@ -143,6 +196,7 @@ export function MonacoDiffEditor({
     originalModelRef.current = originalModel;
     modifiedModelRef.current = modifiedModel;
     modelDescriptorRef.current = describeModel(nextPath, nextLanguage);
+    layoutEditor();
   }
 
   return <div ref={containerRef} className="monaco-diff-editor" />;
