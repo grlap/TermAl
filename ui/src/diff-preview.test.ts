@@ -4,7 +4,7 @@ import { buildDiffPreviewModel } from "./diff-preview";
 
 describe("buildDiffPreviewModel", () => {
   it("builds a minimal preview from simple add/remove lines", () => {
-    expect(buildDiffPreviewModel("-hello\n+goodbye", "edit")).toEqual({
+    expect(buildDiffPreviewModel("-hello\n+goodbye", "edit")).toMatchObject({
       changeSummary: {
         addedLineCount: 0,
         changedLineCount: 1,
@@ -32,7 +32,7 @@ describe("buildDiffPreviewModel", () => {
         ].join("\n"),
         "edit",
       ),
-    ).toEqual({
+    ).toMatchObject({
       changeSummary: {
         addedLineCount: 0,
         changedLineCount: 2,
@@ -55,7 +55,7 @@ describe("buildDiffPreviewModel", () => {
         ].join("\n"),
         "create",
       ),
-    ).toEqual({
+    ).toMatchObject({
       changeSummary: {
         addedLineCount: 2,
         changedLineCount: 0,
@@ -86,6 +86,45 @@ describe("buildDiffPreviewModel", () => {
       addedLineCount: 1,
       changedLineCount: 1,
       removedLineCount: 1,
+    });
+  });
+
+  it("builds hunk rows with line numbers and inline change highlights", () => {
+    const preview = buildDiffPreviewModel(
+      [
+        "@@ -4,2 +4,2 @@",
+        "-const greeting = 'hello';",
+        "+const greeting = 'hi';",
+        " const punctuation = '!';",
+      ].join("\n"),
+      "edit",
+    );
+
+    expect(preview.hunks).toHaveLength(1);
+    expect(preview.hunks[0].header).toBe("@@ -4,2 +4,2 @@");
+    expect(preview.hunks[0].rows[0]).toMatchObject({
+      kind: "changed",
+      left: {
+        lineNumber: 4,
+        text: "const greeting = 'hello';",
+      },
+      right: {
+        lineNumber: 4,
+        text: "const greeting = 'hi';",
+      },
+    });
+    expect(preview.hunks[0].rows[0].left.highlights.length).toBeGreaterThan(0);
+    expect(preview.hunks[0].rows[0].right.highlights.length).toBeGreaterThan(0);
+    expect(preview.hunks[0].rows[1]).toMatchObject({
+      kind: "context",
+      left: {
+        lineNumber: 5,
+        text: "const punctuation = '!';",
+      },
+      right: {
+        lineNumber: 5,
+        text: "const punctuation = '!';",
+      },
     });
   });
 });

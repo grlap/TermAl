@@ -3,12 +3,10 @@ import { fetchFile, type FileResponse } from "../api";
 import { buildDiffPreviewModel } from "../diff-preview";
 import type { MonacoAppearance } from "../monaco";
 import type { DiffMessage } from "../types";
+import { StructuredDiffView } from "./StructuredDiffView";
 
 const MonacoCodeEditor = lazy(() =>
   import("../MonacoCodeEditor").then(({ MonacoCodeEditor }) => ({ default: MonacoCodeEditor })),
-);
-const MonacoDiffEditor = lazy(() =>
-  import("../MonacoDiffEditor").then(({ MonacoDiffEditor }) => ({ default: MonacoDiffEditor })),
 );
 
 type DiffViewMode = "visual" | "latest" | "raw";
@@ -229,20 +227,7 @@ function renderCurrentView({
   }
 
   if (viewMode === "visual" && preview.hasStructuredPreview) {
-    return (
-      <div className="diff-editor-shell">
-        <Suspense fallback={<div className="source-editor-loading">Loading diff editor...</div>}>
-          <MonacoDiffEditor
-            appearance={appearance}
-            ariaLabel={filePath ? `Diff preview for ${filePath}` : "Diff preview"}
-            language={language}
-            path={filePath}
-            modifiedValue={preview.modifiedText}
-            originalValue={preview.originalText}
-          />
-        </Suspense>
-      </div>
-    );
+    return <StructuredDiffView filePath={filePath} preview={preview} />;
   }
 
   return <RawPatchView diff={diff} />;
@@ -347,4 +332,3 @@ function getErrorMessage(error: unknown) {
 
   return "The request failed.";
 }
-

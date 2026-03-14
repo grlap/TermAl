@@ -12,12 +12,6 @@ vi.mock("../api", async () => {
   };
 });
 
-vi.mock("../MonacoDiffEditor", () => ({
-  MonacoDiffEditor: ({ modifiedValue, originalValue }: { modifiedValue: string; originalValue: string }) => (
-    <div data-testid="monaco-diff-editor">{`${originalValue}=>${modifiedValue}`}</div>
-  ),
-}));
-
 vi.mock("../MonacoCodeEditor", () => ({
   MonacoCodeEditor: ({ readOnly, value }: { readOnly?: boolean; value: string }) => (
     <div data-read-only={String(Boolean(readOnly))} data-testid="monaco-code-editor">
@@ -63,7 +57,8 @@ describe("DiffPanel", () => {
 
     expect(screen.getByText("Changed 1")).toBeInTheDocument();
     expect(screen.getByText("Added 1")).toBeInTheDocument();
-    expect(await screen.findByTestId("monaco-diff-editor")).toBeInTheDocument();
+    expect(await screen.findByTestId("structured-diff-view")).toBeInTheDocument();
+    expect(screen.getByText("@@ -1,2 +1,3 @@")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Latest file" }));
 
@@ -107,7 +102,7 @@ describe("DiffPanel", () => {
     await waitFor(() => {
       expect(fetchFileMock).toHaveBeenCalledWith("/repo/src/example.ts");
     });
-    expect(await screen.findByTestId("monaco-diff-editor")).toBeInTheDocument();
+    expect(await screen.findByTestId("structured-diff-view")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Raw patch" }));
 
@@ -115,5 +110,31 @@ describe("DiffPanel", () => {
     expect(container.querySelector(".diff-preview-raw-line-removed")).not.toBeNull();
     expect(container.querySelector(".diff-preview-raw-line-hunk")).not.toBeNull();
     expect(container.querySelector(".diff-preview-raw-line-meta")).not.toBeNull();
+  });
+
+  it("renders inline change emphasis inside paired edits", async () => {
+    fetchFileMock.mockResolvedValue({
+      content: "const greeting = 'hi';\n",
+      language: "typescript",
+      path: "/repo/src/example.ts",
+    });
+
+    await act(async () => {
+      render(
+        <DiffPanel
+          appearance="dark"
+          changeType="edit"
+          diff={["@@ -1 +1 @@", "-const greeting = 'hello';", "+const greeting = 'hi';"].join("\n")}
+          diffMessageId="diff-3"
+          filePath="/repo/src/example.ts"
+          language="typescript"
+          onOpenPath={() => {}}
+          summary="Refined greeting"
+        />,
+      );
+    });
+
+    expect(await screen.findByTestId("structured-diff-view")).toBeInTheDocument();
+    expect(document.querySelectorAll(".structured-diff-inline-change").length).toBeGreaterThan(0);
   });
 });
