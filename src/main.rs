@@ -207,6 +207,7 @@ struct AppState {
     persistence_path: Arc<PathBuf>,
     state_events: broadcast::Sender<String>,
     delta_events: broadcast::Sender<String>,
+    shared_codex_runtime: Arc<Mutex<Option<SharedCodexRuntime>>>,
     inner: Arc<Mutex<StateInner>>,
 }
 
@@ -238,6 +239,7 @@ impl AppState {
             persistence_path: Arc::new(persistence_path),
             state_events: broadcast::channel(128).0,
             delta_events: broadcast::channel(256).0,
+            shared_codex_runtime: Arc::new(Mutex::new(None)),
             inner: Arc::new(Mutex::new(inner)),
         };
         {
@@ -484,6 +486,60 @@ impl AppState {
         Ok(())
     }
 
+    fn shared_codex_runtime(&self) -> Result<SharedCodexRuntime> {
+        let mut shared_runtime = self
+            .shared_codex_runtime
+            .lock()
+            .expect("shared Codex runtime mutex poisoned");
+        if let Some(runtime) = shared_runtime.clone() {
+            return Ok(runtime);
+        }
+
+        let runtime = spawn_shared_codex_runtime(self.clone())?;
+        *shared_runtime = Some(runtime.clone());
+        Ok(runtime)
+    }
+
+    fn clear_shared_codex_runtime_if_matches(&self, runtime_id: &str) {
+        let mut shared_runtime = self
+            .shared_codex_runtime
+            .lock()
+            .expect("shared Codex runtime mutex poisoned");
+        if shared_runtime
+            .as_ref()
+            .is_some_and(|runtime| runtime.runtime_id == runtime_id)
+        {
+            *shared_runtime = None;
+        }
+    }
+
+    fn handle_shared_codex_runtime_exit(
+        &self,
+        runtime_id: &str,
+        error_message: Option<&str>,
+    ) -> Result<()> {
+        let session_ids = {
+            let inner = self.inner.lock().expect("state mutex poisoned");
+            inner
+                .sessions
+                .iter()
+                .filter_map(|record| match &record.runtime {
+                    SessionRuntime::Codex(handle) if handle.runtime_id == runtime_id => {
+                        Some(record.session.id.clone())
+                    }
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+        };
+
+        let token = RuntimeToken::Codex(runtime_id.to_owned());
+        for session_id in session_ids {
+            self.handle_runtime_exit_if_matches(&session_id, &token, error_message)?;
+        }
+        self.clear_shared_codex_runtime_if_matches(runtime_id);
+        Ok(())
+    }
+
     fn snapshot_from_inner(&self, inner: &StateInner) -> StateResponse {
         StateResponse {
             revision: inner.revision,
@@ -583,11 +639,15 @@ impl AppState {
             Agent::Codex => {
                 if record.runtime_reset_required {
                     if let SessionRuntime::Codex(handle) = &record.runtime {
-                        handle.kill().map_err(|err| {
-                            ApiError::internal(format!(
-                                "failed to restart Codex session runtime: {err:#}"
-                            ))
-                        })?;
+                        if let Some(shared_session) = &handle.shared_session {
+                            shared_session.detach();
+                        } else {
+                            handle.kill().map_err(|err| {
+                                ApiError::internal(format!(
+                                    "failed to restart Codex session runtime: {err:#}"
+                                ))
+                            })?;
+                        }
                     }
                     record.runtime = SessionRuntime::None;
                     record.pending_codex_approvals.clear();
@@ -1178,11 +1238,15 @@ impl AppState {
         if agent == Agent::Codex {
             if record.runtime_reset_required {
                 if let SessionRuntime::Codex(handle) = &record.runtime {
-                    handle.kill().map_err(|err| {
-                        ApiError::internal(format!(
-                            "failed to restart Codex session runtime: {err:#}"
-                        ))
-                    })?;
+                    if let Some(shared_session) = &handle.shared_session {
+                        shared_session.detach();
+                    } else {
+                        handle.kill().map_err(|err| {
+                            ApiError::internal(format!(
+                                "failed to restart Codex session runtime: {err:#}"
+                            ))
+                        })?;
+                    }
                 }
                 record.runtime = SessionRuntime::None;
                 record.pending_codex_approvals.clear();
@@ -1459,6 +1523,14 @@ impl AppState {
             .ok_or_else(|| anyhow!("session `{session_id}` not found"))?;
         inner.sessions[index].runtime = SessionRuntime::Codex(handle);
         Ok(())
+    }
+
+    fn session_matches_runtime_token(&self, session_id: &str, token: &RuntimeToken) -> bool {
+        let inner = self.inner.lock().expect("state mutex poisoned");
+        inner
+            .find_session_index(session_id)
+            .and_then(|index| inner.sessions.get(index))
+            .is_some_and(|record| record.runtime.matches_runtime_token(token))
     }
 
     fn clear_runtime(&self, session_id: &str) -> Result<()> {
@@ -1815,9 +1887,23 @@ impl AppState {
         };
 
         if let Some(runtime) = runtime_to_kill {
-            runtime
-                .kill()
-                .map_err(|err| ApiError::internal(format!("failed to kill session: {err:#}")))?;
+            match runtime {
+                KillableRuntime::Codex(handle) => {
+                    if let Some(shared_session) = &handle.shared_session {
+                        shared_session.interrupt_turn().map_err(|err| {
+                            ApiError::internal(format!("failed to interrupt Codex session: {err:#}"))
+                        })?;
+                        shared_session.detach();
+                    } else {
+                        handle.kill().map_err(|err| {
+                            ApiError::internal(format!("failed to kill session: {err:#}"))
+                        })?;
+                    }
+                }
+                runtime => runtime.kill().map_err(|err| {
+                    ApiError::internal(format!("failed to kill session: {err:#}"))
+                })?,
+            }
         }
 
         let mut inner = self.inner.lock().expect("state mutex poisoned");
@@ -1898,9 +1984,23 @@ impl AppState {
             runtime
         };
 
-        runtime_to_stop
-            .kill()
-            .map_err(|err| ApiError::internal(format!("failed to stop session: {err:#}")))?;
+        match runtime_to_stop {
+            KillableRuntime::Codex(handle) => {
+                if let Some(shared_session) = &handle.shared_session {
+                    shared_session.interrupt_turn().map_err(|err| {
+                        ApiError::internal(format!("failed to stop session: {err:#}"))
+                    })?;
+                    shared_session.detach();
+                } else {
+                    handle.kill().map_err(|err| {
+                        ApiError::internal(format!("failed to stop session: {err:#}"))
+                    })?;
+                }
+            }
+            runtime => runtime
+                .kill()
+                .map_err(|err| ApiError::internal(format!("failed to stop session: {err:#}")))?,
+        }
         self.clear_runtime(session_id)
             .map_err(|err| ApiError::internal(format!("failed to clear runtime: {err:#}")))?;
         self.push_message(
@@ -2281,12 +2381,12 @@ impl AppState {
         if let Some((handle, pending)) = codex_runtime_action {
             handle
                 .input_tx
-                .send(CodexRuntimeCommand::ApprovalResponse(
-                    CodexApprovalResponseCommand {
+                .send(CodexRuntimeCommand::ApprovalResponse {
+                    response: CodexApprovalResponseCommand {
                         request_id: pending.request_id.clone(),
                         result: codex_approval_result(&pending.kind, decision),
                     },
-                ))
+                })
                 .map_err(|err| {
                     ApiError::internal(format!(
                         "failed to deliver approval response to Codex: {err}"
@@ -2885,11 +2985,100 @@ struct CodexRuntimeHandle {
     runtime_id: String,
     input_tx: Sender<CodexRuntimeCommand>,
     process: Arc<Mutex<Child>>,
+    shared_session: Option<SharedCodexSessionHandle>,
 }
 
 impl CodexRuntimeHandle {
     fn kill(&self) -> Result<()> {
         kill_child_process(&self.process, "Codex")
+    }
+}
+
+#[derive(Clone)]
+struct SharedCodexRuntime {
+    runtime_id: String,
+    input_tx: Sender<CodexRuntimeCommand>,
+    process: Arc<Mutex<Child>>,
+    sessions: SharedCodexSessionMap,
+    thread_sessions: SharedCodexThreadMap,
+}
+
+#[derive(Clone)]
+struct SharedCodexSessionHandle {
+    runtime: SharedCodexRuntime,
+    session_id: String,
+}
+
+impl SharedCodexSessionHandle {
+    fn ensure_registered(&self) {
+        let mut sessions = self
+            .runtime
+            .sessions
+            .lock()
+            .expect("shared Codex session mutex poisoned");
+        sessions.entry(self.session_id.clone()).or_default();
+    }
+
+    fn detach(&self) {
+        let removed_thread_id = {
+            let mut sessions = self
+                .runtime
+                .sessions
+                .lock()
+                .expect("shared Codex session mutex poisoned");
+            sessions
+                .remove(&self.session_id)
+                .and_then(|state| state.thread_id)
+        };
+
+        if let Some(thread_id) = removed_thread_id {
+            self.runtime
+                .thread_sessions
+                .lock()
+                .expect("shared Codex thread mutex poisoned")
+                .remove(&thread_id);
+        }
+    }
+
+    fn interrupt_turn(&self) -> Result<()> {
+        let (thread_id, turn_id) = {
+            let sessions = self
+                .runtime
+                .sessions
+                .lock()
+                .expect("shared Codex session mutex poisoned");
+            let Some(state) = sessions.get(&self.session_id) else {
+                return Ok(());
+            };
+            let Some(thread_id) = state.thread_id.clone() else {
+                return Ok(());
+            };
+            let Some(turn_id) = state.turn_id.clone() else {
+                return Ok(());
+            };
+            (thread_id, turn_id)
+        };
+
+        let (response_tx, response_rx) = mpsc::channel();
+        self.runtime
+            .input_tx
+            .send(CodexRuntimeCommand::InterruptTurn {
+                response_tx,
+                thread_id,
+                turn_id,
+            })
+            .map_err(|err| anyhow!("failed to queue Codex turn interrupt: {err}"))?;
+
+        match response_rx.recv_timeout(Duration::from_secs(10)) {
+            Ok(Ok(())) => Ok(()),
+            Ok(Err(detail)) => Err(anyhow!(detail)),
+            Err(mpsc::RecvTimeoutError::Timeout) => {
+                Err(anyhow!("timed out waiting for Codex turn interrupt"))
+            }
+            Err(mpsc::RecvTimeoutError::Disconnected) => {
+                Err(anyhow!("Codex turn interrupt did not return a result"))
+            }
+        }
     }
 }
 
@@ -3304,8 +3493,18 @@ fn sync_codex_home_file(
 
 #[derive(Clone)]
 enum CodexRuntimeCommand {
-    Prompt(CodexPromptCommand),
-    ApprovalResponse(CodexApprovalResponseCommand),
+    Prompt {
+        session_id: String,
+        command: CodexPromptCommand,
+    },
+    ApprovalResponse {
+        response: CodexApprovalResponseCommand,
+    },
+    InterruptTurn {
+        response_tx: Sender<std::result::Result<(), String>>,
+        thread_id: String,
+        turn_id: String,
+    },
     RefreshModelList {
         response_tx: Sender<std::result::Result<Vec<SessionModelOption>, String>>,
     },
@@ -3479,6 +3678,23 @@ type AcpPendingRequestMap = Arc<Mutex<HashMap<String, Sender<std::result::Result
 struct CodexTurnState {
     streamed_agent_message_item_ids: HashSet<String>,
 }
+
+#[derive(Default)]
+struct SessionRecorderState {
+    command_messages: HashMap<String, String>,
+    streaming_text_message_id: Option<String>,
+}
+
+#[derive(Default)]
+struct SharedCodexSessionState {
+    recorder: SessionRecorderState,
+    thread_id: Option<String>,
+    turn_id: Option<String>,
+    turn_state: CodexTurnState,
+}
+
+type SharedCodexSessionMap = Arc<Mutex<HashMap<String, SharedCodexSessionState>>>;
+type SharedCodexThreadMap = Arc<Mutex<HashMap<String, String>>>;
 
 fn spawn_acp_runtime(
     state: AppState,
@@ -4551,9 +4767,26 @@ fn log_unhandled_acp_event(agent: AcpAgent, context: &str, message: &Value) {
 fn spawn_codex_runtime(
     state: AppState,
     session_id: String,
-    workdir: String,
+    _workdir: String,
 ) -> Result<CodexRuntimeHandle> {
-    let codex_home = prepare_termal_codex_home(&workdir, &session_id)?;
+    let shared_runtime = state.shared_codex_runtime()?;
+    let shared_session = SharedCodexSessionHandle {
+        runtime: shared_runtime.clone(),
+        session_id,
+    };
+    shared_session.ensure_registered();
+
+    Ok(CodexRuntimeHandle {
+        runtime_id: shared_runtime.runtime_id.clone(),
+        input_tx: shared_runtime.input_tx.clone(),
+        process: shared_runtime.process.clone(),
+        shared_session: Some(shared_session),
+    })
+}
+
+fn spawn_shared_codex_runtime(state: AppState) -> Result<SharedCodexRuntime> {
+    // Codex threads carry their own cwd, so one shared app-server can serve all sessions.
+    let codex_home = prepare_termal_codex_home(&state.default_workdir, "shared-app-server")?;
     let runtime_id = Uuid::new_v4().to_string();
     let mut command = codex_command()?;
     command
@@ -4565,30 +4798,31 @@ fn spawn_codex_runtime(
 
     let mut child = command
         .spawn()
-        .context("failed to start Codex app-server")?;
+        .context("failed to start shared Codex app-server")?;
     let stdin = child
         .stdin
         .take()
-        .context("failed to capture Codex app-server stdin")?;
+        .context("failed to capture shared Codex app-server stdin")?;
     let stdout = child
         .stdout
         .take()
-        .context("failed to capture Codex app-server stdout")?;
+        .context("failed to capture shared Codex app-server stdout")?;
     let stderr = child
         .stderr
         .take()
-        .context("failed to capture Codex app-server stderr")?;
+        .context("failed to capture shared Codex app-server stderr")?;
     let process = Arc::new(Mutex::new(child));
     let (input_tx, input_rx) = mpsc::channel::<CodexRuntimeCommand>();
     let pending_requests: CodexPendingRequestMap = Arc::new(Mutex::new(HashMap::new()));
-    let current_thread_id = Arc::new(Mutex::new(None::<String>));
+    let sessions: SharedCodexSessionMap = Arc::new(Mutex::new(HashMap::new()));
+    let thread_sessions: SharedCodexThreadMap = Arc::new(Mutex::new(HashMap::new()));
 
     {
-        let writer_session_id = session_id.clone();
         let writer_state = state.clone();
         let writer_pending_requests = pending_requests.clone();
-        let writer_thread_id = current_thread_id.clone();
-        let writer_runtime_token = RuntimeToken::Codex(runtime_id.clone());
+        let writer_sessions = sessions.clone();
+        let writer_thread_sessions = thread_sessions.clone();
+        let writer_runtime_id = runtime_id.clone();
         std::thread::spawn(move || {
             let mut stdin = stdin;
             let initialize_result = send_codex_json_rpc_request(
@@ -4608,27 +4842,28 @@ fn spawn_codex_runtime(
             });
 
             if let Err(err) = initialize_result {
-                let _ = writer_state.handle_runtime_exit_if_matches(
-                    &writer_session_id,
-                    &writer_runtime_token,
-                    Some(&format!(
-                        "failed to initialize Codex app-server session: {err:#}"
-                    )),
+                let _ = writer_state.handle_shared_codex_runtime_exit(
+                    &writer_runtime_id,
+                    Some(&format!("failed to initialize shared Codex app-server: {err:#}")),
                 );
                 return;
             }
 
             while let Ok(command) = input_rx.recv() {
                 let command_result = match command {
-                    CodexRuntimeCommand::Prompt(prompt) => handle_codex_prompt_command(
+                    CodexRuntimeCommand::Prompt {
+                        session_id,
+                        command,
+                    } => handle_shared_codex_prompt_command(
                         &mut stdin,
                         &writer_pending_requests,
                         &writer_state,
-                        &writer_session_id,
-                        &writer_thread_id,
-                        prompt,
+                        &writer_sessions,
+                        &writer_thread_sessions,
+                        &session_id,
+                        command,
                     ),
-                    CodexRuntimeCommand::ApprovalResponse(response) => {
+                    CodexRuntimeCommand::ApprovalResponse { response } => {
                         write_codex_json_rpc_message(
                             &mut stdin,
                             &json!({
@@ -4636,6 +4871,26 @@ fn spawn_codex_runtime(
                                 "result": response.result,
                             }),
                         )
+                    }
+                    CodexRuntimeCommand::InterruptTurn {
+                        response_tx,
+                        thread_id,
+                        turn_id,
+                    } => {
+                        let interrupt_result = send_codex_json_rpc_request(
+                            &mut stdin,
+                            &writer_pending_requests,
+                            "turn/interrupt",
+                            json!({
+                                "threadId": thread_id,
+                                "turnId": turn_id,
+                            }),
+                            Duration::from_secs(30),
+                        )
+                        .map(|_| ())
+                        .map_err(|err| format!("{err:#}"));
+                        let _ = response_tx.send(interrupt_result.clone());
+                        interrupt_result.map_err(anyhow::Error::msg)
                     }
                     CodexRuntimeCommand::RefreshModelList { response_tx } => {
                         let refresh_result =
@@ -4655,11 +4910,10 @@ fn spawn_codex_runtime(
                 };
 
                 if let Err(err) = command_result {
-                    let _ = writer_state.handle_runtime_exit_if_matches(
-                        &writer_session_id,
-                        &writer_runtime_token,
+                    let _ = writer_state.handle_shared_codex_runtime_exit(
+                        &writer_runtime_id,
                         Some(&format!(
-                            "failed to communicate with Codex app-server: {err:#}"
+                            "failed to communicate with shared Codex app-server: {err:#}"
                         )),
                     );
                     break;
@@ -4669,27 +4923,25 @@ fn spawn_codex_runtime(
     }
 
     {
-        let reader_session_id = session_id.clone();
         let reader_state = state.clone();
         let reader_pending_requests = pending_requests.clone();
-        let reader_thread_id = current_thread_id.clone();
-        let reader_runtime_token = RuntimeToken::Codex(runtime_id.clone());
+        let reader_sessions = sessions.clone();
+        let reader_thread_sessions = thread_sessions.clone();
+        let reader_runtime_id = runtime_id.clone();
         std::thread::spawn(move || {
             let mut reader = BufReader::new(stdout);
             let mut raw_line = String::new();
-            let mut turn_state = CodexTurnState::default();
-            let mut recorder =
-                SessionRecorder::new(reader_state.clone(), reader_session_id.clone());
 
             loop {
                 raw_line.clear();
                 let bytes_read = match reader.read_line(&mut raw_line) {
                     Ok(bytes_read) => bytes_read,
                     Err(err) => {
-                        let _ = reader_state.fail_turn_if_runtime_matches(
-                            &reader_session_id,
-                            &reader_runtime_token,
-                            &format!("failed to read stdout from Codex app-server: {err}"),
+                        let _ = reader_state.handle_shared_codex_runtime_exit(
+                            &reader_runtime_id,
+                            Some(&format!(
+                                "failed to read stdout from shared Codex app-server: {err}"
+                            )),
                         );
                         break;
                     }
@@ -4702,35 +4954,39 @@ fn spawn_codex_runtime(
                 let message: Value = match serde_json::from_str(raw_line.trim_end()) {
                     Ok(message) => message,
                     Err(err) => {
-                        let _ = reader_state.fail_turn_if_runtime_matches(
-                            &reader_session_id,
-                            &reader_runtime_token,
-                            &format!("failed to parse Codex app-server JSON line: {err}"),
+                        let _ = reader_state.handle_shared_codex_runtime_exit(
+                            &reader_runtime_id,
+                            Some(&format!(
+                                "failed to parse shared Codex app-server JSON line: {err}"
+                            )),
                         );
                         break;
                     }
                 };
 
-                if let Err(err) = handle_codex_app_server_message(
+                if let Err(err) = handle_shared_codex_app_server_message(
                     &message,
                     &reader_state,
-                    &reader_session_id,
-                    &reader_runtime_token,
+                    &reader_runtime_id,
                     &reader_pending_requests,
-                    &reader_thread_id,
-                    &mut turn_state,
-                    &mut recorder,
+                    &reader_sessions,
+                    &reader_thread_sessions,
                 ) {
-                    let _ = reader_state.fail_turn_if_runtime_matches(
-                        &reader_session_id,
-                        &reader_runtime_token,
-                        &format!("failed to handle Codex app-server event: {err:#}"),
+                    let _ = reader_state.handle_shared_codex_runtime_exit(
+                        &reader_runtime_id,
+                        Some(&format!("failed to handle shared Codex app-server event: {err:#}")),
                     );
                     break;
                 }
             }
 
-            let _ = recorder.finish_streaming_text();
+            let mut sessions = reader_sessions
+                .lock()
+                .expect("shared Codex session mutex poisoned");
+            for session_state in sessions.values_mut() {
+                session_state.recorder.streaming_text_message_id = None;
+                session_state.turn_id = None;
+            }
         });
     }
 
@@ -4744,40 +5000,35 @@ fn spawn_codex_runtime(
     }
 
     {
-        let wait_session_id = session_id.clone();
         let wait_state = state.clone();
         let wait_process = process.clone();
-        let wait_runtime_token = RuntimeToken::Codex(runtime_id.clone());
+        let wait_runtime_id = runtime_id.clone();
         std::thread::spawn(move || {
             loop {
                 let status = {
-                    let mut child = wait_process.lock().expect("Codex process mutex poisoned");
+                    let mut child = wait_process
+                        .lock()
+                        .expect("shared Codex process mutex poisoned");
                     child.try_wait()
                 };
 
                 match status {
                     Ok(Some(status)) if status.success() => {
-                        let _ = wait_state.handle_runtime_exit_if_matches(
-                            &wait_session_id,
-                            &wait_runtime_token,
-                            None,
-                        );
+                        let _ = wait_state.handle_shared_codex_runtime_exit(&wait_runtime_id, None);
                         break;
                     }
                     Ok(Some(status)) => {
-                        let _ = wait_state.handle_runtime_exit_if_matches(
-                            &wait_session_id,
-                            &wait_runtime_token,
-                            Some(&format!("Codex session exited with status {status}")),
+                        let _ = wait_state.handle_shared_codex_runtime_exit(
+                            &wait_runtime_id,
+                            Some(&format!("shared Codex app-server exited with status {status}")),
                         );
                         break;
                     }
                     Ok(None) => std::thread::sleep(Duration::from_millis(100)),
                     Err(err) => {
-                        let _ = wait_state.handle_runtime_exit_if_matches(
-                            &wait_session_id,
-                            &wait_runtime_token,
-                            Some(&format!("failed waiting for Codex session: {err}")),
+                        let _ = wait_state.handle_shared_codex_runtime_exit(
+                            &wait_runtime_id,
+                            Some(&format!("failed waiting for shared Codex app-server: {err}")),
                         );
                         break;
                     }
@@ -4786,66 +5037,133 @@ fn spawn_codex_runtime(
         });
     }
 
-    Ok(CodexRuntimeHandle {
+    Ok(SharedCodexRuntime {
         runtime_id,
         input_tx,
         process,
+        sessions,
+        thread_sessions,
     })
 }
 
-fn handle_codex_prompt_command(
+fn remember_shared_codex_thread(
+    sessions: &SharedCodexSessionMap,
+    thread_sessions: &SharedCodexThreadMap,
+    session_id: &str,
+    thread_id: String,
+) {
+    let previous_thread_id = {
+        let mut sessions = sessions
+            .lock()
+            .expect("shared Codex session mutex poisoned");
+        let session_state = sessions.entry(session_id.to_owned()).or_default();
+        session_state.turn_id = None;
+        session_state.thread_id.replace(thread_id.clone())
+    };
+
+    let mut thread_sessions = thread_sessions
+        .lock()
+        .expect("shared Codex thread mutex poisoned");
+    if let Some(previous_thread_id) = previous_thread_id {
+        if previous_thread_id != thread_id {
+            thread_sessions.remove(&previous_thread_id);
+        }
+    }
+    thread_sessions.insert(thread_id, session_id.to_owned());
+}
+
+fn find_shared_codex_session_id(
+    state: &AppState,
+    thread_sessions: &SharedCodexThreadMap,
+    thread_id: &str,
+) -> Option<String> {
+    if let Some(session_id) = thread_sessions
+        .lock()
+        .expect("shared Codex thread mutex poisoned")
+        .get(thread_id)
+        .cloned()
+    {
+        return Some(session_id);
+    }
+
+    let session_id = {
+        let inner = state.inner.lock().expect("state mutex poisoned");
+        inner.sessions.iter().find_map(|record| {
+            (record.external_session_id.as_deref() == Some(thread_id))
+                .then(|| record.session.id.clone())
+        })
+    }?;
+
+    thread_sessions
+        .lock()
+        .expect("shared Codex thread mutex poisoned")
+        .insert(thread_id.to_owned(), session_id.clone());
+    Some(session_id)
+}
+
+fn codex_message_thread_id<'a>(message: &'a Value) -> Option<&'a str> {
+    message
+        .pointer("/params/threadId")
+        .and_then(Value::as_str)
+        .or_else(|| message.pointer("/params/thread/id").and_then(Value::as_str))
+}
+
+fn handle_shared_codex_prompt_command(
     writer: &mut impl Write,
     pending_requests: &CodexPendingRequestMap,
     state: &AppState,
+    sessions: &SharedCodexSessionMap,
+    thread_sessions: &SharedCodexThreadMap,
     session_id: &str,
-    current_thread_id: &Arc<Mutex<Option<String>>>,
     command: CodexPromptCommand,
 ) -> Result<()> {
-    let thread_id = {
-        let mut slot = current_thread_id
+    let existing_thread_id = {
+        let sessions = sessions
             .lock()
-            .expect("Codex thread id mutex poisoned");
-        if let Some(thread_id) = slot.clone() {
-            thread_id
-        } else {
-            let result = match command.resume_thread_id.as_deref() {
-                Some(thread_id) => send_codex_json_rpc_request(
-                    writer,
-                    pending_requests,
-                    "thread/resume",
-                    json!({
-                        "threadId": thread_id,
-                        "cwd": command.cwd,
-                        "model": command.model,
-                        "sandbox": command.sandbox_mode.as_cli_value(),
-                        "approvalPolicy": command.approval_policy.as_cli_value(),
-                    }),
-                    Duration::from_secs(30),
-                )?,
-                None => send_codex_json_rpc_request(
-                    writer,
-                    pending_requests,
-                    "thread/start",
-                    json!({
-                        "cwd": command.cwd,
-                        "model": command.model,
-                        "sandbox": command.sandbox_mode.as_cli_value(),
-                        "approvalPolicy": command.approval_policy.as_cli_value(),
-                        "personality": "pragmatic",
-                    }),
-                    Duration::from_secs(30),
-                )?,
-            };
+            .expect("shared Codex session mutex poisoned");
+        sessions.get(session_id).and_then(|session| session.thread_id.clone())
+    };
 
-            let thread_id = result
-                .pointer("/thread/id")
-                .and_then(Value::as_str)
-                .ok_or_else(|| anyhow!("Codex app-server did not return a thread id"))?
-                .to_owned();
-            state.set_external_session_id(session_id, thread_id.clone())?;
-            *slot = Some(thread_id.clone());
-            thread_id
-        }
+    let thread_id = if let Some(thread_id) = existing_thread_id {
+        thread_id
+    } else {
+        let result = match command.resume_thread_id.as_deref() {
+            Some(thread_id) => send_codex_json_rpc_request(
+                writer,
+                pending_requests,
+                "thread/resume",
+                json!({
+                    "threadId": thread_id,
+                    "cwd": command.cwd,
+                    "model": command.model,
+                    "sandbox": command.sandbox_mode.as_cli_value(),
+                    "approvalPolicy": command.approval_policy.as_cli_value(),
+                }),
+                Duration::from_secs(30),
+            )?,
+            None => send_codex_json_rpc_request(
+                writer,
+                pending_requests,
+                "thread/start",
+                json!({
+                    "cwd": command.cwd,
+                    "model": command.model,
+                    "sandbox": command.sandbox_mode.as_cli_value(),
+                    "approvalPolicy": command.approval_policy.as_cli_value(),
+                    "personality": "pragmatic",
+                }),
+                Duration::from_secs(30),
+            )?,
+        };
+
+        let thread_id = result
+            .pointer("/thread/id")
+            .and_then(Value::as_str)
+            .ok_or_else(|| anyhow!("Codex app-server did not return a thread id"))?
+            .to_owned();
+        state.set_external_session_id(session_id, thread_id.clone())?;
+        remember_shared_codex_thread(sessions, thread_sessions, session_id, thread_id.clone());
+        thread_id
     };
 
     state.record_codex_runtime_config(
@@ -4855,7 +5173,7 @@ fn handle_codex_prompt_command(
         command.reasoning_effort,
     )?;
 
-    send_codex_json_rpc_request(
+    let turn_result = send_codex_json_rpc_request(
         writer,
         pending_requests,
         "turn/start",
@@ -4871,18 +5189,25 @@ fn handle_codex_prompt_command(
         Duration::from_secs(30),
     )?;
 
+    let turn_id = turn_result
+        .pointer("/turn/id")
+        .and_then(Value::as_str)
+        .map(str::to_owned);
+    let mut sessions = sessions
+        .lock()
+        .expect("shared Codex session mutex poisoned");
+    let session_state = sessions.entry(session_id.to_owned()).or_default();
+    session_state.turn_id = turn_id;
     Ok(())
 }
 
-fn handle_codex_app_server_message(
+fn handle_shared_codex_app_server_message(
     message: &Value,
     state: &AppState,
-    session_id: &str,
-    runtime_token: &RuntimeToken,
+    runtime_id: &str,
     pending_requests: &CodexPendingRequestMap,
-    current_thread_id: &Arc<Mutex<Option<String>>>,
-    turn_state: &mut CodexTurnState,
-    recorder: &mut SessionRecorder,
+    sessions: &SharedCodexSessionMap,
+    thread_sessions: &SharedCodexThreadMap,
 ) -> Result<()> {
     if let Some(response_id) = message.get("id") {
         if message.get("result").is_some() || message.get("error").is_some() {
@@ -4910,26 +5235,213 @@ fn handle_codex_app_server_message(
         return Ok(());
     };
 
-    if message.get("id").is_some() {
-        return handle_codex_app_server_request(method, message, recorder);
+    if method == "account/rateLimits/updated" {
+        let Some(rate_limits) = message.pointer("/params/rateLimits") else {
+            log_unhandled_codex_event(
+                "Codex rate limit notification missing params.rateLimits",
+                message,
+            );
+            return Ok(());
+        };
+
+        match serde_json::from_value::<CodexRateLimits>(rate_limits.clone()) {
+            Ok(rate_limits) => state.note_codex_rate_limits(rate_limits)?,
+            Err(err) => {
+                log_unhandled_codex_event(
+                    &format!("failed to parse Codex rate limits notification: {err}"),
+                    message,
+                );
+            }
+        }
+        return Ok(());
     }
 
-    handle_codex_app_server_notification(
+    let Some(thread_id) = codex_message_thread_id(message) else {
+        match method {
+            "thread/archived"
+            | "thread/closed"
+            | "thread/compacted"
+            | "thread/name/updated"
+            | "thread/realtime/closed"
+            | "thread/realtime/error"
+            | "thread/realtime/itemAdded"
+            | "thread/realtime/outputAudio/delta"
+            | "thread/realtime/started"
+            | "thread/status/changed"
+            | "thread/tokenUsage/updated" => return Ok(()),
+            _ => {
+                log_unhandled_codex_event(
+                    &format!("shared Codex event missing thread id for `{method}`"),
+                    message,
+                );
+                return Ok(());
+            }
+        }
+    };
+
+    let Some(session_id) = find_shared_codex_session_id(state, thread_sessions, thread_id) else {
+        return Ok(());
+    };
+    let runtime_token = RuntimeToken::Codex(runtime_id.to_owned());
+    if !state.session_matches_runtime_token(&session_id, &runtime_token) {
+        return Ok(());
+    }
+
+    let mut sessions = sessions
+        .lock()
+        .expect("shared Codex session mutex poisoned");
+    let Some(session_state) = sessions.get_mut(&session_id) else {
+        return Ok(());
+    };
+    let SharedCodexSessionState {
+        recorder: recorder_state,
+        thread_id,
+        turn_id,
+        turn_state,
+    } = session_state;
+    let mut recorder = BorrowedSessionRecorder::new(state, &session_id, recorder_state);
+
+    if message.get("id").is_some() {
+        return handle_codex_app_server_request(method, message, &mut recorder);
+    }
+
+    handle_shared_codex_app_server_notification(
         method,
         message,
         state,
-        session_id,
-        runtime_token,
-        current_thread_id,
+        &session_id,
+        &runtime_token,
+        thread_id,
+        turn_id,
         turn_state,
-        recorder,
+        thread_sessions,
+        &mut recorder,
     )
+}
+
+fn handle_shared_codex_app_server_notification(
+    method: &str,
+    message: &Value,
+    state: &AppState,
+    session_id: &str,
+    runtime_token: &RuntimeToken,
+    session_thread_id: &mut Option<String>,
+    turn_id: &mut Option<String>,
+    turn_state: &mut CodexTurnState,
+    thread_sessions: &SharedCodexThreadMap,
+    recorder: &mut impl TurnRecorder,
+) -> Result<()> {
+    match method {
+        "thread/started" => {
+            if let Some(thread_id) = message.pointer("/params/thread/id").and_then(Value::as_str) {
+                let previous_thread_id = session_thread_id.replace(thread_id.to_owned());
+                *turn_id = None;
+                let mut thread_sessions = thread_sessions
+                    .lock()
+                    .expect("shared Codex thread mutex poisoned");
+                if let Some(previous_thread_id) = previous_thread_id {
+                    if previous_thread_id != thread_id {
+                        thread_sessions.remove(&previous_thread_id);
+                    }
+                }
+                thread_sessions.insert(thread_id.to_owned(), session_id.to_owned());
+                state.set_external_session_id(session_id, thread_id.to_owned())?;
+                recorder.note_external_session(thread_id)?;
+            }
+        }
+        "turn/started" => {
+            turn_state.streamed_agent_message_item_ids.clear();
+            *turn_id = message
+                .pointer("/params/turn/id")
+                .and_then(Value::as_str)
+                .map(str::to_owned);
+            recorder.finish_streaming_text()?;
+        }
+        "turn/completed" => {
+            *turn_id = None;
+            recorder.finish_streaming_text()?;
+            if let Some(error) = message.pointer("/params/turn/error") {
+                if !error.is_null() {
+                    state.fail_turn_if_runtime_matches(
+                        session_id,
+                        runtime_token,
+                        &summarize_error(error),
+                    )?;
+                    return Ok(());
+                }
+            }
+            state.finish_turn_ok_if_runtime_matches(session_id, runtime_token)?;
+        }
+        "item/started" => {
+            if let Some(item) = message.get("params").and_then(|params| params.get("item")) {
+                handle_codex_app_server_item_started(item, recorder)?;
+            }
+        }
+        "item/completed" => {
+            if let Some(item) = message.get("params").and_then(|params| params.get("item")) {
+                handle_codex_app_server_item_completed(item, turn_state, recorder)?;
+            }
+        }
+        "item/agentMessage/delta" => {
+            let Some(delta) = message.pointer("/params/delta").and_then(Value::as_str) else {
+                return Ok(());
+            };
+            let Some(item_id) = message.pointer("/params/itemId").and_then(Value::as_str) else {
+                return Ok(());
+            };
+            turn_state
+                .streamed_agent_message_item_ids
+                .insert(item_id.to_owned());
+            recorder.text_delta(delta)?;
+        }
+        "thread/status/changed"
+        | "turn/diff/updated"
+        | "turn/plan/updated"
+        | "item/commandExecution/outputDelta"
+        | "item/commandExecution/terminalInteraction"
+        | "item/fileChange/outputDelta"
+        | "item/plan/delta"
+        | "item/reasoning/summaryTextDelta"
+        | "item/reasoning/summaryPartAdded"
+        | "item/reasoning/textDelta"
+        | "thread/tokenUsage/updated"
+        | "thread/name/updated"
+        | "thread/closed"
+        | "thread/archived"
+        | "thread/unarchived"
+        | "thread/compacted"
+        | "thread/realtime/started"
+        | "thread/realtime/itemAdded"
+        | "thread/realtime/outputAudio/delta"
+        | "thread/realtime/error"
+        | "thread/realtime/closed" => {}
+        "error" => {
+            *turn_id = None;
+            let payload = message.get("params").unwrap_or(message);
+            let detail = summarize_error(payload);
+
+            if is_retryable_connectivity_error(payload) {
+                state.note_turn_retry_if_runtime_matches(session_id, runtime_token, &detail)?;
+            } else {
+                state.fail_turn_if_runtime_matches(session_id, runtime_token, &detail)?;
+            }
+        }
+        _ if method.starts_with("codex/event/") => {}
+        _ => {
+            log_unhandled_codex_event(
+                &format!("unhandled shared Codex app-server notification `{method}`"),
+                message,
+            );
+        }
+    }
+
+    Ok(())
 }
 
 fn handle_codex_app_server_request(
     method: &str,
     message: &Value,
-    recorder: &mut SessionRecorder,
+    recorder: &mut impl CodexTurnRecorder,
 ) -> Result<()> {
     let request_id = message
         .get("id")
@@ -5122,7 +5634,7 @@ fn handle_codex_app_server_notification(
 
 fn handle_codex_app_server_item_started(
     item: &Value,
-    recorder: &mut SessionRecorder,
+    recorder: &mut impl TurnRecorder,
 ) -> Result<()> {
     match item.get("type").and_then(Value::as_str) {
         Some("agentMessage") => {
@@ -5151,7 +5663,7 @@ fn handle_codex_app_server_item_started(
 fn handle_codex_app_server_item_completed(
     item: &Value,
     turn_state: &CodexTurnState,
-    recorder: &mut SessionRecorder,
+    recorder: &mut impl TurnRecorder,
 ) -> Result<()> {
     match item.get("type").and_then(Value::as_str) {
         Some("agentMessage") => {
@@ -6696,20 +7208,28 @@ trait TurnRecorder {
     fn error(&mut self, detail: &str) -> Result<()>;
 }
 
+trait CodexTurnRecorder: TurnRecorder {
+    fn push_codex_approval(
+        &mut self,
+        title: &str,
+        command: &str,
+        detail: &str,
+        approval: CodexPendingApproval,
+    ) -> Result<()>;
+}
+
 struct SessionRecorder {
-    command_messages: HashMap<String, String>,
+    recorder_state: SessionRecorderState,
     session_id: String,
     state: AppState,
-    streaming_text_message_id: Option<String>,
 }
 
 impl SessionRecorder {
     fn new(state: AppState, session_id: String) -> Self {
         Self {
-            command_messages: HashMap::new(),
+            recorder_state: SessionRecorderState::default(),
             session_id,
             state,
-            streaming_text_message_id: None,
         }
     }
 
@@ -6792,6 +7312,76 @@ impl SessionRecorder {
     }
 }
 
+impl CodexTurnRecorder for SessionRecorder {
+    fn push_codex_approval(
+        &mut self,
+        title: &str,
+        command: &str,
+        detail: &str,
+        approval: CodexPendingApproval,
+    ) -> Result<()> {
+        SessionRecorder::push_codex_approval(self, title, command, detail, approval)
+    }
+}
+
+struct BorrowedSessionRecorder<'a> {
+    recorder_state: &'a mut SessionRecorderState,
+    session_id: &'a str,
+    state: &'a AppState,
+}
+
+impl<'a> BorrowedSessionRecorder<'a> {
+    fn new(
+        state: &'a AppState,
+        session_id: &'a str,
+        recorder_state: &'a mut SessionRecorderState,
+    ) -> Self {
+        Self {
+            recorder_state,
+            session_id,
+            state,
+        }
+    }
+
+    fn push_codex_approval(
+        &mut self,
+        title: &str,
+        command: &str,
+        detail: &str,
+        approval: CodexPendingApproval,
+    ) -> Result<()> {
+        self.finish_streaming_text()?;
+        let message_id = self.state.allocate_message_id();
+        self.state.push_message(
+            self.session_id,
+            Message::Approval {
+                id: message_id.clone(),
+                timestamp: stamp_now(),
+                author: Author::Assistant,
+                title: title.to_owned(),
+                command: command.to_owned(),
+                command_language: Some(shell_language().to_owned()),
+                detail: detail.to_owned(),
+                decision: ApprovalDecision::Pending,
+            },
+        )?;
+        self.state
+            .register_codex_pending_approval(self.session_id, message_id, approval)
+    }
+}
+
+impl CodexTurnRecorder for BorrowedSessionRecorder<'_> {
+    fn push_codex_approval(
+        &mut self,
+        title: &str,
+        command: &str,
+        detail: &str,
+        approval: CodexPendingApproval,
+    ) -> Result<()> {
+        BorrowedSessionRecorder::push_codex_approval(self, title, command, detail, approval)
+    }
+}
+
 impl TurnRecorder for SessionRecorder {
     fn note_external_session(&mut self, session_id: &str) -> Result<()> {
         self.state
@@ -6840,7 +7430,7 @@ impl TurnRecorder for SessionRecorder {
             return Ok(());
         }
 
-        let message_id = match &self.streaming_text_message_id {
+        let message_id = match &self.recorder_state.streaming_text_message_id {
             Some(message_id) => message_id.clone(),
             None => {
                 let message_id = self.state.allocate_message_id();
@@ -6855,7 +7445,7 @@ impl TurnRecorder for SessionRecorder {
                         expanded_text: None,
                     },
                 )?;
-                self.streaming_text_message_id = Some(message_id.clone());
+                self.recorder_state.streaming_text_message_id = Some(message_id.clone());
                 message_id
             }
         };
@@ -6910,12 +7500,13 @@ impl TurnRecorder for SessionRecorder {
     }
 
     fn finish_streaming_text(&mut self) -> Result<()> {
-        self.streaming_text_message_id = None;
+        self.recorder_state.streaming_text_message_id = None;
         Ok(())
     }
 
     fn command_started(&mut self, key: &str, command: &str) -> Result<()> {
         let message_id = self
+            .recorder_state
             .command_messages
             .entry(key.to_owned())
             .or_insert_with(|| self.state.allocate_message_id())
@@ -6938,6 +7529,7 @@ impl TurnRecorder for SessionRecorder {
         status: CommandStatus,
     ) -> Result<()> {
         let message_id = self
+            .recorder_state
             .command_messages
             .entry(key.to_owned())
             .or_insert_with(|| self.state.allocate_message_id())
@@ -6956,6 +7548,178 @@ impl TurnRecorder for SessionRecorder {
         self.finish_streaming_text()?;
         self.state.push_message(
             &self.session_id,
+            Message::Text {
+                attachments: Vec::new(),
+                id: self.state.allocate_message_id(),
+                timestamp: stamp_now(),
+                author: Author::Assistant,
+                text: format!("Error: {cleaned}"),
+                expanded_text: None,
+            },
+        )
+    }
+}
+
+impl TurnRecorder for BorrowedSessionRecorder<'_> {
+    fn note_external_session(&mut self, session_id: &str) -> Result<()> {
+        self.state
+            .set_external_session_id(self.session_id, session_id.to_owned())
+    }
+
+    fn push_approval(&mut self, title: &str, command: &str, detail: &str) -> Result<()> {
+        self.finish_streaming_text()?;
+        self.state.push_message(
+            self.session_id,
+            Message::Approval {
+                id: self.state.allocate_message_id(),
+                timestamp: stamp_now(),
+                author: Author::Assistant,
+                title: title.to_owned(),
+                command: command.to_owned(),
+                command_language: Some(shell_language().to_owned()),
+                detail: detail.to_owned(),
+                decision: ApprovalDecision::Pending,
+            },
+        )
+    }
+
+    fn push_text(&mut self, text: &str) -> Result<()> {
+        let trimmed = text.trim();
+        if trimmed.is_empty() {
+            return Ok(());
+        }
+
+        self.finish_streaming_text()?;
+        self.state.push_message(
+            self.session_id,
+            Message::Text {
+                attachments: Vec::new(),
+                id: self.state.allocate_message_id(),
+                timestamp: stamp_now(),
+                author: Author::Assistant,
+                text: trimmed.to_owned(),
+                expanded_text: None,
+            },
+        )
+    }
+
+    fn text_delta(&mut self, delta: &str) -> Result<()> {
+        if delta.is_empty() {
+            return Ok(());
+        }
+
+        let message_id = match &self.recorder_state.streaming_text_message_id {
+            Some(message_id) => message_id.clone(),
+            None => {
+                let message_id = self.state.allocate_message_id();
+                self.state.push_message(
+                    self.session_id,
+                    Message::Text {
+                        attachments: Vec::new(),
+                        id: message_id.clone(),
+                        timestamp: stamp_now(),
+                        author: Author::Assistant,
+                        text: String::new(),
+                        expanded_text: None,
+                    },
+                )?;
+                self.recorder_state.streaming_text_message_id = Some(message_id.clone());
+                message_id
+            }
+        };
+
+        self.state.append_text_delta(self.session_id, &message_id, delta)
+    }
+
+    fn push_thinking(&mut self, title: &str, lines: Vec<String>) -> Result<()> {
+        if lines.is_empty() {
+            return Ok(());
+        }
+
+        self.finish_streaming_text()?;
+        self.state.push_message(
+            self.session_id,
+            Message::Thinking {
+                id: self.state.allocate_message_id(),
+                timestamp: stamp_now(),
+                author: Author::Assistant,
+                title: title.to_owned(),
+                lines,
+            },
+        )
+    }
+
+    fn push_diff(
+        &mut self,
+        file_path: &str,
+        summary: &str,
+        diff: &str,
+        change_type: ChangeType,
+    ) -> Result<()> {
+        if diff.trim().is_empty() {
+            return Ok(());
+        }
+
+        self.finish_streaming_text()?;
+        self.state.push_message(
+            self.session_id,
+            Message::Diff {
+                id: self.state.allocate_message_id(),
+                timestamp: stamp_now(),
+                author: Author::Assistant,
+                file_path: file_path.to_owned(),
+                summary: summary.to_owned(),
+                diff: diff.to_owned(),
+                language: Some("diff".to_owned()),
+                change_type,
+            },
+        )
+    }
+
+    fn finish_streaming_text(&mut self) -> Result<()> {
+        self.recorder_state.streaming_text_message_id = None;
+        Ok(())
+    }
+
+    fn command_started(&mut self, key: &str, command: &str) -> Result<()> {
+        let message_id = self
+            .recorder_state
+            .command_messages
+            .entry(key.to_owned())
+            .or_insert_with(|| self.state.allocate_message_id())
+            .clone();
+
+        self.state
+            .upsert_command_message(self.session_id, &message_id, command, "", CommandStatus::Running)
+    }
+
+    fn command_completed(
+        &mut self,
+        key: &str,
+        command: &str,
+        output: &str,
+        status: CommandStatus,
+    ) -> Result<()> {
+        let message_id = self
+            .recorder_state
+            .command_messages
+            .entry(key.to_owned())
+            .or_insert_with(|| self.state.allocate_message_id())
+            .clone();
+
+        self.state
+            .upsert_command_message(self.session_id, &message_id, command, output, status)
+    }
+
+    fn error(&mut self, detail: &str) -> Result<()> {
+        let cleaned = detail.trim();
+        if cleaned.is_empty() {
+            return Ok(());
+        }
+
+        self.finish_streaming_text()?;
+        self.state.push_message(
+            self.session_id,
             Message::Text {
                 attachments: Vec::new(),
                 id: self.state.allocate_message_id(),
@@ -7155,6 +7919,7 @@ fn run_codex_turn(
             runtime_id: Uuid::new_v4().to_string(),
             input_tx,
             process: process.clone(),
+            shared_session: None,
         };
 
         if let Err(err) = state.set_codex_runtime(runtime_session_id, runtime) {
@@ -8665,7 +9430,10 @@ fn deliver_turn_dispatch(state: &AppState, dispatch: TurnDispatch) -> Result<(),
             sender,
             session_id,
         } => {
-            if let Err(err) = sender.send(CodexRuntimeCommand::Prompt(command)) {
+            if let Err(err) = sender.send(CodexRuntimeCommand::Prompt {
+                session_id: session_id.clone(),
+                command,
+            }) {
                 let _ = state.clear_runtime(&session_id);
                 let _ = state.fail_turn(
                     &session_id,
@@ -10473,6 +11241,7 @@ mod tests {
             persistence_path: Arc::new(persistence_path),
             state_events: broadcast::channel(16).0,
             delta_events: broadcast::channel(16).0,
+            shared_codex_runtime: Arc::new(Mutex::new(None)),
             inner: Arc::new(Mutex::new(StateInner::new())),
         }
     }
@@ -10507,7 +11276,28 @@ mod tests {
             runtime_id: runtime_id.to_owned(),
             input_tx,
             process: Arc::new(Mutex::new(child)),
+            shared_session: None,
         }
+    }
+
+    fn test_shared_codex_runtime(
+        runtime_id: &str,
+    ) -> (
+        SharedCodexRuntime,
+        mpsc::Receiver<CodexRuntimeCommand>,
+        Arc<Mutex<Child>>,
+    ) {
+        let child = test_exit_success_child();
+        let process = Arc::new(Mutex::new(child));
+        let (input_tx, input_rx) = mpsc::channel();
+        let runtime = SharedCodexRuntime {
+            runtime_id: runtime_id.to_owned(),
+            input_tx,
+            process: process.clone(),
+            sessions: Arc::new(Mutex::new(HashMap::new())),
+            thread_sessions: Arc::new(Mutex::new(HashMap::new())),
+        };
+        (runtime, input_rx, process)
     }
 
     #[test]
@@ -11262,6 +12052,7 @@ Use the active agent's tools.
             runtime_id: "codex-model-refresh".to_owned(),
             input_tx,
             process: Arc::new(Mutex::new(child)),
+            shared_session: None,
         };
 
         {
@@ -11303,6 +12094,129 @@ Use the active agent's tools.
                 SessionModelOption::plain("gpt-5.3-codex", "gpt-5.3-codex"),
             ]
         );
+    }
+
+    #[test]
+    fn reuses_shared_codex_runtime_across_sessions() {
+        let state = test_app_state();
+        let (runtime, _input_rx, process) = test_shared_codex_runtime("shared-codex");
+        *state
+            .shared_codex_runtime
+            .lock()
+            .expect("shared Codex runtime mutex poisoned") = Some(runtime.clone());
+
+        let first = spawn_codex_runtime(state.clone(), "session-a".to_owned(), "/tmp".to_owned())
+            .expect("first Codex handle should attach");
+        let second = spawn_codex_runtime(state.clone(), "session-b".to_owned(), "/tmp".to_owned())
+            .expect("second Codex handle should attach");
+
+        assert_eq!(first.runtime_id, "shared-codex");
+        assert_eq!(second.runtime_id, "shared-codex");
+        assert!(Arc::ptr_eq(&first.process, &process));
+        assert!(Arc::ptr_eq(&second.process, &process));
+        let shared_sessions = runtime
+            .sessions
+            .lock()
+            .expect("shared Codex session mutex poisoned");
+        assert!(shared_sessions.contains_key("session-a"));
+        assert!(shared_sessions.contains_key("session-b"));
+    }
+
+    #[test]
+    fn stops_shared_codex_sessions_via_turn_interrupt() {
+        let state = test_app_state();
+        let session_id = test_session_id(&state, Agent::Codex);
+        let (runtime, input_rx, process) = test_shared_codex_runtime("shared-codex-stop");
+        runtime
+            .sessions
+            .lock()
+            .expect("shared Codex session mutex poisoned")
+            .insert(
+                session_id.clone(),
+                SharedCodexSessionState {
+                    thread_id: Some("thread-123".to_owned()),
+                    turn_id: Some("turn-123".to_owned()),
+                    ..SharedCodexSessionState::default()
+                },
+            );
+        runtime
+            .thread_sessions
+            .lock()
+            .expect("shared Codex thread mutex poisoned")
+            .insert("thread-123".to_owned(), session_id.clone());
+
+        let handle = CodexRuntimeHandle {
+            runtime_id: runtime.runtime_id.clone(),
+            input_tx: runtime.input_tx.clone(),
+            process,
+            shared_session: Some(SharedCodexSessionHandle {
+                runtime: runtime.clone(),
+                session_id: session_id.clone(),
+            }),
+        };
+
+        {
+            let mut inner = state.inner.lock().expect("state mutex poisoned");
+            let index = inner
+                .find_session_index(&session_id)
+                .expect("Codex session should exist");
+            inner.sessions[index].runtime = SessionRuntime::Codex(handle);
+            inner.sessions[index].session.status = SessionStatus::Active;
+        }
+
+        std::thread::spawn(move || {
+            let command = input_rx
+                .recv_timeout(Duration::from_secs(1))
+                .expect("Codex interrupt command should arrive");
+            match command {
+                CodexRuntimeCommand::InterruptTurn {
+                    thread_id,
+                    turn_id,
+                    response_tx,
+                } => {
+                    assert_eq!(thread_id, "thread-123");
+                    assert_eq!(turn_id, "turn-123");
+                    let _ = response_tx.send(Ok(()));
+                }
+                _ => panic!("expected Codex turn interrupt command"),
+            }
+        });
+
+        let snapshot = state.stop_session(&session_id).unwrap();
+        let session = snapshot
+            .sessions
+            .iter()
+            .find(|session| session.id == session_id)
+            .expect("stopped session should remain present");
+        assert_eq!(session.status, SessionStatus::Idle);
+        assert!(session
+            .messages
+            .iter()
+            .any(|message| matches!(
+                message,
+                Message::Text { text, .. } if text == "Turn stopped by user."
+            )));
+
+        let inner = state.inner.lock().expect("state mutex poisoned");
+        let record = inner
+            .sessions
+            .iter()
+            .find(|record| record.session.id == session_id)
+            .expect("Codex session should exist");
+        assert!(matches!(record.runtime, SessionRuntime::None));
+        drop(inner);
+
+        let shared_sessions = runtime
+            .sessions
+            .lock()
+            .expect("shared Codex session mutex poisoned");
+        assert!(!shared_sessions.contains_key(&session_id));
+        drop(shared_sessions);
+        assert!(!runtime
+            .thread_sessions
+            .lock()
+            .expect("shared Codex thread mutex poisoned")
+            .contains_key("thread-123"));
     }
 
     #[test]
