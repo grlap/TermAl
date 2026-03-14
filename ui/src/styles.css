@@ -2133,6 +2133,18 @@ textarea {
   font-size: 0.84rem;
 }
 
+.session-control-notice {
+  grid-column: 1 / -1;
+  margin: 0;
+  padding: 0.7rem 0.85rem;
+  border: 1px solid var(--accent-blue-border);
+  border-radius: 0.9rem;
+  background: var(--accent-blue-bg);
+  color: var(--signal-blue);
+  font-size: 0.82rem;
+  line-height: 1.45;
+}
+
 .session-model-details {
   display: grid;
   gap: 0.35rem;

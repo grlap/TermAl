@@ -1,7 +1,8 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
-import App, { MarkdownContent } from "./App";
+import App, { MarkdownContent, describeCodexModelAdjustmentNotice } from "./App";
+import type { Session } from "./types";
 
 class EventSourceMock {
   addEventListener() {}
@@ -28,6 +29,24 @@ function jsonResponse(body: unknown) {
   });
 }
 
+function makeSession(id: string, overrides?: Partial<Session>): Session {
+  return {
+    id,
+    name: id,
+    emoji: "x",
+    agent: "Codex",
+    workdir: "/tmp",
+    model: "gpt-5.4",
+    approvalPolicy: "never",
+    reasoningEffort: "medium",
+    sandboxMode: "workspace-write",
+    status: "idle",
+    preview: "",
+    messages: [],
+    ...overrides,
+  };
+}
+
 describe("MarkdownContent", () => {
   it("wraps markdown tables in a scroll container", () => {
     const markdown = [
@@ -52,6 +71,37 @@ describe("MarkdownContent", () => {
 });
 
 describe("App", () => {
+  it("describes when a Codex model switch resets reasoning effort", () => {
+    expect(
+      describeCodexModelAdjustmentNotice(
+        makeSession("before", {
+          model: "gpt-5",
+          reasoningEffort: "minimal",
+          modelOptions: [
+            {
+              label: "GPT-5",
+              value: "gpt-5",
+              supportedReasoningEfforts: ["minimal", "low", "medium", "high"],
+            },
+          ],
+        }),
+        makeSession("after", {
+          model: "gpt-5-codex-mini",
+          reasoningEffort: "medium",
+          modelOptions: [
+            {
+              label: "GPT-5 Codex Mini",
+              value: "gpt-5-codex-mini",
+              supportedReasoningEfforts: ["medium", "high"],
+            },
+          ],
+        }),
+      ),
+    ).toBe(
+      "GPT-5 Codex Mini only supports medium and high reasoning, so TermAl reset effort from minimal to medium.",
+    );
+  });
+
   it("refreshes model options after creating a new Codex session", async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);

@@ -164,6 +164,7 @@ type SessionSettingsValue =
   | CursorMode
   | GeminiApprovalMode;
 type SessionErrorMap = Record<string, string | undefined>;
+type SessionNoticeMap = Record<string, string | undefined>;
 type PreferencesTabId = "themes" | "codex-prompts" | "claude-approvals";
 type DraftImageAttachment = ImageAttachment & {
   base64Data: string;
@@ -445,6 +446,44 @@ function sessionModelCapabilitySummary(option: SessionModelOption | null) {
     : `Reasoning: ${supported}.`;
 }
 
+function formatCodexReasoningEffortList(efforts: readonly CodexReasoningEffort[]) {
+  if (efforts.length === 0) {
+    return "";
+  }
+  if (efforts.length === 1) {
+    return efforts[0];
+  }
+  if (efforts.length === 2) {
+    return `${efforts[0]} and ${efforts[1]}`;
+  }
+
+  return `${efforts.slice(0, -1).join(", ")}, and ${efforts[efforts.length - 1]}`;
+}
+
+export function describeCodexModelAdjustmentNotice(previousSession: Session, nextSession: Session) {
+  if (previousSession.agent !== "Codex" || nextSession.agent !== "Codex") {
+    return null;
+  }
+
+  const previousEffort = normalizedCodexReasoningEffort(previousSession);
+  const nextEffort = normalizedCodexReasoningEffort(nextSession);
+  if (previousEffort === nextEffort) {
+    return null;
+  }
+
+  const currentModelOption = currentCodexModelOption(nextSession);
+  const currentModelLabel = currentModelOption?.label ?? nextSession.model;
+  const supportedEfforts = currentModelOption?.supportedReasoningEfforts ?? [];
+
+  if (supportedEfforts.length > 0) {
+    return `${currentModelLabel} only supports ${formatCodexReasoningEffortList(
+      supportedEfforts,
+    )} reasoning, so TermAl reset effort from ${previousEffort} to ${nextEffort}.`;
+  }
+
+  return `${currentModelLabel} reset Codex reasoning effort from ${previousEffort} to ${nextEffort}.`;
+}
+
 export default function App() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [sessions, setSessions] = useState<Session[]>([]);
@@ -482,6 +521,7 @@ export default function App() {
   const [refreshingSessionModelOptionIds, setRefreshingSessionModelOptionIds] =
     useState<SessionFlagMap>({});
   const [sessionModelOptionErrors, setSessionModelOptionErrors] = useState<SessionErrorMap>({});
+  const [sessionSettingNotices, setSessionSettingNotices] = useState<SessionNoticeMap>({});
   const [requestError, setRequestError] = useState<string | null>(null);
   const [sessionListFilter, setSessionListFilter] = useState<SessionListFilter>("all");
   const [sessionListSearchQuery, setSessionListSearchQuery] = useState("");
@@ -815,6 +855,7 @@ export default function App() {
       current && availableSessionIds.has(current.sessionId) ? current : null,
     );
     setUpdatingSessionIds((current) => pruneSessionFlags(current, availableSessionIds));
+    setSessionSettingNotices((current) => pruneSessionValues(current, availableSessionIds));
   }
 
   function adoptState(
@@ -1956,6 +1997,27 @@ export default function App() {
 
       const state = await updateSessionSettings(sessionId, payload);
       adoptState(state);
+      const updatedSession =
+        state.sessions.find((entry) => entry.id === sessionId) ?? null;
+      const nextNotice =
+        session.agent === "Codex" && field === "model" && updatedSession
+          ? describeCodexModelAdjustmentNotice(session, updatedSession)
+          : null;
+      setSessionSettingNotices((current) => {
+        if (nextNotice) {
+          return {
+            ...current,
+            [sessionId]: nextNotice,
+          };
+        }
+        if (!current[sessionId]) {
+          return current;
+        }
+
+        const nextState = { ...current };
+        delete nextState[sessionId];
+        return nextState;
+      });
       setRequestError(null);
     } catch (error) {
       setRequestError(getErrorMessage(error));
@@ -2604,6 +2666,7 @@ export default function App() {
               updatingSessionIds={updatingSessionIds}
               refreshingSessionModelOptionIds={refreshingSessionModelOptionIds}
               sessionModelOptionErrors={sessionModelOptionErrors}
+              sessionSettingNotices={sessionSettingNotices}
               paneShouldStickToBottomRef={paneShouldStickToBottomRef}
               paneScrollPositionsRef={paneScrollPositionsRef}
               paneContentSignaturesRef={paneContentSignaturesRef}
@@ -3910,6 +3973,7 @@ function WorkspaceNodeView({
   updatingSessionIds,
   refreshingSessionModelOptionIds,
   sessionModelOptionErrors,
+  sessionSettingNotices,
   paneShouldStickToBottomRef,
   paneScrollPositionsRef,
   paneContentSignaturesRef,
@@ -3960,6 +4024,7 @@ function WorkspaceNodeView({
   updatingSessionIds: SessionFlagMap;
   refreshingSessionModelOptionIds: SessionFlagMap;
   sessionModelOptionErrors: SessionErrorMap;
+  sessionSettingNotices: SessionNoticeMap;
   paneShouldStickToBottomRef: React.MutableRefObject<Record<string, boolean | undefined>>;
   paneScrollPositionsRef: React.MutableRefObject<
     Record<string, Record<string, { top: number; shouldStick: boolean }>>
@@ -4057,6 +4122,9 @@ function WorkspaceNodeView({
         modelOptionsError={
           pane.activeSessionId ? (sessionModelOptionErrors[pane.activeSessionId] ?? null) : null
         }
+        sessionSettingNotice={
+          pane.activeSessionId ? (sessionSettingNotices[pane.activeSessionId] ?? null) : null
+        }
         paneShouldStickToBottomRef={paneShouldStickToBottomRef}
         paneScrollPositionsRef={paneScrollPositionsRef}
         paneContentSignaturesRef={paneContentSignaturesRef}
@@ -4127,6 +4195,7 @@ function WorkspaceNodeView({
           updatingSessionIds={updatingSessionIds}
           refreshingSessionModelOptionIds={refreshingSessionModelOptionIds}
           sessionModelOptionErrors={sessionModelOptionErrors}
+          sessionSettingNotices={sessionSettingNotices}
           paneShouldStickToBottomRef={paneShouldStickToBottomRef}
           paneScrollPositionsRef={paneScrollPositionsRef}
           paneContentSignaturesRef={paneContentSignaturesRef}
@@ -4193,6 +4262,7 @@ function WorkspaceNodeView({
           updatingSessionIds={updatingSessionIds}
           refreshingSessionModelOptionIds={refreshingSessionModelOptionIds}
           sessionModelOptionErrors={sessionModelOptionErrors}
+          sessionSettingNotices={sessionSettingNotices}
           paneShouldStickToBottomRef={paneShouldStickToBottomRef}
           paneScrollPositionsRef={paneScrollPositionsRef}
           paneContentSignaturesRef={paneContentSignaturesRef}
@@ -4248,6 +4318,7 @@ function SessionPaneView({
   isUpdating,
   isRefreshingModelOptions,
   modelOptionsError,
+  sessionSettingNotice,
   paneShouldStickToBottomRef,
   paneScrollPositionsRef,
   paneContentSignaturesRef,
@@ -4296,6 +4367,7 @@ function SessionPaneView({
   isUpdating: boolean;
   isRefreshingModelOptions: boolean;
   modelOptionsError: string | null;
+  sessionSettingNotice: string | null;
   paneShouldStickToBottomRef: React.MutableRefObject<Record<string, boolean | undefined>>;
   paneScrollPositionsRef: React.MutableRefObject<
     Record<string, Record<string, { top: number; shouldStick: boolean }>>
@@ -5404,6 +5476,7 @@ function SessionPaneView({
                     session={session}
                     isUpdating={panelIsUpdating}
                     isRefreshingModelOptions={isRefreshingModelOptions}
+                    sessionNotice={session.id === activeSession?.id ? sessionSettingNotice : null}
                     onRequestModelOptions={onRefreshSessionModelOptions}
                     onSessionSettingsChange={handleSettingsChange}
                   />
@@ -5597,6 +5670,7 @@ export function CodexPromptSettingsCard({
   session,
   isUpdating,
   isRefreshingModelOptions,
+  sessionNotice,
   onRequestModelOptions,
   onSessionSettingsChange,
 }: {
@@ -5604,6 +5678,7 @@ export function CodexPromptSettingsCard({
   session: Session;
   isUpdating: boolean;
   isRefreshingModelOptions: boolean;
+  sessionNotice: string | null;
   onRequestModelOptions: (sessionId: string) => void;
   onSessionSettingsChange: (
     sessionId: string,
@@ -5702,6 +5777,7 @@ export function CodexPromptSettingsCard({
             }
           />
         </div>
+        {sessionNotice ? <p className="session-control-notice">{sessionNotice}</p> : null}
         <p className="session-control-hint">
           {isRefreshingModelOptions
             ? "Loading Codex's live model list for this session. Sandbox, approval, and reasoning changes still apply on the next Codex prompt."
@@ -7346,12 +7422,12 @@ function setSessionFlag(current: SessionFlagMap, sessionId: string, value: boole
   return next;
 }
 
-function pruneSessionValues(
-  current: Record<string, string>,
+function pruneSessionValues<T extends string | undefined>(
+  current: Record<string, T>,
   availableSessionIds: Set<string>,
-): Record<string, string> {
+): Record<string, T> {
   const nextEntries = Object.entries(current).filter(([sessionId]) => availableSessionIds.has(sessionId));
-  return Object.fromEntries(nextEntries);
+  return Object.fromEntries(nextEntries) as Record<string, T>;
 }
 
 function pruneSessionAttachmentValues(

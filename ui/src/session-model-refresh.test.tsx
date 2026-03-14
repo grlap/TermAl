@@ -40,6 +40,7 @@ describe("session model refresh controls", () => {
         })}
         isUpdating={false}
         isRefreshingModelOptions={false}
+        sessionNotice={null}
         onRequestModelOptions={onRequestModelOptions}
         onSessionSettingsChange={() => {}}
       />,
@@ -76,6 +77,7 @@ describe("session model refresh controls", () => {
         })}
         isUpdating={false}
         isRefreshingModelOptions={false}
+        sessionNotice="GPT-5 Codex Mini only supports medium and high reasoning, so TermAl reset effort from minimal to medium."
         onRequestModelOptions={() => {}}
         onSessionSettingsChange={() => {}}
       />,
@@ -84,6 +86,11 @@ describe("session model refresh controls", () => {
     expect(
       screen.getByText((content) =>
         content.includes("This model supports medium, high reasoning. medium is the default."),
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "GPT-5 Codex Mini only supports medium and high reasoning, so TermAl reset effort from minimal to medium.",
       ),
     ).toBeInTheDocument();
 
