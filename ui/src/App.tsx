@@ -13,6 +13,7 @@ import {
   type DragEvent as ReactDragEvent,
   type KeyboardEvent as ReactKeyboardEvent,
   type PointerEvent as ReactPointerEvent,
+  type WheelEvent as ReactWheelEvent,
   type ReactNode,
   type RefObject,
 } from "react";
@@ -118,6 +119,8 @@ import {
   type WorkspaceState,
 } from "./workspace";
 import { reconcileSessions } from "./session-reconcile";
+
+const TAB_DRAG_STALE_TIMEOUT_MS = 15000;
 import {
   clampFontSizePreference,
   DEFAULT_FONT_SIZE_PX,
@@ -2363,6 +2366,35 @@ export default function App() {
     });
   }
 
+  function clearStaleTabDragState() {
+    const endedDrag = draggedTabRef.current;
+    draggedTabRef.current = null;
+    setDraggedTab(null);
+    setExternalDraggedTab(null);
+    if (!endedDrag) {
+      return;
+    }
+
+    broadcastTabDragMessage({
+      type: "drag-end",
+      dragId: endedDrag.dragId,
+      sourceWindowId: endedDrag.sourceWindowId,
+    });
+  }
+
+  function recoverFromLostTabDrag(buttons: number) {
+    if (buttons !== 0) {
+      return false;
+    }
+
+    if (!draggedTabRef.current && !externalDraggedTab) {
+      return false;
+    }
+
+    clearStaleTabDragState();
+    return true;
+  }
+
   function handleTabDrop(targetPaneId: string, placement: TabDropPlacement, tabIndex?: number) {
     if (draggedTab) {
       const drop = draggedTab;
@@ -2429,6 +2461,38 @@ export default function App() {
       sourceWindowId: drop.sourceWindowId,
     });
   }
+
+  useEffect(() => {
+    if (!draggedTab && !externalDraggedTab) {
+      return;
+    }
+
+    const handleWindowBlur = () => {
+      clearStaleTabDragState();
+    };
+    const handlePageHide = () => {
+      clearStaleTabDragState();
+    };
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "hidden") {
+        clearStaleTabDragState();
+      }
+    };
+    const timeoutId = window.setTimeout(() => {
+      clearStaleTabDragState();
+    }, TAB_DRAG_STALE_TIMEOUT_MS);
+
+    window.addEventListener("blur", handleWindowBlur);
+    window.addEventListener("pagehide", handlePageHide);
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+      window.removeEventListener("blur", handleWindowBlur);
+      window.removeEventListener("pagehide", handlePageHide);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+    };
+  }, [draggedTab, externalDraggedTab]);
 
   function handlePaneViewModeChange(paneId: string, viewMode: SessionPaneViewMode) {
     if (viewMode === "session") {
@@ -4982,6 +5046,39 @@ function SessionPaneView({
     }
   }
 
+  function handleMessageStackWheel(event: ReactWheelEvent<HTMLElement>) {
+    if (event.defaultPrevented || event.ctrlKey) {
+      return;
+    }
+
+    const node = messageStackRef.current;
+    if (!node) {
+      return;
+    }
+
+    const deltaY = normalizeWheelDelta(event, node);
+    if (Math.abs(deltaY) < 0.5) {
+      return;
+    }
+
+    if (canNestedScrollableConsumeWheel(event.target, node, deltaY)) {
+      return;
+    }
+
+    const maxScrollTop = Math.max(node.scrollHeight - node.clientHeight, 0);
+    if (maxScrollTop <= 0) {
+      return;
+    }
+
+    const nextScrollTop = clamp(node.scrollTop + deltaY, 0, maxScrollTop);
+    if (Math.abs(nextScrollTop - node.scrollTop) < 0.5) {
+      return;
+    }
+
+    event.preventDefault();
+    node.scrollTop = nextScrollTop;
+  }
+
   useEffect(() => {
     if (canFindInSession) {
       return;
@@ -5549,6 +5646,7 @@ function SessionPaneView({
       <section
         ref={messageStackRef}
         className={`message-stack${activeControlPanelTab ? " control-panel-stack" : ""}`}
+        onWheel={handleMessageStackWheel}
         onScroll={(event) => {
           const node = event.currentTarget;
           const shouldStick = node.scrollHeight - node.scrollTop - node.clientHeight < 72;
@@ -7896,6 +7994,53 @@ function formatByteSize(byteSize: number) {
 
 function clamp(value: number, min: number, max: number) {
   return Math.min(Math.max(value, min), max);
+}
+
+function normalizeWheelDelta(
+  event: Pick<ReactWheelEvent<HTMLElement>, "deltaMode" | "deltaY">,
+  container: HTMLElement,
+) {
+  if (event.deltaMode === 1) {
+    const computedLineHeight = Number.parseFloat(window.getComputedStyle(container).lineHeight);
+    const lineHeight = Number.isFinite(computedLineHeight) ? computedLineHeight : 16;
+    return event.deltaY * lineHeight;
+  }
+
+  if (event.deltaMode === 2) {
+    return event.deltaY * Math.max(container.clientHeight, 1);
+  }
+
+  return event.deltaY;
+}
+
+function canNestedScrollableConsumeWheel(
+  target: EventTarget | null,
+  container: HTMLElement,
+  deltaY: number,
+) {
+  let current = target instanceof HTMLElement ? target : null;
+
+  while (current && current !== container) {
+    const style = window.getComputedStyle(current);
+    const overflowY = style.overflowY;
+    const canScrollY =
+      (overflowY === "auto" || overflowY === "scroll" || overflowY === "overlay") &&
+      current.scrollHeight > current.clientHeight + 1;
+
+    if (canScrollY) {
+      const maxScrollTop = current.scrollHeight - current.clientHeight;
+      if (deltaY < 0 && current.scrollTop > 0) {
+        return true;
+      }
+      if (deltaY > 0 && current.scrollTop < maxScrollTop) {
+        return true;
+      }
+    }
+
+    current = current.parentElement;
+  }
+
+  return false;
 }
 
 function dropLabelForPlacement(placement: TabDropPlacement) {
