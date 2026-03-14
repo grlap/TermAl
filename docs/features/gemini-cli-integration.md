@@ -1,14 +1,22 @@
-# Feature Brief: Gemini CLI Integration
+# Feature Reference: Gemini CLI Integration
 
-This brief tracks Gemini as a first-class TermAl agent.
+This document tracks Gemini as a first-class TermAl agent.
 
 Reference: [`agent-integration-comparison.md`](./agent-integration-comparison.md)
 
+## Status
+
+Implemented in TermAl via the shared ACP adapter.
+
+TermAl currently uses Gemini's ACP mode rather than the older one-shot
+`stream-json` path. The option comparison below is kept as protocol reference,
+but the shipped integration is the bidirectional ACP session model.
+
 ## Problem
 
-Only Claude and Codex are wired through session creation, runtime spawning,
-message dispatch, and frontend rendering. Gemini CLI is a widely-used open-source
-agent with strong tool support that is missing entirely from TermAl.
+Gemini CLI is now wired through session creation, runtime spawning, message
+dispatch, approval handling, and frontend rendering. The remaining questions are
+about protocol hardening and UX polish, not whether Gemini belongs in TermAl.
 
 ## Integration options
 
@@ -49,10 +57,9 @@ same protocol as Cursor (shared adapter logic possible).
 
 ### Recommendation
 
-Start with **Option A** (`stream-json`) for an initial working integration, then
-migrate to **Option B** (`--experimental-acp`) once that flag stabilizes or if
-bidirectional approval is needed. The ACP path could potentially share adapter
-code with the Cursor integration.
+TermAl now uses **Option B** (`--experimental-acp`) so Gemini can share the ACP
+runtime path with Cursor and expose session-scoped model refresh, approval-mode
+controls, and live permission handling.
 
 ---
 

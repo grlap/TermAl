@@ -264,6 +264,10 @@ WorkspacePane = {
 - Session modes: `session` (chat), `prompt` (input focus), `commands` (command list), `diffs` (diff list)
 - Tool modes: `source`, `filesystem`, `gitStatus`, `diffPreview`
 
+When a session becomes active in a pane, the frontend keeps the existing
+scroll-to-latest behavior and also autofocuses the composer so typing can begin
+immediately.
+
 ### State Management
 
 No external state library. State lives in `App.tsx` via `useState` and `useRef`:

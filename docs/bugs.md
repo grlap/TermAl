@@ -264,20 +264,32 @@ Server mode already uses `codex app-server` over stdio JSON-RPC with:
 - mapping for more notifications beyond the current subset
 
 
-## No model change on running sessions
+## Session model controls still need polish
 
 **Severity:** Medium - detailed brief:
 - [Session Model Switching](./features/model-switching.md)
 
-## No slash command support
+Session-scoped model switching is implemented for Claude, Codex, Cursor, and
+Gemini. The remaining work is polish: richer capability metadata, stronger
+refresh recovery, and deeper end-to-end coverage.
+
+## Agent-native slash commands are still missing
 
 **Severity:** Medium - detailed brief:
 - [Slash Commands](./features/slash-commands.md)
 
-## No Gemini CLI integration
+TermAl now ships a session-control slash palette for `/model`, `/mode`,
+`/sandbox`, `/approvals`, and `/effort`. What is still missing is discovery and
+dispatch of the agents' own native slash commands.
+
+## Gemini ACP integration still needs hardening
 
 **Severity:** Medium - detailed brief:
 - [Gemini CLI Integration](./features/gemini-cli-integration.md)
+
+Gemini is implemented as a first-class ACP-backed agent now. The remaining work
+is hardening: clearer auth/setup recovery, broader ACP protocol coverage, and
+more end-to-end testing around model refresh and approval-mode changes.
 
 ## Codex app-server and HTTP route coverage is still partial
 
@@ -440,15 +452,14 @@ Concrete work implied by the current TermAl parity gaps. Ordered by user impact 
 
 ## P1
 
-- [ ] Add slash command support:
-  parse the `commands` field from Claude's initialize `system` init event, store and expose
-  available commands, and add a `/`-triggered command picker in the composer with fuzzy filtering
-  and keyboard navigation. Commands are sent as regular user messages.
-- [ ] Add model change on running sessions:
-  discover available models dynamically from Claude's initialize `control_response` and Codex's
-  `models_cache.json`, cache and persist the list, expose via `GET /api/models`, send `set_model`
-  control request to Claude and update `config.toml` for Codex, and add a model selector to the
-  session settings UI. Sessions start with the default model â€” this is about changing it after.
+- [ ] Add native slash command discovery:
+  keep the existing session-control slash palette, but also parse and expose
+  native agent commands such as Claude's `commands` metadata so TermAl can offer
+  `/review`-style workflows directly from the composer.
+- [ ] Polish session model controls:
+  keep the current session-scoped model switching, but continue improving live
+  metadata, validation, recovery flows, and create/clone defaults so the model
+  UX feels intentional across Claude, Codex, Cursor, and Gemini.
 - [ ] Migrate REPL mode off legacy `codex exec --json` and onto the app-server path so server mode
   and REPL mode share one implementation.
 - [ ] Replace the `try_wait()` polling loops in the Claude and Codex runtime supervisors with

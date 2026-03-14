@@ -1,58 +1,54 @@
-# Feature Brief: Slash Commands
+# Feature Reference: Session Slash Commands
 
-This brief tracks parity work for Claude-style slash commands in the TermAl
-composer.
+This document describes the slash-command behavior that TermAl currently ships
+in the composer.
 
 Backlog source: [`docs/bugs.md`](../bugs.md)
 
-## Problem
+## Status
 
-Claude Code exposes slash commands such as `/review`, `/release-notes`,
-`/security-review`, `/simplify`, and `/batch`. TermAl has no equivalent
-command discovery or picker UI today.
+Implemented for session controls. Native agent slash-command discovery is still
+future work.
 
-## Protocol behavior
+## What TermAl supports today
 
-Claude's initialize response already carries command metadata in the `system`
-event with `subtype: "init"`.
+Typing `/` in the composer opens a session-control palette. The palette is
+scoped to the active session and uses the same settings APIs as the Prompt tab.
 
-Relevant fields:
-- `commands`
-- `models`
-- `pid`
+Supported commands:
 
-TermAl currently only extracts `session_id` from that event and drops the rest.
+- `/model` for `Claude`, `Codex`, `Cursor`, and `Gemini`
+- `/mode` for `Claude`, `Cursor`, and `Gemini`
+- `/sandbox` for `Codex`
+- `/approvals` for `Codex`
+- `/effort` for `Codex`
 
-## Dispatch model
+## Behavior
 
-Slash commands do not need a special transport path. They are sent as normal
-user messages. The missing work is client-side discovery and selection.
+- Keyboard navigation works inside the palette.
+- `Enter` applies the highlighted choice and closes the palette.
+- `Space` applies the highlighted choice and keeps the palette open.
+- The active choice stays aligned with the real selected session setting after
+  live refreshes and setting changes.
+- `/model` supports manual model-id entry as well as choosing from the live
+  list.
+- For live model lists, labels resolve to canonical ids before TermAl stores
+  the selection.
 
-That means the feature breaks down into:
+## Live model integration
 
-1. Discovery: parse available commands from the init response.
-2. UI: show a picker when the user types `/`.
-3. Dispatch: send the chosen command text as a normal user message.
+For Claude, Codex, Cursor, and Gemini, the slash palette can:
 
-## Backend tasks
+- trigger live model refresh when the model list is missing
+- show inline loading state
+- show inline error guidance
+- offer retry without leaving the composer
 
-- Parse `commands` in `handle_claude_event` alongside `session_id`.
-- Store commands per session or in a shared app cache.
-- Expose commands through the state API or a dedicated `GET /api/commands`
-  endpoint.
-- Persist the discovered command list so it survives restart.
+## What is not implemented yet
 
-## Frontend tasks
+This is not full Claude Code or Cursor command parity. TermAl does not yet
+discover and dispatch the agents' native slash commands such as Claude's
+`/review`, `/release-notes`, or `/security-review`.
 
-- Add a `SlashCommand` type.
-- Detect `/` at the start of composer input.
-- Show a filtered command picker with keyboard navigation.
-- Support fuzzy filtering such as `/re` -> `/review`.
-- On selection, insert the command text into the composer or send it
-  immediately.
-
-## Open question
-
-Codex may or may not have an equivalent slash command model. If it does, the
-metadata would likely come from the app-server initialize flow or from cached
-Codex metadata. That should be verified before building a cross-agent UI.
+The remaining work is native command discovery and metadata plumbing, not basic
+session-control slash behavior.

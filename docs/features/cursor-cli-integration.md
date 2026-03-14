@@ -1,15 +1,23 @@
-# Feature Brief: Cursor CLI Integration
+# Feature Reference: Cursor CLI Integration
 
-This brief tracks Cursor as a first-class TermAl agent via its ACP (Agent Client
+This document tracks Cursor as a first-class TermAl agent via its ACP (Agent Client
 Protocol) mode.
 
 Reference: [`agent-integration-comparison.md`](./agent-integration-comparison.md)
 
+## Status
+
+Implemented in TermAl via the shared ACP adapter.
+
+Cursor sessions now support live model discovery, session-scoped `/model` and
+`/mode` controls, Prompt-tab settings, and standard approval handling through
+the same ACP runtime plumbing that also serves Gemini.
+
 ## Problem
 
-Only Claude and Codex are wired through session creation, runtime spawning,
-message dispatch, and frontend rendering. Cursor CLI offers a rich terminal agent
-with its own protocol that many developers already use.
+Cursor CLI is now wired through session creation, runtime spawning, message
+dispatch, and frontend rendering. The open work is protocol coverage and UX
+polish, not basic agent support.
 
 ## Why Cursor fits well
 

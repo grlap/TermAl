@@ -10,7 +10,7 @@ Cross-agent reference for TermAl adapter design.
 | Transport | stdin/stdout only | stdin/stdout or WebSocket | Spawned CLI stdout or stdio (ACP) | stdin/stdout only |
 | Bidirectional | Yes | Yes | No (stream-json) / Yes (ACP) | Yes |
 | Server mode | No | `codex app-server` | `--experimental-acp` | `cursor agent acp` |
-| Best TermAl integration | Spawn child and speak NDJSON over stdio | Spawn app-server and speak JSON-RPC over stdio | Spawn CLI with `--output-format stream-json` (or ACP when stable) | Spawn `agent acp` and speak JSON-RPC over stdio |
+| Best TermAl integration | Spawn child and speak NDJSON over stdio | Spawn app-server and speak JSON-RPC over stdio | Spawn CLI in ACP mode over stdio | Spawn `agent acp` and speak JSON-RPC over stdio |
 
 ## Session persistence
 
@@ -85,7 +85,7 @@ with differences isolated to:
 | Subcommand | `agent acp` | `--experimental-acp` |
 | Auth methods | `cursor agent login`, `--api-key`, `--auth-token` | OAuth, `GEMINI_API_KEY`, Vertex AI |
 | Extended methods | `cursor/ask_question`, `cursor/create_plan`, `cursor/update_todos` | TBD |
-| Stability | Stable | Experimental |
+| Stability | Stable | Experimental, but already used by TermAl |
 
 See individual feature briefs for full protocol details:
 - [`cursor-cli-integration.md`](./cursor-cli-integration.md)

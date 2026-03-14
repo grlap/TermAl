@@ -1,66 +1,77 @@
-# Feature Brief: Session Model Switching
+# Feature Reference: Session Model Switching
 
-This brief tracks the work needed to let users change models on existing
-Claude and Codex sessions.
+This document describes the current session-scoped model controls in TermAl.
 
 Backlog source: [`docs/bugs.md`](../bugs.md)
 
-## Problem
+## Status
 
-`Session.model` exists in both the Rust backend and the TypeScript frontend,
-but it is effectively a static label today. It is hardcoded at session
-creation and is neither surfaced in the UI nor changeable once a session is
-running.
+Implemented for `Claude`, `Codex`, `Cursor`, and `Gemini`.
 
-The missing capability is changing the active model after session creation,
-similar to `/model` inside Claude Code.
+Model selection is no longer a create-dialog setting for those agents. New
+sessions start on the agent default, then TermAl loads the live model list from
+the session itself and lets the user switch from the Prompt tab or the slash
+palette.
 
-## What already works
+## Core UX
 
-- Claude already supports a `set_model` control request mid-session.
-- Claude returns available `models` in its initialize `control_response`.
-- Codex already syncs a session-scoped `config.toml` in `CODEX_HOME`.
-- The runtime command plumbing already has a close template in
-  `SetPermissionMode`.
+- `Prompt` settings cards own model selection for Claude, Codex, Cursor, and
+  Gemini.
+- `/model` in the composer opens the same session-scoped model controls.
+- New sessions automatically request their model list as soon as the session is
+  created or opened.
+- Every supported agent exposes a `Refresh models` action in the session card.
+- Manual model-id entry is supported for all four agents.
+- If the selected model is not in the current live list, TermAl warns before
+  sending the next prompt and requires a second send to continue.
 
-## Model discovery
+## Per-agent behavior
 
-Claude:
-- Parse the `models` field from the initialize `control_response`.
-- Cache the list in `AppState`.
-- Persist it so the list is available after restart.
-- Before any Claude session initializes, show `Default` only.
+### Claude
 
-Codex:
-- Read available models from `models_cache.json` inside `CODEX_HOME`.
-- Cache and persist the list alongside other app state.
+- Model options come from the live Claude session.
+- Model changes are applied to the running session with Claude's `set_model`
+  control request.
+- Session mode is also session-scoped: `ask`, `auto-approve`, or `plan`.
 
-## Backend tasks
+### Codex
 
-- Add `model: Option<String>` to `UpdateSessionSettingsRequest`.
-- Add `SetModel(String)` to `ClaudeRuntimeCommand`.
-- Handle `SetModel` in the Claude writer thread.
-- Add `write_claude_set_model` using the same pattern as
-  `write_claude_set_permission_mode`.
-- In `update_session_settings`, send `SetModel` to a live Claude runtime and
-  update `config.toml` for Codex.
-- Update `session.model` in persisted state for both agents.
-- Parse and persist Claude model lists from initialize responses.
-- Read Codex `models_cache.json` on startup or on first Codex session init.
-- Add `GET /api/models` returning `{ claude: [...], codex: [...] }`.
+- Model options come from Codex app-server `model/list`.
+- Model, sandbox, approval policy, and reasoning effort are all session-scoped.
+- Those settings apply on the next Codex prompt.
+- Reasoning-effort options are filtered by the selected model's supported
+  capabilities.
+- If a model change forces reasoning effort to normalize, TermAl updates the
+  session and shows an inline notice explaining the reset.
 
-## Frontend tasks
+### Cursor
 
-- Add `model?: string` to the session settings update payload.
-- Add a `fetchModels` API call for `GET /api/models`.
-- Extend `SessionSettingsField` with `"model"`.
-- Wire model changes through the existing session settings flow.
-- Add model selectors to both Claude and Codex session settings views.
+- Model options come from Cursor ACP session config.
+- Model changes are pushed to the live session with
+  `session/set_config_option`.
+- Session mode is session-scoped: `agent`, `plan`, or `ask`.
 
-## UX note
+### Gemini
 
-Claude can switch models mid-session.
+- Model options come from the Gemini ACP session.
+- Model selection is session-scoped and uses the live session model list.
+- Gemini approval mode is also session-scoped: `default`, `auto_edit`, `yolo`,
+  or `plan`.
+- Approval-mode changes apply on the next Gemini prompt and may require the ACP
+  runtime to restart cleanly.
 
-Codex does not expose a mid-turn model switch path through the current TermAl
-integration. For Codex, updating the model should modify `config.toml` and
-take effect on the next turn. The UI should say that explicitly.
+## Validation and recovery
+
+- Known model labels are normalized to the live model id before they are stored.
+- Manual model ids that are not in the current list are still allowed, but the
+  UI calls that out explicitly.
+- Refresh failures are rewritten into agent-specific guidance instead of raw
+  transport errors.
+
+## Remaining gaps
+
+- Richer visual treatment for recommended/default models and capability hints.
+- Deeper end-to-end coverage for create -> refresh -> manual model -> first
+  prompt flows.
+- More agent-specific recovery actions when model refresh fails because of
+  install, auth, or runtime state problems.
