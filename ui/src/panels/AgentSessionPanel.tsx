@@ -229,6 +229,22 @@ function formatSessionModelLabel(model: string): string {
   return model;
 }
 
+function isSpaceKey(event: {
+  key: string;
+  code?: string;
+  keyCode?: number;
+  which?: number;
+}) {
+  return (
+    event.key === " " ||
+    event.key === "Space" ||
+    event.key === "Spacebar" ||
+    event.code === "Space" ||
+    event.keyCode === 32 ||
+    event.which === 32
+  );
+}
+
 const ALL_CODEX_REASONING_EFFORTS = CODEX_REASONING_EFFORT_SLASH_OPTIONS.map(
   (option) => option.value,
 ) as CodexReasoningEffort[];
@@ -660,6 +676,10 @@ function buildSlashPaletteState(
     choiceState.items.findIndex((item) => item.kind === "choice" && item.isCurrent),
     0,
   );
+  const currentChoiceKeys = choiceState.items
+    .filter((item) => item.kind === "choice" && item.isCurrent)
+    .map((item) => item.key)
+    .join("|");
 
   return {
     defaultActiveIndex,
@@ -670,7 +690,7 @@ function buildSlashPaletteState(
     items: choiceState.items,
     kind: "choice",
     refreshActionLabel: choiceState.refreshActionLabel,
-    resetKey: `${activeCommand.id}:${session.id}:${optionQuery}:${choiceState.items.map((item) => item.key).join("|")}:${choiceState.errorMessage ?? ""}:${choiceState.isRefreshing ? "loading" : "ready"}`,
+    resetKey: `${activeCommand.id}:${session.id}:${optionQuery}:${currentChoiceKeys}:${choiceState.items.map((item) => item.key).join("|")}:${choiceState.errorMessage ?? ""}:${choiceState.isRefreshing ? "loading" : "ready"}`,
     supportsLiveRefresh: choiceState.supportsLiveRefresh ?? false,
     title: choiceState.title,
   };
@@ -1735,7 +1755,7 @@ const SessionComposer = memo(function SessionComposer({
     commitDraft(activeSessionId, getComposerDraftValue());
   }
 
-  function applySlashPaletteItem(item: SlashPaletteItem) {
+  function applySlashPaletteItem(item: SlashPaletteItem, keepPaletteOpen = false) {
     if (!session || isSending || isStopping) {
       return;
     }
@@ -1749,10 +1769,14 @@ const SessionComposer = memo(function SessionComposer({
       return;
     }
 
-    updateLocalDraft(session.id, "");
-    commitDraft(session.id, "");
     void onSessionSettingsChange(session.id, item.field, item.value);
-    focusComposerInput(0);
+    if (keepPaletteOpen) {
+      focusComposerInput(composerDraft.length);
+    } else {
+      updateLocalDraft(session.id, "");
+      commitDraft(session.id, "");
+      focusComposerInput(0);
+    }
   }
 
   function handleComposerSend() {
@@ -1797,6 +1821,24 @@ const SessionComposer = memo(function SessionComposer({
       if ((event.key === "Enter" && !event.shiftKey) || event.key === "Tab") {
         event.preventDefault();
         handleComposerSend();
+        return;
+      }
+
+      if (
+        isSpaceKey(event) &&
+        !event.altKey &&
+        !event.ctrlKey &&
+        !event.metaKey &&
+        !event.shiftKey
+      ) {
+        if (activeSlashItem) {
+          event.preventDefault();
+          if (activeSlashItem.kind === "choice") {
+            applySlashPaletteItem(activeSlashItem, true);
+          } else {
+            applySlashPaletteItem(activeSlashItem);
+          }
+        }
         return;
       }
 

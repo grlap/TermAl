@@ -163,6 +163,36 @@ describe("AgentSessionPanelFooter", () => {
     expect(screen.getByLabelText("Message session-a")).toHaveValue("");
   });
 
+  it("applies a model slash choice on space without closing the slash menu", () => {
+    const onSend = vi.fn(() => true);
+    const onSessionSettingsChange = vi.fn();
+
+    render(
+      renderFooter({
+        onSend,
+        onSessionSettingsChange,
+        session: makeSession("session-a", {
+          agent: "Codex",
+          model: "gpt-5.4",
+          modelOptions: [
+            { label: "gpt-5.4", value: "gpt-5.4" },
+            { label: "gpt-5.3-codex", value: "gpt-5.3-codex" },
+          ],
+        }),
+      }),
+    );
+
+    const textarea = screen.getByLabelText("Message session-a");
+    fireEvent.change(textarea, { target: { value: "/model" } });
+    fireEvent.keyDown(textarea, { key: "ArrowDown" });
+    fireEvent.keyDown(textarea, { key: "Space", code: "Space" });
+
+    expect(onSessionSettingsChange).toHaveBeenCalledWith("session-a", "model", "gpt-5.3-codex");
+    expect(onSend).not.toHaveBeenCalled();
+    expect(screen.getByLabelText("Message session-a")).toHaveValue("/model");
+    expect(screen.getByRole("listbox", { name: "Codex models" })).toBeInTheDocument();
+  });
+
   it("applies a manual /model value when the live list does not include it", () => {
     const onSend = vi.fn(() => true);
     const onSessionSettingsChange = vi.fn();
@@ -379,6 +409,85 @@ describe("AgentSessionPanelFooter", () => {
       "reasoningEffort",
       "high",
     );
+  });
+
+  it("applies /effort on space without closing the slash menu", () => {
+    const onSessionSettingsChange = vi.fn();
+
+    render(
+      renderFooter({
+        onSessionSettingsChange,
+        session: makeSession("session-a", {
+          agent: "Codex",
+          approvalPolicy: "never",
+          reasoningEffort: "medium",
+          sandboxMode: "workspace-write",
+          model: "gpt-5",
+        }),
+      }),
+    );
+
+    const textarea = screen.getByLabelText("Message session-a");
+    fireEvent.change(textarea, { target: { value: "/effort" } });
+    fireEvent.keyDown(textarea, { key: "ArrowDown" });
+    fireEvent.keyDown(textarea, { key: "Space", code: "Space" });
+
+    expect(onSessionSettingsChange).toHaveBeenCalledWith(
+      "session-a",
+      "reasoningEffort",
+      "high",
+    );
+    expect(screen.getByLabelText("Message session-a")).toHaveValue("/effort");
+    expect(screen.getByRole("listbox", { name: "Codex reasoning effort" })).toBeInTheDocument();
+  });
+
+  it("resets the slash selection to the current model after the session model changes", async () => {
+    const sessionA = makeSession("session-a", {
+      agent: "Codex",
+      model: "gpt-5.4",
+      modelOptions: [
+        { label: "gpt-5.4", value: "gpt-5.4" },
+        { label: "gpt-5.3-codex", value: "gpt-5.3-codex" },
+      ],
+    });
+    const { rerender } = render(
+      renderFooter({
+        session: sessionA,
+      }),
+    );
+
+    const textarea = screen.getByLabelText("Message session-a");
+    fireEvent.change(textarea, { target: { value: "/model" } });
+    fireEvent.keyDown(textarea, { key: "ArrowDown" });
+
+    expect(screen.getByRole("option", { name: /gpt-5\.3-codex/i })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+
+    rerender(
+      renderFooter({
+        session: makeSession("session-a", {
+          agent: "Codex",
+          model: "gpt-5.3-codex",
+          modelOptions: [
+            { label: "gpt-5.4", value: "gpt-5.4" },
+            { label: "gpt-5.3-codex", value: "gpt-5.3-codex" },
+          ],
+        }),
+      }),
+    );
+
+    await waitFor(() => {
+      expect(screen.getByRole("option", { name: /gpt-5\.3-codex/i })).toHaveAttribute(
+        "aria-selected",
+        "true",
+      );
+      expect(screen.getByRole("option", { name: /gpt-5\.4/i })).toHaveAttribute(
+        "aria-selected",
+        "false",
+      );
+    });
   });
 
   it("limits /effort choices to the selected Codex model capabilities", () => {
