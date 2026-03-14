@@ -1,5 +1,5 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import App, {
   MarkdownContent,
@@ -88,6 +88,16 @@ describe("MarkdownContent", () => {
 });
 
 describe("App", () => {
+  const originalScrollTo = HTMLElement.prototype.scrollTo;
+
+  beforeEach(() => {
+    HTMLElement.prototype.scrollTo = vi.fn();
+  });
+
+  afterEach(() => {
+    HTMLElement.prototype.scrollTo = originalScrollTo;
+  });
+
   it("applies the active combobox option on space without closing the menu", () => {
     const onChange = vi.fn();
     const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;

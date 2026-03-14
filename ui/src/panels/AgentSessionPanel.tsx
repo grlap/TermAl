@@ -791,6 +791,7 @@ export function AgentSessionPanel({
 export function AgentSessionPanelFooter({
   paneId,
   viewMode,
+  isPaneActive,
   activeSession,
   committedDraft,
   draftAttachments,
@@ -813,6 +814,7 @@ export function AgentSessionPanelFooter({
 }: {
   paneId: string;
   viewMode: PaneViewMode;
+  isPaneActive: boolean;
   activeSession: Session | null;
   committedDraft: string;
   draftAttachments: DraftImageAttachment[];
@@ -841,6 +843,7 @@ export function AgentSessionPanelFooter({
     return (
       <SessionComposer
         paneId={paneId}
+        isPaneActive={isPaneActive}
         session={activeSession}
         committedDraft={committedDraft}
         draftAttachments={draftAttachments}
@@ -1424,6 +1427,7 @@ function MeasuredMessageCard({
 
 const SessionComposer = memo(function SessionComposer({
   paneId,
+  isPaneActive,
   session,
   committedDraft,
   draftAttachments,
@@ -1444,6 +1448,7 @@ const SessionComposer = memo(function SessionComposer({
   onPaste,
 }: {
   paneId: string;
+  isPaneActive: boolean;
   session: Session | null;
   committedDraft: string;
   draftAttachments: DraftImageAttachment[];
@@ -1672,6 +1677,14 @@ const SessionComposer = memo(function SessionComposer({
       }
     };
   }, [activeSessionId]);
+
+  useEffect(() => {
+    if (!activeSessionId || !isPaneActive || composerInputDisabled) {
+      return;
+    }
+
+    focusComposerInput();
+  }, [activeSessionId, composerInputDisabled, isPaneActive]);
 
   function resetPromptHistory(sessionId: string) {
     setPromptHistoryStateBySessionId((current) => {
@@ -2102,6 +2115,7 @@ const SessionComposer = memo(function SessionComposer({
   );
 }, (previous, next) =>
   previous.paneId === next.paneId &&
+  previous.isPaneActive === next.isPaneActive &&
   previous.session === next.session &&
   previous.committedDraft === next.committedDraft &&
   previous.draftAttachments === next.draftAttachments &&

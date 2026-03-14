@@ -20,6 +20,7 @@ function makeSession(id: string, overrides?: Partial<Session>): Session {
 }
 
 function renderFooter({
+  isPaneActive = true,
   session,
   committedDraft = "",
   onDraftCommit = vi.fn(),
@@ -28,6 +29,7 @@ function renderFooter({
   onSend = vi.fn(() => true),
   onSessionSettingsChange = vi.fn(),
 }: {
+  isPaneActive?: boolean;
   session: Session | null;
   committedDraft?: string;
   onDraftCommit?: (sessionId: string, nextValue: string) => void;
@@ -40,6 +42,7 @@ function renderFooter({
     <AgentSessionPanelFooter
       paneId="pane-1"
       viewMode="session"
+      isPaneActive={isPaneActive}
       activeSession={session}
       committedDraft={committedDraft}
       draftAttachments={[]}
@@ -111,6 +114,44 @@ describe("AgentSessionPanelFooter", () => {
     );
 
     expect(onDraftCommit).toHaveBeenCalledWith("session-a", "carry this draft");
+  });
+
+  it("focuses the prompt when a session opens in the active pane", async () => {
+    const { rerender } = render(
+      renderFooter({
+        session: null,
+      }),
+    );
+
+    rerender(
+      renderFooter({
+        session: makeSession("session-a"),
+      }),
+    );
+
+    await waitFor(() => {
+      expect(screen.getByLabelText("Message session-a")).toHaveFocus();
+    });
+  });
+
+  it("does not focus the prompt for an inactive pane", async () => {
+    render(
+      <>
+        <button type="button">Outside focus</button>
+        {renderFooter({
+          isPaneActive: false,
+          session: makeSession("session-a"),
+        })}
+      </>,
+    );
+
+    const outsideButton = screen.getByRole("button", { name: "Outside focus" });
+    outsideButton.focus();
+    expect(outsideButton).toHaveFocus();
+
+    await waitFor(() => {
+      expect(outsideButton).toHaveFocus();
+    });
   });
 
   it("expands /model from the slash command menu", () => {

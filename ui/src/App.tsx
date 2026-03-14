@@ -5714,6 +5714,7 @@ function SessionPaneView({
         <AgentSessionPanelFooter
           paneId={pane.id}
           viewMode={pane.viewMode}
+          isPaneActive={isActive}
           activeSession={activeSession}
           committedDraft={draft}
           draftAttachments={draftAttachments}
