@@ -244,7 +244,18 @@ function codexReasoningEffortChoice(effort: CodexReasoningEffort) {
 }
 
 function currentSessionModelCapabilities(session: Session) {
-  return session.modelOptions?.find((option) => option.value === session.model) ?? null;
+  const normalizedSessionModel = session.model.trim().toLowerCase();
+  if (!normalizedSessionModel) {
+    return null;
+  }
+
+  return (
+    session.modelOptions?.find(
+      (option) =>
+        option.value.toLowerCase() === normalizedSessionModel ||
+        option.label.toLowerCase() === normalizedSessionModel,
+    ) ?? null
+  );
 }
 
 function supportedCodexReasoningEfforts(session: Session) {
@@ -275,7 +286,7 @@ function codexReasoningEffortChoices(session: Session): SlashChoiceDefinition[] 
     return {
       detail:
         defaultEffort === effort
-          ? `${option.detail} · Default for ${currentModel?.label ?? "this model"}`
+          ? `${option.detail} | Default for ${currentModel?.label ?? "this model"}`
           : option.detail,
       label: option.label,
       value: option.value,
@@ -291,7 +302,7 @@ function sessionModelChoiceDetail(
     detailParts.push(option.description);
   }
   if (option.badges?.length) {
-    detailParts.push(option.badges.join(" · "));
+    detailParts.push(option.badges.join(" | "));
   }
   if (option.supportedReasoningEfforts?.length) {
     const defaultEffort =
@@ -301,12 +312,12 @@ function sessionModelChoiceDetail(
         : null;
     detailParts.push(
       defaultEffort
-        ? `Reasoning ${option.supportedReasoningEfforts.join(", ")} · Default ${defaultEffort}`
+        ? `Reasoning ${option.supportedReasoningEfforts.join(", ")} | Default ${defaultEffort}`
         : `Reasoning ${option.supportedReasoningEfforts.join(", ")}`,
     );
   }
 
-  return detailParts.join(" · ") || option.value;
+  return detailParts.join(" | ") || option.value;
 }
 
 function slashCommandsForSession(session: Session) {
@@ -356,6 +367,41 @@ function sessionModelChoicesForSlashCommand(session: Session): SessionModelChoic
       : STATIC_MODEL_OPTIONS[session.agent];
 
   return ensureCurrentSessionModelChoice(baseOptions, session.model);
+}
+
+function manualSessionModelSlashItem(
+  options: readonly SessionModelChoice[],
+  session: Session,
+  rawQuery: string,
+): SlashPaletteItem | null {
+  const trimmedQuery = rawQuery.trim();
+  if (!trimmedQuery) {
+    return null;
+  }
+
+  const normalizedQuery = trimmedQuery.toLowerCase();
+  const hasExactMatch = options.some(
+    (option) =>
+      option.value.toLowerCase() === normalizedQuery ||
+      option.label.toLowerCase() === normalizedQuery,
+  );
+  if (hasExactMatch || normalizedQuery === session.model.toLowerCase()) {
+    return null;
+  }
+  const detail =
+    (session.modelOptions?.length ?? 0) > 0
+      ? `${trimmedQuery} is not in the current live model list. TermAl will still try it on the next prompt.`
+      : `Apply ${trimmedQuery} to this ${session.agent} session while the live model list is still loading.`;
+
+  return {
+    detail,
+    field: "model",
+    isCurrent: false,
+    key: `model:custom:${trimmedQuery}`,
+    kind: "choice",
+    label: `Use "${trimmedQuery}"`,
+    value: trimmedQuery,
+  };
 }
 
 function matchSlashCommand(commandLabel: string, query: string) {
@@ -473,12 +519,14 @@ function codexReasoningEffortSlashState(session: Session, query: string): SlashC
 function sessionModelSlashState(
   session: Session,
   query: string,
+  rawQuery: string,
   isRefreshingModelOptions: boolean,
   modelOptionsError: string | null,
 ): SlashChoiceState {
   const supportsLiveRefresh = supportsLiveSessionModelOptions(session);
   const hasLiveModelList = (session.modelOptions?.length ?? 0) > 0;
-  const items = sessionModelChoicesForSlashCommand(session)
+  const sessionModelChoices = sessionModelChoicesForSlashCommand(session);
+  const items = sessionModelChoices
     .filter((option) =>
       query.length === 0
         ? true
@@ -495,14 +543,18 @@ function sessionModelSlashState(
       label: option.label,
       value: option.value,
     }));
+  const manualItem = manualSessionModelSlashItem(sessionModelChoices, session, rawQuery);
+  if (manualItem) {
+    items.unshift(manualItem);
+  }
 
-  let hint = "Enter to apply a model. Esc clears the command line.";
+  let hint = "Enter to apply a model. Type a full model id to apply it manually. Esc clears the command line.";
   if (supportsLiveRefresh && !hasLiveModelList) {
     hint = isRefreshingModelOptions
       ? `Loading ${session.agent}'s live model list for this session.`
       : modelOptionsError
         ? `Could not load ${session.agent}'s live model list. Retry to fetch the full list.`
-        : `Fetching ${session.agent}'s live model list for this session.`;
+        : `Fetching ${session.agent}'s live model list for this session. You can still type a full model id manually.`;
   }
 
   return {
@@ -569,7 +621,13 @@ function buildSlashPaletteState(
 
   const choiceState =
     activeCommand.id === "model"
-      ? sessionModelSlashState(session, optionQuery, isRefreshingModelOptions, modelOptionsError)
+      ? sessionModelSlashState(
+          session,
+          optionQuery,
+          rawOptionQuery,
+          isRefreshingModelOptions,
+          modelOptionsError,
+        )
       : activeCommand.id === "mode"
         ? sessionModeSlashState(session, rawOptionQuery)
         : activeCommand.id === "sandbox"
@@ -750,7 +808,7 @@ export function AgentSessionPanelFooter({
   isRefreshingModelOptions: boolean;
   modelOptionsError: string | null;
   onRefreshSessionModelOptions: (sessionId: string) => void;
-  onSend: (sessionId: string, draftText?: string) => void;
+  onSend: (sessionId: string, draftText?: string) => boolean;
   onSessionSettingsChange: (
     sessionId: string,
     field: SessionSettingsField,
@@ -1380,7 +1438,7 @@ const SessionComposer = memo(function SessionComposer({
   onDraftCommit: (sessionId: string, nextValue: string) => void;
   onDraftAttachmentRemove: (sessionId: string, attachmentId: string) => void;
   onRefreshSessionModelOptions: (sessionId: string) => void;
-  onSend: (sessionId: string, draftText?: string) => void;
+  onSend: (sessionId: string, draftText?: string) => boolean;
   onSessionSettingsChange: (
     sessionId: string,
     field: SessionSettingsField,
@@ -1710,10 +1768,15 @@ const SessionComposer = memo(function SessionComposer({
     }
 
     const draftToSend = getComposerDraftValue();
+    const accepted = onSend(session.id, draftToSend);
+    if (!accepted) {
+      focusComposerInput();
+      return;
+    }
+
     resetPromptHistory(session.id);
     updateLocalDraft(session.id, "");
     commitDraft(session.id, "");
-    onSend(session.id, draftToSend);
     focusComposerInput();
   }
 
@@ -1852,7 +1915,7 @@ const SessionComposer = memo(function SessionComposer({
               <div className="composer-attachment-copy">
                 <strong className="composer-attachment-name">{attachment.fileName}</strong>
                 <span className="composer-attachment-meta">
-                  {formatByteSize(attachment.byteSize)} � {attachment.mediaType}
+                  {formatByteSize(attachment.byteSize)} | {attachment.mediaType}
                 </span>
               </div>
               <button
@@ -2114,7 +2177,7 @@ function MessageAttachmentList({
             {renderHighlightedText(attachment.fileName, searchQuery, searchHighlightTone)}
           </strong>
           <span className="message-attachment-meta">
-            {formatByteSize(attachment.byteSize)} �{" "}
+            {formatByteSize(attachment.byteSize)} |{" "}
             {renderHighlightedText(attachment.mediaType, searchQuery, searchHighlightTone)}
           </span>
         </div>
@@ -2272,4 +2335,3 @@ function formatByteSize(byteSize: number) {
 
   return `${(byteSize / (1024 * 1024)).toFixed(1)} MB`;
 }
-

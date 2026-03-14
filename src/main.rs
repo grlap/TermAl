@@ -852,15 +852,20 @@ impl AppState {
                 return Err(ApiError::bad_request("session model cannot be empty"));
             }
         }
+        let requested_model = request
+            .model
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(|value| {
+                matching_session_model_option_value(value, &record.session.model_options)
+                    .unwrap_or_else(|| value.to_owned())
+            });
 
         match record.session.agent {
             agent if agent.supports_codex_prompt_settings() => {
-                let next_model = request
-                    .model
-                    .as_deref()
-                    .map(str::trim)
-                    .filter(|value| !value.is_empty())
-                    .map(str::to_owned)
+                let next_model = requested_model
+                    .clone()
                     .unwrap_or_else(|| record.session.model.clone());
                 let next_reasoning_effort =
                     request.reasoning_effort.unwrap_or(record.codex_reasoning_effort);
@@ -887,10 +892,9 @@ impl AppState {
                         }
                     }
                 }
-                if let Some(model) = request.model.as_deref() {
-                    let trimmed = model.trim().to_owned();
-                    if record.session.model != trimmed {
-                        record.session.model = trimmed;
+                if let Some(model) = requested_model.as_deref() {
+                    if record.session.model != model {
+                        record.session.model = model.to_owned();
                     }
                 }
                 if let Some(sandbox_mode) = request.sandbox_mode {
@@ -912,12 +916,11 @@ impl AppState {
                 }
             }
             agent if agent.supports_claude_approval_mode() => {
-                if let Some(model) = request.model.as_deref() {
-                    let trimmed = model.trim().to_owned();
-                    if record.session.model != trimmed {
-                        record.session.model = trimmed.clone();
+                if let Some(model) = requested_model.as_deref() {
+                    if record.session.model != model {
+                        record.session.model = model.to_owned();
                         if let SessionRuntime::Claude(handle) = &record.runtime {
-                            claude_model_update = Some((handle.clone(), trimmed));
+                            claude_model_update = Some((handle.clone(), model.to_owned()));
                         }
                     }
                 }
@@ -934,9 +937,8 @@ impl AppState {
                 }
             }
             agent if agent.supports_cursor_mode() => {
-                if let Some(model) = request.model.as_deref() {
-                    let trimmed = model.trim().to_owned();
-                    record.session.model = trimmed.clone();
+                if let Some(model) = requested_model.as_deref() {
+                    record.session.model = model.to_owned();
                     if let (SessionRuntime::Acp(handle), Some(external_session_id)) =
                         (&record.runtime, record.external_session_id.as_deref())
                     {
@@ -948,7 +950,7 @@ impl AppState {
                                 "params": {
                                     "sessionId": external_session_id,
                                     "optionId": "model",
-                                    "value": trimmed,
+                                    "value": model,
                                 }
                             }),
                         ));
@@ -959,8 +961,8 @@ impl AppState {
                 }
             }
             agent if agent.supports_gemini_approval_mode() => {
-                if let Some(model) = request.model.as_deref() {
-                    record.session.model = model.trim().to_owned();
+                if let Some(model) = requested_model.as_deref() {
+                    record.session.model = model.to_owned();
                 }
                 if let Some(gemini_approval_mode) = request.gemini_approval_mode {
                     if record.session.gemini_approval_mode != Some(gemini_approval_mode) {
@@ -5207,6 +5209,24 @@ fn codex_model_option<'a>(
     model_options: &'a [SessionModelOption],
 ) -> Option<&'a SessionModelOption> {
     model_options.iter().find(|option| option.value == model)
+}
+
+fn matching_session_model_option_value(
+    requested_model: &str,
+    model_options: &[SessionModelOption],
+) -> Option<String> {
+    let trimmed_model = requested_model.trim();
+    if trimmed_model.is_empty() {
+        return None;
+    }
+
+    model_options
+        .iter()
+        .find(|option| {
+            option.value.eq_ignore_ascii_case(trimmed_model)
+                || option.label.eq_ignore_ascii_case(trimmed_model)
+        })
+        .map(|option| option.value.clone())
 }
 
 fn normalized_codex_reasoning_effort(
@@ -10727,6 +10747,58 @@ mod tests {
             matching_acp_config_option_value(&config, "model", "GPT-5.3 Codex High Fast"),
             Some("gpt-5.3-codex-high-fast".to_owned())
         );
+    }
+
+    #[test]
+    fn canonicalizes_session_model_updates_from_live_model_labels() {
+        let state = test_app_state();
+
+        let created = state
+            .create_session(CreateSessionRequest {
+                agent: Some(Agent::Codex),
+                name: Some("Codex Canonical".to_owned()),
+                workdir: Some("/tmp".to_owned()),
+                project_id: None,
+                model: Some("gpt-5.4".to_owned()),
+                approval_policy: None,
+                reasoning_effort: None,
+                sandbox_mode: None,
+                cursor_mode: None,
+                claude_approval_mode: None,
+                gemini_approval_mode: None,
+            })
+            .unwrap();
+
+        state
+            .sync_session_model_options(
+                &created.session_id,
+                None,
+                vec![SessionModelOption::plain("GPT-5.4", "gpt-5.4")],
+            )
+            .unwrap();
+
+        let updated = state
+            .update_session_settings(
+                &created.session_id,
+                UpdateSessionSettingsRequest {
+                    name: None,
+                    model: Some("GPT-5.4".to_owned()),
+                    sandbox_mode: None,
+                    approval_policy: None,
+                    reasoning_effort: None,
+                    cursor_mode: None,
+                    claude_approval_mode: None,
+                    gemini_approval_mode: None,
+                },
+            )
+            .unwrap();
+
+        let session = updated
+            .sessions
+            .iter()
+            .find(|session| session.id == created.session_id)
+            .expect("updated Codex session should be present");
+        assert_eq!(session.model, "gpt-5.4");
     }
 
     #[test]

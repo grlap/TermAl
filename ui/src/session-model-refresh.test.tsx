@@ -40,6 +40,7 @@ describe("session model refresh controls", () => {
         })}
         isUpdating={false}
         isRefreshingModelOptions={false}
+        modelOptionsError={null}
         sessionNotice={null}
         onRequestModelOptions={onRequestModelOptions}
         onSessionSettingsChange={() => {}}
@@ -77,6 +78,7 @@ describe("session model refresh controls", () => {
         })}
         isUpdating={false}
         isRefreshingModelOptions={false}
+        modelOptionsError={null}
         sessionNotice="GPT-5 Codex Mini only supports medium and high reasoning, so TermAl reset effort from minimal to medium."
         onRequestModelOptions={() => {}}
         onSessionSettingsChange={() => {}}
@@ -115,6 +117,7 @@ describe("session model refresh controls", () => {
         })}
         isUpdating={false}
         isRefreshingModelOptions={false}
+        modelOptionsError={null}
         onRequestModelOptions={onRequestModelOptions}
         onSessionSettingsChange={() => {}}
       />,
@@ -129,7 +132,7 @@ describe("session model refresh controls", () => {
     ).toBeInTheDocument();
   });
 
-  it("lets Claude apply a manual model id from the session card", () => {
+  it("canonicalizes a known manual Claude model label from the session card", () => {
     const onSessionSettingsChange = vi.fn();
 
     render(
@@ -156,23 +159,69 @@ describe("session model refresh controls", () => {
         })}
         isUpdating={false}
         isRefreshingModelOptions={false}
+        modelOptionsError={null}
         onRequestModelOptions={() => {}}
         onSessionSettingsChange={onSessionSettingsChange}
       />,
     );
 
     fireEvent.change(screen.getByLabelText("Manual model id"), {
-      target: { value: "claude-opus-4-6" },
+      target: { value: "Default (recommended)" },
     });
+    expect(
+      screen.getByText(
+        "Matches Default (recommended) from the current live list. TermAl will apply default.",
+      ),
+    ).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Apply" }));
 
     expect(onSessionSettingsChange).toHaveBeenCalledWith(
       "claude-session",
       "model",
-      "claude-opus-4-6",
+      "default",
     );
     expect(screen.getByText("Sonnet 4.6 · Best for everyday tasks")).toBeInTheDocument();
     expect(screen.getByText("Effort")).toBeInTheDocument();
+  });
+
+  it("lets Codex apply a manual model id from the session card", () => {
+    const onSessionSettingsChange = vi.fn();
+
+    render(
+      <CodexPromptSettingsCard
+        paneId="pane-codex"
+        session={makeSession("codex-session", {
+          agent: "Codex",
+          approvalPolicy: "never",
+          reasoningEffort: "medium",
+          sandboxMode: "workspace-write",
+          model: "gpt-5.4",
+          modelOptions: [{ label: "GPT-5.4", value: "gpt-5.4" }],
+        })}
+        isUpdating={false}
+        isRefreshingModelOptions={false}
+        modelOptionsError={null}
+        sessionNotice={null}
+        onRequestModelOptions={() => {}}
+        onSessionSettingsChange={onSessionSettingsChange}
+      />,
+    );
+
+    fireEvent.change(screen.getByLabelText("Manual model id"), {
+      target: { value: "gpt-5.5-preview" },
+    });
+    expect(
+      screen.getByText(
+        "gpt-5.5-preview is not in the current live model list. TermAl will still try it on the next prompt.",
+      ),
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Apply" }));
+
+    expect(onSessionSettingsChange).toHaveBeenCalledWith(
+      "codex-session",
+      "model",
+      "gpt-5.5-preview",
+    );
   });
 
   it("auto-requests Cursor model options when the session card opens without a live list", async () => {
@@ -187,6 +236,7 @@ describe("session model refresh controls", () => {
         })}
         isUpdating={false}
         isRefreshingModelOptions={false}
+        modelOptionsError={null}
         onRequestModelOptions={onRequestModelOptions}
         onSessionSettingsChange={() => {}}
       />,
@@ -214,6 +264,7 @@ describe("session model refresh controls", () => {
         })}
         isUpdating={false}
         isRefreshingModelOptions={false}
+        modelOptionsError={null}
         onRequestModelOptions={onRequestModelOptions}
         onSessionSettingsChange={() => {}}
       />,
@@ -223,5 +274,27 @@ describe("session model refresh controls", () => {
 
     expect(onRequestModelOptions).toHaveBeenCalledTimes(1);
     expect(onRequestModelOptions).toHaveBeenCalledWith("gemini-session");
+  });
+
+  it("shows inline refresh errors in the session card", () => {
+    render(
+      <GeminiPromptSettingsCard
+        paneId="pane-gemini"
+        session={makeSession("gemini-session", {
+          agent: "Gemini",
+          geminiApprovalMode: "default",
+          model: "auto",
+        })}
+        isUpdating={false}
+        isRefreshingModelOptions={false}
+        modelOptionsError="Gemini CLI is not authenticated."
+        onRequestModelOptions={() => {}}
+        onSessionSettingsChange={() => {}}
+      />,
+    );
+
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "Could not refresh Gemini's live model list for this session. Gemini CLI is not authenticated.",
+    );
   });
 });

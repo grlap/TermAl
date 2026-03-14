@@ -25,7 +25,7 @@ function renderFooter({
   onDraftCommit = vi.fn(),
   modelOptionsError = null,
   onRefreshSessionModelOptions = vi.fn(),
-  onSend = vi.fn(),
+  onSend = vi.fn(() => true),
   onSessionSettingsChange = vi.fn(),
 }: {
   session: Session | null;
@@ -33,7 +33,7 @@ function renderFooter({
   onDraftCommit?: (sessionId: string, nextValue: string) => void;
   modelOptionsError?: string | null;
   onRefreshSessionModelOptions?: (sessionId: string) => void;
-  onSend?: (sessionId: string, draftText?: string) => void;
+  onSend?: (sessionId: string, draftText?: string) => boolean;
   onSessionSettingsChange?: (sessionId: string, field: string, value: string) => void;
 }) {
   return (
@@ -135,7 +135,7 @@ describe("AgentSessionPanelFooter", () => {
   });
 
   it("applies a model slash command with keyboard navigation instead of sending a prompt", () => {
-    const onSend = vi.fn();
+    const onSend = vi.fn(() => true);
     const onSessionSettingsChange = vi.fn();
 
     render(
@@ -161,6 +161,76 @@ describe("AgentSessionPanelFooter", () => {
     expect(onSessionSettingsChange).toHaveBeenCalledWith("session-a", "model", "gpt-5.3-codex");
     expect(onSend).not.toHaveBeenCalled();
     expect(screen.getByLabelText("Message session-a")).toHaveValue("");
+  });
+
+  it("applies a manual /model value when the live list does not include it", () => {
+    const onSend = vi.fn(() => true);
+    const onSessionSettingsChange = vi.fn();
+
+    render(
+      renderFooter({
+        onSend,
+        onSessionSettingsChange,
+        session: makeSession("session-a", {
+          agent: "Codex",
+          model: "gpt-5.4",
+          modelOptions: [{ label: "gpt-5.4", value: "gpt-5.4" }],
+        }),
+      }),
+    );
+
+    const textarea = screen.getByLabelText("Message session-a");
+    fireEvent.change(textarea, { target: { value: "/model gpt-5.5-preview" } });
+    expect(
+      screen.getByText('Use "gpt-5.5-preview"'),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "gpt-5.5-preview is not in the current live model list. TermAl will still try it on the next prompt.",
+      ),
+    ).toBeInTheDocument();
+    fireEvent.keyDown(textarea, { key: "Enter" });
+
+    expect(onSessionSettingsChange).toHaveBeenCalledWith(
+      "session-a",
+      "model",
+      "gpt-5.5-preview",
+    );
+    expect(onSend).not.toHaveBeenCalled();
+    expect(screen.getByLabelText("Message session-a")).toHaveValue("");
+  });
+
+  it("shows rich model metadata in the /model slash menu", () => {
+    render(
+      renderFooter({
+        session: makeSession("session-a", {
+          agent: "Codex",
+          model: "gpt-5.4",
+          modelOptions: [
+            {
+              label: "GPT-5.4",
+              value: "gpt-5.4",
+              description: "Latest frontier agentic coding model.",
+              badges: ["Recommended"],
+              defaultReasoningEffort: "medium",
+              supportedReasoningEfforts: ["low", "medium", "high"],
+            },
+          ],
+        }),
+      }),
+    );
+
+    fireEvent.change(screen.getByLabelText("Message session-a"), {
+      target: { value: "/model" },
+    });
+
+    expect(
+      screen.getByText((content) =>
+        content.includes("Latest frontier agentic coding model.") &&
+        content.includes("Recommended") &&
+        content.includes("Reasoning low, medium, high | Default medium"),
+      ),
+    ).toBeInTheDocument();
   });
 
   it("requests live Claude model options from /model when they have not loaded yet", async () => {

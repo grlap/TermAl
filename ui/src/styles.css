@@ -2133,6 +2133,29 @@ textarea {
   font-size: 0.84rem;
 }
 
+.session-control-status,
+.session-control-error,
+.session-control-notice {
+  grid-column: 1 / -1;
+  margin: 0;
+  padding: 0.7rem 0.85rem;
+  border-radius: 0.9rem;
+  font-size: 0.82rem;
+  line-height: 1.45;
+}
+
+.session-control-status {
+  border: 1px solid var(--line);
+  background: var(--surface-white-soft);
+  color: var(--muted);
+}
+
+.session-control-error {
+  border: 1px solid var(--accent-red-border);
+  background: var(--accent-red-bg);
+  color: var(--signal-red);
+}
+
 .session-control-notice {
   grid-column: 1 / -1;
   margin: 0;
@@ -2195,6 +2218,20 @@ textarea {
 
 .session-model-custom-apply {
   min-width: 4.8rem;
+}
+
+.session-model-custom-validation {
+  margin: 0;
+  font-size: 0.76rem;
+  line-height: 1.45;
+}
+
+.session-model-custom-validation.info {
+  color: var(--muted);
+}
+
+.session-model-custom-validation.warning {
+  color: var(--signal-red);
 }
 
 .thread-chips {
@@ -4328,4 +4365,3 @@ textarea {
   border-color: var(--line-strong);
   background: var(--surface-composer);
 }
-

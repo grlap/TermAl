@@ -284,11 +284,11 @@ function createSessionModelHint(agent: AgentType): string {
     case "Claude":
       return "Claude model selection lives on the session itself. TermAl asks Claude for its live model list after the session opens, and you can always enter a full Claude model id manually. New Claude sessions start on Sonnet.";
     case "Codex":
-      return "Codex model selection lives on the session itself. TermAl asks Codex for its live model list after the session opens.";
+      return "Codex model selection lives on the session itself. TermAl asks Codex for its live model list after the session opens, and you can always enter a full Codex model id manually.";
     case "Cursor":
-      return "Cursor model selection lives on the session itself, like Cursor Agent's /model flow. New Cursor sessions start on Auto.";
+      return "Cursor model selection lives on the session itself, like Cursor Agent's /model flow. TermAl asks Cursor for its live model list after the session opens, and you can still enter a full model id manually. New Cursor sessions start on Auto.";
     case "Gemini":
-      return "Gemini model selection lives on the session itself. TermAl asks Gemini for its live model list after the session opens. New Gemini sessions start on Auto.";
+      return "Gemini model selection lives on the session itself. TermAl asks Gemini for its live model list after the session opens, and you can still enter a full Gemini model id manually. New Gemini sessions start on Auto.";
   }
 }
 
@@ -325,7 +325,7 @@ function sessionModelComboboxOptions(
     return modelOptions.map((option) => ({
       label: option.label,
       value: option.value,
-      description: option.description ?? undefined,
+      description: sessionModelOptionDescription(option) ?? undefined,
       badges: option.badges?.length ? option.badges : undefined,
     }));
   }
@@ -338,8 +338,31 @@ function sessionModelComboboxOptions(
   ];
 }
 
+function matchingSessionModelOption(
+  modelOptions: Session["modelOptions"] | undefined,
+  requestedModel: string,
+) {
+  const trimmedModel = requestedModel.trim();
+  if (!trimmedModel) {
+    return null;
+  }
+
+  const normalizedRequestedModel = trimmedModel.toLowerCase();
+  return (
+    modelOptions?.find(
+      (option) =>
+        option.value.toLowerCase() === normalizedRequestedModel ||
+        option.label.toLowerCase() === normalizedRequestedModel,
+    ) ?? null
+  );
+}
+
+function normalizedRequestedSessionModel(session: Session, requestedModel: string) {
+  return matchingSessionModelOption(session.modelOptions, requestedModel)?.value ?? requestedModel.trim();
+}
+
 function currentSessionModelOption(session: Session) {
-  return session.modelOptions?.find((option) => option.value === session.model) ?? null;
+  return matchingSessionModelOption(session.modelOptions, session.model);
 }
 
 const ALL_CODEX_REASONING_EFFORTS = CODEX_REASONING_EFFORT_OPTIONS.map(
@@ -389,8 +412,7 @@ function normalizedCodexReasoningEffort(
   model: string = session.model,
 ): CodexReasoningEffort {
   const currentEffort = session.reasoningEffort ?? "medium";
-  const modelOption =
-    session.modelOptions?.find((option) => option.value === model) ?? null;
+  const modelOption = matchingSessionModelOption(session.modelOptions, model);
   const supportedEfforts = modelOption?.supportedReasoningEfforts ?? [];
   if (!supportedEfforts.length) {
     return currentEffort;
@@ -403,8 +425,7 @@ function normalizedCodexReasoningEffort(
 }
 
 function codexReasoningEffortComboboxOptions(session: Session, model: string = session.model) {
-  const modelOption =
-    session.modelOptions?.find((option) => option.value === model) ?? null;
+  const modelOption = matchingSessionModelOption(session.modelOptions, model);
   const defaultEffort = defaultCodexReasoningEffortForModelOption(modelOption);
 
   return supportedCodexReasoningEffortsForModelOption(modelOption).map((effort) => {
@@ -417,8 +438,7 @@ function codexReasoningEffortComboboxOptions(session: Session, model: string = s
 }
 
 function codexReasoningEffortHint(session: Session, model: string = session.model) {
-  const modelOption =
-    session.modelOptions?.find((option) => option.value === model) ?? null;
+  const modelOption = matchingSessionModelOption(session.modelOptions, model);
   if (!modelOption?.supportedReasoningEfforts?.length) {
     return null;
   }
@@ -444,6 +464,112 @@ function sessionModelCapabilitySummary(option: SessionModelOption | null) {
   return defaultEffort
     ? `Reasoning: ${supported}. Default ${defaultEffort}.`
     : `Reasoning: ${supported}.`;
+}
+
+function sessionModelOptionDescription(option: SessionModelOption | null) {
+  if (!option) {
+    return null;
+  }
+
+  const parts = [];
+  if (option.description) {
+    parts.push(option.description);
+  }
+
+  const capabilitySummary = sessionModelCapabilitySummary(option);
+  if (capabilitySummary) {
+    parts.push(capabilitySummary);
+  }
+
+  return parts.join(" ");
+}
+
+function manualSessionModelPlaceholder(agent: AgentType): string {
+  switch (agent) {
+    case "Claude":
+      return "claude-sonnet-4-6";
+    case "Codex":
+      return "gpt-5.4";
+    case "Cursor":
+      return "gpt-5.3-codex";
+    case "Gemini":
+      return "gemini-2.5-pro";
+  }
+}
+
+function unknownSessionModelConfirmationKey(sessionId: string, model: string) {
+  return `${sessionId}:${model}`;
+}
+
+export function describeUnknownSessionModelWarning(session: Session) {
+  if ((session.modelOptions?.length ?? 0) === 0) {
+    return null;
+  }
+  if (currentSessionModelOption(session)) {
+    return null;
+  }
+
+  return `${session.agent} is set to ${session.model}, but that model is not in the current live list. Refresh models to verify it, or send the prompt again to continue anyway.`;
+}
+
+export function describeSessionModelRefreshError(
+  agent: AgentType,
+  rawError: string,
+  readiness: AgentReadiness | null = null,
+) {
+  if (readiness?.blocking) {
+    return readiness.detail;
+  }
+
+  const normalizedError = rawError.toLowerCase();
+  if (agent === "Cursor") {
+    if (normalizedError.includes("timed out")) {
+      return "Cursor did not return its live model list in time. Try Refresh models again, or send a prompt to warm up the session.";
+    }
+    if (normalizedError.includes("did not return a result")) {
+      return "Cursor did not return its live model list. Try Refresh models again after the session finishes connecting.";
+    }
+    return "Cursor could not refresh its live model list. Verify `cursor-agent` is installed and signed in, then try again.";
+  }
+
+  if (agent === "Gemini") {
+    if (
+      normalizedError.includes("auth") ||
+      normalizedError.includes("credential") ||
+      normalizedError.includes("api key") ||
+      normalizedError.includes("oauth") ||
+      normalizedError.includes("vertex")
+    ) {
+      return readiness?.detail ??
+        "Gemini needs valid auth before it can return its live model list. Configure `GEMINI_API_KEY`, Vertex AI, or Google login, then try again.";
+    }
+    if (normalizedError.includes("timed out")) {
+      return "Gemini did not return its live model list in time. Confirm the CLI is authenticated, then try Refresh models again.";
+    }
+    return "Gemini could not refresh its live model list. Confirm the CLI is installed and authenticated, then try again.";
+  }
+
+  if (agent === "Claude") {
+    if (normalizedError.includes("timed out")) {
+      return "Claude did not return its live model list in time. Try Refresh models again. If this keeps happening, start a new Claude session.";
+    }
+    if (normalizedError.includes("restart") || normalizedError.includes("start persistent")) {
+      return "Claude could not restart cleanly to reload its model list. Try sending a prompt or opening a new Claude session.";
+    }
+    return "Claude could not refresh its live model list. Try Refresh models again or start a new Claude session.";
+  }
+
+  if (agent === "Codex") {
+    if (normalizedError.includes("timed out")) {
+      return "Codex did not return its live model list in time. Try Refresh models again, or send a prompt to warm up the runtime.";
+    }
+    if (normalizedError.includes("start persistent")) {
+      return "Codex could not start its local runtime to refresh models. Verify the Codex CLI is installed and authenticated, then try again.";
+    }
+    return "Codex could not refresh its live model list. Try Refresh models again or restart the session.";
+  }
+
+  return rawError;
 }
 
 function formatCodexReasoningEffortList(efforts: readonly CodexReasoningEffort[]) {
@@ -587,6 +713,7 @@ export default function App() {
   const pendingKillConfirmButtonRef = useRef<HTMLButtonElement | null>(null);
   const pendingKillCloseTimeoutRef = useRef<number | null>(null);
   const isMountedRef = useRef(true);
+  const confirmedUnknownModelSendsRef = useRef<Set<string>>(new Set());
   const refreshingSessionModelOptionIdsRef = useRef<SessionFlagMap>({});
   const controlPanelSurfaceRef = useRef<ControlPanelSurfaceHandle | null>(null);
   const lastDerivedControlPanelGitWorkdirRef = useRef<string | null>(null);
@@ -856,6 +983,14 @@ export default function App() {
     );
     setUpdatingSessionIds((current) => pruneSessionFlags(current, availableSessionIds));
     setSessionSettingNotices((current) => pruneSessionValues(current, availableSessionIds));
+    const availableUnknownModelKeys = new Set(
+      mergedSessions
+        .filter((session) => describeUnknownSessionModelWarning(session))
+        .map((session) => unknownSessionModelConfirmationKey(session.id, session.model)),
+    );
+    confirmedUnknownModelSendsRef.current = new Set(
+      [...confirmedUnknownModelSendsRef.current].filter((key) => availableUnknownModelKeys.has(key)),
+    );
   }
 
   function adoptState(
@@ -1341,17 +1476,28 @@ export default function App() {
     };
   }, []);
 
-  async function handleSend(sessionId: string, draftTextOverride?: string) {
+  function handleSend(sessionId: string, draftTextOverride?: string) {
     const session = sessionLookup.get(sessionId);
     if (!session) {
-      return;
+      return false;
     }
 
     const draftText = draftTextOverride ?? draftsBySessionId[sessionId] ?? "";
     const prompt = draftText.trim();
     const attachments = draftAttachmentsBySessionId[sessionId] ?? [];
     if (!prompt && attachments.length === 0) {
-      return;
+      return false;
+    }
+    const unknownModelWarning = describeUnknownSessionModelWarning(session);
+    const unknownModelKey = unknownSessionModelConfirmationKey(sessionId, session.model);
+    if (unknownModelWarning) {
+      if (!confirmedUnknownModelSendsRef.current.has(unknownModelKey)) {
+        confirmedUnknownModelSendsRef.current.add(unknownModelKey);
+        setRequestError(unknownModelWarning);
+        return false;
+      }
+    } else {
+      confirmedUnknownModelSendsRef.current.delete(unknownModelKey);
     }
 
     setSendingSessionIds((current) => setSessionFlag(current, sessionId, true));
@@ -1375,52 +1521,56 @@ export default function App() {
       return nextState;
     });
 
-    try {
-      const state = await sendMessage(
-        sessionId,
-        prompt,
-        attachments.map((attachment) => ({
-          data: attachment.base64Data,
-          fileName: attachment.fileName,
-          mediaType: attachment.mediaType,
-        })),
-      );
-      adoptState(state);
-      releaseDraftAttachments(attachments);
-      setRequestError(null);
-    } catch (error) {
-      let restoredDraft = false;
-      let restoredAttachments = false;
-
-      setDraftsBySessionId((current) => {
-        if (!draftText || (current[sessionId] ?? "") !== "") {
-          return current;
-        }
-
-        restoredDraft = true;
-        return {
-          ...current,
-          [sessionId]: draftText,
-        };
-      });
-      setDraftAttachmentsBySessionId((current) => {
-        if (attachments.length === 0 || (current[sessionId]?.length ?? 0) > 0) {
-          return current;
-        }
-
-        restoredAttachments = true;
-        return {
-          ...current,
-          [sessionId]: attachments,
-        };
-      });
-      if (!restoredAttachments) {
+    void (async () => {
+      try {
+        const state = await sendMessage(
+          sessionId,
+          prompt,
+          attachments.map((attachment) => ({
+            data: attachment.base64Data,
+            fileName: attachment.fileName,
+            mediaType: attachment.mediaType,
+          })),
+        );
+        adoptState(state);
         releaseDraftAttachments(attachments);
+        setRequestError(null);
+      } catch (error) {
+        let restoredDraft = false;
+        let restoredAttachments = false;
+
+        setDraftsBySessionId((current) => {
+          if (!draftText || (current[sessionId] ?? "") !== "") {
+            return current;
+          }
+
+          restoredDraft = true;
+          return {
+            ...current,
+            [sessionId]: draftText,
+          };
+        });
+        setDraftAttachmentsBySessionId((current) => {
+          if (attachments.length === 0 || (current[sessionId]?.length ?? 0) > 0) {
+            return current;
+          }
+
+          restoredAttachments = true;
+          return {
+            ...current,
+            [sessionId]: attachments,
+          };
+        });
+        if (!restoredAttachments) {
+          releaseDraftAttachments(attachments);
+        }
+        setRequestError(getErrorMessage(error));
+      } finally {
+        setSendingSessionIds((current) => setSessionFlag(current, sessionId, false));
       }
-      setRequestError(getErrorMessage(error));
-    } finally {
-      setSendingSessionIds((current) => setSessionFlag(current, sessionId, false));
-    }
+    })();
+
+    return true;
   }
 
   function handleDraftAttachmentsAdd(sessionId: string, attachments: DraftImageAttachment[]) {
@@ -1857,7 +2007,7 @@ export default function App() {
             : undefined,
         reasoningEffort:
           session.agent === "Codex"
-            ? (session.reasoningEffort ?? "medium")
+            ? normalizedCodexReasoningEffort(session)
             : undefined,
         cursorMode:
           session.agent === "Cursor" ? (session.cursorMode ?? defaultCursorMode) : undefined,
@@ -1937,19 +2087,23 @@ export default function App() {
     if (!session) {
       return;
     }
+    const normalizedModelValue =
+      field === "model" ? normalizedRequestedSessionModel(session, value as string) : null;
 
     setUpdatingSessionIds((current) => setSessionFlag(current, sessionId, true));
     try {
       const payload =
         session.agent === "Codex"
           ? {
-              ...(field === "model" ? { model: value as string } : {}),
+              ...(field === "model" ? { model: normalizedModelValue ?? (value as string) } : {}),
               reasoningEffort:
                 field === "reasoningEffort"
                   ? (value as CodexReasoningEffort)
                   : normalizedCodexReasoningEffort(
                       session,
-                      field === "model" ? (value as string) : session.model,
+                      field === "model"
+                        ? (normalizedModelValue ?? (value as string))
+                        : session.model,
                     ),
               sandboxMode:
                 field === "sandboxMode"
@@ -1963,7 +2117,7 @@ export default function App() {
           : session.agent === "Cursor"
             ? field === "model"
               ? {
-                  model: value as string,
+                  model: normalizedModelValue ?? (value as string),
                 }
               : field === "cursorMode"
               ? {
@@ -1973,7 +2127,7 @@ export default function App() {
           : session.agent === "Claude"
             ? field === "model"
               ? {
-                  model: value as string,
+                  model: normalizedModelValue ?? (value as string),
                 }
               : field === "claudeApprovalMode"
                 ? {
@@ -1983,7 +2137,7 @@ export default function App() {
             : session.agent === "Gemini"
               ? field === "model"
                 ? {
-                    model: value as string,
+                    model: normalizedModelValue ?? (value as string),
                   }
                 : field === "geminiApprovalMode"
                   ? {
@@ -2027,6 +2181,7 @@ export default function App() {
   }
 
   async function handleRefreshSessionModelOptions(sessionId: string) {
+    const previousSession = sessionsRef.current.find((entry) => entry.id === sessionId) ?? null;
     if (refreshingSessionModelOptionIdsRef.current[sessionId]) {
       return;
     }
@@ -2051,9 +2206,29 @@ export default function App() {
     try {
       const state = await refreshSessionModelOptions(sessionId);
       adoptState(state);
+      if (previousSession?.agent === "Codex") {
+        const refreshedSession = state.sessions.find((entry) => entry.id === sessionId) ?? null;
+        const nextNotice = refreshedSession
+          ? describeCodexModelAdjustmentNotice(previousSession, refreshedSession)
+          : null;
+        if (nextNotice) {
+          setSessionSettingNotices((current) => ({
+            ...current,
+            [sessionId]: nextNotice,
+          }));
+        }
+      }
       setRequestError(null);
     } catch (error) {
-      const message = getErrorMessage(error);
+      const rawMessage = getErrorMessage(error);
+      const session = sessionsRef.current.find((entry) => entry.id === sessionId) ?? null;
+      const message = session
+        ? describeSessionModelRefreshError(
+            session.agent,
+            rawMessage,
+            agentReadinessByAgent.get(session.agent) ?? null,
+          )
+        : rawMessage;
       setSessionModelOptionErrors((current) => ({
         ...current,
         [sessionId]: message,
@@ -4071,7 +4246,7 @@ function WorkspaceNodeView({
   onDraftAttachmentsAdd: (sessionId: string, attachments: DraftImageAttachment[]) => void;
   onDraftAttachmentRemove: (sessionId: string, attachmentId: string) => void;
   onComposerError: (message: string | null) => void;
-  onSend: (sessionId: string, draftText?: string) => void;
+  onSend: (sessionId: string, draftText?: string) => boolean;
   onCancelQueuedPrompt: (sessionId: string, promptId: string) => void;
   onApprovalDecision: (
     sessionId: string,
@@ -4409,7 +4584,7 @@ function SessionPaneView({
   onDraftAttachmentsAdd: (sessionId: string, attachments: DraftImageAttachment[]) => void;
   onDraftAttachmentRemove: (sessionId: string, attachmentId: string) => void;
   onComposerError: (message: string | null) => void;
-  onSend: (sessionId: string, draftText?: string) => void;
+  onSend: (sessionId: string, draftText?: string) => boolean;
   onCancelQueuedPrompt: (sessionId: string, promptId: string) => void;
   onApprovalDecision: (
     sessionId: string,
@@ -5476,6 +5651,7 @@ function SessionPaneView({
                     session={session}
                     isUpdating={panelIsUpdating}
                     isRefreshingModelOptions={isRefreshingModelOptions}
+                    modelOptionsError={modelOptionsError}
                     sessionNotice={session.id === activeSession?.id ? sessionSettingNotice : null}
                     onRequestModelOptions={onRefreshSessionModelOptions}
                     onSessionSettingsChange={handleSettingsChange}
@@ -5490,6 +5666,7 @@ function SessionPaneView({
                     session={session}
                     isUpdating={panelIsUpdating}
                     isRefreshingModelOptions={isRefreshingModelOptions}
+                    modelOptionsError={modelOptionsError}
                     onRequestModelOptions={onRefreshSessionModelOptions}
                     onSessionSettingsChange={handleSettingsChange}
                   />
@@ -5503,6 +5680,7 @@ function SessionPaneView({
                     session={session}
                     isUpdating={panelIsUpdating}
                     isRefreshingModelOptions={isRefreshingModelOptions}
+                    modelOptionsError={modelOptionsError}
                     onRequestModelOptions={onRefreshSessionModelOptions}
                     onSessionSettingsChange={handleSettingsChange}
                   />
@@ -5516,6 +5694,7 @@ function SessionPaneView({
                     session={session}
                     isUpdating={panelIsUpdating}
                     isRefreshingModelOptions={isRefreshingModelOptions}
+                    modelOptionsError={modelOptionsError}
                     onRequestModelOptions={onRefreshSessionModelOptions}
                     onSessionSettingsChange={handleSettingsChange}
                   />
@@ -5670,6 +5849,7 @@ export function CodexPromptSettingsCard({
   session,
   isUpdating,
   isRefreshingModelOptions,
+  modelOptionsError,
   sessionNotice,
   onRequestModelOptions,
   onSessionSettingsChange,
@@ -5678,6 +5858,7 @@ export function CodexPromptSettingsCard({
   session: Session;
   isUpdating: boolean;
   isRefreshingModelOptions: boolean;
+  modelOptionsError: string | null;
   sessionNotice: string | null;
   onRequestModelOptions: (sessionId: string) => void;
   onSessionSettingsChange: (
@@ -5722,7 +5903,18 @@ export function CodexPromptSettingsCard({
             sessionId={session.id}
             onRequestModelOptions={onRequestModelOptions}
           />
+          <SessionModelRefreshFeedback
+            agent={session.agent}
+            isRefreshing={isRefreshingModelOptions}
+            modelOptionsError={modelOptionsError}
+          />
           <SessionModelDetails option={currentModelOption} />
+          <SessionManualModelControl
+            paneId={paneId}
+            session={session}
+            isUpdating={isUpdating}
+            onSessionSettingsChange={onSessionSettingsChange}
+          />
         </div>
         <div className="session-control-group">
           <label className="session-control-label" htmlFor={`sandbox-mode-${paneId}`}>
@@ -5782,8 +5974,8 @@ export function CodexPromptSettingsCard({
           {isRefreshingModelOptions
             ? "Loading Codex's live model list for this session. Sandbox, approval, and reasoning changes still apply on the next Codex prompt."
             : canChangeModel
-              ? "Model, sandbox, approval, and reasoning changes apply on the next Codex prompt."
-              : "TermAl asks Codex for its live model list when this session opens. New sessions begin on Codex's default model. Sandbox, approval, and reasoning changes still apply on the next Codex prompt."}
+              ? "Model, sandbox, approval, and reasoning changes apply on the next Codex prompt. You can still paste a full Codex model id manually if the live list is behind."
+              : "TermAl asks Codex for its live model list when this session opens. New sessions begin on Codex's default model. You can still paste a full Codex model id manually. Sandbox, approval, and reasoning changes still apply on the next Codex prompt."}
           {modelCapabilityHint ? ` ${modelCapabilityHint}` : ""}
         </p>
       </div>
@@ -5796,6 +5988,7 @@ export function ClaudePromptSettingsCard({
   session,
   isUpdating,
   isRefreshingModelOptions,
+  modelOptionsError,
   onRequestModelOptions,
   onSessionSettingsChange,
 }: {
@@ -5803,6 +5996,7 @@ export function ClaudePromptSettingsCard({
   session: Session;
   isUpdating: boolean;
   isRefreshingModelOptions: boolean;
+  modelOptionsError: string | null;
   onRequestModelOptions: (sessionId: string) => void;
   onSessionSettingsChange: (
     sessionId: string,
@@ -5816,25 +6010,8 @@ export function ClaudePromptSettingsCard({
     session,
   });
 
-  const [customModel, setCustomModel] = useState(session.model);
-
-  useEffect(() => {
-    setCustomModel(session.model);
-  }, [session.id, session.model]);
-
   const modelOptions = sessionModelComboboxOptions(session.modelOptions, session.model);
   const currentModelOption = currentSessionModelOption(session);
-  const trimmedCustomModel = customModel.trim();
-  const canApplyCustomModel =
-    trimmedCustomModel.length > 0 && trimmedCustomModel !== session.model && !isUpdating;
-
-  function applyCustomClaudeModel() {
-    if (!canApplyCustomModel) {
-      return;
-    }
-
-    void onSessionSettingsChange(session.id, "model", trimmedCustomModel);
-  }
 
   return (
     <article className="message-card prompt-settings-card">
@@ -5859,42 +6036,18 @@ export function ClaudePromptSettingsCard({
             sessionId={session.id}
             onRequestModelOptions={onRequestModelOptions}
           />
+          <SessionModelRefreshFeedback
+            agent={session.agent}
+            isRefreshing={isRefreshingModelOptions}
+            modelOptionsError={modelOptionsError}
+          />
           <SessionModelDetails option={currentModelOption} />
-          <div className="session-model-custom">
-            <label className="session-control-label" htmlFor={`claude-custom-model-${paneId}`}>
-              Manual model id
-            </label>
-            <div className="session-model-custom-row">
-              <input
-                id={`claude-custom-model-${paneId}`}
-                className="themed-input session-model-custom-input"
-                type="text"
-                value={customModel}
-                placeholder="claude-sonnet-4-6"
-                spellCheck={false}
-                autoCapitalize="off"
-                autoCorrect="off"
-                disabled={isUpdating}
-                onChange={(event) => setCustomModel(event.target.value)}
-                onKeyDown={(event) => {
-                  if (event.key !== "Enter") {
-                    return;
-                  }
-
-                  event.preventDefault();
-                  applyCustomClaudeModel();
-                }}
-              />
-              <button
-                type="button"
-                className="ghost-button session-model-custom-apply"
-                disabled={!canApplyCustomModel}
-                onClick={applyCustomClaudeModel}
-              >
-                Apply
-              </button>
-            </div>
-          </div>
+          <SessionManualModelControl
+            paneId={paneId}
+            session={session}
+            isUpdating={isUpdating}
+            onSessionSettingsChange={onSessionSettingsChange}
+          />
         </div>
         <div className="session-control-group">
           <label className="session-control-label" htmlFor={`claude-approval-mode-${paneId}`}>
@@ -5975,6 +6128,131 @@ function SessionModelRefreshAction({
   );
 }
 
+function SessionModelRefreshFeedback({
+  agent,
+  isRefreshing,
+  modelOptionsError,
+}: {
+  agent: AgentType;
+  isRefreshing: boolean;
+  modelOptionsError: string | null;
+}) {
+  if (modelOptionsError) {
+    return (
+      <p className="session-control-error" role="alert">
+        Could not refresh {agent}'s live model list for this session. {modelOptionsError}
+      </p>
+    );
+  }
+
+  if (!isRefreshing) {
+    return null;
+  }
+
+  return (
+    <p className="session-control-status" aria-live="polite">
+      Refreshing {agent}'s live model list from the active session.
+    </p>
+  );
+}
+
+function SessionManualModelControl({
+  paneId,
+  session,
+  isUpdating,
+  onSessionSettingsChange,
+}: {
+  paneId: string;
+  session: Session;
+  isUpdating: boolean;
+  onSessionSettingsChange: (
+    sessionId: string,
+    field: SessionSettingsField,
+    value: SessionSettingsValue,
+  ) => void;
+}) {
+  const [customModel, setCustomModel] = useState(session.model);
+
+  useEffect(() => {
+    setCustomModel(session.model);
+  }, [session.id, session.model]);
+
+  const trimmedCustomModel = customModel.trim();
+  const matchedModelOption = matchingSessionModelOption(session.modelOptions, trimmedCustomModel);
+  const normalizedCustomModel = normalizedRequestedSessionModel(session, trimmedCustomModel);
+  const hasLiveModelList = (session.modelOptions?.length ?? 0) > 0;
+  const canApplyCustomModel =
+    trimmedCustomModel.length > 0 && normalizedCustomModel !== session.model && !isUpdating;
+  const validationMessage =
+    trimmedCustomModel.length === 0
+      ? null
+      : matchedModelOption &&
+          normalizedCustomModel === session.model &&
+          trimmedCustomModel !== session.model
+        ? `${trimmedCustomModel} already resolves to the current session model.`
+      : matchedModelOption && normalizedCustomModel !== trimmedCustomModel
+        ? `Matches ${matchedModelOption.label} from the current live list. TermAl will apply ${normalizedCustomModel}.`
+        : !matchedModelOption && hasLiveModelList
+          ? `${trimmedCustomModel} is not in the current live model list. TermAl will still try it on the next prompt.`
+          : null;
+  const validationTone =
+    validationMessage && !matchedModelOption && hasLiveModelList ? "warning" : "info";
+
+  function applyCustomModel() {
+    if (!canApplyCustomModel) {
+      return;
+    }
+
+    void onSessionSettingsChange(session.id, "model", normalizedCustomModel);
+  }
+
+  return (
+    <div className="session-model-custom">
+      <label className="session-control-label" htmlFor={`${session.agent}-custom-model-${paneId}`}>
+        Manual model id
+      </label>
+      <div className="session-model-custom-row">
+        <input
+          id={`${session.agent}-custom-model-${paneId}`}
+          className="themed-input session-model-custom-input"
+          type="text"
+          value={customModel}
+          placeholder={manualSessionModelPlaceholder(session.agent)}
+          spellCheck={false}
+          autoCapitalize="off"
+          autoCorrect="off"
+          disabled={isUpdating}
+          onChange={(event) => setCustomModel(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key !== "Enter") {
+              return;
+            }
+
+            event.preventDefault();
+            applyCustomModel();
+          }}
+        />
+        <button
+          type="button"
+          className="ghost-button session-model-custom-apply"
+          disabled={!canApplyCustomModel}
+          onClick={applyCustomModel}
+        >
+          Apply
+        </button>
+      </div>
+      {validationMessage ? (
+        <p
+          className={`session-model-custom-validation ${validationTone === "warning" ? "warning" : "info"}`}
+          aria-live="polite"
+        >
+          {validationMessage}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
 function SessionModelDetails({
   option,
 }: {
@@ -6013,6 +6291,7 @@ export function CursorPromptSettingsCard({
   session,
   isUpdating,
   isRefreshingModelOptions,
+  modelOptionsError,
   onRequestModelOptions,
   onSessionSettingsChange,
 }: {
@@ -6020,6 +6299,7 @@ export function CursorPromptSettingsCard({
   session: Session;
   isUpdating: boolean;
   isRefreshingModelOptions: boolean;
+  modelOptionsError: string | null;
   onRequestModelOptions: (sessionId: string) => void;
   onSessionSettingsChange: (
     sessionId: string,
@@ -6062,7 +6342,18 @@ export function CursorPromptSettingsCard({
             sessionId={session.id}
             onRequestModelOptions={onRequestModelOptions}
           />
+          <SessionModelRefreshFeedback
+            agent={session.agent}
+            isRefreshing={isRefreshingModelOptions}
+            modelOptionsError={modelOptionsError}
+          />
           <SessionModelDetails option={currentModelOption} />
+          <SessionManualModelControl
+            paneId={paneId}
+            session={session}
+            isUpdating={isUpdating}
+            onSessionSettingsChange={onSessionSettingsChange}
+          />
         </div>
         <div className="session-control-group">
           <label className="session-control-label" htmlFor={`cursor-mode-${paneId}`}>
@@ -6083,8 +6374,8 @@ export function CursorPromptSettingsCard({
           {isRefreshingModelOptions
             ? "Loading Cursor's live model list for this session."
             : canChangeModel
-              ? "Model and mode changes apply to the live Cursor session."
-              : "TermAl asks Cursor for its live model list when this session opens. New sessions begin on Auto."}{" "}
+              ? "Model and mode changes apply to the live Cursor session. You can still paste a full model id manually if Cursor's list is behind."
+              : "TermAl asks Cursor for its live model list when this session opens. New sessions begin on Auto, and you can still paste a full model id manually."}{" "}
           Agent can edit, Plan stays read-only, and Ask keeps the session focused on explanation.
         </p>
       </div>
@@ -6097,6 +6388,7 @@ export function GeminiPromptSettingsCard({
   session,
   isUpdating,
   isRefreshingModelOptions,
+  modelOptionsError,
   onRequestModelOptions,
   onSessionSettingsChange,
 }: {
@@ -6104,6 +6396,7 @@ export function GeminiPromptSettingsCard({
   session: Session;
   isUpdating: boolean;
   isRefreshingModelOptions: boolean;
+  modelOptionsError: string | null;
   onRequestModelOptions: (sessionId: string) => void;
   onSessionSettingsChange: (
     sessionId: string,
@@ -6146,7 +6439,18 @@ export function GeminiPromptSettingsCard({
             sessionId={session.id}
             onRequestModelOptions={onRequestModelOptions}
           />
+          <SessionModelRefreshFeedback
+            agent={session.agent}
+            isRefreshing={isRefreshingModelOptions}
+            modelOptionsError={modelOptionsError}
+          />
           <SessionModelDetails option={currentModelOption} />
+          <SessionManualModelControl
+            paneId={paneId}
+            session={session}
+            isUpdating={isUpdating}
+            onSessionSettingsChange={onSessionSettingsChange}
+          />
         </div>
         <div className="session-control-group">
           <label className="session-control-label" htmlFor={`gemini-approval-mode-${paneId}`}>
@@ -6171,8 +6475,8 @@ export function GeminiPromptSettingsCard({
           {isRefreshingModelOptions
             ? "Loading Gemini's live model list for this session."
             : canChangeModel
-              ? "Model changes apply to the live Gemini session."
-              : "TermAl asks Gemini for its live model list when this session opens. New sessions begin on Auto."}{" "}
+              ? "Model changes apply to the live Gemini session. You can still paste a full Gemini model id manually if the live list is behind."
+              : "TermAl asks Gemini for its live model list when this session opens. New sessions begin on Auto, and you can still paste a full Gemini model id manually."}{" "}
           Default prompts for approval, Auto edit approves edit tools, YOLO approves all tools,
           and Plan stays read-only. Approval-mode changes apply on the next Gemini prompt.
         </p>
