@@ -218,7 +218,6 @@ const NEW_SESSION_AGENT_OPTIONS = [
 const NEW_SESSION_MODEL_OPTIONS: Readonly<Record<AgentType, readonly ComboboxOption[]>> = {
   Claude: [
     { label: "Sonnet", value: "sonnet" },
-    { label: "Opus", value: "opus" },
   ],
   Codex: [{ label: "GPT-5.4", value: "gpt-5.4" }],
   Cursor: [{ label: "Auto", value: "auto" }],
@@ -279,7 +278,7 @@ function usesSessionModelPicker(agent: AgentType): boolean {
 function createSessionModelHint(agent: AgentType): string {
   switch (agent) {
     case "Claude":
-      return "Claude model selection lives on the session itself. New Claude sessions start on Sonnet.";
+      return "Claude model selection lives on the session itself. TermAl asks Claude for its live model list after the session opens. New Claude sessions start on Sonnet.";
     case "Codex":
       return "Codex model selection lives on the session itself. TermAl asks Codex for its live model list after the session opens.";
     case "Cursor":
@@ -1338,7 +1337,7 @@ export default function App() {
           applyControlPanelLayout(openSessionInWorkspaceState(current, created.sessionId, targetPaneId)),
         );
       }
-      if (agent === "Codex" || agent === "Cursor" || agent === "Gemini") {
+      if (agent === "Claude" || agent === "Codex" || agent === "Cursor" || agent === "Gemini") {
         await handleRefreshSessionModelOptions(created.sessionId);
       }
       setRequestError(null);
@@ -1706,7 +1705,12 @@ export default function App() {
           applyControlPanelLayout(openSessionInWorkspaceState(current, created.sessionId, targetPaneId)),
         );
       }
-      if (session.agent === "Codex" || session.agent === "Cursor" || session.agent === "Gemini") {
+      if (
+        session.agent === "Claude" ||
+        session.agent === "Codex" ||
+        session.agent === "Cursor" ||
+        session.agent === "Gemini"
+      ) {
         await handleRefreshSessionModelOptions(created.sessionId);
       }
       setRequestError(null);
@@ -5250,6 +5254,8 @@ function SessionPaneView({
                     paneId={panelPaneId}
                     session={session}
                     isUpdating={panelIsUpdating}
+                    isRefreshingModelOptions={isRefreshingModelOptions}
+                    onRequestModelOptions={onRefreshSessionModelOptions}
                     onSessionSettingsChange={handleSettingsChange}
                   />
                 );
@@ -5547,22 +5553,39 @@ export function CodexPromptSettingsCard({
   );
 }
 
-function ClaudePromptSettingsCard({
+export function ClaudePromptSettingsCard({
   paneId,
   session,
   isUpdating,
+  isRefreshingModelOptions,
+  onRequestModelOptions,
   onSessionSettingsChange,
 }: {
   paneId: string;
   session: Session;
   isUpdating: boolean;
+  isRefreshingModelOptions: boolean;
+  onRequestModelOptions: (sessionId: string) => void;
   onSessionSettingsChange: (
     sessionId: string,
     field: SessionSettingsField,
     value: SessionSettingsValue,
   ) => void;
 }) {
-  const modelOptions = staticSessionModelOptions("Claude", session.model);
+  const modelOptions = session.modelOptions?.length
+    ? session.modelOptions
+    : [
+        {
+          label: session.model === "default" ? "Default" : session.model,
+          value: session.model,
+        },
+      ];
+
+  useSessionModelOptionsAutoRefresh({
+    isRefreshingModelOptions,
+    onRequestModelOptions,
+    session,
+  });
 
   return (
     <article className="message-card prompt-settings-card">
@@ -5578,8 +5601,14 @@ function ClaudePromptSettingsCard({
             className="prompt-settings-select"
             value={session.model}
             options={modelOptions}
-            disabled={isUpdating}
+            disabled={isUpdating || isRefreshingModelOptions || !session.modelOptions?.length}
             onChange={(nextValue) => void onSessionSettingsChange(session.id, "model", nextValue)}
+          />
+          <SessionModelRefreshAction
+            disabled={isUpdating}
+            isRefreshing={isRefreshingModelOptions}
+            sessionId={session.id}
+            onRequestModelOptions={onRequestModelOptions}
           />
         </div>
         <div className="session-control-group">
@@ -5602,9 +5631,11 @@ function ClaudePromptSettingsCard({
           />
         </div>
         <p className="session-control-hint">
-          Model and mode changes apply on the next Claude prompt. If the model changed, TermAl
-          restarts the Claude runtime for the next turn. Ask keeps approval cards, Auto-approve
-          continues through tool requests, and Plan keeps Claude in read-only analysis mode.
+          {isRefreshingModelOptions
+            ? "Refreshing Claude's live model list from the session."
+            : session.modelOptions?.length
+              ? "Claude exposes its live model list during session initialization. Model changes are applied live to the session. Ask keeps approval cards, Auto-approve continues through tool requests, and Plan keeps Claude in read-only analysis mode."
+              : "Start the Claude session once to load its live model list. New Claude sessions begin on Sonnet."}
         </p>
       </div>
     </article>

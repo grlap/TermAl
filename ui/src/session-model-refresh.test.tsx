@@ -1,7 +1,12 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
-import { CodexPromptSettingsCard, CursorPromptSettingsCard, GeminiPromptSettingsCard } from "./App";
+import {
+  ClaudePromptSettingsCard,
+  CodexPromptSettingsCard,
+  CursorPromptSettingsCard,
+  GeminiPromptSettingsCard,
+} from "./App";
 import type { Session } from "./types";
 
 function makeSession(id: string, overrides?: Partial<Session>): Session {
@@ -42,6 +47,33 @@ describe("session model refresh controls", () => {
 
     await waitFor(() => {
       expect(onRequestModelOptions).toHaveBeenCalledWith("codex-session");
+    });
+    expect(onRequestModelOptions).toHaveBeenCalledTimes(1);
+    expect(
+      screen.getByRole("button", { name: "Refresh models" }),
+    ).toBeInTheDocument();
+  });
+
+  it("auto-requests Claude model options when the session card opens without a live list", async () => {
+    const onRequestModelOptions = vi.fn();
+
+    render(
+      <ClaudePromptSettingsCard
+        paneId="pane-claude"
+        session={makeSession("claude-session", {
+          agent: "Claude",
+          claudeApprovalMode: "ask",
+          model: "sonnet",
+        })}
+        isUpdating={false}
+        isRefreshingModelOptions={false}
+        onRequestModelOptions={onRequestModelOptions}
+        onSessionSettingsChange={() => {}}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(onRequestModelOptions).toHaveBeenCalledWith("claude-session");
     });
     expect(onRequestModelOptions).toHaveBeenCalledTimes(1);
     expect(

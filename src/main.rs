@@ -511,6 +511,7 @@ impl AppState {
                                 .claude_approval_mode
                                 .unwrap_or_else(default_claude_approval_mode),
                             record.external_session_id.clone(),
+                            None,
                         )
                         .map_err(|err| {
                             ApiError::internal(format!(
@@ -765,6 +766,7 @@ impl AppState {
             .find_session_index(session_id)
             .ok_or_else(|| ApiError::not_found("session not found"))?;
         let record = &mut inner.sessions[index];
+        let mut claude_model_update: Option<(ClaudeRuntimeHandle, String)> = None;
         let mut claude_permission_mode_update: Option<(ClaudeRuntimeHandle, String)> = None;
         let mut acp_model_update: Option<(AcpRuntimeHandle, Value)> = None;
 
@@ -873,26 +875,24 @@ impl AppState {
                 }
             }
             agent if agent.supports_claude_approval_mode() => {
-                let mut model_changed = false;
                 if let Some(model) = request.model.as_deref() {
                     let trimmed = model.trim().to_owned();
                     if record.session.model != trimmed {
-                        record.session.model = trimmed;
-                        record.runtime_reset_required = true;
-                        model_changed = true;
+                        record.session.model = trimmed.clone();
+                        if let SessionRuntime::Claude(handle) = &record.runtime {
+                            claude_model_update = Some((handle.clone(), trimmed));
+                        }
                     }
                 }
                 if let Some(claude_approval_mode) = request.claude_approval_mode {
                     record.session.claude_approval_mode = Some(claude_approval_mode);
-                    if !model_changed {
-                        if let SessionRuntime::Claude(handle) = &record.runtime {
-                            claude_permission_mode_update = Some((
-                                handle.clone(),
-                                claude_approval_mode
-                                    .session_cli_permission_mode()
-                                    .to_owned(),
-                            ));
-                        }
+                    if let SessionRuntime::Claude(handle) = &record.runtime {
+                        claude_permission_mode_update = Some((
+                            handle.clone(),
+                            claude_approval_mode
+                                .session_cli_permission_mode()
+                                .to_owned(),
+                        ));
                     }
                 }
             }
@@ -941,6 +941,9 @@ impl AppState {
         let snapshot = self.snapshot_from_inner(&inner);
         drop(inner);
 
+        if let Some((handle, model)) = claude_model_update {
+            let _ = handle.input_tx.send(ClaudeRuntimeCommand::SetModel(model));
+        }
         if let Some((handle, permission_mode)) = claude_permission_mode_update {
             let _ = handle
                 .input_tx
@@ -965,6 +968,98 @@ impl AppState {
             .ok_or_else(|| ApiError::not_found("session not found"))?;
         let record = &mut inner.sessions[index];
         let agent = record.session.agent;
+        if agent == Agent::Claude {
+            if !record.session.model_options.is_empty() {
+                return Ok(self.snapshot_from_inner(&inner));
+            }
+
+            if record.runtime_reset_required {
+                if let SessionRuntime::Claude(handle) = &record.runtime {
+                    handle.kill().map_err(|err| {
+                        ApiError::internal(format!(
+                            "failed to restart Claude session runtime: {err:#}"
+                        ))
+                    })?;
+                }
+                record.runtime = SessionRuntime::None;
+                record.pending_claude_approvals.clear();
+                record.runtime_reset_required = false;
+            }
+
+            match &record.runtime {
+                SessionRuntime::Acp(_) => {
+                    return Err(ApiError::internal(
+                        "unexpected ACP runtime attached to Claude session",
+                    ));
+                }
+                SessionRuntime::Codex(_) => {
+                    return Err(ApiError::internal(
+                        "unexpected Codex runtime attached to Claude session",
+                    ));
+                }
+                SessionRuntime::Claude(_) => {
+                    let model_options = record.session.model_options.clone();
+                    let current_model = record.session.model.clone();
+                    drop(inner);
+                    self.sync_session_model_options(session_id, Some(current_model), model_options)
+                        .map_err(|err| {
+                            ApiError::internal(format!(
+                                "failed to sync Claude model options: {err:#}"
+                            ))
+                        })?;
+                    return Ok(self.snapshot());
+                }
+                SessionRuntime::None => {}
+            }
+
+            let (response_tx, response_rx) =
+                mpsc::channel::<std::result::Result<Vec<SessionModelOption>, String>>();
+            let handle = spawn_claude_runtime(
+                self.clone(),
+                record.session.id.clone(),
+                record.session.workdir.clone(),
+                record.session.model.clone(),
+                record
+                    .session
+                    .claude_approval_mode
+                    .unwrap_or_else(default_claude_approval_mode),
+                record.external_session_id.clone(),
+                Some(response_tx),
+            )
+            .map_err(|err| {
+                ApiError::internal(format!(
+                    "failed to start persistent Claude session: {err:#}"
+                ))
+            })?;
+            record.runtime = SessionRuntime::Claude(handle);
+            drop(inner);
+
+            let model_options = match response_rx.recv_timeout(Duration::from_secs(30)) {
+                Ok(Ok(model_options)) => model_options,
+                Ok(Err(detail)) => {
+                    return Err(ApiError::internal(format!(
+                        "failed to refresh Claude model options: {detail}"
+                    )));
+                }
+                Err(mpsc::RecvTimeoutError::Timeout) => {
+                    return Err(ApiError::internal(
+                        "timed out refreshing Claude model options".to_owned(),
+                    ));
+                }
+                Err(mpsc::RecvTimeoutError::Disconnected) => {
+                    return Err(ApiError::internal(
+                        "Claude model refresh did not return a result".to_owned(),
+                    ));
+                }
+            };
+
+            self.sync_session_model_options(session_id, None, model_options)
+                .map_err(|err| {
+                    ApiError::internal(format!("failed to sync Claude model options: {err:#}"))
+                })?;
+            return Ok(self.snapshot());
+        }
+
         if agent == Agent::Codex {
             if record.runtime_reset_required {
                 if let SessionRuntime::Codex(handle) = &record.runtime {
@@ -3013,6 +3108,7 @@ struct ClaudePromptCommand {
 enum ClaudeRuntimeCommand {
     Prompt(ClaudePromptCommand),
     PermissionResponse(ClaudePermissionDecision),
+    SetModel(String),
     SetPermissionMode(String),
 }
 
@@ -4950,6 +5046,33 @@ fn handle_codex_model_list_refresh(
     Ok(model_options)
 }
 
+fn claude_model_options(message: &Value) -> Option<Vec<SessionModelOption>> {
+    let models = message.pointer("/response/response/models")?.as_array()?;
+    Some(
+        models
+            .iter()
+            .filter_map(|entry| {
+                let value = entry
+                    .get("value")
+                    .or_else(|| entry.get("model"))
+                    .and_then(Value::as_str)
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())?
+                    .to_owned();
+                let label = entry
+                    .get("displayName")
+                    .or_else(|| entry.get("label"))
+                    .and_then(Value::as_str)
+                    .map(str::trim)
+                    .filter(|label| !label.is_empty())
+                    .unwrap_or(&value)
+                    .to_owned();
+                Some(SessionModelOption { label, value })
+            })
+            .collect(),
+    )
+}
+
 fn codex_model_options(model_list_result: &Value) -> Vec<SessionModelOption> {
     model_list_result
         .get("data")
@@ -5582,6 +5705,7 @@ fn spawn_claude_runtime(
     model: String,
     approval_mode: ClaudeApprovalMode,
     resume_session_id: Option<String>,
+    model_options_tx: Option<Sender<std::result::Result<Vec<SessionModelOption>, String>>>,
 ) -> Result<ClaudeRuntimeHandle> {
     let runtime_id = Uuid::new_v4().to_string();
     let mut command = Command::new("claude");
@@ -5652,6 +5776,9 @@ fn spawn_claude_runtime(
                     ClaudeRuntimeCommand::PermissionResponse(decision) => {
                         write_claude_permission_response(&mut stdin, &decision)
                     }
+                    ClaudeRuntimeCommand::SetModel(model) => {
+                        write_claude_set_model(&mut stdin, &model)
+                    }
                     ClaudeRuntimeCommand::SetPermissionMode(mode) => {
                         write_claude_set_permission_mode(&mut stdin, &mode)
                     }
@@ -5681,12 +5808,16 @@ fn spawn_claude_runtime(
             let mut recorder =
                 SessionRecorder::new(reader_state.clone(), reader_session_id.clone());
             let mut resolved_session_id: Option<String> = None;
+            let mut initialize_model_options_tx = model_options_tx;
 
             loop {
                 raw_line.clear();
                 let bytes_read = match reader.read_line(&mut raw_line) {
                     Ok(bytes_read) => bytes_read,
                     Err(err) => {
+                        if let Some(tx) = initialize_model_options_tx.take() {
+                            let _ = tx.send(Err(format!("failed to read stdout from Claude: {err}")));
+                        }
                         let _ = reader_state.fail_turn_if_runtime_matches(
                             &reader_session_id,
                             &reader_runtime_token,
@@ -5703,6 +5834,11 @@ fn spawn_claude_runtime(
                 let message: Value = match serde_json::from_str(raw_line.trim_end()) {
                     Ok(message) => message,
                     Err(err) => {
+                        if let Some(tx) = initialize_model_options_tx.take() {
+                            let _ = tx.send(Err(format!(
+                                "failed to parse Claude JSON line: {err}"
+                            )));
+                        }
                         let _ = reader_state.fail_turn_if_runtime_matches(
                             &reader_session_id,
                             &reader_runtime_token,
@@ -5719,6 +5855,30 @@ fn spawn_claude_runtime(
                     .and_then(Value::as_bool)
                     .unwrap_or(false);
                 let error_summary = is_result.then(|| summarize_error(&message));
+
+                if let Some(model_options) = claude_model_options(&message) {
+                    if let Err(err) = reader_state.sync_session_model_options(
+                        &reader_session_id,
+                        None,
+                        model_options.clone(),
+                    ) {
+                        if let Some(tx) = initialize_model_options_tx.take() {
+                            let _ = tx.send(Err(format!(
+                                "failed to sync Claude model options: {err:#}"
+                            )));
+                        }
+                        let _ = reader_state.fail_turn_if_runtime_matches(
+                            &reader_session_id,
+                            &reader_runtime_token,
+                            &format!("failed to sync Claude model options: {err:#}"),
+                        );
+                        break;
+                    }
+
+                    if let Some(tx) = initialize_model_options_tx.take() {
+                        let _ = tx.send(Ok(model_options));
+                    }
+                }
 
                 if message_type == Some("control_request") {
                     let approval_mode = match reader_state.claude_approval_mode(&reader_session_id)
@@ -5819,6 +5979,9 @@ fn spawn_claude_runtime(
                 }
             }
 
+            if let Some(tx) = initialize_model_options_tx.take() {
+                let _ = tx.send(Err("Claude exited before reporting model options".to_owned()));
+            }
             let _ = recorder.finish_streaming_text();
         });
     }
@@ -5979,6 +6142,20 @@ fn write_claude_set_permission_mode(writer: &mut impl Write, mode: &str) -> Resu
             "request": {
                 "subtype": "set_permission_mode",
                 "mode": mode,
+            }
+        }),
+    )
+}
+
+fn write_claude_set_model(writer: &mut impl Write, model: &str) -> Result<()> {
+    write_claude_message(
+        writer,
+        &json!({
+            "request_id": Uuid::new_v4().to_string(),
+            "type": "control_request",
+            "request": {
+                "subtype": "set_model",
+                "model": model,
             }
         }),
     )
@@ -9917,7 +10094,7 @@ mod tests {
     }
 
     #[test]
-    fn updates_claude_session_model_settings_and_flags_restart() {
+    fn updates_claude_session_model_settings_without_restarting_runtime() {
         let state = test_app_state();
 
         let created = state
@@ -9935,6 +10112,22 @@ mod tests {
                 gemini_approval_mode: None,
             })
             .unwrap();
+
+        let child = Command::new("sh").arg("-c").arg("exit 0").spawn().unwrap();
+        let (input_tx, input_rx) = mpsc::channel();
+        let runtime = ClaudeRuntimeHandle {
+            runtime_id: "claude-model-update".to_owned(),
+            input_tx,
+            process: Arc::new(Mutex::new(child)),
+        };
+
+        {
+            let mut inner = state.inner.lock().expect("state mutex poisoned");
+            let index = inner
+                .find_session_index(&created.session_id)
+                .expect("Claude session should exist");
+            inner.sessions[index].runtime = SessionRuntime::Claude(runtime);
+        }
 
         let updated = state
             .update_session_settings(
@@ -9965,11 +10158,19 @@ mod tests {
             .iter()
             .find(|record| record.session.id == created.session_id)
             .expect("Claude session should exist");
-        assert!(record.runtime_reset_required);
+        assert!(!record.runtime_reset_required);
+
+        let command = input_rx
+            .recv_timeout(Duration::from_secs(1))
+            .expect("Claude model update should arrive");
+        match command {
+            ClaudeRuntimeCommand::SetModel(model) => assert_eq!(model, "opus"),
+            _ => panic!("expected Claude model update command"),
+        }
     }
 
     #[test]
-    fn rejects_model_option_refresh_for_claude_sessions() {
+    fn refreshes_claude_model_options_from_session_cache() {
         let state = test_app_state();
 
         let created = state
@@ -9988,14 +10189,33 @@ mod tests {
             })
             .unwrap();
 
-        let error = match state.refresh_session_model_options(&created.session_id) {
-            Ok(_) => panic!("Claude sessions should reject live model refreshes"),
-            Err(error) => error,
-        };
-        assert_eq!(error.status, StatusCode::BAD_REQUEST);
+        let model_options = vec![
+            SessionModelOption {
+                label: "Default (recommended)".to_owned(),
+                value: "default".to_owned(),
+            },
+            SessionModelOption {
+                label: "Sonnet".to_owned(),
+                value: "sonnet".to_owned(),
+            },
+        ];
+
+        state
+            .sync_session_model_options(&created.session_id, None, model_options.clone())
+            .expect("Claude model options should sync");
+
+        let refreshed = state
+            .refresh_session_model_options(&created.session_id)
+            .expect("Claude model refresh should succeed");
+        let session = refreshed
+            .sessions
+            .iter()
+            .find(|session| session.id == created.session_id)
+            .expect("refreshed Claude session should be present");
+
         assert_eq!(
-            error.message,
-            "Claude sessions do not expose live model options"
+            session.model_options,
+            model_options
         );
     }
 
@@ -11101,6 +11321,43 @@ mod tests {
     }
 
     #[test]
+    fn parses_claude_model_options_from_initialize_response() {
+        let message = json!({
+            "type": "control_response",
+            "response": {
+                "subtype": "success",
+                "request_id": "init-1",
+                "response": {
+                    "models": [
+                        {
+                            "value": "default",
+                            "displayName": "Default (recommended)"
+                        },
+                        {
+                            "value": "sonnet",
+                            "displayName": "Sonnet"
+                        }
+                    ]
+                }
+            }
+        });
+
+        assert_eq!(
+            claude_model_options(&message),
+            Some(vec![
+                SessionModelOption {
+                    label: "Default (recommended)".to_owned(),
+                    value: "default".to_owned(),
+                },
+                SessionModelOption {
+                    label: "Sonnet".to_owned(),
+                    value: "sonnet".to_owned(),
+                },
+            ])
+        );
+    }
+
+    #[test]
     fn encodes_claude_allow_permission_response() {
         let mut buffer = Vec::new();
         write_claude_permission_response(
@@ -11149,6 +11406,19 @@ mod tests {
             message["response"]["response"]["message"],
             "User rejected this action in TermAl."
         );
+    }
+
+    #[test]
+    fn encodes_claude_set_model_request() {
+        let mut buffer = Vec::new();
+        write_claude_set_model(&mut buffer, "claude-sonnet-4-6").unwrap();
+
+        let encoded = String::from_utf8(buffer).unwrap();
+        let message: Value = serde_json::from_str(encoded.trim_end()).unwrap();
+
+        assert_eq!(message["type"], "control_request");
+        assert_eq!(message["request"]["subtype"], "set_model");
+        assert_eq!(message["request"]["model"], "claude-sonnet-4-6");
     }
 
     #[test]

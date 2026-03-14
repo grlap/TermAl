@@ -163,6 +163,27 @@ describe("AgentSessionPanelFooter", () => {
     expect(screen.getByLabelText("Message session-a")).toHaveValue("");
   });
 
+  it("requests live Claude model options from /model when they have not loaded yet", async () => {
+    const onRefreshSessionModelOptions = vi.fn();
+
+    render(
+      renderFooter({
+        onRefreshSessionModelOptions,
+        session: makeSession("session-a", {
+          agent: "Claude",
+          model: "sonnet",
+        }),
+      }),
+    );
+
+    const textarea = screen.getByLabelText("Message session-a");
+    fireEvent.change(textarea, { target: { value: "/model" } });
+
+    await waitFor(() => {
+      expect(onRefreshSessionModelOptions).toHaveBeenCalledWith("session-a");
+    });
+  });
+
   it("applies Claude mode changes from /mode", () => {
     const onSessionSettingsChange = vi.fn();
 

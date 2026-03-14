@@ -64,10 +64,7 @@ const VIRTUALIZED_MESSAGE_GAP_PX = 12;
 const DEFAULT_VIRTUALIZED_VIEWPORT_HEIGHT = 720;
 const EMPTY_MATCHED_ITEM_KEYS = new Set<string>();
 const STATIC_MODEL_OPTIONS: Readonly<Record<Session["agent"], readonly { label: string; value: string }[]>> = {
-  Claude: [
-    { label: "Sonnet", value: "sonnet" },
-    { label: "Opus", value: "opus" },
-  ],
+  Claude: [],
   Codex: [],
   Cursor: [{ label: "Auto", value: "auto" }],
   Gemini: [{ label: "Auto", value: "auto" }],
@@ -222,7 +219,13 @@ type SlashChoiceState = {
 };
 
 function formatSessionModelLabel(model: string): string {
-  return model === "auto" ? "Auto" : model;
+  if (model === "auto") {
+    return "Auto";
+  }
+  if (model === "default") {
+    return "Default";
+  }
+  return model;
 }
 
 function slashCommandsForSession(session: Session) {
@@ -230,7 +233,12 @@ function slashCommandsForSession(session: Session) {
 }
 
 function supportsLiveSessionModelOptions(session: Session): boolean {
-  return session.agent === "Codex" || session.agent === "Cursor" || session.agent === "Gemini";
+  return (
+    session.agent === "Claude" ||
+    session.agent === "Codex" ||
+    session.agent === "Cursor" ||
+    session.agent === "Gemini"
+  );
 }
 
 function ensureCurrentSessionModelChoice(
@@ -252,7 +260,10 @@ function ensureCurrentSessionModelChoice(
 
 function sessionModelChoicesForSlashCommand(session: Session): SessionModelChoice[] {
   const baseOptions =
-    session.agent === "Codex" || session.agent === "Cursor" || session.agent === "Gemini"
+    session.agent === "Claude" ||
+    session.agent === "Codex" ||
+    session.agent === "Cursor" ||
+    session.agent === "Gemini"
       ? session.modelOptions?.length
         ? session.modelOptions.map((option) => ({
             label: option.label,
