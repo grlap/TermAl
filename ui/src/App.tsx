@@ -5330,9 +5330,9 @@ function SessionPaneView({
     draggedTab?.sourcePaneId === pane.id &&
     pane.tabs.length <= 1
   );
-  const candidateSourcePaths = useMemo(
-    () => (activeSession ? collectCandidateSourcePaths(activeSession) : []),
-    [activeSession],
+  const sourceCandidatePaths = useMemo(
+    () => (activeSourceTab && activeSession ? collectCandidateSourcePaths(activeSession) : []),
+    [activeSession, activeSourceTab],
   );
   const commandMessages = useMemo(
     () =>
@@ -5364,10 +5364,6 @@ function SessionPaneView({
         ? buildSessionConversationSignature(activeSession)
         : "",
     [activeSession, pane.viewMode],
-  );
-  const lastUserPrompt = useMemo(
-    () => (activeSession ? findLastUserPrompt(activeSession) : null),
-    [activeSession],
   );
   const isSessionBusy =
     activeSession?.status === "active" || activeSession?.status === "approval";
@@ -5406,8 +5402,13 @@ function SessionPaneView({
   const activeSessionSearchMatchIndex = activeSessionSearchMatch
     ? Math.min(sessionFindActiveIndex, sessionSearchMatches.length - 1)
     : -1;
-  const waitingIndicatorPrompt =
-    !isSessionBusy && isSending ? null : lastUserPrompt;
+  const waitingIndicatorPrompt = useMemo(() => {
+    if (!showWaitingIndicator || !activeSession || (!isSessionBusy && isSending)) {
+      return null;
+    }
+
+    return findLastUserPrompt(activeSession);
+  }, [activeSession, isSending, isSessionBusy, showWaitingIndicator]);
   const composerInputDisabled = !activeSession || isStopping;
   const composerSendDisabled = !activeSession || isSending || isStopping;
   const scrollStateKey = activeSourceTab
@@ -6006,10 +6007,10 @@ function SessionPaneView({
       return;
     }
 
-    if (!pane.sourcePath && candidateSourcePaths[0]) {
-      onPaneSourcePathChange(pane.id, candidateSourcePaths[0]);
+    if (!pane.sourcePath && sourceCandidatePaths[0]) {
+      onPaneSourcePathChange(pane.id, sourceCandidatePaths[0]);
     }
-  }, [candidateSourcePaths, onPaneSourcePathChange, pane.id, pane.sourcePath, pane.viewMode]);
+  }, [onPaneSourcePathChange, pane.id, pane.sourcePath, pane.viewMode, sourceCandidatePaths]);
 
   useEffect(() => {
     let cancelled = false;
@@ -6153,9 +6154,12 @@ function SessionPaneView({
               <button
                 className="pane-view-button"
                 type="button"
-                onClick={() =>
-                  onOpenSourceTab(pane.id, candidateSourcePaths[0] ?? null, activeSession?.id ?? null)
-                }
+                onClick={() => {
+                  const candidatePath = activeSession
+                    ? collectCandidateSourcePaths(activeSession)[0] ?? null
+                    : null;
+                  onOpenSourceTab(pane.id, candidatePath, activeSession?.id ?? null);
+                }}
               >
                 File
               </button>
@@ -6264,7 +6268,7 @@ function SessionPaneView({
           renderControlPanel(pane.id)
         ) : activeSourceTab ? (
           <SourcePanel
-            candidatePaths={candidateSourcePaths}
+            candidatePaths={sourceCandidatePaths}
             editorAppearance={editorAppearance}
             fileState={fileState}
             sourceDraft={sourceDraft}
