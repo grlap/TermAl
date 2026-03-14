@@ -443,8 +443,17 @@ impl AppState {
     }
 
     // Delta-producing changes advance the revision without publishing a full snapshot; the delta event
-    // carries the new revision instead.
+    // carries the new revision instead. Persisting the full state on every streamed chunk makes
+    // long responses increasingly slow, so durable persistence is deferred until the next
+    // non-delta commit.
     fn commit_delta_locked(&self, inner: &mut StateInner) -> Result<u64> {
+        inner.revision += 1;
+        Ok(inner.revision)
+    }
+
+    // Some live-update paths still need durable persistence, but should not force a full-state
+    // SSE snapshot when a small targeted delta is enough for the UI.
+    fn commit_persisted_delta_locked(&self, inner: &mut StateInner) -> Result<u64> {
         self.bump_revision_and_persist_locked(inner)
     }
 
@@ -506,9 +515,7 @@ impl AppState {
             .map(str::trim)
             .filter(|value| !value.is_empty() && *value != prompt)
             .map(str::to_owned);
-        let runtime_prompt = expanded_prompt
-            .clone()
-            .unwrap_or_else(|| prompt.clone());
+        let runtime_prompt = expanded_prompt.clone().unwrap_or_else(|| prompt.clone());
 
         let dispatch = match record.session.agent {
             Agent::Claude => {
@@ -707,14 +714,17 @@ impl AppState {
             }
         };
 
-        record.session.messages.push(Message::Text {
-            attachments: message_attachments.clone(),
-            id: message_id,
-            timestamp: stamp_now(),
-            author: Author::You,
-            text: prompt.clone(),
-            expanded_text: expanded_prompt,
-        });
+        push_message_on_record(
+            record,
+            Message::Text {
+                attachments: message_attachments.clone(),
+                id: message_id,
+                timestamp: stamp_now(),
+                author: Author::You,
+                text: prompt.clone(),
+                expanded_text: expanded_prompt,
+            },
+        );
         record.session.status = SessionStatus::Active;
         record.session.preview = prompt_preview_text(&prompt, &message_attachments);
 
@@ -1916,61 +1926,87 @@ impl AppState {
     }
 
     fn push_message(&self, session_id: &str, message: Message) -> Result<()> {
-        let mut inner = self.inner.lock().expect("state mutex poisoned");
-        let index = inner
-            .find_session_index(session_id)
-            .ok_or_else(|| anyhow!("session `{session_id}` not found"))?;
-        let session = &mut inner.sessions[index].session;
-        if let Some(preview) = message.preview_text() {
-            session.preview = preview;
-        }
-        if matches!(message, Message::Approval { .. }) {
-            session.status = SessionStatus::Approval;
-        }
-        session.messages.push(message);
-        self.commit_locked(&mut inner)?;
-        Ok(())
-    }
-
-    fn append_text_delta(&self, session_id: &str, message_id: &str, delta: &str) -> Result<()> {
-        let (preview, revision) = {
+        let (revision, message, message_index, preview, status) = {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
             let index = inner
                 .find_session_index(session_id)
                 .ok_or_else(|| anyhow!("session `{session_id}` not found"))?;
-            let session = &mut inner.sessions[index].session;
+            let (message_index, preview, status) = {
+                let record = &mut inner.sessions[index];
+                if let Some(next_preview) = message.preview_text() {
+                    record.session.preview = next_preview;
+                }
+                if matches!(message, Message::Approval { .. }) {
+                    record.session.status = SessionStatus::Approval;
+                }
+                let message_index = push_message_on_record(record, message.clone());
+                (
+                    message_index,
+                    record.session.preview.clone(),
+                    record.session.status,
+                )
+            };
+            let revision = self.commit_persisted_delta_locked(&mut inner)?;
+            (revision, message, message_index, preview, status)
+        };
 
-            let mut updated_text = None;
-            for message in &mut session.messages {
-                if let Message::Text { id, text, .. } = message {
-                    if id == message_id {
-                        text.push_str(delta);
-                        updated_text = Some(text.clone());
-                        break;
+        self.publish_delta(&DeltaEvent::MessageCreated {
+            revision,
+            session_id: session_id.to_owned(),
+            message_id: message.id().to_owned(),
+            message_index,
+            message,
+            preview,
+            status,
+        });
+        Ok(())
+    }
+
+    fn append_text_delta(&self, session_id: &str, message_id: &str, delta: &str) -> Result<()> {
+        let (preview, revision, message_index) = {
+            let mut inner = self.inner.lock().expect("state mutex poisoned");
+            let index = inner
+                .find_session_index(session_id)
+                .ok_or_else(|| anyhow!("session `{session_id}` not found"))?;
+            let record = &mut inner.sessions[index];
+            let message_index = message_index_on_record(record, message_id).ok_or_else(|| {
+                anyhow!("session `{session_id}` message `{message_id}` not found")
+            })?;
+            let session = &mut record.session;
+
+            let mut preview = None;
+            let Some(message) = session.messages.get_mut(message_index) else {
+                return Err(anyhow!(
+                    "session `{session_id}` message index `{message_index}` is out of bounds"
+                ));
+            };
+            match message {
+                Message::Text { id, text, .. } if id == message_id => {
+                    text.push_str(delta);
+                    let trimmed = text.trim();
+                    if !trimmed.is_empty() {
+                        preview = Some(make_preview(trimmed));
                     }
+                }
+                _ => {
+                    return Err(anyhow!(
+                        "session `{session_id}` message `{message_id}` is not a text message"
+                    ));
                 }
             }
 
-            let preview = if let Some(text) = updated_text {
-                let trimmed = text.trim();
-                if !trimmed.is_empty() {
-                    let p = make_preview(trimmed);
-                    session.preview = p.clone();
-                    Some(p)
-                } else {
-                    None
-                }
-            } else {
-                None
-            };
+            if let Some(next_preview) = preview.as_ref() {
+                session.preview = next_preview.clone();
+            }
             let revision = self.commit_delta_locked(&mut inner)?;
-            (preview, revision)
+            (preview, revision, message_index)
         };
 
         self.publish_delta(&DeltaEvent::TextDelta {
             revision,
             session_id: session_id.to_owned(),
             message_id: message_id.to_owned(),
+            message_index,
             delta: delta.to_owned(),
             preview,
         });
@@ -1989,83 +2025,122 @@ impl AppState {
         let command_language = Some(shell_language().to_owned());
         let output_language = infer_command_output_language(command).map(str::to_owned);
 
-        let (preview, revision) = {
+        let (preview, revision, message_index, created_message, session_status) = {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
             let index = inner
                 .find_session_index(session_id)
                 .ok_or_else(|| anyhow!("session `{session_id}` not found"))?;
-            let session = &mut inner.sessions[index].session;
-
-            let mut found = false;
-            for message in &mut session.messages {
-                if let Message::Command {
-                    id,
-                    command: existing_command,
-                    command_language: existing_command_language,
-                    output: existing_output,
-                    output_language: existing_output_language,
-                    status: existing_status,
-                    ..
-                } = message
+            let (message_index, created_message, preview, session_status) = {
+                let record = &mut inner.sessions[index];
+                let (message_index, created_message) = if let Some(message_index) =
+                    message_index_on_record(record, message_id)
                 {
-                    if id == message_id {
-                        *existing_command = command.to_owned();
-                        *existing_command_language = command_language.clone();
-                        *existing_output = output.to_owned();
-                        *existing_output_language = output_language.clone();
-                        *existing_status = status;
-                        found = true;
-                        break;
+                    let Some(message) = record.session.messages.get_mut(message_index) else {
+                        return Err(anyhow!(
+                            "session `{session_id}` message index `{message_index}` is out of bounds"
+                        ));
+                    };
+                    match message {
+                        Message::Command {
+                            id,
+                            command: existing_command,
+                            command_language: existing_command_language,
+                            output: existing_output,
+                            output_language: existing_output_language,
+                            status: existing_status,
+                            ..
+                        } if id == message_id => {
+                            *existing_command = command.to_owned();
+                            *existing_command_language = command_language.clone();
+                            *existing_output = output.to_owned();
+                            *existing_output_language = output_language.clone();
+                            *existing_status = status;
+                            (message_index, None)
+                        }
+                        _ => {
+                            return Err(anyhow!(
+                                "session `{session_id}` message `{message_id}` is not a command message"
+                            ));
+                        }
                     }
-                }
-            }
+                } else {
+                    let message = Message::Command {
+                        id: message_id.to_owned(),
+                        timestamp: stamp_now(),
+                        author: Author::Assistant,
+                        command: command.to_owned(),
+                        command_language: command_language.clone(),
+                        output: output.to_owned(),
+                        output_language: output_language.clone(),
+                        status,
+                    };
+                    let message_index = push_message_on_record(record, message.clone());
+                    (message_index, Some(message))
+                };
 
-            if !found {
-                session.messages.push(Message::Command {
-                    id: message_id.to_owned(),
-                    timestamp: stamp_now(),
-                    author: Author::Assistant,
-                    command: command.to_owned(),
-                    command_language: command_language.clone(),
-                    output: output.to_owned(),
-                    output_language: output_language.clone(),
-                    status,
-                });
-            }
-
-            let preview = match status {
-                CommandStatus::Running => make_preview(&format!("Running {command}")),
-                CommandStatus::Success => {
-                    if output.trim().is_empty() {
-                        make_preview(&format!("Completed {command}"))
-                    } else {
-                        make_preview(output.trim())
+                let preview = match status {
+                    CommandStatus::Running => make_preview(&format!("Running {command}")),
+                    CommandStatus::Success => {
+                        if output.trim().is_empty() {
+                            make_preview(&format!("Completed {command}"))
+                        } else {
+                            make_preview(output.trim())
+                        }
                     }
-                }
-                CommandStatus::Error => {
-                    if output.trim().is_empty() {
-                        make_preview(&format!("Command failed: {command}"))
-                    } else {
-                        make_preview(output.trim())
+                    CommandStatus::Error => {
+                        if output.trim().is_empty() {
+                            make_preview(&format!("Command failed: {command}"))
+                        } else {
+                            make_preview(output.trim())
+                        }
                     }
-                }
+                };
+                record.session.preview = preview.clone();
+                (
+                    message_index,
+                    created_message,
+                    preview,
+                    record.session.status,
+                )
             };
-            session.preview = preview.clone();
-            let revision = self.commit_delta_locked(&mut inner)?;
-            (preview, revision)
+            let revision = if created_message.is_some() {
+                self.commit_persisted_delta_locked(&mut inner)?
+            } else {
+                self.commit_delta_locked(&mut inner)?
+            };
+            (
+                preview,
+                revision,
+                message_index,
+                created_message,
+                session_status,
+            )
         };
 
-        self.publish_delta(&DeltaEvent::CommandUpdate {
-            revision,
-            session_id: session_id.to_owned(),
-            message_id: message_id.to_owned(),
-            command: command.to_owned(),
-            command_language,
-            output: output.to_owned(),
-            output_language,
-            status,
-            preview,
-        });
+        if let Some(message) = created_message {
+            self.publish_delta(&DeltaEvent::MessageCreated {
+                revision,
+                session_id: session_id.to_owned(),
+                message_id: message_id.to_owned(),
+                message_index,
+                message,
+                preview,
+                status: session_status,
+            });
+        } else {
+            self.publish_delta(&DeltaEvent::CommandUpdate {
+                revision,
+                session_id: session_id.to_owned(),
+                message_id: message_id.to_owned(),
+                message_index,
+                command: command.to_owned(),
+                command_language,
+                output: output.to_owned(),
+                output_language,
+                status,
+                preview,
+            });
+        }
 
         Ok(())
     }
@@ -2084,14 +2159,13 @@ impl AppState {
             .find_session_index(session_id)
             .ok_or_else(|| ApiError::not_found("session not found"))?;
         let record = &mut inner.sessions[index];
-        let session = &mut record.session;
-        if session.status != SessionStatus::Approval {
+        if record.session.status != SessionStatus::Approval {
             return Err(ApiError::conflict(
                 "session is not currently awaiting approval",
             ));
         }
 
-        if session.agent == Agent::Claude
+        if record.session.agent == Agent::Claude
             && matches!(
                 decision,
                 ApprovalDecision::Accepted
@@ -2123,7 +2197,7 @@ impl AppState {
                 }
             };
             claude_runtime_action = Some((handle, pending));
-        } else if session.agent == Agent::Codex
+        } else if record.session.agent == Agent::Codex
             && matches!(
                 decision,
                 ApprovalDecision::Accepted
@@ -2143,7 +2217,7 @@ impl AppState {
                 }
             };
             codex_runtime_action = Some((handle, pending));
-        } else if matches!(session.agent, Agent::Cursor | Agent::Gemini)
+        } else if matches!(record.session.agent, Agent::Cursor | Agent::Gemini)
             && matches!(
                 decision,
                 ApprovalDecision::Accepted
@@ -2265,30 +2339,29 @@ impl AppState {
             .find_session_index(session_id)
             .ok_or_else(|| ApiError::not_found("session not found"))?;
         let record = &mut inner.sessions[index];
-        let session = &mut record.session;
-        if session.status != SessionStatus::Approval && decision == ApprovalDecision::Pending {
+        if record.session.status != SessionStatus::Approval && decision == ApprovalDecision::Pending
+        {
             return Err(ApiError::conflict(
                 "session is not currently awaiting approval",
             ));
         }
-        let mut found = false;
-        for message in &mut session.messages {
-            if let Message::Approval {
+        let Some(message_index) = message_index_on_record(record, message_id) else {
+            return Err(ApiError::not_found("approval message not found"));
+        };
+        let Some(message) = record.session.messages.get_mut(message_index) else {
+            return Err(ApiError::not_found("approval message not found"));
+        };
+        match message {
+            Message::Approval {
                 id,
                 decision: current,
                 ..
-            } = message
-            {
-                if id == message_id {
-                    *current = decision;
-                    found = true;
-                    break;
-                }
+            } if id == message_id => {
+                *current = decision;
             }
-        }
-
-        if !found {
-            return Err(ApiError::not_found("approval message not found"));
+            _ => {
+                return Err(ApiError::not_found("approval message not found"));
+            }
         }
 
         if decision != ApprovalDecision::Pending {
@@ -2296,16 +2369,18 @@ impl AppState {
             record.pending_codex_approvals.remove(message_id);
             record.pending_acp_approvals.remove(message_id);
         }
-        if session.status == SessionStatus::Approval {
-            session.status = if decision == ApprovalDecision::Pending {
+        if record.session.status == SessionStatus::Approval {
+            record.session.status = if decision == ApprovalDecision::Pending {
                 SessionStatus::Approval
             } else {
                 SessionStatus::Active
             };
         }
-        if session.status == SessionStatus::Approval || session.status == SessionStatus::Active {
-            let agent_name = session.agent.name();
-            session.preview = match decision {
+        if record.session.status == SessionStatus::Approval
+            || record.session.status == SessionStatus::Active
+        {
+            let agent_name = record.session.agent.name();
+            record.session.preview = match decision {
                 ApprovalDecision::Pending => "Approval pending.".to_owned(),
                 ApprovalDecision::Accepted => {
                     format!("Approval granted. {agent_name} is continuing…")
@@ -2448,6 +2523,7 @@ impl StateInner {
             pending_codex_approvals: HashMap::new(),
             pending_acp_approvals: HashMap::new(),
             queued_prompts: VecDeque::new(),
+            message_positions: HashMap::new(),
             runtime: SessionRuntime::None,
             runtime_reset_required: false,
             session: Session {
@@ -2695,6 +2771,7 @@ impl PersistedSessionRecord {
             pending_codex_approvals: HashMap::new(),
             pending_acp_approvals: HashMap::new(),
             queued_prompts: self.queued_prompts,
+            message_positions: build_message_positions(&session.messages),
             runtime: SessionRuntime::None,
             runtime_reset_required: false,
             session,
@@ -2717,6 +2794,7 @@ struct SessionRecord {
     pending_codex_approvals: HashMap<String, CodexPendingApproval>,
     pending_acp_approvals: HashMap<String, AcpPendingApproval>,
     queued_prompts: VecDeque<QueuedPromptRecord>,
+    message_positions: HashMap<String, usize>,
     runtime: SessionRuntime,
     runtime_reset_required: bool,
     session: Session,
@@ -2746,6 +2824,39 @@ fn queue_prompt_on_record(
         pending_prompt,
     });
     sync_pending_prompts(record);
+}
+
+fn build_message_positions(messages: &[Message]) -> HashMap<String, usize> {
+    messages
+        .iter()
+        .enumerate()
+        .map(|(index, message)| (message.id().to_owned(), index))
+        .collect()
+}
+
+fn message_index_on_record(record: &mut SessionRecord, message_id: &str) -> Option<usize> {
+    if let Some(index) = record.message_positions.get(message_id).copied() {
+        if record
+            .session
+            .messages
+            .get(index)
+            .is_some_and(|message| message.id() == message_id)
+        {
+            return Some(index);
+        }
+    }
+
+    record.message_positions = build_message_positions(&record.session.messages);
+    record.message_positions.get(message_id).copied()
+}
+
+fn push_message_on_record(record: &mut SessionRecord, message: Message) -> usize {
+    let index = record.session.messages.len();
+    record
+        .message_positions
+        .insert(message.id().to_owned(), index);
+    record.session.messages.push(message);
+    index
 }
 
 #[derive(Clone)]
@@ -9585,7 +9696,11 @@ struct PendingPrompt {
     id: String,
     timestamp: String,
     text: String,
-    #[serde(default, rename = "expandedText", skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        rename = "expandedText",
+        skip_serializing_if = "Option::is_none"
+    )]
     expanded_text: Option<String>,
 }
 
@@ -9600,7 +9715,11 @@ enum Message {
         timestamp: String,
         author: Author,
         text: String,
-        #[serde(default, rename = "expandedText", skip_serializing_if = "Option::is_none")]
+        #[serde(
+            default,
+            rename = "expandedText",
+            skip_serializing_if = "Option::is_none"
+        )]
         expanded_text: Option<String>,
     },
     Thinking {
@@ -9668,6 +9787,17 @@ enum Message {
 }
 
 impl Message {
+    fn id(&self) -> &str {
+        match self {
+            Self::Text { id, .. }
+            | Self::Thinking { id, .. }
+            | Self::Command { id, .. }
+            | Self::Diff { id, .. }
+            | Self::Markdown { id, .. }
+            | Self::Approval { id, .. } => id,
+        }
+    }
+
     fn preview_text(&self) -> Option<String> {
         match self {
             Self::Text {
@@ -9987,12 +10117,26 @@ struct PickProjectRootResponse {
 #[derive(Serialize)]
 #[serde(tag = "type", rename_all = "camelCase")]
 enum DeltaEvent {
+    MessageCreated {
+        revision: u64,
+        #[serde(rename = "sessionId")]
+        session_id: String,
+        #[serde(rename = "messageId")]
+        message_id: String,
+        #[serde(rename = "messageIndex")]
+        message_index: usize,
+        message: Message,
+        preview: String,
+        status: SessionStatus,
+    },
     TextDelta {
         revision: u64,
         #[serde(rename = "sessionId")]
         session_id: String,
         #[serde(rename = "messageId")]
         message_id: String,
+        #[serde(rename = "messageIndex")]
+        message_index: usize,
         delta: String,
         #[serde(skip_serializing_if = "Option::is_none")]
         preview: Option<String>,
@@ -10003,6 +10147,8 @@ enum DeltaEvent {
         session_id: String,
         #[serde(rename = "messageId")]
         message_id: String,
+        #[serde(rename = "messageIndex")]
+        message_index: usize,
         command: String,
         #[serde(rename = "commandLanguage", skip_serializing_if = "Option::is_none")]
         command_language: Option<String>,
@@ -11521,6 +11667,14 @@ Use the active agent's tools.
             .unwrap();
         let baseline = state.snapshot().revision;
 
+        let created_payload = delta_events
+            .try_recv()
+            .expect("message-created delta payload should exist");
+        let created_event: Value =
+            serde_json::from_str(&created_payload).expect("delta should be valid json");
+        assert_eq!(created_event["type"], "messageCreated");
+        assert_eq!(created_event["messageIndex"], json!(0));
+
         state
             .append_text_delta(&session_id, "message-1", " there")
             .unwrap();
@@ -11530,7 +11684,63 @@ Use the active agent's tools.
 
         assert_eq!(event["type"], "textDelta");
         assert_eq!(event["revision"], json!(baseline + 1));
+        assert_eq!(event["messageIndex"], json!(0));
         assert_eq!(state.snapshot().revision, baseline + 1);
+    }
+
+    #[test]
+    fn delta_persistence_is_deferred_until_the_next_durable_commit() {
+        let state = test_app_state();
+        let session_id = test_session_id(&state, Agent::Codex);
+
+        state
+            .push_message(
+                &session_id,
+                Message::Text {
+                    attachments: Vec::new(),
+                    id: "message-1".to_owned(),
+                    timestamp: stamp_now(),
+                    author: Author::Assistant,
+                    text: "Hi".to_owned(),
+                    expanded_text: None,
+                },
+            )
+            .unwrap();
+
+        state
+            .append_text_delta(&session_id, "message-1", " there")
+            .unwrap();
+
+        let persisted_before_commit = load_state(state.persistence_path.as_path())
+            .unwrap()
+            .expect("persisted state should exist");
+        let persisted_record = persisted_before_commit
+            .sessions
+            .iter()
+            .find(|record| record.session.id == session_id)
+            .expect("session should reload");
+        assert!(matches!(
+            persisted_record.session.messages.last(),
+            Some(Message::Text { text, .. }) if text == "Hi"
+        ));
+
+        {
+            let mut inner = state.inner.lock().expect("state mutex poisoned");
+            state.commit_locked(&mut inner).unwrap();
+        }
+
+        let persisted_after_commit = load_state(state.persistence_path.as_path())
+            .unwrap()
+            .expect("persisted state should exist");
+        let persisted_record = persisted_after_commit
+            .sessions
+            .iter()
+            .find(|record| record.session.id == session_id)
+            .expect("session should reload");
+        assert!(matches!(
+            persisted_record.session.messages.last(),
+            Some(Message::Text { text, .. }) if text == "Hi there"
+        ));
     }
 
     #[test]
@@ -11742,7 +11952,9 @@ Use the active agent's tools.
                 &session_id,
                 SendMessageRequest {
                     text: "/review-local staged changes".to_owned(),
-                    expanded_text: Some("Review staged changes using the project reviewers.".to_owned()),
+                    expanded_text: Some(
+                        "Review staged changes using the project reviewers.".to_owned(),
+                    ),
                     attachments: Vec::new(),
                 },
             )
@@ -11750,7 +11962,10 @@ Use the active agent's tools.
 
         match result {
             DispatchTurnResult::Dispatched(TurnDispatch::PersistentClaude { command, .. }) => {
-                assert_eq!(command.text, "Review staged changes using the project reviewers.");
+                assert_eq!(
+                    command.text,
+                    "Review staged changes using the project reviewers."
+                );
             }
             DispatchTurnResult::Dispatched(_) => panic!("expected Claude dispatch"),
             DispatchTurnResult::Queued => panic!("expected dispatched turn"),

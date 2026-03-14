@@ -13,13 +13,27 @@ export function applyDeltaToSessions(sessions: Session[], delta: DeltaEvent): De
   const session = sessions[sessionIndex];
 
   switch (delta.type) {
-    case "textDelta": {
-      const messageIndex = session.messages.findIndex((message) => message.id === delta.messageId);
-      if (messageIndex === -1) {
+    case "messageCreated": {
+      if (delta.message.id !== delta.messageId || delta.messageIndex !== session.messages.length) {
         return { kind: "needsResync" };
       }
 
-      const message = session.messages[messageIndex];
+      return {
+        kind: "applied",
+        sessions: replaceSession(sessions, sessionIndex, {
+          ...session,
+          messages: [...session.messages, delta.message],
+          preview: delta.preview,
+          status: delta.status,
+        }),
+      };
+    }
+
+    case "textDelta": {
+      const message = session.messages[delta.messageIndex];
+      if (!message || message.id !== delta.messageId) {
+        return { kind: "needsResync" };
+      }
       if (message.type !== "text") {
         return { kind: "needsResync" };
       }
@@ -29,7 +43,7 @@ export function applyDeltaToSessions(sessions: Session[], delta: DeltaEvent): De
         text: message.text + delta.delta,
       };
       const updatedMessages = session.messages.slice();
-      updatedMessages[messageIndex] = updatedMessage;
+      updatedMessages[delta.messageIndex] = updatedMessage;
 
       return {
         kind: "applied",
@@ -42,12 +56,10 @@ export function applyDeltaToSessions(sessions: Session[], delta: DeltaEvent): De
     }
 
     case "commandUpdate": {
-      const messageIndex = session.messages.findIndex((message) => message.id === delta.messageId);
-      if (messageIndex === -1) {
+      const message = session.messages[delta.messageIndex];
+      if (!message || message.id !== delta.messageId) {
         return { kind: "needsResync" };
       }
-
-      const message = session.messages[messageIndex];
       if (message.type !== "command") {
         return { kind: "needsResync" };
       }
@@ -61,7 +73,7 @@ export function applyDeltaToSessions(sessions: Session[], delta: DeltaEvent): De
         status: delta.status,
       };
       const updatedMessages = session.messages.slice();
-      updatedMessages[messageIndex] = updatedMessage;
+      updatedMessages[delta.messageIndex] = updatedMessage;
 
       return {
         kind: "applied",

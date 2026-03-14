@@ -17,6 +17,41 @@ function makeSession(id: string, overrides?: Partial<Session>): Session {
 }
 
 describe("applyDeltaToSessions", () => {
+  it("appends a created message without needing a resync", () => {
+    const sessions = [makeSession("session-a")];
+    const delta: DeltaEvent = {
+      type: "messageCreated",
+      revision: 1,
+      sessionId: "session-a",
+      messageId: "message-1",
+      messageIndex: 0,
+      message: {
+        id: "message-1",
+        type: "text",
+        timestamp: "10:00",
+        author: "assistant",
+        text: "",
+      },
+      preview: "Waiting for activity.",
+      status: "active",
+    };
+
+    const result = applyDeltaToSessions(sessions, delta);
+
+    expect(result.kind).toBe("applied");
+    if (result.kind !== "applied") {
+      throw new Error("expected delta to apply");
+    }
+
+    expect(result.sessions[0].status).toBe("active");
+    expect(result.sessions[0].messages).toHaveLength(1);
+    expect(result.sessions[0].messages[0]).toMatchObject({
+      id: "message-1",
+      type: "text",
+      text: "",
+    });
+  });
+
   it("applies text deltas to an existing message", () => {
     const sessions = [
       makeSession("session-a", {
@@ -37,6 +72,7 @@ describe("applyDeltaToSessions", () => {
       revision: 2,
       sessionId: "session-a",
       messageId: "message-1",
+      messageIndex: 0,
       delta: " there",
       preview: "Hi there",
     };
@@ -64,6 +100,7 @@ describe("applyDeltaToSessions", () => {
       revision: 2,
       sessionId: "session-a",
       messageId: "missing-message",
+      messageIndex: 0,
       delta: "hello",
     };
 
@@ -92,6 +129,7 @@ describe("applyDeltaToSessions", () => {
       revision: 3,
       sessionId: "session-a",
       messageId: "command-1",
+      messageIndex: 0,
       command: "pwd",
       output: "/tmp",
       status: "success",
@@ -122,6 +160,7 @@ describe("applyDeltaToSessions", () => {
       revision: 3,
       sessionId: "session-a",
       messageId: "command-1",
+      messageIndex: 0,
       command: "pwd",
       output: "",
       status: "running",

@@ -163,8 +163,20 @@ export type TextDeltaEvent = {
   revision: number;
   sessionId: string;
   messageId: string;
+  messageIndex: number;
   delta: string;
   preview?: string | null;
+};
+
+export type MessageCreatedEvent = {
+  type: "messageCreated";
+  revision: number;
+  sessionId: string;
+  messageId: string;
+  messageIndex: number;
+  message: Message;
+  preview: string;
+  status: SessionStatus;
 };
 
 export type CommandUpdateEvent = {
@@ -172,6 +184,7 @@ export type CommandUpdateEvent = {
   revision: number;
   sessionId: string;
   messageId: string;
+  messageIndex: number;
   command: string;
   commandLanguage?: string | null;
   output: string;
@@ -180,4 +193,4 @@ export type CommandUpdateEvent = {
   preview: string;
 };
 
-export type DeltaEvent = TextDeltaEvent | CommandUpdateEvent;
+export type DeltaEvent = MessageCreatedEvent | TextDeltaEvent | CommandUpdateEvent;
