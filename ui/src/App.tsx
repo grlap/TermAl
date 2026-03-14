@@ -24,6 +24,7 @@ import {
   createProject,
   createSession,
   fetchFile,
+  fetchGitStatus,
   fetchState,
   killSession,
   pickProjectRoot,
@@ -219,11 +220,7 @@ const NEW_SESSION_MODEL_OPTIONS: Readonly<Record<AgentType, readonly ComboboxOpt
     { label: "Sonnet", value: "sonnet" },
     { label: "Opus", value: "opus" },
   ],
-  Codex: [
-    { label: "GPT-5", value: "gpt-5" },
-    { label: "GPT-5 mini", value: "gpt-5-mini" },
-    { label: "o3", value: "o3" },
-  ],
+  Codex: [{ label: "GPT-5.4", value: "gpt-5.4" }],
   Cursor: [{ label: "Auto", value: "auto" }],
   Gemini: [{ label: "Auto", value: "auto" }],
 };
@@ -284,7 +281,7 @@ function createSessionModelHint(agent: AgentType): string {
     case "Claude":
       return "Claude model selection lives on the session itself. New Claude sessions start on Sonnet.";
     case "Codex":
-      return "Codex model selection lives on the session itself. New Codex sessions start on GPT-5.";
+      return "Codex model selection lives on the session itself. TermAl asks Codex for its live model list after the session opens.";
     case "Cursor":
       return "Cursor model selection lives on the session itself, like Cursor Agent's /model flow. New Cursor sessions start on Auto.";
     case "Gemini":
@@ -368,6 +365,7 @@ export default function App() {
   );
   const [isCreateProjectOpen, setIsCreateProjectOpen] = useState(false);
   const [controlPanelGitWorkdir, setControlPanelGitWorkdir] = useState<string | null>(null);
+  const [controlPanelGitStatusCount, setControlPanelGitStatusCount] = useState(0);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [settingsTab, setSettingsTab] = useState<PreferencesTabId>("themes");
   const [pendingSessionRename, setPendingSessionRename] = useState<PendingSessionRename | null>(
@@ -537,6 +535,34 @@ export default function App() {
       return current;
     });
   }, [derivedControlPanelGitWorkdir]);
+
+  useEffect(() => {
+    const normalizedGitWorkdir = controlPanelGitWorkdir?.trim() ?? "";
+    let cancelled = false;
+
+    if (!normalizedGitWorkdir) {
+      setControlPanelGitStatusCount(0);
+      return;
+    }
+
+    void fetchGitStatus(normalizedGitWorkdir)
+      .then((status) => {
+        if (cancelled) {
+          return;
+        }
+        setControlPanelGitStatusCount(status.files.length);
+      })
+      .catch(() => {
+        if (cancelled) {
+          return;
+        }
+        setControlPanelGitStatusCount(0);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [controlPanelGitWorkdir]);
 
   const sessionListSearchResults = useMemo(() => {
     if (!hasSessionListSearch) {
@@ -1274,7 +1300,7 @@ export default function App() {
     projectSelectionId?: string;
   }) {
     const trimmedModel = model.trim();
-    if (!trimmedModel) {
+    if (!trimmedModel && !usesSessionModelPicker(agent)) {
       setRequestError("Choose a model.");
       return false;
     }
@@ -1291,7 +1317,7 @@ export default function App() {
         projectSelectionId === CREATE_SESSION_WORKSPACE_ID ? null : projectSelectionId;
       const created = await createSession({
         agent,
-        model: trimmedModel,
+        model: usesSessionModelPicker(agent) ? undefined : trimmedModel,
         approvalPolicy:
           agent === "Codex" ? defaultCodexApprovalPolicy : undefined,
         cursorMode: agent === "Cursor" ? defaultCursorMode : undefined,
@@ -1312,7 +1338,7 @@ export default function App() {
           applyControlPanelLayout(openSessionInWorkspaceState(current, created.sessionId, targetPaneId)),
         );
       }
-      if (agent === "Cursor" || agent === "Gemini") {
+      if (agent === "Codex" || agent === "Cursor" || agent === "Gemini") {
         await handleRefreshSessionModelOptions(created.sessionId);
       }
       setRequestError(null);
@@ -1680,7 +1706,7 @@ export default function App() {
           applyControlPanelLayout(openSessionInWorkspaceState(current, created.sessionId, targetPaneId)),
         );
       }
-      if (session.agent === "Cursor" || session.agent === "Gemini") {
+      if (session.agent === "Codex" || session.agent === "Cursor" || session.agent === "Gemini") {
         await handleRefreshSessionModelOptions(created.sessionId);
       }
       setRequestError(null);
@@ -2102,6 +2128,7 @@ export default function App() {
             <section className="control-panel-section-stack control-panel-section-git" aria-label="Git status">
               <GitStatusPanel
                 workdir={controlPanelGitWorkdir}
+                onStatusChange={(status) => setControlPanelGitStatusCount(status?.files.length ?? 0)}
                 onOpenPath={(path) => handleOpenSourceTab(paneId, path, activeSession?.id ?? null)}
                 onOpenWorkdir={(path) => setControlPanelGitWorkdir(path.trim() || null)}
               />
@@ -2378,6 +2405,7 @@ export default function App() {
       <div className="sidebar sidebar-panel">
         <ControlPanelSurface
           ref={controlPanelSurfaceRef}
+          gitStatusCount={controlPanelGitStatusCount}
           isPreferencesOpen={isSettingsOpen}
           onOpenPreferences={() => setIsSettingsOpen(true)}
           projectCount={projects.length}
@@ -5209,6 +5237,8 @@ function SessionPaneView({
                     paneId={panelPaneId}
                     session={session}
                     isUpdating={panelIsUpdating}
+                    isRefreshingModelOptions={isRefreshingModelOptions}
+                    onRequestModelOptions={onRefreshSessionModelOptions}
                     onSessionSettingsChange={handleSettingsChange}
                   />
                 );
@@ -5394,22 +5424,39 @@ function SessionFindBar({
   );
 }
 
-function CodexPromptSettingsCard({
+export function CodexPromptSettingsCard({
   paneId,
   session,
   isUpdating,
+  isRefreshingModelOptions,
+  onRequestModelOptions,
   onSessionSettingsChange,
 }: {
   paneId: string;
   session: Session;
   isUpdating: boolean;
+  isRefreshingModelOptions: boolean;
+  onRequestModelOptions: (sessionId: string) => void;
   onSessionSettingsChange: (
     sessionId: string,
     field: SessionSettingsField,
     value: SessionSettingsValue,
   ) => void;
 }) {
-  const modelOptions = staticSessionModelOptions("Codex", session.model);
+  useSessionModelOptionsAutoRefresh({
+    isRefreshingModelOptions,
+    onRequestModelOptions,
+    session,
+  });
+
+  const modelOptions =
+    session.modelOptions?.length
+      ? session.modelOptions.map((option) => ({
+          label: option.label,
+          value: option.value,
+        }))
+      : [{ label: session.model, value: session.model }];
+  const canChangeModel = (session.modelOptions?.length ?? 0) > 0;
 
   return (
     <article className="message-card prompt-settings-card">
@@ -5425,8 +5472,14 @@ function CodexPromptSettingsCard({
             className="prompt-settings-select"
             value={session.model}
             options={modelOptions}
-            disabled={isUpdating}
+            disabled={isUpdating || !canChangeModel}
             onChange={(nextValue) => void onSessionSettingsChange(session.id, "model", nextValue)}
+          />
+          <SessionModelRefreshAction
+            disabled={isUpdating || isRefreshingModelOptions}
+            isRefreshing={isRefreshingModelOptions}
+            sessionId={session.id}
+            onRequestModelOptions={onRequestModelOptions}
           />
         </div>
         <div className="session-control-group">
@@ -5483,8 +5536,11 @@ function CodexPromptSettingsCard({
           />
         </div>
         <p className="session-control-hint">
-          Model, reasoning, sandbox, and approval changes apply on the next Codex prompt. If the
-          model or sandbox changed, TermAl restarts the Codex runtime for the next turn.
+          {isRefreshingModelOptions
+            ? "Loading Codex's live model list for this session. Sandbox, approval, and reasoning changes still apply on the next Codex prompt."
+            : canChangeModel
+              ? "Model, sandbox, approval, and reasoning changes apply on the next Codex prompt."
+              : "TermAl asks Codex for its live model list when this session opens. New sessions begin on Codex's default model. Sandbox, approval, and reasoning changes still apply on the next Codex prompt."}
         </p>
       </div>
     </article>

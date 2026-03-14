@@ -22,10 +22,12 @@ type GitActionTarget = {
 };
 
 export function GitStatusPanel({
+  onStatusChange,
   onOpenPath,
   onOpenWorkdir,
   workdir,
 }: {
+  onStatusChange?: (status: GitStatusResponse | null) => void;
   onOpenPath: (path: string) => void;
   onOpenWorkdir: (path: string) => void;
   workdir: string | null;
@@ -53,11 +55,12 @@ export function GitStatusPanel({
     if (!normalizedWorkdir) {
       setStatus(null);
       setError(null);
+      onStatusChange?.(null);
       return;
     }
 
     void loadStatus(normalizedWorkdir);
-  }, [normalizedWorkdir]);
+  }, [normalizedWorkdir, onStatusChange]);
 
   async function loadStatus(path: string) {
     setIsLoading(true);
@@ -65,9 +68,11 @@ export function GitStatusPanel({
     try {
       const response = await fetchGitStatus(path);
       setStatus(response);
+      onStatusChange?.(response);
     } catch (nextError) {
       setStatus(null);
       setError(getErrorMessage(nextError));
+      onStatusChange?.(null);
     } finally {
       setIsLoading(false);
     }
@@ -119,12 +124,15 @@ export function GitStatusPanel({
 
       if (response) {
         setStatus(response);
+        onStatusChange?.(response);
       }
     } catch (nextError) {
       setError(getErrorMessage(nextError));
       if (targets.length > 1) {
         try {
-          setStatus(await fetchGitStatus(activeWorkdir));
+          const refreshedStatus = await fetchGitStatus(activeWorkdir);
+          setStatus(refreshedStatus);
+          onStatusChange?.(refreshedStatus);
         } catch {
           // Keep the action error visible if the follow-up refresh also fails.
         }

@@ -561,7 +561,7 @@ impl AppState {
                         let handle = spawn_codex_runtime(
                             self.clone(),
                             record.session.id.clone(),
-                            record.session.model.clone(),
+                            record.session.workdir.clone(),
                         )
                         .map_err(|err| {
                             ApiError::internal(format!(
@@ -578,6 +578,7 @@ impl AppState {
                         approval_policy: record.codex_approval_policy,
                         attachments,
                         cwd: record.session.workdir.clone(),
+                        model: record.session.model.clone(),
                         prompt: prompt.to_owned(),
                         reasoning_effort: record.codex_reasoning_effort,
                         resume_thread_id: record.external_session_id.clone(),
@@ -856,7 +857,6 @@ impl AppState {
                     let trimmed = model.trim().to_owned();
                     if record.session.model != trimmed {
                         record.session.model = trimmed;
-                        record.runtime_reset_required = true;
                     }
                 }
                 if let Some(sandbox_mode) = request.sandbox_mode {
@@ -965,6 +965,84 @@ impl AppState {
             .ok_or_else(|| ApiError::not_found("session not found"))?;
         let record = &mut inner.sessions[index];
         let agent = record.session.agent;
+        if agent == Agent::Codex {
+            if record.runtime_reset_required {
+                if let SessionRuntime::Codex(handle) = &record.runtime {
+                    handle.kill().map_err(|err| {
+                        ApiError::internal(format!(
+                            "failed to restart Codex session runtime: {err:#}"
+                        ))
+                    })?;
+                }
+                record.runtime = SessionRuntime::None;
+                record.pending_codex_approvals.clear();
+                record.runtime_reset_required = false;
+            }
+
+            let handle = match &record.runtime {
+                SessionRuntime::Codex(handle) => handle.clone(),
+                SessionRuntime::Acp(_) => {
+                    return Err(ApiError::internal(
+                        "unexpected ACP runtime attached to Codex session",
+                    ));
+                }
+                SessionRuntime::Claude(_) => {
+                    return Err(ApiError::internal(
+                        "unexpected Claude runtime attached to Codex session",
+                    ));
+                }
+                SessionRuntime::None => {
+                    let handle = spawn_codex_runtime(
+                        self.clone(),
+                        record.session.id.clone(),
+                        record.session.workdir.clone(),
+                    )
+                    .map_err(|err| {
+                        ApiError::internal(format!(
+                            "failed to start persistent Codex session: {err:#}"
+                        ))
+                    })?;
+                    record.runtime = SessionRuntime::Codex(handle.clone());
+                    handle
+                }
+            };
+            drop(inner);
+
+            let (response_tx, response_rx) =
+                mpsc::channel::<std::result::Result<Vec<SessionModelOption>, String>>();
+            handle
+                .input_tx
+                .send(CodexRuntimeCommand::RefreshModelList { response_tx })
+                .map_err(|err| {
+                    ApiError::internal(format!("failed to queue Codex model refresh: {err}"))
+                })?;
+
+            let model_options = match response_rx.recv_timeout(Duration::from_secs(30)) {
+                Ok(Ok(model_options)) => model_options,
+                Ok(Err(detail)) => {
+                    return Err(ApiError::internal(format!(
+                        "failed to refresh Codex model options: {detail}"
+                    )));
+                }
+                Err(mpsc::RecvTimeoutError::Timeout) => {
+                    return Err(ApiError::internal(
+                        "timed out refreshing Codex model options".to_owned(),
+                    ));
+                }
+                Err(mpsc::RecvTimeoutError::Disconnected) => {
+                    return Err(ApiError::internal(
+                        "Codex model refresh did not return a result".to_owned(),
+                    ));
+                }
+            };
+
+            self.sync_session_model_options(session_id, None, model_options)
+                .map_err(|err| {
+                    ApiError::internal(format!("failed to sync Codex model options: {err:#}"))
+                })?;
+            return Ok(self.snapshot());
+        }
+
         let expected_acp_agent = agent.acp_runtime().ok_or_else(|| {
             ApiError::bad_request(format!(
                 "{} sessions do not expose live model options",
@@ -1078,7 +1156,7 @@ impl AppState {
         Ok(())
     }
 
-    fn sync_acp_model_config(
+    fn sync_session_model_options(
         &self,
         session_id: &str,
         current_model: Option<String>,
@@ -2890,6 +2968,9 @@ fn sync_codex_home_file(
 enum CodexRuntimeCommand {
     Prompt(CodexPromptCommand),
     ApprovalResponse(CodexApprovalResponseCommand),
+    RefreshModelList {
+        response_tx: Sender<std::result::Result<Vec<SessionModelOption>, String>>,
+    },
 }
 
 #[derive(Clone)]
@@ -2897,6 +2978,7 @@ struct CodexPromptCommand {
     approval_policy: CodexApprovalPolicy,
     attachments: Vec<PromptImageAttachment>,
     cwd: String,
+    model: String,
     prompt: String,
     reasoning_effort: CodexReasoningEffort,
     resume_thread_id: Option<String>,
@@ -3524,7 +3606,7 @@ fn ensure_acp_session_ready(
         command.cursor_mode,
         &session_config,
     )?;
-    state.sync_acp_model_config(
+    state.sync_session_model_options(
         session_id,
         current_acp_config_option_value(&session_config, "model").or_else(|| {
             let requested = command.model.trim();
@@ -3903,7 +3985,7 @@ fn handle_acp_session_update(
             }
         }
         "config_options_update" | "config_update" => {
-            state.sync_acp_model_config(
+            state.sync_session_model_options(
                 session_id,
                 current_acp_config_option_value(update, "model"),
                 acp_model_options(update),
@@ -4118,13 +4200,12 @@ fn log_unhandled_acp_event(agent: AcpAgent, context: &str, message: &Value) {
 fn spawn_codex_runtime(
     state: AppState,
     session_id: String,
-    model: String,
+    workdir: String,
 ) -> Result<CodexRuntimeHandle> {
-    let codex_home = prepare_termal_codex_home(&state.default_workdir, &session_id)?;
+    let codex_home = prepare_termal_codex_home(&workdir, &session_id)?;
     let runtime_id = Uuid::new_v4().to_string();
     let mut command = codex_command()?;
     command
-        .args(["-m", &model])
         .arg("app-server")
         .env("CODEX_HOME", &codex_home)
         .stdin(Stdio::piped())
@@ -4204,6 +4285,23 @@ fn spawn_codex_runtime(
                                 "result": response.result,
                             }),
                         )
+                    }
+                    CodexRuntimeCommand::RefreshModelList { response_tx } => {
+                        let refresh_result = handle_codex_model_list_refresh(
+                            &mut stdin,
+                            &writer_pending_requests,
+                        )
+                        .map_err(|err| format!("{err:#}"));
+                        match refresh_result {
+                            Ok(model_options) => {
+                                let _ = response_tx.send(Ok(model_options));
+                                Ok(())
+                            }
+                            Err(detail) => {
+                                let _ = response_tx.send(Err(detail.clone()));
+                                Err(anyhow!(detail))
+                            }
+                        }
                     }
                 };
 
@@ -4369,6 +4467,7 @@ fn handle_codex_prompt_command(
                     json!({
                         "threadId": thread_id,
                         "cwd": command.cwd,
+                        "model": command.model,
                         "sandbox": command.sandbox_mode.as_cli_value(),
                         "approvalPolicy": command.approval_policy.as_cli_value(),
                     }),
@@ -4380,6 +4479,7 @@ fn handle_codex_prompt_command(
                     "thread/start",
                     json!({
                         "cwd": command.cwd,
+                        "model": command.model,
                         "sandbox": command.sandbox_mode.as_cli_value(),
                         "approvalPolicy": command.approval_policy.as_cli_value(),
                         "personality": "pragmatic",
@@ -4415,6 +4515,7 @@ fn handle_codex_prompt_command(
             "cwd": command.cwd,
             "approvalPolicy": command.approval_policy.as_cli_value(),
             "effort": command.reasoning_effort.as_api_value(),
+            "model": command.model,
             "sandboxPolicy": codex_sandbox_policy_value(command.sandbox_mode),
             "input": codex_user_input_items(&command.prompt, &command.attachments),
         }),
@@ -4815,6 +4916,64 @@ fn send_codex_json_rpc_request(
             ))
         }
     }
+}
+
+fn handle_codex_model_list_refresh(
+    writer: &mut impl Write,
+    pending_requests: &CodexPendingRequestMap,
+) -> Result<Vec<SessionModelOption>> {
+    let mut cursor: Option<String> = None;
+    let mut model_options = Vec::new();
+
+    loop {
+        let result = send_codex_json_rpc_request(
+            writer,
+            pending_requests,
+            "model/list",
+            json!({
+                "cursor": cursor,
+                "includeHidden": false,
+                "limit": 100,
+            }),
+            Duration::from_secs(30),
+        )?;
+        model_options.extend(codex_model_options(&result));
+        cursor = result
+            .get("nextCursor")
+            .and_then(Value::as_str)
+            .map(str::to_owned);
+        if cursor.is_none() {
+            break;
+        }
+    }
+
+    Ok(model_options)
+}
+
+fn codex_model_options(model_list_result: &Value) -> Vec<SessionModelOption> {
+    model_list_result
+        .get("data")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|entry| {
+            let value = entry
+                .get("model")
+                .or_else(|| entry.get("id"))
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|value| !value.is_empty())?
+                .to_owned();
+            let label = entry
+                .get("displayName")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|label| !label.is_empty())
+                .unwrap_or(&value)
+                .to_owned();
+            Some(SessionModelOption { label, value })
+        })
+        .collect()
 }
 
 fn write_codex_json_rpc_message(writer: &mut impl Write, message: &Value) -> Result<()> {
@@ -8533,7 +8692,7 @@ impl Agent {
 
     fn default_model(self) -> &'static str {
         match self {
-            Self::Codex => "gpt-5",
+            Self::Codex => "gpt-5.4",
             Self::Claude => "sonnet",
             Self::Cursor => "auto",
             Self::Gemini => "auto",
@@ -9653,7 +9812,7 @@ mod tests {
     }
 
     #[test]
-    fn updates_codex_session_model_settings_and_flags_restart() {
+    fn updates_codex_session_model_settings_without_restarting_runtime() {
         let state = test_app_state();
 
         let created = state
@@ -9701,7 +9860,7 @@ mod tests {
             .iter()
             .find(|record| record.session.id == created.session_id)
             .expect("Codex session should exist");
-        assert!(record.runtime_reset_required);
+        assert!(!record.runtime_reset_required);
     }
 
     #[test]
@@ -9810,13 +9969,13 @@ mod tests {
     }
 
     #[test]
-    fn rejects_model_option_refresh_for_non_acp_sessions() {
+    fn rejects_model_option_refresh_for_claude_sessions() {
         let state = test_app_state();
 
         let created = state
             .create_session(CreateSessionRequest {
-                agent: Some(Agent::Codex),
-                name: Some("Codex Refresh".to_owned()),
+                agent: Some(Agent::Claude),
+                name: Some("Claude Refresh".to_owned()),
                 workdir: Some("/tmp".to_owned()),
                 project_id: None,
                 model: None,
@@ -9830,13 +9989,92 @@ mod tests {
             .unwrap();
 
         let error = match state.refresh_session_model_options(&created.session_id) {
-            Ok(_) => panic!("Codex sessions should reject live model refreshes"),
+            Ok(_) => panic!("Claude sessions should reject live model refreshes"),
             Err(error) => error,
         };
         assert_eq!(error.status, StatusCode::BAD_REQUEST);
         assert_eq!(
             error.message,
-            "Codex sessions do not expose live model options"
+            "Claude sessions do not expose live model options"
+        );
+    }
+
+    #[test]
+    fn refreshes_codex_model_options_from_runtime() {
+        let state = test_app_state();
+
+        let created = state
+            .create_session(CreateSessionRequest {
+                agent: Some(Agent::Codex),
+                name: Some("Codex Refresh".to_owned()),
+                workdir: Some("/tmp".to_owned()),
+                project_id: None,
+                model: Some("gpt-5.4".to_owned()),
+                approval_policy: None,
+                reasoning_effort: None,
+                sandbox_mode: None,
+                cursor_mode: None,
+                claude_approval_mode: None,
+                gemini_approval_mode: None,
+            })
+            .unwrap();
+
+        let child = Command::new("sh").arg("-c").arg("exit 0").spawn().unwrap();
+        let (input_tx, input_rx) = mpsc::channel();
+        let runtime = CodexRuntimeHandle {
+            runtime_id: "codex-model-refresh".to_owned(),
+            input_tx,
+            process: Arc::new(Mutex::new(child)),
+        };
+
+        {
+            let mut inner = state.inner.lock().expect("state mutex poisoned");
+            let index = inner
+                .find_session_index(&created.session_id)
+                .expect("Codex session should exist");
+            inner.sessions[index].runtime = SessionRuntime::Codex(runtime);
+        }
+
+        std::thread::spawn(move || {
+            let command = input_rx.recv().expect("Codex refresh command should arrive");
+            match command {
+                CodexRuntimeCommand::RefreshModelList { response_tx } => {
+                    let _ = response_tx.send(Ok(vec![
+                        SessionModelOption {
+                            label: "gpt-5.4".to_owned(),
+                            value: "gpt-5.4".to_owned(),
+                        },
+                        SessionModelOption {
+                            label: "gpt-5.3-codex".to_owned(),
+                            value: "gpt-5.3-codex".to_owned(),
+                        },
+                    ]));
+                }
+                _ => panic!("expected Codex model refresh command"),
+            }
+        });
+
+        let refreshed = state
+            .refresh_session_model_options(&created.session_id)
+            .expect("Codex model refresh should succeed");
+        let session = refreshed
+            .sessions
+            .iter()
+            .find(|session| session.id == created.session_id)
+            .expect("refreshed Codex session should be present");
+
+        assert_eq!(
+            session.model_options,
+            vec![
+                SessionModelOption {
+                    label: "gpt-5.4".to_owned(),
+                    value: "gpt-5.4".to_owned(),
+                },
+                SessionModelOption {
+                    label: "gpt-5.3-codex".to_owned(),
+                    value: "gpt-5.3-codex".to_owned(),
+                },
+            ]
         );
     }
 
@@ -9871,7 +10109,7 @@ mod tests {
             },
         ];
         state
-            .sync_acp_model_config(
+            .sync_session_model_options(
                 &created.session_id,
                 Some("gpt-5.3-codex".to_owned()),
                 model_options.clone(),

@@ -11,6 +11,7 @@ import {
 export type ControlPanelSectionId = "sessions" | "projects" | "git";
 
 type ControlPanelSurfaceProps = {
+  gitStatusCount: number;
   isPreferencesOpen: boolean;
   onOpenPreferences: () => void;
   projectCount: number;
@@ -42,6 +43,7 @@ const PREFERENCES_ACTION: ControlPanelActionDefinition = {
 };
 
 export const ControlPanelSurface = forwardRef<ControlPanelSurfaceHandle, ControlPanelSurfaceProps>(function ControlPanelSurface({
+  gitStatusCount,
   isPreferencesOpen,
   onOpenPreferences,
   projectCount,
@@ -64,6 +66,7 @@ export const ControlPanelSurface = forwardRef<ControlPanelSurfaceHandle, Control
       icon: <ProjectsIcon />,
     },
     {
+      badgeCount: gitStatusCount,
       id: "git",
       label: "Git status",
       icon: <GitStatusIcon />,

@@ -64,6 +64,44 @@ describe("GitStatusPanel", () => {
     expect(screen.queryByText("ControlPanelSurface.tsx")).not.toBeInTheDocument();
   });
 
+  it("reports git status updates for badge counts", async () => {
+    fetchGitStatusMock.mockResolvedValue(
+      makeStatusResponse([
+        {
+          indexStatus: "M",
+          path: "src/main.rs",
+          worktreeStatus: "M",
+        },
+        {
+          path: "ui/src/App.tsx",
+          worktreeStatus: "M",
+        },
+      ]),
+    );
+
+    const onStatusChange = vi.fn();
+
+    render(
+      <GitStatusPanel
+        workdir="/repo"
+        onStatusChange={onStatusChange}
+        onOpenPath={() => {}}
+        onOpenWorkdir={() => {}}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(onStatusChange).toHaveBeenCalledWith(
+        expect.objectContaining({
+          files: expect.arrayContaining([
+            expect.objectContaining({ path: "src/main.rs" }),
+            expect.objectContaining({ path: "ui/src/App.tsx" }),
+          ]),
+        }),
+      );
+    });
+  });
+
   it("applies git file actions from file rows and refreshes the tree state", async () => {
     fetchGitStatusMock.mockResolvedValue(
       makeStatusResponse([

@@ -144,7 +144,11 @@ describe("AgentSessionPanelFooter", () => {
         onSessionSettingsChange,
         session: makeSession("session-a", {
           agent: "Codex",
-          model: "gpt-5",
+          model: "gpt-5.4",
+          modelOptions: [
+            { label: "gpt-5.4", value: "gpt-5.4" },
+            { label: "gpt-5.3-codex", value: "gpt-5.3-codex" },
+          ],
         }),
       }),
     );
@@ -154,7 +158,7 @@ describe("AgentSessionPanelFooter", () => {
     fireEvent.keyDown(textarea, { key: "ArrowDown" });
     fireEvent.keyDown(textarea, { key: "Enter" });
 
-    expect(onSessionSettingsChange).toHaveBeenCalledWith("session-a", "model", "gpt-5-mini");
+    expect(onSessionSettingsChange).toHaveBeenCalledWith("session-a", "model", "gpt-5.3-codex");
     expect(onSend).not.toHaveBeenCalled();
     expect(screen.getByLabelText("Message session-a")).toHaveValue("");
   });
@@ -278,6 +282,29 @@ describe("AgentSessionPanelFooter", () => {
       "geminiApprovalMode",
       "yolo",
     );
+  });
+
+  it("requests live Codex model options when /model opens", async () => {
+    const onRefreshSessionModelOptions = vi.fn();
+
+    render(
+      renderFooter({
+        onRefreshSessionModelOptions,
+        session: makeSession("session-a", {
+          agent: "Codex",
+          model: "gpt-5.4",
+          modelOptions: undefined,
+        }),
+      }),
+    );
+
+    fireEvent.change(screen.getByLabelText("Message session-a"), {
+      target: { value: "/model" },
+    });
+
+    await waitFor(() => {
+      expect(onRefreshSessionModelOptions).toHaveBeenCalledWith("session-a");
+    });
   });
 
   it("requests live Cursor model options when /model opens", async () => {

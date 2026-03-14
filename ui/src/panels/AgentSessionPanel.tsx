@@ -68,11 +68,7 @@ const STATIC_MODEL_OPTIONS: Readonly<Record<Session["agent"], readonly { label: 
     { label: "Sonnet", value: "sonnet" },
     { label: "Opus", value: "opus" },
   ],
-  Codex: [
-    { label: "GPT-5", value: "gpt-5" },
-    { label: "GPT-5 mini", value: "gpt-5-mini" },
-    { label: "o3", value: "o3" },
-  ],
+  Codex: [],
   Cursor: [{ label: "Auto", value: "auto" }],
   Gemini: [{ label: "Auto", value: "auto" }],
 };
@@ -234,7 +230,7 @@ function slashCommandsForSession(session: Session) {
 }
 
 function supportsLiveSessionModelOptions(session: Session): boolean {
-  return session.agent === "Cursor" || session.agent === "Gemini";
+  return session.agent === "Codex" || session.agent === "Cursor" || session.agent === "Gemini";
 }
 
 function ensureCurrentSessionModelChoice(
@@ -256,7 +252,7 @@ function ensureCurrentSessionModelChoice(
 
 function sessionModelChoicesForSlashCommand(session: Session): SessionModelChoice[] {
   const baseOptions =
-    session.agent === "Cursor" || session.agent === "Gemini"
+    session.agent === "Codex" || session.agent === "Cursor" || session.agent === "Gemini"
       ? session.modelOptions?.length
         ? session.modelOptions.map((option) => ({
             label: option.label,

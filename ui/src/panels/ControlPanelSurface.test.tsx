@@ -7,6 +7,7 @@ describe("ControlPanelSurface", () => {
   it("switches sections from the activity rail", () => {
     render(
       <ControlPanelSurface
+        gitStatusCount={5}
         isPreferencesOpen={false}
         onOpenPreferences={() => {}}
         projectCount={3}
@@ -34,6 +35,7 @@ describe("ControlPanelSurface", () => {
 
     render(
       <ControlPanelSurface
+        gitStatusCount={5}
         isPreferencesOpen={false}
         onOpenPreferences={onOpenPreferences}
         projectCount={3}
@@ -47,5 +49,20 @@ describe("ControlPanelSurface", () => {
     expect(onOpenPreferences).toHaveBeenCalledTimes(1);
     expect(screen.getByRole("heading", { level: 2, name: "Sessions" })).toBeInTheDocument();
     expect(screen.getByTestId("section-body")).toHaveTextContent("sessions");
+  });
+
+  it("renders a badge for git status counts", () => {
+    render(
+      <ControlPanelSurface
+        gitStatusCount={11}
+        isPreferencesOpen={false}
+        onOpenPreferences={() => {}}
+        projectCount={3}
+        sessionCount={7}
+        renderSection={(sectionId) => <div data-testid="section-body">{sectionId}</div>}
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: "Git status" })).toHaveTextContent("11");
   });
 });

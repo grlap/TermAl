@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
-import { CursorPromptSettingsCard, GeminiPromptSettingsCard } from "./App";
+import { CodexPromptSettingsCard, CursorPromptSettingsCard, GeminiPromptSettingsCard } from "./App";
 import type { Session } from "./types";
 
 function makeSession(id: string, overrides?: Partial<Session>): Session {
@@ -20,6 +20,35 @@ function makeSession(id: string, overrides?: Partial<Session>): Session {
 }
 
 describe("session model refresh controls", () => {
+  it("auto-requests Codex model options when the session card opens without a live list", async () => {
+    const onRequestModelOptions = vi.fn();
+
+    render(
+      <CodexPromptSettingsCard
+        paneId="pane-codex"
+        session={makeSession("codex-session", {
+          agent: "Codex",
+          approvalPolicy: "never",
+          reasoningEffort: "medium",
+          sandboxMode: "workspace-write",
+          model: "gpt-5.4",
+        })}
+        isUpdating={false}
+        isRefreshingModelOptions={false}
+        onRequestModelOptions={onRequestModelOptions}
+        onSessionSettingsChange={() => {}}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(onRequestModelOptions).toHaveBeenCalledWith("codex-session");
+    });
+    expect(onRequestModelOptions).toHaveBeenCalledTimes(1);
+    expect(
+      screen.getByRole("button", { name: "Refresh models" }),
+    ).toBeInTheDocument();
+  });
+
   it("auto-requests Cursor model options when the session card opens without a live list", async () => {
     const onRequestModelOptions = vi.fn();
 
