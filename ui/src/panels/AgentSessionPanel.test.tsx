@@ -278,6 +278,39 @@ describe("AgentSessionPanelFooter", () => {
     );
   });
 
+  it("limits /effort choices to the selected Codex model capabilities", () => {
+    render(
+      renderFooter({
+        session: makeSession("session-a", {
+          agent: "Codex",
+          approvalPolicy: "never",
+          reasoningEffort: "medium",
+          sandboxMode: "workspace-write",
+          model: "gpt-5-codex-mini",
+          modelOptions: [
+            {
+              label: "GPT-5 Codex Mini",
+              value: "gpt-5-codex-mini",
+              description: "Optimized for codex. Cheaper, faster, but less capable.",
+              defaultReasoningEffort: "medium",
+              supportedReasoningEfforts: ["medium", "high"],
+            },
+          ],
+        }),
+      }),
+    );
+
+    fireEvent.change(screen.getByLabelText("Message session-a"), {
+      target: { value: "/effort" },
+    });
+
+    expect(screen.getByText(/GPT-5 Codex Mini supports medium, high\./)).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: /medium/i })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: /high/i })).toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: /minimal/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: /^low/i })).not.toBeInTheDocument();
+  });
+
   it("applies Gemini mode changes from /mode", () => {
     const onSessionSettingsChange = vi.fn();
 

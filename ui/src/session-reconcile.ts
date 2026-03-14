@@ -86,7 +86,22 @@ function sameModelOptions(previous?: Session["modelOptions"], next?: Session["mo
 
   return previous.every((option, index) => {
     const nextOption = next[index];
-    return nextOption?.label === option.label && nextOption.value === option.value;
+    const previousBadges = option.badges ?? [];
+    const nextBadges = nextOption?.badges ?? [];
+    const previousSupportedReasoningEfforts = option.supportedReasoningEfforts ?? [];
+    const nextSupportedReasoningEfforts = nextOption?.supportedReasoningEfforts ?? [];
+    return (
+      nextOption?.label === option.label &&
+      nextOption.value === option.value &&
+      (nextOption.description ?? null) === (option.description ?? null) &&
+      (nextOption.defaultReasoningEffort ?? null) === (option.defaultReasoningEffort ?? null) &&
+      previousBadges.length === nextBadges.length &&
+      previousBadges.every((badge, badgeIndex) => nextBadges[badgeIndex] === badge) &&
+      previousSupportedReasoningEfforts.length === nextSupportedReasoningEfforts.length &&
+      previousSupportedReasoningEfforts.every(
+        (effort, effortIndex) => nextSupportedReasoningEfforts[effortIndex] === effort,
+      )
+    );
   });
 }
 

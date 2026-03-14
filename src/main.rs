@@ -855,6 +855,38 @@ impl AppState {
 
         match record.session.agent {
             agent if agent.supports_codex_prompt_settings() => {
+                let next_model = request
+                    .model
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+                    .map(str::to_owned)
+                    .unwrap_or_else(|| record.session.model.clone());
+                let next_reasoning_effort =
+                    request.reasoning_effort.unwrap_or(record.codex_reasoning_effort);
+                let normalized_reasoning_effort = normalized_codex_reasoning_effort(
+                    &next_model,
+                    next_reasoning_effort,
+                    &record.session.model_options,
+                );
+                if request.reasoning_effort.is_some() {
+                    if let Some(normalized_reasoning_effort) = normalized_reasoning_effort {
+                        if normalized_reasoning_effort != next_reasoning_effort {
+                            if let Some(option) =
+                                codex_model_option(&next_model, &record.session.model_options)
+                            {
+                                return Err(ApiError::bad_request(format!(
+                                    "model `{}` does not support `{}` reasoning effort; choose {}",
+                                    option.label,
+                                    next_reasoning_effort.as_api_value(),
+                                    format_codex_reasoning_efforts(
+                                        &option.supported_reasoning_efforts
+                                    )
+                                )));
+                            }
+                        }
+                    }
+                }
                 if let Some(model) = request.model.as_deref() {
                     let trimmed = model.trim().to_owned();
                     if record.session.model != trimmed {
@@ -872,6 +904,11 @@ impl AppState {
                 if let Some(reasoning_effort) = request.reasoning_effort {
                     record.codex_reasoning_effort = reasoning_effort;
                     record.session.reasoning_effort = Some(reasoning_effort);
+                } else if let Some(normalized_reasoning_effort) = normalized_reasoning_effort {
+                    if record.codex_reasoning_effort != normalized_reasoning_effort {
+                        record.codex_reasoning_effort = normalized_reasoning_effort;
+                        record.session.reasoning_effort = Some(normalized_reasoning_effort);
+                    }
                 }
             }
             agent if agent.supports_claude_approval_mode() => {
@@ -969,10 +1006,6 @@ impl AppState {
         let record = &mut inner.sessions[index];
         let agent = record.session.agent;
         if agent == Agent::Claude {
-            if !record.session.model_options.is_empty() {
-                return Ok(self.snapshot_from_inner(&inner));
-            }
-
             if record.runtime_reset_required {
                 if let SessionRuntime::Claude(handle) = &record.runtime {
                     handle.kill().map_err(|err| {
@@ -997,17 +1030,14 @@ impl AppState {
                         "unexpected Codex runtime attached to Claude session",
                     ));
                 }
-                SessionRuntime::Claude(_) => {
-                    let model_options = record.session.model_options.clone();
-                    let current_model = record.session.model.clone();
-                    drop(inner);
-                    self.sync_session_model_options(session_id, Some(current_model), model_options)
-                        .map_err(|err| {
-                            ApiError::internal(format!(
-                                "failed to sync Claude model options: {err:#}"
-                            ))
-                        })?;
-                    return Ok(self.snapshot());
+                SessionRuntime::Claude(handle) => {
+                    handle.kill().map_err(|err| {
+                        ApiError::internal(format!(
+                            "failed to restart Claude session runtime: {err:#}"
+                        ))
+                    })?;
+                    record.runtime = SessionRuntime::None;
+                    record.pending_claude_approvals.clear();
                 }
                 SessionRuntime::None => {}
             }
@@ -1261,21 +1291,34 @@ impl AppState {
         let index = inner
             .find_session_index(session_id)
             .ok_or_else(|| anyhow!("session `{session_id}` not found"))?;
-        let session = &mut inner.sessions[index].session;
+        let record = &mut inner.sessions[index];
 
         let mut changed = false;
         if let Some(current_model) = current_model
             .map(|value| value.trim().to_owned())
             .filter(|value| !value.is_empty())
         {
-            if session.model != current_model {
-                session.model = current_model;
+            if record.session.model != current_model {
+                record.session.model = current_model;
                 changed = true;
             }
         }
-        if session.model_options != model_options {
-            session.model_options = model_options;
+        if record.session.model_options != model_options {
+            record.session.model_options = model_options;
             changed = true;
+        }
+        if record.session.agent.supports_codex_prompt_settings() {
+            if let Some(normalized_effort) = normalized_codex_reasoning_effort(
+                &record.session.model,
+                record.codex_reasoning_effort,
+                &record.session.model_options,
+            ) {
+                if record.codex_reasoning_effort != normalized_effort {
+                    record.codex_reasoning_effort = normalized_effort;
+                    record.session.reasoning_effort = Some(normalized_effort);
+                    changed = true;
+                }
+            }
         }
 
         if changed {
@@ -3838,9 +3881,19 @@ fn acp_model_options(config_result: &Value) -> Vec<SessionModelOption> {
                         .map(str::trim)
                         .filter(|label| !label.is_empty())
                         .unwrap_or(value);
+                    let description = entry
+                        .get("description")
+                        .and_then(Value::as_str)
+                        .map(str::trim)
+                        .filter(|description| !description.is_empty())
+                        .map(str::to_owned);
                     Some(SessionModelOption {
                         label: label.to_owned(),
                         value: value.to_owned(),
+                        description,
+                        badges: Vec::new(),
+                        default_reasoning_effort: None,
+                        supported_reasoning_efforts: Vec::new(),
                     })
                 })
                 .collect()
@@ -5067,10 +5120,128 @@ fn claude_model_options(message: &Value) -> Option<Vec<SessionModelOption>> {
                     .filter(|label| !label.is_empty())
                     .unwrap_or(&value)
                     .to_owned();
-                Some(SessionModelOption { label, value })
+                let description = entry
+                    .get("description")
+                    .and_then(Value::as_str)
+                    .map(str::trim)
+                    .filter(|description| !description.is_empty())
+                    .map(str::to_owned);
+                Some(SessionModelOption {
+                    label,
+                    value,
+                    description,
+                    badges: claude_model_badges(entry),
+                    default_reasoning_effort: None,
+                    supported_reasoning_efforts: Vec::new(),
+                })
             })
             .collect(),
     )
+}
+
+fn claude_model_badges(entry: &Value) -> Vec<String> {
+    let mut badges = Vec::new();
+    let display_name = entry
+        .get("displayName")
+        .and_then(Value::as_str)
+        .map(str::to_ascii_lowercase)
+        .unwrap_or_default();
+    if entry.get("value").and_then(Value::as_str) == Some("default")
+        || display_name.contains("recommended")
+    {
+        badges.push("Recommended".to_owned());
+    }
+    if entry
+        .get("supportsEffort")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+        || entry
+            .get("supportedEffortLevels")
+            .and_then(Value::as_array)
+            .is_some_and(|levels| !levels.is_empty())
+    {
+        badges.push("Effort".to_owned());
+    }
+    if entry
+        .get("supportsAdaptiveThinking")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+    {
+        badges.push("Adaptive".to_owned());
+    }
+    if entry
+        .get("supportsFastMode")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+    {
+        badges.push("Fast".to_owned());
+    }
+    badges
+}
+
+fn parse_codex_reasoning_effort(value: &str) -> Option<CodexReasoningEffort> {
+    match value.trim() {
+        "none" => Some(CodexReasoningEffort::None),
+        "minimal" => Some(CodexReasoningEffort::Minimal),
+        "low" => Some(CodexReasoningEffort::Low),
+        "medium" => Some(CodexReasoningEffort::Medium),
+        "high" => Some(CodexReasoningEffort::High),
+        "xhigh" => Some(CodexReasoningEffort::XHigh),
+        _ => None,
+    }
+}
+
+fn codex_reasoning_effort_rank(effort: CodexReasoningEffort) -> usize {
+    match effort {
+        CodexReasoningEffort::None => 0,
+        CodexReasoningEffort::Minimal => 1,
+        CodexReasoningEffort::Low => 2,
+        CodexReasoningEffort::Medium => 3,
+        CodexReasoningEffort::High => 4,
+        CodexReasoningEffort::XHigh => 5,
+    }
+}
+
+fn codex_model_option<'a>(
+    model: &str,
+    model_options: &'a [SessionModelOption],
+) -> Option<&'a SessionModelOption> {
+    model_options.iter().find(|option| option.value == model)
+}
+
+fn normalized_codex_reasoning_effort(
+    model: &str,
+    current_effort: CodexReasoningEffort,
+    model_options: &[SessionModelOption],
+) -> Option<CodexReasoningEffort> {
+    let option = codex_model_option(model, model_options)?;
+    if option.supported_reasoning_efforts.is_empty() {
+        return None;
+    }
+    if option.supported_reasoning_efforts.contains(&current_effort) {
+        return Some(current_effort);
+    }
+
+    option
+        .default_reasoning_effort
+        .filter(|effort| option.supported_reasoning_efforts.contains(effort))
+        .or_else(|| option.supported_reasoning_efforts.first().copied())
+}
+
+fn format_codex_reasoning_efforts(efforts: &[CodexReasoningEffort]) -> String {
+    let efforts = efforts
+        .iter()
+        .map(|effort| effort.as_api_value())
+        .collect::<Vec<_>>();
+    match efforts.as_slice() {
+        [] => "the available reasoning levels".to_owned(),
+        [only] => (*only).to_owned(),
+        [first, second] => format!("{first} or {second}"),
+        _ => {
+            let last = efforts.last().copied().unwrap_or_default();
+            format!("{}, or {}", efforts[..efforts.len() - 1].join(", "), last)
+        }
+    }
 }
 
 fn codex_model_options(model_list_result: &Value) -> Vec<SessionModelOption> {
@@ -5094,7 +5265,42 @@ fn codex_model_options(model_list_result: &Value) -> Vec<SessionModelOption> {
                 .filter(|label| !label.is_empty())
                 .unwrap_or(&value)
                 .to_owned();
-            Some(SessionModelOption { label, value })
+            let description = entry
+                .get("description")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|description| !description.is_empty())
+                .map(str::to_owned);
+            let default_reasoning_effort = entry
+                .get("default_reasoning_level")
+                .or_else(|| entry.get("defaultReasoningLevel"))
+                .and_then(Value::as_str)
+                .and_then(parse_codex_reasoning_effort);
+            let mut supported_reasoning_efforts = entry
+                .get("supported_reasoning_levels")
+                .or_else(|| entry.get("supportedReasoningLevels"))
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .filter_map(|level| {
+                    level
+                        .get("effort")
+                        .or_else(|| level.get("value"))
+                        .and_then(Value::as_str)
+                        .or_else(|| level.as_str())
+                        .and_then(parse_codex_reasoning_effort)
+                })
+                .collect::<Vec<_>>();
+            supported_reasoning_efforts.sort_by_key(|effort| codex_reasoning_effort_rank(*effort));
+            supported_reasoning_efforts.dedup();
+            Some(SessionModelOption {
+                label,
+                value,
+                description,
+                badges: Vec::new(),
+                default_reasoning_effort,
+                supported_reasoning_efforts,
+            })
         })
         .collect()
 }
@@ -9389,6 +9595,28 @@ struct UpdateSessionSettingsRequest {
 struct SessionModelOption {
     label: String,
     value: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    description: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    badges: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    default_reasoning_effort: Option<CodexReasoningEffort>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    supported_reasoning_efforts: Vec<CodexReasoningEffort>,
+}
+
+impl SessionModelOption {
+    #[cfg(test)]
+    fn plain(label: impl Into<String>, value: impl Into<String>) -> Self {
+        Self {
+            label: label.into(),
+            value: value.into(),
+            description: None,
+            badges: Vec::new(),
+            default_reasoning_effort: None,
+            supported_reasoning_efforts: Vec::new(),
+        }
+    }
 }
 
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
@@ -10094,6 +10322,159 @@ mod tests {
     }
 
     #[test]
+    fn normalizes_codex_reasoning_effort_when_switching_models() {
+        let state = test_app_state();
+
+        let created = state
+            .create_session(CreateSessionRequest {
+                agent: Some(Agent::Codex),
+                name: Some("Codex Model Caps".to_owned()),
+                workdir: Some("/tmp".to_owned()),
+                project_id: None,
+                model: Some("gpt-5".to_owned()),
+                approval_policy: None,
+                reasoning_effort: Some(CodexReasoningEffort::Minimal),
+                sandbox_mode: None,
+                cursor_mode: None,
+                claude_approval_mode: None,
+                gemini_approval_mode: None,
+            })
+            .unwrap();
+
+        state
+            .sync_session_model_options(
+                &created.session_id,
+                None,
+                vec![
+                    SessionModelOption {
+                        label: "GPT-5".to_owned(),
+                        value: "gpt-5".to_owned(),
+                        description: Some("Frontier agentic coding model.".to_owned()),
+                        badges: Vec::new(),
+                        default_reasoning_effort: Some(CodexReasoningEffort::Medium),
+                        supported_reasoning_efforts: vec![
+                            CodexReasoningEffort::Minimal,
+                            CodexReasoningEffort::Low,
+                            CodexReasoningEffort::Medium,
+                            CodexReasoningEffort::High,
+                        ],
+                    },
+                    SessionModelOption {
+                        label: "GPT-5 Codex Mini".to_owned(),
+                        value: "gpt-5-codex-mini".to_owned(),
+                        description: Some(
+                            "Optimized for codex. Cheaper, faster, but less capable."
+                                .to_owned(),
+                        ),
+                        badges: Vec::new(),
+                        default_reasoning_effort: Some(CodexReasoningEffort::Medium),
+                        supported_reasoning_efforts: vec![
+                            CodexReasoningEffort::Medium,
+                            CodexReasoningEffort::High,
+                        ],
+                    },
+                ],
+            )
+            .unwrap();
+
+        let updated = state
+            .update_session_settings(
+                &created.session_id,
+                UpdateSessionSettingsRequest {
+                    name: None,
+                    model: Some("gpt-5-codex-mini".to_owned()),
+                    sandbox_mode: None,
+                    approval_policy: None,
+                    reasoning_effort: None,
+                    cursor_mode: None,
+                    claude_approval_mode: None,
+                    gemini_approval_mode: None,
+                },
+            )
+            .unwrap();
+
+        let session = updated
+            .sessions
+            .iter()
+            .find(|session| session.id == created.session_id)
+            .expect("updated Codex session should be present");
+        assert_eq!(session.model, "gpt-5-codex-mini");
+        assert_eq!(session.reasoning_effort, Some(CodexReasoningEffort::Medium));
+
+        let inner = state.inner.lock().expect("state mutex poisoned");
+        let record = inner
+            .sessions
+            .iter()
+            .find(|record| record.session.id == created.session_id)
+            .expect("Codex session should exist");
+        assert_eq!(record.codex_reasoning_effort, CodexReasoningEffort::Medium);
+    }
+
+    #[test]
+    fn rejects_unsupported_codex_reasoning_effort_for_selected_model() {
+        let state = test_app_state();
+
+        let created = state
+            .create_session(CreateSessionRequest {
+                agent: Some(Agent::Codex),
+                name: Some("Codex Invalid Effort".to_owned()),
+                workdir: Some("/tmp".to_owned()),
+                project_id: None,
+                model: Some("gpt-5-codex-mini".to_owned()),
+                approval_policy: None,
+                reasoning_effort: Some(CodexReasoningEffort::Medium),
+                sandbox_mode: None,
+                cursor_mode: None,
+                claude_approval_mode: None,
+                gemini_approval_mode: None,
+            })
+            .unwrap();
+
+        state
+            .sync_session_model_options(
+                &created.session_id,
+                None,
+                vec![SessionModelOption {
+                    label: "GPT-5 Codex Mini".to_owned(),
+                    value: "gpt-5-codex-mini".to_owned(),
+                    description: Some(
+                        "Optimized for codex. Cheaper, faster, but less capable.".to_owned()
+                    ),
+                    badges: Vec::new(),
+                    default_reasoning_effort: Some(CodexReasoningEffort::Medium),
+                    supported_reasoning_efforts: vec![
+                        CodexReasoningEffort::Medium,
+                        CodexReasoningEffort::High,
+                    ],
+                }],
+            )
+            .unwrap();
+
+        let error = match state.update_session_settings(
+            &created.session_id,
+            UpdateSessionSettingsRequest {
+                name: None,
+                model: None,
+                sandbox_mode: None,
+                approval_policy: None,
+                reasoning_effort: Some(CodexReasoningEffort::Low),
+                cursor_mode: None,
+                claude_approval_mode: None,
+                gemini_approval_mode: None,
+            },
+        ) {
+            Ok(_) => panic!("unsupported Codex effort should be rejected"),
+            Err(error) => error,
+        };
+
+        assert!(
+            error
+                .message
+                .contains("does not support `low` reasoning effort; choose medium or high")
+        );
+    }
+
+    #[test]
     fn updates_claude_session_model_settings_without_restarting_runtime() {
         let state = test_app_state();
 
@@ -10170,7 +10551,7 @@ mod tests {
     }
 
     #[test]
-    fn refreshes_claude_model_options_from_session_cache() {
+    fn syncs_claude_model_options_into_session_state() {
         let state = test_app_state();
 
         let created = state
@@ -10190,33 +10571,22 @@ mod tests {
             .unwrap();
 
         let model_options = vec![
-            SessionModelOption {
-                label: "Default (recommended)".to_owned(),
-                value: "default".to_owned(),
-            },
-            SessionModelOption {
-                label: "Sonnet".to_owned(),
-                value: "sonnet".to_owned(),
-            },
+            SessionModelOption::plain("Default (recommended)", "default"),
+            SessionModelOption::plain("Sonnet", "sonnet"),
         ];
 
         state
             .sync_session_model_options(&created.session_id, None, model_options.clone())
             .expect("Claude model options should sync");
 
-        let refreshed = state
-            .refresh_session_model_options(&created.session_id)
-            .expect("Claude model refresh should succeed");
-        let session = refreshed
+        let snapshot = state.snapshot();
+        let session = snapshot
             .sessions
             .iter()
             .find(|session| session.id == created.session_id)
-            .expect("refreshed Claude session should be present");
+            .expect("synced Claude session should be present");
 
-        assert_eq!(
-            session.model_options,
-            model_options
-        );
+        assert_eq!(session.model_options, model_options);
     }
 
     #[test]
@@ -10260,14 +10630,8 @@ mod tests {
             match command {
                 CodexRuntimeCommand::RefreshModelList { response_tx } => {
                     let _ = response_tx.send(Ok(vec![
-                        SessionModelOption {
-                            label: "gpt-5.4".to_owned(),
-                            value: "gpt-5.4".to_owned(),
-                        },
-                        SessionModelOption {
-                            label: "gpt-5.3-codex".to_owned(),
-                            value: "gpt-5.3-codex".to_owned(),
-                        },
+                        SessionModelOption::plain("gpt-5.4", "gpt-5.4"),
+                        SessionModelOption::plain("gpt-5.3-codex", "gpt-5.3-codex"),
                     ]));
                 }
                 _ => panic!("expected Codex model refresh command"),
@@ -10286,14 +10650,8 @@ mod tests {
         assert_eq!(
             session.model_options,
             vec![
-                SessionModelOption {
-                    label: "gpt-5.4".to_owned(),
-                    value: "gpt-5.4".to_owned(),
-                },
-                SessionModelOption {
-                    label: "gpt-5.3-codex".to_owned(),
-                    value: "gpt-5.3-codex".to_owned(),
-                },
+                SessionModelOption::plain("gpt-5.4", "gpt-5.4"),
+                SessionModelOption::plain("gpt-5.3-codex", "gpt-5.3-codex"),
             ]
         );
     }
@@ -10319,14 +10677,8 @@ mod tests {
             .unwrap();
 
         let model_options = vec![
-            SessionModelOption {
-                label: "Auto".to_owned(),
-                value: "auto".to_owned(),
-            },
-            SessionModelOption {
-                label: "GPT-5.3 Codex".to_owned(),
-                value: "gpt-5.3-codex".to_owned(),
-            },
+            SessionModelOption::plain("Auto", "auto"),
+            SessionModelOption::plain("GPT-5.3 Codex", "gpt-5.3-codex"),
         ];
         state
             .sync_session_model_options(
@@ -11331,11 +11683,17 @@ mod tests {
                     "models": [
                         {
                             "value": "default",
-                            "displayName": "Default (recommended)"
+                            "displayName": "Default (recommended)",
+                            "description": "Opus 4.6 · Most capable for complex work",
+                            "supportsEffort": true,
+                            "supportsAdaptiveThinking": true,
+                            "supportsFastMode": true
                         },
                         {
                             "value": "sonnet",
-                            "displayName": "Sonnet"
+                            "displayName": "Sonnet",
+                            "description": "Sonnet 4.6 · Best for everyday tasks",
+                            "supportsEffort": true
                         }
                     ]
                 }
@@ -11348,12 +11706,66 @@ mod tests {
                 SessionModelOption {
                     label: "Default (recommended)".to_owned(),
                     value: "default".to_owned(),
+                    description: Some("Opus 4.6 · Most capable for complex work".to_owned()),
+                    badges: vec![
+                        "Recommended".to_owned(),
+                        "Effort".to_owned(),
+                        "Adaptive".to_owned(),
+                        "Fast".to_owned(),
+                    ],
+                    default_reasoning_effort: None,
+                    supported_reasoning_efforts: Vec::new(),
                 },
                 SessionModelOption {
                     label: "Sonnet".to_owned(),
                     value: "sonnet".to_owned(),
+                    description: Some("Sonnet 4.6 · Best for everyday tasks".to_owned()),
+                    badges: vec!["Effort".to_owned()],
+                    default_reasoning_effort: None,
+                    supported_reasoning_efforts: Vec::new(),
                 },
             ])
+        );
+    }
+
+    #[test]
+    fn parses_codex_model_options_from_model_list_response() {
+        let response = json!({
+            "data": [
+                {
+                    "id": "gpt-5-codex-mini",
+                    "displayName": "GPT-5 Codex Mini",
+                    "description": "Optimized for codex. Cheaper, faster, but less capable.",
+                    "default_reasoning_level": "medium",
+                    "supported_reasoning_levels": [
+                        {
+                            "effort": "medium",
+                            "description": "Dynamically adjusts reasoning based on the task"
+                        },
+                        {
+                            "effort": "high",
+                            "description": "Maximizes reasoning depth for complex or ambiguous problems"
+                        }
+                    ]
+                }
+            ]
+        });
+
+        assert_eq!(
+            codex_model_options(&response),
+            vec![SessionModelOption {
+                label: "GPT-5 Codex Mini".to_owned(),
+                value: "gpt-5-codex-mini".to_owned(),
+                description: Some(
+                    "Optimized for codex. Cheaper, faster, but less capable.".to_owned()
+                ),
+                badges: Vec::new(),
+                default_reasoning_effort: Some(CodexReasoningEffort::Medium),
+                supported_reasoning_efforts: vec![
+                    CodexReasoningEffort::Medium,
+                    CodexReasoningEffort::High,
+                ],
+            }]
         );
     }
 

@@ -87,6 +87,7 @@ import type {
   Project,
   SandboxMode,
   Session,
+  SessionModelOption,
   TextMessage,
   ThinkingMessage,
 } from "./types";
@@ -179,6 +180,8 @@ type PendingSessionRename = {
 type ComboboxOption = {
   label: string;
   value: string;
+  description?: string;
+  badges?: string[];
 };
 
 const PENDING_KILL_CLOSE_DELAY_MS = 180;
@@ -235,12 +238,12 @@ const APPROVAL_POLICY_OPTIONS = [
   { label: "on-failure", value: "on-failure" },
 ] as const;
 const CODEX_REASONING_EFFORT_OPTIONS = [
-  { label: "none", value: "none" },
-  { label: "minimal", value: "minimal" },
-  { label: "low", value: "low" },
-  { label: "medium", value: "medium" },
-  { label: "high", value: "high" },
-  { label: "xhigh", value: "xhigh" },
+  { label: "none", value: "none", description: "Disable reasoning for speed-sensitive turns" },
+  { label: "minimal", value: "minimal", description: "Use the lightest reasoning pass" },
+  { label: "low", value: "low", description: "Keep reasoning light" },
+  { label: "medium", value: "medium", description: "Use the standard reasoning depth" },
+  { label: "high", value: "high", description: "Use deeper reasoning for harder prompts" },
+  { label: "xhigh", value: "xhigh", description: "Use the maximum reasoning depth" },
 ] as const;
 const CLAUDE_APPROVAL_OPTIONS = [
   { label: "ask", value: "ask" },
@@ -278,7 +281,7 @@ function usesSessionModelPicker(agent: AgentType): boolean {
 function createSessionModelHint(agent: AgentType): string {
   switch (agent) {
     case "Claude":
-      return "Claude model selection lives on the session itself. TermAl asks Claude for its live model list after the session opens. New Claude sessions start on Sonnet.";
+      return "Claude model selection lives on the session itself. TermAl asks Claude for its live model list after the session opens, and you can always enter a full Claude model id manually. New Claude sessions start on Sonnet.";
     case "Codex":
       return "Codex model selection lives on the session itself. TermAl asks Codex for its live model list after the session opens.";
     case "Cursor":
@@ -301,6 +304,145 @@ function staticSessionModelOptions(agent: AgentType, currentModel: string): Comb
       value: currentModel,
     },
   ];
+}
+
+function formatSessionModelOptionLabel(model: string): string {
+  if (model === "auto") {
+    return "Auto";
+  }
+  if (model === "default") {
+    return "Default";
+  }
+  return model;
+}
+
+function sessionModelComboboxOptions(
+  modelOptions: Session["modelOptions"] | undefined,
+  currentModel: string,
+): ComboboxOption[] {
+  if (modelOptions?.length) {
+    return modelOptions.map((option) => ({
+      label: option.label,
+      value: option.value,
+      description: option.description ?? undefined,
+      badges: option.badges?.length ? option.badges : undefined,
+    }));
+  }
+
+  return [
+    {
+      label: formatSessionModelOptionLabel(currentModel),
+      value: currentModel,
+    },
+  ];
+}
+
+function currentSessionModelOption(session: Session) {
+  return session.modelOptions?.find((option) => option.value === session.model) ?? null;
+}
+
+const ALL_CODEX_REASONING_EFFORTS = CODEX_REASONING_EFFORT_OPTIONS.map(
+  (option) => option.value,
+) as CodexReasoningEffort[];
+
+function codexReasoningEffortOption(
+  effort: CodexReasoningEffort,
+): ComboboxOption {
+  return (
+    CODEX_REASONING_EFFORT_OPTIONS.find((option) => option.value === effort) ?? {
+      label: effort,
+      value: effort,
+      description: undefined,
+    }
+  );
+}
+
+function supportedCodexReasoningEffortsForModelOption(option: SessionModelOption | null) {
+  return option?.supportedReasoningEfforts?.length
+    ? option.supportedReasoningEfforts
+    : ALL_CODEX_REASONING_EFFORTS;
+}
+
+function defaultCodexReasoningEffortForModelOption(option: SessionModelOption | null) {
+  const supportedEfforts = supportedCodexReasoningEffortsForModelOption(option);
+  if (
+    option?.defaultReasoningEffort &&
+    supportedEfforts.includes(option.defaultReasoningEffort)
+  ) {
+    return option.defaultReasoningEffort;
+  }
+
+  return supportedEfforts[0] ?? null;
+}
+
+function currentCodexModelOption(session: Session) {
+  if (session.agent !== "Codex") {
+    return null;
+  }
+
+  return currentSessionModelOption(session);
+}
+
+function normalizedCodexReasoningEffort(
+  session: Session,
+  model: string = session.model,
+): CodexReasoningEffort {
+  const currentEffort = session.reasoningEffort ?? "medium";
+  const modelOption =
+    session.modelOptions?.find((option) => option.value === model) ?? null;
+  const supportedEfforts = modelOption?.supportedReasoningEfforts ?? [];
+  if (!supportedEfforts.length) {
+    return currentEffort;
+  }
+  if (supportedEfforts.includes(currentEffort)) {
+    return currentEffort;
+  }
+
+  return defaultCodexReasoningEffortForModelOption(modelOption) ?? currentEffort;
+}
+
+function codexReasoningEffortComboboxOptions(session: Session, model: string = session.model) {
+  const modelOption =
+    session.modelOptions?.find((option) => option.value === model) ?? null;
+  const defaultEffort = defaultCodexReasoningEffortForModelOption(modelOption);
+
+  return supportedCodexReasoningEffortsForModelOption(modelOption).map((effort) => {
+    const option = codexReasoningEffortOption(effort);
+    return {
+      ...option,
+      badges: defaultEffort === effort ? ["Default"] : undefined,
+    };
+  });
+}
+
+function codexReasoningEffortHint(session: Session, model: string = session.model) {
+  const modelOption =
+    session.modelOptions?.find((option) => option.value === model) ?? null;
+  if (!modelOption?.supportedReasoningEfforts?.length) {
+    return null;
+  }
+
+  const supported = modelOption.supportedReasoningEfforts.join(", ");
+  const defaultEffort = defaultCodexReasoningEffortForModelOption(modelOption);
+  return defaultEffort
+    ? `This model supports ${supported} reasoning. ${defaultEffort} is the default.`
+    : `This model supports ${supported} reasoning.`;
+}
+
+function sessionModelCapabilitySummary(option: SessionModelOption | null) {
+  if (!option?.supportedReasoningEfforts?.length) {
+    return null;
+  }
+
+  const supported = option.supportedReasoningEfforts.join(", ");
+  const defaultEffort =
+    option.defaultReasoningEffort &&
+    option.supportedReasoningEfforts.includes(option.defaultReasoningEffort)
+      ? option.defaultReasoningEffort
+      : null;
+  return defaultEffort
+    ? `Reasoning: ${supported}. Default ${defaultEffort}.`
+    : `Reasoning: ${supported}.`;
 }
 
 export default function App() {
@@ -405,6 +547,7 @@ export default function App() {
   const pendingKillConfirmButtonRef = useRef<HTMLButtonElement | null>(null);
   const pendingKillCloseTimeoutRef = useRef<number | null>(null);
   const isMountedRef = useRef(true);
+  const refreshingSessionModelOptionIdsRef = useRef<SessionFlagMap>({});
   const controlPanelSurfaceRef = useRef<ControlPanelSurfaceHandle | null>(null);
   const lastDerivedControlPanelGitWorkdirRef = useRef<string | null>(null);
   const sessionsRef = useRef<Session[]>([]);
@@ -1758,24 +1901,24 @@ export default function App() {
     try {
       const payload =
         session.agent === "Codex"
-          ? field === "model"
-            ? {
-                model: value as string,
-              }
-            : {
-                reasoningEffort:
-                  field === "reasoningEffort"
-                    ? (value as CodexReasoningEffort)
-                    : (session.reasoningEffort ?? "medium"),
-                sandboxMode:
-                  field === "sandboxMode"
-                    ? (value as SandboxMode)
-                    : (session.sandboxMode ?? "workspace-write"),
-                approvalPolicy:
-                  field === "approvalPolicy"
-                    ? (value as ApprovalPolicy)
-                    : (session.approvalPolicy ?? "never"),
-              }
+          ? {
+              ...(field === "model" ? { model: value as string } : {}),
+              reasoningEffort:
+                field === "reasoningEffort"
+                  ? (value as CodexReasoningEffort)
+                  : normalizedCodexReasoningEffort(
+                      session,
+                      field === "model" ? (value as string) : session.model,
+                    ),
+              sandboxMode:
+                field === "sandboxMode"
+                  ? (value as SandboxMode)
+                  : (session.sandboxMode ?? "workspace-write"),
+              approvalPolicy:
+                field === "approvalPolicy"
+                  ? (value as ApprovalPolicy)
+                  : (session.approvalPolicy ?? "never"),
+            }
           : session.agent === "Cursor"
             ? field === "model"
               ? {
@@ -1822,17 +1965,16 @@ export default function App() {
   }
 
   async function handleRefreshSessionModelOptions(sessionId: string) {
-    let started = false;
-    setRefreshingSessionModelOptionIds((current) => {
-      if (current[sessionId]) {
-        return current;
-      }
-      started = true;
-      return setSessionFlag(current, sessionId, true);
-    });
-    if (!started) {
+    if (refreshingSessionModelOptionIdsRef.current[sessionId]) {
       return;
     }
+    const nextRefreshingSessionIds = setSessionFlag(
+      refreshingSessionModelOptionIdsRef.current,
+      sessionId,
+      true,
+    );
+    refreshingSessionModelOptionIdsRef.current = nextRefreshingSessionIds;
+    setRefreshingSessionModelOptionIds(nextRefreshingSessionIds);
 
     setSessionModelOptionErrors((current) => {
       if (!current[sessionId]) {
@@ -1856,7 +1998,13 @@ export default function App() {
       }));
       setRequestError(message);
     } finally {
-      setRefreshingSessionModelOptionIds((current) => setSessionFlag(current, sessionId, false));
+      const nextRefreshingSessionIds = setSessionFlag(
+        refreshingSessionModelOptionIdsRef.current,
+        sessionId,
+        false,
+      );
+      refreshingSessionModelOptionIdsRef.current = nextRefreshingSessionIds;
+      setRefreshingSessionModelOptionIds(nextRefreshingSessionIds);
     }
   }
 
@@ -3524,7 +3672,7 @@ function ThemedCombobox({
 
       const rect = trigger.getBoundingClientRect();
       const viewportPadding = 12;
-      const estimatedHeight = Math.min(Math.max(options.length * 52 + 12, 120), 280);
+      const estimatedHeight = Math.min(Math.max(options.length * 76 + 12, 120), 360);
       const availableBelow = window.innerHeight - rect.bottom - viewportPadding;
       const availableAbove = rect.top - viewportPadding;
       const openUpward =
@@ -3717,7 +3865,21 @@ function ThemedCombobox({
                       triggerRef.current?.focus();
                     }}
                   >
-                    <span className="combo-option-label">{option.label}</span>
+                    <span className="combo-option-copy">
+                      <span className="combo-option-label">{option.label}</span>
+                      {option.description ? (
+                        <span className="combo-option-description">{option.description}</span>
+                      ) : null}
+                      {option.badges?.length ? (
+                        <span className="combo-option-badges">
+                          {option.badges.map((badge) => (
+                            <span key={badge} className="combo-option-badge">
+                              {badge}
+                            </span>
+                          ))}
+                        </span>
+                      ) : null}
+                    </span>
                     <span
                       className={`combo-option-indicator ${isSelected ? "visible" : ""}`}
                       aria-hidden="true"
@@ -5455,14 +5617,12 @@ export function CodexPromptSettingsCard({
     session,
   });
 
-  const modelOptions =
-    session.modelOptions?.length
-      ? session.modelOptions.map((option) => ({
-          label: option.label,
-          value: option.value,
-        }))
-      : [{ label: session.model, value: session.model }];
+  const modelOptions = sessionModelComboboxOptions(session.modelOptions, session.model);
   const canChangeModel = (session.modelOptions?.length ?? 0) > 0;
+  const currentModelOption = currentCodexModelOption(session);
+  const reasoningEffortOptions = codexReasoningEffortComboboxOptions(session);
+  const currentReasoningEffort = normalizedCodexReasoningEffort(session);
+  const modelCapabilityHint = codexReasoningEffortHint(session);
 
   return (
     <article className="message-card prompt-settings-card">
@@ -5487,6 +5647,7 @@ export function CodexPromptSettingsCard({
             sessionId={session.id}
             onRequestModelOptions={onRequestModelOptions}
           />
+          <SessionModelDetails option={currentModelOption} />
         </div>
         <div className="session-control-group">
           <label className="session-control-label" htmlFor={`sandbox-mode-${paneId}`}>
@@ -5529,8 +5690,8 @@ export function CodexPromptSettingsCard({
           <ThemedCombobox
             id={`reasoning-effort-${paneId}`}
             className="prompt-settings-select"
-            value={session.reasoningEffort ?? "medium"}
-            options={CODEX_REASONING_EFFORT_OPTIONS as readonly ComboboxOption[]}
+            value={currentReasoningEffort}
+            options={reasoningEffortOptions}
             disabled={isUpdating}
             onChange={(nextValue) =>
               void onSessionSettingsChange(
@@ -5547,6 +5708,7 @@ export function CodexPromptSettingsCard({
             : canChangeModel
               ? "Model, sandbox, approval, and reasoning changes apply on the next Codex prompt."
               : "TermAl asks Codex for its live model list when this session opens. New sessions begin on Codex's default model. Sandbox, approval, and reasoning changes still apply on the next Codex prompt."}
+          {modelCapabilityHint ? ` ${modelCapabilityHint}` : ""}
         </p>
       </div>
     </article>
@@ -5572,20 +5734,31 @@ export function ClaudePromptSettingsCard({
     value: SessionSettingsValue,
   ) => void;
 }) {
-  const modelOptions = session.modelOptions?.length
-    ? session.modelOptions
-    : [
-        {
-          label: session.model === "default" ? "Default" : session.model,
-          value: session.model,
-        },
-      ];
-
   useSessionModelOptionsAutoRefresh({
     isRefreshingModelOptions,
     onRequestModelOptions,
     session,
   });
+
+  const [customModel, setCustomModel] = useState(session.model);
+
+  useEffect(() => {
+    setCustomModel(session.model);
+  }, [session.id, session.model]);
+
+  const modelOptions = sessionModelComboboxOptions(session.modelOptions, session.model);
+  const currentModelOption = currentSessionModelOption(session);
+  const trimmedCustomModel = customModel.trim();
+  const canApplyCustomModel =
+    trimmedCustomModel.length > 0 && trimmedCustomModel !== session.model && !isUpdating;
+
+  function applyCustomClaudeModel() {
+    if (!canApplyCustomModel) {
+      return;
+    }
+
+    void onSessionSettingsChange(session.id, "model", trimmedCustomModel);
+  }
 
   return (
     <article className="message-card prompt-settings-card">
@@ -5605,11 +5778,47 @@ export function ClaudePromptSettingsCard({
             onChange={(nextValue) => void onSessionSettingsChange(session.id, "model", nextValue)}
           />
           <SessionModelRefreshAction
-            disabled={isUpdating}
+            disabled={isUpdating || isRefreshingModelOptions}
             isRefreshing={isRefreshingModelOptions}
             sessionId={session.id}
             onRequestModelOptions={onRequestModelOptions}
           />
+          <SessionModelDetails option={currentModelOption} />
+          <div className="session-model-custom">
+            <label className="session-control-label" htmlFor={`claude-custom-model-${paneId}`}>
+              Manual model id
+            </label>
+            <div className="session-model-custom-row">
+              <input
+                id={`claude-custom-model-${paneId}`}
+                className="themed-input session-model-custom-input"
+                type="text"
+                value={customModel}
+                placeholder="claude-sonnet-4-6"
+                spellCheck={false}
+                autoCapitalize="off"
+                autoCorrect="off"
+                disabled={isUpdating}
+                onChange={(event) => setCustomModel(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key !== "Enter") {
+                    return;
+                  }
+
+                  event.preventDefault();
+                  applyCustomClaudeModel();
+                }}
+              />
+              <button
+                type="button"
+                className="ghost-button session-model-custom-apply"
+                disabled={!canApplyCustomModel}
+                onClick={applyCustomClaudeModel}
+              >
+                Apply
+              </button>
+            </div>
+          </div>
         </div>
         <div className="session-control-group">
           <label className="session-control-label" htmlFor={`claude-approval-mode-${paneId}`}>
@@ -5634,8 +5843,8 @@ export function ClaudePromptSettingsCard({
           {isRefreshingModelOptions
             ? "Refreshing Claude's live model list from the session."
             : session.modelOptions?.length
-              ? "Claude exposes its live model list during session initialization. Model changes are applied live to the session. Ask keeps approval cards, Auto-approve continues through tool requests, and Plan keeps Claude in read-only analysis mode."
-              : "Start the Claude session once to load its live model list. New Claude sessions begin on Sonnet."}
+              ? "Claude exposes its live model list during session initialization. Model changes are applied live to the session, and you can still paste a full model id if you need something outside the current list. Ask keeps approval cards, Auto-approve continues through tool requests, and Plan keeps Claude in read-only analysis mode."
+              : "Start the Claude session once to load its live model list. New Claude sessions begin on Sonnet, and you can still paste a full Claude model id manually."}
         </p>
       </div>
     </article>
@@ -5690,6 +5899,39 @@ function SessionModelRefreshAction({
   );
 }
 
+function SessionModelDetails({
+  option,
+}: {
+  option: SessionModelOption | null;
+}) {
+  const capabilitySummary = sessionModelCapabilitySummary(option);
+  const description = option?.description ?? null;
+  const badges = option?.badges ?? [];
+  if (!description && badges.length === 0 && !capabilitySummary) {
+    return null;
+  }
+
+  return (
+    <div className="session-model-details" aria-live="polite">
+      {description ? (
+        <p className="session-model-description">{description}</p>
+      ) : null}
+      {badges.length > 0 ? (
+        <div className="session-model-badges">
+          {badges.map((badge) => (
+            <span key={badge} className="session-model-badge">
+              {badge}
+            </span>
+          ))}
+        </div>
+      ) : null}
+      {capabilitySummary ? (
+        <p className="session-model-description">{capabilitySummary}</p>
+      ) : null}
+    </div>
+  );
+}
+
 export function CursorPromptSettingsCard({
   paneId,
   session,
@@ -5715,14 +5957,9 @@ export function CursorPromptSettingsCard({
     session,
   });
 
-  const modelOptions =
-    session.modelOptions?.length
-      ? session.modelOptions.map((option) => ({
-          label: option.label,
-          value: option.value,
-        }))
-      : [{ label: session.model === "auto" ? "Auto" : session.model, value: session.model }];
+  const modelOptions = sessionModelComboboxOptions(session.modelOptions, session.model);
   const canChangeModel = (session.modelOptions?.length ?? 0) > 0;
+  const currentModelOption = currentSessionModelOption(session);
 
   return (
     <article className="message-card prompt-settings-card">
@@ -5749,6 +5986,7 @@ export function CursorPromptSettingsCard({
             sessionId={session.id}
             onRequestModelOptions={onRequestModelOptions}
           />
+          <SessionModelDetails option={currentModelOption} />
         </div>
         <div className="session-control-group">
           <label className="session-control-label" htmlFor={`cursor-mode-${paneId}`}>
@@ -5803,14 +6041,9 @@ export function GeminiPromptSettingsCard({
     session,
   });
 
-  const modelOptions =
-    session.modelOptions?.length
-      ? session.modelOptions.map((option) => ({
-          label: option.label,
-          value: option.value,
-        }))
-      : [{ label: session.model === "auto" ? "Auto" : session.model, value: session.model }];
+  const modelOptions = sessionModelComboboxOptions(session.modelOptions, session.model);
   const canChangeModel = (session.modelOptions?.length ?? 0) > 0;
+  const currentModelOption = currentSessionModelOption(session);
 
   return (
     <article className="message-card prompt-settings-card">
@@ -5837,6 +6070,7 @@ export function GeminiPromptSettingsCard({
             sessionId={session.id}
             onRequestModelOptions={onRequestModelOptions}
           />
+          <SessionModelDetails option={currentModelOption} />
         </div>
         <div className="session-control-group">
           <label className="session-control-label" htmlFor={`gemini-approval-mode-${paneId}`}>

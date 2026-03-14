@@ -54,6 +54,47 @@ describe("session model refresh controls", () => {
     ).toBeInTheDocument();
   });
 
+  it("limits Codex reasoning effort choices to the selected model capabilities", () => {
+    render(
+      <CodexPromptSettingsCard
+        paneId="pane-codex"
+        session={makeSession("codex-session", {
+          agent: "Codex",
+          approvalPolicy: "never",
+          reasoningEffort: "high",
+          sandboxMode: "workspace-write",
+          model: "gpt-5-codex-mini",
+          modelOptions: [
+            {
+              label: "GPT-5 Codex Mini",
+              value: "gpt-5-codex-mini",
+              description: "Optimized for codex. Cheaper, faster, but less capable.",
+              defaultReasoningEffort: "medium",
+              supportedReasoningEfforts: ["medium", "high"],
+            },
+          ],
+        })}
+        isUpdating={false}
+        isRefreshingModelOptions={false}
+        onRequestModelOptions={() => {}}
+        onSessionSettingsChange={() => {}}
+      />,
+    );
+
+    expect(
+      screen.getByText((content) =>
+        content.includes("This model supports medium, high reasoning. medium is the default."),
+      ),
+    ).toBeInTheDocument();
+
+    fireEvent.click(screen.getByLabelText("Reasoning effort"));
+
+    expect(screen.getByRole("option", { name: /medium/i })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: /high/i })).toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: /minimal/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: /^low/i })).not.toBeInTheDocument();
+  });
+
   it("auto-requests Claude model options when the session card opens without a live list", async () => {
     const onRequestModelOptions = vi.fn();
 
@@ -79,6 +120,52 @@ describe("session model refresh controls", () => {
     expect(
       screen.getByRole("button", { name: "Refresh models" }),
     ).toBeInTheDocument();
+  });
+
+  it("lets Claude apply a manual model id from the session card", () => {
+    const onSessionSettingsChange = vi.fn();
+
+    render(
+      <ClaudePromptSettingsCard
+        paneId="pane-claude"
+        session={makeSession("claude-session", {
+          agent: "Claude",
+          claudeApprovalMode: "ask",
+          model: "sonnet",
+          modelOptions: [
+            {
+              label: "Default (recommended)",
+              value: "default",
+              description: "Opus 4.6 · Most capable for complex work",
+              badges: ["Recommended", "Effort", "Adaptive", "Fast"],
+            },
+            {
+              label: "Sonnet",
+              value: "sonnet",
+              description: "Sonnet 4.6 · Best for everyday tasks",
+              badges: ["Effort"],
+            },
+          ],
+        })}
+        isUpdating={false}
+        isRefreshingModelOptions={false}
+        onRequestModelOptions={() => {}}
+        onSessionSettingsChange={onSessionSettingsChange}
+      />,
+    );
+
+    fireEvent.change(screen.getByLabelText("Manual model id"), {
+      target: { value: "claude-opus-4-6" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Apply" }));
+
+    expect(onSessionSettingsChange).toHaveBeenCalledWith(
+      "claude-session",
+      "model",
+      "claude-opus-4-6",
+    );
+    expect(screen.getByText("Sonnet 4.6 · Best for everyday tasks")).toBeInTheDocument();
+    expect(screen.getByText("Effort")).toBeInTheDocument();
   });
 
   it("auto-requests Cursor model options when the session card opens without a live list", async () => {

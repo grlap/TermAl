@@ -2050,7 +2050,7 @@ textarea {
 
 .combo-option {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
   gap: 0.8rem;
   width: 100%;
@@ -2072,11 +2072,43 @@ textarea {
   background: var(--tab-active-bg);
 }
 
+.combo-option-copy {
+  min-width: 0;
+  display: grid;
+  gap: 0.2rem;
+}
+
 .combo-option-label {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.combo-option-description {
+  color: var(--muted);
+  font-size: 0.78rem;
+  line-height: 1.35;
+  white-space: normal;
+}
+
+.combo-option-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.32rem;
+}
+
+.combo-option-badge {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 0.12rem 0.42rem;
+  border: 1px solid var(--line);
+  background: var(--surface-white-soft);
+  color: var(--muted);
+  font-size: 0.68rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
 }
 
 .combo-option-indicator {
@@ -2099,6 +2131,58 @@ textarea {
   margin: 0;
   color: var(--muted);
   font-size: 0.84rem;
+}
+
+.session-model-details {
+  display: grid;
+  gap: 0.35rem;
+  padding: 0.15rem 0.1rem 0;
+}
+
+.session-model-description {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.8rem;
+  line-height: 1.4;
+}
+
+.session-model-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.session-model-badge {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 0.16rem 0.5rem;
+  border: 1px solid var(--accent-blue-border);
+  background: var(--accent-blue-bg);
+  color: var(--signal-blue);
+  font-size: 0.68rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.session-model-custom {
+  display: grid;
+  gap: 0.45rem;
+  padding-top: 0.25rem;
+}
+
+.session-model-custom-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.45rem;
+}
+
+.session-model-custom-input {
+  min-width: 0;
+}
+
+.session-model-custom-apply {
+  min-width: 4.8rem;
 }
 
 .thread-chips {
@@ -4092,6 +4176,7 @@ textarea {
   .prompt-settings-grid,
   .composer-attachments,
   .composer-row,
+  .session-model-custom-row,
   .source-path-row,
   .utility-header {
     grid-template-columns: 1fr;

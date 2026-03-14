@@ -63,11 +63,11 @@ const VIRTUALIZED_MESSAGE_OVERSCAN_PX = 960;
 const VIRTUALIZED_MESSAGE_GAP_PX = 12;
 const DEFAULT_VIRTUALIZED_VIEWPORT_HEIGHT = 720;
 const EMPTY_MATCHED_ITEM_KEYS = new Set<string>();
-const STATIC_MODEL_OPTIONS: Readonly<Record<Session["agent"], readonly { label: string; value: string }[]>> = {
+const STATIC_MODEL_OPTIONS: Readonly<Record<Session["agent"], readonly SessionModelChoice[]>> = {
   Claude: [],
   Codex: [],
-  Cursor: [{ label: "Auto", value: "auto" }],
-  Gemini: [{ label: "Auto", value: "auto" }],
+  Cursor: [{ detail: "Auto", label: "Auto", value: "auto" }],
+  Gemini: [{ detail: "Auto", label: "Auto", value: "auto" }],
 };
 const SANDBOX_SLASH_OPTIONS = [
   { detail: "Write inside the workspace", label: "workspace-write", value: "workspace-write" },
@@ -152,6 +152,7 @@ const SLASH_COMMANDS: ReadonlyArray<{
 ] as const;
 
 type SessionModelChoice = {
+  detail: string;
   label: string;
   value: string;
 };
@@ -228,6 +229,86 @@ function formatSessionModelLabel(model: string): string {
   return model;
 }
 
+const ALL_CODEX_REASONING_EFFORTS = CODEX_REASONING_EFFORT_SLASH_OPTIONS.map(
+  (option) => option.value,
+) as CodexReasoningEffort[];
+
+function codexReasoningEffortChoice(effort: CodexReasoningEffort) {
+  return (
+    CODEX_REASONING_EFFORT_SLASH_OPTIONS.find((option) => option.value === effort) ?? {
+      detail: effort,
+      label: effort,
+      value: effort,
+    }
+  );
+}
+
+function currentSessionModelCapabilities(session: Session) {
+  return session.modelOptions?.find((option) => option.value === session.model) ?? null;
+}
+
+function supportedCodexReasoningEfforts(session: Session) {
+  const option = currentSessionModelCapabilities(session);
+  return option?.supportedReasoningEfforts?.length
+    ? option.supportedReasoningEfforts
+    : ALL_CODEX_REASONING_EFFORTS;
+}
+
+function defaultCodexReasoningEffort(session: Session) {
+  const option = currentSessionModelCapabilities(session);
+  const supportedEfforts = supportedCodexReasoningEfforts(session);
+  if (
+    option?.defaultReasoningEffort &&
+    supportedEfforts.includes(option.defaultReasoningEffort)
+  ) {
+    return option.defaultReasoningEffort;
+  }
+
+  return supportedEfforts[0] ?? "medium";
+}
+
+function codexReasoningEffortChoices(session: Session): SlashChoiceDefinition[] {
+  const currentModel = currentSessionModelCapabilities(session);
+  const defaultEffort = defaultCodexReasoningEffort(session);
+  return supportedCodexReasoningEfforts(session).map((effort) => {
+    const option = codexReasoningEffortChoice(effort);
+    return {
+      detail:
+        defaultEffort === effort
+          ? `${option.detail} · Default for ${currentModel?.label ?? "this model"}`
+          : option.detail,
+      label: option.label,
+      value: option.value,
+    };
+  });
+}
+
+function sessionModelChoiceDetail(
+  option: NonNullable<Session["modelOptions"]>[number],
+) {
+  const detailParts = [];
+  if (option.description) {
+    detailParts.push(option.description);
+  }
+  if (option.badges?.length) {
+    detailParts.push(option.badges.join(" · "));
+  }
+  if (option.supportedReasoningEfforts?.length) {
+    const defaultEffort =
+      option.defaultReasoningEffort &&
+      option.supportedReasoningEfforts.includes(option.defaultReasoningEffort)
+        ? option.defaultReasoningEffort
+        : null;
+    detailParts.push(
+      defaultEffort
+        ? `Reasoning ${option.supportedReasoningEfforts.join(", ")} · Default ${defaultEffort}`
+        : `Reasoning ${option.supportedReasoningEfforts.join(", ")}`,
+    );
+  }
+
+  return detailParts.join(" · ") || option.value;
+}
+
 function slashCommandsForSession(session: Session) {
   return SLASH_COMMANDS.filter((command) => command.supports.includes(session.agent));
 }
@@ -251,6 +332,7 @@ function ensureCurrentSessionModelChoice(
 
   return [
     {
+      detail: currentModel,
       label: formatSessionModelLabel(currentModel),
       value: currentModel,
     },
@@ -266,6 +348,7 @@ function sessionModelChoicesForSlashCommand(session: Session): SessionModelChoic
     session.agent === "Gemini"
       ? session.modelOptions?.length
         ? session.modelOptions.map((option) => ({
+            detail: sessionModelChoiceDetail(option),
             label: option.label,
             value: option.value,
           }))
@@ -373,19 +456,16 @@ function codexApprovalSlashState(query: string, currentValue: ApprovalPolicy): S
   };
 }
 
-function codexReasoningEffortSlashState(
-  query: string,
-  currentValue: CodexReasoningEffort,
-): SlashChoiceState {
+function codexReasoningEffortSlashState(session: Session, query: string): SlashChoiceState {
+  const currentValue = session.reasoningEffort ?? defaultCodexReasoningEffort(session);
+  const currentModel = currentSessionModelCapabilities(session);
+  const currentModelSupportHint = currentModel?.supportedReasoningEfforts?.length
+    ? ` ${currentModel.label} supports ${currentModel.supportedReasoningEfforts.join(", ")}.`
+    : "";
   return {
     emptyMessage: `No reasoning effort options match "${query}".`,
-    hint: "Enter to set the next Codex prompt reasoning effort.",
-    items: makeSlashChoices(
-      CODEX_REASONING_EFFORT_SLASH_OPTIONS,
-      "reasoningEffort",
-      currentValue,
-      query,
-    ),
+    hint: `Enter to set the next Codex prompt reasoning effort.${currentModelSupportHint}`,
+    items: makeSlashChoices(codexReasoningEffortChoices(session), "reasoningEffort", currentValue, query),
     title: "Codex reasoning effort",
   };
 }
@@ -402,10 +482,12 @@ function sessionModelSlashState(
     .filter((option) =>
       query.length === 0
         ? true
-        : option.label.toLowerCase().includes(query) || option.value.toLowerCase().includes(query),
+        : option.label.toLowerCase().includes(query) ||
+          option.value.toLowerCase().includes(query) ||
+          option.detail.toLowerCase().includes(query),
     )
     .map<SlashPaletteItem>((option) => ({
-      detail: option.value,
+      detail: option.detail,
       field: "model",
       isCurrent: option.value === session.model,
       key: `model:${option.value}`,
@@ -500,7 +582,7 @@ function buildSlashPaletteState(
               : null
             : activeCommand.id === "effort"
               ? session.agent === "Codex"
-                ? codexReasoningEffortSlashState(rawOptionQuery, session.reasoningEffort ?? "medium")
+                ? codexReasoningEffortSlashState(session, rawOptionQuery)
                 : null
             : null;
 

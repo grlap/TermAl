@@ -19,6 +19,10 @@ export type AgentReadiness = {
 export type SessionModelOption = {
   label: string;
   value: string;
+  description?: string | null;
+  badges?: string[];
+  defaultReasoningEffort?: CodexReasoningEffort | null;
+  supportedReasoningEfforts?: CodexReasoningEffort[];
 };
 
 export type CodexRateLimitWindow = {
