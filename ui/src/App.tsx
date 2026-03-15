@@ -8298,6 +8298,8 @@ function renderDecision(decision: Exclude<ApprovalDecision, "pending">) {
       return "approved for this session";
     case "rejected":
       return "rejected";
+    case "interrupted":
+      return "expired after restart";
   }
 }
 

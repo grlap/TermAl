@@ -840,10 +840,13 @@ impl AppState {
             return Err(ApiError::bad_request("prompt cannot be empty"));
         }
 
-        if matches!(
+        let session_is_busy = matches!(
             inner.sessions[index].session.status,
             SessionStatus::Active | SessionStatus::Approval
-        ) {
+        );
+        let has_queued_prompts = !inner.sessions[index].queued_prompts.is_empty();
+
+        if session_is_busy || has_queued_prompts {
             let message_id = inner.next_message_id();
             queue_prompt_on_record(
                 &mut inner.sessions[index],
@@ -862,7 +865,18 @@ impl AppState {
             self.commit_locked(&mut inner).map_err(|err| {
                 ApiError::internal(format!("failed to persist session state: {err:#}"))
             })?;
-            return Ok(DispatchTurnResult::Queued);
+            if session_is_busy {
+                return Ok(DispatchTurnResult::Queued);
+            }
+
+            drop(inner);
+            let dispatch = self
+                .dispatch_next_queued_turn(session_id)
+                .map_err(|err| {
+                    ApiError::internal(format!("failed to dispatch queued turn: {err:#}"))
+                })?
+                .ok_or_else(|| ApiError::internal("queued prompt disappeared before dispatch"))?;
+            return Ok(DispatchTurnResult::Dispatched(dispatch));
         }
 
         let message_id = inner.next_message_id();
@@ -1891,7 +1905,9 @@ impl AppState {
                 KillableRuntime::Codex(handle) => {
                     if let Some(shared_session) = &handle.shared_session {
                         shared_session.interrupt_turn().map_err(|err| {
-                            ApiError::internal(format!("failed to interrupt Codex session: {err:#}"))
+                            ApiError::internal(format!(
+                                "failed to interrupt Codex session: {err:#}"
+                            ))
                         })?;
                         shared_session.detach();
                     } else {
@@ -2251,6 +2267,12 @@ impl AppState {
         message_id: &str,
         decision: ApprovalDecision,
     ) -> std::result::Result<StateResponse, ApiError> {
+        if decision == ApprovalDecision::Interrupted {
+            return Err(ApiError::bad_request(
+                "approval decisions cannot be marked interrupted manually",
+            ));
+        }
+
         let mut claude_runtime_action: Option<(ClaudeRuntimeHandle, ClaudePendingApproval)> = None;
         let mut codex_runtime_action: Option<(CodexRuntimeHandle, CodexPendingApproval)> = None;
         let mut acp_runtime_action: Option<(AcpRuntimeHandle, AcpPendingApproval)> = None;
@@ -2366,7 +2388,9 @@ impl AppState {
                     request_id: pending.request_id.clone(),
                     message: "User rejected this action in TermAl.".to_owned(),
                 },
-                ApprovalDecision::Pending => unreachable!("pending decisions are not sent"),
+                ApprovalDecision::Pending | ApprovalDecision::Interrupted => {
+                    unreachable!("non-deliverable approval decisions are not sent")
+                }
             };
 
             handle
@@ -2410,7 +2434,7 @@ impl AppState {
                     .clone()
                     .or_else(|| pending.allow_once_option_id.clone())
                     .or_else(|| pending.allow_always_option_id.clone()),
-                ApprovalDecision::Pending => None,
+                ApprovalDecision::Pending | ApprovalDecision::Interrupted => None,
             }
             .ok_or_else(|| {
                 ApiError::conflict("no approval option is available for this request")
@@ -2482,6 +2506,9 @@ impl AppState {
             let agent_name = record.session.agent.name();
             record.session.preview = match decision {
                 ApprovalDecision::Pending => "Approval pending.".to_owned(),
+                ApprovalDecision::Interrupted => {
+                    "Approval expired after TermAl restarted.".to_owned()
+                }
                 ApprovalDecision::Accepted => {
                     format!("Approval granted. {agent_name} is continuing…")
                 }
@@ -2542,13 +2569,17 @@ fn codex_approval_result(kind: &CodexApprovalKind, decision: ApprovalDecision) -
             ApprovalDecision::Accepted => json!("accept"),
             ApprovalDecision::AcceptedForSession => json!("acceptForSession"),
             ApprovalDecision::Rejected => json!("decline"),
-            ApprovalDecision::Pending => unreachable!("pending approvals are not sent to Codex"),
+            ApprovalDecision::Pending | ApprovalDecision::Interrupted => {
+                unreachable!("non-deliverable approval decisions are not sent to Codex")
+            }
         },
         CodexApprovalKind::FileChange => match decision {
             ApprovalDecision::Accepted => json!("accept"),
             ApprovalDecision::AcceptedForSession => json!("acceptForSession"),
             ApprovalDecision::Rejected => json!("decline"),
-            ApprovalDecision::Pending => unreachable!("pending approvals are not sent to Codex"),
+            ApprovalDecision::Pending | ApprovalDecision::Interrupted => {
+                unreachable!("non-deliverable approval decisions are not sent to Codex")
+            }
         },
     };
 
@@ -2732,6 +2763,39 @@ impl StateInner {
             self.sessions[index].session.project_id = Some(project_id);
         }
     }
+
+    fn recover_interrupted_sessions(&mut self) {
+        for index in 0..self.sessions.len() {
+            let recovery = {
+                let record = &mut self.sessions[index];
+                recover_interrupted_session_record(record)
+            };
+
+            let Some(recovery) = recovery else {
+                continue;
+            };
+
+            let message_id = self.next_message_id();
+            let record = &mut self.sessions[index];
+            push_message_on_record(
+                record,
+                Message::Text {
+                    attachments: Vec::new(),
+                    id: message_id,
+                    timestamp: stamp_now(),
+                    author: Author::Assistant,
+                    text: recovery,
+                    expanded_text: None,
+                },
+            );
+            record.session.status = SessionStatus::Error;
+            if let Some(message) = record.session.messages.last() {
+                if let Some(preview) = message.preview_text() {
+                    record.session.preview = preview;
+                }
+            }
+        }
+    }
 }
 
 #[derive(Deserialize, Serialize)]
@@ -2782,6 +2846,7 @@ impl PersistedState {
                 .collect(),
         };
         inner.ensure_projects_consistent();
+        inner.recover_interrupted_sessions();
         inner
     }
 }
@@ -2924,6 +2989,61 @@ fn queue_prompt_on_record(
         pending_prompt,
     });
     sync_pending_prompts(record);
+}
+
+fn recover_interrupted_session_record(record: &mut SessionRecord) -> Option<String> {
+    if !matches!(
+        record.session.status,
+        SessionStatus::Active | SessionStatus::Approval
+    ) {
+        return None;
+    }
+
+    let interrupted_approval_count = expire_pending_approval_messages(&mut record.session.messages);
+    fail_running_command_messages(&mut record.session.messages);
+
+    let mut notice = if interrupted_approval_count > 0
+        || record.session.status == SessionStatus::Approval
+    {
+        "TermAl restarted while this session was waiting for approval. That request expired. Send another prompt to continue.".to_owned()
+    } else {
+        "TermAl restarted before this turn finished. The last response may be incomplete. Send another prompt to continue.".to_owned()
+    };
+
+    let queued_count = record.queued_prompts.len();
+    if queued_count > 0 {
+        let noun = if queued_count == 1 {
+            "prompt remains"
+        } else {
+            "prompts remain"
+        };
+        notice.push_str(&format!(" {queued_count} queued {noun} saved."));
+    }
+
+    Some(notice)
+}
+
+fn expire_pending_approval_messages(messages: &mut [Message]) -> usize {
+    let mut count = 0;
+    for message in messages {
+        if let Message::Approval { decision, .. } = message {
+            if *decision == ApprovalDecision::Pending {
+                *decision = ApprovalDecision::Interrupted;
+                count += 1;
+            }
+        }
+    }
+    count
+}
+
+fn fail_running_command_messages(messages: &mut [Message]) {
+    for message in messages {
+        if let Message::Command { status, .. } = message {
+            if *status == CommandStatus::Running {
+                *status = CommandStatus::Error;
+            }
+        }
+    }
 }
 
 fn build_message_positions(messages: &[Message]) -> HashMap<String, usize> {
@@ -4844,7 +4964,9 @@ fn spawn_shared_codex_runtime(state: AppState) -> Result<SharedCodexRuntime> {
             if let Err(err) = initialize_result {
                 let _ = writer_state.handle_shared_codex_runtime_exit(
                     &writer_runtime_id,
-                    Some(&format!("failed to initialize shared Codex app-server: {err:#}")),
+                    Some(&format!(
+                        "failed to initialize shared Codex app-server: {err:#}"
+                    )),
                 );
                 return;
             }
@@ -4974,7 +5096,9 @@ fn spawn_shared_codex_runtime(state: AppState) -> Result<SharedCodexRuntime> {
                 ) {
                     let _ = reader_state.handle_shared_codex_runtime_exit(
                         &reader_runtime_id,
-                        Some(&format!("failed to handle shared Codex app-server event: {err:#}")),
+                        Some(&format!(
+                            "failed to handle shared Codex app-server event: {err:#}"
+                        )),
                     );
                     break;
                 }
@@ -5020,7 +5144,9 @@ fn spawn_shared_codex_runtime(state: AppState) -> Result<SharedCodexRuntime> {
                     Ok(Some(status)) => {
                         let _ = wait_state.handle_shared_codex_runtime_exit(
                             &wait_runtime_id,
-                            Some(&format!("shared Codex app-server exited with status {status}")),
+                            Some(&format!(
+                                "shared Codex app-server exited with status {status}"
+                            )),
                         );
                         break;
                     }
@@ -5028,7 +5154,9 @@ fn spawn_shared_codex_runtime(state: AppState) -> Result<SharedCodexRuntime> {
                     Err(err) => {
                         let _ = wait_state.handle_shared_codex_runtime_exit(
                             &wait_runtime_id,
-                            Some(&format!("failed waiting for shared Codex app-server: {err}")),
+                            Some(&format!(
+                                "failed waiting for shared Codex app-server: {err}"
+                            )),
                         );
                         break;
                     }
@@ -5121,7 +5249,9 @@ fn handle_shared_codex_prompt_command(
         let sessions = sessions
             .lock()
             .expect("shared Codex session mutex poisoned");
-        sessions.get(session_id).and_then(|session| session.thread_id.clone())
+        sessions
+            .get(session_id)
+            .and_then(|session| session.thread_id.clone())
     };
 
     let thread_id = if let Some(thread_id) = existing_thread_id {
@@ -7628,7 +7758,8 @@ impl TurnRecorder for BorrowedSessionRecorder<'_> {
             }
         };
 
-        self.state.append_text_delta(self.session_id, &message_id, delta)
+        self.state
+            .append_text_delta(self.session_id, &message_id, delta)
     }
 
     fn push_thinking(&mut self, title: &str, lines: Vec<String>) -> Result<()> {
@@ -7689,8 +7820,13 @@ impl TurnRecorder for BorrowedSessionRecorder<'_> {
             .or_insert_with(|| self.state.allocate_message_id())
             .clone();
 
-        self.state
-            .upsert_command_message(self.session_id, &message_id, command, "", CommandStatus::Running)
+        self.state.upsert_command_message(
+            self.session_id,
+            &message_id,
+            command,
+            "",
+            CommandStatus::Running,
+        )
     }
 
     fn command_completed(
@@ -10444,6 +10580,7 @@ enum ChangeType {
 #[serde(rename_all = "camelCase")]
 enum ApprovalDecision {
     Pending,
+    Interrupted,
     Accepted,
     AcceptedForSession,
     Rejected,
@@ -12190,13 +12327,10 @@ Use the active agent's tools.
             .find(|session| session.id == session_id)
             .expect("stopped session should remain present");
         assert_eq!(session.status, SessionStatus::Idle);
-        assert!(session
-            .messages
-            .iter()
-            .any(|message| matches!(
-                message,
-                Message::Text { text, .. } if text == "Turn stopped by user."
-            )));
+        assert!(session.messages.iter().any(|message| matches!(
+            message,
+            Message::Text { text, .. } if text == "Turn stopped by user."
+        )));
 
         let inner = state.inner.lock().expect("state mutex poisoned");
         let record = inner
@@ -12213,11 +12347,13 @@ Use the active agent's tools.
             .expect("shared Codex session mutex poisoned");
         assert!(!shared_sessions.contains_key(&session_id));
         drop(shared_sessions);
-        assert!(!runtime
-            .thread_sessions
-            .lock()
-            .expect("shared Codex thread mutex poisoned")
-            .contains_key("thread-123"));
+        assert!(
+            !runtime
+                .thread_sessions
+                .lock()
+                .expect("shared Codex thread mutex poisoned")
+                .contains_key("thread-123")
+        );
     }
 
     #[test]
@@ -12848,6 +12984,73 @@ Use the active agent's tools.
     }
 
     #[test]
+    fn dispatches_saved_queued_prompts_before_new_prompt_after_recovery() {
+        let state = test_app_state();
+        let session_id = test_session_id(&state, Agent::Claude);
+
+        let child = test_exit_success_child();
+        let (input_tx, _input_rx) = mpsc::channel();
+        let runtime = ClaudeRuntimeHandle {
+            runtime_id: "recovered-queue-dispatch".to_owned(),
+            input_tx,
+            process: Arc::new(Mutex::new(child)),
+        };
+
+        {
+            let mut inner = state.inner.lock().expect("state mutex poisoned");
+            let index = inner.find_session_index(&session_id).unwrap();
+            inner.sessions[index].runtime = SessionRuntime::Claude(runtime);
+            inner.sessions[index].session.status = SessionStatus::Error;
+            queue_prompt_on_record(
+                &mut inner.sessions[index],
+                PendingPrompt {
+                    attachments: Vec::new(),
+                    id: "queued-1".to_owned(),
+                    timestamp: stamp_now(),
+                    text: "first".to_owned(),
+                    expanded_text: None,
+                },
+                Vec::new(),
+            );
+            state.commit_locked(&mut inner).unwrap();
+        }
+
+        let result = state
+            .dispatch_turn(
+                &session_id,
+                SendMessageRequest {
+                    text: "second".to_owned(),
+                    expanded_text: None,
+                    attachments: Vec::new(),
+                },
+            )
+            .unwrap();
+
+        match result {
+            DispatchTurnResult::Dispatched(TurnDispatch::PersistentClaude { command, .. }) => {
+                assert_eq!(command.text, "first");
+            }
+            DispatchTurnResult::Dispatched(_) => panic!("expected Claude dispatch"),
+            DispatchTurnResult::Queued => panic!("expected dispatched turn"),
+        }
+
+        let snapshot = state.snapshot();
+        let session = snapshot
+            .sessions
+            .iter()
+            .find(|session| session.id == session_id)
+            .unwrap();
+
+        assert_eq!(session.status, SessionStatus::Active);
+        assert_eq!(session.pending_prompts.len(), 1);
+        assert_eq!(session.pending_prompts[0].text, "second");
+        assert!(matches!(
+            session.messages.last(),
+            Some(Message::Text { text, .. }) if text == "first"
+        ));
+    }
+
+    #[test]
     fn dispatches_expanded_prompts_but_keeps_original_user_text() {
         let state = test_app_state();
         let session_id = test_session_id(&state, Agent::Claude);
@@ -13016,6 +13219,119 @@ Use the active agent's tools.
             record.queued_prompts[0].attachments[0].metadata.media_type,
             "image/png"
         );
+    }
+
+    #[test]
+    fn load_state_recovers_interrupted_active_sessions() {
+        let state = test_app_state();
+        let session_id = test_session_id(&state, Agent::Codex);
+
+        {
+            let mut inner = state.inner.lock().expect("state mutex poisoned");
+            let index = inner.find_session_index(&session_id).unwrap();
+            inner.sessions[index].external_session_id = Some("thread-123".to_owned());
+            inner.sessions[index].session.external_session_id = Some("thread-123".to_owned());
+            inner.sessions[index].session.status = SessionStatus::Active;
+            push_message_on_record(
+                &mut inner.sessions[index],
+                Message::Command {
+                    id: "message-running".to_owned(),
+                    timestamp: stamp_now(),
+                    author: Author::Assistant,
+                    command: "npm test".to_owned(),
+                    command_language: Some("bash".to_owned()),
+                    output: "running".to_owned(),
+                    output_language: None,
+                    status: CommandStatus::Running,
+                },
+            );
+            queue_prompt_on_record(
+                &mut inner.sessions[index],
+                PendingPrompt {
+                    attachments: Vec::new(),
+                    id: "queued-1".to_owned(),
+                    timestamp: stamp_now(),
+                    text: "follow-up".to_owned(),
+                    expanded_text: None,
+                },
+                Vec::new(),
+            );
+            state.commit_locked(&mut inner).unwrap();
+        }
+
+        let reloaded = load_state(state.persistence_path.as_path())
+            .unwrap()
+            .expect("persisted state should exist");
+        let record = reloaded
+            .sessions
+            .iter()
+            .find(|record| record.session.id == session_id)
+            .expect("session should reload");
+
+        assert!(matches!(record.runtime, SessionRuntime::None));
+        assert_eq!(record.session.status, SessionStatus::Error);
+        assert_eq!(record.external_session_id.as_deref(), Some("thread-123"));
+        assert_eq!(
+            record.session.external_session_id.as_deref(),
+            Some("thread-123")
+        );
+        assert_eq!(record.queued_prompts.len(), 1);
+        assert_eq!(record.session.pending_prompts.len(), 1);
+        assert!(matches!(
+            record.session.messages.first(),
+            Some(Message::Command { status, .. }) if *status == CommandStatus::Error
+        ));
+        assert!(matches!(
+            record.session.messages.last(),
+            Some(Message::Text { text, .. })
+                if text.contains("The last response may be incomplete")
+                    && text.contains("1 queued prompt remains saved")
+        ));
+    }
+
+    #[test]
+    fn load_state_expires_pending_approvals_after_restart() {
+        let state = test_app_state();
+        let session_id = test_session_id(&state, Agent::Claude);
+
+        {
+            let mut inner = state.inner.lock().expect("state mutex poisoned");
+            let index = inner.find_session_index(&session_id).unwrap();
+            inner.sessions[index].session.status = SessionStatus::Approval;
+            push_message_on_record(
+                &mut inner.sessions[index],
+                Message::Approval {
+                    id: "approval-1".to_owned(),
+                    timestamp: stamp_now(),
+                    author: Author::Assistant,
+                    title: "Approve command".to_owned(),
+                    command: "rm -rf /tmp/example".to_owned(),
+                    command_language: Some("bash".to_owned()),
+                    detail: "Need approval".to_owned(),
+                    decision: ApprovalDecision::Pending,
+                },
+            );
+            state.commit_locked(&mut inner).unwrap();
+        }
+
+        let reloaded = load_state(state.persistence_path.as_path())
+            .unwrap()
+            .expect("persisted state should exist");
+        let record = reloaded
+            .sessions
+            .iter()
+            .find(|record| record.session.id == session_id)
+            .expect("session should reload");
+
+        assert_eq!(record.session.status, SessionStatus::Error);
+        assert!(matches!(
+            record.session.messages.first(),
+            Some(Message::Approval { decision, .. }) if *decision == ApprovalDecision::Interrupted
+        ));
+        assert!(matches!(
+            record.session.messages.last(),
+            Some(Message::Text { text, .. }) if text.contains("request expired")
+        ));
     }
 
     #[test]

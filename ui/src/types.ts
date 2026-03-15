@@ -147,7 +147,7 @@ export type MarkdownMessage = BaseMessage & {
   markdown: string;
 };
 
-export type ApprovalDecision = "pending" | "accepted" | "acceptedForSession" | "rejected";
+export type ApprovalDecision = "pending" | "interrupted" | "accepted" | "acceptedForSession" | "rejected";
 
 export type ApprovalMessage = BaseMessage & {
   type: "approval";
