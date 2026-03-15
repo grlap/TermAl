@@ -75,6 +75,16 @@ export type GitStatusResponse = {
 };
 
 export type GitFileAction = "revert" | "stage" | "unstage";
+export type GitDiffSection = "staged" | "unstaged";
+
+export type GitDiffResponse = {
+  changeType: "edit" | "create";
+  diff: string;
+  diffId: string;
+  filePath?: string | null;
+  language?: string | null;
+  summary: string;
+};
 
 type CreateSessionRequest = {
   agent?: AgentType;
@@ -254,6 +264,19 @@ export function fetchDirectory(path: string) {
 
 export function fetchGitStatus(path: string) {
   return request<GitStatusResponse>(`/api/git/status?path=${encodeURIComponent(path)}`);
+}
+
+export function fetchGitDiff(payload: {
+  originalPath?: string | null;
+  path: string;
+  sectionId: GitDiffSection;
+  statusCode?: string | null;
+  workdir: string;
+}) {
+  return request<GitDiffResponse>("/api/git/diff", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
 }
 
 export function applyGitFileAction(payload: {

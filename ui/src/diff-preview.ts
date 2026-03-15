@@ -2,6 +2,11 @@ import type { DiffMessage } from "./types";
 
 const OMITTED_SECTION_MARKER = "...";
 
+type DiffHunk = {
+  modifiedStart: number;
+  lines: string[];
+};
+
 export type DiffPreviewChangeSummary = {
   addedLineCount: number;
   changedLineCount: number;
@@ -17,6 +22,25 @@ export type DiffPreviewModel = {
 };
 
 export function buildDiffPreviewModel(
+  diff: string,
+  changeType: DiffMessage["changeType"],
+  latestFileContent?: string | null,
+): DiffPreviewModel {
+  const fallbackPreview = buildPatchPreviewModel(diff, changeType);
+  const expandedPreview =
+    latestFileContent != null
+      ? expandDiffPreviewToWholeFile(
+          diff,
+          changeType,
+          latestFileContent,
+          fallbackPreview.changeSummary,
+        )
+      : null;
+
+  return expandedPreview ?? fallbackPreview;
+}
+
+function buildPatchPreviewModel(
   diff: string,
   changeType: DiffMessage["changeType"],
 ): DiffPreviewModel {
@@ -57,12 +81,7 @@ export function buildDiffPreviewModel(
       continue;
     }
 
-    if (
-      line.startsWith("diff --git ") ||
-      line.startsWith("index ") ||
-      line.startsWith("--- ") ||
-      line.startsWith("+++ ")
-    ) {
+    if (isDiffMetadataLine(line)) {
       flushChangeBlock();
       continue;
     }
@@ -92,7 +111,6 @@ export function buildDiffPreviewModel(
       originalLines.push(content);
       modifiedLines.push(content);
       currentHunkHasContent = true;
-      continue;
     }
   }
 
@@ -116,6 +134,180 @@ export function buildDiffPreviewModel(
         : null,
     originalText,
   };
+}
+
+function expandDiffPreviewToWholeFile(
+  diff: string,
+  changeType: DiffMessage["changeType"],
+  latestFileContent: string,
+  changeSummary: DiffPreviewChangeSummary,
+): DiffPreviewModel | null {
+  const normalizedLatestFileContent = normalizeLineEndings(latestFileContent);
+  if (changeType === "create") {
+    return {
+      changeSummary,
+      hasStructuredPreview: true,
+      modifiedText: normalizedLatestFileContent,
+      note: null,
+      originalText: "",
+    };
+  }
+
+  const hunks = parseUnifiedDiffHunks(diff);
+  if (hunks.length === 0) {
+    return null;
+  }
+
+  const modifiedSourceLines = splitContentLines(normalizedLatestFileContent);
+  const originalLines: string[] = [];
+  const modifiedLines: string[] = [];
+  let modifiedIndex = 0;
+
+  for (const hunk of hunks) {
+    const targetIndex = clampLineIndex(
+      hunk.modifiedStart - 1,
+      modifiedIndex,
+      modifiedSourceLines.length,
+    );
+    while (modifiedIndex < targetIndex) {
+      const line = modifiedSourceLines[modifiedIndex] ?? "";
+      originalLines.push(line);
+      modifiedLines.push(line);
+      modifiedIndex += 1;
+    }
+
+    for (const line of hunk.lines) {
+      if (line === "\\ No newline at end of file") {
+        continue;
+      }
+
+      const prefix = line[0] ?? "";
+      const content = line.slice(1);
+      if (prefix === " ") {
+        if (modifiedSourceLines[modifiedIndex] !== content) {
+          return null;
+        }
+
+        originalLines.push(content);
+        modifiedLines.push(content);
+        modifiedIndex += 1;
+        continue;
+      }
+
+      if (prefix === "+") {
+        if (modifiedSourceLines[modifiedIndex] !== content) {
+          return null;
+        }
+
+        modifiedLines.push(content);
+        modifiedIndex += 1;
+        continue;
+      }
+
+      if (prefix === "-") {
+        originalLines.push(content);
+      }
+    }
+  }
+
+  while (modifiedIndex < modifiedSourceLines.length) {
+    const line = modifiedSourceLines[modifiedIndex] ?? "";
+    originalLines.push(line);
+    modifiedLines.push(line);
+    modifiedIndex += 1;
+  }
+
+  return {
+    changeSummary,
+    hasStructuredPreview: true,
+    modifiedText: modifiedLines.join("\n"),
+    note: null,
+    originalText: originalLines.join("\n"),
+  };
+}
+
+function parseUnifiedDiffHunks(diff: string): DiffHunk[] {
+  const hunks: DiffHunk[] = [];
+  let currentHunk: DiffHunk | null = null;
+
+  for (const line of diff.split("\n")) {
+    if (line.startsWith("@@")) {
+      const hunkHeader = parseHunkHeader(line);
+      if (!hunkHeader) {
+        continue;
+      }
+
+      currentHunk = {
+        modifiedStart: hunkHeader.modifiedStart,
+        lines: [],
+      };
+      hunks.push(currentHunk);
+      continue;
+    }
+
+    if (!currentHunk) {
+      continue;
+    }
+
+    if (isDiffMetadataLine(line)) {
+      continue;
+    }
+
+    if (
+      line.startsWith(" ") ||
+      line.startsWith("+") ||
+      line.startsWith("-") ||
+      line === "\\ No newline at end of file"
+    ) {
+      currentHunk.lines.push(line);
+    }
+  }
+
+  return hunks;
+}
+
+function parseHunkHeader(line: string) {
+  const match = /^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@/.exec(line);
+  if (!match) {
+    return null;
+  }
+
+  return {
+    modifiedStart: Number.parseInt(match[1] ?? "1", 10),
+  };
+}
+
+function isDiffMetadataLine(line: string) {
+  return (
+    line.startsWith("diff --git ") ||
+    line.startsWith("index ") ||
+    line.startsWith("--- ") ||
+    line.startsWith("+++ ") ||
+    line.startsWith("new file mode ") ||
+    line.startsWith("deleted file mode ") ||
+    line.startsWith("rename from ") ||
+    line.startsWith("rename to ")
+  );
+}
+
+function splitContentLines(text: string) {
+  if (!text) {
+    return [];
+  }
+
+  const lines = text.split("\n");
+  if (text.endsWith("\n")) {
+    lines.pop();
+  }
+  return lines;
+}
+
+function normalizeLineEndings(text: string) {
+  return text.replace(/\r\n/g, "\n");
+}
+
+function clampLineIndex(value: number, min: number, max: number) {
+  return Math.min(Math.max(value, min), max);
 }
 
 function appendOmittedSectionMarker(originalLines: string[], modifiedLines: string[]) {

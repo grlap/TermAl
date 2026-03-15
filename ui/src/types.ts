@@ -88,6 +88,7 @@ export type Message =
   | CommandMessage
   | DiffMessage
   | MarkdownMessage
+  | SubagentResultMessage
   | ApprovalMessage;
 
 export type ImageAttachment = {
@@ -145,6 +146,14 @@ export type MarkdownMessage = BaseMessage & {
   type: "markdown";
   title: string;
   markdown: string;
+};
+
+export type SubagentResultMessage = BaseMessage & {
+  type: "subagentResult";
+  title: string;
+  summary: string;
+  conversationId?: string | null;
+  turnId?: string | null;
 };
 
 export type ApprovalDecision = "pending" | "interrupted" | "accepted" | "acceptedForSession" | "rejected";

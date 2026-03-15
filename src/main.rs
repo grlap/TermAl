@@ -65,6 +65,7 @@ async fn run_server() -> Result<()> {
         .route("/api/file", get(read_file).put(write_file))
         .route("/api/fs", get(read_directory))
         .route("/api/git/status", get(read_git_status))
+        .route("/api/git/diff", post(read_git_diff))
         .route("/api/git/file", post(apply_git_file_action))
         .route("/api/state", get(get_state))
         .route("/api/events", get(state_events))
@@ -5236,6 +5237,16 @@ fn codex_message_thread_id<'a>(message: &'a Value) -> Option<&'a str> {
         .or_else(|| message.pointer("/params/thread/id").and_then(Value::as_str))
 }
 
+fn shared_codex_session_thread_id<'a>(method: &str, message: &'a Value) -> Option<&'a str> {
+    codex_message_thread_id(message).or_else(|| {
+        if method == "codex/event/task_complete" {
+            message.pointer("/params/conversationId").and_then(Value::as_str)
+        } else {
+            None
+        }
+    })
+}
+
 fn handle_shared_codex_prompt_command(
     writer: &mut impl Write,
     pending_requests: &CodexPendingRequestMap,
@@ -5386,7 +5397,7 @@ fn handle_shared_codex_app_server_message(
         return Ok(());
     }
 
-    let Some(thread_id) = codex_message_thread_id(message) else {
+    let Some(thread_id) = shared_codex_session_thread_id(method, message) else {
         match method {
             "thread/archived"
             | "thread/closed"
@@ -5556,6 +5567,9 @@ fn handle_shared_codex_app_server_notification(
                 state.fail_turn_if_runtime_matches(session_id, runtime_token, &detail)?;
             }
         }
+        "codex/event/task_complete" => {
+            handle_shared_codex_task_complete(message, recorder)?;
+        }
         _ if method.starts_with("codex/event/") => {}
         _ => {
             log_unhandled_codex_event(
@@ -5566,6 +5580,28 @@ fn handle_shared_codex_app_server_notification(
     }
 
     Ok(())
+}
+
+fn handle_shared_codex_task_complete(
+    message: &Value,
+    recorder: &mut impl TurnRecorder,
+) -> Result<()> {
+    let Some(summary) = message
+        .pointer("/params/msg/last_agent_message")
+        .and_then(Value::as_str)
+    else {
+        return Ok(());
+    };
+
+    recorder.push_subagent_result(
+        "Subagent completed",
+        summary,
+        message.pointer("/params/conversationId").and_then(Value::as_str),
+        message
+            .pointer("/params/msg/turn_id")
+            .and_then(Value::as_str)
+            .or_else(|| message.pointer("/params/turn_id").and_then(Value::as_str)),
+    )
 }
 
 fn handle_codex_app_server_request(
@@ -5749,6 +5785,9 @@ fn handle_codex_app_server_notification(
             } else {
                 state.fail_turn_if_runtime_matches(session_id, runtime_token, &detail)?;
             }
+        }
+        "codex/event/task_complete" => {
+            handle_shared_codex_task_complete(message, recorder)?;
         }
         _ if method.starts_with("codex/event/") => {}
         _ => {
@@ -7317,6 +7356,13 @@ trait TurnRecorder {
     fn note_external_session(&mut self, session_id: &str) -> Result<()>;
     fn push_approval(&mut self, title: &str, command: &str, detail: &str) -> Result<()>;
     fn push_text(&mut self, text: &str) -> Result<()>;
+    fn push_subagent_result(
+        &mut self,
+        title: &str,
+        summary: &str,
+        conversation_id: Option<&str>,
+        turn_id: Option<&str>,
+    ) -> Result<()>;
     fn push_thinking(&mut self, title: &str, lines: Vec<String>) -> Result<()>;
     fn push_diff(
         &mut self,
@@ -7555,6 +7601,33 @@ impl TurnRecorder for SessionRecorder {
         )
     }
 
+    fn push_subagent_result(
+        &mut self,
+        title: &str,
+        summary: &str,
+        conversation_id: Option<&str>,
+        turn_id: Option<&str>,
+    ) -> Result<()> {
+        let trimmed = summary.trim();
+        if trimmed.is_empty() {
+            return Ok(());
+        }
+
+        self.finish_streaming_text()?;
+        self.state.push_message(
+            &self.session_id,
+            Message::SubagentResult {
+                id: self.state.allocate_message_id(),
+                timestamp: stamp_now(),
+                author: Author::Assistant,
+                title: title.to_owned(),
+                summary: trimmed.to_owned(),
+                conversation_id: conversation_id.map(str::to_owned),
+                turn_id: turn_id.map(str::to_owned),
+            },
+        )
+    }
+
     fn text_delta(&mut self, delta: &str) -> Result<()> {
         if delta.is_empty() {
             return Ok(());
@@ -7733,6 +7806,33 @@ impl TurnRecorder for BorrowedSessionRecorder<'_> {
         )
     }
 
+    fn push_subagent_result(
+        &mut self,
+        title: &str,
+        summary: &str,
+        conversation_id: Option<&str>,
+        turn_id: Option<&str>,
+    ) -> Result<()> {
+        let trimmed = summary.trim();
+        if trimmed.is_empty() {
+            return Ok(());
+        }
+
+        self.finish_streaming_text()?;
+        self.state.push_message(
+            self.session_id,
+            Message::SubagentResult {
+                id: self.state.allocate_message_id(),
+                timestamp: stamp_now(),
+                author: Author::Assistant,
+                title: title.to_owned(),
+                summary: trimmed.to_owned(),
+                conversation_id: conversation_id.map(str::to_owned),
+                turn_id: turn_id.map(str::to_owned),
+            },
+        )
+    }
+
     fn text_delta(&mut self, delta: &str) -> Result<()> {
         if delta.is_empty() {
             return Ok(());
@@ -7891,6 +7991,18 @@ impl TurnRecorder for ReplPrinter {
         if !trimmed.is_empty() {
             println!("assistant> {trimmed}");
         }
+        Ok(())
+    }
+
+    fn push_subagent_result(
+        &mut self,
+        title: &str,
+        summary: &str,
+        _conversation_id: Option<&str>,
+        _turn_id: Option<&str>,
+    ) -> Result<()> {
+        println!("subagent> {title}");
+        println!("{summary}");
         Ok(())
     }
 
@@ -9838,6 +9950,13 @@ async fn read_git_status(
     Ok(Json(load_git_status_for_path(&workdir)?))
 }
 
+async fn read_git_diff(
+    Json(request): Json<GitDiffRequest>,
+) -> Result<Json<GitDiffResponse>, ApiError> {
+    let workdir = resolve_requested_path(&request.workdir)?;
+    Ok(Json(load_git_diff_for_request(&workdir, &request)?))
+}
+
 async fn apply_git_file_action(
     Json(request): Json<GitFileActionRequest>,
 ) -> Result<Json<GitStatusResponse>, ApiError> {
@@ -9884,6 +10003,69 @@ async fn apply_git_file_action(
     }
 
     Ok(Json(load_git_status_for_path(&workdir)?))
+}
+
+fn load_git_diff_for_request(
+    workdir: &FsPath,
+    request: &GitDiffRequest,
+) -> Result<GitDiffResponse, ApiError> {
+    let workdir = normalize_git_workdir_path(workdir)?;
+    let Some(repo_root) = resolve_git_repo_root(&workdir)? else {
+        return Err(ApiError::bad_request("no git repository found"));
+    };
+
+    let current_path = normalize_git_repo_relative_path(&request.path)?;
+    let original_path = request
+        .original_path
+        .as_deref()
+        .map(normalize_git_repo_relative_path)
+        .transpose()?;
+    let status_code = request
+        .status_code
+        .as_deref()
+        .and_then(|value| value.chars().next())
+        .and_then(normalize_git_status_code);
+    let diff = load_git_file_diff_text(
+        &repo_root,
+        &current_path,
+        original_path.as_deref(),
+        status_code.as_deref(),
+        request.section_id,
+    )?;
+
+    if diff.trim().is_empty() {
+        return Err(ApiError::bad_request(format!(
+            "no diff available for {}",
+            current_path
+        )));
+    }
+
+    let file_path = repo_root.join(&current_path);
+    let diff_identity = [
+        repo_root.to_string_lossy().as_ref(),
+        request.section_id.as_key(),
+        current_path.as_str(),
+        original_path.as_deref().unwrap_or(""),
+        diff.as_str(),
+    ]
+    .join("\n");
+
+    Ok(GitDiffResponse {
+        change_type: if matches!(status_code.as_deref(), Some("A" | "?")) {
+            GitDiffChangeType::Create
+        } else {
+            GitDiffChangeType::Edit
+        },
+        diff,
+        diff_id: format!("git:{}", stable_text_hash(&diff_identity)),
+        file_path: file_path.exists().then(|| file_path.to_string_lossy().into_owned()),
+        language: infer_language_from_path(FsPath::new(&current_path)).map(str::to_owned),
+        summary: format!(
+            "{} changes in {}",
+            request.section_id.summary_label(),
+            current_path
+        ),
+    })
 }
 
 fn load_git_status_for_path(path: &FsPath) -> Result<GitStatusResponse, ApiError> {
@@ -10007,6 +10189,74 @@ fn collect_git_pathspecs(current_path: &str, original_path: Option<&str>) -> Vec
     pathspecs
 }
 
+fn load_git_file_diff_text(
+    repo_root: &FsPath,
+    current_path: &str,
+    original_path: Option<&str>,
+    status_code: Option<&str>,
+    section_id: GitDiffSection,
+) -> Result<String, ApiError> {
+    if matches!(section_id, GitDiffSection::Unstaged) && status_code == Some("?") {
+        return build_untracked_git_diff(repo_root, current_path);
+    }
+
+    let pathspecs = collect_git_pathspecs(current_path, original_path);
+    let mut command = Command::new("git");
+    command.arg("-C").arg(repo_root).arg("diff").arg("--find-renames");
+
+    if matches!(section_id, GitDiffSection::Staged) {
+        command.arg("--cached");
+    }
+
+    let output = command
+        .arg("--")
+        .args(&pathspecs)
+        .output()
+        .map_err(|err| ApiError::internal(format!("failed to load git diff: {err}")))?;
+
+    if output.status.success() {
+        return Ok(String::from_utf8_lossy(&output.stdout).into_owned());
+    }
+
+    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_owned();
+    if stderr.is_empty() {
+        Err(ApiError::internal("failed to load git diff"))
+    } else {
+        Err(ApiError::internal(format!(
+            "failed to load git diff: {stderr}"
+        )))
+    }
+}
+
+fn build_untracked_git_diff(repo_root: &FsPath, current_path: &str) -> Result<String, ApiError> {
+    let file_path = repo_root.join(current_path);
+    let content = fs::read(&file_path).map_err(|err| {
+        ApiError::internal(format!(
+            "failed to read untracked file {}: {err}",
+            file_path.display()
+        ))
+    })?;
+    let content = String::from_utf8_lossy(&content);
+    let lines: Vec<&str> = content.lines().collect();
+    let mut diff_lines = vec![
+        format!("diff --git a/{current_path} b/{current_path}"),
+        "new file mode 100644".to_owned(),
+        "--- /dev/null".to_owned(),
+        format!("+++ b/{current_path}"),
+    ];
+
+    if !lines.is_empty() {
+        diff_lines.push(format!("@@ -0,0 +1,{} @@", lines.len()));
+        diff_lines.extend(lines.into_iter().map(|line| format!("+{line}")));
+    }
+
+    if !content.is_empty() && !content.ends_with('\n') {
+        diff_lines.push(r"\ No newline at end of file".to_owned());
+    }
+
+    Ok(diff_lines.join("\n"))
+}
+
 fn revert_git_file_action(
     repo_root: &FsPath,
     current_path: &str,
@@ -10069,6 +10319,15 @@ fn run_git_pathspec_command(
     } else {
         Err(ApiError::internal(format!("{error_context}: {detail}")))
     }
+}
+
+fn stable_text_hash(value: &str) -> String {
+    let mut hash = 0xcbf29ce484222325_u64;
+    for byte in value.as_bytes() {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(0x100000001b3);
+    }
+    format!("{hash:016x}")
 }
 
 async fn state_events(
@@ -10675,6 +10934,22 @@ enum Message {
         title: String,
         markdown: String,
     },
+    #[serde(rename = "subagentResult")]
+    SubagentResult {
+        id: String,
+        timestamp: String,
+        author: Author,
+        title: String,
+        summary: String,
+        #[serde(
+            default,
+            rename = "conversationId",
+            skip_serializing_if = "Option::is_none"
+        )]
+        conversation_id: Option<String>,
+        #[serde(default, rename = "turnId", skip_serializing_if = "Option::is_none")]
+        turn_id: Option<String>,
+    },
     Approval {
         id: String,
         timestamp: String,
@@ -10700,6 +10975,7 @@ impl Message {
             | Self::Command { id, .. }
             | Self::Diff { id, .. }
             | Self::Markdown { id, .. }
+            | Self::SubagentResult { id, .. }
             | Self::Approval { id, .. } => id,
         }
     }
@@ -10713,6 +10989,7 @@ impl Message {
             Self::Markdown { title, .. } => Some(make_preview(title)),
             Self::Approval { title, .. } => Some(make_preview(title)),
             Self::Diff { summary, .. } => Some(make_preview(summary)),
+            Self::SubagentResult { .. } => None,
             Self::Command { .. } => None,
         }
     }
@@ -10818,12 +11095,66 @@ struct GitStatusResponse {
     workdir: String,
 }
 
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+enum GitDiffSection {
+    Staged,
+    Unstaged,
+}
+
+impl GitDiffSection {
+    fn as_key(self) -> &'static str {
+        match self {
+            Self::Staged => "staged",
+            Self::Unstaged => "unstaged",
+        }
+    }
+
+    fn summary_label(self) -> &'static str {
+        match self {
+            Self::Staged => "Staged",
+            Self::Unstaged => "Unstaged",
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 enum GitFileAction {
     Stage,
     Unstage,
     Revert,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct GitDiffRequest {
+    original_path: Option<String>,
+    path: String,
+    section_id: GitDiffSection,
+    #[serde(default)]
+    status_code: Option<String>,
+    workdir: String,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+enum GitDiffChangeType {
+    Edit,
+    Create,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct GitDiffResponse {
+    change_type: GitDiffChangeType,
+    diff: String,
+    diff_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    file_path: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    language: Option<String>,
+    summary: String,
 }
 
 #[derive(Deserialize)]
@@ -11308,6 +11639,17 @@ mod tests {
 
         fn push_text(&mut self, text: &str) -> Result<()> {
             self.texts.push(text.to_owned());
+            Ok(())
+        }
+
+        fn push_subagent_result(
+            &mut self,
+            title: &str,
+            summary: &str,
+            _conversation_id: Option<&str>,
+            _turn_id: Option<&str>,
+        ) -> Result<()> {
+            self.texts.push(format!("{title}\n{summary}"));
             Ok(())
         }
 
@@ -12232,6 +12574,91 @@ Use the active agent's tools.
                 SessionModelOption::plain("gpt-5.3-codex", "gpt-5.3-codex"),
             ]
         );
+    }
+
+    #[test]
+    fn shared_codex_task_complete_event_records_subagent_result() {
+        let state = test_app_state();
+        let session_id = test_session_id(&state, Agent::Codex);
+        let (runtime, _input_rx, process) = test_shared_codex_runtime("shared-codex-task-complete");
+
+        {
+            let mut inner = state.inner.lock().expect("state mutex poisoned");
+            let index = inner
+                .find_session_index(&session_id)
+                .expect("Codex session should exist");
+            inner.sessions[index].runtime = SessionRuntime::Codex(CodexRuntimeHandle {
+                runtime_id: runtime.runtime_id.clone(),
+                input_tx: runtime.input_tx.clone(),
+                process,
+                shared_session: Some(SharedCodexSessionHandle {
+                    runtime: runtime.clone(),
+                    session_id: session_id.clone(),
+                }),
+            });
+            inner.sessions[index].session.status = SessionStatus::Active;
+        }
+
+        runtime
+            .sessions
+            .lock()
+            .expect("shared Codex session mutex poisoned")
+            .insert(
+                session_id.clone(),
+                SharedCodexSessionState {
+                    thread_id: Some("conversation-123".to_owned()),
+                    ..SharedCodexSessionState::default()
+                },
+            );
+        runtime
+            .thread_sessions
+            .lock()
+            .expect("shared Codex thread mutex poisoned")
+            .insert("conversation-123".to_owned(), session_id.clone());
+
+        let pending_requests = Arc::new(Mutex::new(HashMap::new()));
+        let message = json!({
+            "method": "codex/event/task_complete",
+            "params": {
+                "conversationId": "conversation-123",
+                "msg": {
+                    "last_agent_message": "Reviewer found a real bug.",
+                    "turn_id": "turn-sub-1",
+                    "type": "task_complete"
+                }
+            }
+        });
+
+        handle_shared_codex_app_server_message(
+            &message,
+            &state,
+            &runtime.runtime_id,
+            &pending_requests,
+            &runtime.sessions,
+            &runtime.thread_sessions,
+        )
+        .unwrap();
+
+        let snapshot = state.snapshot();
+        let session = snapshot
+            .sessions
+            .iter()
+            .find(|session| session.id == session_id)
+            .expect("updated session should be present");
+
+        assert!(matches!(
+            session.messages.last(),
+            Some(Message::SubagentResult {
+                title,
+                summary,
+                conversation_id,
+                turn_id,
+                ..
+            }) if title == "Subagent completed"
+                && summary == "Reviewer found a real bug."
+                && conversation_id.as_deref() == Some("conversation-123")
+                && turn_id.as_deref() == Some("turn-sub-1")
+        ));
     }
 
     #[test]
@@ -14272,6 +14699,68 @@ Use the active agent's tools.
         assert!(!file_path.exists());
         let status = load_git_status_for_path(&repo_root).unwrap();
         assert!(status.files.is_empty());
+
+        fs::remove_dir_all(repo_root).unwrap();
+    }
+
+    #[test]
+    fn git_diff_request_loads_staged_patch_for_modified_files() {
+        let repo_root = create_test_git_repo();
+        let file_path = repo_root.join("tracked.txt");
+        fs::write(&file_path, "changed\n").unwrap();
+
+        run_git_pathspec_command(
+            &repo_root,
+            &["add", "-A"],
+            &["tracked.txt".to_owned()],
+            "failed to stage git changes",
+        )
+        .unwrap();
+
+        let diff = load_git_diff_for_request(
+            &repo_root,
+            &GitDiffRequest {
+                original_path: None,
+                path: "tracked.txt".to_owned(),
+                section_id: GitDiffSection::Staged,
+                status_code: Some("M".to_owned()),
+                workdir: repo_root.to_string_lossy().into_owned(),
+            },
+        )
+        .unwrap();
+
+        assert_eq!(diff.change_type, GitDiffChangeType::Edit);
+        assert_eq!(diff.file_path.as_deref().map(FsPath::new), Some(file_path.as_path()));
+        assert_eq!(diff.summary, "Staged changes in tracked.txt");
+        assert!(diff.diff.contains("-base"));
+        assert!(diff.diff.contains("+changed"));
+
+        fs::remove_dir_all(repo_root).unwrap();
+    }
+
+    #[test]
+    fn git_diff_request_builds_untracked_patch() {
+        let repo_root = create_test_git_repo();
+        let file_path = repo_root.join("scratch.txt");
+        fs::write(&file_path, "temp\n").unwrap();
+
+        let diff = load_git_diff_for_request(
+            &repo_root,
+            &GitDiffRequest {
+                original_path: None,
+                path: "scratch.txt".to_owned(),
+                section_id: GitDiffSection::Unstaged,
+                status_code: Some("?".to_owned()),
+                workdir: repo_root.to_string_lossy().into_owned(),
+            },
+        )
+        .unwrap();
+
+        assert_eq!(diff.change_type, GitDiffChangeType::Create);
+        assert_eq!(diff.file_path.as_deref().map(FsPath::new), Some(file_path.as_path()));
+        assert_eq!(diff.summary, "Unstaged changes in scratch.txt");
+        assert!(diff.diff.contains("new file mode 100644"));
+        assert!(diff.diff.contains("+temp"));
 
         fs::remove_dir_all(repo_root).unwrap();
     }

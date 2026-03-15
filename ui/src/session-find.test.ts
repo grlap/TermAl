@@ -96,6 +96,32 @@ describe("session find helpers", () => {
     ]);
   });
 
+  it("indexes subagent result messages for conversation search", () => {
+    const session = createSession({
+      messages: [
+        {
+          id: "message-subagent",
+          type: "subagentResult",
+          author: "assistant",
+          timestamp: "09:00",
+          title: "Subagent completed",
+          summary: "Reviewer found a batching bug in location smoothing.",
+          conversationId: "conversation-123",
+          turnId: "turn-sub-1",
+        },
+      ],
+    });
+
+    expect(buildSessionSearchMatches(session, "batching")).toEqual([
+      expect.objectContaining({
+        itemId: "message-subagent",
+        itemKey: sessionSearchItemKey("message", "message-subagent"),
+        itemKind: "message",
+      }),
+    ]);
+    expect(buildSessionSearchMatches(session, "turn-sub-1")).toHaveLength(1);
+  });
+
   it("returns no results for blank queries", () => {
     const session = createSession({
       messages: [

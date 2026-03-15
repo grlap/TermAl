@@ -5,6 +5,7 @@ import type {
   ImageAttachment,
   MarkdownMessage,
   Message,
+  SubagentResultMessage,
   PendingPrompt,
   Session,
   ThinkingMessage,
@@ -181,6 +182,8 @@ function collectMessageSearchText(message: Message) {
       return collectDiffSearchText(message);
     case "markdown":
       return collectMarkdownSearchText(message);
+    case "subagentResult":
+      return collectSubagentResultSearchText(message);
     case "approval":
       return collectApprovalSearchText(message);
     default:
@@ -202,6 +205,10 @@ function collectDiffSearchText(message: DiffMessage) {
 
 function collectMarkdownSearchText(message: MarkdownMessage) {
   return joinSearchableParts([message.title, message.markdown]);
+}
+
+function collectSubagentResultSearchText(message: SubagentResultMessage) {
+  return joinSearchableParts([message.title, message.summary, message.conversationId, message.turnId]);
 }
 
 function collectApprovalSearchText(message: ApprovalMessage) {

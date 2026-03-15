@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { applyGitFileAction, fetchGitStatus, type GitStatusFile, type GitStatusResponse } from "../api";
+import { applyGitFileAction, fetchGitDiff, fetchGitStatus, type GitDiffResponse, type GitStatusFile, type GitStatusResponse } from "../api";
 import { GitStatusPanel } from "./GitStatusPanel";
 
 vi.mock("../api", async () => {
@@ -9,20 +9,23 @@ vi.mock("../api", async () => {
   return {
     ...actual,
     applyGitFileAction: vi.fn(),
+    fetchGitDiff: vi.fn(),
     fetchGitStatus: vi.fn(),
   };
 });
 
 const applyGitFileActionMock = vi.mocked(applyGitFileAction);
+const fetchGitDiffMock = vi.mocked(fetchGitDiff);
 const fetchGitStatusMock = vi.mocked(fetchGitStatus);
 
 describe("GitStatusPanel", () => {
   beforeEach(() => {
     applyGitFileActionMock.mockReset();
+    fetchGitDiffMock.mockReset();
     fetchGitStatusMock.mockReset();
   });
 
-  it("renders staged and unstaged trees and opens files relative to the repo root", async () => {
+  it("renders staged and unstaged trees and opens diff previews from git rows", async () => {
     fetchGitStatusMock.mockResolvedValue(
       makeStatusResponse([
         {
@@ -41,10 +44,11 @@ describe("GitStatusPanel", () => {
         },
       ]),
     );
+    fetchGitDiffMock.mockResolvedValue(makeDiffResponse());
 
-    const onOpenPath = vi.fn();
+    const onOpenDiff = vi.fn();
 
-    render(<GitStatusPanel workdir="/repo" onOpenPath={onOpenPath} onOpenWorkdir={() => {}} />);
+    render(<GitStatusPanel workdir="/repo" onOpenDiff={onOpenDiff} onOpenWorkdir={() => {}} />);
 
     await waitFor(() => {
       expect(fetchGitStatusMock).toHaveBeenCalledWith("/repo");
@@ -57,7 +61,19 @@ describe("GitStatusPanel", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /^ControlPanelSurface\.tsx$/i }));
 
-    expect(onOpenPath).toHaveBeenCalledWith("/repo/ui/src/panels/ControlPanelSurface.tsx");
+    await waitFor(() => {
+      expect(fetchGitDiffMock).toHaveBeenCalledWith({
+        originalPath: undefined,
+        path: "ui/src/panels/ControlPanelSurface.tsx",
+        sectionId: "staged",
+        statusCode: "A",
+        workdir: "/repo",
+      });
+    });
+
+    await waitFor(() => {
+      expect(onOpenDiff).toHaveBeenCalledWith(makeDiffResponse());
+    });
 
     fireEvent.click(screen.getByRole("button", { name: /^Staged\b/i }));
 
@@ -85,7 +101,7 @@ describe("GitStatusPanel", () => {
       <GitStatusPanel
         workdir="/repo"
         onStatusChange={onStatusChange}
-        onOpenPath={() => {}}
+        onOpenDiff={() => {}}
         onOpenWorkdir={() => {}}
       />,
     );
@@ -117,7 +133,7 @@ describe("GitStatusPanel", () => {
       <GitStatusPanel
         workdir="/repo"
         onStatusChange={() => {}}
-        onOpenPath={() => {}}
+        onOpenDiff={() => {}}
         onOpenWorkdir={() => {}}
       />,
     );
@@ -131,7 +147,7 @@ describe("GitStatusPanel", () => {
       <GitStatusPanel
         workdir="/repo"
         onStatusChange={() => {}}
-        onOpenPath={() => {}}
+        onOpenDiff={() => {}}
         onOpenWorkdir={() => {}}
       />,
     );
@@ -158,7 +174,7 @@ describe("GitStatusPanel", () => {
       ]),
     );
 
-    render(<GitStatusPanel workdir="/repo" onOpenPath={() => {}} onOpenWorkdir={() => {}} />);
+    render(<GitStatusPanel workdir="/repo" onOpenDiff={() => {}} onOpenWorkdir={() => {}} />);
 
     await screen.findByText("scratch.txt");
 
@@ -205,7 +221,7 @@ describe("GitStatusPanel", () => {
       ]),
     );
 
-    render(<GitStatusPanel workdir="/repo" onOpenPath={() => {}} onOpenWorkdir={() => {}} />);
+    render(<GitStatusPanel workdir="/repo" onOpenDiff={() => {}} onOpenWorkdir={() => {}} />);
 
     fireEvent.click(await screen.findByRole("button", { name: /Stage ui/i }));
 
@@ -264,7 +280,7 @@ describe("GitStatusPanel", () => {
       ]),
     );
 
-    render(<GitStatusPanel workdir="/repo" onOpenPath={() => {}} onOpenWorkdir={() => {}} />);
+    render(<GitStatusPanel workdir="/repo" onOpenDiff={() => {}} onOpenWorkdir={() => {}} />);
 
     fireEvent.click(await screen.findByRole("button", { name: /Move ui to unstaged/i }));
 
@@ -295,6 +311,17 @@ describe("GitStatusPanel", () => {
     expect(await screen.findByRole("button", { name: /Stage ui/i })).toBeInTheDocument();
   });
 });
+
+function makeDiffResponse(): GitDiffResponse {
+  return {
+    changeType: "edit",
+    diff: ["@@ -1 +1 @@", "-old", "+new"].join("\n"),
+    diffId: "git:preview-1",
+    filePath: "/repo/ui/src/panels/ControlPanelSurface.tsx",
+    language: "typescript",
+    summary: "Staged changes in ui/src/panels/ControlPanelSurface.tsx",
+  };
+}
 
 function makeStatusResponse(files: GitStatusFile[]): GitStatusResponse {
   return {

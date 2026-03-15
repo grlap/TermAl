@@ -88,4 +88,24 @@ describe("buildDiffPreviewModel", () => {
       removedLineCount: 1,
     });
   });
+
+  it("reconstructs the whole file when latest file content is available", () => {
+    expect(
+      buildDiffPreviewModel(
+        ["@@ -2 +2 @@", "-before", "+bravo"].join("\n"),
+        "edit",
+        "alpha\nbravo\ncharlie\n",
+      ),
+    ).toEqual({
+      changeSummary: {
+        addedLineCount: 0,
+        changedLineCount: 1,
+        removedLineCount: 0,
+      },
+      hasStructuredPreview: true,
+      modifiedText: ["alpha", "bravo", "charlie"].join("\n"),
+      note: null,
+      originalText: ["alpha", "before", "charlie"].join("\n"),
+    });
+  });
 });

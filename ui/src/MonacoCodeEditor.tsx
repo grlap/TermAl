@@ -1,9 +1,10 @@
-import { useEffect, useLayoutEffect, useRef } from "react";
+﻿import { useEffect, useLayoutEffect, useRef } from "react";
 import type {
   IDisposable,
   editor as MonacoEditor,
 } from "monaco-editor/esm/vs/editor/editor.api";
 import {
+  applyMonacoTheme,
   ensureMonacoEnvironment,
   monacoThemeName,
   resolveMonacoLanguage,
@@ -68,7 +69,7 @@ export function MonacoCodeEditor({
 
     const monaco = ensureMonacoEnvironment();
     monacoRef.current = monaco;
-    monaco.editor.setTheme(monacoThemeName(appearance));
+    syncTheme(monaco);
 
     const editor = monaco.editor.create(container, {
       ariaLabel,
@@ -148,9 +149,33 @@ export function MonacoCodeEditor({
       return;
     }
 
-    monaco.editor.setTheme(monacoThemeName(appearance));
+    syncTheme(monaco);
     layoutEditor();
     emitStatus();
+  }, [appearance]);
+
+  useEffect(() => {
+    const monaco = monacoRef.current;
+    if (!monaco || typeof document === "undefined" || typeof MutationObserver === "undefined") {
+      return;
+    }
+
+    const observer = new MutationObserver((mutations) => {
+      if (!mutations.some((mutation) => mutation.attributeName === "data-theme")) {
+        return;
+      }
+
+      syncTheme(monaco);
+      layoutEditor();
+      emitStatus();
+    });
+
+    observer.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ["data-theme"],
+    });
+
+    return () => observer.disconnect();
   }, [appearance]);
 
   useEffect(() => {
@@ -182,6 +207,11 @@ export function MonacoCodeEditor({
     layoutEditor();
     emitStatus();
   }, [value]);
+
+  function syncTheme(monacoModule: MonacoModule) {
+    applyMonacoTheme(monacoModule, appearance);
+    monacoModule.editor.setTheme(monacoThemeName(appearance));
+  }
 
   function layoutEditor() {
     const editor = editorRef.current;
@@ -263,7 +293,7 @@ function buildModelUri(monaco: MonacoModule, path: string | null | undefined, ba
     return monaco.Uri.parse(`${baseUri}/untitled.txt`);
   }
 
-  const segments = normalizedPath.split(/[/\\]+/).filter(Boolean);
+  const segments = normalizedPath.split(/[\\/]+/).filter(Boolean);
   const fileName = segments[segments.length - 1] ?? "file.txt";
   return monaco.Uri.parse(`${baseUri}/${encodeURIComponent(fileName)}?path=${encodeURIComponent(normalizedPath)}`);
 }
@@ -280,4 +310,3 @@ function resolveEditorFontFamily() {
   const configured = window.getComputedStyle(document.documentElement).getPropertyValue("--code-font").trim();
   return configured || "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace";
 }
-

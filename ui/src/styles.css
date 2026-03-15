@@ -10,6 +10,7 @@
   --control-radius-large: min(var(--button-radius-large), 1rem);
   --control-radius-pill: min(var(--button-radius-tight), 0.72rem);
   --control-panel-pane-width: 23rem;
+  --control-panel-pane-min-width: 18rem;
 }
 
 html,
@@ -1126,10 +1127,7 @@ textarea {
 }
 
 .tile-branch.control-panel-branch {
-  flex: 0 0 var(--control-panel-pane-width);
-  width: var(--control-panel-pane-width);
-  min-width: var(--control-panel-pane-width);
-  max-width: var(--control-panel-pane-width);
+  min-width: min(var(--control-panel-pane-min-width), 100%);
 }
 
 .tile-branch.flexible-branch {
@@ -3317,6 +3315,44 @@ textarea {
   justify-content: flex-end;
 }
 
+.diff-preview-statusbar {
+  border-top-left-radius: 0;
+  border-top-right-radius: 0;
+}
+
+.diff-preview-change-nav {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.diff-preview-nav-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.95rem;
+  height: 1.7rem;
+  padding: 0;
+  border: 1px solid color-mix(in srgb, #ffffff 26%, transparent);
+  border-radius: 0.5rem;
+  background: color-mix(in srgb, #ffffff 16%, transparent);
+  color: inherit;
+  cursor: pointer;
+}
+
+.diff-preview-nav-button:hover:not(:disabled) {
+  background: color-mix(in srgb, #ffffff 26%, transparent);
+}
+
+.diff-preview-nav-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.diff-preview-nav-button svg {
+  width: 0.95rem;
+  height: 0.95rem;
+}
 .diff-preview-toggle.selected {
   border-color: var(--accent-blue-border);
   background: color-mix(in srgb, var(--surface-white) 82%, var(--accent-blue-bg));
@@ -4309,6 +4345,32 @@ textarea {
 .approval-card {
   border-color: var(--accent-gold-border);
   background: var(--approval-bg);
+}
+
+.subagent-result-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.subagent-result-header h3 {
+  margin: 0;
+}
+
+.subagent-result-toggle {
+  flex: 0 0 auto;
+}
+
+.subagent-result-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.subagent-result-preview {
+  margin-bottom: 0;
 }
 
 .approval-actions {

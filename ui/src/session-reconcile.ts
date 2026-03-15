@@ -7,6 +7,7 @@ import type {
   Message,
   PendingPrompt,
   Session,
+  SubagentResultMessage,
   TextMessage,
   ThinkingMessage,
 } from "./types";
@@ -150,6 +151,8 @@ function reconcileMessage(previous: Message, next: Message): Message {
       return reconcileDiffMessage(previous as DiffMessage, next);
     case "markdown":
       return reconcileMarkdownMessage(previous as MarkdownMessage, next);
+    case "subagentResult":
+      return reconcileSubagentResultMessage(previous as SubagentResultMessage, next);
     case "approval":
       return reconcileApprovalMessage(previous as ApprovalMessage, next);
   }
@@ -228,6 +231,24 @@ function reconcileMarkdownMessage(previous: MarkdownMessage, next: MarkdownMessa
     previous.author === next.author &&
     previous.title === next.title &&
     previous.markdown === next.markdown
+  ) {
+    return previous;
+  }
+
+  return next;
+}
+
+function reconcileSubagentResultMessage(
+  previous: SubagentResultMessage,
+  next: SubagentResultMessage,
+): SubagentResultMessage {
+  if (
+    previous.timestamp === next.timestamp &&
+    previous.author === next.author &&
+    previous.title === next.title &&
+    previous.summary === next.summary &&
+    previous.conversationId === next.conversationId &&
+    previous.turnId === next.turnId
   ) {
     return previous;
   }

@@ -1,38 +1,74 @@
-import { useEffect, useLayoutEffect, useRef } from "react";
-import type { editor as MonacoEditor } from "monaco-editor/esm/vs/editor/editor.api";
 import {
+  forwardRef,
+  useEffect,
+  useImperativeHandle,
+  useLayoutEffect,
+  useRef,
+} from "react";
+import type { IDisposable, editor as MonacoEditor } from "monaco-editor/esm/vs/editor/editor.api";
+import {
+  applyMonacoTheme,
   ensureMonacoEnvironment,
   monacoThemeName,
   resolveMonacoLanguage,
   type MonacoAppearance,
   type MonacoModule,
 } from "./monaco";
+import type { MonacoCodeEditorStatus } from "./MonacoCodeEditor";
 
 type MonacoDiffEditorProps = {
   appearance: MonacoAppearance;
   ariaLabel: string;
   language?: string | null;
+  onStatusChange?: (status: MonacoDiffEditorStatus) => void;
   path?: string | null;
   modifiedValue: string;
   originalValue: string;
 };
 
-export function MonacoDiffEditor({
+export type MonacoDiffEditorStatus = MonacoCodeEditorStatus & {
+  changeCount: number;
+  currentChange: number;
+};
+
+export type MonacoDiffEditorHandle = {
+  goToNextChange: () => void;
+  goToPreviousChange: () => void;
+};
+
+export const MonacoDiffEditor = forwardRef<MonacoDiffEditorHandle, MonacoDiffEditorProps>(function MonacoDiffEditor({
   appearance,
   ariaLabel,
   language,
+  onStatusChange,
   path,
   modifiedValue,
   originalValue,
-}: MonacoDiffEditorProps) {
+}, ref) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const diffEditorRef = useRef<MonacoEditor.IStandaloneDiffEditor | null>(null);
   const monacoRef = useRef<MonacoModule | null>(null);
   const originalModelRef = useRef<MonacoEditor.ITextModel | null>(null);
   const modifiedModelRef = useRef<MonacoEditor.ITextModel | null>(null);
+  const modifiedCursorSubscriptionRef = useRef<IDisposable | null>(null);
+  const diffSubscriptionRef = useRef<IDisposable | null>(null);
   const resizeObserverRef = useRef<ResizeObserver | null>(null);
   const untitledUriRef = useRef(`inmemory://termal-diff/${crypto.randomUUID()}`);
   const modelDescriptorRef = useRef("");
+  const statusHandlerRef = useRef(onStatusChange);
+
+  statusHandlerRef.current = onStatusChange;
+
+  useImperativeHandle(ref, () => ({
+    goToNextChange() {
+      diffEditorRef.current?.goToDiff("next");
+      emitStatus();
+    },
+    goToPreviousChange() {
+      diffEditorRef.current?.goToDiff("previous");
+      emitStatus();
+    },
+  }), []);
 
   useLayoutEffect(() => {
     const container = containerRef.current;
@@ -42,7 +78,7 @@ export function MonacoDiffEditor({
 
     const monaco = ensureMonacoEnvironment();
     monacoRef.current = monaco;
-    monaco.editor.setTheme(monacoThemeName(appearance));
+    syncTheme(monaco);
 
     const editor = monaco.editor.createDiffEditor(container, {
       ariaLabel,
@@ -73,6 +109,7 @@ export function MonacoDiffEditor({
       readOnly: true,
       renderIndicators: true,
       renderSideBySide: true,
+      renderWhitespace: "all",
       roundedSelection: false,
       scrollBeyondLastLine: false,
       stickyScroll: { enabled: false },
@@ -80,6 +117,12 @@ export function MonacoDiffEditor({
       wordWrap: "off",
     });
     diffEditorRef.current = editor;
+    modifiedCursorSubscriptionRef.current = editor.getModifiedEditor().onDidChangeCursorPosition(() => {
+      emitStatus();
+    });
+    diffSubscriptionRef.current = editor.onDidUpdateDiff(() => {
+      emitStatus();
+    });
 
     resizeObserverRef.current = new ResizeObserver(() => {
       window.requestAnimationFrame(layoutEditor);
@@ -91,7 +134,11 @@ export function MonacoDiffEditor({
 
     window.requestAnimationFrame(() => {
       layoutEditor();
-      window.requestAnimationFrame(layoutEditor);
+      emitStatus();
+      window.requestAnimationFrame(() => {
+        layoutEditor();
+        emitStatus();
+      });
     });
 
     replaceModels(originalValue, modifiedValue, path, language);
@@ -99,6 +146,10 @@ export function MonacoDiffEditor({
     return () => {
       resizeObserverRef.current?.disconnect();
       resizeObserverRef.current = null;
+      modifiedCursorSubscriptionRef.current?.dispose();
+      modifiedCursorSubscriptionRef.current = null;
+      diffSubscriptionRef.current?.dispose();
+      diffSubscriptionRef.current = null;
       diffEditorRef.current?.dispose();
       diffEditorRef.current = null;
       originalModelRef.current?.dispose();
@@ -116,16 +167,44 @@ export function MonacoDiffEditor({
       return;
     }
 
-    monaco.editor.setTheme(monacoThemeName(appearance));
+    syncTheme(monaco);
     layoutEditor();
+    emitStatus();
+  }, [appearance]);
+
+  useEffect(() => {
+    const monaco = monacoRef.current;
+    if (!monaco || typeof document === "undefined" || typeof MutationObserver === "undefined") {
+      return;
+    }
+
+    const observer = new MutationObserver((mutations) => {
+      if (!mutations.some((mutation) => mutation.attributeName === "data-theme")) {
+        return;
+      }
+
+      syncTheme(monaco);
+      layoutEditor();
+      emitStatus();
+    });
+
+    observer.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ["data-theme"],
+    });
+
+    return () => observer.disconnect();
   }, [appearance]);
 
   useEffect(() => {
     const nextDescriptor = describeModel(path, language);
     if (modelDescriptorRef.current !== nextDescriptor) {
       replaceModels(originalValue, modifiedValue, path, language);
+      return;
     }
+
     layoutEditor();
+    emitStatus();
   }, [language, modifiedValue, originalValue, path]);
 
   useEffect(() => {
@@ -140,7 +219,13 @@ export function MonacoDiffEditor({
     }
 
     layoutEditor();
+    emitStatus();
   }, [modifiedValue, originalValue]);
+
+  function syncTheme(monacoModule: MonacoModule) {
+    applyMonacoTheme(monacoModule, appearance);
+    monacoModule.editor.setTheme(monacoThemeName(appearance));
+  }
 
   function layoutEditor() {
     const editor = diffEditorRef.current;
@@ -156,6 +241,29 @@ export function MonacoDiffEditor({
     }
 
     editor.layout({ width, height });
+  }
+
+  function emitStatus() {
+    const editor = diffEditorRef.current;
+    const model = modifiedModelRef.current;
+    if (!editor || !model) {
+      return;
+    }
+
+    const modifiedEditor = editor.getModifiedEditor();
+    const position = modifiedEditor.getPosition();
+    const options = model.getOptions();
+    const lineChanges = editor.getLineChanges() ?? [];
+
+    statusHandlerRef.current?.({
+      line: position?.lineNumber ?? 1,
+      column: position?.column ?? 1,
+      tabSize: options.tabSize,
+      insertSpaces: options.insertSpaces,
+      endOfLine: model.getEOL() === "\r\n" ? "CRLF" : "LF",
+      changeCount: lineChanges.length,
+      currentChange: getCurrentChangeIndex(lineChanges, position?.lineNumber ?? 1),
+    });
   }
 
   function replaceModels(
@@ -197,10 +305,11 @@ export function MonacoDiffEditor({
     modifiedModelRef.current = modifiedModel;
     modelDescriptorRef.current = describeModel(nextPath, nextLanguage);
     layoutEditor();
+    emitStatus();
   }
 
   return <div ref={containerRef} className="monaco-diff-editor" />;
-}
+});
 
 function buildModelUri(
   monaco: MonacoModule,
@@ -208,7 +317,7 @@ function buildModelUri(
   path: string | null | undefined,
   role: "original" | "modified",
 ) {
-  const suffix = path?.trim().split(/[/\\]+/).filter(Boolean).join("-") ?? "untitled";
+  const suffix = path?.trim().split(/[\\/]+/).filter(Boolean).join("-") ?? "untitled";
   return monaco.Uri.parse(`${baseUri}/${role}/${encodeURIComponent(suffix)}`);
 }
 
@@ -223,4 +332,46 @@ function resolveEditorFontFamily() {
 
   const configured = window.getComputedStyle(document.documentElement).getPropertyValue("--code-font").trim();
   return configured || "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace";
+}
+
+function getCurrentChangeIndex(lineChanges: MonacoEditor.ILineChange[], lineNumber: number) {
+  if (lineChanges.length === 0) {
+    return 0;
+  }
+
+  for (let index = 0; index < lineChanges.length; index += 1) {
+    const change = lineChanges[index];
+    const start = resolveModifiedLineStart(change);
+    const end = resolveModifiedLineEnd(change, start);
+
+    if (lineNumber >= start && lineNumber <= end) {
+      return index + 1;
+    }
+
+    if (lineNumber < start) {
+      return index + 1;
+    }
+  }
+
+  return lineChanges.length;
+}
+
+function resolveModifiedLineStart(change: MonacoEditor.ILineChange) {
+  if (change.modifiedStartLineNumber > 0) {
+    return change.modifiedStartLineNumber;
+  }
+
+  if (change.modifiedEndLineNumber > 0) {
+    return change.modifiedEndLineNumber;
+  }
+
+  return 1;
+}
+
+function resolveModifiedLineEnd(change: MonacoEditor.ILineChange, fallbackStart: number) {
+  if (change.modifiedEndLineNumber > 0) {
+    return change.modifiedEndLineNumber;
+  }
+
+  return fallbackStart;
 }

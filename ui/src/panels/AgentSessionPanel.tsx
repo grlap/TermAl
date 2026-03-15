@@ -2790,6 +2790,8 @@ function estimateConversationMessageHeight(message: Message) {
         message.markdown.length === 0 ? 1 : message.markdown.split("\n").length;
       return Math.min(1600, Math.max(140, 124 + markdownLineCount * 24));
     }
+    case "subagentResult":
+      return Math.min(720, Math.max(132, 128 + Math.min(message.summary.split("\n").length, 4) * 24));
     case "approval":
       return Math.max(220, 188 + (message.detail.length === 0 ? 1 : message.detail.split("\n").length) * 22);
   }
