@@ -3386,6 +3386,264 @@ textarea {
   margin: 0;
 }
 
+.structured-diff-shell {
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--surface-white) 86%, #e9eef7 14%),
+      color-mix(in srgb, var(--surface-white) 95%, #f7f8fb 5%)
+    );
+}
+
+.structured-diff {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: clamp(22rem, 62vh, 48rem);
+  flex-direction: column;
+  color: var(--copy);
+}
+
+.structured-diff-column-headings {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.8rem;
+  padding: 0.85rem 1rem 0.7rem;
+  border-bottom: 1px solid color-mix(in srgb, var(--line) 82%, transparent);
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--surface-white) 85%, #d9e6ff 15%),
+      color-mix(in srgb, var(--surface-white) 98%, #f8fbff 2%)
+    );
+}
+
+.structured-diff-column-heading {
+  display: flex;
+  flex-direction: column;
+  gap: 0.18rem;
+  min-width: 0;
+}
+
+.structured-diff-column-heading strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.92rem;
+}
+
+.structured-diff-column-eyebrow {
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.structured-diff-body {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+  flex-direction: column;
+  gap: 0.9rem;
+  padding: 0.9rem 0.9rem 1rem;
+  overflow: auto;
+}
+
+.structured-diff-hunk {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  border: 1px solid color-mix(in srgb, var(--line) 88%, #000 12%);
+  border-radius: 0.8rem;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--surface-white) 96%, #f7f9fc 4%);
+  box-shadow: 0 0.6rem 1.5rem color-mix(in srgb, #b8c3d6 18%, transparent);
+}
+
+.structured-diff-hunk-header {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  min-width: 0;
+  padding: 0.72rem 0.9rem;
+  border-bottom: 1px solid color-mix(in srgb, var(--line) 80%, transparent);
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--accent-blue-soft) 62%, var(--surface-white)),
+      color-mix(in srgb, var(--surface-white) 95%, #f4f8ff 5%)
+    );
+}
+
+.structured-diff-hunk-badge {
+  flex: none;
+  border: 1px solid color-mix(in srgb, var(--accent-blue-border) 78%, transparent);
+  border-radius: 999px;
+  padding: 0.15rem 0.5rem;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--signal-blue);
+  background: color-mix(in srgb, var(--surface-white) 72%, var(--accent-blue-bg));
+}
+
+.structured-diff-hunk-header code {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.8rem;
+  color: color-mix(in srgb, var(--signal-blue) 76%, var(--copy));
+}
+
+.structured-diff-grid {
+  display: flex;
+  flex-direction: column;
+  background: var(--surface-white);
+}
+
+.structured-diff-row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.structured-diff-row + .structured-diff-row {
+  border-top: 1px solid color-mix(in srgb, var(--line) 76%, transparent);
+}
+
+.structured-diff-row-omitted {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.structured-diff-omitted {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 2.1rem;
+  padding: 0.5rem 1rem;
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--muted);
+  background:
+    repeating-linear-gradient(
+      -45deg,
+      color-mix(in srgb, var(--surface-white-soft) 55%, #eef2f8),
+      color-mix(in srgb, var(--surface-white-soft) 55%, #eef2f8) 10px,
+      color-mix(in srgb, var(--surface-white) 78%, #f8fbff) 10px,
+      color-mix(in srgb, var(--surface-white) 78%, #f8fbff) 20px
+    );
+}
+
+.structured-diff-cell {
+  display: grid;
+  grid-template-columns: 3.25rem 1.35rem minmax(0, 1fr);
+  min-width: 0;
+  font-family: var(--code-font);
+  font-size: 0.86rem;
+  line-height: 1.55;
+}
+
+.structured-diff-cell + .structured-diff-cell {
+  border-left: 1px solid color-mix(in srgb, var(--line) 78%, transparent);
+}
+
+.structured-diff-line-number,
+.structured-diff-line-sign {
+  padding: 0.24rem 0.42rem;
+  color: color-mix(in srgb, var(--muted) 88%, transparent);
+  user-select: none;
+}
+
+.structured-diff-line-number {
+  text-align: right;
+  background: color-mix(in srgb, var(--surface-white-soft) 52%, #eef2f8);
+}
+
+.structured-diff-line-sign {
+  text-align: center;
+  border-left: 1px solid color-mix(in srgb, var(--line) 65%, transparent);
+}
+
+.structured-diff-line-text {
+  min-width: 0;
+  padding: 0.24rem 0.8rem;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.structured-diff-line-placeholder {
+  display: inline-block;
+  min-width: 0.75rem;
+}
+
+.structured-diff-row-context .structured-diff-line-text {
+  color: color-mix(in srgb, var(--copy) 82%, var(--muted));
+}
+
+.structured-diff-row-added .structured-diff-cell-right {
+  background: color-mix(in srgb, var(--status-green-glow) 72%, var(--surface-white));
+}
+
+.structured-diff-row-added .structured-diff-cell-left {
+  background: color-mix(in srgb, var(--surface-white) 85%, #f7faf7);
+}
+
+.structured-diff-row-added .structured-diff-cell-right .structured-diff-line-sign,
+.structured-diff-row-added .structured-diff-cell-right .structured-diff-line-number {
+  color: color-mix(in srgb, var(--signal-green) 72%, var(--copy));
+}
+
+.structured-diff-row-removed .structured-diff-cell-left {
+  background: color-mix(in srgb, var(--accent-rose-bg) 70%, var(--surface-white));
+}
+
+.structured-diff-row-removed .structured-diff-cell-right {
+  background: color-mix(in srgb, var(--surface-white) 85%, #fbf7f8);
+}
+
+.structured-diff-row-removed .structured-diff-cell-left .structured-diff-line-sign,
+.structured-diff-row-removed .structured-diff-cell-left .structured-diff-line-number {
+  color: color-mix(in srgb, var(--signal-rose) 72%, var(--copy));
+}
+
+.structured-diff-row-changed .structured-diff-cell-left {
+  background: color-mix(in srgb, var(--accent-rose-bg) 62%, var(--surface-white));
+}
+
+.structured-diff-row-changed .structured-diff-cell-right {
+  background: color-mix(in srgb, var(--status-green-glow) 62%, var(--surface-white));
+}
+
+.structured-diff-row-changed .structured-diff-cell-left .structured-diff-line-sign,
+.structured-diff-row-changed .structured-diff-cell-left .structured-diff-line-number {
+  color: color-mix(in srgb, var(--signal-rose) 76%, var(--copy));
+}
+
+.structured-diff-row-changed .structured-diff-cell-right .structured-diff-line-sign,
+.structured-diff-row-changed .structured-diff-cell-right .structured-diff-line-number {
+  color: color-mix(in srgb, var(--signal-green) 76%, var(--copy));
+}
+
+.structured-diff-inline-change {
+  border-radius: 0.26rem;
+  padding: 0.02rem 0.12rem;
+  color: inherit;
+}
+
+.structured-diff-row-changed .structured-diff-cell-left .structured-diff-inline-change {
+  background: color-mix(in srgb, var(--accent-rose-border) 30%, #ffffff);
+}
+
+.structured-diff-row-changed .structured-diff-cell-right .structured-diff-inline-change {
+  background: color-mix(in srgb, var(--status-green-ring) 28%, #ffffff);
+}
+
+.structured-diff-cell-empty .structured-diff-line-text {
+  color: transparent;
+}
+
 .diff-preview-raw-shell {
   background: var(--code-bg);
   color: var(--code-fg);
@@ -5089,7 +5347,6 @@ textarea {
   border-color: var(--line-strong);
   background: var(--surface-composer);
 }
-
 
 
 

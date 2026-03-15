@@ -1,10 +1,39 @@
 import type { DiffMessage } from "./types";
 
 const OMITTED_SECTION_MARKER = "...";
+const HUNK_HEADER_PATTERN =
+  /^@@ -(?<oldStart>\d+)(?:,(?<oldCount>\d+))? \+(?<newStart>\d+)(?:,(?<newCount>\d+))? @@/;
+const TOKEN_PATTERN = /(\s+|[A-Za-z0-9_]+|[^A-Za-z0-9_\s]+)/g;
 
 type DiffHunk = {
   modifiedStart: number;
   lines: string[];
+};
+
+export type DiffPreviewHighlight = {
+  end: number;
+  start: number;
+};
+
+export type DiffPreviewCell = {
+  highlights: DiffPreviewHighlight[];
+  lineNumber: number | null;
+  text: string;
+};
+
+export type DiffPreviewRow = {
+  kind: "added" | "changed" | "context" | "omitted" | "removed";
+  left: DiffPreviewCell;
+  right: DiffPreviewCell;
+};
+
+export type DiffPreviewHunk = {
+  header: string | null;
+  newCount: number | null;
+  newStart: number | null;
+  oldCount: number | null;
+  oldStart: number | null;
+  rows: DiffPreviewRow[];
 };
 
 export type DiffPreviewChangeSummary = {
@@ -16,9 +45,15 @@ export type DiffPreviewChangeSummary = {
 export type DiffPreviewModel = {
   changeSummary: DiffPreviewChangeSummary;
   hasStructuredPreview: boolean;
+  hunks: DiffPreviewHunk[];
   modifiedText: string;
   note: string | null;
   originalText: string;
+};
+
+type DiffPreviewLine = {
+  lineNumber: number | null;
+  text: string;
 };
 
 export function buildDiffPreviewModel(
@@ -26,58 +61,160 @@ export function buildDiffPreviewModel(
   changeType: DiffMessage["changeType"],
   latestFileContent?: string | null,
 ): DiffPreviewModel {
-  const fallbackPreview = buildPatchPreviewModel(diff, changeType);
+  const patchPreview = buildPatchPreviewModel(diff, changeType);
   const expandedPreview =
     latestFileContent != null
       ? expandDiffPreviewToWholeFile(
           diff,
           changeType,
           latestFileContent,
-          fallbackPreview.changeSummary,
+          patchPreview.changeSummary,
         )
       : null;
 
-  return expandedPreview ?? fallbackPreview;
+  if (!expandedPreview) {
+    return patchPreview;
+  }
+
+  return {
+    ...patchPreview,
+    hasStructuredPreview: patchPreview.hasStructuredPreview || expandedPreview.hasStructuredPreview,
+    modifiedText: expandedPreview.modifiedText,
+    note: expandedPreview.note,
+    originalText: expandedPreview.originalText,
+  };
 }
 
 function buildPatchPreviewModel(
   diff: string,
   changeType: DiffMessage["changeType"],
 ): DiffPreviewModel {
-  const originalLines: string[] = [];
-  const modifiedLines: string[] = [];
+  const hunks: DiffPreviewHunk[] = [];
   const lines = diff.split("\n");
-  let sawOmittedContext = false;
-  let currentHunkHasContent = false;
+  let currentHunk: DiffPreviewHunk | null = null;
+  let oldLineNumber: number | null = null;
+  let newLineNumber: number | null = null;
   let sawHunkHeader = false;
-  let pendingAddedLineCount = 0;
-  let pendingRemovedLineCount = 0;
+  let sawOmittedContext = false;
+  let pendingAddedLines: DiffPreviewLine[] = [];
+  let pendingRemovedLines: DiffPreviewLine[] = [];
   let addedLineCount = 0;
   let changedLineCount = 0;
   let removedLineCount = 0;
 
+  function ensureCurrentHunk() {
+    if (currentHunk) {
+      return currentHunk;
+    }
+
+    currentHunk = {
+      header: null,
+      newCount: null,
+      newStart: null,
+      oldCount: null,
+      oldStart: null,
+      rows: [],
+    };
+    hunks.push(currentHunk);
+    return currentHunk;
+  }
+
   function flushChangeBlock() {
-    if (pendingAddedLineCount === 0 && pendingRemovedLineCount === 0) {
+    if (pendingAddedLines.length === 0 && pendingRemovedLines.length === 0) {
       return;
     }
 
-    const changedLineDelta = Math.min(pendingAddedLineCount, pendingRemovedLineCount);
-    changedLineCount += changedLineDelta;
-    addedLineCount += Math.max(0, pendingAddedLineCount - changedLineDelta);
-    removedLineCount += Math.max(0, pendingRemovedLineCount - changedLineDelta);
-    pendingAddedLineCount = 0;
-    pendingRemovedLineCount = 0;
+    const hunk = ensureCurrentHunk();
+    const pairedLineCount = Math.min(pendingAddedLines.length, pendingRemovedLines.length);
+    changedLineCount += pairedLineCount;
+    addedLineCount += Math.max(0, pendingAddedLines.length - pairedLineCount);
+    removedLineCount += Math.max(0, pendingRemovedLines.length - pairedLineCount);
+
+    for (let index = 0; index < pairedLineCount; index += 1) {
+      const left = pendingRemovedLines[index];
+      const right = pendingAddedLines[index];
+      const highlights = computeChangedLineHighlights(left.text, right.text);
+      hunk.rows.push({
+        kind: "changed",
+        left: {
+          highlights: highlights.left,
+          lineNumber: left.lineNumber,
+          text: left.text,
+        },
+        right: {
+          highlights: highlights.right,
+          lineNumber: right.lineNumber,
+          text: right.text,
+        },
+      });
+    }
+
+    for (const line of pendingRemovedLines.slice(pairedLineCount)) {
+      hunk.rows.push({
+        kind: "removed",
+        left: {
+          highlights: [],
+          lineNumber: line.lineNumber,
+          text: line.text,
+        },
+        right: {
+          highlights: [],
+          lineNumber: null,
+          text: "",
+        },
+      });
+    }
+
+    for (const line of pendingAddedLines.slice(pairedLineCount)) {
+      hunk.rows.push({
+        kind: "added",
+        left: {
+          highlights: [],
+          lineNumber: null,
+          text: "",
+        },
+        right: {
+          highlights: [],
+          lineNumber: line.lineNumber,
+          text: line.text,
+        },
+      });
+    }
+
+    pendingAddedLines = [];
+    pendingRemovedLines = [];
+  }
+
+  function appendOmittedMarker() {
+    if (!currentHunk || currentHunk.rows.length === 0) {
+      return;
+    }
+
+    currentHunk.rows.push({
+      kind: "omitted",
+      left: {
+        highlights: [],
+        lineNumber: null,
+        text: OMITTED_SECTION_MARKER,
+      },
+      right: {
+        highlights: [],
+        lineNumber: null,
+        text: OMITTED_SECTION_MARKER,
+      },
+    });
+    sawOmittedContext = true;
   }
 
   for (const line of lines) {
     if (line.startsWith("@@")) {
       flushChangeBlock();
-      if (sawHunkHeader && currentHunkHasContent) {
-        appendOmittedSectionMarker(originalLines, modifiedLines);
-        sawOmittedContext = true;
-      }
+      appendOmittedMarker();
+      currentHunk = createHunkFromHeader(line);
+      hunks.push(currentHunk);
+      oldLineNumber = currentHunk.oldStart;
+      newLineNumber = currentHunk.newStart;
       sawHunkHeader = true;
-      currentHunkHasContent = false;
       continue;
     }
 
@@ -92,33 +229,52 @@ function buildPatchPreviewModel(
     }
 
     if (line.startsWith("-")) {
-      originalLines.push(line.slice(1));
-      pendingRemovedLineCount += 1;
-      currentHunkHasContent = true;
+      ensureCurrentHunk();
+      pendingRemovedLines.push({
+        lineNumber: oldLineNumber,
+        text: line.slice(1),
+      });
+      oldLineNumber = incrementLineNumber(oldLineNumber);
       continue;
     }
 
     if (line.startsWith("+")) {
-      modifiedLines.push(line.slice(1));
-      pendingAddedLineCount += 1;
-      currentHunkHasContent = true;
+      ensureCurrentHunk();
+      pendingAddedLines.push({
+        lineNumber: newLineNumber,
+        text: line.slice(1),
+      });
+      newLineNumber = incrementLineNumber(newLineNumber);
       continue;
     }
 
     if (line.startsWith(" ")) {
       flushChangeBlock();
-      const content = line.slice(1);
-      originalLines.push(content);
-      modifiedLines.push(content);
-      currentHunkHasContent = true;
+      const hunk = ensureCurrentHunk();
+      const text = line.slice(1);
+      hunk.rows.push({
+        kind: "context",
+        left: {
+          highlights: [],
+          lineNumber: oldLineNumber,
+          text,
+        },
+        right: {
+          highlights: [],
+          lineNumber: newLineNumber,
+          text,
+        },
+      });
+      oldLineNumber = incrementLineNumber(oldLineNumber);
+      newLineNumber = incrementLineNumber(newLineNumber);
     }
   }
 
   flushChangeBlock();
 
-  const originalText = changeType === "create" ? "" : originalLines.join("\n");
-  const modifiedText = modifiedLines.join("\n");
-  const hasStructuredPreview = originalText.length > 0 || modifiedText.length > 0;
+  const hasStructuredPreview = hunks.some((hunk) => hunk.rows.length > 0);
+  const originalText = changeType === "create" ? "" : flattenPreviewText(hunks, "left");
+  const modifiedText = flattenPreviewText(hunks, "right");
 
   return {
     changeSummary: {
@@ -127,6 +283,7 @@ function buildPatchPreviewModel(
       removedLineCount,
     },
     hasStructuredPreview,
+    hunks,
     modifiedText,
     note:
       hasStructuredPreview && (sawOmittedContext || sawHunkHeader)
@@ -141,7 +298,7 @@ function expandDiffPreviewToWholeFile(
   changeType: DiffMessage["changeType"],
   latestFileContent: string,
   changeSummary: DiffPreviewChangeSummary,
-): DiffPreviewModel | null {
+): Omit<DiffPreviewModel, "hunks"> | null {
   const normalizedLatestFileContent = normalizeLineEndings(latestFileContent);
   if (changeType === "create") {
     return {
@@ -153,8 +310,8 @@ function expandDiffPreviewToWholeFile(
     };
   }
 
-  const hunks = parseUnifiedDiffHunks(diff);
-  if (hunks.length === 0) {
+  const parsedHunks = parseUnifiedDiffHunks(diff);
+  if (parsedHunks.length === 0) {
     return null;
   }
 
@@ -163,7 +320,7 @@ function expandDiffPreviewToWholeFile(
   const modifiedLines: string[] = [];
   let modifiedIndex = 0;
 
-  for (const hunk of hunks) {
+  for (const hunk of parsedHunks) {
     const targetIndex = clampLineIndex(
       hunk.modifiedStart - 1,
       modifiedIndex,
@@ -232,7 +389,7 @@ function parseUnifiedDiffHunks(diff: string): DiffHunk[] {
 
   for (const line of diff.split("\n")) {
     if (line.startsWith("@@")) {
-      const hunkHeader = parseHunkHeader(line);
+      const hunkHeader = parseExpandedHunkHeader(line);
       if (!hunkHeader) {
         continue;
       }
@@ -266,7 +423,7 @@ function parseUnifiedDiffHunks(diff: string): DiffHunk[] {
   return hunks;
 }
 
-function parseHunkHeader(line: string) {
+function parseExpandedHunkHeader(line: string) {
   const match = /^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@/.exec(line);
   if (!match) {
     return null;
@@ -275,6 +432,142 @@ function parseHunkHeader(line: string) {
   return {
     modifiedStart: Number.parseInt(match[1] ?? "1", 10),
   };
+}
+
+function createHunkFromHeader(header: string): DiffPreviewHunk {
+  const match = header.match(HUNK_HEADER_PATTERN);
+  const groups = match?.groups;
+  const oldStart = groups?.oldStart ? Number(groups.oldStart) : null;
+  const newStart = groups?.newStart ? Number(groups.newStart) : null;
+
+  return {
+    header,
+    newCount: parseHunkCount(groups?.newCount, newStart),
+    newStart,
+    oldCount: parseHunkCount(groups?.oldCount, oldStart),
+    oldStart,
+    rows: [],
+  };
+}
+
+function parseHunkCount(count: string | undefined, start: number | null) {
+  if (count) {
+    return Number(count);
+  }
+
+  if (start === null) {
+    return null;
+  }
+
+  return 1;
+}
+
+function incrementLineNumber(value: number | null) {
+  return value === null ? null : value + 1;
+}
+
+function flattenPreviewText(hunks: DiffPreviewHunk[], side: "left" | "right") {
+  const lines: string[] = [];
+
+  for (const hunk of hunks) {
+    for (const row of hunk.rows) {
+      if (row.kind === "omitted") {
+        lines.push(OMITTED_SECTION_MARKER);
+        continue;
+      }
+
+      const cell = side === "left" ? row.left : row.right;
+      if (cell.text.length > 0) {
+        lines.push(cell.text);
+      }
+    }
+  }
+
+  return lines.join("\n");
+}
+
+function computeChangedLineHighlights(left: string, right: string) {
+  const leftTokens = tokenizeWithPositions(left);
+  const rightTokens = tokenizeWithPositions(right);
+
+  let prefixLength = 0;
+  while (
+    prefixLength < leftTokens.length &&
+    prefixLength < rightTokens.length &&
+    leftTokens[prefixLength].value === rightTokens[prefixLength].value
+  ) {
+    prefixLength += 1;
+  }
+
+  let leftSuffixLength = leftTokens.length - 1;
+  let rightSuffixLength = rightTokens.length - 1;
+  while (
+    leftSuffixLength >= prefixLength &&
+    rightSuffixLength >= prefixLength &&
+    leftTokens[leftSuffixLength].value === rightTokens[rightSuffixLength].value
+  ) {
+    leftSuffixLength -= 1;
+    rightSuffixLength -= 1;
+  }
+
+  return {
+    left: buildHighlightRange(left, leftTokens, prefixLength, leftSuffixLength),
+    right: buildHighlightRange(right, rightTokens, prefixLength, rightSuffixLength),
+  };
+}
+
+function tokenizeWithPositions(text: string) {
+  const tokens: Array<{ end: number; start: number; value: string }> = [];
+  for (const match of text.matchAll(TOKEN_PATTERN)) {
+    const value = match[0];
+    const start = match.index ?? 0;
+    tokens.push({
+      end: start + value.length,
+      start,
+      value,
+    });
+  }
+
+  if (tokens.length === 0 && text.length > 0) {
+    tokens.push({
+      end: text.length,
+      start: 0,
+      value: text,
+    });
+  }
+
+  return tokens;
+}
+
+function buildHighlightRange(
+  text: string,
+  tokens: Array<{ end: number; start: number; value: string }>,
+  prefixLength: number,
+  suffixIndex: number,
+): DiffPreviewHighlight[] {
+  if (text.length === 0 || tokens.length === 0) {
+    return [];
+  }
+
+  if (prefixLength >= tokens.length || prefixLength > suffixIndex) {
+    if (prefixLength === tokens.length) {
+      return [];
+    }
+
+    return [
+      {
+        end: text.length,
+        start: tokens[prefixLength]?.start ?? 0,
+      },
+    ];
+  }
+
+  return [
+    {
+      end: tokens[suffixIndex]?.end ?? text.length,
+      start: tokens[prefixLength]?.start ?? 0,
+    },
+  ];
 }
 
 function isDiffMetadataLine(line: string) {
@@ -308,14 +601,4 @@ function normalizeLineEndings(text: string) {
 
 function clampLineIndex(value: number, min: number, max: number) {
   return Math.min(Math.max(value, min), max);
-}
-
-function appendOmittedSectionMarker(originalLines: string[], modifiedLines: string[]) {
-  if (originalLines[originalLines.length - 1] !== OMITTED_SECTION_MARKER) {
-    originalLines.push(OMITTED_SECTION_MARKER);
-  }
-
-  if (modifiedLines[modifiedLines.length - 1] !== OMITTED_SECTION_MARKER) {
-    modifiedLines.push(OMITTED_SECTION_MARKER);
-  }
 }
