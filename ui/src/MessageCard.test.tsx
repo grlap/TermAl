@@ -2,7 +2,7 @@ import { render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import { MessageCard } from "./App";
-import type { TextMessage } from "./types";
+import type { TextMessage, ThinkingMessage } from "./types";
 
 describe("MessageCard", () => {
   it("shows a command badge for slash-expanded prompts", () => {
@@ -32,5 +32,23 @@ describe("MessageCard", () => {
     render(<MessageCard message={message} onApprovalDecision={vi.fn()} />);
 
     expect(screen.queryByText("Command")).not.toBeInTheDocument();
+  });
+
+
+  it("renders thinking content with markdown formatting", async () => {
+    const message: ThinkingMessage = {
+      id: "message-3",
+      type: "thinking",
+      author: "assistant",
+      timestamp: "10:02",
+      title: "Thinking",
+      lines: ["## Summary of Changes", "1. Added markdown rendering", "- Preserved list formatting"],
+    };
+
+    render(<MessageCard message={message} onApprovalDecision={vi.fn()} />);
+
+    expect(await screen.findByRole("heading", { name: "Summary of Changes" })).toBeInTheDocument();
+    expect(screen.getByText("Added markdown rendering")).toBeInTheDocument();
+    expect(screen.getByText("Preserved list formatting")).toBeInTheDocument();
   });
 });

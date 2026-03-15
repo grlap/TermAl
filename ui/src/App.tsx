@@ -7713,16 +7713,18 @@ function ThinkingCard({
   searchQuery?: string;
   searchHighlightTone?: SearchHighlightTone;
 }) {
+  const markdown = message.lines.join("\n");
+
   return (
     <article className="message-card reasoning-card">
       <MessageMeta author={message.author} timestamp={message.timestamp} />
       <div className="card-label">Thinking</div>
       <h3>{renderHighlightedText(message.title, searchQuery, searchHighlightTone)}</h3>
-      <ul className="plain-list">
-        {message.lines.map((line) => (
-          <li key={line}>{renderHighlightedText(line, searchQuery, searchHighlightTone)}</li>
-        ))}
-      </ul>
+      <DeferredMarkdownContent
+        markdown={markdown}
+        searchQuery={searchQuery}
+        searchHighlightTone={searchHighlightTone}
+      />
     </article>
   );
 }
@@ -8197,7 +8199,9 @@ export function MarkdownContent({
             );
           },
           p: ({ children, ...props }) => <p {...props}>{highlightChildren(children)}</p>,
-          li: ({ children, ...props }) => <li {...props}>{highlightChildren(children)}</li>,
+          li: ({ children, ordered: _ordered, index: _index, checked: _checked, ...props }) => (
+            <li {...props}>{highlightChildren(children)}</li>
+          ),
           blockquote: ({ children, ...props }) => (
             <blockquote {...props}>{highlightChildren(children)}</blockquote>
           ),
