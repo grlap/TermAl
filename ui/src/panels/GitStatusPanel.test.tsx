@@ -405,6 +405,35 @@ describe("GitStatusPanel", () => {
     expect(await screen.findByText("main.rs")).toBeInTheDocument();
   });
 
+  it("renders changed files when the response workdir is a canonical Windows path alias", async () => {
+    fetchGitStatusMock.mockResolvedValue(
+      makeStatusResponse(
+        [
+          {
+            path: "src/main.rs",
+            worktreeStatus: "M",
+          },
+        ],
+        {
+          repoRoot: "D:/src/repo",
+          workdir: "D:/src/repo",
+        },
+      ),
+    );
+
+    render(
+      <GitStatusPanel
+        sessionId={null}
+        workdir={"Q:\\repo"}
+        showPathControls={false}
+        onOpenDiff={() => {}}
+        onOpenWorkdir={() => {}}
+      />,
+    );
+
+    expect(await screen.findByText("main.rs")).toBeInTheDocument();
+  });
+
   it("reports git status updates for badge counts", async () => {
     fetchGitStatusMock.mockResolvedValue(
       makeStatusResponse([
