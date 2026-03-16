@@ -26,29 +26,19 @@ type GitActionTarget = {
 type GitDiffOpenOptions = {
   openInNewTab?: boolean;
 };
-type GitRequestScope =
-  | {
-      sessionId: string;
-    }
-  | {
-      projectId: string;
-    };
-
 
 export function GitStatusPanel({
   onStatusChange,
   onOpenDiff,
   onOpenWorkdir,
-  projectId = null,
-  sessionId,
+  sessionId: _sessionId = null,
   workdir,
   showPathControls = true,
 }: {
   onStatusChange?: (status: GitStatusResponse | null) => void;
   onOpenDiff: (diff: GitDiffResponse, options?: GitDiffOpenOptions) => void;
   onOpenWorkdir: (path: string) => void;
-  projectId?: string | null;
-  sessionId: string | null;
+  sessionId?: string | null;
   workdir: string | null;
   showPathControls?: boolean;
 }) {
@@ -62,17 +52,8 @@ export function GitStatusPanel({
   const [pendingActionKey, setPendingActionKey] = useState<string | null>(null);
   const [treeExpansionByKey, setTreeExpansionByKey] = useState<Record<string, boolean>>({});
   const onStatusChangeRef = useRef(onStatusChange);
-  const normalizedProjectId = projectId?.trim() ?? "";
   const normalizedWorkdir = workdir?.trim() ?? "";
-  const requestScope: GitRequestScope | null = sessionId
-    ? { sessionId }
-    : normalizedProjectId
-      ? { projectId: normalizedProjectId }
-      : null;
-  const hasRequestScope = requestScope !== null;
   const visibleStatus = status?.workdir === normalizedWorkdir ? status : null;
-  const isWaitingForSession = Boolean(normalizedWorkdir && !hasRequestScope && !showPathControls);
-  const isMissingSession = Boolean(normalizedWorkdir && !hasRequestScope && showPathControls);
   const changedFiles = visibleStatus?.files ?? [];
   const hasStagedChanges = changedFiles.some((file) => Boolean(file.indexStatus));
   const sections = useMemo(() => buildGitStatusTree(changedFiles), [changedFiles]);
@@ -100,29 +81,15 @@ export function GitStatusPanel({
       return;
     }
 
-    if (!hasRequestScope) {
-      setStatus(null);
-      setError(null);
-      onStatusChangeRef.current?.(null);
-      return;
-    }
-
     void loadStatus(normalizedWorkdir);
-  }, [hasRequestScope, normalizedWorkdir, normalizedProjectId, sessionId]);
+  }, [normalizedWorkdir]);
 
   async function loadStatus(path: string, options?: { preserveVisibleStatus?: boolean }) {
-    if (!requestScope) {
-      return;
-    }
-
     const preserveVisibleStatus = options?.preserveVisibleStatus && visibleStatus?.workdir === path;
     setIsLoading(true);
     setError(null);
     try {
-      const response =
-        "sessionId" in requestScope
-          ? await fetchGitStatus(path, requestScope.sessionId)
-          : await fetchGitStatus(path, null, { projectId: requestScope.projectId });
+      const response = await fetchGitStatus(path, null);
       setStatus(response);
       onStatusChangeRef.current?.(response);
     } catch (nextError) {
@@ -138,7 +105,7 @@ export function GitStatusPanel({
 
   async function handleOpenDiff(sectionId: GitStatusSectionId, node: GitStatusTreeFileNode, options?: GitDiffOpenOptions) {
     const activeWorkdir = visibleStatus?.workdir ?? normalizedWorkdir;
-    if (!activeWorkdir || !requestScope) {
+    if (!activeWorkdir) {
       return;
     }
 
@@ -152,7 +119,6 @@ export function GitStatusPanel({
         originalPath: node.originalPath,
         path: node.path,
         sectionId,
-        ...requestScope,
         statusCode: node.statusCode,
         workdir: activeWorkdir,
       });
@@ -195,7 +161,7 @@ export function GitStatusPanel({
     action: GitFileAction,
   ) {
     const activeWorkdir = visibleStatus?.workdir ?? normalizedWorkdir;
-    if (!activeWorkdir || !requestScope || targets.length === 0) {
+    if (!activeWorkdir || targets.length === 0) {
       return;
     }
 
@@ -212,7 +178,6 @@ export function GitStatusPanel({
           action,
           originalPath: target.originalPath,
           path: target.path,
-          ...requestScope,
           statusCode: target.statusCode,
           workdir: activeWorkdir,
         });
@@ -226,12 +191,7 @@ export function GitStatusPanel({
       setError(getErrorMessage(nextError));
       if (targets.length > 1) {
         try {
-          const refreshedStatus =
-            "sessionId" in requestScope
-              ? await fetchGitStatus(activeWorkdir, requestScope.sessionId)
-              : await fetchGitStatus(activeWorkdir, null, {
-                  projectId: requestScope.projectId,
-                });
+          const refreshedStatus = await fetchGitStatus(activeWorkdir, null);
           setStatus(refreshedStatus);
           onStatusChangeRef.current?.(refreshedStatus);
         } catch {
@@ -274,7 +234,7 @@ export function GitStatusPanel({
   async function submitCommit() {
     const activeWorkdir = visibleStatus?.workdir ?? normalizedWorkdir;
     const nextMessage = commitMessage.trim();
-    if (!activeWorkdir || !requestScope || !nextMessage || !hasStagedChanges || isCommitting) {
+    if (!activeWorkdir || !nextMessage || !hasStagedChanges || isCommitting) {
       return;
     }
 
@@ -285,7 +245,6 @@ export function GitStatusPanel({
     try {
       const response = await commitGitChanges({
         message: nextMessage,
-        ...requestScope,
         workdir: activeWorkdir,
       });
       setStatus(response.status);
@@ -346,24 +305,6 @@ export function GitStatusPanel({
         <EmptyState
           title="No workspace selected"
           body="Load a folder path to inspect the git repository for this tile. TermAl resolves the containing repo."
-        />
-      ) : null}
-
-      {isWaitingForSession ? (
-        <article className="activity-card">
-          <div className="activity-spinner" aria-hidden="true" />
-          <div>
-            <div className="card-label">Git</div>
-            <h3>Waiting for a live session</h3>
-            <p>Select or open a session in this project to load git status.</p>
-          </div>
-        </article>
-      ) : null}
-
-      {isMissingSession ? (
-        <EmptyState
-          title="No live session available"
-          body="Open or reconnect a live session to inspect git status for this workspace."
         />
       ) : null}
 

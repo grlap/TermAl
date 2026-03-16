@@ -329,45 +329,20 @@ fn read_claude_agent_commands(workdir: &FsPath) -> Result<Vec<AgentCommand>, Api
     Ok(commands)
 }
 
-async fn read_git_status(
-    State(state): State<AppState>,
-    Query(query): Query<FileQuery>,
-) -> Result<Json<GitStatusResponse>, ApiError> {
-    let workdir = resolve_project_scoped_requested_path(
-        &state,
-        query.session_id.as_deref(),
-        query.project_id.as_deref(),
-        &query.path,
-        ScopedPathMode::ExistingPath,
-    )?;
+async fn read_git_status(Query(query): Query<FileQuery>) -> Result<Json<GitStatusResponse>, ApiError> {
+    let workdir = resolve_existing_requested_path(&query.path, "path")?;
     Ok(Json(load_git_status_for_path(&workdir)?))
 }
 
-async fn read_git_diff(
-    State(state): State<AppState>,
-    Json(request): Json<GitDiffRequest>,
-) -> Result<Json<GitDiffResponse>, ApiError> {
-    let workdir = resolve_project_scoped_requested_path(
-        &state,
-        request.session_id.as_deref(),
-        request.project_id.as_deref(),
-        &request.workdir,
-        ScopedPathMode::ExistingPath,
-    )?;
+async fn read_git_diff(Json(request): Json<GitDiffRequest>) -> Result<Json<GitDiffResponse>, ApiError> {
+    let workdir = resolve_existing_requested_path(&request.workdir, "path")?;
     Ok(Json(load_git_diff_for_request(&workdir, &request)?))
 }
 
 async fn apply_git_file_action(
-    State(state): State<AppState>,
     Json(request): Json<GitFileActionRequest>,
 ) -> Result<Json<GitStatusResponse>, ApiError> {
-    let workdir = resolve_project_scoped_requested_path(
-        &state,
-        request.session_id.as_deref(),
-        request.project_id.as_deref(),
-        &request.workdir,
-        ScopedPathMode::ExistingPath,
-    )?;
+    let workdir = resolve_existing_requested_path(&request.workdir, "path")?;
     let workdir = normalize_git_workdir_path(&workdir)?;
     let Some(repo_root) = resolve_git_repo_root(&workdir)? else {
         return Err(ApiError::bad_request("no git repository found"));
@@ -412,17 +387,8 @@ async fn apply_git_file_action(
     Ok(Json(load_git_status_for_path(&workdir)?))
 }
 
-async fn commit_git_changes(
-    State(state): State<AppState>,
-    Json(request): Json<GitCommitRequest>,
-) -> Result<Json<GitCommitResponse>, ApiError> {
-    let workdir = resolve_project_scoped_requested_path(
-        &state,
-        request.session_id.as_deref(),
-        request.project_id.as_deref(),
-        &request.workdir,
-        ScopedPathMode::ExistingPath,
-    )?;
+async fn commit_git_changes(Json(request): Json<GitCommitRequest>) -> Result<Json<GitCommitResponse>, ApiError> {
+    let workdir = resolve_existing_requested_path(&request.workdir, "path")?;
     let workdir = normalize_git_workdir_path(&workdir)?;
     let Some(repo_root) = resolve_git_repo_root(&workdir)? else {
         return Err(ApiError::bad_request("no git repository found"));
@@ -1526,7 +1492,6 @@ struct UpdateAppSettingsRequest {
 struct FileQuery {
     path: String,
     session_id: Option<String>,
-    project_id: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -1633,8 +1598,6 @@ struct GitDiffRequest {
     original_path: Option<String>,
     path: String,
     section_id: GitDiffSection,
-    session_id: Option<String>,
-    project_id: Option<String>,
     #[serde(default)]
     status_code: Option<String>,
     workdir: String,
@@ -1674,8 +1637,6 @@ struct GitFileActionRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
     original_path: Option<String>,
     path: String,
-    session_id: Option<String>,
-    project_id: Option<String>,
     #[serde(default)]
     status_code: Option<String>,
     workdir: String,
@@ -1685,8 +1646,6 @@ struct GitFileActionRequest {
 #[serde(rename_all = "camelCase")]
 struct GitCommitRequest {
     message: String,
-    session_id: Option<String>,
-    project_id: Option<String>,
     workdir: String,
 }
 
@@ -1930,6 +1889,17 @@ fn resolve_requested_path(path: &str) -> Result<PathBuf, ApiError> {
     };
 
     Ok(resolved)
+}
+
+fn resolve_existing_requested_path(path: &str, label: &str) -> Result<PathBuf, ApiError> {
+    let trimmed = path.trim();
+    if trimmed.is_empty() {
+        return Err(ApiError::bad_request(format!("{label} cannot be empty")));
+    }
+
+    let requested_path = resolve_requested_path(trimmed)?;
+    let resolved_path = canonicalize_existing_path(&requested_path, label)?;
+    Ok(normalize_user_facing_path(&resolved_path))
 }
 
 #[derive(Clone, Copy)]

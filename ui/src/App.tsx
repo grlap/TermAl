@@ -1020,7 +1020,6 @@ export default function App() {
 
     return projectScopedSessions[0]?.id ?? null;
   }, [activeSession?.id, activeSession?.projectId, projectScopedSessions, selectedProject, sessions]);
-  const controlPanelProjectId = selectedProject?.id ?? null;
   const sessionFilterCounts = useMemo(
     () => countSessionsByFilter(projectScopedSessions),
     [projectScopedSessions],
@@ -1080,21 +1079,14 @@ export default function App() {
 
   useEffect(() => {
     const normalizedGitWorkdir = controlPanelGitWorkdir?.trim() ?? "";
-    const gitStatusProjectId = controlPanelSessionId ? null : controlPanelProjectId;
     let cancelled = false;
 
-    if (!normalizedGitWorkdir || (!controlPanelSessionId && !gitStatusProjectId)) {
+    if (!normalizedGitWorkdir) {
       setControlPanelGitStatusCount(0);
       return;
     }
 
-    const statusRequest = controlPanelSessionId
-      ? fetchGitStatus(normalizedGitWorkdir, controlPanelSessionId)
-      : fetchGitStatus(normalizedGitWorkdir, null, {
-          projectId: gitStatusProjectId,
-        });
-
-    void statusRequest
+    void fetchGitStatus(normalizedGitWorkdir, null)
       .then((status) => {
         if (cancelled) {
           return;
@@ -1111,7 +1103,7 @@ export default function App() {
     return () => {
       cancelled = true;
     };
-  }, [controlPanelGitWorkdir, controlPanelProjectId, controlPanelSessionId]);
+  }, [controlPanelGitWorkdir]);
 
   const sessionListSearchResults = useMemo(() => {
     if (!hasSessionListSearch || !sessionListSearchIndex) {
@@ -3328,7 +3320,6 @@ export default function App() {
             <section className="control-panel-section-stack control-panel-section-git" aria-label="Git status">
               {renderControlPanelProjectScope()}
               <GitStatusPanel
-                projectId={controlPanelProjectId}
                 sessionId={controlPanelSessionId}
                 workdir={controlPanelGitWorkdir}
                 showPathControls={false}

@@ -27,7 +27,6 @@ const applyGitFileActionMock = vi.mocked(applyGitFileAction);
 const commitGitChangesMock = vi.mocked(commitGitChanges);
 const fetchGitDiffMock = vi.mocked(fetchGitDiff);
 const fetchGitStatusMock = vi.mocked(fetchGitStatus);
-const PROJECT_ID = "project-1";
 const SESSION_ID = "session-1";
 
 describe("GitStatusPanel", () => {
@@ -321,7 +320,9 @@ describe("GitStatusPanel", () => {
     expect(screen.getByText("Working tree clean.")).toBeInTheDocument();
   });
 
-  it("shows a waiting indicator instead of a detached-session error in project-scoped mode", () => {
+  it("loads git status without a live session when a repo path is available", async () => {
+    fetchGitStatusMock.mockResolvedValue(makeStatusResponse([]));
+
     render(
       <GitStatusPanel
         sessionId={null}
@@ -332,13 +333,14 @@ describe("GitStatusPanel", () => {
       />,
     );
 
-    expect(screen.getByText("Waiting for a live session")).toBeInTheDocument();
-    expect(screen.getByText(/Select or open a session in this project/i)).toBeInTheDocument();
-    expect(screen.queryByText(/no longer associated with a live session/i)).not.toBeInTheDocument();
-    expect(fetchGitStatusMock).not.toHaveBeenCalled();
+    await waitFor(() => {
+      expect(fetchGitStatusMock).toHaveBeenCalledWith("/repo", null);
+    });
+
+    expect(await screen.findByText("Working tree clean.")).toBeInTheDocument();
   });
 
-  it("loads git status from the selected project when no session is available", async () => {
+  it("opens git diffs without a live session when a repo path is available", async () => {
     fetchGitStatusMock.mockResolvedValue(
       makeStatusResponse([
         {
@@ -351,7 +353,6 @@ describe("GitStatusPanel", () => {
 
     render(
       <GitStatusPanel
-        projectId={PROJECT_ID}
         sessionId={null}
         workdir="/repo"
         showPathControls={false}
@@ -361,9 +362,7 @@ describe("GitStatusPanel", () => {
     );
 
     await waitFor(() => {
-      expect(fetchGitStatusMock).toHaveBeenCalledWith("/repo", null, {
-        projectId: PROJECT_ID,
-      });
+      expect(fetchGitStatusMock).toHaveBeenCalledWith("/repo", null);
     });
 
     fireEvent.click(await screen.findByRole("button", { name: /^main\.rs$/i }));
@@ -372,7 +371,6 @@ describe("GitStatusPanel", () => {
       expect(fetchGitDiffMock).toHaveBeenCalledWith({
         originalPath: undefined,
         path: "src/main.rs",
-        projectId: PROJECT_ID,
         sectionId: "unstaged",
         statusCode: "M",
         workdir: "/repo",
