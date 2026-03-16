@@ -93,6 +93,7 @@ export type WorkspaceState = {
 };
 
 export type TabDropPlacement = "left" | "right" | "top" | "bottom" | "tabs";
+const DEFAULT_CONTROL_PANEL_DOCK_WIDTH_RATIO = 0.24;
 
 export function createSessionTab(sessionId: string): WorkspaceSessionTab {
   return {
@@ -314,6 +315,9 @@ export function openSourceInWorkspaceState(
   path: string | null,
   preferredPaneId: string | null,
   originSessionId: string | null,
+  options?: {
+    openInNewPane?: boolean;
+  },
 ): WorkspaceState {
   const normalizedPath = normalizeWorkspacePath(path);
   const targetPaneId = findContextualTargetPaneId(
@@ -323,6 +327,10 @@ export function openSourceInWorkspaceState(
     "source",
   );
   const nextTab = createSourceTab(normalizedPath, originSessionId);
+  if (options?.openInNewPane) {
+    return openTabInNewPane(workspace, nextTab, preferredPaneId, originSessionId);
+  }
+
   if (normalizedPath) {
     const existing = findSourceTab(workspace, normalizedPath);
     if (existing) {
@@ -430,17 +438,35 @@ export function dockControlPanelAtWorkspaceEdge(
     type: "pane",
     paneId: controlPanel.paneId,
   };
+  const rootSplit =
+    workspace.root.type === "split" &&
+    workspace.root.direction === "row" &&
+    (isPaneNode(workspace.root.first, controlPanel.paneId) ||
+      isPaneNode(workspace.root.second, controlPanel.paneId))
+      ? workspace.root
+      : null;
+  const controlPanelWidthRatio = getDockedControlPanelWidthRatio(workspace.root, controlPanel.paneId);
+  const nextRatio = side === "left"
+    ? controlPanelWidthRatio ?? DEFAULT_CONTROL_PANEL_DOCK_WIDTH_RATIO
+    : 1 - (controlPanelWidthRatio ?? DEFAULT_CONTROL_PANEL_DOCK_WIDTH_RATIO);
 
   return {
     ...workspace,
-    root: {
-      id: crypto.randomUUID(),
-      type: "split",
-      direction: "row",
-      ratio: side === "left" ? 0.24 : 0.76,
-      first: side === "left" ? controlPanelNode : contentRoot,
-      second: side === "left" ? contentRoot : controlPanelNode,
-    },
+    root: rootSplit
+      ? {
+          ...rootSplit,
+          ratio: nextRatio,
+          first: side === "left" ? controlPanelNode : contentRoot,
+          second: side === "left" ? contentRoot : controlPanelNode,
+        }
+      : {
+          id: crypto.randomUUID(),
+          type: "split",
+          direction: "row",
+          ratio: nextRatio,
+          first: side === "left" ? controlPanelNode : contentRoot,
+          second: side === "left" ? contentRoot : controlPanelNode,
+        },
   };
 }
 
@@ -457,10 +483,15 @@ export function openDiffPreviewInWorkspaceState(
   },
   preferredPaneId: string | null,
   options?: {
+    openInNewPane?: boolean;
     reuseActiveViewerTab?: boolean;
   },
 ): WorkspaceState {
   const nextTab = createDiffPreviewTab(tab);
+  if (options?.openInNewPane) {
+    return openTabInNewPane(workspace, nextTab, preferredPaneId, tab.originSessionId);
+  }
+
   const existing = findDiffPreviewTab(workspace, tab.diffMessageId, tab.originSessionId);
   if (existing) {
     return activatePane(workspace, existing.paneId, existing.tab.id);
@@ -937,6 +968,48 @@ function openTabInAdjacentPane(
   };
 }
 
+function openTabInNewPane(
+  workspace: WorkspaceState,
+  tab: WorkspaceTab,
+  preferredPaneId: string | null,
+  originSessionId: string | null,
+): WorkspaceState {
+  const anchorPaneId = findNewPaneAnchorPaneId(workspace, preferredPaneId, originSessionId, tab.kind);
+  if (!anchorPaneId || !workspace.root) {
+    return openTabInWorkspaceState(workspace, tab, preferredPaneId);
+  }
+
+  return openTabInAdjacentPane(workspace, anchorPaneId, tab, "row", false);
+}
+
+function findNewPaneAnchorPaneId(
+  workspace: WorkspaceState,
+  preferredPaneId: string | null,
+  originSessionId: string | null,
+  tabKind: WorkspaceTab["kind"],
+) {
+  const contextualPaneId = findContextualTargetPaneId(workspace, preferredPaneId, originSessionId, tabKind);
+  if (contextualPaneId) {
+    return contextualPaneId;
+  }
+
+  const preferredPane = preferredPaneId
+    ? workspace.panes.find((pane) => pane.id === preferredPaneId) ?? null
+    : null;
+  if (preferredPane && !paneContainsControlPanel(preferredPane)) {
+    return preferredPane.id;
+  }
+
+  if (preferredPane && paneContainsControlPanel(preferredPane)) {
+    const nonControlPanelPaneId = findNonControlPanelPaneId(workspace, preferredPane.id);
+    if (nonControlPanelPaneId) {
+      return nonControlPanelPaneId;
+    }
+  }
+
+  return findNonControlPanelPaneId(workspace, null) ?? preferredPaneId ?? workspace.activePaneId ?? workspace.panes[0]?.id ?? null;
+}
+
 function openContextualTabInWorkspaceState<T extends WorkspaceTab>(
   workspace: WorkspaceState,
   tab: T,
@@ -1108,6 +1181,29 @@ function findControlPanelTab(workspace: WorkspaceState) {
     if (tab) {
       return { paneId: pane.id, tab };
     }
+  }
+
+  return null;
+}
+
+function isPaneNode(node: WorkspaceNode, paneId: string): boolean {
+  return node.type === "pane" && node.paneId === paneId;
+}
+
+function getDockedControlPanelWidthRatio(
+  root: WorkspaceNode | null,
+  controlPanelPaneId: string,
+): number | null {
+  if (!root || root.type === "pane" || root.direction !== "row") {
+    return null;
+  }
+
+  if (isPaneNode(root.first, controlPanelPaneId)) {
+    return root.ratio;
+  }
+
+  if (isPaneNode(root.second, controlPanelPaneId)) {
+    return 1 - root.ratio;
   }
 
   return null;

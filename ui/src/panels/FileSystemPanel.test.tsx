@@ -90,6 +90,30 @@ describe("FileSystemPanel", () => {
     expect(onOpenPath).toHaveBeenCalledWith("/repo/src/main.rs");
   });
 
+  it("passes openInNewPane when ctrl-clicking a file", async () => {
+    fetchDirectoryMock.mockResolvedValue(
+      makeDirectoryResponse("repo", "/repo", [{ kind: "file", name: "main.rs", path: "/repo/main.rs" }]),
+    );
+    fetchGitStatusMock.mockResolvedValue(makeStatusResponse([]));
+
+    const onOpenPath = vi.fn();
+
+    render(
+      <FileSystemPanel
+        rootPath="/repo"
+        showPathControls={false}
+        onOpenPath={onOpenPath}
+        onOpenRootPath={() => {}}
+      />,
+    );
+
+    const mainFileButton = await screen.findByRole("button", { name: /^main\.rs/i });
+
+    fireEvent.click(mainFileButton, { ctrlKey: true });
+
+    expect(onOpenPath).toHaveBeenCalledWith("/repo/main.rs", { openInNewPane: true });
+  });
+
   it("opens a new root from the toolbar when path controls are visible", () => {
     const onOpenRootPath = vi.fn();
 

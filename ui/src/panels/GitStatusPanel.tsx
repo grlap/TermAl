@@ -22,6 +22,10 @@ type GitActionTarget = {
   path: string;
   statusCode?: string | null;
 };
+type GitDiffOpenOptions = {
+  openInNewPane?: boolean;
+};
+
 
 export function GitStatusPanel({
   onStatusChange,
@@ -30,7 +34,7 @@ export function GitStatusPanel({
   workdir,
 }: {
   onStatusChange?: (status: GitStatusResponse | null) => void;
-  onOpenDiff: (diff: GitDiffResponse) => void;
+  onOpenDiff: (diff: GitDiffResponse, options?: GitDiffOpenOptions) => void;
   onOpenWorkdir: (path: string) => void;
   workdir: string | null;
 }) {
@@ -85,7 +89,7 @@ export function GitStatusPanel({
     }
   }
 
-  async function handleOpenDiff(sectionId: GitStatusSectionId, node: GitStatusTreeFileNode) {
+  async function handleOpenDiff(sectionId: GitStatusSectionId, node: GitStatusTreeFileNode, options?: GitDiffOpenOptions) {
     const activeWorkdir = status?.workdir ?? normalizedWorkdir;
     if (!activeWorkdir) {
       return;
@@ -103,7 +107,11 @@ export function GitStatusPanel({
         statusCode: node.statusCode,
         workdir: activeWorkdir,
       });
-      onOpenDiff(diff);
+      if (options?.openInNewPane) {
+        onOpenDiff(diff, { openInNewPane: true });
+      } else {
+        onOpenDiff(diff);
+      }
     } catch (nextError) {
       setError(getErrorMessage(nextError));
     } finally {
@@ -331,7 +339,7 @@ function GitStatusSection({
     action: GitFileAction,
   ) => void;
   onFileAction: (sectionId: GitStatusSectionId, node: GitStatusTreeFileNode, action: GitFileAction) => void;
-  onOpenDiff: (sectionId: GitStatusSectionId, node: GitStatusTreeFileNode) => void;
+  onOpenDiff: (sectionId: GitStatusSectionId, node: GitStatusTreeFileNode, options?: GitDiffOpenOptions) => void;
   onSectionAction: (sectionId: GitStatusSectionId, nodes: GitStatusTreeNode[], action: GitFileAction) => void;
   onToggle: (defaultValue: boolean) => void;
   onTreeToggle: (key: string, defaultValue: boolean) => void;
@@ -415,7 +423,7 @@ function GitStatusTree({
     action: GitFileAction,
   ) => void;
   onFileAction: (sectionId: GitStatusSectionId, node: GitStatusTreeFileNode, action: GitFileAction) => void;
-  onOpenDiff: (sectionId: GitStatusSectionId, node: GitStatusTreeFileNode) => void;
+  onOpenDiff: (sectionId: GitStatusSectionId, node: GitStatusTreeFileNode, options?: GitDiffOpenOptions) => void;
   onTreeToggle: (key: string, defaultValue: boolean) => void;
   pendingActionKey: string | null;
   repoRoot: string;
@@ -472,7 +480,7 @@ function GitStatusDirectoryNode({
     action: GitFileAction,
   ) => void;
   onFileAction: (sectionId: GitStatusSectionId, node: GitStatusTreeFileNode, action: GitFileAction) => void;
-  onOpenDiff: (sectionId: GitStatusSectionId, node: GitStatusTreeFileNode) => void;
+  onOpenDiff: (sectionId: GitStatusSectionId, node: GitStatusTreeFileNode, options?: GitDiffOpenOptions) => void;
   onTreeToggle: (key: string, defaultValue: boolean) => void;
   pendingActionKey: string | null;
   repoRoot: string;
@@ -549,7 +557,7 @@ function GitStatusFileRow({
   isPending: boolean;
   node: GitStatusTreeFileNode;
   onAction: (sectionId: GitStatusSectionId, node: GitStatusTreeFileNode, action: GitFileAction) => void;
-  onOpenDiff: (sectionId: GitStatusSectionId, node: GitStatusTreeFileNode) => void;
+  onOpenDiff: (sectionId: GitStatusSectionId, node: GitStatusTreeFileNode, options?: GitDiffOpenOptions) => void;
   repoRoot: string;
   sectionId: GitStatusSectionId;
 }) {
@@ -562,7 +570,11 @@ function GitStatusFileRow({
       <button
         className="git-status-tree-open-button"
         type="button"
-        onClick={() => onOpenDiff(sectionId, node)}
+        onClick={(event) =>
+          event.ctrlKey || event.metaKey
+            ? onOpenDiff(sectionId, node, { openInNewPane: true })
+            : onOpenDiff(sectionId, node)
+        }
         disabled={isPending}
       >
         <span className="git-tree-toggle git-tree-toggle-placeholder" aria-hidden="true" />

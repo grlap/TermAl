@@ -7,6 +7,7 @@ import App, {
   ThemedCombobox,
   describeCodexModelAdjustmentNotice,
   describeSessionModelRefreshError,
+  getWorkspaceSplitResizeBounds,
   describeUnknownSessionModelWarning,
   resolveUnknownSessionModelSendAttempt,
 } from "./App";
@@ -608,6 +609,132 @@ describe("App", () => {
       restoreGlobal("EventSource", originalEventSource);
       restoreGlobal("ResizeObserver", originalResizeObserver);
     }
+  });
+
+  it("keeps the control panel divider resizable when a session pane is open", async () => {
+    const originalFetch = globalThis.fetch;
+    const originalEventSource = globalThis.EventSource;
+    const originalResizeObserver = globalThis.ResizeObserver;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/api/state") {
+        return jsonResponse({
+          revision: 1,
+          projects: [],
+          sessions: [
+            makeSession("session-1", {
+              name: "Session 1",
+              preview: "Ready for a prompt.",
+            }),
+          ],
+        });
+      }
+
+      throw new Error(`Unexpected fetch: ${url}`);
+    });
+
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("EventSource", EventSourceMock as unknown as typeof EventSource);
+    vi.stubGlobal("ResizeObserver", ResizeObserverMock as unknown as typeof ResizeObserver);
+    const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
+    HTMLElement.prototype.scrollIntoView = vi.fn();
+
+    try {
+      await renderApp();
+      const eventSource = EventSourceMock.instances[0];
+      expect(eventSource).toBeTruthy();
+      act(() => {
+        eventSource.dispatchError();
+      });
+      await settleAsyncUi();
+      await clickAndSettle(await screen.findByRole("button", { name: "Sessions" }));
+
+      const sessionList = document.querySelector(".session-list");
+      if (!(sessionList instanceof HTMLDivElement)) {
+        throw new Error("Session list not found");
+      }
+
+      const sessionRowLabel = await within(sessionList).findByText("Session 1");
+      const sessionRowButton = sessionRowLabel.closest("button");
+      if (!sessionRowButton) {
+        throw new Error("Session row button not found");
+      }
+
+      await clickAndSettle(sessionRowButton);
+
+      expect(document.querySelector(".tile-divider-row")).not.toBeNull();
+      expect(document.querySelector(".tile-divider-row.fixed")).toBeNull();
+    } finally {
+      HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
+      restoreGlobal("fetch", originalFetch);
+      restoreGlobal("EventSource", originalEventSource);
+      restoreGlobal("ResizeObserver", originalResizeObserver);
+    }
+  });
+
+  it("uses the control panel pixel minimum instead of the generic row split clamp", () => {
+    document.documentElement.style.setProperty("--control-panel-pane-min-width", "14rem");
+
+    const bounds = getWorkspaceSplitResizeBounds(
+      {
+        id: "split-1",
+        type: "split",
+        direction: "row",
+        ratio: 0.24,
+        first: {
+          type: "pane",
+          paneId: "control-panel-pane",
+        },
+        second: {
+          type: "pane",
+          paneId: "session-pane",
+        },
+      },
+      "split-1",
+      "row",
+      1600,
+      new Map([
+        [
+          "control-panel-pane",
+          {
+            id: "control-panel-pane",
+            tabs: [
+              {
+                id: "control-panel-tab",
+                kind: "controlPanel",
+                originSessionId: null,
+              },
+            ],
+            activeTabId: "control-panel-tab",
+            activeSessionId: null,
+            viewMode: "controlPanel",
+            lastSessionViewMode: "session",
+            sourcePath: null,
+          },
+        ],
+        [
+          "session-pane",
+          {
+            id: "session-pane",
+            tabs: [
+              {
+                id: "session-tab",
+                kind: "session",
+                sessionId: "session-1",
+              },
+            ],
+            activeTabId: "session-tab",
+            activeSessionId: "session-1",
+            viewMode: "session",
+            lastSessionViewMode: "session",
+            sourcePath: null,
+          },
+        ],
+      ]),
+    );
+
+    expect(bounds.minRatio).toBeCloseTo(14 / 100, 4);
+    expect(bounds.maxRatio).toBeCloseTo(78 / 100, 4);
   });
 
   it("shows a Codex notice when live model refresh resets reasoning effort after session creation", async () => {

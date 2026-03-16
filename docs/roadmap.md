@@ -1,9 +1,9 @@
 # TermAl Roadmap
 
 This document tracks product phases. It is intentionally separate from the `P0` / `P1` / `P2`
-implementation backlog in [`docs/bugs.md`](/Users/greg/GitHub/Personal/termal/docs/bugs.md).
+implementation backlog in [`bugs.md`](./bugs.md).
 
-For product framing, see [`docs/vision.md`](/Users/greg/GitHub/Personal/termal/docs/vision.md).
+For product framing, see [`vision.md`](./vision.md).
 
 Priority buckets answer "what should we build next inside the current product shape?"
 
@@ -71,6 +71,17 @@ streams."
 - Diff preview tabs and backlinks
 - Saved review comments and agent review replies
 - Reliability, restart safety, and test coverage
+
+### Recent progress
+
+Recent Phase 1 work has improved the local supervision loop in concrete ways:
+
+- Prompt queueing, queued-prompt cancel, and stop controls are implemented.
+- Diff preview reuse and editable diff workspace flows are implemented.
+- The control-panel workspace model now better routes filesystem and git status actions into source and diff review.
+- Filesystem and git status rows can open source or diff views in a brand-new pane via modifier-click.
+- Backend connection state is now clearer at a glance with a compact status chip.
+- UI test coverage now includes the new pane-opening behavior in filesystem, git status, and workspace helpers.
 
 ### Not in scope
 
@@ -234,15 +245,15 @@ These rules prevent roadmap drift:
 
 ## Mapping Current Work To Phases
 
-Most current work in [`docs/bugs.md`](/Users/greg/GitHub/Personal/termal/docs/bugs.md) belongs to
-Phase 1.
+Most current work in [`bugs.md`](./bugs.md) belongs to Phase 1.
 
 Examples:
 
 - Gemini integration is Phase 1
 - Codex app-server coverage is Phase 1
 - Runtime reliability and restart safety are Phase 1
-- Diff preview tabs are Phase 1
+- Diff preview tabs, editable review flows, and pane-management polish are Phase 1
+- Prompt queueing, stop controls, filesystem/git review navigation, and connection-state UX are Phase 1
 - Saved review comments and agent replies are Phase 1
 - Relay, daemon, and remote auth are Phase 2
 - Mobile client and notifications are Phase 3
@@ -250,8 +261,11 @@ Examples:
 
 ## Current Status
 
-As of March 10, 2026, TermAl is still in Phase 1.
+As of March 15, 2026, TermAl is still in Phase 1.
 
-The current app is already a local Rust server plus React UI, but the remaining work is still
-primarily Phase 1 work: integration depth, reliability, structured review flows, and local UX
-polish.
+The product has moved beyond the earliest local plumbing. The current app already has the local
+Rust server plus React UI, streaming session updates, prompt queueing, diff/source/git workspace
+surfaces, and improving pane-management flows for review.
+
+The remaining Phase 1 work is now concentrated in integration depth, restart safety, saved review
+threads, and the last layer of local UX polish needed to make the app dependable for daily use.

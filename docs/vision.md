@@ -2,8 +2,8 @@
 
 This is a product vision draft, not a delivery checklist.
 
-For phased rollout, see [`roadmap.md`](/Users/greg/GitHub/Personal/termal/roadmap.md).
-For implementation backlog, see [`docs/bugs.md`](/Users/greg/GitHub/Personal/termal/docs/bugs.md).
+For phased rollout, see [`roadmap.md`](./roadmap.md).
+For implementation backlog, see [`bugs.md`](./bugs.md).
 
 ## Framing
 
@@ -195,3 +195,4 @@ a terminal transcript.
 TermAl began at the terminal, but its real destination is broader:
 
 an operating environment for software engineering work done with AI agents.
+

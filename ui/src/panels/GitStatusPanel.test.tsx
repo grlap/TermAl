@@ -80,6 +80,30 @@ describe("GitStatusPanel", () => {
     expect(screen.queryByText("ControlPanelSurface.tsx")).not.toBeInTheDocument();
   });
 
+  it("passes openInNewPane when ctrl-clicking a git row", async () => {
+    fetchGitStatusMock.mockResolvedValue(
+      makeStatusResponse([
+        {
+          indexStatus: "M",
+          path: "ui/src/ControlPanelSurface.tsx",
+        },
+      ]),
+    );
+    fetchGitDiffMock.mockResolvedValue(makeDiffResponse());
+
+    const onOpenDiff = vi.fn();
+
+    render(<GitStatusPanel workdir="/repo" onOpenDiff={onOpenDiff} onOpenWorkdir={() => {}} />);
+
+    const fileButton = await screen.findByRole("button", { name: /^ControlPanelSurface\.tsx$/i });
+
+    fireEvent.click(fileButton, { ctrlKey: true });
+
+    await waitFor(() => {
+      expect(onOpenDiff).toHaveBeenCalledWith(makeDiffResponse(), { openInNewPane: true });
+    });
+  });
+
   it("reports git status updates for badge counts", async () => {
     fetchGitStatusMock.mockResolvedValue(
       makeStatusResponse([

@@ -4,6 +4,7 @@ import {
   activatePane,
   closeWorkspaceTab,
   createPane,
+  dockControlPanelAtWorkspaceEdge,
   ensureControlPanelInWorkspaceState,
   findWorkspacePaneIdForSession,
   openControlPanelInWorkspaceState,
@@ -241,6 +242,88 @@ describe("workspace helpers", () => {
     expect(next.panes.find((pane) => pane.id === "pane-b")?.tabs).toEqual([makeSessionTab("tab-b", "session-b")]);
   });
 
+  it("dockControlPanelAtWorkspaceEdge preserves the resized control panel width", () => {
+    const workspace = {
+      root: {
+        id: "split-1",
+        type: "split" as const,
+        direction: "row" as const,
+        ratio: 0.14,
+        first: {
+          type: "pane" as const,
+          paneId: "pane-control",
+        },
+        second: {
+          type: "pane" as const,
+          paneId: "pane-session",
+        },
+      },
+      panes: [
+        makePane("pane-control", [makeControlPanelTab("control-a", null)], {
+          activeTabId: "control-a",
+          activeSessionId: null,
+          viewMode: "controlPanel",
+        }),
+        makePane("pane-session", [makeSessionTab("tab-a", "session-a")], {
+          activeTabId: "tab-a",
+          activeSessionId: "session-a",
+          viewMode: "session",
+        }),
+      ],
+      activePaneId: "pane-session",
+    };
+
+    const next = dockControlPanelAtWorkspaceEdge(workspace, "left");
+
+    expect(next.root).toMatchObject({
+      id: "split-1",
+      type: "split",
+      direction: "row",
+      ratio: 0.14,
+    });
+  });
+
+  it("dockControlPanelAtWorkspaceEdge preserves control panel width when moving sides", () => {
+    const workspace = {
+      root: {
+        id: "split-1",
+        type: "split" as const,
+        direction: "row" as const,
+        ratio: 0.14,
+        first: {
+          type: "pane" as const,
+          paneId: "pane-control",
+        },
+        second: {
+          type: "pane" as const,
+          paneId: "pane-session",
+        },
+      },
+      panes: [
+        makePane("pane-control", [makeControlPanelTab("control-a", null)], {
+          activeTabId: "control-a",
+          activeSessionId: null,
+          viewMode: "controlPanel",
+        }),
+        makePane("pane-session", [makeSessionTab("tab-a", "session-a")], {
+          activeTabId: "tab-a",
+          activeSessionId: "session-a",
+          viewMode: "session",
+        }),
+      ],
+      activePaneId: "pane-session",
+    };
+
+    const next = dockControlPanelAtWorkspaceEdge(workspace, "right");
+
+    expect(next.root).toMatchObject({
+      id: "split-1",
+      type: "split",
+      direction: "row",
+      ratio: 0.86,
+    });
+  });
+
   it("findWorkspacePaneIdForSession returns the pane that owns the session tab", () => {
     const paneA = makePane("pane-a", [makeSessionTab("tab-a", "session-a")]);
     const paneB = makePane("pane-b", [makeSessionTab("tab-b", "session-b")]);
@@ -355,6 +438,51 @@ describe("workspace helpers", () => {
       activeSessionId: "session-b",
       viewMode: "source",
       sourcePath: "/tmp/app.ts",
+    });
+  });
+
+  it("openSourceInWorkspaceState opens a new pane instead of reusing an existing source tab when requested", () => {
+    const next = openSourceInWorkspaceState(
+      makeSplitWorkspace(
+        makePane("pane-a", [makeControlPanelTab("control-a", null)], {
+          activeTabId: "control-a",
+          activeSessionId: null,
+          viewMode: "controlPanel",
+        }),
+        makePane("pane-b", [makeSourceTab("source-a", "/tmp/app.ts", null)], {
+          activeTabId: "source-a",
+          activeSessionId: null,
+          viewMode: "source",
+          sourcePath: "/tmp/app.ts",
+        }),
+        "pane-a",
+      ),
+      "/tmp/app.ts",
+      "pane-a",
+      null,
+      {
+        openInNewPane: true,
+      },
+    );
+
+    expect(next.panes).toHaveLength(3);
+    expect(next.panes.find((pane) => pane.id === "pane-b")?.tabs).toEqual([
+      makeSourceTab("source-a", "/tmp/app.ts", null),
+    ]);
+    expect(next.activePaneId).not.toBe("pane-a");
+    expect(next.activePaneId).not.toBe("pane-b");
+    expect(next.panes.find((pane) => pane.id === next.activePaneId)).toMatchObject({
+      tabs: [
+        {
+          id: expect.any(String),
+          kind: "source",
+          path: "/tmp/app.ts",
+          originSessionId: null,
+        },
+      ],
+      viewMode: "source",
+      sourcePath: "/tmp/app.ts",
+      activeSessionId: null,
     });
   });
 
@@ -706,6 +834,57 @@ describe("workspace helpers", () => {
     });
   });
 
+
+  it("openDiffPreviewInWorkspaceState opens a new pane instead of reusing an existing viewer when requested", () => {
+    const next = openDiffPreviewInWorkspaceState(
+      makeSplitWorkspace(
+        makePane("pane-a", [makeGitStatusTab("git-a", "/tmp/project", null)], {
+          activeTabId: "git-a",
+          activeSessionId: null,
+          viewMode: "gitStatus",
+        }),
+        makePane("pane-b", [makeDiffPreviewTab("diff-tab-a", "diff-a", "/tmp/app.ts", null)], {
+          activeTabId: "diff-tab-a",
+          activeSessionId: null,
+          viewMode: "diffPreview",
+        }),
+      ),
+      {
+        changeType: "edit",
+        diff: "-foo\n+bar",
+        diffMessageId: "diff-b",
+        filePath: "/tmp/next.ts",
+        language: "typescript",
+        originSessionId: null,
+        summary: "Updated next.ts",
+      },
+      "pane-a",
+      {
+        openInNewPane: true,
+        reuseActiveViewerTab: true,
+      },
+    );
+
+    expect(next.panes).toHaveLength(3);
+    expect(next.panes.find((pane) => pane.id === "pane-b")?.tabs).toEqual([
+      makeDiffPreviewTab("diff-tab-a", "diff-a", "/tmp/app.ts", null),
+    ]);
+    expect(next.activePaneId).not.toBe("pane-a");
+    expect(next.activePaneId).not.toBe("pane-b");
+    expect(next.panes.find((pane) => pane.id === next.activePaneId)).toMatchObject({
+      tabs: [
+        {
+          id: expect.any(String),
+          kind: "diffPreview",
+          diffMessageId: "diff-b",
+          filePath: "/tmp/next.ts",
+          originSessionId: null,
+        },
+      ],
+      viewMode: "diffPreview",
+      activeSessionId: null,
+    });
+  });
 
   it("openDiffPreviewInWorkspaceState reuses the existing diff pane for later previews", () => {
     const next = openDiffPreviewInWorkspaceState(

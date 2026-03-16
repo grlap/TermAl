@@ -213,6 +213,9 @@ type ComboboxOption = {
 
 const PENDING_KILL_CLOSE_DELAY_MS = 180;
 const PENDING_SESSION_RENAME_CLOSE_DELAY_MS = 300;
+const DEFAULT_SPLIT_MIN_RATIO = 0.22;
+const DEFAULT_SPLIT_MAX_RATIO = 0.78;
+const CONTROL_PANEL_PANE_MIN_WIDTH_FALLBACK_PX = 14 * 16;
 
 type SessionConversationItem =
   | {
@@ -878,6 +881,8 @@ export default function App() {
     splitId: string;
     direction: "row" | "column";
     startRatio: number;
+    minRatio: number;
+    maxRatio: number;
     startX: number;
     startY: number;
     size: number;
@@ -1961,8 +1966,8 @@ export default function App() {
           : event.clientY - resizeState.startY;
       const nextRatio = clamp(
         resizeState.startRatio + delta / Math.max(resizeState.size, 1),
-        0.22,
-        0.78,
+        resizeState.minRatio,
+        resizeState.maxRatio,
       );
 
       setWorkspace((current) => updateSplitRatio(current, resizeState.splitId, nextRatio));
@@ -2894,10 +2899,19 @@ export default function App() {
     }
 
     const rect = container.getBoundingClientRect();
+    const { minRatio, maxRatio } = getWorkspaceSplitResizeBounds(
+      workspace.root,
+      splitId,
+      direction,
+      direction === "row" ? rect.width : rect.height,
+      paneLookup,
+    );
     resizeStateRef.current = {
       splitId,
       direction,
       startRatio: ratio,
+      minRatio,
+      maxRatio,
       startX: event.clientX,
       startY: event.clientY,
       size: direction === "row" ? rect.width : rect.height,
@@ -3092,9 +3106,20 @@ export default function App() {
     setWorkspace((current) => setPaneSourcePath(current, paneId, path));
   }
 
-  function handleOpenSourceTab(paneId: string, path: string | null, originSessionId: string | null) {
+  function handleOpenSourceTab(
+    paneId: string,
+    path: string | null,
+    originSessionId: string | null,
+    options?: {
+      openInNewPane?: boolean;
+    },
+  ) {
     setWorkspace((current) =>
-      applyControlPanelLayout(openSourceInWorkspaceState(current, path, paneId, originSessionId)),
+      applyControlPanelLayout(
+        openSourceInWorkspaceState(current, path, paneId, originSessionId, {
+          openInNewPane: options?.openInNewPane,
+        }),
+      ),
     );
   }
 
@@ -3126,6 +3151,9 @@ export default function App() {
     paneId: string,
     diffPreview: GitDiffResponse,
     originSessionId: string | null,
+    options?: {
+      openInNewPane?: boolean;
+    },
   ) {
     setWorkspace((current) =>
       applyControlPanelLayout(
@@ -3141,9 +3169,13 @@ export default function App() {
             summary: diffPreview.summary,
           },
           paneId,
-          {
-            reuseActiveViewerTab: true,
-          },
+          options?.openInNewPane
+            ? {
+                openInNewPane: true,
+              }
+            : {
+                reuseActiveViewerTab: true,
+              },
         ),
       ),
     );
@@ -3262,7 +3294,9 @@ export default function App() {
               <FileSystemPanel
                 rootPath={controlPanelFilesystemRoot}
                 showPathControls={false}
-                onOpenPath={(path) => handleOpenSourceTab(paneId, path, activeSession?.id ?? null)}
+                onOpenPath={(path, options) =>
+                  handleOpenSourceTab(paneId, path, activeSession?.id ?? null, options)
+                }
                 onOpenRootPath={(path) => setControlPanelFilesystemRoot(path.trim() || null)}
               />
             </section>
@@ -3275,7 +3309,9 @@ export default function App() {
               <GitStatusPanel
                 workdir={controlPanelGitWorkdir}
                 onStatusChange={(status) => setControlPanelGitStatusCount(status?.files.length ?? 0)}
-                onOpenDiff={(diff) => handleOpenGitStatusDiffPreviewTab(paneId, diff, activeSession?.id ?? null)}
+                onOpenDiff={(diff, options) =>
+                  handleOpenGitStatusDiffPreviewTab(paneId, diff, activeSession?.id ?? null, options)
+                }
                 onOpenWorkdir={(path) => setControlPanelGitWorkdir(path.trim() || null)}
               />
             </section>
@@ -5130,7 +5166,12 @@ function WorkspaceNodeView({
   onTabDragEnd: () => void;
   onTabDrop: (targetPaneId: string, placement: TabDropPlacement, tabIndex?: number) => void;
   onPaneViewModeChange: (paneId: string, viewMode: SessionPaneViewMode) => void;
-  onOpenSourceTab: (paneId: string, path: string | null, originSessionId: string | null) => void;
+  onOpenSourceTab: (
+    paneId: string,
+    path: string | null,
+    originSessionId: string | null,
+    options?: { openInNewPane?: boolean },
+  ) => void;
   onOpenDiffPreviewTab: (
     paneId: string,
     message: DiffMessage,
@@ -5140,6 +5181,7 @@ function WorkspaceNodeView({
     paneId: string,
     diffPreview: GitDiffResponse,
     originSessionId: string | null,
+    options?: { openInNewPane?: boolean },
   ) => void;
   onOpenFilesystemTab: (
     paneId: string,
@@ -5270,20 +5312,22 @@ function WorkspaceNodeView({
 
   const firstContainsControlPanel = workspaceNodeContainsControlPanel(node.first, paneLookup);
   const secondContainsControlPanel = workspaceNodeContainsControlPanel(node.second, paneLookup);
-  const shouldPinControlPanelBranch =
+  const shouldMarkControlPanelBranch =
     node.direction === "row" && firstContainsControlPanel !== secondContainsControlPanel;
-  const firstBranchClassName = shouldPinControlPanelBranch
-    ? `tile-branch ${firstContainsControlPanel ? "control-panel-branch" : "flexible-branch"}`
-    : "tile-branch";
-  const secondBranchClassName = shouldPinControlPanelBranch
-    ? `tile-branch ${secondContainsControlPanel ? "control-panel-branch" : "flexible-branch"}`
-    : "tile-branch";
+  const firstBranchClassName =
+    shouldMarkControlPanelBranch && firstContainsControlPanel
+      ? "tile-branch control-panel-branch"
+      : "tile-branch";
+  const secondBranchClassName =
+    shouldMarkControlPanelBranch && secondContainsControlPanel
+      ? "tile-branch control-panel-branch"
+      : "tile-branch";
 
   return (
     <div className={`tile-split tile-split-${node.direction}`}>
       <div
         className={firstBranchClassName}
-        style={shouldPinControlPanelBranch ? undefined : { flexGrow: node.ratio, flexBasis: 0 }}
+        style={{ flexGrow: node.ratio, flexBasis: 0 }}
       >
         <WorkspaceNodeView
           node={node.first}
@@ -5346,17 +5390,13 @@ function WorkspaceNodeView({
       </div>
 
       <div
-        className={`tile-divider tile-divider-${node.direction}${shouldPinControlPanelBranch ? " fixed" : ""}`}
-        onPointerDown={
-          shouldPinControlPanelBranch
-            ? undefined
-            : (event) => onResizeStart(node.id, node.direction, event)
-        }
+        className={`tile-divider tile-divider-${node.direction}`}
+        onPointerDown={(event) => onResizeStart(node.id, node.direction, event)}
       />
 
       <div
         className={secondBranchClassName}
-        style={shouldPinControlPanelBranch ? undefined : { flexGrow: 1 - node.ratio, flexBasis: 0 }}
+        style={{ flexGrow: 1 - node.ratio, flexBasis: 0 }}
       >
         <WorkspaceNodeView
           node={node.second}
@@ -5517,7 +5557,12 @@ function SessionPaneView({
   onTabDragEnd: () => void;
   onTabDrop: (targetPaneId: string, placement: TabDropPlacement, tabIndex?: number) => void;
   onPaneViewModeChange: (paneId: string, viewMode: SessionPaneViewMode) => void;
-  onOpenSourceTab: (paneId: string, path: string | null, originSessionId: string | null) => void;
+  onOpenSourceTab: (
+    paneId: string,
+    path: string | null,
+    originSessionId: string | null,
+    options?: { openInNewPane?: boolean },
+  ) => void;
   onOpenDiffPreviewTab: (
     paneId: string,
     message: DiffMessage,
@@ -5527,6 +5572,7 @@ function SessionPaneView({
     paneId: string,
     diffPreview: GitDiffResponse,
     originSessionId: string | null,
+    options?: { openInNewPane?: boolean },
   ) => void;
   onOpenFilesystemTab: (
     paneId: string,
@@ -6579,7 +6625,9 @@ function SessionPaneView({
         ) : activeFilesystemTab ? (
           <FileSystemPanel
             rootPath={activeFilesystemTab.rootPath}
-            onOpenPath={(path) => onOpenSourceTab(pane.id, path, activeSession?.id ?? null)}
+            onOpenPath={(path, options) =>
+              onOpenSourceTab(pane.id, path, activeSession?.id ?? null, options)
+            }
             onOpenRootPath={(path) =>
               onOpenFilesystemTab(pane.id, path, activeSession?.id ?? null)
             }
@@ -6587,7 +6635,9 @@ function SessionPaneView({
         ) : activeGitStatusTab ? (
           <GitStatusPanel
             workdir={activeGitStatusTab.workdir}
-            onOpenDiff={(diff) => onOpenGitStatusDiffPreviewTab(pane.id, diff, activeSession?.id ?? null)}
+            onOpenDiff={(diff, options) =>
+              onOpenGitStatusDiffPreviewTab(pane.id, diff, activeSession?.id ?? null, options)
+            }
             onOpenWorkdir={(path) =>
               onOpenGitStatusTab(pane.id, path, activeSession?.id ?? null)
             }
@@ -6771,6 +6821,105 @@ function workspaceNodeContainsControlPanel(
     workspaceNodeContainsControlPanel(node.first, paneLookup) ||
     workspaceNodeContainsControlPanel(node.second, paneLookup)
   );
+}
+
+function findWorkspaceSplitNode(
+  node: WorkspaceNode | null,
+  splitId: string,
+): Extract<WorkspaceNode, { type: "split" }> | null {
+  if (!node || node.type === "pane") {
+    return null;
+  }
+
+  if (node.id === splitId) {
+    return node;
+  }
+
+  return (
+    findWorkspaceSplitNode(node.first, splitId) ?? findWorkspaceSplitNode(node.second, splitId)
+  );
+}
+
+function resolveRootCssLengthPx(cssVariableName: string, fallbackPx: number): number {
+  if (typeof window === "undefined" || typeof document === "undefined") {
+    return fallbackPx;
+  }
+
+  const rootStyle = window.getComputedStyle(document.documentElement);
+  const rawValue = rootStyle.getPropertyValue(cssVariableName).trim();
+  if (!rawValue) {
+    return fallbackPx;
+  }
+
+  const numericValue = Number.parseFloat(rawValue);
+  if (!Number.isFinite(numericValue)) {
+    return fallbackPx;
+  }
+
+  if (rawValue.endsWith("rem")) {
+    const rootFontSizePx = Number.parseFloat(rootStyle.fontSize);
+    return numericValue * (Number.isFinite(rootFontSizePx) ? rootFontSizePx : 16);
+  }
+
+  return numericValue;
+}
+
+export function getWorkspaceSplitResizeBounds(
+  root: WorkspaceNode | null,
+  splitId: string,
+  direction: "row" | "column",
+  size: number,
+  paneLookup: Map<string, WorkspacePane>,
+): { minRatio: number; maxRatio: number } {
+  if (direction !== "row" || size <= 0) {
+    return {
+      minRatio: DEFAULT_SPLIT_MIN_RATIO,
+      maxRatio: DEFAULT_SPLIT_MAX_RATIO,
+    };
+  }
+
+  const splitNode = findWorkspaceSplitNode(root, splitId);
+  if (!splitNode) {
+    return {
+      minRatio: DEFAULT_SPLIT_MIN_RATIO,
+      maxRatio: DEFAULT_SPLIT_MAX_RATIO,
+    };
+  }
+
+  const controlPanelMinRatio = clamp(
+    resolveRootCssLengthPx(
+      "--control-panel-pane-min-width",
+      CONTROL_PANEL_PANE_MIN_WIDTH_FALLBACK_PX,
+    ) / size,
+    0,
+    1,
+  );
+  const firstMinRatio = workspaceNodeContainsControlPanel(splitNode.first, paneLookup)
+    ? controlPanelMinRatio
+    : DEFAULT_SPLIT_MIN_RATIO;
+  const secondMinRatio = workspaceNodeContainsControlPanel(splitNode.second, paneLookup)
+    ? controlPanelMinRatio
+    : DEFAULT_SPLIT_MIN_RATIO;
+  const minRatio = firstMinRatio;
+  const maxRatio = 1 - secondMinRatio;
+
+  if (minRatio <= maxRatio) {
+    return {
+      minRatio,
+      maxRatio,
+    };
+  }
+
+  const constrainedRatio = clamp(
+    firstMinRatio / Math.max(firstMinRatio + secondMinRatio, Number.EPSILON),
+    0,
+    1,
+  );
+
+  return {
+    minRatio: constrainedRatio,
+    maxRatio: constrainedRatio,
+  };
 }
 
 function SessionFindBar({
@@ -8761,29 +8910,29 @@ function describeBackendConnectionState(state: BackendConnectionState) {
     case "connecting":
       return {
         detail: "Connecting to the TermAl backend.",
+        icon: "spinner" as const,
         label: "Connecting",
-        showSpinner: true,
         tone: "active" as const,
       };
     case "connected":
       return {
         detail: "Live updates are connected.",
+        icon: "connected" as const,
         label: "Connected",
-        showSpinner: false,
         tone: "idle" as const,
       };
     case "reconnecting":
       return {
         detail: "Waiting for the backend connection to recover.",
+        icon: "spinner" as const,
         label: "Reconnecting",
-        showSpinner: true,
         tone: "active" as const,
       };
     case "offline":
       return {
         detail: "The browser is offline or cannot reach the backend.",
+        icon: "offline" as const,
         label: "Offline",
-        showSpinner: false,
         tone: "error" as const,
       };
   }
@@ -8794,16 +8943,55 @@ function BackendConnectionStatus({ state }: { state: BackendConnectionState }) {
 
   return (
     <div className="workspace-connection-status" role="status" aria-live="polite" title={descriptor.detail}>
-      <span className="card-label">Backend</span>
       <span className={`chip chip-status chip-status-${descriptor.tone} workspace-connection-chip`}>
-        {descriptor.showSpinner ? (
+        {descriptor.icon === "spinner" ? (
           <span className="activity-spinner workspace-connection-spinner" aria-hidden="true" />
         ) : (
-          <span className="workspace-connection-dot" aria-hidden="true" />
+          <BackendConnectionIcon state={descriptor.icon} />
         )}
-        <span>{descriptor.label}</span>
+        <span className="visually-hidden">{descriptor.label}</span>
       </span>
     </div>
+  );
+}
+
+function BackendConnectionIcon({ state }: { state: "connected" | "offline" }) {
+  if (state === "connected") {
+    return (
+      <span className="workspace-connection-icon" aria-hidden="true">
+        <svg viewBox="0 0 16 16" focusable="false" aria-hidden="true">
+          <path
+            d="m4 8.2 2.2 2.2L12 4.6"
+            fill="none"
+            stroke="currentColor"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            strokeWidth="1.8"
+          />
+        </svg>
+      </span>
+    );
+  }
+
+  return (
+    <span className="workspace-connection-icon" aria-hidden="true">
+      <svg viewBox="0 0 16 16" focusable="false" aria-hidden="true">
+        <path
+          d="M4.5 4.5 11.5 11.5"
+          fill="none"
+          stroke="currentColor"
+          strokeLinecap="round"
+          strokeWidth="1.8"
+        />
+        <path
+          d="M11.5 4.5 4.5 11.5"
+          fill="none"
+          stroke="currentColor"
+          strokeLinecap="round"
+          strokeWidth="1.8"
+        />
+      </svg>
+    </span>
   );
 }
 

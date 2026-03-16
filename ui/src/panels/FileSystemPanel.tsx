@@ -21,6 +21,10 @@ type FileSystemGitDecorations = {
   directoriesByPath: Record<string, GitDecorationTone | undefined>;
   filesByPath: Record<string, FileDecoration | undefined>;
 };
+type FileSystemOpenOptions = {
+  openInNewPane?: boolean;
+};
+
 
 const GIT_STATUS_LABELS: Record<string, string> = {
   "?": "Untracked",
@@ -47,7 +51,7 @@ export function FileSystemPanel({
   rootPath,
   showPathControls = true,
 }: {
-  onOpenPath: (path: string) => void;
+  onOpenPath: (path: string, options?: FileSystemOpenOptions) => void;
   onOpenRootPath: (path: string) => void;
   rootPath: string | null;
   showPathControls?: boolean;
@@ -284,7 +288,7 @@ function DirectoryTree({
   gitDecorations: FileSystemGitDecorations;
   loadingPaths: Record<string, true | undefined>;
   onDirectoryToggle: (path: string) => void;
-  onOpenPath: (path: string) => void;
+  onOpenPath: (path: string, options?: FileSystemOpenOptions) => void;
 }) {
   return (
     <div className="filesystem-tree">
@@ -328,7 +332,11 @@ function DirectoryTree({
               <button
                 className="filesystem-row filesystem-file-row"
                 type="button"
-                onClick={() => onOpenPath(entry.path)}
+                onClick={(event) =>
+                  event.ctrlKey || event.metaKey
+                    ? onOpenPath(entry.path, { openInNewPane: true })
+                    : onOpenPath(entry.path)
+                }
               >
                 <span className="filesystem-toggle filesystem-toggle-placeholder" aria-hidden="true">
                   <ChevronIcon expanded={false} />
