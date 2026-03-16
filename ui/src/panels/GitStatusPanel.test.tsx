@@ -27,6 +27,7 @@ const applyGitFileActionMock = vi.mocked(applyGitFileAction);
 const commitGitChangesMock = vi.mocked(commitGitChanges);
 const fetchGitDiffMock = vi.mocked(fetchGitDiff);
 const fetchGitStatusMock = vi.mocked(fetchGitStatus);
+const PROJECT_ID = "project-1";
 const SESSION_ID = "session-1";
 
 describe("GitStatusPanel", () => {
@@ -335,6 +336,48 @@ describe("GitStatusPanel", () => {
     expect(screen.getByText(/Select or open a session in this project/i)).toBeInTheDocument();
     expect(screen.queryByText(/no longer associated with a live session/i)).not.toBeInTheDocument();
     expect(fetchGitStatusMock).not.toHaveBeenCalled();
+  });
+
+  it("loads git status from the selected project when no session is available", async () => {
+    fetchGitStatusMock.mockResolvedValue(
+      makeStatusResponse([
+        {
+          path: "src/main.rs",
+          worktreeStatus: "M",
+        },
+      ]),
+    );
+    fetchGitDiffMock.mockResolvedValue(makeDiffResponse());
+
+    render(
+      <GitStatusPanel
+        projectId={PROJECT_ID}
+        sessionId={null}
+        workdir="/repo"
+        showPathControls={false}
+        onOpenDiff={() => {}}
+        onOpenWorkdir={() => {}}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(fetchGitStatusMock).toHaveBeenCalledWith("/repo", null, {
+        projectId: PROJECT_ID,
+      });
+    });
+
+    fireEvent.click(await screen.findByRole("button", { name: /^main\.rs$/i }));
+
+    await waitFor(() => {
+      expect(fetchGitDiffMock).toHaveBeenCalledWith({
+        originalPath: undefined,
+        path: "src/main.rs",
+        projectId: PROJECT_ID,
+        sectionId: "unstaged",
+        statusCode: "M",
+        workdir: "/repo",
+      });
+    });
   });
 
   it("reports git status updates for badge counts", async () => {

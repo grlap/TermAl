@@ -26,12 +26,20 @@ type GitActionTarget = {
 type GitDiffOpenOptions = {
   openInNewTab?: boolean;
 };
+type GitRequestScope =
+  | {
+      sessionId: string;
+    }
+  | {
+      projectId: string;
+    };
 
 
 export function GitStatusPanel({
   onStatusChange,
   onOpenDiff,
   onOpenWorkdir,
+  projectId = null,
   sessionId,
   workdir,
   showPathControls = true,
@@ -39,6 +47,7 @@ export function GitStatusPanel({
   onStatusChange?: (status: GitStatusResponse | null) => void;
   onOpenDiff: (diff: GitDiffResponse, options?: GitDiffOpenOptions) => void;
   onOpenWorkdir: (path: string) => void;
+  projectId?: string | null;
   sessionId: string | null;
   workdir: string | null;
   showPathControls?: boolean;
@@ -53,10 +62,17 @@ export function GitStatusPanel({
   const [pendingActionKey, setPendingActionKey] = useState<string | null>(null);
   const [treeExpansionByKey, setTreeExpansionByKey] = useState<Record<string, boolean>>({});
   const onStatusChangeRef = useRef(onStatusChange);
+  const normalizedProjectId = projectId?.trim() ?? "";
   const normalizedWorkdir = workdir?.trim() ?? "";
+  const requestScope: GitRequestScope | null = sessionId
+    ? { sessionId }
+    : normalizedProjectId
+      ? { projectId: normalizedProjectId }
+      : null;
+  const hasRequestScope = requestScope !== null;
   const visibleStatus = status?.workdir === normalizedWorkdir ? status : null;
-  const isWaitingForSession = Boolean(normalizedWorkdir && !sessionId && !showPathControls);
-  const isMissingSession = Boolean(normalizedWorkdir && !sessionId && showPathControls);
+  const isWaitingForSession = Boolean(normalizedWorkdir && !hasRequestScope && !showPathControls);
+  const isMissingSession = Boolean(normalizedWorkdir && !hasRequestScope && showPathControls);
   const changedFiles = visibleStatus?.files ?? [];
   const hasStagedChanges = changedFiles.some((file) => Boolean(file.indexStatus));
   const sections = useMemo(() => buildGitStatusTree(changedFiles), [changedFiles]);
@@ -84,7 +100,7 @@ export function GitStatusPanel({
       return;
     }
 
-    if (!sessionId) {
+    if (!hasRequestScope) {
       setStatus(null);
       setError(null);
       onStatusChangeRef.current?.(null);
@@ -92,10 +108,10 @@ export function GitStatusPanel({
     }
 
     void loadStatus(normalizedWorkdir);
-  }, [normalizedWorkdir, sessionId]);
+  }, [hasRequestScope, normalizedWorkdir, normalizedProjectId, sessionId]);
 
   async function loadStatus(path: string, options?: { preserveVisibleStatus?: boolean }) {
-    if (!sessionId) {
+    if (!requestScope) {
       return;
     }
 
@@ -103,7 +119,10 @@ export function GitStatusPanel({
     setIsLoading(true);
     setError(null);
     try {
-      const response = await fetchGitStatus(path, sessionId);
+      const response =
+        "sessionId" in requestScope
+          ? await fetchGitStatus(path, requestScope.sessionId)
+          : await fetchGitStatus(path, null, { projectId: requestScope.projectId });
       setStatus(response);
       onStatusChangeRef.current?.(response);
     } catch (nextError) {
@@ -119,7 +138,7 @@ export function GitStatusPanel({
 
   async function handleOpenDiff(sectionId: GitStatusSectionId, node: GitStatusTreeFileNode, options?: GitDiffOpenOptions) {
     const activeWorkdir = visibleStatus?.workdir ?? normalizedWorkdir;
-    if (!activeWorkdir || !sessionId) {
+    if (!activeWorkdir || !requestScope) {
       return;
     }
 
@@ -133,7 +152,7 @@ export function GitStatusPanel({
         originalPath: node.originalPath,
         path: node.path,
         sectionId,
-        sessionId,
+        ...requestScope,
         statusCode: node.statusCode,
         workdir: activeWorkdir,
       });
@@ -176,7 +195,7 @@ export function GitStatusPanel({
     action: GitFileAction,
   ) {
     const activeWorkdir = visibleStatus?.workdir ?? normalizedWorkdir;
-    if (!activeWorkdir || !sessionId || targets.length === 0) {
+    if (!activeWorkdir || !requestScope || targets.length === 0) {
       return;
     }
 
@@ -193,7 +212,7 @@ export function GitStatusPanel({
           action,
           originalPath: target.originalPath,
           path: target.path,
-          sessionId,
+          ...requestScope,
           statusCode: target.statusCode,
           workdir: activeWorkdir,
         });
@@ -207,7 +226,12 @@ export function GitStatusPanel({
       setError(getErrorMessage(nextError));
       if (targets.length > 1) {
         try {
-          const refreshedStatus = await fetchGitStatus(activeWorkdir, sessionId);
+          const refreshedStatus =
+            "sessionId" in requestScope
+              ? await fetchGitStatus(activeWorkdir, requestScope.sessionId)
+              : await fetchGitStatus(activeWorkdir, null, {
+                  projectId: requestScope.projectId,
+                });
           setStatus(refreshedStatus);
           onStatusChangeRef.current?.(refreshedStatus);
         } catch {
@@ -250,7 +274,7 @@ export function GitStatusPanel({
   async function submitCommit() {
     const activeWorkdir = visibleStatus?.workdir ?? normalizedWorkdir;
     const nextMessage = commitMessage.trim();
-    if (!activeWorkdir || !sessionId || !nextMessage || !hasStagedChanges || isCommitting) {
+    if (!activeWorkdir || !requestScope || !nextMessage || !hasStagedChanges || isCommitting) {
       return;
     }
 
@@ -261,7 +285,7 @@ export function GitStatusPanel({
     try {
       const response = await commitGitChanges({
         message: nextMessage,
-        sessionId,
+        ...requestScope,
         workdir: activeWorkdir,
       });
       setStatus(response.status);

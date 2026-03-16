@@ -1841,6 +1841,74 @@ fn allows_new_file_paths_inside_the_session_project_root() {
 }
 
 #[test]
+fn resolves_project_scoped_paths_without_a_session() {
+    let state = test_app_state();
+    let root = std::env::temp_dir().join(format!("termal-project-scope-only-{}", Uuid::new_v4()));
+    let inside_dir = root.join("src");
+    let inside_file = inside_dir.join("main.rs");
+    let outside_root = std::env::temp_dir().join(format!(
+        "termal-project-scope-only-outside-{}",
+        Uuid::new_v4()
+    ));
+    let outside_file = outside_root.join("escape.rs");
+
+    fs::create_dir_all(&inside_dir).unwrap();
+    fs::create_dir_all(&outside_root).unwrap();
+    fs::write(&inside_file, "fn main() {}\n").unwrap();
+    fs::write(&outside_file, "fn main() {}\n").unwrap();
+
+    let project = state
+        .create_project(CreateProjectRequest {
+            name: Some("Scope Only Project".to_owned()),
+            root_path: root.to_string_lossy().into_owned(),
+        })
+        .unwrap();
+
+    let resolved = resolve_project_scoped_requested_path(
+        &state,
+        None,
+        Some(&project.project_id),
+        &inside_file.to_string_lossy(),
+        ScopedPathMode::ExistingFile,
+    )
+    .unwrap();
+    assert_eq!(
+        resolved,
+        normalize_user_facing_path(&fs::canonicalize(&inside_file).unwrap())
+    );
+
+    let error = resolve_project_scoped_requested_path(
+        &state,
+        None,
+        Some(&project.project_id),
+        &outside_file.to_string_lossy(),
+        ScopedPathMode::ExistingFile,
+    )
+    .unwrap_err();
+    assert_eq!(error.status, StatusCode::BAD_REQUEST);
+    assert!(error.message.contains("must stay inside project"));
+
+    fs::remove_dir_all(root).unwrap();
+    fs::remove_dir_all(outside_root).unwrap();
+}
+
+#[test]
+fn project_scoped_paths_require_a_session_or_project_identifier() {
+    let state = test_app_state();
+    let error = resolve_project_scoped_requested_path(
+        &state,
+        None,
+        None,
+        "/tmp",
+        ScopedPathMode::ExistingPath,
+    )
+    .unwrap_err();
+
+    assert_eq!(error.status, StatusCode::BAD_REQUEST);
+    assert_eq!(error.message, "sessionId or projectId is required");
+}
+
+#[test]
 fn persisted_state_without_projects_migrates_cleanly() {
     let path = std::env::temp_dir().join(format!("termal-project-migrate-{}.json", Uuid::new_v4()));
     let mut inner = StateInner::new();

@@ -333,9 +333,13 @@ async fn read_git_status(
     State(state): State<AppState>,
     Query(query): Query<FileQuery>,
 ) -> Result<Json<GitStatusResponse>, ApiError> {
-    let session_id = required_session_id(query.session_id.as_deref())?;
-    let workdir =
-        resolve_session_scoped_requested_path(&state, session_id, &query.path, ScopedPathMode::ExistingPath)?;
+    let workdir = resolve_project_scoped_requested_path(
+        &state,
+        query.session_id.as_deref(),
+        query.project_id.as_deref(),
+        &query.path,
+        ScopedPathMode::ExistingPath,
+    )?;
     Ok(Json(load_git_status_for_path(&workdir)?))
 }
 
@@ -343,10 +347,10 @@ async fn read_git_diff(
     State(state): State<AppState>,
     Json(request): Json<GitDiffRequest>,
 ) -> Result<Json<GitDiffResponse>, ApiError> {
-    let session_id = required_session_id(request.session_id.as_deref())?;
-    let workdir = resolve_session_scoped_requested_path(
+    let workdir = resolve_project_scoped_requested_path(
         &state,
-        session_id,
+        request.session_id.as_deref(),
+        request.project_id.as_deref(),
         &request.workdir,
         ScopedPathMode::ExistingPath,
     )?;
@@ -357,10 +361,10 @@ async fn apply_git_file_action(
     State(state): State<AppState>,
     Json(request): Json<GitFileActionRequest>,
 ) -> Result<Json<GitStatusResponse>, ApiError> {
-    let session_id = required_session_id(request.session_id.as_deref())?;
-    let workdir = resolve_session_scoped_requested_path(
+    let workdir = resolve_project_scoped_requested_path(
         &state,
-        session_id,
+        request.session_id.as_deref(),
+        request.project_id.as_deref(),
         &request.workdir,
         ScopedPathMode::ExistingPath,
     )?;
@@ -412,10 +416,10 @@ async fn commit_git_changes(
     State(state): State<AppState>,
     Json(request): Json<GitCommitRequest>,
 ) -> Result<Json<GitCommitResponse>, ApiError> {
-    let session_id = required_session_id(request.session_id.as_deref())?;
-    let workdir = resolve_session_scoped_requested_path(
+    let workdir = resolve_project_scoped_requested_path(
         &state,
-        session_id,
+        request.session_id.as_deref(),
+        request.project_id.as_deref(),
         &request.workdir,
         ScopedPathMode::ExistingPath,
     )?;
@@ -1522,6 +1526,7 @@ struct UpdateAppSettingsRequest {
 struct FileQuery {
     path: String,
     session_id: Option<String>,
+    project_id: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -1629,6 +1634,7 @@ struct GitDiffRequest {
     path: String,
     section_id: GitDiffSection,
     session_id: Option<String>,
+    project_id: Option<String>,
     #[serde(default)]
     status_code: Option<String>,
     workdir: String,
@@ -1669,6 +1675,7 @@ struct GitFileActionRequest {
     original_path: Option<String>,
     path: String,
     session_id: Option<String>,
+    project_id: Option<String>,
     #[serde(default)]
     status_code: Option<String>,
     workdir: String,
@@ -1679,6 +1686,7 @@ struct GitFileActionRequest {
 struct GitCommitRequest {
     message: String,
     session_id: Option<String>,
+    project_id: Option<String>,
     workdir: String,
 }
 
@@ -1938,6 +1946,10 @@ fn required_session_id(session_id: Option<&str>) -> Result<&str, ApiError> {
     Ok(session_id)
 }
 
+fn normalize_optional_identifier(value: Option<&str>) -> Option<&str> {
+    value.map(str::trim).filter(|candidate| !candidate.is_empty())
+}
+
 fn resolve_session_project_root_path(
     state: &AppState,
     session_id: &str,
@@ -1973,13 +1985,54 @@ fn resolve_session_project_root_path(
     })
 }
 
-fn resolve_session_scoped_requested_path(
+fn resolve_project_root_path_by_id(
     state: &AppState,
-    session_id: &str,
+    project_id: &str,
+) -> Result<PathBuf, ApiError> {
+    let root_path = {
+        let inner = state.inner.lock().expect("state mutex poisoned");
+        inner
+            .find_project(project_id)
+            .ok_or_else(|| ApiError::not_found("project not found"))?
+            .root_path
+            .clone()
+    };
+
+    fs::canonicalize(&root_path).map_err(|err| match err.kind() {
+        io::ErrorKind::NotFound => {
+            ApiError::bad_request(format!("project root not found: {root_path}"))
+        }
+        _ => ApiError::internal(format!(
+            "failed to resolve project root {}: {err}",
+            root_path
+        )),
+    })
+}
+
+fn resolve_request_project_root_path(
+    state: &AppState,
+    session_id: Option<&str>,
+    project_id: Option<&str>,
+) -> Result<PathBuf, ApiError> {
+    if let Some(session_id) = normalize_optional_identifier(session_id) {
+        return resolve_session_project_root_path(state, session_id);
+    }
+
+    if let Some(project_id) = normalize_optional_identifier(project_id) {
+        return resolve_project_root_path_by_id(state, project_id);
+    }
+
+    Err(ApiError::bad_request("sessionId or projectId is required"))
+}
+
+fn resolve_project_scoped_requested_path(
+    state: &AppState,
+    session_id: Option<&str>,
+    project_id: Option<&str>,
     path: &str,
     mode: ScopedPathMode,
 ) -> Result<PathBuf, ApiError> {
-    let project_root = resolve_session_project_root_path(state, session_id)?;
+    let project_root = resolve_request_project_root_path(state, session_id, project_id)?;
     let requested_path = resolve_requested_path(path)?;
     let resolved_path = match mode {
         ScopedPathMode::ExistingFile => canonicalize_existing_path(&requested_path, "file")?,
@@ -1996,6 +2049,15 @@ fn resolve_session_scoped_requested_path(
     }
 
     Ok(normalize_user_facing_path(&resolved_path))
+}
+
+fn resolve_session_scoped_requested_path(
+    state: &AppState,
+    session_id: &str,
+    path: &str,
+    mode: ScopedPathMode,
+) -> Result<PathBuf, ApiError> {
+    resolve_project_scoped_requested_path(state, Some(session_id), None, path, mode)
 }
 
 fn canonicalize_existing_path(path: &FsPath, label: &str) -> Result<PathBuf, ApiError> {
@@ -2279,4 +2341,3 @@ fn normalize_git_status_code(code: char) -> Option<String> {
         other => Some(other.to_string()),
     }
 }
-

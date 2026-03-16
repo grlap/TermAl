@@ -283,17 +283,35 @@ export function fetchDirectory(path: string, sessionId: string) {
   );
 }
 
-export function fetchGitStatus(path: string, sessionId: string) {
-  return request<GitStatusResponse>(
-    `/api/git/status?path=${encodeURIComponent(path)}&sessionId=${encodeURIComponent(sessionId)}`,
-  );
+export function fetchGitStatus(
+  path: string,
+  sessionId: string | null,
+  options?: {
+    projectId?: string | null;
+  },
+) {
+  const query = new URLSearchParams({
+    path,
+  });
+
+  if (sessionId) {
+    query.set("sessionId", sessionId);
+  }
+
+  const projectId = options?.projectId?.trim();
+  if (projectId) {
+    query.set("projectId", projectId);
+  }
+
+  return request<GitStatusResponse>(`/api/git/status?${query.toString()}`);
 }
 
 export function fetchGitDiff(payload: {
   originalPath?: string | null;
   path: string;
   sectionId: GitDiffSection;
-  sessionId: string;
+  sessionId?: string | null;
+  projectId?: string | null;
   statusCode?: string | null;
   workdir: string;
 }) {
@@ -307,7 +325,8 @@ export function applyGitFileAction(payload: {
   action: GitFileAction;
   originalPath?: string | null;
   path: string;
-  sessionId: string;
+  sessionId?: string | null;
+  projectId?: string | null;
   statusCode?: string | null;
   workdir: string;
 }) {
@@ -319,7 +338,8 @@ export function applyGitFileAction(payload: {
 
 export function commitGitChanges(payload: {
   message: string;
-  sessionId: string;
+  sessionId?: string | null;
+  projectId?: string | null;
   workdir: string;
 }) {
   return request<GitCommitResponse>("/api/git/commit", {
