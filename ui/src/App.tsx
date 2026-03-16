@@ -3141,6 +3141,9 @@ export default function App() {
             summary: diffPreview.summary,
           },
           paneId,
+          {
+            reuseActiveViewerTab: true,
+          },
         ),
       ),
     );
