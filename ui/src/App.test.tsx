@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import App, {
@@ -104,6 +104,29 @@ async function openCreateSessionDialog() {
   fireEvent.click(await screen.findByRole("button", { name: "Sessions" }));
   fireEvent.click(await screen.findByRole("button", { name: "New" }));
   await screen.findByRole("heading", { level: 2, name: "New session" });
+}
+
+async function selectComboboxOption(name: string, optionName: string | RegExp) {
+  const combobox = await screen.findByRole("combobox", { name });
+  fireEvent.click(combobox);
+
+  const listbox = await screen.findByRole("listbox");
+  const option = within(listbox)
+    .getAllByRole("option")
+    .find((candidate) => {
+      const label =
+        candidate.querySelector(".combo-option-label")?.textContent?.trim() ??
+        candidate.textContent?.trim() ??
+        "";
+
+      return typeof optionName === "string" ? label === optionName : optionName.test(label);
+    });
+
+  if (!option) {
+    throw new Error(`Combobox option not found for ${String(optionName)}`);
+  }
+
+  fireEvent.click(option);
 }
 
 function makeSession(id: string, overrides?: Partial<Session>): Session {
@@ -556,6 +579,266 @@ describe("App", () => {
             "GPT-5 Codex Mini only supports medium and high reasoning, so TermAl reset effort from minimal to medium.",
           ),
         ).toBeInTheDocument();
+      });
+    } finally {
+      HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
+      restoreGlobal("fetch", originalFetch);
+      restoreGlobal("EventSource", originalEventSource);
+      restoreGlobal("ResizeObserver", originalResizeObserver);
+    }
+  });
+
+
+  it("applies the configured Codex reasoning effort to new Codex sessions", async () => {
+    const originalFetch = globalThis.fetch;
+    const originalEventSource = globalThis.EventSource;
+    const originalResizeObserver = globalThis.ResizeObserver;
+    let createSessionBody: Record<string, unknown> | null = null;
+    let settingsBody: Record<string, unknown> | null = null;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url === "/api/state") {
+        return jsonResponse({
+          revision: 1,
+          preferences: {
+            defaultCodexReasoningEffort: "medium",
+            defaultClaudeEffort: "default",
+          },
+          projects: [],
+          sessions: [],
+        });
+      }
+      if (url === "/api/settings") {
+        settingsBody = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
+        return jsonResponse({
+          revision: 2,
+          preferences: {
+            defaultCodexReasoningEffort: "high",
+            defaultClaudeEffort: "default",
+          },
+          projects: [],
+          sessions: [],
+        });
+      }
+      if (url === "/api/sessions") {
+        createSessionBody = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
+        return jsonResponse({
+          sessionId: "session-1",
+          state: {
+            revision: 3,
+            preferences: {
+              defaultCodexReasoningEffort: "high",
+              defaultClaudeEffort: "default",
+            },
+            projects: [],
+            sessions: [
+              {
+                id: "session-1",
+                name: "Codex 1",
+                emoji: "O",
+                agent: "Codex",
+                workdir: "/tmp",
+                model: "gpt-5.4",
+                approvalPolicy: "never",
+                reasoningEffort: "high",
+                sandboxMode: "workspace-write",
+                status: "idle",
+                preview: "Ready for a prompt.",
+                messages: [],
+              },
+            ],
+          },
+        });
+      }
+      if (url === "/api/sessions/session-1/model-options/refresh") {
+        return jsonResponse({
+          revision: 4,
+          preferences: {
+            defaultCodexReasoningEffort: "high",
+            defaultClaudeEffort: "default",
+          },
+          projects: [],
+          sessions: [
+            {
+              id: "session-1",
+              name: "Codex 1",
+              emoji: "O",
+              agent: "Codex",
+              workdir: "/tmp",
+              model: "gpt-5.4",
+              approvalPolicy: "never",
+              reasoningEffort: "high",
+              sandboxMode: "workspace-write",
+              status: "idle",
+              preview: "Ready for a prompt.",
+              messages: [],
+            },
+          ],
+        });
+      }
+
+      throw new Error(`Unexpected fetch: ${url}`);
+    });
+
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("EventSource", EventSourceMock as unknown as typeof EventSource);
+    vi.stubGlobal("ResizeObserver", ResizeObserverMock as unknown as typeof ResizeObserver);
+    const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
+    HTMLElement.prototype.scrollIntoView = vi.fn();
+
+    try {
+      render(<App />);
+
+      fireEvent.click(await screen.findByRole("button", { name: "Open preferences" }));
+      fireEvent.click(screen.getByRole("tab", { name: "Codex defaults" }));
+      await selectComboboxOption("Default reasoning effort", /high/i);
+      await waitFor(() => {
+        expect(settingsBody).not.toBeNull();
+      });
+      expect(settingsBody).toMatchObject({
+        defaultCodexReasoningEffort: "high",
+      });
+      fireEvent.click(screen.getByRole("button", { name: "Close dialog" }));
+
+      await openCreateSessionDialog();
+      expect(screen.getByRole("combobox", { name: "Codex reasoning effort" })).toHaveTextContent("high");
+      fireEvent.click(screen.getByRole("button", { name: "Create session" }));
+
+      await waitFor(() => {
+        expect(createSessionBody).not.toBeNull();
+      });
+      expect(createSessionBody).toMatchObject({
+        agent: "Codex",
+        reasoningEffort: "high",
+      });
+    } finally {
+      HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
+      restoreGlobal("fetch", originalFetch);
+      restoreGlobal("EventSource", originalEventSource);
+      restoreGlobal("ResizeObserver", originalResizeObserver);
+    }
+  });
+
+  it("applies the configured Claude effort to new Claude sessions", async () => {
+    const originalFetch = globalThis.fetch;
+    const originalEventSource = globalThis.EventSource;
+    const originalResizeObserver = globalThis.ResizeObserver;
+    let createSessionBody: Record<string, unknown> | null = null;
+    let settingsBody: Record<string, unknown> | null = null;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url === "/api/state") {
+        return jsonResponse({
+          revision: 1,
+          preferences: {
+            defaultCodexReasoningEffort: "medium",
+            defaultClaudeEffort: "default",
+          },
+          projects: [],
+          sessions: [],
+        });
+      }
+      if (url === "/api/settings") {
+        settingsBody = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
+        return jsonResponse({
+          revision: 2,
+          preferences: {
+            defaultCodexReasoningEffort: "medium",
+            defaultClaudeEffort: "max",
+          },
+          projects: [],
+          sessions: [],
+        });
+      }
+      if (url === "/api/sessions") {
+        createSessionBody = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
+        return jsonResponse({
+          sessionId: "session-1",
+          state: {
+            revision: 3,
+            preferences: {
+              defaultCodexReasoningEffort: "medium",
+              defaultClaudeEffort: "max",
+            },
+            projects: [],
+            sessions: [
+              {
+                id: "session-1",
+                name: "Claude 1",
+                emoji: "C",
+                agent: "Claude",
+                workdir: "/tmp",
+                model: "claude-sonnet-4-20250514",
+                claudeApprovalMode: "ask",
+                claudeEffort: "max",
+                status: "idle",
+                preview: "Ready for a prompt.",
+                messages: [],
+              },
+            ],
+          },
+        });
+      }
+      if (url === "/api/sessions/session-1/model-options/refresh") {
+        return jsonResponse({
+          revision: 4,
+          preferences: {
+            defaultCodexReasoningEffort: "medium",
+            defaultClaudeEffort: "max",
+          },
+          projects: [],
+          sessions: [
+            {
+              id: "session-1",
+              name: "Claude 1",
+              emoji: "C",
+              agent: "Claude",
+              workdir: "/tmp",
+              model: "claude-sonnet-4-20250514",
+              claudeApprovalMode: "ask",
+              claudeEffort: "max",
+              status: "idle",
+              preview: "Ready for a prompt.",
+              messages: [],
+            },
+          ],
+        });
+      }
+
+      throw new Error(`Unexpected fetch: ${url}`);
+    });
+
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("EventSource", EventSourceMock as unknown as typeof EventSource);
+    vi.stubGlobal("ResizeObserver", ResizeObserverMock as unknown as typeof ResizeObserver);
+    const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
+    HTMLElement.prototype.scrollIntoView = vi.fn();
+
+    try {
+      render(<App />);
+
+      fireEvent.click(await screen.findByRole("button", { name: "Open preferences" }));
+      fireEvent.click(screen.getByRole("tab", { name: "Claude defaults" }));
+      await selectComboboxOption("Default Claude effort", /max/i);
+      await waitFor(() => {
+        expect(settingsBody).not.toBeNull();
+      });
+      expect(settingsBody).toMatchObject({
+        defaultClaudeEffort: "max",
+      });
+      fireEvent.click(screen.getByRole("button", { name: "Close dialog" }));
+
+      await openCreateSessionDialog();
+      await selectComboboxOption("Assistant", /^Claude$/i);
+      expect(screen.getByRole("combobox", { name: "Claude effort" })).toHaveTextContent("max");
+      fireEvent.click(screen.getByRole("button", { name: "Create session" }));
+
+      await waitFor(() => {
+        expect(createSessionBody).not.toBeNull();
+      });
+      expect(createSessionBody).toMatchObject({
+        agent: "Claude",
+        claudeEffort: "max",
       });
     } finally {
       HTMLElement.prototype.scrollIntoView = originalScrollIntoView;

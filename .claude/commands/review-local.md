@@ -23,7 +23,8 @@ Do NOT read full file contents upfront — subagents will read files on-demand a
 
 ## Step 3: Discover reviewers
 
-Glob `.claude/reviewers/*.md` to find all available reviewer lens files.
+Run `find .claude/reviewers -name "*.md" 2>/dev/null` via Bash to find all available reviewer lens files.
+(Do NOT use the Glob tool here — it silently fails on Windows paths.)
 Read each file to get:
 - The reviewer name (from the filename, e.g., `rust.md` → "Rust")
 - The review instructions (the file content)

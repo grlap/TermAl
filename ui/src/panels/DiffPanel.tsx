@@ -1,6 +1,7 @@
-import { Suspense, lazy, useEffect, useMemo, useState } from "react";
+import { Suspense, lazy, useEffect, useMemo, useRef, useState } from "react";
 import { fetchFile, type FileResponse } from "../api";
 import type { MonacoCodeEditorStatus } from "../MonacoCodeEditor";
+import type { MonacoDiffEditorHandle, MonacoDiffEditorStatus } from "../MonacoDiffEditor";
 import { buildDiffPreviewModel } from "../diff-preview";
 import { resolveMonacoLanguage, type MonacoAppearance } from "../monaco";
 import type { DiffMessage } from "../types";
@@ -9,8 +10,11 @@ import { StructuredDiffView } from "./StructuredDiffView";
 const MonacoCodeEditor = lazy(() =>
   import("../MonacoCodeEditor").then(({ MonacoCodeEditor }) => ({ default: MonacoCodeEditor })),
 );
+const MonacoDiffEditor = lazy(() =>
+  import("../MonacoDiffEditor").then(({ MonacoDiffEditor }) => ({ default: MonacoDiffEditor })),
+);
 
-type DiffViewMode = "visual" | "edit" | "raw";
+type DiffViewMode = "all" | "changes" | "edit" | "raw";
 
 type LatestFileState = {
   status: "idle" | "loading" | "ready" | "error";
@@ -26,6 +30,12 @@ const DEFAULT_EDITOR_STATUS: MonacoCodeEditorStatus = {
   tabSize: 2,
   insertSpaces: true,
   endOfLine: "LF",
+};
+
+const DEFAULT_DIFF_EDITOR_STATUS: MonacoDiffEditorStatus = {
+  ...DEFAULT_EDITOR_STATUS,
+  changeCount: 0,
+  currentChange: 0,
 };
 
 const LANGUAGE_LABELS: Record<string, string> = {
@@ -75,6 +85,8 @@ export function DiffPanel({
   const [saveError, setSaveError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [editEditorStatus, setEditEditorStatus] = useState<MonacoCodeEditorStatus>(DEFAULT_EDITOR_STATUS);
+  const [visualEditorStatus, setVisualEditorStatus] = useState<MonacoDiffEditorStatus>(DEFAULT_DIFF_EDITOR_STATUS);
+  const diffEditorRef = useRef<MonacoDiffEditorHandle | null>(null);
 
   const preview = useMemo(
     () =>
@@ -92,6 +104,7 @@ export function DiffPanel({
   useEffect(() => {
     setViewMode(defaultDiffViewMode(preview.hasStructuredPreview, Boolean(filePath)));
     setEditEditorStatus(DEFAULT_EDITOR_STATUS);
+    setVisualEditorStatus(DEFAULT_DIFF_EDITOR_STATUS);
     setSaveError(null);
     setIsSaving(false);
   }, [diffMessageId, filePath, preview.hasStructuredPreview]);
@@ -153,9 +166,11 @@ export function DiffPanel({
     }
   }, [latestFile.content, latestFile.path, latestFile.status]);
 
+  const visualLanguage = formatLanguageLabel(language, filePath);
   const editLanguage = latestFile.status === "ready"
     ? formatLanguageLabel(latestFile.language ?? language ?? null, latestFile.path)
     : formatLanguageLabel(language, filePath);
+  const hasVisualNavigation = viewMode === "all" && visualEditorStatus.changeCount > 0;
   const isDirty = latestFile.status === "ready" && editValue !== latestFile.content;
   const saveStateLabel = saveError ? "Save failed" : isSaving ? "Saving..." : isDirty ? "Unsaved changes" : null;
 
@@ -212,11 +227,20 @@ export function DiffPanel({
           <div className="source-editor-actions diff-preview-actions">
             {preview.hasStructuredPreview ? (
               <button
-                className={`ghost-button diff-preview-toggle ${viewMode === "visual" ? "selected" : ""}`}
+                className={`ghost-button diff-preview-toggle ${viewMode === "all" ? "selected" : ""}`}
                 type="button"
-                onClick={() => setViewMode("visual")}
+                onClick={() => setViewMode("all")}
               >
-                Changes
+                All lines
+              </button>
+            ) : null}
+            {preview.hasStructuredPreview ? (
+              <button
+                className={`ghost-button diff-preview-toggle ${viewMode === "changes" ? "selected" : ""}`}
+                type="button"
+                onClick={() => setViewMode("changes")}
+              >
+                Changed only
               </button>
             ) : null}
             {filePath ? (
@@ -275,11 +299,66 @@ export function DiffPanel({
           </>
         ) : null}
 
-        {viewMode === "visual" && preview.hasStructuredPreview ? (
+        {viewMode === "all" && preview.hasStructuredPreview ? (
+          <div className="source-editor-shell source-editor-shell-with-statusbar">
+            <div className="diff-editor-shell">
+              <Suspense fallback={<div className="source-editor-loading">Loading diff editor...</div>}>
+                <MonacoDiffEditor
+                  ref={diffEditorRef}
+                  appearance={appearance}
+                  ariaLabel={filePath ? `Diff preview for ${filePath}` : "Diff preview"}
+                  language={language}
+                  onStatusChange={setVisualEditorStatus}
+                  path={filePath}
+                  modifiedValue={preview.modifiedText}
+                  originalValue={preview.originalText}
+                />
+              </Suspense>
+            </div>
+            <footer className="source-editor-statusbar diff-preview-statusbar" aria-label="Diff status">
+              <div className="source-editor-statusbar-group">
+                <div className="diff-preview-change-nav" aria-label="Change navigation">
+                  <button
+                    className="diff-preview-nav-button"
+                    type="button"
+                    onClick={() => diffEditorRef.current?.goToPreviousChange()}
+                    disabled={!hasVisualNavigation}
+                    aria-label="Previous change"
+                    title="Previous change"
+                  >
+                    <DiffNavArrow direction="up" />
+                  </button>
+                  <button
+                    className="diff-preview-nav-button"
+                    type="button"
+                    onClick={() => diffEditorRef.current?.goToNextChange()}
+                    disabled={!hasVisualNavigation}
+                    aria-label="Next change"
+                    title="Next change"
+                  >
+                    <DiffNavArrow direction="down" />
+                  </button>
+                </div>
+                <span className="source-editor-statusbar-item source-editor-statusbar-state">
+                  {formatChangeNavigationLabel(visualEditorStatus)}
+                </span>
+              </div>
+              <div className="source-editor-statusbar-group source-editor-statusbar-group-meta">
+                <span className="source-editor-statusbar-item">{`Ln ${visualEditorStatus.line}, Col ${visualEditorStatus.column}`}</span>
+                <span className="source-editor-statusbar-item">{formatIndentationLabel(visualEditorStatus)}</span>
+                <span className="source-editor-statusbar-item">UTF-8</span>
+                <span className="source-editor-statusbar-item">{visualEditorStatus.endOfLine}</span>
+                <span className="source-editor-statusbar-item">{visualLanguage}</span>
+              </div>
+            </footer>
+          </div>
+        ) : null}
+
+        {viewMode === "changes" && preview.hasStructuredPreview ? (
           <StructuredDiffView filePath={filePath} preview={preview} />
         ) : null}
 
-        {viewMode === "raw" || (viewMode === "visual" && !preview.hasStructuredPreview) ? (
+        {viewMode === "raw" || (viewMode === "all" && !preview.hasStructuredPreview) ? (
           <RawPatchView diff={diff} />
         ) : null}
 
@@ -363,6 +442,17 @@ function renderEditFileView({
   );
 }
 
+function DiffNavArrow({ direction }: { direction: "up" | "down" }) {
+  return (
+    <svg viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+      <path
+        d={direction === "up" ? "M8 3.5 13 8.5l-1.15 1.15L8.8 6.61V13h-1.6V6.61L4.15 9.65 3 8.5l5-5Z" : "M8 12.5 3 7.5l1.15-1.15L7.2 9.39V3h1.6v6.39l3.05-3.04L13 7.5l-5 5Z"}
+        fill="currentColor"
+      />
+    </svg>
+  );
+}
+
 function RawPatchView({ diff }: { diff: string }) {
   const lines = diff.split("\n");
 
@@ -419,7 +509,7 @@ function rawDiffLineClassName(line: string) {
 
 function defaultDiffViewMode(hasStructuredPreview: boolean, hasFilePath: boolean): DiffViewMode {
   if (hasStructuredPreview) {
-    return "visual";
+    return "all";
   }
 
   return hasFilePath ? "edit" : "raw";
@@ -460,6 +550,14 @@ function createEditorStatusSnapshot(content: string): MonacoCodeEditorStatus {
     ...DEFAULT_EDITOR_STATUS,
     endOfLine: content.includes("\r\n") ? "CRLF" : "LF",
   };
+}
+
+function formatChangeNavigationLabel(status: MonacoDiffEditorStatus) {
+  if (status.changeCount === 0) {
+    return "No changes";
+  }
+
+  return `Change ${Math.max(status.currentChange, 1)} of ${status.changeCount}`;
 }
 
 function formatIndentationLabel(status: MonacoCodeEditorStatus) {

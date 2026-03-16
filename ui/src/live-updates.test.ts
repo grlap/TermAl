@@ -52,6 +52,48 @@ describe("applyDeltaToSessions", () => {
     });
   });
 
+  it("inserts created messages at the provided index", () => {
+    const sessions = [
+      makeSession("session-a", {
+        messages: [
+          {
+            id: "message-2",
+            type: "text",
+            timestamp: "10:01",
+            author: "assistant",
+            text: "Final answer",
+          },
+        ],
+      }),
+    ];
+    const delta: DeltaEvent = {
+      type: "messageCreated",
+      revision: 2,
+      sessionId: "session-a",
+      messageId: "message-1",
+      messageIndex: 0,
+      message: {
+        id: "message-1",
+        type: "subagentResult",
+        timestamp: "10:00",
+        author: "assistant",
+        title: "Subagent completed",
+        summary: "Hidden thinking",
+      },
+      preview: "",
+      status: "active",
+    };
+
+    const result = applyDeltaToSessions(sessions, delta);
+
+    expect(result.kind).toBe("applied");
+    if (result.kind !== "applied") {
+      throw new Error("expected delta to apply");
+    }
+
+    expect(result.sessions[0].messages.map((message) => message.id)).toEqual(["message-1", "message-2"]);
+  });
+
   it("applies text deltas to an existing message", () => {
     const sessions = [
       makeSession("session-a", {

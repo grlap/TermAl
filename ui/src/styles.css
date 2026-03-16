@@ -1127,7 +1127,10 @@ textarea {
 }
 
 .tile-branch.control-panel-branch {
-  min-width: min(var(--control-panel-pane-min-width), 100%);
+  flex: 0 0 var(--control-panel-pane-width);
+  width: var(--control-panel-pane-width);
+  min-width: min(var(--control-panel-pane-width), 100%);
+  max-width: var(--control-panel-pane-width);
 }
 
 .tile-branch.flexible-branch {
@@ -2590,6 +2593,10 @@ textarea {
   animation: rise-in 360ms ease-out both;
 }
 
+.message-card.bubble {
+  padding-block: 0.78rem;
+}
+
 .message-card,
 .thread-notice,
 .empty-state {
@@ -2840,6 +2847,10 @@ textarea {
   margin-bottom: 0.55rem;
   font-size: 0.82rem;
   color: var(--muted);
+}
+
+.message-card.bubble .message-meta {
+  margin-bottom: 0.36rem;
 }
 
 .message-meta-end {
@@ -3507,9 +3518,6 @@ textarea {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
-.structured-diff-row + .structured-diff-row {
-  border-top: 1px solid color-mix(in srgb, var(--line) 76%, transparent);
-}
 
 .structured-diff-row-omitted {
   grid-template-columns: minmax(0, 1fr);
@@ -3844,6 +3852,17 @@ textarea {
   padding: 0.08rem 0.16rem;
 }
 
+.git-status-section-header {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 0.25rem;
+  align-items: center;
+}
+
+.git-status-section-action {
+  width: 1.4rem;
+  height: 1.4rem;
+}
 .filesystem-row:hover,
 .git-status-tree-row:hover,
 .git-status-section-toggle:hover {
@@ -4009,6 +4028,11 @@ textarea {
   color: var(--muted);
   font-size: 0.72rem;
   font-weight: 700;
+}
+
+.git-status-section-count {
+  justify-self: end;
+  white-space: nowrap;
 }
 
 .git-status-tree {
@@ -4605,6 +4629,40 @@ textarea {
   background: var(--approval-bg);
 }
 
+.subagent-result-collapsed-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.subagent-result-inline-label {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.subagent-result-inline-author {
+  color: var(--text-muted);
+  font-size: 1rem;
+}
+
+.subagent-result-inline-thinking {
+  margin: 0;
+}
+
+.subagent-result-collapsed-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  flex: 0 0 auto;
+}
+
+.subagent-result-collapsed-time {
+  color: var(--text-muted);
+  font-size: 0.95rem;
+}
+
 .subagent-result-header {
   display: flex;
   align-items: flex-start;
@@ -4618,17 +4676,6 @@ textarea {
 
 .subagent-result-toggle {
   flex: 0 0 auto;
-}
-
-.subagent-result-meta {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin-bottom: 12px;
-}
-
-.subagent-result-preview {
-  margin-bottom: 0;
 }
 
 .approval-actions {
@@ -5347,13 +5394,3 @@ textarea {
   border-color: var(--line-strong);
   background: var(--surface-composer);
 }
-
-
-
-
-
-
-
-
-
-

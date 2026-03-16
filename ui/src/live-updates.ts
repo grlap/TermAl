@@ -14,15 +14,22 @@ export function applyDeltaToSessions(sessions: Session[], delta: DeltaEvent): De
 
   switch (delta.type) {
     case "messageCreated": {
-      if (delta.message.id !== delta.messageId || delta.messageIndex !== session.messages.length) {
+      if (
+        delta.message.id !== delta.messageId ||
+        delta.messageIndex < 0 ||
+        delta.messageIndex > session.messages.length
+      ) {
         return { kind: "needsResync" };
       }
+
+      const updatedMessages = session.messages.slice();
+      updatedMessages.splice(delta.messageIndex, 0, delta.message);
 
       return {
         kind: "applied",
         sessions: replaceSession(sessions, sessionIndex, {
           ...session,
-          messages: [...session.messages, delta.message],
+          messages: updatedMessages,
           preview: delta.preview,
           status: delta.status,
         }),

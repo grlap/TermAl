@@ -68,6 +68,7 @@ async fn run_server() -> Result<()> {
         .route("/api/git/diff", post(read_git_diff))
         .route("/api/git/file", post(apply_git_file_action))
         .route("/api/state", get(get_state))
+        .route("/api/settings", post(update_app_settings))
         .route("/api/events", get(state_events))
         .route("/api/projects", post(create_project))
         .route("/api/projects/pick", post(pick_project_root))
@@ -416,6 +417,36 @@ impl AppState {
         })
     }
 
+    fn update_app_settings(
+        &self,
+        request: UpdateAppSettingsRequest,
+    ) -> Result<StateResponse, ApiError> {
+        let mut inner = self.inner.lock().expect("state mutex poisoned");
+        let mut changed = false;
+
+        if let Some(default_codex_reasoning_effort) = request.default_codex_reasoning_effort {
+            if inner.preferences.default_codex_reasoning_effort != default_codex_reasoning_effort {
+                inner.preferences.default_codex_reasoning_effort = default_codex_reasoning_effort;
+                changed = true;
+            }
+        }
+
+        if let Some(default_claude_effort) = request.default_claude_effort {
+            if inner.preferences.default_claude_effort != default_claude_effort {
+                inner.preferences.default_claude_effort = default_claude_effort;
+                changed = true;
+            }
+        }
+
+        if changed {
+            self.commit_locked(&mut inner).map_err(|err| {
+                ApiError::internal(format!("failed to persist app settings: {err:#}"))
+            })?;
+        }
+
+        Ok(self.snapshot_from_inner(&inner))
+    }
+
     fn create_project(
         &self,
         request: CreateProjectRequest,
@@ -546,6 +577,7 @@ impl AppState {
             revision: inner.revision,
             codex: inner.codex.clone(),
             agent_readiness: collect_agent_readiness(&self.default_workdir),
+            preferences: inner.preferences.clone(),
             projects: inner.projects.clone(),
             sessions: inner
                 .sessions
@@ -2056,7 +2088,8 @@ impl AppState {
                 if matches!(message, Message::Approval { .. }) {
                     record.session.status = SessionStatus::Approval;
                 }
-                let message_index = push_message_on_record(record, message.clone());
+                let insert_index = preferred_message_insert_index(record, &message);
+                let message_index = insert_message_on_record(record, insert_index, message.clone());
                 (
                     message_index,
                     record.session.preview.clone(),
@@ -2589,6 +2622,7 @@ fn codex_approval_result(kind: &CodexApprovalKind, decision: ApprovalDecision) -
 
 struct StateInner {
     codex: CodexState,
+    preferences: AppPreferences,
     revision: u64,
     next_project_number: usize,
     next_session_number: usize,
@@ -2601,6 +2635,7 @@ impl StateInner {
     fn new() -> Self {
         Self {
             codex: CodexState::default(),
+            preferences: AppPreferences::default(),
             revision: 0,
             next_project_number: 1,
             next_session_number: 1,
@@ -2648,7 +2683,7 @@ impl StateInner {
             active_codex_reasoning_effort: None,
             active_codex_sandbox_mode: None,
             codex_approval_policy: default_codex_approval_policy(),
-            codex_reasoning_effort: default_codex_reasoning_effort(),
+            codex_reasoning_effort: self.preferences.default_codex_reasoning_effort,
             codex_sandbox_mode: default_codex_sandbox_mode(),
             external_session_id: None,
             pending_claude_approvals: HashMap::new(),
@@ -2678,7 +2713,7 @@ impl StateInner {
                     .then_some(default_claude_approval_mode()),
                 claude_effort: agent
                     .supports_claude_approval_mode()
-                    .then_some(default_claude_effort()),
+                    .then_some(self.preferences.default_claude_effort),
                 gemini_approval_mode: agent
                     .supports_gemini_approval_mode()
                     .then_some(default_gemini_approval_mode()),
@@ -2696,7 +2731,7 @@ impl StateInner {
             record.session.reasoning_effort = Some(record.codex_reasoning_effort);
             record.session.sandbox_mode = Some(record.codex_sandbox_mode);
         } else if record.session.agent.supports_claude_approval_mode() {
-            record.session.claude_effort = Some(default_claude_effort());
+            record.session.claude_effort = Some(self.preferences.default_claude_effort);
         }
 
         self.sessions.push(record.clone());
@@ -2805,6 +2840,8 @@ struct PersistedState {
     #[serde(default, skip_serializing_if = "CodexState::is_empty")]
     codex: CodexState,
     #[serde(default)]
+    preferences: AppPreferences,
+    #[serde(default)]
     revision: u64,
     #[serde(default)]
     next_project_number: usize,
@@ -2819,6 +2856,7 @@ impl PersistedState {
     fn from_inner(inner: &StateInner) -> Self {
         Self {
             codex: inner.codex.clone(),
+            preferences: inner.preferences.clone(),
             revision: inner.revision,
             next_project_number: inner.next_project_number,
             next_session_number: inner.next_session_number,
@@ -2835,6 +2873,7 @@ impl PersistedState {
     fn into_inner(self) -> StateInner {
         let mut inner = StateInner {
             codex: self.codex,
+            preferences: self.preferences,
             revision: self.revision,
             next_project_number: self.next_project_number.max(1),
             next_session_number: self.next_session_number,
@@ -3071,13 +3110,33 @@ fn message_index_on_record(record: &mut SessionRecord, message_id: &str) -> Opti
     record.message_positions.get(message_id).copied()
 }
 
-fn push_message_on_record(record: &mut SessionRecord, message: Message) -> usize {
-    let index = record.session.messages.len();
-    record
-        .message_positions
-        .insert(message.id().to_owned(), index);
-    record.session.messages.push(message);
+fn insert_message_on_record(record: &mut SessionRecord, index: usize, message: Message) -> usize {
+    let index = index.min(record.session.messages.len());
+    record.session.messages.insert(index, message);
+    record.message_positions = build_message_positions(&record.session.messages);
     index
+}
+
+fn push_message_on_record(record: &mut SessionRecord, message: Message) -> usize {
+    insert_message_on_record(record, record.session.messages.len(), message)
+}
+
+fn preferred_message_insert_index(record: &SessionRecord, message: &Message) -> usize {
+    if matches!(message, Message::SubagentResult { .. }) {
+        if let Some(index) = record.session.messages.iter().rposition(|existing| {
+            matches!(
+                existing,
+                Message::Text {
+                    author: Author::Assistant,
+                    ..
+                }
+            )
+        }) {
+            return index;
+        }
+    }
+
+    record.session.messages.len()
 }
 
 #[derive(Clone)]
@@ -5238,12 +5297,13 @@ fn codex_message_thread_id<'a>(message: &'a Value) -> Option<&'a str> {
 }
 
 fn shared_codex_session_thread_id<'a>(method: &str, message: &'a Value) -> Option<&'a str> {
-    codex_message_thread_id(message).or_else(|| {
-        if method == "codex/event/task_complete" {
-            message.pointer("/params/conversationId").and_then(Value::as_str)
-        } else {
-            None
-        }
+    codex_message_thread_id(message).or_else(|| match method {
+        "codex/event/task_complete" => message.pointer("/params/conversationId").and_then(Value::as_str),
+        "codex/event/item_completed" => message
+            .pointer("/params/msg/thread_id")
+            .and_then(Value::as_str)
+            .or_else(|| message.pointer("/params/conversationId").and_then(Value::as_str)),
+        _ => None,
     })
 }
 
@@ -5567,6 +5627,9 @@ fn handle_shared_codex_app_server_notification(
                 state.fail_turn_if_runtime_matches(session_id, runtime_token, &detail)?;
             }
         }
+        "codex/event/item_completed" => {
+            handle_shared_codex_event_item_completed(message, turn_state, recorder)?;
+        }
         "codex/event/task_complete" => {
             handle_shared_codex_task_complete(message, recorder)?;
         }
@@ -5602,6 +5665,60 @@ fn handle_shared_codex_task_complete(
             .and_then(Value::as_str)
             .or_else(|| message.pointer("/params/turn_id").and_then(Value::as_str)),
     )
+}
+
+fn handle_shared_codex_event_item_completed(
+    message: &Value,
+    turn_state: &CodexTurnState,
+    recorder: &mut impl TurnRecorder,
+) -> Result<()> {
+    let Some(item) = message.pointer("/params/msg/item") else {
+        return Ok(());
+    };
+
+    match item.get("type").and_then(Value::as_str) {
+        Some("AgentMessage") => {
+            let item_id = item.get("id").and_then(Value::as_str).unwrap_or("");
+            if turn_state.streamed_agent_message_item_ids.contains(item_id) {
+                return Ok(());
+            }
+
+            let text = item
+                .get("content")
+                .and_then(Value::as_array)
+                .and_then(|content| {
+                    content.iter().find_map(|part| match part.get("type").and_then(Value::as_str) {
+                        Some("Text") => part.get("text").and_then(Value::as_str),
+                        _ => None,
+                    })
+                });
+
+            if let Some(text) = text {
+                recorder.push_text(text)?;
+            }
+        }
+        Some("CommandExecution") => {
+            if let Some(command) = item.get("command").and_then(Value::as_str) {
+                let key = item.get("id").and_then(Value::as_str).unwrap_or(command);
+                let output = item
+                    .get("aggregatedOutput")
+                    .and_then(Value::as_str)
+                    .unwrap_or("");
+                let status = match item.get("status").and_then(Value::as_str) {
+                    Some("completed") if item.get("exitCode").and_then(Value::as_i64) == Some(0) => {
+                        CommandStatus::Success
+                    }
+                    Some("completed") => CommandStatus::Error,
+                    Some("failed") | Some("declined") => CommandStatus::Error,
+                    _ => CommandStatus::Running,
+                };
+                recorder.command_completed(key, command, output, status)?;
+            }
+        }
+        _ => {}
+    }
+
+    Ok(())
 }
 
 fn handle_codex_app_server_request(
@@ -5785,6 +5902,9 @@ fn handle_codex_app_server_notification(
             } else {
                 state.fail_turn_if_runtime_matches(session_id, runtime_token, &detail)?;
             }
+        }
+        "codex/event/item_completed" => {
+            handle_shared_codex_event_item_completed(message, turn_state, recorder)?;
         }
         "codex/event/task_complete" => {
             handle_shared_codex_task_complete(message, recorder)?;
@@ -8313,6 +8433,24 @@ fn default_claude_effort() -> ClaudeEffortLevel {
     ClaudeEffortLevel::Default
 }
 
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AppPreferences {
+    #[serde(default = "default_codex_reasoning_effort")]
+    default_codex_reasoning_effort: CodexReasoningEffort,
+    #[serde(default = "default_claude_effort")]
+    default_claude_effort: ClaudeEffortLevel,
+}
+
+impl Default for AppPreferences {
+    fn default() -> Self {
+        Self {
+            default_codex_reasoning_effort: default_codex_reasoning_effort(),
+            default_claude_effort: default_claude_effort(),
+        }
+    }
+}
+
 fn default_cursor_mode() -> CursorMode {
     CursorMode::Agent
 }
@@ -10391,6 +10529,14 @@ async fn create_project(
     Ok((StatusCode::CREATED, Json(response)))
 }
 
+async fn update_app_settings(
+    State(state): State<AppState>,
+    Json(request): Json<UpdateAppSettingsRequest>,
+) -> Result<Json<StateResponse>, ApiError> {
+    let response = state.update_app_settings(request)?;
+    Ok(Json(response))
+}
+
 async fn pick_project_root(
     State(state): State<AppState>,
 ) -> Result<Json<PickProjectRootResponse>, ApiError> {
@@ -11026,6 +11172,13 @@ struct CreateProjectRequest {
 }
 
 #[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct UpdateAppSettingsRequest {
+    default_codex_reasoning_effort: Option<CodexReasoningEffort>,
+    default_claude_effort: Option<ClaudeEffortLevel>,
+}
+
+#[derive(Deserialize)]
 struct FileQuery {
     path: String,
 }
@@ -11311,6 +11464,7 @@ struct StateResponse {
     codex: CodexState,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     agent_readiness: Vec<AgentReadiness>,
+    preferences: AppPreferences,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     projects: Vec<Project>,
     sessions: Vec<Session>,
@@ -11949,6 +12103,98 @@ Use the active agent's tools.
 
         assert_eq!(session.claude_approval_mode, Some(ClaudeApprovalMode::Plan));
         assert_eq!(session.claude_effort, Some(ClaudeEffortLevel::High));
+    }
+
+    #[test]
+    fn persists_app_settings_and_applies_them_to_new_sessions() {
+        let state = test_app_state();
+
+        let updated = state
+            .update_app_settings(UpdateAppSettingsRequest {
+                default_codex_reasoning_effort: Some(CodexReasoningEffort::High),
+                default_claude_effort: Some(ClaudeEffortLevel::Max),
+            })
+            .unwrap();
+
+        assert_eq!(
+            updated.preferences.default_codex_reasoning_effort,
+            CodexReasoningEffort::High
+        );
+        assert_eq!(updated.preferences.default_claude_effort, ClaudeEffortLevel::Max);
+
+        let reloaded_inner = load_state(state.persistence_path.as_path())
+            .unwrap()
+            .expect("persisted state should exist");
+        assert_eq!(
+            reloaded_inner.preferences.default_codex_reasoning_effort,
+            CodexReasoningEffort::High
+        );
+        assert_eq!(
+            reloaded_inner.preferences.default_claude_effort,
+            ClaudeEffortLevel::Max
+        );
+
+        let reloaded_state = AppState {
+            default_workdir: "/tmp".to_owned(),
+            persistence_path: state.persistence_path.clone(),
+            state_events: broadcast::channel(16).0,
+            delta_events: broadcast::channel(16).0,
+            shared_codex_runtime: Arc::new(Mutex::new(None)),
+            inner: Arc::new(Mutex::new(reloaded_inner)),
+        };
+
+        let codex_created = reloaded_state
+            .create_session(CreateSessionRequest {
+                agent: Some(Agent::Codex),
+                name: Some("Persisted Codex".to_owned()),
+                workdir: Some("/tmp".to_owned()),
+                project_id: None,
+                model: None,
+                approval_policy: None,
+                reasoning_effort: None,
+                sandbox_mode: None,
+                cursor_mode: None,
+                claude_approval_mode: None,
+                claude_effort: None,
+                gemini_approval_mode: None,
+            })
+            .unwrap();
+        let codex_session = codex_created
+            .state
+            .sessions
+            .iter()
+            .find(|session| session.id == codex_created.session_id)
+            .expect("created Codex session should be present");
+        assert_eq!(
+            codex_session.reasoning_effort,
+            Some(CodexReasoningEffort::High)
+        );
+
+        let claude_created = reloaded_state
+            .create_session(CreateSessionRequest {
+                agent: Some(Agent::Claude),
+                name: Some("Persisted Claude".to_owned()),
+                workdir: Some("/tmp".to_owned()),
+                project_id: None,
+                model: None,
+                approval_policy: None,
+                reasoning_effort: None,
+                sandbox_mode: None,
+                cursor_mode: None,
+                claude_approval_mode: None,
+                claude_effort: None,
+                gemini_approval_mode: None,
+            })
+            .unwrap();
+        let claude_session = claude_created
+            .state
+            .sessions
+            .iter()
+            .find(|session| session.id == claude_created.session_id)
+            .expect("created Claude session should be present");
+        assert_eq!(claude_session.claude_effort, Some(ClaudeEffortLevel::Max));
+
+        let _ = fs::remove_file(state.persistence_path.as_path());
     }
 
     #[test]
@@ -12658,6 +12904,144 @@ Use the active agent's tools.
                 && summary == "Reviewer found a real bug."
                 && conversation_id.as_deref() == Some("conversation-123")
                 && turn_id.as_deref() == Some("turn-sub-1")
+        ));
+    }
+
+    #[test]
+    fn shared_codex_item_completed_event_records_agent_message() {
+        let state = test_app_state();
+        let session_id = test_session_id(&state, Agent::Codex);
+        let (runtime, _input_rx, process) = test_shared_codex_runtime("shared-codex-item-completed");
+
+        {
+            let mut inner = state.inner.lock().expect("state mutex poisoned");
+            let index = inner
+                .find_session_index(&session_id)
+                .expect("Codex session should exist");
+            inner.sessions[index].runtime = SessionRuntime::Codex(CodexRuntimeHandle {
+                runtime_id: runtime.runtime_id.clone(),
+                input_tx: runtime.input_tx.clone(),
+                process,
+                shared_session: Some(SharedCodexSessionHandle {
+                    runtime: runtime.clone(),
+                    session_id: session_id.clone(),
+                }),
+            });
+            inner.sessions[index].session.status = SessionStatus::Active;
+        }
+
+        runtime
+            .sessions
+            .lock()
+            .expect("shared Codex session mutex poisoned")
+            .insert(
+                session_id.clone(),
+                SharedCodexSessionState {
+                    thread_id: Some("conversation-123".to_owned()),
+                    ..SharedCodexSessionState::default()
+                },
+            );
+        runtime
+            .thread_sessions
+            .lock()
+            .expect("shared Codex thread mutex poisoned")
+            .insert("conversation-123".to_owned(), session_id.clone());
+
+        let pending_requests = Arc::new(Mutex::new(HashMap::new()));
+        let message = json!({
+            "method": "codex/event/item_completed",
+            "params": {
+                "conversationId": "conversation-123",
+                "id": "turn-123",
+                "msg": {
+                    "item": {
+                        "content": [
+                            {
+                                "text": "Hello.",
+                                "type": "Text"
+                            }
+                        ],
+                        "id": "msg-123",
+                        "phase": "final_answer",
+                        "type": "AgentMessage"
+                    },
+                    "thread_id": "conversation-123",
+                    "turn_id": "turn-123",
+                    "type": "item_completed"
+                }
+            }
+        });
+
+        handle_shared_codex_app_server_message(
+            &message,
+            &state,
+            &runtime.runtime_id,
+            &pending_requests,
+            &runtime.sessions,
+            &runtime.thread_sessions,
+        )
+        .unwrap();
+
+        let snapshot = state.snapshot();
+        let session = snapshot
+            .sessions
+            .iter()
+            .find(|session| session.id == session_id)
+            .expect("updated session should be present");
+
+        assert!(matches!(
+            session.messages.last(),
+            Some(Message::Text { text, .. }) if text == "Hello."
+        ));
+    }
+
+    #[test]
+    fn subagent_results_insert_before_trailing_assistant_text() {
+        let state = test_app_state();
+        let session_id = test_session_id(&state, Agent::Codex);
+
+        state
+            .push_message(
+                &session_id,
+                Message::Text {
+                    attachments: Vec::new(),
+                    id: "assistant-1".to_owned(),
+                    timestamp: stamp_now(),
+                    author: Author::Assistant,
+                    text: "Final answer".to_owned(),
+                    expanded_text: None,
+                },
+            )
+            .unwrap();
+        state
+            .push_message(
+                &session_id,
+                Message::SubagentResult {
+                    id: "subagent-1".to_owned(),
+                    timestamp: stamp_now(),
+                    author: Author::Assistant,
+                    title: "Subagent completed".to_owned(),
+                    summary: "Hidden thinking".to_owned(),
+                    conversation_id: None,
+                    turn_id: None,
+                },
+            )
+            .unwrap();
+
+        let snapshot = state.snapshot();
+        let session = snapshot
+            .sessions
+            .iter()
+            .find(|session| session.id == session_id)
+            .expect("session should be present");
+
+        assert!(matches!(
+            session.messages.first(),
+            Some(Message::SubagentResult { .. })
+        ));
+        assert!(matches!(
+            session.messages.last(),
+            Some(Message::Text { text, .. }) if text == "Final answer"
         ));
     }
 

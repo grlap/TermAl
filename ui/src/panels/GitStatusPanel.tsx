@@ -127,6 +127,10 @@ export function GitStatusPanel({
     await handleTreeAction(sectionId, node.path, collectDirectoryTargets(node), action);
   }
 
+  async function handleSectionAction(sectionId: GitStatusSectionId, nodes: GitStatusTreeNode[], action: GitFileAction) {
+    await handleTreeAction(sectionId, sectionId, collectGitActionTargets(nodes), action);
+  }
+
   async function handleTreeAction(
     sectionId: GitStatusSectionId,
     actionPath: string,
@@ -290,6 +294,7 @@ export function GitStatusPanel({
                   onDirectoryAction={handleDirectoryAction}
                   onFileAction={handleFileAction}
                   onOpenDiff={handleOpenDiff}
+                  onSectionAction={handleSectionAction}
                   onToggle={(defaultValue) => toggleTreeItem(sectionExpansionKey(section.id), defaultValue)}
                   onTreeToggle={toggleTreeItem}
                   pendingActionKey={pendingActionKey}
@@ -311,6 +316,7 @@ function GitStatusSection({
   onDirectoryAction,
   onFileAction,
   onOpenDiff,
+  onSectionAction,
   onToggle,
   onTreeToggle,
   pendingActionKey,
@@ -326,6 +332,7 @@ function GitStatusSection({
   ) => void;
   onFileAction: (sectionId: GitStatusSectionId, node: GitStatusTreeFileNode, action: GitFileAction) => void;
   onOpenDiff: (sectionId: GitStatusSectionId, node: GitStatusTreeFileNode) => void;
+  onSectionAction: (sectionId: GitStatusSectionId, nodes: GitStatusTreeNode[], action: GitFileAction) => void;
   onToggle: (defaultValue: boolean) => void;
   onTreeToggle: (key: string, defaultValue: boolean) => void;
   pendingActionKey: string | null;
@@ -333,22 +340,41 @@ function GitStatusSection({
   section: GitStatusTreeSection;
   treeExpansionByKey: Record<string, boolean>;
 }) {
+  const isStaged = section.id === "staged";
+  const sectionAction: GitFileAction = isStaged ? "unstage" : "stage";
+  const sectionActionLabel = isStaged ? "Unstage all files" : "Stage all files";
+  const isSectionActionPending = pendingActionKey === gitFileActionKey(section.id, section.id, sectionAction);
+
   return (
     <section className="git-status-section">
-      <button
-        className="git-status-section-toggle"
-        type="button"
-        aria-expanded={isExpanded}
-        onClick={() => onToggle(section.fileCount > 0)}
-      >
-        <span className="git-tree-toggle" aria-hidden="true">
-          <ChevronIcon expanded={isExpanded} />
-        </span>
-        <span className="git-status-section-label">{section.label}</span>
+      <div className="git-status-section-header">
+        <button
+          className="git-status-section-toggle"
+          type="button"
+          aria-expanded={isExpanded}
+          onClick={() => onToggle(section.fileCount > 0)}
+        >
+          <span className="git-tree-toggle" aria-hidden="true">
+            <ChevronIcon expanded={isExpanded} />
+          </span>
+          <span className="git-status-section-label">{section.label}</span>
+        </button>
+        {section.fileCount > 0 ? (
+          <button
+            className="git-status-action-button git-status-section-action"
+            type="button"
+            onClick={() => onSectionAction(section.id, section.nodes, sectionAction)}
+            aria-label={sectionActionLabel}
+            title={sectionActionLabel}
+            disabled={isSectionActionPending}
+          >
+            {isStaged ? <UnstageIcon /> : <StageIcon />}
+          </button>
+        ) : null}
         <span className="git-status-section-count" aria-hidden="true">
           {section.fileCount}
         </span>
-      </button>
+      </div>
 
       {isExpanded ? (
         section.fileCount > 0 ? (

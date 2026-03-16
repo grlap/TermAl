@@ -4,6 +4,7 @@ import type {
   AgentReadiness,
   AgentCommand,
   ApprovalPolicy,
+  AppPreferences,
   ClaudeApprovalMode,
   ClaudeEffortLevel,
   CodexReasoningEffort,
@@ -20,6 +21,7 @@ export type StateResponse = {
   revision: number;
   codex?: CodexState;
   agentReadiness?: AgentReadiness[];
+  preferences?: AppPreferences;
   projects: Project[];
   sessions: Session[];
 };
@@ -137,6 +139,16 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
 export function fetchState() {
   return request<StateResponse>("/api/state");
+}
+
+export function updateAppSettings(payload: {
+  defaultCodexReasoningEffort?: CodexReasoningEffort;
+  defaultClaudeEffort?: ClaudeEffortLevel;
+}) {
+  return request<StateResponse>("/api/settings", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
 }
 
 export function createSession(payload: CreateSessionRequest) {

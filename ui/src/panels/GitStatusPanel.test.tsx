@@ -252,6 +252,76 @@ describe("GitStatusPanel", () => {
     expect(await screen.findByRole("button", { name: /Move ui to unstaged/i })).toBeInTheDocument();
   });
 
+  it("stages all files from the unstaged section header", async () => {
+    fetchGitStatusMock.mockResolvedValue(
+      makeStatusResponse([
+        {
+          path: "src/main.rs",
+          worktreeStatus: "M",
+        },
+        {
+          path: "ui/src/App.tsx",
+          worktreeStatus: "M",
+        },
+      ]),
+    );
+    applyGitFileActionMock.mockResolvedValue(
+      makeStatusResponse([
+        {
+          indexStatus: "M",
+          path: "src/main.rs",
+        },
+        {
+          indexStatus: "M",
+          path: "ui/src/App.tsx",
+        },
+      ]),
+    );
+
+    render(<GitStatusPanel workdir="/repo" onOpenDiff={() => {}} onOpenWorkdir={() => {}} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Stage all files" }));
+
+    await waitFor(() => {
+      expect(applyGitFileActionMock).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  it("unstages all files from the staged section header", async () => {
+    fetchGitStatusMock.mockResolvedValue(
+      makeStatusResponse([
+        {
+          indexStatus: "M",
+          path: "src/main.rs",
+        },
+        {
+          indexStatus: "A",
+          path: "ui/src/App.tsx",
+        },
+      ]),
+    );
+    applyGitFileActionMock.mockResolvedValue(
+      makeStatusResponse([
+        {
+          path: "src/main.rs",
+          worktreeStatus: "M",
+        },
+        {
+          path: "ui/src/App.tsx",
+          worktreeStatus: "M",
+        },
+      ]),
+    );
+
+    render(<GitStatusPanel workdir="/repo" onOpenDiff={() => {}} onOpenWorkdir={() => {}} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Unstage all files" }));
+
+    await waitFor(() => {
+      expect(applyGitFileActionMock).toHaveBeenCalledTimes(2);
+    });
+  });
+
   it("applies git actions from staged folder rows and moves the folder back to unstaged", async () => {
     fetchGitStatusMock.mockResolvedValue(
       makeStatusResponse([

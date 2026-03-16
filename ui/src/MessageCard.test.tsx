@@ -34,7 +34,6 @@ describe("MessageCard", () => {
     expect(screen.queryByText("Command")).not.toBeInTheDocument();
   });
 
-
   it("renders thinking content with markdown formatting", async () => {
     const message: ThinkingMessage = {
       id: "message-3",

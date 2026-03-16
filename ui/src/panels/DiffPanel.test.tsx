@@ -1,5 +1,5 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { useEffect } from "react";
+import { forwardRef, useEffect, useImperativeHandle, type ForwardedRef } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { fetchFile } from "../api";
@@ -12,6 +12,48 @@ vi.mock("../api", async () => {
     fetchFile: vi.fn(),
   };
 });
+
+vi.mock("../MonacoDiffEditor", () => ({
+  MonacoDiffEditor: forwardRef(function MonacoDiffEditorMock(
+    {
+      modifiedValue,
+      onStatusChange,
+      originalValue,
+    }: {
+      modifiedValue: string;
+      onStatusChange?: (status: {
+        line: number;
+        column: number;
+        tabSize: number;
+        insertSpaces: boolean;
+        endOfLine: "LF" | "CRLF";
+        changeCount: number;
+        currentChange: number;
+      }) => void;
+      originalValue: string;
+    },
+    ref: ForwardedRef<{ goToNextChange: () => void; goToPreviousChange: () => void }>,
+  ) {
+    useImperativeHandle(ref, () => ({
+      goToNextChange: () => {},
+      goToPreviousChange: () => {},
+    }));
+
+    useEffect(() => {
+      onStatusChange?.({
+        line: 1,
+        column: 1,
+        tabSize: 2,
+        insertSpaces: true,
+        endOfLine: "LF",
+        changeCount: 2,
+        currentChange: 1,
+      });
+    }, [onStatusChange]);
+
+    return <div data-testid="monaco-diff-editor">{`${originalValue}=>${modifiedValue}`}</div>;
+  }),
+}));
 
 vi.mock("../MonacoCodeEditor", () => ({
   MonacoCodeEditor: ({
@@ -56,7 +98,7 @@ describe("DiffPanel", () => {
     fetchFileMock.mockReset();
   });
 
-  it("shows change stats and switches to edit mode", async () => {
+  it("defaults to the full diff view and supports changed-only and edit modes", async () => {
     fetchFileMock.mockResolvedValue({
       content: "const latest = true;\n",
       language: "typescript",
@@ -87,6 +129,10 @@ describe("DiffPanel", () => {
 
     expect(screen.getByText("Changed 1")).toBeInTheDocument();
     expect(screen.getByText("Added 1")).toBeInTheDocument();
+    expect(await screen.findByTestId("monaco-diff-editor")).toBeInTheDocument();
+    expect(screen.getByText("Change 1 of 2")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Changed only" }));
     expect(await screen.findByTestId("structured-diff-view")).toBeInTheDocument();
     expect(screen.getByText("@@ -1,2 +1,3 @@")).toBeInTheDocument();
 
@@ -159,11 +205,6 @@ describe("DiffPanel", () => {
       ));
     });
 
-    await waitFor(() => {
-      expect(fetchFileMock).toHaveBeenCalledWith("/repo/src/example.ts");
-    });
-    expect(await screen.findByTestId("structured-diff-view")).toBeInTheDocument();
-
     fireEvent.click(screen.getByRole("button", { name: "Raw patch" }));
 
     expect(container.querySelector(".diff-preview-raw-line-added")).not.toBeNull();
@@ -172,7 +213,7 @@ describe("DiffPanel", () => {
     expect(container.querySelector(".diff-preview-raw-line-meta")).not.toBeNull();
   });
 
-  it("renders inline change emphasis inside paired edits", async () => {
+  it("renders inline change emphasis in changed-only mode", async () => {
     fetchFileMock.mockResolvedValue({
       content: "const greeting = 'hi';\n",
       language: "typescript",
@@ -194,6 +235,8 @@ describe("DiffPanel", () => {
         />,
       );
     });
+
+    fireEvent.click(screen.getByRole("button", { name: "Changed only" }));
 
     expect(await screen.findByTestId("structured-diff-view")).toBeInTheDocument();
     expect(document.querySelectorAll(".structured-diff-inline-change").length).toBeGreaterThan(0);

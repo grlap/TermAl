@@ -53,6 +53,11 @@ export type CodexState = {
   rateLimits?: CodexRateLimits | null;
 };
 
+export type AppPreferences = {
+  defaultCodexReasoningEffort: CodexReasoningEffort;
+  defaultClaudeEffort: ClaudeEffortLevel;
+};
+
 export type Project = {
   id: string;
   name: string;

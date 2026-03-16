@@ -9,6 +9,50 @@ The earlier command-card UX issue where `OUT` could render as an empty dark bloc
 Command messages now use a compact `IN` / `OUT` layout with copy controls, a collapsible output
 view for longer results, and a plain placeholder when there is no command output.
 
+## Shared Codex subagent ordering is not turn-scoped
+
+**Severity:** High - hidden review trace messages can be inserted into the wrong part of the conversation.
+
+The shared Codex path now inserts `SubagentResult` messages before the last assistant text in the
+session so the UI can show `Agent THINKING` before the visible answer. That heuristic is global to
+the whole session, not scoped to the active turn.
+
+**Current impact:**
+- If a future/shared Codex run emits the hidden review event before the current turn's final answer,
+  the inserted card can land before the previous turn's response instead of inside the current turn
+- Cross-turn ordering can become impossible to reason about because insertion is anchored to the
+  last assistant text anywhere in the transcript
+- The current tests only cover the simple single-response case, not the multi-turn edge case
+
+**Affected code (`src/main.rs`):**
+- `preferred_message_insert_index()`
+- `push_message()` / `insert_message_on_record()`
+
+**Fix:**
+- Buffer subagent-review summaries in turn-local state and flush them when the current turn's final
+  answer is committed, instead of inserting relative to the last assistant text globally
+- Add a regression test where a new turn has older assistant messages already in the transcript
+
+## Shared Codex `item_completed` parsing can truncate multipart agent messages
+
+**Severity:** Medium
+
+The new `codex/event/item_completed` handler reads `params.msg.item.content` and currently keeps
+only the first `Text` block it finds. If Codex emits a final answer as multiple text parts, TermAl
+will silently drop everything after the first part.
+
+**Current impact:**
+- Shared Codex final answers can be truncated in the transcript
+- The bug is silent because the handler still records a valid-looking assistant message
+- Current tests only cover a single `Text` block payload
+
+**Affected code (`src/main.rs`):**
+- `handle_shared_codex_event_item_completed()`
+
+**Fix:**
+- Concatenate all `Text` parts in order before calling `push_text()`
+- Add a regression test with multiple text blocks in one `AgentMessage`
+
 ## Image attachment UX is inconsistent
 
 **Severity:** Low â€” the transport path works, but the product copy and interaction model lag behind it.

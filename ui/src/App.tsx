@@ -36,7 +36,9 @@ import {
   sendMessage,
   stopSession,
   submitApproval,
+  type GitDiffResponse,
   type StateResponse,
+  updateAppSettings,
   updateSessionSettings,
 } from "./api";
 import { AgentIcon } from "./agent-icon";
@@ -70,6 +72,7 @@ import {
   type SessionSearchMatch,
 } from "./session-find";
 import type {
+  AppPreferences,
   ApprovalDecision,
   ApprovalMessage,
   ApprovalPolicy,
@@ -88,6 +91,7 @@ import type {
   ImageAttachment,
   MarkdownMessage,
   Message,
+  SubagentResultMessage,
   PendingPrompt,
   Project,
   SandboxMode,
@@ -291,8 +295,8 @@ const GEMINI_APPROVAL_OPTIONS = [
 ] as const;
 const PREFERENCES_TABS: ReadonlyArray<{ id: PreferencesTabId; label: string }> = [
   { id: "themes", label: "Themes" },
-  { id: "codex-prompts", label: "Codex prompts" },
-  { id: "claude-approvals", label: "Claude approvals" },
+  { id: "codex-prompts", label: "Codex defaults" },
+  { id: "claude-approvals", label: "Claude defaults" },
 ];
 const ALL_PROJECTS_FILTER_ID = "__all__";
 const CREATE_SESSION_WORKSPACE_ID = "__workspace__";
@@ -395,8 +399,17 @@ function currentSessionModelOption(session: Session) {
 const ALL_CODEX_REASONING_EFFORTS = CODEX_REASONING_EFFORT_OPTIONS.map(
   (option) => option.value,
 ) as CodexReasoningEffort[];
+const DEFAULT_CODEX_REASONING_EFFORT: CodexReasoningEffort = "medium";
 const DEFAULT_CLAUDE_EFFORT: ClaudeEffortLevel = "default";
 const FALLBACK_CLAUDE_EFFORTS = ["low", "medium", "high"] as ClaudeEffortLevel[];
+
+function resolveAppPreferences(preferences?: AppPreferences | null) {
+  return {
+    defaultCodexReasoningEffort:
+      preferences?.defaultCodexReasoningEffort ?? DEFAULT_CODEX_REASONING_EFFORT,
+    defaultClaudeEffort: preferences?.defaultClaudeEffort ?? DEFAULT_CLAUDE_EFFORT,
+  };
+}
 
 function codexReasoningEffortOption(
   effort: CodexReasoningEffort,
@@ -817,8 +830,12 @@ export default function App() {
     useState<SandboxMode>("workspace-write");
   const [defaultCodexApprovalPolicy, setDefaultCodexApprovalPolicy] =
     useState<ApprovalPolicy>("never");
+  const [defaultCodexReasoningEffort, setDefaultCodexReasoningEffort] =
+    useState<CodexReasoningEffort>(DEFAULT_CODEX_REASONING_EFFORT);
   const [defaultClaudeApprovalMode, setDefaultClaudeApprovalMode] =
     useState<ClaudeApprovalMode>("ask");
+  const [defaultClaudeEffort, setDefaultClaudeEffort] =
+    useState<ClaudeEffortLevel>(DEFAULT_CLAUDE_EFFORT);
   const [defaultCursorMode, setDefaultCursorMode] = useState<CursorMode>("agent");
   const [defaultGeminiApprovalMode, setDefaultGeminiApprovalMode] =
     useState<GeminiApprovalMode>("default");
@@ -1370,6 +1387,12 @@ export default function App() {
     return changed ? nextSession : currentSession;
   }
 
+  function syncPreferencesFromState(nextState: StateResponse) {
+    const preferences = resolveAppPreferences(nextState.preferences);
+    setDefaultCodexReasoningEffort(preferences.defaultCodexReasoningEffort);
+    setDefaultClaudeEffort(preferences.defaultClaudeEffort);
+  }
+
   function adoptState(
     nextState: StateResponse,
     options?: { openSessionId?: string; paneId?: string | null },
@@ -1381,6 +1404,7 @@ export default function App() {
     latestStateRevisionRef.current = nextState.revision;
     setCodexState(nextState.codex ?? {});
     setAgentReadiness(nextState.agentReadiness ?? []);
+    syncPreferencesFromState(nextState);
     setProjects(nextState.projects ?? []);
     adoptSessions(nextState.sessions, options);
     if (options?.openSessionId) {
@@ -1390,6 +1414,44 @@ export default function App() {
     return true;
   }
 
+
+  async function persistAppPreferences(payload: {
+    defaultCodexReasoningEffort?: CodexReasoningEffort;
+    defaultClaudeEffort?: ClaudeEffortLevel;
+  }) {
+    try {
+      const state = await updateAppSettings(payload);
+      adoptState(state);
+      setRequestError(null);
+    } catch (error) {
+      setRequestError(getErrorMessage(error));
+      try {
+        const state = await fetchState();
+        syncPreferencesFromState(state);
+        adoptState(state);
+      } catch {
+        // Keep the optimistic selection until the next successful sync.
+      }
+    }
+  }
+
+  function handleDefaultCodexReasoningEffortChange(nextValue: CodexReasoningEffort) {
+    if (nextValue === defaultCodexReasoningEffort) {
+      return;
+    }
+
+    setDefaultCodexReasoningEffort(nextValue);
+    void persistAppPreferences({ defaultCodexReasoningEffort: nextValue });
+  }
+
+  function handleDefaultClaudeEffortChange(nextValue: ClaudeEffortLevel) {
+    if (nextValue === defaultClaudeEffort) {
+      return;
+    }
+
+    setDefaultClaudeEffort(nextValue);
+    void persistAppPreferences({ defaultClaudeEffort: nextValue });
+  }
 
   useEffect(() => {
     function handleBrowserOnline() {
@@ -2076,9 +2138,13 @@ export default function App() {
         model: usesSessionModelPicker(agent) ? undefined : trimmedModel,
         approvalPolicy:
           agent === "Codex" ? defaultCodexApprovalPolicy : undefined,
+        reasoningEffort:
+          agent === "Codex" ? defaultCodexReasoningEffort : undefined,
         cursorMode: agent === "Cursor" ? defaultCursorMode : undefined,
         claudeApprovalMode:
           agent === "Claude" ? defaultClaudeApprovalMode : undefined,
+        claudeEffort:
+          agent === "Claude" ? defaultClaudeEffort : undefined,
         geminiApprovalMode:
           agent === "Gemini" ? defaultGeminiApprovalMode : undefined,
         sandboxMode: agent === "Codex" ? defaultCodexSandboxMode : undefined,
@@ -2430,7 +2496,7 @@ export default function App() {
             : undefined,
         reasoningEffort:
           session.agent === "Codex"
-            ? normalizedCodexReasoningEffort(session)
+            ? (session.reasoningEffort ?? defaultCodexReasoningEffort)
             : undefined,
         cursorMode:
           session.agent === "Cursor" ? (session.cursorMode ?? defaultCursorMode) : undefined,
@@ -2440,7 +2506,7 @@ export default function App() {
             : undefined,
         claudeEffort:
           session.agent === "Claude"
-            ? (session.claudeEffort ?? DEFAULT_CLAUDE_EFFORT)
+            ? (session.claudeEffort ?? defaultClaudeEffort)
             : undefined,
         geminiApprovalMode:
           session.agent === "Gemini"
@@ -3031,6 +3097,30 @@ export default function App() {
     );
   }
 
+  function handleOpenGitStatusDiffPreviewTab(
+    paneId: string,
+    diffPreview: GitDiffResponse,
+    originSessionId: string | null,
+  ) {
+    setWorkspace((current) =>
+      applyControlPanelLayout(
+        openDiffPreviewInWorkspaceState(
+          current,
+          {
+            changeType: diffPreview.changeType,
+            diff: diffPreview.diff,
+            diffMessageId: diffPreview.diffId,
+            filePath: diffPreview.filePath ?? null,
+            language: diffPreview.language ?? null,
+            originSessionId,
+            summary: diffPreview.summary,
+          },
+          paneId,
+        ),
+      ),
+    );
+  }
+
   function handleOpenFilesystemTab(
     paneId: string,
     rootPath: string | null,
@@ -3136,7 +3226,7 @@ export default function App() {
               <GitStatusPanel
                 workdir={controlPanelGitWorkdir}
                 onStatusChange={(status) => setControlPanelGitStatusCount(status?.files.length ?? 0)}
-                onOpenPath={(path) => handleOpenSourceTab(paneId, path, activeSession?.id ?? null)}
+                onOpenDiff={(diff) => handleOpenGitStatusDiffPreviewTab(paneId, diff, activeSession?.id ?? null)}
                 onOpenWorkdir={(path) => setControlPanelGitWorkdir(path.trim() || null)}
               />
             </section>
@@ -3468,6 +3558,7 @@ export default function App() {
               onPaneViewModeChange={handlePaneViewModeChange}
               onOpenSourceTab={handleOpenSourceTab}
               onOpenDiffPreviewTab={handleOpenDiffPreviewTab}
+              onOpenGitStatusDiffPreviewTab={handleOpenGitStatusDiffPreviewTab}
               onOpenFilesystemTab={handleOpenFilesystemTab}
               onOpenGitStatusTab={handleOpenGitStatusTab}
               onPaneSourcePathChange={handlePaneSourcePathChange}
@@ -3769,6 +3860,44 @@ export default function App() {
                 </div>
               )}
 
+              {newSessionAgent === "Codex" ? (
+                <div className="create-session-field">
+                  <label className="session-control-label" htmlFor="create-session-codex-reasoning-effort">
+                    Codex reasoning effort
+                  </label>
+                  <ThemedCombobox
+                    id="create-session-codex-reasoning-effort"
+                    value={defaultCodexReasoningEffort}
+                    options={CODEX_REASONING_EFFORT_OPTIONS as readonly ComboboxOption[]}
+                    onChange={(nextValue) =>
+                      handleDefaultCodexReasoningEffortChange(nextValue as CodexReasoningEffort)
+                    }
+                    disabled={isCreating}
+                  />
+                  <p className="create-session-field-hint">
+                    New Codex sessions start with this reasoning effort, and you can still change it per session later.
+                  </p>
+                </div>
+              ) : null}
+
+              {newSessionAgent === "Claude" ? (
+                <div className="create-session-field">
+                  <label className="session-control-label" htmlFor="create-session-claude-effort">
+                    Claude effort
+                  </label>
+                  <ThemedCombobox
+                    id="create-session-claude-effort"
+                    value={defaultClaudeEffort}
+                    options={CLAUDE_EFFORT_OPTIONS as readonly ComboboxOption[]}
+                    onChange={(nextValue) => handleDefaultClaudeEffortChange(nextValue as ClaudeEffortLevel)}
+                    disabled={isCreating}
+                  />
+                  <p className="create-session-field-hint">
+                    New Claude sessions start with this effort, and you can still change it per session later.
+                  </p>
+                </div>
+              ) : null}
+
               {newSessionAgent === "Cursor" ? (
                 <div className="create-session-field">
                   <label className="session-control-label" htmlFor="create-session-cursor-mode">
@@ -4046,13 +4175,17 @@ export default function App() {
                 ) : settingsTab === "codex-prompts" ? (
                   <CodexPromptPreferencesPanel
                     defaultApprovalPolicy={defaultCodexApprovalPolicy}
+                    defaultReasoningEffort={defaultCodexReasoningEffort}
                     defaultSandboxMode={defaultCodexSandboxMode}
                     onSelectApprovalPolicy={setDefaultCodexApprovalPolicy}
+                    onSelectReasoningEffort={handleDefaultCodexReasoningEffortChange}
                     onSelectSandboxMode={setDefaultCodexSandboxMode}
                   />
                 ) : (
                   <ClaudeApprovalsPreferencesPanel
                     defaultClaudeApprovalMode={defaultClaudeApprovalMode}
+                    defaultClaudeEffort={defaultClaudeEffort}
+                    onSelectEffort={handleDefaultClaudeEffortChange}
                     onSelectMode={setDefaultClaudeApprovalMode}
                   />
                 )}
@@ -4370,9 +4503,13 @@ function ThemePicker({
 
 function ClaudeApprovalsPreferencesPanel({
   defaultClaudeApprovalMode,
+  defaultClaudeEffort,
+  onSelectEffort,
   onSelectMode,
 }: {
   defaultClaudeApprovalMode: ClaudeApprovalMode;
+  defaultClaudeEffort: ClaudeEffortLevel;
+  onSelectEffort: (effort: ClaudeEffortLevel) => void;
   onSelectMode: (mode: ClaudeApprovalMode) => void;
 }) {
   return (
@@ -4381,14 +4518,14 @@ function ClaudeApprovalsPreferencesPanel({
         <div>
           <p className="session-control-label">New Claude sessions</p>
           <p className="settings-panel-copy">
-            Choose the default Claude mode for sessions created in this window.
+            Choose the default Claude mode and effort for sessions created in this window.
           </p>
         </div>
       </div>
 
       <article className="message-card prompt-settings-card">
         <div className="card-label">Session Default</div>
-        <h3>Claude mode</h3>
+        <h3>Claude startup settings</h3>
         <div className="prompt-settings-grid">
           <div className="session-control-group">
             <label className="session-control-label" htmlFor="default-claude-approval-mode">
@@ -4402,9 +4539,22 @@ function ClaudeApprovalsPreferencesPanel({
               onChange={(nextValue) => onSelectMode(nextValue as ClaudeApprovalMode)}
             />
           </div>
+          <div className="session-control-group">
+            <label className="session-control-label" htmlFor="default-claude-effort">
+              Default Claude effort
+            </label>
+            <ThemedCombobox
+              id="default-claude-effort"
+              className="prompt-settings-select"
+              value={defaultClaudeEffort}
+              options={CLAUDE_EFFORT_OPTIONS as readonly ComboboxOption[]}
+              onChange={(nextValue) => onSelectEffort(nextValue as ClaudeEffortLevel)}
+            />
+          </div>
           <p className="session-control-hint">
             Ask keeps approval cards, Auto-approve continues through tool requests, and Plan keeps
-            Claude read-only. Existing sessions keep their current mode.
+            Claude read-only. The effort setting is used when a new Claude session starts. Existing
+            sessions keep their current mode and effort.
           </p>
         </div>
       </article>
@@ -4414,13 +4564,17 @@ function ClaudeApprovalsPreferencesPanel({
 
 function CodexPromptPreferencesPanel({
   defaultApprovalPolicy,
+  defaultReasoningEffort,
   defaultSandboxMode,
   onSelectApprovalPolicy,
+  onSelectReasoningEffort,
   onSelectSandboxMode,
 }: {
   defaultApprovalPolicy: ApprovalPolicy;
+  defaultReasoningEffort: CodexReasoningEffort;
   defaultSandboxMode: SandboxMode;
   onSelectApprovalPolicy: (policy: ApprovalPolicy) => void;
+  onSelectReasoningEffort: (effort: CodexReasoningEffort) => void;
   onSelectSandboxMode: (mode: SandboxMode) => void;
 }) {
   return (
@@ -4429,8 +4583,8 @@ function CodexPromptPreferencesPanel({
         <div>
           <p className="session-control-label">New Codex sessions</p>
           <p className="settings-panel-copy">
-            Choose the default prompt sandbox and approval policy for Codex sessions created in
-            this window.
+            Choose the default sandbox, approval policy, and reasoning effort for Codex sessions
+            created in this window.
           </p>
         </div>
       </div>
@@ -4461,6 +4615,18 @@ function CodexPromptPreferencesPanel({
               value={defaultApprovalPolicy}
               options={APPROVAL_POLICY_OPTIONS as readonly ComboboxOption[]}
               onChange={(nextValue) => onSelectApprovalPolicy(nextValue as ApprovalPolicy)}
+            />
+          </div>
+          <div className="session-control-group">
+            <label className="session-control-label" htmlFor="default-codex-reasoning-effort">
+              Default reasoning effort
+            </label>
+            <ThemedCombobox
+              id="default-codex-reasoning-effort"
+              className="prompt-settings-select"
+              value={defaultReasoningEffort}
+              options={CODEX_REASONING_EFFORT_OPTIONS as readonly ComboboxOption[]}
+              onChange={(nextValue) => onSelectReasoningEffort(nextValue as CodexReasoningEffort)}
             />
           </div>
           <p className="session-control-hint">
@@ -4789,6 +4955,7 @@ function WorkspaceNodeView({
   onPaneViewModeChange,
   onOpenSourceTab,
   onOpenDiffPreviewTab,
+  onOpenGitStatusDiffPreviewTab,
   onOpenFilesystemTab,
   onOpenGitStatusTab,
   onPaneSourcePathChange,
@@ -4855,6 +5022,11 @@ function WorkspaceNodeView({
   onOpenDiffPreviewTab: (
     paneId: string,
     message: DiffMessage,
+    originSessionId: string | null,
+  ) => void;
+  onOpenGitStatusDiffPreviewTab: (
+    paneId: string,
+    diffPreview: GitDiffResponse,
     originSessionId: string | null,
   ) => void;
   onOpenFilesystemTab: (
@@ -4960,6 +5132,7 @@ function WorkspaceNodeView({
         onPaneViewModeChange={onPaneViewModeChange}
         onOpenSourceTab={onOpenSourceTab}
         onOpenDiffPreviewTab={onOpenDiffPreviewTab}
+        onOpenGitStatusDiffPreviewTab={onOpenGitStatusDiffPreviewTab}
         onOpenFilesystemTab={onOpenFilesystemTab}
         onOpenGitStatusTab={onOpenGitStatusTab}
         onPaneSourcePathChange={onPaneSourcePathChange}
@@ -5036,6 +5209,7 @@ function WorkspaceNodeView({
           onPaneViewModeChange={onPaneViewModeChange}
           onOpenSourceTab={onOpenSourceTab}
           onOpenDiffPreviewTab={onOpenDiffPreviewTab}
+          onOpenGitStatusDiffPreviewTab={onOpenGitStatusDiffPreviewTab}
           onOpenFilesystemTab={onOpenFilesystemTab}
           onOpenGitStatusTab={onOpenGitStatusTab}
           onPaneSourcePathChange={onPaneSourcePathChange}
@@ -5107,6 +5281,7 @@ function WorkspaceNodeView({
           onPaneViewModeChange={onPaneViewModeChange}
           onOpenSourceTab={onOpenSourceTab}
           onOpenDiffPreviewTab={onOpenDiffPreviewTab}
+          onOpenGitStatusDiffPreviewTab={onOpenGitStatusDiffPreviewTab}
           onOpenFilesystemTab={onOpenFilesystemTab}
           onOpenGitStatusTab={onOpenGitStatusTab}
           onPaneSourcePathChange={onPaneSourcePathChange}
@@ -5167,6 +5342,7 @@ function SessionPaneView({
   onPaneViewModeChange,
   onOpenSourceTab,
   onOpenDiffPreviewTab,
+  onOpenGitStatusDiffPreviewTab,
   onOpenFilesystemTab,
   onOpenGitStatusTab,
   onPaneSourcePathChange,
@@ -5228,6 +5404,11 @@ function SessionPaneView({
   onOpenDiffPreviewTab: (
     paneId: string,
     message: DiffMessage,
+    originSessionId: string | null,
+  ) => void;
+  onOpenGitStatusDiffPreviewTab: (
+    paneId: string,
+    diffPreview: GitDiffResponse,
     originSessionId: string | null,
   ) => void;
   onOpenFilesystemTab: (
@@ -6288,7 +6469,7 @@ function SessionPaneView({
         ) : activeGitStatusTab ? (
           <GitStatusPanel
             workdir={activeGitStatusTab.workdir}
-            onOpenPath={(path) => onOpenSourceTab(pane.id, path, activeSession?.id ?? null)}
+            onOpenDiff={(diff) => onOpenGitStatusDiffPreviewTab(pane.id, diff, activeSession?.id ?? null)}
             onOpenWorkdir={(path) =>
               onOpenGitStatusTab(pane.id, path, activeSession?.id ?? null)
             }
@@ -6302,6 +6483,7 @@ function SessionPaneView({
             filePath={activeDiffPreviewTab.filePath}
             language={activeDiffPreviewTab.language ?? null}
             onOpenPath={(path) => onOpenSourceTab(pane.id, path, activeSession?.id ?? null)}
+            onSaveFile={handleSourceFileSave}
             summary={activeDiffPreviewTab.summary}
           />
         ) : (
@@ -7338,6 +7520,14 @@ export const MessageCard = memo(function MessageCard({
           searchHighlightTone={searchHighlightTone}
         />
       );
+    case "subagentResult":
+      return (
+        <SubagentResultCard
+          message={message}
+          searchQuery={searchQuery}
+          searchHighlightTone={searchHighlightTone}
+        />
+      );
     case "approval":
       return (
         <ApprovalCard
@@ -8086,6 +8276,70 @@ function MarkdownCard({
   );
 }
 
+function SubagentResultCard({
+  message,
+  searchQuery = "",
+  searchHighlightTone = "match",
+}: {
+  message: SubagentResultMessage;
+  searchQuery?: string;
+  searchHighlightTone?: SearchHighlightTone;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const isSearchExpanded = searchQuery.trim().length > 0;
+  const isExpanded = expanded || isSearchExpanded;
+
+  return (
+    <article className="message-card reasoning-card subagent-result-card">
+      {!isExpanded ? (
+        <div className="subagent-result-collapsed-row">
+          <div className="subagent-result-inline-label" aria-label="Agent thinking">
+            <span className="subagent-result-inline-author">Agent</span>
+            <span className="card-label subagent-result-inline-thinking">THINKING</span>
+          </div>
+          <div className="subagent-result-collapsed-actions">
+            <button
+              className="ghost-button subagent-result-toggle"
+              type="button"
+              onClick={() => setExpanded((open) => !open)}
+              aria-expanded={isExpanded}
+            >
+              Show details
+            </button>
+            <span className="subagent-result-collapsed-time">{message.timestamp}</span>
+          </div>
+        </div>
+      ) : (
+        <>
+          <MessageMeta
+            author={message.author}
+            timestamp={message.timestamp}
+            trailing={
+              <button
+                className="ghost-button subagent-result-toggle"
+                type="button"
+                onClick={() => setExpanded((open) => !open)}
+                aria-expanded={isExpanded}
+              >
+                Hide details
+              </button>
+            }
+          />
+          <div className="card-label">Agent Thinking</div>
+          <div className="subagent-result-header">
+            <h3>{renderHighlightedText(message.title, searchQuery, searchHighlightTone)}</h3>
+          </div>
+          <DeferredMarkdownContent
+            markdown={message.summary}
+            searchQuery={searchQuery}
+            searchHighlightTone={searchHighlightTone}
+          />
+        </>
+      )}
+    </article>
+  );
+}
+
 function ApprovalCard({
   message,
   onApprovalDecision,
@@ -8499,6 +8753,8 @@ function messageChangeMarker(message: Message) {
       return `${message.type}:${message.filePath}:${message.diff.length}`;
     case "markdown":
       return `${message.type}:${message.title.length}:${message.markdown.length}`;
+    case "subagentResult":
+      return `${message.type}:${message.title.length}:${message.summary.length}`;
     case "approval":
       return `${message.type}:${message.decision}:${message.command.length}`;
   }
