@@ -540,6 +540,76 @@ describe("App", () => {
     }
   });
 
+  it("filters sessions from the control panel project selector", async () => {
+    const originalFetch = globalThis.fetch;
+    const originalEventSource = globalThis.EventSource;
+    const originalResizeObserver = globalThis.ResizeObserver;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/api/state") {
+        return jsonResponse({
+          revision: 1,
+          projects: [
+            {
+              id: "project-api",
+              name: "API",
+              rootPath: "/projects/api",
+            },
+            {
+              id: "project-web",
+              name: "Web",
+              rootPath: "/projects/web",
+            },
+          ],
+          sessions: [
+            makeSession("session-web", {
+              name: "Web Session",
+              projectId: "project-web",
+              workdir: "/projects/web",
+            }),
+          ],
+        });
+      }
+
+      throw new Error(`Unexpected fetch: ${url}`);
+    });
+
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("EventSource", EventSourceMock as unknown as typeof EventSource);
+    vi.stubGlobal("ResizeObserver", ResizeObserverMock as unknown as typeof ResizeObserver);
+    const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
+    HTMLElement.prototype.scrollIntoView = vi.fn();
+
+    try {
+      await renderApp();
+      const eventSource = EventSourceMock.instances[0];
+      expect(eventSource).toBeTruthy();
+      act(() => {
+        eventSource.dispatchError();
+      });
+      await settleAsyncUi();
+      await clickAndSettle(await screen.findByRole("button", { name: "Projects" }));
+      await screen.findByText("API");
+      await clickAndSettle(await screen.findByRole("button", { name: "Sessions" }));
+
+      expect(screen.getByRole("combobox", { name: "Project" })).toHaveTextContent("All projects");
+
+      await selectComboboxOption("Project", /^API$/i);
+
+      await waitFor(() => {
+        expect(screen.getByText("No sessions in API.")).toBeInTheDocument();
+      });
+
+      await clickAndSettle(await screen.findByRole("button", { name: "Files" }));
+      expect(screen.getByRole("combobox", { name: "Project" })).toHaveTextContent("API");
+    } finally {
+      HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
+      restoreGlobal("fetch", originalFetch);
+      restoreGlobal("EventSource", originalEventSource);
+      restoreGlobal("ResizeObserver", originalResizeObserver);
+    }
+  });
+
   it("shows a Codex notice when live model refresh resets reasoning effort after session creation", async () => {
     const originalFetch = globalThis.fetch;
     const originalEventSource = globalThis.EventSource;

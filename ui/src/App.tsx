@@ -970,6 +970,20 @@ export default function App() {
       })),
     ];
   }, [activeSession?.workdir, projects]);
+  const controlPanelProjectOptions = useMemo<readonly ComboboxOption[]>(() => {
+    return [
+      {
+        label: "All projects",
+        value: ALL_PROJECTS_FILTER_ID,
+        description: "Show every session in this window.",
+      },
+      ...projects.map((project) => ({
+        label: project.name,
+        value: project.id,
+        description: project.rootPath,
+      })),
+    ];
+  }, [projects]);
   const createSessionProjectHint = createSessionSelectedProject
     ? createSessionSelectedProject.rootPath
     : activeSession?.workdir
@@ -3158,6 +3172,25 @@ export default function App() {
 
   function renderWorkspaceControlSurface(paneId: string): JSX.Element {
     const surfaceId = paneId;
+    const controlPanelProjectFilterId = `control-panel-project-scope-${surfaceId}`;
+
+    function renderControlPanelProjectScope() {
+      return (
+        <div className="control-panel-scope-control">
+          <label className="control-panel-scope-label" htmlFor={controlPanelProjectFilterId}>
+            Project
+          </label>
+          <ThemedCombobox
+            id={controlPanelProjectFilterId}
+            className="control-panel-scope-combobox"
+            value={selectedProjectId}
+            options={controlPanelProjectOptions}
+            onChange={setSelectedProjectId}
+            aria-label="Project"
+          />
+        </div>
+      );
+    }
 
     function renderControlPanelHeaderActions(sectionId: ControlPanelSectionId) {
       switch (sectionId) {
@@ -3222,6 +3255,7 @@ export default function App() {
         case "files":
           return (
             <section className="control-panel-section-stack control-panel-section-files" aria-label="Files">
+              {renderControlPanelProjectScope()}
               <FileSystemPanel
                 rootPath={controlPanelFilesystemRoot}
                 showPathControls={false}
@@ -3234,6 +3268,7 @@ export default function App() {
         case "git":
           return (
             <section className="control-panel-section-stack control-panel-section-git" aria-label="Git status">
+              {renderControlPanelProjectScope()}
               <GitStatusPanel
                 workdir={controlPanelGitWorkdir}
                 onStatusChange={(status) => setControlPanelGitStatusCount(status?.files.length ?? 0)}
@@ -3302,13 +3337,8 @@ export default function App() {
           return (
             <section className="control-panel-section-stack control-panel-section-sessions" aria-label="Sessions">
               <section className="session-list-shell" aria-label="Sessions">
-                <div className="session-list-header">
-                  <span className="session-control-label">Sessions</span>
-                  <span className="session-list-scope">
-                    {selectedProject ? selectedProject.name : "All projects"}
-                  </span>
-                </div>
                 <div className="session-list-tools">
+                  {renderControlPanelProjectScope()}
                   <input
                     ref={sessionListSearchInputRef}
                     className="themed-input session-list-search-input"
@@ -4711,6 +4741,8 @@ function CodexPromptPreferencesPanel({
 }
 
 export function ThemedCombobox({
+  "aria-label": ariaLabel,
+  "aria-labelledby": ariaLabelledBy,
   className,
   disabled = false,
   id,
@@ -4718,6 +4750,8 @@ export function ThemedCombobox({
   options,
   value,
 }: {
+  "aria-label"?: string;
+  "aria-labelledby"?: string;
   className?: string;
   disabled?: boolean;
   id: string;
@@ -4909,9 +4943,11 @@ export function ThemedCombobox({
         className={`session-select combo-trigger ${className ?? ""}`.trim()}
         type="button"
         role="combobox"
+        aria-label={ariaLabel}
         aria-controls={listboxId}
         aria-expanded={isOpen}
         aria-haspopup="listbox"
+        aria-labelledby={ariaLabelledBy}
         aria-activedescendant={isOpen ? `${listboxId}-option-${activeIndex}` : undefined}
         disabled={disabled}
         onClick={() => {

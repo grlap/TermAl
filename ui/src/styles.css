@@ -310,6 +310,28 @@ textarea {
   margin-left: auto;
 }
 
+.control-panel-scope-control {
+  display: grid;
+  gap: 0.32rem;
+}
+
+.control-panel-scope-label {
+  padding-left: 0.08rem;
+  color: var(--muted);
+  font-size: 0.66rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.control-panel-scope-combobox.session-select {
+  min-width: 0;
+  padding: 0.62rem 0.82rem;
+  border-radius: var(--control-radius-large);
+  background: var(--surface-white-soft);
+}
+
 .control-panel-body {
   display: grid;
   align-content: start;
@@ -1866,7 +1888,7 @@ textarea {
 
 .session-list-tools {
   display: grid;
-  gap: 0.45rem;
+  gap: 0.6rem;
 }
 
 .session-list-search-input {
@@ -2594,7 +2616,7 @@ textarea {
 }
 
 .message-card.bubble {
-  padding-block: 0.78rem;
+  padding-block: 0.62rem;
 }
 
 .message-card,
@@ -2850,7 +2872,7 @@ textarea {
 }
 
 .message-card.bubble .message-meta {
-  margin-bottom: 0.36rem;
+  margin-bottom: 0.24rem;
 }
 
 .message-meta-end {
@@ -4629,17 +4651,23 @@ textarea {
   background: var(--approval-bg);
 }
 
+.subagent-result-card {
+  padding-block: 0.72rem;
+}
+
 .subagent-result-collapsed-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 16px;
+  min-height: 0;
 }
 
 .subagent-result-inline-label {
   display: inline-flex;
   align-items: baseline;
   gap: 10px;
+  line-height: 1.1;
 }
 
 .subagent-result-inline-author {
@@ -4656,6 +4684,10 @@ textarea {
   align-items: center;
   gap: 12px;
   flex: 0 0 auto;
+}
+
+.subagent-result-card .subagent-result-toggle {
+  padding-block: 0.3rem;
 }
 
 .subagent-result-collapsed-time {
