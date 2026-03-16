@@ -44,7 +44,6 @@ export function GitStatusPanel({
 }) {
   const [workdirDraft, setWorkdirDraft] = useState(workdir ?? "");
   const [status, setStatus] = useState<GitStatusResponse | null>(null);
-  const [statusRequestWorkdir, setStatusRequestWorkdir] = useState<string | null>(null);
   const [commitMessage, setCommitMessage] = useState("");
   const [commitNotice, setCommitNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -53,11 +52,9 @@ export function GitStatusPanel({
   const [pendingActionKey, setPendingActionKey] = useState<string | null>(null);
   const [treeExpansionByKey, setTreeExpansionByKey] = useState<Record<string, boolean>>({});
   const onStatusChangeRef = useRef(onStatusChange);
+  const latestLoadRequestIdRef = useRef(0);
   const normalizedWorkdir = workdir?.trim() ?? "";
-  const normalizedStatusWorkdir = normalizePath(statusRequestWorkdir ?? "");
-  const normalizedVisibleWorkdir = normalizePath(normalizedWorkdir);
-  const visibleStatus =
-    status && normalizedStatusWorkdir === normalizedVisibleWorkdir ? status : null;
+  const visibleStatus = status;
   const changedFiles = visibleStatus?.files ?? [];
   const hasStagedChanges = changedFiles.some((file) => Boolean(file.indexStatus));
   const sections = useMemo(() => buildGitStatusTree(changedFiles), [changedFiles]);
@@ -80,34 +77,43 @@ export function GitStatusPanel({
   useEffect(() => {
     if (!normalizedWorkdir) {
       setStatus(null);
-      setStatusRequestWorkdir(null);
       setError(null);
       onStatusChangeRef.current?.(null);
       return;
     }
 
+    setStatus(null);
+    setError(null);
+    onStatusChangeRef.current?.(null);
     void loadStatus(normalizedWorkdir);
   }, [normalizedWorkdir]);
 
   async function loadStatus(path: string, options?: { preserveVisibleStatus?: boolean }) {
-    const preserveVisibleStatus =
-      options?.preserveVisibleStatus && normalizePath(visibleStatus?.workdir ?? "") === normalizePath(path);
+    const requestId = latestLoadRequestIdRef.current + 1;
+    latestLoadRequestIdRef.current = requestId;
+    const preserveVisibleStatus = options?.preserveVisibleStatus;
     setIsLoading(true);
     setError(null);
     try {
       const response = await fetchGitStatus(path, null);
+      if (latestLoadRequestIdRef.current !== requestId) {
+        return;
+      }
       setStatus(response);
-      setStatusRequestWorkdir(path);
       onStatusChangeRef.current?.(response);
     } catch (nextError) {
+      if (latestLoadRequestIdRef.current !== requestId) {
+        return;
+      }
       if (!preserveVisibleStatus) {
         setStatus(null);
-        setStatusRequestWorkdir(null);
         onStatusChangeRef.current?.(null);
       }
       setError(getErrorMessage(nextError));
     } finally {
-      setIsLoading(false);
+      if (latestLoadRequestIdRef.current === requestId) {
+        setIsLoading(false);
+      }
     }
   }
 
@@ -169,7 +175,6 @@ export function GitStatusPanel({
     action: GitFileAction,
   ) {
     const activeWorkdir = visibleStatus?.workdir ?? normalizedWorkdir;
-    const requestedWorkdir = normalizedWorkdir;
     if (!activeWorkdir || targets.length === 0) {
       return;
     }
@@ -194,7 +199,6 @@ export function GitStatusPanel({
 
       if (response) {
         setStatus(response);
-        setStatusRequestWorkdir(requestedWorkdir);
         onStatusChangeRef.current?.(response);
       }
     } catch (nextError) {
@@ -203,7 +207,6 @@ export function GitStatusPanel({
         try {
           const refreshedStatus = await fetchGitStatus(activeWorkdir, null);
           setStatus(refreshedStatus);
-          setStatusRequestWorkdir(requestedWorkdir);
           onStatusChangeRef.current?.(refreshedStatus);
         } catch {
           // Keep the action error visible if the follow-up refresh also fails.
@@ -245,7 +248,6 @@ export function GitStatusPanel({
   async function submitCommit() {
     const activeWorkdir = visibleStatus?.workdir ?? normalizedWorkdir;
     const nextMessage = commitMessage.trim();
-    const requestedWorkdir = normalizedWorkdir;
     if (!activeWorkdir || !nextMessage || !hasStagedChanges || isCommitting) {
       return;
     }
@@ -260,7 +262,6 @@ export function GitStatusPanel({
         workdir: activeWorkdir,
       });
       setStatus(response.status);
-      setStatusRequestWorkdir(requestedWorkdir);
       setCommitMessage("");
       setCommitNotice(response.summary);
       onStatusChangeRef.current?.(response.status);
@@ -779,26 +780,6 @@ function resolveGitFilePath(repoRoot: string, relativePath: string) {
   }
 
   return `${repoRoot.replace(/[\\/]+$/, "")}/${relativePath}`;
-}
-
-function normalizePath(path: string) {
-  const normalized = path.trim().replace(/\\+/g, "/").replace(/\/+/g, "/");
-  if (!normalized) {
-    return "";
-  }
-
-  if (/^[a-z]:\/$/i.test(normalized)) {
-    return normalized.toLowerCase();
-  }
-
-  const withoutTrailingSlash = normalized.endsWith("/") ? normalized.slice(0, -1) : normalized;
-  return isWindowsLikePath(withoutTrailingSlash)
-    ? withoutTrailingSlash.toLowerCase()
-    : withoutTrailingSlash;
-}
-
-function isWindowsLikePath(path: string) {
-  return /^[a-z]:\//i.test(path) || path.startsWith("//");
 }
 
 function EmptyState({ title, body }: { title: string; body: string }) {
