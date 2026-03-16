@@ -1691,9 +1691,25 @@ impl AppState {
         let index = inner
             .find_session_index(session_id)
             .ok_or_else(|| anyhow!("session `{session_id}` not found"))?;
-        inner.sessions[index]
+        let record = &mut inner.sessions[index];
+        let message_ids: Vec<String> = record
             .pending_claude_approvals
-            .retain(|_, approval| approval.request_id != request_id);
+            .iter()
+            .filter(|(_, approval)| approval.request_id == request_id)
+            .map(|(message_id, _)| message_id.clone())
+            .collect();
+
+        if message_ids.is_empty() {
+            return Ok(());
+        }
+
+        for message_id in &message_ids {
+            set_approval_decision_on_record(record, message_id, ApprovalDecision::Canceled)?;
+            record.pending_claude_approvals.remove(message_id);
+        }
+
+        sync_session_approval_state(record, ApprovalDecision::Canceled);
+        self.commit_locked(&mut inner)?;
         Ok(())
     }
 
@@ -2096,9 +2112,12 @@ impl AppState {
         message_id: &str,
         decision: ApprovalDecision,
     ) -> std::result::Result<StateResponse, ApiError> {
-        if decision == ApprovalDecision::Interrupted {
+        if matches!(
+            decision,
+            ApprovalDecision::Interrupted | ApprovalDecision::Canceled
+        ) {
             return Err(ApiError::bad_request(
-                "approval decisions cannot be marked interrupted manually",
+                "approval decisions cannot be marked interrupted or canceled manually",
             ));
         }
 
@@ -2217,7 +2236,9 @@ impl AppState {
                     request_id: pending.request_id.clone(),
                     message: "User rejected this action in TermAl.".to_owned(),
                 },
-                ApprovalDecision::Pending | ApprovalDecision::Interrupted => {
+                ApprovalDecision::Pending
+                | ApprovalDecision::Interrupted
+                | ApprovalDecision::Canceled => {
                     unreachable!("non-deliverable approval decisions are not sent")
                 }
             };
@@ -2263,7 +2284,9 @@ impl AppState {
                     .clone()
                     .or_else(|| pending.allow_once_option_id.clone())
                     .or_else(|| pending.allow_always_option_id.clone()),
-                ApprovalDecision::Pending | ApprovalDecision::Interrupted => None,
+                ApprovalDecision::Pending
+                | ApprovalDecision::Interrupted
+                | ApprovalDecision::Canceled => None,
             }
             .ok_or_else(|| {
                 ApiError::conflict("no approval option is available for this request")
@@ -2298,58 +2321,15 @@ impl AppState {
                 "session is not currently awaiting approval",
             ));
         }
-        let Some(message_index) = message_index_on_record(record, message_id) else {
-            return Err(ApiError::not_found("approval message not found"));
-        };
-        let Some(message) = record.session.messages.get_mut(message_index) else {
-            return Err(ApiError::not_found("approval message not found"));
-        };
-        match message {
-            Message::Approval {
-                id,
-                decision: current,
-                ..
-            } if id == message_id => {
-                *current = decision;
-            }
-            _ => {
-                return Err(ApiError::not_found("approval message not found"));
-            }
-        }
+        set_approval_decision_on_record(record, message_id, decision)
+            .map_err(|_| ApiError::not_found("approval message not found"))?;
 
         if decision != ApprovalDecision::Pending {
             record.pending_claude_approvals.remove(message_id);
             record.pending_codex_approvals.remove(message_id);
             record.pending_acp_approvals.remove(message_id);
         }
-        if record.session.status == SessionStatus::Approval {
-            record.session.status = if decision == ApprovalDecision::Pending {
-                SessionStatus::Approval
-            } else {
-                SessionStatus::Active
-            };
-        }
-        if record.session.status == SessionStatus::Approval
-            || record.session.status == SessionStatus::Active
-        {
-            let agent_name = record.session.agent.name();
-            record.session.preview = match decision {
-                ApprovalDecision::Pending => "Approval pending.".to_owned(),
-                ApprovalDecision::Interrupted => {
-                    "Approval expired after TermAl restarted.".to_owned()
-                }
-                ApprovalDecision::Accepted => {
-                    format!("Approval granted. {agent_name} is continuing…")
-                }
-                ApprovalDecision::AcceptedForSession => {
-                    format!("Approval granted for this session. {agent_name} is continuing…")
-                }
-                ApprovalDecision::Rejected => {
-                    format!("Approval rejected. {agent_name} is continuing…")
-                }
-            };
-        }
-
+        sync_session_approval_state(record, decision);
         self.commit_locked(&mut inner).map_err(|err| {
             ApiError::internal(format!("failed to persist session state: {err:#}"))
         })?;
@@ -2398,7 +2378,9 @@ fn codex_approval_result(kind: &CodexApprovalKind, decision: ApprovalDecision) -
             ApprovalDecision::Accepted => json!("accept"),
             ApprovalDecision::AcceptedForSession => json!("acceptForSession"),
             ApprovalDecision::Rejected => json!("decline"),
-            ApprovalDecision::Pending | ApprovalDecision::Interrupted => {
+            ApprovalDecision::Pending
+            | ApprovalDecision::Interrupted
+            | ApprovalDecision::Canceled => {
                 unreachable!("non-deliverable approval decisions are not sent to Codex")
             }
         },
@@ -2406,7 +2388,9 @@ fn codex_approval_result(kind: &CodexApprovalKind, decision: ApprovalDecision) -
             ApprovalDecision::Accepted => json!("accept"),
             ApprovalDecision::AcceptedForSession => json!("acceptForSession"),
             ApprovalDecision::Rejected => json!("decline"),
-            ApprovalDecision::Pending | ApprovalDecision::Interrupted => {
+            ApprovalDecision::Pending
+            | ApprovalDecision::Interrupted
+            | ApprovalDecision::Canceled => {
                 unreachable!("non-deliverable approval decisions are not sent to Codex")
             }
         },
@@ -2812,6 +2796,77 @@ fn sync_pending_prompts(record: &mut SessionRecord) {
         .iter()
         .map(|queued| queued.pending_prompt.clone())
         .collect();
+}
+
+fn set_approval_decision_on_record(
+    record: &mut SessionRecord,
+    message_id: &str,
+    decision: ApprovalDecision,
+) -> Result<()> {
+    let Some(message_index) = message_index_on_record(record, message_id) else {
+        return Err(anyhow!("approval message `{message_id}` not found"));
+    };
+    let Some(message) = record.session.messages.get_mut(message_index) else {
+        return Err(anyhow!("approval message `{message_id}` not found"));
+    };
+    match message {
+        Message::Approval {
+            id,
+            decision: current,
+            ..
+        } if id == message_id => {
+            *current = decision;
+            Ok(())
+        }
+        _ => Err(anyhow!("approval message `{message_id}` not found")),
+    }
+}
+
+fn session_has_live_approvals(record: &SessionRecord) -> bool {
+    record.session.messages.iter().any(|message| {
+        matches!(
+            message,
+            Message::Approval {
+                decision: ApprovalDecision::Pending,
+                ..
+            }
+        )
+    })
+}
+
+fn approval_preview_text(agent_name: &str, decision: ApprovalDecision) -> String {
+    match decision {
+        ApprovalDecision::Pending => "Approval pending.".to_owned(),
+        ApprovalDecision::Interrupted => "Approval expired after TermAl restarted.".to_owned(),
+        ApprovalDecision::Canceled => format!("Approval canceled. {agent_name} is continuing…"),
+        ApprovalDecision::Accepted => {
+            format!("Approval granted. {agent_name} is continuing…")
+        }
+        ApprovalDecision::AcceptedForSession => {
+            format!("Approval granted for this session. {agent_name} is continuing…")
+        }
+        ApprovalDecision::Rejected => {
+            format!("Approval rejected. {agent_name} is continuing…")
+        }
+    }
+}
+
+fn sync_session_approval_state(record: &mut SessionRecord, resolved_decision: ApprovalDecision) {
+    if session_has_live_approvals(record) {
+        record.session.status = SessionStatus::Approval;
+        record.session.preview =
+            approval_preview_text(record.session.agent.name(), ApprovalDecision::Pending);
+        return;
+    }
+
+    if matches!(
+        record.session.status,
+        SessionStatus::Approval | SessionStatus::Active
+    ) {
+        record.session.status = SessionStatus::Active;
+        record.session.preview =
+            approval_preview_text(record.session.agent.name(), resolved_decision);
+    }
 }
 
 fn queue_prompt_on_record(

@@ -8823,6 +8823,8 @@ function renderDecision(decision: Exclude<ApprovalDecision, "pending">) {
       return "approved";
     case "acceptedForSession":
       return "approved for this session";
+    case "canceled":
+      return "canceled";
     case "rejected":
       return "rejected";
     case "interrupted":

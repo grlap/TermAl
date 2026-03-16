@@ -1,4 +1,3 @@
-
 use super::*;
 
 #[derive(Default)]
@@ -137,6 +136,22 @@ fn test_codex_runtime_handle(runtime_id: &str) -> CodexRuntimeHandle {
         process: Arc::new(Mutex::new(child)),
         shared_session: None,
     }
+}
+
+fn test_claude_runtime_handle(
+    runtime_id: &str,
+) -> (ClaudeRuntimeHandle, mpsc::Receiver<ClaudeRuntimeCommand>) {
+    let child = test_exit_success_child();
+    let (input_tx, input_rx) = mpsc::channel();
+
+    (
+        ClaudeRuntimeHandle {
+            runtime_id: runtime_id.to_owned(),
+            input_tx,
+            process: Arc::new(Mutex::new(child)),
+        },
+        input_rx,
+    )
 }
 
 fn test_shared_codex_runtime(
@@ -2084,5 +2099,173 @@ fn dispatches_saved_queued_prompts_before_new_prompt_after_recovery() {
     assert!(matches!(
         session.messages.last(),
         Some(Message::Text { text, .. }) if text == "first"
+    ));
+}
+
+#[test]
+fn canceling_claude_approval_marks_message_canceled_and_resumes_session() {
+    let state = test_app_state();
+    let session_id = test_session_id(&state, Agent::Claude);
+    let message_id = state.allocate_message_id();
+
+    state
+        .push_message(
+            &session_id,
+            Message::Approval {
+                id: message_id.clone(),
+                timestamp: stamp_now(),
+                author: Author::Assistant,
+                title: "Approve edit".to_owned(),
+                command: "apply_patch".to_owned(),
+                command_language: Some(shell_language().to_owned()),
+                detail: "Claude requested permission.".to_owned(),
+                decision: ApprovalDecision::Pending,
+            },
+        )
+        .unwrap();
+    state
+        .register_claude_pending_approval(
+            &session_id,
+            message_id.clone(),
+            ClaudePendingApproval {
+                permission_mode_for_session: None,
+                request_id: "req-cancel".to_owned(),
+                tool_input: json!({ "path": "src/runtime.rs" }),
+            },
+        )
+        .unwrap();
+
+    state
+        .clear_claude_pending_approval_by_request(&session_id, "req-cancel")
+        .unwrap();
+
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    let record = inner
+        .sessions
+        .iter()
+        .find(|record| record.session.id == session_id)
+        .expect("Claude session should exist");
+
+    assert!(record.pending_claude_approvals.is_empty());
+    assert_eq!(record.session.status, SessionStatus::Active);
+    assert_eq!(
+        record.session.preview,
+        "Approval canceled. Claude is continuing…"
+    );
+    assert!(matches!(
+        record.session.messages.first(),
+        Some(Message::Approval { decision, .. }) if *decision == ApprovalDecision::Canceled
+    ));
+}
+
+#[test]
+fn resolving_one_of_multiple_pending_approvals_keeps_session_waiting() {
+    let state = test_app_state();
+    let session_id = test_session_id(&state, Agent::Claude);
+    let (runtime, input_rx) = test_claude_runtime_handle("claude-approval-lifecycle");
+
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner.find_session_index(&session_id).unwrap();
+        inner.sessions[index].runtime = SessionRuntime::Claude(runtime);
+    }
+
+    let first_message_id = state.allocate_message_id();
+    state
+        .push_message(
+            &session_id,
+            Message::Approval {
+                id: first_message_id.clone(),
+                timestamp: stamp_now(),
+                author: Author::Assistant,
+                title: "Approve command".to_owned(),
+                command: "git status".to_owned(),
+                command_language: Some(shell_language().to_owned()),
+                detail: "First approval.".to_owned(),
+                decision: ApprovalDecision::Pending,
+            },
+        )
+        .unwrap();
+    state
+        .register_claude_pending_approval(
+            &session_id,
+            first_message_id.clone(),
+            ClaudePendingApproval {
+                permission_mode_for_session: None,
+                request_id: "req-1".to_owned(),
+                tool_input: json!({ "command": "git status" }),
+            },
+        )
+        .unwrap();
+
+    let second_message_id = state.allocate_message_id();
+    state
+        .push_message(
+            &session_id,
+            Message::Approval {
+                id: second_message_id.clone(),
+                timestamp: stamp_now(),
+                author: Author::Assistant,
+                title: "Approve edit".to_owned(),
+                command: "apply_patch".to_owned(),
+                command_language: Some(shell_language().to_owned()),
+                detail: "Second approval.".to_owned(),
+                decision: ApprovalDecision::Pending,
+            },
+        )
+        .unwrap();
+    state
+        .register_claude_pending_approval(
+            &session_id,
+            second_message_id.clone(),
+            ClaudePendingApproval {
+                permission_mode_for_session: None,
+                request_id: "req-2".to_owned(),
+                tool_input: json!({ "path": "src/state.rs" }),
+            },
+        )
+        .unwrap();
+
+    state
+        .update_approval(&session_id, &first_message_id, ApprovalDecision::Accepted)
+        .unwrap();
+
+    match input_rx.recv_timeout(Duration::from_secs(1)).unwrap() {
+        ClaudeRuntimeCommand::PermissionResponse(ClaudePermissionDecision::Allow {
+            request_id,
+            updated_input,
+        }) => {
+            assert_eq!(request_id, "req-1");
+            assert_eq!(updated_input, json!({ "command": "git status" }));
+        }
+        _ => panic!("expected Claude approval response"),
+    }
+
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    let record = inner
+        .sessions
+        .iter()
+        .find(|record| record.session.id == session_id)
+        .expect("Claude session should exist");
+
+    assert_eq!(record.session.status, SessionStatus::Approval);
+    assert_eq!(record.session.preview, "Approval pending.");
+    assert!(
+        !record
+            .pending_claude_approvals
+            .contains_key(&first_message_id)
+    );
+    assert!(
+        record
+            .pending_claude_approvals
+            .contains_key(&second_message_id)
+    );
+    assert!(matches!(
+        record.session.messages.first(),
+        Some(Message::Approval { decision, .. }) if *decision == ApprovalDecision::Accepted
+    ));
+    assert!(matches!(
+        record.session.messages.get(1),
+        Some(Message::Approval { decision, .. }) if *decision == ApprovalDecision::Pending
     ));
 }

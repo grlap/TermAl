@@ -2,7 +2,7 @@ import { render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import { MessageCard } from "./App";
-import type { TextMessage, ThinkingMessage } from "./types";
+import type { ApprovalMessage, TextMessage, ThinkingMessage } from "./types";
 
 describe("MessageCard", () => {
   it("shows a command badge for slash-expanded prompts", () => {
@@ -49,5 +49,22 @@ describe("MessageCard", () => {
     expect(await screen.findByRole("heading", { name: "Summary of Changes" })).toBeInTheDocument();
     expect(screen.getByText("Added markdown rendering")).toBeInTheDocument();
     expect(screen.getByText("Preserved list formatting")).toBeInTheDocument();
+  });
+
+  it("shows canceled approvals as a resolved decision", () => {
+    const message: ApprovalMessage = {
+      id: "message-4",
+      type: "approval",
+      author: "assistant",
+      timestamp: "10:03",
+      title: "Approve edit",
+      command: "apply_patch",
+      detail: "Claude withdrew the request.",
+      decision: "canceled",
+    };
+
+    render(<MessageCard message={message} onApprovalDecision={vi.fn()} />);
+
+    expect(screen.getByText("Decision: canceled")).toBeInTheDocument();
   });
 });

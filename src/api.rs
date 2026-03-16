@@ -1283,6 +1283,7 @@ enum ChangeType {
 enum ApprovalDecision {
     Pending,
     Interrupted,
+    Canceled,
     Accepted,
     AcceptedForSession,
     Rejected,

@@ -161,7 +161,13 @@ export type SubagentResultMessage = BaseMessage & {
   turnId?: string | null;
 };
 
-export type ApprovalDecision = "pending" | "interrupted" | "accepted" | "acceptedForSession" | "rejected";
+export type ApprovalDecision =
+  | "pending"
+  | "interrupted"
+  | "canceled"
+  | "accepted"
+  | "acceptedForSession"
+  | "rejected";
 
 export type ApprovalMessage = BaseMessage & {
   type: "approval";
