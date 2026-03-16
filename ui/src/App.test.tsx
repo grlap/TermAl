@@ -1,6 +1,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
+import * as api from "./api";
 import App, {
   MarkdownContent,
   ThemedCombobox,
@@ -453,79 +454,66 @@ describe("App", () => {
   });
 
   it("refreshes model options after creating a new Codex session", async () => {
-    const originalFetch = globalThis.fetch;
     const originalEventSource = globalThis.EventSource;
     const originalResizeObserver = globalThis.ResizeObserver;
-    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
-      const url = String(input);
-      if (url === "/api/state") {
-        return jsonResponse({
-          revision: 1,
-          projects: [],
-          sessions: [],
-        });
-      }
-      if (url === "/api/sessions") {
-        return jsonResponse({
-          sessionId: "session-1",
-          state: {
-            revision: 2,
-            projects: [],
-            sessions: [
-              {
-                id: "session-1",
-                name: "Codex 1",
-                emoji: "O",
-                agent: "Codex",
-                workdir: "/tmp",
-                model: "gpt-5.4",
-                approvalPolicy: "never",
-                reasoningEffort: "medium",
-                sandboxMode: "workspace-write",
-                status: "idle",
-                preview: "Ready for a prompt.",
-                messages: [],
-              },
-            ],
+    const fetchStateSpy = vi.spyOn(api, "fetchState").mockResolvedValue({
+      revision: 1,
+      projects: [],
+      sessions: [],
+    });
+    const createSessionSpy = vi.spyOn(api, "createSession").mockResolvedValue({
+      sessionId: "session-1",
+      state: {
+        revision: 2,
+        projects: [],
+        sessions: [
+          {
+            id: "session-1",
+            name: "Codex 1",
+            emoji: "O",
+            agent: "Codex",
+            workdir: "/tmp",
+            model: "gpt-5.4",
+            approvalPolicy: "never",
+            reasoningEffort: "medium",
+            sandboxMode: "workspace-write",
+            status: "idle",
+            preview: "Ready for a prompt.",
+            messages: [],
           },
-        });
-      }
-      if (url === "/api/sessions/session-1/model-options/refresh") {
-        return jsonResponse({
-          revision: 3,
-          projects: [],
-          sessions: [
+        ],
+      },
+    });
+    const refreshSessionModelOptionsSpy = vi.spyOn(api, "refreshSessionModelOptions").mockResolvedValue({
+      revision: 3,
+      projects: [],
+      sessions: [
+        {
+          id: "session-1",
+          name: "Codex 1",
+          emoji: "O",
+          agent: "Codex",
+          workdir: "/tmp",
+          model: "gpt-5.4",
+          modelOptions: [
             {
-              id: "session-1",
-              name: "Codex 1",
-              emoji: "O",
-              agent: "Codex",
-              workdir: "/tmp",
-              model: "gpt-5.4",
-              modelOptions: [
-                {
-                  label: "gpt-5.4",
-                  value: "gpt-5.4",
-                  description: "Latest frontier agentic coding model.",
-                  defaultReasoningEffort: "medium",
-                  supportedReasoningEfforts: ["low", "medium", "high", "xhigh"],
-                },
-              ],
-              approvalPolicy: "never",
-              reasoningEffort: "medium",
-              sandboxMode: "workspace-write",
-              status: "idle",
-              preview: "Ready for a prompt.",
-              messages: [],
+              label: "gpt-5.4",
+              value: "gpt-5.4",
+              description: "Latest frontier agentic coding model.",
+              defaultReasoningEffort: "medium",
+              supportedReasoningEfforts: ["low", "medium", "high", "xhigh"],
             },
           ],
-        });
-      }
-
-      throw new Error(`Unexpected fetch: ${url}`);
+          approvalPolicy: "never",
+          reasoningEffort: "medium",
+          sandboxMode: "workspace-write",
+          status: "idle",
+          preview: "Ready for a prompt.",
+          messages: [],
+        },
+      ],
     });
 
-    vi.stubGlobal("fetch", fetchMock);
     vi.stubGlobal("EventSource", EventSourceMock as unknown as typeof EventSource);
     vi.stubGlobal("ResizeObserver", ResizeObserverMock as unknown as typeof ResizeObserver);
     const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
@@ -538,15 +526,15 @@ describe("App", () => {
       await clickAndSettle(screen.getByRole("button", { name: "Create session" }));
 
       await waitFor(() => {
-        expect(
-          fetchMock.mock.calls.some(
-            ([url]) => String(url) === "/api/sessions/session-1/model-options/refresh",
-          ),
-        ).toBe(true);
+        expect(refreshSessionModelOptionsSpy).toHaveBeenCalledWith("session-1");
       });
+      await screen.findAllByText("Codex 1");
+      await settleAsyncUi();
     } finally {
       HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
-      restoreGlobal("fetch", originalFetch);
+      fetchStateSpy.mockRestore();
+      createSessionSpy.mockRestore();
+      refreshSessionModelOptionsSpy.mockRestore();
       restoreGlobal("EventSource", originalEventSource);
       restoreGlobal("ResizeObserver", originalResizeObserver);
     }
