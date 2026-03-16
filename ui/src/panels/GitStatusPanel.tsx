@@ -52,7 +52,8 @@ export function GitStatusPanel({
   const [treeExpansionByKey, setTreeExpansionByKey] = useState<Record<string, boolean>>({});
   const onStatusChangeRef = useRef(onStatusChange);
   const normalizedWorkdir = workdir?.trim() ?? "";
-  const changedFiles = status?.files ?? [];
+  const visibleStatus = status?.workdir === normalizedWorkdir ? status : null;
+  const changedFiles = visibleStatus?.files ?? [];
   const hasStagedChanges = changedFiles.some((file) => Boolean(file.indexStatus));
   const sections = useMemo(() => buildGitStatusTree(changedFiles), [changedFiles]);
 
@@ -82,7 +83,8 @@ export function GitStatusPanel({
     void loadStatus(normalizedWorkdir);
   }, [normalizedWorkdir]);
 
-  async function loadStatus(path: string) {
+  async function loadStatus(path: string, options?: { preserveVisibleStatus?: boolean }) {
+    const preserveVisibleStatus = options?.preserveVisibleStatus && visibleStatus?.workdir === path;
     setIsLoading(true);
     setError(null);
     try {
@@ -90,16 +92,18 @@ export function GitStatusPanel({
       setStatus(response);
       onStatusChangeRef.current?.(response);
     } catch (nextError) {
-      setStatus(null);
+      if (!preserveVisibleStatus) {
+        setStatus(null);
+        onStatusChangeRef.current?.(null);
+      }
       setError(getErrorMessage(nextError));
-      onStatusChangeRef.current?.(null);
     } finally {
       setIsLoading(false);
     }
   }
 
   async function handleOpenDiff(sectionId: GitStatusSectionId, node: GitStatusTreeFileNode, options?: GitDiffOpenOptions) {
-    const activeWorkdir = status?.workdir ?? normalizedWorkdir;
+    const activeWorkdir = visibleStatus?.workdir ?? normalizedWorkdir;
     if (!activeWorkdir) {
       return;
     }
@@ -155,7 +159,7 @@ export function GitStatusPanel({
     targets: GitActionTarget[],
     action: GitFileAction,
   ) {
-    const activeWorkdir = status?.workdir ?? normalizedWorkdir;
+    const activeWorkdir = visibleStatus?.workdir ?? normalizedWorkdir;
     if (!activeWorkdir || targets.length === 0) {
       return;
     }
@@ -223,11 +227,11 @@ export function GitStatusPanel({
       return;
     }
 
-    void loadStatus(normalizedWorkdir);
+    void loadStatus(normalizedWorkdir, { preserveVisibleStatus: true });
   }
 
   async function submitCommit() {
-    const activeWorkdir = status?.workdir ?? normalizedWorkdir;
+    const activeWorkdir = visibleStatus?.workdir ?? normalizedWorkdir;
     const nextMessage = commitMessage.trim();
     if (!activeWorkdir || !nextMessage || !hasStagedChanges || isCommitting) {
       return;
@@ -253,7 +257,7 @@ export function GitStatusPanel({
     }
   }
 
-  const branchName = status?.branch ?? "Detached HEAD";
+  const branchName = visibleStatus?.branch ?? "Detached HEAD";
 
   return (
     <div className="source-pane git-status-panel">
@@ -303,7 +307,7 @@ export function GitStatusPanel({
         />
       ) : null}
 
-      {isLoading ? (
+      {isLoading && !visibleStatus ? (
         <article className="activity-card">
           <div className="activity-spinner" aria-hidden="true" />
           <div>
@@ -321,14 +325,14 @@ export function GitStatusPanel({
         </article>
       ) : null}
 
-      {status && !status.repoRoot ? (
+      {visibleStatus && !visibleStatus.repoRoot ? (
         <EmptyState
           title="No git repository found"
           body="The selected folder is not inside a git repository."
         />
       ) : null}
 
-      {status?.repoRoot ? (
+      {visibleStatus?.repoRoot ? (
         <article className="message-card git-status-card">
           <div className="git-status-meta">
             <div className="git-status-meta-topline">
@@ -354,7 +358,7 @@ export function GitStatusPanel({
               ) : null}
             </div>
           </div>
-          {status.isClean ? (
+          {visibleStatus.isClean ? (
             <p className="support-copy git-status-empty-copy">Working tree clean.</p>
           ) : (
             <div className="git-status-sections">
@@ -369,7 +373,7 @@ export function GitStatusPanel({
                   onToggle={(defaultValue) => toggleTreeItem(sectionExpansionKey(section.id), defaultValue)}
                   onTreeToggle={toggleTreeItem}
                   pendingActionKey={pendingActionKey}
-                  repoRoot={status.repoRoot ?? ""}
+                  repoRoot={visibleStatus.repoRoot ?? ""}
                   section={section}
                   treeExpansionByKey={treeExpansionByKey}
                 />

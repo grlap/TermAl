@@ -152,6 +152,40 @@ describe("GitStatusPanel", () => {
     expect(await screen.findByText("scratch.txt")).toBeInTheDocument();
   });
 
+  it("keeps the current tree visible while a refresh is in flight", async () => {
+    const refreshResponse = createDeferred<GitStatusResponse>();
+    fetchGitStatusMock
+      .mockResolvedValueOnce(
+        makeStatusResponse([
+          {
+            path: "scratch.txt",
+            worktreeStatus: "?",
+          },
+        ]),
+      )
+      .mockImplementationOnce(() => refreshResponse.promise);
+
+    render(<GitStatusPanel workdir="/repo" onOpenDiff={() => {}} onOpenWorkdir={() => {}} />);
+
+    await screen.findByText("scratch.txt");
+
+    fireEvent.click(screen.getByRole("button", { name: /Refresh git status/i }));
+
+    expect(screen.getByText("scratch.txt")).toBeInTheDocument();
+    expect(screen.queryByText(/Loading repository state/i)).not.toBeInTheDocument();
+
+    refreshResponse.resolve(
+      makeStatusResponse([
+        {
+          path: "next.txt",
+          worktreeStatus: "?",
+        },
+      ]),
+    );
+
+    expect(await screen.findByText("next.txt")).toBeInTheDocument();
+  });
+
   it("keeps a branch summary header when the parent supplies project scope", async () => {
     fetchGitStatusMock.mockResolvedValue(makeStatusResponse([]));
 
@@ -562,5 +596,19 @@ function makeStatusResponse(files: GitStatusFile[]): GitStatusResponse {
     repoRoot: "/repo",
     upstream: "origin/main",
     workdir: "/repo",
+  };
+}
+
+function createDeferred<T>() {
+  let resolve: ((value: T) => void) | undefined;
+  const promise = new Promise<T>((nextResolve) => {
+    resolve = nextResolve;
+  });
+
+  return {
+    promise,
+    resolve(value: T) {
+      resolve?.(value);
+    },
   };
 }
