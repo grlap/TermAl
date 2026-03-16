@@ -21,8 +21,11 @@ type MonacoDiffEditorProps = {
   ariaLabel: string;
   fontSizePx: number;
   language?: string | null;
+  onChange?: (value: string) => void;
+  onSave?: () => void;
   onStatusChange?: (status: MonacoDiffEditorStatus) => void;
   path?: string | null;
+  readOnly?: boolean;
   modifiedValue: string;
   originalValue: string;
 };
@@ -42,8 +45,11 @@ export const MonacoDiffEditor = forwardRef<MonacoDiffEditorHandle, MonacoDiffEdi
   ariaLabel,
   fontSizePx,
   language,
+  onChange,
+  onSave,
   onStatusChange,
   path,
+  readOnly = true,
   modifiedValue,
   originalValue,
 }, ref) {
@@ -58,8 +64,16 @@ export const MonacoDiffEditor = forwardRef<MonacoDiffEditorHandle, MonacoDiffEdi
   const untitledUriRef = useRef(`inmemory://termal-diff/${crypto.randomUUID()}`);
   const modelDescriptorRef = useRef("");
   const statusHandlerRef = useRef(onStatusChange);
+  const changeHandlerRef = useRef(onChange);
+  const saveHandlerRef = useRef(onSave);
+  const readOnlyRef = useRef(readOnly);
+  const modifiedContentSubscriptionRef = useRef<IDisposable | null>(null);
+  const isApplyingExternalValueRef = useRef(false);
 
   statusHandlerRef.current = onStatusChange;
+  changeHandlerRef.current = onChange;
+  saveHandlerRef.current = onSave;
+  readOnlyRef.current = readOnly;
 
   useImperativeHandle(ref, () => ({
     goToNextChange() {
@@ -109,7 +123,7 @@ export const MonacoDiffEditor = forwardRef<MonacoDiffEditorHandle, MonacoDiffEdi
       },
       originalEditable: false,
       padding: { top: 8, bottom: 8 },
-      readOnly: true,
+      readOnly,
       renderIndicators: true,
       renderSideBySide: true,
       renderWhitespace: "all",
@@ -120,11 +134,23 @@ export const MonacoDiffEditor = forwardRef<MonacoDiffEditorHandle, MonacoDiffEdi
       wordWrap: "off",
     });
     diffEditorRef.current = editor;
-    modifiedCursorSubscriptionRef.current = editor.getModifiedEditor().onDidChangeCursorPosition(() => {
+    const modifiedEditor = editor.getModifiedEditor();
+    modifiedCursorSubscriptionRef.current = modifiedEditor.onDidChangeCursorPosition(() => {
+      emitStatus();
+    });
+    modifiedContentSubscriptionRef.current = modifiedEditor.onDidChangeModelContent(() => {
+      if (!isApplyingExternalValueRef.current) {
+        changeHandlerRef.current?.(modifiedEditor.getValue());
+      }
       emitStatus();
     });
     diffSubscriptionRef.current = editor.onDidUpdateDiff(() => {
       emitStatus();
+    });
+    modifiedEditor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => {
+      if (!readOnlyRef.current) {
+        saveHandlerRef.current?.();
+      }
     });
 
     resizeObserverRef.current = new ResizeObserver(() => {
@@ -151,6 +177,8 @@ export const MonacoDiffEditor = forwardRef<MonacoDiffEditorHandle, MonacoDiffEdi
       resizeObserverRef.current = null;
       modifiedCursorSubscriptionRef.current?.dispose();
       modifiedCursorSubscriptionRef.current = null;
+      modifiedContentSubscriptionRef.current?.dispose();
+      modifiedContentSubscriptionRef.current = null;
       diffSubscriptionRef.current?.dispose();
       diffSubscriptionRef.current = null;
       diffEditorRef.current?.dispose();
@@ -206,6 +234,12 @@ export const MonacoDiffEditor = forwardRef<MonacoDiffEditorHandle, MonacoDiffEdi
   }, [fontSizePx]);
 
   useEffect(() => {
+    diffEditorRef.current?.updateOptions({ readOnly });
+    layoutEditor();
+    emitStatus();
+  }, [readOnly]);
+
+  useEffect(() => {
     const nextDescriptor = describeModel(path, language);
     if (modelDescriptorRef.current !== nextDescriptor) {
       replaceModels(originalValue, modifiedValue, path, language);
@@ -224,7 +258,9 @@ export const MonacoDiffEditor = forwardRef<MonacoDiffEditorHandle, MonacoDiffEdi
 
     const modifiedModel = modifiedModelRef.current;
     if (modifiedModel && modifiedModel.getValue() !== modifiedValue) {
+      isApplyingExternalValueRef.current = true;
       modifiedModel.setValue(modifiedValue);
+      isApplyingExternalValueRef.current = false;
     }
 
     layoutEditor();

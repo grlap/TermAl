@@ -374,6 +374,50 @@ async fn apply_git_file_action(
     Ok(Json(load_git_status_for_path(&workdir)?))
 }
 
+async fn commit_git_changes(
+    Json(request): Json<GitCommitRequest>,
+) -> Result<Json<GitCommitResponse>, ApiError> {
+    let workdir = resolve_requested_path(&request.workdir)?;
+    let workdir = normalize_git_workdir_path(&workdir)?;
+    let Some(repo_root) = resolve_git_repo_root(&workdir)? else {
+        return Err(ApiError::bad_request("no git repository found"));
+    };
+
+    let message = request.message.trim();
+    if message.is_empty() {
+        return Err(ApiError::bad_request("commit message cannot be empty"));
+    }
+
+    let status_before = load_git_status_for_path(&workdir)?;
+    if !has_staged_git_changes(&status_before) {
+        return Err(ApiError::bad_request("no staged changes to commit"));
+    }
+
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(&repo_root)
+        .args(["commit", "-m"])
+        .arg(message)
+        .output()
+        .map_err(|err| ApiError::internal(format!("failed to create git commit: {err}")))?;
+
+    if !output.status.success() {
+        let detail = extract_git_command_error(&output);
+        let message = if detail.is_empty() {
+            "failed to create git commit".to_owned()
+        } else {
+            format!("failed to create git commit: {detail}")
+        };
+        return Err(ApiError::bad_request(message));
+    }
+
+    let status = load_git_status_for_path(&workdir)?;
+    Ok(Json(GitCommitResponse {
+        status,
+        summary: build_git_commit_summary(message),
+    }))
+}
+
 fn load_git_diff_for_request(
     workdir: &FsPath,
     request: &GitDiffRequest,
@@ -687,6 +731,28 @@ fn run_git_pathspec_command(
         Err(ApiError::internal(error_context))
     } else {
         Err(ApiError::internal(format!("{error_context}: {detail}")))
+    }
+}
+
+fn has_staged_git_changes(status: &GitStatusResponse) -> bool {
+    status.files.iter().any(|file| file.index_status.is_some())
+}
+
+fn extract_git_command_error(output: &std::process::Output) -> String {
+    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_owned();
+    if !stderr.is_empty() {
+        return stderr;
+    }
+
+    String::from_utf8_lossy(&output.stdout).trim().to_owned()
+}
+
+fn build_git_commit_summary(message: &str) -> String {
+    let headline = message.lines().next().unwrap_or("").trim();
+    if headline.is_empty() {
+        "Created commit.".to_owned()
+    } else {
+        format!("Created commit: {headline}")
     }
 }
 
@@ -1541,6 +1607,13 @@ struct GitDiffResponse {
     summary: String,
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct GitCommitResponse {
+    status: GitStatusResponse,
+    summary: String,
+}
+
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct GitFileActionRequest {
@@ -1550,6 +1623,13 @@ struct GitFileActionRequest {
     path: String,
     #[serde(default)]
     status_code: Option<String>,
+    workdir: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct GitCommitRequest {
+    message: String,
     workdir: String,
 }
 

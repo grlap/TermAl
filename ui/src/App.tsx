@@ -215,7 +215,7 @@ const PENDING_KILL_CLOSE_DELAY_MS = 180;
 const PENDING_SESSION_RENAME_CLOSE_DELAY_MS = 300;
 const DEFAULT_SPLIT_MIN_RATIO = 0.22;
 const DEFAULT_SPLIT_MAX_RATIO = 0.78;
-const CONTROL_PANEL_PANE_MIN_WIDTH_FALLBACK_PX = 14 * 16;
+const CONTROL_PANEL_PANE_MIN_WIDTH_FALLBACK_PX = 20 * 16;
 
 type SessionConversationItem =
   | {
@@ -3308,6 +3308,7 @@ export default function App() {
               {renderControlPanelProjectScope()}
               <GitStatusPanel
                 workdir={controlPanelGitWorkdir}
+                showPathControls={false}
                 onStatusChange={(status) => setControlPanelGitStatusCount(status?.files.length ?? 0)}
                 onOpenDiff={(diff, options) =>
                   handleOpenGitStatusDiffPreviewTab(paneId, diff, activeSession?.id ?? null, options)

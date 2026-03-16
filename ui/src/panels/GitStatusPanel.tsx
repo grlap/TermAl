@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   applyGitFileAction,
+  commitGitChanges,
   fetchGitDiff,
   fetchGitStatus,
   type GitDiffResponse,
@@ -32,21 +33,27 @@ export function GitStatusPanel({
   onOpenDiff,
   onOpenWorkdir,
   workdir,
+  showPathControls = true,
 }: {
   onStatusChange?: (status: GitStatusResponse | null) => void;
   onOpenDiff: (diff: GitDiffResponse, options?: GitDiffOpenOptions) => void;
   onOpenWorkdir: (path: string) => void;
   workdir: string | null;
+  showPathControls?: boolean;
 }) {
   const [workdirDraft, setWorkdirDraft] = useState(workdir ?? "");
   const [status, setStatus] = useState<GitStatusResponse | null>(null);
+  const [commitMessage, setCommitMessage] = useState("");
+  const [commitNotice, setCommitNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [isCommitting, setIsCommitting] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [pendingActionKey, setPendingActionKey] = useState<string | null>(null);
   const [treeExpansionByKey, setTreeExpansionByKey] = useState<Record<string, boolean>>({});
   const onStatusChangeRef = useRef(onStatusChange);
   const normalizedWorkdir = workdir?.trim() ?? "";
   const changedFiles = status?.files ?? [];
+  const hasStagedChanges = changedFiles.some((file) => Boolean(file.indexStatus));
   const sections = useMemo(() => buildGitStatusTree(changedFiles), [changedFiles]);
 
   useEffect(() => {
@@ -59,6 +66,8 @@ export function GitStatusPanel({
 
   useEffect(() => {
     setPendingActionKey(null);
+    setCommitMessage("");
+    setCommitNotice(null);
     setTreeExpansionByKey({});
   }, [normalizedWorkdir]);
 
@@ -98,6 +107,7 @@ export function GitStatusPanel({
     const actionKey = gitFileOpenKey(sectionId, node.path);
     setPendingActionKey(actionKey);
     setError(null);
+    setCommitNotice(null);
 
     try {
       const diff = await fetchGitDiff({
@@ -153,6 +163,7 @@ export function GitStatusPanel({
     const actionKey = gitFileActionKey(sectionId, actionPath, action);
     setPendingActionKey(actionKey);
     setError(null);
+    setCommitNotice(null);
 
     try {
       let response: GitStatusResponse | null = null;
@@ -198,12 +209,58 @@ export function GitStatusPanel({
     }));
   }
 
+  function submitWorkdir() {
+    const nextWorkdir = workdirDraft.trim();
+    if (!nextWorkdir) {
+      return;
+    }
+
+    onOpenWorkdir(nextWorkdir);
+  }
+
+  function refreshCurrentStatus() {
+    if (!normalizedWorkdir || isLoading || isCommitting) {
+      return;
+    }
+
+    void loadStatus(normalizedWorkdir);
+  }
+
+  async function submitCommit() {
+    const activeWorkdir = status?.workdir ?? normalizedWorkdir;
+    const nextMessage = commitMessage.trim();
+    if (!activeWorkdir || !nextMessage || !hasStagedChanges || isCommitting) {
+      return;
+    }
+
+    setIsCommitting(true);
+    setError(null);
+    setCommitNotice(null);
+
+    try {
+      const response = await commitGitChanges({
+        message: nextMessage,
+        workdir: activeWorkdir,
+      });
+      setStatus(response.status);
+      setCommitMessage("");
+      setCommitNotice(response.summary);
+      onStatusChangeRef.current?.(response.status);
+    } catch (nextError) {
+      setError(getErrorMessage(nextError));
+    } finally {
+      setIsCommitting(false);
+    }
+  }
+
+  const branchName = status?.branch ?? "Detached HEAD";
+
   const branchSummary = useMemo(() => {
     if (!status?.repoRoot) {
       return null;
     }
 
-    const parts = [status.branch ?? "Detached HEAD"];
+    const parts: string[] = [];
     if (status.upstream) {
       parts.push(`tracking ${status.upstream}`);
     }
@@ -218,38 +275,49 @@ export function GitStatusPanel({
 
   return (
     <div className="source-pane git-status-panel">
-      <div className="source-toolbar">
-        <div className="source-path-row">
-          <input
-            className="source-path-input"
-            type="text"
-            value={workdirDraft}
-            onChange={(event) => setWorkdirDraft(event.target.value)}
-            placeholder="/absolute/path/to/repository"
-          />
-          <button
-            className="ghost-button"
-            type="button"
-            onClick={() => onOpenWorkdir(workdirDraft.trim())}
-            disabled={!workdirDraft.trim()}
-          >
-            Open
-          </button>
-          <button
-            className="ghost-button"
-            type="button"
-            onClick={() => normalizedWorkdir && void loadStatus(normalizedWorkdir)}
-            disabled={!normalizedWorkdir || isLoading}
-          >
-            Refresh
-          </button>
-        </div>
-      </div>
+      {showPathControls ? (
+        <form
+          className="source-toolbar git-status-toolbar"
+          onSubmit={(event) => {
+            event.preventDefault();
+            submitWorkdir();
+          }}
+        >
+          <div className="source-path-row git-status-path-row">
+            <input
+              className="source-path-input"
+              type="text"
+              value={workdirDraft}
+              onChange={(event) => setWorkdirDraft(event.target.value)}
+              placeholder="C:\\path\\to\\repo or any folder inside it"
+            />
+            <div className="git-status-path-actions">
+              <button className="ghost-button git-status-load-button" type="submit" disabled={!workdirDraft.trim()}>
+                Load repo
+              </button>
+              <button
+                className="command-icon-button git-status-refresh-button"
+                type="button"
+                onClick={refreshCurrentStatus}
+                disabled={!normalizedWorkdir || isLoading || isCommitting}
+                aria-label="Refresh git status"
+                title="Refresh git status"
+              >
+                {isLoading ? (
+                  <span className="activity-spinner git-status-refresh-spinner" aria-hidden="true" />
+                ) : (
+                  <RefreshIcon />
+                )}
+              </button>
+            </div>
+          </div>
+        </form>
+      ) : null}
 
       {!normalizedWorkdir ? (
         <EmptyState
           title="No workspace selected"
-          body="Open a folder or repository path to inspect its git status in this tile."
+          body="Load a folder path to inspect the git repository for this tile. TermAl resolves the containing repo."
         />
       ) : null}
 
@@ -281,7 +349,31 @@ export function GitStatusPanel({
       {status?.repoRoot ? (
         <article className="message-card git-status-card">
           <div className="git-status-meta">
-            <span className="git-status-meta-label">Git</span>
+            <div className="git-status-meta-topline">
+              <span
+                className="chip git-status-branch-chip"
+                title={branchSummary ? `${branchName} / ${branchSummary}` : branchName}
+              >
+                <BranchIcon />
+                <span className="git-status-branch-chip-text">{branchName}</span>
+              </span>
+              {!showPathControls ? (
+                <button
+                  className="command-icon-button git-status-refresh-button"
+                  type="button"
+                  onClick={refreshCurrentStatus}
+                  disabled={!normalizedWorkdir || isLoading || isCommitting}
+                  aria-label="Refresh git status"
+                  title="Refresh git status"
+                >
+                  {isLoading ? (
+                    <span className="activity-spinner git-status-refresh-spinner" aria-hidden="true" />
+                  ) : (
+                    <RefreshIcon />
+                  )}
+                </button>
+              ) : null}
+            </div>
             <span className="git-status-meta-path" title={status.repoRoot}>
               {status.repoRoot}
             </span>
@@ -313,6 +405,40 @@ export function GitStatusPanel({
               ))}
             </div>
           )}
+          <form
+            className="git-status-commit-panel"
+            onSubmit={(event) => {
+              event.preventDefault();
+              void submitCommit();
+            }}
+          >
+            <label className="git-status-commit-label session-control-label" htmlFor="git-status-commit-message">
+              Commit
+            </label>
+            <textarea
+              id="git-status-commit-message"
+              className="themed-input git-status-commit-input"
+              value={commitMessage}
+              onChange={(event) => setCommitMessage(event.target.value)}
+              placeholder="Commit message"
+              rows={3}
+            />
+            {commitNotice ? <p className="session-control-notice git-status-commit-notice">{commitNotice}</p> : null}
+            <div className="git-status-commit-actions">
+              <p className="support-copy git-status-commit-hint">
+                {hasStagedChanges
+                  ? "Staged changes are ready to commit."
+                  : "Stage changes to enable commit."}
+              </p>
+              <button
+                className="send-button git-status-commit-button"
+                type="submit"
+                disabled={!hasStagedChanges || !commitMessage.trim() || isCommitting}
+              >
+                {isCommitting ? "Committing..." : "Commit"}
+              </button>
+            </div>
+          </form>
         </article>
       ) : null}
     </div>
@@ -698,6 +824,54 @@ function ChevronIcon({ expanded }: { expanded: boolean }) {
           strokeWidth="1.5"
         />
       )}
+    </svg>
+  );
+}
+
+function BranchIcon() {
+  return (
+    <svg className="git-status-branch-icon" viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+      <circle cx="4" cy="4" r="1.55" fill="none" stroke="currentColor" strokeWidth="1.35" />
+      <circle cx="4" cy="12" r="1.55" fill="none" stroke="currentColor" strokeWidth="1.35" />
+      <circle cx="12" cy="8" r="1.55" fill="none" stroke="currentColor" strokeWidth="1.35" />
+      <path
+        d="M5.55 4v4a2.45 2.45 0 0 0 2.45 2.45H10.3"
+        fill="none"
+        stroke="currentColor"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth="1.35"
+      />
+      <path
+        d="M5.55 12V8a2.45 2.45 0 0 1 2.45-2.45H10.3"
+        fill="none"
+        stroke="currentColor"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth="1.35"
+      />
+    </svg>
+  );
+}
+
+function RefreshIcon() {
+  return (
+    <svg className="command-icon" viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+      <path
+        d="M12.2 5.9A5 5 0 1 0 13 8"
+        fill="none"
+        stroke="currentColor"
+        strokeLinecap="round"
+        strokeWidth="1.5"
+      />
+      <path
+        d="M10.1 3.9h2.7v2.7"
+        fill="none"
+        stroke="currentColor"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth="1.5"
+      />
     </svg>
   );
 }

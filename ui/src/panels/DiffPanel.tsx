@@ -84,20 +84,17 @@ export function DiffPanel({
 }) {
   const [latestFile, setLatestFile] = useState<LatestFileState>(() => createInitialLatestFileState(filePath));
   const [editValue, setEditValue] = useState("");
+  const [visualBaseContent, setVisualBaseContent] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [editEditorStatus, setEditEditorStatus] = useState<MonacoCodeEditorStatus>(DEFAULT_EDITOR_STATUS);
   const [visualEditorStatus, setVisualEditorStatus] = useState<MonacoDiffEditorStatus>(DEFAULT_DIFF_EDITOR_STATUS);
   const diffEditorRef = useRef<MonacoDiffEditorHandle | null>(null);
 
+  const previewSourceContent = visualBaseContent ?? (latestFile.status === "ready" ? latestFile.content : null);
   const preview = useMemo(
-    () =>
-      buildDiffPreviewModel(
-        diff,
-        changeType,
-        latestFile.status === "ready" ? latestFile.content : null,
-      ),
-    [changeType, diff, latestFile.content, latestFile.status],
+    () => buildDiffPreviewModel(diff, changeType, previewSourceContent),
+    [changeType, diff, previewSourceContent],
   );
   const [viewMode, setViewMode] = useState<DiffViewMode>(() =>
     defaultDiffViewMode(buildDiffPreviewModel(diff, changeType).hasStructuredPreview, Boolean(filePath)),
@@ -116,9 +113,11 @@ export function DiffPanel({
 
     if (!filePath) {
       setLatestFile(createInitialLatestFileState(null));
+      setVisualBaseContent(null);
       return;
     }
 
+    setVisualBaseContent(null);
     setLatestFile({
       status: "loading",
       path: filePath,
@@ -133,6 +132,7 @@ export function DiffPanel({
           return;
         }
 
+        setVisualBaseContent(response.content);
         setLatestFile(toLatestFileState(response));
       })
       .catch((error) => {
@@ -172,6 +172,8 @@ export function DiffPanel({
   const editLanguage = latestFile.status === "ready"
     ? formatLanguageLabel(latestFile.language ?? language ?? null, latestFile.path)
     : formatLanguageLabel(language, filePath);
+  const canEditVisualDiff =
+    preview.hasStructuredPreview && latestFile.status === "ready" && Boolean(filePath);
   const hasVisualNavigation = viewMode === "all" && visualEditorStatus.changeCount > 0;
   const isDirty = latestFile.status === "ready" && editValue !== latestFile.content;
   const saveStateLabel = saveError ? "Save failed" : isSaving ? "Saving..." : isDirty ? "Unsaved changes" : null;
@@ -311,10 +313,13 @@ export function DiffPanel({
                   appearance={appearance}
                   fontSizePx={fontSizePx}
                   ariaLabel={filePath ? `Diff preview for ${filePath}` : "Diff preview"}
-                  language={language}
+                  language={latestFile.status === "ready" ? latestFile.language ?? language ?? null : language}
+                  onChange={canEditVisualDiff ? setEditValue : undefined}
+                  onSave={canEditVisualDiff ? () => void handleSave() : undefined}
                   onStatusChange={setVisualEditorStatus}
                   path={filePath}
-                  modifiedValue={preview.modifiedText}
+                  readOnly={!canEditVisualDiff}
+                  modifiedValue={canEditVisualDiff ? editValue : preview.modifiedText}
                   originalValue={preview.originalText}
                 />
               </Suspense>
@@ -346,6 +351,9 @@ export function DiffPanel({
                 <span className="source-editor-statusbar-item source-editor-statusbar-state">
                   {formatChangeNavigationLabel(visualEditorStatus)}
                 </span>
+                {canEditVisualDiff && saveStateLabel ? (
+                  <span className="source-editor-statusbar-item source-editor-statusbar-state">{saveStateLabel}</span>
+                ) : null}
               </div>
               <div className="source-editor-statusbar-group source-editor-statusbar-group-meta">
                 <span className="source-editor-statusbar-item">{`Ln ${visualEditorStatus.line}, Col ${visualEditorStatus.column}`}</span>

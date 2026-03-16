@@ -88,6 +88,11 @@ export type GitDiffResponse = {
   summary: string;
 };
 
+export type GitCommitResponse = {
+  status: GitStatusResponse;
+  summary: string;
+};
+
 type CreateSessionRequest = {
   agent?: AgentType;
   model?: string;
@@ -299,6 +304,16 @@ export function applyGitFileAction(payload: {
   workdir: string;
 }) {
   return request<GitStatusResponse>("/api/git/file", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function commitGitChanges(payload: {
+  message: string;
+  workdir: string;
+}) {
+  return request<GitCommitResponse>("/api/git/commit", {
     method: "POST",
     body: JSON.stringify(payload),
   });

@@ -17,10 +17,15 @@ vi.mock("../MonacoDiffEditor", () => ({
   MonacoDiffEditor: forwardRef(function MonacoDiffEditorMock(
     {
       modifiedValue,
+      onChange,
+      onSave,
       onStatusChange,
       originalValue,
+      readOnly = true,
     }: {
       modifiedValue: string;
+      onChange?: (value: string) => void;
+      onSave?: () => void;
       onStatusChange?: (status: {
         line: number;
         column: number;
@@ -31,6 +36,7 @@ vi.mock("../MonacoDiffEditor", () => ({
         currentChange: number;
       }) => void;
       originalValue: string;
+      readOnly?: boolean;
     },
     ref: ForwardedRef<{ goToNextChange: () => void; goToPreviousChange: () => void }>,
   ) {
@@ -51,7 +57,20 @@ vi.mock("../MonacoDiffEditor", () => ({
       });
     }, [onStatusChange]);
 
-    return <div data-testid="monaco-diff-editor">{`${originalValue}=>${modifiedValue}`}</div>;
+    return (
+      <div>
+        <div data-testid="monaco-diff-editor">{`${originalValue}=>${modifiedValue}`}</div>
+        <textarea
+          data-testid="monaco-diff-editor-modified"
+          readOnly={readOnly}
+          value={modifiedValue}
+          onChange={(event) => onChange?.(event.target.value)}
+        />
+        <button type="button" onClick={() => onSave?.()}>
+          Mock diff save
+        </button>
+      </div>
+    );
   }),
 }));
 
@@ -175,6 +194,45 @@ describe("DiffPanel", () => {
     fireEvent.change(editor, { target: { value: "changed\n" } });
 
     expect(screen.getByText("Unsaved changes")).toBeInTheDocument();
+  });
+
+  it("supports editing and saving from the full diff view", async () => {
+    fetchFileMock.mockResolvedValue({
+      content: "const latest = true;\n",
+      language: "typescript",
+      path: "/repo/src/example.ts",
+    });
+    const onSaveFile = vi.fn(async () => {});
+
+    await act(async () => {
+      render(
+        <DiffPanel
+          appearance="dark"
+          fontSizePx={13}
+          changeType="edit"
+          diff={["@@ -1 +1 @@", "-old line", "+new line"].join("\n")}
+          diffMessageId="diff-visual-edit"
+          filePath="/repo/src/example.ts"
+          language="typescript"
+          onOpenPath={() => {}}
+          onSaveFile={onSaveFile}
+          summary="Updated example file"
+        />,
+      );
+    });
+
+    const editor = await screen.findByTestId("monaco-diff-editor-modified");
+    expect(editor).toHaveValue("const latest = true;\n");
+    expect(editor).not.toHaveAttribute("readonly");
+
+    fireEvent.change(editor, { target: { value: "const latest = false;\n" } });
+    expect(screen.getByText("Unsaved changes")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Mock diff save" }));
+
+    await waitFor(() => {
+      expect(onSaveFile).toHaveBeenCalledWith("/repo/src/example.ts", "const latest = false;\n");
+    });
   });
 
   it("renders a color-coded raw patch view", async () => {

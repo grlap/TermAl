@@ -10,7 +10,7 @@
   --control-radius-large: min(var(--button-radius-large), 1rem);
   --control-radius-pill: min(var(--button-radius-tight), 0.72rem);
   --control-panel-pane-width: 23rem;
-  --control-panel-pane-min-width: 14rem;
+  --control-panel-pane-min-width: 20rem;
 }
 
 html,
@@ -3231,6 +3231,33 @@ textarea {
   color: var(--ink);
 }
 
+.git-status-toolbar {
+  gap: 0.45rem;
+}
+
+.git-status-path-row {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+}
+
+.git-status-path-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.git-status-load-button {
+  min-height: 2.1rem;
+  white-space: nowrap;
+}
+
+.git-status-refresh-spinner {
+  width: 0.8rem;
+  height: 0.8rem;
+  border-width: 2px;
+}
+
+
 .source-chip-row {
   display: flex;
   flex-wrap: wrap;
@@ -3772,32 +3799,61 @@ textarea {
 }
 
 .git-status-card {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
+  gap: 0.65rem;
   padding: 0.7rem 0.75rem 0.78rem;
   border-radius: 1rem;
 }
 
 .git-status-meta {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  align-items: center;
-  gap: 0.55rem;
+  gap: 0.4rem;
   font-size: 0.8rem;
   color: var(--muted);
 }
 
-.git-status-meta-label {
-  font-family: var(--code-font);
+.git-status-meta-topline {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.55rem;
+  min-width: 0;
 }
 
-.git-status-meta-path {
+.git-status-branch-chip {
+  gap: 0.42rem;
+  min-width: 0;
+  max-width: 100%;
+  color: var(--ink);
+  font-weight: 700;
+}
+
+.git-status-branch-chip-text {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
+.git-status-branch-icon {
+  width: 0.9rem;
+  height: 0.9rem;
+  flex: none;
+}
+
+.git-status-meta-path {
+  min-width: 0;
+  padding-left: 0.08rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .git-status-branch-summary {
-  margin: 0.2rem 0 0.45rem;
+  margin: -0.1rem 0 0;
   font-size: 0.8rem;
   line-height: 1.35;
   overflow: hidden;
@@ -4037,8 +4093,11 @@ textarea {
 
 .git-status-sections {
   display: grid;
+  flex: 1 1 auto;
   gap: 0.32rem;
-  margin-top: 0.2rem;
+  min-height: 0;
+  overflow: auto;
+  padding-right: 0.1rem;
 }
 
 .git-status-section {
@@ -4145,6 +4204,42 @@ textarea {
 .git-status-empty-copy {
   margin: 0.05rem 0 0.1rem 1.18rem;
   font-size: 0.8rem;
+}
+
+.git-status-commit-panel {
+  display: grid;
+  gap: 0.55rem;
+  margin-top: auto;
+  padding-top: 0.72rem;
+  border-top: 1px solid var(--line);
+}
+
+.git-status-commit-input {
+  min-height: 5.75rem;
+  resize: vertical;
+}
+
+.git-status-commit-notice {
+  margin: 0;
+}
+
+.git-status-commit-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.7rem;
+  flex-wrap: wrap;
+}
+
+.git-status-commit-hint {
+  margin: 0;
+  font-size: 0.8rem;
+}
+
+.git-status-commit-button {
+  min-width: 6.5rem;
+  padding: 0.72rem 1rem;
+  white-space: nowrap;
 }
 
 .git-status-tree-actions {
@@ -5296,6 +5391,14 @@ textarea {
 
   .font-size-readout {
     grid-column: 1 / -1;
+  }
+
+  .git-status-path-actions {
+    justify-content: space-between;
+  }
+
+  .git-status-load-button {
+    flex: 1 1 auto;
   }
 
   .composer-attachment-remove {

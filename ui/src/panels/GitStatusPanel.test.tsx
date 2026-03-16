@@ -1,7 +1,15 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { applyGitFileAction, fetchGitDiff, fetchGitStatus, type GitDiffResponse, type GitStatusFile, type GitStatusResponse } from "../api";
+import {
+  applyGitFileAction,
+  commitGitChanges,
+  fetchGitDiff,
+  fetchGitStatus,
+  type GitDiffResponse,
+  type GitStatusFile,
+  type GitStatusResponse,
+} from "../api";
 import { GitStatusPanel } from "./GitStatusPanel";
 
 vi.mock("../api", async () => {
@@ -9,18 +17,21 @@ vi.mock("../api", async () => {
   return {
     ...actual,
     applyGitFileAction: vi.fn(),
+    commitGitChanges: vi.fn(),
     fetchGitDiff: vi.fn(),
     fetchGitStatus: vi.fn(),
   };
 });
 
 const applyGitFileActionMock = vi.mocked(applyGitFileAction);
+const commitGitChangesMock = vi.mocked(commitGitChanges);
 const fetchGitDiffMock = vi.mocked(fetchGitDiff);
 const fetchGitStatusMock = vi.mocked(fetchGitStatus);
 
 describe("GitStatusPanel", () => {
   beforeEach(() => {
     applyGitFileActionMock.mockReset();
+    commitGitChangesMock.mockReset();
     fetchGitDiffMock.mockReset();
     fetchGitStatusMock.mockReset();
   });
@@ -102,6 +113,128 @@ describe("GitStatusPanel", () => {
     await waitFor(() => {
       expect(onOpenDiff).toHaveBeenCalledWith(makeDiffResponse(), { openInNewTab: true });
     });
+  });
+
+  it("loads a drafted repo path from the toolbar", () => {
+    const onOpenWorkdir = vi.fn();
+
+    render(<GitStatusPanel workdir={null} onOpenDiff={() => {}} onOpenWorkdir={onOpenWorkdir} />);
+
+    fireEvent.change(screen.getByPlaceholderText(/folder inside it/i), {
+      target: { value: "/repo/subdir" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /Load repo/i }));
+
+    expect(onOpenWorkdir).toHaveBeenCalledWith("/repo/subdir");
+  });
+
+  it("refreshes the current repo from the icon button", async () => {
+    fetchGitStatusMock
+      .mockResolvedValueOnce(makeStatusResponse([]))
+      .mockResolvedValueOnce(
+        makeStatusResponse([
+          {
+            path: "scratch.txt",
+            worktreeStatus: "?",
+          },
+        ]),
+      );
+
+    render(<GitStatusPanel workdir="/repo" onOpenDiff={() => {}} onOpenWorkdir={() => {}} />);
+
+    await screen.findByText("Working tree clean.");
+
+    fireEvent.click(screen.getByRole("button", { name: /Refresh git status/i }));
+
+    await waitFor(() => {
+      expect(fetchGitStatusMock).toHaveBeenCalledTimes(2);
+    });
+    expect(await screen.findByText("scratch.txt")).toBeInTheDocument();
+  });
+
+  it("keeps a branch summary header when the parent supplies project scope", async () => {
+    fetchGitStatusMock.mockResolvedValue(makeStatusResponse([]));
+
+    render(
+      <GitStatusPanel
+        workdir="/repo"
+        showPathControls={false}
+        onOpenDiff={() => {}}
+        onOpenWorkdir={() => {}}
+      />,
+    );
+
+    await screen.findByText("Working tree clean.");
+
+    expect(screen.queryByRole("button", { name: /Load repo/i })).not.toBeInTheDocument();
+    expect(screen.queryByPlaceholderText(/folder inside it/i)).not.toBeInTheDocument();
+    expect(screen.getByText("main")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Refresh git status/i })).toBeInTheDocument();
+  });
+
+  it("refreshes the current repo from the branch header when path controls are hidden", async () => {
+    fetchGitStatusMock
+      .mockResolvedValueOnce(makeStatusResponse([]))
+      .mockResolvedValueOnce(
+        makeStatusResponse([
+          {
+            path: "scratch.txt",
+            worktreeStatus: "?",
+          },
+        ]),
+      );
+
+    render(
+      <GitStatusPanel
+        workdir="/repo"
+        showPathControls={false}
+        onOpenDiff={() => {}}
+        onOpenWorkdir={() => {}}
+      />,
+    );
+
+    await screen.findByText("Working tree clean.");
+
+    fireEvent.click(screen.getByRole("button", { name: /Refresh git status/i }));
+
+    await waitFor(() => {
+      expect(fetchGitStatusMock).toHaveBeenCalledTimes(2);
+    });
+    expect(await screen.findByText("scratch.txt")).toBeInTheDocument();
+  });
+
+  it("commits staged changes from the footer composer", async () => {
+    fetchGitStatusMock.mockResolvedValue(
+      makeStatusResponse([
+        {
+          indexStatus: "M",
+          path: "src/main.rs",
+        },
+      ]),
+    );
+    commitGitChangesMock.mockResolvedValue({
+      status: makeStatusResponse([]),
+      summary: "Created commit: Tighten git footer",
+    });
+
+    render(<GitStatusPanel workdir="/repo" onOpenDiff={() => {}} onOpenWorkdir={() => {}} />);
+
+    await screen.findByText("main.rs");
+
+    fireEvent.change(screen.getByLabelText(/Commit/i), {
+      target: { value: "Tighten git footer" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /^Commit$/i }));
+
+    await waitFor(() => {
+      expect(commitGitChangesMock).toHaveBeenCalledWith({
+        message: "Tighten git footer",
+        workdir: "/repo",
+      });
+    });
+
+    expect(await screen.findByText("Created commit: Tighten git footer")).toBeInTheDocument();
+    expect(screen.getByText("Working tree clean.")).toBeInTheDocument();
   });
 
   it("reports git status updates for badge counts", async () => {

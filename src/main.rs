@@ -67,6 +67,7 @@ async fn run_server() -> Result<()> {
         .route("/api/git/status", get(read_git_status))
         .route("/api/git/diff", post(read_git_diff))
         .route("/api/git/file", post(apply_git_file_action))
+        .route("/api/git/commit", post(commit_git_changes))
         .route("/api/state", get(get_state))
         .route("/api/settings", post(update_app_settings))
         .route("/api/events", get(state_events))
