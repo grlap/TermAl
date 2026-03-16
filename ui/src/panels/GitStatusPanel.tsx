@@ -53,7 +53,10 @@ export function GitStatusPanel({
   const [treeExpansionByKey, setTreeExpansionByKey] = useState<Record<string, boolean>>({});
   const onStatusChangeRef = useRef(onStatusChange);
   const normalizedWorkdir = workdir?.trim() ?? "";
-  const visibleStatus = status?.workdir === normalizedWorkdir ? status : null;
+  const normalizedStatusWorkdir = status ? normalizePath(status.workdir) : "";
+  const normalizedVisibleWorkdir = normalizePath(normalizedWorkdir);
+  const visibleStatus =
+    status && normalizedStatusWorkdir === normalizedVisibleWorkdir ? status : null;
   const changedFiles = visibleStatus?.files ?? [];
   const hasStagedChanges = changedFiles.some((file) => Boolean(file.indexStatus));
   const sections = useMemo(() => buildGitStatusTree(changedFiles), [changedFiles]);
@@ -85,7 +88,8 @@ export function GitStatusPanel({
   }, [normalizedWorkdir]);
 
   async function loadStatus(path: string, options?: { preserveVisibleStatus?: boolean }) {
-    const preserveVisibleStatus = options?.preserveVisibleStatus && visibleStatus?.workdir === path;
+    const preserveVisibleStatus =
+      options?.preserveVisibleStatus && normalizePath(visibleStatus?.workdir ?? "") === normalizePath(path);
     setIsLoading(true);
     setError(null);
     try {
@@ -766,6 +770,26 @@ function resolveGitFilePath(repoRoot: string, relativePath: string) {
   }
 
   return `${repoRoot.replace(/[\\/]+$/, "")}/${relativePath}`;
+}
+
+function normalizePath(path: string) {
+  const normalized = path.trim().replace(/\\+/g, "/").replace(/\/+/g, "/");
+  if (!normalized) {
+    return "";
+  }
+
+  if (/^[a-z]:\/$/i.test(normalized)) {
+    return normalized.toLowerCase();
+  }
+
+  const withoutTrailingSlash = normalized.endsWith("/") ? normalized.slice(0, -1) : normalized;
+  return isWindowsLikePath(withoutTrailingSlash)
+    ? withoutTrailingSlash.toLowerCase()
+    : withoutTrailingSlash;
+}
+
+function isWindowsLikePath(path: string) {
+  return /^[a-z]:\//i.test(path) || path.startsWith("//");
 }
 
 function EmptyState({ title, body }: { title: string; body: string }) {

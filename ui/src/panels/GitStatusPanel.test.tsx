@@ -70,7 +70,7 @@ describe("GitStatusPanel", () => {
     );
 
     await waitFor(() => {
-      expect(fetchGitStatusMock).toHaveBeenCalledWith("/repo", SESSION_ID);
+      expect(fetchGitStatusMock).toHaveBeenCalledWith("/repo", null);
     });
 
     expect(await screen.findByRole("button", { name: /^Staged\b/i })).toBeInTheDocument();
@@ -85,7 +85,6 @@ describe("GitStatusPanel", () => {
         originalPath: undefined,
         path: "ui/src/panels/ControlPanelSurface.tsx",
         sectionId: "staged",
-        sessionId: SESSION_ID,
         statusCode: "A",
         workdir: "/repo",
       });
@@ -311,7 +310,6 @@ describe("GitStatusPanel", () => {
     await waitFor(() => {
       expect(commitGitChangesMock).toHaveBeenCalledWith({
         message: "Tighten git footer",
-        sessionId: SESSION_ID,
         workdir: "/repo",
       });
     });
@@ -376,6 +374,35 @@ describe("GitStatusPanel", () => {
         workdir: "/repo",
       });
     });
+  });
+
+  it("renders changed files when Windows path casing differs between request and response", async () => {
+    fetchGitStatusMock.mockResolvedValue(
+      makeStatusResponse(
+        [
+          {
+            path: "src/main.rs",
+            worktreeStatus: "M",
+          },
+        ],
+        {
+          repoRoot: "C:/Repo",
+          workdir: "C:/Repo",
+        },
+      ),
+    );
+
+    render(
+      <GitStatusPanel
+        sessionId={null}
+        workdir={"c:\\Repo\\"}
+        showPathControls={false}
+        onOpenDiff={() => {}}
+        onOpenWorkdir={() => {}}
+      />,
+    );
+
+    expect(await screen.findByText("main.rs")).toBeInTheDocument();
   });
 
   it("reports git status updates for badge counts", async () => {
@@ -493,7 +520,6 @@ describe("GitStatusPanel", () => {
         action: "stage",
         originalPath: undefined,
         path: "scratch.txt",
-        sessionId: SESSION_ID,
         statusCode: "?",
         workdir: "/repo",
       });
@@ -552,7 +578,6 @@ describe("GitStatusPanel", () => {
           action: "stage",
           originalPath: undefined,
           path: "ui/src/App.tsx",
-          sessionId: SESSION_ID,
           statusCode: "M",
           workdir: "/repo",
         },
@@ -560,7 +585,6 @@ describe("GitStatusPanel", () => {
           action: "stage",
           originalPath: "legacy/Widget.tsx",
           path: "ui/src/Widget.tsx",
-          sessionId: SESSION_ID,
           statusCode: "R",
           workdir: "/repo",
         },
@@ -704,7 +728,6 @@ describe("GitStatusPanel", () => {
           action: "unstage",
           originalPath: undefined,
           path: "ui/src/App.tsx",
-          sessionId: SESSION_ID,
           statusCode: "M",
           workdir: "/repo",
         },
@@ -712,7 +735,6 @@ describe("GitStatusPanel", () => {
           action: "unstage",
           originalPath: "legacy/Widget.tsx",
           path: "ui/src/Widget.tsx",
-          sessionId: SESSION_ID,
           statusCode: "R",
           workdir: "/repo",
         },
@@ -734,16 +756,19 @@ function makeDiffResponse(): GitDiffResponse {
   };
 }
 
-function makeStatusResponse(files: GitStatusFile[]): GitStatusResponse {
+function makeStatusResponse(
+  files: GitStatusFile[],
+  overrides?: Partial<Pick<GitStatusResponse, "repoRoot" | "workdir">>,
+): GitStatusResponse {
   return {
     ahead: 0,
     behind: 0,
     branch: "main",
     files,
     isClean: files.length === 0,
-    repoRoot: "/repo",
+    repoRoot: overrides?.repoRoot ?? "/repo",
     upstream: "origin/main",
-    workdir: "/repo",
+    workdir: overrides?.workdir ?? "/repo",
   };
 }
 
