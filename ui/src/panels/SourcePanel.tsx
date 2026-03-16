@@ -46,6 +46,7 @@ export type SourceFileState = {
 export function SourcePanel({
   candidatePaths,
   editorAppearance,
+  editorFontSizePx,
   fileState,
   sourceDraft,
   sourcePath,
@@ -55,6 +56,7 @@ export function SourcePanel({
 }: {
   candidatePaths: string[];
   editorAppearance: MonacoAppearance;
+  editorFontSizePx: number;
   fileState: SourceFileState;
   sourceDraft: string;
   sourcePath: string | null;
@@ -183,6 +185,7 @@ export function SourcePanel({
               <MonacoCodeEditor
                 appearance={editorAppearance}
                 ariaLabel={`Source editor for ${fileState.path}`}
+                fontSizePx={editorFontSizePx}
                 language={fileState.language}
                 path={fileState.path}
                 value={editorValue}

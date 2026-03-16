@@ -109,6 +109,7 @@ describe("DiffPanel", () => {
       render(
         <DiffPanel
           appearance="dark"
+          fontSizePx={13}
           changeType="edit"
           diff={[
             "@@ -1,2 +1,3 @@",
@@ -156,6 +157,7 @@ describe("DiffPanel", () => {
       render(
         <DiffPanel
           appearance="dark"
+          fontSizePx={13}
           changeType="edit"
           diff={["@@ -1 +1 @@", "-old line", "+new line"].join("\n")}
           diffMessageId="diff-edit"
@@ -188,6 +190,7 @@ describe("DiffPanel", () => {
       ({ container } = render(
         <DiffPanel
           appearance="light"
+          fontSizePx={13}
           changeType="edit"
           diff={[
             "diff --git a/example.ts b/example.ts",
@@ -224,6 +227,7 @@ describe("DiffPanel", () => {
       render(
         <DiffPanel
           appearance="dark"
+          fontSizePx={13}
           changeType="edit"
           diff={["@@ -1 +1 @@", "-const greeting = 'hello';", "+const greeting = 'hi';"].join("\n")}
           diffMessageId="diff-3"

@@ -135,14 +135,20 @@ import { reconcileSessions } from "./session-reconcile";
 
 const TAB_DRAG_STALE_TIMEOUT_MS = 15000;
 import {
+  clampEditorFontSizePreference,
   clampFontSizePreference,
+  DEFAULT_EDITOR_FONT_SIZE_PX,
   DEFAULT_FONT_SIZE_PX,
+  MAX_EDITOR_FONT_SIZE_PX,
   MAX_FONT_SIZE_PX,
+  MIN_EDITOR_FONT_SIZE_PX,
   MIN_FONT_SIZE_PX,
   applyFontSizePreference,
   THEMES,
+  getStoredEditorFontSizePreference,
   getStoredFontSizePreference,
   applyThemePreference,
+  persistEditorFontSizePreference,
   persistFontSizePreference,
   getStoredThemePreference,
   persistThemePreference,
@@ -826,6 +832,7 @@ export default function App() {
   const [isCreatingProject, setIsCreatingProject] = useState(false);
   const [themeId, setThemeId] = useState<ThemeId>(() => getStoredThemePreference());
   const [fontSizePx, setFontSizePx] = useState<number>(() => getStoredFontSizePreference());
+  const [editorFontSizePx, setEditorFontSizePx] = useState<number>(() => getStoredEditorFontSizePreference());
   const [defaultCodexSandboxMode, setDefaultCodexSandboxMode] =
     useState<SandboxMode>("workspace-write");
   const [defaultCodexApprovalPolicy, setDefaultCodexApprovalPolicy] =
@@ -1646,6 +1653,10 @@ export default function App() {
     applyFontSizePreference(fontSizePx);
     persistFontSizePreference(fontSizePx);
   }, [fontSizePx]);
+
+  useEffect(() => {
+    persistEditorFontSizePreference(editorFontSizePx);
+  }, [editorFontSizePx]);
 
   useEffect(() => {
     persistWorkspaceLayout({
@@ -3547,6 +3558,7 @@ export default function App() {
               windowId={windowId}
               draggedTab={activeDraggedTab}
               editorAppearance={editorAppearance}
+              editorFontSizePx={editorFontSizePx}
               onActivatePane={handlePaneActivate}
               onSelectTab={handlePaneTabSelect}
               onCloseTab={handleCloseTab}
@@ -4165,8 +4177,12 @@ export default function App() {
                 {settingsTab === "themes" ? (
                   <ThemePicker
                     activeTheme={activeTheme}
+                    editorFontSizePx={editorFontSizePx}
                     fontSizePx={fontSizePx}
                     themeId={themeId}
+                    onSelectEditorFontSize={(nextValue) =>
+                      setEditorFontSizePx(clampEditorFontSizePreference(nextValue))
+                    }
                     onSelectFontSize={(nextValue) =>
                       setFontSizePx(clampFontSizePreference(nextValue))
                     }
@@ -4200,14 +4216,18 @@ export default function App() {
 
 function ThemePicker({
   activeTheme,
+  editorFontSizePx,
   fontSizePx,
   themeId,
+  onSelectEditorFontSize,
   onSelectFontSize,
   onSelectTheme,
 }: {
   activeTheme: (typeof THEMES)[number];
+  editorFontSizePx: number;
   fontSizePx: number;
   themeId: ThemeId;
+  onSelectEditorFontSize: (fontSizePx: number) => void;
   onSelectFontSize: (fontSizePx: number) => void;
   onSelectTheme: (themeId: ThemeId) => void;
 }) {
@@ -4225,6 +4245,8 @@ function ThemePicker({
   const [isDraggingScrollbar, setIsDraggingScrollbar] = useState(false);
   const canDecreaseFontSize = fontSizePx > MIN_FONT_SIZE_PX;
   const canIncreaseFontSize = fontSizePx < MAX_FONT_SIZE_PX;
+  const canDecreaseEditorFontSize = editorFontSizePx > MIN_EDITOR_FONT_SIZE_PX;
+  const canIncreaseEditorFontSize = editorFontSizePx < MAX_EDITOR_FONT_SIZE_PX;
 
   useLayoutEffect(() => {
     const listElement = listRef.current;
@@ -4383,55 +4405,33 @@ function ThemePicker({
   return (
     <section className="settings-panel-stack">
       <article className="message-card prompt-settings-card appearance-settings-card">
-        <div className="card-label">Interface</div>
-        <h3>Font size</h3>
+        <div className="card-label">Appearance</div>
+        <h3>Font sizes</h3>
         <div className="prompt-settings-grid appearance-settings-grid">
-          <div className="session-control-group">
-            <label className="session-control-label" htmlFor="font-size-decrease">
-              Scale
-            </label>
-            <div className="font-size-controls" role="group" aria-label="UI font size controls">
-              <button
-                id="font-size-decrease"
-                className="ghost-button font-size-stepper"
-                type="button"
-                onClick={() => onSelectFontSize(fontSizePx - 1)}
-                disabled={!canDecreaseFontSize}
-              >
-                A-
-              </button>
-              <div className="font-size-readout" aria-live="polite">
-                <strong className="font-size-readout-value">{fontSizePx}px</strong>
-                <span className="font-size-readout-copy">
-                  {fontSizePx === DEFAULT_FONT_SIZE_PX ? "Default" : "Live"}
-                </span>
-              </div>
-              <button
-                className="ghost-button font-size-stepper"
-                type="button"
-                onClick={() => onSelectFontSize(fontSizePx + 1)}
-                disabled={!canIncreaseFontSize}
-              >
-                A+
-              </button>
-            </div>
-          </div>
-          <div className="session-control-group">
-            <label className="session-control-label" htmlFor="font-size-reset">
-              Reset
-            </label>
-            <button
-              id="font-size-reset"
-              className="ghost-button font-size-reset"
-              type="button"
-              onClick={() => onSelectFontSize(DEFAULT_FONT_SIZE_PX)}
-              disabled={fontSizePx === DEFAULT_FONT_SIZE_PX}
-            >
-              Use default
-            </button>
-          </div>
+          <FontSizePreferenceControl
+            canDecrease={canDecreaseFontSize}
+            canIncrease={canIncreaseFontSize}
+            controlsLabel="UI font size controls"
+            defaultValue={DEFAULT_FONT_SIZE_PX}
+            decreaseId="font-size-decrease"
+            label="UI"
+            onSelectFontSize={onSelectFontSize}
+            resetId="font-size-reset"
+            value={fontSizePx}
+          />
+          <FontSizePreferenceControl
+            canDecrease={canDecreaseEditorFontSize}
+            canIncrease={canIncreaseEditorFontSize}
+            controlsLabel="Editor font size controls"
+            defaultValue={DEFAULT_EDITOR_FONT_SIZE_PX}
+            decreaseId="editor-font-size-decrease"
+            label="Editor"
+            onSelectFontSize={onSelectEditorFontSize}
+            resetId="editor-font-size-reset"
+            value={editorFontSizePx}
+          />
           <p className="session-control-hint">
-            Changes apply immediately across the interface and are saved in this browser.
+            UI changes apply across the interface. Editor changes affect source and diff editors. Both are saved in this browser.
           </p>
         </div>
       </article>
@@ -4498,6 +4498,77 @@ function ThemePicker({
         </div>
       </section>
     </section>
+  );
+}
+
+function FontSizePreferenceControl({
+  canDecrease,
+  canIncrease,
+  controlsLabel,
+  defaultValue,
+  decreaseId,
+  label,
+  onSelectFontSize,
+  resetId,
+  value,
+}: {
+  canDecrease: boolean;
+  canIncrease: boolean;
+  controlsLabel: string;
+  defaultValue: number;
+  decreaseId: string;
+  label: string;
+  onSelectFontSize: (fontSizePx: number) => void;
+  resetId: string;
+  value: number;
+}) {
+  return (
+    <>
+      <div className="session-control-group">
+        <label className="session-control-label" htmlFor={decreaseId}>
+          {label}
+        </label>
+        <div className="font-size-controls" role="group" aria-label={controlsLabel}>
+          <button
+            id={decreaseId}
+            className="ghost-button font-size-stepper"
+            type="button"
+            onClick={() => onSelectFontSize(value - 1)}
+            disabled={!canDecrease}
+          >
+            A-
+          </button>
+          <div className="font-size-readout" aria-live="polite">
+            <strong className="font-size-readout-value">{value}px</strong>
+            <span className="font-size-readout-copy">
+              {value === defaultValue ? "Default" : "Live"}
+            </span>
+          </div>
+          <button
+            className="ghost-button font-size-stepper"
+            type="button"
+            onClick={() => onSelectFontSize(value + 1)}
+            disabled={!canIncrease}
+          >
+            A+
+          </button>
+        </div>
+      </div>
+      <div className="session-control-group">
+        <label className="session-control-label" htmlFor={resetId}>
+          Reset
+        </label>
+        <button
+          id={resetId}
+          className="ghost-button font-size-reset"
+          type="button"
+          onClick={() => onSelectFontSize(defaultValue)}
+          disabled={value === defaultValue}
+        >
+          Use default
+        </button>
+      </div>
+    </>
   );
 }
 
@@ -4944,6 +5015,7 @@ function WorkspaceNodeView({
   windowId,
   draggedTab,
   editorAppearance,
+  editorFontSizePx,
   onActivatePane,
   onSelectTab,
   onCloseTab,
@@ -5005,6 +5077,7 @@ function WorkspaceNodeView({
   windowId: string;
   draggedTab: WorkspaceTabDrag | null;
   editorAppearance: MonacoAppearance;
+  editorFontSizePx: number;
   onActivatePane: (paneId: string) => void;
   onSelectTab: (paneId: string, tabId: string) => void;
   onCloseTab: (paneId: string, tabId: string) => void;
@@ -5122,6 +5195,7 @@ function WorkspaceNodeView({
         windowId={windowId}
         draggedTab={draggedTab}
         editorAppearance={editorAppearance}
+        editorFontSizePx={editorFontSizePx}
         onActivatePane={onActivatePane}
         onSelectTab={onSelectTab}
         onCloseTab={onCloseTab}
@@ -5198,6 +5272,7 @@ function WorkspaceNodeView({
           windowId={windowId}
           draggedTab={draggedTab}
           editorAppearance={editorAppearance}
+          editorFontSizePx={editorFontSizePx}
           onActivatePane={onActivatePane}
           onSelectTab={onSelectTab}
           onCloseTab={onCloseTab}
@@ -5270,6 +5345,7 @@ function WorkspaceNodeView({
           windowId={windowId}
           draggedTab={draggedTab}
           editorAppearance={editorAppearance}
+          editorFontSizePx={editorFontSizePx}
           onActivatePane={onActivatePane}
           onSelectTab={onSelectTab}
           onCloseTab={onCloseTab}
@@ -5332,6 +5408,7 @@ function SessionPaneView({
   windowId,
   draggedTab,
   editorAppearance,
+  editorFontSizePx,
   onActivatePane,
   onSelectTab,
   onCloseTab,
@@ -5392,6 +5469,7 @@ function SessionPaneView({
   windowId: string;
   draggedTab: WorkspaceTabDrag | null;
   editorAppearance: MonacoAppearance;
+  editorFontSizePx: number;
   onActivatePane: (paneId: string) => void;
   onSelectTab: (paneId: string, tabId: string) => void;
   onCloseTab: (paneId: string, tabId: string) => void;
@@ -6451,6 +6529,7 @@ function SessionPaneView({
           <SourcePanel
             candidatePaths={sourceCandidatePaths}
             editorAppearance={editorAppearance}
+            editorFontSizePx={editorFontSizePx}
             fileState={fileState}
             sourceDraft={sourceDraft}
             sourcePath={activeSourceTab.path}
@@ -6478,6 +6557,7 @@ function SessionPaneView({
           <DiffPanel
             appearance={editorAppearance}
             changeType={activeDiffPreviewTab.changeType}
+            fontSizePx={editorFontSizePx}
             diff={activeDiffPreviewTab.diff}
             diffMessageId={activeDiffPreviewTab.diffMessageId}
             filePath={activeDiffPreviewTab.filePath}

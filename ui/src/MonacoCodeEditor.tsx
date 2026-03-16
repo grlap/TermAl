@@ -23,6 +23,7 @@ export type MonacoCodeEditorStatus = {
 type MonacoCodeEditorProps = {
   appearance: MonacoAppearance;
   ariaLabel: string;
+  fontSizePx: number;
   language?: string | null;
   path?: string | null;
   readOnly?: boolean;
@@ -35,6 +36,7 @@ type MonacoCodeEditorProps = {
 export function MonacoCodeEditor({
   appearance,
   ariaLabel,
+  fontSizePx,
   language,
   path,
   readOnly = false,
@@ -76,7 +78,8 @@ export function MonacoCodeEditor({
       automaticLayout: true,
       bracketPairColorization: { enabled: true },
       fontFamily: resolveEditorFontFamily(),
-      fontSize: 13,
+      fontLigatures: true,
+      fontSize: fontSizePx,
       guides: {
         bracketPairs: true,
         bracketPairsHorizontal: "active",
@@ -183,6 +186,12 @@ export function MonacoCodeEditor({
     layoutEditor();
     emitStatus();
   }, [readOnly]);
+
+  useEffect(() => {
+    editorRef.current?.updateOptions({ fontSize: fontSizePx });
+    layoutEditor();
+    emitStatus();
+  }, [fontSizePx]);
 
   useEffect(() => {
     const nextDescriptor = describeModel(path, language);
@@ -303,10 +312,11 @@ function describeModel(path: string | null | undefined, language: string | null 
 }
 
 function resolveEditorFontFamily() {
+  const fallback = '"Fira Code", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace';
   if (typeof window === "undefined") {
-    return "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace";
+    return fallback;
   }
 
   const configured = window.getComputedStyle(document.documentElement).getPropertyValue("--code-font").trim();
-  return configured || "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace";
+  return configured ? `"Fira Code", ${configured}` : fallback;
 }

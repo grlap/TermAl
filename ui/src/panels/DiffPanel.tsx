@@ -62,6 +62,7 @@ const LANGUAGE_LABELS: Record<string, string> = {
 export function DiffPanel({
   appearance,
   changeType,
+  fontSizePx,
   diff,
   diffMessageId,
   filePath,
@@ -72,6 +73,7 @@ export function DiffPanel({
 }: {
   appearance: MonacoAppearance;
   changeType: DiffMessage["changeType"];
+  fontSizePx: number;
   diff: string;
   diffMessageId: string;
   filePath: string | null;
@@ -275,6 +277,7 @@ export function DiffPanel({
             {renderEditFileView({
               appearance,
               editValue,
+              fontSizePx,
               filePath,
               language,
               latestFile,
@@ -306,6 +309,7 @@ export function DiffPanel({
                 <MonacoDiffEditor
                   ref={diffEditorRef}
                   appearance={appearance}
+                  fontSizePx={fontSizePx}
                   ariaLabel={filePath ? `Diff preview for ${filePath}` : "Diff preview"}
                   language={language}
                   onStatusChange={setVisualEditorStatus}
@@ -386,6 +390,7 @@ export function DiffPanel({
 function renderEditFileView({
   appearance,
   editValue,
+  fontSizePx,
   filePath,
   language,
   latestFile,
@@ -395,6 +400,7 @@ function renderEditFileView({
 }: {
   appearance: MonacoAppearance;
   editValue: string;
+  fontSizePx: number;
   filePath: string | null;
   language?: string | null;
   latestFile: LatestFileState;
@@ -430,6 +436,7 @@ function renderEditFileView({
         <MonacoCodeEditor
           appearance={appearance}
           ariaLabel={`Edit mode for ${latestFile.path}`}
+          fontSizePx={fontSizePx}
           language={latestFile.language ?? language ?? null}
           path={latestFile.path}
           value={editValue}

@@ -19,6 +19,7 @@ import type { MonacoCodeEditorStatus } from "./MonacoCodeEditor";
 type MonacoDiffEditorProps = {
   appearance: MonacoAppearance;
   ariaLabel: string;
+  fontSizePx: number;
   language?: string | null;
   onStatusChange?: (status: MonacoDiffEditorStatus) => void;
   path?: string | null;
@@ -39,6 +40,7 @@ export type MonacoDiffEditorHandle = {
 export const MonacoDiffEditor = forwardRef<MonacoDiffEditorHandle, MonacoDiffEditorProps>(function MonacoDiffEditor({
   appearance,
   ariaLabel,
+  fontSizePx,
   language,
   onStatusChange,
   path,
@@ -87,7 +89,8 @@ export const MonacoDiffEditor = forwardRef<MonacoDiffEditorHandle, MonacoDiffEdi
       diffCodeLens: false,
       diffWordWrap: "off",
       fontFamily: resolveEditorFontFamily(),
-      fontSize: 13,
+      fontLigatures: true,
+      fontSize: fontSizePx,
       guides: {
         bracketPairs: true,
         bracketPairsHorizontal: "active",
@@ -195,6 +198,12 @@ export const MonacoDiffEditor = forwardRef<MonacoDiffEditorHandle, MonacoDiffEdi
 
     return () => observer.disconnect();
   }, [appearance]);
+
+  useEffect(() => {
+    diffEditorRef.current?.updateOptions({ fontSize: fontSizePx });
+    layoutEditor();
+    emitStatus();
+  }, [fontSizePx]);
 
   useEffect(() => {
     const nextDescriptor = describeModel(path, language);
@@ -326,12 +335,13 @@ function describeModel(path: string | null | undefined, language: string | null 
 }
 
 function resolveEditorFontFamily() {
+  const fallback = '"Fira Code", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace';
   if (typeof window === "undefined") {
-    return "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace";
+    return fallback;
   }
 
   const configured = window.getComputedStyle(document.documentElement).getPropertyValue("--code-font").trim();
-  return configured || "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace";
+  return configured ? `"Fira Code", ${configured}` : fallback;
 }
 
 function getCurrentChangeIndex(lineChanges: MonacoEditor.ILineChange[], lineNumber: number) {

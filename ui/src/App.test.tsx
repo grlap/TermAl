@@ -1,5 +1,5 @@
-import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import App, {
   MarkdownContent,
@@ -84,6 +84,37 @@ function restoreGlobal<Key extends RestorableGlobalKey>(
   globalThis[key] = originalValue;
 }
 
+function createActWrappedAnimationFrameMocks() {
+  let nextFrameId = 1;
+  const callbacks = new Map<number, FrameRequestCallback>();
+
+  function requestAnimationFrameMock(callback: FrameRequestCallback) {
+    const frameId = nextFrameId;
+    nextFrameId += 1;
+    callbacks.set(frameId, callback);
+    queueMicrotask(() => {
+      const pending = callbacks.get(frameId);
+      if (!pending) {
+        return;
+      }
+
+      callbacks.delete(frameId);
+      act(() => {
+        pending(Date.now());
+      });
+    });
+    return frameId;
+  }
+
+  function cancelAnimationFrameMock(frameId: number) {
+    callbacks.delete(frameId);
+  }
+
+  return {
+    cancelAnimationFrameMock,
+    requestAnimationFrameMock,
+  };
+}
 function normalizeMessageEventListener(listener: EventListenerOrEventListenerObject) {
   if (typeof listener === "function") {
     return listener as (event: MessageEvent<string>) => void;
@@ -100,15 +131,33 @@ function createDeferred<T>() {
   return { promise, resolve };
 }
 
+async function settleAsyncUi() {
+  await act(async () => {
+    await Promise.resolve();
+    await new Promise((resolve) => window.setTimeout(resolve, 0));
+    await Promise.resolve();
+  });
+}
+
+async function renderApp() {
+  render(<App />);
+  await settleAsyncUi();
+}
+
+async function clickAndSettle(target: HTMLElement) {
+  fireEvent.click(target);
+  await settleAsyncUi();
+}
+
 async function openCreateSessionDialog() {
-  fireEvent.click(await screen.findByRole("button", { name: "Sessions" }));
-  fireEvent.click(await screen.findByRole("button", { name: "New" }));
+  await clickAndSettle(await screen.findByRole("button", { name: "Sessions" }));
+  await clickAndSettle(await screen.findByRole("button", { name: "New" }));
   await screen.findByRole("heading", { level: 2, name: "New session" });
 }
 
 async function selectComboboxOption(name: string, optionName: string | RegExp) {
   const combobox = await screen.findByRole("combobox", { name });
-  fireEvent.click(combobox);
+  await clickAndSettle(combobox);
 
   const listbox = await screen.findByRole("listbox");
   const option = within(listbox)
@@ -126,7 +175,7 @@ async function selectComboboxOption(name: string, optionName: string | RegExp) {
     throw new Error(`Combobox option not found for ${String(optionName)}`);
   }
 
-  fireEvent.click(option);
+  await clickAndSettle(option);
 }
 
 function makeSession(id: string, overrides?: Partial<Session>): Session {
@@ -183,14 +232,30 @@ describe("MarkdownContent", () => {
 
 describe("App", () => {
   const originalScrollTo = HTMLElement.prototype.scrollTo;
+  const originalRequestAnimationFrame = globalThis.requestAnimationFrame;
+  const originalCancelAnimationFrame = globalThis.cancelAnimationFrame;
 
   beforeEach(() => {
+    const { cancelAnimationFrameMock, requestAnimationFrameMock } =
+      createActWrappedAnimationFrameMocks();
+    vi.stubGlobal("requestAnimationFrame", requestAnimationFrameMock);
+    vi.stubGlobal("cancelAnimationFrame", cancelAnimationFrameMock);
     HTMLElement.prototype.scrollTo = vi.fn() as unknown as typeof HTMLElement.prototype.scrollTo;
     EventSourceMock.instances = [];
   });
 
-  afterEach(() => {
+  afterEach(async () => {
     HTMLElement.prototype.scrollTo = originalScrollTo;
+    if (originalRequestAnimationFrame === undefined) {
+      delete (globalThis as Partial<typeof globalThis>).requestAnimationFrame;
+    } else {
+      globalThis.requestAnimationFrame = originalRequestAnimationFrame;
+    }
+    if (originalCancelAnimationFrame === undefined) {
+      delete (globalThis as Partial<typeof globalThis>).cancelAnimationFrame;
+    } else {
+      globalThis.cancelAnimationFrame = originalCancelAnimationFrame;
+    }
   });
 
   it("applies the active combobox option on space without closing the menu", () => {
@@ -313,7 +378,7 @@ describe("App", () => {
     HTMLElement.prototype.scrollIntoView = vi.fn();
 
     try {
-      render(<App />);
+      await renderApp();
 
       const eventSource = EventSourceMock.instances[0];
       expect(eventSource).toBeTruthy();
@@ -467,10 +532,10 @@ describe("App", () => {
     HTMLElement.prototype.scrollIntoView = vi.fn();
 
     try {
-      render(<App />);
+      await renderApp();
 
       await openCreateSessionDialog();
-      fireEvent.click(screen.getByRole("button", { name: "Create session" }));
+      await clickAndSettle(screen.getByRole("button", { name: "Create session" }));
 
       await waitFor(() => {
         expect(
@@ -567,11 +632,11 @@ describe("App", () => {
     HTMLElement.prototype.scrollIntoView = vi.fn();
 
     try {
-      render(<App />);
+      await renderApp();
 
       await openCreateSessionDialog();
-      fireEvent.click(screen.getByRole("button", { name: "Create session" }));
-      fireEvent.click(await screen.findByRole("button", { name: "Prompt" }));
+      await clickAndSettle(screen.getByRole("button", { name: "Create session" }));
+      await clickAndSettle(await screen.findByRole("button", { name: "Prompt" }));
 
       await waitFor(() => {
         expect(
@@ -687,10 +752,10 @@ describe("App", () => {
     HTMLElement.prototype.scrollIntoView = vi.fn();
 
     try {
-      render(<App />);
+      await renderApp();
 
-      fireEvent.click(await screen.findByRole("button", { name: "Open preferences" }));
-      fireEvent.click(screen.getByRole("tab", { name: "Codex defaults" }));
+      await clickAndSettle(await screen.findByRole("button", { name: "Open preferences" }));
+      await clickAndSettle(screen.getByRole("tab", { name: "Codex defaults" }));
       await selectComboboxOption("Default reasoning effort", /high/i);
       await waitFor(() => {
         expect(settingsBody).not.toBeNull();
@@ -698,11 +763,11 @@ describe("App", () => {
       expect(settingsBody).toMatchObject({
         defaultCodexReasoningEffort: "high",
       });
-      fireEvent.click(screen.getByRole("button", { name: "Close dialog" }));
+      await clickAndSettle(screen.getByRole("button", { name: "Close dialog" }));
 
       await openCreateSessionDialog();
       expect(screen.getByRole("combobox", { name: "Codex reasoning effort" })).toHaveTextContent("high");
-      fireEvent.click(screen.getByRole("button", { name: "Create session" }));
+      await clickAndSettle(screen.getByRole("button", { name: "Create session" }));
 
       await waitFor(() => {
         expect(createSessionBody).not.toBeNull();
@@ -815,10 +880,10 @@ describe("App", () => {
     HTMLElement.prototype.scrollIntoView = vi.fn();
 
     try {
-      render(<App />);
+      await renderApp();
 
-      fireEvent.click(await screen.findByRole("button", { name: "Open preferences" }));
-      fireEvent.click(screen.getByRole("tab", { name: "Claude defaults" }));
+      await clickAndSettle(await screen.findByRole("button", { name: "Open preferences" }));
+      await clickAndSettle(screen.getByRole("tab", { name: "Claude defaults" }));
       await selectComboboxOption("Default Claude effort", /max/i);
       await waitFor(() => {
         expect(settingsBody).not.toBeNull();
@@ -826,12 +891,12 @@ describe("App", () => {
       expect(settingsBody).toMatchObject({
         defaultClaudeEffort: "max",
       });
-      fireEvent.click(screen.getByRole("button", { name: "Close dialog" }));
+      await clickAndSettle(screen.getByRole("button", { name: "Close dialog" }));
 
       await openCreateSessionDialog();
       await selectComboboxOption("Assistant", /^Claude$/i);
       expect(screen.getByRole("combobox", { name: "Claude effort" })).toHaveTextContent("max");
-      fireEvent.click(screen.getByRole("button", { name: "Create session" }));
+      await clickAndSettle(screen.getByRole("button", { name: "Create session" }));
 
       await waitFor(() => {
         expect(createSessionBody).not.toBeNull();
