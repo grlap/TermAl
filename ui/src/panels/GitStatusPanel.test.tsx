@@ -169,6 +169,8 @@ describe("GitStatusPanel", () => {
     expect(screen.queryByRole("button", { name: /Load repo/i })).not.toBeInTheDocument();
     expect(screen.queryByPlaceholderText(/folder inside it/i)).not.toBeInTheDocument();
     expect(screen.getByText("main")).toBeInTheDocument();
+    expect(screen.queryByText("/repo")).not.toBeInTheDocument();
+    expect(screen.queryByText(/tracking origin\/main/i)).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Refresh git status/i })).toBeInTheDocument();
   });
 

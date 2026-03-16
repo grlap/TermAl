@@ -362,6 +362,11 @@ textarea {
   align-content: stretch;
 }
 
+.control-panel-body[data-section="git"] {
+  align-content: stretch;
+  overflow: hidden;
+}
+
 .control-panel-section-stack {
   display: grid;
   gap: 0.75rem;
@@ -382,6 +387,16 @@ textarea {
 .control-panel-section-files,
 .control-panel-section-git {
   min-height: 0;
+}
+
+.control-panel-section-git {
+  height: 100%;
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
+.control-panel-section-git > .git-status-panel {
+  min-height: 0;
+  height: 100%;
 }
 
 .project-controls {
@@ -3844,23 +3859,6 @@ textarea {
   flex: none;
 }
 
-.git-status-meta-path {
-  min-width: 0;
-  padding-left: 0.08rem;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.git-status-branch-summary {
-  margin: -0.1rem 0 0;
-  font-size: 0.8rem;
-  line-height: 1.35;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 .filesystem-explorer {
   display: grid;
   gap: 0.42rem;
@@ -4094,7 +4092,9 @@ textarea {
 .git-status-sections {
   display: grid;
   flex: 1 1 auto;
+  align-content: start;
   gap: 0.32rem;
+  grid-auto-rows: max-content;
   min-height: 0;
   overflow: auto;
   padding-right: 0.1rem;

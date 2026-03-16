@@ -255,24 +255,6 @@ export function GitStatusPanel({
 
   const branchName = status?.branch ?? "Detached HEAD";
 
-  const branchSummary = useMemo(() => {
-    if (!status?.repoRoot) {
-      return null;
-    }
-
-    const parts: string[] = [];
-    if (status.upstream) {
-      parts.push(`tracking ${status.upstream}`);
-    }
-    if (status.ahead > 0) {
-      parts.push(`ahead ${status.ahead}`);
-    }
-    if (status.behind > 0) {
-      parts.push(`behind ${status.behind}`);
-    }
-    return parts.join(" / ");
-  }, [status]);
-
   return (
     <div className="source-pane git-status-panel">
       {showPathControls ? (
@@ -350,10 +332,7 @@ export function GitStatusPanel({
         <article className="message-card git-status-card">
           <div className="git-status-meta">
             <div className="git-status-meta-topline">
-              <span
-                className="chip git-status-branch-chip"
-                title={branchSummary ? `${branchName} / ${branchSummary}` : branchName}
-              >
+              <span className="chip git-status-branch-chip" title={branchName}>
                 <BranchIcon />
                 <span className="git-status-branch-chip-text">{branchName}</span>
               </span>
@@ -374,15 +353,7 @@ export function GitStatusPanel({
                 </button>
               ) : null}
             </div>
-            <span className="git-status-meta-path" title={status.repoRoot}>
-              {status.repoRoot}
-            </span>
           </div>
-          {branchSummary ? (
-            <p className="git-status-branch-summary support-copy" title={branchSummary}>
-              {branchSummary}
-            </p>
-          ) : null}
           {status.isClean ? (
             <p className="support-copy git-status-empty-copy">Working tree clean.</p>
           ) : (
