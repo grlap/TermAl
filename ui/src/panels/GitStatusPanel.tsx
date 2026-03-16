@@ -32,12 +32,14 @@ export function GitStatusPanel({
   onStatusChange,
   onOpenDiff,
   onOpenWorkdir,
+  sessionId,
   workdir,
   showPathControls = true,
 }: {
   onStatusChange?: (status: GitStatusResponse | null) => void;
   onOpenDiff: (diff: GitDiffResponse, options?: GitDiffOpenOptions) => void;
   onOpenWorkdir: (path: string) => void;
+  sessionId: string | null;
   workdir: string | null;
   showPathControls?: boolean;
 }) {
@@ -53,6 +55,8 @@ export function GitStatusPanel({
   const onStatusChangeRef = useRef(onStatusChange);
   const normalizedWorkdir = workdir?.trim() ?? "";
   const visibleStatus = status?.workdir === normalizedWorkdir ? status : null;
+  const isWaitingForSession = Boolean(normalizedWorkdir && !sessionId && !showPathControls);
+  const isMissingSession = Boolean(normalizedWorkdir && !sessionId && showPathControls);
   const changedFiles = visibleStatus?.files ?? [];
   const hasStagedChanges = changedFiles.some((file) => Boolean(file.indexStatus));
   const sections = useMemo(() => buildGitStatusTree(changedFiles), [changedFiles]);
@@ -80,15 +84,26 @@ export function GitStatusPanel({
       return;
     }
 
+    if (!sessionId) {
+      setStatus(null);
+      setError(null);
+      onStatusChangeRef.current?.(null);
+      return;
+    }
+
     void loadStatus(normalizedWorkdir);
-  }, [normalizedWorkdir]);
+  }, [normalizedWorkdir, sessionId]);
 
   async function loadStatus(path: string, options?: { preserveVisibleStatus?: boolean }) {
+    if (!sessionId) {
+      return;
+    }
+
     const preserveVisibleStatus = options?.preserveVisibleStatus && visibleStatus?.workdir === path;
     setIsLoading(true);
     setError(null);
     try {
-      const response = await fetchGitStatus(path);
+      const response = await fetchGitStatus(path, sessionId);
       setStatus(response);
       onStatusChangeRef.current?.(response);
     } catch (nextError) {
@@ -104,7 +119,7 @@ export function GitStatusPanel({
 
   async function handleOpenDiff(sectionId: GitStatusSectionId, node: GitStatusTreeFileNode, options?: GitDiffOpenOptions) {
     const activeWorkdir = visibleStatus?.workdir ?? normalizedWorkdir;
-    if (!activeWorkdir) {
+    if (!activeWorkdir || !sessionId) {
       return;
     }
 
@@ -118,6 +133,7 @@ export function GitStatusPanel({
         originalPath: node.originalPath,
         path: node.path,
         sectionId,
+        sessionId,
         statusCode: node.statusCode,
         workdir: activeWorkdir,
       });
@@ -160,7 +176,7 @@ export function GitStatusPanel({
     action: GitFileAction,
   ) {
     const activeWorkdir = visibleStatus?.workdir ?? normalizedWorkdir;
-    if (!activeWorkdir || targets.length === 0) {
+    if (!activeWorkdir || !sessionId || targets.length === 0) {
       return;
     }
 
@@ -177,6 +193,7 @@ export function GitStatusPanel({
           action,
           originalPath: target.originalPath,
           path: target.path,
+          sessionId,
           statusCode: target.statusCode,
           workdir: activeWorkdir,
         });
@@ -190,7 +207,7 @@ export function GitStatusPanel({
       setError(getErrorMessage(nextError));
       if (targets.length > 1) {
         try {
-          const refreshedStatus = await fetchGitStatus(activeWorkdir);
+          const refreshedStatus = await fetchGitStatus(activeWorkdir, sessionId);
           setStatus(refreshedStatus);
           onStatusChangeRef.current?.(refreshedStatus);
         } catch {
@@ -233,7 +250,7 @@ export function GitStatusPanel({
   async function submitCommit() {
     const activeWorkdir = visibleStatus?.workdir ?? normalizedWorkdir;
     const nextMessage = commitMessage.trim();
-    if (!activeWorkdir || !nextMessage || !hasStagedChanges || isCommitting) {
+    if (!activeWorkdir || !sessionId || !nextMessage || !hasStagedChanges || isCommitting) {
       return;
     }
 
@@ -244,6 +261,7 @@ export function GitStatusPanel({
     try {
       const response = await commitGitChanges({
         message: nextMessage,
+        sessionId,
         workdir: activeWorkdir,
       });
       setStatus(response.status);
@@ -304,6 +322,24 @@ export function GitStatusPanel({
         <EmptyState
           title="No workspace selected"
           body="Load a folder path to inspect the git repository for this tile. TermAl resolves the containing repo."
+        />
+      ) : null}
+
+      {isWaitingForSession ? (
+        <article className="activity-card">
+          <div className="activity-spinner" aria-hidden="true" />
+          <div>
+            <div className="card-label">Git</div>
+            <h3>Waiting for a live session</h3>
+            <p>Select or open a session in this project to load git status.</p>
+          </div>
+        </article>
+      ) : null}
+
+      {isMissingSession ? (
+        <EmptyState
+          title="No live session available"
+          body="Open or reconnect a live session to inspect git status for this workspace."
         />
       ) : null}
 

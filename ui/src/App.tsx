@@ -44,6 +44,7 @@ import {
 import { AgentIcon } from "./agent-icon";
 import { ExpandedPromptPanel } from "./ExpandedPromptPanel";
 import { copyTextToClipboard } from "./clipboard";
+import { buildDiffPreviewModel } from "./diff-preview";
 import { highlightCode } from "./highlight";
 import { applyDeltaToSessions } from "./live-updates";
 import { resolvePaneScrollCommand } from "./pane-keyboard";
@@ -1008,6 +1009,17 @@ export default function App() {
 
     return sessions.filter((session) => session.projectId === selectedProject.id);
   }, [selectedProject, sessions]);
+  const controlPanelSessionId = useMemo(() => {
+    if (!selectedProject) {
+      return activeSession?.id ?? sessions[0]?.id ?? null;
+    }
+
+    if (activeSession?.projectId === selectedProject.id) {
+      return activeSession.id;
+    }
+
+    return projectScopedSessions[0]?.id ?? null;
+  }, [activeSession?.id, activeSession?.projectId, projectScopedSessions, selectedProject, sessions]);
   const sessionFilterCounts = useMemo(
     () => countSessionsByFilter(projectScopedSessions),
     [projectScopedSessions],
@@ -1069,12 +1081,12 @@ export default function App() {
     const normalizedGitWorkdir = controlPanelGitWorkdir?.trim() ?? "";
     let cancelled = false;
 
-    if (!normalizedGitWorkdir) {
+    if (!normalizedGitWorkdir || !controlPanelSessionId) {
       setControlPanelGitStatusCount(0);
       return;
     }
 
-    void fetchGitStatus(normalizedGitWorkdir)
+    void fetchGitStatus(normalizedGitWorkdir, controlPanelSessionId)
       .then((status) => {
         if (cancelled) {
           return;
@@ -1091,7 +1103,7 @@ export default function App() {
     return () => {
       cancelled = true;
     };
-  }, [controlPanelGitWorkdir]);
+  }, [controlPanelGitWorkdir, controlPanelSessionId]);
 
   const sessionListSearchResults = useMemo(() => {
     if (!hasSessionListSearch || !sessionListSearchIndex) {
@@ -3234,7 +3246,7 @@ export default function App() {
             <button
               className="control-panel-header-action control-panel-header-open-button"
               type="button"
-              onClick={() => handleOpenFilesystemTab(paneId, controlPanelFilesystemRoot, activeSession?.id ?? null)}
+              onClick={() => handleOpenFilesystemTab(paneId, controlPanelFilesystemRoot, controlPanelSessionId)}
               disabled={!(controlPanelFilesystemRoot?.trim() ?? "")}
             >
               <span className="control-panel-header-action-icon" aria-hidden="true">
@@ -3293,9 +3305,10 @@ export default function App() {
               {renderControlPanelProjectScope()}
               <FileSystemPanel
                 rootPath={controlPanelFilesystemRoot}
+                sessionId={controlPanelSessionId}
                 showPathControls={false}
                 onOpenPath={(path, options) =>
-                  handleOpenSourceTab(paneId, path, activeSession?.id ?? null, options)
+                  handleOpenSourceTab(paneId, path, controlPanelSessionId, options)
                 }
                 onOpenRootPath={(path) => setControlPanelFilesystemRoot(path.trim() || null)}
               />
@@ -3307,11 +3320,12 @@ export default function App() {
             <section className="control-panel-section-stack control-panel-section-git" aria-label="Git status">
               {renderControlPanelProjectScope()}
               <GitStatusPanel
+                sessionId={controlPanelSessionId}
                 workdir={controlPanelGitWorkdir}
                 showPathControls={false}
                 onStatusChange={(status) => setControlPanelGitStatusCount(status?.files.length ?? 0)}
                 onOpenDiff={(diff, options) =>
-                  handleOpenGitStatusDiffPreviewTab(paneId, diff, activeSession?.id ?? null, options)
+                  handleOpenGitStatusDiffPreviewTab(paneId, diff, controlPanelSessionId, options)
                 }
                 onOpenWorkdir={(path) => setControlPanelGitWorkdir(path.trim() || null)}
               />
@@ -5621,6 +5635,10 @@ function SessionPaneView({
   const activeFilesystemTab = activeTab?.kind === "filesystem" ? activeTab : null;
   const activeGitStatusTab = activeTab?.kind === "gitStatus" ? activeTab : null;
   const activeDiffPreviewTab = activeTab?.kind === "diffPreview" ? activeTab : null;
+  const activeSourceOriginSessionId = activeSourceTab?.originSessionId ?? null;
+  const activeFilesystemOriginSessionId = activeFilesystemTab?.originSessionId ?? null;
+  const activeGitStatusOriginSessionId = activeGitStatusTab?.originSessionId ?? null;
+  const activeDiffOriginSessionId = activeDiffPreviewTab?.originSessionId ?? null;
   const isSessionTabActive = activeTab?.kind === "session";
   const sessionTabs = useMemo(
     () =>
@@ -5833,8 +5851,12 @@ function SessionPaneView({
       });
   }
 
-  async function handleSourceFileSave(path: string, content: string) {
-    const response = await saveFile(path, content);
+  async function handleSourceFileSave(path: string, content: string, sessionId: string | null) {
+    if (!sessionId) {
+      throw new Error("This file view is no longer associated with a live session.");
+    }
+
+    const response = await saveFile(path, content, sessionId);
     setFileState({
       status: "ready",
       path: response.path,
@@ -6361,6 +6383,17 @@ function SessionPaneView({
     let cancelled = false;
 
     async function loadFile(path: string) {
+      if (!activeSourceOriginSessionId) {
+        setFileState({
+          status: "error",
+          path,
+          content: "",
+          error: "This file view is no longer associated with a live session.",
+          language: null,
+        });
+        return;
+      }
+
       setFileState({
         status: "loading",
         path,
@@ -6370,7 +6403,7 @@ function SessionPaneView({
       });
 
       try {
-        const response = await fetchFile(path);
+        const response = await fetchFile(path, activeSourceOriginSessionId);
         if (cancelled) {
           return;
         }
@@ -6412,7 +6445,7 @@ function SessionPaneView({
     return () => {
       cancelled = true;
     };
-  }, [pane.sourcePath, pane.viewMode]);
+  }, [activeSourceOriginSessionId, pane.sourcePath, pane.viewMode]);
 
   useEffect(() => {
     if (!showDropOverlay) {
@@ -6621,26 +6654,30 @@ function SessionPaneView({
             sourcePath={activeSourceTab.path}
             onDraftChange={setSourceDraft}
             onOpenPath={(path) => onPaneSourcePathChange(pane.id, path)}
-            onSaveFile={handleSourceFileSave}
+            onSaveFile={(path, content) =>
+              handleSourceFileSave(path, content, activeSourceOriginSessionId)
+            }
           />
         ) : activeFilesystemTab ? (
           <FileSystemPanel
             rootPath={activeFilesystemTab.rootPath}
+            sessionId={activeFilesystemOriginSessionId}
             onOpenPath={(path, options) =>
-              onOpenSourceTab(pane.id, path, activeSession?.id ?? null, options)
+              onOpenSourceTab(pane.id, path, activeFilesystemOriginSessionId, options)
             }
             onOpenRootPath={(path) =>
-              onOpenFilesystemTab(pane.id, path, activeSession?.id ?? null)
+              onOpenFilesystemTab(pane.id, path, activeFilesystemOriginSessionId)
             }
           />
         ) : activeGitStatusTab ? (
           <GitStatusPanel
+            sessionId={activeGitStatusOriginSessionId}
             workdir={activeGitStatusTab.workdir}
             onOpenDiff={(diff, options) =>
-              onOpenGitStatusDiffPreviewTab(pane.id, diff, activeSession?.id ?? null, options)
+              onOpenGitStatusDiffPreviewTab(pane.id, diff, activeGitStatusOriginSessionId, options)
             }
             onOpenWorkdir={(path) =>
-              onOpenGitStatusTab(pane.id, path, activeSession?.id ?? null)
+              onOpenGitStatusTab(pane.id, path, activeGitStatusOriginSessionId)
             }
           />
         ) : activeDiffPreviewTab ? (
@@ -6652,8 +6689,11 @@ function SessionPaneView({
             diffMessageId={activeDiffPreviewTab.diffMessageId}
             filePath={activeDiffPreviewTab.filePath}
             language={activeDiffPreviewTab.language ?? null}
-            onOpenPath={(path) => onOpenSourceTab(pane.id, path, activeSession?.id ?? null)}
-            onSaveFile={handleSourceFileSave}
+            sessionId={activeDiffOriginSessionId}
+            onOpenPath={(path) => onOpenSourceTab(pane.id, path, activeDiffOriginSessionId)}
+            onSaveFile={(path, content) =>
+              handleSourceFileSave(path, content, activeDiffOriginSessionId)
+            }
             summary={activeDiffPreviewTab.summary}
           />
         ) : (
@@ -6683,6 +6723,7 @@ function SessionPaneView({
                 onOpenPreview={() =>
                   onOpenDiffPreviewTab(pane.id, message, activeSession?.id ?? null)
                 }
+                workspaceRoot={activeSession?.workdir ?? null}
               />
             )}
             renderMessageCard={(message, preferImmediateHeavyRender, handleDecision) => (
@@ -6699,6 +6740,7 @@ function SessionPaneView({
                 searchHighlightTone={
                   activeSessionSearchMatch?.itemKey === `message:${message.id}` ? "active" : "match"
                 }
+                workspaceRoot={activeSession?.workdir ?? null}
               />
             )}
             renderPromptSettings={(panelPaneId, session, panelIsUpdating, handleSettingsChange) => {
@@ -7679,6 +7721,7 @@ export const MessageCard = memo(function MessageCard({
   onApprovalDecision,
   searchQuery = "",
   searchHighlightTone = "match",
+  workspaceRoot = null,
 }: {
   message: Message;
   onOpenDiffPreview?: (message: DiffMessage) => void;
@@ -7686,6 +7729,7 @@ export const MessageCard = memo(function MessageCard({
   onApprovalDecision: (messageId: string, decision: ApprovalDecision) => void;
   searchQuery?: string;
   searchHighlightTone?: SearchHighlightTone;
+  workspaceRoot?: string | null;
 }) {
   switch (message.type) {
     case "text": {
@@ -7779,6 +7823,7 @@ export const MessageCard = memo(function MessageCard({
           onOpenPreview={() => onOpenDiffPreview?.(message)}
           searchQuery={searchQuery}
           searchHighlightTone={searchHighlightTone}
+          workspaceRoot={workspaceRoot}
         />
       );
     case "markdown":
@@ -8395,14 +8440,27 @@ function DiffCard({
   onOpenPreview,
   searchQuery = "",
   searchHighlightTone = "match",
+  workspaceRoot = null,
 }: {
   message: DiffMessage;
   onOpenPreview: () => void;
   searchQuery?: string;
   searchHighlightTone?: SearchHighlightTone;
+  workspaceRoot?: string | null;
 }) {
   const [expanded, setExpanded] = useState(false);
   const [copied, setCopied] = useState(false);
+  const diffStats = useMemo(() => {
+    const changeSummary = buildDiffPreviewModel(message.diff, message.changeType).changeSummary;
+    return {
+      addedLineCount: changeSummary.changedLineCount + changeSummary.addedLineCount,
+      removedLineCount: changeSummary.changedLineCount + changeSummary.removedLineCount,
+    };
+  }, [message.changeType, message.diff]);
+  const displayPath = useMemo(
+    () => relativizePathToWorkspace(message.filePath, workspaceRoot),
+    [message.filePath, workspaceRoot],
+  );
   const canExpandDiff = message.diff.split("\n").length > 14 || message.diff.length > 900;
   const isExpanded = !canExpandDiff || expanded || searchQuery.trim().length > 0;
 
@@ -8435,10 +8493,25 @@ function DiffCard({
       <div className="card-label">{message.changeType === "create" ? "New file" : "File edit"}</div>
       <div className="command-panel diff-panel">
         <div className="command-row diff-file-row">
-          <div className="command-row-label">FILE</div>
+          <div className="command-row-label diff-file-label">
+            <span>FILE</span>
+            {diffStats.addedLineCount > 0 || diffStats.removedLineCount > 0 ? (
+              <div className="diff-file-stats">
+                {diffStats.addedLineCount > 0 ? (
+                  <span className="chip diff-preview-stat diff-preview-stat-added">+{diffStats.addedLineCount}</span>
+                ) : null}
+                {diffStats.removedLineCount > 0 ? (
+                  <span className="chip diff-preview-stat diff-preview-stat-removed">-{diffStats.removedLineCount}</span>
+                ) : null}
+              </div>
+            ) : null}
+          </div>
           <div className="command-row-body">
-            <div className="diff-file-path">
-              {renderHighlightedText(message.filePath, searchQuery, searchHighlightTone)}
+            <div
+              className="diff-file-path"
+              title={displayPath !== message.filePath ? message.filePath : undefined}
+            >
+              {renderHighlightedText(displayPath, searchQuery, searchHighlightTone)}
             </div>
             <p className="diff-file-summary">
               {renderHighlightedText(message.summary, searchQuery, searchHighlightTone)}
@@ -9072,6 +9145,40 @@ function messageChangeMarker(message: Message) {
 
 function pendingPromptChangeMarker(prompt: PendingPrompt) {
   return `${prompt.text.length}:${prompt.attachments?.length ?? 0}`;
+}
+
+function relativizePathToWorkspace(path: string, workspaceRoot: string | null) {
+  const trimmedPath = path.trim();
+  const trimmedRoot = workspaceRoot?.trim();
+  if (!trimmedPath || !trimmedRoot) {
+    return trimmedPath;
+  }
+
+  const normalizedPath = normalizeDisplayPath(trimmedPath);
+  const normalizedRoot = normalizeDisplayPath(trimmedRoot).replace(/\/+$/, "");
+  const exactPrefix = `${normalizedRoot}/`;
+  if (normalizedPath.startsWith(exactPrefix)) {
+    return normalizedPath.slice(exactPrefix.length);
+  }
+
+  if (looksLikeWindowsPath(trimmedPath) || looksLikeWindowsPath(trimmedRoot)) {
+    const lowerPath = normalizedPath.toLowerCase();
+    const lowerRoot = normalizedRoot.toLowerCase();
+    const lowerPrefix = `${lowerRoot}/`;
+    if (lowerPath.startsWith(lowerPrefix)) {
+      return normalizedPath.slice(lowerPrefix.length);
+    }
+  }
+
+  return trimmedPath;
+}
+
+function normalizeDisplayPath(path: string) {
+  return path.trim().replace(/[\\/]+/g, "/");
+}
+
+function looksLikeWindowsPath(path: string) {
+  return /^[A-Za-z]:[\\/]/.test(path) || path.includes("\\");
 }
 
 function collectCandidateSourcePaths(session: Session) {

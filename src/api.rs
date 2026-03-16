@@ -104,8 +104,13 @@ async fn get_state(State(state): State<AppState>) -> Json<StateResponse> {
     Json(state.snapshot())
 }
 
-async fn read_file(Query(query): Query<FileQuery>) -> Result<Json<FileResponse>, ApiError> {
-    let resolved_path = resolve_requested_path(&query.path)?;
+async fn read_file(
+    State(state): State<AppState>,
+    Query(query): Query<FileQuery>,
+) -> Result<Json<FileResponse>, ApiError> {
+    let session_id = required_session_id(query.session_id.as_deref())?;
+    let resolved_path =
+        resolve_session_scoped_requested_path(&state, session_id, &query.path, ScopedPathMode::ExistingFile)?;
     let content = fs::read_to_string(&resolved_path).map_err(|err| match err.kind() {
         io::ErrorKind::NotFound => {
             ApiError::bad_request(format!("file not found: {}", resolved_path.display()))
@@ -127,8 +132,17 @@ async fn read_file(Query(query): Query<FileQuery>) -> Result<Json<FileResponse>,
     }))
 }
 
-async fn write_file(Json(request): Json<WriteFileRequest>) -> Result<Json<FileResponse>, ApiError> {
-    let resolved_path = resolve_requested_path(&request.path)?;
+async fn write_file(
+    State(state): State<AppState>,
+    Json(request): Json<WriteFileRequest>,
+) -> Result<Json<FileResponse>, ApiError> {
+    let session_id = required_session_id(request.session_id.as_deref())?;
+    let resolved_path = resolve_session_scoped_requested_path(
+        &state,
+        session_id,
+        &request.path,
+        ScopedPathMode::AllowMissingLeaf,
+    )?;
     if let Some(parent) = resolved_path.parent() {
         fs::create_dir_all(parent).map_err(|err| {
             ApiError::internal(format!(
@@ -153,9 +167,12 @@ async fn write_file(Json(request): Json<WriteFileRequest>) -> Result<Json<FileRe
 }
 
 async fn read_directory(
+    State(state): State<AppState>,
     Query(query): Query<FileQuery>,
 ) -> Result<Json<DirectoryResponse>, ApiError> {
-    let resolved_path = resolve_requested_path(&query.path)?;
+    let session_id = required_session_id(query.session_id.as_deref())?;
+    let resolved_path =
+        resolve_session_scoped_requested_path(&state, session_id, &query.path, ScopedPathMode::ExistingPath)?;
     let metadata = fs::metadata(&resolved_path).map_err(|err| match err.kind() {
         io::ErrorKind::NotFound => {
             ApiError::bad_request(format!("path not found: {}", resolved_path.display()))
@@ -313,23 +330,40 @@ fn read_claude_agent_commands(workdir: &FsPath) -> Result<Vec<AgentCommand>, Api
 }
 
 async fn read_git_status(
+    State(state): State<AppState>,
     Query(query): Query<FileQuery>,
 ) -> Result<Json<GitStatusResponse>, ApiError> {
-    let workdir = resolve_requested_path(&query.path)?;
+    let session_id = required_session_id(query.session_id.as_deref())?;
+    let workdir =
+        resolve_session_scoped_requested_path(&state, session_id, &query.path, ScopedPathMode::ExistingPath)?;
     Ok(Json(load_git_status_for_path(&workdir)?))
 }
 
 async fn read_git_diff(
+    State(state): State<AppState>,
     Json(request): Json<GitDiffRequest>,
 ) -> Result<Json<GitDiffResponse>, ApiError> {
-    let workdir = resolve_requested_path(&request.workdir)?;
+    let session_id = required_session_id(request.session_id.as_deref())?;
+    let workdir = resolve_session_scoped_requested_path(
+        &state,
+        session_id,
+        &request.workdir,
+        ScopedPathMode::ExistingPath,
+    )?;
     Ok(Json(load_git_diff_for_request(&workdir, &request)?))
 }
 
 async fn apply_git_file_action(
+    State(state): State<AppState>,
     Json(request): Json<GitFileActionRequest>,
 ) -> Result<Json<GitStatusResponse>, ApiError> {
-    let workdir = resolve_requested_path(&request.workdir)?;
+    let session_id = required_session_id(request.session_id.as_deref())?;
+    let workdir = resolve_session_scoped_requested_path(
+        &state,
+        session_id,
+        &request.workdir,
+        ScopedPathMode::ExistingPath,
+    )?;
     let workdir = normalize_git_workdir_path(&workdir)?;
     let Some(repo_root) = resolve_git_repo_root(&workdir)? else {
         return Err(ApiError::bad_request("no git repository found"));
@@ -375,9 +409,16 @@ async fn apply_git_file_action(
 }
 
 async fn commit_git_changes(
+    State(state): State<AppState>,
     Json(request): Json<GitCommitRequest>,
 ) -> Result<Json<GitCommitResponse>, ApiError> {
-    let workdir = resolve_requested_path(&request.workdir)?;
+    let session_id = required_session_id(request.session_id.as_deref())?;
+    let workdir = resolve_session_scoped_requested_path(
+        &state,
+        session_id,
+        &request.workdir,
+        ScopedPathMode::ExistingPath,
+    )?;
     let workdir = normalize_git_workdir_path(&workdir)?;
     let Some(repo_root) = resolve_git_repo_root(&workdir)? else {
         return Err(ApiError::bad_request("no git repository found"));
@@ -1477,14 +1518,18 @@ struct UpdateAppSettingsRequest {
 }
 
 #[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct FileQuery {
     path: String,
+    session_id: Option<String>,
 }
 
 #[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct WriteFileRequest {
     path: String,
     content: String,
+    session_id: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -1583,6 +1628,7 @@ struct GitDiffRequest {
     original_path: Option<String>,
     path: String,
     section_id: GitDiffSection,
+    session_id: Option<String>,
     #[serde(default)]
     status_code: Option<String>,
     workdir: String,
@@ -1622,6 +1668,7 @@ struct GitFileActionRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
     original_path: Option<String>,
     path: String,
+    session_id: Option<String>,
     #[serde(default)]
     status_code: Option<String>,
     workdir: String,
@@ -1631,6 +1678,7 @@ struct GitFileActionRequest {
 #[serde(rename_all = "camelCase")]
 struct GitCommitRequest {
     message: String,
+    session_id: Option<String>,
     workdir: String,
 }
 
@@ -1874,6 +1922,154 @@ fn resolve_requested_path(path: &str) -> Result<PathBuf, ApiError> {
     };
 
     Ok(resolved)
+}
+
+#[derive(Clone, Copy)]
+enum ScopedPathMode {
+    ExistingFile,
+    ExistingPath,
+    AllowMissingLeaf,
+}
+
+fn required_session_id(session_id: Option<&str>) -> Result<&str, ApiError> {
+    let Some(session_id) = session_id.map(str::trim).filter(|value| !value.is_empty()) else {
+        return Err(ApiError::bad_request("sessionId is required"));
+    };
+    Ok(session_id)
+}
+
+fn resolve_session_project_root_path(
+    state: &AppState,
+    session_id: &str,
+) -> Result<PathBuf, ApiError> {
+    let root_path = {
+        let inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(session_id)
+            .ok_or_else(|| ApiError::not_found("session not found"))?;
+        let record = &inner.sessions[index];
+        record
+            .session
+            .project_id
+            .as_deref()
+            .and_then(|project_id| inner.find_project(project_id))
+            .map(|project| project.root_path.clone())
+            .or_else(|| {
+                inner
+                    .find_project_for_workdir(&record.session.workdir)
+                    .map(|project| project.root_path.clone())
+            })
+            .unwrap_or_else(|| record.session.workdir.clone())
+    };
+
+    fs::canonicalize(&root_path).map_err(|err| match err.kind() {
+        io::ErrorKind::NotFound => {
+            ApiError::bad_request(format!("project root not found: {root_path}"))
+        }
+        _ => ApiError::internal(format!(
+            "failed to resolve project root {}: {err}",
+            root_path
+        )),
+    })
+}
+
+fn resolve_session_scoped_requested_path(
+    state: &AppState,
+    session_id: &str,
+    path: &str,
+    mode: ScopedPathMode,
+) -> Result<PathBuf, ApiError> {
+    let project_root = resolve_session_project_root_path(state, session_id)?;
+    let requested_path = resolve_requested_path(path)?;
+    let resolved_path = match mode {
+        ScopedPathMode::ExistingFile => canonicalize_existing_path(&requested_path, "file")?,
+        ScopedPathMode::ExistingPath => canonicalize_existing_path(&requested_path, "path")?,
+        ScopedPathMode::AllowMissingLeaf => canonicalize_path_with_existing_ancestor(&requested_path)?,
+    };
+
+    if resolved_path != project_root && !resolved_path.starts_with(&project_root) {
+        return Err(ApiError::bad_request(format!(
+            "path `{}` must stay inside project `{}`",
+            requested_path.display(),
+            project_root.display()
+        )));
+    }
+
+    Ok(normalize_user_facing_path(&resolved_path))
+}
+
+fn canonicalize_existing_path(path: &FsPath, label: &str) -> Result<PathBuf, ApiError> {
+    fs::canonicalize(path).map_err(|err| match err.kind() {
+        io::ErrorKind::NotFound => ApiError::bad_request(format!("{label} not found: {}", path.display())),
+        _ => ApiError::internal(format!("failed to resolve {label} {}: {err}", path.display())),
+    })
+}
+
+fn canonicalize_path_with_existing_ancestor(path: &FsPath) -> Result<PathBuf, ApiError> {
+    let absolute = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        std::env::current_dir()
+            .map_err(|err| ApiError::internal(format!("failed to resolve cwd: {err}")))?
+            .join(path)
+    };
+
+    let mut suffix = Vec::new();
+    let mut probe = absolute.as_path();
+
+    loop {
+        match fs::metadata(probe) {
+            Ok(_) => {
+                let mut canonical = fs::canonicalize(probe).map_err(|err| {
+                    ApiError::internal(format!(
+                        "failed to resolve path {}: {err}",
+                        probe.display()
+                    ))
+                })?;
+                for component in suffix.iter().rev() {
+                    canonical.push(component);
+                }
+                return Ok(canonical);
+            }
+            Err(err) if err.kind() == io::ErrorKind::NotFound => {
+                let Some(name) = probe.file_name().map(|value| value.to_os_string()) else {
+                    return Err(ApiError::bad_request(format!(
+                        "path not found: {}",
+                        absolute.display()
+                    )));
+                };
+                suffix.push(name);
+                let Some(parent) = probe.parent() else {
+                    return Err(ApiError::bad_request(format!(
+                        "path not found: {}",
+                        absolute.display()
+                    )));
+                };
+                probe = parent;
+            }
+            Err(err) => {
+                return Err(ApiError::internal(format!(
+                    "failed to resolve path {}: {err}",
+                    probe.display()
+                )));
+            }
+        }
+    }
+}
+
+fn normalize_user_facing_path(path: &FsPath) -> PathBuf {
+    #[cfg(windows)]
+    {
+        let raw = path.to_string_lossy();
+        if let Some(rest) = raw.strip_prefix(r"\\?\UNC\") {
+            return PathBuf::from(format!(r"\\{rest}"));
+        }
+        if let Some(rest) = raw.strip_prefix(r"\\?\") {
+            return PathBuf::from(rest);
+        }
+    }
+
+    path.to_path_buf()
 }
 
 fn resolve_directory_path(path: &str, label: &str) -> Result<String, ApiError> {

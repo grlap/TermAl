@@ -67,6 +67,7 @@ export function DiffPanel({
   diffMessageId,
   filePath,
   language,
+  sessionId,
   onOpenPath,
   onSaveFile,
   summary,
@@ -78,6 +79,7 @@ export function DiffPanel({
   diffMessageId: string;
   filePath: string | null;
   language?: string | null;
+  sessionId: string | null;
   onOpenPath: (path: string) => void;
   onSaveFile: (path: string, content: string) => Promise<void>;
   summary: string;
@@ -117,6 +119,18 @@ export function DiffPanel({
       return;
     }
 
+    if (!sessionId) {
+      setVisualBaseContent(null);
+      setLatestFile({
+        status: "error",
+        path: filePath,
+        content: "",
+        error: "This diff preview is no longer associated with a live session.",
+        language: language ?? null,
+      });
+      return;
+    }
+
     setVisualBaseContent(null);
     setLatestFile({
       status: "loading",
@@ -126,7 +140,7 @@ export function DiffPanel({
       language: language ?? null,
     });
 
-    void fetchFile(filePath)
+    void fetchFile(filePath, sessionId)
       .then((response) => {
         if (cancelled) {
           return;
@@ -152,7 +166,7 @@ export function DiffPanel({
     return () => {
       cancelled = true;
     };
-  }, [filePath, language]);
+  }, [filePath, language, sessionId]);
 
   useEffect(() => {
     if (latestFile.status === "ready") {

@@ -1718,6 +1718,129 @@ fn rejects_empty_project_roots() {
 }
 
 #[test]
+fn resolves_requested_paths_inside_the_session_project_root() {
+    let state = test_app_state();
+    let root = std::env::temp_dir().join(format!("termal-project-scope-{}", Uuid::new_v4()));
+    let inside_dir = root.join("src");
+    let inside_file = inside_dir.join("main.rs");
+    let outside_root =
+        std::env::temp_dir().join(format!("termal-project-scope-outside-{}", Uuid::new_v4()));
+    let outside_file = outside_root.join("main.rs");
+
+    fs::create_dir_all(&inside_dir).unwrap();
+    fs::create_dir_all(&outside_root).unwrap();
+    fs::write(&inside_file, "fn main() {}\n").unwrap();
+    fs::write(&outside_file, "fn main() {}\n").unwrap();
+
+    let project = state
+        .create_project(CreateProjectRequest {
+            name: Some("Scoped Project".to_owned()),
+            root_path: root.to_string_lossy().into_owned(),
+        })
+        .unwrap();
+    let created = state
+        .create_session(CreateSessionRequest {
+            agent: Some(Agent::Codex),
+            name: Some("Scoped Session".to_owned()),
+            workdir: Some(inside_dir.to_string_lossy().into_owned()),
+            project_id: Some(project.project_id),
+            model: None,
+            approval_policy: None,
+            reasoning_effort: None,
+            sandbox_mode: None,
+            cursor_mode: None,
+            claude_approval_mode: None,
+            claude_effort: None,
+            gemini_approval_mode: None,
+        })
+        .unwrap();
+
+    let resolved = resolve_session_scoped_requested_path(
+        &state,
+        &created.session_id,
+        &inside_file.to_string_lossy(),
+        ScopedPathMode::ExistingFile,
+    )
+    .unwrap();
+    assert_eq!(
+        resolved,
+        normalize_user_facing_path(&fs::canonicalize(&inside_file).unwrap())
+    );
+
+    let error = resolve_session_scoped_requested_path(
+        &state,
+        &created.session_id,
+        &outside_file.to_string_lossy(),
+        ScopedPathMode::ExistingFile,
+    )
+    .unwrap_err();
+    assert_eq!(error.status, StatusCode::BAD_REQUEST);
+    assert!(error.message.contains("must stay inside project"));
+
+    fs::remove_dir_all(root).unwrap();
+    fs::remove_dir_all(outside_root).unwrap();
+}
+
+#[test]
+fn allows_new_file_paths_inside_the_session_project_root() {
+    let state = test_app_state();
+    let root = std::env::temp_dir().join(format!("termal-project-write-scope-{}", Uuid::new_v4()));
+    let inside_dir = root.join("src");
+    let new_file = root.join("generated").join("output.rs");
+    let outside_root =
+        std::env::temp_dir().join(format!("termal-project-write-outside-{}", Uuid::new_v4()));
+    let outside_file = outside_root.join("escape.rs");
+
+    fs::create_dir_all(&inside_dir).unwrap();
+    fs::create_dir_all(&outside_root).unwrap();
+
+    let project = state
+        .create_project(CreateProjectRequest {
+            name: Some("Writable Project".to_owned()),
+            root_path: root.to_string_lossy().into_owned(),
+        })
+        .unwrap();
+    let created = state
+        .create_session(CreateSessionRequest {
+            agent: Some(Agent::Codex),
+            name: Some("Writable Session".to_owned()),
+            workdir: Some(inside_dir.to_string_lossy().into_owned()),
+            project_id: Some(project.project_id),
+            model: None,
+            approval_policy: None,
+            reasoning_effort: None,
+            sandbox_mode: None,
+            cursor_mode: None,
+            claude_approval_mode: None,
+            claude_effort: None,
+            gemini_approval_mode: None,
+        })
+        .unwrap();
+
+    let resolved = resolve_session_scoped_requested_path(
+        &state,
+        &created.session_id,
+        &new_file.to_string_lossy(),
+        ScopedPathMode::AllowMissingLeaf,
+    )
+    .unwrap();
+    assert_eq!(resolved, new_file);
+
+    let error = resolve_session_scoped_requested_path(
+        &state,
+        &created.session_id,
+        &outside_file.to_string_lossy(),
+        ScopedPathMode::AllowMissingLeaf,
+    )
+    .unwrap_err();
+    assert_eq!(error.status, StatusCode::BAD_REQUEST);
+    assert!(error.message.contains("must stay inside project"));
+
+    fs::remove_dir_all(root).unwrap();
+    fs::remove_dir_all(outside_root).unwrap();
+}
+
+#[test]
 fn persisted_state_without_projects_migrates_cleanly() {
     let path = std::env::temp_dir().join(format!("termal-project-migrate-{}.json", Uuid::new_v4()));
     let mut inner = StateInner::new();

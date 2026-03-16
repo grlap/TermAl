@@ -264,29 +264,36 @@ export function stopSession(sessionId: string) {
   });
 }
 
-export function fetchFile(path: string) {
-  return request<FileResponse>(`/api/file?path=${encodeURIComponent(path)}`);
+export function fetchFile(path: string, sessionId: string) {
+  return request<FileResponse>(
+    `/api/file?path=${encodeURIComponent(path)}&sessionId=${encodeURIComponent(sessionId)}`,
+  );
 }
 
-export function saveFile(path: string, content: string) {
+export function saveFile(path: string, content: string, sessionId: string) {
   return request<FileResponse>("/api/file", {
     method: "PUT",
-    body: JSON.stringify({ path, content }),
+    body: JSON.stringify({ path, content, sessionId }),
   });
 }
 
-export function fetchDirectory(path: string) {
-  return request<DirectoryResponse>(`/api/fs?path=${encodeURIComponent(path)}`);
+export function fetchDirectory(path: string, sessionId: string) {
+  return request<DirectoryResponse>(
+    `/api/fs?path=${encodeURIComponent(path)}&sessionId=${encodeURIComponent(sessionId)}`,
+  );
 }
 
-export function fetchGitStatus(path: string) {
-  return request<GitStatusResponse>(`/api/git/status?path=${encodeURIComponent(path)}`);
+export function fetchGitStatus(path: string, sessionId: string) {
+  return request<GitStatusResponse>(
+    `/api/git/status?path=${encodeURIComponent(path)}&sessionId=${encodeURIComponent(sessionId)}`,
+  );
 }
 
 export function fetchGitDiff(payload: {
   originalPath?: string | null;
   path: string;
   sectionId: GitDiffSection;
+  sessionId: string;
   statusCode?: string | null;
   workdir: string;
 }) {
@@ -300,6 +307,7 @@ export function applyGitFileAction(payload: {
   action: GitFileAction;
   originalPath?: string | null;
   path: string;
+  sessionId: string;
   statusCode?: string | null;
   workdir: string;
 }) {
@@ -311,6 +319,7 @@ export function applyGitFileAction(payload: {
 
 export function commitGitChanges(payload: {
   message: string;
+  sessionId: string;
   workdir: string;
 }) {
   return request<GitCommitResponse>("/api/git/commit", {

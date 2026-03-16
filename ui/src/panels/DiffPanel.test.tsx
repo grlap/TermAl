@@ -140,6 +140,7 @@ describe("DiffPanel", () => {
           diffMessageId="diff-1"
           filePath="/repo/src/example.ts"
           language="typescript"
+          sessionId="session-1"
           onOpenPath={() => {}}
           onSaveFile={async () => {}}
           summary="Updated example file"
@@ -159,7 +160,7 @@ describe("DiffPanel", () => {
     fireEvent.click(screen.getByRole("button", { name: "Edit mode" }));
 
     await waitFor(() => {
-      expect(fetchFileMock).toHaveBeenCalledWith("/repo/src/example.ts");
+      expect(fetchFileMock).toHaveBeenCalledWith("/repo/src/example.ts", "session-1");
     });
 
     expect(await screen.findByTestId("monaco-code-editor")).toHaveValue("const latest = true;\n");
@@ -182,6 +183,7 @@ describe("DiffPanel", () => {
           diffMessageId="diff-edit"
           filePath="/repo/src/example.ts"
           language="typescript"
+          sessionId="session-1"
           onOpenPath={() => {}}
           onSaveFile={async () => {}}
           summary="Updated example file"
@@ -214,6 +216,7 @@ describe("DiffPanel", () => {
           diffMessageId="diff-visual-edit"
           filePath="/repo/src/example.ts"
           language="typescript"
+          sessionId="session-1"
           onOpenPath={() => {}}
           onSaveFile={onSaveFile}
           summary="Updated example file"
@@ -259,6 +262,7 @@ describe("DiffPanel", () => {
           diffMessageId="diff-2"
           filePath="/repo/src/example.ts"
           language="typescript"
+          sessionId="session-1"
           onOpenPath={() => {}}
           onSaveFile={async () => {}}
           summary="Updated example file"
@@ -291,6 +295,7 @@ describe("DiffPanel", () => {
           diffMessageId="diff-3"
           filePath="/repo/src/example.ts"
           language="typescript"
+          sessionId="session-1"
           onOpenPath={() => {}}
           onSaveFile={async () => {}}
           summary="Refined greeting"

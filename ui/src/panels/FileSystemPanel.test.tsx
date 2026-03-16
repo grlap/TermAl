@@ -55,6 +55,7 @@ describe("FileSystemPanel", () => {
     const { container } = render(
       <FileSystemPanel
         rootPath="/repo"
+        sessionId="session-1"
         showPathControls={false}
         onOpenPath={onOpenPath}
         onOpenRootPath={() => {}}
@@ -62,10 +63,10 @@ describe("FileSystemPanel", () => {
     );
 
     await waitFor(() => {
-      expect(fetchDirectoryMock).toHaveBeenCalledWith("/repo");
+      expect(fetchDirectoryMock).toHaveBeenCalledWith("/repo", "session-1");
     });
     await waitFor(() => {
-      expect(fetchGitStatusMock).toHaveBeenCalledWith("/repo");
+      expect(fetchGitStatusMock).toHaveBeenCalledWith("/repo", "session-1");
     });
 
     const readmeButton = await screen.findByRole("button", { name: /^README\.md/i });
@@ -79,7 +80,7 @@ describe("FileSystemPanel", () => {
     fireEvent.click(screen.getByRole("button", { name: "src" }));
 
     await waitFor(() => {
-      expect(fetchDirectoryMock).toHaveBeenCalledWith("/repo/src");
+      expect(fetchDirectoryMock).toHaveBeenCalledWith("/repo/src", "session-1");
     });
 
     const mainFileButton = await screen.findByRole("button", { name: /^main\.rs/i });
@@ -101,6 +102,7 @@ describe("FileSystemPanel", () => {
     render(
       <FileSystemPanel
         rootPath="/repo"
+        sessionId="session-1"
         showPathControls={false}
         onOpenPath={onOpenPath}
         onOpenRootPath={() => {}}
@@ -120,6 +122,7 @@ describe("FileSystemPanel", () => {
     render(
       <FileSystemPanel
         rootPath={null}
+        sessionId="session-1"
         onOpenPath={() => {}}
         onOpenRootPath={onOpenRootPath}
       />,

@@ -49,11 +49,13 @@ export function FileSystemPanel({
   onOpenPath,
   onOpenRootPath,
   rootPath,
+  sessionId,
   showPathControls = true,
 }: {
   onOpenPath: (path: string, options?: FileSystemOpenOptions) => void;
   onOpenRootPath: (path: string) => void;
   rootPath: string | null;
+  sessionId: string | null;
   showPathControls?: boolean;
 }) {
   const [rootDraft, setRootDraft] = useState(rootPath ?? "");
@@ -81,6 +83,14 @@ export function FileSystemPanel({
       return;
     }
 
+    if (!sessionId) {
+      setDirectoriesByPath({});
+      setErrorsByPath({
+        [normalizedRootPath]: "This file browser is no longer associated with a live session.",
+      });
+      return;
+    }
+
     setExpandedPaths((current) =>
       current[normalizedRootPath]
         ? current
@@ -90,7 +100,7 @@ export function FileSystemPanel({
           },
     );
     void loadDirectory(normalizedRootPath, true);
-  }, [normalizedRootPath]);
+  }, [normalizedRootPath, sessionId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -100,7 +110,12 @@ export function FileSystemPanel({
       return;
     }
 
-    void fetchGitStatus(normalizedRootPath)
+    if (!sessionId) {
+      setGitDecorations(createEmptyGitDecorations());
+      return;
+    }
+
+    void fetchGitStatus(normalizedRootPath, sessionId)
       .then((status) => {
         if (cancelled) {
           return;
@@ -119,10 +134,18 @@ export function FileSystemPanel({
     return () => {
       cancelled = true;
     };
-  }, [normalizedRootPath]);
+  }, [normalizedRootPath, sessionId]);
 
   async function loadDirectory(path: string, force = false) {
     if (!force && (directoriesByPath[path] || loadingPaths[path])) {
+      return;
+    }
+
+    if (!sessionId) {
+      setErrorsByPath((current) => ({
+        ...current,
+        [path]: "This file browser is no longer associated with a live session.",
+      }));
       return;
     }
 
@@ -141,7 +164,7 @@ export function FileSystemPanel({
     });
 
     try {
-      const response = await fetchDirectory(path);
+      const response = await fetchDirectory(path, sessionId);
       setDirectoriesByPath((current) => ({
         ...current,
         [path]: response,

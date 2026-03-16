@@ -27,6 +27,7 @@ const applyGitFileActionMock = vi.mocked(applyGitFileAction);
 const commitGitChangesMock = vi.mocked(commitGitChanges);
 const fetchGitDiffMock = vi.mocked(fetchGitDiff);
 const fetchGitStatusMock = vi.mocked(fetchGitStatus);
+const SESSION_ID = "session-1";
 
 describe("GitStatusPanel", () => {
   beforeEach(() => {
@@ -59,10 +60,17 @@ describe("GitStatusPanel", () => {
 
     const onOpenDiff = vi.fn();
 
-    render(<GitStatusPanel workdir="/repo" onOpenDiff={onOpenDiff} onOpenWorkdir={() => {}} />);
+    render(
+      <GitStatusPanel
+        sessionId={SESSION_ID}
+        workdir="/repo"
+        onOpenDiff={onOpenDiff}
+        onOpenWorkdir={() => {}}
+      />,
+    );
 
     await waitFor(() => {
-      expect(fetchGitStatusMock).toHaveBeenCalledWith("/repo");
+      expect(fetchGitStatusMock).toHaveBeenCalledWith("/repo", SESSION_ID);
     });
 
     expect(await screen.findByRole("button", { name: /^Staged\b/i })).toBeInTheDocument();
@@ -77,6 +85,7 @@ describe("GitStatusPanel", () => {
         originalPath: undefined,
         path: "ui/src/panels/ControlPanelSurface.tsx",
         sectionId: "staged",
+        sessionId: SESSION_ID,
         statusCode: "A",
         workdir: "/repo",
       });
@@ -104,7 +113,14 @@ describe("GitStatusPanel", () => {
 
     const onOpenDiff = vi.fn();
 
-    render(<GitStatusPanel workdir="/repo" onOpenDiff={onOpenDiff} onOpenWorkdir={() => {}} />);
+    render(
+      <GitStatusPanel
+        sessionId={SESSION_ID}
+        workdir="/repo"
+        onOpenDiff={onOpenDiff}
+        onOpenWorkdir={() => {}}
+      />,
+    );
 
     const fileButton = await screen.findByRole("button", { name: /^ControlPanelSurface\.tsx$/i });
 
@@ -118,7 +134,14 @@ describe("GitStatusPanel", () => {
   it("loads a drafted repo path from the toolbar", () => {
     const onOpenWorkdir = vi.fn();
 
-    render(<GitStatusPanel workdir={null} onOpenDiff={() => {}} onOpenWorkdir={onOpenWorkdir} />);
+    render(
+      <GitStatusPanel
+        sessionId={SESSION_ID}
+        workdir={null}
+        onOpenDiff={() => {}}
+        onOpenWorkdir={onOpenWorkdir}
+      />,
+    );
 
     fireEvent.change(screen.getByPlaceholderText(/folder inside it/i), {
       target: { value: "/repo/subdir" },
@@ -140,7 +163,14 @@ describe("GitStatusPanel", () => {
         ]),
       );
 
-    render(<GitStatusPanel workdir="/repo" onOpenDiff={() => {}} onOpenWorkdir={() => {}} />);
+    render(
+      <GitStatusPanel
+        sessionId={SESSION_ID}
+        workdir="/repo"
+        onOpenDiff={() => {}}
+        onOpenWorkdir={() => {}}
+      />,
+    );
 
     await screen.findByText("Working tree clean.");
 
@@ -165,7 +195,14 @@ describe("GitStatusPanel", () => {
       )
       .mockImplementationOnce(() => refreshResponse.promise);
 
-    render(<GitStatusPanel workdir="/repo" onOpenDiff={() => {}} onOpenWorkdir={() => {}} />);
+    render(
+      <GitStatusPanel
+        sessionId={SESSION_ID}
+        workdir="/repo"
+        onOpenDiff={() => {}}
+        onOpenWorkdir={() => {}}
+      />,
+    );
 
     await screen.findByText("scratch.txt");
 
@@ -191,6 +228,7 @@ describe("GitStatusPanel", () => {
 
     render(
       <GitStatusPanel
+        sessionId={SESSION_ID}
         workdir="/repo"
         showPathControls={false}
         onOpenDiff={() => {}}
@@ -222,6 +260,7 @@ describe("GitStatusPanel", () => {
 
     render(
       <GitStatusPanel
+        sessionId={SESSION_ID}
         workdir="/repo"
         showPathControls={false}
         onOpenDiff={() => {}}
@@ -253,7 +292,14 @@ describe("GitStatusPanel", () => {
       summary: "Created commit: Tighten git footer",
     });
 
-    render(<GitStatusPanel workdir="/repo" onOpenDiff={() => {}} onOpenWorkdir={() => {}} />);
+    render(
+      <GitStatusPanel
+        sessionId={SESSION_ID}
+        workdir="/repo"
+        onOpenDiff={() => {}}
+        onOpenWorkdir={() => {}}
+      />,
+    );
 
     await screen.findByText("main.rs");
 
@@ -265,12 +311,30 @@ describe("GitStatusPanel", () => {
     await waitFor(() => {
       expect(commitGitChangesMock).toHaveBeenCalledWith({
         message: "Tighten git footer",
+        sessionId: SESSION_ID,
         workdir: "/repo",
       });
     });
 
     expect(await screen.findByText("Created commit: Tighten git footer")).toBeInTheDocument();
     expect(screen.getByText("Working tree clean.")).toBeInTheDocument();
+  });
+
+  it("shows a waiting indicator instead of a detached-session error in project-scoped mode", () => {
+    render(
+      <GitStatusPanel
+        sessionId={null}
+        workdir="/repo"
+        showPathControls={false}
+        onOpenDiff={() => {}}
+        onOpenWorkdir={() => {}}
+      />,
+    );
+
+    expect(screen.getByText("Waiting for a live session")).toBeInTheDocument();
+    expect(screen.getByText(/Select or open a session in this project/i)).toBeInTheDocument();
+    expect(screen.queryByText(/no longer associated with a live session/i)).not.toBeInTheDocument();
+    expect(fetchGitStatusMock).not.toHaveBeenCalled();
   });
 
   it("reports git status updates for badge counts", async () => {
@@ -292,6 +356,7 @@ describe("GitStatusPanel", () => {
 
     render(
       <GitStatusPanel
+        sessionId={SESSION_ID}
         workdir="/repo"
         onStatusChange={onStatusChange}
         onOpenDiff={() => {}}
@@ -324,6 +389,7 @@ describe("GitStatusPanel", () => {
 
     const { rerender } = render(
       <GitStatusPanel
+        sessionId={SESSION_ID}
         workdir="/repo"
         onStatusChange={() => {}}
         onOpenDiff={() => {}}
@@ -338,6 +404,7 @@ describe("GitStatusPanel", () => {
 
     rerender(
       <GitStatusPanel
+        sessionId={SESSION_ID}
         workdir="/repo"
         onStatusChange={() => {}}
         onOpenDiff={() => {}}
@@ -367,7 +434,14 @@ describe("GitStatusPanel", () => {
       ]),
     );
 
-    render(<GitStatusPanel workdir="/repo" onOpenDiff={() => {}} onOpenWorkdir={() => {}} />);
+    render(
+      <GitStatusPanel
+        sessionId={SESSION_ID}
+        workdir="/repo"
+        onOpenDiff={() => {}}
+        onOpenWorkdir={() => {}}
+      />,
+    );
 
     await screen.findByText("scratch.txt");
 
@@ -378,6 +452,7 @@ describe("GitStatusPanel", () => {
         action: "stage",
         originalPath: undefined,
         path: "scratch.txt",
+        sessionId: SESSION_ID,
         statusCode: "?",
         workdir: "/repo",
       });
@@ -414,7 +489,14 @@ describe("GitStatusPanel", () => {
       ]),
     );
 
-    render(<GitStatusPanel workdir="/repo" onOpenDiff={() => {}} onOpenWorkdir={() => {}} />);
+    render(
+      <GitStatusPanel
+        sessionId={SESSION_ID}
+        workdir="/repo"
+        onOpenDiff={() => {}}
+        onOpenWorkdir={() => {}}
+      />,
+    );
 
     fireEvent.click(await screen.findByRole("button", { name: /Stage ui/i }));
 
@@ -429,6 +511,7 @@ describe("GitStatusPanel", () => {
           action: "stage",
           originalPath: undefined,
           path: "ui/src/App.tsx",
+          sessionId: SESSION_ID,
           statusCode: "M",
           workdir: "/repo",
         },
@@ -436,6 +519,7 @@ describe("GitStatusPanel", () => {
           action: "stage",
           originalPath: "legacy/Widget.tsx",
           path: "ui/src/Widget.tsx",
+          sessionId: SESSION_ID,
           statusCode: "R",
           workdir: "/repo",
         },
@@ -471,7 +555,14 @@ describe("GitStatusPanel", () => {
       ]),
     );
 
-    render(<GitStatusPanel workdir="/repo" onOpenDiff={() => {}} onOpenWorkdir={() => {}} />);
+    render(
+      <GitStatusPanel
+        sessionId={SESSION_ID}
+        workdir="/repo"
+        onOpenDiff={() => {}}
+        onOpenWorkdir={() => {}}
+      />,
+    );
 
     fireEvent.click(await screen.findByRole("button", { name: "Stage all files" }));
 
@@ -506,7 +597,14 @@ describe("GitStatusPanel", () => {
       ]),
     );
 
-    render(<GitStatusPanel workdir="/repo" onOpenDiff={() => {}} onOpenWorkdir={() => {}} />);
+    render(
+      <GitStatusPanel
+        sessionId={SESSION_ID}
+        workdir="/repo"
+        onOpenDiff={() => {}}
+        onOpenWorkdir={() => {}}
+      />,
+    );
 
     fireEvent.click(await screen.findByRole("button", { name: "Unstage all files" }));
 
@@ -543,7 +641,14 @@ describe("GitStatusPanel", () => {
       ]),
     );
 
-    render(<GitStatusPanel workdir="/repo" onOpenDiff={() => {}} onOpenWorkdir={() => {}} />);
+    render(
+      <GitStatusPanel
+        sessionId={SESSION_ID}
+        workdir="/repo"
+        onOpenDiff={() => {}}
+        onOpenWorkdir={() => {}}
+      />,
+    );
 
     fireEvent.click(await screen.findByRole("button", { name: /Move ui to unstaged/i }));
 
@@ -558,6 +663,7 @@ describe("GitStatusPanel", () => {
           action: "unstage",
           originalPath: undefined,
           path: "ui/src/App.tsx",
+          sessionId: SESSION_ID,
           statusCode: "M",
           workdir: "/repo",
         },
@@ -565,6 +671,7 @@ describe("GitStatusPanel", () => {
           action: "unstage",
           originalPath: "legacy/Widget.tsx",
           path: "ui/src/Widget.tsx",
+          sessionId: SESSION_ID,
           statusCode: "R",
           workdir: "/repo",
         },
