@@ -1684,6 +1684,7 @@ const SessionComposer = memo(function SessionComposer({
   const onDraftCommitRef = useRef(onDraftCommit);
   const requestedSlashModelOptionsRef = useRef<string | null>(null);
   const requestedSlashAgentCommandsRef = useRef<string | null>(null);
+  const slashOptionsRef = useRef<HTMLDivElement | null>(null);
   const [localDraftsBySessionId, setLocalDraftsBySessionId] = useState<Record<string, string>>({});
   const [promptHistoryStateBySessionId, setPromptHistoryStateBySessionId] = useState<
     Record<string, PromptHistoryState | undefined>
@@ -1809,6 +1810,33 @@ const SessionComposer = memo(function SessionComposer({
     slashPalette.kind,
     slashPaletteSupportsModelRefresh,
   ]);
+
+  useEffect(() => {
+    if (slashPalette.kind === "none") {
+      return;
+    }
+
+    const container = slashOptionsRef.current;
+    if (!container) {
+      return;
+    }
+
+    const activeOption = container.querySelector<HTMLButtonElement>(
+      '.composer-slash-option.active[role="option"]',
+    );
+    if (!activeOption) {
+      return;
+    }
+
+    const containerRect = container.getBoundingClientRect();
+    const optionRect = activeOption.getBoundingClientRect();
+
+    if (optionRect.top < containerRect.top) {
+      container.scrollTop += optionRect.top - containerRect.top;
+    } else if (optionRect.bottom > containerRect.bottom) {
+      container.scrollTop += optionRect.bottom - containerRect.bottom;
+    }
+  }, [slashPalette.kind, slashPaletteResetKey, slashActiveIndex]);
 
   useEffect(() => {
     if (
@@ -2438,7 +2466,10 @@ const SessionComposer = memo(function SessionComposer({
             </div>
           ) : null}
           {slashPalette.items.length > 0 ? (
-            <div className={`composer-slash-options modality-${slashNavModality}`}>
+            <div
+              ref={slashOptionsRef}
+              className={`composer-slash-options modality-${slashNavModality}`}
+            >
               {slashPalette.items.map((item, index) => {
                 const isActive = activeSlashItem?.key === item.key && index === slashActiveIndex;
 
