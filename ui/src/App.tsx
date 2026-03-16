@@ -3111,13 +3111,13 @@ export default function App() {
     path: string | null,
     originSessionId: string | null,
     options?: {
-      openInNewPane?: boolean;
+      openInNewTab?: boolean;
     },
   ) {
     setWorkspace((current) =>
       applyControlPanelLayout(
         openSourceInWorkspaceState(current, path, paneId, originSessionId, {
-          openInNewPane: options?.openInNewPane,
+          openInNewTab: options?.openInNewTab,
         }),
       ),
     );
@@ -3152,7 +3152,7 @@ export default function App() {
     diffPreview: GitDiffResponse,
     originSessionId: string | null,
     options?: {
-      openInNewPane?: boolean;
+      openInNewTab?: boolean;
     },
   ) {
     setWorkspace((current) =>
@@ -3169,9 +3169,9 @@ export default function App() {
             summary: diffPreview.summary,
           },
           paneId,
-          options?.openInNewPane
+          options?.openInNewTab
             ? {
-                openInNewPane: true,
+                openInNewTab: true,
               }
             : {
                 reuseActiveViewerTab: true,
@@ -5170,7 +5170,7 @@ function WorkspaceNodeView({
     paneId: string,
     path: string | null,
     originSessionId: string | null,
-    options?: { openInNewPane?: boolean },
+    options?: { openInNewTab?: boolean },
   ) => void;
   onOpenDiffPreviewTab: (
     paneId: string,
@@ -5181,7 +5181,7 @@ function WorkspaceNodeView({
     paneId: string,
     diffPreview: GitDiffResponse,
     originSessionId: string | null,
-    options?: { openInNewPane?: boolean },
+    options?: { openInNewTab?: boolean },
   ) => void;
   onOpenFilesystemTab: (
     paneId: string,
@@ -5561,7 +5561,7 @@ function SessionPaneView({
     paneId: string,
     path: string | null,
     originSessionId: string | null,
-    options?: { openInNewPane?: boolean },
+    options?: { openInNewTab?: boolean },
   ) => void;
   onOpenDiffPreviewTab: (
     paneId: string,
@@ -5572,7 +5572,7 @@ function SessionPaneView({
     paneId: string,
     diffPreview: GitDiffResponse,
     originSessionId: string | null,
-    options?: { openInNewPane?: boolean },
+    options?: { openInNewTab?: boolean },
   ) => void;
   onOpenFilesystemTab: (
     paneId: string,

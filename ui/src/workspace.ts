@@ -316,7 +316,7 @@ export function openSourceInWorkspaceState(
   preferredPaneId: string | null,
   originSessionId: string | null,
   options?: {
-    openInNewPane?: boolean;
+    openInNewTab?: boolean;
   },
 ): WorkspaceState {
   const normalizedPath = normalizeWorkspacePath(path);
@@ -327,8 +327,8 @@ export function openSourceInWorkspaceState(
     "source",
   );
   const nextTab = createSourceTab(normalizedPath, originSessionId);
-  if (options?.openInNewPane) {
-    return openTabInNewPane(workspace, nextTab, preferredPaneId, originSessionId);
+  if (options?.openInNewTab) {
+    return openContextualTabInWorkspaceState(workspace, nextTab, null, preferredPaneId, originSessionId);
   }
 
   if (normalizedPath) {
@@ -483,13 +483,19 @@ export function openDiffPreviewInWorkspaceState(
   },
   preferredPaneId: string | null,
   options?: {
-    openInNewPane?: boolean;
+    openInNewTab?: boolean;
     reuseActiveViewerTab?: boolean;
   },
 ): WorkspaceState {
   const nextTab = createDiffPreviewTab(tab);
-  if (options?.openInNewPane) {
-    return openTabInNewPane(workspace, nextTab, preferredPaneId, tab.originSessionId);
+  if (options?.openInNewTab) {
+    return openContextualTabInWorkspaceState(
+      workspace,
+      nextTab,
+      null,
+      preferredPaneId,
+      tab.originSessionId,
+    );
   }
 
   const existing = findDiffPreviewTab(workspace, tab.diffMessageId, tab.originSessionId);
@@ -966,48 +972,6 @@ function openTabInAdjacentPane(
     panes: [...workspace.panes, newPane],
     activePaneId: newPane.id,
   };
-}
-
-function openTabInNewPane(
-  workspace: WorkspaceState,
-  tab: WorkspaceTab,
-  preferredPaneId: string | null,
-  originSessionId: string | null,
-): WorkspaceState {
-  const anchorPaneId = findNewPaneAnchorPaneId(workspace, preferredPaneId, originSessionId, tab.kind);
-  if (!anchorPaneId || !workspace.root) {
-    return openTabInWorkspaceState(workspace, tab, preferredPaneId);
-  }
-
-  return openTabInAdjacentPane(workspace, anchorPaneId, tab, "row", false);
-}
-
-function findNewPaneAnchorPaneId(
-  workspace: WorkspaceState,
-  preferredPaneId: string | null,
-  originSessionId: string | null,
-  tabKind: WorkspaceTab["kind"],
-) {
-  const contextualPaneId = findContextualTargetPaneId(workspace, preferredPaneId, originSessionId, tabKind);
-  if (contextualPaneId) {
-    return contextualPaneId;
-  }
-
-  const preferredPane = preferredPaneId
-    ? workspace.panes.find((pane) => pane.id === preferredPaneId) ?? null
-    : null;
-  if (preferredPane && !paneContainsControlPanel(preferredPane)) {
-    return preferredPane.id;
-  }
-
-  if (preferredPane && paneContainsControlPanel(preferredPane)) {
-    const nonControlPanelPaneId = findNonControlPanelPaneId(workspace, preferredPane.id);
-    if (nonControlPanelPaneId) {
-      return nonControlPanelPaneId;
-    }
-  }
-
-  return findNonControlPanelPaneId(workspace, null) ?? preferredPaneId ?? workspace.activePaneId ?? workspace.panes[0]?.id ?? null;
 }
 
 function openContextualTabInWorkspaceState<T extends WorkspaceTab>(

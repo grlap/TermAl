@@ -22,7 +22,7 @@ type FileSystemGitDecorations = {
   filesByPath: Record<string, FileDecoration | undefined>;
 };
 type FileSystemOpenOptions = {
-  openInNewPane?: boolean;
+  openInNewTab?: boolean;
 };
 
 
@@ -334,7 +334,7 @@ function DirectoryTree({
                 type="button"
                 onClick={(event) =>
                   event.ctrlKey || event.metaKey
-                    ? onOpenPath(entry.path, { openInNewPane: true })
+                    ? onOpenPath(entry.path, { openInNewTab: true })
                     : onOpenPath(entry.path)
                 }
               >

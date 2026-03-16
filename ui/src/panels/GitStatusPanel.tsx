@@ -23,7 +23,7 @@ type GitActionTarget = {
   statusCode?: string | null;
 };
 type GitDiffOpenOptions = {
-  openInNewPane?: boolean;
+  openInNewTab?: boolean;
 };
 
 
@@ -107,8 +107,8 @@ export function GitStatusPanel({
         statusCode: node.statusCode,
         workdir: activeWorkdir,
       });
-      if (options?.openInNewPane) {
-        onOpenDiff(diff, { openInNewPane: true });
+      if (options?.openInNewTab) {
+        onOpenDiff(diff, { openInNewTab: true });
       } else {
         onOpenDiff(diff);
       }
@@ -572,7 +572,7 @@ function GitStatusFileRow({
         type="button"
         onClick={(event) =>
           event.ctrlKey || event.metaKey
-            ? onOpenDiff(sectionId, node, { openInNewPane: true })
+            ? onOpenDiff(sectionId, node, { openInNewTab: true })
             : onOpenDiff(sectionId, node)
         }
         disabled={isPending}

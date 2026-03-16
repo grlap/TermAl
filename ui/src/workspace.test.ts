@@ -441,7 +441,7 @@ describe("workspace helpers", () => {
     });
   });
 
-  it("openSourceInWorkspaceState opens a new pane instead of reusing an existing source tab when requested", () => {
+  it("openSourceInWorkspaceState opens a new tab instead of reusing an existing source tab when requested", () => {
     const next = openSourceInWorkspaceState(
       makeSplitWorkspace(
         makePane("pane-a", [makeControlPanelTab("control-a", null)], {
@@ -461,25 +461,22 @@ describe("workspace helpers", () => {
       "pane-a",
       null,
       {
-        openInNewPane: true,
+        openInNewTab: true,
       },
     );
 
-    expect(next.panes).toHaveLength(3);
+    expect(next.panes).toHaveLength(2);
+    expect(next.activePaneId).toBe("pane-b");
     expect(next.panes.find((pane) => pane.id === "pane-b")?.tabs).toEqual([
       makeSourceTab("source-a", "/tmp/app.ts", null),
+      {
+        id: expect.any(String),
+        kind: "source",
+        path: "/tmp/app.ts",
+        originSessionId: null,
+      },
     ]);
-    expect(next.activePaneId).not.toBe("pane-a");
-    expect(next.activePaneId).not.toBe("pane-b");
-    expect(next.panes.find((pane) => pane.id === next.activePaneId)).toMatchObject({
-      tabs: [
-        {
-          id: expect.any(String),
-          kind: "source",
-          path: "/tmp/app.ts",
-          originSessionId: null,
-        },
-      ],
+    expect(next.panes.find((pane) => pane.id === "pane-b")).toMatchObject({
       viewMode: "source",
       sourcePath: "/tmp/app.ts",
       activeSessionId: null,
@@ -835,7 +832,7 @@ describe("workspace helpers", () => {
   });
 
 
-  it("openDiffPreviewInWorkspaceState opens a new pane instead of reusing an existing viewer when requested", () => {
+  it("openDiffPreviewInWorkspaceState opens a new tab instead of reusing an existing viewer when requested", () => {
     const next = openDiffPreviewInWorkspaceState(
       makeSplitWorkspace(
         makePane("pane-a", [makeGitStatusTab("git-a", "/tmp/project", null)], {
@@ -860,27 +857,28 @@ describe("workspace helpers", () => {
       },
       "pane-a",
       {
-        openInNewPane: true,
+        openInNewTab: true,
         reuseActiveViewerTab: true,
       },
     );
 
-    expect(next.panes).toHaveLength(3);
+    expect(next.panes).toHaveLength(2);
+    expect(next.activePaneId).toBe("pane-b");
     expect(next.panes.find((pane) => pane.id === "pane-b")?.tabs).toEqual([
       makeDiffPreviewTab("diff-tab-a", "diff-a", "/tmp/app.ts", null),
+      {
+        id: expect.any(String),
+        kind: "diffPreview",
+        changeType: "edit",
+        diff: "-foo\n+bar",
+        diffMessageId: "diff-b",
+        filePath: "/tmp/next.ts",
+        language: "typescript",
+        originSessionId: null,
+        summary: "Updated next.ts",
+      },
     ]);
-    expect(next.activePaneId).not.toBe("pane-a");
-    expect(next.activePaneId).not.toBe("pane-b");
-    expect(next.panes.find((pane) => pane.id === next.activePaneId)).toMatchObject({
-      tabs: [
-        {
-          id: expect.any(String),
-          kind: "diffPreview",
-          diffMessageId: "diff-b",
-          filePath: "/tmp/next.ts",
-          originSessionId: null,
-        },
-      ],
+    expect(next.panes.find((pane) => pane.id === "pane-b")).toMatchObject({
       viewMode: "diffPreview",
       activeSessionId: null,
     });

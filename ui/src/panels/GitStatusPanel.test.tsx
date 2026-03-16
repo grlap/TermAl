@@ -80,7 +80,7 @@ describe("GitStatusPanel", () => {
     expect(screen.queryByText("ControlPanelSurface.tsx")).not.toBeInTheDocument();
   });
 
-  it("passes openInNewPane when ctrl-clicking a git row", async () => {
+  it("passes openInNewTab when ctrl-clicking a git row", async () => {
     fetchGitStatusMock.mockResolvedValue(
       makeStatusResponse([
         {
@@ -100,7 +100,7 @@ describe("GitStatusPanel", () => {
     fireEvent.click(fileButton, { ctrlKey: true });
 
     await waitFor(() => {
-      expect(onOpenDiff).toHaveBeenCalledWith(makeDiffResponse(), { openInNewPane: true });
+      expect(onOpenDiff).toHaveBeenCalledWith(makeDiffResponse(), { openInNewTab: true });
     });
   });
 
