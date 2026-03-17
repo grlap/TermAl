@@ -555,6 +555,47 @@ describe("workspace helpers", () => {
       sourcePath: "/tmp/app.ts",
     });
   });
+
+  it("openSourceInWorkspaceState retargets an existing source tab to the requested line", () => {
+    const next = openSourceInWorkspaceState(
+      makeSinglePaneWorkspace(
+        makePane(
+          "pane-a",
+          [
+            makeSessionTab("tab-a", "session-a"),
+            makeSourceTab("source-a", "/tmp/app.ts", "session-a"),
+          ],
+          {
+            activeTabId: "tab-a",
+            activeSessionId: "session-a",
+            viewMode: "session",
+          },
+        ),
+      ),
+      "/tmp/app.ts",
+      "pane-a",
+      "session-a",
+      {
+        line: 63,
+      },
+    );
+
+    const sourceTab = next.panes[0]?.tabs.find((tab) => tab.id === "source-a");
+    expect(sourceTab).toMatchObject({
+      id: "source-a",
+      kind: "source",
+      path: "/tmp/app.ts",
+      focusLineNumber: 63,
+      focusToken: expect.any(String),
+      originSessionId: "session-a",
+    });
+    expect(next.panes[0]).toMatchObject({
+      activeSessionId: "session-a",
+      activeTabId: "source-a",
+      viewMode: "source",
+      sourcePath: "/tmp/app.ts",
+    });
+  });
   it("openFilesystemInWorkspaceState creates a filesystem tab and switches the pane mode", () => {
     const next = openFilesystemInWorkspaceState(
       makeSinglePaneWorkspace(makePane("pane-a", [makeSessionTab("tab-a", "session-a")])),

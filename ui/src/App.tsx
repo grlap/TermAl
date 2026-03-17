@@ -12,10 +12,11 @@ import {
   type ClipboardEvent as ReactClipboardEvent,
   type DragEvent as ReactDragEvent,
   type KeyboardEvent as ReactKeyboardEvent,
+  type MouseEvent as ReactMouseEvent,
   type PointerEvent as ReactPointerEvent,
-  type WheelEvent as ReactWheelEvent,
   type ReactNode,
   type RefObject,
+  type WheelEvent as ReactWheelEvent,
 } from "react";
 import { createPortal, flushSync } from "react-dom";
 import ReactMarkdown from "react-markdown";
@@ -3124,12 +3125,16 @@ export default function App() {
     originSessionId: string | null,
     originProjectId: string | null,
     options?: {
+      line?: number;
+      column?: number;
       openInNewTab?: boolean;
     },
   ) {
     setWorkspace((current) =>
       applyControlPanelLayout(
         openSourceInWorkspaceState(current, path, paneId, originSessionId, originProjectId, {
+          line: options?.line,
+          column: options?.column,
           openInNewTab: options?.openInNewTab,
         }),
       ),
@@ -5206,7 +5211,7 @@ function WorkspaceNodeView({
     path: string | null,
     originSessionId: string | null,
     originProjectId: string | null,
-    options?: { openInNewTab?: boolean },
+    options?: { line?: number; column?: number; openInNewTab?: boolean },
   ) => void;
   onOpenDiffPreviewTab: (
     paneId: string,
@@ -5602,7 +5607,7 @@ function SessionPaneView({
     path: string | null,
     originSessionId: string | null,
     originProjectId: string | null,
-    options?: { openInNewTab?: boolean },
+    options?: { line?: number; column?: number; openInNewTab?: boolean },
   ) => void;
   onOpenDiffPreviewTab: (
     paneId: string,
@@ -6698,6 +6703,15 @@ function SessionPaneView({
             editorFontSizePx={editorFontSizePx}
             fileState={fileState}
             sourceDraft={sourceDraft}
+            sourceFocus={
+              activeSourceTab?.focusLineNumber
+                ? {
+                    line: activeSourceTab.focusLineNumber,
+                    column: activeSourceTab.focusColumnNumber ?? null,
+                    token: activeSourceTab.focusToken ?? null,
+                  }
+                : null
+            }
             sourcePath={activeSourceTab.path}
             onDraftChange={setSourceDraft}
             onOpenPath={(path) => onPaneSourcePathChange(pane.id, path)}
@@ -6799,6 +6813,19 @@ function SessionPaneView({
                 message={message}
                 onOpenDiffPreview={(diffMessage) =>
                   onOpenDiffPreviewTab(pane.id, diffMessage, activeSession?.id ?? null, activeSession?.projectId ?? null)
+                }
+                onOpenSourceLink={(target) =>
+                  onOpenSourceTab(
+                    pane.id,
+                    target.path,
+                    activeSession?.id ?? null,
+                    activeSession?.projectId ?? null,
+                    {
+                      line: target.line,
+                      column: target.column,
+                      openInNewTab: target.openInNewTab,
+                    },
+                  )
                 }
                 preferImmediateHeavyRender={preferImmediateHeavyRender}
                 onApprovalDecision={handleDecision}
@@ -7782,9 +7809,17 @@ export function GeminiPromptSettingsCard({
   );
 }
 
+type MarkdownFileLinkTarget = {
+  path: string;
+  line?: number;
+  column?: number;
+  openInNewTab?: boolean;
+};
+
 export const MessageCard = memo(function MessageCard({
   message,
   onOpenDiffPreview,
+  onOpenSourceLink,
   preferImmediateHeavyRender = false,
   onApprovalDecision,
   searchQuery = "",
@@ -7793,6 +7828,7 @@ export const MessageCard = memo(function MessageCard({
 }: {
   message: Message;
   onOpenDiffPreview?: (message: DiffMessage) => void;
+  onOpenSourceLink?: (target: MarkdownFileLinkTarget) => void;
   preferImmediateHeavyRender?: boolean;
   onApprovalDecision: (messageId: string, decision: ApprovalDecision) => void;
   searchQuery?: string;
@@ -7839,14 +7875,18 @@ export const MessageCard = memo(function MessageCard({
             preferImmediateHeavyRender ? (
               <MarkdownContent
                 markdown={message.text}
+                onOpenSourceLink={onOpenSourceLink}
                 searchQuery={searchQuery}
                 searchHighlightTone={searchHighlightTone}
+                workspaceRoot={workspaceRoot}
               />
             ) : (
               <DeferredMarkdownContent
                 markdown={message.text}
+                onOpenSourceLink={onOpenSourceLink}
                 searchQuery={searchQuery}
                 searchHighlightTone={searchHighlightTone}
+                workspaceRoot={workspaceRoot}
               />
             )
           ) : message.text ? (
@@ -7872,8 +7912,10 @@ export const MessageCard = memo(function MessageCard({
       return (
         <ThinkingCard
           message={message}
+          onOpenSourceLink={onOpenSourceLink}
           searchQuery={searchQuery}
           searchHighlightTone={searchHighlightTone}
+          workspaceRoot={workspaceRoot}
         />
       );
     case "command":
@@ -7898,16 +7940,20 @@ export const MessageCard = memo(function MessageCard({
       return (
         <MarkdownCard
           message={message}
+          onOpenSourceLink={onOpenSourceLink}
           searchQuery={searchQuery}
           searchHighlightTone={searchHighlightTone}
+          workspaceRoot={workspaceRoot}
         />
       );
     case "subagentResult":
       return (
         <SubagentResultCard
           message={message}
+          onOpenSourceLink={onOpenSourceLink}
           searchQuery={searchQuery}
           searchHighlightTone={searchHighlightTone}
+          workspaceRoot={workspaceRoot}
         />
       );
     case "approval":
@@ -7925,9 +7971,11 @@ export const MessageCard = memo(function MessageCard({
 }, (previous, next) =>
   previous.message === next.message &&
   previous.onOpenDiffPreview === next.onOpenDiffPreview &&
+  previous.onOpenSourceLink === next.onOpenSourceLink &&
   previous.preferImmediateHeavyRender === next.preferImmediateHeavyRender &&
   previous.searchQuery === next.searchQuery &&
-  previous.searchHighlightTone === next.searchHighlightTone
+  previous.searchHighlightTone === next.searchHighlightTone &&
+  previous.workspaceRoot === next.workspaceRoot
 );
 
 function promptCommandMetaLabel(text: string, expandedText?: string | null) {
@@ -8152,12 +8200,16 @@ function DeferredHighlightedCodeBlock({
 
 function DeferredMarkdownContent({
   markdown,
+  onOpenSourceLink,
   searchQuery = "",
   searchHighlightTone = "match",
+  workspaceRoot = null,
 }: {
   markdown: string;
+  onOpenSourceLink?: (target: MarkdownFileLinkTarget) => void;
   searchQuery?: string;
   searchHighlightTone?: SearchHighlightTone;
+  workspaceRoot?: string | null;
 }) {
   const metrics = useMemo(() => measureTextBlock(markdown), [markdown]);
   const showSearchHighlight = containsSearchMatch(markdown, searchQuery);
@@ -8170,8 +8222,10 @@ function DeferredMarkdownContent({
     return (
       <MarkdownContent
         markdown={markdown}
+        onOpenSourceLink={onOpenSourceLink}
         searchQuery={searchQuery}
         searchHighlightTone={searchHighlightTone}
+        workspaceRoot={workspaceRoot}
       />
     );
   }
@@ -8187,8 +8241,10 @@ function DeferredMarkdownContent({
     >
       <MarkdownContent
         markdown={markdown}
+        onOpenSourceLink={onOpenSourceLink}
         searchQuery={searchQuery}
         searchHighlightTone={searchHighlightTone}
+        workspaceRoot={workspaceRoot}
       />
     </DeferredHeavyContent>
   );
@@ -8278,12 +8334,16 @@ function HighlightedCodeBlock({
 
 function ThinkingCard({
   message,
+  onOpenSourceLink,
   searchQuery = "",
   searchHighlightTone = "match",
+  workspaceRoot = null,
 }: {
   message: ThinkingMessage;
+  onOpenSourceLink?: (target: MarkdownFileLinkTarget) => void;
   searchQuery?: string;
   searchHighlightTone?: SearchHighlightTone;
+  workspaceRoot?: string | null;
 }) {
   const markdown = message.lines.join("\n");
 
@@ -8294,8 +8354,10 @@ function ThinkingCard({
       <h3>{renderHighlightedText(message.title, searchQuery, searchHighlightTone)}</h3>
       <DeferredMarkdownContent
         markdown={markdown}
+        onOpenSourceLink={onOpenSourceLink}
         searchQuery={searchQuery}
         searchHighlightTone={searchHighlightTone}
+        workspaceRoot={workspaceRoot}
       />
     </article>
   );
@@ -8665,12 +8727,16 @@ function PreviewIcon() {
 
 function MarkdownCard({
   message,
+  onOpenSourceLink,
   searchQuery = "",
   searchHighlightTone = "match",
+  workspaceRoot = null,
 }: {
   message: MarkdownMessage;
+  onOpenSourceLink?: (target: MarkdownFileLinkTarget) => void;
   searchQuery?: string;
   searchHighlightTone?: SearchHighlightTone;
+  workspaceRoot?: string | null;
 }) {
   return (
     <article className="message-card markdown-card">
@@ -8679,8 +8745,10 @@ function MarkdownCard({
       <h3>{renderHighlightedText(message.title, searchQuery, searchHighlightTone)}</h3>
       <DeferredMarkdownContent
         markdown={message.markdown}
+        onOpenSourceLink={onOpenSourceLink}
         searchQuery={searchQuery}
         searchHighlightTone={searchHighlightTone}
+        workspaceRoot={workspaceRoot}
       />
     </article>
   );
@@ -8688,12 +8756,16 @@ function MarkdownCard({
 
 function SubagentResultCard({
   message,
+  onOpenSourceLink,
   searchQuery = "",
   searchHighlightTone = "match",
+  workspaceRoot = null,
 }: {
   message: SubagentResultMessage;
+  onOpenSourceLink?: (target: MarkdownFileLinkTarget) => void;
   searchQuery?: string;
   searchHighlightTone?: SearchHighlightTone;
+  workspaceRoot?: string | null;
 }) {
   const [expanded, setExpanded] = useState(false);
   const isSearchExpanded = searchQuery.trim().length > 0;
@@ -8741,8 +8813,10 @@ function SubagentResultCard({
           </div>
           <DeferredMarkdownContent
             markdown={message.summary}
+            onOpenSourceLink={onOpenSourceLink}
             searchQuery={searchQuery}
             searchHighlightTone={searchHighlightTone}
+            workspaceRoot={workspaceRoot}
           />
         </>
       )}
@@ -8813,14 +8887,113 @@ function ApprovalCard({
   );
 }
 
+type MarkdownAstNode = {
+  type: string;
+  value?: string;
+  url?: string;
+  children?: MarkdownAstNode[];
+};
+
+const MARKDOWN_BARE_FILE_REFERENCE_PATTERN =
+  /(^|[\s([{"\'""`])((?:(?:\.\.?[\\/])|(?:\/[A-Za-z]:[\\/])|(?:[A-Za-z]:[\\/])|(?:\\\\)|\/)?(?:[\w.-]+[\\/])*[\w.-]+\.[A-Za-z0-9]{2,12}(?:\.?#L\d+(?:C\d+)?|:\d+(?::\d+)?))(?=$|[\s)\]},"\'"";!?`.])/g;
+const MARKDOWN_BARE_FILE_REFERENCE_IGNORED_NODE_TYPES = new Set([
+  "code",
+  "definition",
+  "html",
+  "inlineCode",
+  "link",
+  "linkReference",
+]);
+const MARKDOWN_REMARK_PLUGINS = [remarkGfm, remarkAutolinkBareFileReferences];
+
+function remarkAutolinkBareFileReferences() {
+  return (tree: MarkdownAstNode) => {
+    autolinkMarkdownBareFileReferences(tree);
+  };
+}
+
+function autolinkMarkdownBareFileReferences(node: MarkdownAstNode) {
+  if (!Array.isArray(node.children) || MARKDOWN_BARE_FILE_REFERENCE_IGNORED_NODE_TYPES.has(node.type)) {
+    return;
+  }
+
+  for (let index = 0; index < node.children.length; index += 1) {
+    const child = node.children[index];
+    if (child.type === "text" && typeof child.value === "string") {
+      const replacement = buildAutolinkedMarkdownTextNodes(child.value);
+      if (replacement) {
+        node.children.splice(index, 1, ...replacement);
+        index += replacement.length - 1;
+        continue;
+      }
+    }
+
+    autolinkMarkdownBareFileReferences(child);
+  }
+}
+
+function buildAutolinkedMarkdownTextNodes(text: string) {
+  MARKDOWN_BARE_FILE_REFERENCE_PATTERN.lastIndex = 0;
+  const nodes: MarkdownAstNode[] = [];
+  let changed = false;
+  let lastIndex = 0;
+  let match = MARKDOWN_BARE_FILE_REFERENCE_PATTERN.exec(text);
+
+  while (match) {
+    const prefix = match[1] ?? "";
+    const reference = match[2] ?? "";
+    const matchIndex = match.index;
+    const referenceStartIndex = matchIndex + prefix.length;
+    if (matchIndex > lastIndex) {
+      nodes.push(createMarkdownTextNode(text.slice(lastIndex, matchIndex)));
+    }
+    if (prefix) {
+      nodes.push(createMarkdownTextNode(prefix));
+    }
+    nodes.push(createMarkdownLinkNode(reference));
+    lastIndex = referenceStartIndex + reference.length;
+    changed = true;
+    match = MARKDOWN_BARE_FILE_REFERENCE_PATTERN.exec(text);
+  }
+
+  if (!changed) {
+    return null;
+  }
+
+  if (lastIndex < text.length) {
+    nodes.push(createMarkdownTextNode(text.slice(lastIndex)));
+  }
+
+  return nodes.filter((node) => node.type !== "text" || (node.value?.length ?? 0) > 0);
+}
+
+function createMarkdownLinkNode(reference: string): MarkdownAstNode {
+  return {
+    type: "link",
+    url: reference,
+    children: [createMarkdownTextNode(reference)],
+  };
+}
+
+function createMarkdownTextNode(value: string): MarkdownAstNode {
+  return {
+    type: "text",
+    value,
+  };
+}
+
 export function MarkdownContent({
   markdown,
+  onOpenSourceLink,
   searchQuery = "",
   searchHighlightTone = "match",
+  workspaceRoot = null,
 }: {
   markdown: string;
+  onOpenSourceLink?: (target: MarkdownFileLinkTarget) => void;
   searchQuery?: string;
   searchHighlightTone?: SearchHighlightTone;
+  workspaceRoot?: string | null;
 }) {
   const highlightChildren = (children: ReactNode) =>
     highlightReactNodeText(children, searchQuery, searchHighlightTone);
@@ -8829,21 +9002,60 @@ export function MarkdownContent({
     <div className="markdown-copy">
       <ReactMarkdown
         components={{
-          a: ({ href, children, ...props }) => (
-            <a
-              {...props}
-              href={href}
-              target={href?.startsWith("http") ? "_blank" : undefined}
-              rel={href?.startsWith("http") ? "noreferrer" : undefined}
-            >
-              {highlightChildren(children)}
-            </a>
-          ),
+          a: ({ href, children, ...props }) => {
+            const isExternalLink = isExternalMarkdownHref(href ?? "");
+            const fileLinkTarget = resolveMarkdownFileLinkTarget(href, workspaceRoot);
+            const handleClick = (event: ReactMouseEvent<HTMLAnchorElement>) => {
+              props.onClick?.(event);
+              if (event.defaultPrevented || !fileLinkTarget || !onOpenSourceLink) {
+                return;
+              }
+
+              event.preventDefault();
+              onOpenSourceLink({
+                ...fileLinkTarget,
+                openInNewTab: event.ctrlKey || event.metaKey,
+              });
+            };
+
+            return (
+              <a
+                {...props}
+                href={href}
+                target={isExternalLink ? "_blank" : undefined}
+                rel={isExternalLink ? "noreferrer" : undefined}
+                onClick={handleClick}
+              >
+                {highlightChildren(children)}
+              </a>
+            );
+          },
           code: ({ children, className, inline, ...props }) => {
             const language = className?.match(/language-([\w-]+)/)?.[1] ?? null;
             const code = String(children).replace(/\n$/, "");
+            const inlineFileLinkTarget = inline
+              ? resolveMarkdownFileLinkTarget(code, workspaceRoot)
+              : null;
 
             if (inline) {
+              if (inlineFileLinkTarget && onOpenSourceLink) {
+                const handleInlineCodeClick = (event: ReactMouseEvent<HTMLAnchorElement>) => {
+                  event.preventDefault();
+                  onOpenSourceLink({
+                    ...inlineFileLinkTarget,
+                    openInNewTab: event.ctrlKey || event.metaKey,
+                  });
+                };
+
+                return (
+                  <a className="inline-code-link" href={code} onClick={handleInlineCodeClick}>
+                    <code className={className} {...props}>
+                      {highlightChildren(children)}
+                    </code>
+                  </a>
+                );
+              }
+
               return (
                 <code className={className} {...props}>
                   {highlightChildren(children)}
@@ -8892,12 +9104,160 @@ export function MarkdownContent({
             <th {...props}>{highlightChildren(children)}</th>
           ),
         }}
-        remarkPlugins={[remarkGfm]}
+        remarkPlugins={MARKDOWN_REMARK_PLUGINS}
       >
         {markdown}
       </ReactMarkdown>
     </div>
   );
+}
+
+function resolveMarkdownFileLinkTarget(
+  href: string | undefined,
+  workspaceRoot: string | null,
+): Omit<MarkdownFileLinkTarget, "openInNewTab"> | null {
+  const trimmedHref = href?.trim();
+  if (!trimmedHref || isExternalMarkdownHref(trimmedHref) || trimmedHref.startsWith("#")) {
+    return null;
+  }
+
+  let candidate = safeDecodeMarkdownHref(trimmedHref).replace(/^file:\/\//i, "");
+  let line: number | undefined;
+  let column: number | undefined;
+
+  const hashIndex = candidate.indexOf("#");
+  if (hashIndex >= 0) {
+    const fragment = candidate.slice(hashIndex + 1);
+    candidate = candidate.slice(0, hashIndex);
+    const fragmentLocation = parseMarkdownFileLinkFragment(fragment);
+    if (fragmentLocation) {
+      line = fragmentLocation.line;
+      column = fragmentLocation.column;
+    }
+  }
+
+  const lineSuffixMatch = candidate.match(/^(.*?)(?::(\d+)(?::(\d+))?)$/);
+  if (lineSuffixMatch) {
+    candidate = lineSuffixMatch[1] ?? candidate;
+    if (!line && lineSuffixMatch[2]) {
+      line = Number(lineSuffixMatch[2]);
+    }
+    if (!column && lineSuffixMatch[3]) {
+      column = Number(lineSuffixMatch[3]);
+    }
+  }
+
+  let trimmedCandidate = candidate.trim();
+  if ((line || column) && trimmedCandidate.endsWith(".")) {
+    trimmedCandidate = trimmedCandidate.slice(0, -1).trimEnd();
+  }
+  if (!trimmedCandidate) {
+    return null;
+  }
+
+  const resolvedPath = looksLikeAbsoluteMarkdownFilePath(trimmedCandidate, workspaceRoot)
+    ? normalizeMarkdownFileLinkAbsolutePath(trimmedCandidate)
+    : !workspaceRoot || !looksLikeRelativeMarkdownFilePath(trimmedCandidate)
+      ? null
+      : joinWorkspacePath(workspaceRoot, trimmedCandidate);
+  if (!resolvedPath) {
+    return null;
+  }
+
+  return {
+    path: resolvedPath,
+    ...(line ? { line } : {}),
+    ...(column ? { column } : {}),
+  };
+}
+
+function parseMarkdownFileLinkFragment(fragment: string) {
+  const match = fragment.trim().match(/^L(\d+)(?:C(\d+))?$/i);
+  if (!match) {
+    return null;
+  }
+
+  return {
+    line: Number(match[1]),
+    ...(match[2] ? { column: Number(match[2]) } : {}),
+  };
+}
+
+function isExternalMarkdownHref(href: string) {
+  if (!href) {
+    return false;
+  }
+
+  if (/^file:\/\//i.test(href) || /^[A-Za-z]:[\\/]/.test(href)) {
+    return false;
+  }
+
+  return /^\/\//.test(href) || /^[a-z][a-z\d+.-]*:/i.test(href);
+}
+
+function safeDecodeMarkdownHref(href: string) {
+  try {
+    return decodeURIComponent(href);
+  } catch {
+    return href;
+  }
+}
+
+function looksLikeAbsoluteMarkdownFilePath(path: string, workspaceRoot: string | null) {
+  if (/^\/[A-Za-z]:[\\/]/.test(path) || /^[A-Za-z]:[\\/]/.test(path) || /^\\\\/.test(path)) {
+    return true;
+  }
+
+  if (!path.startsWith("/") || path.startsWith("//")) {
+    return false;
+  }
+
+  const trimmedRoot = workspaceRoot?.trim();
+  if (trimmedRoot) {
+    const normalizedPath = normalizeDisplayPath(path);
+    const normalizedRoot = normalizeDisplayPath(trimmedRoot).replace(/\/+$/, "");
+    if (normalizedPath === normalizedRoot || normalizedPath.startsWith(`${normalizedRoot}/`)) {
+      return true;
+    }
+  }
+
+  return looksLikeFilePathReference(path);
+}
+
+function normalizeMarkdownFileLinkAbsolutePath(path: string) {
+  return /^\/[A-Za-z]:[\\/]/.test(path) ? path.slice(1) : path;
+}
+
+function looksLikeRelativeMarkdownFilePath(path: string) {
+  if (!path || path.startsWith("/") || /^[a-z][a-z\d+.-]*:/i.test(path)) {
+    return false;
+  }
+
+  return path.startsWith("./") || path.startsWith("../") || /[\\/]/.test(path) || looksLikeFilePathReference(path);
+}
+
+function looksLikeFilePathReference(path: string) {
+  const segments = path.trim().split(/[\\/]+/).filter(Boolean);
+  const fileName = segments[segments.length - 1] ?? "";
+  return fileName.startsWith(".") || fileName.includes(".");
+}
+
+function joinWorkspacePath(rootPath: string, relativePath: string) {
+  const trimmedRoot = rootPath.trim().replace(/[\\/]+$/, "");
+  const trimmedRelative = relativePath.trim().replace(/^[\\/]+/, "");
+  if (!trimmedRoot) {
+    return trimmedRelative;
+  }
+
+  if (!trimmedRelative) {
+    return trimmedRoot;
+  }
+
+  const useBackslashSeparator = looksLikeWindowsPath(trimmedRoot);
+  const normalizedRelative = useBackslashSeparator
+    ? trimmedRelative.replace(/\//g, "\\")
+    : trimmedRelative.replace(/\\/g, "/");
+  return `${trimmedRoot}${useBackslashSeparator ? "\\" : "/"}${normalizedRelative}`;
 }
 
 function resolveDeferredRenderRoot(node: Element) {
@@ -9538,3 +9898,6 @@ function dropLabelForPlacement(placement: TabDropPlacement) {
       return "Bottom";
   }
 }
+
+
+

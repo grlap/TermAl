@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import { MessageCard } from "./App";
@@ -95,4 +95,91 @@ describe("MessageCard", () => {
 
     expect(screen.getByText("Decision: canceled")).toBeInTheDocument();
   });
+
+  it("opens assistant file links through the source callback", () => {
+    const message: TextMessage = {
+      id: "message-5",
+      type: "text",
+      author: "assistant",
+      timestamp: "10:04",
+      text: "[experience.tex#L63](experience.tex#L63)",
+    };
+    const onOpenSourceLink = vi.fn();
+
+    render(
+      <MessageCard
+        message={message}
+        onApprovalDecision={vi.fn()}
+        onOpenSourceLink={onOpenSourceLink}
+        workspaceRoot="/repo"
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("link", { name: "experience.tex#L63" }));
+
+    expect(onOpenSourceLink).toHaveBeenCalledWith({
+      path: "/repo/experience.tex",
+      line: 63,
+      openInNewTab: false,
+    });
+  });
+
+  it("autolinks bare assistant file references through the source callback", () => {
+    const message: TextMessage = {
+      id: "message-6",
+      type: "text",
+      author: "assistant",
+      timestamp: "10:05",
+      text: "The Microsoft scope bullet needs more evidence in experience.tex#L63.",
+    };
+    const onOpenSourceLink = vi.fn();
+
+    render(
+      <MessageCard
+        message={message}
+        onApprovalDecision={vi.fn()}
+        onOpenSourceLink={onOpenSourceLink}
+        workspaceRoot="/repo"
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("link", { name: "experience.tex#L63" }));
+
+    expect(onOpenSourceLink).toHaveBeenCalledWith({
+      path: "/repo/experience.tex",
+      line: 63,
+      openInNewTab: false,
+    });
+  });
+
+  it("opens inline assistant file references through the source callback", () => {
+    const message: TextMessage = {
+      id: "message-7",
+      type: "text",
+      author: "assistant",
+      timestamp: "10:06",
+      text: "Text like `experience.tex.#L63` should stay clickable.",
+    };
+    const onOpenSourceLink = vi.fn();
+
+    render(
+      <MessageCard
+        message={message}
+        onApprovalDecision={vi.fn()}
+        onOpenSourceLink={onOpenSourceLink}
+        workspaceRoot="/repo"
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("link", { name: "experience.tex.#L63" }));
+
+    expect(onOpenSourceLink).toHaveBeenCalledWith({
+      path: "/repo/experience.tex",
+      line: 63,
+      openInNewTab: false,
+    });
+  });
 });
+
+
+

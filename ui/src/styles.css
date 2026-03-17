@@ -2945,6 +2945,11 @@ textarea {
   width: fit-content;
   max-width: 100%;
   justify-self: start;
+  padding-block: 0.8rem 0.88rem;
+}
+
+.command-card .message-meta {
+  margin-bottom: 0.32rem;
 }
 
 .diff-card {
@@ -2953,7 +2958,7 @@ textarea {
 }
 
 .command-card-label {
-  margin-bottom: 0.3rem;
+  margin-bottom: 0.18rem;
 }
 
 .utility-header {
@@ -2985,7 +2990,7 @@ textarea {
 }
 
 .command-card .command-panel {
-  margin-top: 0.55rem;
+  margin-top: 0.38rem;
 }
 
 .command-row {
@@ -2993,7 +2998,7 @@ textarea {
   grid-template-columns: auto minmax(0, 1fr) auto;
   gap: 0.65rem;
   align-items: start;
-  padding: 0.68rem 0.85rem;
+  padding: 0.54rem 0.85rem;
 }
 
 .command-row + .command-row {
@@ -3026,6 +3031,11 @@ textarea {
 
 .command-status-chip {
   font-weight: 700;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  font-size: inherit;
   text-transform: capitalize;
 }
 
@@ -3045,6 +3055,13 @@ textarea {
   border-color: var(--accent-rose-border);
   background: var(--accent-rose-bg);
   color: var(--signal-rose);
+}
+
+.command-status-chip.chip-status-active,
+.command-status-chip.chip-status-idle,
+.command-status-chip.chip-status-error {
+  background: transparent;
+  border-color: transparent;
 }
 
 .command-icon-button {
@@ -3386,6 +3403,25 @@ textarea {
 .source-editor-shell-with-statusbar .monaco-code-editor .monaco-editor,
 .source-editor-shell-with-statusbar .monaco-code-editor .monaco-editor .overflow-guard {
   border-radius: 0.45rem 0.45rem 0 0;
+}
+
+.monaco-code-editor .monaco-editor .monaco-link-target-line {
+  background: color-mix(in srgb, var(--signal-gold) 16%, transparent);
+  animation: monaco-link-target-line-flash 1.25s ease-out;
+}
+
+.monaco-code-editor .monaco-editor .monaco-link-target-line-gutter {
+  box-shadow: inset 3px 0 0 color-mix(in srgb, var(--signal-gold) 78%, white 22%);
+}
+
+@keyframes monaco-link-target-line-flash {
+  0% {
+    background: color-mix(in srgb, var(--signal-gold) 34%, transparent);
+  }
+
+  100% {
+    background: color-mix(in srgb, var(--signal-gold) 16%, transparent);
+  }
 }
 
 .source-editor-hint {
@@ -4697,6 +4733,15 @@ textarea {
   text-underline-offset: 0.16em;
 }
 
+.markdown-copy a.inline-code-link {
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.markdown-copy a.inline-code-link > code {
+  color: inherit;
+}
+
 .markdown-copy pre {
   margin: 0;
   border-radius: 1rem;
@@ -4808,7 +4853,12 @@ textarea {
 }
 
 .subagent-result-card .subagent-result-toggle {
+  inline-size: 8.4rem;
+  min-block-size: 2.35rem;
   padding-block: 0.3rem;
+  font-size: 1rem;
+  line-height: 1.2;
+  text-align: center;
 }
 
 .subagent-result-collapsed-time {
@@ -5564,3 +5614,4 @@ textarea {
   border-color: var(--line-strong);
   background: var(--surface-composer);
 }
+

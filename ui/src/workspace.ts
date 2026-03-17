@@ -19,6 +19,9 @@ export type WorkspaceSourceTab = {
   id: string;
   kind: "source";
   path: string | null;
+  focusLineNumber?: number | null;
+  focusColumnNumber?: number | null;
+  focusToken?: string | null;
   originSessionId: string | null;
   originProjectId?: string | null;
 };
@@ -77,6 +80,18 @@ export type WorkspacePane = {
   sourcePath: string | null;
 };
 
+type WorkspaceSourceFocus = {
+  line: number | null;
+  column: number | null;
+  token: string | null;
+};
+
+type OpenSourceTabOptions = {
+  line?: number | null;
+  column?: number | null;
+  openInNewTab?: boolean;
+};
+
 export type WorkspaceNode =
   | {
       type: "pane";
@@ -112,8 +127,10 @@ export function createSourceTab(
   path: string | null = null,
   originSessionId: string | null = null,
   originProjectId: string | null = null,
+  focus: WorkspaceSourceFocus = EMPTY_WORKSPACE_SOURCE_FOCUS,
 ): WorkspaceSourceTab {
   const normalizedOriginProjectId = normalizeWorkspaceIdentifier(originProjectId);
+  const normalizedFocus = normalizeWorkspaceSourceFocus(focus);
 
   return {
     id: crypto.randomUUID(),
@@ -121,6 +138,7 @@ export function createSourceTab(
     path: normalizeWorkspacePath(path),
     originSessionId,
     ...projectOriginProps(normalizedOriginProjectId),
+    ...sourceFocusProps(normalizedFocus),
   };
 }
 
@@ -221,13 +239,26 @@ export function reconcileWorkspaceState(current: WorkspaceState, sessions: Sessi
         const originProjectId = normalizeWorkspaceIdentifier(tab.originProjectId);
 
         if (tab.kind === "source") {
-          const { originProjectId: _ignoredOriginProjectId, ...tabWithoutOriginProjectId } = tab;
+          const {
+            originProjectId: _ignoredOriginProjectId,
+            focusLineNumber: _ignoredFocusLineNumber,
+            focusColumnNumber: _ignoredFocusColumnNumber,
+            focusToken: _ignoredFocusToken,
+            ...tabWithoutOriginProjectId
+          } = tab;
           return [
             {
               ...tabWithoutOriginProjectId,
               originSessionId,
               ...projectOriginProps(originProjectId),
               path: normalizeWorkspacePath(tab.path),
+              ...sourceFocusProps(
+                normalizeWorkspaceSourceFocus({
+                  line: tab.focusLineNumber ?? null,
+                  column: tab.focusColumnNumber ?? null,
+                  token: tab.focusToken ?? null,
+                }),
+              ),
             },
           ];
         }
@@ -352,10 +383,8 @@ export function openSourceInWorkspaceState(
   path: string | null,
   preferredPaneId: string | null,
   originSessionId: string | null,
-  originProjectIdOrOptions: string | null | { openInNewTab?: boolean } = null,
-  options?: {
-    openInNewTab?: boolean;
-  },
+  originProjectIdOrOptions: string | null | OpenSourceTabOptions = null,
+  options?: OpenSourceTabOptions,
 ): WorkspaceState {
   const originProjectId =
     typeof originProjectIdOrOptions === "string" || originProjectIdOrOptions === null
@@ -372,7 +401,8 @@ export function openSourceInWorkspaceState(
     originSessionId,
     "source",
   );
-  const nextTab = createSourceTab(normalizedPath, originSessionId, originProjectId);
+  const focus = createOpenSourceFocus(resolvedOptions);
+  const nextTab = createSourceTab(normalizedPath, originSessionId, originProjectId, focus);
   if (resolvedOptions?.openInNewTab) {
     return openContextualTabInWorkspaceState(workspace, nextTab, null, preferredPaneId, originSessionId);
   }
@@ -380,11 +410,15 @@ export function openSourceInWorkspaceState(
   if (normalizedPath) {
     const existing = findSourceTab(workspace, normalizedPath);
     if (existing) {
-      if (targetPaneId && existing.paneId !== targetPaneId) {
-        return moveWorkspaceTabToPane(workspace, existing.paneId, existing.tab.id, targetPaneId);
-      }
-
-      return activatePane(workspace, existing.paneId, existing.tab.id);
+      const activatedWorkspace =
+        targetPaneId && existing.paneId !== targetPaneId
+          ? activatePane(
+              moveWorkspaceTabToPane(workspace, existing.paneId, existing.tab.id, targetPaneId),
+              targetPaneId,
+              existing.tab.id,
+            )
+          : activatePane(workspace, existing.paneId, existing.tab.id);
+      return setSourceTabFocus(activatedWorkspace, existing.tab.id, focus);
     }
   }
 
@@ -847,7 +881,11 @@ export function setPaneSourcePath(
     )?.id ?? null;
   const existing = nextPath ? findSourceTab(workspace, nextPath) : null;
   if (existing && existing.tab.id !== activeSourceTabId) {
-    return activatePane(workspace, existing.paneId, existing.tab.id);
+    return activatePane(
+      setSourceTabFocus(workspace, existing.tab.id, EMPTY_WORKSPACE_SOURCE_FOCUS),
+      existing.paneId,
+      existing.tab.id,
+    );
   }
 
   return {
@@ -869,7 +907,13 @@ export function setPaneSourcePath(
             return tab;
           }
 
-          const { originProjectId: _ignoredOriginProjectId, ...tabWithoutOriginProjectId } = tab;
+          const {
+            originProjectId: _ignoredOriginProjectId,
+            focusLineNumber: _ignoredFocusLineNumber,
+            focusColumnNumber: _ignoredFocusColumnNumber,
+            focusToken: _ignoredFocusToken,
+            ...tabWithoutOriginProjectId
+          } = tab;
           return {
             ...tabWithoutOriginProjectId,
             path: nextPath,
@@ -1485,6 +1529,97 @@ function findContextualTargetPaneId(
 }
 function getActiveTab(pane: WorkspacePane) {
   return pane.tabs.find((tab) => tab.id === pane.activeTabId) ?? pane.tabs[0] ?? null;
+}
+
+const EMPTY_WORKSPACE_SOURCE_FOCUS: WorkspaceSourceFocus = {
+  line: null,
+  column: null,
+  token: null,
+};
+
+function createOpenSourceFocus(options?: OpenSourceTabOptions | null) {
+  const line = normalizeWorkspaceLineNumber(options?.line);
+  if (!line) {
+    return EMPTY_WORKSPACE_SOURCE_FOCUS;
+  }
+
+  return normalizeWorkspaceSourceFocus({
+    line,
+    column: options?.column ?? null,
+    token: crypto.randomUUID(),
+  });
+}
+
+function normalizeWorkspaceSourceFocus(
+  focus: Partial<WorkspaceSourceFocus> | null | undefined,
+): WorkspaceSourceFocus {
+  const line = normalizeWorkspaceLineNumber(focus?.line);
+  if (!line) {
+    return EMPTY_WORKSPACE_SOURCE_FOCUS;
+  }
+
+  const token = typeof focus?.token === "string" ? focus.token.trim() : "";
+  return {
+    line,
+    column: normalizeWorkspaceLineNumber(focus?.column),
+    token: token || null,
+  };
+}
+
+function sourceFocusProps(focus: WorkspaceSourceFocus) {
+  if (!focus.line) {
+    return {};
+  }
+
+  return {
+    focusLineNumber: focus.line,
+    ...(focus.column ? { focusColumnNumber: focus.column } : {}),
+    ...(focus.token ? { focusToken: focus.token } : {}),
+  };
+}
+
+function setSourceTabFocus(
+  workspace: WorkspaceState,
+  sourceTabId: string,
+  focus: WorkspaceSourceFocus,
+): WorkspaceState {
+  return {
+    ...workspace,
+    panes: workspace.panes.map((pane) => {
+      if (!pane.tabs.some((tab) => tab.id === sourceTabId)) {
+        return pane;
+      }
+
+      return syncPaneState({
+        ...pane,
+        tabs: pane.tabs.map((tab) => {
+          if (tab.id !== sourceTabId || tab.kind !== "source") {
+            return tab;
+          }
+
+          const {
+            focusLineNumber: _ignoredFocusLineNumber,
+            focusColumnNumber: _ignoredFocusColumnNumber,
+            focusToken: _ignoredFocusToken,
+            ...tabWithoutFocus
+          } = tab;
+          return {
+            ...tabWithoutFocus,
+            ...sourceFocusProps(focus),
+          };
+        }),
+      });
+    }),
+  };
+}
+
+function normalizeWorkspaceLineNumber(value: number | null | undefined) {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return null;
+  }
+
+  const normalized = Math.trunc(value);
+  return normalized >= 1 ? normalized : null;
 }
 
 function normalizeWorkspacePath(path: string | null | undefined) {

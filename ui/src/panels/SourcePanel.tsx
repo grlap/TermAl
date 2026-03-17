@@ -43,12 +43,19 @@ export type SourceFileState = {
   language: string | null;
 };
 
+export type SourcePanelFocus = {
+  line: number;
+  column: number | null;
+  token: string | null;
+};
+
 export function SourcePanel({
   candidatePaths,
   editorAppearance,
   editorFontSizePx,
   fileState,
   sourceDraft,
+  sourceFocus = null,
   sourcePath,
   onDraftChange,
   onOpenPath,
@@ -59,6 +66,7 @@ export function SourcePanel({
   editorFontSizePx: number;
   fileState: SourceFileState;
   sourceDraft: string;
+  sourceFocus?: SourcePanelFocus | null;
   sourcePath: string | null;
   onDraftChange: (nextValue: string) => void;
   onOpenPath: (path: string) => void;
@@ -186,6 +194,9 @@ export function SourcePanel({
                 appearance={editorAppearance}
                 ariaLabel={`Source editor for ${fileState.path}`}
                 fontSizePx={editorFontSizePx}
+                highlightedColumnNumber={sourceFocus?.column ?? null}
+                highlightedLineNumber={sourceFocus?.line ?? null}
+                highlightToken={sourceFocus?.token ?? null}
                 language={fileState.language}
                 path={fileState.path}
                 value={editorValue}

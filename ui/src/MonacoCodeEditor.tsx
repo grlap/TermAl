@@ -1,4 +1,4 @@
-﻿import { useEffect, useLayoutEffect, useRef } from "react";
+import { useEffect, useLayoutEffect, useRef } from "react";
 import type {
   IDisposable,
   editor as MonacoEditor,
@@ -24,6 +24,9 @@ type MonacoCodeEditorProps = {
   appearance: MonacoAppearance;
   ariaLabel: string;
   fontSizePx: number;
+  highlightedColumnNumber?: number | null;
+  highlightedLineNumber?: number | null;
+  highlightToken?: string | null;
   language?: string | null;
   path?: string | null;
   readOnly?: boolean;
@@ -37,6 +40,9 @@ export function MonacoCodeEditor({
   appearance,
   ariaLabel,
   fontSizePx,
+  highlightedColumnNumber = null,
+  highlightedLineNumber = null,
+  highlightToken = null,
   language,
   path,
   readOnly = false,
@@ -58,6 +64,8 @@ export function MonacoCodeEditor({
   const isApplyingExternalValueRef = useRef(false);
   const untitledUriRef = useRef(`inmemory://termal/source/${crypto.randomUUID()}`);
   const modelDescriptorRef = useRef("");
+  const highlightDecorationIdsRef = useRef<string[]>([]);
+  const lastHighlightDescriptorRef = useRef("");
 
   changeHandlerRef.current = onChange;
   saveHandlerRef.current = onSave;
@@ -137,12 +145,14 @@ export function MonacoCodeEditor({
       cursorSubscriptionRef.current = null;
       modelSubscriptionRef.current?.dispose();
       modelSubscriptionRef.current = null;
+      clearHighlightDecorations();
       editorRef.current?.dispose();
       editorRef.current = null;
       modelRef.current?.dispose();
       modelRef.current = null;
       monacoRef.current = null;
       modelDescriptorRef.current = "";
+      lastHighlightDescriptorRef.current = "";
     };
   }, []);
 
@@ -217,6 +227,65 @@ export function MonacoCodeEditor({
     emitStatus();
   }, [value]);
 
+  useEffect(() => {
+    const editor = editorRef.current;
+    const model = modelRef.current;
+    const monaco = monacoRef.current;
+    if (!editor || !model || !monaco) {
+      return;
+    }
+
+    if (!highlightedLineNumber) {
+      clearHighlightDecorations();
+      lastHighlightDescriptorRef.current = "";
+      return;
+    }
+
+    const targetLineNumber = Math.min(Math.max(highlightedLineNumber, 1), model.getLineCount());
+    const targetColumnNumber = Math.min(
+      Math.max(highlightedColumnNumber ?? 1, 1),
+      model.getLineMaxColumn(targetLineNumber),
+    );
+    const highlightDescriptor = [
+      path?.trim() ?? "",
+      highlightToken ?? "focus",
+      String(targetLineNumber),
+      String(targetColumnNumber),
+    ].join(":");
+    if (
+      lastHighlightDescriptorRef.current === highlightDescriptor &&
+      highlightDecorationIdsRef.current.length > 0
+    ) {
+      return;
+    }
+
+    lastHighlightDescriptorRef.current = highlightDescriptor;
+    highlightDecorationIdsRef.current = editor.deltaDecorations(highlightDecorationIdsRef.current, [
+      {
+        range: new monaco.Range(
+          targetLineNumber,
+          1,
+          targetLineNumber,
+          Math.max(model.getLineMaxColumn(targetLineNumber), 1),
+        ),
+        options: {
+          className: "monaco-link-target-line",
+          isWholeLine: true,
+          linesDecorationsClassName: "monaco-link-target-line-gutter",
+          stickiness: monaco.editor.TrackedRangeStickiness.NeverGrowsWhenTypingAtEdges,
+        },
+      },
+    ]);
+
+    const position = {
+      lineNumber: targetLineNumber,
+      column: targetColumnNumber,
+    };
+    editor.setPosition(position);
+    editor.revealPositionInCenter(position);
+    emitStatus();
+  }, [highlightedColumnNumber, highlightedLineNumber, highlightToken, path, value]);
+
   function syncTheme(monacoModule: MonacoModule) {
     applyMonacoTheme(monacoModule, appearance);
     monacoModule.editor.setTheme(monacoThemeName(appearance));
@@ -256,6 +325,16 @@ export function MonacoCodeEditor({
     });
   }
 
+  function clearHighlightDecorations() {
+    const editor = editorRef.current;
+    if (!editor) {
+      highlightDecorationIdsRef.current = [];
+      return;
+    }
+
+    highlightDecorationIdsRef.current = editor.deltaDecorations(highlightDecorationIdsRef.current, []);
+  }
+
   function replaceModel(nextValue: string, nextPath?: string | null, nextLanguage?: string | null) {
     const monaco = monacoRef.current;
     const editor = editorRef.current;
@@ -285,6 +364,7 @@ export function MonacoCodeEditor({
       emitStatus();
     });
 
+    clearHighlightDecorations();
     editor.setModel(nextModel);
     previousModel?.dispose();
     modelRef.current = nextModel;

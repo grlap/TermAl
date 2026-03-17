@@ -230,6 +230,87 @@ describe("MarkdownContent", () => {
       consoleError.mockRestore();
     }
   });
+
+  it("opens local file links through the source callback", () => {
+    const onOpenSourceLink = vi.fn();
+
+    render(
+      <MarkdownContent
+        markdown="[experience.tex#L63](experience.tex#L63)"
+        onOpenSourceLink={onOpenSourceLink}
+        workspaceRoot="/repo"
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("link", { name: "experience.tex#L63" }));
+
+    expect(onOpenSourceLink).toHaveBeenCalledWith({
+      path: "/repo/experience.tex",
+      line: 63,
+      openInNewTab: false,
+    });
+  });
+
+  it("autolinks bare file references with line targets", () => {
+    const onOpenSourceLink = vi.fn();
+
+    render(
+      <MarkdownContent
+        markdown="The Microsoft scope bullet needs more evidence in experience.tex#L63."
+        onOpenSourceLink={onOpenSourceLink}
+        workspaceRoot="/repo"
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("link", { name: "experience.tex#L63" }));
+
+    expect(onOpenSourceLink).toHaveBeenCalledWith({
+      path: "/repo/experience.tex",
+      line: 63,
+      openInNewTab: false,
+    });
+  });
+
+  it("autolinks bare file references with dotted line targets", () => {
+    const onOpenSourceLink = vi.fn();
+
+    render(
+      <MarkdownContent
+        markdown="The Microsoft scope bullet needs more evidence in experience.tex.#L63."
+        onOpenSourceLink={onOpenSourceLink}
+        workspaceRoot="/repo"
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("link", { name: "experience.tex.#L63" }));
+
+    expect(onOpenSourceLink).toHaveBeenCalledWith({
+      path: "/repo/experience.tex",
+      line: 63,
+      openInNewTab: false,
+    });
+  });
+
+  it("opens inline code file references through the source callback", () => {
+    const onOpenSourceLink = vi.fn();
+
+    render(
+      <MarkdownContent
+        markdown="Text like `experience.tex.#L63` should stay clickable."
+        onOpenSourceLink={onOpenSourceLink}
+        workspaceRoot="/repo"
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("link", { name: "experience.tex.#L63" }));
+
+    expect(onOpenSourceLink).toHaveBeenCalledWith({
+      path: "/repo/experience.tex",
+      line: 63,
+      openInNewTab: false,
+    });
+  });
+
 });
 
 describe("App", () => {
@@ -1279,3 +1360,6 @@ describe("App", () => {
     expect(secondAttempt.warning).toBeNull();
   });
 });
+
+
+
