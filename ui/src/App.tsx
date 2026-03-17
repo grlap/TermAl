@@ -4838,6 +4838,31 @@ export function ThemedCombobox({
   }, [isOpen, safeSelectedIndex]);
 
   useLayoutEffect(() => {
+    if (!isOpen || !menuStyle) {
+      return;
+    }
+
+    const listbox = listRef.current;
+    if (!listbox) {
+      return;
+    }
+
+    const activeOption = listbox.querySelector<HTMLElement>(`[data-option-index="${activeIndex}"]`);
+    if (!activeOption) {
+      return;
+    }
+
+    const listRect = listbox.getBoundingClientRect();
+    const optionRect = activeOption.getBoundingClientRect();
+
+    if (optionRect.top < listRect.top) {
+      listbox.scrollTop += optionRect.top - listRect.top;
+    } else if (optionRect.bottom > listRect.bottom) {
+      listbox.scrollTop += optionRect.bottom - listRect.bottom;
+    }
+  }, [activeIndex, isOpen, menuStyle]);
+
+  useLayoutEffect(() => {
     if (!isOpen) {
       return;
     }
@@ -4954,19 +4979,6 @@ export function ThemedCombobox({
       window.removeEventListener("keydown", handleKeyDown);
     };
   }, [activeIndex, isOpen, onChange, options]);
-
-  useEffect(() => {
-    if (!isOpen) {
-      return;
-    }
-
-    const activeOption = listRef.current?.querySelector<HTMLElement>(
-      `[data-option-index="${activeIndex}"]`,
-    );
-    activeOption?.scrollIntoView({
-      block: "nearest",
-    });
-  }, [activeIndex, isOpen]);
 
   function handleTriggerKeyDown(event: ReactKeyboardEvent<HTMLButtonElement>) {
     if (disabled) {

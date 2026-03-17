@@ -296,6 +296,69 @@ describe("App", () => {
     }
   });
 
+  it("scrolls an off-screen combobox selection into view when the menu opens", async () => {
+    const originalGetBoundingClientRect = HTMLElement.prototype.getBoundingClientRect;
+    HTMLElement.prototype.getBoundingClientRect = function () {
+      if (this.classList.contains("combo-menu")) {
+        return {
+          bottom: 90,
+          height: 90,
+          left: 0,
+          right: 240,
+          top: 0,
+          width: 240,
+          x: 0,
+          y: 0,
+          toJSON: () => ({}),
+        } as DOMRect;
+      }
+
+      const optionIndex = this.getAttribute("data-option-index");
+      if (optionIndex !== null) {
+        const index = Number(optionIndex);
+        const listbox = this.parentElement as HTMLElement | null;
+        const top = index * 30 - (listbox?.scrollTop ?? 0);
+
+        return {
+          bottom: top + 30,
+          height: 30,
+          left: 0,
+          right: 240,
+          top,
+          width: 240,
+          x: 0,
+          y: top,
+          toJSON: () => ({}),
+        } as DOMRect;
+      }
+
+      return originalGetBoundingClientRect.call(this);
+    };
+
+    try {
+      render(
+        <ThemedCombobox
+          id="overflow-combobox"
+          value="model-7"
+          options={Array.from({ length: 8 }, (_, index) => ({
+            label: `Model ${index}`,
+            value: `model-${index}`,
+          }))}
+          onChange={vi.fn()}
+        />,
+      );
+
+      fireEvent.click(screen.getByRole("combobox"));
+
+      const listbox = await screen.findByRole("listbox");
+      await waitFor(() => {
+        expect(listbox.scrollTop).toBe(150);
+      });
+    } finally {
+      HTMLElement.prototype.getBoundingClientRect = originalGetBoundingClientRect;
+    }
+  });
+
   it("describes when a Codex model switch resets reasoning effort", () => {
     expect(
       describeCodexModelAdjustmentNotice(
