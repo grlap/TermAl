@@ -1309,6 +1309,7 @@ textarea {
 .pane-top {
   display: grid;
   flex: none;
+  min-width: 0;
 }
 
 .pane-bar {
@@ -1316,6 +1317,7 @@ textarea {
   align-items: center;
   justify-content: space-between;
   gap: 0.7rem;
+  min-width: 0;
   padding: 0.55rem 0.7rem 0.5rem;
   border-bottom: 1px solid var(--line);
   background: var(--surface-warm-bar);
@@ -1349,9 +1351,11 @@ textarea {
 .pane-view-strip-right {
   display: flex;
   align-items: center;
+  flex: 1 1 auto;
   gap: 0.75rem;
   min-width: 0;
   margin-left: auto;
+  overflow: hidden;
 }
 
 .pane-view-button {
@@ -2505,11 +2509,21 @@ textarea {
 
 .thread-chips {
   display: flex;
-  flex: 0 0 auto;
+  flex: 1 1 auto;
   flex-wrap: nowrap;
   justify-content: flex-end;
   gap: 0.6rem;
-  min-width: max-content;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.thread-chips > .chip {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .session-find-bar {
