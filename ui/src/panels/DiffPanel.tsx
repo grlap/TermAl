@@ -68,6 +68,7 @@ export function DiffPanel({
   filePath,
   language,
   sessionId,
+  projectId = null,
   onOpenPath,
   onSaveFile,
   summary,
@@ -80,11 +81,15 @@ export function DiffPanel({
   filePath: string | null;
   language?: string | null;
   sessionId: string | null;
+  projectId?: string | null;
   onOpenPath: (path: string) => void;
   onSaveFile: (path: string, content: string) => Promise<void>;
   summary: string;
 }) {
   const [latestFile, setLatestFile] = useState<LatestFileState>(() => createInitialLatestFileState(filePath));
+  const normalizedSessionId = sessionId?.trim() ?? "";
+  const normalizedProjectId = projectId?.trim() ?? "";
+  const hasScope = Boolean(normalizedSessionId || normalizedProjectId);
   const [editValue, setEditValue] = useState("");
   const [visualBaseContent, setVisualBaseContent] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -119,13 +124,13 @@ export function DiffPanel({
       return;
     }
 
-    if (!sessionId) {
+    if (!hasScope) {
       setVisualBaseContent(null);
       setLatestFile({
         status: "error",
         path: filePath,
         content: "",
-        error: "This diff preview is no longer associated with a live session.",
+        error: "This diff preview is no longer associated with a live session or project.",
         language: language ?? null,
       });
       return;
@@ -140,7 +145,10 @@ export function DiffPanel({
       language: language ?? null,
     });
 
-    void fetchFile(filePath, sessionId)
+    void fetchFile(filePath, {
+      sessionId: normalizedSessionId || null,
+      projectId: normalizedProjectId || null,
+    })
       .then((response) => {
         if (cancelled) {
           return;
@@ -166,7 +174,7 @@ export function DiffPanel({
     return () => {
       cancelled = true;
     };
-  }, [filePath, language, sessionId]);
+  }, [filePath, hasScope, language, normalizedProjectId, normalizedSessionId]);
 
   useEffect(() => {
     if (latestFile.status === "ready") {

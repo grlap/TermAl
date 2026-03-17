@@ -122,13 +122,13 @@ function isWorkspaceTab(value: unknown): value is WorkspaceTab {
     case "session":
       return isString(value.sessionId);
     case "source":
-      return isNullableString(value.path) && isNullableString(value.originSessionId);
+      return isNullableString(value.path) && isNullableString(value.originSessionId) && isOptionalNullableString(value.originProjectId);
     case "filesystem":
-      return isNullableString(value.rootPath) && isNullableString(value.originSessionId);
+      return isNullableString(value.rootPath) && isNullableString(value.originSessionId) && isOptionalNullableString(value.originProjectId);
     case "gitStatus":
-      return isNullableString(value.workdir) && isNullableString(value.originSessionId);
+      return isNullableString(value.workdir) && isNullableString(value.originSessionId) && isOptionalNullableString(value.originProjectId);
     case "controlPanel":
-      return isNullableString(value.originSessionId);
+      return isNullableString(value.originSessionId) && isOptionalNullableString(value.originProjectId);
     case "diffPreview":
       return (
         isString(value.diff) &&
@@ -136,6 +136,7 @@ function isWorkspaceTab(value: unknown): value is WorkspaceTab {
         isNullableString(value.filePath) &&
         isOptionalNullableString(value.language) &&
         isNullableString(value.originSessionId) &&
+        isOptionalNullableString(value.originProjectId) &&
         isString(value.summary) &&
         isDiffChangeType(value.changeType)
       );

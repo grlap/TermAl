@@ -160,7 +160,45 @@ describe("DiffPanel", () => {
     fireEvent.click(screen.getByRole("button", { name: "Edit mode" }));
 
     await waitFor(() => {
-      expect(fetchFileMock).toHaveBeenCalledWith("/repo/src/example.ts", "session-1");
+      expect(fetchFileMock).toHaveBeenCalledWith("/repo/src/example.ts", { sessionId: "session-1", projectId: null });
+    });
+
+    expect(await screen.findByTestId("monaco-code-editor")).toHaveValue("const latest = true;\n");
+  });
+
+  it("loads the latest file with a project scope when no session is present", async () => {
+    fetchFileMock.mockResolvedValue({
+      content: "const latest = true;\n",
+      language: "typescript",
+      path: "/repo/src/example.ts",
+    });
+
+    await act(async () => {
+      render(
+        <DiffPanel
+          appearance="dark"
+          fontSizePx={13}
+          changeType="edit"
+          diff={["@@ -1 +1 @@", "-old line", "+new line"].join("\n")}
+          diffMessageId="diff-project"
+          filePath="/repo/src/example.ts"
+          language="typescript"
+          sessionId={null}
+          projectId="project-1"
+          onOpenPath={() => {}}
+          onSaveFile={async () => {}}
+          summary="Updated example file"
+        />,
+      );
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Edit mode" }));
+
+    await waitFor(() => {
+      expect(fetchFileMock).toHaveBeenCalledWith("/repo/src/example.ts", {
+        sessionId: null,
+        projectId: "project-1",
+      });
     });
 
     expect(await screen.findByTestId("monaco-code-editor")).toHaveValue("const latest = true;\n");

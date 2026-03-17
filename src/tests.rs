@@ -2010,6 +2010,92 @@ fn project_scoped_paths_require_a_session_or_project_identifier() {
     assert_eq!(error.message, "sessionId or projectId is required");
 }
 
+#[tokio::test]
+async fn read_directory_accepts_project_id_without_session() {
+    let state = test_app_state();
+    let root = std::env::temp_dir().join(format!("termal-project-fs-read-{}", Uuid::new_v4()));
+    let src_dir = root.join("src");
+    let file_path = src_dir.join("main.rs");
+
+    fs::create_dir_all(&src_dir).unwrap();
+    fs::write(&file_path, "fn main() {}
+").unwrap();
+
+    let project = state
+        .create_project(CreateProjectRequest {
+            name: Some("Project Files".to_owned()),
+            root_path: root.to_string_lossy().into_owned(),
+        })
+        .unwrap();
+
+    let Json(response) = read_directory(
+        State(state),
+        Query(FileQuery {
+            path: root.to_string_lossy().into_owned(),
+            project_id: Some(project.project_id),
+            session_id: None,
+        }),
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(response.path, normalize_user_facing_path(&fs::canonicalize(&root).unwrap()).to_string_lossy());
+    assert_eq!(response.entries.len(), 1);
+    assert_eq!(response.entries[0].name, "src");
+
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[tokio::test]
+async fn read_and_write_file_accept_project_id_without_session() {
+    let state = test_app_state();
+    let root = std::env::temp_dir().join(format!("termal-project-file-read-write-{}", Uuid::new_v4()));
+    let existing_file = root.join("src").join("main.rs");
+    let new_file = root.join("generated").join("output.rs");
+
+    fs::create_dir_all(existing_file.parent().unwrap()).unwrap();
+    fs::write(&existing_file, "fn main() {}
+").unwrap();
+
+    let project = state
+        .create_project(CreateProjectRequest {
+            name: Some("Project Files".to_owned()),
+            root_path: root.to_string_lossy().into_owned(),
+        })
+        .unwrap();
+
+    let Json(read_response) = read_file(
+        State(state.clone()),
+        Query(FileQuery {
+            path: existing_file.to_string_lossy().into_owned(),
+            project_id: Some(project.project_id.clone()),
+            session_id: None,
+        }),
+    )
+    .await
+    .unwrap();
+    assert_eq!(read_response.content, "fn main() {}
+");
+
+    let Json(write_response) = write_file(
+        State(state),
+        Json(WriteFileRequest {
+            path: new_file.to_string_lossy().into_owned(),
+            content: "pub fn generated() {}
+".to_owned(),
+            project_id: Some(project.project_id),
+            session_id: None,
+        }),
+    )
+    .await
+    .unwrap();
+    assert_eq!(write_response.path, new_file.to_string_lossy());
+    assert_eq!(fs::read_to_string(&new_file).unwrap(), "pub fn generated() {}
+");
+
+    fs::remove_dir_all(root).unwrap();
+}
+
 #[test]
 fn persisted_state_without_projects_migrates_cleanly() {
     let path = std::env::temp_dir().join(format!("termal-project-migrate-{}.json", Uuid::new_v4()));

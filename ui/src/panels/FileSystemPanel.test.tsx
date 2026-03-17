@@ -63,10 +63,10 @@ describe("FileSystemPanel", () => {
     );
 
     await waitFor(() => {
-      expect(fetchDirectoryMock).toHaveBeenCalledWith("/repo", "session-1");
+      expect(fetchDirectoryMock).toHaveBeenCalledWith("/repo", { sessionId: "session-1", projectId: null });
     });
     await waitFor(() => {
-      expect(fetchGitStatusMock).toHaveBeenCalledWith("/repo", "session-1");
+      expect(fetchGitStatusMock).toHaveBeenCalledWith("/repo", "session-1", { projectId: null });
     });
 
     const readmeButton = await screen.findByRole("button", { name: /^README\.md/i });
@@ -80,7 +80,7 @@ describe("FileSystemPanel", () => {
     fireEvent.click(screen.getByRole("button", { name: "src" }));
 
     await waitFor(() => {
-      expect(fetchDirectoryMock).toHaveBeenCalledWith("/repo/src", "session-1");
+      expect(fetchDirectoryMock).toHaveBeenCalledWith("/repo/src", { sessionId: "session-1", projectId: null });
     });
 
     const mainFileButton = await screen.findByRole("button", { name: /^main\.rs/i });
@@ -89,6 +89,36 @@ describe("FileSystemPanel", () => {
     fireEvent.click(mainFileButton);
 
     expect(onOpenPath).toHaveBeenCalledWith("/repo/src/main.rs");
+  });
+
+  it("loads project-scoped directories without a live session", async () => {
+    fetchDirectoryMock.mockResolvedValue(
+      makeDirectoryResponse("repo", "/repo", [{ kind: "file", name: "main.rs", path: "/repo/main.rs" }]),
+    );
+    fetchGitStatusMock.mockResolvedValue(makeStatusResponse([]));
+
+    render(
+      <FileSystemPanel
+        rootPath="/repo"
+        sessionId={null}
+        projectId="project-1"
+        showPathControls={false}
+        onOpenPath={() => {}}
+        onOpenRootPath={() => {}}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(fetchDirectoryMock).toHaveBeenCalledWith("/repo", { sessionId: null, projectId: "project-1" });
+    });
+    await waitFor(() => {
+      expect(fetchGitStatusMock).toHaveBeenCalledWith("/repo", null, { projectId: "project-1" });
+    });
+
+    expect(await screen.findByRole("button", { name: /^main\.rs/i })).toBeInTheDocument();
+    expect(
+      screen.queryByText("This file browser is no longer associated with a live session or project."),
+    ).not.toBeInTheDocument();
   });
 
   it("passes openInNewTab when ctrl-clicking a file", async () => {

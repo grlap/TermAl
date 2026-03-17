@@ -50,12 +50,14 @@ export function FileSystemPanel({
   onOpenRootPath,
   rootPath,
   sessionId,
+  projectId = null,
   showPathControls = true,
 }: {
   onOpenPath: (path: string, options?: FileSystemOpenOptions) => void;
   onOpenRootPath: (path: string) => void;
   rootPath: string | null;
   sessionId: string | null;
+  projectId?: string | null;
   showPathControls?: boolean;
 }) {
   const [rootDraft, setRootDraft] = useState(rootPath ?? "");
@@ -65,6 +67,9 @@ export function FileSystemPanel({
   const [loadingPaths, setLoadingPaths] = useState<Record<string, true | undefined>>({});
   const [gitDecorations, setGitDecorations] = useState<FileSystemGitDecorations>(createEmptyGitDecorations());
   const normalizedRootPath = rootPath?.trim() ?? "";
+  const normalizedSessionId = sessionId?.trim() ?? "";
+  const normalizedProjectId = projectId?.trim() ?? "";
+  const hasScope = Boolean(normalizedSessionId || normalizedProjectId);
   const rootDirectory = normalizedRootPath ? directoriesByPath[normalizedRootPath] ?? null : null;
   const rootError = normalizedRootPath ? errorsByPath[normalizedRootPath] ?? null : null;
   const isRootLoading = Boolean(normalizedRootPath && loadingPaths[normalizedRootPath]);
@@ -83,10 +88,10 @@ export function FileSystemPanel({
       return;
     }
 
-    if (!sessionId) {
+    if (!hasScope) {
       setDirectoriesByPath({});
       setErrorsByPath({
-        [normalizedRootPath]: "This file browser is no longer associated with a live session.",
+        [normalizedRootPath]: "This file browser is no longer associated with a live session or project.",
       });
       return;
     }
@@ -100,7 +105,7 @@ export function FileSystemPanel({
           },
     );
     void loadDirectory(normalizedRootPath, true);
-  }, [normalizedRootPath, sessionId]);
+  }, [hasScope, normalizedRootPath, normalizedProjectId, normalizedSessionId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -110,12 +115,14 @@ export function FileSystemPanel({
       return;
     }
 
-    if (!sessionId) {
+    if (!hasScope) {
       setGitDecorations(createEmptyGitDecorations());
       return;
     }
 
-    void fetchGitStatus(normalizedRootPath, sessionId)
+    void fetchGitStatus(normalizedRootPath, normalizedSessionId || null, {
+      projectId: normalizedProjectId || null,
+    })
       .then((status) => {
         if (cancelled) {
           return;
@@ -134,17 +141,17 @@ export function FileSystemPanel({
     return () => {
       cancelled = true;
     };
-  }, [normalizedRootPath, sessionId]);
+  }, [hasScope, normalizedProjectId, normalizedRootPath, normalizedSessionId]);
 
   async function loadDirectory(path: string, force = false) {
     if (!force && (directoriesByPath[path] || loadingPaths[path])) {
       return;
     }
 
-    if (!sessionId) {
+    if (!hasScope) {
       setErrorsByPath((current) => ({
         ...current,
-        [path]: "This file browser is no longer associated with a live session.",
+        [path]: "This file browser is no longer associated with a live session or project.",
       }));
       return;
     }
@@ -164,7 +171,10 @@ export function FileSystemPanel({
     });
 
     try {
-      const response = await fetchDirectory(path, sessionId);
+      const response = await fetchDirectory(path, {
+        sessionId: normalizedSessionId || null,
+        projectId: normalizedProjectId || null,
+      });
       setDirectoriesByPath((current) => ({
         ...current,
         [path]: response,

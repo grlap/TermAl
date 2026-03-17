@@ -3122,13 +3122,14 @@ export default function App() {
     paneId: string,
     path: string | null,
     originSessionId: string | null,
+    originProjectId: string | null,
     options?: {
       openInNewTab?: boolean;
     },
   ) {
     setWorkspace((current) =>
       applyControlPanelLayout(
-        openSourceInWorkspaceState(current, path, paneId, originSessionId, {
+        openSourceInWorkspaceState(current, path, paneId, originSessionId, originProjectId, {
           openInNewTab: options?.openInNewTab,
         }),
       ),
@@ -3139,6 +3140,7 @@ export default function App() {
     paneId: string,
     message: DiffMessage,
     originSessionId: string | null,
+    originProjectId: string | null,
   ) {
     setWorkspace((current) =>
       applyControlPanelLayout(
@@ -3151,6 +3153,7 @@ export default function App() {
             filePath: message.filePath,
             language: message.language ?? null,
             originSessionId,
+            originProjectId,
             summary: message.summary,
           },
           paneId,
@@ -3163,6 +3166,7 @@ export default function App() {
     paneId: string,
     diffPreview: GitDiffResponse,
     originSessionId: string | null,
+    originProjectId: string | null,
     options?: {
       openInNewTab?: boolean;
     },
@@ -3178,6 +3182,7 @@ export default function App() {
             filePath: diffPreview.filePath ?? null,
             language: diffPreview.language ?? null,
             originSessionId,
+            originProjectId,
             summary: diffPreview.summary,
           },
           paneId,
@@ -3197,10 +3202,11 @@ export default function App() {
     paneId: string,
     rootPath: string | null,
     originSessionId: string | null,
+    originProjectId: string | null,
   ) {
     setWorkspace((current) =>
       applyControlPanelLayout(
-        openFilesystemInWorkspaceState(current, rootPath, paneId, originSessionId),
+        openFilesystemInWorkspaceState(current, rootPath, paneId, originSessionId, originProjectId),
       ),
     );
   }
@@ -3209,10 +3215,11 @@ export default function App() {
     paneId: string,
     workdir: string | null,
     originSessionId: string | null,
+    originProjectId: string | null,
   ) {
     setWorkspace((current) =>
       applyControlPanelLayout(
-        openGitStatusInWorkspaceState(current, workdir, paneId, originSessionId),
+        openGitStatusInWorkspaceState(current, workdir, paneId, originSessionId, originProjectId),
       ),
     );
   }
@@ -3246,7 +3253,7 @@ export default function App() {
             <button
               className="control-panel-header-action control-panel-header-open-button"
               type="button"
-              onClick={() => handleOpenFilesystemTab(paneId, controlPanelFilesystemRoot, controlPanelSessionId)}
+              onClick={() => handleOpenFilesystemTab(paneId, controlPanelFilesystemRoot, controlPanelSessionId, selectedProject?.id ?? null)}
               disabled={!(controlPanelFilesystemRoot?.trim() ?? "")}
             >
               <span className="control-panel-header-action-icon" aria-hidden="true">
@@ -3306,9 +3313,10 @@ export default function App() {
               <FileSystemPanel
                 rootPath={controlPanelFilesystemRoot}
                 sessionId={controlPanelSessionId}
+                projectId={selectedProject?.id ?? null}
                 showPathControls={false}
                 onOpenPath={(path, options) =>
-                  handleOpenSourceTab(paneId, path, controlPanelSessionId, options)
+                  handleOpenSourceTab(paneId, path, controlPanelSessionId, selectedProject?.id ?? null, options)
                 }
                 onOpenRootPath={(path) => setControlPanelFilesystemRoot(path.trim() || null)}
               />
@@ -3325,7 +3333,7 @@ export default function App() {
                 showPathControls={false}
                 onStatusChange={(status) => setControlPanelGitStatusCount(status?.files.length ?? 0)}
                 onOpenDiff={(diff, options) =>
-                  handleOpenGitStatusDiffPreviewTab(paneId, diff, controlPanelSessionId, options)
+                  handleOpenGitStatusDiffPreviewTab(paneId, diff, controlPanelSessionId, selectedProject?.id ?? null, options)
                 }
                 onOpenWorkdir={(path) => setControlPanelGitWorkdir(path.trim() || null)}
               />
@@ -5197,28 +5205,33 @@ function WorkspaceNodeView({
     paneId: string,
     path: string | null,
     originSessionId: string | null,
+    originProjectId: string | null,
     options?: { openInNewTab?: boolean },
   ) => void;
   onOpenDiffPreviewTab: (
     paneId: string,
     message: DiffMessage,
     originSessionId: string | null,
+    originProjectId: string | null,
   ) => void;
   onOpenGitStatusDiffPreviewTab: (
     paneId: string,
     diffPreview: GitDiffResponse,
     originSessionId: string | null,
+    originProjectId: string | null,
     options?: { openInNewTab?: boolean },
   ) => void;
   onOpenFilesystemTab: (
     paneId: string,
     rootPath: string | null,
     originSessionId: string | null,
+    originProjectId: string | null,
   ) => void;
   onOpenGitStatusTab: (
     paneId: string,
     workdir: string | null,
     originSessionId: string | null,
+    originProjectId: string | null,
   ) => void;
   onPaneSourcePathChange: (paneId: string, path: string) => void;
   onDraftCommit: (sessionId: string, nextValue: string) => void;
@@ -5588,28 +5601,33 @@ function SessionPaneView({
     paneId: string,
     path: string | null,
     originSessionId: string | null,
+    originProjectId: string | null,
     options?: { openInNewTab?: boolean },
   ) => void;
   onOpenDiffPreviewTab: (
     paneId: string,
     message: DiffMessage,
     originSessionId: string | null,
+    originProjectId: string | null,
   ) => void;
   onOpenGitStatusDiffPreviewTab: (
     paneId: string,
     diffPreview: GitDiffResponse,
     originSessionId: string | null,
+    originProjectId: string | null,
     options?: { openInNewTab?: boolean },
   ) => void;
   onOpenFilesystemTab: (
     paneId: string,
     rootPath: string | null,
     originSessionId: string | null,
+    originProjectId: string | null,
   ) => void;
   onOpenGitStatusTab: (
     paneId: string,
     workdir: string | null,
     originSessionId: string | null,
+    originProjectId: string | null,
   ) => void;
   onPaneSourcePathChange: (paneId: string, path: string) => void;
   onDraftCommit: (sessionId: string, nextValue: string) => void;
@@ -5648,9 +5666,13 @@ function SessionPaneView({
   const activeGitStatusTab = activeTab?.kind === "gitStatus" ? activeTab : null;
   const activeDiffPreviewTab = activeTab?.kind === "diffPreview" ? activeTab : null;
   const activeSourceOriginSessionId = activeSourceTab?.originSessionId ?? null;
+  const activeSourceOriginProjectId = activeSourceTab?.originProjectId ?? null;
   const activeFilesystemOriginSessionId = activeFilesystemTab?.originSessionId ?? null;
+  const activeFilesystemOriginProjectId = activeFilesystemTab?.originProjectId ?? null;
   const activeGitStatusOriginSessionId = activeGitStatusTab?.originSessionId ?? null;
+  const activeGitStatusOriginProjectId = activeGitStatusTab?.originProjectId ?? null;
   const activeDiffOriginSessionId = activeDiffPreviewTab?.originSessionId ?? null;
+  const activeDiffOriginProjectId = activeDiffPreviewTab?.originProjectId ?? null;
   const isSessionTabActive = activeTab?.kind === "session";
   const sessionTabs = useMemo(
     () =>
@@ -5863,12 +5885,20 @@ function SessionPaneView({
       });
   }
 
-  async function handleSourceFileSave(path: string, content: string, sessionId: string | null) {
-    if (!sessionId) {
-      throw new Error("This file view is no longer associated with a live session.");
+  async function handleSourceFileSave(
+    path: string,
+    content: string,
+    sessionId: string | null,
+    projectId: string | null,
+  ) {
+    if (!sessionId && !projectId) {
+      throw new Error("This file view is no longer associated with a live session or project.");
     }
 
-    const response = await saveFile(path, content, sessionId);
+    const response = await saveFile(path, content, {
+      sessionId,
+      projectId,
+    });
     setFileState({
       status: "ready",
       path: response.path,
@@ -6395,12 +6425,12 @@ function SessionPaneView({
     let cancelled = false;
 
     async function loadFile(path: string) {
-      if (!activeSourceOriginSessionId) {
+      if (!activeSourceOriginSessionId && !activeSourceOriginProjectId) {
         setFileState({
           status: "error",
           path,
           content: "",
-          error: "This file view is no longer associated with a live session.",
+          error: "This file view is no longer associated with a live session or project.",
           language: null,
         });
         return;
@@ -6415,7 +6445,10 @@ function SessionPaneView({
       });
 
       try {
-        const response = await fetchFile(path, activeSourceOriginSessionId);
+        const response = await fetchFile(path, {
+          sessionId: activeSourceOriginSessionId,
+          projectId: activeSourceOriginProjectId,
+        });
         if (cancelled) {
           return;
         }
@@ -6457,7 +6490,7 @@ function SessionPaneView({
     return () => {
       cancelled = true;
     };
-  }, [activeSourceOriginSessionId, pane.sourcePath, pane.viewMode]);
+  }, [activeSourceOriginProjectId, activeSourceOriginSessionId, pane.sourcePath, pane.viewMode]);
 
   useEffect(() => {
     if (!showDropOverlay) {
@@ -6548,7 +6581,7 @@ function SessionPaneView({
                   const candidatePath = activeSession
                     ? collectCandidateSourcePaths(activeSession)[0] ?? null
                     : null;
-                  onOpenSourceTab(pane.id, candidatePath, activeSession?.id ?? null);
+                  onOpenSourceTab(pane.id, candidatePath, activeSession?.id ?? null, activeSession?.projectId ?? null);
                 }}
               >
                 File
@@ -6561,6 +6594,7 @@ function SessionPaneView({
                     pane.id,
                     activeSession?.workdir ?? null,
                     activeSession?.id ?? null,
+                    activeSession?.projectId ?? null,
                   )
                 }
               >
@@ -6574,6 +6608,7 @@ function SessionPaneView({
                     pane.id,
                     activeSession?.workdir ?? null,
                     activeSession?.id ?? null,
+                    activeSession?.projectId ?? null,
                   )
                 }
                 >
@@ -6667,18 +6702,30 @@ function SessionPaneView({
             onDraftChange={setSourceDraft}
             onOpenPath={(path) => onPaneSourcePathChange(pane.id, path)}
             onSaveFile={(path, content) =>
-              handleSourceFileSave(path, content, activeSourceOriginSessionId)
+              handleSourceFileSave(path, content, activeSourceOriginSessionId, activeSourceOriginProjectId)
             }
           />
         ) : activeFilesystemTab ? (
           <FileSystemPanel
             rootPath={activeFilesystemTab.rootPath}
             sessionId={activeFilesystemOriginSessionId}
+            projectId={activeFilesystemOriginProjectId}
             onOpenPath={(path, options) =>
-              onOpenSourceTab(pane.id, path, activeFilesystemOriginSessionId, options)
+              onOpenSourceTab(
+                pane.id,
+                path,
+                activeFilesystemOriginSessionId,
+                activeFilesystemOriginProjectId,
+                options,
+              )
             }
             onOpenRootPath={(path) =>
-              onOpenFilesystemTab(pane.id, path, activeFilesystemOriginSessionId)
+              onOpenFilesystemTab(
+                pane.id,
+                path,
+                activeFilesystemOriginSessionId,
+                activeFilesystemOriginProjectId,
+              )
             }
           />
         ) : activeGitStatusTab ? (
@@ -6686,10 +6733,16 @@ function SessionPaneView({
             sessionId={activeGitStatusOriginSessionId}
             workdir={activeGitStatusTab.workdir}
             onOpenDiff={(diff, options) =>
-              onOpenGitStatusDiffPreviewTab(pane.id, diff, activeGitStatusOriginSessionId, options)
+              onOpenGitStatusDiffPreviewTab(
+                pane.id,
+                diff,
+                activeGitStatusOriginSessionId,
+                activeGitStatusOriginProjectId,
+                options,
+              )
             }
             onOpenWorkdir={(path) =>
-              onOpenGitStatusTab(pane.id, path, activeGitStatusOriginSessionId)
+              onOpenGitStatusTab(pane.id, path, activeGitStatusOriginSessionId, activeGitStatusOriginProjectId)
             }
           />
         ) : activeDiffPreviewTab ? (
@@ -6702,9 +6755,12 @@ function SessionPaneView({
             filePath={activeDiffPreviewTab.filePath}
             language={activeDiffPreviewTab.language ?? null}
             sessionId={activeDiffOriginSessionId}
-            onOpenPath={(path) => onOpenSourceTab(pane.id, path, activeDiffOriginSessionId)}
+            projectId={activeDiffOriginProjectId}
+            onOpenPath={(path) =>
+              onOpenSourceTab(pane.id, path, activeDiffOriginSessionId, activeDiffOriginProjectId)
+            }
             onSaveFile={(path, content) =>
-              handleSourceFileSave(path, content, activeDiffOriginSessionId)
+              handleSourceFileSave(path, content, activeDiffOriginSessionId, activeDiffOriginProjectId)
             }
             summary={activeDiffPreviewTab.summary}
           />
@@ -6733,7 +6789,7 @@ function SessionPaneView({
               <DiffCard
                 message={message}
                 onOpenPreview={() =>
-                  onOpenDiffPreviewTab(pane.id, message, activeSession?.id ?? null)
+                  onOpenDiffPreviewTab(pane.id, message, activeSession?.id ?? null, activeSession?.projectId ?? null)
                 }
                 workspaceRoot={activeSession?.workdir ?? null}
               />
@@ -6742,7 +6798,7 @@ function SessionPaneView({
               <MessageCard
                 message={message}
                 onOpenDiffPreview={(diffMessage) =>
-                  onOpenDiffPreviewTab(pane.id, diffMessage, activeSession?.id ?? null)
+                  onOpenDiffPreviewTab(pane.id, diffMessage, activeSession?.id ?? null, activeSession?.projectId ?? null)
                 }
                 preferImmediateHeavyRender={preferImmediateHeavyRender}
                 onApprovalDecision={handleDecision}

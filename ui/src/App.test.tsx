@@ -674,6 +674,103 @@ describe("App", () => {
     }
   });
 
+  it("loads project files in the control panel without requiring a session", async () => {
+    const originalFetch = globalThis.fetch;
+    const originalEventSource = globalThis.EventSource;
+    const originalResizeObserver = globalThis.ResizeObserver;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const requestUrl = new URL(String(input), "http://localhost");
+      if (requestUrl.pathname === "/api/state") {
+        return jsonResponse({
+          revision: 1,
+          projects: [
+            {
+              id: "project-api",
+              name: "API",
+              rootPath: "/projects/api",
+            },
+            {
+              id: "project-web",
+              name: "Web",
+              rootPath: "/projects/web",
+            },
+          ],
+          sessions: [
+            makeSession("session-web", {
+              name: "Web Session",
+              projectId: "project-web",
+              workdir: "/projects/web",
+            }),
+          ],
+        });
+      }
+
+      if (requestUrl.pathname === "/api/fs") {
+        expect(requestUrl.searchParams.get("path")).toBe("/projects/api");
+        expect(requestUrl.searchParams.get("sessionId")).toBeNull();
+        expect(requestUrl.searchParams.get("projectId")).toBe("project-api");
+        return jsonResponse({
+          entries: [
+            {
+              kind: "file",
+              name: "README.md",
+              path: "/projects/api/README.md",
+            },
+          ],
+          name: "api",
+          path: "/projects/api",
+        });
+      }
+
+      if (requestUrl.pathname === "/api/git/status") {
+        expect(requestUrl.searchParams.get("path")).toBe("/projects/api");
+        expect(requestUrl.searchParams.get("sessionId")).toBeNull();
+        expect(requestUrl.searchParams.get("projectId")).toBe("project-api");
+        return jsonResponse({
+          ahead: 0,
+          behind: 0,
+          branch: "main",
+          files: [],
+          isClean: true,
+          repoRoot: "/projects/api",
+          upstream: "origin/main",
+          workdir: "/projects/api",
+        });
+      }
+
+      throw new Error(`Unexpected fetch: ${requestUrl.pathname}${requestUrl.search}`);
+    });
+
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("EventSource", EventSourceMock as unknown as typeof EventSource);
+    vi.stubGlobal("ResizeObserver", ResizeObserverMock as unknown as typeof ResizeObserver);
+    const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
+    HTMLElement.prototype.scrollIntoView = vi.fn();
+
+    try {
+      await renderApp();
+      const eventSource = EventSourceMock.instances[0];
+      expect(eventSource).toBeTruthy();
+      act(() => {
+        eventSource.dispatchError();
+      });
+      await settleAsyncUi();
+
+      await selectComboboxOption("Project", /^API$/i);
+      await clickAndSettle(await screen.findByRole("button", { name: "Files" }));
+
+      expect(await screen.findByRole("button", { name: /^README\.md/i })).toBeInTheDocument();
+      expect(
+        screen.queryByText("This file browser is no longer associated with a live session or project."),
+      ).not.toBeInTheDocument();
+    } finally {
+      HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
+      restoreGlobal("fetch", originalFetch);
+      restoreGlobal("EventSource", originalEventSource);
+      restoreGlobal("ResizeObserver", originalResizeObserver);
+    }
+  });
+
   it("keeps the control panel divider resizable when a session pane is open", async () => {
     const originalFetch = globalThis.fetch;
     const originalEventSource = globalThis.EventSource;

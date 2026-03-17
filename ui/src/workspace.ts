@@ -20,6 +20,7 @@ export type WorkspaceSourceTab = {
   kind: "source";
   path: string | null;
   originSessionId: string | null;
+  originProjectId?: string | null;
 };
 
 export type WorkspaceFilesystemTab = {
@@ -27,6 +28,7 @@ export type WorkspaceFilesystemTab = {
   kind: "filesystem";
   rootPath: string | null;
   originSessionId: string | null;
+  originProjectId?: string | null;
 };
 
 export type WorkspaceGitStatusTab = {
@@ -34,12 +36,14 @@ export type WorkspaceGitStatusTab = {
   kind: "gitStatus";
   workdir: string | null;
   originSessionId: string | null;
+  originProjectId?: string | null;
 };
 
 export type WorkspaceControlPanelTab = {
   id: string;
   kind: "controlPanel";
   originSessionId: string | null;
+  originProjectId?: string | null;
 };
 
 export type WorkspaceDiffPreviewTab = {
@@ -51,6 +55,7 @@ export type WorkspaceDiffPreviewTab = {
   filePath: string | null;
   language?: string | null;
   originSessionId: string | null;
+  originProjectId?: string | null;
   summary: string;
 };
 
@@ -106,46 +111,62 @@ export function createSessionTab(sessionId: string): WorkspaceSessionTab {
 export function createSourceTab(
   path: string | null = null,
   originSessionId: string | null = null,
+  originProjectId: string | null = null,
 ): WorkspaceSourceTab {
+  const normalizedOriginProjectId = normalizeWorkspaceIdentifier(originProjectId);
+
   return {
     id: crypto.randomUUID(),
     kind: "source",
     path: normalizeWorkspacePath(path),
     originSessionId,
+    ...projectOriginProps(normalizedOriginProjectId),
   };
 }
 
 export function createFilesystemTab(
   rootPath: string | null = null,
   originSessionId: string | null = null,
+  originProjectId: string | null = null,
 ): WorkspaceFilesystemTab {
+  const normalizedOriginProjectId = normalizeWorkspaceIdentifier(originProjectId);
+
   return {
     id: crypto.randomUUID(),
     kind: "filesystem",
     rootPath: normalizeWorkspacePath(rootPath),
     originSessionId,
+    ...projectOriginProps(normalizedOriginProjectId),
   };
 }
 
 export function createGitStatusTab(
   workdir: string | null = null,
   originSessionId: string | null = null,
+  originProjectId: string | null = null,
 ): WorkspaceGitStatusTab {
+  const normalizedOriginProjectId = normalizeWorkspaceIdentifier(originProjectId);
+
   return {
     id: crypto.randomUUID(),
     kind: "gitStatus",
     workdir: normalizeWorkspacePath(workdir),
     originSessionId,
+    ...projectOriginProps(normalizedOriginProjectId),
   };
 }
 
 export function createControlPanelTab(
   originSessionId: string | null = null,
+  originProjectId: string | null = null,
 ): WorkspaceControlPanelTab {
+  const normalizedOriginProjectId = normalizeWorkspaceIdentifier(originProjectId);
+
   return {
     id: crypto.randomUUID(),
     kind: "controlPanel",
     originSessionId,
+    ...projectOriginProps(normalizedOriginProjectId),
   };
 }
 
@@ -156,6 +177,7 @@ export function createDiffPreviewTab({
   filePath = null,
   language = null,
   originSessionId = null,
+  originProjectId = null,
   summary,
 }: {
   changeType: DiffMessage["changeType"];
@@ -164,8 +186,11 @@ export function createDiffPreviewTab({
   filePath?: string | null;
   language?: string | null;
   originSessionId?: string | null;
+  originProjectId?: string | null;
   summary: string;
 }): WorkspaceDiffPreviewTab {
+  const normalizedOriginProjectId = normalizeWorkspaceIdentifier(originProjectId);
+
   return {
     id: crypto.randomUUID(),
     kind: "diffPreview",
@@ -175,6 +200,7 @@ export function createDiffPreviewTab({
     filePath: normalizeWorkspacePath(filePath),
     language,
     originSessionId,
+    ...projectOriginProps(normalizedOriginProjectId),
     summary,
   };
 }
@@ -192,50 +218,61 @@ export function reconcileWorkspaceState(current: WorkspaceState, sessions: Sessi
           tab.originSessionId && availableSessionIds.has(tab.originSessionId)
             ? tab.originSessionId
             : null;
+        const originProjectId = normalizeWorkspaceIdentifier(tab.originProjectId);
 
         if (tab.kind === "source") {
+          const { originProjectId: _ignoredOriginProjectId, ...tabWithoutOriginProjectId } = tab;
           return [
             {
-              ...tab,
+              ...tabWithoutOriginProjectId,
               originSessionId,
+              ...projectOriginProps(originProjectId),
               path: normalizeWorkspacePath(tab.path),
             },
           ];
         }
 
         if (tab.kind === "filesystem") {
+          const { originProjectId: _ignoredOriginProjectId, ...tabWithoutOriginProjectId } = tab;
           return [
             {
-              ...tab,
+              ...tabWithoutOriginProjectId,
               originSessionId,
+              ...projectOriginProps(originProjectId),
               rootPath: normalizeWorkspacePath(tab.rootPath),
             },
           ];
         }
 
         if (tab.kind === "gitStatus") {
+          const { originProjectId: _ignoredOriginProjectId, ...tabWithoutOriginProjectId } = tab;
           return [
             {
-              ...tab,
+              ...tabWithoutOriginProjectId,
               originSessionId,
+              ...projectOriginProps(originProjectId),
               workdir: normalizeWorkspacePath(tab.workdir),
             },
           ];
         }
 
         if (tab.kind === "controlPanel") {
+          const { originProjectId: _ignoredOriginProjectId, ...tabWithoutOriginProjectId } = tab;
           return [
             {
-              ...tab,
+              ...tabWithoutOriginProjectId,
               originSessionId,
+              ...projectOriginProps(originProjectId),
             },
           ];
         }
 
+        const { originProjectId: _ignoredOriginProjectId, ...tabWithoutOriginProjectId } = tab;
         return [
           {
-            ...tab,
+            ...tabWithoutOriginProjectId,
             originSessionId,
+            ...projectOriginProps(originProjectId),
             filePath: normalizeWorkspacePath(tab.filePath),
           },
         ];
@@ -315,10 +352,19 @@ export function openSourceInWorkspaceState(
   path: string | null,
   preferredPaneId: string | null,
   originSessionId: string | null,
+  originProjectIdOrOptions: string | null | { openInNewTab?: boolean } = null,
   options?: {
     openInNewTab?: boolean;
   },
 ): WorkspaceState {
+  const originProjectId =
+    typeof originProjectIdOrOptions === "string" || originProjectIdOrOptions === null
+      ? originProjectIdOrOptions
+      : null;
+  const resolvedOptions =
+    typeof originProjectIdOrOptions === "string" || originProjectIdOrOptions === null
+      ? options
+      : originProjectIdOrOptions;
   const normalizedPath = normalizeWorkspacePath(path);
   const targetPaneId = findContextualTargetPaneId(
     workspace,
@@ -326,8 +372,8 @@ export function openSourceInWorkspaceState(
     originSessionId,
     "source",
   );
-  const nextTab = createSourceTab(normalizedPath, originSessionId);
-  if (options?.openInNewTab) {
+  const nextTab = createSourceTab(normalizedPath, originSessionId, originProjectId);
+  if (resolvedOptions?.openInNewTab) {
     return openContextualTabInWorkspaceState(workspace, nextTab, null, preferredPaneId, originSessionId);
   }
 
@@ -354,6 +400,7 @@ export function openFilesystemInWorkspaceState(
   rootPath: string | null,
   preferredPaneId: string | null,
   originSessionId: string | null,
+  originProjectId: string | null = null,
 ): WorkspaceState {
   const normalizedRootPath = normalizeWorkspacePath(rootPath);
   if (normalizedRootPath) {
@@ -365,7 +412,7 @@ export function openFilesystemInWorkspaceState(
 
   return openTabInWorkspaceState(
     workspace,
-    createFilesystemTab(normalizedRootPath, originSessionId),
+    createFilesystemTab(normalizedRootPath, originSessionId, originProjectId),
     preferredPaneId,
   );
 }
@@ -375,6 +422,7 @@ export function openGitStatusInWorkspaceState(
   workdir: string | null,
   preferredPaneId: string | null,
   originSessionId: string | null,
+  originProjectId: string | null = null,
 ): WorkspaceState {
   const normalizedWorkdir = normalizeWorkspacePath(workdir);
   if (normalizedWorkdir) {
@@ -386,7 +434,7 @@ export function openGitStatusInWorkspaceState(
 
   return openTabInWorkspaceState(
     workspace,
-    createGitStatusTab(normalizedWorkdir, originSessionId),
+    createGitStatusTab(normalizedWorkdir, originSessionId, originProjectId),
     preferredPaneId,
   );
 }
@@ -395,6 +443,7 @@ export function openControlPanelInWorkspaceState(
   workspace: WorkspaceState,
   preferredPaneId: string | null,
   originSessionId: string | null,
+  originProjectId: string | null = null,
 ): WorkspaceState {
   const existing = findControlPanelTab(workspace);
   if (existing) {
@@ -403,7 +452,7 @@ export function openControlPanelInWorkspaceState(
 
   return openTabInWorkspaceState(
     workspace,
-    createControlPanelTab(originSessionId),
+    createControlPanelTab(originSessionId, originProjectId),
     preferredPaneId,
   );
 }
@@ -415,7 +464,7 @@ export function ensureControlPanelInWorkspaceState(workspace: WorkspaceState): W
 
   return openTabInWorkspaceState(
     workspace,
-    createControlPanelTab(null),
+    createControlPanelTab(null, null),
     findDefaultControlPanelAnchorPaneId(workspace),
   );
 }
@@ -479,6 +528,7 @@ export function openDiffPreviewInWorkspaceState(
     filePath: string | null;
     language?: string | null;
     originSessionId: string | null;
+    originProjectId?: string | null;
     summary: string;
   },
   preferredPaneId: string | null,
@@ -498,7 +548,7 @@ export function openDiffPreviewInWorkspaceState(
     );
   }
 
-  const existing = findDiffPreviewTab(workspace, tab.diffMessageId, tab.originSessionId);
+  const existing = findDiffPreviewTab(workspace, tab.diffMessageId, tab.originSessionId, tab.originProjectId ?? null);
   if (existing) {
     return activatePane(workspace, existing.paneId, existing.tab.id);
   }
@@ -814,15 +864,19 @@ export function setPaneSourcePath(
 
       return syncPaneState({
         ...pane,
-        tabs: pane.tabs.map((tab) =>
-          tab.id === activeTab.id
-            ? {
-                ...tab,
-                path: nextPath,
-                originSessionId: activeTab.originSessionId ?? pane.activeSessionId ?? null,
-              }
-            : tab,
-        ),
+        tabs: pane.tabs.map((tab) => {
+          if (tab.id !== activeTab.id || tab.kind !== "source") {
+            return tab;
+          }
+
+          const { originProjectId: _ignoredOriginProjectId, ...tabWithoutOriginProjectId } = tab;
+          return {
+            ...tabWithoutOriginProjectId,
+            path: nextPath,
+            originSessionId: activeTab.originSessionId ?? pane.activeSessionId ?? null,
+            ...projectOriginProps(activeTab.originProjectId ?? null),
+          };
+        }),
       });
     }),
   };
@@ -1228,13 +1282,15 @@ function findDiffPreviewTab(
   workspace: WorkspaceState,
   diffMessageId: string,
   originSessionId: string | null,
+  originProjectId: string | null,
 ) {
   for (const pane of workspace.panes) {
     const tab = pane.tabs.find(
       (candidate): candidate is WorkspaceDiffPreviewTab =>
         candidate.kind === "diffPreview" &&
         candidate.diffMessageId === diffMessageId &&
-        candidate.originSessionId === originSessionId,
+        candidate.originSessionId === originSessionId &&
+        (candidate.originProjectId ?? null) === originProjectId,
     );
     if (tab) {
       return { paneId: pane.id, tab };
@@ -1434,6 +1490,19 @@ function getActiveTab(pane: WorkspacePane) {
 function normalizeWorkspacePath(path: string | null | undefined) {
   const trimmed = path?.trim();
   return trimmed ? trimmed : null;
+}
+
+function normalizeWorkspaceIdentifier(value: string | null | undefined) {
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const trimmed = value.trim();
+  return trimmed ? trimmed : null;
+}
+
+function projectOriginProps(originProjectId: string | null) {
+  return originProjectId ? { originProjectId } : {};
 }
 
 function resolveOriginSessionId(

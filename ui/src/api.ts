@@ -264,23 +264,55 @@ export function stopSession(sessionId: string) {
   });
 }
 
-export function fetchFile(path: string, sessionId: string) {
-  return request<FileResponse>(
-    `/api/file?path=${encodeURIComponent(path)}&sessionId=${encodeURIComponent(sessionId)}`,
-  );
+type FileRequestScope = {
+  projectId?: string | null;
+  sessionId?: string | null;
+};
+
+export function fetchFile(path: string, scope?: FileRequestScope) {
+  const query = new URLSearchParams({
+    path,
+  });
+
+  const sessionId = scope?.sessionId?.trim();
+  if (sessionId) {
+    query.set("sessionId", sessionId);
+  }
+
+  const projectId = scope?.projectId?.trim();
+  if (projectId) {
+    query.set("projectId", projectId);
+  }
+
+  return request<FileResponse>(`/api/file?${query.toString()}`);
 }
 
-export function saveFile(path: string, content: string, sessionId: string) {
+export function saveFile(path: string, content: string, scope?: FileRequestScope) {
+  const sessionId = scope?.sessionId?.trim();
+  const projectId = scope?.projectId?.trim();
+
   return request<FileResponse>("/api/file", {
     method: "PUT",
-    body: JSON.stringify({ path, content, sessionId }),
+    body: JSON.stringify({ path, content, sessionId, projectId }),
   });
 }
 
-export function fetchDirectory(path: string, sessionId: string) {
-  return request<DirectoryResponse>(
-    `/api/fs?path=${encodeURIComponent(path)}&sessionId=${encodeURIComponent(sessionId)}`,
-  );
+export function fetchDirectory(path: string, scope?: FileRequestScope) {
+  const query = new URLSearchParams({
+    path,
+  });
+
+  const sessionId = scope?.sessionId?.trim();
+  if (sessionId) {
+    query.set("sessionId", sessionId);
+  }
+
+  const projectId = scope?.projectId?.trim();
+  if (projectId) {
+    query.set("projectId", projectId);
+  }
+
+  return request<DirectoryResponse>(`/api/fs?${query.toString()}`);
 }
 
 export function fetchGitStatus(

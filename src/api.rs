@@ -108,9 +108,13 @@ async fn read_file(
     State(state): State<AppState>,
     Query(query): Query<FileQuery>,
 ) -> Result<Json<FileResponse>, ApiError> {
-    let session_id = required_session_id(query.session_id.as_deref())?;
-    let resolved_path =
-        resolve_session_scoped_requested_path(&state, session_id, &query.path, ScopedPathMode::ExistingFile)?;
+    let resolved_path = resolve_project_scoped_requested_path(
+        &state,
+        query.session_id.as_deref(),
+        query.project_id.as_deref(),
+        &query.path,
+        ScopedPathMode::ExistingFile,
+    )?;
     let content = fs::read_to_string(&resolved_path).map_err(|err| match err.kind() {
         io::ErrorKind::NotFound => {
             ApiError::bad_request(format!("file not found: {}", resolved_path.display()))
@@ -136,10 +140,10 @@ async fn write_file(
     State(state): State<AppState>,
     Json(request): Json<WriteFileRequest>,
 ) -> Result<Json<FileResponse>, ApiError> {
-    let session_id = required_session_id(request.session_id.as_deref())?;
-    let resolved_path = resolve_session_scoped_requested_path(
+    let resolved_path = resolve_project_scoped_requested_path(
         &state,
-        session_id,
+        request.session_id.as_deref(),
+        request.project_id.as_deref(),
         &request.path,
         ScopedPathMode::AllowMissingLeaf,
     )?;
@@ -170,9 +174,13 @@ async fn read_directory(
     State(state): State<AppState>,
     Query(query): Query<FileQuery>,
 ) -> Result<Json<DirectoryResponse>, ApiError> {
-    let session_id = required_session_id(query.session_id.as_deref())?;
-    let resolved_path =
-        resolve_session_scoped_requested_path(&state, session_id, &query.path, ScopedPathMode::ExistingPath)?;
+    let resolved_path = resolve_project_scoped_requested_path(
+        &state,
+        query.session_id.as_deref(),
+        query.project_id.as_deref(),
+        &query.path,
+        ScopedPathMode::ExistingPath,
+    )?;
     let metadata = fs::metadata(&resolved_path).map_err(|err| match err.kind() {
         io::ErrorKind::NotFound => {
             ApiError::bad_request(format!("path not found: {}", resolved_path.display()))
@@ -1488,6 +1496,7 @@ struct UpdateAppSettingsRequest {
 #[serde(rename_all = "camelCase")]
 struct FileQuery {
     path: String,
+    project_id: Option<String>,
     session_id: Option<String>,
 }
 
@@ -1496,6 +1505,7 @@ struct FileQuery {
 struct WriteFileRequest {
     path: String,
     content: String,
+    project_id: Option<String>,
     session_id: Option<String>,
 }
 
@@ -1904,13 +1914,6 @@ enum ScopedPathMode {
     ExistingFile,
     ExistingPath,
     AllowMissingLeaf,
-}
-
-fn required_session_id(session_id: Option<&str>) -> Result<&str, ApiError> {
-    let Some(session_id) = session_id.map(str::trim).filter(|value| !value.is_empty()) else {
-        return Err(ApiError::bad_request("sessionId is required"));
-    };
-    Ok(session_id)
 }
 
 fn normalize_optional_identifier(value: Option<&str>) -> Option<&str> {
