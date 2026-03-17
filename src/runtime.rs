@@ -485,6 +485,8 @@ type AcpPendingRequestMap = Arc<Mutex<HashMap<String, Sender<std::result::Result
 
 #[derive(Default)]
 struct CodexTurnState {
+    current_agent_message_id: Option<String>,
+    streamed_agent_message_text_by_item_id: HashMap<String, String>,
     streamed_agent_message_item_ids: HashSet<String>,
 }
 
@@ -1927,8 +1929,7 @@ fn codex_message_thread_id<'a>(message: &'a Value) -> Option<&'a str> {
 
 fn shared_codex_session_thread_id<'a>(method: &str, message: &'a Value) -> Option<&'a str> {
     codex_message_thread_id(message).or_else(|| match method {
-        "codex/event/task_complete" => message.pointer("/params/conversationId").and_then(Value::as_str),
-        "codex/event/item_completed" => message
+        _ if method.starts_with("codex/event/") => message
             .pointer("/params/msg/thread_id")
             .and_then(Value::as_str)
             .or_else(|| message.pointer("/params/conversationId").and_then(Value::as_str)),
@@ -2180,6 +2181,8 @@ fn handle_shared_codex_app_server_notification(
             }
         }
         "turn/started" => {
+            turn_state.current_agent_message_id = None;
+            turn_state.streamed_agent_message_text_by_item_id.clear();
             turn_state.streamed_agent_message_item_ids.clear();
             *turn_id = message
                 .pointer("/params/turn/id")
@@ -2189,6 +2192,8 @@ fn handle_shared_codex_app_server_notification(
         }
         "turn/completed" => {
             *turn_id = None;
+            turn_state.current_agent_message_id = None;
+            turn_state.streamed_agent_message_text_by_item_id.clear();
             recorder.finish_streaming_text()?;
             if let Some(error) = message.pointer("/params/turn/error") {
                 if !error.is_null() {
@@ -2219,10 +2224,7 @@ fn handle_shared_codex_app_server_notification(
             let Some(item_id) = message.pointer("/params/itemId").and_then(Value::as_str) else {
                 return Ok(());
             };
-            turn_state
-                .streamed_agent_message_item_ids
-                .insert(item_id.to_owned());
-            recorder.text_delta(delta)?;
+            record_codex_agent_message_delta(turn_state, recorder, item_id, delta)?;
         }
         "thread/status/changed"
         | "turn/diff/updated"
@@ -2258,6 +2260,12 @@ fn handle_shared_codex_app_server_notification(
         }
         "codex/event/item_completed" => {
             handle_shared_codex_event_item_completed(message, turn_state, recorder)?;
+        }
+        "codex/event/agent_message_content_delta" => {
+            handle_shared_codex_event_agent_message_content_delta(message, turn_state, recorder)?;
+        }
+        "codex/event/agent_message" => {
+            handle_shared_codex_event_agent_message(message, turn_state, recorder)?;
         }
         "codex/event/task_complete" => {
             handle_shared_codex_task_complete(message, recorder)?;
@@ -2348,6 +2356,112 @@ fn handle_shared_codex_event_item_completed(
     }
 
     Ok(())
+}
+
+fn handle_shared_codex_event_agent_message_content_delta(
+    message: &Value,
+    turn_state: &mut CodexTurnState,
+    recorder: &mut impl TurnRecorder,
+) -> Result<()> {
+    let Some(delta) = message.pointer("/params/msg/delta").and_then(Value::as_str) else {
+        return Ok(());
+    };
+    let Some(item_id) = message.pointer("/params/msg/item_id").and_then(Value::as_str) else {
+        return Ok(());
+    };
+
+    record_codex_agent_message_delta(turn_state, recorder, item_id, delta)
+}
+
+fn handle_shared_codex_event_agent_message(
+    message: &Value,
+    turn_state: &CodexTurnState,
+    recorder: &mut impl TurnRecorder,
+) -> Result<()> {
+    if !turn_state.streamed_agent_message_item_ids.is_empty() {
+        return Ok(());
+    }
+
+    let Some(text) = message.pointer("/params/msg/message").and_then(Value::as_str) else {
+        return Ok(());
+    };
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        return Ok(());
+    }
+
+    recorder.push_text(trimmed)
+}
+
+fn record_codex_agent_message_delta(
+    turn_state: &mut CodexTurnState,
+    recorder: &mut impl TurnRecorder,
+    item_id: &str,
+    delta: &str,
+) -> Result<()> {
+    if turn_state.current_agent_message_id.as_deref() != Some(item_id) {
+        recorder.finish_streaming_text()?;
+        turn_state.current_agent_message_id = Some(item_id.to_owned());
+    }
+    let entry = turn_state
+        .streamed_agent_message_text_by_item_id
+        .entry(item_id.to_owned())
+        .or_default();
+    let Some(unseen_suffix) = next_codex_delta_suffix(entry, delta) else {
+        return Ok(());
+    };
+    turn_state
+        .streamed_agent_message_item_ids
+        .insert(item_id.to_owned());
+    recorder.text_delta(&unseen_suffix)
+}
+
+fn next_codex_delta_suffix(existing: &mut String, incoming: &str) -> Option<String> {
+    if incoming.is_empty() {
+        return None;
+    }
+
+    if existing.is_empty() {
+        existing.push_str(incoming);
+        return Some(incoming.to_owned());
+    }
+
+    if incoming == existing {
+        return None;
+    }
+
+    if incoming.starts_with(existing.as_str()) {
+        let split = existing.len();
+        debug_assert!(incoming.is_char_boundary(split));
+        let suffix = incoming[split..].to_owned();
+        existing.clear();
+        existing.push_str(incoming);
+        return if suffix.is_empty() { None } else { Some(suffix) };
+    }
+
+    if existing.ends_with(incoming) {
+        return None;
+    }
+
+    let overlap = longest_codex_delta_overlap(existing, incoming);
+    let suffix = incoming[overlap..].to_owned();
+    existing.push_str(&suffix);
+    if suffix.is_empty() {
+        None
+    } else {
+        Some(suffix)
+    }
+}
+
+fn longest_codex_delta_overlap(existing: &str, incoming: &str) -> usize {
+    let max_overlap = existing.len().min(incoming.len());
+    for overlap in (1..=max_overlap).rev() {
+        if incoming.is_char_boundary(overlap) && existing.ends_with(&incoming[..overlap]) {
+            return overlap;
+        }
+    }
+
+    0
 }
 
 fn handle_codex_app_server_request(
