@@ -59,8 +59,15 @@ const STATUS_LABELS: Record<string, string> = {
   U: "Unmerged",
 };
 
-export function buildGitStatusTree(files: GitStatusFile[]): GitStatusTreeSection[] {
-  return SECTION_DEFINITIONS.map((definition) => buildSection(definition.id, definition.label, files));
+export function buildGitStatusTree(
+  files: GitStatusFile[],
+  previousSections?: readonly GitStatusTreeSection[],
+): GitStatusTreeSection[] {
+  const previousById = new Map(previousSections?.map((section) => [section.id, section]) ?? []);
+
+  return SECTION_DEFINITIONS.map((definition) =>
+    buildSection(definition.id, definition.label, files, previousById.get(definition.id)),
+  );
 }
 
 export function gitStatusTone(statusCode: string) {
@@ -82,7 +89,12 @@ export function gitStatusTone(statusCode: string) {
   }
 }
 
-function buildSection(id: GitStatusSectionId, label: string, files: GitStatusFile[]): GitStatusTreeSection {
+function buildSection(
+  id: GitStatusSectionId,
+  label: string,
+  files: GitStatusFile[],
+  previousSection?: GitStatusTreeSection,
+): GitStatusTreeSection {
   const entries = files
     .filter((file) => fileBelongsToSection(file, id))
     .map((file) => toTreeEntry(file, id));
@@ -92,12 +104,12 @@ function buildSection(id: GitStatusSectionId, label: string, files: GitStatusFil
     insertFileEntry(root, entry);
   }
 
-  return {
+  return reconcileSection(previousSection, {
     fileCount: entries.length,
     id,
     label,
     nodes: materializeChildren(root),
-  };
+  });
 }
 
 function createDirectoryBuilder(name: string, path: string): GitTreeDirectoryBuilder {
@@ -183,6 +195,102 @@ function materializeDirectory(directory: GitTreeDirectoryBuilder): GitStatusTree
     name: directory.name,
     path: directory.path,
   };
+}
+
+function reconcileSection(
+  previousSection: GitStatusTreeSection | undefined,
+  nextSection: GitStatusTreeSection,
+): GitStatusTreeSection {
+  const reconciledNodes = reconcileNodes(previousSection?.nodes, nextSection.nodes);
+  if (
+    previousSection &&
+    previousSection.fileCount === nextSection.fileCount &&
+    previousSection.nodes.length === reconciledNodes.length &&
+    previousSection.nodes.every((node, index) => node === reconciledNodes[index])
+  ) {
+    return previousSection;
+  }
+
+  return reconciledNodes === nextSection.nodes ? nextSection : { ...nextSection, nodes: reconciledNodes };
+}
+
+function reconcileNodes(
+  previousNodes: readonly GitStatusTreeNode[] | undefined,
+  nextNodes: GitStatusTreeNode[],
+): GitStatusTreeNode[] {
+  if (!previousNodes || previousNodes.length === 0) {
+    return nextNodes;
+  }
+
+  const previousByKey = new Map(previousNodes.map((node) => [gitStatusTreeNodeKey(node), node]));
+  let changed = previousNodes.length !== nextNodes.length;
+
+  const reconciledNodes = nextNodes.map((nextNode, index) => {
+    const previousNode = previousByKey.get(gitStatusTreeNodeKey(nextNode));
+    if (!previousNode || previousNode.kind !== nextNode.kind) {
+      changed = true;
+      return nextNode;
+    }
+
+    const reconciledNode =
+      nextNode.kind === "directory"
+        ? reconcileDirectoryNode(previousNode, nextNode)
+        : reconcileFileNode(previousNode, nextNode);
+
+    if (previousNodes[index] !== reconciledNode) {
+      changed = true;
+    }
+
+    return reconciledNode;
+  });
+
+  if (!changed && previousNodes.every((node, index) => node === reconciledNodes[index])) {
+    return previousNodes as GitStatusTreeNode[];
+  }
+
+  return reconciledNodes;
+}
+
+function reconcileDirectoryNode(
+  previousNode: GitStatusTreeNode,
+  nextNode: GitStatusTreeDirectoryNode,
+): GitStatusTreeDirectoryNode {
+  if (previousNode.kind !== "directory") {
+    return nextNode;
+  }
+
+  const reconciledChildren = reconcileNodes(previousNode.children, nextNode.children);
+  if (
+    previousNode.fileCount === nextNode.fileCount &&
+    previousNode.children.length === reconciledChildren.length &&
+    previousNode.children.every((child, index) => child === reconciledChildren[index])
+  ) {
+    return previousNode;
+  }
+
+  return reconciledChildren === nextNode.children ? nextNode : { ...nextNode, children: reconciledChildren };
+}
+
+function reconcileFileNode(previousNode: GitStatusTreeNode, nextNode: GitStatusTreeFileNode): GitStatusTreeFileNode {
+  if (previousNode.kind !== "file") {
+    return nextNode;
+  }
+
+  if (
+    previousNode.name === nextNode.name &&
+    previousNode.originalPath === nextNode.originalPath &&
+    previousNode.path === nextNode.path &&
+    previousNode.statusCode === nextNode.statusCode &&
+    previousNode.statusLabel === nextNode.statusLabel
+  ) {
+    return previousNode;
+  }
+
+  return nextNode;
+}
+
+function gitStatusTreeNodeKey(node: GitStatusTreeNode) {
+  return `${node.kind}:${node.path}`;
 }
 
 function compareGitTreeNames(left: string, right: string) {

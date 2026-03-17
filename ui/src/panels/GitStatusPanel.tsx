@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   applyGitFileAction,
   commitGitChanges,
@@ -53,15 +53,26 @@ export function GitStatusPanel({
   const [treeExpansionByKey, setTreeExpansionByKey] = useState<Record<string, boolean>>({});
   const onStatusChangeRef = useRef(onStatusChange);
   const latestLoadRequestIdRef = useRef(0);
+  const previousSectionsRef = useRef<GitStatusTreeSection[] | null>(null);
+  const previousSectionsWorkdirRef = useRef<string | null>(null);
   const normalizedWorkdir = workdir?.trim() ?? "";
   const visibleStatus = status;
   const changedFiles = visibleStatus?.files ?? [];
   const hasStagedChanges = changedFiles.some((file) => Boolean(file.indexStatus));
-  const sections = useMemo(() => buildGitStatusTree(changedFiles), [changedFiles]);
+  const sections = useMemo(() => {
+    const previousSections =
+      previousSectionsWorkdirRef.current === normalizedWorkdir ? (previousSectionsRef.current ?? undefined) : undefined;
+    return buildGitStatusTree(changedFiles, previousSections);
+  }, [changedFiles, normalizedWorkdir]);
 
   useEffect(() => {
     onStatusChangeRef.current = onStatusChange;
   }, [onStatusChange]);
+
+  useEffect(() => {
+    previousSectionsRef.current = sections;
+    previousSectionsWorkdirRef.current = normalizedWorkdir || null;
+  }, [sections, normalizedWorkdir]);
 
   useEffect(() => {
     setWorkdirDraft(workdir ?? "");
@@ -117,116 +128,123 @@ export function GitStatusPanel({
     }
   }
 
-  async function handleOpenDiff(sectionId: GitStatusSectionId, node: GitStatusTreeFileNode, options?: GitDiffOpenOptions) {
-    const activeWorkdir = visibleStatus?.workdir ?? normalizedWorkdir;
-    if (!activeWorkdir) {
-      return;
-    }
-
-    const actionKey = gitFileOpenKey(sectionId, node.path);
-    setPendingActionKey(actionKey);
-    setError(null);
-    setCommitNotice(null);
-
-    try {
-      const diff = await fetchGitDiff({
-        originalPath: node.originalPath,
-        path: node.path,
-        sectionId,
-        statusCode: node.statusCode,
-        workdir: activeWorkdir,
-      });
-      if (options?.openInNewTab) {
-        onOpenDiff(diff, { openInNewTab: true });
-      } else {
-        onOpenDiff(diff);
+  const handleOpenDiff = useCallback(
+    async (sectionId: GitStatusSectionId, node: GitStatusTreeFileNode, options?: GitDiffOpenOptions) => {
+      const activeWorkdir = visibleStatus?.workdir ?? normalizedWorkdir;
+      if (!activeWorkdir) {
+        return;
       }
-    } catch (nextError) {
-      setError(getErrorMessage(nextError));
-    } finally {
-      setPendingActionKey((current) => (current === actionKey ? null : current));
-    }
-  }
 
-  async function handleFileAction(
-    sectionId: GitStatusSectionId,
-    node: GitStatusTreeFileNode,
-    action: GitFileAction,
-  ) {
-    await handleTreeAction(sectionId, node.path, [toGitActionTarget(node)], action);
-  }
+      const actionKey = gitFileOpenKey(sectionId, node.path);
+      setPendingActionKey(actionKey);
+      setError(null);
+      setCommitNotice(null);
 
-  async function handleDirectoryAction(
-    sectionId: GitStatusSectionId,
-    node: GitStatusTreeDirectoryNode,
-    action: GitFileAction,
-  ) {
-    await handleTreeAction(sectionId, node.path, collectDirectoryTargets(node), action);
-  }
-
-  async function handleSectionAction(sectionId: GitStatusSectionId, nodes: GitStatusTreeNode[], action: GitFileAction) {
-    await handleTreeAction(sectionId, sectionId, collectGitActionTargets(nodes), action);
-  }
-
-  async function handleTreeAction(
-    sectionId: GitStatusSectionId,
-    actionPath: string,
-    targets: GitActionTarget[],
-    action: GitFileAction,
-  ) {
-    const activeWorkdir = visibleStatus?.workdir ?? normalizedWorkdir;
-    if (!activeWorkdir || targets.length === 0) {
-      return;
-    }
-
-    const actionKey = gitFileActionKey(sectionId, actionPath, action);
-    setPendingActionKey(actionKey);
-    setError(null);
-    setCommitNotice(null);
-
-    try {
-      let response: GitStatusResponse | null = null;
-
-      for (const target of targets) {
-        response = await applyGitFileAction({
-          action,
-          originalPath: target.originalPath,
-          path: target.path,
-          statusCode: target.statusCode,
+      try {
+        const diff = await fetchGitDiff({
+          originalPath: node.originalPath,
+          path: node.path,
+          sectionId,
+          statusCode: node.statusCode,
           workdir: activeWorkdir,
         });
+        if (options?.openInNewTab) {
+          onOpenDiff(diff, { openInNewTab: true });
+        } else {
+          onOpenDiff(diff);
+        }
+      } catch (nextError) {
+        setError(getErrorMessage(nextError));
+      } finally {
+        setPendingActionKey((current) => (current === actionKey ? null : current));
+      }
+    },
+    [normalizedWorkdir, onOpenDiff, visibleStatus?.workdir],
+  );
+
+  const handleTreeAction = useCallback(
+    async (
+      sectionId: GitStatusSectionId,
+      actionPath: string,
+      targets: GitActionTarget[],
+      action: GitFileAction,
+    ) => {
+      const activeWorkdir = visibleStatus?.workdir ?? normalizedWorkdir;
+      if (!activeWorkdir || targets.length === 0) {
+        return;
       }
 
-      if (response) {
-        setStatus(response);
-        onStatusChangeRef.current?.(response);
-      }
-    } catch (nextError) {
-      setError(getErrorMessage(nextError));
-      if (targets.length > 1) {
-        try {
-          const refreshedStatus = await fetchGitStatus(activeWorkdir, null);
-          setStatus(refreshedStatus);
-          onStatusChangeRef.current?.(refreshedStatus);
-        } catch {
-          // Keep the action error visible if the follow-up refresh also fails.
+      const actionKey = gitFileActionKey(sectionId, actionPath, action);
+      setPendingActionKey(actionKey);
+      setError(null);
+      setCommitNotice(null);
+
+      try {
+        let response: GitStatusResponse | null = null;
+
+        for (const target of targets) {
+          response = await applyGitFileAction({
+            action,
+            originalPath: target.originalPath,
+            path: target.path,
+            statusCode: target.statusCode,
+            workdir: activeWorkdir,
+          });
         }
+
+        if (response) {
+          setStatus(response);
+          onStatusChangeRef.current?.(response);
+        }
+      } catch (nextError) {
+        setError(getErrorMessage(nextError));
+        if (targets.length > 1) {
+          try {
+            const refreshedStatus = await fetchGitStatus(activeWorkdir, null);
+            setStatus(refreshedStatus);
+            onStatusChangeRef.current?.(refreshedStatus);
+          } catch {
+            // Keep the action error visible if the follow-up refresh also fails.
+          }
+        }
+      } finally {
+        setPendingActionKey((current) => (current === actionKey ? null : current));
       }
-    } finally {
-      setPendingActionKey((current) => (current === actionKey ? null : current));
-    }
-  }
+    },
+    [normalizedWorkdir, visibleStatus?.workdir],
+  );
+
+  const handleFileAction = useCallback(
+    async (sectionId: GitStatusSectionId, node: GitStatusTreeFileNode, action: GitFileAction) => {
+      await handleTreeAction(sectionId, node.path, [toGitActionTarget(node)], action);
+    },
+    [handleTreeAction],
+  );
+
+  const handleDirectoryAction = useCallback(
+    async (sectionId: GitStatusSectionId, node: GitStatusTreeDirectoryNode, action: GitFileAction) => {
+      await handleTreeAction(sectionId, node.path, collectDirectoryTargets(node), action);
+    },
+    [handleTreeAction],
+  );
+
+  const handleSectionAction = useCallback(
+    async (sectionId: GitStatusSectionId, nodes: GitStatusTreeNode[], action: GitFileAction) => {
+      await handleTreeAction(sectionId, sectionId, collectGitActionTargets(nodes), action);
+    },
+    [handleTreeAction],
+  );
 
   function isTreeItemExpanded(key: string, defaultValue: boolean) {
     return treeExpansionByKey[key] ?? defaultValue;
   }
 
-  function toggleTreeItem(key: string, defaultValue: boolean) {
+  const toggleTreeItem = useCallback((key: string, defaultValue: boolean) => {
     setTreeExpansionByKey((current) => ({
       ...current,
       [key]: !(current[key] ?? defaultValue),
     }));
-  }
+  }, []);
 
   function submitWorkdir() {
     const nextWorkdir = workdirDraft.trim();
@@ -385,7 +403,6 @@ export function GitStatusPanel({
                   onFileAction={handleFileAction}
                   onOpenDiff={handleOpenDiff}
                   onSectionAction={handleSectionAction}
-                  onToggle={(defaultValue) => toggleTreeItem(sectionExpansionKey(section.id), defaultValue)}
                   onTreeToggle={toggleTreeItem}
                   pendingActionKey={pendingActionKey}
                   repoRoot={visibleStatus.repoRoot ?? ""}
@@ -435,13 +452,12 @@ export function GitStatusPanel({
   );
 }
 
-function GitStatusSection({
+const GitStatusSection = memo(function GitStatusSection({
   isExpanded,
   onDirectoryAction,
   onFileAction,
   onOpenDiff,
   onSectionAction,
-  onToggle,
   onTreeToggle,
   pendingActionKey,
   repoRoot,
@@ -457,7 +473,6 @@ function GitStatusSection({
   onFileAction: (sectionId: GitStatusSectionId, node: GitStatusTreeFileNode, action: GitFileAction) => void;
   onOpenDiff: (sectionId: GitStatusSectionId, node: GitStatusTreeFileNode, options?: GitDiffOpenOptions) => void;
   onSectionAction: (sectionId: GitStatusSectionId, nodes: GitStatusTreeNode[], action: GitFileAction) => void;
-  onToggle: (defaultValue: boolean) => void;
   onTreeToggle: (key: string, defaultValue: boolean) => void;
   pendingActionKey: string | null;
   repoRoot: string;
@@ -476,7 +491,7 @@ function GitStatusSection({
           className="git-status-section-toggle"
           type="button"
           aria-expanded={isExpanded}
-          onClick={() => onToggle(section.fileCount > 0)}
+          onClick={() => onTreeToggle(sectionExpansionKey(section.id), section.fileCount > 0)}
         >
           <span className="git-tree-toggle" aria-hidden="true">
             <ChevronIcon expanded={isExpanded} />
@@ -519,9 +534,9 @@ function GitStatusSection({
       ) : null}
     </section>
   );
-}
+});
 
-function GitStatusTree({
+const GitStatusTree = memo(function GitStatusTree({
   nodes,
   onDirectoryAction,
   onFileAction,
@@ -576,9 +591,9 @@ function GitStatusTree({
       )}
     </div>
   );
-}
+});
 
-function GitStatusDirectoryNode({
+const GitStatusDirectoryNode = memo(function GitStatusDirectoryNode({
   node,
   onDirectoryAction,
   onFileAction,
@@ -660,9 +675,9 @@ function GitStatusDirectoryNode({
       ) : null}
     </div>
   );
-}
+});
 
-function GitStatusFileRow({
+const GitStatusFileRow = memo(function GitStatusFileRow({
   isPending,
   node,
   onAction,
@@ -734,7 +749,7 @@ function GitStatusFileRow({
       </span>
     </div>
   );
-}
+});
 
 function toGitActionTarget(node: GitStatusTreeFileNode): GitActionTarget {
   return {

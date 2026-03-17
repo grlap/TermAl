@@ -892,6 +892,7 @@ export default function App() {
   const draftAttachmentsRef = useRef<Record<string, DraftImageAttachment[]>>({});
   const dragChannelRef = useRef<BroadcastChannel | null>(null);
   const draggedTabRef = useRef<WorkspaceTabDrag | null>(null);
+  const isMountedRef = useRef(true);
   const sessionListSearchInputRef = useRef<HTMLInputElement>(null);
   const pendingSessionRenameTriggerRef = useRef<HTMLElement | null>(null);
   const pendingSessionRenamePopoverRef = useRef<HTMLFormElement | null>(null);
@@ -901,7 +902,6 @@ export default function App() {
   const pendingKillPopoverRef = useRef<HTMLDivElement | null>(null);
   const pendingKillConfirmButtonRef = useRef<HTMLButtonElement | null>(null);
   const pendingKillCloseTimeoutRef = useRef<number | null>(null);
-  const isMountedRef = useRef(true);
   const confirmedUnknownModelSendsRef = useRef<Set<string>>(new Set());
   const refreshingSessionModelOptionIdsRef = useRef<SessionFlagMap>({});
   const refreshingAgentCommandSessionIdsRef = useRef<SessionFlagMap>({});
@@ -1436,6 +1436,10 @@ export default function App() {
     nextState: StateResponse,
     options?: { openSessionId?: string; paneId?: string | null },
   ) {
+    if (!isMountedRef.current) {
+      return false;
+    }
+
     if (!shouldAdoptStateRevision(latestStateRevisionRef.current, nextState.revision)) {
       return false;
     }
@@ -1460,12 +1464,21 @@ export default function App() {
   }) {
     try {
       const state = await updateAppSettings(payload);
+      if (!isMountedRef.current) {
+        return;
+      }
       adoptState(state);
       setRequestError(null);
     } catch (error) {
+      if (!isMountedRef.current) {
+        return;
+      }
       setRequestError(getErrorMessage(error));
       try {
         const state = await fetchState();
+        if (!isMountedRef.current) {
+          return;
+        }
         syncPreferencesFromState(state);
         adoptState(state);
       } catch {
@@ -2194,6 +2207,9 @@ export default function App() {
         projectId: targetProjectId ?? undefined,
         workdir: targetProjectId ? undefined : activeSession?.workdir,
       });
+      if (!isMountedRef.current) {
+        return false;
+      }
       const adopted = adoptState(created.state, {
         openSessionId: created.sessionId,
         paneId: targetPaneId,
@@ -2205,14 +2221,22 @@ export default function App() {
       }
       if (agent === "Claude" || agent === "Codex" || agent === "Cursor" || agent === "Gemini") {
         await handleRefreshSessionModelOptions(created.sessionId);
+        if (!isMountedRef.current) {
+          return false;
+        }
       }
       setRequestError(null);
       return true;
     } catch (error) {
+      if (!isMountedRef.current) {
+        return false;
+      }
       setRequestError(getErrorMessage(error));
       return false;
     } finally {
-      setIsCreating(false);
+      if (isMountedRef.current) {
+        setIsCreating(false);
+      }
     }
   }
 
@@ -2224,7 +2248,7 @@ export default function App() {
       projectSelectionId: createSessionProjectId,
     });
 
-    if (created) {
+    if (created && isMountedRef.current) {
       setIsCreateSessionOpen(false);
     }
   }
@@ -2756,6 +2780,9 @@ export default function App() {
 
     try {
       const state = await refreshSessionModelOptions(sessionId);
+      if (!isMountedRef.current) {
+        return;
+      }
       adoptState(state);
       if (previousSession?.agent === "Codex") {
         const refreshedSession = state.sessions.find((entry) => entry.id === sessionId) ?? null;
@@ -2771,6 +2798,9 @@ export default function App() {
       }
       setRequestError(null);
     } catch (error) {
+      if (!isMountedRef.current) {
+        return;
+      }
       const rawMessage = getErrorMessage(error);
       const session = sessionsRef.current.find((entry) => entry.id === sessionId) ?? null;
       const message = session
@@ -2786,6 +2816,9 @@ export default function App() {
       }));
       setRequestError(message);
     } finally {
+      if (!isMountedRef.current) {
+        return;
+      }
       const nextRefreshingSessionIds = setSessionFlag(
         refreshingSessionModelOptionIdsRef.current,
         sessionId,
@@ -8772,42 +8805,24 @@ function SubagentResultCard({
   const isExpanded = expanded || isSearchExpanded;
 
   return (
-    <article className="message-card reasoning-card subagent-result-card">
-      {!isExpanded ? (
-        <div className="subagent-result-collapsed-row">
-          <div className="subagent-result-inline-label" aria-label="Agent thinking">
-            <span className="subagent-result-inline-author">Agent</span>
-            <span className="card-label subagent-result-inline-thinking">THINKING</span>
-          </div>
-          <div className="subagent-result-collapsed-actions">
-            <button
-              className="ghost-button subagent-result-toggle"
-              type="button"
-              onClick={() => setExpanded((open) => !open)}
-              aria-expanded={isExpanded}
-            >
-              Show details
-            </button>
-            <span className="subagent-result-collapsed-time">{message.timestamp}</span>
-          </div>
-        </div>
-      ) : (
+    <article className={`message-card reasoning-card subagent-result-card${isExpanded ? " is-expanded" : ""}`}>
+      <MessageMeta
+        author={message.author}
+        timestamp={message.timestamp}
+        trailing={
+          <button
+            className="ghost-button subagent-result-toggle"
+            type="button"
+            onClick={() => setExpanded((open) => !open)}
+            aria-expanded={isExpanded}
+          >
+            {isExpanded ? "Hide details" : "Show details"}
+          </button>
+        }
+      />
+      <div className="card-label subagent-result-card-label">Thinking</div>
+      {isExpanded ? (
         <>
-          <MessageMeta
-            author={message.author}
-            timestamp={message.timestamp}
-            trailing={
-              <button
-                className="ghost-button subagent-result-toggle"
-                type="button"
-                onClick={() => setExpanded((open) => !open)}
-                aria-expanded={isExpanded}
-              >
-                Hide details
-              </button>
-            }
-          />
-          <div className="card-label">Agent Thinking</div>
           <div className="subagent-result-header">
             <h3>{renderHighlightedText(message.title, searchQuery, searchHighlightTone)}</h3>
           </div>
@@ -8819,7 +8834,7 @@ function SubagentResultCard({
             workspaceRoot={workspaceRoot}
           />
         </>
-      )}
+      ) : null}
     </article>
   );
 }

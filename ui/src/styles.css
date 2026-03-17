@@ -4821,6 +4821,18 @@ textarea {
   padding-block: 0.72rem;
 }
 
+.subagent-result-card .message-meta {
+  margin-bottom: 0.1rem;
+}
+
+.subagent-result-card-label {
+  margin-bottom: 0;
+}
+
+.subagent-result-card.is-expanded .subagent-result-card-label {
+  margin-bottom: 0.18rem;
+}
+
 .subagent-result-collapsed-row {
   display: flex;
   align-items: center;
@@ -4853,11 +4865,11 @@ textarea {
 }
 
 .subagent-result-card .subagent-result-toggle {
-  inline-size: 8.4rem;
-  min-block-size: 2.35rem;
-  padding-block: 0.3rem;
-  font-size: 1rem;
-  line-height: 1.2;
+  inline-size: 6.7rem;
+  min-block-size: 1.8rem;
+  padding-block: 0.14rem;
+  font-size: 0.86rem;
+  line-height: 1.1;
   text-align: center;
 }
 

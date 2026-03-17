@@ -1,5 +1,5 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import * as api from "./api";
 import App, {
@@ -133,22 +133,46 @@ function createDeferred<T>() {
   return { promise, resolve };
 }
 
-async function settleAsyncUi() {
-  await act(async () => {
+async function flushUiWork() {
+  for (let iteration = 0; iteration < 3; iteration += 1) {
+    await Promise.resolve();
     await Promise.resolve();
     await new Promise((resolve) => window.setTimeout(resolve, 0));
-    await Promise.resolve();
+  }
+  await Promise.resolve();
+  await Promise.resolve();
+}
+
+async function settleAsyncUi() {
+  await act(async () => {
+    await flushUiWork();
   });
 }
 
 async function renderApp() {
-  render(<App />);
-  await settleAsyncUi();
+  await act(async () => {
+    render(<App />);
+    await flushUiWork();
+  });
 }
 
 async function clickAndSettle(target: HTMLElement) {
-  fireEvent.click(target);
-  await settleAsyncUi();
+  await act(async () => {
+    fireEvent.click(target);
+    await flushUiWork();
+  });
+}
+
+async function submitButtonAndSettle(target: HTMLElement) {
+  const form = target.closest("form");
+  if (!form) {
+    throw new Error("Submit target is not inside a form.");
+  }
+
+  await act(async () => {
+    fireEvent.submit(form);
+    await flushUiWork();
+  });
 }
 
 async function openCreateSessionDialog() {
@@ -328,6 +352,10 @@ describe("App", () => {
   });
 
   afterEach(async () => {
+    await act(async () => {
+      cleanup();
+      await flushUiWork();
+    });
     HTMLElement.prototype.scrollTo = originalScrollTo;
     if (originalRequestAnimationFrame === undefined) {
       delete (globalThis as Partial<typeof globalThis>).requestAnimationFrame;
@@ -582,12 +610,13 @@ describe("App", () => {
             ],
           }),
         );
-        await Promise.resolve();
+        await flushUiWork();
       });
 
       await waitFor(() => {
         expect(screen.getByText("Newer Session")).toBeInTheDocument();
       });
+      await settleAsyncUi();
       expect(screen.queryByText("Older Session")).not.toBeInTheDocument();
       expect(screen.queryByText("Stale preview")).not.toBeInTheDocument();
     } finally {
@@ -601,63 +630,19 @@ describe("App", () => {
   it("refreshes model options after creating a new Codex session", async () => {
     const originalEventSource = globalThis.EventSource;
     const originalResizeObserver = globalThis.ResizeObserver;
-    const fetchStateSpy = vi.spyOn(api, "fetchState").mockResolvedValue({
-      revision: 1,
-      projects: [],
-      sessions: [],
-    });
-    const createSessionSpy = vi.spyOn(api, "createSession").mockResolvedValue({
-      sessionId: "session-1",
-      state: {
-        revision: 2,
-        projects: [],
-        sessions: [
-          {
-            id: "session-1",
-            name: "Codex 1",
-            emoji: "O",
-            agent: "Codex",
-            workdir: "/tmp",
-            model: "gpt-5.4",
-            approvalPolicy: "never",
-            reasoningEffort: "medium",
-            sandboxMode: "workspace-write",
-            status: "idle",
-            preview: "Ready for a prompt.",
-            messages: [],
-          },
-        ],
-      },
-    });
-    const refreshSessionModelOptionsSpy = vi.spyOn(api, "refreshSessionModelOptions").mockResolvedValue({
-      revision: 3,
-      projects: [],
-      sessions: [
-        {
-          id: "session-1",
-          name: "Codex 1",
-          emoji: "O",
-          agent: "Codex",
-          workdir: "/tmp",
-          model: "gpt-5.4",
-          modelOptions: [
-            {
-              label: "gpt-5.4",
-              value: "gpt-5.4",
-              description: "Latest frontier agentic coding model.",
-              defaultReasoningEffort: "medium",
-              supportedReasoningEfforts: ["low", "medium", "high", "xhigh"],
-            },
-          ],
-          approvalPolicy: "never",
-          reasoningEffort: "medium",
-          sandboxMode: "workspace-write",
-          status: "idle",
-          preview: "Ready for a prompt.",
-          messages: [],
-        },
-      ],
-    });
+    const fetchStateDeferred = createDeferred<Awaited<ReturnType<typeof api.fetchState>>>();
+    const createSessionDeferred = createDeferred<{
+      sessionId: string;
+      state: Awaited<ReturnType<typeof api.fetchState>>;
+    }>();
+    const refreshSessionModelOptionsDeferred = createDeferred<Awaited<ReturnType<typeof api.fetchState>>>();
+    const fetchStateSpy = vi.spyOn(api, "fetchState").mockImplementation(() => fetchStateDeferred.promise);
+    const createSessionSpy = vi.spyOn(api, "createSession").mockImplementation(
+      () => createSessionDeferred.promise,
+    );
+    const refreshSessionModelOptionsSpy = vi
+      .spyOn(api, "refreshSessionModelOptions")
+      .mockImplementation(() => refreshSessionModelOptionsDeferred.promise);
 
     vi.stubGlobal("EventSource", EventSourceMock as unknown as typeof EventSource);
     vi.stubGlobal("ResizeObserver", ResizeObserverMock as unknown as typeof ResizeObserver);
@@ -668,10 +653,73 @@ describe("App", () => {
       await renderApp();
 
       await openCreateSessionDialog();
-      await clickAndSettle(screen.getByRole("button", { name: "Create session" }));
+      await settleAsyncUi();
+      await submitButtonAndSettle(screen.getByRole("button", { name: "Create session" }));
+
+      await waitFor(() => {
+        expect(createSessionSpy).toHaveBeenCalled();
+      });
+      await act(async () => {
+        createSessionDeferred.resolve({
+          sessionId: "session-1",
+          state: {
+            revision: 2,
+            projects: [],
+            sessions: [
+              {
+                id: "session-1",
+                name: "Codex 1",
+                emoji: "O",
+                agent: "Codex",
+                workdir: "/tmp",
+                model: "gpt-5.4",
+                approvalPolicy: "never",
+                reasoningEffort: "medium",
+                sandboxMode: "workspace-write",
+                status: "idle",
+                preview: "Ready for a prompt.",
+                messages: [],
+              },
+            ],
+          },
+        });
+        await flushUiWork();
+      });
 
       await waitFor(() => {
         expect(refreshSessionModelOptionsSpy).toHaveBeenCalledWith("session-1");
+      });
+      await act(async () => {
+        refreshSessionModelOptionsDeferred.resolve({
+          revision: 3,
+          projects: [],
+          sessions: [
+            {
+              id: "session-1",
+              name: "Codex 1",
+              emoji: "O",
+              agent: "Codex",
+              workdir: "/tmp",
+              model: "gpt-5.4",
+              modelOptions: [
+                {
+                  label: "gpt-5.4",
+                  value: "gpt-5.4",
+                  description: "Latest frontier agentic coding model.",
+                  defaultReasoningEffort: "medium",
+                  supportedReasoningEfforts: ["low", "medium", "high", "xhigh"],
+                },
+              ],
+              approvalPolicy: "never",
+              reasoningEffort: "medium",
+              sandboxMode: "workspace-write",
+              status: "idle",
+              preview: "Ready for a prompt.",
+              messages: [],
+            },
+          ],
+        });
+        await flushUiWork();
       });
       await screen.findAllByText("Codex 1");
       await settleAsyncUi();
@@ -747,6 +795,7 @@ describe("App", () => {
 
       await clickAndSettle(await screen.findByRole("button", { name: "Files" }));
       expect(screen.getByRole("combobox", { name: "Project" })).toHaveTextContent("API");
+      await settleAsyncUi();
     } finally {
       HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
       restoreGlobal("fetch", originalFetch);
@@ -979,20 +1028,45 @@ describe("App", () => {
   });
 
   it("shows a Codex notice when live model refresh resets reasoning effort after session creation", async () => {
-    const originalFetch = globalThis.fetch;
     const originalEventSource = globalThis.EventSource;
     const originalResizeObserver = globalThis.ResizeObserver;
-    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
-      const url = String(input);
-      if (url === "/api/state") {
-        return jsonResponse({
+    const fetchStateDeferred = createDeferred<Awaited<ReturnType<typeof api.fetchState>>>();
+    const createSessionDeferred = createDeferred<{
+      sessionId: string;
+      state: Awaited<ReturnType<typeof api.fetchState>>;
+    }>();
+    const refreshSessionModelOptionsDeferred = createDeferred<Awaited<ReturnType<typeof api.fetchState>>>();
+    const fetchStateSpy = vi.spyOn(api, "fetchState").mockImplementation(() => fetchStateDeferred.promise);
+    const createSessionSpy = vi.spyOn(api, "createSession").mockImplementation(
+      () => createSessionDeferred.promise,
+    );
+    const refreshSessionModelOptionsSpy = vi
+      .spyOn(api, "refreshSessionModelOptions")
+      .mockImplementation(() => refreshSessionModelOptionsDeferred.promise);
+    vi.stubGlobal("EventSource", EventSourceMock as unknown as typeof EventSource);
+    vi.stubGlobal("ResizeObserver", ResizeObserverMock as unknown as typeof ResizeObserver);
+    const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
+    HTMLElement.prototype.scrollIntoView = vi.fn();
+
+    try {
+      await renderApp();
+      await act(async () => {
+        fetchStateDeferred.resolve({
           revision: 1,
           projects: [],
           sessions: [],
         });
-      }
-      if (url === "/api/sessions") {
-        return jsonResponse({
+        await flushUiWork();
+      });
+
+      await openCreateSessionDialog();
+      await settleAsyncUi();
+      await submitButtonAndSettle(screen.getByRole("button", { name: "Create session" }));
+      await waitFor(() => {
+        expect(createSessionSpy).toHaveBeenCalled();
+      });
+      await act(async () => {
+        createSessionDeferred.resolve({
           sessionId: "session-1",
           state: {
             revision: 2,
@@ -1015,9 +1089,13 @@ describe("App", () => {
             ],
           },
         });
-      }
-      if (url === "/api/sessions/session-1/model-options/refresh") {
-        return jsonResponse({
+        await flushUiWork();
+      });
+      await waitFor(() => {
+        expect(refreshSessionModelOptionsSpy).toHaveBeenCalledWith("session-1");
+      });
+      await act(async () => {
+        refreshSessionModelOptionsDeferred.resolve({
           revision: 3,
           projects: [],
           sessions: [
@@ -1046,22 +1124,8 @@ describe("App", () => {
             },
           ],
         });
-      }
-
-      throw new Error(`Unexpected fetch: ${url}`);
-    });
-
-    vi.stubGlobal("fetch", fetchMock);
-    vi.stubGlobal("EventSource", EventSourceMock as unknown as typeof EventSource);
-    vi.stubGlobal("ResizeObserver", ResizeObserverMock as unknown as typeof ResizeObserver);
-    const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
-    HTMLElement.prototype.scrollIntoView = vi.fn();
-
-    try {
-      await renderApp();
-
-      await openCreateSessionDialog();
-      await clickAndSettle(screen.getByRole("button", { name: "Create session" }));
+        await flushUiWork();
+      });
       await clickAndSettle(await screen.findByRole("button", { name: "Prompt" }));
 
       await waitFor(() => {
@@ -1071,25 +1135,45 @@ describe("App", () => {
           ),
         ).toBeInTheDocument();
       });
+      await settleAsyncUi();
     } finally {
       HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
-      restoreGlobal("fetch", originalFetch);
+      fetchStateSpy.mockRestore();
+      createSessionSpy.mockRestore();
+      refreshSessionModelOptionsSpy.mockRestore();
       restoreGlobal("EventSource", originalEventSource);
       restoreGlobal("ResizeObserver", originalResizeObserver);
     }
   });
-
-
   it("applies the configured Codex reasoning effort to new Codex sessions", async () => {
-    const originalFetch = globalThis.fetch;
     const originalEventSource = globalThis.EventSource;
     const originalResizeObserver = globalThis.ResizeObserver;
-    let createSessionBody: Record<string, unknown> | null = null;
-    let settingsBody: Record<string, unknown> | null = null;
-    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-      const url = String(input);
-      if (url === "/api/state") {
-        return jsonResponse({
+    const fetchStateDeferred = createDeferred<Awaited<ReturnType<typeof api.fetchState>>>();
+    const updateSettingsDeferred = createDeferred<Awaited<ReturnType<typeof api.fetchState>>>();
+    const createSessionDeferred = createDeferred<{
+      sessionId: string;
+      state: Awaited<ReturnType<typeof api.fetchState>>;
+    }>();
+    const refreshSessionModelOptionsDeferred = createDeferred<Awaited<ReturnType<typeof api.fetchState>>>();
+    const fetchStateSpy = vi.spyOn(api, "fetchState").mockImplementation(() => fetchStateDeferred.promise);
+    const updateAppSettingsSpy = vi
+      .spyOn(api, "updateAppSettings")
+      .mockImplementation(() => updateSettingsDeferred.promise);
+    const createSessionSpy = vi.spyOn(api, "createSession").mockImplementation(
+      () => createSessionDeferred.promise,
+    );
+    const refreshSessionModelOptionsSpy = vi
+      .spyOn(api, "refreshSessionModelOptions")
+      .mockImplementation(() => refreshSessionModelOptionsDeferred.promise);
+    vi.stubGlobal("EventSource", EventSourceMock as unknown as typeof EventSource);
+    vi.stubGlobal("ResizeObserver", ResizeObserverMock as unknown as typeof ResizeObserver);
+    const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
+    HTMLElement.prototype.scrollIntoView = vi.fn();
+
+    try {
+      await renderApp();
+      await act(async () => {
+        fetchStateDeferred.resolve({
           revision: 1,
           preferences: {
             defaultCodexReasoningEffort: "medium",
@@ -1098,10 +1182,19 @@ describe("App", () => {
           projects: [],
           sessions: [],
         });
-      }
-      if (url === "/api/settings") {
-        settingsBody = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
-        return jsonResponse({
+        await flushUiWork();
+      });
+
+      await clickAndSettle(await screen.findByRole("button", { name: "Open preferences" }));
+      await clickAndSettle(screen.getByRole("tab", { name: "Codex defaults" }));
+      await selectComboboxOption("Default reasoning effort", /high/i);
+      await waitFor(() => {
+        expect(updateAppSettingsSpy).toHaveBeenCalledWith({
+          defaultCodexReasoningEffort: "high",
+        });
+      });
+      await act(async () => {
+        updateSettingsDeferred.resolve({
           revision: 2,
           preferences: {
             defaultCodexReasoningEffort: "high",
@@ -1110,10 +1203,25 @@ describe("App", () => {
           projects: [],
           sessions: [],
         });
-      }
-      if (url === "/api/sessions") {
-        createSessionBody = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
-        return jsonResponse({
+        await flushUiWork();
+      });
+      await clickAndSettle(screen.getByRole("button", { name: "Close dialog" }));
+
+      await openCreateSessionDialog();
+      await settleAsyncUi();
+      expect(screen.getByRole("combobox", { name: "Codex reasoning effort" })).toHaveTextContent("high");
+      await submitButtonAndSettle(screen.getByRole("button", { name: "Create session" }));
+
+      await waitFor(() => {
+        expect(createSessionSpy).toHaveBeenCalledWith(
+          expect.objectContaining({
+            agent: "Codex",
+            reasoningEffort: "high",
+          }),
+        );
+      });
+      await act(async () => {
+        createSessionDeferred.resolve({
           sessionId: "session-1",
           state: {
             revision: 3,
@@ -1140,9 +1248,13 @@ describe("App", () => {
             ],
           },
         });
-      }
-      if (url === "/api/sessions/session-1/model-options/refresh") {
-        return jsonResponse({
+        await flushUiWork();
+      });
+      await waitFor(() => {
+        expect(refreshSessionModelOptionsSpy).toHaveBeenCalledWith("session-1");
+      });
+      await act(async () => {
+        refreshSessionModelOptionsDeferred.resolve({
           revision: 4,
           preferences: {
             defaultCodexReasoningEffort: "high",
@@ -1166,12 +1278,40 @@ describe("App", () => {
             },
           ],
         });
-      }
+        await flushUiWork();
+      });
+      await settleAsyncUi();
+    } finally {
+      HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
+      fetchStateSpy.mockRestore();
+      updateAppSettingsSpy.mockRestore();
+      createSessionSpy.mockRestore();
+      refreshSessionModelOptionsSpy.mockRestore();
+      restoreGlobal("EventSource", originalEventSource);
+      restoreGlobal("ResizeObserver", originalResizeObserver);
+    }
+  });
 
-      throw new Error(`Unexpected fetch: ${url}`);
-    });
-
-    vi.stubGlobal("fetch", fetchMock);
+  it("applies the configured Claude effort to new Claude sessions", async () => {
+    const originalEventSource = globalThis.EventSource;
+    const originalResizeObserver = globalThis.ResizeObserver;
+    const fetchStateDeferred = createDeferred<Awaited<ReturnType<typeof api.fetchState>>>();
+    const updateSettingsDeferred = createDeferred<Awaited<ReturnType<typeof api.fetchState>>>();
+    const createSessionDeferred = createDeferred<{
+      sessionId: string;
+      state: Awaited<ReturnType<typeof api.fetchState>>;
+    }>();
+    const refreshSessionModelOptionsDeferred = createDeferred<Awaited<ReturnType<typeof api.fetchState>>>();
+    const fetchStateSpy = vi.spyOn(api, "fetchState").mockImplementation(() => fetchStateDeferred.promise);
+    const updateAppSettingsSpy = vi
+      .spyOn(api, "updateAppSettings")
+      .mockImplementation(() => updateSettingsDeferred.promise);
+    const createSessionSpy = vi.spyOn(api, "createSession").mockImplementation(
+      () => createSessionDeferred.promise,
+    );
+    const refreshSessionModelOptionsSpy = vi
+      .spyOn(api, "refreshSessionModelOptions")
+      .mockImplementation(() => refreshSessionModelOptionsDeferred.promise);
     vi.stubGlobal("EventSource", EventSourceMock as unknown as typeof EventSource);
     vi.stubGlobal("ResizeObserver", ResizeObserverMock as unknown as typeof ResizeObserver);
     const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
@@ -1179,47 +1319,8 @@ describe("App", () => {
 
     try {
       await renderApp();
-
-      await clickAndSettle(await screen.findByRole("button", { name: "Open preferences" }));
-      await clickAndSettle(screen.getByRole("tab", { name: "Codex defaults" }));
-      await selectComboboxOption("Default reasoning effort", /high/i);
-      await waitFor(() => {
-        expect(settingsBody).not.toBeNull();
-      });
-      expect(settingsBody).toMatchObject({
-        defaultCodexReasoningEffort: "high",
-      });
-      await clickAndSettle(screen.getByRole("button", { name: "Close dialog" }));
-
-      await openCreateSessionDialog();
-      expect(screen.getByRole("combobox", { name: "Codex reasoning effort" })).toHaveTextContent("high");
-      await clickAndSettle(screen.getByRole("button", { name: "Create session" }));
-
-      await waitFor(() => {
-        expect(createSessionBody).not.toBeNull();
-      });
-      expect(createSessionBody).toMatchObject({
-        agent: "Codex",
-        reasoningEffort: "high",
-      });
-    } finally {
-      HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
-      restoreGlobal("fetch", originalFetch);
-      restoreGlobal("EventSource", originalEventSource);
-      restoreGlobal("ResizeObserver", originalResizeObserver);
-    }
-  });
-
-  it("applies the configured Claude effort to new Claude sessions", async () => {
-    const originalFetch = globalThis.fetch;
-    const originalEventSource = globalThis.EventSource;
-    const originalResizeObserver = globalThis.ResizeObserver;
-    let createSessionBody: Record<string, unknown> | null = null;
-    let settingsBody: Record<string, unknown> | null = null;
-    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-      const url = String(input);
-      if (url === "/api/state") {
-        return jsonResponse({
+      await act(async () => {
+        fetchStateDeferred.resolve({
           revision: 1,
           preferences: {
             defaultCodexReasoningEffort: "medium",
@@ -1228,10 +1329,19 @@ describe("App", () => {
           projects: [],
           sessions: [],
         });
-      }
-      if (url === "/api/settings") {
-        settingsBody = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
-        return jsonResponse({
+        await flushUiWork();
+      });
+
+      await clickAndSettle(await screen.findByRole("button", { name: "Open preferences" }));
+      await clickAndSettle(screen.getByRole("tab", { name: "Claude defaults" }));
+      await selectComboboxOption("Default Claude effort", /max/i);
+      await waitFor(() => {
+        expect(updateAppSettingsSpy).toHaveBeenCalledWith({
+          defaultClaudeEffort: "max",
+        });
+      });
+      await act(async () => {
+        updateSettingsDeferred.resolve({
           revision: 2,
           preferences: {
             defaultCodexReasoningEffort: "medium",
@@ -1240,10 +1350,26 @@ describe("App", () => {
           projects: [],
           sessions: [],
         });
-      }
-      if (url === "/api/sessions") {
-        createSessionBody = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
-        return jsonResponse({
+        await flushUiWork();
+      });
+      await clickAndSettle(screen.getByRole("button", { name: "Close dialog" }));
+
+      await openCreateSessionDialog();
+      await settleAsyncUi();
+      await selectComboboxOption("Assistant", /^Claude$/i);
+      expect(screen.getByRole("combobox", { name: "Claude effort" })).toHaveTextContent("max");
+      await submitButtonAndSettle(screen.getByRole("button", { name: "Create session" }));
+
+      await waitFor(() => {
+        expect(createSessionSpy).toHaveBeenCalledWith(
+          expect.objectContaining({
+            agent: "Claude",
+            claudeEffort: "max",
+          }),
+        );
+      });
+      await act(async () => {
+        createSessionDeferred.resolve({
           sessionId: "session-1",
           state: {
             revision: 3,
@@ -1269,9 +1395,13 @@ describe("App", () => {
             ],
           },
         });
-      }
-      if (url === "/api/sessions/session-1/model-options/refresh") {
-        return jsonResponse({
+        await flushUiWork();
+      });
+      await waitFor(() => {
+        expect(refreshSessionModelOptionsSpy).toHaveBeenCalledWith("session-1");
+      });
+      await act(async () => {
+        refreshSessionModelOptionsDeferred.resolve({
           revision: 4,
           preferences: {
             defaultCodexReasoningEffort: "medium",
@@ -1294,46 +1424,15 @@ describe("App", () => {
             },
           ],
         });
-      }
-
-      throw new Error(`Unexpected fetch: ${url}`);
-    });
-
-    vi.stubGlobal("fetch", fetchMock);
-    vi.stubGlobal("EventSource", EventSourceMock as unknown as typeof EventSource);
-    vi.stubGlobal("ResizeObserver", ResizeObserverMock as unknown as typeof ResizeObserver);
-    const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
-    HTMLElement.prototype.scrollIntoView = vi.fn();
-
-    try {
-      await renderApp();
-
-      await clickAndSettle(await screen.findByRole("button", { name: "Open preferences" }));
-      await clickAndSettle(screen.getByRole("tab", { name: "Claude defaults" }));
-      await selectComboboxOption("Default Claude effort", /max/i);
-      await waitFor(() => {
-        expect(settingsBody).not.toBeNull();
+        await flushUiWork();
       });
-      expect(settingsBody).toMatchObject({
-        defaultClaudeEffort: "max",
-      });
-      await clickAndSettle(screen.getByRole("button", { name: "Close dialog" }));
-
-      await openCreateSessionDialog();
-      await selectComboboxOption("Assistant", /^Claude$/i);
-      expect(screen.getByRole("combobox", { name: "Claude effort" })).toHaveTextContent("max");
-      await clickAndSettle(screen.getByRole("button", { name: "Create session" }));
-
-      await waitFor(() => {
-        expect(createSessionBody).not.toBeNull();
-      });
-      expect(createSessionBody).toMatchObject({
-        agent: "Claude",
-        claudeEffort: "max",
-      });
+      await settleAsyncUi();
     } finally {
       HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
-      restoreGlobal("fetch", originalFetch);
+      fetchStateSpy.mockRestore();
+      updateAppSettingsSpy.mockRestore();
+      createSessionSpy.mockRestore();
+      refreshSessionModelOptionsSpy.mockRestore();
       restoreGlobal("EventSource", originalEventSource);
       restoreGlobal("ResizeObserver", originalResizeObserver);
     }

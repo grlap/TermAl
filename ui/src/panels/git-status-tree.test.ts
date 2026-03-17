@@ -43,6 +43,44 @@ describe("buildGitStatusTree", () => {
     expect(unstagedAgentFile.statusCode).toBe("?");
     expect(findFile(stagedUiSrcDirectory.children, "agent-icon.tsx")).toBeUndefined();
   });
+
+  it("reuses unchanged branches when git status refreshes", () => {
+    const initial = buildGitStatusTree([
+      makeGitStatusFile("docs/guide.md", { worktreeStatus: "M" }),
+      makeGitStatusFile("ui/src/App.tsx", { worktreeStatus: "M" }),
+      makeGitStatusFile("ui/src/agent-icon.tsx", { worktreeStatus: "M" }),
+    ]);
+
+    const initialStaged = initial[0];
+    const initialUnstaged = initial[1];
+    const initialUiDirectory = findDirectory(initialUnstaged.nodes, "ui");
+    const initialUiSrcDirectory = findDirectory(initialUiDirectory.children, "src");
+    const initialAppFile = findRequiredFile(initialUiSrcDirectory.children, "App.tsx");
+    const initialAgentFile = findRequiredFile(initialUiSrcDirectory.children, "agent-icon.tsx");
+    const initialDocsDirectory = findDirectory(initialUnstaged.nodes, "docs");
+
+    const refreshed = buildGitStatusTree(
+      [
+        makeGitStatusFile("docs/guide.md", { worktreeStatus: "M" }),
+        makeGitStatusFile("docs/notes.md", { worktreeStatus: "M" }),
+        makeGitStatusFile("ui/src/App.tsx", { worktreeStatus: "M" }),
+        makeGitStatusFile("ui/src/agent-icon.tsx", { worktreeStatus: "M" }),
+      ],
+      initial,
+    );
+
+    const refreshedUiDirectory = findDirectory(refreshed[1].nodes, "ui");
+    const refreshedUiSrcDirectory = findDirectory(refreshedUiDirectory.children, "src");
+    const refreshedDocsDirectory = findDirectory(refreshed[1].nodes, "docs");
+
+    expect(refreshed[0]).toBe(initialStaged);
+    expect(refreshed[1]).not.toBe(initialUnstaged);
+    expect(refreshedUiDirectory).toBe(initialUiDirectory);
+    expect(refreshedUiSrcDirectory).toBe(initialUiSrcDirectory);
+    expect(findRequiredFile(refreshedUiSrcDirectory.children, "App.tsx")).toBe(initialAppFile);
+    expect(findRequiredFile(refreshedUiSrcDirectory.children, "agent-icon.tsx")).toBe(initialAgentFile);
+    expect(refreshedDocsDirectory).not.toBe(initialDocsDirectory);
+  });
 });
 
 function makeGitStatusFile(path: string, overrides?: Partial<GitStatusFile>): GitStatusFile {

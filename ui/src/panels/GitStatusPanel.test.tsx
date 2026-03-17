@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -28,6 +28,13 @@ const commitGitChangesMock = vi.mocked(commitGitChanges);
 const fetchGitDiffMock = vi.mocked(fetchGitDiff);
 const fetchGitStatusMock = vi.mocked(fetchGitStatus);
 const SESSION_ID = "session-1";
+
+async function clickAndSettle(target: HTMLElement, eventInit?: MouseEventInit) {
+  await act(async () => {
+    fireEvent.click(target, eventInit);
+    await Promise.resolve();
+  });
+}
 
 describe("GitStatusPanel", () => {
   beforeEach(() => {
@@ -78,7 +85,7 @@ describe("GitStatusPanel", () => {
     expect(screen.getAllByText("ui").length).toBeGreaterThan(0);
     expect(screen.getByText("ControlPanelSurface.tsx")).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: /^ControlPanelSurface\.tsx$/i }));
+    await clickAndSettle(screen.getByRole("button", { name: /^ControlPanelSurface\.tsx$/i }));
 
     await waitFor(() => {
       expect(fetchGitDiffMock).toHaveBeenCalledWith({
@@ -94,7 +101,7 @@ describe("GitStatusPanel", () => {
       expect(onOpenDiff).toHaveBeenCalledWith(makeDiffResponse());
     });
 
-    fireEvent.click(screen.getByRole("button", { name: /^Staged\b/i }));
+    await clickAndSettle(screen.getByRole("button", { name: /^Staged\b/i }));
 
     expect(screen.queryByText("ControlPanelSurface.tsx")).not.toBeInTheDocument();
   });
@@ -123,14 +130,14 @@ describe("GitStatusPanel", () => {
 
     const fileButton = await screen.findByRole("button", { name: /^ControlPanelSurface\.tsx$/i });
 
-    fireEvent.click(fileButton, { ctrlKey: true });
+    await clickAndSettle(fileButton, { ctrlKey: true });
 
     await waitFor(() => {
       expect(onOpenDiff).toHaveBeenCalledWith(makeDiffResponse(), { openInNewTab: true });
     });
   });
 
-  it("loads a drafted repo path from the toolbar", () => {
+  it("loads a drafted repo path from the toolbar", async () => {
     const onOpenWorkdir = vi.fn();
 
     render(
@@ -145,7 +152,7 @@ describe("GitStatusPanel", () => {
     fireEvent.change(screen.getByPlaceholderText(/folder inside it/i), {
       target: { value: "/repo/subdir" },
     });
-    fireEvent.click(screen.getByRole("button", { name: /Load repo/i }));
+    await clickAndSettle(screen.getByRole("button", { name: /Load repo/i }));
 
     expect(onOpenWorkdir).toHaveBeenCalledWith("/repo/subdir");
   });
@@ -173,7 +180,7 @@ describe("GitStatusPanel", () => {
 
     await screen.findByText("Working tree clean.");
 
-    fireEvent.click(screen.getByRole("button", { name: /Refresh git status/i }));
+    await clickAndSettle(screen.getByRole("button", { name: /Refresh git status/i }));
 
     await waitFor(() => {
       expect(fetchGitStatusMock).toHaveBeenCalledTimes(2);
@@ -205,7 +212,7 @@ describe("GitStatusPanel", () => {
 
     await screen.findByText("scratch.txt");
 
-    fireEvent.click(screen.getByRole("button", { name: /Refresh git status/i }));
+    await clickAndSettle(screen.getByRole("button", { name: /Refresh git status/i }));
 
     expect(screen.getByText("scratch.txt")).toBeInTheDocument();
     expect(screen.queryByText(/Loading repository state/i)).not.toBeInTheDocument();
@@ -269,7 +276,7 @@ describe("GitStatusPanel", () => {
 
     await screen.findByText("Working tree clean.");
 
-    fireEvent.click(screen.getByRole("button", { name: /Refresh git status/i }));
+    await clickAndSettle(screen.getByRole("button", { name: /Refresh git status/i }));
 
     await waitFor(() => {
       expect(fetchGitStatusMock).toHaveBeenCalledTimes(2);
@@ -305,7 +312,7 @@ describe("GitStatusPanel", () => {
     fireEvent.change(screen.getByLabelText(/Commit/i), {
       target: { value: "Tighten git footer" },
     });
-    fireEvent.click(screen.getByRole("button", { name: /^Commit$/i }));
+    await clickAndSettle(screen.getByRole("button", { name: /^Commit$/i }));
 
     await waitFor(() => {
       expect(commitGitChangesMock).toHaveBeenCalledWith({
@@ -363,7 +370,7 @@ describe("GitStatusPanel", () => {
       expect(fetchGitStatusMock).toHaveBeenCalledWith("/repo", null);
     });
 
-    fireEvent.click(await screen.findByRole("button", { name: /^main\.rs$/i }));
+    await clickAndSettle(await screen.findByRole("button", { name: /^main\.rs$/i }));
 
     await waitFor(() => {
       expect(fetchGitDiffMock).toHaveBeenCalledWith({
@@ -542,7 +549,7 @@ describe("GitStatusPanel", () => {
 
     await screen.findByText("scratch.txt");
 
-    fireEvent.click(screen.getByRole("button", { name: /Stage scratch\.txt/i }));
+    await clickAndSettle(screen.getByRole("button", { name: /Stage scratch\.txt/i }));
 
     await waitFor(() => {
       expect(applyGitFileActionMock).toHaveBeenCalledWith({
@@ -594,7 +601,7 @@ describe("GitStatusPanel", () => {
       />,
     );
 
-    fireEvent.click(await screen.findByRole("button", { name: /Stage ui/i }));
+    await clickAndSettle(await screen.findByRole("button", { name: /Stage ui/i }));
 
     await waitFor(() => {
       expect(applyGitFileActionMock).toHaveBeenCalledTimes(2);
@@ -658,7 +665,7 @@ describe("GitStatusPanel", () => {
       />,
     );
 
-    fireEvent.click(await screen.findByRole("button", { name: "Stage all files" }));
+    await clickAndSettle(await screen.findByRole("button", { name: "Stage all files" }));
 
     await waitFor(() => {
       expect(applyGitFileActionMock).toHaveBeenCalledTimes(2);
@@ -700,7 +707,7 @@ describe("GitStatusPanel", () => {
       />,
     );
 
-    fireEvent.click(await screen.findByRole("button", { name: "Unstage all files" }));
+    await clickAndSettle(await screen.findByRole("button", { name: "Unstage all files" }));
 
     await waitFor(() => {
       expect(applyGitFileActionMock).toHaveBeenCalledTimes(2);
@@ -744,7 +751,7 @@ describe("GitStatusPanel", () => {
       />,
     );
 
-    fireEvent.click(await screen.findByRole("button", { name: /Move ui to unstaged/i }));
+    await clickAndSettle(await screen.findByRole("button", { name: /Move ui to unstaged/i }));
 
     await waitFor(() => {
       expect(applyGitFileActionMock).toHaveBeenCalledTimes(2);

@@ -112,6 +112,23 @@ vi.mock("../MonacoCodeEditor", () => ({
 
 const fetchFileMock = vi.mocked(fetchFile);
 
+async function clickAndSettle(target: HTMLElement, eventInit?: MouseEventInit) {
+  await act(async () => {
+    fireEvent.click(target, eventInit);
+    await Promise.resolve();
+  });
+}
+
+async function changeAndSettle(
+  target: HTMLElement,
+  eventInit: Parameters<typeof fireEvent.change>[1],
+) {
+  await act(async () => {
+    fireEvent.change(target, eventInit);
+    await Promise.resolve();
+  });
+}
+
 describe("DiffPanel", () => {
   beforeEach(() => {
     fetchFileMock.mockReset();
@@ -153,11 +170,11 @@ describe("DiffPanel", () => {
     expect(await screen.findByTestId("monaco-diff-editor")).toBeInTheDocument();
     expect(screen.getByText("Change 1 of 2")).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "Changed only" }));
+    await clickAndSettle(screen.getByRole("button", { name: "Changed only" }));
     expect(await screen.findByTestId("structured-diff-view")).toBeInTheDocument();
     expect(screen.getByText("@@ -1,2 +1,3 @@")).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "Edit mode" }));
+    await clickAndSettle(screen.getByRole("button", { name: "Edit mode" }));
 
     await waitFor(() => {
       expect(fetchFileMock).toHaveBeenCalledWith("/repo/src/example.ts", { sessionId: "session-1", projectId: null });
@@ -192,7 +209,7 @@ describe("DiffPanel", () => {
       );
     });
 
-    fireEvent.click(screen.getByRole("button", { name: "Edit mode" }));
+    await clickAndSettle(screen.getByRole("button", { name: "Edit mode" }));
 
     await waitFor(() => {
       expect(fetchFileMock).toHaveBeenCalledWith("/repo/src/example.ts", {
@@ -229,9 +246,9 @@ describe("DiffPanel", () => {
       );
     });
 
-    fireEvent.click(screen.getByRole("button", { name: "Edit mode" }));
+    await clickAndSettle(screen.getByRole("button", { name: "Edit mode" }));
     const editor = await screen.findByTestId("monaco-code-editor");
-    fireEvent.change(editor, { target: { value: "changed\n" } });
+    await changeAndSettle(editor, { target: { value: "changed\n" } });
 
     expect(screen.getByText("Unsaved changes")).toBeInTheDocument();
   });
@@ -266,10 +283,10 @@ describe("DiffPanel", () => {
     expect(editor).toHaveValue("const latest = true;\n");
     expect(editor).not.toHaveAttribute("readonly");
 
-    fireEvent.change(editor, { target: { value: "const latest = false;\n" } });
+    await changeAndSettle(editor, { target: { value: "const latest = false;\n" } });
     expect(screen.getByText("Unsaved changes")).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "Mock diff save" }));
+    await clickAndSettle(screen.getByRole("button", { name: "Mock diff save" }));
 
     await waitFor(() => {
       expect(onSaveFile).toHaveBeenCalledWith("/repo/src/example.ts", "const latest = false;\n");
@@ -308,7 +325,7 @@ describe("DiffPanel", () => {
       ));
     });
 
-    fireEvent.click(screen.getByRole("button", { name: "Raw patch" }));
+    await clickAndSettle(screen.getByRole("button", { name: "Raw patch" }));
 
     expect(container.querySelector(".diff-preview-raw-line-added")).not.toBeNull();
     expect(container.querySelector(".diff-preview-raw-line-removed")).not.toBeNull();
@@ -341,7 +358,7 @@ describe("DiffPanel", () => {
       );
     });
 
-    fireEvent.click(screen.getByRole("button", { name: "Changed only" }));
+    await clickAndSettle(screen.getByRole("button", { name: "Changed only" }));
 
     expect(await screen.findByTestId("structured-diff-view")).toBeInTheDocument();
     expect(document.querySelectorAll(".structured-diff-inline-change").length).toBeGreaterThan(0);
