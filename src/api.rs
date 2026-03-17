@@ -544,10 +544,7 @@ fn load_git_status_for_path(path: &FsPath) -> Result<GitStatusResponse, ApiError
 
         let status = &line[..2];
         let path_payload = line[3..].trim();
-        let (original_path, path) = match path_payload.split_once(" -> ") {
-            Some((from, to)) => (Some(from.trim().to_owned()), to.trim().to_owned()),
-            None => (None, path_payload.to_owned()),
-        };
+        let (original_path, path) = parse_git_status_paths(path_payload);
         let index_status = status.chars().next().and_then(normalize_git_status_code);
         let worktree_status = status.chars().nth(1).and_then(normalize_git_status_code);
 
@@ -2303,6 +2300,130 @@ fn parse_git_branch_status(line: &str) -> ParsedGitBranchStatus {
         branch,
         upstream,
     }
+}
+
+fn parse_git_status_paths(path_payload: &str) -> (Option<String>, String) {
+    if let Some(separator_index) = find_git_status_rename_separator(path_payload) {
+        let original_path = decode_git_status_path(&path_payload[..separator_index]);
+        let path = decode_git_status_path(&path_payload[separator_index + 4..]);
+        return (Some(original_path), path);
+    }
+
+    (None, decode_git_status_path(path_payload))
+}
+
+fn find_git_status_rename_separator(path_payload: &str) -> Option<usize> {
+    let bytes = path_payload.as_bytes();
+    let mut index = 0;
+    let mut in_quotes = false;
+
+    while index < bytes.len() {
+        match bytes[index] {
+            b'\\' if in_quotes => {
+                index += 2;
+            }
+            b'"' => {
+                in_quotes = !in_quotes;
+                index += 1;
+            }
+            b' ' if !in_quotes && bytes[index..].starts_with(b" -> ") => {
+                return Some(index);
+            }
+            _ => {
+                index += 1;
+            }
+        }
+    }
+
+    None
+}
+
+fn decode_git_status_path(path: &str) -> String {
+    let trimmed = path.trim();
+    decode_git_status_quoted_path(trimmed).unwrap_or_else(|| trimmed.to_owned())
+}
+
+fn decode_git_status_quoted_path(path: &str) -> Option<String> {
+    if !path.starts_with('"') || !path.ends_with('"') || path.len() < 2 {
+        return None;
+    }
+
+    let inner = &path[1..path.len() - 1];
+    let bytes = inner.as_bytes();
+    let mut decoded = Vec::with_capacity(bytes.len());
+    let mut index = 0;
+
+    while index < bytes.len() {
+        if bytes[index] != b'\\' {
+            decoded.push(bytes[index]);
+            index += 1;
+            continue;
+        }
+
+        index += 1;
+        if index >= bytes.len() {
+            return None;
+        }
+
+        match bytes[index] {
+            b'"' | b'\\' => {
+                decoded.push(bytes[index]);
+                index += 1;
+            }
+            b'a' => {
+                decoded.push(0x07);
+                index += 1;
+            }
+            b'b' => {
+                decoded.push(0x08);
+                index += 1;
+            }
+            b'f' => {
+                decoded.push(0x0c);
+                index += 1;
+            }
+            b'n' => {
+                decoded.push(b'\n');
+                index += 1;
+            }
+            b'r' => {
+                decoded.push(b'\r');
+                index += 1;
+            }
+            b't' => {
+                decoded.push(b'\t');
+                index += 1;
+            }
+            b'v' => {
+                decoded.push(0x0b);
+                index += 1;
+            }
+            b'0'..=b'7' => {
+                let mut value = bytes[index] - b'0';
+                index += 1;
+
+                for _ in 0..2 {
+                    if index >= bytes.len() {
+                        break;
+                    }
+                    let next = bytes[index];
+                    if !matches!(next, b'0'..=b'7') {
+                        break;
+                    }
+                    value = value.saturating_mul(8).saturating_add(next - b'0');
+                    index += 1;
+                }
+
+                decoded.push(value);
+            }
+            other => {
+                decoded.push(other);
+                index += 1;
+            }
+        }
+    }
+
+    Some(String::from_utf8_lossy(&decoded).into_owned())
 }
 
 fn normalize_git_status_code(code: char) -> Option<String> {

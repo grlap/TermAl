@@ -118,6 +118,24 @@ fn test_session_id(state: &AppState, agent: Agent) -> String {
     session_id
 }
 
+fn run_git_test_command(repo_root: &FsPath, args: &[&str]) {
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(repo_root)
+        .args(args)
+        .output()
+        .unwrap_or_else(|err| panic!("failed to run git {:?}: {err}", args));
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_owned();
+        let stdout = String::from_utf8_lossy(&output.stdout).trim().to_owned();
+        panic!(
+            "git {:?} failed with status {}.\nstdout: {}\nstderr: {}",
+            args, output.status, stdout, stderr
+        );
+    }
+}
+
 fn test_exit_success_child() -> Child {
     if cfg!(windows) {
         Command::new("cmd").args(["/C", "exit 0"]).spawn().unwrap()
@@ -1890,6 +1908,90 @@ fn resolves_project_scoped_paths_without_a_session() {
 
     fs::remove_dir_all(root).unwrap();
     fs::remove_dir_all(outside_root).unwrap();
+}
+
+#[test]
+fn parses_quoted_git_status_paths() {
+    assert_eq!(
+        parse_git_status_paths(r#""folder/file with spaces.txt""#),
+        (None, "folder/file with spaces.txt".to_owned())
+    );
+    assert_eq!(
+        parse_git_status_paths(r#""caf\303\251.txt""#),
+        (None, "café.txt".to_owned())
+    );
+    assert_eq!(
+        parse_git_status_paths(r#""old name.txt" -> "new name.txt""#),
+        (Some("old name.txt".to_owned()), "new name.txt".to_owned(),)
+    );
+}
+
+#[test]
+fn git_status_file_actions_support_paths_with_spaces() {
+    let repo_root = std::env::temp_dir().join(format!("termal-git-status-{}", Uuid::new_v4()));
+    let nested_dir = repo_root.join("folder");
+    let tracked_file = repo_root.join("README.md");
+    let spaced_file = nested_dir.join("file with spaces.txt");
+
+    fs::create_dir_all(&nested_dir).unwrap();
+    fs::write(&tracked_file, "# Test\n").unwrap();
+
+    run_git_test_command(&repo_root, &["init"]);
+    run_git_test_command(&repo_root, &["config", "user.email", "termal@example.com"]);
+    run_git_test_command(&repo_root, &["config", "user.name", "TermAl"]);
+    run_git_test_command(&repo_root, &["add", "README.md"]);
+    run_git_test_command(&repo_root, &["commit", "-m", "init"]);
+
+    fs::write(&spaced_file, "hello\n").unwrap();
+
+    let status = load_git_status_for_path(&repo_root).unwrap();
+    let file = status
+        .files
+        .iter()
+        .find(|entry| entry.path == "folder/file with spaces.txt")
+        .expect("status should include the untracked file");
+
+    assert_eq!(file.index_status.as_deref(), Some("?"));
+    assert_eq!(file.worktree_status.as_deref(), Some("?"));
+
+    let pathspecs = collect_git_pathspecs(&file.path, None);
+    run_git_pathspec_command(
+        &repo_root,
+        &["add", "-A"],
+        &pathspecs,
+        "failed to stage git changes",
+    )
+    .unwrap();
+
+    let staged_status = load_git_status_for_path(&repo_root).unwrap();
+    let staged_file = staged_status
+        .files
+        .iter()
+        .find(|entry| entry.path == "folder/file with spaces.txt")
+        .expect("status should include the staged file");
+
+    assert_eq!(staged_file.index_status.as_deref(), Some("A"));
+    assert_eq!(staged_file.worktree_status, None);
+
+    run_git_pathspec_command(
+        &repo_root,
+        &["restore", "--staged"],
+        &pathspecs,
+        "failed to unstage git changes",
+    )
+    .unwrap();
+
+    let unstaged_status = load_git_status_for_path(&repo_root).unwrap();
+    let unstaged_file = unstaged_status
+        .files
+        .iter()
+        .find(|entry| entry.path == "folder/file with spaces.txt")
+        .expect("status should include the unstaged file");
+
+    assert_eq!(unstaged_file.index_status.as_deref(), Some("?"));
+    assert_eq!(unstaged_file.worktree_status.as_deref(), Some("?"));
+
+    fs::remove_dir_all(repo_root).unwrap();
 }
 
 #[test]
