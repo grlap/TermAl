@@ -19,7 +19,7 @@ import {
   type WheelEvent as ReactWheelEvent,
 } from "react";
 import { createPortal, flushSync } from "react-dom";
-import ReactMarkdown from "react-markdown";
+import ReactMarkdown, { uriTransformer } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import {
   cancelQueuedPrompt,
@@ -9030,6 +9030,7 @@ export function MarkdownContent({
   return (
     <div className="markdown-copy">
       <ReactMarkdown
+        transformLinkUri={transformMarkdownLinkUri}
         components={{
           a: ({ href, children, ...props }) => {
             const isExternalLink = isExternalMarkdownHref(href ?? "");
@@ -9222,6 +9223,10 @@ function isExternalMarkdownHref(href: string) {
   }
 
   return /^\/\//.test(href) || /^[a-z][a-z\d+.-]*:/i.test(href);
+}
+
+function transformMarkdownLinkUri(href: string) {
+  return isExternalMarkdownHref(href) ? uriTransformer(href) : href;
 }
 
 function safeDecodeMarkdownHref(href: string) {

@@ -275,6 +275,46 @@ describe("MarkdownContent", () => {
     });
   });
 
+  it("opens absolute Windows file links through the source callback", () => {
+    const onOpenSourceLink = vi.fn();
+
+    render(
+      <MarkdownContent
+        markdown="[route_post_processing_service.dart:469](C:/github/Personal/fit_friends/lib/services/route_post_processing_service.dart#L469)"
+        onOpenSourceLink={onOpenSourceLink}
+        workspaceRoot="C:/github/Personal/TermAl"
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("link", { name: "route_post_processing_service.dart:469" }));
+
+    expect(onOpenSourceLink).toHaveBeenCalledWith({
+      path: "C:/github/Personal/fit_friends/lib/services/route_post_processing_service.dart",
+      line: 469,
+      openInNewTab: false,
+    });
+  });
+
+  it("opens absolute Linux file links through the source callback", () => {
+    const onOpenSourceLink = vi.fn();
+
+    render(
+      <MarkdownContent
+        markdown="[route_post_processing_service.dart:469](/home/grzeg/projects/fit_friends/lib/services/route_post_processing_service.dart#L469)"
+        onOpenSourceLink={onOpenSourceLink}
+        workspaceRoot="/repo"
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("link", { name: "route_post_processing_service.dart:469" }));
+
+    expect(onOpenSourceLink).toHaveBeenCalledWith({
+      path: "/home/grzeg/projects/fit_friends/lib/services/route_post_processing_service.dart",
+      line: 469,
+      openInNewTab: false,
+    });
+  });
+
   it("autolinks bare file references with line targets", () => {
     const onOpenSourceLink = vi.fn();
 

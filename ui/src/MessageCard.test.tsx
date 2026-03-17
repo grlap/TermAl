@@ -124,6 +124,62 @@ describe("MessageCard", () => {
     });
   });
 
+  it("opens assistant absolute Windows file links through the source callback", () => {
+    const message: TextMessage = {
+      id: "message-5b",
+      type: "text",
+      author: "assistant",
+      timestamp: "10:04",
+      text: "[route_post_processing_service.dart:469](C:/github/Personal/fit_friends/lib/services/route_post_processing_service.dart#L469)",
+    };
+    const onOpenSourceLink = vi.fn();
+
+    render(
+      <MessageCard
+        message={message}
+        onApprovalDecision={vi.fn()}
+        onOpenSourceLink={onOpenSourceLink}
+        workspaceRoot="C:/github/Personal/TermAl"
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("link", { name: "route_post_processing_service.dart:469" }));
+
+    expect(onOpenSourceLink).toHaveBeenCalledWith({
+      path: "C:/github/Personal/fit_friends/lib/services/route_post_processing_service.dart",
+      line: 469,
+      openInNewTab: false,
+    });
+  });
+
+  it("opens assistant absolute Linux file links through the source callback", () => {
+    const message: TextMessage = {
+      id: "message-5c",
+      type: "text",
+      author: "assistant",
+      timestamp: "10:04",
+      text: "[route_post_processing_service.dart:469](/home/grzeg/projects/fit_friends/lib/services/route_post_processing_service.dart#L469)",
+    };
+    const onOpenSourceLink = vi.fn();
+
+    render(
+      <MessageCard
+        message={message}
+        onApprovalDecision={vi.fn()}
+        onOpenSourceLink={onOpenSourceLink}
+        workspaceRoot="/repo"
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("link", { name: "route_post_processing_service.dart:469" }));
+
+    expect(onOpenSourceLink).toHaveBeenCalledWith({
+      path: "/home/grzeg/projects/fit_friends/lib/services/route_post_processing_service.dart",
+      line: 469,
+      openInNewTab: false,
+    });
+  });
+
   it("autolinks bare assistant file references through the source callback", () => {
     const message: TextMessage = {
       id: "message-6",
