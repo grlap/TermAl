@@ -48,6 +48,11 @@ import { copyTextToClipboard } from "./clipboard";
 import { buildDiffPreviewModel } from "./diff-preview";
 import { highlightCode } from "./highlight";
 import { applyDeltaToSessions } from "./live-updates";
+import {
+  looksLikeWindowsPath,
+  normalizeDisplayPath,
+  relativizePathToWorkspace,
+} from "./path-display";
 import { resolvePaneScrollCommand } from "./pane-keyboard";
 import { AgentSessionPanel, AgentSessionPanelFooter } from "./panels/AgentSessionPanel";
 import {
@@ -3665,6 +3670,7 @@ export default function App() {
             <WorkspaceNodeView
               node={workspace.root}
               codexState={codexState}
+              projectLookup={projectLookup}
               paneLookup={paneLookup}
               sessionLookup={sessionLookup}
               activePaneId={workspace.activePaneId}
@@ -5140,6 +5146,7 @@ export function ThemedCombobox({
 function WorkspaceNodeView({
   node,
   codexState,
+  projectLookup,
   paneLookup,
   sessionLookup,
   activePaneId,
@@ -5197,6 +5204,7 @@ function WorkspaceNodeView({
 }: {
   node: WorkspaceNode;
   codexState: CodexState;
+  projectLookup: Map<string, Project>;
   paneLookup: Map<string, WorkspacePane>;
   sessionLookup: Map<string, Session>;
   activePaneId: string | null;
@@ -5311,6 +5319,7 @@ function WorkspaceNodeView({
       <SessionPaneView
         pane={pane}
         codexState={codexState}
+        projectLookup={projectLookup}
         sessionLookup={sessionLookup}
         isActive={pane.id === activePaneId}
         isLoading={isLoading}
@@ -5410,6 +5419,7 @@ function WorkspaceNodeView({
         <WorkspaceNodeView
           node={node.first}
           codexState={codexState}
+          projectLookup={projectLookup}
           paneLookup={paneLookup}
           sessionLookup={sessionLookup}
           activePaneId={activePaneId}
@@ -5479,6 +5489,7 @@ function WorkspaceNodeView({
         <WorkspaceNodeView
           node={node.second}
           codexState={codexState}
+          projectLookup={projectLookup}
           paneLookup={paneLookup}
           sessionLookup={sessionLookup}
           activePaneId={activePaneId}
@@ -5542,6 +5553,7 @@ function WorkspaceNodeView({
 function SessionPaneView({
   pane,
   codexState,
+  projectLookup,
   sessionLookup,
   isActive,
   isLoading,
@@ -5598,6 +5610,7 @@ function SessionPaneView({
 }: {
   pane: WorkspacePane;
   codexState: CodexState;
+  projectLookup: Map<string, Project>;
   sessionLookup: Map<string, Session>;
   isActive: boolean;
   isLoading: boolean;
@@ -6586,6 +6599,7 @@ function SessionPaneView({
               tabs={pane.tabs}
               activeTabId={activeTab?.id ?? null}
               codexState={codexState}
+              projectLookup={projectLookup}
               sessionLookup={sessionLookup}
               draggedTab={draggedTab}
               onSelectTab={onSelectTab}
@@ -9588,40 +9602,6 @@ function messageChangeMarker(message: Message) {
 
 function pendingPromptChangeMarker(prompt: PendingPrompt) {
   return `${prompt.text.length}:${prompt.attachments?.length ?? 0}`;
-}
-
-function relativizePathToWorkspace(path: string, workspaceRoot: string | null) {
-  const trimmedPath = path.trim();
-  const trimmedRoot = workspaceRoot?.trim();
-  if (!trimmedPath || !trimmedRoot) {
-    return trimmedPath;
-  }
-
-  const normalizedPath = normalizeDisplayPath(trimmedPath);
-  const normalizedRoot = normalizeDisplayPath(trimmedRoot).replace(/\/+$/, "");
-  const exactPrefix = `${normalizedRoot}/`;
-  if (normalizedPath.startsWith(exactPrefix)) {
-    return normalizedPath.slice(exactPrefix.length);
-  }
-
-  if (looksLikeWindowsPath(trimmedPath) || looksLikeWindowsPath(trimmedRoot)) {
-    const lowerPath = normalizedPath.toLowerCase();
-    const lowerRoot = normalizedRoot.toLowerCase();
-    const lowerPrefix = `${lowerRoot}/`;
-    if (lowerPath.startsWith(lowerPrefix)) {
-      return normalizedPath.slice(lowerPrefix.length);
-    }
-  }
-
-  return trimmedPath;
-}
-
-function normalizeDisplayPath(path: string) {
-  return path.trim().replace(/[\\/]+/g, "/");
-}
-
-function looksLikeWindowsPath(path: string) {
-  return /^[A-Za-z]:[\\/]/.test(path) || path.includes("\\");
 }
 
 function collectCandidateSourcePaths(session: Session) {

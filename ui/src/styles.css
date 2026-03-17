@@ -1631,6 +1631,48 @@ textarea {
   color: var(--ink);
 }
 
+.pane-tab-context-menu {
+  position: fixed;
+  left: 0;
+  top: 0;
+  z-index: 18;
+  min-width: 12.5rem;
+  padding: 0.35rem;
+  border-radius: 1rem;
+  background: color-mix(in srgb, var(--surface-white) 90%, white 10%);
+  box-shadow: 0 20px 40px color-mix(in srgb, var(--ink) 14%, transparent);
+}
+
+.pane-tab-context-menu-item {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  justify-content: flex-start;
+  padding: 0.72rem 0.9rem;
+  border: 0;
+  border-radius: 0.8rem;
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+
+.pane-tab-context-menu-item:hover:not(:disabled),
+.pane-tab-context-menu-item:focus-visible {
+  background: color-mix(in srgb, var(--accent-blue-bg) 58%, var(--surface-white));
+  outline: none;
+}
+
+.pane-tab-context-menu-item:disabled {
+  color: var(--muted);
+  cursor: default;
+}
+
+.pane-tab-context-menu-item-danger {
+  color: var(--signal-red);
+}
+
 .pane-tab-status-tooltip {
   --pane-tab-status-arrow-left: 1.4rem;
   position: fixed;

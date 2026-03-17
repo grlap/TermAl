@@ -8,18 +8,33 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import { AgentIcon } from "../agent-icon";
+import { copyTextToClipboard } from "../clipboard";
+import {
+  looksLikeAbsoluteDisplayPath,
+  normalizeDisplayPath,
+  relativizePathToWorkspace,
+} from "../path-display";
 import {
   attachWorkspaceTabDragData,
   createWorkspaceTabDrag,
   type WorkspaceTabDrag,
 } from "../tab-drag";
 import { measurePaneTabStatusTooltipPosition } from "../pane-tab-status-tooltip";
-import type { CodexRateLimitWindow, CodexState, Session } from "../types";
+import type { CodexRateLimitWindow, CodexState, Project, Session } from "../types";
 import type { TabDropPlacement, WorkspaceTab } from "../workspace";
 
 type ActiveCodexTooltipState = {
   id: string;
   sessionId: string;
+};
+
+type FileTabContextMenuState = {
+  clientX: number;
+  clientY: number;
+  paneId: string;
+  path: string;
+  relativePath: string | null;
+  tabId: string;
 };
 
 export function PaneTabs({
@@ -28,6 +43,7 @@ export function PaneTabs({
   tabs,
   activeTabId,
   codexState,
+  projectLookup,
   sessionLookup,
   draggedTab,
   onSelectTab,
@@ -42,6 +58,7 @@ export function PaneTabs({
   tabs: WorkspaceTab[];
   activeTabId: string | null;
   codexState: CodexState;
+  projectLookup: Map<string, Project>;
   sessionLookup: Map<string, Session>;
   draggedTab: WorkspaceTabDrag | null;
   onSelectTab: (paneId: string, tabId: string) => void;
@@ -58,6 +75,7 @@ export function PaneTabs({
 }) {
   const paneTabsRef = useRef<HTMLDivElement | null>(null);
   const activeCodexTooltipAnchorRef = useRef<HTMLElement | null>(null);
+  const fileTabContextMenuRef = useRef<HTMLDivElement | null>(null);
   const paneHasControlPanel = tabs.some((tab) => tab.kind === "controlPanel");
   const canDropInTabRail = draggedTab !== null &&
     draggedTab.tab.kind !== "controlPanel" &&
@@ -70,6 +88,8 @@ export function PaneTabs({
   const [activeTabInsertIndex, setActiveTabInsertIndex] = useState<number | null>(null);
   const [activeCodexTooltip, setActiveCodexTooltip] = useState<ActiveCodexTooltipState | null>(null);
   const [activeCodexTooltipStyle, setActiveCodexTooltipStyle] = useState<CSSProperties | null>(null);
+  const [fileTabContextMenu, setFileTabContextMenu] = useState<FileTabContextMenuState | null>(null);
+  const [fileTabContextMenuStyle, setFileTabContextMenuStyle] = useState<CSSProperties | null>(null);
 
   function updateActiveCodexTooltipPosition(anchor = activeCodexTooltipAnchorRef.current) {
     if (!anchor || typeof window === "undefined") {
@@ -99,6 +119,37 @@ export function PaneTabs({
     activeCodexTooltipAnchorRef.current = null;
     setActiveCodexTooltip(null);
     setActiveCodexTooltipStyle(null);
+  }
+
+  function closeFileTabContextMenu() {
+    setFileTabContextMenu(null);
+    setFileTabContextMenuStyle(null);
+  }
+
+  function updateFileTabContextMenuPosition(
+    menu = fileTabContextMenu,
+    node = fileTabContextMenuRef.current,
+  ) {
+    if (!menu || !node || typeof window === "undefined") {
+      setFileTabContextMenuStyle(null);
+      return;
+    }
+
+    const menuRect = node.getBoundingClientRect();
+    const viewportPadding = 12;
+    const left = Math.max(
+      viewportPadding,
+      Math.min(menu.clientX, window.innerWidth - menuRect.width - viewportPadding),
+    );
+    const top = Math.max(
+      viewportPadding,
+      Math.min(menu.clientY, window.innerHeight - menuRect.height - viewportPadding),
+    );
+
+    setFileTabContextMenuStyle({
+      left: `${left}px`,
+      top: `${top}px`,
+    });
   }
 
   function updateTabRailState() {
@@ -264,6 +315,51 @@ export function PaneTabs({
     }
   }, [draggedTab]);
 
+  useEffect(() => {
+    if (!fileTabContextMenu) {
+      return;
+    }
+
+    const handlePointerDown = (event: PointerEvent) => {
+      const target = event.target;
+      if (target instanceof Node && fileTabContextMenuRef.current?.contains(target)) {
+        return;
+      }
+
+      closeFileTabContextMenu();
+    };
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        closeFileTabContextMenu();
+      }
+    };
+    const handleViewportChange = () => {
+      closeFileTabContextMenu();
+    };
+
+    window.addEventListener("pointerdown", handlePointerDown, true);
+    window.addEventListener("keydown", handleKeyDown);
+    window.addEventListener("resize", handleViewportChange);
+    window.addEventListener("scroll", handleViewportChange, true);
+
+    return () => {
+      window.removeEventListener("pointerdown", handlePointerDown, true);
+      window.removeEventListener("keydown", handleKeyDown);
+      window.removeEventListener("resize", handleViewportChange);
+      window.removeEventListener("scroll", handleViewportChange, true);
+    };
+  }, [fileTabContextMenu]);
+
+  useEffect(() => {
+    if (!fileTabContextMenu) {
+      return;
+    }
+
+    if (!tabs.some((tab) => tab.id === fileTabContextMenu.tabId)) {
+      closeFileTabContextMenu();
+    }
+  }, [fileTabContextMenu, tabs]);
+
   useLayoutEffect(() => {
     if (!activeCodexTooltip) {
       return;
@@ -292,6 +388,14 @@ export function PaneTabs({
       node?.removeEventListener("scroll", updateTooltipPosition);
     };
   }, [activeCodexTooltip, activeTabId, tabs.length]);
+
+  useLayoutEffect(() => {
+    if (!fileTabContextMenu) {
+      return;
+    }
+
+    updateFileTabContextMenuPosition();
+  }, [fileTabContextMenu]);
 
   useEffect(() => {
     if (!activeCodexTooltip || sessionLookup.has(activeCodexTooltip.sessionId)) {
@@ -378,6 +482,25 @@ export function PaneTabs({
                   }
                 }}
                 onContextMenu={(event) => {
+                  closeFileTabContextMenu();
+                  const fileTabContext = buildFileTabContextMenu(tab, sessionLookup, projectLookup);
+                  if (fileTabContext) {
+                    event.preventDefault();
+                    setFileTabContextMenu({
+                      clientX: event.clientX,
+                      clientY: event.clientY,
+                      paneId,
+                      path: fileTabContext.path,
+                      relativePath: fileTabContext.relativePath,
+                      tabId: tab.id,
+                    });
+                    setFileTabContextMenuStyle({
+                      left: `${event.clientX}px`,
+                      top: `${event.clientY}px`,
+                    });
+                    return;
+                  }
+
                   if (!session) {
                     return;
                   }
@@ -413,6 +536,7 @@ export function PaneTabs({
                         Math.max(12, event.clientY - rect.top),
                       );
                     }
+                    closeFileTabContextMenu();
                     onTabDragStart(drag);
                   }}
                   onDragEnd={onTabDragEnd}
@@ -476,8 +600,63 @@ export function PaneTabs({
             document.body,
           )
         : null}
+      {fileTabContextMenu && fileTabContextMenuStyle
+        ? createPortal(
+            <div
+              ref={fileTabContextMenuRef}
+              className="pane-tab-context-menu panel"
+              role="menu"
+              aria-label="File tab actions"
+              style={fileTabContextMenuStyle}
+            >
+              <button
+                className="pane-tab-context-menu-item"
+                type="button"
+                role="menuitem"
+                onClick={() => void handleCopyTabPath(fileTabContextMenu.path, closeFileTabContextMenu)}
+              >
+                Copy Path
+              </button>
+              <button
+                className="pane-tab-context-menu-item"
+                type="button"
+                role="menuitem"
+                disabled={!fileTabContextMenu.relativePath}
+                onClick={() =>
+                  void handleCopyTabPath(fileTabContextMenu.relativePath, closeFileTabContextMenu)
+                }
+              >
+                Copy Relative Path
+              </button>
+              <button
+                className="pane-tab-context-menu-item pane-tab-context-menu-item-danger"
+                type="button"
+                role="menuitem"
+                onClick={() => {
+                  closeFileTabContextMenu();
+                  onCloseTab(fileTabContextMenu.paneId, fileTabContextMenu.tabId);
+                }}
+              >
+                Close
+              </button>
+            </div>,
+            document.body,
+          )
+        : null}
     </div>
   );
+}
+
+async function handleCopyTabPath(path: string | null, onDone: () => void) {
+  if (!path) {
+    return;
+  }
+
+  try {
+    await copyTextToClipboard(path);
+  } finally {
+    onDone();
+  }
 }
 
 function CodexTabStatusTooltip({
@@ -619,4 +798,70 @@ function formatRateLimitResetLabel(resetsAt: number | null, label: string) {
 
 function clamp(value: number, min: number, max: number) {
   return Math.min(Math.max(value, min), max);
+}
+
+function buildFileTabContextMenu(
+  tab: WorkspaceTab,
+  sessionLookup: ReadonlyMap<string, Session>,
+  projectLookup: ReadonlyMap<string, Project>,
+) {
+  const path = getFileTabPath(tab);
+  if (!path) {
+    return null;
+  }
+
+  const workspaceRoot = resolveFileTabWorkspaceRoot(tab, sessionLookup, projectLookup);
+  return {
+    path,
+    relativePath: resolveRelativeTabPath(path, workspaceRoot),
+  };
+}
+
+function getFileTabPath(tab: WorkspaceTab) {
+  if (tab.kind === "source") {
+    return tab.path?.trim() || null;
+  }
+
+  if (tab.kind === "diffPreview") {
+    return tab.filePath?.trim() || null;
+  }
+
+  return null;
+}
+
+function resolveFileTabWorkspaceRoot(
+  tab: WorkspaceTab,
+  sessionLookup: ReadonlyMap<string, Session>,
+  projectLookup: ReadonlyMap<string, Project>,
+) {
+  if (tab.kind !== "source" && tab.kind !== "diffPreview") {
+    return null;
+  }
+
+  const originSession =
+    tab.originSessionId ? (sessionLookup.get(tab.originSessionId) ?? null) : null;
+  if (originSession?.workdir) {
+    return originSession.workdir;
+  }
+
+  const originProjectId = tab.originProjectId ?? originSession?.projectId ?? null;
+  return originProjectId ? (projectLookup.get(originProjectId)?.rootPath ?? null) : null;
+}
+
+function resolveRelativeTabPath(path: string, workspaceRoot: string | null) {
+  const trimmedPath = path.trim();
+  if (!trimmedPath) {
+    return null;
+  }
+
+  if (!looksLikeAbsoluteDisplayPath(trimmedPath)) {
+    return normalizeDisplayPath(trimmedPath);
+  }
+
+  if (!workspaceRoot) {
+    return null;
+  }
+
+  const relativePath = relativizePathToWorkspace(trimmedPath, workspaceRoot);
+  return relativePath === trimmedPath ? null : relativePath;
 }
