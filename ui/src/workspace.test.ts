@@ -12,6 +12,7 @@ import {
   openDiffPreviewInWorkspaceState,
   openFilesystemInWorkspaceState,
   openGitStatusInWorkspaceState,
+  openInstructionDebuggerInWorkspaceState,
   openSessionInWorkspaceState,
   openSourceInWorkspaceState,
   placeDraggedTab,
@@ -86,6 +87,19 @@ function makeControlPanelTab(id: string, originSessionId: string | null): Worksp
   return {
     id,
     kind: "controlPanel",
+    originSessionId,
+  };
+}
+
+function makeInstructionDebuggerTab(
+  id: string,
+  workdir: string | null,
+  originSessionId: string | null,
+): WorkspaceTab {
+  return {
+    id,
+    kind: "instructionDebugger",
+    workdir,
     originSessionId,
   };
 }
@@ -239,6 +253,25 @@ describe("workspace helpers", () => {
 
     expect(next.activePaneId).toBe("pane-a");
     expect(next.panes.find((pane) => pane.id === "pane-a")?.activeTabId).toBe("tab-a");
+    expect(next.panes.find((pane) => pane.id === "pane-b")?.tabs).toEqual([makeSessionTab("tab-b", "session-b")]);
+  });
+
+  it("openInstructionDebuggerInWorkspaceState focuses the existing debugger tab for the same session", () => {
+    const paneA = makePane("pane-a", [
+      makeSessionTab("tab-session", "session-a"),
+      makeInstructionDebuggerTab("tab-instructions", "/tmp/project", "session-a"),
+    ]);
+    const paneB = makePane("pane-b", [makeSessionTab("tab-b", "session-b")]);
+
+    const next = openInstructionDebuggerInWorkspaceState(
+      makeSplitWorkspace(paneA, paneB, paneB.id),
+      "/tmp/project",
+      paneB.id,
+      "session-a",
+    );
+
+    expect(next.activePaneId).toBe("pane-a");
+    expect(next.panes.find((pane) => pane.id === "pane-a")?.activeTabId).toBe("tab-instructions");
     expect(next.panes.find((pane) => pane.id === "pane-b")?.tabs).toEqual([makeSessionTab("tab-b", "session-b")]);
   });
 

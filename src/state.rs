@@ -68,6 +68,22 @@ impl AppState {
         })
     }
 
+    fn search_instructions(
+        &self,
+        session_id: &str,
+        query: &str,
+    ) -> std::result::Result<InstructionSearchResponse, ApiError> {
+        let session = {
+            let inner = self.inner.lock().expect("state mutex poisoned");
+            let index = inner
+                .find_session_index(session_id)
+                .ok_or_else(|| ApiError::not_found("session not found"))?;
+            inner.sessions[index].session.clone()
+        };
+
+        search_instruction_phrase(FsPath::new(&session.workdir), query)
+    }
+
     fn create_session(
         &self,
         request: CreateSessionRequest,

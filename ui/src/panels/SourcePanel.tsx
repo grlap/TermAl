@@ -58,6 +58,7 @@ export function SourcePanel({
   sourceFocus = null,
   sourcePath,
   onDraftChange,
+  onOpenInstructionDebugger,
   onOpenPath,
   onSaveFile,
 }: {
@@ -69,6 +70,7 @@ export function SourcePanel({
   sourceFocus?: SourcePanelFocus | null;
   sourcePath: string | null;
   onDraftChange: (nextValue: string) => void;
+  onOpenInstructionDebugger?: (() => void) | null;
   onOpenPath: (path: string) => void;
   onSaveFile: (path: string, content: string) => Promise<void>;
 }) {
@@ -123,6 +125,10 @@ export function SourcePanel({
   }
 
   const saveStateLabel = saveError ? "Save failed" : isSaving ? "Saving..." : isDirty ? "Unsaved changes" : null;
+  const activeInstructionPath = sourcePath?.trim() || fileState.path?.trim() || "";
+  const canDebugInstructions =
+    typeof onOpenInstructionDebugger === "function" &&
+    isInstructionLikePath(activeInstructionPath);
 
   return (
     <div className={`source-pane${fileState.status === "ready" ? " has-editor" : ""}`}>
@@ -136,6 +142,15 @@ export function SourcePanel({
             onKeyDown={handlePathKeyDown}
             placeholder="/absolute/path/to/file.rs"
           />
+          {canDebugInstructions ? (
+            <button
+              className="ghost-button source-toolbar-action"
+              type="button"
+              onClick={onOpenInstructionDebugger}
+            >
+              Debug instructions
+            </button>
+          ) : null}
         </div>
 
         {candidatePaths.length > 0 ? (
@@ -256,6 +271,29 @@ function formatLanguageLabel(language: string | null, path: string) {
   }
 
   return LANGUAGE_LABELS[resolved] ?? resolved.replace(/[-_]+/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+function isInstructionLikePath(path: string) {
+  const normalized = path.trim().toLowerCase().replace(/[\\/]+/g, "/");
+  if (!normalized) {
+    return false;
+  }
+
+  return (
+    normalized.endsWith("/agents.md") ||
+    normalized.endsWith("/claude.md") ||
+    normalized.endsWith("/gemini.md") ||
+    normalized.endsWith("/rules.md") ||
+    normalized.endsWith("/skills.md") ||
+    normalized.endsWith("/skill.md") ||
+    normalized.endsWith("/agent.md") ||
+    normalized.endsWith("/.claude.md") ||
+    normalized.includes("/.claude/commands/") ||
+    normalized.includes("/.claude/reviewers/") ||
+    normalized.includes("/.cursor/rules/") ||
+    normalized.includes("/skills/") ||
+    normalized.includes("/rules/")
+  );
 }
 
 function getErrorMessage(error: unknown) {

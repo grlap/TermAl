@@ -12,6 +12,7 @@ import type {
   CursorMode,
   GeminiApprovalMode,
   ImageAttachment,
+  InstructionSearchResponse,
   Project,
   SandboxMode,
   Session,
@@ -243,6 +244,15 @@ export function fetchAgentCommands(sessionId: string) {
   return request<AgentCommandsResponse>(
     `/api/sessions/${encodeURIComponent(sessionId)}/agent-commands`,
   );
+}
+
+export function fetchInstructionSearch(sessionId: string, queryText: string) {
+  const query = new URLSearchParams({
+    q: queryText,
+    sessionId,
+  });
+
+  return request<InstructionSearchResponse>(`/api/instructions/search?${query.toString()}`);
 }
 
 export function renameSession(sessionId: string, name: string) {

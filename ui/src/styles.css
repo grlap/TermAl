@@ -5810,4 +5810,361 @@ textarea {
   background: var(--surface-composer);
 }
 
+.instruction-debugger-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.instruction-debugger-toolbar {
+  align-items: stretch;
+  gap: 0.85rem;
+}
+
+.instruction-debugger-toolbar-row,
+.instruction-debugger-meta-row,
+.instruction-debugger-search-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.instruction-debugger-toolbar-row {
+  justify-content: space-between;
+}
+
+.instruction-debugger-toolbar-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.instruction-debugger-support-copy {
+  margin: 0;
+}
+
+.instruction-debugger-summary-badge,
+.instruction-debugger-session-chip,
+.instruction-debugger-workdir,
+.instruction-match-label,
+.instruction-root-kind-badge,
+.instruction-match-root-count,
+.instruction-root-hop-count,
+.instruction-match-line {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--border-muted);
+  border-radius: 999px;
+  padding: 0.22rem 0.65rem;
+  color: var(--text-secondary);
+  font-size: 0.8rem;
+  letter-spacing: 0.02em;
+  background: color-mix(in srgb, var(--panel-elevated) 84%, transparent);
+}
+
+.instruction-debugger-search-row {
+  flex-wrap: wrap;
+}
+
+.instruction-debugger-search-input {
+  flex: 1 1 20rem;
+}
+
+.instruction-debugger-search-button {
+  white-space: nowrap;
+}
+
+.instruction-debugger-meta-row {
+  flex-wrap: wrap;
+}
+
+.instruction-debugger-workdir {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.instruction-debugger-results {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  padding: 0 1rem 1rem;
+}
+
+.instruction-match-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+}
+
+.instruction-match-header,
+.instruction-root-path-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.instruction-match-copy,
+.instruction-root-path-copy {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.instruction-root-path-heading {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.instruction-root-path-link {
+  font-size: 1.02rem;
+  font-weight: 700;
+}
+
+.instruction-root-path-summary {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 0.9rem;
+  line-height: 1.45;
+}
+
+.instruction-match-text,
+.instruction-root-direct-copy,
+.instruction-root-step-excerpt {
+  margin: 0;
+}
+
+.instruction-root-path-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.8rem;
+}
+
+.instruction-root-path-card {
+  border: 1px solid var(--border-muted);
+  border-radius: 16px;
+  padding: 1rem 1.05rem;
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--panel) 90%, transparent),
+      color-mix(in srgb, var(--panel-elevated) 86%, transparent)
+    );
+  box-shadow: inset 0 1px 0 color-mix(in srgb, white 22%, transparent);
+}
+
+.instruction-trace-list {
+  position: relative;
+  display: grid;
+  gap: 0.8rem;
+  margin-top: 0.95rem;
+}
+
+.instruction-trace-list::before {
+  content: "";
+  position: absolute;
+  left: 0.84rem;
+  top: 0.5rem;
+  bottom: 0.5rem;
+  width: 2px;
+  border-radius: 999px;
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--accent) 45%, transparent),
+    color-mix(in srgb, var(--accent) 10%, var(--border-muted))
+  );
+}
+
+.instruction-trace-item {
+  position: relative;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 0.85rem;
+  align-items: start;
+}
+
+.instruction-trace-index {
+  position: relative;
+  z-index: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.7rem;
+  height: 1.7rem;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 88%, white);
+  color: white;
+  font-size: 0.82rem;
+  font-weight: 800;
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--panel) 92%, transparent);
+}
+
+.instruction-trace-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  padding: 0.9rem 1rem;
+  border-radius: 16px;
+  border: 1px solid var(--border-muted);
+  box-shadow: inset 0 1px 0 color-mix(in srgb, white 16%, transparent);
+}
+
+.instruction-trace-card-root {
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--signal-blue) 8%, var(--panel)),
+      color-mix(in srgb, var(--panel) 88%, transparent)
+    );
+  border-color: color-mix(in srgb, var(--signal-blue) 28%, var(--border-muted));
+}
+
+.instruction-trace-card-referenced {
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--signal-amber) 9%, var(--panel-elevated)),
+      color-mix(in srgb, var(--panel-elevated) 86%, transparent)
+    );
+}
+
+.instruction-trace-card-match {
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--accent) 16%, var(--panel-elevated)),
+      color-mix(in srgb, var(--panel-elevated) 88%, transparent)
+    );
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border-muted));
+}
+
+.instruction-trace-card-hop {
+  background: color-mix(in srgb, var(--panel-elevated) 65%, transparent);
+  border-color: color-mix(in srgb, var(--accent) 28%, var(--border-muted));
+}
+
+.instruction-trace-card-top {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  flex-wrap: wrap;
+}
+
+.instruction-trace-card-title {
+  color: var(--text-primary);
+  font-size: 0.78rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.instruction-trace-card-kind {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 0.18rem 0.55rem;
+  font-size: 0.78rem;
+  letter-spacing: 0.02em;
+  color: var(--text-secondary);
+  background: color-mix(in srgb, var(--panel) 70%, transparent);
+}
+
+.instruction-node-card-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.55rem;
+}
+
+.instruction-node-card-line {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 0.18rem 0.55rem;
+  font-size: 0.78rem;
+  letter-spacing: 0.02em;
+  color: var(--text-secondary);
+  background: color-mix(in srgb, var(--panel) 70%, transparent);
+}
+
+.instruction-trace-path {
+  font-size: 0.98rem;
+  font-weight: 700;
+}
+
+.instruction-trace-description {
+  margin: 0;
+  color: var(--text-primary);
+  line-height: 1.45;
+}
+
+.instruction-trace-meta {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));
+  gap: 0.65rem 0.9rem;
+}
+
+.instruction-trace-meta-group,
+.instruction-trace-evidence {
+  display: grid;
+  gap: 0.25rem;
+}
+
+.instruction-trace-meta-label {
+  color: var(--text-secondary);
+  font-size: 0.74rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.instruction-root-step-relation {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 0.18rem 0.55rem;
+  color: var(--text-secondary);
+  font-size: 0.76rem;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  background: color-mix(in srgb, var(--panel) 72%, transparent);
+}
+
+.instruction-root-step-target {
+  color: var(--text-primary);
+  font-size: 0.92rem;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.instruction-debugger-link {
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--accent);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.instruction-debugger-link:hover {
+  text-decoration: underline;
+}
+
+.source-toolbar-action {
+  white-space: nowrap;
+}
+
+@media (max-width: 900px) {
+  .instruction-match-header,
+  .instruction-root-path-header,
+  .instruction-debugger-toolbar-row {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+}
+
 

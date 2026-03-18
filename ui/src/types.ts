@@ -24,6 +24,46 @@ export type AgentCommand = {
   source: string;
 };
 
+export type InstructionDocumentKind =
+  | "rootInstruction"
+  | "commandInstruction"
+  | "reviewerInstruction"
+  | "rulesInstruction"
+  | "skillInstruction"
+  | "referencedInstruction";
+
+export type InstructionRelation =
+  | "markdownLink"
+  | "fileReference"
+  | "directoryDiscovery";
+
+export type InstructionPathStep = {
+  excerpt: string;
+  fromPath: string;
+  line: number;
+  relation: InstructionRelation;
+  toPath: string;
+};
+
+export type InstructionRootPath = {
+  rootKind: InstructionDocumentKind;
+  rootPath: string;
+  steps: InstructionPathStep[];
+};
+
+export type InstructionSearchMatch = {
+  line: number;
+  path: string;
+  rootPaths: InstructionRootPath[];
+  text: string;
+};
+
+export type InstructionSearchResponse = {
+  matches: InstructionSearchMatch[];
+  query: string;
+  workdir: string;
+};
+
 export type SessionModelOption = {
   label: string;
   value: string;

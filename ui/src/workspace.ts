@@ -8,6 +8,7 @@ export type PaneViewMode =
   | "source"
   | "filesystem"
   | "gitStatus"
+  | "instructionDebugger"
   | "diffPreview";
 
 export type WorkspaceSessionTab = {
@@ -50,6 +51,14 @@ export type WorkspaceControlPanelTab = {
   originProjectId?: string | null;
 };
 
+export type WorkspaceInstructionDebuggerTab = {
+  id: string;
+  kind: "instructionDebugger";
+  workdir: string | null;
+  originSessionId: string | null;
+  originProjectId?: string | null;
+};
+
 export type WorkspaceDiffPreviewTab = {
   id: string;
   kind: "diffPreview";
@@ -70,6 +79,7 @@ export type WorkspaceTab =
   | WorkspaceFilesystemTab
   | WorkspaceGitStatusTab
   | WorkspaceControlPanelTab
+  | WorkspaceInstructionDebuggerTab
   | WorkspaceDiffPreviewTab;
 
 export type WorkspacePane = {
@@ -190,6 +200,22 @@ export function createControlPanelTab(
   };
 }
 
+export function createInstructionDebuggerTab(
+  workdir: string | null = null,
+  originSessionId: string | null = null,
+  originProjectId: string | null = null,
+): WorkspaceInstructionDebuggerTab {
+  const normalizedOriginProjectId = normalizeWorkspaceIdentifier(originProjectId);
+
+  return {
+    id: crypto.randomUUID(),
+    kind: "instructionDebugger",
+    workdir: normalizeWorkspacePath(workdir),
+    originSessionId,
+    ...projectOriginProps(normalizedOriginProjectId),
+  };
+}
+
 export function createDiffPreviewTab({
   changeType,
   diff,
@@ -299,6 +325,18 @@ export function reconcileWorkspaceState(current: WorkspaceState, sessions: Sessi
               ...tabWithoutOriginProjectId,
               originSessionId,
               ...projectOriginProps(originProjectId),
+            },
+          ];
+        }
+
+        if (tab.kind === "instructionDebugger") {
+          const { originProjectId: _ignoredOriginProjectId, ...tabWithoutOriginProjectId } = tab;
+          return [
+            {
+              ...tabWithoutOriginProjectId,
+              originSessionId,
+              ...projectOriginProps(originProjectId),
+              workdir: normalizeWorkspacePath(tab.workdir),
             },
           ];
         }
@@ -492,6 +530,26 @@ export function openControlPanelInWorkspaceState(
   return openTabInWorkspaceState(
     workspace,
     createControlPanelTab(originSessionId, originProjectId),
+    preferredPaneId,
+  );
+}
+
+export function openInstructionDebuggerInWorkspaceState(
+  workspace: WorkspaceState,
+  workdir: string | null,
+  preferredPaneId: string | null,
+  originSessionId: string | null,
+  originProjectId: string | null = null,
+): WorkspaceState {
+  const normalizedWorkdir = normalizeWorkspacePath(workdir);
+  const existing = findInstructionDebuggerTab(workspace, normalizedWorkdir, originSessionId);
+  if (existing) {
+    return activatePane(workspace, existing.paneId, existing.tab.id);
+  }
+
+  return openTabInWorkspaceState(
+    workspace,
+    createInstructionDebuggerTab(normalizedWorkdir, originSessionId, originProjectId),
     preferredPaneId,
   );
 }
@@ -1161,6 +1219,16 @@ function syncPaneState(pane: WorkspacePane): WorkspacePane {
     };
   }
 
+  if (activeTab.kind === "instructionDebugger") {
+    return {
+      ...pane,
+      activeTabId: activeTab.id,
+      activeSessionId: resolveOriginSessionId(activeTab.originSessionId, pane.activeSessionId, pane.tabs),
+      viewMode: "instructionDebugger",
+      sourcePath: null,
+    };
+  }
+
   return {
     ...pane,
     activeTabId: activeTab.id,
@@ -1245,6 +1313,26 @@ function findControlPanelTab(workspace: WorkspaceState) {
   for (const pane of workspace.panes) {
     const tab = pane.tabs.find(
       (candidate): candidate is WorkspaceControlPanelTab => candidate.kind === "controlPanel",
+    );
+    if (tab) {
+      return { paneId: pane.id, tab };
+    }
+  }
+
+  return null;
+}
+
+function findInstructionDebuggerTab(
+  workspace: WorkspaceState,
+  workdir: string | null,
+  originSessionId: string | null,
+) {
+  for (const pane of workspace.panes) {
+    const tab = pane.tabs.find(
+      (candidate): candidate is WorkspaceInstructionDebuggerTab =>
+        candidate.kind === "instructionDebugger" &&
+        candidate.originSessionId === originSessionId &&
+        candidate.workdir === workdir,
     );
     if (tab) {
       return { paneId: pane.id, tab };

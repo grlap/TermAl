@@ -64,6 +64,7 @@ import {
 import { DiffPanel } from "./panels/DiffPanel";
 import { FileSystemPanel } from "./panels/FileSystemPanel";
 import { GitStatusPanel } from "./panels/GitStatusPanel";
+import { InstructionDebuggerPanel } from "./panels/InstructionDebuggerPanel";
 import { PaneTabs } from "./panels/PaneTabs";
 import { SourcePanel, type SourceFileState } from "./panels/SourcePanel";
 import {
@@ -118,6 +119,7 @@ import {
   openDiffPreviewInWorkspaceState,
   openFilesystemInWorkspaceState,
   openGitStatusInWorkspaceState,
+  openInstructionDebuggerInWorkspaceState,
   openSessionInWorkspaceState,
   openSourceInWorkspaceState,
   placeDraggedTab,
@@ -3283,6 +3285,25 @@ export default function App() {
     );
   }
 
+  function handleOpenInstructionDebuggerTab(
+    paneId: string,
+    workdir: string | null,
+    originSessionId: string | null,
+    originProjectId: string | null,
+  ) {
+    setWorkspace((current) =>
+      applyControlPanelLayout(
+        openInstructionDebuggerInWorkspaceState(
+          current,
+          workdir,
+          paneId,
+          originSessionId,
+          originProjectId,
+        ),
+      ),
+    );
+  }
+
   function renderWorkspaceControlSurface(paneId: string): JSX.Element {
     const surfaceId = paneId;
     const controlPanelProjectFilterId = `control-panel-project-scope-${surfaceId}`;
@@ -3722,6 +3743,7 @@ export default function App() {
               onOpenGitStatusDiffPreviewTab={handleOpenGitStatusDiffPreviewTab}
               onOpenFilesystemTab={handleOpenFilesystemTab}
               onOpenGitStatusTab={handleOpenGitStatusTab}
+              onOpenInstructionDebuggerTab={handleOpenInstructionDebuggerTab}
               onPaneSourcePathChange={handlePaneSourcePathChange}
               onDraftCommit={handleDraftChange}
               onDraftAttachmentsAdd={handleDraftAttachmentsAdd}
@@ -5210,6 +5232,7 @@ function WorkspaceNodeView({
   onOpenGitStatusDiffPreviewTab,
   onOpenFilesystemTab,
   onOpenGitStatusTab,
+  onOpenInstructionDebuggerTab,
   onPaneSourcePathChange,
   onDraftCommit,
   onDraftAttachmentsAdd,
@@ -5300,6 +5323,12 @@ function WorkspaceNodeView({
     originProjectId: string | null,
   ) => void;
   onOpenGitStatusTab: (
+    paneId: string,
+    workdir: string | null,
+    originSessionId: string | null,
+    originProjectId: string | null,
+  ) => void;
+  onOpenInstructionDebuggerTab: (
     paneId: string,
     workdir: string | null,
     originSessionId: string | null,
@@ -5404,6 +5433,7 @@ function WorkspaceNodeView({
         onOpenGitStatusDiffPreviewTab={onOpenGitStatusDiffPreviewTab}
         onOpenFilesystemTab={onOpenFilesystemTab}
         onOpenGitStatusTab={onOpenGitStatusTab}
+        onOpenInstructionDebuggerTab={onOpenInstructionDebuggerTab}
         onPaneSourcePathChange={onPaneSourcePathChange}
         onDraftCommit={onDraftCommit}
         onDraftAttachmentsAdd={onDraftAttachmentsAdd}
@@ -5486,6 +5516,7 @@ function WorkspaceNodeView({
           onOpenGitStatusDiffPreviewTab={onOpenGitStatusDiffPreviewTab}
           onOpenFilesystemTab={onOpenFilesystemTab}
           onOpenGitStatusTab={onOpenGitStatusTab}
+          onOpenInstructionDebuggerTab={onOpenInstructionDebuggerTab}
           onPaneSourcePathChange={onPaneSourcePathChange}
           onDraftCommit={onDraftCommit}
           onDraftAttachmentsAdd={onDraftAttachmentsAdd}
@@ -5557,6 +5588,7 @@ function WorkspaceNodeView({
           onOpenGitStatusDiffPreviewTab={onOpenGitStatusDiffPreviewTab}
           onOpenFilesystemTab={onOpenFilesystemTab}
           onOpenGitStatusTab={onOpenGitStatusTab}
+          onOpenInstructionDebuggerTab={onOpenInstructionDebuggerTab}
           onPaneSourcePathChange={onPaneSourcePathChange}
           onDraftCommit={onDraftCommit}
           onDraftAttachmentsAdd={onDraftAttachmentsAdd}
@@ -5621,6 +5653,7 @@ function SessionPaneView({
   onOpenGitStatusDiffPreviewTab,
   onOpenFilesystemTab,
   onOpenGitStatusTab,
+  onOpenInstructionDebuggerTab,
   onPaneSourcePathChange,
   onDraftCommit,
   onDraftAttachmentsAdd,
@@ -5711,6 +5744,12 @@ function SessionPaneView({
     originSessionId: string | null,
     originProjectId: string | null,
   ) => void;
+  onOpenInstructionDebuggerTab: (
+    paneId: string,
+    workdir: string | null,
+    originSessionId: string | null,
+    originProjectId: string | null,
+  ) => void;
   onPaneSourcePathChange: (paneId: string, path: string) => void;
   onDraftCommit: (sessionId: string, nextValue: string) => void;
   onDraftAttachmentsAdd: (sessionId: string, attachments: DraftImageAttachment[]) => void;
@@ -5747,6 +5786,8 @@ function SessionPaneView({
   const activeSourceTab = activeTab?.kind === "source" ? activeTab : null;
   const activeFilesystemTab = activeTab?.kind === "filesystem" ? activeTab : null;
   const activeGitStatusTab = activeTab?.kind === "gitStatus" ? activeTab : null;
+  const activeInstructionDebuggerTab =
+    activeTab?.kind === "instructionDebugger" ? activeTab : null;
   const activeDiffPreviewTab = activeTab?.kind === "diffPreview" ? activeTab : null;
   const activeSourceOriginSessionId = activeSourceTab?.originSessionId ?? null;
   const activeSourceOriginProjectId = activeSourceTab?.originProjectId ?? null;
@@ -5754,6 +5795,14 @@ function SessionPaneView({
   const activeFilesystemOriginProjectId = activeFilesystemTab?.originProjectId ?? null;
   const activeGitStatusOriginSessionId = activeGitStatusTab?.originSessionId ?? null;
   const activeGitStatusOriginProjectId = activeGitStatusTab?.originProjectId ?? null;
+  const activeInstructionDebuggerOriginSessionId =
+    activeInstructionDebuggerTab?.originSessionId ?? null;
+  const activeInstructionDebuggerOriginProjectId =
+    activeInstructionDebuggerTab?.originProjectId ?? null;
+  const activeInstructionDebuggerSession =
+    activeInstructionDebuggerOriginSessionId
+      ? (sessionLookup.get(activeInstructionDebuggerOriginSessionId) ?? null)
+      : null;
   const activeDiffOriginSessionId = activeDiffPreviewTab?.originSessionId ?? null;
   const activeDiffOriginProjectId = activeDiffPreviewTab?.originProjectId ?? null;
   const activeDiffWorkspaceRoot =
@@ -5900,6 +5949,8 @@ function SessionPaneView({
       ? `${pane.id}:filesystem:${activeFilesystemTab.rootPath ?? "empty"}`
       : activeGitStatusTab
         ? `${pane.id}:gitStatus:${activeGitStatusTab.workdir ?? "empty"}`
+        : activeInstructionDebuggerTab
+          ? `${pane.id}:instructionDebugger:${activeInstructionDebuggerTab.originSessionId ?? activeInstructionDebuggerTab.workdir ?? "empty"}`
         : activeDiffPreviewTab
           ? `${pane.id}:diffPreview:${activeDiffPreviewTab.diffMessageId}`
         : `${pane.id}:${pane.viewMode}:${activeSession?.id ?? "empty"}`;
@@ -6705,6 +6756,20 @@ function SessionPaneView({
                 >
                   Git
                 </button>
+                <button
+                  className="pane-view-button"
+                  type="button"
+                  onClick={() =>
+                    onOpenInstructionDebuggerTab(
+                      pane.id,
+                      activeSession?.workdir ?? null,
+                      activeSession?.id ?? null,
+                      activeSession?.projectId ?? null,
+                    )
+                  }
+                >
+                  Instructions
+                </button>
                 {canFindInSession ? (
                   <button
                     className={`pane-view-button${isSessionFindOpen ? " selected" : ""}`}
@@ -6771,6 +6836,17 @@ function SessionPaneView({
             }
             sourcePath={activeSourceTab.path}
             onDraftChange={setSourceDraft}
+            onOpenInstructionDebugger={
+              activeSourceOriginSessionId
+                ? () =>
+                    onOpenInstructionDebuggerTab(
+                      pane.id,
+                      sessionLookup.get(activeSourceOriginSessionId)?.workdir ?? null,
+                      activeSourceOriginSessionId,
+                      activeSourceOriginProjectId,
+                    )
+                : null
+            }
             onOpenPath={(path) => onPaneSourcePathChange(pane.id, path)}
             onSaveFile={(path, content) =>
               handleSourceFileSave(path, content, activeSourceOriginSessionId, activeSourceOriginProjectId)
@@ -6814,6 +6890,20 @@ function SessionPaneView({
             }
             onOpenWorkdir={(path) =>
               onOpenGitStatusTab(pane.id, path, activeGitStatusOriginSessionId, activeGitStatusOriginProjectId)
+            }
+          />
+        ) : activeInstructionDebuggerTab ? (
+          <InstructionDebuggerPanel
+            session={activeInstructionDebuggerSession}
+            workdir={activeInstructionDebuggerTab.workdir}
+            onOpenPath={(path, options) =>
+              onOpenSourceTab(
+                pane.id,
+                path,
+                activeInstructionDebuggerOriginSessionId,
+                activeInstructionDebuggerOriginProjectId,
+                options,
+              )
             }
           />
         ) : activeDiffPreviewTab ? (
@@ -6960,7 +7050,7 @@ function SessionPaneView({
           />
         )}
       </section>
-      {activeControlPanelTab || activeSourceTab || activeFilesystemTab || activeGitStatusTab || activeDiffPreviewTab ? null : (
+      {activeControlPanelTab || activeSourceTab || activeFilesystemTab || activeGitStatusTab || activeInstructionDebuggerTab || activeDiffPreviewTab ? null : (
         <AgentSessionPanelFooter
           paneId={pane.id}
           viewMode={pane.viewMode}
@@ -9411,6 +9501,8 @@ function labelForPaneViewMode(viewMode: PaneViewMode) {
       return "Files";
     case "gitStatus":
       return "Git status";
+    case "instructionDebugger":
+      return "Instructions";
     case "diffPreview":
       return "Diff preview";
   }

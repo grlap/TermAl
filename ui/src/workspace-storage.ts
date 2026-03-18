@@ -28,6 +28,7 @@ const PANE_VIEW_MODES: readonly PaneViewMode[] = [
   "source",
   "filesystem",
   "gitStatus",
+  "instructionDebugger",
   "diffPreview",
 ];
 const DIFF_CHANGE_TYPES = ["edit", "create"] as const;
@@ -129,6 +130,12 @@ function isWorkspaceTab(value: unknown): value is WorkspaceTab {
       return isNullableString(value.workdir) && isNullableString(value.originSessionId) && isOptionalNullableString(value.originProjectId);
     case "controlPanel":
       return isNullableString(value.originSessionId) && isOptionalNullableString(value.originProjectId);
+    case "instructionDebugger":
+      return (
+        isNullableString(value.workdir) &&
+        isNullableString(value.originSessionId) &&
+        isOptionalNullableString(value.originProjectId)
+      );
     case "diffPreview":
       return (
         isString(value.diff) &&

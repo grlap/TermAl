@@ -70,6 +70,7 @@ async fn run_server() -> Result<()> {
         .route("/api/git/commit", post(commit_git_changes))
         .route("/api/state", get(get_state))
         .route("/api/settings", post(update_app_settings))
+        .route("/api/instructions/search", get(search_instructions))
         .route("/api/events", get(state_events))
         .route("/api/projects", post(create_project))
         .route("/api/projects/pick", post(pick_project_root))
