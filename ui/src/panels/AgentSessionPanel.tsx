@@ -106,9 +106,9 @@ const CLAUDE_EFFORT_SLASH_OPTIONS = [
   { detail: "Use the highest available effort", label: "max", value: "max" },
 ] as const;
 const CURSOR_MODE_SLASH_OPTIONS = [
-  { detail: "Allow edits and tool use", label: "agent", value: "agent" },
-  { detail: "Stay read-only and plan", label: "plan", value: "plan" },
-  { detail: "Focus on explanation", label: "ask", value: "ask" },
+  { detail: "Allow edits and auto-approve tools", label: "agent", value: "agent" },
+  { detail: "Stay read-only and deny tools", label: "plan", value: "plan" },
+  { detail: "Show approval cards before tools", label: "ask", value: "ask" },
 ] as const;
 const GEMINI_MODE_SLASH_OPTIONS = [
   { detail: "Ask before tool use", label: "default", value: "default" },

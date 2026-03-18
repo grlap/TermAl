@@ -9,6 +9,7 @@ import {
 import { createPortal } from "react-dom";
 import { AgentIcon } from "../agent-icon";
 import { copyTextToClipboard } from "../clipboard";
+import { FileTabIcon } from "../file-tab-icon";
 import {
   looksLikeAbsoluteDisplayPath,
   normalizeDisplayPath,
@@ -550,6 +551,10 @@ export function PaneTabs({
                       >
                         <AgentIcon agent={session.agent} className="pane-tab-agent-icon" />
                       </span>
+                    ) : tab.kind === "source" ? (
+                      <FileTabIcon path={tab.path} />
+                    ) : tab.kind === "diffPreview" ? (
+                      <FileTabIcon language={tab.language ?? null} path={tab.filePath} />
                     ) : null}
                     <span className="pane-tab-label">{tabLabel}</span>
                   </span>

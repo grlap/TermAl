@@ -176,6 +176,40 @@ describe("PaneTabs", () => {
     );
     expect(screen.queryByRole("menu", { name: "File tab actions" })).not.toBeInTheDocument();
   });
+
+  it("renders file-type icons for source and diff tabs", () => {
+    renderPaneTabs({
+      projectLookup: new Map([
+        ["project-1", makeProject("project-1", "C:/repo")],
+      ]),
+      tabs: [
+        {
+          id: "tab-source",
+          kind: "source",
+          path: "C:/repo/src/main.rs",
+          originSessionId: null,
+        },
+        {
+          id: "tab-diff",
+          kind: "diffPreview",
+          changeType: "edit",
+          diff: "@@ -1 +1 @@",
+          diffMessageId: "diff-1",
+          filePath: "C:/repo/ui/src/App.tsx",
+          language: "typescript",
+          originProjectId: "project-1",
+          originSessionId: null,
+          summary: "Updated app",
+        },
+      ],
+    });
+
+    const sourceTab = screen.getByRole("tab", { name: /main\.rs/i });
+    const diffTab = screen.getByRole("tab", { name: /Diff: App\.tsx/i });
+
+    expect(sourceTab.querySelector('.pane-tab-file-icon[data-file-kind="rust"]')).not.toBeNull();
+    expect(diffTab.querySelector('.pane-tab-file-icon[data-file-kind="typescript"]')).not.toBeNull();
+  });
 });
 
 function renderPaneTabs({

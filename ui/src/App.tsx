@@ -198,7 +198,7 @@ type SessionErrorMap = Record<string, string | undefined>;
 type SessionNoticeMap = Record<string, string | undefined>;
 type BackendConnectionState = "connecting" | "connected" | "reconnecting" | "offline";
 type SessionAgentCommandMap = Record<string, AgentCommand[] | undefined>;
-type PreferencesTabId = "themes" | "codex-prompts" | "claude-approvals";
+type PreferencesTabId = "themes" | "appearance" | "codex-prompts" | "claude-approvals";
 type DraftImageAttachment = ImageAttachment & {
   base64Data: string;
   id: string;
@@ -299,9 +299,21 @@ const CLAUDE_EFFORT_OPTIONS = [
   { label: "max", value: "max", description: "Use the highest available effort" },
 ] as const;
 const CURSOR_MODE_OPTIONS = [
-  { label: "agent", value: "agent" },
-  { label: "plan", value: "plan" },
-  { label: "ask", value: "ask" },
+  {
+    label: "agent",
+    value: "agent",
+    description: "Allow edits and auto-approve tool requests",
+  },
+  {
+    label: "plan",
+    value: "plan",
+    description: "Stay read-only and deny tool requests",
+  },
+  {
+    label: "ask",
+    value: "ask",
+    description: "Keep approval cards before tool use",
+  },
 ] as const;
 const GEMINI_APPROVAL_OPTIONS = [
   { label: "default", value: "default" },
@@ -311,6 +323,7 @@ const GEMINI_APPROVAL_OPTIONS = [
 ] as const;
 const PREFERENCES_TABS: ReadonlyArray<{ id: PreferencesTabId; label: string }> = [
   { id: "themes", label: "Themes" },
+  { id: "appearance", label: "Editor & UI appearance" },
   { id: "codex-prompts", label: "Codex defaults" },
   { id: "claude-approvals", label: "Claude defaults" },
 ];
@@ -3648,9 +3661,6 @@ export default function App() {
       <div className="background-orbit background-orbit-right" />
 
       <main className="workspace-shell">
-        <div className="workspace-status-strip">
-          <BackendConnectionStatus state={backendConnectionState} />
-        </div>
 
         {requestError ? (
           <article className="thread-notice workspace-notice">
@@ -3725,6 +3735,7 @@ export default function App() {
               onRefreshSessionModelOptions={handleRefreshSessionModelOptions}
               onRefreshAgentCommands={handleRefreshAgentCommands}
               renderControlPanel={(paneId) => renderWorkspaceControlSurface(paneId)}
+              backendConnectionState={backendConnectionState}
             />
           ) : (
             <div className="workspace-empty panel">
@@ -4059,7 +4070,8 @@ export default function App() {
                     disabled={isCreating}
                   />
                   <p className="create-session-field-hint">
-                    Agent can edit, Plan stays read-only, and Ask keeps the session in Q&A mode.
+                    Agent auto-approves tool requests and can edit, Ask keeps approval cards, and
+                    Plan stays read-only.
                   </p>
                 </div>
               ) : null}
@@ -4313,16 +4325,19 @@ export default function App() {
                 {settingsTab === "themes" ? (
                   <ThemePicker
                     activeTheme={activeTheme}
+                    themeId={themeId}
+                    onSelectTheme={setThemeId}
+                  />
+                ) : settingsTab === "appearance" ? (
+                  <AppearancePreferencesPanel
                     editorFontSizePx={editorFontSizePx}
                     fontSizePx={fontSizePx}
-                    themeId={themeId}
                     onSelectEditorFontSize={(nextValue) =>
                       setEditorFontSizePx(clampEditorFontSizePreference(nextValue))
                     }
                     onSelectFontSize={(nextValue) =>
                       setFontSizePx(clampFontSizePreference(nextValue))
                     }
-                    onSelectTheme={setThemeId}
                   />
                 ) : settingsTab === "codex-prompts" ? (
                   <CodexPromptPreferencesPanel
@@ -4352,19 +4367,11 @@ export default function App() {
 
 function ThemePicker({
   activeTheme,
-  editorFontSizePx,
-  fontSizePx,
   themeId,
-  onSelectEditorFontSize,
-  onSelectFontSize,
   onSelectTheme,
 }: {
   activeTheme: (typeof THEMES)[number];
-  editorFontSizePx: number;
-  fontSizePx: number;
   themeId: ThemeId;
-  onSelectEditorFontSize: (fontSizePx: number) => void;
-  onSelectFontSize: (fontSizePx: number) => void;
   onSelectTheme: (themeId: ThemeId) => void;
 }) {
   const listRef = useRef<HTMLDivElement | null>(null);
@@ -4379,10 +4386,6 @@ function ThemePicker({
     visible: false,
   });
   const [isDraggingScrollbar, setIsDraggingScrollbar] = useState(false);
-  const canDecreaseFontSize = fontSizePx > MIN_FONT_SIZE_PX;
-  const canIncreaseFontSize = fontSizePx < MAX_FONT_SIZE_PX;
-  const canDecreaseEditorFontSize = editorFontSizePx > MIN_EDITOR_FONT_SIZE_PX;
-  const canIncreaseEditorFontSize = editorFontSizePx < MAX_EDITOR_FONT_SIZE_PX;
 
   useLayoutEffect(() => {
     const listElement = listRef.current;
@@ -4539,6 +4542,87 @@ function ThemePicker({
   }
 
   return (
+    <section className="theme-panel">
+      <div className="theme-panel-header">
+        <div>
+          <p className="session-control-label">Appearance</p>
+          <p className="theme-panel-copy">{activeTheme.description}</p>
+        </div>
+        <span className="theme-active-badge">{activeTheme.name}</span>
+      </div>
+
+      <div className="theme-option-list-shell">
+        <div ref={listRef} className="theme-option-list" role="radiogroup" aria-label="UI theme">
+          {THEMES.map((theme) => {
+            const isSelected = theme.id === themeId;
+
+            return (
+              <button
+                key={theme.id}
+                className={`theme-option ${isSelected ? "selected" : ""}`}
+                type="button"
+                role="radio"
+                aria-checked={isSelected}
+                onClick={() => onSelectTheme(theme.id)}
+              >
+                <span className="theme-option-main">
+                  <span className="theme-option-title-row">
+                    <strong className="theme-option-title">{theme.name}</strong>
+                    {isSelected ? <span className="theme-option-status">Live</span> : null}
+                  </span>
+                  <span className="theme-option-copy">{theme.description}</span>
+                </span>
+                <span className="theme-option-preview" aria-hidden="true">
+                  {theme.swatches.map((swatch) => (
+                    <span
+                      key={`${theme.id}-${swatch}`}
+                      className="theme-option-swatch"
+                      style={{ background: swatch }}
+                    />
+                  ))}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+        {scrollState.visible ? (
+          <div
+            className={`theme-option-scrollbar ${isDraggingScrollbar ? "dragging" : ""}`}
+            aria-hidden="true"
+            onPointerDown={handleScrollbarTrackPointerDown}
+          >
+            <span
+              className="theme-option-scrollbar-thumb"
+              onPointerDown={handleScrollbarThumbPointerDown}
+              style={{
+                height: `${scrollState.thumbHeight}px`,
+                transform: `translateY(${scrollState.thumbOffset}px)`,
+              }}
+            />
+          </div>
+        ) : null}
+      </div>
+    </section>
+  );
+}
+
+function AppearancePreferencesPanel({
+  editorFontSizePx,
+  fontSizePx,
+  onSelectEditorFontSize,
+  onSelectFontSize,
+}: {
+  editorFontSizePx: number;
+  fontSizePx: number;
+  onSelectEditorFontSize: (fontSizePx: number) => void;
+  onSelectFontSize: (fontSizePx: number) => void;
+}) {
+  const canDecreaseFontSize = fontSizePx > MIN_FONT_SIZE_PX;
+  const canIncreaseFontSize = fontSizePx < MAX_FONT_SIZE_PX;
+  const canDecreaseEditorFontSize = editorFontSizePx > MIN_EDITOR_FONT_SIZE_PX;
+  const canIncreaseEditorFontSize = editorFontSizePx < MAX_EDITOR_FONT_SIZE_PX;
+
+  return (
     <section className="settings-panel-stack">
       <article className="message-card prompt-settings-card appearance-settings-card">
         <div className="card-label">Appearance</div>
@@ -4571,68 +4655,6 @@ function ThemePicker({
           </p>
         </div>
       </article>
-
-      <section className="theme-panel">
-        <div className="theme-panel-header">
-          <div>
-            <p className="session-control-label">Appearance</p>
-            <p className="theme-panel-copy">{activeTheme.description}</p>
-          </div>
-          <span className="theme-active-badge">{activeTheme.name}</span>
-        </div>
-
-        <div className="theme-option-list-shell">
-          <div ref={listRef} className="theme-option-list" role="radiogroup" aria-label="UI theme">
-            {THEMES.map((theme) => {
-              const isSelected = theme.id === themeId;
-
-              return (
-                <button
-                  key={theme.id}
-                  className={`theme-option ${isSelected ? "selected" : ""}`}
-                  type="button"
-                  role="radio"
-                  aria-checked={isSelected}
-                  onClick={() => onSelectTheme(theme.id)}
-                >
-                  <span className="theme-option-main">
-                    <span className="theme-option-title-row">
-                      <strong className="theme-option-title">{theme.name}</strong>
-                      {isSelected ? <span className="theme-option-status">Live</span> : null}
-                    </span>
-                    <span className="theme-option-copy">{theme.description}</span>
-                  </span>
-                  <span className="theme-option-preview" aria-hidden="true">
-                    {theme.swatches.map((swatch) => (
-                      <span
-                        key={`${theme.id}-${swatch}`}
-                        className="theme-option-swatch"
-                        style={{ background: swatch }}
-                      />
-                    ))}
-                  </span>
-                </button>
-              );
-            })}
-          </div>
-          {scrollState.visible ? (
-            <div
-              className={`theme-option-scrollbar ${isDraggingScrollbar ? "dragging" : ""}`}
-              aria-hidden="true"
-              onPointerDown={handleScrollbarTrackPointerDown}
-            >
-              <span
-                className="theme-option-scrollbar-thumb"
-                onPointerDown={handleScrollbarThumbPointerDown}
-                style={{
-                  height: `${scrollState.thumbHeight}px`,
-                  transform: `translateY(${scrollState.thumbOffset}px)`,
-                }}
-              />
-            </div>
-          ) : null}
-        </div>
-      </section>
     </section>
   );
 }
@@ -5201,6 +5223,7 @@ function WorkspaceNodeView({
   onRefreshSessionModelOptions,
   onRefreshAgentCommands,
   renderControlPanel,
+  backendConnectionState,
 }: {
   node: WorkspaceNode;
   codexState: CodexState;
@@ -5308,6 +5331,7 @@ function WorkspaceNodeView({
   onRefreshSessionModelOptions: (sessionId: string) => void;
   onRefreshAgentCommands: (sessionId: string) => void;
   renderControlPanel: (paneId: string) => JSX.Element;
+  backendConnectionState: BackendConnectionState;
 }) {
   if (node.type === "pane") {
     const pane = paneLookup.get(node.paneId);
@@ -5393,6 +5417,7 @@ function WorkspaceNodeView({
         onRefreshSessionModelOptions={onRefreshSessionModelOptions}
         onRefreshAgentCommands={onRefreshAgentCommands}
         renderControlPanel={renderControlPanel}
+        backendConnectionState={backendConnectionState}
       />
     );
   }
@@ -5474,6 +5499,7 @@ function WorkspaceNodeView({
           onRefreshSessionModelOptions={onRefreshSessionModelOptions}
           onRefreshAgentCommands={onRefreshAgentCommands}
           renderControlPanel={renderControlPanel}
+          backendConnectionState={backendConnectionState}
         />
       </div>
 
@@ -5544,6 +5570,7 @@ function WorkspaceNodeView({
           onRefreshSessionModelOptions={onRefreshSessionModelOptions}
           onRefreshAgentCommands={onRefreshAgentCommands}
           renderControlPanel={renderControlPanel}
+          backendConnectionState={backendConnectionState}
         />
       </div>
     </div>
@@ -5607,6 +5634,7 @@ function SessionPaneView({
   onRefreshSessionModelOptions,
   onRefreshAgentCommands,
   renderControlPanel,
+  backendConnectionState,
 }: {
   pane: WorkspacePane;
   codexState: CodexState;
@@ -5709,6 +5737,7 @@ function SessionPaneView({
   onRefreshSessionModelOptions: (sessionId: string) => void;
   onRefreshAgentCommands: (sessionId: string) => void;
   renderControlPanel: (paneId: string) => JSX.Element;
+  backendConnectionState: BackendConnectionState;
 }) {
   const activeTab = pane.tabs.find((tab) => tab.id === pane.activeTabId) ?? pane.tabs[0] ?? null;
   const activeControlPanelTab = activeTab?.kind === "controlPanel" ? activeTab : null;
@@ -5724,6 +5753,9 @@ function SessionPaneView({
   const activeGitStatusOriginProjectId = activeGitStatusTab?.originProjectId ?? null;
   const activeDiffOriginSessionId = activeDiffPreviewTab?.originSessionId ?? null;
   const activeDiffOriginProjectId = activeDiffPreviewTab?.originProjectId ?? null;
+  const activeDiffWorkspaceRoot =
+    (activeDiffOriginSessionId ? (sessionLookup.get(activeDiffOriginSessionId)?.workdir ?? null) : null) ??
+    (activeDiffOriginProjectId ? (projectLookup.get(activeDiffOriginProjectId)?.rootPath ?? null) : null);
   const isSessionTabActive = activeTab?.kind === "session";
   const sessionTabs = useMemo(
     () =>
@@ -6610,7 +6642,11 @@ function SessionPaneView({
               onRenameSessionRequest={onRenameSessionRequest}
             />
           </div>
-
+          {activeControlPanelTab ? (
+            <div className="pane-bar-right">
+              <BackendConnectionStatus state={backendConnectionState} />
+            </div>
+          ) : null}
         </div>
 
         <div className="pane-view-strip">
@@ -6677,21 +6713,7 @@ function SessionPaneView({
                   </button>
                 ) : null}
             </div>
-          ) : activeTab?.kind === "controlPanel" ? null : (
-            <div className="pane-view-strip-left">
-              <span className="chip">
-                {activeTab?.kind === "source"
-                  ? "File viewer"
-                  : activeTab?.kind === "filesystem"
-                    ? "File browser"
-                    : activeTab?.kind === "gitStatus"
-                      ? "Git status"
-                      : activeTab?.kind === "diffPreview"
-                        ? "Diff preview"
-                      : "Panel"}
-              </span>
-            </div>
-          )}
+          ) : null}
           <div className="pane-view-strip-right">
             {canFindInSession && isSessionFindOpen ? (
               <SessionFindBar
@@ -6704,21 +6726,6 @@ function SessionPaneView({
                 onPrevious={() => stepSessionFind(-1)}
                 onClose={closeSessionFind}
               />
-            ) : null}
-            {activeSession && !activeControlPanelTab ? (
-              <div className="thread-chips">
-                <span className="chip">{activeSession.workdir}</span>
-                {activeSourceTab?.path ? <span className="chip">{activeSourceTab.path}</span> : null}
-                {activeFilesystemTab?.rootPath ? (
-                  <span className="chip">{activeFilesystemTab.rootPath}</span>
-                ) : null}
-                {activeGitStatusTab?.workdir ? (
-                  <span className="chip">{activeGitStatusTab.workdir}</span>
-                ) : null}
-                {activeDiffPreviewTab?.filePath ? (
-                  <span className="chip">{activeDiffPreviewTab.filePath}</span>
-                ) : null}
-              </div>
             ) : null}
           </div>
         </div>
@@ -6817,6 +6824,7 @@ function SessionPaneView({
             language={activeDiffPreviewTab.language ?? null}
             sessionId={activeDiffOriginSessionId}
             projectId={activeDiffOriginProjectId}
+            workspaceRoot={activeDiffWorkspaceRoot}
             onOpenPath={(path) =>
               onOpenSourceTab(pane.id, path, activeDiffOriginSessionId, activeDiffOriginProjectId)
             }
@@ -7747,7 +7755,8 @@ export function CursorPromptSettingsCard({
             : canChangeModel
               ? "Model and mode changes apply to the live Cursor session. You can still paste a full model id manually if Cursor's list is behind."
               : "TermAl asks Cursor for its live model list when this session opens. New sessions begin on Auto, and you can still paste a full model id manually."}{" "}
-          Agent can edit, Plan stays read-only, and Ask keeps the session focused on explanation.
+          Agent auto-approves tool requests and can edit, Ask keeps approval cards, and Plan
+          denies tool requests.
         </p>
       </div>
     </article>
@@ -8079,7 +8088,7 @@ function MessageAttachmentList({
             {renderHighlightedText(attachment.fileName, searchQuery, searchHighlightTone)}
           </strong>
           <span className="message-attachment-meta">
-            {formatByteSize(attachment.byteSize)} ·{" "}
+            {formatByteSize(attachment.byteSize)} {"\u00b7"}{" "}
             {renderHighlightedText(attachment.mediaType, searchQuery, searchHighlightTone)}
           </span>
         </div>
@@ -8426,7 +8435,7 @@ function CommandCard({
   const displayOutput = hasOutput
     ? message.output
     : message.status === "running"
-      ? "Awaiting output…"
+      ? "Awaiting output\u2026"
       : "No output";
   const canExpandCommand =
     message.command.split("\n").length > 10 || message.command.length > 480;
@@ -8675,10 +8684,10 @@ function DiffCard({
             {diffStats.addedLineCount > 0 || diffStats.removedLineCount > 0 ? (
               <div className="diff-file-stats">
                 {diffStats.addedLineCount > 0 ? (
-                  <span className="chip diff-preview-stat diff-preview-stat-added">+{diffStats.addedLineCount}</span>
+                  <span className="diff-preview-stat diff-preview-stat-added">+{diffStats.addedLineCount}</span>
                 ) : null}
                 {diffStats.removedLineCount > 0 ? (
-                  <span className="chip diff-preview-stat diff-preview-stat-removed">-{diffStats.removedLineCount}</span>
+                  <span className="diff-preview-stat diff-preview-stat-removed">-{diffStats.removedLineCount}</span>
                 ) : null}
               </div>
             ) : null}
@@ -9335,7 +9344,7 @@ function buildDeferredPreviewText(text: string) {
     .slice(0, DEFERRED_PREVIEW_CHARACTER_LIMIT)
     .trimEnd();
 
-  return preview.length < text.length ? `${preview}\n…` : preview;
+  return preview.length < text.length ? `${preview}\n\u2026` : preview;
 }
 
 function buildMarkdownPreviewText(markdown: string) {
@@ -9898,6 +9907,4 @@ function dropLabelForPlacement(placement: TabDropPlacement) {
       return "Bottom";
   }
 }
-
-
 

@@ -25,7 +25,11 @@ export function relativizePathToWorkspace(path: string, workspaceRoot: string | 
 }
 
 export function normalizeDisplayPath(path: string) {
-  return path.trim().replace(/[\\/]+/g, "/");
+  const trimmed = path.trim();
+  const withoutExtendedPrefix = trimmed
+    .replace(/^\\\\\?\\UNC\\/i, "\\\\")
+    .replace(/^\\\\\?\\/, "");
+  return withoutExtendedPrefix.replace(/[\\/]+/g, "/");
 }
 
 export function looksLikeWindowsPath(path: string) {

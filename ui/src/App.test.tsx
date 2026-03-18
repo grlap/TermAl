@@ -1478,6 +1478,48 @@ describe("App", () => {
     }
   });
 
+  it("separates theme selection from editor and UI appearance controls in preferences", async () => {
+    const originalEventSource = globalThis.EventSource;
+    const originalResizeObserver = globalThis.ResizeObserver;
+    const fetchStateDeferred = createDeferred<Awaited<ReturnType<typeof api.fetchState>>>();
+    const fetchStateSpy = vi.spyOn(api, "fetchState").mockImplementation(() => fetchStateDeferred.promise);
+    vi.stubGlobal("EventSource", EventSourceMock as unknown as typeof EventSource);
+    vi.stubGlobal("ResizeObserver", ResizeObserverMock as unknown as typeof ResizeObserver);
+    const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
+    HTMLElement.prototype.scrollIntoView = vi.fn();
+
+    try {
+      await renderApp();
+      await act(async () => {
+        fetchStateDeferred.resolve({
+          revision: 1,
+          preferences: {
+            defaultCodexReasoningEffort: "medium",
+            defaultClaudeEffort: "default",
+          },
+          projects: [],
+          sessions: [],
+        });
+        await flushUiWork();
+      });
+
+      await clickAndSettle(await screen.findByRole("button", { name: "Open preferences" }));
+
+      expect(screen.getByRole("radiogroup", { name: "UI theme" })).toBeInTheDocument();
+      expect(screen.queryByRole("heading", { level: 3, name: "Font sizes" })).not.toBeInTheDocument();
+
+      await clickAndSettle(screen.getByRole("tab", { name: "Editor & UI appearance" }));
+
+      expect(screen.getByRole("heading", { level: 3, name: "Font sizes" })).toBeInTheDocument();
+      expect(screen.queryByRole("radiogroup", { name: "UI theme" })).not.toBeInTheDocument();
+    } finally {
+      HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
+      fetchStateSpy.mockRestore();
+      restoreGlobal("EventSource", originalEventSource);
+      restoreGlobal("ResizeObserver", originalResizeObserver);
+    }
+  });
+
   it("warns once before sending with an unknown model, then allows the retry", () => {
     const session = makeSession("session-1", {
       agent: "Codex",
@@ -1499,6 +1541,4 @@ describe("App", () => {
     expect(secondAttempt.warning).toBeNull();
   });
 });
-
-
 

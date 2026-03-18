@@ -82,9 +82,11 @@ describe("Backend connection state", () => {
     vi.stubGlobal("ResizeObserver", ResizeObserverMock as unknown as typeof ResizeObserver);
 
     try {
-      render(<App />);
+      const { container } = render(<App />);
 
       expect(screen.getByText("Connecting")).toBeInTheDocument();
+      expect(container.querySelector(".workspace-status-strip")).toBeNull();
+      expect(screen.getByText("Connecting").closest(".pane-bar-right")).not.toBeNull();
 
       const eventSource = EventSourceMock.instances[EventSourceMock.instances.length - 1];
       expect(eventSource).toBeDefined();
@@ -156,3 +158,4 @@ function restoreGlobal<Key extends "fetch" | "EventSource" | "ResizeObserver">(
 
   globalThis[key] = originalValue;
 }
+

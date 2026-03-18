@@ -1382,6 +1382,25 @@ textarea {
   flex: 1 1 auto;
 }
 
+.pane-bar-right {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex: 0 0 auto;
+}
+
+.pane-bar-right .workspace-connection-status {
+  gap: 0;
+}
+
+.pane-bar-right .workspace-connection-chip {
+  min-width: 0;
+  padding: 0;
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
+}
+
 .pane-tabs-shell {
   display: flex;
   align-items: center;
@@ -1604,6 +1623,52 @@ textarea {
   z-index: 1;
   width: 0.82rem;
   height: 0.82rem;
+}
+
+.pane-tab-file-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 0.95rem;
+  height: 0.95rem;
+  color: var(--muted);
+  flex: none;
+}
+
+.pane-tab-file-icon-svg {
+  width: 0.9rem;
+  height: 0.9rem;
+  display: block;
+  flex: none;
+}
+
+.pane-tab-file-icon-svg-generic {
+  width: 0.86rem;
+  height: 0.86rem;
+}
+
+.pane-tab-file-icon[data-file-tone="blue"] {
+  color: var(--signal-blue);
+}
+
+.pane-tab-file-icon[data-file-tone="gold"] {
+  color: var(--signal-gold);
+}
+
+.pane-tab-file-icon[data-file-tone="green"] {
+  color: var(--signal-green);
+}
+
+.pane-tab-file-icon[data-file-tone="muted"] {
+  color: var(--muted);
+}
+
+.pane-tab-file-icon[data-file-tone="red"] {
+  color: var(--signal-red);
+}
+
+.pane-tab-file-icon[data-file-tone="rose"] {
+  color: var(--signal-rose);
 }
 
 .session-row-status-icon {
@@ -3488,6 +3553,48 @@ textarea {
   justify-content: flex-end;
 }
 
+.diff-preview-file-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  min-width: 0;
+  color: var(--muted);
+}
+
+.diff-preview-file-icon {
+  width: 1rem;
+  height: 1rem;
+}
+
+.diff-preview-file-icon .pane-tab-file-icon-svg,
+.diff-preview-file-icon .pane-tab-file-icon-svg-generic {
+  width: 100%;
+  height: 100%;
+}
+
+.diff-preview-file-path {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--code-font);
+  font-size: 0.85rem;
+}
+
+.diff-preview-toggle-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.25rem;
+  height: 2.25rem;
+  padding: 0;
+}
+
+.diff-preview-toggle-icon svg {
+  width: 1rem;
+  height: 1rem;
+}
+
 .diff-preview-statusbar {
   border-top-left-radius: 0;
   border-top-right-radius: 0;
@@ -3533,24 +3640,23 @@ textarea {
 }
 
 .diff-preview-stat {
+  display: inline-flex;
+  align-items: center;
   font-weight: 700;
+  font-size: 0.88rem;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
 }
 
 .diff-preview-stat-added {
-  border-color: var(--status-green-ring);
-  background: var(--status-green-glow);
   color: var(--signal-green);
 }
 
 .diff-preview-stat-changed {
-  border-color: var(--accent-blue-border);
-  background: var(--accent-blue-soft);
   color: var(--signal-blue);
 }
 
 .diff-preview-stat-removed {
-  border-color: var(--accent-rose-border);
-  background: var(--accent-rose-bg);
   color: var(--signal-rose);
 }
 
@@ -4618,8 +4724,7 @@ textarea {
   gap: 0.3rem;
 }
 
-.diff-file-stats .chip {
-  padding: 0.14rem 0.45rem;
+.diff-file-stats .diff-preview-stat {
   font-size: 0.74rem;
   line-height: 1.1;
 }
@@ -5682,4 +5787,5 @@ textarea {
   border-color: var(--line-strong);
   background: var(--surface-composer);
 }
+
 

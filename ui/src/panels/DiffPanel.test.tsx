@@ -158,6 +158,7 @@ describe("DiffPanel", () => {
           filePath="/repo/src/example.ts"
           language="typescript"
           sessionId="session-1"
+          workspaceRoot="/repo"
           onOpenPath={() => {}}
           onSaveFile={async () => {}}
           summary="Updated example file"
@@ -165,8 +166,10 @@ describe("DiffPanel", () => {
       );
     });
 
-    expect(screen.getByText("Changed 1")).toBeInTheDocument();
-    expect(screen.getByText("Added 1")).toBeInTheDocument();
+    expect(screen.getByLabelText("Changed lines: 1")).toHaveTextContent("1");
+    expect(screen.getByLabelText("Added lines: 1")).toHaveTextContent("+1");
+    expect(screen.getByText("src/example.ts")).not.toHaveClass("chip");
+    expect(document.querySelector('.diff-preview-file-icon[data-file-kind="typescript"]')).not.toBeNull();
     expect(await screen.findByTestId("monaco-diff-editor")).toBeInTheDocument();
     expect(screen.getByText("Change 1 of 2")).toBeInTheDocument();
 
@@ -219,6 +222,42 @@ describe("DiffPanel", () => {
     });
 
     expect(await screen.findByTestId("monaco-code-editor")).toHaveValue("const latest = true;\n");
+  });
+
+  it("renders plain added and removed stats with +/- markers", async () => {
+    await act(async () => {
+      render(
+        <DiffPanel
+          appearance="dark"
+          fontSizePx={13}
+          changeType="edit"
+          diff={[
+            "@@ -1,5 +1,5 @@",
+            "-const before = false;",
+            "+const after = true;",
+            " unchanged",
+            "+const added = true;",
+            " stable",
+            "-const removed = true;",
+          ].join("\n")}
+          diffMessageId="diff-stats"
+          filePath={null}
+          language="typescript"
+          sessionId={null}
+          onOpenPath={() => {}}
+          onSaveFile={async () => {}}
+          summary="Updated example file"
+        />,
+      );
+    });
+
+    const addedStat = screen.getByLabelText("Added lines: 1");
+    const removedStat = screen.getByLabelText("Removed lines: 1");
+
+    expect(addedStat).toHaveTextContent("+1");
+    expect(removedStat).toHaveTextContent("-1");
+    expect(addedStat).not.toHaveClass("chip");
+    expect(removedStat).not.toHaveClass("chip");
   });
 
   it("shows unsaved changes in edit mode", async () => {

@@ -1,9 +1,12 @@
 import { Suspense, lazy, useEffect, useMemo, useRef, useState } from "react";
+import type { ReactNode } from "react";
 import { fetchFile, type FileResponse } from "../api";
+import { FileTabIcon } from "../file-tab-icon";
 import type { MonacoCodeEditorStatus } from "../MonacoCodeEditor";
 import type { MonacoDiffEditorHandle, MonacoDiffEditorStatus } from "../MonacoDiffEditor";
 import { buildDiffPreviewModel } from "../diff-preview";
 import { resolveMonacoLanguage, type MonacoAppearance } from "../monaco";
+import { normalizeDisplayPath, relativizePathToWorkspace } from "../path-display";
 import type { DiffMessage } from "../types";
 import { StructuredDiffView } from "./StructuredDiffView";
 
@@ -69,6 +72,7 @@ export function DiffPanel({
   language,
   sessionId,
   projectId = null,
+  workspaceRoot = null,
   onOpenPath,
   onSaveFile,
   summary,
@@ -82,6 +86,7 @@ export function DiffPanel({
   language?: string | null;
   sessionId: string | null;
   projectId?: string | null;
+  workspaceRoot?: string | null;
   onOpenPath: (path: string) => void;
   onSaveFile: (path: string, content: string) => Promise<void>;
   summary: string;
@@ -199,6 +204,14 @@ export function DiffPanel({
   const hasVisualNavigation = viewMode === "all" && visualEditorStatus.changeCount > 0;
   const isDirty = latestFile.status === "ready" && editValue !== latestFile.content;
   const saveStateLabel = saveError ? "Save failed" : isSaving ? "Saving..." : isDirty ? "Unsaved changes" : null;
+  const displayFilePath = useMemo(() => {
+    if (!filePath) {
+      return null;
+    }
+
+    return normalizeDisplayPath(relativizePathToWorkspace(filePath, workspaceRoot));
+  }, [filePath, workspaceRoot]);
+  const filePathTitle = filePath ? normalizeDisplayPath(filePath) : null;
 
   async function handleSave() {
     if (latestFile.status !== "ready" || !isDirty || isSaving) {
@@ -233,58 +246,74 @@ export function DiffPanel({
           <div className="source-editor-status">
             <span className="chip">{changeType === "create" ? "New file" : "File edit"}</span>
             {preview.changeSummary.changedLineCount > 0 ? (
-              <span className="chip diff-preview-stat diff-preview-stat-changed">
-                Changed {preview.changeSummary.changedLineCount}
+              <span
+                className="diff-preview-stat diff-preview-stat-changed"
+                aria-label={`Changed lines: ${preview.changeSummary.changedLineCount}`}
+                title={`Changed lines: ${preview.changeSummary.changedLineCount}`}
+              >
+                {preview.changeSummary.changedLineCount}
               </span>
             ) : null}
             {preview.changeSummary.addedLineCount > 0 ? (
-              <span className="chip diff-preview-stat diff-preview-stat-added">
-                Added {preview.changeSummary.addedLineCount}
+              <span
+                className="diff-preview-stat diff-preview-stat-added"
+                aria-label={`Added lines: ${preview.changeSummary.addedLineCount}`}
+                title={`Added lines: ${preview.changeSummary.addedLineCount}`}
+              >
+                +{preview.changeSummary.addedLineCount}
               </span>
             ) : null}
             {preview.changeSummary.removedLineCount > 0 ? (
-              <span className="chip diff-preview-stat diff-preview-stat-removed">
-                Removed {preview.changeSummary.removedLineCount}
+              <span
+                className="diff-preview-stat diff-preview-stat-removed"
+                aria-label={`Removed lines: ${preview.changeSummary.removedLineCount}`}
+                title={`Removed lines: ${preview.changeSummary.removedLineCount}`}
+              >
+                -{preview.changeSummary.removedLineCount}
               </span>
             ) : null}
-            {language ? <span className="chip">{language}</span> : null}
-            {filePath ? <span className="chip">{filePath}</span> : null}
+            {filePath || language ? (
+              <div className="diff-preview-file-meta" title={filePathTitle ?? undefined}>
+                <FileTabIcon className="diff-preview-file-icon" language={language ?? null} path={filePath} />
+                {displayFilePath ? <span className="diff-preview-file-path">{displayFilePath}</span> : null}
+              </div>
+            ) : null}
           </div>
           <div className="source-editor-actions diff-preview-actions">
             {preview.hasStructuredPreview ? (
-              <button
-                className={`ghost-button diff-preview-toggle ${viewMode === "all" ? "selected" : ""}`}
-                type="button"
+              <DiffPreviewToggleButton
+                selected={viewMode === "all"}
+                label="All lines"
                 onClick={() => setViewMode("all")}
               >
-                All lines
-              </button>
+                <AllLinesIcon />
+              </DiffPreviewToggleButton>
             ) : null}
             {preview.hasStructuredPreview ? (
-              <button
-                className={`ghost-button diff-preview-toggle ${viewMode === "changes" ? "selected" : ""}`}
-                type="button"
+              <DiffPreviewToggleButton
+                selected={viewMode === "changes"}
+                label="Changed only"
                 onClick={() => setViewMode("changes")}
               >
-                Changed only
-              </button>
+                <ChangedOnlyIcon />
+              </DiffPreviewToggleButton>
             ) : null}
             {filePath ? (
-              <button
-                className={`ghost-button diff-preview-toggle ${viewMode === "edit" ? "selected" : ""}`}
-                type="button"
+              <DiffPreviewToggleButton
+                selected={viewMode === "edit"}
+                label="Edit mode"
                 onClick={() => setViewMode("edit")}
               >
-                Edit mode
-              </button>
+                <EditModeIcon />
+              </DiffPreviewToggleButton>
             ) : null}
-            <button
-              className={`ghost-button diff-preview-toggle ${viewMode === "raw" ? "selected" : ""}`}
-              type="button"
+            <DiffPreviewToggleButton
+              selected={viewMode === "raw"}
+              label="Raw patch"
               onClick={() => setViewMode("raw")}
             >
-              Raw patch
-            </button>
+              <RawPatchIcon />
+            </DiffPreviewToggleButton>
             {filePath ? (
               <button className="ghost-button" type="button" onClick={() => onOpenPath(filePath)}>
                 Open file
@@ -414,6 +443,63 @@ export function DiffPanel({
         ) : null}
       </div>
     </div>
+  );
+}
+
+function DiffPreviewToggleButton({
+  children,
+  label,
+  onClick,
+  selected,
+}: {
+  children: ReactNode;
+  label: string;
+  onClick: () => void;
+  selected: boolean;
+}) {
+  return (
+    <button
+      className={`ghost-button diff-preview-toggle diff-preview-toggle-icon ${selected ? "selected" : ""}`}
+      type="button"
+      aria-label={label}
+      title={label}
+      onClick={onClick}
+    >
+      {children}
+    </button>
+  );
+}
+
+function AllLinesIcon() {
+  return (
+    <svg viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+      <path d="M2.25 3h11.5v1.75H2.25Zm0 4.13h11.5v1.75H2.25Zm0 4.12h11.5V13H2.25Z" fill="currentColor" />
+    </svg>
+  );
+}
+
+function ChangedOnlyIcon() {
+  return (
+    <svg viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+      <path d="M2.25 3.25H6.5V5H2.25Zm7.25 0h4.25V5H9.5ZM2.25 11h4.25v1.75H2.25ZM9.5 11h4.25v1.75H9.5Z" fill="currentColor" />
+      <path d="m6.45 8 1.6-1.6 1.48 1.48L8 9.41 6.47 7.88Z" fill="currentColor" />
+    </svg>
+  );
+}
+
+function EditModeIcon() {
+  return (
+    <svg viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+      <path d="m11.77 1.88 2.35 2.35-7.4 7.4-3 .65.65-3Zm-6.28 7.87 4.83-4.83-.75-.75-4.83 4.83-.3 1.35Zm6-6 .76.75.88-.88-.76-.75Z" fill="currentColor" />
+    </svg>
+  );
+}
+
+function RawPatchIcon() {
+  return (
+    <svg viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+      <path d="M4.9 2 2 8l2.9 6h1.72L3.72 8l2.9-6Zm6.2 0L14 8l-2.9 6H9.38l2.9-6-2.9-6Z" fill="currentColor" />
+    </svg>
   );
 }
 
