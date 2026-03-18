@@ -213,6 +213,7 @@ function reconcileDiffMessage(previous: DiffMessage, next: DiffMessage): DiffMes
   if (
     previous.timestamp === next.timestamp &&
     previous.author === next.author &&
+    previous.changeSetId === next.changeSetId &&
     previous.filePath === next.filePath &&
     previous.summary === next.summary &&
     previous.diff === next.diff &&

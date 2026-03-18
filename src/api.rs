@@ -104,6 +104,73 @@ async fn get_state(State(state): State<AppState>) -> Json<StateResponse> {
     Json(state.snapshot())
 }
 
+async fn get_review(
+    AxumPath(change_set_id): AxumPath<String>,
+    Query(query): Query<ReviewQuery>,
+    State(state): State<AppState>,
+) -> Result<Json<ReviewDocumentResponse>, ApiError> {
+    let review_root = resolve_review_storage_root(
+        &state,
+        query.session_id.as_deref(),
+        query.project_id.as_deref(),
+    )?;
+    let review_path = resolve_review_document_path(&review_root, &change_set_id)?;
+    let review = load_review_document(&review_path, &change_set_id)?;
+    Ok(Json(ReviewDocumentResponse {
+        review_file_path: review_path.to_string_lossy().into_owned(),
+        review,
+    }))
+}
+
+async fn put_review(
+    AxumPath(change_set_id): AxumPath<String>,
+    Query(query): Query<ReviewQuery>,
+    State(state): State<AppState>,
+    Json(review): Json<ReviewDocument>,
+) -> Result<Json<ReviewDocumentResponse>, ApiError> {
+    let review_root = resolve_review_storage_root(
+        &state,
+        query.session_id.as_deref(),
+        query.project_id.as_deref(),
+    )?;
+    let review_path = resolve_review_document_path(&review_root, &change_set_id)?;
+    let persisted_review = {
+        let _state_guard = state.inner.lock().expect("state mutex poisoned");
+        let persisted = prepare_review_document_for_write(&review_path, &change_set_id, review)?;
+        persist_review_document(&review_path, &persisted)?;
+        persisted
+    };
+    Ok(Json(ReviewDocumentResponse {
+        review_file_path: review_path.to_string_lossy().into_owned(),
+        review: persisted_review,
+    }))
+}
+
+async fn get_review_summary(
+    AxumPath(change_set_id): AxumPath<String>,
+    Query(query): Query<ReviewQuery>,
+    State(state): State<AppState>,
+) -> Result<Json<ReviewSummaryResponse>, ApiError> {
+    let review_root = resolve_review_storage_root(
+        &state,
+        query.session_id.as_deref(),
+        query.project_id.as_deref(),
+    )?;
+    let review_path = resolve_review_document_path(&review_root, &change_set_id)?;
+    let review = load_review_document(&review_path, &change_set_id)?;
+    let summary = summarize_review_document(&review);
+
+    Ok(Json(ReviewSummaryResponse {
+        change_set_id: review.change_set_id,
+        review_file_path: review_path.to_string_lossy().into_owned(),
+        thread_count: summary.thread_count,
+        open_thread_count: summary.open_thread_count,
+        resolved_thread_count: summary.resolved_thread_count,
+        comment_count: summary.comment_count,
+        has_threads: summary.thread_count > 0,
+    }))
+}
+
 async fn read_file(
     State(state): State<AppState>,
     Query(query): Query<FileQuery>,
@@ -1259,14 +1326,17 @@ fn load_git_diff_for_request(
     ]
     .join("\n");
 
+    let diff_hash = stable_text_hash(&diff_identity);
+
     Ok(GitDiffResponse {
         change_type: if matches!(status_code.as_deref(), Some("A" | "?")) {
             GitDiffChangeType::Create
         } else {
             GitDiffChangeType::Edit
         },
+        change_set_id: format!("git-diff-{diff_hash}"),
         diff,
-        diff_id: format!("git:{}", stable_text_hash(&diff_identity)),
+        diff_id: format!("git:{diff_hash}"),
         file_path: file_path.exists().then(|| file_path.to_string_lossy().into_owned()),
         language: infer_language_from_path(FsPath::new(&current_path)).map(str::to_owned),
         summary: format!(
@@ -1748,6 +1818,227 @@ impl IntoResponse for ApiError {
     }
 }
 
+fn resolve_review_storage_root(
+    state: &AppState,
+    session_id: Option<&str>,
+    project_id: Option<&str>,
+) -> Result<PathBuf, ApiError> {
+    resolve_request_project_root_path(state, session_id, project_id)
+}
+
+fn resolve_review_document_path(
+    review_root: &FsPath,
+    change_set_id: &str,
+) -> Result<PathBuf, ApiError> {
+    validate_review_change_set_id(change_set_id)?;
+    Ok(review_root
+        .join(".termal")
+        .join("reviews")
+        .join(format!("{change_set_id}.json")))
+}
+
+fn load_review_document(
+    path: &FsPath,
+    change_set_id: &str,
+) -> Result<ReviewDocument, ApiError> {
+    if !path.exists() {
+        return Ok(default_review_document(change_set_id));
+    }
+
+    let raw = fs::read(path).map_err(|err| {
+        ApiError::internal(format!("failed to read review file {}: {err}", path.display()))
+    })?;
+    let review: ReviewDocument = serde_json::from_slice(&raw).map_err(|err| {
+        ApiError::internal(format!(
+            "failed to parse review file {}: {err}",
+            path.display()
+        ))
+    })?;
+    validate_review_document(change_set_id, &review)?;
+    Ok(review)
+}
+
+fn persist_review_document(path: &FsPath, review: &ReviewDocument) -> Result<(), ApiError> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|err| {
+            ApiError::internal(format!(
+                "failed to create review directory {}: {err}",
+                parent.display()
+            ))
+        })?;
+    }
+
+    let encoded = serde_json::to_vec_pretty(review)
+        .map_err(|err| ApiError::internal(format!("failed to serialize review document: {err}")))?;
+    fs::write(path, encoded).map_err(|err| {
+        ApiError::internal(format!("failed to write review file {}: {err}", path.display()))
+    })
+}
+
+fn prepare_review_document_for_write(
+    path: &FsPath,
+    change_set_id: &str,
+    review: ReviewDocument,
+) -> Result<ReviewDocument, ApiError> {
+    validate_review_document(change_set_id, &review)?;
+    let current = load_review_document(path, change_set_id)?;
+    if review.revision != current.revision {
+        return Err(ApiError::conflict(format!(
+            "review document is out of date: expected revision {}, got {}",
+            current.revision, review.revision
+        )));
+    }
+
+    let next_revision = current
+        .revision
+        .checked_add(1)
+        .ok_or_else(|| ApiError::internal("review revision overflow"))?;
+    let mut next = review;
+    next.revision = next_revision;
+    Ok(next)
+}
+
+fn default_review_document(change_set_id: &str) -> ReviewDocument {
+    ReviewDocument {
+        version: REVIEW_DOCUMENT_VERSION,
+        revision: 0,
+        change_set_id: change_set_id.to_owned(),
+        origin: None,
+        files: Vec::new(),
+        threads: Vec::new(),
+    }
+}
+
+fn summarize_review_document(review: &ReviewDocument) -> ReviewDocumentSummary {
+    let mut summary = ReviewDocumentSummary::default();
+    summary.thread_count = review.threads.len();
+
+    for thread in &review.threads {
+        summary.comment_count += thread.comments.len();
+        match thread.status {
+            ReviewThreadStatus::Open => summary.open_thread_count += 1,
+            ReviewThreadStatus::Resolved => summary.resolved_thread_count += 1,
+            ReviewThreadStatus::Applied | ReviewThreadStatus::Dismissed => {}
+        }
+    }
+
+    summary
+}
+
+fn validate_review_change_set_id(change_set_id: &str) -> Result<(), ApiError> {
+    let trimmed = change_set_id.trim();
+    if trimmed.is_empty() {
+        return Err(ApiError::bad_request("changeSetId cannot be empty"));
+    }
+
+    if trimmed
+        .chars()
+        .all(|character| character.is_ascii_alphanumeric() || matches!(character, '-' | '_' | '.'))
+    {
+        return Ok(());
+    }
+
+    Err(ApiError::bad_request(
+        "changeSetId may only contain letters, numbers, '.', '-', and '_'",
+    ))
+}
+
+fn validate_review_document(
+    change_set_id: &str,
+    review: &ReviewDocument,
+) -> Result<(), ApiError> {
+    if review.version != REVIEW_DOCUMENT_VERSION {
+        return Err(ApiError::bad_request(format!(
+            "unsupported review document version {}",
+            review.version
+        )));
+    }
+
+    if review.change_set_id != change_set_id {
+        return Err(ApiError::bad_request(format!(
+            "review changeSetId `{}` does not match route `{change_set_id}`",
+            review.change_set_id
+        )));
+    }
+
+    if let Some(origin) = review.origin.as_ref() {
+        validate_non_empty_review_field("origin.sessionId", &origin.session_id)?;
+        validate_non_empty_review_field("origin.messageId", &origin.message_id)?;
+        validate_non_empty_review_field("origin.agent", &origin.agent)?;
+        validate_non_empty_review_field("origin.workdir", &origin.workdir)?;
+        validate_non_empty_review_field("origin.createdAt", &origin.created_at)?;
+    }
+
+    for file in &review.files {
+        validate_non_empty_review_field("files[].filePath", &file.file_path)?;
+    }
+
+    for thread in &review.threads {
+        validate_review_thread(thread)?;
+    }
+
+    Ok(())
+}
+
+fn validate_review_thread(thread: &ReviewThread) -> Result<(), ApiError> {
+    validate_non_empty_review_field("threads[].id", &thread.id)?;
+    validate_review_anchor(&thread.anchor)?;
+
+    if thread.comments.is_empty() {
+        return Err(ApiError::bad_request(
+            "review threads must contain at least one comment",
+        ));
+    }
+
+    for comment in &thread.comments {
+        validate_non_empty_review_field("threads[].comments[].id", &comment.id)?;
+        validate_non_empty_review_field("threads[].comments[].body", &comment.body)?;
+        validate_non_empty_review_field("threads[].comments[].createdAt", &comment.created_at)?;
+        validate_non_empty_review_field("threads[].comments[].updatedAt", &comment.updated_at)?;
+    }
+
+    Ok(())
+}
+
+fn validate_review_anchor(anchor: &ReviewAnchor) -> Result<(), ApiError> {
+    match anchor {
+        ReviewAnchor::ChangeSet => Ok(()),
+        ReviewAnchor::File { file_path } => {
+            validate_non_empty_review_field("comments[].anchor.filePath", file_path)
+        }
+        ReviewAnchor::Hunk {
+            file_path,
+            hunk_header,
+        } => {
+            validate_non_empty_review_field("comments[].anchor.filePath", file_path)?;
+            validate_non_empty_review_field("comments[].anchor.hunkHeader", hunk_header)
+        }
+        ReviewAnchor::Line {
+            file_path,
+            hunk_header,
+            old_line,
+            new_line,
+        } => {
+            validate_non_empty_review_field("comments[].anchor.filePath", file_path)?;
+            validate_non_empty_review_field("comments[].anchor.hunkHeader", hunk_header)?;
+            if old_line.is_none() && new_line.is_none() {
+                return Err(ApiError::bad_request(
+                    "line review anchors must include oldLine, newLine, or both",
+                ));
+            }
+            Ok(())
+        }
+    }
+}
+
+fn validate_non_empty_review_field(label: &str, value: &str) -> Result<(), ApiError> {
+    if value.trim().is_empty() {
+        return Err(ApiError::bad_request(format!("{label} cannot be empty")));
+    }
+
+    Ok(())
+}
+
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
 enum Agent {
     Codex,
@@ -2155,6 +2446,12 @@ enum Message {
         id: String,
         timestamp: String,
         author: Author,
+        #[serde(
+            default,
+            rename = "changeSetId",
+            skip_serializing_if = "Option::is_none"
+        )]
+        change_set_id: Option<String>,
         #[serde(rename = "filePath")]
         file_path: String,
         summary: String,
@@ -2286,6 +2583,13 @@ struct InstructionSearchQuery {
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
+struct ReviewQuery {
+    project_id: Option<String>,
+    session_id: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct WriteFileRequest {
     path: String,
     content: String,
@@ -2405,6 +2709,7 @@ enum GitDiffChangeType {
 #[serde(rename_all = "camelCase")]
 struct GitDiffResponse {
     change_type: GitDiffChangeType,
+    change_set_id: String,
     diff: String,
     diff_id: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -2419,6 +2724,122 @@ struct GitDiffResponse {
 struct GitCommitResponse {
     status: GitStatusResponse,
     summary: String,
+}
+
+const REVIEW_DOCUMENT_VERSION: u32 = 1;
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ReviewDocument {
+    version: u32,
+    #[serde(default)]
+    revision: u64,
+    change_set_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    origin: Option<ReviewOrigin>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    files: Vec<ReviewFileEntry>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    threads: Vec<ReviewThread>,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ReviewOrigin {
+    session_id: String,
+    message_id: String,
+    agent: String,
+    workdir: String,
+    created_at: String,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ReviewFileEntry {
+    file_path: String,
+    change_type: ChangeType,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ReviewThread {
+    id: String,
+    anchor: ReviewAnchor,
+    status: ReviewThreadStatus,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    comments: Vec<ReviewThreadComment>,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ReviewThreadComment {
+    id: String,
+    author: ReviewCommentAuthor,
+    body: String,
+    created_at: String,
+    updated_at: String,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+enum ReviewAnchor {
+    ChangeSet,
+    File {
+        file_path: String,
+    },
+    Hunk {
+        file_path: String,
+        hunk_header: String,
+    },
+    Line {
+        file_path: String,
+        hunk_header: String,
+        old_line: Option<usize>,
+        new_line: Option<usize>,
+    },
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+enum ReviewCommentAuthor {
+    User,
+    Agent,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+enum ReviewThreadStatus {
+    Open,
+    Resolved,
+    Applied,
+    Dismissed,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ReviewDocumentResponse {
+    review_file_path: String,
+    review: ReviewDocument,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ReviewSummaryResponse {
+    change_set_id: String,
+    review_file_path: String,
+    thread_count: usize,
+    open_thread_count: usize,
+    resolved_thread_count: usize,
+    comment_count: usize,
+    has_threads: bool,
+}
+
+#[derive(Default)]
+struct ReviewDocumentSummary {
+    thread_count: usize,
+    open_thread_count: usize,
+    resolved_thread_count: usize,
+    comment_count: usize,
 }
 
 #[derive(Deserialize)]

@@ -600,8 +600,16 @@ fn instruction_search_returns_all_roots_for_a_phrase() {
     let root = std::env::temp_dir().join(format!("termal-instruction-search-{}", Uuid::new_v4()));
     let docs_dir = root.join("docs");
     fs::create_dir_all(&docs_dir).unwrap();
-    fs::write(root.join("AGENTS.md"), "See docs/backend.md for service rules.\n").unwrap();
-    fs::write(root.join("CLAUDE.md"), "Use docs/backend.md for implementation guidance.\n").unwrap();
+    fs::write(
+        root.join("AGENTS.md"),
+        "See docs/backend.md for service rules.\n",
+    )
+    .unwrap();
+    fs::write(
+        root.join("CLAUDE.md"),
+        "Use docs/backend.md for implementation guidance.\n",
+    )
+    .unwrap();
     fs::write(
         docs_dir.join("backend.md"),
         "# Backend\n\nPrefer dependency injection when module boundaries shift.\n",
@@ -612,7 +620,9 @@ fn instruction_search_returns_all_roots_for_a_phrase() {
 
     assert_eq!(response.matches.len(), 1);
     let matched = &response.matches[0];
-    assert!(matched.path.ends_with("docs\\backend.md") || matched.path.ends_with("docs/backend.md"));
+    assert!(
+        matched.path.ends_with("docs\\backend.md") || matched.path.ends_with("docs/backend.md")
+    );
     assert_eq!(
         matched.text,
         "Prefer dependency injection when module boundaries shift."
@@ -633,18 +643,23 @@ fn instruction_search_returns_all_roots_for_a_phrase() {
                 .into_owned(),
         ]
     );
-    assert!(matched
-        .root_paths
-        .iter()
-        .all(|root_path| root_path.steps.len() == 1 && root_path.steps[0].to_path == matched.path));
+    assert!(
+        matched
+            .root_paths
+            .iter()
+            .all(|root_path| root_path.steps.len() == 1
+                && root_path.steps[0].to_path == matched.path)
+    );
 
     fs::remove_dir_all(root).unwrap();
 }
 
 #[test]
 fn instruction_search_expands_directory_discovery_edges() {
-    let root =
-        std::env::temp_dir().join(format!("termal-instruction-directory-search-{}", Uuid::new_v4()));
+    let root = std::env::temp_dir().join(format!(
+        "termal-instruction-directory-search-{}",
+        Uuid::new_v4()
+    ));
     let reviewers_dir = root.join(".claude").join("reviewers");
     let commands_dir = root.join(".claude").join("commands");
     fs::create_dir_all(&reviewers_dir).unwrap();
@@ -664,7 +679,10 @@ fn instruction_search_expands_directory_discovery_edges() {
 
     assert_eq!(response.matches.len(), 1);
     let matched = &response.matches[0];
-    assert!(matched.path.ends_with(".claude\\reviewers\\rust.md") || matched.path.ends_with(".claude/reviewers/rust.md"));
+    assert!(
+        matched.path.ends_with(".claude\\reviewers\\rust.md")
+            || matched.path.ends_with(".claude/reviewers/rust.md")
+    );
     assert_eq!(matched.root_paths.len(), 1);
     let root_path = &matched.root_paths[0];
     assert_eq!(
@@ -674,7 +692,10 @@ fn instruction_search_expands_directory_discovery_edges() {
             .into_owned()
     );
     assert_eq!(root_path.steps.len(), 1);
-    assert_eq!(root_path.steps[0].relation, InstructionRelation::DirectoryDiscovery);
+    assert_eq!(
+        root_path.steps[0].relation,
+        InstructionRelation::DirectoryDiscovery
+    );
     assert_eq!(
         root_path.steps[0].to_path,
         normalize_path_best_effort(&reviewers_dir.join("rust.md"))
@@ -687,12 +708,18 @@ fn instruction_search_expands_directory_discovery_edges() {
 
 #[test]
 fn instruction_search_stops_at_generic_referenced_docs() {
-    let root =
-        std::env::temp_dir().join(format!("termal-instruction-generic-docs-{}", Uuid::new_v4()));
+    let root = std::env::temp_dir().join(format!(
+        "termal-instruction-generic-docs-{}",
+        Uuid::new_v4()
+    ));
     let docs_dir = root.join("docs");
     let features_dir = docs_dir.join("features");
     fs::create_dir_all(&features_dir).unwrap();
-    fs::write(root.join("AGENTS.md"), "See README.md for additional context.\n").unwrap();
+    fs::write(
+        root.join("AGENTS.md"),
+        "See README.md for additional context.\n",
+    )
+    .unwrap();
     fs::write(
         root.join("README.md"),
         "- [docs/bugs.md](docs/bugs.md) - implementation backlog\n",
@@ -742,8 +769,10 @@ fn instruction_search_walks_instructionish_docs_transitively() {
 
     assert_eq!(response.matches.len(), 1);
     let matched = &response.matches[0];
-    assert!(matched.path.ends_with("docs\\instructions\\shared.md")
-        || matched.path.ends_with("docs/instructions/shared.md"));
+    assert!(
+        matched.path.ends_with("docs\\instructions\\shared.md")
+            || matched.path.ends_with("docs/instructions/shared.md")
+    );
     assert_eq!(matched.root_paths.len(), 1);
     let root_path = &matched.root_paths[0];
     assert_eq!(
@@ -771,8 +800,10 @@ fn instruction_search_walks_instructionish_docs_transitively() {
 
 #[test]
 fn instruction_search_ignores_internal_termal_roots_for_claude_reviewers() {
-    let root =
-        std::env::temp_dir().join(format!("termal-instruction-realtime-search-{}", Uuid::new_v4()));
+    let root = std::env::temp_dir().join(format!(
+        "termal-instruction-realtime-search-{}",
+        Uuid::new_v4()
+    ));
     let commands_dir = root.join(".claude").join("commands");
     let reviewers_dir = root.join(".claude").join("reviewers");
     let docs_features_dir = root.join("docs").join("features");
@@ -818,20 +849,20 @@ fn instruction_search_ignores_internal_termal_roots_for_claude_reviewers() {
         "- a reviewer file was discovered from `.claude/reviewers/`\n",
     )
     .unwrap();
-    fs::write(
-        internal_skill_dir.join("SKILL.md"),
-        "- README.md\n",
-    )
-    .unwrap();
+    fs::write(internal_skill_dir.join("SKILL.md"), "- README.md\n").unwrap();
 
     let response = search_instruction_phrase(&root, "real-time handling").unwrap();
 
     assert_eq!(response.matches.len(), 1);
     let matched = &response.matches[0];
-    assert!(matched.path.ends_with(".claude\\reviewers\\react-typescript.md")
-        || matched
+    assert!(
+        matched
             .path
-            .ends_with(".claude/reviewers/react-typescript.md"));
+            .ends_with(".claude\\reviewers\\react-typescript.md")
+            || matched
+                .path
+                .ends_with(".claude/reviewers/react-typescript.md")
+    );
     assert_eq!(matched.root_paths.len(), 1);
     let root_path = &matched.root_paths[0];
     assert_eq!(
@@ -841,7 +872,10 @@ fn instruction_search_ignores_internal_termal_roots_for_claude_reviewers() {
             .into_owned()
     );
     assert_eq!(root_path.steps.len(), 1);
-    assert_eq!(root_path.steps[0].relation, InstructionRelation::DirectoryDiscovery);
+    assert_eq!(
+        root_path.steps[0].relation,
+        InstructionRelation::DirectoryDiscovery
+    );
     assert_eq!(
         root_path.steps[0].to_path,
         normalize_path_best_effort(&reviewers_dir.join("react-typescript.md"))
@@ -855,7 +889,9 @@ fn instruction_search_ignores_internal_termal_roots_for_claude_reviewers() {
 #[test]
 fn instruction_search_returns_not_found_for_missing_session() {
     let state = test_app_state();
-    let error = state.search_instructions("missing-session", "dependency injection").unwrap_err();
+    let error = state
+        .search_instructions("missing-session", "dependency injection")
+        .unwrap_err();
 
     assert_eq!(error.status, StatusCode::NOT_FOUND);
     assert_eq!(error.message, "session not found");
@@ -3805,4 +3841,302 @@ fn resolving_one_of_multiple_pending_approvals_keeps_session_waiting() {
         record.session.messages.get(1),
         Some(Message::Approval { decision, .. }) if *decision == ApprovalDecision::Pending
     ));
+}
+
+#[test]
+fn review_documents_round_trip_through_disk() {
+    let review_path = std::env::temp_dir()
+        .join(format!("termal-review-{}", Uuid::new_v4()))
+        .join("change-message-42.json");
+    let review = ReviewDocument {
+        version: REVIEW_DOCUMENT_VERSION,
+        revision: 3,
+        change_set_id: "change-message-42".to_owned(),
+        origin: Some(ReviewOrigin {
+            session_id: "session-3".to_owned(),
+            message_id: "message-42".to_owned(),
+            agent: "Codex".to_owned(),
+            workdir: "/tmp/project".to_owned(),
+            created_at: "2026-03-09T18:55:00Z".to_owned(),
+        }),
+        files: vec![ReviewFileEntry {
+            file_path: "docs/bugs.md".to_owned(),
+            change_type: ChangeType::Edit,
+        }],
+        threads: vec![ReviewThread {
+            id: "comment-1".to_owned(),
+            anchor: ReviewAnchor::Line {
+                file_path: "docs/bugs.md".to_owned(),
+                hunk_header: "@@ -10,3 +10,8 @@".to_owned(),
+                old_line: None,
+                new_line: Some(17),
+            },
+            status: ReviewThreadStatus::Open,
+            comments: vec![
+                ReviewThreadComment {
+                    id: "comment-1".to_owned(),
+                    author: ReviewCommentAuthor::User,
+                    body: "Mention Codex attachment support explicitly.".to_owned(),
+                    created_at: "2026-03-09T19:02:00Z".to_owned(),
+                    updated_at: "2026-03-09T19:02:00Z".to_owned(),
+                },
+                ReviewThreadComment {
+                    id: "reply-1".to_owned(),
+                    author: ReviewCommentAuthor::Agent,
+                    body: "Handled in the follow-up patch.".to_owned(),
+                    created_at: "2026-03-09T19:05:00Z".to_owned(),
+                    updated_at: "2026-03-09T19:05:00Z".to_owned(),
+                },
+            ],
+        }],
+    };
+
+    persist_review_document(&review_path, &review).expect("review should persist");
+    let loaded =
+        load_review_document(&review_path, "change-message-42").expect("review should load");
+
+    assert_eq!(loaded, review);
+}
+
+#[test]
+fn missing_review_documents_return_default_state() {
+    let review_path = std::env::temp_dir()
+        .join(format!("termal-review-{}", Uuid::new_v4()))
+        .join("change-message-99.json");
+
+    let loaded = load_review_document(&review_path, "change-message-99")
+        .expect("missing review should default");
+
+    assert_eq!(
+        loaded,
+        ReviewDocument {
+            version: REVIEW_DOCUMENT_VERSION,
+            revision: 0,
+            change_set_id: "change-message-99".to_owned(),
+            origin: None,
+            files: Vec::new(),
+            threads: Vec::new(),
+        }
+    );
+}
+
+#[test]
+fn review_documents_reject_invalid_line_anchors() {
+    let review = ReviewDocument {
+        version: REVIEW_DOCUMENT_VERSION,
+        revision: 0,
+        change_set_id: "change-message-88".to_owned(),
+        origin: None,
+        files: Vec::new(),
+        threads: vec![ReviewThread {
+            id: "comment-1".to_owned(),
+            anchor: ReviewAnchor::Line {
+                file_path: "docs/bugs.md".to_owned(),
+                hunk_header: "@@ -1,1 +1,1 @@".to_owned(),
+                old_line: None,
+                new_line: None,
+            },
+            status: ReviewThreadStatus::Open,
+            comments: vec![ReviewThreadComment {
+                id: "comment-1".to_owned(),
+                author: ReviewCommentAuthor::User,
+                body: "Need a concrete line target.".to_owned(),
+                created_at: "2026-03-09T19:02:00Z".to_owned(),
+                updated_at: "2026-03-09T19:02:00Z".to_owned(),
+            }],
+        }],
+    };
+
+    let error = validate_review_document("change-message-88", &review)
+        .expect_err("invalid line anchors should be rejected");
+
+    assert_eq!(error.status, StatusCode::BAD_REQUEST);
+    assert!(error.message.contains("line review anchors"));
+}
+
+#[test]
+fn review_document_paths_resolve_inside_the_scoped_project_root() {
+    let state = test_app_state();
+    let root = std::env::temp_dir().join(format!("termal-review-root-{}", Uuid::new_v4()));
+    let nested = root.join("workspace");
+
+    fs::create_dir_all(&nested).unwrap();
+
+    let project = state
+        .create_project(CreateProjectRequest {
+            name: Some("Review Project".to_owned()),
+            root_path: root.to_string_lossy().into_owned(),
+        })
+        .unwrap();
+    let created = state
+        .create_session(CreateSessionRequest {
+            agent: Some(Agent::Codex),
+            name: Some("Review Session".to_owned()),
+            workdir: Some(nested.to_string_lossy().into_owned()),
+            project_id: Some(project.project_id),
+            model: None,
+            approval_policy: None,
+            reasoning_effort: None,
+            sandbox_mode: None,
+            cursor_mode: None,
+            claude_approval_mode: None,
+            claude_effort: None,
+            gemini_approval_mode: None,
+        })
+        .unwrap();
+
+    let review_root = resolve_review_storage_root(&state, Some(&created.session_id), None).unwrap();
+    let review_path = resolve_review_document_path(&review_root, "change-message-7").unwrap();
+
+    assert_eq!(
+        review_root,
+        normalize_user_facing_path(&fs::canonicalize(&root).unwrap())
+    );
+    assert_eq!(
+        review_path,
+        normalize_user_facing_path(&fs::canonicalize(&root).unwrap())
+            .join(".termal")
+            .join("reviews")
+            .join("change-message-7.json")
+    );
+
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn review_document_writes_increment_revision() {
+    let review_path = std::env::temp_dir()
+        .join(format!("termal-review-write-{}", Uuid::new_v4()))
+        .join("change-message-55.json");
+    let review = ReviewDocument {
+        version: REVIEW_DOCUMENT_VERSION,
+        revision: 0,
+        change_set_id: "change-message-55".to_owned(),
+        origin: None,
+        files: Vec::new(),
+        threads: vec![ReviewThread {
+            id: "thread-1".to_owned(),
+            anchor: ReviewAnchor::ChangeSet,
+            status: ReviewThreadStatus::Open,
+            comments: vec![ReviewThreadComment {
+                id: "comment-1".to_owned(),
+                author: ReviewCommentAuthor::User,
+                body: "First pass.".to_owned(),
+                created_at: "2026-03-17T10:00:00Z".to_owned(),
+                updated_at: "2026-03-17T10:00:00Z".to_owned(),
+            }],
+        }],
+    };
+
+    let persisted = prepare_review_document_for_write(&review_path, "change-message-55", review)
+        .expect("review should prepare");
+    persist_review_document(&review_path, &persisted).expect("review should persist");
+
+    assert_eq!(persisted.revision, 1);
+    let loaded = load_review_document(&review_path, "change-message-55").unwrap();
+    assert_eq!(loaded.revision, 1);
+}
+
+#[test]
+fn review_document_writes_reject_stale_revisions() {
+    let review_path = std::env::temp_dir()
+        .join(format!("termal-review-stale-{}", Uuid::new_v4()))
+        .join("change-message-56.json");
+    let review = ReviewDocument {
+        version: REVIEW_DOCUMENT_VERSION,
+        revision: 0,
+        change_set_id: "change-message-56".to_owned(),
+        origin: None,
+        files: Vec::new(),
+        threads: vec![ReviewThread {
+            id: "thread-1".to_owned(),
+            anchor: ReviewAnchor::ChangeSet,
+            status: ReviewThreadStatus::Open,
+            comments: vec![ReviewThreadComment {
+                id: "comment-1".to_owned(),
+                author: ReviewCommentAuthor::User,
+                body: "Current comment.".to_owned(),
+                created_at: "2026-03-17T10:00:00Z".to_owned(),
+                updated_at: "2026-03-17T10:00:00Z".to_owned(),
+            }],
+        }],
+    };
+    let persisted =
+        prepare_review_document_for_write(&review_path, "change-message-56", review.clone())
+            .unwrap();
+    persist_review_document(&review_path, &persisted).unwrap();
+
+    let error = prepare_review_document_for_write(&review_path, "change-message-56", review)
+        .expect_err("stale review should conflict");
+
+    assert_eq!(error.status, StatusCode::CONFLICT);
+    assert!(error.message.contains("out of date"));
+}
+
+#[test]
+fn review_summary_counts_only_resolved_threads_as_resolved() {
+    let review = ReviewDocument {
+        version: REVIEW_DOCUMENT_VERSION,
+        revision: 2,
+        change_set_id: "change-message-57".to_owned(),
+        origin: None,
+        files: Vec::new(),
+        threads: vec![
+            ReviewThread {
+                id: "thread-open".to_owned(),
+                anchor: ReviewAnchor::ChangeSet,
+                status: ReviewThreadStatus::Open,
+                comments: vec![ReviewThreadComment {
+                    id: "comment-open".to_owned(),
+                    author: ReviewCommentAuthor::User,
+                    body: "Open".to_owned(),
+                    created_at: "2026-03-17T10:00:00Z".to_owned(),
+                    updated_at: "2026-03-17T10:00:00Z".to_owned(),
+                }],
+            },
+            ReviewThread {
+                id: "thread-resolved".to_owned(),
+                anchor: ReviewAnchor::ChangeSet,
+                status: ReviewThreadStatus::Resolved,
+                comments: vec![ReviewThreadComment {
+                    id: "comment-resolved".to_owned(),
+                    author: ReviewCommentAuthor::User,
+                    body: "Resolved".to_owned(),
+                    created_at: "2026-03-17T10:00:00Z".to_owned(),
+                    updated_at: "2026-03-17T10:00:00Z".to_owned(),
+                }],
+            },
+            ReviewThread {
+                id: "thread-applied".to_owned(),
+                anchor: ReviewAnchor::ChangeSet,
+                status: ReviewThreadStatus::Applied,
+                comments: vec![ReviewThreadComment {
+                    id: "comment-applied".to_owned(),
+                    author: ReviewCommentAuthor::User,
+                    body: "Applied".to_owned(),
+                    created_at: "2026-03-17T10:00:00Z".to_owned(),
+                    updated_at: "2026-03-17T10:00:00Z".to_owned(),
+                }],
+            },
+            ReviewThread {
+                id: "thread-dismissed".to_owned(),
+                anchor: ReviewAnchor::ChangeSet,
+                status: ReviewThreadStatus::Dismissed,
+                comments: vec![ReviewThreadComment {
+                    id: "comment-dismissed".to_owned(),
+                    author: ReviewCommentAuthor::User,
+                    body: "Dismissed".to_owned(),
+                    created_at: "2026-03-17T10:00:00Z".to_owned(),
+                    updated_at: "2026-03-17T10:00:00Z".to_owned(),
+                }],
+            },
+        ],
+    };
+
+    let summary = summarize_review_document(&review);
+
+    assert_eq!(summary.thread_count, 4);
+    assert_eq!(summary.open_thread_count, 1);
+    assert_eq!(summary.resolved_thread_count, 1);
+    assert_eq!(summary.comment_count, 4);
 }

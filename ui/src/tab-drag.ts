@@ -128,6 +128,7 @@ function isWorkspaceTab(value: unknown): value is WorkspaceTab {
     case "diffPreview":
       return (
         (value.changeType === "create" || value.changeType === "edit") &&
+        isOptionalNullableString(value.changeSetId) &&
         typeof value.diff === "string" &&
         typeof value.diffMessageId === "string" &&
         isNullableString(value.filePath) &&
@@ -142,6 +143,10 @@ function isWorkspaceTab(value: unknown): value is WorkspaceTab {
 
 function isNullableString(value: unknown): value is string | null {
   return value === null || typeof value === "string";
+}
+
+function isOptionalNullableString(value: unknown): value is string | null | undefined {
+  return typeof value === "undefined" || isNullableString(value);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

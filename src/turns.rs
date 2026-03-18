@@ -383,12 +383,14 @@ impl TurnRecorder for SessionRecorder {
         }
 
         self.finish_streaming_text()?;
+        let message_id = self.state.allocate_message_id();
         self.state.push_message(
             &self.session_id,
             Message::Diff {
-                id: self.state.allocate_message_id(),
+                id: message_id.clone(),
                 timestamp: stamp_now(),
                 author: Author::Assistant,
+                change_set_id: Some(diff_change_set_id(&message_id)),
                 file_path: file_path.to_owned(),
                 summary: summary.to_owned(),
                 diff: diff.to_owned(),
@@ -588,12 +590,14 @@ impl TurnRecorder for BorrowedSessionRecorder<'_> {
         }
 
         self.finish_streaming_text()?;
+        let message_id = self.state.allocate_message_id();
         self.state.push_message(
             self.session_id,
             Message::Diff {
-                id: self.state.allocate_message_id(),
+                id: message_id.clone(),
                 timestamp: stamp_now(),
                 author: Author::Assistant,
+                change_set_id: Some(diff_change_set_id(&message_id)),
                 file_path: file_path.to_owned(),
                 summary: summary.to_owned(),
                 diff: diff.to_owned(),
@@ -2342,4 +2346,3 @@ fn sanitize_attachment_file_name(value: &str) -> String {
 fn stamp_now() -> String {
     Local::now().format("%H:%M").to_string()
 }
-

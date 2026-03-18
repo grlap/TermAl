@@ -63,6 +63,7 @@ export type WorkspaceDiffPreviewTab = {
   id: string;
   kind: "diffPreview";
   changeType: DiffMessage["changeType"];
+  changeSetId?: string | null;
   diff: string;
   diffMessageId: string;
   filePath: string | null;
@@ -218,6 +219,7 @@ export function createInstructionDebuggerTab(
 
 export function createDiffPreviewTab({
   changeType,
+  changeSetId = null,
   diff,
   diffMessageId,
   filePath = null,
@@ -228,6 +230,7 @@ export function createDiffPreviewTab({
   summary,
 }: {
   changeType: DiffMessage["changeType"];
+  changeSetId?: string | null;
   diff: string;
   diffMessageId: string;
   filePath?: string | null;
@@ -237,12 +240,14 @@ export function createDiffPreviewTab({
   originProjectId?: string | null;
   summary: string;
 }): WorkspaceDiffPreviewTab {
+  const normalizedChangeSetId = normalizeWorkspaceIdentifier(changeSetId);
   const normalizedOriginProjectId = normalizeWorkspaceIdentifier(originProjectId);
 
   return {
     id: crypto.randomUUID(),
     kind: "diffPreview",
     changeType,
+    ...(normalizedChangeSetId ? { changeSetId: normalizedChangeSetId } : {}),
     diff,
     diffMessageId,
     filePath: normalizeWorkspacePath(filePath),
@@ -342,11 +347,13 @@ export function reconcileWorkspaceState(current: WorkspaceState, sessions: Sessi
         }
 
         const { originProjectId: _ignoredOriginProjectId, ...tabWithoutOriginProjectId } = tab;
+        const normalizedChangeSetId = normalizeWorkspaceIdentifier(tab.changeSetId);
         return [
           {
             ...tabWithoutOriginProjectId,
             originSessionId,
             ...projectOriginProps(originProjectId),
+            ...(normalizedChangeSetId ? { changeSetId: normalizedChangeSetId } : {}),
             filePath: normalizeWorkspacePath(tab.filePath),
           },
         ];
@@ -620,6 +627,7 @@ export function openDiffPreviewInWorkspaceState(
   workspace: WorkspaceState,
   tab: {
     changeType: DiffMessage["changeType"];
+    changeSetId?: string | null;
     diff: string;
     diffMessageId: string;
     filePath: string | null;
@@ -646,7 +654,13 @@ export function openDiffPreviewInWorkspaceState(
     );
   }
 
-  const existing = findDiffPreviewTab(workspace, tab.diffMessageId, tab.originSessionId, tab.originProjectId ?? null);
+  const existing = findDiffPreviewTab(
+    workspace,
+    normalizeWorkspaceIdentifier(tab.changeSetId),
+    tab.diffMessageId,
+    tab.originSessionId,
+    tab.originProjectId ?? null,
+  );
   if (existing) {
     return activatePane(workspace, existing.paneId, existing.tab.id);
   }
@@ -1418,6 +1432,7 @@ function isAllowedControlPanelPlacement(
 
 function findDiffPreviewTab(
   workspace: WorkspaceState,
+  changeSetId: string | null,
   diffMessageId: string,
   originSessionId: string | null,
   originProjectId: string | null,
@@ -1426,7 +1441,10 @@ function findDiffPreviewTab(
     const tab = pane.tabs.find(
       (candidate): candidate is WorkspaceDiffPreviewTab =>
         candidate.kind === "diffPreview" &&
-        candidate.diffMessageId === diffMessageId &&
+        (changeSetId
+          ? (candidate.changeSetId ?? null) === changeSetId ||
+            candidate.diffMessageId === diffMessageId
+          : candidate.diffMessageId === diffMessageId) &&
         candidate.originSessionId === originSessionId &&
         (candidate.originProjectId ?? null) === originProjectId,
     );

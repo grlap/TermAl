@@ -180,6 +180,7 @@ export type CommandMessage = BaseMessage & {
 
 export type DiffMessage = BaseMessage & {
   type: "diff";
+  changeSetId?: string | null;
   filePath: string;
   summary: string;
   diff: string;

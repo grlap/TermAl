@@ -2908,6 +2908,41 @@ export default function App() {
     );
   }
 
+  function handleOpenConversationFromDiff(
+    sessionId: string,
+    preferredPaneId: string | null = null,
+  ) {
+    handleSidebarSessionClick(sessionId, preferredPaneId);
+  }
+
+  function handleInsertReviewIntoPrompt(
+    sessionId: string,
+    preferredPaneId: string | null,
+    prompt: string,
+  ) {
+    const nextPrompt = prompt.trim();
+    handleOpenConversationFromDiff(sessionId, preferredPaneId);
+    if (!nextPrompt) {
+      return;
+    }
+
+    setDraftsBySessionId((current) => {
+      const existingDraft = current[sessionId] ?? "";
+      const nextValue =
+        existingDraft.trim().length > 0
+          ? `${existingDraft.trimEnd()}\n\n${nextPrompt}`
+          : nextPrompt;
+      if (existingDraft === nextValue) {
+        return current;
+      }
+
+      return {
+        ...current,
+        [sessionId]: nextValue,
+      };
+    });
+  }
+
   function handleScrollToBottomRequestHandled(token: number) {
     setPendingScrollToBottomRequest((current) =>
       current?.token === token ? null : current,
@@ -3207,6 +3242,7 @@ export default function App() {
           current,
           {
             changeType: message.changeType,
+            changeSetId: message.changeSetId ?? `change-${message.id}`,
             diff: message.diff,
             diffMessageId: message.id,
             filePath: message.filePath,
@@ -3237,6 +3273,7 @@ export default function App() {
           current,
           {
             changeType: diffPreview.changeType,
+            changeSetId: diffPreview.changeSetId ?? null,
             diff: diffPreview.diff,
             diffMessageId: diffPreview.diffId,
             filePath: diffPreview.filePath ?? null,
@@ -3745,6 +3782,8 @@ export default function App() {
               onOpenGitStatusTab={handleOpenGitStatusTab}
               onOpenInstructionDebuggerTab={handleOpenInstructionDebuggerTab}
               onPaneSourcePathChange={handlePaneSourcePathChange}
+              onOpenConversationFromDiff={handleOpenConversationFromDiff}
+              onInsertReviewIntoPrompt={handleInsertReviewIntoPrompt}
               onDraftCommit={handleDraftChange}
               onDraftAttachmentsAdd={handleDraftAttachmentsAdd}
               onDraftAttachmentRemove={handleDraftAttachmentRemove}
@@ -5234,6 +5273,8 @@ function WorkspaceNodeView({
   onOpenGitStatusTab,
   onOpenInstructionDebuggerTab,
   onPaneSourcePathChange,
+  onOpenConversationFromDiff,
+  onInsertReviewIntoPrompt,
   onDraftCommit,
   onDraftAttachmentsAdd,
   onDraftAttachmentRemove,
@@ -5335,6 +5376,12 @@ function WorkspaceNodeView({
     originProjectId: string | null,
   ) => void;
   onPaneSourcePathChange: (paneId: string, path: string) => void;
+  onOpenConversationFromDiff: (sessionId: string, preferredPaneId: string | null) => void;
+  onInsertReviewIntoPrompt: (
+    sessionId: string,
+    preferredPaneId: string | null,
+    prompt: string,
+  ) => void;
   onDraftCommit: (sessionId: string, nextValue: string) => void;
   onDraftAttachmentsAdd: (sessionId: string, attachments: DraftImageAttachment[]) => void;
   onDraftAttachmentRemove: (sessionId: string, attachmentId: string) => void;
@@ -5435,6 +5482,8 @@ function WorkspaceNodeView({
         onOpenGitStatusTab={onOpenGitStatusTab}
         onOpenInstructionDebuggerTab={onOpenInstructionDebuggerTab}
         onPaneSourcePathChange={onPaneSourcePathChange}
+        onOpenConversationFromDiff={onOpenConversationFromDiff}
+        onInsertReviewIntoPrompt={onInsertReviewIntoPrompt}
         onDraftCommit={onDraftCommit}
         onDraftAttachmentsAdd={onDraftAttachmentsAdd}
         onDraftAttachmentRemove={onDraftAttachmentRemove}
@@ -5518,6 +5567,8 @@ function WorkspaceNodeView({
           onOpenGitStatusTab={onOpenGitStatusTab}
           onOpenInstructionDebuggerTab={onOpenInstructionDebuggerTab}
           onPaneSourcePathChange={onPaneSourcePathChange}
+          onOpenConversationFromDiff={onOpenConversationFromDiff}
+          onInsertReviewIntoPrompt={onInsertReviewIntoPrompt}
           onDraftCommit={onDraftCommit}
           onDraftAttachmentsAdd={onDraftAttachmentsAdd}
           onDraftAttachmentRemove={onDraftAttachmentRemove}
@@ -5590,6 +5641,8 @@ function WorkspaceNodeView({
           onOpenGitStatusTab={onOpenGitStatusTab}
           onOpenInstructionDebuggerTab={onOpenInstructionDebuggerTab}
           onPaneSourcePathChange={onPaneSourcePathChange}
+          onOpenConversationFromDiff={onOpenConversationFromDiff}
+          onInsertReviewIntoPrompt={onInsertReviewIntoPrompt}
           onDraftCommit={onDraftCommit}
           onDraftAttachmentsAdd={onDraftAttachmentsAdd}
           onDraftAttachmentRemove={onDraftAttachmentRemove}
@@ -5655,6 +5708,8 @@ function SessionPaneView({
   onOpenGitStatusTab,
   onOpenInstructionDebuggerTab,
   onPaneSourcePathChange,
+  onOpenConversationFromDiff,
+  onInsertReviewIntoPrompt,
   onDraftCommit,
   onDraftAttachmentsAdd,
   onDraftAttachmentRemove,
@@ -5751,6 +5806,12 @@ function SessionPaneView({
     originProjectId: string | null,
   ) => void;
   onPaneSourcePathChange: (paneId: string, path: string) => void;
+  onOpenConversationFromDiff: (sessionId: string, preferredPaneId: string | null) => void;
+  onInsertReviewIntoPrompt: (
+    sessionId: string,
+    preferredPaneId: string | null,
+    prompt: string,
+  ) => void;
   onDraftCommit: (sessionId: string, nextValue: string) => void;
   onDraftAttachmentsAdd: (sessionId: string, attachments: DraftImageAttachment[]) => void;
   onDraftAttachmentRemove: (sessionId: string, attachmentId: string) => void;
@@ -6910,6 +6971,7 @@ function SessionPaneView({
           <DiffPanel
             appearance={editorAppearance}
             changeType={activeDiffPreviewTab.changeType}
+            changeSetId={activeDiffPreviewTab.changeSetId ?? null}
             fontSizePx={editorFontSizePx}
             diff={activeDiffPreviewTab.diff}
             diffMessageId={activeDiffPreviewTab.diffMessageId}
@@ -6918,9 +6980,25 @@ function SessionPaneView({
             language={activeDiffPreviewTab.language ?? null}
             sessionId={activeDiffOriginSessionId}
             projectId={activeDiffOriginProjectId}
+            originAgentName={
+              activeDiffOriginSessionId
+                ? (sessionLookup.get(activeDiffOriginSessionId)?.agent ?? null)
+                : null
+            }
             workspaceRoot={activeDiffWorkspaceRoot}
             onOpenPath={(path) =>
               onOpenSourceTab(pane.id, path, activeDiffOriginSessionId, activeDiffOriginProjectId)
+            }
+            onInsertReviewIntoPrompt={
+              activeDiffOriginSessionId
+                ? (_reviewFilePath, prompt) =>
+                    onInsertReviewIntoPrompt(activeDiffOriginSessionId, pane.id, prompt)
+                : undefined
+            }
+            onOpenConversation={
+              activeDiffOriginSessionId
+                ? () => onOpenConversationFromDiff(activeDiffOriginSessionId, pane.id)
+                : undefined
             }
             onSaveFile={(path, content) =>
               handleSourceFileSave(path, content, activeDiffOriginSessionId, activeDiffOriginProjectId)
@@ -10003,4 +10081,3 @@ function dropLabelForPlacement(placement: TabDropPlacement) {
       return "Bottom";
   }
 }
-

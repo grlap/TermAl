@@ -109,11 +109,13 @@ function makeDiffPreviewTab(
   diffMessageId: string,
   filePath: string | null,
   originSessionId: string | null,
+  changeSetId: string | null = null,
 ): WorkspaceTab {
   return {
     id,
     kind: "diffPreview",
     changeType: "edit",
+    ...(changeSetId ? { changeSetId } : {}),
     diff: "-before\n+after",
     diffMessageId,
     filePath,
@@ -903,6 +905,39 @@ describe("workspace helpers", () => {
       activeSessionId: "session-b",
       viewMode: "diffPreview",
     });
+  });
+
+  it("openDiffPreviewInWorkspaceState focuses an existing diff tab with the same change set", () => {
+    const next = openDiffPreviewInWorkspaceState(
+      makeSplitWorkspace(
+        makePane("pane-a", [makeSessionTab("tab-a", "session-a")]),
+        makePane(
+          "pane-b",
+          [makeDiffPreviewTab("diff-tab-a", "diff-a", "/tmp/app.ts", "session-a", "change-shared")],
+          {
+            activeTabId: "diff-tab-a",
+            activeSessionId: "session-a",
+            viewMode: "diffPreview",
+          },
+        ),
+      ),
+      {
+        changeType: "edit",
+        changeSetId: "change-shared",
+        diff: "-foo\n+bar",
+        diffMessageId: "diff-b",
+        filePath: "/tmp/next.ts",
+        language: "typescript",
+        originSessionId: "session-a",
+        summary: "Updated next.ts",
+      },
+      "pane-a",
+    );
+
+    expect(next.activePaneId).toBe("pane-b");
+    expect(next.panes.find((pane) => pane.id === "pane-b")?.tabs).toEqual([
+      makeDiffPreviewTab("diff-tab-a", "diff-a", "/tmp/app.ts", "session-a", "change-shared"),
+    ]);
   });
 
 

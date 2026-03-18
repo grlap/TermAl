@@ -72,6 +72,14 @@ async fn run_server() -> Result<()> {
         .route("/api/settings", post(update_app_settings))
         .route("/api/instructions/search", get(search_instructions))
         .route("/api/events", get(state_events))
+        .route(
+            "/api/reviews/{change_set_id}",
+            get(get_review).put(put_review),
+        )
+        .route(
+            "/api/reviews/{change_set_id}/summary",
+            get(get_review_summary),
+        )
         .route("/api/projects", post(create_project))
         .route("/api/projects/pick", post(pick_project_root))
         .route("/api/sessions", post(create_session))
@@ -115,6 +123,10 @@ async fn run_server() -> Result<()> {
     axum::serve(listener, app)
         .await
         .context("backend server failed")
+}
+
+fn diff_change_set_id(message_id: &str) -> String {
+    format!("change-{message_id}")
 }
 
 fn run_repl(agent: Agent) -> Result<()> {

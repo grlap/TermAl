@@ -2,7 +2,7 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { forwardRef, useEffect, useImperativeHandle, type ForwardedRef } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { fetchFile } from "../api";
+import { fetchFile, fetchReviewDocument, saveReviewDocument } from "../api";
 import { copyTextToClipboard } from "../clipboard";
 import { DiffPanel } from "./DiffPanel";
 
@@ -11,6 +11,8 @@ vi.mock("../api", async () => {
   return {
     ...actual,
     fetchFile: vi.fn(),
+    fetchReviewDocument: vi.fn(),
+    saveReviewDocument: vi.fn(),
   };
 });
 
@@ -116,6 +118,8 @@ vi.mock("../MonacoCodeEditor", () => ({
 }));
 
 const fetchFileMock = vi.mocked(fetchFile);
+const fetchReviewDocumentMock = vi.mocked(fetchReviewDocument);
+const saveReviewDocumentMock = vi.mocked(saveReviewDocument);
 const copyTextToClipboardMock = vi.mocked(copyTextToClipboard);
 
 async function clickAndSettle(target: HTMLElement, eventInit?: MouseEventInit) {
@@ -138,6 +142,8 @@ async function changeAndSettle(
 describe("DiffPanel", () => {
   beforeEach(() => {
     fetchFileMock.mockReset();
+    fetchReviewDocumentMock.mockReset();
+    saveReviewDocumentMock.mockReset();
     copyTextToClipboardMock.mockReset();
     copyTextToClipboardMock.mockResolvedValue(undefined);
   });
@@ -415,5 +421,260 @@ describe("DiffPanel", () => {
 
     expect(await screen.findByTestId("structured-diff-view")).toBeInTheDocument();
     expect(document.querySelectorAll(".structured-diff-inline-change").length).toBeGreaterThan(0);
+  });
+
+  it("renders saved review threads inline in changed-only mode", async () => {
+    fetchFileMock.mockResolvedValue({
+      content: "const greeting = 'hi';\n",
+      language: "typescript",
+      path: "/repo/src/example.ts",
+    });
+    fetchReviewDocumentMock.mockResolvedValue({
+      reviewFilePath: "/repo/.termal/reviews/change-diff-threads.json",
+      review: {
+        version: 1,
+        revision: 2,
+        changeSetId: "change-diff-threads",
+        threads: [
+          {
+            id: "thread-1",
+            anchor: {
+              kind: "line",
+              filePath: "/repo/src/example.ts",
+              hunkHeader: "@@ -1 +1 @@",
+              oldLine: null,
+              newLine: 1,
+            },
+            status: "open",
+            comments: [
+              {
+                id: "comment-1",
+                author: "agent",
+                body: "Please split this into a named helper.",
+                createdAt: "2026-03-17T22:00:00Z",
+                updatedAt: "2026-03-17T22:00:00Z",
+              },
+              {
+                id: "comment-2",
+                author: "agent",
+                body: "Handled in a follow-up patch.",
+                createdAt: "2026-03-17T22:05:00Z",
+                updatedAt: "2026-03-17T22:05:00Z",
+              },
+            ],
+          },
+        ],
+      },
+    });
+
+    await act(async () => {
+      render(
+        <DiffPanel
+          appearance="dark"
+          fontSizePx={13}
+          changeType="edit"
+          changeSetId="change-diff-threads"
+          diff={["@@ -1 +1 @@", "-const greeting = 'hello';", "+const greeting = 'hi';"].join("\n")}
+          diffMessageId="diff-threaded"
+          filePath="/repo/src/example.ts"
+          language="typescript"
+          sessionId="session-1"
+          onOpenPath={() => {}}
+          onSaveFile={async () => {}}
+          summary="Refined greeting"
+        />,
+      );
+    });
+
+    await clickAndSettle(screen.getByRole("button", { name: "Changed only" }));
+
+    expect(await screen.findByText("Please split this into a named helper.")).toBeInTheDocument();
+    expect(screen.getByText("Handled in a follow-up patch.")).toBeInTheDocument();
+    expect(fetchReviewDocumentMock).toHaveBeenCalledWith("change-diff-threads", {
+      sessionId: "session-1",
+      projectId: null,
+    });
+  });
+
+  it("creates a line review thread and persists it", async () => {
+    fetchFileMock.mockResolvedValue({
+      content: "const greeting = 'hi';\n",
+      language: "typescript",
+      path: "/repo/src/example.ts",
+    });
+    fetchReviewDocumentMock.mockResolvedValue({
+      reviewFilePath: "/repo/.termal/reviews/change-create-thread.json",
+      review: {
+        version: 1,
+        revision: 0,
+        changeSetId: "change-create-thread",
+        threads: [],
+      },
+    });
+    saveReviewDocumentMock.mockImplementation(async (_changeSetId, review) => ({
+      reviewFilePath: "/repo/.termal/reviews/change-create-thread.json",
+      review,
+    }));
+
+    await act(async () => {
+      render(
+        <DiffPanel
+          appearance="dark"
+          fontSizePx={13}
+          changeType="edit"
+          changeSetId="change-create-thread"
+          diff={["@@ -1 +1 @@", "-const greeting = 'hello';", "+const greeting = 'hi';"].join("\n")}
+          diffMessageId="diff-create-thread"
+          filePath="/repo/src/example.ts"
+          language="typescript"
+          sessionId="session-1"
+          onOpenPath={() => {}}
+          onSaveFile={async () => {}}
+          summary="Refined greeting"
+        />,
+      );
+    });
+
+    await clickAndSettle(screen.getByRole("button", { name: "Changed only" }));
+    await clickAndSettle(screen.getByRole("button", { name: "Comment on line 1" }));
+    await changeAndSettle(screen.getByPlaceholderText("Write a review comment..."), {
+      target: { value: "Please factor this into a helper." },
+    });
+    await clickAndSettle(screen.getByRole("button", { name: "Start thread" }));
+
+    await waitFor(() => {
+      expect(saveReviewDocumentMock).toHaveBeenCalledTimes(1);
+    });
+
+    expect(saveReviewDocumentMock).toHaveBeenCalledWith(
+      "change-create-thread",
+      expect.objectContaining({
+        changeSetId: "change-create-thread",
+        revision: 0,
+        files: [{ filePath: "/repo/src/example.ts", changeType: "edit" }],
+        threads: [
+          expect.objectContaining({
+            anchor: {
+              kind: "line",
+              filePath: "/repo/src/example.ts",
+              hunkHeader: "@@ -1 +1 @@",
+              oldLine: 1,
+              newLine: 1,
+            },
+            status: "open",
+            comments: [
+              expect.objectContaining({
+                author: "user",
+                body: "Please factor this into a helper.",
+              }),
+            ],
+          }),
+        ],
+      }),
+      {
+        sessionId: "session-1",
+        projectId: null,
+      },
+    );
+  });
+
+  it("inserts the review handoff prompt for open threads", async () => {
+    fetchFileMock.mockResolvedValue({
+      content: "const greeting = 'hi';\n",
+      language: "typescript",
+      path: "/repo/src/example.ts",
+    });
+    fetchReviewDocumentMock.mockResolvedValue({
+      reviewFilePath: "/repo/.termal/reviews/change-insert-review.json",
+      review: {
+        version: 1,
+        revision: 4,
+        changeSetId: "change-insert-review",
+        threads: [
+          {
+            id: "thread-1",
+            anchor: {
+              kind: "line",
+              filePath: "/repo/src/example.ts",
+              hunkHeader: "@@ -1 +1 @@",
+              oldLine: 1,
+              newLine: 1,
+            },
+            status: "open",
+            comments: [
+              {
+                id: "comment-1",
+                author: "agent",
+                body: "Please tighten this up.",
+                createdAt: "2026-03-17T22:00:00Z",
+                updatedAt: "2026-03-17T22:00:00Z",
+              },
+            ],
+          },
+        ],
+      },
+    });
+    const onInsertReviewIntoPrompt = vi.fn();
+
+    await act(async () => {
+      render(
+        <DiffPanel
+          appearance="dark"
+          fontSizePx={13}
+          changeType="edit"
+          changeSetId="change-insert-review"
+          diff={["@@ -1 +1 @@", "-const greeting = 'hello';", "+const greeting = 'hi';"].join("\n")}
+          diffMessageId="diff-insert-review"
+          filePath="/repo/src/example.ts"
+          language="typescript"
+          sessionId="session-1"
+          onInsertReviewIntoPrompt={onInsertReviewIntoPrompt}
+          onOpenPath={() => {}}
+          onSaveFile={async () => {}}
+          summary="Refined greeting"
+        />,
+      );
+    });
+
+    await clickAndSettle(await screen.findByRole("button", { name: "Insert review into prompt" }));
+
+    expect(onInsertReviewIntoPrompt).toHaveBeenCalledWith(
+      "/repo/.termal/reviews/change-insert-review.json",
+      "Please address the 1 open review thread in /repo/.termal/reviews/change-insert-review.json. Reply in each thread and resolve threads you have handled.",
+    );
+  });
+
+  it("disables review actions when the review document fails to load", async () => {
+    fetchFileMock.mockResolvedValue({
+      content: "const greeting = 'hi';\n",
+      language: "typescript",
+      path: "/repo/src/example.ts",
+    });
+    fetchReviewDocumentMock.mockRejectedValue(new Error("failed to parse review file"));
+
+    await act(async () => {
+      render(
+        <DiffPanel
+          appearance="dark"
+          fontSizePx={13}
+          changeType="edit"
+          changeSetId="change-bad-review"
+          diff={["@@ -1 +1 @@", "-const greeting = 'hello';", "+const greeting = 'hi';"].join("\n")}
+          diffMessageId="diff-bad-review"
+          filePath="/repo/src/example.ts"
+          language="typescript"
+          sessionId="session-1"
+          onOpenPath={() => {}}
+          onSaveFile={async () => {}}
+          summary="Refined greeting"
+        />,
+      );
+    });
+
+    await clickAndSettle(screen.getByRole("button", { name: "Changed only" }));
+
+    expect(await screen.findByText("Review threads unavailable: failed to parse review file")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Comment on change set" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Comment on line 1" })).not.toBeInTheDocument();
   });
 });

@@ -139,6 +139,7 @@ function isWorkspaceTab(value: unknown): value is WorkspaceTab {
     case "diffPreview":
       return (
         isString(value.diff) &&
+        isOptionalNullableString(value.changeSetId) &&
         isString(value.diffMessageId) &&
         isNullableString(value.filePath) &&
         isOptionalNullableString(value.language) &&
