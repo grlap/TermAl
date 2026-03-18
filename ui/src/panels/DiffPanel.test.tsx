@@ -3,6 +3,7 @@ import { forwardRef, useEffect, useImperativeHandle, type ForwardedRef } from "r
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { fetchFile } from "../api";
+import { copyTextToClipboard } from "../clipboard";
 import { DiffPanel } from "./DiffPanel";
 
 vi.mock("../api", async () => {
@@ -12,6 +13,10 @@ vi.mock("../api", async () => {
     fetchFile: vi.fn(),
   };
 });
+
+vi.mock("../clipboard", () => ({
+  copyTextToClipboard: vi.fn(() => Promise.resolve()),
+}));
 
 vi.mock("../MonacoDiffEditor", () => ({
   MonacoDiffEditor: forwardRef(function MonacoDiffEditorMock(
@@ -111,6 +116,7 @@ vi.mock("../MonacoCodeEditor", () => ({
 }));
 
 const fetchFileMock = vi.mocked(fetchFile);
+const copyTextToClipboardMock = vi.mocked(copyTextToClipboard);
 
 async function clickAndSettle(target: HTMLElement, eventInit?: MouseEventInit) {
   await act(async () => {
@@ -132,6 +138,8 @@ async function changeAndSettle(
 describe("DiffPanel", () => {
   beforeEach(() => {
     fetchFileMock.mockReset();
+    copyTextToClipboardMock.mockReset();
+    copyTextToClipboardMock.mockResolvedValue(undefined);
   });
 
   it("defaults to the full diff view and supports changed-only and edit modes", async () => {
@@ -156,6 +164,7 @@ describe("DiffPanel", () => {
           ].join("\n")}
           diffMessageId="diff-1"
           filePath="/repo/src/example.ts"
+          gitSectionId="staged"
           language="typescript"
           sessionId="session-1"
           workspaceRoot="/repo"
@@ -168,8 +177,13 @@ describe("DiffPanel", () => {
 
     expect(screen.getByLabelText("Changed lines: 1")).toHaveTextContent("1");
     expect(screen.getByLabelText("Added lines: 1")).toHaveTextContent("+1");
+    expect(screen.getByText("Staged")).toBeInTheDocument();
+    expect(screen.queryByText("File edit")).not.toBeInTheDocument();
+    expect(screen.queryByText("Updated example file")).not.toBeInTheDocument();
     expect(screen.getByText("src/example.ts")).not.toHaveClass("chip");
     expect(document.querySelector('.diff-preview-file-icon[data-file-kind="typescript"]')).not.toBeNull();
+    await clickAndSettle(screen.getByRole("button", { name: "Copy path" }));
+    expect(copyTextToClipboardMock).toHaveBeenCalledWith("src/example.ts");
     expect(await screen.findByTestId("monaco-diff-editor")).toBeInTheDocument();
     expect(screen.getByText("Change 1 of 2")).toBeInTheDocument();
 

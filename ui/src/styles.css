@@ -3410,6 +3410,18 @@ textarea {
   border-width: 2px;
 }
 
+.git-status-loading-state {
+  display: grid;
+  place-items: center;
+  min-height: 8rem;
+}
+
+.git-status-loading-spinner {
+  width: 1.4rem;
+  height: 1.4rem;
+  border-width: 2px;
+}
+
 
 .source-chip-row {
   display: flex;
@@ -3579,6 +3591,16 @@ textarea {
   white-space: nowrap;
   font-family: var(--code-font);
   font-size: 0.85rem;
+}
+
+.diff-preview-copy-button {
+  width: 1.7rem;
+  height: 1.7rem;
+}
+
+.diff-preview-copy-button svg {
+  width: 0.9rem;
+  height: 0.9rem;
 }
 
 .diff-preview-toggle-icon {

@@ -4,6 +4,7 @@ import {
   commitGitChanges,
   fetchGitDiff,
   fetchGitStatus,
+  type GitDiffSection,
   type GitDiffResponse,
   type GitFileAction,
   type GitStatusResponse,
@@ -18,6 +19,11 @@ import {
   type GitStatusTreeSection,
 } from "./git-status-tree";
 
+type GitStatusPanelCacheEntry = {
+  status: GitStatusResponse;
+  treeExpansionByKey: Record<string, boolean>;
+};
+
 type GitActionTarget = {
   originalPath?: string | null;
   path: string;
@@ -25,7 +31,10 @@ type GitActionTarget = {
 };
 type GitDiffOpenOptions = {
   openInNewTab?: boolean;
+  sectionId?: GitDiffSection;
 };
+
+const gitStatusPanelCache = new Map<string, GitStatusPanelCacheEntry>();
 
 export function GitStatusPanel({
   onStatusChange,
@@ -42,20 +51,24 @@ export function GitStatusPanel({
   workdir: string | null;
   showPathControls?: boolean;
 }) {
+  const normalizedWorkdir = workdir?.trim() ?? "";
+  const cachedPanelState = normalizedWorkdir ? gitStatusPanelCache.get(normalizedWorkdir) ?? null : null;
   const [workdirDraft, setWorkdirDraft] = useState(workdir ?? "");
-  const [status, setStatus] = useState<GitStatusResponse | null>(null);
+  const [status, setStatus] = useState<GitStatusResponse | null>(() => cachedPanelState?.status ?? null);
+  const [statusCacheKey, setStatusCacheKey] = useState<string | null>(() => (cachedPanelState?.status ? normalizedWorkdir : null));
   const [commitMessage, setCommitMessage] = useState("");
   const [commitNotice, setCommitNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isCommitting, setIsCommitting] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [pendingActionKey, setPendingActionKey] = useState<string | null>(null);
-  const [treeExpansionByKey, setTreeExpansionByKey] = useState<Record<string, boolean>>({});
+  const [treeExpansionByKey, setTreeExpansionByKey] = useState<Record<string, boolean>>(
+    () => cachedPanelState?.treeExpansionByKey ?? {},
+  );
   const onStatusChangeRef = useRef(onStatusChange);
   const latestLoadRequestIdRef = useRef(0);
   const previousSectionsRef = useRef<GitStatusTreeSection[] | null>(null);
   const previousSectionsWorkdirRef = useRef<string | null>(null);
-  const normalizedWorkdir = workdir?.trim() ?? "";
   const visibleStatus = status;
   const changedFiles = visibleStatus?.files ?? [];
   const hasStagedChanges = changedFiles.some((file) => Boolean(file.indexStatus));
@@ -75,26 +88,46 @@ export function GitStatusPanel({
   }, [sections, normalizedWorkdir]);
 
   useEffect(() => {
+    if (!statusCacheKey || !status) {
+      return;
+    }
+
+    gitStatusPanelCache.set(statusCacheKey, {
+      status,
+      treeExpansionByKey,
+    });
+  }, [status, statusCacheKey, treeExpansionByKey]);
+
+  useEffect(() => {
     setWorkdirDraft(workdir ?? "");
   }, [workdir]);
 
   useEffect(() => {
+    latestLoadRequestIdRef.current += 1;
     setPendingActionKey(null);
     setCommitMessage("");
     setCommitNotice(null);
-    setTreeExpansionByKey({});
-  }, [normalizedWorkdir]);
-
-  useEffect(() => {
     if (!normalizedWorkdir) {
       setStatus(null);
+      setStatusCacheKey(null);
       setError(null);
+      setTreeExpansionByKey({});
       onStatusChangeRef.current?.(null);
       return;
     }
 
-    setStatus(null);
+    const cachedState = gitStatusPanelCache.get(normalizedWorkdir) ?? null;
+    setTreeExpansionByKey(cachedState?.treeExpansionByKey ?? {});
     setError(null);
+    if (cachedState?.status) {
+      setStatus(cachedState.status);
+      setStatusCacheKey(normalizedWorkdir);
+      onStatusChangeRef.current?.(cachedState.status);
+      return;
+    }
+
+    setStatus(null);
+    setStatusCacheKey(null);
     onStatusChangeRef.current?.(null);
     void loadStatus(normalizedWorkdir);
   }, [normalizedWorkdir]);
@@ -111,6 +144,7 @@ export function GitStatusPanel({
         return;
       }
       setStatus(response);
+      setStatusCacheKey(path);
       onStatusChangeRef.current?.(response);
     } catch (nextError) {
       if (latestLoadRequestIdRef.current !== requestId) {
@@ -118,6 +152,7 @@ export function GitStatusPanel({
       }
       if (!preserveVisibleStatus) {
         setStatus(null);
+        setStatusCacheKey(null);
         onStatusChangeRef.current?.(null);
       }
       setError(getErrorMessage(nextError));
@@ -149,9 +184,9 @@ export function GitStatusPanel({
           workdir: activeWorkdir,
         });
         if (options?.openInNewTab) {
-          onOpenDiff(diff, { openInNewTab: true });
+          onOpenDiff(diff, { openInNewTab: true, sectionId });
         } else {
-          onOpenDiff(diff);
+          onOpenDiff(diff, { sectionId });
         }
       } catch (nextError) {
         setError(getErrorMessage(nextError));
@@ -194,6 +229,7 @@ export function GitStatusPanel({
 
         if (response) {
           setStatus(response);
+          setStatusCacheKey(normalizedWorkdir || activeWorkdir);
           onStatusChangeRef.current?.(response);
         }
       } catch (nextError) {
@@ -202,6 +238,7 @@ export function GitStatusPanel({
           try {
             const refreshedStatus = await fetchGitStatus(activeWorkdir, null);
             setStatus(refreshedStatus);
+            setStatusCacheKey(normalizedWorkdir || activeWorkdir);
             onStatusChangeRef.current?.(refreshedStatus);
           } catch {
             // Keep the action error visible if the follow-up refresh also fails.
@@ -280,6 +317,7 @@ export function GitStatusPanel({
         workdir: activeWorkdir,
       });
       setStatus(response.status);
+      setStatusCacheKey(normalizedWorkdir || activeWorkdir);
       setCommitMessage("");
       setCommitNotice(response.summary);
       onStatusChangeRef.current?.(response.status);
@@ -341,14 +379,14 @@ export function GitStatusPanel({
       ) : null}
 
       {isLoading && !visibleStatus ? (
-        <article className="activity-card">
-          <div className="activity-spinner" aria-hidden="true" />
-          <div>
-            <div className="card-label">Git</div>
-            <h3>Loading repository state</h3>
-            <p>{normalizedWorkdir}</p>
-          </div>
-        </article>
+        <div
+          className="git-status-loading-state"
+          role="status"
+          aria-label="Loading git status"
+          title={normalizedWorkdir}
+        >
+          <span className="activity-spinner git-status-loading-spinner" aria-hidden="true" />
+        </div>
       ) : null}
 
       {error ? (
@@ -938,4 +976,8 @@ function getErrorMessage(error: unknown) {
   }
 
   return "The request failed.";
+}
+
+export function __resetGitStatusPanelCacheForTests() {
+  gitStatusPanelCache.clear();
 }

@@ -37,6 +37,7 @@ import {
   sendMessage,
   stopSession,
   submitApproval,
+  type GitDiffSection,
   type GitDiffResponse,
   type StateResponse,
   updateAppSettings,
@@ -3225,6 +3226,7 @@ export default function App() {
     originProjectId: string | null,
     options?: {
       openInNewTab?: boolean;
+      sectionId?: GitDiffSection;
     },
   ) {
     setWorkspace((current) =>
@@ -3236,6 +3238,7 @@ export default function App() {
             diff: diffPreview.diff,
             diffMessageId: diffPreview.diffId,
             filePath: diffPreview.filePath ?? null,
+            gitSectionId: options?.sectionId ?? null,
             language: diffPreview.language ?? null,
             originSessionId,
             originProjectId,
@@ -6821,6 +6824,7 @@ function SessionPaneView({
             diff={activeDiffPreviewTab.diff}
             diffMessageId={activeDiffPreviewTab.diffMessageId}
             filePath={activeDiffPreviewTab.filePath}
+            gitSectionId={activeDiffPreviewTab.gitSectionId ?? null}
             language={activeDiffPreviewTab.language ?? null}
             sessionId={activeDiffOriginSessionId}
             projectId={activeDiffOriginProjectId}

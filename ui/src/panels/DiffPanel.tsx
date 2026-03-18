@@ -1,6 +1,7 @@
 import { Suspense, lazy, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
-import { fetchFile, type FileResponse } from "../api";
+import { fetchFile, type FileResponse, type GitDiffSection } from "../api";
+import { copyTextToClipboard } from "../clipboard";
 import { FileTabIcon } from "../file-tab-icon";
 import type { MonacoCodeEditorStatus } from "../MonacoCodeEditor";
 import type { MonacoDiffEditorHandle, MonacoDiffEditorStatus } from "../MonacoDiffEditor";
@@ -69,6 +70,7 @@ export function DiffPanel({
   diff,
   diffMessageId,
   filePath,
+  gitSectionId = null,
   language,
   sessionId,
   projectId = null,
@@ -83,6 +85,7 @@ export function DiffPanel({
   diff: string;
   diffMessageId: string;
   filePath: string | null;
+  gitSectionId?: GitDiffSection | null;
   language?: string | null;
   sessionId: string | null;
   projectId?: string | null;
@@ -101,6 +104,7 @@ export function DiffPanel({
   const [isSaving, setIsSaving] = useState(false);
   const [editEditorStatus, setEditEditorStatus] = useState<MonacoCodeEditorStatus>(DEFAULT_EDITOR_STATUS);
   const [visualEditorStatus, setVisualEditorStatus] = useState<MonacoDiffEditorStatus>(DEFAULT_DIFF_EDITOR_STATUS);
+  const [copiedPath, setCopiedPath] = useState(false);
   const diffEditorRef = useRef<MonacoDiffEditorHandle | null>(null);
 
   const previewSourceContent = visualBaseContent ?? (latestFile.status === "ready" ? latestFile.content : null);
@@ -204,6 +208,9 @@ export function DiffPanel({
   const hasVisualNavigation = viewMode === "all" && visualEditorStatus.changeCount > 0;
   const isDirty = latestFile.status === "ready" && editValue !== latestFile.content;
   const saveStateLabel = saveError ? "Save failed" : isSaving ? "Saving..." : isDirty ? "Unsaved changes" : null;
+  const gitSectionLabel =
+    gitSectionId === "staged" ? "Staged" : gitSectionId === "unstaged" ? "Unstaged" : null;
+  const visibleSummary = gitSectionLabel ? null : summary;
   const displayFilePath = useMemo(() => {
     if (!filePath) {
       return null;
@@ -212,6 +219,21 @@ export function DiffPanel({
     return normalizeDisplayPath(relativizePathToWorkspace(filePath, workspaceRoot));
   }, [filePath, workspaceRoot]);
   const filePathTitle = filePath ? normalizeDisplayPath(filePath) : null;
+  const copyablePath = displayFilePath ?? filePathTitle;
+
+  useEffect(() => {
+    if (!copiedPath) {
+      return;
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      setCopiedPath(false);
+    }, 1600);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+  }, [copiedPath]);
 
   async function handleSave() {
     if (latestFile.status !== "ready" || !isDirty || isSaving) {
@@ -239,12 +261,26 @@ export function DiffPanel({
     }
   }
 
+  async function handleCopyPath() {
+    if (!copyablePath) {
+      return;
+    }
+
+    try {
+      await copyTextToClipboard(copyablePath);
+      setCopiedPath(true);
+    } catch {
+      setCopiedPath(false);
+    }
+  }
+
   return (
     <div className="source-pane diff-preview-panel has-editor">
       <div className="source-toolbar">
         <div className="source-editor-toolbar">
           <div className="source-editor-status">
-            <span className="chip">{changeType === "create" ? "New file" : "File edit"}</span>
+            {gitSectionLabel ? <span className="chip">{gitSectionLabel}</span> : null}
+            {!gitSectionLabel && changeType === "create" ? <span className="chip">New file</span> : null}
             {preview.changeSummary.changedLineCount > 0 ? (
               <span
                 className="diff-preview-stat diff-preview-stat-changed"
@@ -276,6 +312,21 @@ export function DiffPanel({
               <div className="diff-preview-file-meta" title={filePathTitle ?? undefined}>
                 <FileTabIcon className="diff-preview-file-icon" language={language ?? null} path={filePath} />
                 {displayFilePath ? <span className="diff-preview-file-path">{displayFilePath}</span> : null}
+                {copyablePath ? (
+                  <button
+                    className={`command-icon-button diff-preview-copy-button${copiedPath ? " copied" : ""}`}
+                    type="button"
+                    onMouseDown={(event) => {
+                      event.preventDefault();
+                      event.stopPropagation();
+                    }}
+                    onClick={() => void handleCopyPath()}
+                    aria-label={copiedPath ? "Path copied" : "Copy path"}
+                    title={copiedPath ? "Copied" : "Copy path"}
+                  >
+                    {copiedPath ? <CheckIcon /> : <CopyIcon />}
+                  </button>
+                ) : null}
               </div>
             ) : null}
           </div>
@@ -321,7 +372,7 @@ export function DiffPanel({
             ) : null}
           </div>
         </div>
-        {summary ? <p className="support-copy file-viewer-summary diff-preview-summary">{summary}</p> : null}
+        {visibleSummary ? <p className="support-copy file-viewer-summary diff-preview-summary">{visibleSummary}</p> : null}
       </div>
 
       <div className="source-editor-region diff-preview-region">
@@ -499,6 +550,32 @@ function RawPatchIcon() {
   return (
     <svg viewBox="0 0 16 16" aria-hidden="true" focusable="false">
       <path d="M4.9 2 2 8l2.9 6h1.72L3.72 8l2.9-6Zm6.2 0L14 8l-2.9 6H9.38l2.9-6-2.9-6Z" fill="currentColor" />
+    </svg>
+  );
+}
+
+function CopyIcon() {
+  return (
+    <svg viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+      <path
+        d="M5 2.5h6.5A1.5 1.5 0 0 1 13 4v7.5A1.5 1.5 0 0 1 11.5 13H5A1.5 1.5 0 0 1 3.5 11.5V4A1.5 1.5 0 0 1 5 2.5Zm0 1a.5.5 0 0 0-.5.5v7.5a.5.5 0 0 0 .5.5h6.5a.5.5 0 0 0 .5-.5V4a.5.5 0 0 0-.5-.5H5Z"
+        fill="currentColor"
+      />
+      <path
+        d="M2.5 5.5a.5.5 0 0 1 .5.5v6A1.5 1.5 0 0 0 4.5 13.5h5a.5.5 0 0 1 0 1h-5A2.5 2.5 0 0 1 2 12V6a.5.5 0 0 1 .5-.5Z"
+        fill="currentColor"
+      />
+    </svg>
+  );
+}
+
+function CheckIcon() {
+  return (
+    <svg viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+      <path
+        d="M13.35 4.65a.5.5 0 0 1 0 .7l-6 6a.5.5 0 0 1-.7 0l-3-3a.5.5 0 1 1 .7-.7L7 10.29l5.65-5.64a.5.5 0 0 1 .7 0Z"
+        fill="currentColor"
+      />
     </svg>
   );
 }

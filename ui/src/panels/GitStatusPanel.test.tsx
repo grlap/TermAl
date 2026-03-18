@@ -10,7 +10,7 @@ import {
   type GitStatusFile,
   type GitStatusResponse,
 } from "../api";
-import { GitStatusPanel } from "./GitStatusPanel";
+import { __resetGitStatusPanelCacheForTests, GitStatusPanel } from "./GitStatusPanel";
 
 vi.mock("../api", async () => {
   const actual = await vi.importActual<typeof import("../api")>("../api");
@@ -38,6 +38,7 @@ async function clickAndSettle(target: HTMLElement, eventInit?: MouseEventInit) {
 
 describe("GitStatusPanel", () => {
   beforeEach(() => {
+    __resetGitStatusPanelCacheForTests();
     applyGitFileActionMock.mockReset();
     commitGitChangesMock.mockReset();
     fetchGitDiffMock.mockReset();
@@ -98,7 +99,7 @@ describe("GitStatusPanel", () => {
     });
 
     await waitFor(() => {
-      expect(onOpenDiff).toHaveBeenCalledWith(makeDiffResponse());
+      expect(onOpenDiff).toHaveBeenCalledWith(makeDiffResponse(), { sectionId: "staged" });
     });
 
     await clickAndSettle(screen.getByRole("button", { name: /^Staged\b/i }));
@@ -133,7 +134,7 @@ describe("GitStatusPanel", () => {
     await clickAndSettle(fileButton, { ctrlKey: true });
 
     await waitFor(() => {
-      expect(onOpenDiff).toHaveBeenCalledWith(makeDiffResponse(), { openInNewTab: true });
+      expect(onOpenDiff).toHaveBeenCalledWith(makeDiffResponse(), { openInNewTab: true, sectionId: "staged" });
     });
   });
 
@@ -155,6 +156,24 @@ describe("GitStatusPanel", () => {
     await clickAndSettle(screen.getByRole("button", { name: /Load repo/i }));
 
     expect(onOpenWorkdir).toHaveBeenCalledWith("/repo/subdir");
+  });
+
+  it("renders an icon-only loading state during the first repo load", () => {
+    const response = createDeferred<GitStatusResponse>();
+    fetchGitStatusMock.mockImplementationOnce(() => response.promise);
+
+    render(
+      <GitStatusPanel
+        sessionId={SESSION_ID}
+        workdir="/repo"
+        onOpenDiff={() => {}}
+        onOpenWorkdir={() => {}}
+      />,
+    );
+
+    expect(screen.getByRole("status", { name: /Loading git status/i })).toBeInTheDocument();
+    expect(screen.queryByText(/Loading repository state/i)).not.toBeInTheDocument();
+    expect(screen.queryByText("/repo")).not.toBeInTheDocument();
   });
 
   it("refreshes the current repo from the icon button", async () => {
@@ -186,6 +205,47 @@ describe("GitStatusPanel", () => {
       expect(fetchGitStatusMock).toHaveBeenCalledTimes(2);
     });
     expect(await screen.findByText("scratch.txt")).toBeInTheDocument();
+  });
+
+  it("reuses cached repo status and tree expansion when remounted for the same workdir", async () => {
+    fetchGitStatusMock.mockResolvedValueOnce(
+      makeStatusResponse([
+        {
+          path: "scratch.txt",
+          worktreeStatus: "?",
+        },
+      ]),
+    );
+
+    const firstRender = render(
+      <GitStatusPanel
+        sessionId={SESSION_ID}
+        workdir="/repo"
+        showPathControls={false}
+        onOpenDiff={() => {}}
+        onOpenWorkdir={() => {}}
+      />,
+    );
+
+    await screen.findByText("scratch.txt");
+    await clickAndSettle(screen.getByRole("button", { name: /^Unstaged\b/i }));
+    expect(screen.queryByText("scratch.txt")).not.toBeInTheDocument();
+
+    firstRender.unmount();
+
+    render(
+      <GitStatusPanel
+        sessionId={SESSION_ID}
+        workdir="/repo"
+        showPathControls={false}
+        onOpenDiff={() => {}}
+        onOpenWorkdir={() => {}}
+      />,
+    );
+
+    expect(fetchGitStatusMock).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole("button", { name: /^Unstaged\b/i })).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByText("scratch.txt")).not.toBeInTheDocument();
   });
 
   it("keeps the current tree visible while a refresh is in flight", async () => {

@@ -1,3 +1,4 @@
+import type { GitDiffSection } from "./api";
 import type { DiffMessage, Session } from "./types";
 
 export type SessionPaneViewMode = "session" | "prompt" | "commands" | "diffs";
@@ -56,6 +57,7 @@ export type WorkspaceDiffPreviewTab = {
   diff: string;
   diffMessageId: string;
   filePath: string | null;
+  gitSectionId?: GitDiffSection | null;
   language?: string | null;
   originSessionId: string | null;
   originProjectId?: string | null;
@@ -193,6 +195,7 @@ export function createDiffPreviewTab({
   diff,
   diffMessageId,
   filePath = null,
+  gitSectionId = null,
   language = null,
   originSessionId = null,
   originProjectId = null,
@@ -202,6 +205,7 @@ export function createDiffPreviewTab({
   diff: string;
   diffMessageId: string;
   filePath?: string | null;
+  gitSectionId?: GitDiffSection | null;
   language?: string | null;
   originSessionId?: string | null;
   originProjectId?: string | null;
@@ -216,6 +220,7 @@ export function createDiffPreviewTab({
     diff,
     diffMessageId,
     filePath: normalizeWorkspacePath(filePath),
+    ...(gitSectionId ? { gitSectionId } : {}),
     language,
     originSessionId,
     ...projectOriginProps(normalizedOriginProjectId),
@@ -560,6 +565,7 @@ export function openDiffPreviewInWorkspaceState(
     diff: string;
     diffMessageId: string;
     filePath: string | null;
+    gitSectionId?: GitDiffSection | null;
     language?: string | null;
     originSessionId: string | null;
     originProjectId?: string | null;
