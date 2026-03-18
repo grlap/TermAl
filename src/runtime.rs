@@ -483,6 +483,11 @@ type CodexPendingRequestMap =
     Arc<Mutex<HashMap<String, Sender<std::result::Result<Value, String>>>>>;
 type AcpPendingRequestMap = Arc<Mutex<HashMap<String, Sender<std::result::Result<Value, String>>>>>;
 
+struct PendingAcpJsonRpcRequest {
+    request_id: String,
+    response_rx: mpsc::Receiver<std::result::Result<Value, String>>,
+}
+
 #[derive(Default)]
 struct CodexTurnState {
     current_agent_message_id: Option<String>,
@@ -708,6 +713,13 @@ fn spawn_acp_runtime(
                 }
             }
 
+            fail_pending_acp_requests(
+                &reader_pending_requests,
+                &format!(
+                    "{} ACP runtime stopped while waiting for a pending response",
+                    agent.label()
+                ),
+            );
             let _ = finish_acp_turn_state(&mut recorder, &mut turn_state, agent);
             let _ = recorder.finish_streaming_text();
         });
@@ -726,6 +738,7 @@ fn spawn_acp_runtime(
         let wait_session_id = session_id.clone();
         let wait_state = state.clone();
         let wait_process = process.clone();
+        let wait_pending_requests = pending_requests.clone();
         let wait_runtime_token = RuntimeToken::Acp(runtime_id.clone());
         std::thread::spawn(move || {
             loop {
@@ -736,6 +749,13 @@ fn spawn_acp_runtime(
 
                 match status {
                     Ok(Some(status)) if status.success() => {
+                        fail_pending_acp_requests(
+                            &wait_pending_requests,
+                            &format!(
+                                "{} ACP runtime exited while waiting for a pending response",
+                                agent.label()
+                            ),
+                        );
                         let _ = wait_state.handle_runtime_exit_if_matches(
                             &wait_session_id,
                             &wait_runtime_token,
@@ -744,25 +764,23 @@ fn spawn_acp_runtime(
                         break;
                     }
                     Ok(Some(status)) => {
+                        let detail = format!("{} session exited with status {status}", agent.label());
+                        fail_pending_acp_requests(&wait_pending_requests, &detail);
                         let _ = wait_state.handle_runtime_exit_if_matches(
                             &wait_session_id,
                             &wait_runtime_token,
-                            Some(&format!(
-                                "{} session exited with status {status}",
-                                agent.label()
-                            )),
+                            Some(&detail),
                         );
                         break;
                     }
                     Ok(None) => std::thread::sleep(Duration::from_millis(100)),
                     Err(err) => {
+                        let detail = format!("failed waiting for {} session: {err}", agent.label());
+                        fail_pending_acp_requests(&wait_pending_requests, &detail);
                         let _ = wait_state.handle_runtime_exit_if_matches(
                             &wait_session_id,
                             &wait_runtime_token,
-                            Some(&format!(
-                                "failed waiting for {} session: {err}",
-                                agent.label()
-                            )),
+                            Some(&detail),
                         );
                         break;
                     }
@@ -852,7 +870,7 @@ fn handle_acp_prompt_command(
         &command,
     )?;
 
-    send_acp_json_rpc_request(
+    let pending_prompt_request = start_acp_json_rpc_request(
         writer,
         pending_requests,
         "session/prompt",
@@ -865,11 +883,40 @@ fn handle_acp_prompt_command(
                 }
             ],
         }),
-        Duration::from_secs(60),
         agent,
     )?;
 
-    state.finish_turn_ok_if_runtime_matches(session_id, runtime_token)?;
+    let pending_requests = pending_requests.clone();
+    let wait_state = state.clone();
+    let wait_session_id = session_id.to_owned();
+    let wait_runtime_token = runtime_token.clone();
+    std::thread::spawn(move || {
+        let result = wait_for_acp_json_rpc_response(
+            &pending_requests,
+            pending_prompt_request,
+            "session/prompt",
+            None,
+            agent,
+        );
+
+        match result {
+            Ok(_) => {
+                let _ =
+                    wait_state.finish_turn_ok_if_runtime_matches(&wait_session_id, &wait_runtime_token);
+            }
+            Err(err) => {
+                let _ = wait_state.handle_runtime_exit_if_matches(
+                    &wait_session_id,
+                    &wait_runtime_token,
+                    Some(&format!(
+                        "failed to communicate with {} ACP runtime: {err:#}",
+                        agent.label()
+                    )),
+                );
+            }
+        }
+    });
+
     Ok(())
 }
 
@@ -1176,7 +1223,7 @@ fn handle_acp_message(
     };
 
     if message.get("id").is_some() {
-        return handle_acp_request(message, input_tx, recorder, agent);
+        return handle_acp_request(message, state, session_id, input_tx, recorder, agent);
     }
 
     handle_acp_notification(
@@ -1194,6 +1241,8 @@ fn handle_acp_message(
 
 fn handle_acp_request(
     message: &Value,
+    state: &AppState,
+    session_id: &str,
     input_tx: &Sender<AcpRuntimeCommand>,
     recorder: &mut SessionRecorder,
     agent: AcpAgent,
@@ -1224,26 +1273,49 @@ fn handle_acp_request(
                 .cloned()
                 .unwrap_or_default();
 
-            recorder.push_acp_approval(
-                &format!("{} needs approval", agent.label()),
-                description,
-                &format!("{} requested approval for `{tool_name}`.", agent.label()),
-                AcpPendingApproval {
-                    allow_once_option_id: find_acp_permission_option(
-                        &options,
-                        &["allow-once", "allow_once", "allow"],
-                    ),
-                    allow_always_option_id: find_acp_permission_option(
-                        &options,
-                        &["allow-always", "allow_always", "always", "acceptForSession"],
-                    ),
-                    reject_option_id: find_acp_permission_option(
-                        &options,
-                        &["reject-once", "reject_once", "reject", "deny", "decline"],
-                    ),
-                    request_id,
-                },
-            )?;
+            let approval = AcpPendingApproval {
+                allow_once_option_id: find_acp_permission_option(
+                    &options,
+                    &["allow-once", "allow_once", "allow"],
+                ),
+                allow_always_option_id: find_acp_permission_option(
+                    &options,
+                    &["allow-always", "allow_always", "always", "acceptForSession"],
+                ),
+                reject_option_id: find_acp_permission_option(
+                    &options,
+                    &["reject-once", "reject_once", "reject", "deny", "decline"],
+                ),
+                request_id,
+            };
+
+            if let Some(option_id) =
+                acp_permission_response_option_id(agent, state, session_id, &approval)?
+            {
+                input_tx
+                    .send(AcpRuntimeCommand::JsonRpcMessage(json!({
+                        "id": approval.request_id.clone(),
+                        "result": {
+                            "outcome": {
+                                "outcome": "selected",
+                                "optionId": option_id,
+                            }
+                        }
+                    })))
+                    .map_err(|err| {
+                        anyhow!(
+                            "failed to deliver automatic {} approval response: {err}",
+                            agent.label()
+                        )
+                    })?;
+            } else {
+                recorder.push_acp_approval(
+                    &format!("{} needs approval", agent.label()),
+                    description,
+                    &format!("{} requested approval for `{tool_name}`.", agent.label()),
+                    approval,
+                )?;
+            }
         }
         _ => {
             let _ = input_tx.send(AcpRuntimeCommand::JsonRpcMessage(json!({
@@ -1258,6 +1330,28 @@ fn handle_acp_request(
     }
 
     Ok(())
+}
+
+fn acp_permission_response_option_id(
+    agent: AcpAgent,
+    state: &AppState,
+    session_id: &str,
+    approval: &AcpPendingApproval,
+) -> Result<Option<String>> {
+    match agent {
+        AcpAgent::Cursor => {
+            let cursor_mode = state.cursor_mode(session_id)?;
+            Ok(match cursor_mode {
+                CursorMode::Agent => approval
+                    .allow_once_option_id
+                    .clone()
+                    .or_else(|| approval.allow_always_option_id.clone()),
+                CursorMode::Ask => None,
+                CursorMode::Plan => approval.reject_option_id.clone(),
+            })
+        }
+        AcpAgent::Gemini => Ok(None),
+    }
 }
 
 fn handle_acp_notification(
@@ -1368,8 +1462,16 @@ fn handle_acp_session_update(
                 current_acp_config_option_value(update, "model"),
                 acp_model_options(update),
             )?;
+            if agent == AcpAgent::Cursor {
+                state.sync_session_cursor_mode(session_id, acp_cursor_mode(update))?;
+            }
         }
-        "available_commands_update" | "mode_update" => {}
+        "available_commands_update" => {}
+        "mode_update" => {
+            if agent == AcpAgent::Cursor {
+                state.sync_session_cursor_mode(session_id, acp_cursor_mode(update))?;
+            }
+        }
         other => {
             log_unhandled_acp_event(
                 agent,
@@ -1477,6 +1579,22 @@ fn acp_tool_status(update: &Value) -> CommandStatus {
     }
 }
 
+fn parse_cursor_mode_acp_value(value: &str) -> Option<CursorMode> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "agent" => Some(CursorMode::Agent),
+        "ask" => Some(CursorMode::Ask),
+        "plan" => Some(CursorMode::Plan),
+        _ => None,
+    }
+}
+
+fn acp_cursor_mode(update: &Value) -> Option<CursorMode> {
+    current_acp_config_option_value(update, "mode")
+        .or_else(|| update.get("mode").and_then(Value::as_str).map(str::to_owned))
+        .or_else(|| update.get("value").and_then(Value::as_str).map(str::to_owned))
+        .and_then(|value| parse_cursor_mode_acp_value(&value))
+}
+
 fn find_acp_permission_option(options: &[Value], hints: &[&str]) -> Option<String> {
     options.iter().find_map(|option| {
         let option_id = option
@@ -1499,6 +1617,33 @@ fn send_acp_json_rpc_request(
     timeout: Duration,
     agent: AcpAgent,
 ) -> Result<Value> {
+    send_acp_json_rpc_request_inner(
+        writer,
+        pending_requests,
+        method,
+        params,
+        Some(timeout),
+        agent,
+    )
+}
+
+fn send_acp_json_rpc_request_without_timeout(
+    writer: &mut impl Write,
+    pending_requests: &AcpPendingRequestMap,
+    method: &str,
+    params: Value,
+    agent: AcpAgent,
+) -> Result<Value> {
+    send_acp_json_rpc_request_inner(writer, pending_requests, method, params, None, agent)
+}
+
+fn start_acp_json_rpc_request(
+    writer: &mut impl Write,
+    pending_requests: &AcpPendingRequestMap,
+    method: &str,
+    params: Value,
+    agent: AcpAgent,
+) -> Result<PendingAcpJsonRpcRequest> {
     let request_id = Uuid::new_v4().to_string();
     let (tx, rx) = mpsc::channel();
     pending_requests
@@ -1523,19 +1668,79 @@ fn send_acp_json_rpc_request(
         return Err(err);
     }
 
-    match rx.recv_timeout(timeout) {
-        Ok(Ok(result)) => Ok(result),
-        Ok(Err(err)) => Err(anyhow!(err)),
-        Err(err) => {
-            pending_requests
-                .lock()
-                .expect("ACP pending requests mutex poisoned")
-                .remove(&request_id);
-            Err(anyhow!(
-                "timed out waiting for {} ACP response to `{method}`: {err}",
-                agent.label()
-            ))
-        }
+    Ok(PendingAcpJsonRpcRequest {
+        request_id,
+        response_rx: rx,
+    })
+}
+
+fn send_acp_json_rpc_request_inner(
+    writer: &mut impl Write,
+    pending_requests: &AcpPendingRequestMap,
+    method: &str,
+    params: Value,
+    timeout: Option<Duration>,
+    agent: AcpAgent,
+) -> Result<Value> {
+    let pending_request =
+        start_acp_json_rpc_request(writer, pending_requests, method, params, agent)?;
+    wait_for_acp_json_rpc_response(pending_requests, pending_request, method, timeout, agent)
+}
+
+fn wait_for_acp_json_rpc_response(
+    pending_requests: &AcpPendingRequestMap,
+    pending_request: PendingAcpJsonRpcRequest,
+    method: &str,
+    timeout: Option<Duration>,
+    agent: AcpAgent,
+) -> Result<Value> {
+    let PendingAcpJsonRpcRequest {
+        request_id,
+        response_rx,
+    } = pending_request;
+
+    let response = match timeout {
+        Some(timeout) => match response_rx.recv_timeout(timeout) {
+            Ok(response) => response,
+            Err(err) => {
+                pending_requests
+                    .lock()
+                    .expect("ACP pending requests mutex poisoned")
+                    .remove(&request_id);
+                return Err(anyhow!(
+                    "timed out waiting for {} ACP response to `{method}`: {err}",
+                    agent.label()
+                ));
+            }
+        },
+        None => match response_rx.recv() {
+            Ok(response) => response,
+            Err(err) => {
+                pending_requests
+                    .lock()
+                    .expect("ACP pending requests mutex poisoned")
+                    .remove(&request_id);
+                return Err(anyhow!(
+                    "failed waiting for {} ACP response to `{method}`: {err}",
+                    agent.label()
+                ));
+            }
+        },
+    };
+
+    response.map_err(|err| anyhow!(err))
+}
+
+fn fail_pending_acp_requests(pending_requests: &AcpPendingRequestMap, detail: &str) {
+    let senders = pending_requests
+        .lock()
+        .expect("ACP pending requests mutex poisoned")
+        .drain()
+        .map(|(_, sender)| sender)
+        .collect::<Vec<_>>();
+
+    for sender in senders {
+        let _ = sender.send(Err(detail.to_owned()));
     }
 }
 

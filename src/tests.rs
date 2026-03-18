@@ -172,6 +172,288 @@ fn test_claude_runtime_handle(
     )
 }
 
+fn test_acp_runtime_handle(
+    agent: AcpAgent,
+    runtime_id: &str,
+) -> (AcpRuntimeHandle, mpsc::Receiver<AcpRuntimeCommand>) {
+    let child = test_exit_success_child();
+    let (input_tx, input_rx) = mpsc::channel();
+
+    (
+        AcpRuntimeHandle {
+            agent,
+            runtime_id: runtime_id.to_owned(),
+            input_tx,
+            process: Arc::new(Mutex::new(child)),
+        },
+        input_rx,
+    )
+}
+
+#[derive(Clone, Default)]
+struct SharedBufferWriter {
+    buffer: Arc<Mutex<Vec<u8>>>,
+}
+
+impl SharedBufferWriter {
+    fn contents(&self) -> String {
+        String::from_utf8(
+            self.buffer
+                .lock()
+                .expect("shared writer mutex poisoned")
+                .clone(),
+        )
+        .expect("shared writer buffer should stay UTF-8")
+    }
+}
+
+impl std::io::Write for SharedBufferWriter {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.buffer
+            .lock()
+            .expect("shared writer mutex poisoned")
+            .extend_from_slice(buf);
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+fn cursor_permission_request(request_id: &str) -> Value {
+    json!({
+        "jsonrpc": "2.0",
+        "id": request_id,
+        "method": "session/request_permission",
+        "params": {
+            "toolName": "edit_file",
+            "description": "Edit src/main.rs",
+            "options": [
+                { "optionId": "allow-once" },
+                { "optionId": "allow-always" },
+                { "optionId": "reject-once" }
+            ]
+        }
+    })
+}
+
+#[test]
+fn acp_json_rpc_request_without_timeout_waits_for_late_response() {
+    let pending_requests = Arc::new(Mutex::new(HashMap::new()));
+    let (result_tx, result_rx) = mpsc::channel();
+    let request_pending_requests = pending_requests.clone();
+
+    std::thread::spawn(move || {
+        let mut writer = Vec::new();
+        let result = send_acp_json_rpc_request_without_timeout(
+            &mut writer,
+            &request_pending_requests,
+            "session/prompt",
+            json!({
+                "sessionId": "cursor-session-1",
+                "prompt": [],
+            }),
+            AcpAgent::Cursor,
+        )
+        .expect("prompt request should resolve once a response arrives");
+        result_tx
+            .send((
+                String::from_utf8(writer).expect("request payload should be UTF-8"),
+                result,
+            ))
+            .unwrap();
+    });
+
+    std::thread::sleep(Duration::from_millis(50));
+
+    let (request_id, sender) = {
+        let mut locked = pending_requests
+            .lock()
+            .expect("ACP pending requests mutex poisoned");
+        assert_eq!(locked.len(), 1);
+        let request_id = locked
+            .keys()
+            .next()
+            .cloned()
+            .expect("request id should exist");
+        let sender = locked
+            .remove(&request_id)
+            .expect("request sender should still be pending");
+        (request_id, sender)
+    };
+
+    sender.send(Ok(json!({ "ok": true }))).unwrap();
+
+    let (written, result) = result_rx
+        .recv_timeout(Duration::from_secs(1))
+        .expect("late ACP response should unblock the prompt request");
+    assert!(written.contains("\"method\":\"session/prompt\""));
+    assert!(written.contains(&format!("\"id\":\"{request_id}\"")));
+    assert_eq!(result, json!({ "ok": true }));
+    assert!(
+        pending_requests
+            .lock()
+            .expect("ACP pending requests mutex poisoned")
+            .is_empty()
+    );
+}
+
+#[test]
+fn acp_prompt_command_keeps_writer_loop_responsive_while_waiting_for_response() {
+    let state = test_app_state();
+    let created = state
+        .create_session(CreateSessionRequest {
+            agent: Some(Agent::Cursor),
+            name: Some("Cursor Prompt Loop".to_owned()),
+            workdir: Some("/tmp".to_owned()),
+            project_id: None,
+            model: Some("auto".to_owned()),
+            approval_policy: None,
+            reasoning_effort: None,
+            sandbox_mode: None,
+            cursor_mode: Some(CursorMode::Ask),
+            claude_approval_mode: None,
+            claude_effort: None,
+            gemini_approval_mode: None,
+        })
+        .unwrap();
+    let pending_requests = Arc::new(Mutex::new(HashMap::new()));
+    let runtime_state = Arc::new(Mutex::new(AcpRuntimeState {
+        current_session_id: Some("cursor-session-1".to_owned()),
+        is_loading_history: false,
+    }));
+    let writer = SharedBufferWriter::default();
+    let thread_writer = writer.clone();
+    let thread_pending_requests = pending_requests.clone();
+    let thread_runtime_state = runtime_state.clone();
+    let thread_state = state.clone();
+    let thread_session_id = created.session_id.clone();
+    let runtime_token = RuntimeToken::Acp("cursor-runtime-1".to_owned());
+    let (input_tx, input_rx) = mpsc::channel();
+
+    let writer_thread = std::thread::spawn(move || {
+        let mut stdin = thread_writer;
+        while let Ok(command) = input_rx.recv_timeout(Duration::from_millis(250)) {
+            match command {
+                AcpRuntimeCommand::Prompt(prompt) => handle_acp_prompt_command(
+                    &mut stdin,
+                    &thread_pending_requests,
+                    &thread_state,
+                    &thread_session_id,
+                    &thread_runtime_state,
+                    &runtime_token,
+                    AcpAgent::Cursor,
+                    prompt,
+                )
+                .unwrap(),
+                AcpRuntimeCommand::JsonRpcMessage(message) => {
+                    write_acp_json_rpc_message(&mut stdin, &message, AcpAgent::Cursor).unwrap();
+                }
+                AcpRuntimeCommand::RefreshSessionConfig { .. } => {
+                    panic!("unexpected config refresh in prompt loop test");
+                }
+            }
+        }
+    });
+
+    input_tx
+        .send(AcpRuntimeCommand::Prompt(AcpPromptCommand {
+            cwd: "/tmp".to_owned(),
+            cursor_mode: Some(CursorMode::Ask),
+            model: "auto".to_owned(),
+            prompt: "review-local".to_owned(),
+            resume_session_id: Some("cursor-session-1".to_owned()),
+        }))
+        .unwrap();
+
+    let deadline = std::time::Instant::now() + Duration::from_secs(1);
+    loop {
+        if pending_requests
+            .lock()
+            .expect("ACP pending requests mutex poisoned")
+            .len()
+            == 1
+        {
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "prompt request should stay pending while waiting for a response"
+        );
+        std::thread::sleep(Duration::from_millis(10));
+    }
+
+    input_tx
+        .send(AcpRuntimeCommand::JsonRpcMessage(json!({
+            "id": "approval-1",
+            "result": {
+                "outcome": {
+                    "outcome": "selected",
+                    "optionId": "allow-once",
+                }
+            }
+        })))
+        .unwrap();
+
+    let deadline = std::time::Instant::now() + Duration::from_secs(1);
+    loop {
+        let written = writer.contents();
+        if written.contains("\"method\":\"session/prompt\"")
+            && written.contains("\"id\":\"approval-1\"")
+        {
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "writer loop should remain able to write approval responses while prompt is pending"
+        );
+        std::thread::sleep(Duration::from_millis(10));
+    }
+
+    let sender = {
+        let mut locked = pending_requests
+            .lock()
+            .expect("ACP pending requests mutex poisoned");
+        let request_id = locked
+            .keys()
+            .next()
+            .cloned()
+            .expect("prompt request id should exist");
+        locked
+            .remove(&request_id)
+            .expect("prompt request sender should still be pending")
+    };
+    sender.send(Ok(json!({ "ok": true }))).unwrap();
+
+    drop(input_tx);
+    writer_thread.join().unwrap();
+}
+
+#[test]
+fn fail_pending_acp_requests_releases_waiters() {
+    let pending_requests = Arc::new(Mutex::new(HashMap::new()));
+    let (tx, rx) = mpsc::channel::<std::result::Result<Value, String>>();
+
+    pending_requests
+        .lock()
+        .expect("ACP pending requests mutex poisoned")
+        .insert("req-1".to_owned(), tx);
+
+    fail_pending_acp_requests(&pending_requests, "Cursor ACP runtime exited.");
+
+    assert!(
+        pending_requests
+            .lock()
+            .expect("ACP pending requests mutex poisoned")
+            .is_empty()
+    );
+    assert_eq!(
+        rx.recv_timeout(Duration::from_secs(1)).unwrap(),
+        Err("Cursor ACP runtime exited.".to_owned())
+    );
+}
+
 fn test_shared_codex_runtime(
     runtime_id: &str,
 ) -> (
@@ -1714,6 +1996,355 @@ fn syncs_cursor_model_options_from_acp_config() {
 }
 
 #[test]
+fn cursor_agent_mode_auto_approves_acp_permission_requests() {
+    let state = test_app_state();
+    let created = state
+        .create_session(CreateSessionRequest {
+            agent: Some(Agent::Cursor),
+            name: Some("Cursor Agent".to_owned()),
+            workdir: Some("/tmp".to_owned()),
+            project_id: None,
+            model: Some("auto".to_owned()),
+            approval_policy: None,
+            reasoning_effort: None,
+            sandbox_mode: None,
+            cursor_mode: Some(CursorMode::Agent),
+            claude_approval_mode: None,
+            claude_effort: None,
+            gemini_approval_mode: None,
+        })
+        .unwrap();
+    let (input_tx, input_rx) = mpsc::channel();
+    let mut recorder = SessionRecorder::new(state.clone(), created.session_id.clone());
+
+    handle_acp_request(
+        &cursor_permission_request("cursor-agent-approval"),
+        &state,
+        &created.session_id,
+        &input_tx,
+        &mut recorder,
+        AcpAgent::Cursor,
+    )
+    .unwrap();
+
+    match input_rx
+        .recv_timeout(Duration::from_millis(100))
+        .expect("Cursor agent mode should auto-respond")
+    {
+        AcpRuntimeCommand::JsonRpcMessage(message) => {
+            assert_eq!(message.get("id"), Some(&json!("cursor-agent-approval")));
+            assert_eq!(
+                message.pointer("/result/outcome/optionId"),
+                Some(&json!("allow-once"))
+            );
+        }
+        _ => panic!("expected automatic Cursor approval response"),
+    }
+
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    let record = inner
+        .sessions
+        .iter()
+        .find(|record| record.session.id == created.session_id)
+        .expect("Cursor session should exist");
+    assert!(record.pending_acp_approvals.is_empty());
+    assert!(record.session.messages.is_empty());
+    assert_eq!(record.session.status, SessionStatus::Idle);
+}
+
+#[test]
+fn cursor_ask_mode_queues_acp_permission_requests() {
+    let state = test_app_state();
+    let created = state
+        .create_session(CreateSessionRequest {
+            agent: Some(Agent::Cursor),
+            name: Some("Cursor Ask".to_owned()),
+            workdir: Some("/tmp".to_owned()),
+            project_id: None,
+            model: Some("auto".to_owned()),
+            approval_policy: None,
+            reasoning_effort: None,
+            sandbox_mode: None,
+            cursor_mode: Some(CursorMode::Ask),
+            claude_approval_mode: None,
+            claude_effort: None,
+            gemini_approval_mode: None,
+        })
+        .unwrap();
+    let (input_tx, input_rx) = mpsc::channel();
+    let mut recorder = SessionRecorder::new(state.clone(), created.session_id.clone());
+
+    handle_acp_request(
+        &cursor_permission_request("cursor-ask-approval"),
+        &state,
+        &created.session_id,
+        &input_tx,
+        &mut recorder,
+        AcpAgent::Cursor,
+    )
+    .unwrap();
+
+    assert!(matches!(
+        input_rx.recv_timeout(Duration::from_millis(50)),
+        Err(mpsc::RecvTimeoutError::Timeout)
+    ));
+
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    let record = inner
+        .sessions
+        .iter()
+        .find(|record| record.session.id == created.session_id)
+        .expect("Cursor session should exist");
+    assert_eq!(record.pending_acp_approvals.len(), 1);
+    assert!(matches!(
+        record.session.messages.first(),
+        Some(Message::Approval {
+            title,
+            command,
+            decision,
+            ..
+        }) if title == "Cursor needs approval"
+            && command == "Edit src/main.rs"
+            && *decision == ApprovalDecision::Pending
+    ));
+    assert_eq!(record.session.status, SessionStatus::Approval);
+}
+
+#[test]
+fn cursor_plan_mode_rejects_acp_permission_requests() {
+    let state = test_app_state();
+    let created = state
+        .create_session(CreateSessionRequest {
+            agent: Some(Agent::Cursor),
+            name: Some("Cursor Plan".to_owned()),
+            workdir: Some("/tmp".to_owned()),
+            project_id: None,
+            model: Some("auto".to_owned()),
+            approval_policy: None,
+            reasoning_effort: None,
+            sandbox_mode: None,
+            cursor_mode: Some(CursorMode::Plan),
+            claude_approval_mode: None,
+            claude_effort: None,
+            gemini_approval_mode: None,
+        })
+        .unwrap();
+    let (input_tx, input_rx) = mpsc::channel();
+    let mut recorder = SessionRecorder::new(state.clone(), created.session_id.clone());
+
+    handle_acp_request(
+        &cursor_permission_request("cursor-plan-approval"),
+        &state,
+        &created.session_id,
+        &input_tx,
+        &mut recorder,
+        AcpAgent::Cursor,
+    )
+    .unwrap();
+
+    match input_rx
+        .recv_timeout(Duration::from_millis(100))
+        .expect("Cursor plan mode should auto-reject")
+    {
+        AcpRuntimeCommand::JsonRpcMessage(message) => {
+            assert_eq!(message.get("id"), Some(&json!("cursor-plan-approval")));
+            assert_eq!(
+                message.pointer("/result/outcome/optionId"),
+                Some(&json!("reject-once"))
+            );
+        }
+        _ => panic!("expected automatic Cursor rejection response"),
+    }
+
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    let record = inner
+        .sessions
+        .iter()
+        .find(|record| record.session.id == created.session_id)
+        .expect("Cursor session should exist");
+    assert!(record.pending_acp_approvals.is_empty());
+    assert!(record.session.messages.is_empty());
+    assert_eq!(record.session.status, SessionStatus::Idle);
+}
+
+#[test]
+fn syncs_cursor_mode_from_acp_config_updates() {
+    let state = test_app_state();
+    let created = state
+        .create_session(CreateSessionRequest {
+            agent: Some(Agent::Cursor),
+            name: Some("Cursor Config Sync".to_owned()),
+            workdir: Some("/tmp".to_owned()),
+            project_id: None,
+            model: Some("auto".to_owned()),
+            approval_policy: None,
+            reasoning_effort: None,
+            sandbox_mode: None,
+            cursor_mode: Some(CursorMode::Agent),
+            claude_approval_mode: None,
+            claude_effort: None,
+            gemini_approval_mode: None,
+        })
+        .unwrap();
+    let mut recorder = SessionRecorder::new(state.clone(), created.session_id.clone());
+    let mut turn_state = AcpTurnState::default();
+
+    handle_acp_session_update(
+        &json!({
+            "sessionUpdate": "config_update",
+            "configOptions": [
+                {
+                    "id": "model",
+                    "currentValue": "auto",
+                    "options": [{ "value": "auto", "name": "Auto" }]
+                },
+                {
+                    "id": "mode",
+                    "currentValue": "ask",
+                    "options": [
+                        { "value": "agent" },
+                        { "value": "ask" },
+                        { "value": "plan" }
+                    ]
+                }
+            ]
+        }),
+        &state,
+        &created.session_id,
+        &mut turn_state,
+        &mut recorder,
+        AcpAgent::Cursor,
+    )
+    .unwrap();
+
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    let record = inner
+        .sessions
+        .iter()
+        .find(|record| record.session.id == created.session_id)
+        .expect("Cursor session should exist");
+    assert_eq!(record.session.cursor_mode, Some(CursorMode::Ask));
+}
+
+#[test]
+fn syncs_cursor_mode_from_mode_updates() {
+    let state = test_app_state();
+    let created = state
+        .create_session(CreateSessionRequest {
+            agent: Some(Agent::Cursor),
+            name: Some("Cursor Mode Sync".to_owned()),
+            workdir: Some("/tmp".to_owned()),
+            project_id: None,
+            model: Some("auto".to_owned()),
+            approval_policy: None,
+            reasoning_effort: None,
+            sandbox_mode: None,
+            cursor_mode: Some(CursorMode::Ask),
+            claude_approval_mode: None,
+            claude_effort: None,
+            gemini_approval_mode: None,
+        })
+        .unwrap();
+    let mut recorder = SessionRecorder::new(state.clone(), created.session_id.clone());
+    let mut turn_state = AcpTurnState::default();
+
+    handle_acp_session_update(
+        &json!({
+            "sessionUpdate": "mode_update",
+            "mode": "plan"
+        }),
+        &state,
+        &created.session_id,
+        &mut turn_state,
+        &mut recorder,
+        AcpAgent::Cursor,
+    )
+    .unwrap();
+
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    let record = inner
+        .sessions
+        .iter()
+        .find(|record| record.session.id == created.session_id)
+        .expect("Cursor session should exist");
+    assert_eq!(record.session.cursor_mode, Some(CursorMode::Plan));
+}
+
+#[test]
+fn updates_live_cursor_mode_on_active_acp_sessions() {
+    let state = test_app_state();
+    let created = state
+        .create_session(CreateSessionRequest {
+            agent: Some(Agent::Cursor),
+            name: Some("Cursor Live Mode".to_owned()),
+            workdir: Some("/tmp".to_owned()),
+            project_id: None,
+            model: Some("auto".to_owned()),
+            approval_policy: None,
+            reasoning_effort: None,
+            sandbox_mode: None,
+            cursor_mode: Some(CursorMode::Agent),
+            claude_approval_mode: None,
+            claude_effort: None,
+            gemini_approval_mode: None,
+        })
+        .unwrap();
+    let (runtime, input_rx) = test_acp_runtime_handle(AcpAgent::Cursor, "cursor-live-mode");
+
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(&created.session_id)
+            .expect("Cursor session should exist");
+        inner.sessions[index].runtime = SessionRuntime::Acp(runtime);
+        inner.sessions[index].external_session_id = Some("cursor-session-1".to_owned());
+    }
+
+    let updated = state
+        .update_session_settings(
+            &created.session_id,
+            UpdateSessionSettingsRequest {
+                name: None,
+                model: None,
+                sandbox_mode: None,
+                approval_policy: None,
+                reasoning_effort: None,
+                cursor_mode: Some(CursorMode::Ask),
+                claude_approval_mode: None,
+                claude_effort: None,
+                gemini_approval_mode: None,
+            },
+        )
+        .unwrap();
+
+    let session = updated
+        .sessions
+        .iter()
+        .find(|session| session.id == created.session_id)
+        .expect("updated Cursor session should be present");
+    assert_eq!(session.cursor_mode, Some(CursorMode::Ask));
+
+    match input_rx
+        .recv_timeout(Duration::from_millis(100))
+        .expect("Cursor mode change should be forwarded to the live ACP session")
+    {
+        AcpRuntimeCommand::JsonRpcMessage(message) => {
+            assert_eq!(
+                message.get("method").and_then(Value::as_str),
+                Some("session/set_config_option")
+            );
+            assert_eq!(
+                message.pointer("/params/sessionId"),
+                Some(&json!("cursor-session-1"))
+            );
+            assert_eq!(message.pointer("/params/optionId"), Some(&json!("mode")));
+            assert_eq!(message.pointer("/params/value"), Some(&json!("ask")));
+        }
+        _ => panic!("expected live Cursor mode update request"),
+    }
+}
+
+#[test]
 fn matches_acp_model_options_by_name_or_label() {
     let config = json!({
         "configOptions": [
@@ -2160,7 +2791,7 @@ fn parses_quoted_git_status_paths() {
     );
     assert_eq!(
         parse_git_status_paths(r#""caf\303\251.txt""#),
-        (None, "café.txt".to_owned())
+        (None, "caf\u{00e9}.txt".to_owned())
     );
     assert_eq!(
         parse_git_status_paths(r#""old name.txt" -> "new name.txt""#),
@@ -2260,8 +2891,12 @@ async fn read_directory_accepts_project_id_without_session() {
     let file_path = src_dir.join("main.rs");
 
     fs::create_dir_all(&src_dir).unwrap();
-    fs::write(&file_path, "fn main() {}
-").unwrap();
+    fs::write(
+        &file_path,
+        "fn main() {}
+",
+    )
+    .unwrap();
 
     let project = state
         .create_project(CreateProjectRequest {
@@ -2281,7 +2916,10 @@ async fn read_directory_accepts_project_id_without_session() {
     .await
     .unwrap();
 
-    assert_eq!(response.path, normalize_user_facing_path(&fs::canonicalize(&root).unwrap()).to_string_lossy());
+    assert_eq!(
+        response.path,
+        normalize_user_facing_path(&fs::canonicalize(&root).unwrap()).to_string_lossy()
+    );
     assert_eq!(response.entries.len(), 1);
     assert_eq!(response.entries[0].name, "src");
 
@@ -2291,13 +2929,18 @@ async fn read_directory_accepts_project_id_without_session() {
 #[tokio::test]
 async fn read_and_write_file_accept_project_id_without_session() {
     let state = test_app_state();
-    let root = std::env::temp_dir().join(format!("termal-project-file-read-write-{}", Uuid::new_v4()));
+    let root =
+        std::env::temp_dir().join(format!("termal-project-file-read-write-{}", Uuid::new_v4()));
     let existing_file = root.join("src").join("main.rs");
     let new_file = root.join("generated").join("output.rs");
 
     fs::create_dir_all(existing_file.parent().unwrap()).unwrap();
-    fs::write(&existing_file, "fn main() {}
-").unwrap();
+    fs::write(
+        &existing_file,
+        "fn main() {}
+",
+    )
+    .unwrap();
 
     let project = state
         .create_project(CreateProjectRequest {
@@ -2316,15 +2959,19 @@ async fn read_and_write_file_accept_project_id_without_session() {
     )
     .await
     .unwrap();
-    assert_eq!(read_response.content, "fn main() {}
-");
+    assert_eq!(
+        read_response.content,
+        "fn main() {}
+"
+    );
 
     let Json(write_response) = write_file(
         State(state),
         Json(WriteFileRequest {
             path: new_file.to_string_lossy().into_owned(),
             content: "pub fn generated() {}
-".to_owned(),
+"
+            .to_owned(),
             project_id: Some(project.project_id),
             session_id: None,
         }),
@@ -2332,8 +2979,11 @@ async fn read_and_write_file_accept_project_id_without_session() {
     .await
     .unwrap();
     assert_eq!(write_response.path, new_file.to_string_lossy());
-    assert_eq!(fs::read_to_string(&new_file).unwrap(), "pub fn generated() {}
-");
+    assert_eq!(
+        fs::read_to_string(&new_file).unwrap(),
+        "pub fn generated() {}
+"
+    );
 
     fs::remove_dir_all(root).unwrap();
 }
@@ -2771,7 +3421,7 @@ fn canceling_claude_approval_marks_message_canceled_and_resumes_session() {
     assert_eq!(record.session.status, SessionStatus::Active);
     assert_eq!(
         record.session.preview,
-        "Approval canceled. Claude is continuing…"
+        "Approval canceled. Claude is continuing\u{2026}"
     );
     assert!(matches!(
         record.session.messages.first(),

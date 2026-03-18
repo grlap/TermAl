@@ -735,7 +735,7 @@ impl AppState {
         let record = &mut inner.sessions[index];
         let mut claude_model_update: Option<(ClaudeRuntimeHandle, String)> = None;
         let mut claude_permission_mode_update: Option<(ClaudeRuntimeHandle, String)> = None;
-        let mut acp_model_update: Option<(AcpRuntimeHandle, Value)> = None;
+        let mut acp_config_updates: Vec<(AcpRuntimeHandle, Value)> = Vec::new();
 
         match record.session.agent {
             agent if agent.supports_codex_prompt_settings() => {
@@ -919,26 +919,46 @@ impl AppState {
             }
             agent if agent.supports_cursor_mode() => {
                 if let Some(model) = requested_model.as_deref() {
-                    record.session.model = model.to_owned();
-                    if let (SessionRuntime::Acp(handle), Some(external_session_id)) =
-                        (&record.runtime, record.external_session_id.as_deref())
-                    {
-                        acp_model_update = Some((
-                            handle.clone(),
-                            json!({
-                                "id": Uuid::new_v4().to_string(),
-                                "method": "session/set_config_option",
-                                "params": {
-                                    "sessionId": external_session_id,
-                                    "optionId": "model",
-                                    "value": model,
-                                }
-                            }),
-                        ));
+                    if record.session.model != model {
+                        record.session.model = model.to_owned();
+                        if let (SessionRuntime::Acp(handle), Some(external_session_id)) =
+                            (&record.runtime, record.external_session_id.as_deref())
+                        {
+                            acp_config_updates.push((
+                                handle.clone(),
+                                json!({
+                                    "id": Uuid::new_v4().to_string(),
+                                    "method": "session/set_config_option",
+                                    "params": {
+                                        "sessionId": external_session_id,
+                                        "optionId": "model",
+                                        "value": model,
+                                    }
+                                }),
+                            ));
+                        }
                     }
                 }
                 if let Some(cursor_mode) = request.cursor_mode {
-                    record.session.cursor_mode = Some(cursor_mode);
+                    if record.session.cursor_mode != Some(cursor_mode) {
+                        record.session.cursor_mode = Some(cursor_mode);
+                        if let (SessionRuntime::Acp(handle), Some(external_session_id)) =
+                            (&record.runtime, record.external_session_id.as_deref())
+                        {
+                            acp_config_updates.push((
+                                handle.clone(),
+                                json!({
+                                    "id": Uuid::new_v4().to_string(),
+                                    "method": "session/set_config_option",
+                                    "params": {
+                                        "sessionId": external_session_id,
+                                        "optionId": "mode",
+                                        "value": cursor_mode.as_acp_value(),
+                                    }
+                                }),
+                            ));
+                        }
+                    }
                 }
             }
             agent if agent.supports_gemini_approval_mode() => {
@@ -969,7 +989,7 @@ impl AppState {
                 .input_tx
                 .send(ClaudeRuntimeCommand::SetPermissionMode(permission_mode));
         }
-        if let Some((handle, request)) = acp_model_update {
+        for (handle, request) in acp_config_updates {
             let _ = handle
                 .input_tx
                 .send(AcpRuntimeCommand::JsonRpcMessage(request));
@@ -1318,6 +1338,31 @@ impl AppState {
         Ok(())
     }
 
+    fn sync_session_cursor_mode(
+        &self,
+        session_id: &str,
+        cursor_mode: Option<CursorMode>,
+    ) -> Result<()> {
+        let Some(cursor_mode) = cursor_mode else {
+            return Ok(());
+        };
+
+        let mut inner = self.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(session_id)
+            .ok_or_else(|| anyhow!("session `{session_id}` not found"))?;
+        let record = &mut inner.sessions[index];
+        if !record.session.agent.supports_cursor_mode()
+            || record.session.cursor_mode == Some(cursor_mode)
+        {
+            return Ok(());
+        }
+
+        record.session.cursor_mode = Some(cursor_mode);
+        self.commit_locked(&mut inner)?;
+        Ok(())
+    }
+
     fn note_codex_rate_limits(&self, rate_limits: CodexRateLimits) -> Result<()> {
         let mut inner = self.inner.lock().expect("state mutex poisoned");
         if inner.codex.rate_limits.as_ref() == Some(&rate_limits) {
@@ -1356,6 +1401,17 @@ impl AppState {
             .session
             .claude_approval_mode
             .unwrap_or_else(default_claude_approval_mode))
+    }
+
+    fn cursor_mode(&self, session_id: &str) -> Result<CursorMode> {
+        let inner = self.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(session_id)
+            .ok_or_else(|| anyhow!("session `{session_id}` not found"))?;
+        Ok(inner.sessions[index]
+            .session
+            .cursor_mode
+            .unwrap_or_else(default_cursor_mode))
     }
 
     fn set_codex_runtime(&self, session_id: &str, handle: CodexRuntimeHandle) -> Result<()> {
@@ -1735,7 +1791,7 @@ impl AppState {
                 )
             {
                 record.session.status = SessionStatus::Idle;
-                record.session.preview = "Stopping session…".to_owned();
+                record.session.preview = "Stopping session\u{2026}".to_owned();
                 self.commit_locked(&mut inner).map_err(|err| {
                     ApiError::internal(format!("failed to persist session state: {err:#}"))
                 })?;
@@ -1836,7 +1892,7 @@ impl AppState {
             };
 
             record.session.status = SessionStatus::Idle;
-            record.session.preview = "Stopping turn…".to_owned();
+            record.session.preview = "Stopping turn\u{2026}".to_owned();
             self.commit_locked(&mut inner).map_err(|err| {
                 ApiError::internal(format!("failed to persist session state: {err:#}"))
             })?;
@@ -2838,15 +2894,15 @@ fn approval_preview_text(agent_name: &str, decision: ApprovalDecision) -> String
     match decision {
         ApprovalDecision::Pending => "Approval pending.".to_owned(),
         ApprovalDecision::Interrupted => "Approval expired after TermAl restarted.".to_owned(),
-        ApprovalDecision::Canceled => format!("Approval canceled. {agent_name} is continuing…"),
+        ApprovalDecision::Canceled => format!("Approval canceled. {agent_name} is continuing\u{2026}"),
         ApprovalDecision::Accepted => {
-            format!("Approval granted. {agent_name} is continuing…")
+            format!("Approval granted. {agent_name} is continuing\u{2026}")
         }
         ApprovalDecision::AcceptedForSession => {
-            format!("Approval granted for this session. {agent_name} is continuing…")
+            format!("Approval granted for this session. {agent_name} is continuing\u{2026}")
         }
         ApprovalDecision::Rejected => {
-            format!("Approval rejected. {agent_name} is continuing…")
+            format!("Approval rejected. {agent_name} is continuing\u{2026}")
         }
     }
 }
