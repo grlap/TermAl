@@ -52,6 +52,15 @@ class ResizeObserverMock {
   unobserve() {}
 }
 
+function jsonResponse(body: unknown) {
+  return new Response(JSON.stringify(body), {
+    headers: {
+      "Content-Type": "application/json",
+    },
+    status: 200,
+  });
+}
+
 describe("Backend connection state", () => {
   const originalScrollTo = HTMLElement.prototype.scrollTo;
 
@@ -70,6 +79,14 @@ describe("Backend connection state", () => {
     const originalResizeObserver = globalThis.ResizeObserver;
     const ownNavigatorOnlineDescriptor = Object.getOwnPropertyDescriptor(window.navigator, "onLine");
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input) === "/api/state") {
+        return jsonResponse({
+          revision: 1,
+          projects: [],
+          sessions: [],
+        });
+      }
+
       throw new Error(`Unexpected fetch: ${String(input)}`);
     });
 
@@ -112,7 +129,9 @@ describe("Backend connection state", () => {
       await waitFor(() => {
         expect(screen.getByText("Reconnecting")).toBeInTheDocument();
       });
-      expect(fetchMock).not.toHaveBeenCalled();
+      await waitFor(() => {
+        expect(fetchMock).toHaveBeenCalled();
+      });
 
       Object.defineProperty(window.navigator, "onLine", {
         configurable: true,

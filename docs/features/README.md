@@ -8,6 +8,7 @@ Use the files here for the detailed feature design and implementation notes.
 
 ## Features
 
+- [Project-Scoped Remotes](./project-scoped-remotes.md)
 - [Session Model Switching](./model-switching.md)
 - [Slash Commands](./slash-commands.md)
 - [Gemini CLI Integration](./gemini-cli-integration.md)
@@ -16,3 +17,4 @@ Use the files here for the detailed feature design and implementation notes.
 - [Instruction Debugger](./instruction-debugger.md)
 - [Territory Visualization](./territory-visualization.md)
 - [Agent Integration Comparison](./agent-integration-comparison.md)
+

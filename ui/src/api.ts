@@ -14,6 +14,7 @@ import type {
   ImageAttachment,
   InstructionSearchResponse,
   Project,
+  RemoteConfig,
   SandboxMode,
   Session,
 } from "./types";
@@ -185,6 +186,7 @@ type CreateSessionRequest = {
 type CreateProjectRequest = {
   name?: string;
   rootPath: string;
+  remoteId?: string;
 };
 
 export type AgentCommandsResponse = {
@@ -223,6 +225,7 @@ export function fetchState() {
 export function updateAppSettings(payload: {
   defaultCodexReasoningEffort?: CodexReasoningEffort;
   defaultClaudeEffort?: ClaudeEffortLevel;
+  remotes?: RemoteConfig[];
 }) {
   return request<StateResponse>("/api/settings", {
     method: "POST",

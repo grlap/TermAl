@@ -31,6 +31,14 @@ Browser (React)                      Rust Backend (axum)
 **Persistence:** Single JSON file at `~/.termal/sessions.json`.
 **Real-time:** Server-Sent Events with monotonic revision counter for ordering.
 
+**Current status:** The implementation in this document is the Phase 1 local-only
+architecture.
+
+**Remote direction:** The long-term remote model keeps the browser on a single
+local TermAl server. That local server stores preferences, manages remote
+connections, and routes project work to local or remote TermAl servers over
+SSH-managed tunnels.
+
 ---
 
 ## Backend
@@ -140,6 +148,212 @@ On broadcast channel lag, the backend falls back to sending a full state snapsho
 ```
 
 `PersistedState` is a projection of `StateInner` that excludes runtime handles, pending approval maps, and empty collections. It stores the revision counter, session configs, message history, and Codex state. On startup, the backend loads this file and reconstructs `StateInner`.
+
+---
+
+## Remote Architecture Direction
+
+The chosen remote architecture is:
+
+`Browser -> local TermAl server -> remote TermAl server`
+
+The browser should not manage multiple backend origins directly. Instead, the
+local server remains the control plane and exposes the single browser-facing
+`/api` and `/api/events` interface.
+
+### Topology
+
+#### Remote Connection Diagram
+
+```
+┌──────────────────────────────┐
+│ Browser UI                   │
+│ React app                    │
+│ - one /api origin            │
+│ - one /api/events stream     │
+└──────────────┬───────────────┘
+               │ HTTP + SSE
+               ▼
+┌──────────────────────────────────────────────────────────────┐
+│ Local TermAl Server                                         │
+│ Control plane                                               │
+│ - stores preferences and remote config                      │
+│ - owns browser-facing REST + SSE                            │
+│ - maps project -> remoteId                                  │
+│ - rewrites ids and aggregates state                         │
+│ - supervises SSH sessions and remote servers                │
+└──────────────┬───────────────────────────────┬───────────────┘
+               │                               │
+               │ local execution               │ SSH bootstrap + persistent tunnel
+               ▼                               ▼
+┌──────────────────────────────┐   ┌──────────────────────────────────────────┐
+│ Local machine runtime        │   │ Remote machine                           │
+│ LocalConnector               │   │ sshd                                     │
+│ - local projects             │   │  └─ starts or reuses `termal server`     │
+│ - local agent processes      │   │     bound to 127.0.0.1 on remote host    │
+└──────────────────────────────┘   └───────────────────┬──────────────────────┘
+                                                       │ tunneled HTTP + SSE
+                                                       ▼
+                                    ┌──────────────────────────────────────────┐
+                                    │ Remote TermAl Server                     │
+                                    │ SshConnector target                      │
+                                    │ - remote projects                        │
+                                    │ - remote sessions                        │
+                                    │ - remote agent runtimes                  │
+                                    └──────────────────────────────────────────┘
+```
+
+#### Project Routing Diagram
+
+```
+Project selection in UI
+        │
+        ▼
+projectId -> remoteId lookup in local control plane
+        │
+        ├─ remoteId = local
+        │      -> LocalConnector
+        │      -> local TermAl execution
+        │
+        └─ remoteId = build-box / laptop / workstation
+               -> SshConnector
+               -> SSH tunnel
+               -> remote TermAl execution
+```
+
+For a remote machine:
+
+1. The local TermAl server uses SSH to connect to the remote host.
+2. SSH starts or reuses a remote `termal server` process.
+3. The remote TermAl server listens on `127.0.0.1` only on the remote machine.
+4. The local TermAl server keeps a persistent SSH tunnel to that remote server.
+5. The local TermAl server speaks the normal TermAl HTTP and SSE protocol over
+   that tunnel.
+
+This is intentionally similar to the Remote-SSH shape used by editor tooling:
+SSH is used to reach the machine, start the remote server, and carry the
+transport. The browser still only talks to the local control plane.
+
+### Control Plane Responsibilities
+
+The local TermAl server owns:
+
+- preferences and remote configuration
+- the built-in local machine connection
+- project-to-remote routing
+- browser-facing state aggregation
+- browser-facing SSE aggregation
+- id rewriting or namespacing across remotes
+- connection supervision and reconnect behavior
+
+The local server is therefore both:
+
+- the local execution backend for projects assigned to the local machine
+- the coordinator for projects assigned to remote machines
+
+### Project-Scoped Routing
+
+Remote ownership is assigned at the project level.
+
+- Each project has a `remoteId`.
+- Each session belongs to a project.
+- Each session inherits its routing from the owning project.
+- File, directory, git, review, and session creation flows should route by
+  project ownership.
+
+This avoids teaching the UI to choose a backend for every action. The user
+chooses a remote when creating a project, and the rest of the routing follows
+from that association.
+
+### Session and Project Identity
+
+Remote-native ids cannot be trusted to be globally unique across multiple
+machines. The local control plane must therefore expose collision-safe browser
+ids for projects and sessions.
+
+Examples:
+
+- `local::project-1`
+- `build-box::project-1`
+- `local::session-3`
+- `build-box::session-3`
+
+Whether these are literal exposed ids or stable local aliases is an
+implementation detail, but the browser should only deal with globally unique
+identifiers.
+
+### State and Event Aggregation
+
+The browser should continue to consume one state stream from the local control
+plane.
+
+That means the local server must:
+
+- fetch or subscribe to state from each configured remote
+- merge those states into one browser-facing `StateResponse`
+- rewrite project and session ids into browser-safe ids
+- emit one aggregate SSE stream
+- use its own aggregate revision counter instead of forwarding raw remote
+  revisions directly
+
+The frontend should not need to know whether a project is local or remote in
+order to consume normal state and delta updates.
+
+### SSH as the Permanent Remote Transport
+
+SSH is not just a bootstrap convenience for the first version. It is the
+intended long-term remote transport model.
+
+Design constraints:
+
+- The remote TermAl server should not be exposed publicly by default.
+- The local control plane should prefer one persistent SSH session or tunnel per
+  remote, not one SSH command per API call.
+- SSE must travel over a stable, long-lived transport.
+- The local server should supervise both the SSH connection and the remote
+  `termal server` lifecycle.
+- System `ssh` and `ssh-agent` should be preferred over custom browser-managed
+  key handling.
+
+### API Shape
+
+The remote TermAl server should expose the same HTTP and SSE protocol shape as a
+local TermAl server as much as possible.
+
+This keeps the system simpler:
+
+- local execution can use the same backend contract as remote execution
+- the local control plane can proxy or adapt requests through one transport
+  abstraction
+- remote machines remain regular TermAl servers rather than a second bespoke
+  protocol
+
+Recommended control-plane connector abstraction:
+
+- `ensure_server_running`
+- `request`
+- `open_event_stream`
+
+With at least two implementations:
+
+- `LocalConnector`
+- `SshConnector`
+
+### UI Implications
+
+The UI should evolve toward:
+
+- one browser connection to the local TermAl server
+- a Settings surface for remote configuration
+- project creation that requires selecting a remote
+- session creation that requires selecting a project
+- remote-aware project/session status display
+
+The UI should not evolve toward:
+
+- direct browser connections to multiple backends
+- one backend picker per action
+- independent frontend-managed SSE connections per remote
 
 ---
 

@@ -100,6 +100,7 @@ fn test_app_state() -> AppState {
         state_events: broadcast::channel(16).0,
         delta_events: broadcast::channel(16).0,
         shared_codex_runtime: Arc::new(Mutex::new(None)),
+        remote_registry: Arc::new(RemoteRegistry::new().expect("remote registry should initialize")),
         inner: Arc::new(Mutex::new(StateInner::new())),
     }
 }
@@ -954,6 +955,7 @@ fn persists_app_settings_and_applies_them_to_new_sessions() {
         .update_app_settings(UpdateAppSettingsRequest {
             default_codex_reasoning_effort: Some(CodexReasoningEffort::High),
             default_claude_effort: Some(ClaudeEffortLevel::Max),
+            remotes: None,
         })
         .unwrap();
 
@@ -965,6 +967,7 @@ fn persists_app_settings_and_applies_them_to_new_sessions() {
         updated.preferences.default_claude_effort,
         ClaudeEffortLevel::Max
     );
+    assert_eq!(updated.preferences.remotes, default_remote_configs());
 
     let reloaded_inner = load_state(state.persistence_path.as_path())
         .unwrap()
@@ -977,6 +980,7 @@ fn persists_app_settings_and_applies_them_to_new_sessions() {
         reloaded_inner.preferences.default_claude_effort,
         ClaudeEffortLevel::Max
     );
+    assert_eq!(reloaded_inner.preferences.remotes, default_remote_configs());
 
     let reloaded_state = AppState {
         default_workdir: "/tmp".to_owned(),
@@ -984,6 +988,7 @@ fn persists_app_settings_and_applies_them_to_new_sessions() {
         state_events: broadcast::channel(16).0,
         delta_events: broadcast::channel(16).0,
         shared_codex_runtime: Arc::new(Mutex::new(None)),
+        remote_registry: Arc::new(RemoteRegistry::new().expect("remote registry should initialize")),
         inner: Arc::new(Mutex::new(reloaded_inner)),
     };
 
@@ -2818,6 +2823,126 @@ fn renames_sessions_via_settings_updates() {
 }
 
 #[test]
+fn persists_remote_settings() {
+    let state = test_app_state();
+
+    let updated = state
+        .update_app_settings(UpdateAppSettingsRequest {
+            default_codex_reasoning_effort: None,
+            default_claude_effort: None,
+            remotes: Some(vec![
+                RemoteConfig::local(),
+                RemoteConfig {
+                    id: "ssh-lab".to_owned(),
+                    name: "SSH Lab".to_owned(),
+                    transport: RemoteTransport::Ssh,
+                    enabled: true,
+                    host: Some("example.com".to_owned()),
+                    port: Some(2222),
+                    user: Some("alice".to_owned()),
+                },
+            ]),
+        })
+        .unwrap();
+
+    assert_eq!(updated.preferences.remotes.len(), 2);
+    assert_eq!(updated.preferences.remotes[1].id, "ssh-lab");
+    assert_eq!(
+        updated.preferences.remotes[1].transport,
+        RemoteTransport::Ssh
+    );
+
+    let reloaded_inner = load_state(state.persistence_path.as_path())
+        .unwrap()
+        .expect("persisted state should exist");
+    assert_eq!(
+        reloaded_inner.preferences.remotes,
+        updated.preferences.remotes
+    );
+}
+
+#[test]
+fn rejects_projects_with_unknown_remote() {
+    let state = test_app_state();
+
+    let error = match state.create_project(CreateProjectRequest {
+        name: Some("Remote Project".to_owned()),
+        root_path: "/tmp".to_owned(),
+        remote_id: "missing-remote".to_owned(),
+    }) {
+        Ok(_) => panic!("project creation should reject unknown remotes"),
+        Err(error) => error,
+    };
+
+    assert_eq!(error.status, StatusCode::BAD_REQUEST);
+    assert!(error.message.contains("unknown remote"));
+}
+
+#[test]
+#[ignore = "requires a reachable SSH remote"]
+fn creates_sessions_for_remote_projects_over_ssh() {
+    let state = test_app_state();
+
+    state
+        .update_app_settings(UpdateAppSettingsRequest {
+            default_codex_reasoning_effort: None,
+            default_claude_effort: None,
+            remotes: Some(vec![
+                RemoteConfig::local(),
+                RemoteConfig {
+                    id: "ssh-lab".to_owned(),
+                    name: "SSH Lab".to_owned(),
+                    transport: RemoteTransport::Ssh,
+                    enabled: true,
+                    host: Some("example.com".to_owned()),
+                    port: Some(22),
+                    user: Some("alice".to_owned()),
+                },
+            ]),
+        })
+        .unwrap();
+
+    let project = state
+        .create_project(CreateProjectRequest {
+            name: Some("Remote Project".to_owned()),
+            root_path: "/workspace/demo".to_owned(),
+            remote_id: "ssh-lab".to_owned(),
+        })
+        .unwrap();
+
+    let stored_project = project
+        .state
+        .projects
+        .iter()
+        .find(|entry| entry.id == project.project_id)
+        .expect("created project should be present");
+    assert_eq!(stored_project.remote_id, "ssh-lab");
+
+    let error = match state.create_session(CreateSessionRequest {
+        agent: Some(Agent::Codex),
+        name: Some("Remote Session".to_owned()),
+        workdir: None,
+        project_id: Some(project.project_id),
+        model: None,
+        approval_policy: None,
+        reasoning_effort: None,
+        sandbox_mode: None,
+        cursor_mode: None,
+        claude_approval_mode: None,
+        claude_effort: None,
+        gemini_approval_mode: None,
+    }) {
+        Ok(_) => {
+            panic!("remote session creation should require a reachable SSH remote in this integration test")
+        }
+        Err(error) => error,
+    };
+
+    assert!(matches!(error.status, StatusCode::BAD_GATEWAY | StatusCode::BAD_REQUEST));
+    assert!(!error.message.trim().is_empty());
+}
+
+#[test]
 fn creates_projects_and_assigns_sessions_to_them() {
     let state = test_app_state();
     let expected_root = resolve_project_root_path("/tmp").unwrap();
@@ -2826,6 +2951,7 @@ fn creates_projects_and_assigns_sessions_to_them() {
         .create_project(CreateProjectRequest {
             name: None,
             root_path: "/tmp".to_owned(),
+            remote_id: default_local_remote_id(),
         })
         .unwrap();
     assert_eq!(project.state.projects.len(), 1);
@@ -2867,6 +2993,7 @@ fn rejects_session_workdirs_outside_the_selected_project() {
         .create_project(CreateProjectRequest {
             name: Some("Project".to_owned()),
             root_path: "/tmp".to_owned(),
+            remote_id: default_local_remote_id(),
         })
         .unwrap();
 
@@ -2900,6 +3027,7 @@ fn rejects_empty_project_roots() {
     let result = state.create_project(CreateProjectRequest {
         name: None,
         root_path: "   ".to_owned(),
+        remote_id: default_local_remote_id(),
     });
     let error = match result {
         Ok(_) => panic!("empty project path should fail"),
@@ -2929,6 +3057,7 @@ fn resolves_requested_paths_inside_the_session_project_root() {
         .create_project(CreateProjectRequest {
             name: Some("Scoped Project".to_owned()),
             root_path: root.to_string_lossy().into_owned(),
+            remote_id: default_local_remote_id(),
         })
         .unwrap();
     let created = state
@@ -2991,6 +3120,7 @@ fn allows_new_file_paths_inside_the_session_project_root() {
         .create_project(CreateProjectRequest {
             name: Some("Writable Project".to_owned()),
             root_path: root.to_string_lossy().into_owned(),
+            remote_id: default_local_remote_id(),
         })
         .unwrap();
     let created = state
@@ -3054,6 +3184,7 @@ fn resolves_project_scoped_paths_without_a_session() {
         .create_project(CreateProjectRequest {
             name: Some("Scope Only Project".to_owned()),
             root_path: root.to_string_lossy().into_owned(),
+            remote_id: default_local_remote_id(),
         })
         .unwrap();
 
@@ -3204,6 +3335,7 @@ async fn read_directory_accepts_project_id_without_session() {
         .create_project(CreateProjectRequest {
             name: Some("Project Files".to_owned()),
             root_path: root.to_string_lossy().into_owned(),
+            remote_id: default_local_remote_id(),
         })
         .unwrap();
 
@@ -3248,6 +3380,7 @@ async fn read_and_write_file_accept_project_id_without_session() {
         .create_project(CreateProjectRequest {
             name: Some("Project Files".to_owned()),
             root_path: root.to_string_lossy().into_owned(),
+            remote_id: default_local_remote_id(),
         })
         .unwrap();
 
@@ -3314,6 +3447,8 @@ fn persisted_state_without_projects_migrates_cleanly() {
     let loaded = load_state(&path).unwrap().expect("state should load");
     assert_eq!(loaded.projects.len(), 1);
     assert_eq!(loaded.projects[0].root_path, "/tmp");
+    assert_eq!(loaded.projects[0].remote_id, default_local_remote_id());
+    assert_eq!(loaded.preferences.remotes, default_remote_configs());
     assert_eq!(
         loaded.sessions[0].session.project_id.as_deref(),
         Some(loaded.projects[0].id.as_str())
@@ -3966,6 +4101,7 @@ fn review_document_paths_resolve_inside_the_scoped_project_root() {
         .create_project(CreateProjectRequest {
             name: Some("Review Project".to_owned()),
             root_path: root.to_string_lossy().into_owned(),
+            remote_id: default_local_remote_id(),
         })
         .unwrap();
     let created = state

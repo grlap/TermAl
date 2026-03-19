@@ -104,22 +104,47 @@ async fn get_state(State(state): State<AppState>) -> Json<StateResponse> {
     Json(state.snapshot())
 }
 
+async fn run_blocking_api<T, F>(operation: F) -> Result<T, ApiError>
+where
+    T: Send + 'static,
+    F: FnOnce() -> Result<T, ApiError> + Send + 'static,
+{
+    tokio::task::spawn_blocking(operation)
+        .await
+        .map_err(|err| ApiError::internal(format!("blocking task failed: {err}")))?
+}
+
 async fn get_review(
     AxumPath(change_set_id): AxumPath<String>,
     Query(query): Query<ReviewQuery>,
     State(state): State<AppState>,
 ) -> Result<Json<ReviewDocumentResponse>, ApiError> {
-    let review_root = resolve_review_storage_root(
-        &state,
-        query.session_id.as_deref(),
-        query.project_id.as_deref(),
-    )?;
-    let review_path = resolve_review_document_path(&review_root, &change_set_id)?;
-    let review = load_review_document(&review_path, &change_set_id)?;
-    Ok(Json(ReviewDocumentResponse {
-        review_file_path: review_path.to_string_lossy().into_owned(),
-        review,
-    }))
+    let response = run_blocking_api(move || {
+        if let Some(scope) = state.remote_scope_for_request(
+            query.session_id.as_deref(),
+            query.project_id.as_deref(),
+        )? {
+            return state.remote_get_json(
+                &scope,
+                &format!("/api/reviews/{}", encode_uri_component(&change_set_id)),
+                Vec::new(),
+            );
+        }
+
+        let review_root = resolve_review_storage_root(
+            &state,
+            query.session_id.as_deref(),
+            query.project_id.as_deref(),
+        )?;
+        let review_path = resolve_review_document_path(&review_root, &change_set_id)?;
+        let review = load_review_document(&review_path, &change_set_id)?;
+        Ok(ReviewDocumentResponse {
+            review_file_path: review_path.to_string_lossy().into_owned(),
+            review,
+        })
+    })
+    .await?;
+    Ok(Json(response))
 }
 
 async fn put_review(
@@ -128,22 +153,39 @@ async fn put_review(
     State(state): State<AppState>,
     Json(review): Json<ReviewDocument>,
 ) -> Result<Json<ReviewDocumentResponse>, ApiError> {
-    let review_root = resolve_review_storage_root(
-        &state,
-        query.session_id.as_deref(),
-        query.project_id.as_deref(),
-    )?;
-    let review_path = resolve_review_document_path(&review_root, &change_set_id)?;
-    let persisted_review = {
-        let _state_guard = state.inner.lock().expect("state mutex poisoned");
-        let persisted = prepare_review_document_for_write(&review_path, &change_set_id, review)?;
-        persist_review_document(&review_path, &persisted)?;
-        persisted
-    };
-    Ok(Json(ReviewDocumentResponse {
-        review_file_path: review_path.to_string_lossy().into_owned(),
-        review: persisted_review,
-    }))
+    let response = run_blocking_api(move || {
+        if let Some(scope) = state.remote_scope_for_request(
+            query.session_id.as_deref(),
+            query.project_id.as_deref(),
+        )? {
+            return state.remote_put_json(
+                &scope,
+                &format!("/api/reviews/{}", encode_uri_component(&change_set_id)),
+                serde_json::to_value(&review).map_err(|err| {
+                    ApiError::internal(format!("failed to encode review payload: {err}"))
+                })?,
+            );
+        }
+
+        let review_root = resolve_review_storage_root(
+            &state,
+            query.session_id.as_deref(),
+            query.project_id.as_deref(),
+        )?;
+        let review_path = resolve_review_document_path(&review_root, &change_set_id)?;
+        let persisted_review = {
+            let _state_guard = state.inner.lock().expect("state mutex poisoned");
+            let persisted = prepare_review_document_for_write(&review_path, &change_set_id, review)?;
+            persist_review_document(&review_path, &persisted)?;
+            persisted
+        };
+        Ok(ReviewDocumentResponse {
+            review_file_path: review_path.to_string_lossy().into_owned(),
+            review: persisted_review,
+        })
+    })
+    .await?;
+    Ok(Json(response))
 }
 
 async fn get_review_summary(
@@ -151,189 +193,255 @@ async fn get_review_summary(
     Query(query): Query<ReviewQuery>,
     State(state): State<AppState>,
 ) -> Result<Json<ReviewSummaryResponse>, ApiError> {
-    let review_root = resolve_review_storage_root(
-        &state,
-        query.session_id.as_deref(),
-        query.project_id.as_deref(),
-    )?;
-    let review_path = resolve_review_document_path(&review_root, &change_set_id)?;
-    let review = load_review_document(&review_path, &change_set_id)?;
-    let summary = summarize_review_document(&review);
+    let response = run_blocking_api(move || {
+        if let Some(scope) = state.remote_scope_for_request(
+            query.session_id.as_deref(),
+            query.project_id.as_deref(),
+        )? {
+            return state.remote_get_json(
+                &scope,
+                &format!(
+                    "/api/reviews/{}/summary",
+                    encode_uri_component(&change_set_id)
+                ),
+                Vec::new(),
+            );
+        }
 
-    Ok(Json(ReviewSummaryResponse {
-        change_set_id: review.change_set_id,
-        review_file_path: review_path.to_string_lossy().into_owned(),
-        thread_count: summary.thread_count,
-        open_thread_count: summary.open_thread_count,
-        resolved_thread_count: summary.resolved_thread_count,
-        comment_count: summary.comment_count,
-        has_threads: summary.thread_count > 0,
-    }))
+        let review_root = resolve_review_storage_root(
+            &state,
+            query.session_id.as_deref(),
+            query.project_id.as_deref(),
+        )?;
+        let review_path = resolve_review_document_path(&review_root, &change_set_id)?;
+        let review = load_review_document(&review_path, &change_set_id)?;
+        let summary = summarize_review_document(&review);
+
+        Ok(ReviewSummaryResponse {
+            change_set_id: review.change_set_id,
+            review_file_path: review_path.to_string_lossy().into_owned(),
+            thread_count: summary.thread_count,
+            open_thread_count: summary.open_thread_count,
+            resolved_thread_count: summary.resolved_thread_count,
+            comment_count: summary.comment_count,
+            has_threads: summary.thread_count > 0,
+        })
+    })
+    .await?;
+    Ok(Json(response))
 }
 
 async fn read_file(
     State(state): State<AppState>,
     Query(query): Query<FileQuery>,
 ) -> Result<Json<FileResponse>, ApiError> {
-    let resolved_path = resolve_project_scoped_requested_path(
-        &state,
-        query.session_id.as_deref(),
-        query.project_id.as_deref(),
-        &query.path,
-        ScopedPathMode::ExistingFile,
-    )?;
-    let content = fs::read_to_string(&resolved_path).map_err(|err| match err.kind() {
-        io::ErrorKind::NotFound => {
-            ApiError::bad_request(format!("file not found: {}", resolved_path.display()))
+    let response = run_blocking_api(move || {
+        if let Some(scope) = state.remote_scope_for_request(
+            query.session_id.as_deref(),
+            query.project_id.as_deref(),
+        )? {
+            return state.remote_get_json(
+                &scope,
+                "/api/file",
+                vec![("path".to_owned(), query.path.clone())],
+            );
         }
-        io::ErrorKind::InvalidData => ApiError::bad_request(format!(
-            "file is not valid UTF-8: {}",
-            resolved_path.display()
-        )),
-        _ => ApiError::internal(format!(
-            "failed to read file {}: {err}",
-            resolved_path.display()
-        )),
-    })?;
 
-    Ok(Json(FileResponse {
-        path: resolved_path.to_string_lossy().into_owned(),
-        content,
-        language: infer_language_from_path(&resolved_path).map(str::to_owned),
-    }))
+        let resolved_path = resolve_project_scoped_requested_path(
+            &state,
+            query.session_id.as_deref(),
+            query.project_id.as_deref(),
+            &query.path,
+            ScopedPathMode::ExistingFile,
+        )?;
+        let content = fs::read_to_string(&resolved_path).map_err(|err| match err.kind() {
+            io::ErrorKind::NotFound => {
+                ApiError::bad_request(format!("file not found: {}", resolved_path.display()))
+            }
+            io::ErrorKind::InvalidData => ApiError::bad_request(format!(
+                "file is not valid UTF-8: {}",
+                resolved_path.display()
+            )),
+            _ => ApiError::internal(format!(
+                "failed to read file {}: {err}",
+                resolved_path.display()
+            )),
+        })?;
+
+        Ok(FileResponse {
+            path: resolved_path.to_string_lossy().into_owned(),
+            content,
+            language: infer_language_from_path(&resolved_path).map(str::to_owned),
+        })
+    })
+    .await?;
+    Ok(Json(response))
 }
 
 async fn write_file(
     State(state): State<AppState>,
     Json(request): Json<WriteFileRequest>,
 ) -> Result<Json<FileResponse>, ApiError> {
-    let resolved_path = resolve_project_scoped_requested_path(
-        &state,
-        request.session_id.as_deref(),
-        request.project_id.as_deref(),
-        &request.path,
-        ScopedPathMode::AllowMissingLeaf,
-    )?;
-    if let Some(parent) = resolved_path.parent() {
-        fs::create_dir_all(parent).map_err(|err| {
+    let response = run_blocking_api(move || {
+        if let Some(scope) = state.remote_scope_for_request(
+            request.session_id.as_deref(),
+            request.project_id.as_deref(),
+        )? {
+            return state.remote_put_json(
+                &scope,
+                "/api/file",
+                json!({
+                    "path": request.path.clone(),
+                    "content": request.content.clone(),
+                }),
+            );
+        }
+
+        let resolved_path = resolve_project_scoped_requested_path(
+            &state,
+            request.session_id.as_deref(),
+            request.project_id.as_deref(),
+            &request.path,
+            ScopedPathMode::AllowMissingLeaf,
+        )?;
+        if let Some(parent) = resolved_path.parent() {
+            fs::create_dir_all(parent).map_err(|err| {
+                ApiError::internal(format!(
+                    "failed to create parent directory for {}: {err}",
+                    resolved_path.display()
+                ))
+            })?;
+        }
+
+        fs::write(&resolved_path, request.content.as_bytes()).map_err(|err| {
             ApiError::internal(format!(
-                "failed to create parent directory for {}: {err}",
+                "failed to write file {}: {err}",
                 resolved_path.display()
             ))
         })?;
-    }
 
-    fs::write(&resolved_path, request.content.as_bytes()).map_err(|err| {
-        ApiError::internal(format!(
-            "failed to write file {}: {err}",
-            resolved_path.display()
-        ))
-    })?;
-
-    Ok(Json(FileResponse {
-        path: resolved_path.to_string_lossy().into_owned(),
-        content: request.content,
-        language: infer_language_from_path(&resolved_path).map(str::to_owned),
-    }))
+        Ok(FileResponse {
+            path: resolved_path.to_string_lossy().into_owned(),
+            content: request.content,
+            language: infer_language_from_path(&resolved_path).map(str::to_owned),
+        })
+    })
+    .await?;
+    Ok(Json(response))
 }
 
 async fn read_directory(
     State(state): State<AppState>,
     Query(query): Query<FileQuery>,
 ) -> Result<Json<DirectoryResponse>, ApiError> {
-    let resolved_path = resolve_project_scoped_requested_path(
-        &state,
-        query.session_id.as_deref(),
-        query.project_id.as_deref(),
-        &query.path,
-        ScopedPathMode::ExistingPath,
-    )?;
-    let metadata = fs::metadata(&resolved_path).map_err(|err| match err.kind() {
-        io::ErrorKind::NotFound => {
-            ApiError::bad_request(format!("path not found: {}", resolved_path.display()))
+    let response = run_blocking_api(move || {
+        if let Some(scope) = state.remote_scope_for_request(
+            query.session_id.as_deref(),
+            query.project_id.as_deref(),
+        )? {
+            return state.remote_get_json(
+                &scope,
+                "/api/fs",
+                vec![("path".to_owned(), query.path.clone())],
+            );
         }
-        _ => ApiError::internal(format!(
-            "failed to stat path {}: {err}",
-            resolved_path.display()
-        )),
-    })?;
 
-    if !metadata.is_dir() {
-        return Err(ApiError::bad_request(format!(
-            "path is not a directory: {}",
-            resolved_path.display()
-        )));
-    }
-
-    let mut entries = fs::read_dir(&resolved_path)
-        .map_err(|err| {
-            ApiError::internal(format!(
-                "failed to read directory {}: {err}",
+        let resolved_path = resolve_project_scoped_requested_path(
+            &state,
+            query.session_id.as_deref(),
+            query.project_id.as_deref(),
+            &query.path,
+            ScopedPathMode::ExistingPath,
+        )?;
+        let metadata = fs::metadata(&resolved_path).map_err(|err| match err.kind() {
+            io::ErrorKind::NotFound => {
+                ApiError::bad_request(format!("path not found: {}", resolved_path.display()))
+            }
+            _ => ApiError::internal(format!(
+                "failed to stat path {}: {err}",
                 resolved_path.display()
-            ))
-        })?
-        .map(|entry| {
-            let entry = entry.map_err(|err| {
+            )),
+        })?;
+
+        if !metadata.is_dir() {
+            return Err(ApiError::bad_request(format!(
+                "path is not a directory: {}",
+                resolved_path.display()
+            )));
+        }
+
+        let mut entries = fs::read_dir(&resolved_path)
+            .map_err(|err| {
                 ApiError::internal(format!(
-                    "failed to read directory entry in {}: {err}",
+                    "failed to read directory {}: {err}",
                     resolved_path.display()
                 ))
-            })?;
-            let path = entry.path();
-            let metadata = entry.metadata().map_err(|err| {
-                ApiError::internal(format!(
-                    "failed to stat directory entry {}: {err}",
-                    path.display()
-                ))
-            })?;
-            let name = entry.file_name().to_string_lossy().into_owned();
+            })?
+            .map(|entry| {
+                let entry = entry.map_err(|err| {
+                    ApiError::internal(format!(
+                        "failed to read directory entry in {}: {err}",
+                        resolved_path.display()
+                    ))
+                })?;
+                let path = entry.path();
+                let metadata = entry.metadata().map_err(|err| {
+                    ApiError::internal(format!(
+                        "failed to stat directory entry {}: {err}",
+                        path.display()
+                    ))
+                })?;
+                let name = entry.file_name().to_string_lossy().into_owned();
 
-            Ok(DirectoryEntry {
-                kind: if metadata.is_dir() {
-                    FileSystemEntryKind::Directory
-                } else {
-                    FileSystemEntryKind::File
-                },
-                name,
-                path: path.to_string_lossy().into_owned(),
+                Ok(DirectoryEntry {
+                    kind: if metadata.is_dir() {
+                        FileSystemEntryKind::Directory
+                    } else {
+                        FileSystemEntryKind::File
+                    },
+                    name,
+                    path: path.to_string_lossy().into_owned(),
+                })
             })
-        })
-        .collect::<Result<Vec<_>, ApiError>>()?;
+            .collect::<Result<Vec<_>, ApiError>>()?;
 
-    entries.sort_by(|left, right| {
-        let kind_order = match (&left.kind, &right.kind) {
-            (FileSystemEntryKind::Directory, FileSystemEntryKind::File) => std::cmp::Ordering::Less,
-            (FileSystemEntryKind::File, FileSystemEntryKind::Directory) => {
-                std::cmp::Ordering::Greater
+        entries.sort_by(|left, right| {
+            let kind_order = match (&left.kind, &right.kind) {
+                (FileSystemEntryKind::Directory, FileSystemEntryKind::File) => std::cmp::Ordering::Less,
+                (FileSystemEntryKind::File, FileSystemEntryKind::Directory) => {
+                    std::cmp::Ordering::Greater
+                }
+                _ => std::cmp::Ordering::Equal,
+            };
+
+            if kind_order == std::cmp::Ordering::Equal {
+                left.name
+                    .to_ascii_lowercase()
+                    .cmp(&right.name.to_ascii_lowercase())
+            } else {
+                kind_order
             }
-            _ => std::cmp::Ordering::Equal,
-        };
+        });
 
-        if kind_order == std::cmp::Ordering::Equal {
-            left.name
-                .to_ascii_lowercase()
-                .cmp(&right.name.to_ascii_lowercase())
-        } else {
-            kind_order
-        }
-    });
-
-    Ok(Json(DirectoryResponse {
-        name: resolved_path
-            .file_name()
-            .and_then(|value| value.to_str())
-            .map(str::to_owned)
-            .unwrap_or_else(|| resolved_path.to_string_lossy().into_owned()),
-        path: resolved_path.to_string_lossy().into_owned(),
-        entries,
-    }))
+        Ok(DirectoryResponse {
+            name: resolved_path
+                .file_name()
+                .and_then(|value| value.to_str())
+                .map(str::to_owned)
+                .unwrap_or_else(|| resolved_path.to_string_lossy().into_owned()),
+            path: resolved_path.to_string_lossy().into_owned(),
+            entries,
+        })
+    })
+    .await?;
+    Ok(Json(response))
 }
 
 async fn list_agent_commands(
     AxumPath(session_id): AxumPath<String>,
     State(state): State<AppState>,
 ) -> Result<Json<AgentCommandsResponse>, ApiError> {
-    let response = state.list_agent_commands(&session_id)?;
+    let response = run_blocking_api(move || state.list_agent_commands(&session_id)).await?;
     Ok(Json(response))
 }
 
@@ -341,7 +449,7 @@ async fn search_instructions(
     Query(query): Query<InstructionSearchQuery>,
     State(state): State<AppState>,
 ) -> Result<Json<InstructionSearchResponse>, ApiError> {
-    let response = state.search_instructions(&query.session_id, &query.q)?;
+    let response = run_blocking_api(move || state.search_instructions(&query.session_id, &query.q)).await?;
     Ok(Json(response))
 }
 
@@ -1181,104 +1289,189 @@ fn trace_instruction_roots_recursive(
     visited.remove(current_path);
 }
 
-async fn read_git_status(Query(query): Query<FileQuery>) -> Result<Json<GitStatusResponse>, ApiError> {
-    let workdir = resolve_existing_requested_path(&query.path, "path")?;
-    Ok(Json(load_git_status_for_path(&workdir)?))
+async fn read_git_status(
+    State(state): State<AppState>,
+    Query(query): Query<FileQuery>,
+) -> Result<Json<GitStatusResponse>, ApiError> {
+    let response = run_blocking_api(move || {
+        if let Some(scope) = state.remote_scope_for_request(
+            query.session_id.as_deref(),
+            query.project_id.as_deref(),
+        )? {
+            return state.remote_get_json(
+                &scope,
+                "/api/git/status",
+                vec![("path".to_owned(), query.path.clone())],
+            );
+        }
+
+        let workdir = resolve_existing_requested_path(&query.path, "path")?;
+        Ok(load_git_status_for_path(&workdir)?)
+    })
+    .await?;
+    Ok(Json(response))
 }
 
-async fn read_git_diff(Json(request): Json<GitDiffRequest>) -> Result<Json<GitDiffResponse>, ApiError> {
-    let workdir = resolve_existing_requested_path(&request.workdir, "path")?;
-    Ok(Json(load_git_diff_for_request(&workdir, &request)?))
+async fn read_git_diff(
+    State(state): State<AppState>,
+    Json(request): Json<GitDiffRequest>,
+) -> Result<Json<GitDiffResponse>, ApiError> {
+    let response = run_blocking_api(move || {
+        if let Some(scope) = state.remote_scope_for_request(
+            request.session_id.as_deref(),
+            request.project_id.as_deref(),
+        )? {
+            return state.remote_post_json(
+                &scope,
+                "/api/git/diff",
+                json!({
+                    "originalPath": request.original_path,
+                    "path": request.path,
+                    "sectionId": request.section_id,
+                    "statusCode": request.status_code,
+                    "workdir": request.workdir,
+                }),
+            );
+        }
+
+        let workdir = resolve_existing_requested_path(&request.workdir, "path")?;
+        Ok(load_git_diff_for_request(&workdir, &request)?)
+    })
+    .await?;
+    Ok(Json(response))
 }
 
 async fn apply_git_file_action(
+    State(state): State<AppState>,
     Json(request): Json<GitFileActionRequest>,
 ) -> Result<Json<GitStatusResponse>, ApiError> {
-    let workdir = resolve_existing_requested_path(&request.workdir, "path")?;
-    let workdir = normalize_git_workdir_path(&workdir)?;
-    let Some(repo_root) = resolve_git_repo_root(&workdir)? else {
-        return Err(ApiError::bad_request("no git repository found"));
-    };
-
-    let current_path = normalize_git_repo_relative_path(&request.path)?;
-    let original_path = request
-        .original_path
-        .as_deref()
-        .map(normalize_git_repo_relative_path)
-        .transpose()?;
-
-    match request.action {
-        GitFileAction::Stage => {
-            let pathspecs = collect_git_pathspecs(&current_path, original_path.as_deref());
-            run_git_pathspec_command(
-                &repo_root,
-                &["add", "-A"],
-                &pathspecs,
-                "failed to stage git changes",
-            )?;
+    let response = run_blocking_api(move || {
+        if let Some(scope) = state.remote_scope_for_request(
+            request.session_id.as_deref(),
+            request.project_id.as_deref(),
+        )? {
+            return state.remote_post_json(
+                &scope,
+                "/api/git/file",
+                json!({
+                    "action": request.action,
+                    "originalPath": request.original_path,
+                    "path": request.path,
+                    "statusCode": request.status_code,
+                    "workdir": request.workdir,
+                }),
+            );
         }
-        GitFileAction::Unstage => {
-            let pathspecs = collect_git_pathspecs(&current_path, original_path.as_deref());
-            run_git_pathspec_command(
-                &repo_root,
-                &["restore", "--staged"],
-                &pathspecs,
-                "failed to unstage git changes",
-            )?;
-        }
-        GitFileAction::Revert => {
-            revert_git_file_action(
-                &repo_root,
-                &current_path,
-                original_path.as_deref(),
-                request.status_code.as_deref(),
-            )?;
-        }
-    }
 
-    Ok(Json(load_git_status_for_path(&workdir)?))
+        let workdir = resolve_existing_requested_path(&request.workdir, "path")?;
+        let workdir = normalize_git_workdir_path(&workdir)?;
+        let Some(repo_root) = resolve_git_repo_root(&workdir)? else {
+            return Err(ApiError::bad_request("no git repository found"));
+        };
+
+        let current_path = normalize_git_repo_relative_path(&request.path)?;
+        let original_path = request
+            .original_path
+            .as_deref()
+            .map(normalize_git_repo_relative_path)
+            .transpose()?;
+
+        match request.action {
+            GitFileAction::Stage => {
+                let pathspecs = collect_git_pathspecs(&current_path, original_path.as_deref());
+                run_git_pathspec_command(
+                    &repo_root,
+                    &["add", "-A"],
+                    &pathspecs,
+                    "failed to stage git changes",
+                )?;
+            }
+            GitFileAction::Unstage => {
+                let pathspecs = collect_git_pathspecs(&current_path, original_path.as_deref());
+                run_git_pathspec_command(
+                    &repo_root,
+                    &["restore", "--staged"],
+                    &pathspecs,
+                    "failed to unstage git changes",
+                )?;
+            }
+            GitFileAction::Revert => {
+                revert_git_file_action(
+                    &repo_root,
+                    &current_path,
+                    original_path.as_deref(),
+                    request.status_code.as_deref(),
+                )?;
+            }
+        }
+
+        Ok(load_git_status_for_path(&workdir)?)
+    })
+    .await?;
+    Ok(Json(response))
 }
 
-async fn commit_git_changes(Json(request): Json<GitCommitRequest>) -> Result<Json<GitCommitResponse>, ApiError> {
-    let workdir = resolve_existing_requested_path(&request.workdir, "path")?;
-    let workdir = normalize_git_workdir_path(&workdir)?;
-    let Some(repo_root) = resolve_git_repo_root(&workdir)? else {
-        return Err(ApiError::bad_request("no git repository found"));
-    };
+async fn commit_git_changes(
+    State(state): State<AppState>,
+    Json(request): Json<GitCommitRequest>,
+) -> Result<Json<GitCommitResponse>, ApiError> {
+    let response = run_blocking_api(move || {
+        if let Some(scope) = state.remote_scope_for_request(
+            request.session_id.as_deref(),
+            request.project_id.as_deref(),
+        )? {
+            return state.remote_post_json(
+                &scope,
+                "/api/git/commit",
+                json!({
+                    "message": request.message,
+                    "workdir": request.workdir,
+                }),
+            );
+        }
 
-    let message = request.message.trim();
-    if message.is_empty() {
-        return Err(ApiError::bad_request("commit message cannot be empty"));
-    }
-
-    let status_before = load_git_status_for_path(&workdir)?;
-    if !has_staged_git_changes(&status_before) {
-        return Err(ApiError::bad_request("no staged changes to commit"));
-    }
-
-    let output = Command::new("git")
-        .arg("-C")
-        .arg(&repo_root)
-        .args(["commit", "-m"])
-        .arg(message)
-        .output()
-        .map_err(|err| ApiError::internal(format!("failed to create git commit: {err}")))?;
-
-    if !output.status.success() {
-        let detail = extract_git_command_error(&output);
-        let message = if detail.is_empty() {
-            "failed to create git commit".to_owned()
-        } else {
-            format!("failed to create git commit: {detail}")
+        let workdir = resolve_existing_requested_path(&request.workdir, "path")?;
+        let workdir = normalize_git_workdir_path(&workdir)?;
+        let Some(repo_root) = resolve_git_repo_root(&workdir)? else {
+            return Err(ApiError::bad_request("no git repository found"));
         };
-        return Err(ApiError::bad_request(message));
-    }
 
-    let status = load_git_status_for_path(&workdir)?;
-    Ok(Json(GitCommitResponse {
-        status,
-        summary: build_git_commit_summary(message),
-    }))
+        let message = request.message.trim();
+        if message.is_empty() {
+            return Err(ApiError::bad_request("commit message cannot be empty"));
+        }
+
+        let status_before = load_git_status_for_path(&workdir)?;
+        if !has_staged_git_changes(&status_before) {
+            return Err(ApiError::bad_request("no staged changes to commit"));
+        }
+
+        let output = Command::new("git")
+            .arg("-C")
+            .arg(&repo_root)
+            .args(["commit", "-m"])
+            .arg(message)
+            .output()
+            .map_err(|err| ApiError::internal(format!("failed to create git commit: {err}")))?;
+
+        if !output.status.success() {
+            let detail = extract_git_command_error(&output);
+            let message = if detail.is_empty() {
+                "failed to create git commit".to_owned()
+            } else {
+                format!("failed to create git commit: {detail}")
+            };
+            return Err(ApiError::bad_request(message));
+        }
+
+        let status = load_git_status_for_path(&workdir)?;
+        Ok(GitCommitResponse {
+            status,
+            summary: build_git_commit_summary(message),
+        })
+    })
+    .await?;
+    Ok(Json(response))
 }
 
 fn load_git_diff_for_request(
@@ -1677,7 +1870,7 @@ async fn create_session(
     State(state): State<AppState>,
     Json(request): Json<CreateSessionRequest>,
 ) -> Result<(StatusCode, Json<CreateSessionResponse>), ApiError> {
-    let response = state.create_session(request)?;
+    let response = run_blocking_api(move || state.create_session(request)).await?;
     Ok((StatusCode::CREATED, Json(response)))
 }
 
@@ -1685,7 +1878,7 @@ async fn create_project(
     State(state): State<AppState>,
     Json(request): Json<CreateProjectRequest>,
 ) -> Result<(StatusCode, Json<CreateProjectResponse>), ApiError> {
-    let response = state.create_project(request)?;
+    let response = run_blocking_api(move || state.create_project(request)).await?;
     Ok((StatusCode::CREATED, Json(response)))
 }
 
@@ -1693,7 +1886,7 @@ async fn update_app_settings(
     State(state): State<AppState>,
     Json(request): Json<UpdateAppSettingsRequest>,
 ) -> Result<Json<StateResponse>, ApiError> {
-    let response = state.update_app_settings(request)?;
+    let response = run_blocking_api(move || state.update_app_settings(request)).await?;
     Ok(Json(response))
 }
 
@@ -1712,7 +1905,7 @@ async fn update_session_settings(
     State(state): State<AppState>,
     Json(request): Json<UpdateSessionSettingsRequest>,
 ) -> Result<Json<StateResponse>, ApiError> {
-    let response = state.update_session_settings(&session_id, request)?;
+    let response = run_blocking_api(move || state.update_session_settings(&session_id, request)).await?;
     Ok(Json(response))
 }
 
@@ -1720,7 +1913,7 @@ async fn refresh_session_model_options(
     AxumPath(session_id): AxumPath<String>,
     State(state): State<AppState>,
 ) -> Result<Json<StateResponse>, ApiError> {
-    let response = state.refresh_session_model_options(&session_id)?;
+    let response = run_blocking_api(move || state.refresh_session_model_options(&session_id)).await?;
     Ok(Json(response))
 }
 
@@ -1729,7 +1922,12 @@ async fn send_message(
     State(state): State<AppState>,
     Json(request): Json<SendMessageRequest>,
 ) -> Result<(StatusCode, Json<StateResponse>), ApiError> {
-    let dispatch = state.dispatch_turn(&session_id, request)?;
+    let dispatch = run_blocking_api({
+        let state = state.clone();
+        let session_id = session_id.clone();
+        move || state.dispatch_turn(&session_id, request)
+    })
+    .await?;
 
     if let DispatchTurnResult::Dispatched(dispatch) = dispatch {
         deliver_turn_dispatch(&state, dispatch)?;
@@ -1744,7 +1942,7 @@ async fn cancel_queued_prompt(
     AxumPath((session_id, prompt_id)): AxumPath<(String, String)>,
     State(state): State<AppState>,
 ) -> Result<Json<StateResponse>, ApiError> {
-    let response = state.cancel_queued_prompt(&session_id, &prompt_id)?;
+    let response = run_blocking_api(move || state.cancel_queued_prompt(&session_id, &prompt_id)).await?;
     Ok(Json(response))
 }
 
@@ -1752,7 +1950,7 @@ async fn stop_session(
     AxumPath(session_id): AxumPath<String>,
     State(state): State<AppState>,
 ) -> Result<Json<StateResponse>, ApiError> {
-    let response = state.stop_session(&session_id)?;
+    let response = run_blocking_api(move || state.stop_session(&session_id)).await?;
     Ok(Json(response))
 }
 
@@ -1760,7 +1958,7 @@ async fn kill_session(
     AxumPath(session_id): AxumPath<String>,
     State(state): State<AppState>,
 ) -> Result<Json<StateResponse>, ApiError> {
-    let response = state.kill_session(&session_id)?;
+    let response = run_blocking_api(move || state.kill_session(&session_id)).await?;
     Ok(Json(response))
 }
 
@@ -1769,7 +1967,7 @@ async fn submit_approval(
     State(state): State<AppState>,
     Json(request): Json<ApprovalRequest>,
 ) -> Result<Json<StateResponse>, ApiError> {
-    let response = state.update_approval(&session_id, &message_id, request.decision)?;
+    let response = run_blocking_api(move || state.update_approval(&session_id, &message_id, request.decision)).await?;
     Ok(Json(response))
 }
 
@@ -1805,6 +2003,20 @@ impl ApiError {
         Self {
             message: message.into(),
             status: StatusCode::INTERNAL_SERVER_ERROR,
+        }
+    }
+
+    fn bad_gateway(message: impl Into<String>) -> Self {
+        Self {
+            message: message.into(),
+            status: StatusCode::BAD_GATEWAY,
+        }
+    }
+
+    fn from_status(status: StatusCode, message: impl Into<String>) -> Self {
+        Self {
+            message: message.into(),
+            status,
         }
     }
 }
@@ -2137,6 +2349,10 @@ struct Project {
     id: String,
     name: String,
     root_path: String,
+    #[serde(default = "default_local_remote_id")]
+    remote_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    remote_project_id: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -2529,7 +2745,7 @@ impl Message {
     }
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct ApprovalRequest {
     decision: ApprovalDecision,
@@ -2557,6 +2773,8 @@ struct CreateSessionRequest {
 struct CreateProjectRequest {
     name: Option<String>,
     root_path: String,
+    #[serde(default = "default_local_remote_id")]
+    remote_id: String,
 }
 
 #[derive(Deserialize)]
@@ -2564,6 +2782,7 @@ struct CreateProjectRequest {
 struct UpdateAppSettingsRequest {
     default_codex_reasoning_effort: Option<CodexReasoningEffort>,
     default_claude_effort: Option<ClaudeEffortLevel>,
+    remotes: Option<Vec<RemoteConfig>>,
 }
 
 #[derive(Deserialize)]
@@ -2597,7 +2816,7 @@ struct WriteFileRequest {
     session_id: Option<String>,
 }
 
-#[derive(Serialize)]
+#[derive(Deserialize, Serialize)]
 struct FileResponse {
     path: String,
     content: String,
@@ -2605,14 +2824,14 @@ struct FileResponse {
     language: Option<String>,
 }
 
-#[derive(Clone, Copy, Serialize)]
+#[derive(Clone, Copy, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 enum FileSystemEntryKind {
     Directory,
     File,
 }
 
-#[derive(Serialize)]
+#[derive(Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct DirectoryEntry {
     kind: FileSystemEntryKind,
@@ -2620,7 +2839,7 @@ struct DirectoryEntry {
     path: String,
 }
 
-#[derive(Serialize)]
+#[derive(Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct DirectoryResponse {
     entries: Vec<DirectoryEntry>,
@@ -2628,7 +2847,7 @@ struct DirectoryResponse {
     path: String,
 }
 
-#[derive(Serialize)]
+#[derive(Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct GitStatusFile {
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -2640,7 +2859,7 @@ struct GitStatusFile {
     worktree_status: Option<String>,
 }
 
-#[derive(Serialize)]
+#[derive(Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct GitStatusResponse {
     ahead: usize,
@@ -2656,7 +2875,7 @@ struct GitStatusResponse {
     workdir: String,
 }
 
-#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 enum GitDiffSection {
     Staged,
@@ -2679,7 +2898,7 @@ impl GitDiffSection {
     }
 }
 
-#[derive(Clone, Copy, Debug, Deserialize)]
+#[derive(Clone, Copy, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 enum GitFileAction {
     Stage,
@@ -2696,16 +2915,20 @@ struct GitDiffRequest {
     #[serde(default)]
     status_code: Option<String>,
     workdir: String,
+    #[serde(default)]
+    project_id: Option<String>,
+    #[serde(default)]
+    session_id: Option<String>,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 enum GitDiffChangeType {
     Edit,
     Create,
 }
 
-#[derive(Serialize)]
+#[derive(Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct GitDiffResponse {
     change_type: GitDiffChangeType,
@@ -2719,7 +2942,7 @@ struct GitDiffResponse {
     summary: String,
 }
 
-#[derive(Serialize)]
+#[derive(Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct GitCommitResponse {
     status: GitStatusResponse,
@@ -2815,14 +3038,14 @@ enum ReviewThreadStatus {
     Dismissed,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct ReviewDocumentResponse {
     review_file_path: String,
     review: ReviewDocument,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct ReviewSummaryResponse {
     change_set_id: String,
@@ -2852,6 +3075,10 @@ struct GitFileActionRequest {
     #[serde(default)]
     status_code: Option<String>,
     workdir: String,
+    #[serde(default)]
+    project_id: Option<String>,
+    #[serde(default)]
+    session_id: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -2859,20 +3086,24 @@ struct GitFileActionRequest {
 struct GitCommitRequest {
     message: String,
     workdir: String,
+    #[serde(default)]
+    project_id: Option<String>,
+    #[serde(default)]
+    session_id: Option<String>,
 }
 
-#[derive(Serialize)]
+#[derive(Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct ErrorResponse {
     error: String,
 }
 
-#[derive(Serialize)]
+#[derive(Deserialize, Serialize)]
 struct HealthResponse {
     ok: bool,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Serialize)]
 struct SendMessageRequest {
     text: String,
     #[serde(default, rename = "expandedText")]
@@ -2881,7 +3112,7 @@ struct SendMessageRequest {
     attachments: Vec<SendMessageAttachmentRequest>,
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct SendMessageAttachmentRequest {
     data: String,
@@ -2976,7 +3207,7 @@ struct CodexRateLimitWindow {
     window_duration_mins: Option<u64>,
 }
 
-#[derive(Clone, Copy, Debug, Serialize)]
+#[derive(Clone, Copy, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 enum AgentReadinessStatus {
     Ready,
@@ -2984,7 +3215,7 @@ enum AgentReadinessStatus {
     NeedsSetup,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct AgentReadiness {
     agent: Agent,
@@ -2995,7 +3226,7 @@ struct AgentReadiness {
     command_path: Option<String>,
 }
 
-#[derive(Serialize)]
+#[derive(Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct StateResponse {
     revision: u64,
@@ -3009,21 +3240,21 @@ struct StateResponse {
     sessions: Vec<Session>,
 }
 
-#[derive(Serialize)]
+#[derive(Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct CreateSessionResponse {
     session_id: String,
     state: StateResponse,
 }
 
-#[derive(Serialize)]
+#[derive(Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct CreateProjectResponse {
     project_id: String,
     state: StateResponse,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct AgentCommand {
     name: String,
@@ -3032,13 +3263,13 @@ struct AgentCommand {
     source: String,
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct AgentCommandsResponse {
     commands: Vec<AgentCommand>,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 enum InstructionDocumentKind {
     RootInstruction,
@@ -3049,7 +3280,7 @@ enum InstructionDocumentKind {
     ReferencedInstruction,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize)]
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Hash, Serialize)]
 #[serde(rename_all = "camelCase")]
 enum InstructionRelation {
     MarkdownLink,
@@ -3057,7 +3288,7 @@ enum InstructionRelation {
     DirectoryDiscovery,
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct InstructionSearchResponse {
     matches: Vec<InstructionSearchMatch>,
@@ -3065,7 +3296,7 @@ struct InstructionSearchResponse {
     workdir: String,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct InstructionSearchMatch {
     line: usize,
@@ -3074,7 +3305,7 @@ struct InstructionSearchMatch {
     text: String,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct InstructionRootPath {
     root_kind: InstructionDocumentKind,
@@ -3082,7 +3313,7 @@ struct InstructionRootPath {
     steps: Vec<InstructionPathStep>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct InstructionPathStep {
     excerpt: String,
@@ -3105,13 +3336,13 @@ struct InstructionSearchGraph {
     incoming: HashMap<String, Vec<InstructionPathStep>>,
 }
 
-#[derive(Serialize)]
+#[derive(Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct PickProjectRootResponse {
     path: Option<String>,
 }
 
-#[derive(Serialize)]
+#[derive(Deserialize, Serialize)]
 #[serde(tag = "type", rename_all = "camelCase")]
 enum DeltaEvent {
     MessageCreated {
@@ -3202,18 +3433,25 @@ fn resolve_session_project_root_path(
             .find_session_index(session_id)
             .ok_or_else(|| ApiError::not_found("session not found"))?;
         let record = &inner.sessions[index];
-        record
+        if let Some(project) = record
             .session
             .project_id
             .as_deref()
             .and_then(|project_id| inner.find_project(project_id))
-            .map(|project| project.root_path.clone())
-            .or_else(|| {
-                inner
-                    .find_project_for_workdir(&record.session.workdir)
-                    .map(|project| project.root_path.clone())
-            })
-            .unwrap_or_else(|| record.session.workdir.clone())
+        {
+            if project.remote_id != LOCAL_REMOTE_ID {
+                return Err(ApiError::bad_request(format!(
+                    "project `{}` is assigned to remote `{}`. Remote file access is not implemented yet.",
+                    project.name, project.remote_id
+                )));
+            }
+            project.root_path.clone()
+        } else {
+            inner
+                .find_project_for_workdir(&record.session.workdir)
+                .map(|project| project.root_path.clone())
+                .unwrap_or_else(|| record.session.workdir.clone())
+        }
     };
 
     fs::canonicalize(&root_path).map_err(|err| match err.kind() {
@@ -3233,11 +3471,16 @@ fn resolve_project_root_path_by_id(
 ) -> Result<PathBuf, ApiError> {
     let root_path = {
         let inner = state.inner.lock().expect("state mutex poisoned");
-        inner
+        let project = inner
             .find_project(project_id)
-            .ok_or_else(|| ApiError::not_found("project not found"))?
-            .root_path
-            .clone()
+            .ok_or_else(|| ApiError::not_found("project not found"))?;
+        if project.remote_id != LOCAL_REMOTE_ID {
+            return Err(ApiError::bad_request(format!(
+                "project `{}` is assigned to remote `{}`. Remote file access is not implemented yet.",
+                project.name, project.remote_id
+            )));
+        }
+        project.root_path.clone()
     };
 
     fs::canonicalize(&root_path).map_err(|err| match err.kind() {

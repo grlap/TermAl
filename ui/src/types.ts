@@ -93,15 +93,29 @@ export type CodexState = {
   rateLimits?: CodexRateLimits | null;
 };
 
+export type RemoteTransport = "local" | "ssh";
+
+export type RemoteConfig = {
+  id: string;
+  name: string;
+  transport: RemoteTransport;
+  enabled: boolean;
+  host?: string | null;
+  port?: number | null;
+  user?: string | null;
+};
+
 export type AppPreferences = {
   defaultCodexReasoningEffort: CodexReasoningEffort;
   defaultClaudeEffort: ClaudeEffortLevel;
+  remotes?: RemoteConfig[] | null;
 };
 
 export type Project = {
   id: string;
   name: string;
   rootPath: string;
+  remoteId?: string | null;
 };
 
 export type Session = {

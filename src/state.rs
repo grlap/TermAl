@@ -5,6 +5,7 @@ struct AppState {
     state_events: broadcast::Sender<String>,
     delta_events: broadcast::Sender<String>,
     shared_codex_runtime: Arc<Mutex<Option<SharedCodexRuntime>>>,
+    remote_registry: Arc<RemoteRegistry>,
     inner: Arc<Mutex<StateInner>>,
 }
 
@@ -13,7 +14,7 @@ impl AppState {
         let persistence_path = resolve_persistence_path(&default_workdir);
         let inner = load_state(&persistence_path)?.unwrap_or_else(|| {
             let mut inner = StateInner::new();
-            let default_project = inner.create_project(None, default_workdir.clone());
+            let default_project = inner.create_project(None, default_workdir.clone(), default_local_remote_id());
             inner.create_session(
                 Agent::Codex,
                 Some("Codex Live".to_owned()),
@@ -37,12 +38,16 @@ impl AppState {
             state_events: broadcast::channel(128).0,
             delta_events: broadcast::channel(256).0,
             shared_codex_runtime: Arc::new(Mutex::new(None)),
+            remote_registry: Arc::new(std::thread::spawn(RemoteRegistry::new)
+                .join()
+                .expect("remote registry init thread panicked")?),
             inner: Arc::new(Mutex::new(inner)),
         };
         {
             let inner = state.inner.lock().expect("state mutex poisoned");
             state.persist_internal_locked(&inner)?;
         }
+        state.restore_remote_event_bridges();
         Ok(state)
     }
 
@@ -55,6 +60,10 @@ impl AppState {
         &self,
         session_id: &str,
     ) -> std::result::Result<AgentCommandsResponse, ApiError> {
+        if self.remote_session_target(session_id)?.is_some() {
+            return self.proxy_remote_list_agent_commands(session_id);
+        }
+
         let session = {
             let inner = self.inner.lock().expect("state mutex poisoned");
             let index = inner
@@ -73,6 +82,10 @@ impl AppState {
         session_id: &str,
         query: &str,
     ) -> std::result::Result<InstructionSearchResponse, ApiError> {
+        if self.remote_session_target(session_id)?.is_some() {
+            return self.proxy_remote_search_instructions(session_id, query);
+        }
+
         let session = {
             let inner = self.inner.lock().expect("state mutex poisoned");
             let index = inner
@@ -88,13 +101,13 @@ impl AppState {
         &self,
         request: CreateSessionRequest,
     ) -> Result<CreateSessionResponse, ApiError> {
-        let mut inner = self.inner.lock().expect("state mutex poisoned");
         let requested_workdir = request
             .workdir
             .as_deref()
             .map(resolve_session_workdir)
             .transpose()?;
-        let project =
+        let project = {
+            let inner = self.inner.lock().expect("state mutex poisoned");
             if let Some(project_id) = request.project_id.as_deref() {
                 Some(inner.find_project(project_id).cloned().ok_or_else(|| {
                     ApiError::bad_request(format!("unknown project `{project_id}`"))
@@ -103,7 +116,8 @@ impl AppState {
                 requested_workdir
                     .as_deref()
                     .and_then(|workdir| inner.find_project_for_workdir(workdir).cloned())
-            };
+            }
+        };
         let workdir = requested_workdir.unwrap_or_else(|| {
             project
                 .as_ref()
@@ -111,6 +125,9 @@ impl AppState {
                 .unwrap_or_else(|| self.default_workdir.clone())
         });
         if let Some(project) = project.as_ref() {
+            if project.remote_id != LOCAL_REMOTE_ID {
+                return self.create_remote_session_proxy(request, project.clone());
+            }
             if !path_contains(&project.root_path, FsPath::new(&workdir)) {
                 return Err(ApiError::bad_request(format!(
                     "session workdir `{workdir}` must stay inside project `{}`",
@@ -120,7 +137,8 @@ impl AppState {
         }
         let agent = request.agent.unwrap_or(Agent::Codex);
         validate_agent_session_setup(agent, &workdir)
-            .map_err(|message| ApiError::bad_request(message))?;
+            .map_err(ApiError::bad_request)?;
+        let mut inner = self.inner.lock().expect("state mutex poisoned");
         let mut record = inner.create_session(
             agent,
             request.name,
@@ -249,13 +267,42 @@ impl AppState {
             }
         }
 
+        let mut next_remotes: Option<Vec<RemoteConfig>> = None;
+        if let Some(remotes) = request.remotes {
+            let normalized_remotes = normalize_remote_configs(remotes)?;
+            let next_remote_ids: HashSet<&str> = normalized_remotes
+                .iter()
+                .map(|remote| remote.id.as_str())
+                .collect();
+            if let Some(project) = inner
+                .projects
+                .iter()
+                .find(|project| !next_remote_ids.contains(project.remote_id.as_str()))
+            {
+                return Err(ApiError::bad_request(format!(
+                    "cannot remove remote `{}` because project `{}` still uses it",
+                    project.remote_id, project.name
+                )));
+            }
+            if inner.preferences.remotes != normalized_remotes {
+                inner.preferences.remotes = normalized_remotes.clone();
+                next_remotes = Some(normalized_remotes);
+                changed = true;
+            }
+        }
+
         if changed {
             self.commit_locked(&mut inner).map_err(|err| {
                 ApiError::internal(format!("failed to persist app settings: {err:#}"))
             })?;
         }
 
-        Ok(self.snapshot_from_inner(&inner))
+        let snapshot = self.snapshot_from_inner(&inner);
+        drop(inner);
+        if let Some(remotes) = next_remotes {
+            self.remote_registry.reconcile(&remotes);
+        }
+        Ok(snapshot)
     }
 
     fn create_project(
@@ -263,9 +310,36 @@ impl AppState {
         request: CreateProjectRequest,
     ) -> Result<CreateProjectResponse, ApiError> {
         let mut inner = self.inner.lock().expect("state mutex poisoned");
-        let root_path = resolve_project_root_path(&request.root_path)?;
+        let remote_id = if request.remote_id.trim().is_empty() {
+            default_local_remote_id()
+        } else {
+            request.remote_id.trim().to_owned()
+        };
+        let remote = inner
+            .find_remote(&remote_id)
+            .cloned()
+            .ok_or_else(|| ApiError::bad_request(format!("unknown remote `{remote_id}`")))?;
+        let trimmed_root_path = request.root_path.trim();
+        if trimmed_root_path.is_empty() {
+            return Err(ApiError::bad_request("project root path cannot be empty"));
+        }
+        let root_path = if matches!(remote.transport, RemoteTransport::Local) {
+            resolve_project_root_path(trimmed_root_path)?
+        } else {
+            trimmed_root_path.to_owned()
+        };
+        if !remote.enabled {
+            return Err(ApiError::bad_request(format!(
+                "remote `{}` is disabled",
+                remote.name
+            )));
+        }
+        if remote_id != LOCAL_REMOTE_ID {
+            drop(inner);
+            return self.create_remote_project_proxy(request, remote, root_path);
+        }
         let existing_len = inner.projects.len();
-        let project = inner.create_project(request.name, root_path);
+        let project = inner.create_project(request.name, root_path, remote_id);
         if inner.projects.len() != existing_len {
             self.commit_locked(&mut inner)
                 .map_err(|err| ApiError::internal(format!("failed to persist project: {err:#}")))?;
@@ -667,6 +741,10 @@ impl AppState {
         session_id: &str,
         request: SendMessageRequest,
     ) -> std::result::Result<DispatchTurnResult, ApiError> {
+        if self.remote_session_target(session_id)?.is_some() {
+            self.proxy_remote_turn_dispatch(session_id, request)?;
+            return Ok(DispatchTurnResult::Queued);
+        }
         let mut inner = self.inner.lock().expect("state mutex poisoned");
         let index = inner
             .find_session_index(session_id)
@@ -744,6 +822,9 @@ impl AppState {
         session_id: &str,
         request: UpdateSessionSettingsRequest,
     ) -> std::result::Result<StateResponse, ApiError> {
+        if self.remote_session_target(session_id)?.is_some() {
+            return self.proxy_remote_session_settings(session_id, request);
+        }
         let mut inner = self.inner.lock().expect("state mutex poisoned");
         let index = inner
             .find_session_index(session_id)
@@ -1018,6 +1099,9 @@ impl AppState {
         &self,
         session_id: &str,
     ) -> std::result::Result<StateResponse, ApiError> {
+        if self.remote_session_target(session_id)?.is_some() {
+            return self.proxy_remote_refresh_session_model_options(session_id);
+        }
         let mut inner = self.inner.lock().expect("state mutex poisoned");
         let index = inner
             .find_session_index(session_id)
@@ -1786,6 +1870,9 @@ impl AppState {
     }
 
     fn kill_session(&self, session_id: &str) -> std::result::Result<StateResponse, ApiError> {
+        if self.remote_session_target(session_id)?.is_some() {
+            return self.proxy_remote_kill_session(session_id);
+        }
         let runtime_to_kill = {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
             let index = inner
@@ -1855,6 +1942,9 @@ impl AppState {
         session_id: &str,
         prompt_id: &str,
     ) -> std::result::Result<StateResponse, ApiError> {
+        if self.remote_session_target(session_id)?.is_some() {
+            return self.proxy_remote_cancel_queued_prompt(session_id, prompt_id);
+        }
         let mut inner = self.inner.lock().expect("state mutex poisoned");
         let index = inner
             .find_session_index(session_id)
@@ -1876,6 +1966,9 @@ impl AppState {
     }
 
     fn stop_session(&self, session_id: &str) -> std::result::Result<StateResponse, ApiError> {
+        if self.remote_session_target(session_id)?.is_some() {
+            return self.proxy_remote_stop_session(session_id);
+        }
         let runtime_to_stop = {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
             let index = inner
@@ -2184,6 +2277,9 @@ impl AppState {
         message_id: &str,
         decision: ApprovalDecision,
     ) -> std::result::Result<StateResponse, ApiError> {
+        if self.remote_session_target(session_id)?.is_some() {
+            return self.proxy_remote_update_approval(session_id, message_id, decision);
+        }
         if matches!(
             decision,
             ApprovalDecision::Interrupted | ApprovalDecision::Canceled
@@ -2471,6 +2567,65 @@ fn codex_approval_result(kind: &CodexApprovalKind, decision: ApprovalDecision) -
     json!({ "decision": decision_value })
 }
 
+fn normalize_remote_configs(remotes: Vec<RemoteConfig>) -> Result<Vec<RemoteConfig>, ApiError> {
+    let mut normalized = vec![RemoteConfig::local()];
+    let mut seen_ids = HashSet::from([default_local_remote_id()]);
+
+    for remote in remotes {
+        let id = remote.id.trim();
+        if id.is_empty() {
+            return Err(ApiError::bad_request("remote id cannot be empty"));
+        }
+        if id.eq_ignore_ascii_case(LOCAL_REMOTE_ID) {
+            continue;
+        }
+        if !seen_ids.insert(id.to_owned()) {
+            return Err(ApiError::bad_request(format!("duplicate remote id `{id}`")));
+        }
+
+        let name = remote.name.trim();
+        if name.is_empty() {
+            return Err(ApiError::bad_request(format!("remote `{id}` must have a name")));
+        }
+
+        match remote.transport {
+            RemoteTransport::Local => {
+                return Err(ApiError::bad_request(format!(
+                    "remote `{id}` cannot use local transport"
+                )));
+            }
+            RemoteTransport::Ssh => {
+                let host = remote.host.as_deref().map(str::trim).unwrap_or("");
+                if host.is_empty() {
+                    return Err(ApiError::bad_request(format!(
+                        "ssh remote `{id}` must have a host"
+                    )));
+                }
+                normalized.push(RemoteConfig {
+                    id: id.to_owned(),
+                    name: name.to_owned(),
+                    transport: RemoteTransport::Ssh,
+                    enabled: remote.enabled,
+                    host: Some(host.to_owned()),
+                    port: Some(remote.port.unwrap_or(DEFAULT_SSH_REMOTE_PORT)),
+                    user: remote
+                        .user
+                        .as_deref()
+                        .map(str::trim)
+                        .filter(|value| !value.is_empty())
+                        .map(str::to_owned),
+                });
+            }
+        }
+    }
+
+    Ok(normalized)
+}
+
+fn normalize_persisted_remote_configs(remotes: Vec<RemoteConfig>) -> Vec<RemoteConfig> {
+    normalize_remote_configs(remotes).unwrap_or_else(|_| default_remote_configs())
+}
+
 struct StateInner {
     codex: CodexState,
     preferences: AppPreferences,
@@ -2496,11 +2651,11 @@ impl StateInner {
         }
     }
 
-    fn create_project(&mut self, name: Option<String>, root_path: String) -> Project {
+    fn create_project(&mut self, name: Option<String>, root_path: String, remote_id: String) -> Project {
         if let Some(existing) = self
             .projects
             .iter()
-            .find(|project| project.root_path == root_path)
+            .find(|project| project.remote_id == remote_id && project.root_path == root_path)
             .cloned()
         {
             return existing;
@@ -2513,6 +2668,8 @@ impl StateInner {
             id: format!("project-{number}"),
             name: dedupe_project_name(&self.projects, &base_name),
             root_path,
+            remote_id,
+            remote_project_id: None,
         };
         self.projects.push(project.clone());
         project
@@ -2542,6 +2699,8 @@ impl StateInner {
             pending_acp_approvals: HashMap::new(),
             queued_prompts: VecDeque::new(),
             message_positions: HashMap::new(),
+            remote_id: None,
+            remote_session_id: None,
             runtime: SessionRuntime::None,
             runtime_reset_required: false,
             session: Session {
@@ -2601,21 +2760,41 @@ impl StateInner {
             .position(|record| record.session.id == session_id)
     }
 
+    fn find_remote_session_index(&self, remote_id: &str, remote_session_id: &str) -> Option<usize> {
+        self.sessions.iter().position(|record| {
+            record.remote_id.as_deref() == Some(remote_id)
+                && record.remote_session_id.as_deref() == Some(remote_session_id)
+        })
+    }
+
     fn find_project(&self, project_id: &str) -> Option<&Project> {
         self.projects
             .iter()
             .find(|project| project.id == project_id)
     }
 
+    fn find_remote(&self, remote_id: &str) -> Option<&RemoteConfig> {
+        self.preferences
+            .remotes
+            .iter()
+            .find(|remote| remote.id == remote_id)
+    }
+
     fn find_project_for_workdir(&self, workdir: &str) -> Option<&Project> {
         let target = FsPath::new(workdir);
         self.projects
             .iter()
-            .filter(|project| path_contains(&project.root_path, target))
+            .filter(|project| project.remote_id == LOCAL_REMOTE_ID && path_contains(&project.root_path, target))
             .max_by_key(|project| project.root_path.len())
     }
 
     fn ensure_projects_consistent(&mut self) {
+        for project in &mut self.projects {
+            if project.remote_id.trim().is_empty() {
+                project.remote_id = default_local_remote_id();
+            }
+        }
+
         let highest_project_number = self
             .projects
             .iter()
@@ -2646,13 +2825,16 @@ impl StateInner {
             let project_id = self
                 .find_project_for_workdir(&workdir)
                 .map(|project| project.id.clone())
-                .unwrap_or_else(|| self.create_project(None, workdir).id);
+                .unwrap_or_else(|| self.create_project(None, workdir, default_local_remote_id()).id);
             self.sessions[index].session.project_id = Some(project_id);
         }
     }
 
     fn recover_interrupted_sessions(&mut self) {
         for index in 0..self.sessions.len() {
+            if self.sessions[index].is_remote_proxy() {
+                continue;
+            }
             let recovery = {
                 let record = &mut self.sessions[index];
                 recover_interrupted_session_record(record)
@@ -2724,7 +2906,10 @@ impl PersistedState {
     fn into_inner(self) -> StateInner {
         let mut inner = StateInner {
             codex: self.codex,
-            preferences: self.preferences,
+            preferences: AppPreferences {
+                remotes: normalize_persisted_remote_configs(self.preferences.remotes),
+                ..self.preferences
+            },
             revision: self.revision,
             next_project_number: self.next_project_number.max(1),
             next_session_number: self.next_session_number,
@@ -2756,13 +2941,19 @@ struct PersistedSessionRecord {
     external_session_id: Option<String>,
     #[serde(default, skip_serializing_if = "VecDeque::is_empty")]
     queued_prompts: VecDeque<QueuedPromptRecord>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    remote_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    remote_session_id: Option<String>,
     session: Session,
 }
 
 impl PersistedSessionRecord {
     fn from_record(record: &SessionRecord) -> Self {
         let mut session = record.session.clone();
-        session.pending_prompts.clear();
+        if !record.is_remote_proxy() {
+            session.pending_prompts.clear();
+        }
 
         Self {
             active_codex_approval_policy: record.active_codex_approval_policy,
@@ -2773,6 +2964,8 @@ impl PersistedSessionRecord {
             codex_sandbox_mode: record.codex_sandbox_mode,
             external_session_id: record.external_session_id.clone(),
             queued_prompts: record.queued_prompts.clone(),
+            remote_id: record.remote_id.clone(),
+            remote_session_id: record.remote_session_id.clone(),
             session,
         }
     }
@@ -2813,7 +3006,9 @@ impl PersistedSessionRecord {
         } else {
             session.reasoning_effort = None;
         }
-        session.pending_prompts.clear();
+        if self.remote_id.is_none() {
+            session.pending_prompts.clear();
+        }
 
         let mut record = SessionRecord {
             active_codex_approval_policy: self.active_codex_approval_policy,
@@ -2828,6 +3023,8 @@ impl PersistedSessionRecord {
             pending_acp_approvals: HashMap::new(),
             queued_prompts: self.queued_prompts,
             message_positions: build_message_positions(&session.messages),
+            remote_id: self.remote_id,
+            remote_session_id: self.remote_session_id,
             runtime: SessionRuntime::None,
             runtime_reset_required: false,
             session,
@@ -2851,9 +3048,17 @@ struct SessionRecord {
     pending_acp_approvals: HashMap<String, AcpPendingApproval>,
     queued_prompts: VecDeque<QueuedPromptRecord>,
     message_positions: HashMap<String, usize>,
+    remote_id: Option<String>,
+    remote_session_id: Option<String>,
     runtime: SessionRuntime,
     runtime_reset_required: bool,
     session: Session,
+}
+
+impl SessionRecord {
+    fn is_remote_proxy(&self) -> bool {
+        self.remote_id.is_some() && self.remote_session_id.is_some()
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -2863,6 +3068,9 @@ struct QueuedPromptRecord {
 }
 
 fn sync_pending_prompts(record: &mut SessionRecord) {
+    if record.is_remote_proxy() {
+        return;
+    }
     record.session.pending_prompts = record
         .queued_prompts
         .iter()

@@ -667,6 +667,115 @@ describe("App", () => {
     }
   });
 
+  it("resyncs after a post-hydration stream error so completed replies do not stay hidden", async () => {
+    const originalFetch = globalThis.fetch;
+    const originalEventSource = globalThis.EventSource;
+    const originalResizeObserver = globalThis.ResizeObserver;
+    const stateFetch = createDeferred<Response>();
+    const fetchMock = vi.fn((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/api/state") {
+        return stateFetch.promise;
+      }
+      throw new Error(`Unexpected fetch: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("EventSource", EventSourceMock as unknown as typeof EventSource);
+    vi.stubGlobal("ResizeObserver", ResizeObserverMock as unknown as typeof ResizeObserver);
+    const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
+    HTMLElement.prototype.scrollIntoView = vi.fn();
+    try {
+      await renderApp();
+      const eventSource = EventSourceMock.instances[0];
+      expect(eventSource).toBeTruthy();
+      act(() => {
+        eventSource.dispatchOpen();
+        eventSource.dispatchNamedEvent("state", {
+          revision: 1,
+          projects: [],
+          sessions: [
+            makeSession("session-1", {
+              name: "Codex Session",
+              status: "active",
+              preview: "test",
+              messages: [
+                {
+                  id: "message-user-1",
+                  type: "text",
+                  timestamp: "10:00",
+                  author: "you",
+                  text: "test",
+                },
+              ],
+            }),
+          ],
+        });
+      });
+
+      await clickAndSettle(await screen.findByRole("button", { name: "Sessions" }));
+      const sessionList = document.querySelector(".session-list");
+      if (!(sessionList instanceof HTMLDivElement)) {
+        throw new Error("Session list not found");
+      }
+
+      const sessionRowLabel = await within(sessionList).findByText("Codex Session");
+      const sessionRowButton = sessionRowLabel.closest("button");
+      if (!sessionRowButton) {
+        throw new Error("Session row button not found");
+      }
+
+      await clickAndSettle(sessionRowButton);
+      await screen.findByText("Waiting for the next chunk of output...");
+      act(() => {
+        eventSource.dispatchError();
+      });
+      await waitFor(() => {
+        expect(fetchMock.mock.calls.some(([url]) => String(url) === "/api/state")).toBe(true);
+      });
+      await act(async () => {
+        stateFetch.resolve(
+          jsonResponse({
+            revision: 2,
+            projects: [],
+            sessions: [
+              makeSession("session-1", {
+                name: "Codex Session",
+                status: "idle",
+                preview: "Here.",
+                messages: [
+                  {
+                    id: "message-user-1",
+                    type: "text",
+                    timestamp: "10:00",
+                    author: "you",
+                    text: "test",
+                  },
+                  {
+                    id: "message-assistant-1",
+                    type: "text",
+                    timestamp: "10:01",
+                    author: "assistant",
+                    text: "Here.",
+                  },
+                ],
+              }),
+            ],
+          }),
+        );
+        await flushUiWork();
+      });
+      await waitFor(() => {
+        expect(screen.getAllByText("Here.").length).toBeGreaterThan(0);
+      });
+      expect(screen.queryByText("Waiting for the next chunk of output...")).not.toBeInTheDocument();
+    } finally {
+      HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
+      restoreGlobal("fetch", originalFetch);
+      restoreGlobal("EventSource", originalEventSource);
+      restoreGlobal("ResizeObserver", originalResizeObserver);
+    }
+  });
+
   it("refreshes model options after creating a new Codex session", async () => {
     const originalEventSource = globalThis.EventSource;
     const originalResizeObserver = globalThis.ResizeObserver;
@@ -1541,4 +1650,3 @@ describe("App", () => {
     expect(secondAttempt.warning).toBeNull();
   });
 });
-

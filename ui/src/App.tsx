@@ -54,6 +54,15 @@ import {
   normalizeDisplayPath,
   relativizePathToWorkspace,
 } from "./path-display";
+import {
+  LOCAL_REMOTE_ID,
+  createBuiltinLocalRemote,
+  isLocalRemoteId,
+  normalizeRemoteConfigs,
+  remoteConnectionLabel,
+  remoteDisplayName,
+  resolveProjectRemoteId,
+} from "./remotes";
 import { resolvePaneScrollCommand } from "./pane-keyboard";
 import { AgentSessionPanel, AgentSessionPanelFooter } from "./panels/AgentSessionPanel";
 import {
@@ -103,6 +112,7 @@ import type {
   SubagentResultMessage,
   PendingPrompt,
   Project,
+  RemoteConfig,
   SandboxMode,
   Session,
   SessionModelOption,
@@ -201,7 +211,7 @@ type SessionErrorMap = Record<string, string | undefined>;
 type SessionNoticeMap = Record<string, string | undefined>;
 type BackendConnectionState = "connecting" | "connected" | "reconnecting" | "offline";
 type SessionAgentCommandMap = Record<string, AgentCommand[] | undefined>;
-type PreferencesTabId = "themes" | "appearance" | "codex-prompts" | "claude-approvals";
+type PreferencesTabId = "themes" | "appearance" | "remotes" | "codex-prompts" | "claude-approvals";
 type DraftImageAttachment = ImageAttachment & {
   base64Data: string;
   id: string;
@@ -327,6 +337,7 @@ const GEMINI_APPROVAL_OPTIONS = [
 const PREFERENCES_TABS: ReadonlyArray<{ id: PreferencesTabId; label: string }> = [
   { id: "themes", label: "Themes" },
   { id: "appearance", label: "Editor & UI appearance" },
+  { id: "remotes", label: "Remotes" },
   { id: "codex-prompts", label: "Codex defaults" },
   { id: "claude-approvals", label: "Claude defaults" },
 ];
@@ -440,7 +451,34 @@ function resolveAppPreferences(preferences?: AppPreferences | null) {
     defaultCodexReasoningEffort:
       preferences?.defaultCodexReasoningEffort ?? DEFAULT_CODEX_REASONING_EFFORT,
     defaultClaudeEffort: preferences?.defaultClaudeEffort ?? DEFAULT_CLAUDE_EFFORT,
+    remotes: normalizeRemoteConfigs(preferences?.remotes),
   };
+}
+
+function resolveRemoteConfig(
+  remoteLookup: ReadonlyMap<string, RemoteConfig>,
+  remoteId?: string | null,
+): RemoteConfig {
+  return remoteLookup.get(remoteId?.trim() || LOCAL_REMOTE_ID) ?? createBuiltinLocalRemote();
+}
+
+function describeProjectScope(
+  project: Project,
+  remoteLookup: ReadonlyMap<string, RemoteConfig>,
+): string {
+  const remoteId = resolveProjectRemoteId(project);
+  const remote = resolveRemoteConfig(remoteLookup, remoteId);
+  const remoteName = remoteDisplayName(remote, remoteId);
+  const connection = remoteConnectionLabel(remote);
+  if (isLocalRemoteId(remoteId)) {
+    return `${remoteName} - ${project.rootPath}`;
+  }
+
+  return `${remoteName} (${connection}) - ${project.rootPath}`;
+}
+
+function remoteBadgeLabel(remote: RemoteConfig): string {
+  return remote.transport === "local" ? "Local" : "SSH";
 }
 
 function codexReasoningEffortOption(
@@ -855,6 +893,7 @@ export default function App() {
   const [sessionListSearchQuery, setSessionListSearchQuery] = useState("");
   const [selectedProjectId, setSelectedProjectId] = useState<string>(ALL_PROJECTS_FILTER_ID);
   const [newProjectRootPath, setNewProjectRootPath] = useState("");
+  const [newProjectRemoteId, setNewProjectRemoteId] = useState<string>(LOCAL_REMOTE_ID);
   const [isCreatingProject, setIsCreatingProject] = useState(false);
   const [themeId, setThemeId] = useState<ThemeId>(() => getStoredThemePreference());
   const [fontSizePx, setFontSizePx] = useState<number>(() => getStoredFontSizePreference());
@@ -869,6 +908,9 @@ export default function App() {
     useState<ClaudeApprovalMode>("ask");
   const [defaultClaudeEffort, setDefaultClaudeEffort] =
     useState<ClaudeEffortLevel>(DEFAULT_CLAUDE_EFFORT);
+  const [remoteConfigs, setRemoteConfigs] = useState<RemoteConfig[]>(() =>
+    resolveAppPreferences(null).remotes,
+  );
   const [defaultCursorMode, setDefaultCursorMode] = useState<CursorMode>("agent");
   const [defaultGeminiApprovalMode, setDefaultGeminiApprovalMode] =
     useState<GeminiApprovalMode>("default");
@@ -980,6 +1022,25 @@ export default function App() {
     selectedProjectId === ALL_PROJECTS_FILTER_ID
       ? null
       : (projectLookup.get(selectedProjectId) ?? null);
+  const remoteLookup = useMemo(
+    () => new Map(remoteConfigs.map((remote) => [remote.id, remote])),
+    [remoteConfigs],
+  );
+  const localRemoteConfig = remoteLookup.get(LOCAL_REMOTE_ID) ?? createBuiltinLocalRemote();
+  const enabledProjectRemotes = useMemo(
+    () => remoteConfigs.filter((remote) => remote.enabled || isLocalRemoteId(remote.id)),
+    [remoteConfigs],
+  );
+  const newProjectSelectedRemote = resolveRemoteConfig(remoteLookup, newProjectRemoteId);
+  const newProjectUsesLocalRemote = isLocalRemoteId(newProjectRemoteId);
+  const createProjectRemoteOptions = useMemo<readonly ComboboxOption[]>(() => {
+    return enabledProjectRemotes.map((remote) => ({
+      label: remoteDisplayName(remote, remote.id),
+      value: remote.id,
+      description: remoteConnectionLabel(remote),
+      badges: [remoteBadgeLabel(remote)],
+    }));
+  }, [enabledProjectRemotes]);
   const newSessionModelOptions = NEW_SESSION_MODEL_OPTIONS[newSessionAgent];
   const newSessionModel =
     newSessionModelByAgent[newSessionAgent] ?? defaultNewSessionModel(newSessionAgent);
@@ -987,17 +1048,25 @@ export default function App() {
     createSessionProjectId === CREATE_SESSION_WORKSPACE_ID
       ? null
       : (projectLookup.get(createSessionProjectId) ?? null);
+  const createSessionSelectedRemote = createSessionSelectedProject
+    ? resolveRemoteConfig(remoteLookup, resolveProjectRemoteId(createSessionSelectedProject))
+    : localRemoteConfig;
   const createSessionProjectOptions = useMemo<readonly ComboboxOption[]>(() => {
     const workspaceLabel = activeSession?.workdir ? "Current workspace" : "Default workspace";
 
     return [
       { label: workspaceLabel, value: CREATE_SESSION_WORKSPACE_ID },
-      ...projects.map((project) => ({
-        label: project.name,
-        value: project.id,
-      })),
+      ...projects.map((project) => {
+        const remote = resolveRemoteConfig(remoteLookup, resolveProjectRemoteId(project));
+        return {
+          label: project.name,
+          value: project.id,
+          description: describeProjectScope(project, remoteLookup),
+          badges: [remoteBadgeLabel(remote)],
+        };
+      }),
     ];
-  }, [activeSession?.workdir, projects]);
+  }, [activeSession?.workdir, projects, remoteLookup]);
   const controlPanelProjectOptions = useMemo<readonly ComboboxOption[]>(() => {
     return [
       {
@@ -1005,23 +1074,37 @@ export default function App() {
         value: ALL_PROJECTS_FILTER_ID,
         description: "Show every session in this window.",
       },
-      ...projects.map((project) => ({
-        label: project.name,
-        value: project.id,
-        description: project.rootPath,
-      })),
+      ...projects.map((project) => {
+        const remote = resolveRemoteConfig(remoteLookup, resolveProjectRemoteId(project));
+        return {
+          label: project.name,
+          value: project.id,
+          description: describeProjectScope(project, remoteLookup),
+          badges: [remoteBadgeLabel(remote)],
+        };
+      }),
     ];
-  }, [projects]);
+  }, [projects, remoteLookup]);
   const createSessionProjectHint = createSessionSelectedProject
-    ? createSessionSelectedProject.rootPath
+    ? describeProjectScope(createSessionSelectedProject, remoteLookup)
     : activeSession?.workdir
       ? `Uses ${activeSession.workdir}`
       : "Uses the app default workspace.";
+  const createSessionUsesRemoteProject =
+    !!createSessionSelectedProject &&
+    !isLocalRemoteId(resolveProjectRemoteId(createSessionSelectedProject));
+  const createSessionProjectSelectionError = null;
   const createSessionUsesSessionModelPicker = usesSessionModelPicker(newSessionAgent);
-  const createSessionAgentReadiness = agentReadinessByAgent.get(newSessionAgent) ?? null;
+  const createSessionAgentReadiness = createSessionUsesRemoteProject
+    ? null
+    : agentReadinessByAgent.get(newSessionAgent) ?? null;
   const createSessionBlocked = createSessionAgentReadiness?.blocking ?? false;
-  const derivedControlPanelWorkspaceRoot =
-    selectedProject?.rootPath ?? activeSession?.workdir ?? sessions[0]?.workdir ?? null;
+  const selectedProjectRemoteId = selectedProject ? resolveProjectRemoteId(selectedProject) : null;
+  const derivedControlPanelWorkspaceRoot = selectedProject
+    ? selectedProjectRemoteId && isLocalRemoteId(selectedProjectRemoteId)
+      ? selectedProject.rootPath
+      : null
+    : activeSession?.workdir ?? sessions[0]?.workdir ?? null;
   const derivedControlPanelFilesystemRoot = derivedControlPanelWorkspaceRoot;
   const derivedControlPanelGitWorkdir = derivedControlPanelWorkspaceRoot;
   const projectScopedSessions = useMemo(() => {
@@ -1072,6 +1155,12 @@ export default function App() {
       setCreateSessionProjectId(CREATE_SESSION_WORKSPACE_ID);
     }
   }, [createSessionProjectId, projectLookup]);
+
+  useEffect(() => {
+    if (!enabledProjectRemotes.some((remote) => remote.id === newProjectRemoteId)) {
+      setNewProjectRemoteId(enabledProjectRemotes[0]?.id ?? LOCAL_REMOTE_ID);
+    }
+  }, [enabledProjectRemotes, newProjectRemoteId]);
 
   useEffect(() => {
     const previousDerived = lastDerivedControlPanelFilesystemRootRef.current?.trim() ?? "";
@@ -1451,6 +1540,7 @@ export default function App() {
     const preferences = resolveAppPreferences(nextState.preferences);
     setDefaultCodexReasoningEffort(preferences.defaultCodexReasoningEffort);
     setDefaultClaudeEffort(preferences.defaultClaudeEffort);
+    setRemoteConfigs(preferences.remotes);
   }
 
   function adoptState(
@@ -1482,6 +1572,7 @@ export default function App() {
   async function persistAppPreferences(payload: {
     defaultCodexReasoningEffort?: CodexReasoningEffort;
     defaultClaudeEffort?: ClaudeEffortLevel;
+    remotes?: RemoteConfig[];
   }) {
     try {
       const state = await updateAppSettings(payload);
@@ -1663,14 +1754,15 @@ export default function App() {
         return;
       }
 
+      const isOnline = readNavigatorOnline();
       setBackendConnectionState(
-        readNavigatorOnline()
+        isOnline
           ? latestStateRevisionRef.current === null
             ? "connecting"
             : "reconnecting"
           : "offline",
       );
-      if (latestStateRevisionRef.current === null) {
+      if (isOnline) {
         requestStateResync();
       }
     };
@@ -2199,7 +2291,15 @@ export default function App() {
       setRequestError("Choose a model.");
       return false;
     }
-    const readiness = agentReadinessByAgent.get(agent);
+    const targetProject =
+      projectSelectionId !== CREATE_SESSION_WORKSPACE_ID
+        ? projectLookup.get(projectSelectionId) ?? null
+        : null;
+    const targetUsesRemoteProject =
+      !!targetProject && !isLocalRemoteId(resolveProjectRemoteId(targetProject));
+    const readiness = targetUsesRemoteProject
+      ? null
+      : agentReadinessByAgent.get(agent);
     if (readiness?.blocking) {
       setRequestError(readiness.detail);
       return false;
@@ -2275,6 +2375,7 @@ export default function App() {
   }
 
   function openCreateProjectDialog() {
+    setNewProjectRemoteId(LOCAL_REMOTE_ID);
     setRequestError(null);
     setIsCreateProjectOpen(true);
   }
@@ -2288,10 +2389,11 @@ export default function App() {
 
     setIsCreatingProject(true);
     try {
-      const created = await createProject({ rootPath });
+      const created = await createProject({ rootPath, remoteId: newProjectRemoteId });
       adoptState(created.state);
       setSelectedProjectId(created.projectId);
       setNewProjectRootPath("");
+      setNewProjectRemoteId(LOCAL_REMOTE_ID);
       setRequestError(null);
       return true;
     } catch (error) {
@@ -2303,6 +2405,11 @@ export default function App() {
   }
 
   async function handlePickProjectRoot() {
+    if (!newProjectUsesLocalRemote) {
+      setRequestError("Remote projects need a path from the remote machine. Enter it manually.");
+      return;
+    }
+
     setIsCreatingProject(true);
     try {
       const response = await pickProjectRoot();
@@ -3500,7 +3607,7 @@ export default function App() {
                       >
                         <span className="project-row-copy">
                           <strong>{project.name}</strong>
-                          <span className="project-row-path">{project.rootPath}</span>
+                          <span className="project-row-path">{describeProjectScope(project, remoteLookup)}</span>
                         </span>
                         <span className="project-row-count">{projectSessionCounts.get(project.id) ?? 0}</span>
                       </button>
@@ -4175,6 +4282,13 @@ export default function App() {
                 <p className="create-session-field-hint">{createSessionProjectHint}</p>
               </div>
 
+              {createSessionProjectSelectionError ? (
+                <article className="thread-notice create-session-readiness">
+                  <div className="card-label">Remote</div>
+                  <p>{createSessionProjectSelectionError}</p>
+                </article>
+              ) : null}
+
               {createSessionAgentReadiness ? (
                 <article className="thread-notice create-session-readiness">
                   <div className="card-label">
@@ -4204,7 +4318,7 @@ export default function App() {
                 <button
                   className="send-button create-session-submit"
                   type="submit"
-                  disabled={isCreating || createSessionBlocked}
+                  disabled={isCreating || createSessionBlocked || !!createSessionProjectSelectionError}
                 >
                   {isCreating ? "Creating..." : "Create session"}
                 </button>
@@ -4238,7 +4352,7 @@ export default function App() {
                 <div className="card-label">Project</div>
                 <h2 id="create-project-dialog-title">Add project</h2>
                 <p className="dialog-copy">
-                  Pick a folder to add it as a project and scope sessions to it.
+                  Choose a local folder or enter a remote root path to add a scoped project.
                 </p>
               </div>
 
@@ -4277,18 +4391,39 @@ export default function App() {
               ) : null}
 
               <div className="create-project-field">
+                <label className="session-control-label" htmlFor="create-project-remote">
+                  Remote
+                </label>
+                <ThemedCombobox
+                  id="create-project-remote"
+                  value={newProjectRemoteId}
+                  options={createProjectRemoteOptions}
+                  onChange={setNewProjectRemoteId}
+                  disabled={isCreatingProject}
+                />
+                <p className="create-session-field-hint">
+                  {remoteDisplayName(newProjectSelectedRemote, newProjectRemoteId)} - {remoteConnectionLabel(newProjectSelectedRemote)}
+                </p>
+              </div>
+
+              <div className="create-project-field">
                 <label className="session-control-label" htmlFor="create-project-root">
-                  Folder
+                  {newProjectUsesLocalRemote ? "Folder" : "Remote root path"}
                 </label>
                 <input
                   id="create-project-root"
                   className="themed-input project-root-input"
                   type="text"
                   value={newProjectRootPath}
-                  placeholder="/path/to/project"
+                  placeholder={newProjectUsesLocalRemote ? "/path/to/project" : "/remote/path/to/project"}
                   onChange={(event) => setNewProjectRootPath(event.target.value)}
                   disabled={isCreatingProject}
                 />
+                <p className="create-session-field-hint">
+                  {newProjectUsesLocalRemote
+                    ? "Local projects use the folder picker and local filesystem panels immediately."
+                    : "Remote projects store the remote path and route files and sessions through the local SSH proxy."}
+                </p>
               </div>
 
               <div className="dialog-actions create-project-dialog-actions">
@@ -4296,7 +4431,7 @@ export default function App() {
                   className="ghost-button"
                   type="button"
                   onClick={() => void handlePickProjectRoot()}
-                  disabled={isCreatingProject}
+                  disabled={isCreatingProject || !newProjectUsesLocalRemote}
                 >
                   Choose folder
                 </button>
@@ -4402,6 +4537,13 @@ export default function App() {
                     onSelectFontSize={(nextValue) =>
                       setFontSizePx(clampFontSizePreference(nextValue))
                     }
+                  />
+                ) : settingsTab === "remotes" ? (
+                  <RemotePreferencesPanel
+                    remotes={remoteConfigs}
+                    onSaveRemotes={(nextRemotes) => {
+                      void persistAppPreferences({ remotes: nextRemotes });
+                    }}
                   />
                 ) : settingsTab === "codex-prompts" ? (
                   <CodexPromptPreferencesPanel
@@ -4794,6 +4936,264 @@ function FontSizePreferenceControl({
   );
 }
 
+function validateRemoteDrafts(remotes: RemoteConfig[]): string | null {
+  let hasLocalRemote = false;
+  const seenIds = new Set<string>();
+
+  for (const remote of remotes) {
+    const id = remote.id.trim();
+    const name = remote.name.trim();
+    if (!id) {
+      return "Every remote needs an id.";
+    }
+
+    const normalizedId = id.toLowerCase();
+    if (seenIds.has(normalizedId)) {
+      return `Remote ids must be unique. Duplicate id: ${id}.`;
+    }
+    seenIds.add(normalizedId);
+
+    if (!name) {
+      return `Remote ${id} needs a name.`;
+    }
+
+    if (isLocalRemoteId(id)) {
+      hasLocalRemote = true;
+      continue;
+    }
+
+    if (!(remote.host?.trim())) {
+      return `Remote ${name} needs a host.`;
+    }
+    if (remote.port !== null && remote.port !== undefined) {
+      if (!Number.isInteger(remote.port) || remote.port <= 0 || remote.port > 65535) {
+        return `Remote ${name} has an invalid SSH port.`;
+      }
+    }
+  }
+
+  return hasLocalRemote ? null : "The built-in local remote is required.";
+}
+
+function createSshRemoteDraft(remotes: RemoteConfig[]): RemoteConfig {
+  let suffix = remotes.length;
+  let id = `ssh-${suffix}`;
+  const existingIds = new Set(remotes.map((remote) => remote.id.trim().toLowerCase()));
+  while (existingIds.has(id)) {
+    suffix += 1;
+    id = `ssh-${suffix}`;
+  }
+
+  return {
+    id,
+    name: `SSH Remote ${suffix}`,
+    transport: "ssh",
+    enabled: true,
+    host: "",
+    port: 22,
+    user: "",
+  };
+}
+
+function RemotePreferencesPanel({
+  remotes,
+  onSaveRemotes,
+}: {
+  remotes: RemoteConfig[];
+  onSaveRemotes: (remotes: RemoteConfig[]) => void;
+}) {
+  const [draftRemotes, setDraftRemotes] = useState<RemoteConfig[]>(remotes);
+
+  useEffect(() => {
+    setDraftRemotes(remotes);
+  }, [remotes]);
+
+  const validationError = useMemo(() => validateRemoteDrafts(draftRemotes), [draftRemotes]);
+  const hasChanges = useMemo(
+    () => JSON.stringify(draftRemotes) !== JSON.stringify(remotes),
+    [draftRemotes, remotes],
+  );
+
+  function updateRemote(index: number, patch: Partial<RemoteConfig>) {
+    setDraftRemotes((current) =>
+      current.map((remote, remoteIndex) =>
+        remoteIndex === index ? { ...remote, ...patch } : remote,
+      ),
+    );
+  }
+
+  return (
+    <section className="settings-panel-stack">
+      <div className="settings-panel-intro">
+        <div>
+          <p className="session-control-label">Local control plane</p>
+          <p className="settings-panel-copy">
+            Remote definitions live in the local TermAl server. Projects point at one remote, and SSH-backed execution will route through that mapping.
+          </p>
+        </div>
+      </div>
+
+      <article className="message-card prompt-settings-card remote-settings-card">
+        <div className="card-label">Project Routing</div>
+        <h3>Remote definitions</h3>
+        <div className="remote-settings-list">
+          {draftRemotes.map((remote, index) => {
+            const isLocal = isLocalRemoteId(remote.id);
+            return (
+              <article key={`${remote.id}-${index}`} className="remote-settings-row">
+                <div className="remote-settings-row-header">
+                  <div>
+                    <p className="session-control-label">
+                      {isLocal ? "Local remote" : remote.name.trim() || `Remote ${index}`}
+                    </p>
+                    <p className="settings-panel-copy">{remoteConnectionLabel(remote)}</p>
+                  </div>
+                  <div className="remote-settings-badges">
+                    <span className="remote-settings-badge">{remoteBadgeLabel(remote)}</span>
+                    <span className="remote-settings-badge">
+                      {remote.enabled || isLocal ? "Enabled" : "Disabled"}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="remote-settings-row-fields">
+                  <div className="session-control-group">
+                    <label className="session-control-label" htmlFor={`remote-id-${index}`}>
+                      Remote id
+                    </label>
+                    <input
+                      id={`remote-id-${index}`}
+                      className="themed-input"
+                      type="text"
+                      value={remote.id}
+                      onChange={(event) => updateRemote(index, { id: event.target.value })}
+                      disabled={isLocal}
+                    />
+                  </div>
+                  <div className="session-control-group">
+                    <label className="session-control-label" htmlFor={`remote-name-${index}`}>
+                      Name
+                    </label>
+                    <input
+                      id={`remote-name-${index}`}
+                      className="themed-input"
+                      type="text"
+                      value={remote.name}
+                      onChange={(event) => updateRemote(index, { name: event.target.value })}
+                      disabled={isLocal}
+                    />
+                  </div>
+                  {!isLocal ? (
+                    <>
+                      <div className="session-control-group">
+                        <label className="session-control-label" htmlFor={`remote-host-${index}`}>
+                          Host
+                        </label>
+                        <input
+                          id={`remote-host-${index}`}
+                          className="themed-input"
+                          type="text"
+                          value={remote.host ?? ""}
+                          onChange={(event) => updateRemote(index, { host: event.target.value })}
+                        />
+                      </div>
+                      <div className="session-control-group">
+                        <label className="session-control-label" htmlFor={`remote-user-${index}`}>
+                          User
+                        </label>
+                        <input
+                          id={`remote-user-${index}`}
+                          className="themed-input"
+                          type="text"
+                          value={remote.user ?? ""}
+                          onChange={(event) => updateRemote(index, { user: event.target.value })}
+                        />
+                      </div>
+                      <div className="session-control-group">
+                        <label className="session-control-label" htmlFor={`remote-port-${index}`}>
+                          Port
+                        </label>
+                        <input
+                          id={`remote-port-${index}`}
+                          className="themed-input"
+                          type="number"
+                          min={1}
+                          max={65535}
+                          value={remote.port ?? 22}
+                          onChange={(event) => {
+                            const value = event.target.value.trim();
+                            updateRemote(index, {
+                              port: value ? Number.parseInt(value, 10) : null,
+                            });
+                          }}
+                        />
+                      </div>
+                      <label className="remote-settings-toggle">
+                        <input
+                          type="checkbox"
+                          checked={remote.enabled}
+                          onChange={(event) => updateRemote(index, { enabled: event.target.checked })}
+                        />
+                        <span>Enabled for new projects</span>
+                      </label>
+                    </>
+                  ) : null}
+                </div>
+
+                {!isLocal ? (
+                  <div className="remote-settings-row-actions">
+                    <button
+                      className="ghost-button"
+                      type="button"
+                      onClick={() => {
+                        setDraftRemotes((current) => current.filter((_, remoteIndex) => remoteIndex !== index));
+                      }}
+                    >
+                      Remove
+                    </button>
+                  </div>
+                ) : null}
+              </article>
+            );
+          })}
+        </div>
+
+        <div className="remote-settings-actions">
+          <button
+            className="ghost-button"
+            type="button"
+            onClick={() => {
+              setDraftRemotes((current) => [...current, createSshRemoteDraft(current)]);
+            }}
+          >
+            Add SSH remote
+          </button>
+          <button
+            className="ghost-button"
+            type="button"
+            onClick={() => setDraftRemotes(remotes)}
+            disabled={!hasChanges}
+          >
+            Reset
+          </button>
+          <button
+            className="send-button"
+            type="button"
+            onClick={() => onSaveRemotes(draftRemotes)}
+            disabled={!hasChanges || !!validationError}
+          >
+            Save remotes
+          </button>
+        </div>
+
+        <p className="session-control-hint">
+          {validationError ??
+            "Remote ids become stable project routing keys. If you rename one later, the backend will reject the change while projects still reference the old id."}
+        </p>
+      </article>
+    </section>
+  );
+}
 function ClaudeApprovalsPreferencesPanel({
   defaultClaudeApprovalMode,
   defaultClaudeEffort,

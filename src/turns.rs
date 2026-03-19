@@ -1013,6 +1013,59 @@ fn default_claude_effort() -> ClaudeEffortLevel {
     ClaudeEffortLevel::Default
 }
 
+const LOCAL_REMOTE_ID: &str = "local";
+const LOCAL_REMOTE_NAME: &str = "Local";
+const DEFAULT_SSH_REMOTE_PORT: u16 = 22;
+
+fn default_local_remote_id() -> String {
+    LOCAL_REMOTE_ID.to_owned()
+}
+
+fn default_remote_enabled() -> bool {
+    true
+}
+
+fn default_remote_configs() -> Vec<RemoteConfig> {
+    vec![RemoteConfig::local()]
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+enum RemoteTransport {
+    Local,
+    Ssh,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct RemoteConfig {
+    id: String,
+    name: String,
+    transport: RemoteTransport,
+    #[serde(default = "default_remote_enabled")]
+    enabled: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    host: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    port: Option<u16>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    user: Option<String>,
+}
+
+impl RemoteConfig {
+    fn local() -> Self {
+        Self {
+            id: default_local_remote_id(),
+            name: LOCAL_REMOTE_NAME.to_owned(),
+            transport: RemoteTransport::Local,
+            enabled: true,
+            host: None,
+            port: None,
+            user: None,
+        }
+    }
+}
+
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct AppPreferences {
@@ -1020,6 +1073,8 @@ struct AppPreferences {
     default_codex_reasoning_effort: CodexReasoningEffort,
     #[serde(default = "default_claude_effort")]
     default_claude_effort: ClaudeEffortLevel,
+    #[serde(default = "default_remote_configs")]
+    remotes: Vec<RemoteConfig>,
 }
 
 impl Default for AppPreferences {
@@ -1027,6 +1082,7 @@ impl Default for AppPreferences {
         Self {
             default_codex_reasoning_effort: default_codex_reasoning_effort(),
             default_claude_effort: default_claude_effort(),
+            remotes: default_remote_configs(),
         }
     }
 }

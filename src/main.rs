@@ -5,7 +5,7 @@ use std::io::{self, BufRead, BufReader, Seek, SeekFrom, Write};
 use std::net::SocketAddr;
 use std::path::{Path as FsPath, PathBuf};
 use std::process::{Child, Command, Stdio};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU16, Ordering};
 use std::sync::mpsc::{self, Sender};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -60,6 +60,7 @@ async fn run_server() -> Result<()> {
     let address = SocketAddr::from(([127, 0, 0, 1], port));
 
     let state = AppState::new(cwd.clone())?;
+    let shutdown_state = state.clone();
     let app = Router::new()
         .route("/api/health", get(health))
         .route("/api/file", get(read_file).put(write_file))
@@ -120,9 +121,19 @@ async fn run_server() -> Result<()> {
     println!("default cwd: {cwd}");
     println!("ui proxy target: /api");
 
-    axum::serve(listener, app)
+    let result = axum::serve(listener, app)
         .await
-        .context("backend server failed")
+        .context("backend server failed");
+
+    // Drop the AppState (which contains reqwest::blocking::Client) on a
+    // regular thread so its internal Tokio runtime isn't dropped inside our
+    // async context — that would panic with "Cannot drop a runtime in a
+    // context where blocking is not allowed".
+    std::thread::spawn(move || drop(shutdown_state))
+        .join()
+        .expect("shutdown cleanup thread panicked");
+
+    result
 }
 
 fn diff_change_set_id(message_id: &str) -> String {
@@ -217,6 +228,7 @@ impl Mode {
     }
 }
 
+include!("remote.rs");
 include!("state.rs");
 include!("runtime.rs");
 include!("turns.rs");

