@@ -3,7 +3,7 @@
 Updated against the current checked-in code in `src/main.rs`, `ui/src/App.tsx`,
 `ui/package.json`, and `ui/vite.config.ts`.
 
-The older entries for "No image paste support", Claude `control_request` fallthrough, "No SSE/WebSocket for real-time updates", "Codex receive has no streaming", "No queueing system for prompts", the stale `/api/state`-after-SSE bootstrap race, Windows `HOME`-only path resolution, and unhandled Codex rate-limit notifications were stale. Those are implemented in the current tree.
+The older entries for "No image paste support", Claude `control_request` fallthrough, "No SSE/WebSocket for real-time updates", "Codex receive has no streaming", "No queueing system for prompts", the stale `/api/state`-after-SSE bootstrap race, the false-positive delta SSE reconciliation drift when a message already existed locally, Windows `HOME`-only path resolution, and unhandled Codex rate-limit notifications were stale. Those are implemented in the current tree.
 
 The earlier command-card UX issue where `OUT` could render as an empty dark block was also fixed.
 Command messages now use a compact `IN` / `OUT` layout with copy controls, a collapsible output
@@ -521,48 +521,11 @@ latency issue is the refresh path during live streaming.
 **What still happens:**
 - The mount path still starts `EventSource("/api/events")` and `fetchState()` in parallel, so a
   late `/api/state` response can overwrite newer delta-applied UI state
-- The UI currently drops delta events when the target message is missing, so once the state drifts
-  there is no immediate self-heal until a later full snapshot arrives
 - Full-state adoption still reruns the broader session reconciliation path whenever a state event
   does arrive, so concurrent activity can still make typing feel slower than it should
 
 **Tasks:**
 - Profile frontend rerenders during active streaming to identify the remaining hot subtrees
-
-## Delta SSE reconciliation can drift behind live session state
-
-**Severity:** Medium
-
-The new delta stream reduces the amount of work done during live output, but it also introduced a
-correctness risk during initial load and reconnects.
-
-**Current behavior:**
-- The frontend opens `/api/events` and fetches `/api/state` at the same time
-- If a delta event is applied first, a slower `/api/state` response can still replace the newer
-  in-memory session tree
-- Later deltas are ignored when the referenced message is not present in the overwritten state
-- The backend paths for streamed text and command updates now publish deltas without also emitting a
-  matching full state snapshot for each update
-
-**Impact:**
-- In-flight assistant output can temporarily disappear on first load or reconnect
-- Once the UI loses the target message for a delta, subsequent deltas for that message are dropped
-- Users only recover when some later full snapshot happens to realign the session tree
-
-**Fix:**
-- Make initial hydration and SSE ordering explicit: either ignore stale `/api/state` payloads or
-  add a monotonic revision so older state cannot overwrite newer deltas
-- Keep delta reconciliation lossless when a message is missing by falling back to a full refresh or
-  by buffering deltas until the message exists
-
-**Likely change locations:**
-- Frontend minimum: `ui/src/App.tsx`
-  `adoptState()` must stop blindly replacing newer in-memory state, the startup `useEffect()` must
-  stop racing `fetchState()` against live SSE updates, and `applyDelta()` must recover when the
-  target message is missing instead of silently dropping the update
-- Backend hardening: `src/main.rs`
-  add a monotonic revision to `StateResponse` and `DeltaEvent`, publish it from `/api/events`, and
-  stamp it on streamed text and command delta events so the frontend can reject stale state
 
 ## Backend persists full state on every streaming text delta
 
@@ -679,12 +642,7 @@ Concrete work implied by the current TermAl parity gaps. Ordered by user impact 
 - [ ] Fix approval lifecycle bookkeeping:
   canceled Claude approvals should clear the session out of `Approval`, and resolving one approval
   must not hide other live approvals in the same session.
-- [ ] Remove the startup snapshot race:
-  avoid letting a late `/api/state` response overwrite newer `/api/events` deltas, or add a
-  revision field so stale state can be ignored before it wipes streamed messages from the UI.
-  Frontend touch points: `ui/src/App.tsx` in `adoptState()` and the startup `useEffect()`.
-  Backend hardening if needed: add revision metadata in `src/main.rs` `StateResponse` and
-  `DeltaEvent`.
+
 - [ ] Add Gemini as a first-class agent in the backend and UI:
   `Agent` enum, session creation, session rendering, and persistence need to stop assuming the
   world is only Claude or Codex.
@@ -744,10 +702,6 @@ Concrete work implied by the current TermAl parity gaps. Ordered by user impact 
 - [ ] Reduce streaming refresh overhead:
   profile SSE-driven rerenders while another session is active, narrow state adoption for
   unrelated sessions, and only consider incremental events after the frontend hot path is trimmed.
-- [ ] Fix lossless delta reconciliation:
-  make the delta SSE path recover when the UI is missing the referenced message, and add frontend
-  coverage for the interaction between initial `/api/state` hydration and live `/api/events`
-  updates. Primary change point: `ui/src/App.tsx` `applyDelta()`.
 - [ ] Preserve command timestamps in the delta path:
   include `timestamp` in first-seen `commandUpdate` payloads or force a full state refresh on
   insert so command cards do not render blank metadata.
