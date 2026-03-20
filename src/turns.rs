@@ -2555,20 +2555,12 @@ fn run_claude_turn(
     resolved_session_id.ok_or_else(|| anyhow!("Claude completed without emitting a session id"))
 }
 
-#[derive(Clone)]
-struct ClaudeParallelAgentState {
-    detail: Option<String>,
-    id: String,
-    status: ParallelAgentStatus,
-    title: String,
-}
-
 #[derive(Default)]
 struct ClaudeTurnState {
     approval_keys_this_turn: HashSet<String>,
     parallel_agent_group_key: Option<String>,
     parallel_agent_order: Vec<String>,
-    parallel_agents: HashMap<String, ClaudeParallelAgentState>,
+    parallel_agents: HashMap<String, ParallelAgentProgress>,
     permission_denied_this_turn: bool,
     pending_tools: HashMap<String, ClaudeToolUse>,
     saw_text_delta: bool,
@@ -2843,7 +2835,7 @@ fn register_claude_tool_use(
             }
             state.parallel_agents.insert(
                 tool_id.to_owned(),
-                ClaudeParallelAgentState {
+                ParallelAgentProgress {
                     detail: Some("Initializing...".to_owned()),
                     id: tool_id.to_owned(),
                     status: ParallelAgentStatus::Initializing,
@@ -2955,7 +2947,7 @@ fn handle_claude_task_result(
         state.parallel_agent_order.push(tool_use_id.to_owned());
         state.parallel_agents.insert(
             tool_use_id.to_owned(),
-            ClaudeParallelAgentState {
+            ParallelAgentProgress {
                 detail: Some(summarized_detail.clone()),
                 id: tool_use_id.to_owned(),
                 status,
@@ -2967,8 +2959,17 @@ fn handle_claude_task_result(
     sync_claude_parallel_agents(state, recorder)?;
 
     let trimmed = detail.trim();
-    if !is_error && !trimmed.is_empty() {
-        recorder.push_subagent_result(&title, trimmed, None, None)?;
+    let result_summary = if trimmed.is_empty() {
+        if is_error {
+            Some(summarized_detail.as_str())
+        } else {
+            None
+        }
+    } else {
+        Some(trimmed)
+    };
+    if let Some(summary) = result_summary {
+        recorder.push_subagent_result(&title, summary, None, None)?;
     }
 
     Ok(())
@@ -2985,14 +2986,7 @@ fn sync_claude_parallel_agents(
     let agents = state
         .parallel_agent_order
         .iter()
-        .filter_map(|agent_id| {
-            state.parallel_agents.get(agent_id).map(|agent| ParallelAgentProgress {
-                detail: agent.detail.clone(),
-                id: agent.id.clone(),
-                status: agent.status,
-                title: agent.title.clone(),
-            })
-        })
+        .filter_map(|agent_id| state.parallel_agents.get(agent_id).cloned())
         .collect::<Vec<_>>();
     if agents.is_empty() {
         return Ok(());

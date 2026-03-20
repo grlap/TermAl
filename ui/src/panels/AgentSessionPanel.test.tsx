@@ -171,6 +171,20 @@ describe("AgentSessionPanelFooter", () => {
     });
   });
 
+  it("shows the paste-only image attachment hint for active sessions", () => {
+    render(
+      renderFooter({
+        session: makeSession("session-a"),
+      }),
+    );
+
+    expect(
+      screen.getByText(
+        "Paste PNG, JPEG, GIF, or WebP images into the prompt. Drag-and-drop is not supported yet.",
+      ),
+    ).toBeInTheDocument();
+  });
+
   it("does not focus the prompt for an inactive pane", async () => {
     render(
       <>

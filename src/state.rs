@@ -2626,6 +2626,9 @@ impl AppState {
                         "session `{session_id}` anchor message `{anchor_message_id}` not found"
                     )
                 })?;
+                // This insertion path is currently reserved for subagent-result messages that do
+                // not contribute preview/status text. Keep the existing session preview/status in
+                // the emitted delta unless a future caller explicitly broadens that contract.
                 let message_index = insert_message_on_record(record, anchor_index, message.clone());
                 (
                     message_index,
@@ -3957,9 +3960,7 @@ fn normalize_remote_configs(remotes: Vec<RemoteConfig>) -> Result<Vec<RemoteConf
 
     for remote in remotes {
         let id = remote.id.trim();
-        if id.is_empty() {
-            return Err(ApiError::bad_request("remote id cannot be empty"));
-        }
+        validate_remote_id_value(id)?;
         if id.eq_ignore_ascii_case(LOCAL_REMOTE_ID) {
             continue;
         }
@@ -3981,25 +3982,15 @@ fn normalize_remote_configs(remotes: Vec<RemoteConfig>) -> Result<Vec<RemoteConf
                 )));
             }
             RemoteTransport::Ssh => {
-                let host = remote.host.as_deref().map(str::trim).unwrap_or("");
-                if host.is_empty() {
-                    return Err(ApiError::bad_request(format!(
-                        "ssh remote `{id}` must have a host"
-                    )));
-                }
+                let host = normalized_remote_ssh_host(&remote)?;
                 normalized.push(RemoteConfig {
                     id: id.to_owned(),
                     name: name.to_owned(),
                     transport: RemoteTransport::Ssh,
                     enabled: remote.enabled,
-                    host: Some(host.to_owned()),
+                    host: Some(host),
                     port: Some(remote.port.unwrap_or(DEFAULT_SSH_REMOTE_PORT)),
-                    user: remote
-                        .user
-                        .as_deref()
-                        .map(str::trim)
-                        .filter(|value| !value.is_empty())
-                        .map(str::to_owned),
+                    user: normalized_remote_ssh_user(&remote)?,
                 });
             }
         }

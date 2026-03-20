@@ -145,9 +145,10 @@ async fn put_review(
             query.session_id.as_deref(),
             query.project_id.as_deref(),
         )? {
-            return state.remote_put_json(
+            return state.remote_put_json_with_query_scope(
                 &scope,
                 &format!("/api/reviews/{}", encode_uri_component(&change_set_id)),
+                Vec::new(),
                 serde_json::to_value(&review).map_err(|err| {
                     ApiError::internal(format!("failed to encode review payload: {err}"))
                 })?,
@@ -1630,6 +1631,12 @@ fn normalize_git_repo_relative_path(path: &str) -> Result<String, ApiError> {
     if trimmed.contains('\0') {
         return Err(ApiError::bad_request(
             "git file path contains invalid characters",
+        ));
+    }
+
+    if trimmed.split(['/', '\\']).any(|component| component == "..") {
+        return Err(ApiError::bad_request(
+            "git file path cannot contain parent-directory traversal",
         ));
     }
 

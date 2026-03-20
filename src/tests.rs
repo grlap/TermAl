@@ -1,6 +1,7 @@
 use super::*;
 use axum::body::{Body, to_bytes};
 use axum::http::Request;
+use std::io::Read as _;
 use tower::util::ServiceExt;
 
 #[derive(Default)]
@@ -534,6 +535,136 @@ fn claude_task_tool_result_updates_parallel_agents_and_records_subagent_result()
         vec![("Rust code review".to_owned(), detail.to_owned())]
     );
 }
+
+#[test]
+fn claude_task_tool_error_records_full_failure_detail() {
+    let mut turn_state = ClaudeTurnState::default();
+    let mut recorder = TestRecorder::default();
+    let mut session_id = None;
+
+    handle_claude_event(
+        &json!({
+            "type": "assistant",
+            "message": {
+                "content": [
+                    {
+                        "type": "tool_use",
+                        "id": "task-1",
+                        "name": "Task",
+                        "input": {
+                            "description": "Rust code review",
+                            "subagent_type": "general-purpose"
+                        }
+                    }
+                ]
+            }
+        }),
+        &mut session_id,
+        &mut turn_state,
+        &mut recorder,
+    )
+    .unwrap();
+
+    let detail = "Reviewer failed to parse the diff.\nStack trace line 1\nStack trace line 2";
+    handle_claude_event(
+        &json!({
+            "type": "user",
+            "message": {
+                "content": [
+                    {
+                        "type": "tool_result",
+                        "tool_use_id": "task-1",
+                        "is_error": true,
+                        "content": detail
+                    }
+                ]
+            }
+        }),
+        &mut session_id,
+        &mut turn_state,
+        &mut recorder,
+    )
+    .unwrap();
+
+    let latest = recorder
+        .parallel_agents
+        .last()
+        .expect("errored parallel agent update should be recorded");
+    assert_eq!(latest.len(), 1);
+    assert_eq!(latest[0].title, "Rust code review");
+    assert_eq!(latest[0].status, ParallelAgentStatus::Error);
+    assert_eq!(
+        latest[0].detail.as_deref(),
+        Some("Reviewer failed to parse the diff.")
+    );
+    assert_eq!(
+        recorder.subagent_results,
+        vec![("Rust code review".to_owned(), detail.to_owned())]
+    );
+}
+
+#[test]
+fn claude_task_tool_error_without_detail_records_fallback_failure_message() {
+    let mut turn_state = ClaudeTurnState::default();
+    let mut recorder = TestRecorder::default();
+    let mut session_id = None;
+
+    handle_claude_event(
+        &json!({
+            "type": "assistant",
+            "message": {
+                "content": [
+                    {
+                        "type": "tool_use",
+                        "id": "task-1",
+                        "name": "Task",
+                        "input": {
+                            "description": "Rust code review",
+                            "subagent_type": "general-purpose"
+                        }
+                    }
+                ]
+            }
+        }),
+        &mut session_id,
+        &mut turn_state,
+        &mut recorder,
+    )
+    .unwrap();
+
+    handle_claude_event(
+        &json!({
+            "type": "user",
+            "message": {
+                "content": [
+                    {
+                        "type": "tool_result",
+                        "tool_use_id": "task-1",
+                        "is_error": true,
+                        "content": ""
+                    }
+                ]
+            }
+        }),
+        &mut session_id,
+        &mut turn_state,
+        &mut recorder,
+    )
+    .unwrap();
+
+    let latest = recorder
+        .parallel_agents
+        .last()
+        .expect("errored parallel agent update should be recorded");
+    assert_eq!(latest.len(), 1);
+    assert_eq!(latest[0].status, ParallelAgentStatus::Error);
+    assert_eq!(latest[0].detail.as_deref(), Some("Task failed."));
+    assert_eq!(
+        recorder.subagent_results,
+        vec![("Rust code review".to_owned(), "Task failed.".to_owned())]
+    );
+}
+
 #[test]
 fn acp_json_rpc_request_without_timeout_waits_for_late_response() {
     let pending_requests = Arc::new(Mutex::new(HashMap::new()));
@@ -7058,6 +7189,419 @@ fn persists_remote_settings() {
     assert_eq!(
         reloaded_inner.preferences.remotes,
         updated.preferences.remotes
+    );
+}
+
+#[test]
+fn rejects_remote_settings_with_unsafe_remote_id() {
+    let state = test_app_state();
+
+    let error = match state.update_app_settings(UpdateAppSettingsRequest {
+        default_codex_reasoning_effort: None,
+        default_claude_effort: None,
+        remotes: Some(vec![
+            RemoteConfig::local(),
+            RemoteConfig {
+                id: "ssh/lab".to_owned(),
+                name: "SSH Lab".to_owned(),
+                transport: RemoteTransport::Ssh,
+                enabled: true,
+                host: Some("example.com".to_owned()),
+                port: Some(22),
+                user: Some("alice".to_owned()),
+            },
+        ]),
+    }) {
+        Ok(_) => panic!("unsafe remote id should be rejected"),
+        Err(error) => error,
+    };
+
+    assert_eq!(error.status, StatusCode::BAD_REQUEST);
+    assert_eq!(
+        error.message,
+        "remote id `ssh/lab` contains unsupported characters"
+    );
+}
+
+#[test]
+fn rejects_remote_settings_with_invalid_ssh_host() {
+    let state = test_app_state();
+
+    let error = match state.update_app_settings(UpdateAppSettingsRequest {
+        default_codex_reasoning_effort: None,
+        default_claude_effort: None,
+        remotes: Some(vec![
+            RemoteConfig::local(),
+            RemoteConfig {
+                id: "ssh-lab".to_owned(),
+                name: "SSH Lab".to_owned(),
+                transport: RemoteTransport::Ssh,
+                enabled: true,
+                host: Some("-oProxyCommand=touch/tmp/pwned".to_owned()),
+                port: Some(22),
+                user: Some("alice".to_owned()),
+            },
+        ]),
+    }) {
+        Ok(_) => panic!("host injection should be rejected"),
+        Err(error) => error,
+    };
+
+    assert_eq!(error.status, StatusCode::BAD_REQUEST);
+    assert_eq!(error.message, "remote `SSH Lab` has an invalid SSH host");
+}
+
+#[test]
+fn rejects_remote_settings_with_invalid_ssh_user() {
+    let state = test_app_state();
+
+    let error = match state.update_app_settings(UpdateAppSettingsRequest {
+        default_codex_reasoning_effort: None,
+        default_claude_effort: None,
+        remotes: Some(vec![
+            RemoteConfig::local(),
+            RemoteConfig {
+                id: "ssh-lab".to_owned(),
+                name: "SSH Lab".to_owned(),
+                transport: RemoteTransport::Ssh,
+                enabled: true,
+                host: Some("example.com".to_owned()),
+                port: Some(22),
+                user: Some("alice@example.com".to_owned()),
+            },
+        ]),
+    }) {
+        Ok(_) => panic!("invalid SSH user should be rejected"),
+        Err(error) => error,
+    };
+
+    assert_eq!(error.status, StatusCode::BAD_REQUEST);
+    assert_eq!(error.message, "remote `SSH Lab` has an invalid SSH user");
+}
+
+#[test]
+fn remote_ssh_command_args_insert_double_dash_before_target() {
+    let remote = RemoteConfig {
+        id: "ssh-lab".to_owned(),
+        name: "SSH Lab".to_owned(),
+        transport: RemoteTransport::Ssh,
+        enabled: true,
+        host: Some("example.com".to_owned()),
+        port: Some(2222),
+        user: Some("alice".to_owned()),
+    };
+
+    let args = remote_ssh_command_args(&remote, 47001, RemoteProcessMode::ManagedServer)
+        .expect("SSH args should build");
+
+    let separator_index = args
+        .iter()
+        .position(|arg| arg == "--")
+        .expect("SSH args should include `--` before the target");
+    assert_eq!(args[separator_index + 1], "alice@example.com");
+    assert_eq!(&args[separator_index + 2..], ["termal", "server"]);
+}
+
+#[test]
+fn removing_remote_stops_event_bridge_worker_and_resets_started_guard() {
+    let state = test_app_state();
+    let remote = RemoteConfig {
+        id: "ssh-lab".to_owned(),
+        name: "SSH Lab".to_owned(),
+        transport: RemoteTransport::Local,
+        enabled: true,
+        host: None,
+        port: None,
+        user: None,
+    };
+    let connection = Arc::new(RemoteConnection {
+        config: Mutex::new(remote.clone()),
+        forwarded_port: 47001,
+        process: Mutex::new(None),
+        event_bridge_started: AtomicBool::new(false),
+        event_bridge_shutdown: AtomicBool::new(false),
+    });
+    state
+        .remote_registry
+        .connections
+        .lock()
+        .expect("remote registry mutex poisoned")
+        .insert(remote.id.clone(), connection.clone());
+
+    connection.start_event_bridge(state.remote_registry.client.client().clone(), state.clone());
+    assert!(connection.event_bridge_started.load(Ordering::SeqCst));
+
+    state.remote_registry.reconcile(&[RemoteConfig::local()]);
+
+    let deadline = std::time::Instant::now() + Duration::from_secs(1);
+    loop {
+        if !connection.event_bridge_started.load(Ordering::SeqCst) {
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "event bridge worker should stop after the remote is removed"
+        );
+        std::thread::sleep(Duration::from_millis(10));
+    }
+
+    assert!(
+        !state
+            .remote_registry
+            .connections
+            .lock()
+            .expect("remote registry mutex poisoned")
+            .contains_key(&remote.id)
+    );
+
+    connection.start_event_bridge(state.remote_registry.client.client().clone(), state.clone());
+    assert!(connection.event_bridge_started.load(Ordering::SeqCst));
+
+    connection.stop_event_bridge();
+
+    let deadline = std::time::Instant::now() + Duration::from_secs(1);
+    loop {
+        if !connection.event_bridge_started.load(Ordering::SeqCst) {
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "event bridge started guard should reset after shutdown"
+        );
+        std::thread::sleep(Duration::from_millis(10));
+    }
+}
+
+#[test]
+fn remote_snapshot_sync_removes_missing_proxy_sessions() {
+    let state = test_app_state();
+    let (kept_local_session_id, removed_local_session_id, local_session_id) = {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let kept = inner.create_session(Agent::Codex, None, "/tmp".to_owned(), None, None);
+        let removed = inner.create_session(Agent::Codex, None, "/tmp".to_owned(), None, None);
+        let local = inner.create_session(Agent::Claude, None, "/tmp".to_owned(), None, None);
+
+        let kept_index = inner
+            .find_session_index(&kept.session.id)
+            .expect("kept session should exist");
+        inner.sessions[kept_index].remote_id = Some("ssh-lab".to_owned());
+        inner.sessions[kept_index].remote_session_id = Some("remote-session-keep".to_owned());
+
+        let removed_index = inner
+            .find_session_index(&removed.session.id)
+            .expect("removed session should exist");
+        inner.sessions[removed_index].remote_id = Some("ssh-lab".to_owned());
+        inner.sessions[removed_index].remote_session_id = Some("remote-session-gone".to_owned());
+
+        (kept.session.id, removed.session.id, local.session.id)
+    };
+
+    let mut remote_state = state.snapshot();
+    let mut remote_session = remote_state
+        .sessions
+        .iter()
+        .find(|session| session.id == kept_local_session_id)
+        .cloned()
+        .expect("kept session should be present in the snapshot");
+    remote_session.id = "remote-session-keep".to_owned();
+    remote_session.preview = "Remote session still exists.".to_owned();
+    remote_state.sessions = vec![remote_session];
+
+    state
+        .apply_remote_state_snapshot("ssh-lab", remote_state)
+        .expect("remote snapshot should apply");
+
+    let snapshot = state.snapshot();
+    assert!(
+        snapshot
+            .sessions
+            .iter()
+            .any(|session| session.id == kept_local_session_id)
+    );
+    assert!(
+        !snapshot
+            .sessions
+            .iter()
+            .any(|session| session.id == removed_local_session_id)
+    );
+    assert!(
+        snapshot
+            .sessions
+            .iter()
+            .any(|session| session.id == local_session_id)
+    );
+    assert_eq!(
+        snapshot
+            .sessions
+            .iter()
+            .find(|session| session.id == kept_local_session_id)
+            .expect("kept session should remain")
+            .preview,
+        "Remote session still exists."
+    );
+}
+
+#[test]
+fn remote_review_put_sends_scope_via_query_params() {
+    let captured = Arc::new(Mutex::new(None::<(String, String)>));
+    let captured_for_server = captured.clone();
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("test listener should bind");
+    let port = listener.local_addr().expect("listener addr").port();
+    let server = std::thread::spawn(move || {
+        for _ in 0..2 {
+            let (mut stream, _) = listener.accept().expect("connection should arrive");
+            let mut buffer = Vec::new();
+            let mut chunk = [0u8; 4096];
+            let header_end = loop {
+                let bytes_read = stream.read(&mut chunk).expect("request should read");
+                assert!(bytes_read > 0, "request closed before headers completed");
+                buffer.extend_from_slice(&chunk[..bytes_read]);
+                if let Some(end) = buffer.windows(4).position(|window| window == b"\r\n\r\n") {
+                    break end;
+                }
+            };
+            let headers = String::from_utf8_lossy(&buffer[..header_end]);
+            let content_length = headers
+                .lines()
+                .find_map(|line| {
+                    let (name, value) = line.split_once(':')?;
+                    name.trim()
+                        .eq_ignore_ascii_case("content-length")
+                        .then_some(value.trim())
+                        .and_then(|value| value.parse::<usize>().ok())
+                })
+                .unwrap_or(0);
+            let body_start = header_end + 4;
+            while buffer.len() < body_start + content_length {
+                let bytes_read = stream.read(&mut chunk).expect("request body should read");
+                if bytes_read == 0 {
+                    break;
+                }
+                buffer.extend_from_slice(&chunk[..bytes_read]);
+            }
+
+            let request_head = String::from_utf8_lossy(&buffer[..body_start]).to_string();
+            let request_line = request_head
+                .lines()
+                .next()
+                .expect("request line should exist")
+                .to_owned();
+            let body = String::from_utf8_lossy(&buffer[body_start..body_start + content_length])
+                .to_string();
+
+            if request_line.starts_with("GET /api/health ") {
+                stream
+                    .write_all(
+                        b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nConnection: close\r\nContent-Length: 11\r\n\r\n{\"ok\":true}",
+                    )
+                    .expect("health response should write");
+                continue;
+            }
+
+            if request_line.starts_with("PUT /api/reviews/change-set-1?") {
+                *captured_for_server.lock().expect("capture mutex poisoned") =
+                    Some((request_line.clone(), body));
+                let response = serde_json::to_string(&ReviewDocumentResponse {
+                    review_file_path: "/remote/.termal/reviews/change-set-1.json".to_owned(),
+                    review: ReviewDocument {
+                        version: 1,
+                        change_set_id: "change-set-1".to_owned(),
+                        revision: 0,
+                        origin: None,
+                        files: Vec::new(),
+                        threads: Vec::new(),
+                    },
+                })
+                .expect("review response should encode");
+                let response_bytes = response.as_bytes();
+                stream
+                    .write_all(
+                        format!(
+                            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nConnection: close\r\nContent-Length: {}\r\n\r\n{}",
+                            response_bytes.len(),
+                            response
+                        )
+                        .as_bytes(),
+                    )
+                    .expect("review response should write");
+                continue;
+            }
+
+            panic!("unexpected request: {request_line}");
+        }
+    });
+
+    let state = test_app_state();
+    let remote = RemoteConfig {
+        id: "ssh-lab".to_owned(),
+        name: "SSH Lab".to_owned(),
+        transport: RemoteTransport::Ssh,
+        enabled: true,
+        host: Some("example.com".to_owned()),
+        port: Some(22),
+        user: Some("alice".to_owned()),
+    };
+    state
+        .remote_registry
+        .connections
+        .lock()
+        .expect("remote registry mutex poisoned")
+        .insert(
+            remote.id.clone(),
+            Arc::new(RemoteConnection {
+                config: Mutex::new(remote.clone()),
+                forwarded_port: port,
+                process: Mutex::new(None),
+                event_bridge_started: AtomicBool::new(false),
+                event_bridge_shutdown: AtomicBool::new(false),
+            }),
+        );
+
+    let response: ReviewDocumentResponse = state
+        .remote_put_json_with_query_scope(
+            &RemoteScope {
+                remote,
+                remote_project_id: None,
+                remote_session_id: Some("remote-session-1".to_owned()),
+            },
+            "/api/reviews/change-set-1",
+            Vec::new(),
+            json!({
+                "version": 1,
+                "changeSetId": "change-set-1",
+                "revision": 0,
+                "threads": [],
+            }),
+        )
+        .expect("remote review PUT should succeed");
+
+    assert_eq!(
+        response.review_file_path,
+        "/remote/.termal/reviews/change-set-1.json"
+    );
+    let (request_line, body) = captured
+        .lock()
+        .expect("capture mutex poisoned")
+        .clone()
+        .expect("captured request should exist");
+    assert!(request_line.contains("sessionId=remote-session-1"));
+    assert!(!request_line.contains("projectId="));
+    let parsed_body: Value = serde_json::from_str(&body).expect("review body should decode");
+    assert_eq!(parsed_body.get("sessionId"), None);
+    assert_eq!(parsed_body.get("projectId"), None);
+
+    server.join().expect("test server should finish");
+}
+
+#[test]
+fn normalize_git_repo_relative_path_rejects_parent_traversal_components() {
+    let error = normalize_git_repo_relative_path("../../etc/passwd")
+        .expect_err("parent traversal should be rejected");
+
+    assert_eq!(error.status, StatusCode::BAD_REQUEST);
+    assert_eq!(
+        error.message,
+        "git file path cannot contain parent-directory traversal"
     );
 }
 

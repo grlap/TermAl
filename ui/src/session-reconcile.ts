@@ -429,11 +429,38 @@ function sameMcpElicitationRequest(
   return sameJsonValue(previous, next);
 }
 
-function sameJsonValue(previous: unknown, next: unknown) {
+function sameJsonValue(previous: unknown, next: unknown): boolean {
   if (previous === next) {
     return true;
   }
-  return JSON.stringify(previous ?? null) === JSON.stringify(next ?? null);
+  if (previous == null || next == null) {
+    return (previous ?? null) === (next ?? null);
+  }
+  if (typeof previous !== typeof next) {
+    return false;
+  }
+  if (typeof previous !== "object") {
+    return previous === next;
+  }
+  if (Array.isArray(previous)) {
+    if (!Array.isArray(next) || previous.length !== next.length) {
+      return false;
+    }
+    return previous.every((item, index) => sameJsonValue(item, next[index]));
+  }
+  if (Array.isArray(next)) {
+    return false;
+  }
+  const previousObj = previous as Record<string, unknown>;
+  const nextObj = next as Record<string, unknown>;
+  const previousKeys = Object.keys(previousObj);
+  const nextKeys = Object.keys(nextObj);
+  if (previousKeys.length !== nextKeys.length) {
+    return false;
+  }
+  return previousKeys.every(
+    (key) => key in nextObj && sameJsonValue(previousObj[key], nextObj[key]),
+  );
 }
 
 function reconcilePendingPrompts(

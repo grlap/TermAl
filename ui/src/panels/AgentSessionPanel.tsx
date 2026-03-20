@@ -1,5 +1,6 @@
 import {
   memo,
+  useCallback,
   useEffect,
   useLayoutEffect,
   useMemo,
@@ -1183,6 +1184,33 @@ const SessionBody = memo(function SessionBody({
     ) => void,
   ) => JSX.Element | null;
 }): JSX.Element | null {
+  // Stabilize render callbacks so children receive a constant function identity.
+  // The latest version is always called through the ref, so closures stay fresh
+  // even though the wrapper identity never changes.
+  const renderMessageCardRef = useRef(renderMessageCard);
+  renderMessageCardRef.current = renderMessageCard;
+  const stableRenderMessageCard = useCallback<RenderMessageCard>(
+    (...args) => renderMessageCardRef.current(...args),
+    [],
+  );
+
+  const renderCommandCardRef = useRef(renderCommandCard);
+  renderCommandCardRef.current = renderCommandCard;
+  const stableRenderCommandCard = useCallback(
+    (message: CommandMessage) => renderCommandCardRef.current(message),
+    [],
+  );
+
+  const renderDiffCardRef = useRef(renderDiffCard);
+  renderDiffCardRef.current = renderDiffCard;
+  const stableRenderDiffCard = useCallback(
+    (message: DiffMessage) => renderDiffCardRef.current(message),
+    [],
+  );
+
+  const renderPromptSettingsRef = useRef(renderPromptSettings);
+  renderPromptSettingsRef.current = renderPromptSettings;
+
   if (!activeSession) {
     return (
       <PanelEmptyState
@@ -1212,7 +1240,7 @@ const SessionBody = memo(function SessionBody({
         {mountedSessions.map((session) => (
           <SessionConversationPage
             key={session.id}
-            renderMessageCard={renderMessageCard}
+            renderMessageCard={stableRenderMessageCard}
             session={session}
             scrollContainerRef={scrollContainerRef}
             isActive={session.id === activeSession.id}
@@ -1239,7 +1267,7 @@ const SessionBody = memo(function SessionBody({
   }
 
   if (viewMode === "prompt") {
-    return renderPromptSettings(paneId, activeSession, isUpdating, onSessionSettingsChange) ?? (
+    return renderPromptSettingsRef.current(paneId, activeSession, isUpdating, onSessionSettingsChange) ?? (
       <PanelEmptyState
         title="No prompt settings"
         body="Prompt controls are only available for supported agent sessions."
@@ -1251,7 +1279,7 @@ const SessionBody = memo(function SessionBody({
     return commandMessages.length > 0 ? (
       <>
         {commandMessages.map((message) => (
-          <MessageSlot key={message.id}>{renderCommandCard(message)}</MessageSlot>
+          <MessageSlot key={message.id}>{stableRenderCommandCard(message)}</MessageSlot>
         ))}
       </>
     ) : (
@@ -1266,7 +1294,7 @@ const SessionBody = memo(function SessionBody({
     return diffMessages.length > 0 ? (
       <>
         {diffMessages.map((message) => (
-          <MessageSlot key={message.id}>{renderDiffCard(message)}</MessageSlot>
+          <MessageSlot key={message.id}>{stableRenderDiffCard(message)}</MessageSlot>
         ))}
       </>
     ) : (
@@ -1295,11 +1323,11 @@ const SessionBody = memo(function SessionBody({
   previous.conversationSearchQuery === next.conversationSearchQuery &&
   previous.conversationSearchMatchedItemKeys === next.conversationSearchMatchedItemKeys &&
   previous.conversationSearchActiveItemKey === next.conversationSearchActiveItemKey &&
-  previous.onConversationSearchItemMount === next.onConversationSearchItemMount &&
-  previous.renderCommandCard === next.renderCommandCard &&
-  previous.renderDiffCard === next.renderDiffCard &&
-  previous.renderMessageCard === next.renderMessageCard &&
-  previous.renderPromptSettings === next.renderPromptSettings
+  previous.onConversationSearchItemMount === next.onConversationSearchItemMount
+  // Render callbacks (renderMessageCard, renderDiffCard, renderCommandCard,
+  // renderPromptSettings) are intentionally excluded — they are inline closures
+  // whose identity changes every render. SessionBody wraps them in stable refs
+  // so children always call the latest version without triggering re-renders.
 );
 
 const SessionConversationPage = memo(function SessionConversationPage({
@@ -1447,6 +1475,15 @@ function ConversationMessageList({
 }) {
   const hasConversationSearch = conversationSearchQuery.trim().length > 0;
 
+  // Inactive cached sessions with many messages should not render the full
+  // non-virtualized message list — the container is hidden anyway and rendering
+  // hundreds of message cards just to tear them down on tab return causes the
+  // multi-second tab-switch stall.  Return nothing; the session content will
+  // rebuild via the virtualized path when the tab becomes active again.
+  if (!isActive && messages.length >= CONVERSATION_VIRTUALIZATION_MIN_MESSAGES) {
+    return null;
+  }
+
   if (hasConversationSearch || !isActive || messages.length < CONVERSATION_VIRTUALIZATION_MIN_MESSAGES) {
     return (
       <>
@@ -1590,28 +1627,53 @@ function VirtualizedConversationMessageList({
     };
   }, [scrollContainerRef, sessionId]);
 
-  function handleHeightChange(messageId: string, nextHeight: number) {
+  // Stabilize handler references so MeasuredMessageCard memo can skip
+  // re-renders for messages whose data and position haven't changed.
+  const messagesRef = useRef(messages);
+  messagesRef.current = messages;
+  const messageIndexByIdRef = useRef(messageIndexById);
+  messageIndexByIdRef.current = messageIndexById;
+
+  const handleHeightChange = useCallback((messageId: string, nextHeight: number) => {
     if (!Number.isFinite(nextHeight) || nextHeight <= 0) {
       return;
     }
 
     const previousHeight =
       messageHeightsRef.current[messageId] ??
-      estimateConversationMessageHeight(messages[messageIndexById.get(messageId) ?? 0]);
+      estimateConversationMessageHeight(messagesRef.current[messageIndexByIdRef.current.get(messageId) ?? 0]);
     if (Math.abs(previousHeight - nextHeight) < 1) {
       return;
     }
 
     messageHeightsRef.current[messageId] = nextHeight;
 
-    const messageIndex = messageIndexById.get(messageId);
+    const messageIndex = messageIndexByIdRef.current.get(messageId);
     const node = scrollContainerRef.current;
     if (node && messageIndex !== undefined && messageIndex < visibleRangeRef.current.startIndex) {
       node.scrollTop += nextHeight - previousHeight;
     }
 
     setLayoutVersion((current) => current + 1);
-  }
+  }, [scrollContainerRef]);
+
+  const boundApprovalDecision = useCallback(
+    (messageId: string, decision: ApprovalDecision) => onApprovalDecision(sessionId, messageId, decision),
+    [sessionId, onApprovalDecision],
+  );
+  const boundUserInputSubmit = useCallback(
+    (messageId: string, answers: Record<string, string[]>) => onUserInputSubmit(sessionId, messageId, answers),
+    [sessionId, onUserInputSubmit],
+  );
+  const boundMcpElicitationSubmit = useCallback(
+    (messageId: string, action: McpElicitationAction, content?: JsonValue) =>
+      onMcpElicitationSubmit(sessionId, messageId, action, content),
+    [sessionId, onMcpElicitationSubmit],
+  );
+  const boundCodexAppRequestSubmit = useCallback(
+    (messageId: string, result: JsonValue) => onCodexAppRequestSubmit(sessionId, messageId, result),
+    [sessionId, onCodexAppRequestSubmit],
+  );
 
   return (
     <div className="virtualized-message-list" style={{ height: layout.totalHeight }}>
@@ -1626,12 +1688,10 @@ function VirtualizedConversationMessageList({
               message={message}
               preferImmediateHeavyRender={messageIndex >= messages.length - 2}
               top={layout.tops[messageIndex] ?? 0}
-              onApprovalDecision={(messageId, decision) => onApprovalDecision(sessionId, messageId, decision)}
-              onUserInputSubmit={(messageId, answers) => onUserInputSubmit(sessionId, messageId, answers)}
-              onMcpElicitationSubmit={(messageId, action, content) =>
-                onMcpElicitationSubmit(sessionId, messageId, action, content)}
-              onCodexAppRequestSubmit={(messageId, result) =>
-                onCodexAppRequestSubmit(sessionId, messageId, result)}
+              onApprovalDecision={boundApprovalDecision}
+              onUserInputSubmit={boundUserInputSubmit}
+              onMcpElicitationSubmit={boundMcpElicitationSubmit}
+              onCodexAppRequestSubmit={boundCodexAppRequestSubmit}
               onHeightChange={handleHeightChange}
             />
           );
@@ -1640,7 +1700,7 @@ function VirtualizedConversationMessageList({
   );
 }
 
-function MeasuredMessageCard({
+const MeasuredMessageCard = memo(function MeasuredMessageCard({
   renderMessageCard,
   message,
   preferImmediateHeavyRender,
@@ -1705,7 +1765,7 @@ function MeasuredMessageCard({
       )}
     </div>
   );
-}
+});
 
 const SessionComposer = memo(function SessionComposer({
   paneId,
@@ -2489,6 +2549,12 @@ const SessionComposer = memo(function SessionComposer({
           </button>
         </div>
       </div>
+      {session ? (
+        <p className="composer-hint">
+          Paste PNG, JPEG, GIF, or WebP images into the prompt. Drag-and-drop is not supported
+          yet.
+        </p>
+      ) : null}
       {session && slashPalette.kind !== "none" ? (
         <div className="composer-slash-menu" role="listbox" aria-label={slashPalette.title}>
           <div className="composer-slash-header">

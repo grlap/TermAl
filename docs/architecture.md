@@ -647,7 +647,7 @@ termal/
 ├── docs/
 │   ├── architecture.md            # This file
 │   ├── bugs.md                    # Bug tracker + implementation tasks
-│   ├── claude-pair-spec.md        # Original product spec (partially stale)
+│   ├── claude-pair-spec.md        # Historical product spec from the pre-web rewrite
 │   └── features/                  # Feature briefs
 ├── Cargo.toml
 └── Cargo.lock

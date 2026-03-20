@@ -1692,6 +1692,272 @@ describe("App", () => {
     }
   });
 
+  it("keeps unsaved remote draft edits across unrelated state refreshes", async () => {
+    const originalEventSource = globalThis.EventSource;
+    const originalResizeObserver = globalThis.ResizeObserver;
+    vi.stubGlobal("EventSource", EventSourceMock as unknown as typeof EventSource);
+    vi.stubGlobal("ResizeObserver", ResizeObserverMock as unknown as typeof ResizeObserver);
+    const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
+    HTMLElement.prototype.scrollIntoView = vi.fn();
+
+    const remotes = [
+      {
+        id: "local",
+        name: "Local",
+        transport: "local" as const,
+        enabled: true,
+        host: null,
+        port: null,
+        user: null,
+      },
+      {
+        id: "ssh-lab",
+        name: "SSH Lab",
+        transport: "ssh" as const,
+        enabled: true,
+        host: "example.com",
+        port: 22,
+        user: "alice",
+      },
+    ];
+
+    try {
+      await renderApp();
+      const eventSource = EventSourceMock.instances[0];
+      expect(eventSource).toBeTruthy();
+
+      await act(async () => {
+        eventSource.dispatchOpen();
+        eventSource.dispatchNamedEvent("state", {
+          revision: 1,
+          preferences: {
+            defaultCodexReasoningEffort: "medium",
+            defaultClaudeEffort: "default",
+            remotes,
+          },
+          projects: [],
+          sessions: [makeSession("session-1", { name: "Codex Session", preview: "Initial preview" })],
+        });
+        await flushUiWork();
+      });
+      await screen.findAllByText("Codex Session");
+
+      await clickAndSettle(await screen.findByRole("button", { name: "Open preferences" }));
+      await clickAndSettle(screen.getByRole("tab", { name: "Remotes" }));
+      await screen.findByRole("heading", { level: 3, name: "Remote definitions" });
+      const remoteName = await screen.findByText("SSH Lab");
+      const remoteRow = remoteName.closest(".remote-settings-row");
+      if (!(remoteRow instanceof HTMLElement)) {
+        throw new Error("SSH remote row not found");
+      }
+      expect(within(remoteRow).getByText("Enabled for projects and sessions")).toBeInTheDocument();
+
+      const hostInput = within(remoteRow).getByDisplayValue("example.com");
+      expect(hostInput).toHaveValue("example.com");
+
+      await act(async () => {
+        fireEvent.change(hostInput, { target: { value: "draft.example.com" } });
+        await flushUiWork();
+      });
+
+      expect(within(remoteRow).getByDisplayValue("draft.example.com")).toBe(hostInput);
+
+      await act(async () => {
+        eventSource.dispatchOpen();
+        eventSource.dispatchNamedEvent("state", {
+          revision: 2,
+          preferences: {
+            defaultCodexReasoningEffort: "medium",
+            defaultClaudeEffort: "default",
+            remotes,
+          },
+          projects: [],
+          sessions: [makeSession("session-1", { name: "Codex Session", preview: "Updated preview" })],
+        });
+        await flushUiWork();
+      });
+
+      expect(within(remoteRow).getByDisplayValue("draft.example.com")).toBe(hostInput);
+    } finally {
+      HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
+      restoreGlobal("EventSource", originalEventSource);
+      restoreGlobal("ResizeObserver", originalResizeObserver);
+    }
+  });
+
+  it("routes current-workspace session creation through the active remote project", async () => {
+    const originalEventSource = globalThis.EventSource;
+    const originalResizeObserver = globalThis.ResizeObserver;
+    const createSessionDeferred = createDeferred<{
+      sessionId: string;
+      state: Awaited<ReturnType<typeof api.fetchState>>;
+    }>();
+    const refreshSessionModelOptionsDeferred = createDeferred<Awaited<ReturnType<typeof api.fetchState>>>();
+    const createSessionSpy = vi.spyOn(api, "createSession").mockImplementation(
+      () => createSessionDeferred.promise,
+    );
+    const refreshSessionModelOptionsSpy = vi
+      .spyOn(api, "refreshSessionModelOptions")
+      .mockImplementation(() => refreshSessionModelOptionsDeferred.promise);
+    vi.stubGlobal("EventSource", EventSourceMock as unknown as typeof EventSource);
+    vi.stubGlobal("ResizeObserver", ResizeObserverMock as unknown as typeof ResizeObserver);
+    const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
+    HTMLElement.prototype.scrollIntoView = vi.fn();
+
+    const remotes = [
+      {
+        id: "local",
+        name: "Local",
+        transport: "local" as const,
+        enabled: true,
+        host: null,
+        port: null,
+        user: null,
+      },
+      {
+        id: "ssh-lab",
+        name: "SSH Lab",
+        transport: "ssh" as const,
+        enabled: true,
+        host: "example.com",
+        port: 22,
+        user: "alice",
+      },
+    ];
+    const projects = [
+      {
+        id: "project-remote",
+        name: "Remote Project",
+        rootPath: "/remote/repo",
+        remoteId: "ssh-lab",
+      },
+    ];
+
+    try {
+      await renderApp();
+      const eventSource = EventSourceMock.instances[0];
+      expect(eventSource).toBeTruthy();
+
+      await act(async () => {
+        eventSource.dispatchOpen();
+        eventSource.dispatchNamedEvent("state", {
+          revision: 1,
+          preferences: {
+            defaultCodexReasoningEffort: "medium",
+            defaultClaudeEffort: "default",
+            remotes,
+          },
+          projects,
+          sessions: [
+            makeSession("session-1", {
+              name: "Remote Session",
+              workdir: "/remote/repo/subdir",
+              projectId: "project-remote",
+            }),
+          ],
+        });
+        await flushUiWork();
+      });
+      await screen.findAllByText("Remote Session");
+
+      await openCreateSessionDialog();
+      const createSessionDialog = screen.getByRole("dialog", { name: "New session" });
+      const projectCombobox = within(createSessionDialog).getByRole("combobox", {
+        name: "Project",
+      });
+      await clickAndSettle(projectCombobox);
+      const projectListbox = await screen.findByRole("listbox");
+      const currentWorkspaceOption = within(projectListbox)
+        .getAllByRole("option")
+        .find((candidate) =>
+          /^Current workspace$/i.test(
+            candidate.querySelector(".combo-option-label")?.textContent?.trim() ??
+              candidate.textContent?.trim() ??
+              "",
+          ),
+        );
+      if (!currentWorkspaceOption) {
+        throw new Error("Current workspace option not found");
+      }
+      await clickAndSettle(currentWorkspaceOption);
+      await submitButtonAndSettle(screen.getByRole("button", { name: "Create session" }));
+
+      await waitFor(() => {
+        expect(createSessionSpy).toHaveBeenCalledWith(
+          expect.objectContaining({
+            projectId: "project-remote",
+            workdir: undefined,
+          }),
+        );
+      });
+
+      await act(async () => {
+        createSessionDeferred.resolve({
+          sessionId: "session-2",
+          state: {
+            revision: 2,
+            preferences: {
+              defaultCodexReasoningEffort: "medium",
+              defaultClaudeEffort: "default",
+              remotes,
+            },
+            projects,
+            sessions: [
+              makeSession("session-1", {
+                name: "Remote Session",
+                workdir: "/remote/repo/subdir",
+                projectId: "project-remote",
+              }),
+              makeSession("session-2", {
+                name: "Codex 2",
+                workdir: "/remote/repo",
+                projectId: "project-remote",
+              }),
+            ],
+          },
+        });
+        await flushUiWork();
+      });
+
+      await waitFor(() => {
+        expect(refreshSessionModelOptionsSpy).toHaveBeenCalledWith("session-2");
+      });
+
+      await act(async () => {
+        refreshSessionModelOptionsDeferred.resolve({
+          revision: 3,
+          preferences: {
+            defaultCodexReasoningEffort: "medium",
+            defaultClaudeEffort: "default",
+            remotes,
+          },
+          projects,
+          sessions: [
+            makeSession("session-1", {
+              name: "Remote Session",
+              workdir: "/remote/repo/subdir",
+              projectId: "project-remote",
+            }),
+            makeSession("session-2", {
+              name: "Codex 2",
+              workdir: "/remote/repo",
+              projectId: "project-remote",
+            }),
+          ],
+        });
+        await flushUiWork();
+      });
+
+      await settleAsyncUi();
+    } finally {
+      HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
+      createSessionSpy.mockRestore();
+      refreshSessionModelOptionsSpy.mockRestore();
+      restoreGlobal("EventSource", originalEventSource);
+      restoreGlobal("ResizeObserver", originalResizeObserver);
+    }
+  });
+
   it("separates theme selection from editor and UI appearance controls in preferences", async () => {
     const originalEventSource = globalThis.EventSource;
     const originalResizeObserver = globalThis.ResizeObserver;

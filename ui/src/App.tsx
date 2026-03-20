@@ -471,6 +471,25 @@ function resolveAppPreferences(preferences?: AppPreferences | null) {
   };
 }
 
+function areRemoteConfigsEqual(left: readonly RemoteConfig[], right: readonly RemoteConfig[]) {
+  return (
+    left.length === right.length &&
+    left.every((remote, index) => {
+      const candidate = right[index];
+      return (
+        candidate !== undefined &&
+        remote.id === candidate.id &&
+        remote.name === candidate.name &&
+        remote.transport === candidate.transport &&
+        remote.enabled === candidate.enabled &&
+        remote.host === candidate.host &&
+        remote.port === candidate.port &&
+        remote.user === candidate.user
+      );
+    })
+  );
+}
+
 function resolveRemoteConfig(
   remoteLookup: ReadonlyMap<string, RemoteConfig>,
   remoteId?: string | null,
@@ -1065,8 +1084,20 @@ export default function App() {
     createSessionProjectId === CREATE_SESSION_WORKSPACE_ID
       ? null
       : (projectLookup.get(createSessionProjectId) ?? null);
-  const createSessionSelectedRemote = createSessionSelectedProject
-    ? resolveRemoteConfig(remoteLookup, resolveProjectRemoteId(createSessionSelectedProject))
+  const createSessionWorkspaceProject =
+    createSessionProjectId === CREATE_SESSION_WORKSPACE_ID &&
+    activeSession?.projectId &&
+    projectLookup.has(activeSession.projectId)
+      ? (projectLookup.get(activeSession.projectId) ?? null)
+      : null;
+  const createSessionEffectiveProject =
+    createSessionSelectedProject ??
+    (createSessionWorkspaceProject &&
+    !isLocalRemoteId(resolveProjectRemoteId(createSessionWorkspaceProject))
+      ? createSessionWorkspaceProject
+      : null);
+  const createSessionSelectedRemote = createSessionEffectiveProject
+    ? resolveRemoteConfig(remoteLookup, resolveProjectRemoteId(createSessionEffectiveProject))
     : localRemoteConfig;
   const createSessionProjectOptions = useMemo<readonly ComboboxOption[]>(() => {
     const workspaceLabel = activeSession?.workdir ? "Current workspace" : "Default workspace";
@@ -1104,13 +1135,20 @@ export default function App() {
   }, [projects, remoteLookup]);
   const createSessionProjectHint = createSessionSelectedProject
     ? describeProjectScope(createSessionSelectedProject, remoteLookup)
-    : activeSession?.workdir
-      ? `Uses ${activeSession.workdir}`
-      : "Uses the app default workspace.";
+    : createSessionEffectiveProject
+      ? describeProjectScope(createSessionEffectiveProject, remoteLookup)
+      : activeSession?.workdir
+        ? `Uses ${activeSession.workdir}`
+        : "Uses the app default workspace.";
   const createSessionUsesRemoteProject =
-    !!createSessionSelectedProject &&
-    !isLocalRemoteId(resolveProjectRemoteId(createSessionSelectedProject));
-  const createSessionProjectSelectionError = null;
+    !!createSessionEffectiveProject &&
+    !isLocalRemoteId(resolveProjectRemoteId(createSessionEffectiveProject));
+  const createSessionProjectSelectionError =
+    createSessionProjectId === CREATE_SESSION_WORKSPACE_ID &&
+    !!activeSession?.projectId &&
+    !projectLookup.has(activeSession.projectId)
+      ? "The current workspace is tied to a project that is no longer available. Choose a project before creating a session."
+      : null;
   const createSessionUsesSessionModelPicker = usesSessionModelPicker(newSessionAgent);
   const createSessionAgentReadiness = createSessionUsesRemoteProject
     ? null
@@ -1557,7 +1595,9 @@ export default function App() {
     const preferences = resolveAppPreferences(nextState.preferences);
     setDefaultCodexReasoningEffort(preferences.defaultCodexReasoningEffort);
     setDefaultClaudeEffort(preferences.defaultClaudeEffort);
-    setRemoteConfigs(preferences.remotes);
+    setRemoteConfigs((current) =>
+      areRemoteConfigsEqual(current, preferences.remotes) ? current : preferences.remotes,
+    );
   }
 
   function adoptState(
@@ -2329,10 +2369,28 @@ export default function App() {
       setRequestError("Choose a model.");
       return false;
     }
+    if (
+      projectSelectionId === CREATE_SESSION_WORKSPACE_ID &&
+      !!activeSession?.projectId &&
+      !projectLookup.has(activeSession.projectId)
+    ) {
+      setRequestError(
+        "The current workspace project is unavailable. Choose a project before creating a session.",
+      );
+      return false;
+    }
+    const workspaceProject =
+      projectSelectionId === CREATE_SESSION_WORKSPACE_ID &&
+      activeSession?.projectId &&
+      projectLookup.has(activeSession.projectId)
+        ? (projectLookup.get(activeSession.projectId) ?? null)
+        : null;
     const targetProject =
       projectSelectionId !== CREATE_SESSION_WORKSPACE_ID
-        ? projectLookup.get(projectSelectionId) ?? null
-        : null;
+        ? (projectLookup.get(projectSelectionId) ?? null)
+        : workspaceProject && !isLocalRemoteId(resolveProjectRemoteId(workspaceProject))
+          ? workspaceProject
+          : null;
     const targetUsesRemoteProject =
       !!targetProject && !isLocalRemoteId(resolveProjectRemoteId(targetProject));
     const readiness = targetUsesRemoteProject
@@ -2363,8 +2421,8 @@ export default function App() {
         geminiApprovalMode:
           agent === "Gemini" ? defaultGeminiApprovalMode : undefined,
         sandboxMode: agent === "Codex" ? defaultCodexSandboxMode : undefined,
-        projectId: targetProjectId ?? undefined,
-        workdir: targetProjectId ? undefined : activeSession?.workdir,
+        projectId: targetProjectId ?? targetProject?.id ?? undefined,
+        workdir: targetProjectId || targetProject ? undefined : activeSession?.workdir,
       });
       if (!isMountedRef.current) {
         return false;
@@ -5193,7 +5251,7 @@ function RemotePreferencesPanel({
   const [draftRemotes, setDraftRemotes] = useState<RemoteConfig[]>(remotes);
 
   useEffect(() => {
-    setDraftRemotes(remotes);
+    setDraftRemotes((current) => (areRemoteConfigsEqual(current, remotes) ? current : remotes));
   }, [remotes]);
 
   const validationError = useMemo(() => validateRemoteDrafts(draftRemotes), [draftRemotes]);
@@ -5322,7 +5380,7 @@ function RemotePreferencesPanel({
                           checked={remote.enabled}
                           onChange={(event) => updateRemote(index, { enabled: event.target.checked })}
                         />
-                        <span>Enabled for new projects</span>
+                        <span>Enabled for projects and sessions</span>
                       </label>
                     </>
                   ) : null}
@@ -6612,14 +6670,28 @@ function SessionPaneView({
     [activeSession, pane.viewMode],
   );
   const pendingPrompts = useMemo(() => activeSession?.pendingPrompts ?? [], [activeSession]);
+  const mountedSessionsRef = useRef<Session[]>([]);
   const mountedSessions = useMemo(() => {
     if (!activeSession) {
-      return [];
+      if (mountedSessionsRef.current.length === 0) {
+        return mountedSessionsRef.current;
+      }
+      mountedSessionsRef.current = [];
+      return mountedSessionsRef.current;
     }
 
     const cachedSessionIds = new Set(cachedSessionOrder);
     cachedSessionIds.add(activeSession.id);
-    return sessions.filter((session) => cachedSessionIds.has(session.id));
+    const next = sessions.filter((session) => cachedSessionIds.has(session.id));
+    const prev = mountedSessionsRef.current;
+    if (
+      next.length === prev.length &&
+      next.every((session, index) => session === prev[index])
+    ) {
+      return prev;
+    }
+    mountedSessionsRef.current = next;
+    return next;
   }, [activeSession, cachedSessionOrder, sessions]);
   const sessionConversationSignature = useMemo(
     () =>

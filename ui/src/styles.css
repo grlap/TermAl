@@ -82,6 +82,22 @@ textarea {
   transition:
     background 180ms ease,
     border-color 180ms ease,
+    color 180ms ease;
+}
+
+/* box-shadow transitions are expensive (full repaint of the stacking context).
+   Only apply them to interactive controls where the visual benefit outweighs
+   the cost — not to .message-card or other frequently-updated elements. */
+.ghost-button,
+.chip,
+.composer,
+.themed-input,
+.session-select,
+.source-path-input,
+.composer-input {
+  transition:
+    background 180ms ease,
+    border-color 180ms ease,
     color 180ms ease,
     box-shadow 180ms ease;
 }

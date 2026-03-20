@@ -1,6 +1,10 @@
-# TermAl — Product Specification
+# TermAl — Historical Product Specification
 
-> A WhatsApp-style interface for controlling AI coding agents running on your machine.
+> Historical design draft from the original desktop-first/Tauri planning phase.
+
+> Current implementation note: TermAl now ships as an axum backend plus a React frontend, with
+> Claude, Codex, Gemini, and Cursor integrations. For the current architecture and active feature
+> briefs, see `docs/architecture.md`, `docs/bugs.md`, and `docs/features/`.
 
 **TermAl** — Terminal meets AI. The capital A makes the double meaning explicit.
 Domain: `termal.app`
@@ -9,11 +13,14 @@ Domain: `termal.app`
 
 ## Vision
 
-A desktop app that lets you run and interact with multiple AI coding agent sessions (Claude Code, Codex, and others) side by side — with a clean chat UI, structured output rendering, diff viewer, and markdown viewer. Phase 1 is local-only desktop. Phase 2 extends it to remote access from any device.
+This document captures the original product direction: a fast interface for running and interacting
+with multiple AI coding agent sessions side by side, with structured rendering for diffs, markdown,
+tool calls, and approvals. The core UX intent still applies, but the delivery architecture has
+changed substantially since this draft was written.
 
 ---
 
-# Phase 1 — Desktop App (Local)
+# Original Phase 1 — Desktop App (Local)
 
 ## Goal
 
@@ -21,9 +28,9 @@ Build and polish the core experience on desktop first. Everything runs on the sa
 
 ---
 
-## What It Is
+## What It Was
 
-A Tauri desktop app that:
+At the time of this draft, the planned implementation was a Tauri desktop app that:
 
 - Manages multiple named agent sessions (contacts)
 - Spawns Claude Code and Codex as long-lived child processes with bidirectional JSON protocols

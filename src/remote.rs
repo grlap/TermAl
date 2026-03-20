@@ -13,6 +13,7 @@ const REMOTE_REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 const REMOTE_STARTUP_TIMEOUT: Duration = Duration::from_secs(15);
 const REMOTE_HEALTH_POLL_INTERVAL: Duration = Duration::from_millis(250);
 const REMOTE_EVENT_RETRY_DELAY: Duration = Duration::from_secs(2);
+const REMOTE_EVENT_SHUTDOWN_POLL_INTERVAL: Duration = Duration::from_millis(50);
 
 static NEXT_REMOTE_FORWARD_PORT: AtomicU16 = AtomicU16::new(REMOTE_FORWARD_PORT_START);
 
@@ -74,7 +75,7 @@ impl RemoteRegistry {
                 continue;
             };
             let Some(remote) = next_by_id.get(&remote_id).cloned() else {
-                connection.disconnect();
+                connection.stop_event_bridge();
                 connections.remove(&remote_id);
                 continue;
             };
@@ -135,6 +136,7 @@ struct RemoteConnection {
     forwarded_port: u16,
     process: Mutex<Option<RemoteProcessHandle>>,
     event_bridge_started: AtomicBool,
+    event_bridge_shutdown: AtomicBool,
 }
 
 impl RemoteConnection {
@@ -144,6 +146,7 @@ impl RemoteConnection {
             forwarded_port: allocate_remote_forward_port(),
             process: Mutex::new(None),
             event_bridge_started: AtomicBool::new(false),
+            event_bridge_shutdown: AtomicBool::new(false),
         }
     }
 
@@ -168,6 +171,28 @@ impl RemoteConnection {
         if let Some(mut handle) = process.take() {
             let _ = handle.child.kill();
             let _ = handle.child.wait();
+        }
+    }
+
+    fn stop_event_bridge(&self) {
+        self.event_bridge_shutdown.store(true, Ordering::SeqCst);
+        self.disconnect();
+    }
+
+    fn wait_for_bridge_retry_or_shutdown(&self, duration: Duration) -> bool {
+        let deadline = Instant::now() + duration;
+        loop {
+            if self.event_bridge_shutdown.load(Ordering::SeqCst) {
+                return true;
+            }
+            let now = Instant::now();
+            if now >= deadline {
+                return false;
+            }
+            thread::sleep(std::cmp::min(
+                REMOTE_EVENT_SHUTDOWN_POLL_INTERVAL,
+                deadline.saturating_duration_since(now),
+            ));
         }
     }
 
@@ -238,36 +263,14 @@ impl RemoteConnection {
         remote: &RemoteConfig,
         mode: RemoteProcessMode,
     ) -> Result<RemoteProcessHandle, ApiError> {
-        let target = remote_ssh_target(remote)?;
         let mut command = Command::new("ssh");
-        command
-            .arg("-T")
-            .arg("-o")
-            .arg("BatchMode=yes")
-            .arg("-o")
-            .arg("ExitOnForwardFailure=yes")
-            .arg("-o")
-            .arg("ServerAliveInterval=15")
-            .arg("-o")
-            .arg("ServerAliveCountMax=3")
-            .arg("-p")
-            .arg(remote.port.unwrap_or(DEFAULT_SSH_REMOTE_PORT).to_string())
-            .arg("-L")
-            .arg(format!(
-                "{}:127.0.0.1:{}",
-                self.forwarded_port, REMOTE_SERVER_PORT
-            ));
-        if matches!(mode, RemoteProcessMode::TunnelOnly) {
-            command.arg("-N");
+        for arg in remote_ssh_command_args(remote, self.forwarded_port, mode)? {
+            command.arg(arg);
         }
         command
-            .arg(target)
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::piped());
-        if matches!(mode, RemoteProcessMode::ManagedServer) {
-            command.arg("termal").arg("server");
-        }
         let child = command.spawn().map_err(|err| {
             ApiError::bad_gateway(format!(
                 "failed to start SSH connection for remote `{}`: {err}",
@@ -278,38 +281,69 @@ impl RemoteConnection {
     }
 
     fn start_event_bridge(self: &Arc<Self>, client: BlockingHttpClient, state: AppState) {
+        self.event_bridge_shutdown.store(false, Ordering::SeqCst);
         if self.event_bridge_started.swap(true, Ordering::SeqCst) {
             return;
         }
 
         let connection = Arc::clone(self);
-        thread::spawn(move || loop {
-            let remote = connection.config();
-            if !remote.enabled || remote.transport != RemoteTransport::Ssh {
-                thread::sleep(REMOTE_EVENT_RETRY_DELAY);
-                continue;
+        thread::spawn(move || {
+            struct EventBridgeReset {
+                connection: Arc<RemoteConnection>,
             }
 
-            let base_url = match connection.ensure_available(&client) {
-                Ok(base_url) => base_url,
-                Err(_) => {
-                    thread::sleep(REMOTE_EVENT_RETRY_DELAY);
-                    continue;
+            impl Drop for EventBridgeReset {
+                fn drop(&mut self) {
+                    self.connection
+                        .event_bridge_started
+                        .store(false, Ordering::SeqCst);
                 }
-            };
-
-            let response = match client.get(format!("{base_url}/api/events")).send() {
-                Ok(response) => response,
-                Err(_) => {
-                    thread::sleep(REMOTE_EVENT_RETRY_DELAY);
-                    continue;
-                }
-            };
-
-            if let Err(err) = process_remote_event_stream(&state, &remote.id, response) {
-                eprintln!("remote event bridge `{}` disconnected: {err:#}", remote.id);
             }
-            thread::sleep(REMOTE_EVENT_RETRY_DELAY);
+
+            let _reset = EventBridgeReset {
+                connection: Arc::clone(&connection),
+            };
+
+            loop {
+                if connection.event_bridge_shutdown.load(Ordering::SeqCst) {
+                    break;
+                }
+
+                let remote = connection.config();
+                if !remote.enabled || remote.transport != RemoteTransport::Ssh {
+                    if connection.wait_for_bridge_retry_or_shutdown(REMOTE_EVENT_RETRY_DELAY) {
+                        break;
+                    }
+                    continue;
+                }
+
+                let base_url = match connection.ensure_available(&client) {
+                    Ok(base_url) => base_url,
+                    Err(_) => {
+                        if connection.wait_for_bridge_retry_or_shutdown(REMOTE_EVENT_RETRY_DELAY) {
+                            break;
+                        }
+                        continue;
+                    }
+                };
+
+                let response = match client.get(format!("{base_url}/api/events")).send() {
+                    Ok(response) => response,
+                    Err(_) => {
+                        if connection.wait_for_bridge_retry_or_shutdown(REMOTE_EVENT_RETRY_DELAY) {
+                            break;
+                        }
+                        continue;
+                    }
+                };
+
+                if let Err(err) = process_remote_event_stream(&state, &remote.id, response) {
+                    eprintln!("remote event bridge `{}` disconnected: {err:#}", remote.id);
+                }
+                if connection.wait_for_bridge_retry_or_shutdown(REMOTE_EVENT_RETRY_DELAY) {
+                    break;
+                }
+            }
         });
     }
 }
@@ -456,6 +490,18 @@ impl AppState {
             &[],
             Some(apply_remote_scope_to_body(scope, body)),
         )
+    }
+
+    fn remote_put_json_with_query_scope<T: DeserializeOwned>(
+        &self,
+        scope: &RemoteScope,
+        path: &str,
+        mut query: Vec<(String, String)>,
+        body: Value,
+    ) -> Result<T, ApiError> {
+        apply_remote_scope_to_query(scope, &mut query);
+        self.remote_registry
+            .request_json(&scope.remote, Method::PUT, path, &query, Some(body))
     }
 
     fn lookup_remote_config(&self, remote_id: &str) -> Result<RemoteConfig, ApiError> {
@@ -1382,6 +1428,23 @@ fn sync_remote_state_inner(
         }
     }
 
+    if focus_remote_session_id.is_none() {
+        let live_remote_session_ids = remote_state
+            .sessions
+            .iter()
+            .map(|session| session.id.as_str())
+            .collect::<HashSet<_>>();
+        inner.sessions.retain(|record| {
+            if record.remote_id.as_deref() != Some(remote_id) {
+                return true;
+            }
+            let Some(remote_session_id) = record.remote_session_id.as_deref() else {
+                return true;
+            };
+            live_remote_session_ids.contains(remote_session_id)
+        });
+    }
+
     for record in &mut inner.sessions {
         if record.remote_id.as_deref() != Some(remote_id) {
             continue;
@@ -1624,31 +1687,144 @@ fn validate_remote_connection_config(remote: &RemoteConfig) -> Result<(), ApiErr
             remote.name
         )));
     }
+    validate_remote_id_value(remote.id.trim())?;
     match remote.transport {
         RemoteTransport::Local => Ok(()),
         RemoteTransport::Ssh => {
-            if remote.host.as_deref().is_none_or(|value| value.trim().is_empty()) {
-                return Err(ApiError::bad_request(format!(
-                    "remote `{}` is missing an SSH host",
-                    remote.name
-                )));
-            }
+            normalized_remote_ssh_host(remote)?;
+            normalized_remote_ssh_user(remote)?;
             Ok(())
         }
     }
 }
 
 fn remote_ssh_target(remote: &RemoteConfig) -> Result<String, ApiError> {
+    let host = normalized_remote_ssh_host(remote)?;
+    let user = normalized_remote_ssh_user(remote)?;
+    Ok(match user {
+        Some(user) => format!("{user}@{host}"),
+        None => host,
+    })
+}
+
+fn remote_ssh_command_args(
+    remote: &RemoteConfig,
+    forwarded_port: u16,
+    mode: RemoteProcessMode,
+) -> Result<Vec<String>, ApiError> {
+    let target = remote_ssh_target(remote)?;
+    let mut args = vec![
+        "-T".to_owned(),
+        "-o".to_owned(),
+        "BatchMode=yes".to_owned(),
+        "-o".to_owned(),
+        "ExitOnForwardFailure=yes".to_owned(),
+        "-o".to_owned(),
+        "ServerAliveInterval=15".to_owned(),
+        "-o".to_owned(),
+        "ServerAliveCountMax=3".to_owned(),
+        "-p".to_owned(),
+        remote
+            .port
+            .unwrap_or(DEFAULT_SSH_REMOTE_PORT)
+            .to_string(),
+        "-L".to_owned(),
+        format!("{forwarded_port}:127.0.0.1:{REMOTE_SERVER_PORT}"),
+    ];
+    if matches!(mode, RemoteProcessMode::TunnelOnly) {
+        args.push("-N".to_owned());
+    }
+    args.push("--".to_owned());
+    args.push(target);
+    if matches!(mode, RemoteProcessMode::ManagedServer) {
+        args.push("termal".to_owned());
+        args.push("server".to_owned());
+    }
+    Ok(args)
+}
+
+fn normalized_remote_ssh_host(remote: &RemoteConfig) -> Result<String, ApiError> {
     let host = remote
         .host
         .as_deref()
         .map(str::trim)
         .filter(|value| !value.is_empty())
-        .ok_or_else(|| ApiError::bad_request(format!("remote `{}` is missing an SSH host", remote.name)))?;
-    Ok(match remote.user.as_deref().map(str::trim) {
-        Some(user) if !user.is_empty() => format!("{user}@{host}"),
-        _ => host.to_owned(),
-    })
+        .ok_or_else(|| {
+            ApiError::bad_request(format!("remote `{}` is missing an SSH host", remote.name))
+        })?;
+    validate_remote_ssh_host_value(host, &remote.name)?;
+    Ok(host.to_owned())
+}
+
+fn normalized_remote_ssh_user(remote: &RemoteConfig) -> Result<Option<String>, ApiError> {
+    let Some(user) = remote
+        .user
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    else {
+        return Ok(None);
+    };
+    validate_remote_ssh_user_value(user, &remote.name)?;
+    Ok(Some(user.to_owned()))
+}
+
+fn validate_remote_id_value(id: &str) -> Result<(), ApiError> {
+    if id.is_empty() {
+        return Err(ApiError::bad_request("remote id cannot be empty"));
+    }
+    if !id
+        .bytes()
+        .all(|byte| matches!(byte, b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'-' | b'_' | b'.'))
+    {
+        return Err(ApiError::bad_request(format!(
+            "remote id `{id}` contains unsupported characters",
+        )));
+    }
+    Ok(())
+}
+
+fn validate_remote_ssh_host_value(host: &str, remote_name: &str) -> Result<(), ApiError> {
+    if host.starts_with('-') {
+        return Err(ApiError::bad_request(format!(
+            "remote `{remote_name}` has an invalid SSH host",
+        )));
+    }
+    if !host.bytes().any(|byte| byte.is_ascii_alphanumeric())
+        || !host.bytes().all(|byte| {
+            matches!(
+                byte,
+                b'a'..=b'z'
+                    | b'A'..=b'Z'
+                    | b'0'..=b'9'
+                    | b'.'
+                    | b'-'
+                    | b'_'
+                    | b':'
+                    | b'['
+                    | b']'
+                    | b'%'
+            )
+        })
+    {
+        return Err(ApiError::bad_request(format!(
+            "remote `{remote_name}` has an invalid SSH host",
+        )));
+    }
+    Ok(())
+}
+
+fn validate_remote_ssh_user_value(user: &str, remote_name: &str) -> Result<(), ApiError> {
+    if user.contains('@')
+        || !user
+            .bytes()
+            .all(|byte| matches!(byte, b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'.' | b'-' | b'_'))
+    {
+        return Err(ApiError::bad_request(format!(
+            "remote `{remote_name}` has an invalid SSH user",
+        )));
+    }
+    Ok(())
 }
 
 fn wait_for_remote_health(
