@@ -555,7 +555,10 @@ fn spawn_acp_runtime(
         .stderr
         .take()
         .with_context(|| format!("failed to capture {} ACP stderr", agent.label()))?;
-    let process = Arc::new(Mutex::new(child));
+    let process = Arc::new(
+        SharedChild::new(child)
+            .with_context(|| format!("failed to share {} ACP runtime child", agent.label()))?,
+    );
     let (input_tx, input_rx) = mpsc::channel::<AcpRuntimeCommand>();
     let pending_requests: AcpPendingRequestMap = Arc::new(Mutex::new(HashMap::new()));
     let runtime_state = Arc::new(Mutex::new(AcpRuntimeState::default()));
@@ -752,50 +755,38 @@ fn spawn_acp_runtime(
         let wait_pending_requests = pending_requests.clone();
         let wait_runtime_token = RuntimeToken::Acp(runtime_id.clone());
         std::thread::spawn(move || {
-            loop {
-                let status = {
-                    let mut child = wait_process.lock().expect("ACP process mutex poisoned");
-                    child.try_wait()
-                };
-
-                match status {
-                    Ok(Some(status)) if status.success() => {
-                        fail_pending_acp_requests(
-                            &wait_pending_requests,
-                            &format!(
-                                "{} ACP runtime exited while waiting for a pending response",
-                                agent.label()
-                            ),
-                        );
-                        let _ = wait_state.handle_runtime_exit_if_matches(
-                            &wait_session_id,
-                            &wait_runtime_token,
-                            None,
-                        );
-                        break;
-                    }
-                    Ok(Some(status)) => {
-                        let detail =
-                            format!("{} session exited with status {status}", agent.label());
-                        fail_pending_acp_requests(&wait_pending_requests, &detail);
-                        let _ = wait_state.handle_runtime_exit_if_matches(
-                            &wait_session_id,
-                            &wait_runtime_token,
-                            Some(&detail),
-                        );
-                        break;
-                    }
-                    Ok(None) => std::thread::sleep(Duration::from_millis(100)),
-                    Err(err) => {
-                        let detail = format!("failed waiting for {} session: {err}", agent.label());
-                        fail_pending_acp_requests(&wait_pending_requests, &detail);
-                        let _ = wait_state.handle_runtime_exit_if_matches(
-                            &wait_session_id,
-                            &wait_runtime_token,
-                            Some(&detail),
-                        );
-                        break;
-                    }
+            match wait_process.wait() {
+                Ok(status) if status.success() => {
+                    fail_pending_acp_requests(
+                        &wait_pending_requests,
+                        &format!(
+                            "{} ACP runtime exited while waiting for a pending response",
+                            agent.label()
+                        ),
+                    );
+                    let _ = wait_state.handle_runtime_exit_if_matches(
+                        &wait_session_id,
+                        &wait_runtime_token,
+                        None,
+                    );
+                }
+                Ok(status) => {
+                    let detail = format!("{} session exited with status {status}", agent.label());
+                    fail_pending_acp_requests(&wait_pending_requests, &detail);
+                    let _ = wait_state.handle_runtime_exit_if_matches(
+                        &wait_session_id,
+                        &wait_runtime_token,
+                        Some(&detail),
+                    );
+                }
+                Err(err) => {
+                    let detail = format!("failed waiting for {} session: {err}", agent.label());
+                    fail_pending_acp_requests(&wait_pending_requests, &detail);
+                    let _ = wait_state.handle_runtime_exit_if_matches(
+                        &wait_session_id,
+                        &wait_runtime_token,
+                        Some(&detail),
+                    );
                 }
             }
         });
@@ -1849,7 +1840,9 @@ fn spawn_shared_codex_runtime(state: AppState) -> Result<SharedCodexRuntime> {
         .stderr
         .take()
         .context("failed to capture shared Codex app-server stderr")?;
-    let process = Arc::new(Mutex::new(child));
+    let process = Arc::new(
+        SharedChild::new(child).context("failed to share shared Codex app-server child")?,
+    );
     let (input_tx, input_rx) = mpsc::channel::<CodexRuntimeCommand>();
     let pending_requests: CodexPendingRequestMap = Arc::new(Mutex::new(HashMap::new()));
     let sessions: SharedCodexSessionMap = Arc::new(Mutex::new(HashMap::new()));
@@ -2046,38 +2039,21 @@ fn spawn_shared_codex_runtime(state: AppState) -> Result<SharedCodexRuntime> {
         let wait_process = process.clone();
         let wait_runtime_id = runtime_id.clone();
         std::thread::spawn(move || {
-            loop {
-                let status = {
-                    let mut child = wait_process
-                        .lock()
-                        .expect("shared Codex process mutex poisoned");
-                    child.try_wait()
-                };
-
-                match status {
-                    Ok(Some(status)) if status.success() => {
-                        let _ = wait_state.handle_shared_codex_runtime_exit(&wait_runtime_id, None);
-                        break;
-                    }
-                    Ok(Some(status)) => {
-                        let _ = wait_state.handle_shared_codex_runtime_exit(
-                            &wait_runtime_id,
-                            Some(&format!(
-                                "shared Codex app-server exited with status {status}"
-                            )),
-                        );
-                        break;
-                    }
-                    Ok(None) => std::thread::sleep(Duration::from_millis(100)),
-                    Err(err) => {
-                        let _ = wait_state.handle_shared_codex_runtime_exit(
-                            &wait_runtime_id,
-                            Some(&format!(
-                                "failed waiting for shared Codex app-server: {err}"
-                            )),
-                        );
-                        break;
-                    }
+            match wait_process.wait() {
+                Ok(status) if status.success() => {
+                    let _ = wait_state.handle_shared_codex_runtime_exit(&wait_runtime_id, None);
+                }
+                Ok(status) => {
+                    let _ = wait_state.handle_shared_codex_runtime_exit(
+                        &wait_runtime_id,
+                        Some(&format!("shared Codex app-server exited with status {status}")),
+                    );
+                }
+                Err(err) => {
+                    let _ = wait_state.handle_shared_codex_runtime_exit(
+                        &wait_runtime_id,
+                        Some(&format!("failed waiting for shared Codex app-server: {err}")),
+                    );
                 }
             }
         });
@@ -4066,7 +4042,7 @@ fn spawn_claude_runtime(
         .stderr
         .take()
         .context("failed to capture Claude stderr")?;
-    let process = Arc::new(Mutex::new(child));
+    let process = Arc::new(SharedChild::new(child).context("failed to share Claude child")?);
 
     let (input_tx, input_rx) = mpsc::channel::<ClaudeRuntimeCommand>();
 
@@ -4319,38 +4295,27 @@ fn spawn_claude_runtime(
         let wait_process = process.clone();
         let wait_runtime_token = RuntimeToken::Claude(runtime_id.clone());
         std::thread::spawn(move || {
-            loop {
-                let status = {
-                    let mut child = wait_process.lock().expect("Claude process mutex poisoned");
-                    child.try_wait()
-                };
-
-                match status {
-                    Ok(Some(status)) if status.success() => {
-                        let _ = wait_state.handle_runtime_exit_if_matches(
-                            &wait_session_id,
-                            &wait_runtime_token,
-                            None,
-                        );
-                        break;
-                    }
-                    Ok(Some(status)) => {
-                        let _ = wait_state.handle_runtime_exit_if_matches(
-                            &wait_session_id,
-                            &wait_runtime_token,
-                            Some(&format!("Claude session exited with status {status}")),
-                        );
-                        break;
-                    }
-                    Ok(None) => std::thread::sleep(Duration::from_millis(100)),
-                    Err(err) => {
-                        let _ = wait_state.handle_runtime_exit_if_matches(
-                            &wait_session_id,
-                            &wait_runtime_token,
-                            Some(&format!("failed waiting for Claude session: {err}")),
-                        );
-                        break;
-                    }
+            match wait_process.wait() {
+                Ok(status) if status.success() => {
+                    let _ = wait_state.handle_runtime_exit_if_matches(
+                        &wait_session_id,
+                        &wait_runtime_token,
+                        None,
+                    );
+                }
+                Ok(status) => {
+                    let _ = wait_state.handle_runtime_exit_if_matches(
+                        &wait_session_id,
+                        &wait_runtime_token,
+                        Some(&format!("Claude session exited with status {status}")),
+                    );
+                }
+                Err(err) => {
+                    let _ = wait_state.handle_runtime_exit_if_matches(
+                        &wait_session_id,
+                        &wait_runtime_token,
+                        Some(&format!("failed waiting for Claude session: {err}")),
+                    );
                 }
             }
         });

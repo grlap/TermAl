@@ -671,13 +671,8 @@ describe("App", () => {
     const originalFetch = globalThis.fetch;
     const originalEventSource = globalThis.EventSource;
     const originalResizeObserver = globalThis.ResizeObserver;
-    const stateFetch = createDeferred<Response>();
     const fetchMock = vi.fn((input: RequestInfo | URL) => {
-      const url = String(input);
-      if (url === "/api/state") {
-        return stateFetch.promise;
-      }
-      throw new Error(`Unexpected fetch: ${url}`);
+      throw new Error(`Unexpected fetch: ${String(input)}`);
     });
     vi.stubGlobal("fetch", fetchMock);
     vi.stubGlobal("EventSource", EventSourceMock as unknown as typeof EventSource);
@@ -729,45 +724,41 @@ describe("App", () => {
       act(() => {
         eventSource.dispatchError();
       });
-      await waitFor(() => {
-        expect(fetchMock.mock.calls.some(([url]) => String(url) === "/api/state")).toBe(true);
-      });
-      await act(async () => {
-        stateFetch.resolve(
-          jsonResponse({
-            revision: 2,
-            projects: [],
-            sessions: [
-              makeSession("session-1", {
-                name: "Codex Session",
-                status: "idle",
-                preview: "Here.",
-                messages: [
-                  {
-                    id: "message-user-1",
-                    type: "text",
-                    timestamp: "10:00",
-                    author: "you",
-                    text: "test",
-                  },
-                  {
-                    id: "message-assistant-1",
-                    type: "text",
-                    timestamp: "10:01",
-                    author: "assistant",
-                    text: "Here.",
-                  },
-                ],
-              }),
-            ],
-          }),
-        );
-        await flushUiWork();
+      act(() => {
+        eventSource.dispatchOpen();
+        eventSource.dispatchNamedEvent("state", {
+          revision: 2,
+          projects: [],
+          sessions: [
+            makeSession("session-1", {
+              name: "Codex Session",
+              status: "idle",
+              preview: "Here.",
+              messages: [
+                {
+                  id: "message-user-1",
+                  type: "text",
+                  timestamp: "10:00",
+                  author: "you",
+                  text: "test",
+                },
+                {
+                  id: "message-assistant-1",
+                  type: "text",
+                  timestamp: "10:01",
+                  author: "assistant",
+                  text: "Here.",
+                },
+              ],
+            }),
+          ],
+        });
       });
       await waitFor(() => {
         expect(screen.getAllByText("Here.").length).toBeGreaterThan(0);
       });
       expect(screen.queryByText("Waiting for the next chunk of output...")).not.toBeInTheDocument();
+      expect(fetchMock.mock.calls.some(([url]) => String(url) === "/api/state")).toBe(false);
     } finally {
       HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
       restoreGlobal("fetch", originalFetch);
@@ -846,10 +837,7 @@ describe("App", () => {
       act(() => {
         eventSource.dispatchError();
       });
-
-      await waitFor(() => {
-        expect(fetchMock.mock.calls.some(([url]) => String(url) === "/api/state")).toBe(true);
-      });
+      expect(fetchMock.mock.calls.some(([url]) => String(url) === "/api/state")).toBe(false);
 
       act(() => {
         eventSource.dispatchOpen();

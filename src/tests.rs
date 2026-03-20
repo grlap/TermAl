@@ -191,7 +191,7 @@ fn test_codex_runtime_handle(
         CodexRuntimeHandle {
             runtime_id: runtime_id.to_owned(),
             input_tx,
-            process: Arc::new(Mutex::new(child)),
+            process: Arc::new(SharedChild::new(child).unwrap()),
             shared_session: None,
         },
         input_rx,
@@ -208,7 +208,7 @@ fn test_claude_runtime_handle(
         ClaudeRuntimeHandle {
             runtime_id: runtime_id.to_owned(),
             input_tx,
-            process: Arc::new(Mutex::new(child)),
+            process: Arc::new(SharedChild::new(child).unwrap()),
         },
         input_rx,
     )
@@ -226,7 +226,7 @@ fn test_acp_runtime_handle(
             agent,
             runtime_id: runtime_id.to_owned(),
             input_tx,
-            process: Arc::new(Mutex::new(child)),
+            process: Arc::new(SharedChild::new(child).unwrap()),
         },
         input_rx,
     )
@@ -616,10 +616,10 @@ fn test_shared_codex_runtime(
 ) -> (
     SharedCodexRuntime,
     mpsc::Receiver<CodexRuntimeCommand>,
-    Arc<Mutex<Child>>,
+    Arc<SharedChild>,
 ) {
     let child = test_exit_success_child();
-    let process = Arc::new(Mutex::new(child));
+    let process = Arc::new(SharedChild::new(child).unwrap());
     let (input_tx, input_rx) = mpsc::channel();
     let runtime = SharedCodexRuntime {
         runtime_id: runtime_id.to_owned(),
@@ -1590,7 +1590,7 @@ fn updates_claude_session_model_settings_without_restarting_runtime() {
     let runtime = ClaudeRuntimeHandle {
         runtime_id: "claude-model-update".to_owned(),
         input_tx,
-        process: Arc::new(Mutex::new(child)),
+        process: Arc::new(SharedChild::new(child).unwrap()),
     };
 
     {
@@ -1668,7 +1668,7 @@ fn updates_claude_effort_and_marks_runtime_for_restart() {
     let runtime = ClaudeRuntimeHandle {
         runtime_id: "claude-effort-update".to_owned(),
         input_tx,
-        process: Arc::new(Mutex::new(child)),
+        process: Arc::new(SharedChild::new(child).unwrap()),
     };
 
     {
@@ -1784,7 +1784,7 @@ fn refreshes_codex_model_options_from_runtime() {
     let runtime = CodexRuntimeHandle {
         runtime_id: "codex-model-refresh".to_owned(),
         input_tx,
-        process: Arc::new(Mutex::new(child)),
+        process: Arc::new(SharedChild::new(child).unwrap()),
         shared_session: None,
     };
 
@@ -5771,7 +5771,7 @@ fn dispatches_saved_queued_prompts_before_new_prompt_after_recovery() {
     let runtime = ClaudeRuntimeHandle {
         runtime_id: "recovered-queue-dispatch".to_owned(),
         input_tx,
-        process: Arc::new(Mutex::new(child)),
+        process: Arc::new(SharedChild::new(child).unwrap()),
     };
 
     {

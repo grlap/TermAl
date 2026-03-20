@@ -912,7 +912,7 @@ fn run_codex_turn(
         .stderr
         .take()
         .context("failed to capture child stderr")?;
-    let process = Arc::new(Mutex::new(child));
+    let process = Arc::new(SharedChild::new(child).context("failed to share Codex child")?);
     if let (Some(state), Some(runtime_session_id)) = (state, runtime_session_id) {
         let (input_tx, _input_rx) = mpsc::channel();
         let runtime = CodexRuntimeHandle {
@@ -997,10 +997,7 @@ fn run_codex_turn(
         )?;
     }
 
-    let status = {
-        let mut child = process.lock().expect("Codex process mutex poisoned");
-        child.wait().context("failed waiting for Codex process")?
-    };
+    let status = process.wait().context("failed waiting for Codex process")?;
     let mut rollout_saw_final_answer = false;
     if let Some(streamer) = rollout_streamer {
         streamer.stop.store(true, Ordering::SeqCst);

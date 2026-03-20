@@ -3,7 +3,7 @@
 Updated against the current checked-in code in `src/main.rs`, `ui/src/App.tsx`,
 `ui/package.json`, and `ui/vite.config.ts`.
 
-The older entries for "No image paste support", Claude `control_request` fallthrough, "No SSE/WebSocket for real-time updates", "Codex receive has no streaming", "No queueing system for prompts", the stale `/api/state`-after-SSE bootstrap race, the false-positive delta SSE reconciliation drift when a message already existed locally, shared Codex turn-scoped subagent ordering, shared Codex `item_completed` multipart truncation, stale shared-Codex agent-event turn filtering, the shared Codex buffered-result flush edge, multiple simultaneous approvals, Windows `HOME`-only path resolution, and unhandled Codex rate-limit notifications were stale. Those are implemented in the current tree.
+The older entries for "No image paste support", Claude `control_request` fallthrough, "No SSE/WebSocket for real-time updates", "Codex receive has no streaming", "No queueing system for prompts", the stale `/api/state`-after-SSE bootstrap race, the false-positive delta SSE reconciliation drift when a message already existed locally, shared Codex turn-scoped subagent ordering, shared Codex `item_completed` multipart truncation, stale shared-Codex agent-event turn filtering, the shared Codex buffered-result flush edge, multiple simultaneous approvals, Windows `HOME`-only path resolution, process-exit polling, unhandled Codex rate-limit notifications, and the stale "Backend persists full state on every streaming text delta" entry were stale. Those are implemented in the current tree.
 
 The newer shared Codex regressions where stale `task_complete` summaries could bleed into the next
 answer or a pre-answer summary insert could overwrite the final-answer preview are also fixed in
@@ -342,18 +342,6 @@ without another state transition, the session can remain stuck in `Approval`.
 - Recompute session status from the remaining live approvals instead of leaving it at `Approval`
 - Add a regression test for canceled approvals
 
-## Polling for process exit
-
-**Severity:** Low
-
-Both `spawn_claude_runtime()` and `spawn_codex_runtime()` still use a `sleep(100ms)` loop around `child.try_wait()` to detect process exit. This is functional, but it is still polling.
-
-**Affected code (`src/main.rs`):**
-- Claude wait thread in `spawn_claude_runtime()`
-- Codex wait thread in `spawn_codex_runtime()`
-
-**Fix:** Replace the polling loop with a dedicated waiter thread that blocks on `child.wait()`, or move runtime supervision to async child handling.
-
 ## No runtime pre-warming / session pooling
 
 **Severity:** Medium â€” first message still pays startup cost.
@@ -549,62 +537,15 @@ latency issue is the refresh path during live streaming.
 - Active long conversations now use a windowed message list instead of mounting every message card
 - Heavy markdown and code blocks now defer their expensive render work until near the viewport
 - Cached conversation pages per pane are now bounded so hidden long tabs do not grow without limit
+- Once the UI has a live revision, EventSource reconnects now wait for the stream's initial
+  `state` event instead of immediately forcing an extra `/api/state` fetch on every stream error
 
 **What still happens:**
-- The mount path still starts `EventSource("/api/events")` and `fetchState()` in parallel, so a
-  late `/api/state` response can overwrite newer delta-applied UI state
-- Full-state adoption still reruns the broader session reconciliation path whenever a state event
-  does arrive, so concurrent activity can still make typing feel slower than it should
+- Delta-gap recovery and explicit full-state events still rerun the broader session reconciliation
+  path, so concurrent activity can still make typing feel slower than it should
 
 **Tasks:**
 - Profile frontend rerenders during active streaming to identify the remaining hot subtrees
-
-## Backend persists full state on every streaming text delta
-
-**Severity:** High – primary cause of responses getting progressively slower over time.
-
-`append_text_delta()` is called for every streaming text chunk (hundreds per response). Each
-invocation acquires the mutex, does a linear scan of all session messages to find the target,
-clones the accumulated text, then calls `commit_delta_locked()` which serializes the **entire**
-`StateInner` as pretty-printed JSON and writes it to disk via `fs::write()`. The mutex is held
-for the full duration of the I/O.
-
-As sessions accumulate messages the serialization payload grows, so each delta takes longer to
-persist. A long conversation with 50+ messages and a streaming response producing 500 deltas
-results in 500 full-state disk writes — each one larger than the last.
-
-**Contributing factors:**
-- **Linear message scan per delta** (`main.rs` ~line 1944): `for message in &mut session.messages`
-  iterates all messages to find the target by ID. O(N) per delta, O(N×M) total for M deltas.
-- **Full text clone per delta** (~line 1948): `text.clone()` copies the entire accumulated
-  assistant response on every chunk just to derive a preview string.
-- **`collect_agent_readiness` on every snapshot** (~line 482): `snapshot_from_inner()` calls
-  `find_command_on_path()` which walks every PATH directory looking for executables. This runs
-  on every `commit_locked()` call and every SSE lag-recovery fallback — not on deltas directly,
-  but still on every full-state publish event.
-- **Broadcast lag forces full reserialization** (~line 9076): when the broadcast channel
-  (capacity 128 state / 256 delta) overflows, the SSE handler calls `state.snapshot()` which
-  re-serializes everything and re-runs `collect_agent_readiness`.
-
-**Affected code (`src/main.rs`):**
-- `append_text_delta()` → `commit_delta_locked()` → `bump_revision_and_persist_locked()` →
-  `persist_state()`
-- `upsert_command_message()` follows the same persist-per-update pattern
-- `snapshot_from_inner()` unconditionally calls `collect_agent_readiness()`
-- `find_session_index()` is O(N) and called on every mutation
-
-**Fix (ordered by impact):**
-1. **Debounce delta persistence** – accumulate deltas in memory and flush to disk on a timer
-   (e.g. every 500 ms) or when the turn finishes, instead of writing after every chunk. The
-   in-memory state is already authoritative; disk is only needed for crash recovery.
-2. **Index messages by ID** – replace the linear `for message in &mut session.messages` scan
-   with a `HashMap<String, usize>` side-index so message lookup is O(1).
-3. **Cache `collect_agent_readiness`** – compute it once on startup and invalidate on a TTL
-   or explicit event, instead of re-scanning PATH on every snapshot.
-4. **Avoid cloning the full text per delta** – derive the preview from the delta or a trailing
-   slice instead of cloning the entire accumulated string.
-5. **Move disk I/O outside the mutex** – serialize and write after releasing the lock so other
-   operations are not blocked on file system latency.
 
 ## Command delta inserts lose timestamps
 

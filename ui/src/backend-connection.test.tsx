@@ -129,9 +129,7 @@ describe("Backend connection state", () => {
       await waitFor(() => {
         expect(screen.getByText("Reconnecting")).toBeInTheDocument();
       });
-      await waitFor(() => {
-        expect(fetchMock).toHaveBeenCalled();
-      });
+      expect(fetchMock).not.toHaveBeenCalled();
 
       Object.defineProperty(window.navigator, "onLine", {
         configurable: true,

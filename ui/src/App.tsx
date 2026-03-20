@@ -1774,7 +1774,10 @@ export default function App() {
             : "reconnecting"
           : "offline",
       );
-      if (isOnline) {
+      if (isOnline && latestStateRevisionRef.current === null) {
+        // The SSE endpoint emits a full state snapshot on connect, so once the client has an
+        // established revision it is cheaper to wait for the reconnect snapshot than to
+        // immediately force a duplicate /api/state fetch.
         requestStateResync();
       }
     };

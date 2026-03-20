@@ -3380,7 +3380,7 @@ enum SessionRuntime {
 struct ClaudeRuntimeHandle {
     runtime_id: String,
     input_tx: Sender<ClaudeRuntimeCommand>,
-    process: Arc<Mutex<Child>>,
+    process: Arc<SharedChild>,
 }
 
 impl ClaudeRuntimeHandle {
@@ -3393,7 +3393,7 @@ impl ClaudeRuntimeHandle {
 struct CodexRuntimeHandle {
     runtime_id: String,
     input_tx: Sender<CodexRuntimeCommand>,
-    process: Arc<Mutex<Child>>,
+    process: Arc<SharedChild>,
     shared_session: Option<SharedCodexSessionHandle>,
 }
 
@@ -3407,7 +3407,7 @@ impl CodexRuntimeHandle {
 struct SharedCodexRuntime {
     runtime_id: String,
     input_tx: Sender<CodexRuntimeCommand>,
-    process: Arc<Mutex<Child>>,
+    process: Arc<SharedChild>,
     sessions: SharedCodexSessionMap,
     thread_sessions: SharedCodexThreadMap,
 }
@@ -3537,7 +3537,7 @@ struct AcpRuntimeHandle {
     agent: AcpAgent,
     runtime_id: String,
     input_tx: Sender<AcpRuntimeCommand>,
-    process: Arc<Mutex<Child>>,
+    process: Arc<SharedChild>,
 }
 
 impl AcpRuntimeHandle {
@@ -3585,13 +3585,10 @@ impl SessionRuntime {
     }
 }
 
-fn kill_child_process(process: &Arc<Mutex<Child>>, label: &str) -> Result<()> {
-    let mut child = process
-        .lock()
-        .unwrap_or_else(|_| panic!("{label} process mutex poisoned"));
-    match child.try_wait() {
+fn kill_child_process(process: &Arc<SharedChild>, label: &str) -> Result<()> {
+    match process.try_wait() {
         Ok(Some(_)) => Ok(()),
-        Ok(None) => child
+        Ok(None) => process
             .kill()
             .with_context(|| format!("failed to terminate {label} process")),
         Err(err) => Err(anyhow!("failed to inspect {label} process state: {err}")),

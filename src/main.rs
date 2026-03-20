@@ -21,6 +21,7 @@ use base64::Engine as _;
 use chrono::Local;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
+use shared_child::SharedChild;
 use tokio::net::TcpListener;
 use tokio::sync::broadcast;
 use tower_http::services::{ServeDir, ServeFile};
