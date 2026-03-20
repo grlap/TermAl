@@ -974,6 +974,7 @@ export default function App() {
   const lastDerivedControlPanelGitWorkdirRef = useRef<string | null>(null);
   const sessionsRef = useRef<Session[]>([]);
   const latestStateRevisionRef = useRef<number | null>(null);
+  const forceAdoptNextStateEventRef = useRef(false);
   const stateResyncInFlightRef = useRef(false);
   const stateResyncPendingRef = useRef(false);
   const paneShouldStickToBottomRef = useRef<Record<string, boolean | undefined>>({});
@@ -1546,13 +1547,16 @@ export default function App() {
 
   function adoptState(
     nextState: StateResponse,
-    options?: { openSessionId?: string; paneId?: string | null },
+    options?: { force?: boolean; openSessionId?: string; paneId?: string | null },
   ) {
     if (!isMountedRef.current) {
       return false;
     }
 
-    if (!shouldAdoptStateRevision(latestStateRevisionRef.current, nextState.revision)) {
+    if (
+      !options?.force &&
+      !shouldAdoptStateRevision(latestStateRevisionRef.current, nextState.revision)
+    ) {
       return false;
     }
 
@@ -1692,7 +1696,9 @@ export default function App() {
 
       try {
         const state = JSON.parse(event.data) as StateResponse;
-        adoptState(state);
+        const force = forceAdoptNextStateEventRef.current;
+        forceAdoptNextStateEventRef.current = false;
+        adoptState(state, { force });
         setRequestError(null);
       } catch (error) {
         if (!cancelled) {
@@ -1746,6 +1752,11 @@ export default function App() {
     eventSource.addEventListener("delta", handleDeltaEvent as EventListener);
     eventSource.onopen = () => {
       if (!cancelled) {
+        if (latestStateRevisionRef.current !== null) {
+          // A restarted backend can reconnect with the same persisted revision but a
+          // more complete authoritative snapshot than the client currently has.
+          forceAdoptNextStateEventRef.current = true;
+        }
         setBackendConnectionState("connected");
         setRequestError(null);
       }

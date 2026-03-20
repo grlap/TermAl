@@ -3,13 +3,12 @@
 Updated against the current checked-in code in `src/main.rs`, `ui/src/App.tsx`,
 `ui/package.json`, and `ui/vite.config.ts`.
 
-The older entries for "No image paste support", Claude `control_request` fallthrough, "No SSE/WebSocket for real-time updates", "Codex receive has no streaming", "No queueing system for prompts", the stale `/api/state`-after-SSE bootstrap race, the false-positive delta SSE reconciliation drift when a message already existed locally, shared Codex turn-scoped subagent ordering, shared Codex `item_completed` multipart truncation, Windows `HOME`-only path resolution, and unhandled Codex rate-limit notifications were stale. Those are implemented in the current tree.
+The older entries for "No image paste support", Claude `control_request` fallthrough, "No SSE/WebSocket for real-time updates", "Codex receive has no streaming", "No queueing system for prompts", the stale `/api/state`-after-SSE bootstrap race, the false-positive delta SSE reconciliation drift when a message already existed locally, shared Codex turn-scoped subagent ordering, shared Codex `item_completed` multipart truncation, stale shared-Codex agent-event turn filtering, the shared Codex buffered-result flush edge, multiple simultaneous approvals, Windows `HOME`-only path resolution, and unhandled Codex rate-limit notifications were stale. Those are implemented in the current tree.
 
 The newer shared Codex regressions where stale `task_complete` summaries could bleed into the next
 answer or a pre-answer summary insert could overwrite the final-answer preview are also fixed in
-the current tree. Shared Codex turn filtering is still incomplete for some other event shapes, the
-`turn/completed` success path still has a theoretical buffered-result drop edge case, and the new
-parallel-agents progress path skips the delta event system — see the entries below.
+the current tree. The new parallel-agents progress path still skips the delta event system — see
+the entry below.
 
 The earlier command-card UX issue where `OUT` could render as an empty dark block was also fixed.
 Command messages now use a compact `IN` / `OUT` layout with copy controls, a collapsible output
@@ -186,76 +185,6 @@ implies a narrower effect than the backend actually enforces.
 
 
 
-## Buffered subagent results can be silently dropped on turn/completed success path
-
-**Severity:** Medium
-
-The `turn/completed` success path only flushes buffered subagent results when
-`assistant_output_started` is false. If `begin_codex_assistant_output` runs (setting the flag to
-true) but `remember_codex_first_assistant_message_id` fails before recording the anchor, a later
-`task_complete` event would buffer its result (since `first_visible_assistant_message_id` is
-`None`). Then `turn/completed` skips the flush because the flag is true, and
-`clear_codex_turn_state` drops the buffer.
-
-In practice this is very unlikely — `remember_codex_first_assistant_message_id` just reads the
-mutex and gets a message ID, so the `?` would propagate and fail the handler. But the defensive
-gap exists.
-
-**Current impact:**
-- Under a narrow failure window, a subagent result could be silently lost from the transcript
-- The bug is silent — no error is surfaced to the user
-
-**Affected code (`src/runtime.rs`):**
-- `turn/completed` success branch in `handle_shared_codex_app_server_notification()`
-- `flush_pending_codex_subagent_results()`
-- `clear_codex_turn_state()`
-
-**Fix:**
-- Unconditionally flush pending results before `clear_codex_turn_state` on the success path:
-  ```rust
-  if !turn_state.pending_subagent_results.is_empty() {
-      flush_pending_codex_subagent_results(turn_state, recorder)?;
-  }
-  ```
-
-## Shared Codex turn filter still accepts stale agent events
-
-**Severity:** High
-
-The shared Codex turn guard now blocks stale `task_complete` summaries, but the other
-turn-scoped handlers still have gaps:
-
-- `shared_codex_event_matches_active_turn()` treats `event_turn_id == None` as a match for the
-  current turn
-- `handle_shared_codex_event_agent_message()`,
-  `handle_shared_codex_event_agent_message_content_delta()`, and
-  `handle_shared_codex_event_item_completed()` only read `/params/msg/turn_id`
-- some observed payloads carry the turn id somewhere else, such as `/params/id`
-- after `turn/completed`, `current_turn_id` becomes `None`, and those handlers still treat that as
-  "match anything"
-
-That means a stale shared Codex final answer, delta, or `item_completed` payload can still be
-recorded into the wrong turn if it arrives late or if its turn id is omitted from the specific
-field those handlers read.
-
-**Current impact:**
-- A stale shared Codex answer or delta can still be attached to the wrong turn
-- Cross-turn transcript ordering can still drift even though stale `task_complete` is fixed
-- The current regression tests cover stale `task_complete`, but not stale `agent_message`,
-  `agent_message_content_delta`, or `item_completed`
-
-**Affected code (`src/runtime.rs`):**
-- `shared_codex_event_matches_active_turn()`
-- `handle_shared_codex_event_item_completed()`
-- `handle_shared_codex_event_agent_message_content_delta()`
-- `handle_shared_codex_event_agent_message()`
-
-**Fix:**
-- Resolve the event turn id from every observed payload location, not just `/params/msg/turn_id`
-- Ignore turn-scoped shared Codex events when there is no active turn
-- Add regression tests for stale `agent_message`, `agent_message_content_delta`, and
-  `item_completed` events
-
 ## Parallel-agents progress updates publish full-state SSE snapshots
 
 **Severity:** Medium
@@ -365,7 +294,6 @@ forwards attachments to both Claude and Codex sessions.
 - Drag-and-drop attachments are still not implemented
 
 **Tasks:**
-- Add a regression test for Codex attachment submission so the docs do not drift again
 - Implement drag-and-drop attachment support, or explicitly document paste-only behavior in the UI
 
 ## Source file reads are not scoped to the active session or workspace
@@ -413,28 +341,6 @@ without another state transition, the session can remain stuck in `Approval`.
 - When a Claude approval is canceled, update the corresponding message state and republish session state
 - Recompute session status from the remaining live approvals instead of leaving it at `Approval`
 - Add a regression test for canceled approvals
-
-## Multiple simultaneous approvals are not modeled correctly
-
-**Severity:** Medium
-
-Approval state is effectively treated as a single boolean on the session. `update_approval()`
-answers one approval message and then moves the whole session back to `Active`, even if other
-pending approvals still exist.
-
-**Current impact:**
-- A second live approval can become unanswerable once the first one is resolved
-- Session preview/status can claim the agent is continuing even though another approval is still pending
-- This is fragile against future Codex or Claude protocol changes that emit multiple approvals in flight
-
-**Affected code (`src/main.rs`):**
-- `update_approval()`
-- `pending_claude_approvals` / `pending_codex_approvals` bookkeeping
-
-**Fix:**
-- Base session status on whether any live approvals remain after each decision
-- Keep approval messages independently resolvable instead of gating everything on one session-level `Approval` state
-- Add tests that exercise two concurrent approvals for both agents
 
 ## Polling for process exit
 
@@ -789,16 +695,6 @@ Concrete work implied by the current TermAl parity gaps. Ordered by user impact 
 
 ## P1
 
-- [ ] Close shared Codex turn-filter gaps:
-  apply the `current_turn_id.is_none()` guard to `handle_shared_codex_event_item_completed`,
-  `handle_shared_codex_event_agent_message_content_delta`, and
-  `handle_shared_codex_event_agent_message` (or change `shared_codex_event_matches_active_turn` to
-  return `false` when `current_turn_id` is `None`). Add regression tests for stale `agent_message`,
-  `agent_message_content_delta`, and `item_completed` events.
-- [ ] Fix the `turn/completed` success-path conditional flush:
-  unconditionally flush pending subagent results before `clear_codex_turn_state` instead of gating
-  on `!assistant_output_started`. Add a dedicated test: `turn/started` → `task_complete` (buffers
-  result) → `turn/completed` (no error, no assistant output) → assert buffered result appears.
 - [ ] Add parallel-agents delta event path:
   add a `ParallelAgentsUpdate` variant to `DeltaEvent`, switch `upsert_parallel_agents_message` to
   `commit_persisted_delta_locked` + `publish_delta`, and handle the new delta type in the

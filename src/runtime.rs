@@ -2435,9 +2435,7 @@ fn handle_shared_codex_app_server_notification(
             }
 
             *turn_id = None;
-            if !turn_state.assistant_output_started {
-                flush_pending_codex_subagent_results(turn_state, recorder)?;
-            }
+            flush_pending_codex_subagent_results(turn_state, recorder)?;
             clear_codex_turn_state(turn_state);
             recorder.finish_streaming_text()?;
             state.finish_turn_ok_if_runtime_matches(session_id, runtime_token)?;
@@ -2566,10 +2564,7 @@ fn handle_shared_codex_task_complete(
     let conversation_id = message
         .pointer("/params/conversationId")
         .and_then(Value::as_str);
-    let turn_id = message
-        .pointer("/params/msg/turn_id")
-        .and_then(Value::as_str)
-        .or_else(|| message.pointer("/params/turn_id").and_then(Value::as_str));
+    let turn_id = shared_codex_event_turn_id(message);
     if current_turn_id.is_none() {
         return Ok(());
     }
@@ -2604,6 +2599,15 @@ fn handle_shared_codex_task_complete(
     Ok(())
 }
 
+fn shared_codex_event_turn_id<'a>(message: &'a Value) -> Option<&'a str> {
+    message
+        .pointer("/params/msg/turn_id")
+        .and_then(Value::as_str)
+        .or_else(|| message.pointer("/params/turn_id").and_then(Value::as_str))
+        .or_else(|| message.pointer("/params/id").and_then(Value::as_str))
+        .or_else(|| message.pointer("/params/turn/id").and_then(Value::as_str))
+}
+
 fn shared_codex_event_matches_active_turn(
     current_turn_id: Option<&str>,
     event_turn_id: Option<&str>,
@@ -2612,7 +2616,7 @@ fn shared_codex_event_matches_active_turn(
         Some(current) => {
             event_turn_id.is_none() || matches!(event_turn_id, Some(event) if current == event)
         }
-        None => true,
+        None => false,
     }
 }
 
@@ -2624,7 +2628,7 @@ fn handle_shared_codex_event_item_completed(
     turn_state: &mut CodexTurnState,
     recorder: &mut impl TurnRecorder,
 ) -> Result<()> {
-    let event_turn_id = message.pointer("/params/msg/turn_id").and_then(Value::as_str);
+    let event_turn_id = shared_codex_event_turn_id(message);
     if !shared_codex_event_matches_active_turn(current_turn_id, event_turn_id) {
         return Ok(());
     }
@@ -2775,7 +2779,7 @@ fn handle_shared_codex_event_agent_message_content_delta(
     state: &AppState,
     session_id: &str,
 ) -> Result<()> {
-    let event_turn_id = message.pointer("/params/msg/turn_id").and_then(Value::as_str);
+    let event_turn_id = shared_codex_event_turn_id(message);
     if !shared_codex_event_matches_active_turn(current_turn_id, event_turn_id) {
         return Ok(());
     }
@@ -2801,7 +2805,7 @@ fn handle_shared_codex_event_agent_message(
     turn_state: &mut CodexTurnState,
     recorder: &mut impl TurnRecorder,
 ) -> Result<()> {
-    let event_turn_id = message.pointer("/params/msg/turn_id").and_then(Value::as_str);
+    let event_turn_id = shared_codex_event_turn_id(message);
     if !shared_codex_event_matches_active_turn(current_turn_id, event_turn_id) {
         return Ok(());
     }

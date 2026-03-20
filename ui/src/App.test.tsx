@@ -776,6 +776,123 @@ describe("App", () => {
     }
   });
 
+  it("adopts the reconnect state snapshot even when the backend restarts at the same revision", async () => {
+    const originalFetch = globalThis.fetch;
+    const originalEventSource = globalThis.EventSource;
+    const originalResizeObserver = globalThis.ResizeObserver;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/api/state") {
+        throw new Error("backend restarting");
+      }
+
+      throw new Error(`Unexpected fetch: ${url}`);
+    });
+
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("EventSource", EventSourceMock as unknown as typeof EventSource);
+    vi.stubGlobal("ResizeObserver", ResizeObserverMock as unknown as typeof ResizeObserver);
+    const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
+    HTMLElement.prototype.scrollIntoView = vi.fn();
+
+    try {
+      await renderApp();
+
+      const eventSource = EventSourceMock.instances[0];
+      expect(eventSource).toBeTruthy();
+
+      act(() => {
+        eventSource.dispatchOpen();
+        eventSource.dispatchNamedEvent("state", {
+          revision: 2,
+          projects: [],
+          sessions: [
+            makeSession("session-1", {
+              name: "Codex Session",
+              status: "active",
+              preview: "test",
+              messages: [
+                {
+                  id: "message-user-1",
+                  type: "text",
+                  timestamp: "10:00",
+                  author: "you",
+                  text: "test",
+                },
+              ],
+            }),
+          ],
+        });
+      });
+
+      await clickAndSettle(await screen.findByRole("button", { name: "Sessions" }));
+      const sessionList = document.querySelector(".session-list");
+      if (!(sessionList instanceof HTMLDivElement)) {
+        throw new Error("Session list not found");
+      }
+
+      const sessionRowLabel = await within(sessionList).findByText("Codex Session");
+      const sessionRowButton = sessionRowLabel.closest("button");
+      if (!sessionRowButton) {
+        throw new Error("Session row button not found");
+      }
+
+      await clickAndSettle(sessionRowButton);
+      await waitFor(() => {
+        expect(screen.getAllByText("test").length).toBeGreaterThan(0);
+      });
+      expect(screen.queryByText("Here.")).not.toBeInTheDocument();
+
+      act(() => {
+        eventSource.dispatchError();
+      });
+
+      await waitFor(() => {
+        expect(fetchMock.mock.calls.some(([url]) => String(url) === "/api/state")).toBe(true);
+      });
+
+      act(() => {
+        eventSource.dispatchOpen();
+        eventSource.dispatchNamedEvent("state", {
+          revision: 2,
+          projects: [],
+          sessions: [
+            makeSession("session-1", {
+              name: "Codex Session",
+              status: "idle",
+              preview: "Here.",
+              messages: [
+                {
+                  id: "message-user-1",
+                  type: "text",
+                  timestamp: "10:00",
+                  author: "you",
+                  text: "test",
+                },
+                {
+                  id: "message-assistant-1",
+                  type: "text",
+                  timestamp: "10:01",
+                  author: "assistant",
+                  text: "Here.",
+                },
+              ],
+            }),
+          ],
+        });
+      });
+
+      await waitFor(() => {
+        expect(screen.getAllByText("Here.").length).toBeGreaterThan(0);
+      });
+    } finally {
+      HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
+      restoreGlobal("fetch", originalFetch);
+      restoreGlobal("EventSource", originalEventSource);
+      restoreGlobal("ResizeObserver", originalResizeObserver);
+    }
+  });
+
   it("refreshes model options after creating a new Codex session", async () => {
     const originalEventSource = globalThis.EventSource;
     const originalResizeObserver = globalThis.ResizeObserver;
