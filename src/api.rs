@@ -3513,15 +3513,17 @@ fn resolve_session_project_root_path(
         }
     };
 
-    fs::canonicalize(&root_path).map_err(|err| match err.kind() {
-        io::ErrorKind::NotFound => {
-            ApiError::bad_request(format!("project root not found: {root_path}"))
-        }
-        _ => ApiError::internal(format!(
-            "failed to resolve project root {}: {err}",
-            root_path
-        )),
-    })
+    fs::canonicalize(&root_path)
+        .map(|path| normalize_user_facing_path(&path))
+        .map_err(|err| match err.kind() {
+            io::ErrorKind::NotFound => {
+                ApiError::bad_request(format!("project root not found: {root_path}"))
+            }
+            _ => ApiError::internal(format!(
+                "failed to resolve project root {}: {err}",
+                root_path
+            )),
+        })
 }
 
 fn resolve_project_root_path_by_id(
@@ -3542,15 +3544,17 @@ fn resolve_project_root_path_by_id(
         project.root_path.clone()
     };
 
-    fs::canonicalize(&root_path).map_err(|err| match err.kind() {
-        io::ErrorKind::NotFound => {
-            ApiError::bad_request(format!("project root not found: {root_path}"))
-        }
-        _ => ApiError::internal(format!(
-            "failed to resolve project root {}: {err}",
-            root_path
-        )),
-    })
+    fs::canonicalize(&root_path)
+        .map(|path| normalize_user_facing_path(&path))
+        .map_err(|err| match err.kind() {
+            io::ErrorKind::NotFound => {
+                ApiError::bad_request(format!("project root not found: {root_path}"))
+            }
+            _ => ApiError::internal(format!(
+                "failed to resolve project root {}: {err}",
+                root_path
+            )),
+        })
 }
 
 fn resolve_request_project_root_path(
@@ -3605,10 +3609,17 @@ fn resolve_session_scoped_requested_path(
 }
 
 fn canonicalize_existing_path(path: &FsPath, label: &str) -> Result<PathBuf, ApiError> {
-    fs::canonicalize(path).map_err(|err| match err.kind() {
-        io::ErrorKind::NotFound => ApiError::bad_request(format!("{label} not found: {}", path.display())),
-        _ => ApiError::internal(format!("failed to resolve {label} {}: {err}", path.display())),
-    })
+    fs::canonicalize(path)
+        .map(|path| normalize_user_facing_path(&path))
+        .map_err(|err| match err.kind() {
+            io::ErrorKind::NotFound => {
+                ApiError::bad_request(format!("{label} not found: {}", path.display()))
+            }
+            _ => ApiError::internal(format!(
+                "failed to resolve {label} {}: {err}",
+                path.display()
+            )),
+        })
 }
 
 fn canonicalize_path_with_existing_ancestor(path: &FsPath) -> Result<PathBuf, ApiError> {
@@ -3635,7 +3646,7 @@ fn canonicalize_path_with_existing_ancestor(path: &FsPath) -> Result<PathBuf, Ap
                 for component in suffix.iter().rev() {
                     canonical.push(component);
                 }
-                return Ok(canonical);
+                return Ok(normalize_user_facing_path(&canonical));
             }
             Err(err) if err.kind() == io::ErrorKind::NotFound => {
                 let Some(name) = probe.file_name().map(|value| value.to_os_string()) else {
@@ -3694,7 +3705,9 @@ fn resolve_directory_path(path: &str, label: &str) -> Result<String, ApiError> {
         )));
     };
     let canonical = fs::canonicalize(&directory).unwrap_or(directory);
-    Ok(canonical.to_string_lossy().into_owned())
+    Ok(normalize_user_facing_path(&canonical)
+        .to_string_lossy()
+        .into_owned())
 }
 
 fn resolve_project_root_path(path: &str) -> Result<String, ApiError> {
@@ -3802,7 +3815,8 @@ fn normalize_path_best_effort(path: &FsPath) -> PathBuf {
             .map(|cwd| cwd.join(path))
             .unwrap_or_else(|_| path.to_path_buf())
     };
-    fs::canonicalize(&resolved).unwrap_or(resolved)
+    let canonical = fs::canonicalize(&resolved).unwrap_or(resolved);
+    normalize_user_facing_path(&canonical)
 }
 
 struct ParsedGitBranchStatus {

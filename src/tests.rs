@@ -134,11 +134,18 @@ fn test_app_state() -> AppState {
         state_events: broadcast::channel(16).0,
         delta_events: broadcast::channel(16).0,
         shared_codex_runtime: Arc::new(Mutex::new(None)),
-        remote_registry: Arc::new(
-            RemoteRegistry::new().expect("remote registry should initialize"),
-        ),
+        remote_registry: test_remote_registry(),
         inner: Arc::new(Mutex::new(StateInner::new())),
     }
+}
+
+fn test_remote_registry() -> Arc<RemoteRegistry> {
+    Arc::new(
+        std::thread::spawn(RemoteRegistry::new)
+            .join()
+            .expect("remote registry init thread panicked")
+            .expect("remote registry should initialize"),
+    )
 }
 
 fn test_session_id(state: &AppState, agent: Agent) -> String {
@@ -1144,9 +1151,7 @@ fn persists_app_settings_and_applies_them_to_new_sessions() {
         state_events: broadcast::channel(16).0,
         delta_events: broadcast::channel(16).0,
         shared_codex_runtime: Arc::new(Mutex::new(None)),
-        remote_registry: Arc::new(
-            RemoteRegistry::new().expect("remote registry should initialize"),
-        ),
+        remote_registry: test_remote_registry(),
         inner: Arc::new(Mutex::new(reloaded_inner)),
     };
 

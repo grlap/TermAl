@@ -16,10 +16,38 @@ const REMOTE_EVENT_RETRY_DELAY: Duration = Duration::from_secs(2);
 
 static NEXT_REMOTE_FORWARD_PORT: AtomicU16 = AtomicU16::new(REMOTE_FORWARD_PORT_START);
 
-#[derive(Clone)]
 struct RemoteRegistry {
-    client: BlockingHttpClient,
+    client: BlockingHttpClientHandle,
     connections: Arc<Mutex<HashMap<String, Arc<RemoteConnection>>>>,
+}
+
+struct BlockingHttpClientHandle {
+    client: Option<BlockingHttpClient>,
+}
+
+impl BlockingHttpClientHandle {
+    fn new(client: BlockingHttpClient) -> Self {
+        Self {
+            client: Some(client),
+        }
+    }
+
+    fn client(&self) -> &BlockingHttpClient {
+        self.client
+            .as_ref()
+            .expect("remote HTTP client should exist while registry is alive")
+    }
+}
+
+impl Drop for BlockingHttpClientHandle {
+    fn drop(&mut self) {
+        if let Some(client) = self.client.take() {
+            // reqwest::blocking tears down an internal Tokio runtime on drop.
+            // Offload that work so the last AppState clone can be released from
+            // async handler contexts without panicking.
+            let _ = thread::spawn(move || drop(client));
+        }
+    }
 }
 
 impl RemoteRegistry {
@@ -29,7 +57,7 @@ impl RemoteRegistry {
             .build()
             .context("failed to build remote HTTP client")?;
         Ok(Self {
-            client,
+            client: BlockingHttpClientHandle::new(client),
             connections: Arc::new(Mutex::new(HashMap::new())),
         })
     }
@@ -73,9 +101,13 @@ impl RemoteRegistry {
         body: Option<Value>,
     ) -> Result<T, ApiError> {
         let connection = self.connection(remote);
-        let base_url = connection.ensure_available(&self.client)?;
+        let base_url = connection.ensure_available(self.client.client())?;
         let url = format!("{base_url}{path}");
-        let mut request = self.client.request(method, &url).timeout(REMOTE_REQUEST_TIMEOUT);
+        let mut request = self
+            .client
+            .client()
+            .request(method, &url)
+            .timeout(REMOTE_REQUEST_TIMEOUT);
         if !query.is_empty() {
             request = request.query(query);
         }
@@ -94,7 +126,7 @@ impl RemoteRegistry {
 
     fn start_event_bridge(&self, state: AppState, remote: &RemoteConfig) {
         let connection = self.connection(remote);
-        connection.start_event_bridge(self.client.clone(), state);
+        connection.start_event_bridge(self.client.client().clone(), state);
     }
 }
 
