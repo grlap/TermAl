@@ -78,6 +78,8 @@ export function PaneTabs({
   const activeCodexTooltipAnchorRef = useRef<HTMLElement | null>(null);
   const fileTabContextMenuRef = useRef<HTMLDivElement | null>(null);
   const paneHasControlPanel = tabs.some((tab) => tab.kind === "controlPanel");
+  const codexNotices = codexState.notices ?? [];
+  const hasCodexNotices = codexNotices.length > 0;
   const canDropInTabRail = draggedTab !== null &&
     draggedTab.tab.kind !== "controlPanel" &&
     !paneHasControlPanel;
@@ -439,7 +441,7 @@ export function PaneTabs({
             const showCodexStatus = Boolean(
               session &&
                 session.agent === "Codex" &&
-                (session.externalSessionId || codexState.rateLimits),
+                (session.externalSessionId || codexState.rateLimits || hasCodexNotices),
             );
             const showDropBefore = activeTabInsertIndex === index;
             const showDropAfter = activeTabInsertIndex === tabs.length && index === tabs.length - 1;
@@ -557,6 +559,15 @@ export function PaneTabs({
                       <FileTabIcon language={tab.language ?? null} path={tab.filePath} />
                     ) : null}
                     <span className="pane-tab-label">{tabLabel}</span>
+                    {session?.agent === "Codex" && hasCodexNotices ? (
+                      <span
+                        className="pane-tab-notice-badge"
+                        aria-hidden="true"
+                        title={formatCodexNoticeBadgeLabel(codexNotices.length)}
+                      >
+                        {codexNotices.length}
+                      </span>
+                    ) : null}
                   </span>
                 </span>
                 {tab.kind === "controlPanel" ? null : (
@@ -676,6 +687,8 @@ function CodexTabStatusTooltip({
   style: CSSProperties;
 }) {
   const rateLimits = codexState.rateLimits;
+  const notices = codexState.notices ?? [];
+  const hasStatusGrid = Boolean(session.externalSessionId || rateLimits?.primary || rateLimits?.secondary);
 
   return (
     <div id={id} className="pane-tab-status-tooltip" role="tooltip" style={style}>
@@ -683,34 +696,59 @@ function CodexTabStatusTooltip({
         <div className="activity-tooltip-label">Status</div>
         {rateLimits?.planType ? <span className="pane-tab-status-plan">{rateLimits.planType}</span> : null}
       </div>
-      <div className="pane-tab-status-grid">
-        {session.externalSessionId ? (
-          <>
-            <div className="pane-tab-status-key">Session:</div>
-            <div className="pane-tab-status-value pane-tab-status-mono">
-              {session.externalSessionId}
-            </div>
-          </>
-        ) : null}
-        {rateLimits?.primary ? (
-          <>
-            <div className="pane-tab-status-key">5h limit:</div>
-            <div className="pane-tab-status-value">
-              <CodexRateLimitMeter label="5h limit" window={rateLimits.primary} />
-            </div>
-          </>
-        ) : null}
-        {rateLimits?.secondary ? (
-          <>
-            <div className="pane-tab-status-key">7d limit:</div>
-            <div className="pane-tab-status-value">
-              <CodexRateLimitMeter label="7d limit" window={rateLimits.secondary} />
-            </div>
-          </>
-        ) : null}
-      </div>
+      {hasStatusGrid ? (
+        <div className="pane-tab-status-grid">
+          {session.externalSessionId ? (
+            <>
+              <div className="pane-tab-status-key">Session:</div>
+              <div className="pane-tab-status-value pane-tab-status-mono">
+                {session.externalSessionId}
+              </div>
+            </>
+          ) : null}
+          {rateLimits?.primary ? (
+            <>
+              <div className="pane-tab-status-key">5h limit:</div>
+              <div className="pane-tab-status-value">
+                <CodexRateLimitMeter label="5h limit" window={rateLimits.primary} />
+              </div>
+            </>
+          ) : null}
+          {rateLimits?.secondary ? (
+            <>
+              <div className="pane-tab-status-key">7d limit:</div>
+              <div className="pane-tab-status-value">
+                <CodexRateLimitMeter label="7d limit" window={rateLimits.secondary} />
+              </div>
+            </>
+          ) : null}
+        </div>
+      ) : null}
+      {notices.length > 0 ? (
+        <div className={`pane-tab-status-section ${hasStatusGrid ? "" : "first"}`}>
+          <div className="pane-tab-status-section-label">Notices</div>
+          <div className="pane-tab-status-notice-list">
+            {notices.map((notice, index) => (
+              <article
+                key={`${notice.kind}-${notice.code ?? "notice"}-${notice.timestamp}-${index}`}
+                className={`pane-tab-status-notice is-${notice.level}`}
+              >
+                <div className="pane-tab-status-notice-header">
+                  <strong>{notice.title}</strong>
+                  <span>{notice.timestamp}</span>
+                </div>
+                <p>{notice.detail}</p>
+              </article>
+            ))}
+          </div>
+        </div>
+      ) : null}
     </div>
   );
+}
+
+function formatCodexNoticeBadgeLabel(count: number) {
+  return `${count} Codex notice${count === 1 ? "" : "s"}`;
 }
 
 function CodexRateLimitMeter({

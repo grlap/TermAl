@@ -83,19 +83,6 @@ fn deliver_turn_dispatch(state: &AppState, dispatch: TurnDispatch) -> Result<(),
     Ok(())
 }
 
-fn get_string<'a>(value: &'a Value, path: &[&str]) -> Result<&'a str> {
-    let mut current = value;
-    for segment in path {
-        current = current
-            .get(segment)
-            .with_context(|| format!("missing field `{}`", path.join(".")))?;
-    }
-
-    current
-        .as_str()
-        .with_context(|| format!("field `{}` is not a string", path.join(".")))
-}
-
 async fn health() -> Json<HealthResponse> {
     Json(HealthResponse { ok: true })
 }
@@ -2014,6 +2001,46 @@ async fn submit_approval(
     Ok(Json(response))
 }
 
+async fn submit_user_input(
+    AxumPath((session_id, message_id)): AxumPath<(String, String)>,
+    State(state): State<AppState>,
+    Json(request): Json<UserInputSubmissionRequest>,
+) -> Result<Json<StateResponse>, ApiError> {
+    let response =
+        run_blocking_api(move || state.submit_codex_user_input(&session_id, &message_id, request.answers))
+            .await?;
+    Ok(Json(response))
+}
+
+async fn submit_mcp_elicitation(
+    AxumPath((session_id, message_id)): AxumPath<(String, String)>,
+    State(state): State<AppState>,
+    Json(request): Json<McpElicitationSubmissionRequest>,
+) -> Result<Json<StateResponse>, ApiError> {
+    let response = run_blocking_api(move || {
+        state.submit_codex_mcp_elicitation(
+            &session_id,
+            &message_id,
+            request.action,
+            request.content,
+        )
+    })
+    .await?;
+    Ok(Json(response))
+}
+
+async fn submit_codex_app_request(
+    AxumPath((session_id, message_id)): AxumPath<(String, String)>,
+    State(state): State<AppState>,
+    Json(request): Json<CodexAppRequestSubmissionRequest>,
+) -> Result<Json<StateResponse>, ApiError> {
+    let response = run_blocking_api(move || {
+        state.submit_codex_app_request(&session_id, &message_id, request.result)
+    })
+    .await?;
+    Ok(Json(response))
+}
+
 #[derive(Debug)]
 struct ApiError {
     message: String,
@@ -2424,11 +2451,20 @@ struct Session {
     gemini_approval_mode: Option<GeminiApprovalMode>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     external_session_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    codex_thread_state: Option<CodexThreadState>,
     status: SessionStatus,
     preview: String,
     messages: Vec<Message>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pending_prompts: Vec<PendingPrompt>,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+enum CodexThreadState {
+    Active,
+    Archived,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
@@ -2643,6 +2679,76 @@ enum ParallelAgentStatus {
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
+struct UserInputQuestionOption {
+    description: String,
+    label: String,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct UserInputQuestion {
+    header: String,
+    id: String,
+    #[serde(default, rename = "isOther")]
+    is_other: bool,
+    #[serde(default, rename = "isSecret")]
+    is_secret: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    options: Option<Vec<UserInputQuestionOption>>,
+    question: String,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+enum McpElicitationAction {
+    Accept,
+    Decline,
+    Cancel,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase", tag = "mode")]
+enum McpElicitationRequestMode {
+    Form {
+        #[serde(default, rename = "_meta", skip_serializing_if = "Option::is_none")]
+        meta: Option<Value>,
+        message: String,
+        #[serde(rename = "requestedSchema")]
+        requested_schema: Value,
+    },
+    Url {
+        #[serde(default, rename = "_meta", skip_serializing_if = "Option::is_none")]
+        meta: Option<Value>,
+        #[serde(rename = "elicitationId")]
+        elicitation_id: String,
+        message: String,
+        url: String,
+    },
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct McpElicitationRequestPayload {
+    #[serde(rename = "threadId")]
+    thread_id: String,
+    #[serde(default, rename = "turnId", skip_serializing_if = "Option::is_none")]
+    turn_id: Option<String>,
+    server_name: String,
+    #[serde(flatten)]
+    mode: McpElicitationRequestMode,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+enum InteractionRequestState {
+    Pending,
+    Submitted,
+    Interrupted,
+    Canceled,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
 struct ParallelAgentProgress {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     detail: Option<String>,
@@ -2784,6 +2890,61 @@ enum Message {
         detail: String,
         decision: ApprovalDecision,
     },
+    #[serde(rename = "userInputRequest")]
+    UserInputRequest {
+        id: String,
+        timestamp: String,
+        author: Author,
+        title: String,
+        detail: String,
+        questions: Vec<UserInputQuestion>,
+        state: InteractionRequestState,
+        #[serde(
+            default,
+            rename = "submittedAnswers",
+            skip_serializing_if = "Option::is_none"
+        )]
+        submitted_answers: Option<BTreeMap<String, Vec<String>>>,
+    },
+    #[serde(rename = "mcpElicitationRequest")]
+    McpElicitationRequest {
+        id: String,
+        timestamp: String,
+        author: Author,
+        title: String,
+        detail: String,
+        request: McpElicitationRequestPayload,
+        state: InteractionRequestState,
+        #[serde(
+            default,
+            rename = "submittedAction",
+            skip_serializing_if = "Option::is_none"
+        )]
+        submitted_action: Option<McpElicitationAction>,
+        #[serde(
+            default,
+            rename = "submittedContent",
+            skip_serializing_if = "Option::is_none"
+        )]
+        submitted_content: Option<Value>,
+    },
+    #[serde(rename = "codexAppRequest")]
+    CodexAppRequest {
+        id: String,
+        timestamp: String,
+        author: Author,
+        title: String,
+        detail: String,
+        method: String,
+        params: Value,
+        state: InteractionRequestState,
+        #[serde(
+            default,
+            rename = "submittedResult",
+            skip_serializing_if = "Option::is_none"
+        )]
+        submitted_result: Option<Value>,
+    },
 }
 
 impl Message {
@@ -2796,7 +2957,10 @@ impl Message {
             | Self::Markdown { id, .. }
             | Self::SubagentResult { id, .. }
             | Self::ParallelAgents { id, .. }
-            | Self::Approval { id, .. } => id,
+            | Self::Approval { id, .. }
+            | Self::UserInputRequest { id, .. }
+            | Self::McpElicitationRequest { id, .. }
+            | Self::CodexAppRequest { id, .. } => id,
         }
     }
 
@@ -2808,6 +2972,9 @@ impl Message {
             Self::Thinking { title, .. } => Some(make_preview(title)),
             Self::Markdown { title, .. } => Some(make_preview(title)),
             Self::Approval { title, .. } => Some(make_preview(title)),
+            Self::UserInputRequest { title, .. } => Some(make_preview(title)),
+            Self::McpElicitationRequest { title, .. } => Some(make_preview(title)),
+            Self::CodexAppRequest { title, .. } => Some(make_preview(title)),
             Self::Diff { summary, .. } => Some(make_preview(summary)),
             Self::SubagentResult { .. } => None,
             Self::ParallelAgents { agents, .. } => Some(parallel_agents_preview_text(agents)),
@@ -2851,6 +3018,26 @@ fn parallel_agents_preview_text(agents: &[ParallelAgentProgress]) -> String {
 #[serde(rename_all = "camelCase")]
 struct ApprovalRequest {
     decision: ApprovalDecision,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct UserInputSubmissionRequest {
+    answers: BTreeMap<String, Vec<String>>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct McpElicitationSubmissionRequest {
+    action: McpElicitationAction,
+    #[serde(default)]
+    content: Option<Value>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CodexAppRequestSubmissionRequest {
+    result: Value,
 }
 
 #[derive(Deserialize)]
@@ -3284,12 +3471,41 @@ impl SessionModelOption {
 struct CodexState {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     rate_limits: Option<CodexRateLimits>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    notices: Vec<CodexNotice>,
 }
 
 impl CodexState {
     fn is_empty(&self) -> bool {
-        self.rate_limits.is_none()
+        self.rate_limits.is_none() && self.notices.is_empty()
     }
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+enum CodexNoticeKind {
+    ConfigWarning,
+    DeprecationNotice,
+    RuntimeNotice,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+enum CodexNoticeLevel {
+    Info,
+    Warning,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct CodexNotice {
+    kind: CodexNoticeKind,
+    level: CodexNoticeLevel,
+    title: String,
+    detail: String,
+    timestamp: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    code: Option<String>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]

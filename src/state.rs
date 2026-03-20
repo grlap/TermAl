@@ -12,7 +12,7 @@ struct AppState {
 impl AppState {
     fn new(default_workdir: String) -> Result<Self> {
         let persistence_path = resolve_persistence_path(&default_workdir);
-        let inner = load_state(&persistence_path)?.unwrap_or_else(|| {
+        let mut inner = load_state(&persistence_path)?.unwrap_or_else(|| {
             let mut inner = StateInner::new();
             let default_project =
                 inner.create_project(None, default_workdir.clone(), default_local_remote_id());
@@ -32,6 +32,15 @@ impl AppState {
             );
             inner
         });
+        let discovery_scopes = collect_codex_discovery_scopes(&default_workdir, &inner.projects);
+        match discover_codex_threads(&default_workdir, &discovery_scopes) {
+            Ok(discovered_threads) => {
+                inner.import_discovered_codex_threads(&default_workdir, discovered_threads);
+            }
+            Err(err) => {
+                eprintln!("codex discovery> failed to load Codex thread metadata: {err:#}");
+            }
+        }
 
         let state = Self {
             default_workdir,
@@ -478,6 +487,11 @@ impl AppState {
                 "wait for the current Codex turn to finish before using thread actions",
             ));
         }
+        if !record.queued_prompts.is_empty() {
+            return Err(ApiError::conflict(
+                "wait for queued Codex prompts to finish before using thread actions",
+            ));
+        }
 
         let thread_id = record.external_session_id.clone().ok_or_else(|| {
             ApiError::bad_request(
@@ -503,6 +517,11 @@ impl AppState {
                 .sandbox_mode
                 .unwrap_or(record.codex_sandbox_mode),
             thread_id,
+            thread_state: normalized_codex_thread_state(
+                record.session.agent,
+                record.external_session_id.as_deref(),
+                record.session.codex_thread_state,
+            ),
             workdir: record.session.workdir.clone(),
         })
     }
@@ -659,6 +678,9 @@ impl AppState {
                     }
                     record.runtime = SessionRuntime::None;
                     record.pending_codex_approvals.clear();
+                    record.pending_codex_user_inputs.clear();
+                    record.pending_codex_mcp_elicitations.clear();
+                    record.pending_codex_app_requests.clear();
                     record.runtime_reset_required = false;
                 }
 
@@ -850,6 +872,11 @@ impl AppState {
         let attachments = parse_prompt_image_attachments(&request.attachments)?;
         if prompt.is_empty() && attachments.is_empty() {
             return Err(ApiError::bad_request("prompt cannot be empty"));
+        }
+        if record_has_archived_codex_thread(&inner.sessions[index]) {
+            return Err(ApiError::conflict(
+                "the current Codex thread is archived; unarchive it before sending another prompt",
+            ));
         }
 
         let session_is_busy = matches!(
@@ -1302,6 +1329,9 @@ impl AppState {
                 }
                 record.runtime = SessionRuntime::None;
                 record.pending_codex_approvals.clear();
+                record.pending_codex_user_inputs.clear();
+                record.pending_codex_mcp_elicitations.clear();
+                record.pending_codex_app_requests.clear();
                 record.runtime_reset_required = false;
             }
 
@@ -1517,9 +1547,13 @@ impl AppState {
             .and_then(Value::as_str)
             .map(str::trim)
             .filter(|value| !value.is_empty())
-            .unwrap_or("No thread preview was returned.");
+            .map(make_preview);
+        let fork_thread = fork_result
+            .get("thread")
+            .ok_or_else(|| ApiError::internal("Codex thread fork did not return a thread"))?;
 
         let mut inner = self.inner.lock().expect("state mutex poisoned");
+        let fork_messages = codex_thread_messages_from_json(&mut inner, fork_thread);
         let mut record = inner.create_session(
             Agent::Codex,
             Some(fork_name),
@@ -1534,18 +1568,25 @@ impl AppState {
         record.session.sandbox_mode = Some(sandbox_mode);
         record.codex_reasoning_effort = reasoning_effort;
         record.session.reasoning_effort = Some(reasoning_effort);
-        record.external_session_id = Some(fork_thread_id.clone());
-        record.session.external_session_id = Some(fork_thread_id.clone());
-        let note_message_id = inner.next_message_id();
-        push_session_markdown_note_on_record(
-            &mut record,
-            note_message_id,
-            "Forked Codex thread",
-            format!(
-                "Forked from `{}` into live Codex thread `{}`.\n\nPreview: {}\n\nTermAl does not backfill the earlier Codex transcript into this new session yet. New prompts here continue on the forked thread from this point forward.",
-                context.name, fork_thread_id, fork_preview
-            ),
-        );
+        set_record_external_session_id(&mut record, Some(fork_thread_id.clone()));
+        if let Some(fork_messages) = fork_messages {
+            replace_session_messages_on_record(&mut record, fork_messages, fork_preview);
+        } else {
+            let note_message_id = inner.next_message_id();
+            push_session_markdown_note_on_record(
+                &mut record,
+                note_message_id,
+                "Forked Codex thread",
+                format!(
+                    "Forked from `{}` into live Codex thread `{}`.\n\nPreview: {}\n\nCodex did not return the earlier thread history for this fork, so TermAl could not backfill the transcript. New prompts here continue on the forked thread from this point forward.",
+                    context.name,
+                    fork_thread_id,
+                    fork_preview
+                        .as_deref()
+                        .unwrap_or("No thread preview was returned.")
+                ),
+            );
+        }
 
         if let Some(slot) = inner
             .find_session_index(&record.session.id)
@@ -1569,6 +1610,9 @@ impl AppState {
         }
 
         let context = self.resolve_codex_thread_action_context(session_id)?;
+        if context.thread_state == Some(CodexThreadState::Archived) {
+            return Err(ApiError::conflict("the current Codex thread is already archived"));
+        }
         self.perform_codex_json_rpc_request(
             "thread/archive",
             json!({
@@ -1582,6 +1626,7 @@ impl AppState {
             .find_session_index(session_id)
             .ok_or_else(|| ApiError::not_found("session not found"))?;
         let note_message_id = inner.next_message_id();
+        set_record_codex_thread_state(&mut inner.sessions[index], CodexThreadState::Archived);
         push_session_markdown_note_on_record(
             &mut inner.sessions[index],
             note_message_id,
@@ -1606,6 +1651,9 @@ impl AppState {
         }
 
         let context = self.resolve_codex_thread_action_context(session_id)?;
+        if context.thread_state != Some(CodexThreadState::Archived) {
+            return Err(ApiError::conflict("the current Codex thread is not archived"));
+        }
         self.perform_codex_json_rpc_request(
             "thread/unarchive",
             json!({
@@ -1619,6 +1667,7 @@ impl AppState {
             .find_session_index(session_id)
             .ok_or_else(|| ApiError::not_found("session not found"))?;
         let note_message_id = inner.next_message_id();
+        set_record_codex_thread_state(&mut inner.sessions[index], CodexThreadState::Active);
         push_session_markdown_note_on_record(
             &mut inner.sessions[index],
             note_message_id,
@@ -1685,7 +1734,7 @@ impl AppState {
         }
 
         let context = self.resolve_codex_thread_action_context(session_id)?;
-        self.perform_codex_json_rpc_request(
+        let rollback_result = self.perform_codex_json_rpc_request(
             "thread/rollback",
             json!({
                 "threadId": context.thread_id,
@@ -1693,24 +1742,43 @@ impl AppState {
             }),
             Duration::from_secs(30),
         )?;
+        let rollback_thread = rollback_result
+            .get("thread")
+            .ok_or_else(|| ApiError::internal("Codex thread rollback did not return a thread"))?;
+        let rollback_preview = rollback_thread
+            .get("preview")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(make_preview);
 
         let mut inner = self.inner.lock().expect("state mutex poisoned");
+        let rollback_messages = codex_thread_messages_from_json(&mut inner, rollback_thread);
         let index = inner
             .find_session_index(session_id)
             .ok_or_else(|| ApiError::not_found("session not found"))?;
-        let turn_label = if num_turns == 1 { "turn" } else { "turns" };
-        let note_message_id = inner.next_message_id();
-        push_session_markdown_note_on_record(
-            &mut inner.sessions[index],
-            note_message_id,
-            "Rolled back Codex thread",
-            format!(
-                "Rolled back the live Codex thread `{}` by {} {}.\n\nTermAl keeps the earlier transcript above as a local record, so it may not exactly match the live Codex thread history after this point.",
-                context.thread_id, num_turns, turn_label
-            ),
-        );
+        if let Some(rollback_messages) = rollback_messages {
+            replace_session_messages_on_record(
+                &mut inner.sessions[index],
+                rollback_messages,
+                rollback_preview,
+            );
+        } else {
+            let turn_label = if num_turns == 1 { "turn" } else { "turns" };
+            let note_message_id = inner.next_message_id();
+            push_session_markdown_note_on_record(
+                &mut inner.sessions[index],
+                note_message_id,
+                "Rolled back Codex thread",
+                format!(
+                    "Rolled back the live Codex thread `{}` by {} {}.\n\nCodex did not return the updated thread history for this rollback, so TermAl kept the earlier local transcript above. It may not exactly match the live Codex thread after this point.",
+                    context.thread_id, num_turns, turn_label
+                ),
+            );
+        }
+        inner.sessions[index].session.status = SessionStatus::Idle;
         self.commit_locked(&mut inner).map_err(|err| {
-            ApiError::internal(format!("failed to persist Codex rollback note: {err:#}"))
+            ApiError::internal(format!("failed to persist Codex rollback state: {err:#}"))
         })?;
         Ok(self.snapshot_from_inner(&inner))
     }
@@ -1725,8 +1793,36 @@ impl AppState {
         let index = inner
             .find_session_index(session_id)
             .ok_or_else(|| anyhow!("session `{session_id}` not found"))?;
-        inner.sessions[index].external_session_id = Some(external_session_id.clone());
-        inner.sessions[index].session.external_session_id = Some(external_session_id);
+        set_record_external_session_id(&mut inner.sessions[index], Some(external_session_id));
+        self.commit_locked(&mut inner)?;
+        Ok(())
+    }
+
+    fn set_codex_thread_state_if_runtime_matches(
+        &self,
+        session_id: &str,
+        token: &RuntimeToken,
+        thread_state: CodexThreadState,
+    ) -> Result<()> {
+        let mut inner = self.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(session_id)
+            .ok_or_else(|| anyhow!("session `{session_id}` not found"))?;
+        let record = &mut inner.sessions[index];
+        if !record.runtime.matches_runtime_token(token) {
+            return Ok(());
+        }
+
+        let next_state = normalized_codex_thread_state(
+            record.session.agent,
+            record.external_session_id.as_deref(),
+            Some(thread_state),
+        );
+        if record.session.codex_thread_state == next_state {
+            return Ok(());
+        }
+
+        record.session.codex_thread_state = next_state;
         self.commit_locked(&mut inner)?;
         Ok(())
     }
@@ -1813,6 +1909,32 @@ impl AppState {
         Ok(())
     }
 
+    fn note_codex_notice(&self, notice: CodexNotice) -> Result<()> {
+        let mut inner = self.inner.lock().expect("state mutex poisoned");
+        if inner
+            .codex
+            .notices
+            .first()
+            .is_some_and(|existing| same_codex_notice_identity(existing, &notice))
+        {
+            return Ok(());
+        }
+
+        if let Some(index) = inner
+            .codex
+            .notices
+            .iter()
+            .position(|existing| same_codex_notice_identity(existing, &notice))
+        {
+            inner.codex.notices.remove(index);
+        }
+
+        inner.codex.notices.insert(0, notice);
+        inner.codex.notices.truncate(5);
+        self.commit_locked(&mut inner)?;
+        Ok(())
+    }
+
     fn record_codex_runtime_config(
         &self,
         session_id: &str,
@@ -1853,15 +1975,6 @@ impl AppState {
             .unwrap_or_else(default_cursor_mode))
     }
 
-    fn set_codex_runtime(&self, session_id: &str, handle: CodexRuntimeHandle) -> Result<()> {
-        let mut inner = self.inner.lock().expect("state mutex poisoned");
-        let index = inner
-            .find_session_index(session_id)
-            .ok_or_else(|| anyhow!("session `{session_id}` not found"))?;
-        inner.sessions[index].runtime = SessionRuntime::Codex(handle);
-        Ok(())
-    }
-
     fn session_matches_runtime_token(&self, session_id: &str, token: &RuntimeToken) -> bool {
         let inner = self.inner.lock().expect("state mutex poisoned");
         inner
@@ -1879,6 +1992,9 @@ impl AppState {
         inner.sessions[index].runtime_reset_required = false;
         inner.sessions[index].pending_claude_approvals.clear();
         inner.sessions[index].pending_codex_approvals.clear();
+        inner.sessions[index].pending_codex_user_inputs.clear();
+        inner.sessions[index].pending_codex_mcp_elicitations.clear();
+        inner.sessions[index].pending_codex_app_requests.clear();
         inner.sessions[index].pending_acp_approvals.clear();
         Ok(())
     }
@@ -2081,6 +2197,9 @@ impl AppState {
             record.runtime_reset_required = false;
             record.pending_claude_approvals.clear();
             record.pending_codex_approvals.clear();
+            record.pending_codex_user_inputs.clear();
+            record.pending_codex_mcp_elicitations.clear();
+            record.pending_codex_app_requests.clear();
             record.pending_acp_approvals.clear();
 
             if !cleaned.is_empty() || was_busy {
@@ -2161,6 +2280,54 @@ impl AppState {
         Ok(())
     }
 
+    fn register_codex_pending_user_input(
+        &self,
+        session_id: &str,
+        message_id: String,
+        request: CodexPendingUserInput,
+    ) -> Result<()> {
+        let mut inner = self.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(session_id)
+            .ok_or_else(|| anyhow!("session `{session_id}` not found"))?;
+        inner.sessions[index]
+            .pending_codex_user_inputs
+            .insert(message_id, request);
+        Ok(())
+    }
+
+    fn register_codex_pending_mcp_elicitation(
+        &self,
+        session_id: &str,
+        message_id: String,
+        request: CodexPendingMcpElicitation,
+    ) -> Result<()> {
+        let mut inner = self.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(session_id)
+            .ok_or_else(|| anyhow!("session `{session_id}` not found"))?;
+        inner.sessions[index]
+            .pending_codex_mcp_elicitations
+            .insert(message_id, request);
+        Ok(())
+    }
+
+    fn register_codex_pending_app_request(
+        &self,
+        session_id: &str,
+        message_id: String,
+        request: CodexPendingAppRequest,
+    ) -> Result<()> {
+        let mut inner = self.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(session_id)
+            .ok_or_else(|| anyhow!("session `{session_id}` not found"))?;
+        inner.sessions[index]
+            .pending_codex_app_requests
+            .insert(message_id, request);
+        Ok(())
+    }
+
     fn register_acp_pending_approval(
         &self,
         session_id: &str,
@@ -2203,7 +2370,10 @@ impl AppState {
             record.pending_claude_approvals.remove(message_id);
         }
 
-        sync_session_approval_state(record, ApprovalDecision::Canceled);
+        sync_session_interaction_state(
+            record,
+            approval_preview_text(record.session.agent.name(), ApprovalDecision::Canceled),
+        );
         self.commit_locked(&mut inner)?;
         Ok(())
     }
@@ -2322,13 +2492,7 @@ impl AppState {
                 return Err(ApiError::conflict("session is not currently running"));
             }
 
-            for message in &mut record.session.messages {
-                if let Message::Approval { decision, .. } = message {
-                    if *decision == ApprovalDecision::Pending {
-                        *decision = ApprovalDecision::Rejected;
-                    }
-                }
-            }
+            cancel_pending_interaction_messages(&mut record.session.messages);
 
             let runtime = match &record.runtime {
                 SessionRuntime::Claude(handle) => KillableRuntime::Claude(handle.clone()),
@@ -2400,7 +2564,13 @@ impl AppState {
                 if let Some(next_preview) = message.preview_text() {
                     record.session.preview = next_preview;
                 }
-                if matches!(message, Message::Approval { .. }) {
+                if matches!(
+                    message,
+                    Message::Approval { .. }
+                        | Message::UserInputRequest { .. }
+                        | Message::McpElicitationRequest { .. }
+                        | Message::CodexAppRequest { .. }
+                ) {
                     record.session.status = SessionStatus::Approval;
                 }
                 let message_index = push_message_on_record(record, message.clone());
@@ -2909,8 +3079,8 @@ impl AppState {
         if let Some((handle, pending)) = codex_runtime_action {
             handle
                 .input_tx
-                .send(CodexRuntimeCommand::ApprovalResponse {
-                    response: CodexApprovalResponseCommand {
+                .send(CodexRuntimeCommand::JsonRpcResponse {
+                    response: CodexJsonRpcResponseCommand {
                         request_id: pending.request_id.clone(),
                         result: codex_approval_result(&pending.kind, decision),
                     },
@@ -2983,7 +3153,269 @@ impl AppState {
             record.pending_codex_approvals.remove(message_id);
             record.pending_acp_approvals.remove(message_id);
         }
-        sync_session_approval_state(record, decision);
+        sync_session_interaction_state(
+            record,
+            approval_preview_text(record.session.agent.name(), decision),
+        );
+        self.commit_locked(&mut inner).map_err(|err| {
+            ApiError::internal(format!("failed to persist session state: {err:#}"))
+        })?;
+        Ok(self.snapshot_from_inner(&inner))
+    }
+
+    fn submit_codex_user_input(
+        &self,
+        session_id: &str,
+        message_id: &str,
+        answers: BTreeMap<String, Vec<String>>,
+    ) -> std::result::Result<StateResponse, ApiError> {
+        if self.remote_session_target(session_id)?.is_some() {
+            return self.proxy_remote_submit_codex_user_input(session_id, message_id, answers);
+        }
+
+        let (handle, pending, response_answers, display_answers) = {
+            let mut inner = self.inner.lock().expect("state mutex poisoned");
+            let index = inner
+                .find_session_index(session_id)
+                .ok_or_else(|| ApiError::not_found("session not found"))?;
+            let record = &mut inner.sessions[index];
+            if record.session.status != SessionStatus::Approval {
+                return Err(ApiError::conflict(
+                    "session is not currently waiting for input",
+                ));
+            }
+            if record.session.agent != Agent::Codex {
+                return Err(ApiError::conflict(
+                    "only Codex sessions currently support structured user input",
+                ));
+            }
+
+            let pending = record
+                .pending_codex_user_inputs
+                .get(message_id)
+                .cloned()
+                .ok_or_else(|| ApiError::conflict("user input request is no longer live"))?;
+            let handle = match &record.runtime {
+                SessionRuntime::Codex(handle) => handle.clone(),
+                SessionRuntime::Claude(_) | SessionRuntime::None | SessionRuntime::Acp(_) => {
+                    return Err(ApiError::conflict("Codex session is not currently running"));
+                }
+            };
+            let (response_answers, display_answers) =
+                validate_codex_user_input_answers(&pending.questions, answers)?;
+            (handle, pending, response_answers, display_answers)
+        };
+
+        handle
+            .input_tx
+            .send(CodexRuntimeCommand::JsonRpcResponse {
+                response: CodexJsonRpcResponseCommand {
+                    request_id: pending.request_id.clone(),
+                    result: json!({ "answers": response_answers }),
+                },
+            })
+            .map_err(|err| {
+                ApiError::internal(format!(
+                    "failed to deliver user input response to Codex: {err}"
+                ))
+            })?;
+
+        let mut inner = self.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(session_id)
+            .ok_or_else(|| ApiError::not_found("session not found"))?;
+        let record = &mut inner.sessions[index];
+        set_user_input_request_state_on_record(
+            record,
+            message_id,
+            InteractionRequestState::Submitted,
+            Some(display_answers),
+        )
+        .map_err(|_| ApiError::not_found("user input request not found"))?;
+        record.pending_codex_user_inputs.remove(message_id);
+        sync_session_interaction_state(
+            record,
+            user_input_request_preview_text(
+                record.session.agent.name(),
+                InteractionRequestState::Submitted,
+            ),
+        );
+        self.commit_locked(&mut inner).map_err(|err| {
+            ApiError::internal(format!("failed to persist session state: {err:#}"))
+        })?;
+        Ok(self.snapshot_from_inner(&inner))
+    }
+
+    fn submit_codex_mcp_elicitation(
+        &self,
+        session_id: &str,
+        message_id: &str,
+        action: McpElicitationAction,
+        content: Option<Value>,
+    ) -> std::result::Result<StateResponse, ApiError> {
+        if self.remote_session_target(session_id)?.is_some() {
+            return self.proxy_remote_submit_codex_mcp_elicitation(
+                session_id,
+                message_id,
+                action,
+                content,
+            );
+        }
+
+        let (handle, pending, normalized_content) = {
+            let mut inner = self.inner.lock().expect("state mutex poisoned");
+            let index = inner
+                .find_session_index(session_id)
+                .ok_or_else(|| ApiError::not_found("session not found"))?;
+            let record = &mut inner.sessions[index];
+            if record.session.status != SessionStatus::Approval {
+                return Err(ApiError::conflict(
+                    "session is not currently waiting for input",
+                ));
+            }
+            if record.session.agent != Agent::Codex {
+                return Err(ApiError::conflict(
+                    "only Codex sessions currently support MCP elicitation input",
+                ));
+            }
+
+            let pending = record
+                .pending_codex_mcp_elicitations
+                .get(message_id)
+                .cloned()
+                .ok_or_else(|| ApiError::conflict("MCP elicitation request is no longer live"))?;
+            let handle = match &record.runtime {
+                SessionRuntime::Codex(handle) => handle.clone(),
+                SessionRuntime::Claude(_) | SessionRuntime::None | SessionRuntime::Acp(_) => {
+                    return Err(ApiError::conflict("Codex session is not currently running"));
+                }
+            };
+            let normalized_content =
+                validate_codex_mcp_elicitation_submission(&pending.request, action, content)?;
+            (handle, pending, normalized_content)
+        };
+
+        handle
+            .input_tx
+            .send(CodexRuntimeCommand::JsonRpcResponse {
+                response: CodexJsonRpcResponseCommand {
+                    request_id: pending.request_id.clone(),
+                    result: json!({
+                        "action": action,
+                        "content": normalized_content
+                    }),
+                },
+            })
+            .map_err(|err| {
+                ApiError::internal(format!(
+                    "failed to deliver MCP elicitation response to Codex: {err}"
+                ))
+            })?;
+
+        let mut inner = self.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(session_id)
+            .ok_or_else(|| ApiError::not_found("session not found"))?;
+        let record = &mut inner.sessions[index];
+        set_mcp_elicitation_request_state_on_record(
+            record,
+            message_id,
+            InteractionRequestState::Submitted,
+            Some(action),
+            normalized_content.clone(),
+        )
+        .map_err(|_| ApiError::not_found("MCP elicitation request not found"))?;
+        record.pending_codex_mcp_elicitations.remove(message_id);
+        sync_session_interaction_state(
+            record,
+            mcp_elicitation_request_preview_text(
+                record.session.agent.name(),
+                InteractionRequestState::Submitted,
+                Some(action),
+            ),
+        );
+        self.commit_locked(&mut inner).map_err(|err| {
+            ApiError::internal(format!("failed to persist session state: {err:#}"))
+        })?;
+        Ok(self.snapshot_from_inner(&inner))
+    }
+
+    fn submit_codex_app_request(
+        &self,
+        session_id: &str,
+        message_id: &str,
+        result: Value,
+    ) -> std::result::Result<StateResponse, ApiError> {
+        if self.remote_session_target(session_id)?.is_some() {
+            return self.proxy_remote_submit_codex_app_request(session_id, message_id, result);
+        }
+        let result = validate_codex_app_request_result(result)?;
+
+        let (handle, pending) = {
+            let mut inner = self.inner.lock().expect("state mutex poisoned");
+            let index = inner
+                .find_session_index(session_id)
+                .ok_or_else(|| ApiError::not_found("session not found"))?;
+            let record = &mut inner.sessions[index];
+            if record.session.status != SessionStatus::Approval {
+                return Err(ApiError::conflict(
+                    "session is not currently waiting for a Codex request response",
+                ));
+            }
+            if record.session.agent != Agent::Codex {
+                return Err(ApiError::conflict(
+                    "only Codex sessions currently support generic app-server requests",
+                ));
+            }
+
+            let pending = record
+                .pending_codex_app_requests
+                .get(message_id)
+                .cloned()
+                .ok_or_else(|| ApiError::conflict("Codex app request is no longer live"))?;
+            let handle = match &record.runtime {
+                SessionRuntime::Codex(handle) => handle.clone(),
+                SessionRuntime::Claude(_) | SessionRuntime::None | SessionRuntime::Acp(_) => {
+                    return Err(ApiError::conflict("Codex session is not currently running"));
+                }
+            };
+            (handle, pending)
+        };
+
+        handle
+            .input_tx
+            .send(CodexRuntimeCommand::JsonRpcResponse {
+                response: CodexJsonRpcResponseCommand {
+                    request_id: pending.request_id.clone(),
+                    result: result.clone(),
+                },
+            })
+            .map_err(|err| {
+                ApiError::internal(format!(
+                    "failed to deliver generic Codex app request response: {err}"
+                ))
+            })?;
+
+        let mut inner = self.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(session_id)
+            .ok_or_else(|| ApiError::not_found("session not found"))?;
+        let record = &mut inner.sessions[index];
+        set_codex_app_request_state_on_record(
+            record,
+            message_id,
+            InteractionRequestState::Submitted,
+            Some(result),
+        )
+        .map_err(|_| ApiError::not_found("Codex app request not found"))?;
+        record.pending_codex_app_requests.remove(message_id);
+        sync_session_interaction_state(
+            record,
+            codex_app_request_preview_text(
+                record.session.agent.name(),
+                InteractionRequestState::Submitted,
+            ),
+        );
         self.commit_locked(&mut inner).map_err(|err| {
             ApiError::internal(format!("failed to persist session state: {err:#}"))
         })?;
@@ -3027,11 +3459,11 @@ impl AppState {
 }
 
 fn codex_approval_result(kind: &CodexApprovalKind, decision: ApprovalDecision) -> Value {
-    let decision_value = match kind {
+    match kind {
         CodexApprovalKind::CommandExecution => match decision {
-            ApprovalDecision::Accepted => json!("accept"),
-            ApprovalDecision::AcceptedForSession => json!("acceptForSession"),
-            ApprovalDecision::Rejected => json!("decline"),
+            ApprovalDecision::Accepted => json!({ "decision": "accept" }),
+            ApprovalDecision::AcceptedForSession => json!({ "decision": "acceptForSession" }),
+            ApprovalDecision::Rejected => json!({ "decision": "decline" }),
             ApprovalDecision::Pending
             | ApprovalDecision::Interrupted
             | ApprovalDecision::Canceled => {
@@ -3039,18 +3471,456 @@ fn codex_approval_result(kind: &CodexApprovalKind, decision: ApprovalDecision) -
             }
         },
         CodexApprovalKind::FileChange => match decision {
-            ApprovalDecision::Accepted => json!("accept"),
-            ApprovalDecision::AcceptedForSession => json!("acceptForSession"),
-            ApprovalDecision::Rejected => json!("decline"),
+            ApprovalDecision::Accepted => json!({ "decision": "accept" }),
+            ApprovalDecision::AcceptedForSession => json!({ "decision": "acceptForSession" }),
+            ApprovalDecision::Rejected => json!({ "decision": "decline" }),
             ApprovalDecision::Pending
             | ApprovalDecision::Interrupted
             | ApprovalDecision::Canceled => {
                 unreachable!("non-deliverable approval decisions are not sent to Codex")
             }
         },
-    };
+        CodexApprovalKind::Permissions {
+            requested_permissions,
+        } => {
+            let permissions = match decision {
+                ApprovalDecision::Accepted | ApprovalDecision::AcceptedForSession => {
+                    requested_permissions.clone()
+                }
+                ApprovalDecision::Rejected => json!({}),
+                ApprovalDecision::Pending
+                | ApprovalDecision::Interrupted
+                | ApprovalDecision::Canceled => {
+                    unreachable!("non-deliverable approval decisions are not sent to Codex")
+                }
+            };
+            let scope = match decision {
+                ApprovalDecision::AcceptedForSession => "session",
+                ApprovalDecision::Accepted | ApprovalDecision::Rejected => "turn",
+                ApprovalDecision::Pending
+                | ApprovalDecision::Interrupted
+                | ApprovalDecision::Canceled => {
+                    unreachable!("non-deliverable approval decisions are not sent to Codex")
+                }
+            };
+            json!({
+                "permissions": permissions,
+                "scope": scope,
+            })
+        }
+    }
+}
 
-    json!({ "decision": decision_value })
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct DiscoveredCodexThread {
+    approval_policy: Option<CodexApprovalPolicy>,
+    archived: bool,
+    cwd: String,
+    id: String,
+    model: Option<String>,
+    reasoning_effort: Option<CodexReasoningEffort>,
+    sandbox_mode: Option<CodexSandboxMode>,
+    title: String,
+}
+
+const MAX_DISCOVERED_CODEX_THREADS_PER_HOME: usize = 500;
+
+fn collect_codex_discovery_scopes(default_workdir: &str, projects: &[Project]) -> Vec<PathBuf> {
+    let mut scopes = Vec::new();
+    let mut seen = HashSet::new();
+    push_codex_home_candidate(
+        &mut scopes,
+        &mut seen,
+        normalize_codex_discovery_path(FsPath::new(default_workdir)),
+    );
+    for project in projects {
+        if project.remote_id == LOCAL_REMOTE_ID {
+            push_codex_home_candidate(
+                &mut scopes,
+                &mut seen,
+                normalize_codex_discovery_path(FsPath::new(&project.root_path)),
+            );
+        }
+    }
+    scopes
+}
+
+fn discover_codex_threads(
+    default_workdir: &str,
+    discovery_scopes: &[PathBuf],
+) -> Result<Vec<DiscoveredCodexThread>> {
+    let source_codex_home = std::env::var_os("CODEX_HOME")
+        .map(PathBuf::from)
+        .or_else(|| {
+            std::env::var_os("HOME")
+                .or_else(|| std::env::var_os("USERPROFILE"))
+                .map(PathBuf::from)
+                .map(|home| home.join(".codex"))
+        })
+        .or_else(|| Some(PathBuf::from(default_workdir).join(".codex")));
+    let termal_codex_root = resolve_termal_codex_discovery_root(default_workdir);
+    discover_codex_threads_from_sources(
+        source_codex_home.as_deref(),
+        &termal_codex_root,
+        discovery_scopes,
+    )
+}
+
+fn discover_codex_threads_from_sources(
+    source_codex_home: Option<&FsPath>,
+    termal_codex_root: &FsPath,
+    discovery_scopes: &[PathBuf],
+) -> Result<Vec<DiscoveredCodexThread>> {
+    let codex_homes = discover_codex_home_candidates(source_codex_home, termal_codex_root);
+    discover_codex_threads_from_homes(&codex_homes, discovery_scopes)
+}
+
+fn discover_codex_home_candidates(
+    source_codex_home: Option<&FsPath>,
+    termal_codex_root: &FsPath,
+) -> Vec<PathBuf> {
+    let mut homes = Vec::new();
+    let mut seen = HashSet::new();
+
+    for scope in ["shared-app-server"] {
+        push_codex_home_candidate(
+            &mut homes,
+            &mut seen,
+            termal_codex_root.join(scope),
+        );
+    }
+
+    let mut extra_termal_homes = fs::read_dir(termal_codex_root)
+        .ok()
+        .into_iter()
+        .flatten()
+        .filter_map(|entry| entry.ok())
+        .filter_map(|entry| match entry.file_type() {
+            Ok(file_type)
+                if file_type.is_dir() && codex_home_scope_is_importable(&entry.path()) =>
+            {
+                Some(entry.path())
+            }
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    extra_termal_homes.sort();
+    for home in extra_termal_homes {
+        push_codex_home_candidate(&mut homes, &mut seen, home);
+    }
+
+    push_codex_home_candidate(
+        &mut homes,
+        &mut seen,
+        termal_codex_root.to_path_buf(),
+    );
+
+    if let Some(source_codex_home) = source_codex_home {
+        push_codex_home_candidate(
+            &mut homes,
+            &mut seen,
+            source_codex_home.to_path_buf(),
+        );
+    }
+
+    homes
+}
+
+fn codex_home_scope_is_importable(path: &FsPath) -> bool {
+    path.file_name()
+        .and_then(|value| value.to_str())
+        .map_or(true, |scope| scope != "repl")
+}
+
+fn push_codex_home_candidate(
+    homes: &mut Vec<PathBuf>,
+    seen: &mut HashSet<PathBuf>,
+    home: PathBuf,
+) {
+    let key = normalize_codex_discovery_path(&home);
+    if seen.insert(key) {
+        homes.push(home);
+    }
+}
+
+fn resolve_termal_codex_discovery_root(default_workdir: &str) -> PathBuf {
+    std::env::var_os("HOME")
+        .or_else(|| std::env::var_os("USERPROFILE"))
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from(default_workdir))
+        .join(".termal")
+        .join("codex-home")
+}
+
+fn discover_codex_threads_from_homes(
+    codex_homes: &[PathBuf],
+    discovery_scopes: &[PathBuf],
+) -> Result<Vec<DiscoveredCodexThread>> {
+    let mut threads = Vec::new();
+    let mut seen_ids = HashSet::new();
+
+    for codex_home in codex_homes {
+        for thread in discover_codex_threads_from_home(codex_home, discovery_scopes)? {
+            if seen_ids.insert(thread.id.clone()) {
+                threads.push(thread);
+            }
+        }
+    }
+
+    Ok(threads)
+}
+
+fn discover_codex_threads_from_home(
+    codex_home: &FsPath,
+    discovery_scopes: &[PathBuf],
+) -> Result<Vec<DiscoveredCodexThread>> {
+    let Some(database_path) = resolve_codex_threads_database_path(codex_home) else {
+        return Ok(Vec::new());
+    };
+    if discovery_scopes.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let connection = rusqlite::Connection::open_with_flags(
+        &database_path,
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+    )
+    .with_context(|| format!("failed to open `{}`", database_path.display()))?;
+    let query_scopes = collect_codex_discovery_query_scope_strings(discovery_scopes);
+    let normalized_scopes = discovery_scopes
+        .iter()
+        .map(|scope| normalize_codex_discovery_path(scope))
+        .collect::<Vec<_>>();
+    let scope_sql = query_scopes
+        .iter()
+        .map(|_| "(cwd = ? OR cwd LIKE ? ESCAPE '\\')")
+        .collect::<Vec<_>>()
+        .join(" OR ");
+    let query = format!(
+        "select id, cwd, title, sandbox_policy, approval_mode, archived, model, reasoning_effort
+         from threads
+         where {scope_sql}
+         order by updated_at desc
+         limit ?"
+    );
+    let mut statement = connection.prepare(&query)?;
+    let mut params = Vec::with_capacity((query_scopes.len() * 2) + 1);
+    for scope in &query_scopes {
+        params.push(rusqlite::types::Value::from(scope.clone()));
+        params.push(rusqlite::types::Value::from(codex_discovery_like_pattern(
+            scope,
+        )));
+    }
+    params.push(rusqlite::types::Value::from(
+        MAX_DISCOVERED_CODEX_THREADS_PER_HOME as i64,
+    ));
+    let rows = statement.query_map(rusqlite::params_from_iter(params), |row| {
+        let sandbox_policy: Option<String> = row.get(3)?;
+        let approval_mode: Option<String> = row.get(4)?;
+        let model: Option<String> = row.get(6)?;
+        let reasoning_effort: Option<String> = row.get(7)?;
+        Ok(DiscoveredCodexThread {
+            approval_policy: approval_mode
+                .as_deref()
+                .and_then(parse_discovered_codex_approval_policy),
+            archived: row.get::<_, i64>(5)? != 0,
+            cwd: row.get(1)?,
+            id: row.get(0)?,
+            model: model
+                .map(|value| value.trim().to_owned())
+                .filter(|value| !value.is_empty()),
+            reasoning_effort: reasoning_effort
+                .as_deref()
+                .and_then(parse_discovered_codex_reasoning_effort),
+            sandbox_mode: sandbox_policy
+                .as_deref()
+                .and_then(parse_discovered_codex_sandbox_mode),
+            title: row.get::<_, String>(2)?,
+        })
+    })?;
+
+    let mut threads = Vec::new();
+    for row in rows {
+        let thread = row?;
+        if thread.id.trim().is_empty() || thread.cwd.trim().is_empty() {
+            continue;
+        }
+        if !normalized_scopes.iter().any(|scope| {
+            codex_discovery_scope_contains(
+                scope.to_string_lossy().as_ref(),
+                FsPath::new(&thread.cwd),
+            )
+        }) {
+            continue;
+        }
+        threads.push(thread);
+    }
+    Ok(threads)
+}
+
+fn collect_codex_discovery_query_scope_strings(discovery_scopes: &[PathBuf]) -> Vec<String> {
+    let mut scopes = Vec::new();
+    let mut seen = HashSet::new();
+    for scope in discovery_scopes {
+        let raw = scope.to_string_lossy().to_string();
+        if seen.insert(raw.clone()) {
+            scopes.push(raw);
+        }
+        let normalized = normalize_codex_discovery_path(scope)
+            .to_string_lossy()
+            .to_string();
+        if seen.insert(normalized.clone()) {
+            scopes.push(normalized);
+        }
+    }
+    scopes
+}
+
+fn codex_discovery_like_pattern(scope: &str) -> String {
+    let escaped_scope = scope
+        .replace('\\', "\\\\")
+        .replace('%', "\\%")
+        .replace('_', "\\_");
+    let separator = std::path::MAIN_SEPARATOR;
+    if escaped_scope.ends_with(separator) {
+        format!("{escaped_scope}%")
+    } else {
+        format!("{escaped_scope}{separator}%")
+    }
+}
+
+fn resolve_codex_threads_database_path(codex_home: &FsPath) -> Option<PathBuf> {
+    let primary = codex_home.join("state.db");
+    if primary
+        .metadata()
+        .ok()
+        .filter(|metadata| metadata.is_file() && metadata.len() > 0)
+        .is_some()
+    {
+        return Some(primary);
+    }
+
+    let mut best_candidate: Option<(u64, PathBuf)> = None;
+    let entries = fs::read_dir(codex_home).ok()?;
+    for entry in entries {
+        let Ok(entry) = entry else {
+            continue;
+        };
+        let path = entry.path();
+        let Some(name) = path.file_name().and_then(|value| value.to_str()) else {
+            continue;
+        };
+        let version = name
+            .strip_prefix("state_")
+            .and_then(|value| value.strip_suffix(".sqlite"))
+            .and_then(|value| value.parse::<u64>().ok());
+        let Some(version) = version else {
+            continue;
+        };
+        if !path.is_file() {
+            continue;
+        }
+
+        match &best_candidate {
+            Some((current_version, _)) if *current_version >= version => {}
+            _ => {
+                best_candidate = Some((version, path));
+            }
+        }
+    }
+
+    best_candidate.map(|(_, path)| path)
+}
+
+fn parse_discovered_codex_sandbox_mode(value: &str) -> Option<CodexSandboxMode> {
+    let payload: Value = serde_json::from_str(value).ok()?;
+    match payload.get("type").and_then(Value::as_str) {
+        Some("read-only") => Some(CodexSandboxMode::ReadOnly),
+        Some("workspace-write") => Some(CodexSandboxMode::WorkspaceWrite),
+        Some("danger-full-access") => Some(CodexSandboxMode::DangerFullAccess),
+        _ => None,
+    }
+}
+
+fn parse_discovered_codex_approval_policy(value: &str) -> Option<CodexApprovalPolicy> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "untrusted" => Some(CodexApprovalPolicy::Untrusted),
+        "on-failure" => Some(CodexApprovalPolicy::OnFailure),
+        "on-request" => Some(CodexApprovalPolicy::OnRequest),
+        "never" => Some(CodexApprovalPolicy::Never),
+        _ => None,
+    }
+}
+
+fn parse_discovered_codex_reasoning_effort(value: &str) -> Option<CodexReasoningEffort> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "none" => Some(CodexReasoningEffort::None),
+        "minimal" => Some(CodexReasoningEffort::Minimal),
+        "low" => Some(CodexReasoningEffort::Low),
+        "medium" => Some(CodexReasoningEffort::Medium),
+        "high" => Some(CodexReasoningEffort::High),
+        "xhigh" => Some(CodexReasoningEffort::XHigh),
+        _ => None,
+    }
+}
+
+fn codex_discovery_scope_contains(root_path: &str, candidate_path: &FsPath) -> bool {
+    let root = normalize_codex_discovery_path(FsPath::new(root_path));
+    let candidate = normalize_codex_discovery_path(candidate_path);
+    candidate == root || candidate.starts_with(root)
+}
+
+fn normalize_codex_discovery_path(path: &FsPath) -> PathBuf {
+    let resolved = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        std::env::current_dir()
+            .map(|cwd| cwd.join(path))
+            .unwrap_or_else(|_| path.to_path_buf())
+    };
+    fs::canonicalize(&resolved).unwrap_or(resolved)
+}
+
+fn apply_discovered_codex_thread(
+    record: &mut SessionRecord,
+    thread: &DiscoveredCodexThread,
+    overwrite_prompt_settings: bool,
+) {
+    set_record_external_session_id(record, Some(thread.id.clone()));
+    set_record_codex_thread_state(
+        record,
+        if thread.archived {
+            CodexThreadState::Archived
+        } else {
+            CodexThreadState::Active
+        },
+    );
+
+    if overwrite_prompt_settings {
+        if let Some(model) = thread.model.as_ref() {
+            record.session.model = model.clone();
+        }
+        if let Some(sandbox_mode) = thread.sandbox_mode {
+            record.codex_sandbox_mode = sandbox_mode;
+            record.session.sandbox_mode = Some(sandbox_mode);
+        }
+        if let Some(approval_policy) = thread.approval_policy {
+            record.codex_approval_policy = approval_policy;
+            record.session.approval_policy = Some(approval_policy);
+        }
+        if let Some(reasoning_effort) = thread.reasoning_effort {
+            record.codex_reasoning_effort = reasoning_effort;
+            record.session.reasoning_effort = Some(reasoning_effort);
+        }
+    }
+
+    if record.session.messages.is_empty() && matches!(record.session.status, SessionStatus::Idle) {
+        record.session.preview = if thread.archived {
+            "Archived Codex thread ready to reopen.".to_owned()
+        } else {
+            "Ready to continue this Codex thread.".to_owned()
+        };
+    }
 }
 
 fn normalize_remote_configs(remotes: Vec<RemoteConfig>) -> Result<Vec<RemoteConfig>, ApiError> {
@@ -3189,6 +4059,9 @@ impl StateInner {
             external_session_id: None,
             pending_claude_approvals: HashMap::new(),
             pending_codex_approvals: HashMap::new(),
+            pending_codex_user_inputs: HashMap::new(),
+            pending_codex_mcp_elicitations: HashMap::new(),
+            pending_codex_app_requests: HashMap::new(),
             pending_acp_approvals: HashMap::new(),
             queued_prompts: VecDeque::new(),
             message_positions: HashMap::new(),
@@ -3221,6 +4094,7 @@ impl StateInner {
                     .supports_gemini_approval_mode()
                     .then_some(default_gemini_approval_mode()),
                 external_session_id: None,
+                codex_thread_state: None,
                 status: SessionStatus::Idle,
                 preview: "Ready for a prompt.".to_owned(),
                 messages: Vec::new(),
@@ -3278,9 +4152,69 @@ impl StateInner {
         self.projects
             .iter()
             .filter(|project| {
-                project.remote_id == LOCAL_REMOTE_ID && path_contains(&project.root_path, target)
+                project.remote_id == LOCAL_REMOTE_ID
+                    && codex_discovery_scope_contains(&project.root_path, target)
             })
             .max_by_key(|project| project.root_path.len())
+    }
+
+    fn import_discovered_codex_threads(
+        &mut self,
+        default_workdir: &str,
+        threads: Vec<DiscoveredCodexThread>,
+    ) {
+        for thread in threads {
+            let target_path = FsPath::new(&thread.cwd);
+            let within_scope = codex_discovery_scope_contains(default_workdir, target_path)
+                || self.projects.iter().any(|project| {
+                    project.remote_id == LOCAL_REMOTE_ID
+                        && codex_discovery_scope_contains(&project.root_path, target_path)
+                });
+            if !within_scope {
+                continue;
+            }
+
+            let project_id = self
+                .find_project_for_workdir(&thread.cwd)
+                .map(|project| project.id.clone())
+                .unwrap_or_else(|| {
+                    self.create_project(None, thread.cwd.clone(), default_local_remote_id())
+                        .id
+                });
+
+            let existing_index = self.sessions.iter().position(|record| {
+                !record.is_remote_proxy()
+                    && record.session.agent == Agent::Codex
+                    && record.external_session_id.as_deref() == Some(thread.id.as_str())
+            });
+
+            if let Some(index) = existing_index {
+                let record = &mut self.sessions[index];
+                if record.session.workdir != thread.cwd {
+                    record.session.workdir = thread.cwd.clone();
+                }
+                if record.session.project_id.as_deref() != Some(project_id.as_str()) {
+                    record.session.project_id = Some(project_id);
+                }
+                apply_discovered_codex_thread(record, &thread, false);
+                continue;
+            }
+
+            let mut record = self.create_session(
+                Agent::Codex,
+                Some(thread.title.clone()),
+                thread.cwd.clone(),
+                Some(project_id),
+                thread.model.clone(),
+            );
+            apply_discovered_codex_thread(&mut record, &thread, true);
+            if let Some(slot) = self
+                .find_session_index(&record.session.id)
+                .and_then(|index| self.sessions.get_mut(index))
+            {
+                *slot = record;
+            }
+        }
     }
 
     fn ensure_projects_consistent(&mut self) {
@@ -3425,6 +4359,14 @@ impl PersistedState {
     }
 }
 
+fn same_codex_notice_identity(left: &CodexNotice, right: &CodexNotice) -> bool {
+    left.kind == right.kind
+        && left.level == right.level
+        && left.title == right.title
+        && left.detail == right.detail
+        && left.code == right.code
+}
+
 #[derive(Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct PersistedSessionRecord {
@@ -3518,6 +4460,9 @@ impl PersistedSessionRecord {
             external_session_id: self.external_session_id,
             pending_claude_approvals: HashMap::new(),
             pending_codex_approvals: HashMap::new(),
+            pending_codex_user_inputs: HashMap::new(),
+            pending_codex_mcp_elicitations: HashMap::new(),
+            pending_codex_app_requests: HashMap::new(),
             pending_acp_approvals: HashMap::new(),
             queued_prompts: self.queued_prompts,
             message_positions: build_message_positions(&session.messages),
@@ -3527,6 +4472,7 @@ impl PersistedSessionRecord {
             runtime_reset_required: false,
             session,
         };
+        sync_codex_thread_state(&mut record);
         sync_pending_prompts(&mut record);
         record
     }
@@ -3543,6 +4489,9 @@ struct SessionRecord {
     external_session_id: Option<String>,
     pending_claude_approvals: HashMap<String, ClaudePendingApproval>,
     pending_codex_approvals: HashMap<String, CodexPendingApproval>,
+    pending_codex_user_inputs: HashMap<String, CodexPendingUserInput>,
+    pending_codex_mcp_elicitations: HashMap<String, CodexPendingMcpElicitation>,
+    pending_codex_app_requests: HashMap<String, CodexPendingAppRequest>,
     pending_acp_approvals: HashMap<String, AcpPendingApproval>,
     queued_prompts: VecDeque<QueuedPromptRecord>,
     message_positions: HashMap<String, usize>,
@@ -3557,6 +4506,44 @@ impl SessionRecord {
     fn is_remote_proxy(&self) -> bool {
         self.remote_id.is_some() && self.remote_session_id.is_some()
     }
+}
+
+fn normalized_codex_thread_state(
+    agent: Agent,
+    external_session_id: Option<&str>,
+    current_state: Option<CodexThreadState>,
+) -> Option<CodexThreadState> {
+    if !agent.supports_codex_prompt_settings() || external_session_id.is_none() {
+        return None;
+    }
+
+    Some(current_state.unwrap_or(CodexThreadState::Active))
+}
+
+fn sync_codex_thread_state(record: &mut SessionRecord) {
+    record.session.codex_thread_state = normalized_codex_thread_state(
+        record.session.agent,
+        record.external_session_id.as_deref(),
+        record.session.codex_thread_state,
+    );
+}
+
+fn set_record_external_session_id(record: &mut SessionRecord, external_session_id: Option<String>) {
+    record.external_session_id = external_session_id.clone();
+    record.session.external_session_id = external_session_id;
+    sync_codex_thread_state(record);
+}
+
+fn set_record_codex_thread_state(record: &mut SessionRecord, thread_state: CodexThreadState) {
+    record.session.codex_thread_state = normalized_codex_thread_state(
+        record.session.agent,
+        record.external_session_id.as_deref(),
+        Some(thread_state),
+    );
+}
+
+fn record_has_archived_codex_thread(record: &SessionRecord) -> bool {
+    record.session.codex_thread_state == Some(CodexThreadState::Archived)
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -3600,16 +4587,135 @@ fn set_approval_decision_on_record(
     }
 }
 
-fn session_has_live_approvals(record: &SessionRecord) -> bool {
-    record.session.messages.iter().any(|message| {
-        matches!(
-            message,
+fn set_user_input_request_state_on_record(
+    record: &mut SessionRecord,
+    message_id: &str,
+    state: InteractionRequestState,
+    submitted_answers: Option<BTreeMap<String, Vec<String>>>,
+) -> Result<()> {
+    let Some(message_index) = message_index_on_record(record, message_id) else {
+        return Err(anyhow!("user input request `{message_id}` not found"));
+    };
+    let Some(message) = record.session.messages.get_mut(message_index) else {
+        return Err(anyhow!("user input request `{message_id}` not found"));
+    };
+    match message {
+        Message::UserInputRequest {
+            id,
+            state: current_state,
+            submitted_answers: current_answers,
+            ..
+        } if id == message_id => {
+            *current_state = state;
+            *current_answers = submitted_answers;
+            Ok(())
+        }
+        _ => Err(anyhow!("user input request `{message_id}` not found")),
+    }
+}
+
+fn set_mcp_elicitation_request_state_on_record(
+    record: &mut SessionRecord,
+    message_id: &str,
+    state: InteractionRequestState,
+    submitted_action: Option<McpElicitationAction>,
+    submitted_content: Option<Value>,
+) -> Result<()> {
+    let Some(message_index) = message_index_on_record(record, message_id) else {
+        return Err(anyhow!("MCP elicitation request `{message_id}` not found"));
+    };
+    let Some(message) = record.session.messages.get_mut(message_index) else {
+        return Err(anyhow!("MCP elicitation request `{message_id}` not found"));
+    };
+    match message {
+        Message::McpElicitationRequest {
+            id,
+            state: current_state,
+            submitted_action: current_action,
+            submitted_content: current_content,
+            ..
+        } if id == message_id => {
+            *current_state = state;
+            *current_action = submitted_action;
+            *current_content = submitted_content;
+            Ok(())
+        }
+        _ => Err(anyhow!("MCP elicitation request `{message_id}` not found")),
+    }
+}
+
+fn set_codex_app_request_state_on_record(
+    record: &mut SessionRecord,
+    message_id: &str,
+    state: InteractionRequestState,
+    submitted_result: Option<Value>,
+) -> Result<()> {
+    let Some(message_index) = message_index_on_record(record, message_id) else {
+        return Err(anyhow!("Codex app request `{message_id}` not found"));
+    };
+    let Some(message) = record.session.messages.get_mut(message_index) else {
+        return Err(anyhow!("Codex app request `{message_id}` not found"));
+    };
+    match message {
+        Message::CodexAppRequest {
+            id,
+            state: current_state,
+            submitted_result: current_result,
+            ..
+        } if id == message_id => {
+            *current_state = state;
+            *current_result = submitted_result;
+            Ok(())
+        }
+        _ => Err(anyhow!("Codex app request `{message_id}` not found")),
+    }
+}
+
+fn latest_pending_interaction_preview(record: &SessionRecord) -> Option<String> {
+    for message in record.session.messages.iter().rev() {
+        match message {
             Message::Approval {
                 decision: ApprovalDecision::Pending,
                 ..
+            } => {
+                return Some(approval_preview_text(
+                    record.session.agent.name(),
+                    ApprovalDecision::Pending,
+                ));
             }
-        )
-    })
+            Message::UserInputRequest {
+                state: InteractionRequestState::Pending,
+                ..
+            } => {
+                return Some(user_input_request_preview_text(
+                    record.session.agent.name(),
+                    InteractionRequestState::Pending,
+                ));
+            }
+            Message::McpElicitationRequest {
+                state: InteractionRequestState::Pending,
+                ..
+            } => {
+                return Some(mcp_elicitation_request_preview_text(
+                    record.session.agent.name(),
+                    InteractionRequestState::Pending,
+                    None,
+                ));
+            }
+            Message::CodexAppRequest {
+                state: InteractionRequestState::Pending,
+                ..
+            } => {
+                return Some(codex_app_request_preview_text(
+                    record.session.agent.name(),
+                    InteractionRequestState::Pending,
+                ));
+            }
+            _ => {}
+        }
+    }
+
+    None
 }
 
 fn approval_preview_text(agent_name: &str, decision: ApprovalDecision) -> String {
@@ -3631,11 +4737,70 @@ fn approval_preview_text(agent_name: &str, decision: ApprovalDecision) -> String
     }
 }
 
-fn sync_session_approval_state(record: &mut SessionRecord, resolved_decision: ApprovalDecision) {
-    if session_has_live_approvals(record) {
+fn user_input_request_preview_text(
+    agent_name: &str,
+    state: InteractionRequestState,
+) -> String {
+    match state {
+        InteractionRequestState::Pending => "Input requested.".to_owned(),
+        InteractionRequestState::Submitted => {
+            format!("Input submitted. {agent_name} is continuing\u{2026}")
+        }
+        InteractionRequestState::Interrupted => {
+            "Input request expired after TermAl restarted.".to_owned()
+        }
+        InteractionRequestState::Canceled => {
+            format!("Input request canceled. {agent_name} is continuing\u{2026}")
+        }
+    }
+}
+
+fn mcp_elicitation_request_preview_text(
+    agent_name: &str,
+    state: InteractionRequestState,
+    action: Option<McpElicitationAction>,
+) -> String {
+    match state {
+        InteractionRequestState::Pending => "MCP input requested.".to_owned(),
+        InteractionRequestState::Submitted => match action.unwrap_or(McpElicitationAction::Accept) {
+            McpElicitationAction::Accept => {
+                format!("MCP input submitted. {agent_name} is continuing\u{2026}")
+            }
+            McpElicitationAction::Decline => {
+                format!("MCP request declined. {agent_name} is continuing\u{2026}")
+            }
+            McpElicitationAction::Cancel => {
+                format!("MCP request canceled. {agent_name} is continuing\u{2026}")
+            }
+        },
+        InteractionRequestState::Interrupted => {
+            "MCP input request expired after TermAl restarted.".to_owned()
+        }
+        InteractionRequestState::Canceled => {
+            format!("MCP input request canceled. {agent_name} is continuing\u{2026}")
+        }
+    }
+}
+
+fn codex_app_request_preview_text(agent_name: &str, state: InteractionRequestState) -> String {
+    match state {
+        InteractionRequestState::Pending => "Codex response requested.".to_owned(),
+        InteractionRequestState::Submitted => {
+            format!("Codex response submitted. {agent_name} is continuing\u{2026}")
+        }
+        InteractionRequestState::Interrupted => {
+            "Codex request expired after TermAl restarted.".to_owned()
+        }
+        InteractionRequestState::Canceled => {
+            format!("Codex request canceled. {agent_name} is continuing\u{2026}")
+        }
+    }
+}
+
+fn sync_session_interaction_state(record: &mut SessionRecord, resolved_preview: String) {
+    if let Some(preview) = latest_pending_interaction_preview(record) {
         record.session.status = SessionStatus::Approval;
-        record.session.preview =
-            approval_preview_text(record.session.agent.name(), ApprovalDecision::Pending);
+        record.session.preview = preview;
         return;
     }
 
@@ -3644,9 +4809,440 @@ fn sync_session_approval_state(record: &mut SessionRecord, resolved_decision: Ap
         SessionStatus::Approval | SessionStatus::Active
     ) {
         record.session.status = SessionStatus::Active;
-        record.session.preview =
-            approval_preview_text(record.session.agent.name(), resolved_decision);
+        record.session.preview = resolved_preview;
     }
+}
+
+fn validate_codex_user_input_answers(
+    questions: &[UserInputQuestion],
+    answers: BTreeMap<String, Vec<String>>,
+) -> std::result::Result<
+    (
+        BTreeMap<String, BTreeMap<String, Vec<String>>>,
+        BTreeMap<String, Vec<String>>,
+    ),
+    ApiError,
+> {
+    if questions.is_empty() {
+        return Err(ApiError::bad_request(
+            "Codex did not include any questions for this request",
+        ));
+    }
+
+    let question_ids: HashSet<&str> = questions
+        .iter()
+        .map(|question| question.id.as_str())
+        .collect();
+    for answer_id in answers.keys() {
+        if !question_ids.contains(answer_id.as_str()) {
+            return Err(ApiError::bad_request(format!(
+                "answer `{answer_id}` does not match any requested question"
+            )));
+        }
+    }
+
+    let mut response_answers = BTreeMap::new();
+    let mut display_answers = BTreeMap::new();
+    for question in questions {
+        let Some(raw_answers) = answers.get(&question.id) else {
+            return Err(ApiError::bad_request(format!(
+                "question `{}` is missing an answer",
+                question.header
+            )));
+        };
+
+        let normalized_answers = raw_answers
+            .iter()
+            .map(|answer: &String| answer.trim())
+            .filter(|answer: &&str| !answer.is_empty())
+            .map(str::to_owned)
+            .collect::<Vec<_>>();
+        if normalized_answers.len() != 1 {
+            return Err(ApiError::bad_request(format!(
+                "question `{}` requires exactly one answer",
+                question.header
+            )));
+        }
+
+        if let Some(options) = question.options.as_ref() {
+            let selected = &normalized_answers[0];
+            let matches_option = options.iter().any(|option| option.label == *selected);
+            if !matches_option && !question.is_other {
+                return Err(ApiError::bad_request(format!(
+                    "question `{}` must use one of the provided options",
+                    question.header
+                )));
+            }
+        }
+
+        response_answers.insert(
+            question.id.clone(),
+            BTreeMap::from([("answers".to_owned(), normalized_answers.clone())]),
+        );
+        display_answers.insert(
+            question.id.clone(),
+            if question.is_secret {
+                vec!["[secret provided]".to_owned()]
+            } else {
+                normalized_answers
+            },
+        );
+    }
+
+    Ok((response_answers, display_answers))
+}
+
+fn validate_codex_mcp_elicitation_submission(
+    request: &McpElicitationRequestPayload,
+    action: McpElicitationAction,
+    content: Option<Value>,
+) -> std::result::Result<Option<Value>, ApiError> {
+    let content = content.filter(|value| !value.is_null());
+    match (&request.mode, action) {
+        (McpElicitationRequestMode::Url { .. }, _) => {
+            if content.is_some() {
+                return Err(ApiError::bad_request(
+                    "URL-based MCP elicitations do not accept structured content",
+                ));
+            }
+            Ok(None)
+        }
+        (McpElicitationRequestMode::Form { .. }, McpElicitationAction::Accept) => {
+            let content = content.ok_or_else(|| {
+                ApiError::bad_request(
+                    "accepted MCP elicitation responses must include structured content",
+                )
+            })?;
+            Ok(Some(validate_codex_mcp_elicitation_form_content(
+                request, content,
+            )?))
+        }
+        (McpElicitationRequestMode::Form { .. }, _) => {
+            if content.is_some() {
+                return Err(ApiError::bad_request(
+                    "declined or canceled MCP elicitations cannot include structured content",
+                ));
+            }
+            Ok(None)
+        }
+    }
+}
+
+fn validate_codex_mcp_elicitation_form_content(
+    request: &McpElicitationRequestPayload,
+    content: Value,
+) -> std::result::Result<Value, ApiError> {
+    let McpElicitationRequestMode::Form {
+        requested_schema, ..
+    } = &request.mode
+    else {
+        return Err(ApiError::bad_request(
+            "structured content is only supported for form-mode MCP elicitations",
+        ));
+    };
+
+    if requested_schema.get("type").and_then(Value::as_str) != Some("object") {
+        return Err(ApiError::bad_request(
+            "MCP elicitation schema must be an object schema",
+        ));
+    }
+    let properties = requested_schema
+        .get("properties")
+        .and_then(Value::as_object)
+        .ok_or_else(|| {
+            ApiError::bad_request("MCP elicitation schema is missing form properties")
+        })?;
+    let required = requested_schema
+        .get("required")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    let object = content.as_object().ok_or_else(|| {
+        ApiError::bad_request("MCP elicitation content must be a JSON object")
+    })?;
+
+    for key in object.keys() {
+        if !properties.contains_key(key) {
+            return Err(ApiError::bad_request(format!(
+                "field `{key}` is not part of this MCP elicitation",
+            )));
+        }
+    }
+    for required_key in required.iter().filter_map(Value::as_str) {
+        if !object.contains_key(required_key) {
+            return Err(ApiError::bad_request(format!(
+                "field `{required_key}` is required for this MCP elicitation",
+            )));
+        }
+    }
+
+    let mut normalized = serde_json::Map::new();
+    for (key, value) in object {
+        let schema = properties.get(key).ok_or_else(|| {
+            ApiError::bad_request(format!(
+                "field `{key}` is not part of this MCP elicitation",
+            ))
+        })?;
+        normalized.insert(
+            key.clone(),
+            validate_codex_mcp_elicitation_field_value(key, schema, value)?,
+        );
+    }
+
+    Ok(Value::Object(normalized))
+}
+
+fn validate_codex_mcp_elicitation_field_value(
+    field_name: &str,
+    schema: &Value,
+    value: &Value,
+) -> std::result::Result<Value, ApiError> {
+    match schema.get("type").and_then(Value::as_str) {
+        Some("boolean") => {
+            if !value.is_boolean() {
+                return Err(ApiError::bad_request(format!(
+                    "field `{field_name}` must be true or false",
+                )));
+            }
+            Ok(value.clone())
+        }
+        Some("number") => {
+            validate_codex_mcp_elicitation_number_value(field_name, schema, value, false)
+        }
+        Some("integer") => {
+            validate_codex_mcp_elicitation_number_value(field_name, schema, value, true)
+        }
+        Some("string") => validate_codex_mcp_elicitation_string_value(field_name, schema, value),
+        Some("array") => validate_codex_mcp_elicitation_array_value(field_name, schema, value),
+        Some(other) => Err(ApiError::bad_request(format!(
+            "field `{field_name}` uses unsupported MCP elicitation type `{other}`",
+        ))),
+        None => Err(ApiError::bad_request(format!(
+            "field `{field_name}` is missing an MCP elicitation type",
+        ))),
+    }
+}
+
+fn validate_codex_mcp_elicitation_number_value(
+    field_name: &str,
+    schema: &Value,
+    value: &Value,
+    require_integer: bool,
+) -> std::result::Result<Value, ApiError> {
+    let Some(number) = value.as_f64() else {
+        let expected = if require_integer { "an integer" } else { "a number" };
+        return Err(ApiError::bad_request(format!(
+            "field `{field_name}` must be {expected}",
+        )));
+    };
+
+    if require_integer && value.as_i64().is_none() && value.as_u64().is_none() {
+        return Err(ApiError::bad_request(format!(
+            "field `{field_name}` must be an integer",
+        )));
+    }
+
+    if let Some(minimum) = schema.get("minimum").and_then(Value::as_f64) {
+        if number < minimum {
+            return Err(ApiError::bad_request(format!(
+                "field `{field_name}` must be at least {minimum}",
+            )));
+        }
+    }
+    if let Some(maximum) = schema.get("maximum").and_then(Value::as_f64) {
+        if number > maximum {
+            return Err(ApiError::bad_request(format!(
+                "field `{field_name}` must be at most {maximum}",
+            )));
+        }
+    }
+
+    Ok(value.clone())
+}
+
+const CODEX_APP_REQUEST_RESULT_MAX_BYTES: usize = 64 * 1024;
+const CODEX_APP_REQUEST_RESULT_MAX_DEPTH: usize = 32;
+
+fn validate_codex_app_request_result(result: Value) -> std::result::Result<Value, ApiError> {
+    validate_codex_app_request_result_depth(&result, 0)?;
+    let encoded = serde_json::to_vec(&result).map_err(|err| {
+        ApiError::bad_request(format!(
+            "Codex app request result could not be serialized as JSON: {err}"
+        ))
+    })?;
+    if encoded.len() > CODEX_APP_REQUEST_RESULT_MAX_BYTES {
+        return Err(ApiError::bad_request(format!(
+            "Codex app request result must be at most {} KB",
+            CODEX_APP_REQUEST_RESULT_MAX_BYTES / 1024
+        )));
+    }
+    Ok(result)
+}
+
+fn validate_codex_app_request_result_depth(
+    value: &Value,
+    depth: usize,
+) -> std::result::Result<(), ApiError> {
+    if depth > CODEX_APP_REQUEST_RESULT_MAX_DEPTH {
+        return Err(ApiError::bad_request(format!(
+            "Codex app request result must be at most {CODEX_APP_REQUEST_RESULT_MAX_DEPTH} levels deep",
+        )));
+    }
+
+    match value {
+        Value::Array(values) => {
+            for entry in values {
+                validate_codex_app_request_result_depth(entry, depth + 1)?;
+            }
+        }
+        Value::Object(entries) => {
+            for entry in entries.values() {
+                validate_codex_app_request_result_depth(entry, depth + 1)?;
+            }
+        }
+        _ => {}
+    }
+
+    Ok(())
+}
+
+fn validate_codex_mcp_elicitation_string_value(
+    field_name: &str,
+    schema: &Value,
+    value: &Value,
+) -> std::result::Result<Value, ApiError> {
+    let Some(text) = value.as_str() else {
+        return Err(ApiError::bad_request(format!(
+            "field `{field_name}` must be a string",
+        )));
+    };
+
+    if let Some(min_length) = schema.get("minLength").and_then(Value::as_u64) {
+        if text.chars().count() < min_length as usize {
+            return Err(ApiError::bad_request(format!(
+                "field `{field_name}` must be at least {min_length} characters",
+            )));
+        }
+    }
+    if let Some(max_length) = schema.get("maxLength").and_then(Value::as_u64) {
+        if text.chars().count() > max_length as usize {
+            return Err(ApiError::bad_request(format!(
+                "field `{field_name}` must be at most {max_length} characters",
+            )));
+        }
+    }
+
+    if let Some(options) = codex_mcp_elicitation_string_options(schema) {
+        if !options.iter().any(|option| option == text) {
+            return Err(ApiError::bad_request(format!(
+                "field `{field_name}` must use one of the provided options",
+            )));
+        }
+    }
+
+    Ok(Value::String(text.to_owned()))
+}
+
+fn validate_codex_mcp_elicitation_array_value(
+    field_name: &str,
+    schema: &Value,
+    value: &Value,
+) -> std::result::Result<Value, ApiError> {
+    let values = value.as_array().ok_or_else(|| {
+        ApiError::bad_request(format!("field `{field_name}` must be a list"))
+    })?;
+
+    if let Some(min_items) = schema.get("minItems").and_then(Value::as_u64) {
+        if values.len() < min_items as usize {
+            return Err(ApiError::bad_request(format!(
+                "field `{field_name}` must include at least {min_items} selections",
+            )));
+        }
+    }
+    if let Some(max_items) = schema.get("maxItems").and_then(Value::as_u64) {
+        if values.len() > max_items as usize {
+            return Err(ApiError::bad_request(format!(
+                "field `{field_name}` must include at most {max_items} selections",
+            )));
+        }
+    }
+
+    let item_schema = schema.get("items").ok_or_else(|| {
+        ApiError::bad_request(format!(
+            "field `{field_name}` is missing its MCP elicitation item schema",
+        ))
+    })?;
+    let allowed = codex_mcp_elicitation_array_options(item_schema);
+    let mut normalized = Vec::with_capacity(values.len());
+    for entry in values {
+        let Some(text) = entry.as_str() else {
+            return Err(ApiError::bad_request(format!(
+                "field `{field_name}` only accepts string selections",
+            )));
+        };
+        if let Some(options) = allowed.as_ref() {
+            if !options.iter().any(|option| option == text) {
+                return Err(ApiError::bad_request(format!(
+                    "field `{field_name}` must use one of the provided options",
+                )));
+            }
+        }
+        normalized.push(Value::String(text.to_owned()));
+    }
+
+    Ok(Value::Array(normalized))
+}
+
+fn codex_mcp_elicitation_string_options(schema: &Value) -> Option<Vec<String>> {
+    if let Some(options) = schema.get("oneOf").and_then(Value::as_array) {
+        let collected = options
+            .iter()
+            .filter_map(|option| option.get("const").and_then(Value::as_str))
+            .map(str::to_owned)
+            .collect::<Vec<_>>();
+        if !collected.is_empty() {
+            return Some(collected);
+        }
+    }
+
+    let collected = schema
+        .get("enum")
+        .and_then(Value::as_array)
+        .map(|options| {
+            options
+                .iter()
+                .filter_map(Value::as_str)
+                .map(str::to_owned)
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    (!collected.is_empty()).then_some(collected)
+}
+
+fn codex_mcp_elicitation_array_options(schema: &Value) -> Option<Vec<String>> {
+    if let Some(options) = schema.get("anyOf").and_then(Value::as_array) {
+        let collected = options
+            .iter()
+            .filter_map(|option| option.get("const").and_then(Value::as_str))
+            .map(str::to_owned)
+            .collect::<Vec<_>>();
+        if !collected.is_empty() {
+            return Some(collected);
+        }
+    }
+
+    let collected = schema
+        .get("enum")
+        .and_then(Value::as_array)
+        .map(|options| {
+            options
+                .iter()
+                .filter_map(Value::as_str)
+                .map(str::to_owned)
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    (!collected.is_empty()).then_some(collected)
 }
 
 fn queue_prompt_on_record(
@@ -3669,13 +5265,14 @@ fn recover_interrupted_session_record(record: &mut SessionRecord) -> Option<Stri
         return None;
     }
 
-    let interrupted_approval_count = expire_pending_approval_messages(&mut record.session.messages);
+    let interrupted_interaction_count =
+        expire_pending_interaction_messages(&mut record.session.messages);
     fail_running_command_messages(&mut record.session.messages);
 
-    let mut notice = if interrupted_approval_count > 0
+    let mut notice = if interrupted_interaction_count > 0
         || record.session.status == SessionStatus::Approval
     {
-        "TermAl restarted while this session was waiting for approval. That request expired. Send another prompt to continue.".to_owned()
+        "TermAl restarted while this session was waiting for approval or input. That request expired. Send another prompt to continue.".to_owned()
     } else {
         "TermAl restarted before this turn finished. The last response may be incomplete. Send another prompt to continue.".to_owned()
     };
@@ -3693,17 +5290,66 @@ fn recover_interrupted_session_record(record: &mut SessionRecord) -> Option<Stri
     Some(notice)
 }
 
-fn expire_pending_approval_messages(messages: &mut [Message]) -> usize {
+fn expire_pending_interaction_messages(messages: &mut [Message]) -> usize {
     let mut count = 0;
     for message in messages {
-        if let Message::Approval { decision, .. } = message {
-            if *decision == ApprovalDecision::Pending {
-                *decision = ApprovalDecision::Interrupted;
-                count += 1;
+        match message {
+            Message::Approval { decision, .. } => {
+                if *decision == ApprovalDecision::Pending {
+                    *decision = ApprovalDecision::Interrupted;
+                    count += 1;
+                }
             }
+            Message::UserInputRequest { state, .. } => {
+                if *state == InteractionRequestState::Pending {
+                    *state = InteractionRequestState::Interrupted;
+                    count += 1;
+                }
+            }
+            Message::McpElicitationRequest { state, .. } => {
+                if *state == InteractionRequestState::Pending {
+                    *state = InteractionRequestState::Interrupted;
+                    count += 1;
+                }
+            }
+            Message::CodexAppRequest { state, .. } => {
+                if *state == InteractionRequestState::Pending {
+                    *state = InteractionRequestState::Interrupted;
+                    count += 1;
+                }
+            }
+            _ => {}
         }
     }
     count
+}
+
+fn cancel_pending_interaction_messages(messages: &mut [Message]) {
+    for message in messages {
+        match message {
+            Message::Approval { decision, .. } => {
+                if *decision == ApprovalDecision::Pending {
+                    *decision = ApprovalDecision::Rejected;
+                }
+            }
+            Message::UserInputRequest { state, .. } => {
+                if *state == InteractionRequestState::Pending {
+                    *state = InteractionRequestState::Canceled;
+                }
+            }
+            Message::McpElicitationRequest { state, .. } => {
+                if *state == InteractionRequestState::Pending {
+                    *state = InteractionRequestState::Canceled;
+                }
+            }
+            Message::CodexAppRequest { state, .. } => {
+                if *state == InteractionRequestState::Pending {
+                    *state = InteractionRequestState::Canceled;
+                }
+            }
+            _ => {}
+        }
+    }
 }
 
 fn fail_running_command_messages(messages: &mut [Message]) {
@@ -3768,6 +5414,353 @@ fn push_session_markdown_note_on_record(
         record.session.preview = preview;
     }
     push_message_on_record(record, message);
+}
+
+fn replace_session_messages_on_record(
+    record: &mut SessionRecord,
+    messages: Vec<Message>,
+    fallback_preview: Option<String>,
+) {
+    record.session.messages = messages;
+    record.message_positions = build_message_positions(&record.session.messages);
+    record.session.preview = record
+        .session
+        .messages
+        .iter()
+        .rev()
+        .find_map(Message::preview_text)
+        .or(fallback_preview)
+        .unwrap_or_else(|| "Ready for a prompt.".to_owned());
+}
+
+fn codex_thread_messages_from_json(inner: &mut StateInner, thread: &Value) -> Option<Vec<Message>> {
+    let turns = thread.get("turns").and_then(Value::as_array)?;
+    let mut messages = Vec::new();
+    for turn in turns {
+        append_codex_thread_turn_messages(inner, turn, &mut messages)?;
+    }
+    (!messages.is_empty()).then_some(messages)
+}
+
+fn append_codex_thread_turn_messages(
+    inner: &mut StateInner,
+    turn: &Value,
+    messages: &mut Vec<Message>,
+) -> Option<()> {
+    let items = turn.get("items").and_then(Value::as_array)?;
+    for item in items {
+        append_codex_thread_item_messages(inner, item, messages);
+    }
+    if let Some(text) = codex_thread_turn_status_text(turn) {
+        messages.push(Message::Text {
+            attachments: Vec::new(),
+            id: inner.next_message_id(),
+            timestamp: stamp_now(),
+            author: Author::Assistant,
+            text,
+            expanded_text: None,
+        });
+    }
+    Some(())
+}
+
+fn append_codex_thread_item_messages(
+    inner: &mut StateInner,
+    item: &Value,
+    messages: &mut Vec<Message>,
+) {
+    match item.get("type").and_then(Value::as_str) {
+        Some("userMessage") => {
+            if let Some(text) = codex_thread_user_message_text(item) {
+                messages.push(Message::Text {
+                    attachments: Vec::new(),
+                    id: inner.next_message_id(),
+                    timestamp: stamp_now(),
+                    author: Author::You,
+                    text,
+                    expanded_text: None,
+                });
+            }
+        }
+        Some("agentMessage") => {
+            let Some(text) = item
+                .get("text")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+            else {
+                return;
+            };
+            messages.push(Message::Text {
+                attachments: Vec::new(),
+                id: inner.next_message_id(),
+                timestamp: stamp_now(),
+                author: Author::Assistant,
+                text: text.to_owned(),
+                expanded_text: None,
+            });
+        }
+        Some("reasoning") => {
+            let lines = codex_thread_reasoning_lines(item);
+            if lines.is_empty() {
+                return;
+            }
+            messages.push(Message::Thinking {
+                id: inner.next_message_id(),
+                timestamp: stamp_now(),
+                author: Author::Assistant,
+                title: "Codex reasoning".to_owned(),
+                lines,
+            });
+        }
+        Some("plan") => {
+            let Some(text) = item
+                .get("text")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+            else {
+                return;
+            };
+            messages.push(Message::Markdown {
+                id: inner.next_message_id(),
+                timestamp: stamp_now(),
+                author: Author::Assistant,
+                title: "Codex plan".to_owned(),
+                markdown: text.to_owned(),
+            });
+        }
+        Some("commandExecution") => {
+            let Some(command) = item
+                .get("command")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+            else {
+                return;
+            };
+            messages.push(Message::Command {
+                id: inner.next_message_id(),
+                timestamp: stamp_now(),
+                author: Author::Assistant,
+                command: command.to_owned(),
+                command_language: Some(shell_language().to_owned()),
+                output: item
+                    .get("aggregatedOutput")
+                    .and_then(Value::as_str)
+                    .unwrap_or("")
+                    .to_owned(),
+                output_language: infer_command_output_language(command).map(str::to_owned),
+                status: codex_thread_command_status(item),
+            });
+        }
+        Some("fileChange") => {
+            let Some(changes) = item.get("changes").and_then(Value::as_array) else {
+                return;
+            };
+            if item.get("status").and_then(Value::as_str) != Some("completed") {
+                return;
+            }
+            for change in changes {
+                let Some(file_path) = change
+                    .get("path")
+                    .and_then(Value::as_str)
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+                else {
+                    continue;
+                };
+                let diff = change.get("diff").and_then(Value::as_str).unwrap_or("");
+                if diff.trim().is_empty() {
+                    continue;
+                }
+                let change_type = match change.pointer("/kind/type").and_then(Value::as_str) {
+                    Some("add") => ChangeType::Create,
+                    _ => ChangeType::Edit,
+                };
+                let summary = match change_type {
+                    ChangeType::Create => format!("Created {}", short_file_name(file_path)),
+                    ChangeType::Edit => format!("Updated {}", short_file_name(file_path)),
+                };
+                let message_id = inner.next_message_id();
+                messages.push(Message::Diff {
+                    id: message_id.clone(),
+                    timestamp: stamp_now(),
+                    author: Author::Assistant,
+                    change_set_id: Some(diff_change_set_id(&message_id)),
+                    file_path: file_path.to_owned(),
+                    summary,
+                    diff: diff.to_owned(),
+                    language: Some("diff".to_owned()),
+                    change_type,
+                });
+            }
+        }
+        Some(item_type) => {
+            let Some(markdown) = codex_thread_fallback_markdown(item, item_type) else {
+                return;
+            };
+            messages.push(Message::Markdown {
+                id: inner.next_message_id(),
+                timestamp: stamp_now(),
+                author: Author::Assistant,
+                title: codex_thread_fallback_title(item_type),
+                markdown,
+            });
+        }
+        None => {}
+    }
+}
+
+fn codex_thread_user_message_text(item: &Value) -> Option<String> {
+    let content = item.get("content").and_then(Value::as_array)?;
+    let parts: Vec<String> = content
+        .iter()
+        .filter_map(codex_thread_user_input_text)
+        .collect();
+    let joined = parts.join("\n\n");
+    let trimmed = joined.trim();
+    (!trimmed.is_empty()).then(|| trimmed.to_owned())
+}
+
+fn codex_thread_user_input_text(input: &Value) -> Option<String> {
+    match input.get("type").and_then(Value::as_str) {
+        Some("text") => input
+            .get("text")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_owned),
+        Some("image") => input
+            .get("url")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(|value| format!("Image: {value}")),
+        Some("localImage") => input
+            .get("path")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(|value| format!("Local image: {value}")),
+        Some("skill") => codex_thread_named_path_text(input, "Skill"),
+        Some("mention") => codex_thread_named_path_text(input, "Mention"),
+        _ => None,
+    }
+}
+
+fn codex_thread_named_path_text(input: &Value, label: &str) -> Option<String> {
+    let name = input
+        .get("name")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    let path = input
+        .get("path")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    match (name, path) {
+        (Some(name), Some(path)) => Some(format!("{label}: {name} ({path})")),
+        (Some(name), None) => Some(format!("{label}: {name}")),
+        (None, Some(path)) => Some(format!("{label}: {path}")),
+        (None, None) => None,
+    }
+}
+
+fn codex_thread_reasoning_lines(item: &Value) -> Vec<String> {
+    let mut lines = Vec::new();
+    for key in ["summary", "content"] {
+        let Some(values) = item.get(key).and_then(Value::as_array) else {
+            continue;
+        };
+        for value in values {
+            let Some(text) = value.as_str() else {
+                continue;
+            };
+            for line in text.lines() {
+                let trimmed = line.trim();
+                if !trimmed.is_empty() {
+                    lines.push(trimmed.to_owned());
+                }
+            }
+        }
+    }
+    lines
+}
+
+fn codex_thread_command_status(item: &Value) -> CommandStatus {
+    match item.get("status").and_then(Value::as_str) {
+        Some("completed") => match item.get("exitCode").and_then(Value::as_i64) {
+            Some(0) | None => CommandStatus::Success,
+            Some(_) => CommandStatus::Error,
+        },
+        Some("failed") | Some("declined") => CommandStatus::Error,
+        _ => CommandStatus::Running,
+    }
+}
+
+fn codex_thread_turn_status_text(turn: &Value) -> Option<String> {
+    match turn.get("status").and_then(Value::as_str) {
+        Some("failed") => {
+            let detail = turn
+                .get("error")
+                .filter(|value| !value.is_null())
+                .map(summarize_error)
+                .unwrap_or_else(|| "Codex reported a turn failure.".to_owned());
+            Some(format!("Turn failed: {detail}"))
+        }
+        Some("interrupted") => Some("Turn interrupted.".to_owned()),
+        _ => None,
+    }
+}
+
+fn codex_thread_fallback_title(item_type: &str) -> String {
+    match item_type {
+        "mcpToolCall" => "Codex MCP tool call".to_owned(),
+        "dynamicToolCall" => "Codex dynamic tool call".to_owned(),
+        _ => format!("Codex {item_type}"),
+    }
+}
+
+fn codex_thread_fallback_markdown(item: &Value, item_type: &str) -> Option<String> {
+    let mut sections = vec![format!("Codex returned a `{item_type}` thread item.")];
+    if let Some(tool) = item
+        .get("tool")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        sections.push(format!("Tool: `{tool}`"));
+    }
+    if let Some(server) = item
+        .get("server")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        sections.push(format!("Server: `{server}`"));
+    }
+    if let Some(status) = item
+        .get("status")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        sections.push(format!("Status: `{status}`"));
+    }
+    if let Some(prompt) = item
+        .get("prompt")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        sections.push(prompt.to_owned());
+    }
+    if let Some(error) = item.get("error").filter(|value| !value.is_null()) {
+        sections.push(format!("Error: {}", summarize_error(error)));
+    }
+    Some(sections.join("\n\n"))
 }
 
 fn codex_approval_policy_from_json_value(value: &Value) -> Option<CodexApprovalPolicy> {
@@ -3859,6 +5852,7 @@ struct CodexThreadActionContext {
     reasoning_effort: CodexReasoningEffort,
     sandbox_mode: CodexSandboxMode,
     thread_id: String,
+    thread_state: Option<CodexThreadState>,
     workdir: String,
 }
 
@@ -3913,15 +5907,6 @@ struct SharedCodexSessionHandle {
 }
 
 impl SharedCodexSessionHandle {
-    fn ensure_registered(&self) {
-        let mut sessions = self
-            .runtime
-            .sessions
-            .lock()
-            .expect("shared Codex session mutex poisoned");
-        sessions.entry(self.session_id.clone()).or_default();
-    }
-
     fn detach(&self) {
         let removed_thread_id = {
             let mut sessions = self

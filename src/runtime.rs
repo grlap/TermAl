@@ -1,153 +1,3 @@
-struct CodexRolloutStreamer {
-    saw_final_answer: Arc<AtomicBool>,
-    stop: Arc<AtomicBool>,
-    join: std::thread::JoinHandle<()>,
-}
-
-fn spawn_codex_rollout_streamer(
-    state: AppState,
-    session_id: String,
-    rollout_path: PathBuf,
-    start_offset: u64,
-) -> CodexRolloutStreamer {
-    let saw_final_answer = Arc::new(AtomicBool::new(false));
-    let stop = Arc::new(AtomicBool::new(false));
-    let thread_saw_final_answer = saw_final_answer.clone();
-    let thread_stop = stop.clone();
-
-    let join = std::thread::spawn(move || {
-        let file = match fs::File::open(&rollout_path) {
-            Ok(file) => file,
-            Err(err) => {
-                eprintln!(
-                    "codex rollout> failed to open `{}`: {err}",
-                    rollout_path.display()
-                );
-                return;
-            }
-        };
-
-        let mut reader = BufReader::new(file);
-        if let Err(err) = reader.seek(SeekFrom::Start(start_offset)) {
-            eprintln!(
-                "codex rollout> failed to seek `{}`: {err}",
-                rollout_path.display()
-            );
-            return;
-        }
-
-        let mut recorder = SessionRecorder::new(state, session_id);
-        let mut last_signature: Option<String> = None;
-        let mut line = String::new();
-
-        loop {
-            line.clear();
-            let bytes_read = match reader.read_line(&mut line) {
-                Ok(bytes_read) => bytes_read,
-                Err(err) => {
-                    eprintln!(
-                        "codex rollout> failed to read `{}`: {err}",
-                        rollout_path.display()
-                    );
-                    break;
-                }
-            };
-
-            if bytes_read == 0 {
-                if thread_stop.load(Ordering::SeqCst) {
-                    break;
-                }
-                std::thread::sleep(Duration::from_millis(60));
-                continue;
-            }
-
-            let message: Value = match serde_json::from_str(line.trim_end()) {
-                Ok(message) => message,
-                Err(err) => {
-                    eprintln!(
-                        "codex rollout> failed to parse line from `{}`: {err}",
-                        rollout_path.display()
-                    );
-                    continue;
-                }
-            };
-
-            let event = extract_codex_rollout_agent_message(&message);
-            let Some((phase, text)) = event else {
-                continue;
-            };
-
-            let signature = format!("{phase}\n{text}");
-            if last_signature.as_deref() == Some(signature.as_str()) {
-                continue;
-            }
-            last_signature = Some(signature);
-
-            if phase == "final_answer" {
-                thread_saw_final_answer.store(true, Ordering::SeqCst);
-            }
-
-            if let Err(err) = recorder.push_text(&text) {
-                eprintln!("codex rollout> failed to push streamed text: {err:#}");
-                break;
-            }
-        }
-    });
-
-    CodexRolloutStreamer {
-        saw_final_answer,
-        stop,
-        join,
-    }
-}
-
-fn locate_codex_rollout_path(codex_home: &FsPath, thread_id: &str) -> Result<Option<PathBuf>> {
-    let mut stack = vec![codex_home.join("sessions")];
-    while let Some(dir) = stack.pop() {
-        let entries = match fs::read_dir(&dir) {
-            Ok(entries) => entries,
-            Err(_) => continue,
-        };
-
-        for entry in entries {
-            let entry = match entry {
-                Ok(entry) => entry,
-                Err(_) => continue,
-            };
-            let path = entry.path();
-            let file_type = match entry.file_type() {
-                Ok(file_type) => file_type,
-                Err(_) => continue,
-            };
-
-            if file_type.is_dir() {
-                stack.push(path);
-                continue;
-            }
-
-            let Some(name) = path.file_name().and_then(|value| value.to_str()) else {
-                continue;
-            };
-            if name.starts_with("rollout-") && name.ends_with(&format!("{thread_id}.jsonl")) {
-                return Ok(Some(path));
-            }
-        }
-    }
-
-    Ok(None)
-}
-
-fn wait_for_codex_rollout_path(codex_home: &FsPath, thread_id: &str) -> Result<Option<PathBuf>> {
-    for _ in 0..20 {
-        if let Some(path) = locate_codex_rollout_path(codex_home, thread_id)? {
-            return Ok(Some(path));
-        }
-        std::thread::sleep(Duration::from_millis(50));
-    }
-
-    Ok(None)
-}
-
 fn resolve_source_codex_home_dir() -> Result<PathBuf> {
     if let Some(path) = std::env::var_os("CODEX_HOME") {
         return Ok(PathBuf::from(path));
@@ -312,8 +162,8 @@ enum CodexRuntimeCommand {
         timeout: Duration,
         response_tx: Sender<std::result::Result<Value, String>>,
     },
-    ApprovalResponse {
-        response: CodexApprovalResponseCommand,
+    JsonRpcResponse {
+        response: CodexJsonRpcResponseCommand,
     },
     InterruptTurn {
         response_tx: Sender<std::result::Result<(), String>>,
@@ -338,7 +188,7 @@ struct CodexPromptCommand {
 }
 
 #[derive(Clone)]
-struct CodexApprovalResponseCommand {
+struct CodexJsonRpcResponseCommand {
     request_id: Value,
     result: Value,
 }
@@ -347,11 +197,29 @@ struct CodexApprovalResponseCommand {
 enum CodexApprovalKind {
     CommandExecution,
     FileChange,
+    Permissions { requested_permissions: Value },
 }
 
 #[derive(Clone)]
 struct CodexPendingApproval {
     kind: CodexApprovalKind,
+    request_id: Value,
+}
+
+#[derive(Clone)]
+struct CodexPendingUserInput {
+    questions: Vec<UserInputQuestion>,
+    request_id: Value,
+}
+
+#[derive(Clone)]
+struct CodexPendingMcpElicitation {
+    request: McpElicitationRequestPayload,
+    request_id: Value,
+}
+
+#[derive(Clone)]
+struct CodexPendingAppRequest {
     request_id: Value,
 }
 
@@ -1809,7 +1677,9 @@ fn spawn_codex_runtime(
         runtime: shared_runtime.clone(),
         session_id,
     };
-    shared_session.ensure_registered();
+    // Shared-session state is inserted lazily once Codex starts or resumes a real thread.
+    // Avoiding eager registration here keeps the first-turn dispatch path from taking the
+    // shared-session mutex while `state.inner` is still locked.
 
     Ok(CodexRuntimeHandle {
         runtime_id: shared_runtime.runtime_id.clone(),
@@ -1919,7 +1789,7 @@ fn spawn_shared_codex_runtime(state: AppState) -> Result<SharedCodexRuntime> {
                         let _ = response_tx.send(request_result.clone());
                         request_result.map(|_| ()).map_err(anyhow::Error::msg)
                     }
-                    CodexRuntimeCommand::ApprovalResponse { response } => {
+                    CodexRuntimeCommand::JsonRpcResponse { response } => {
                         write_codex_json_rpc_message(
                             &mut stdin,
                             &json!({
@@ -2317,6 +2187,10 @@ fn handle_shared_codex_app_server_message(
         return Ok(());
     }
 
+    if handle_shared_codex_global_notice(method, message, state)? {
+        return Ok(());
+    }
+
     let Some(thread_id) = shared_codex_session_thread_id(method, message) else {
         match method {
             "thread/archived"
@@ -2331,6 +2205,10 @@ fn handle_shared_codex_app_server_message(
             | "thread/status/changed"
             | "thread/tokenUsage/updated" => return Ok(()),
             _ => {
+                if let Some(notice) = build_shared_codex_runtime_notice(method, message) {
+                    state.note_codex_notice(notice)?;
+                    return Ok(());
+                }
                 log_unhandled_codex_event(
                     &format!("shared Codex event missing thread id for `{method}`"),
                     message,
@@ -2380,6 +2258,144 @@ fn handle_shared_codex_app_server_message(
     )
 }
 
+fn handle_shared_codex_global_notice(
+    method: &str,
+    message: &Value,
+    state: &AppState,
+) -> Result<bool> {
+    let notice = match method {
+        "configWarning" => build_shared_codex_global_notice(
+            CodexNoticeKind::ConfigWarning,
+            CodexNoticeLevel::Warning,
+            "Config warning",
+            message,
+        ),
+        "deprecationNotice" => build_shared_codex_global_notice(
+            CodexNoticeKind::DeprecationNotice,
+            CodexNoticeLevel::Info,
+            "Deprecation notice",
+            message,
+        ),
+        _ => return Ok(false),
+    };
+
+    if let Some(notice) = notice {
+        state.note_codex_notice(notice)?;
+    } else {
+        log_unhandled_codex_event(
+            &format!("failed to parse shared Codex global notice `{method}`"),
+            message,
+        );
+    }
+
+    Ok(true)
+}
+
+fn build_shared_codex_runtime_notice(method: &str, message: &Value) -> Option<CodexNotice> {
+    build_shared_codex_global_notice(
+        CodexNoticeKind::RuntimeNotice,
+        infer_shared_codex_notice_level(method, message),
+        &format!("Codex notice: {method}"),
+        message,
+    )
+}
+
+fn infer_shared_codex_notice_level(method: &str, message: &Value) -> CodexNoticeLevel {
+    let payload = message.get("params").unwrap_or(message);
+    let severity = payload
+        .get("level")
+        .or_else(|| payload.get("severity"))
+        .and_then(Value::as_str)
+        .map(|value| value.trim().to_ascii_lowercase());
+
+    match severity.as_deref() {
+        Some("warning") | Some("warn") | Some("error") => CodexNoticeLevel::Warning,
+        Some("info") | Some("notice") => CodexNoticeLevel::Info,
+        _ => {
+            let normalized = method.to_ascii_lowercase();
+            if normalized.contains("warning")
+                || normalized.contains("error")
+                || normalized.contains("auth")
+                || normalized.contains("maintenance")
+            {
+                CodexNoticeLevel::Warning
+            } else {
+                CodexNoticeLevel::Info
+            }
+        }
+    }
+}
+
+fn build_shared_codex_global_notice(
+    kind: CodexNoticeKind,
+    level: CodexNoticeLevel,
+    default_title: &str,
+    message: &Value,
+) -> Option<CodexNotice> {
+    let payload = message.get("params").unwrap_or(message);
+    let code = extract_shared_codex_notice_text(
+        payload,
+        &[
+            "/code",
+            "/id",
+            "/warningCode",
+            "/warning/code",
+            "/deprecationId",
+            "/deprecation/id",
+        ],
+    );
+    let title = extract_shared_codex_notice_text(
+        payload,
+        &[
+            "/title",
+            "/name",
+            "/warning/title",
+            "/deprecation/title",
+        ],
+    );
+    let detail = extract_shared_codex_notice_text(
+        payload,
+        &[
+            "/detail",
+            "/message",
+            "/description",
+            "/text",
+            "/warning/message",
+            "/warning/detail",
+            "/deprecation/message",
+            "/deprecation/detail",
+        ],
+    );
+
+    let (title, detail) = match (title, detail, code.clone()) {
+        (Some(title), Some(detail), _) => (title, detail),
+        (Some(title), None, _) if title != default_title => (default_title.to_owned(), title),
+        (None, Some(detail), _) => (default_title.to_owned(), detail),
+        (None, None, Some(code)) => (default_title.to_owned(), format!("Code: `{code}`")),
+        _ => return None,
+    };
+
+    Some(CodexNotice {
+        kind,
+        level,
+        title,
+        detail,
+        timestamp: stamp_now(),
+        code,
+    })
+}
+
+fn extract_shared_codex_notice_text(payload: &Value, pointers: &[&str]) -> Option<String> {
+    pointers.iter().find_map(|pointer| {
+        payload
+            .pointer(pointer)
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_owned)
+    })
+}
+
 fn handle_shared_codex_app_server_notification(
     method: &str,
     message: &Value,
@@ -2409,6 +2425,20 @@ fn handle_shared_codex_app_server_notification(
                 state.set_external_session_id(session_id, thread_id.to_owned())?;
                 recorder.note_external_session(thread_id)?;
             }
+        }
+        "thread/archived" => {
+            state.set_codex_thread_state_if_runtime_matches(
+                session_id,
+                runtime_token,
+                CodexThreadState::Archived,
+            )?;
+        }
+        "thread/unarchived" => {
+            state.set_codex_thread_state_if_runtime_matches(
+                session_id,
+                runtime_token,
+                CodexThreadState::Active,
+            )?;
         }
         "turn/started" => {
             clear_codex_turn_state(turn_state);
@@ -2458,6 +2488,19 @@ fn handle_shared_codex_app_server_notification(
             };
             record_codex_agent_message_delta(turn_state, recorder, state, session_id, item_id, delta)?;
         }
+        "model/rerouted" => {
+            handle_shared_codex_model_rerouted(message, state, session_id, turn_id.as_deref(), turn_state, recorder)?;
+        }
+        "thread/compacted" => {
+            handle_shared_codex_thread_compacted(
+                message,
+                state,
+                session_id,
+                turn_id.as_deref(),
+                turn_state,
+                recorder,
+            )?;
+        }
         "thread/status/changed"
         | "turn/diff/updated"
         | "turn/plan/updated"
@@ -2471,9 +2514,6 @@ fn handle_shared_codex_app_server_notification(
         | "thread/tokenUsage/updated"
         | "thread/name/updated"
         | "thread/closed"
-        | "thread/archived"
-        | "thread/unarchived"
-        | "thread/compacted"
         | "thread/realtime/started"
         | "thread/realtime/itemAdded"
         | "thread/realtime/outputAudio/delta"
@@ -2602,6 +2642,7 @@ fn shared_codex_event_turn_id<'a>(message: &'a Value) -> Option<&'a str> {
     message
         .pointer("/params/msg/turn_id")
         .and_then(Value::as_str)
+        .or_else(|| message.pointer("/params/turnId").and_then(Value::as_str))
         .or_else(|| message.pointer("/params/turn_id").and_then(Value::as_str))
         .or_else(|| message.pointer("/params/id").and_then(Value::as_str))
         .or_else(|| message.pointer("/params/turn/id").and_then(Value::as_str))
@@ -2617,6 +2658,83 @@ fn shared_codex_event_matches_active_turn(
         }
         None => false,
     }
+}
+
+fn push_shared_codex_turn_notice(
+    state: &AppState,
+    session_id: &str,
+    turn_state: &mut CodexTurnState,
+    text: &str,
+) -> Result<()> {
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        return Ok(());
+    }
+
+    let message = Message::Text {
+        attachments: Vec::new(),
+        id: state.allocate_message_id(),
+        timestamp: stamp_now(),
+        author: Author::Assistant,
+        text: trimmed.to_owned(),
+        expanded_text: None,
+    };
+
+    if let Some(anchor_message_id) = turn_state.first_visible_assistant_message_id.as_deref() {
+        state.insert_message_before(session_id, anchor_message_id, message)?;
+        return Ok(());
+    }
+
+    state.push_message(session_id, message)
+}
+
+fn handle_shared_codex_model_rerouted(
+    message: &Value,
+    state: &AppState,
+    session_id: &str,
+    current_turn_id: Option<&str>,
+    turn_state: &mut CodexTurnState,
+    _recorder: &mut impl TurnRecorder,
+) -> Result<()> {
+    let event_turn_id = shared_codex_event_turn_id(message);
+    if !shared_codex_event_matches_active_turn(current_turn_id, event_turn_id) {
+        return Ok(());
+    }
+
+    let Some(from_model) = message.pointer("/params/fromModel").and_then(Value::as_str) else {
+        return Ok(());
+    };
+    let Some(to_model) = message.pointer("/params/toModel").and_then(Value::as_str) else {
+        return Ok(());
+    };
+    if from_model == to_model {
+        return Ok(());
+    }
+
+    let reason = match message.pointer("/params/reason").and_then(Value::as_str) {
+        Some("highRiskCyberActivity") => " because it detected high-risk cyber activity",
+        Some(_) | None => "",
+    };
+    let notice = format!(
+        "Codex rerouted this turn from `{from_model}` to `{to_model}`{reason}."
+    );
+    push_shared_codex_turn_notice(state, session_id, turn_state, &notice)
+}
+
+fn handle_shared_codex_thread_compacted(
+    message: &Value,
+    state: &AppState,
+    session_id: &str,
+    current_turn_id: Option<&str>,
+    turn_state: &mut CodexTurnState,
+    _recorder: &mut impl TurnRecorder,
+) -> Result<()> {
+    let event_turn_id = shared_codex_event_turn_id(message);
+    if !shared_codex_event_matches_active_turn(current_turn_id, event_turn_id) {
+        return Ok(());
+    }
+
+    push_shared_codex_turn_notice(state, session_id, turn_state, "Codex compacted the thread context for this turn.")
 }
 
 fn handle_shared_codex_event_item_completed(
@@ -2970,15 +3088,125 @@ fn handle_codex_app_server_request(
                 },
             )?;
         }
-        _ => {
-            log_unhandled_codex_event(
-                &format!("unhandled Codex app-server request `{method}`"),
-                message,
+        "item/permissions/requestApproval" => {
+            let reason = params.get("reason").and_then(Value::as_str).unwrap_or("");
+            let permissions_summary = describe_codex_permission_request(
+                params.get("permissions").unwrap_or(&Value::Null),
             );
+            let detail = match (
+                reason.trim().is_empty(),
+                permissions_summary.as_deref().filter(|value| !value.is_empty()),
+            ) {
+                (true, Some(summary)) => {
+                    format!("Codex requested approval to grant additional permissions: {summary}.")
+                }
+                (false, Some(summary)) => format!(
+                    "Codex requested approval to grant additional permissions: {summary}. Reason: {reason}"
+                ),
+                (true, None) => {
+                    "Codex requested approval to grant additional permissions.".to_owned()
+                }
+                (false, None) => format!(
+                    "Codex requested approval to grant additional permissions. Reason: {reason}"
+                ),
+            };
+
+            recorder.push_codex_approval(
+                "Codex needs approval",
+                "Grant additional permissions",
+                &detail,
+                CodexPendingApproval {
+                    kind: CodexApprovalKind::Permissions {
+                        requested_permissions: params
+                            .get("permissions")
+                            .cloned()
+                            .unwrap_or_else(|| json!({})),
+                    },
+                    request_id,
+                },
+            )?;
+        }
+        "item/tool/requestUserInput" => {
+            let questions: Vec<UserInputQuestion> = serde_json::from_value(
+                params.get("questions").cloned().unwrap_or_else(|| json!([])),
+            )
+            .context("failed to parse Codex request_user_input questions")?;
+            let detail = describe_codex_user_input_request(&questions);
+
+            recorder.push_codex_user_input_request(
+                "Codex needs input",
+                &detail,
+                questions.clone(),
+                CodexPendingUserInput {
+                    questions,
+                    request_id,
+                },
+            )?;
+        }
+        "mcpServer/elicitation/request" => {
+            let request: McpElicitationRequestPayload = serde_json::from_value(params.clone())
+                .context("failed to parse Codex MCP elicitation request")?;
+            let detail = describe_codex_mcp_elicitation_request(&request);
+
+            recorder.push_codex_mcp_elicitation_request(
+                "Codex needs MCP input",
+                &detail,
+                request.clone(),
+                CodexPendingMcpElicitation {
+                    request,
+                    request_id,
+                },
+            )?;
+        }
+        _ => {
+            let (title, detail) = describe_codex_app_server_request(method, params);
+            recorder.push_codex_app_request(
+                &title,
+                &detail,
+                method,
+                params.clone(),
+                CodexPendingAppRequest {
+                    request_id,
+                },
+            )?;
         }
     }
 
     Ok(())
+}
+
+fn describe_codex_app_server_request(method: &str, params: &Value) -> (String, String) {
+    if method == "item/tool/call" {
+        let tool = params
+            .get("tool")
+            .or_else(|| params.get("toolName"))
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .unwrap_or("tool");
+        let server = params
+            .get("server")
+            .or_else(|| params.get("serverName"))
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty());
+        let scope = server
+            .map(|server_name| format!(" from `{server_name}`"))
+            .unwrap_or_default();
+        return (
+            "Codex needs a tool result".to_owned(),
+            format!(
+                "Codex requested a result for `{tool}`{scope}. Review the request payload and submit the JSON result to continue."
+            ),
+        );
+    }
+
+    (
+        "Codex needs a response".to_owned(),
+        format!(
+            "Codex sent an app-server request `{method}` that needs a JSON result before it can continue."
+        ),
+    )
 }
 
 fn handle_codex_app_server_item_started(
@@ -3007,6 +3235,126 @@ fn handle_codex_app_server_item_started(
     }
 
     Ok(())
+}
+
+fn describe_codex_permission_request(permissions: &Value) -> Option<String> {
+    let mut parts = Vec::new();
+
+    if let Some(read_paths) = permissions
+        .pointer("/fileSystem/read")
+        .and_then(Value::as_array)
+        .filter(|paths| !paths.is_empty())
+    {
+        let joined = read_paths
+            .iter()
+            .filter_map(Value::as_str)
+            .collect::<Vec<_>>()
+            .join(", ");
+        if !joined.is_empty() {
+            parts.push(format!("read access to `{joined}`"));
+        }
+    }
+
+    if let Some(write_paths) = permissions
+        .pointer("/fileSystem/write")
+        .and_then(Value::as_array)
+        .filter(|paths| !paths.is_empty())
+    {
+        let joined = write_paths
+            .iter()
+            .filter_map(Value::as_str)
+            .collect::<Vec<_>>()
+            .join(", ");
+        if !joined.is_empty() {
+            parts.push(format!("write access to `{joined}`"));
+        }
+    }
+
+    if permissions.pointer("/network/enabled").and_then(Value::as_bool) == Some(true) {
+        parts.push("network access".to_owned());
+    }
+
+    if permissions.pointer("/macos/accessibility").and_then(Value::as_bool) == Some(true) {
+        parts.push("macOS accessibility access".to_owned());
+    }
+
+    if permissions.pointer("/macos/calendar").and_then(Value::as_bool) == Some(true) {
+        parts.push("macOS calendar access".to_owned());
+    }
+
+    if let Some(preferences) = permissions
+        .pointer("/macos/preferences")
+        .and_then(Value::as_str)
+        .filter(|value| *value != "none")
+    {
+        parts.push(format!("macOS preferences access ({preferences})"));
+    }
+
+    if let Some(automations) = permissions.pointer("/macos/automations") {
+        if let Some(scope) = automations.as_str() {
+            if scope == "all" {
+                parts.push("macOS automation access".to_owned());
+            }
+        } else if let Some(bundle_ids) = automations.get("bundle_ids").and_then(Value::as_array) {
+            let joined = bundle_ids
+                .iter()
+                .filter_map(Value::as_str)
+                .collect::<Vec<_>>()
+                .join(", ");
+            if !joined.is_empty() {
+                parts.push(format!("macOS automation access for `{joined}`"));
+            }
+        }
+    }
+
+    (!parts.is_empty()).then(|| parts.join(", "))
+}
+
+fn describe_codex_user_input_request(questions: &[UserInputQuestion]) -> String {
+    match questions.len() {
+        0 => "Codex requested additional input.".to_owned(),
+        1 => {
+            let question = &questions[0];
+            format!(
+                "Codex requested additional input for \"{}\".",
+                question.header.trim()
+            )
+        }
+        count => format!("Codex requested additional input for {count} questions."),
+    }
+}
+
+fn describe_codex_mcp_elicitation_request(request: &McpElicitationRequestPayload) -> String {
+    match &request.mode {
+        McpElicitationRequestMode::Form { message, .. } => {
+            let trimmed = message.trim();
+            if trimmed.is_empty() {
+                format!(
+                    "MCP server {} requested additional structured input.",
+                    request.server_name
+                )
+            } else {
+                format!(
+                    "MCP server {} requested additional structured input. {}",
+                    request.server_name, trimmed
+                )
+            }
+        }
+        McpElicitationRequestMode::Url { message, url, .. } => {
+            let trimmed = message.trim();
+            if trimmed.is_empty() {
+                format!(
+                    "MCP server {} requested that you continue in a browser: {}",
+                    request.server_name, url
+                )
+            } else {
+                format!(
+                    "MCP server {} requested that you continue in a browser. {} {}",
+                    request.server_name, trimmed, url
+                )
+            }
+        }
+    }
 }
 
 fn handle_codex_app_server_item_completed(

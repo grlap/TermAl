@@ -1,7 +1,7 @@
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::convert::Infallible;
 use std::fs;
-use std::io::{self, BufRead, BufReader, Seek, SeekFrom, Write};
+use std::io::{self, BufRead, BufReader, Write};
 use std::net::SocketAddr;
 use std::path::{Path as FsPath, PathBuf};
 use std::process::{Child, Command, Stdio};
@@ -62,7 +62,39 @@ async fn run_server() -> Result<()> {
 
     let state = AppState::new(cwd.clone())?;
     let shutdown_state = state.clone();
-    let app = Router::new()
+    let app = app_router(state).fallback_service(
+        ServeDir::new(ui_dist_dir).not_found_service(ServeFile::new(ui_index_file)),
+    );
+
+    let listener = TcpListener::bind(address)
+        .await
+        .with_context(|| format!("failed to bind backend to {address}"))?;
+    let bound = listener
+        .local_addr()
+        .context("failed to read local backend address")?;
+
+    println!("TermAl backend");
+    println!("listening: http://{bound}");
+    println!("default cwd: {cwd}");
+    println!("ui proxy target: /api");
+
+    let result = axum::serve(listener, app)
+        .await
+        .context("backend server failed");
+
+    // Drop the AppState (which contains reqwest::blocking::Client) on a
+    // regular thread so its internal Tokio runtime isn't dropped inside our
+    // async context — that would panic with "Cannot drop a runtime in a
+    // context where blocking is not allowed".
+    std::thread::spawn(move || drop(shutdown_state))
+        .join()
+        .expect("shutdown cleanup thread panicked");
+
+    result
+}
+
+fn app_router(state: AppState) -> Router {
+    Router::new()
         .route("/api/health", get(health))
         .route("/api/file", get(read_file).put(write_file))
         .route("/api/fs", get(read_directory))
@@ -125,36 +157,19 @@ async fn run_server() -> Result<()> {
             "/api/sessions/{id}/approvals/{message_id}",
             post(submit_approval),
         )
+        .route(
+            "/api/sessions/{id}/user-input/{message_id}",
+            post(submit_user_input),
+        )
+        .route(
+            "/api/sessions/{id}/mcp-elicitation/{message_id}",
+            post(submit_mcp_elicitation),
+        )
+        .route(
+            "/api/sessions/{id}/codex/requests/{message_id}",
+            post(submit_codex_app_request),
+        )
         .with_state(state)
-        .fallback_service(
-            ServeDir::new(ui_dist_dir).not_found_service(ServeFile::new(ui_index_file)),
-        );
-
-    let listener = TcpListener::bind(address)
-        .await
-        .with_context(|| format!("failed to bind backend to {address}"))?;
-    let bound = listener
-        .local_addr()
-        .context("failed to read local backend address")?;
-
-    println!("TermAl backend");
-    println!("listening: http://{bound}");
-    println!("default cwd: {cwd}");
-    println!("ui proxy target: /api");
-
-    let result = axum::serve(listener, app)
-        .await
-        .context("backend server failed");
-
-    // Drop the AppState (which contains reqwest::blocking::Client) on a
-    // regular thread so its internal Tokio runtime isn't dropped inside our
-    // async context — that would panic with "Cannot drop a runtime in a
-    // context where blocking is not allowed".
-    std::thread::spawn(move || drop(shutdown_state))
-        .join()
-        .expect("shutdown cleanup thread panicked");
-
-    result
 }
 
 fn diff_change_set_id(message_id: &str) -> String {

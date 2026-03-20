@@ -238,4 +238,28 @@ describe("reconcileSessions", () => {
     expect(merged[0]).not.toBe(previous[0]);
     expect(merged[0].externalSessionId).toBe("019cd7b9-551b-7200-9af4-afa006a74db7");
   });
+
+  it("replaces a session when the Codex thread state changes", () => {
+    const previous = [
+      makeSession("session-a", {
+        externalSessionId: "thread-1",
+        codexThreadState: "active",
+        preview: "ready",
+      }),
+    ];
+
+    const next = [
+      makeSession("session-a", {
+        externalSessionId: "thread-1",
+        codexThreadState: "archived",
+        preview: "ready",
+      }),
+    ];
+
+    const merged = reconcileSessions(previous, next);
+
+    expect(merged).not.toBe(previous);
+    expect(merged[0]).not.toBe(previous[0]);
+    expect(merged[0].codexThreadState).toBe("archived");
+  });
 });

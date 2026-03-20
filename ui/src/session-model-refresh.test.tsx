@@ -294,6 +294,7 @@ describe("session model refresh controls", () => {
           sandboxMode: "workspace-write",
           model: "gpt-5.4",
           externalSessionId: "thread-live",
+          codexThreadState: "active",
         })}
         isUpdating={false}
         isRefreshingModelOptions={false}
@@ -312,7 +313,7 @@ describe("session model refresh controls", () => {
     fireEvent.click(screen.getByRole("button", { name: "Fork thread" }));
     fireEvent.click(screen.getByRole("button", { name: "Compact" }));
     fireEvent.click(screen.getByRole("button", { name: "Archive" }));
-    fireEvent.click(screen.getByRole("button", { name: "Unarchive" }));
+    expect(screen.getByRole("button", { name: "Unarchive" })).toBeDisabled();
     fireEvent.change(screen.getByLabelText("Roll back turns"), {
       target: { value: "3" },
     });
@@ -321,8 +322,89 @@ describe("session model refresh controls", () => {
     expect(onForkThread).toHaveBeenCalledWith("codex-session", "pane-codex");
     expect(onCompactThread).toHaveBeenCalledWith("codex-session");
     expect(onArchiveThread).toHaveBeenCalledWith("codex-session");
-    expect(onUnarchiveThread).toHaveBeenCalledWith("codex-session");
+    expect(onUnarchiveThread).not.toHaveBeenCalled();
     expect(onRollbackThread).toHaveBeenCalledWith("codex-session", 3);
+  });
+
+  it("disables Codex thread actions while prompts are queued", () => {
+    render(
+      <CodexPromptSettingsCard
+        paneId="pane-codex"
+        session={makeSession("codex-session", {
+          agent: "Codex",
+          approvalPolicy: "never",
+          reasoningEffort: "medium",
+          sandboxMode: "workspace-write",
+          model: "gpt-5.4",
+          externalSessionId: "thread-live",
+          codexThreadState: "active",
+          pendingPrompts: [
+            {
+              id: "pending-1",
+              timestamp: "2026-03-20T10:00:00Z",
+              text: "finish the queued review",
+            },
+          ],
+        })}
+        isUpdating={false}
+        isRefreshingModelOptions={false}
+        modelOptionsError={null}
+        sessionNotice={null}
+        onArchiveThread={noopArchiveThread}
+        onCompactThread={noopCompactThread}
+        onForkThread={noopForkThread}
+        onRequestModelOptions={() => {}}
+        onRollbackThread={noopRollbackThread}
+        onSessionSettingsChange={() => {}}
+        onUnarchiveThread={noopUnarchiveThread}
+      />,
+    );
+
+    expect(screen.getByText("Wait for queued Codex prompts to finish before changing the live thread.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Fork thread" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Compact" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Archive" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Unarchive" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Roll back" })).toBeDisabled();
+  });
+
+  it("switches the Codex archive controls when the live thread is archived", () => {
+    const onArchiveThread = vi.fn();
+    const onUnarchiveThread = vi.fn();
+
+    render(
+      <CodexPromptSettingsCard
+        paneId="pane-codex"
+        session={makeSession("codex-session", {
+          agent: "Codex",
+          approvalPolicy: "never",
+          reasoningEffort: "medium",
+          sandboxMode: "workspace-write",
+          model: "gpt-5.4",
+          externalSessionId: "thread-live",
+          codexThreadState: "archived",
+        })}
+        isUpdating={false}
+        isRefreshingModelOptions={false}
+        modelOptionsError={null}
+        sessionNotice={null}
+        onArchiveThread={onArchiveThread}
+        onCompactThread={noopCompactThread}
+        onForkThread={noopForkThread}
+        onRequestModelOptions={() => {}}
+        onRollbackThread={noopRollbackThread}
+        onSessionSettingsChange={() => {}}
+        onUnarchiveThread={onUnarchiveThread}
+      />,
+    );
+
+    expect(screen.getByText("This Codex thread is archived. Unarchive it before sending another prompt.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Archive" })).toBeDisabled();
+
+    fireEvent.click(screen.getByRole("button", { name: "Unarchive" }));
+
+    expect(onArchiveThread).not.toHaveBeenCalled();
+    expect(onUnarchiveThread).toHaveBeenCalledWith("codex-session");
   });
 
   it("auto-requests Cursor model options when the session card opens without a live list", async () => {

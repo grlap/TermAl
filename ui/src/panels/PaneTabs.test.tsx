@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { copyTextToClipboard } from "../clipboard";
 import { PaneTabs } from "./PaneTabs";
-import type { Project, Session } from "../types";
+import type { CodexState, Project, Session } from "../types";
 import type { WorkspaceTab } from "../workspace";
 
 vi.mock("../clipboard", () => ({
@@ -210,9 +210,43 @@ describe("PaneTabs", () => {
     expect(sourceTab.querySelector('.pane-tab-file-icon[data-file-kind="rust"]')).not.toBeNull();
     expect(diffTab.querySelector('.pane-tab-file-icon[data-file-kind="typescript"]')).not.toBeNull();
   });
+
+  it("shows Codex global notices in the status tooltip", async () => {
+    renderPaneTabs({
+      codexState: {
+        notices: [
+          {
+            kind: "configWarning",
+            level: "warning",
+            title: "Config warning",
+            detail: "Codex is using fallback sandbox defaults.",
+            timestamp: "14:05",
+            code: "sandbox_fallback",
+          },
+        ],
+      },
+      sessionLookup: new Map([["session-1", makeSession("session-1", "C:/repo", "Codex Live")]]),
+      tabs: [
+        {
+          id: "tab-session",
+          kind: "session",
+          sessionId: "session-1",
+        },
+      ],
+    });
+
+    fireEvent.mouseEnter(screen.getByRole("tab", { name: /Codex Live/i }));
+
+    const tooltip = await screen.findByRole("tooltip");
+    expect(tooltip).toHaveTextContent("Notices");
+    expect(tooltip).toHaveTextContent("Config warning");
+    expect(tooltip).toHaveTextContent("Codex is using fallback sandbox defaults.");
+    expect(screen.getByTitle("1 Codex notice")).toBeInTheDocument();
+  });
 });
 
 function renderPaneTabs({
+  codexState = {},
   onCloseTab = vi.fn(),
   onRenameSessionRequest = vi.fn(),
   onSelectTab = vi.fn(),
@@ -220,6 +254,7 @@ function renderPaneTabs({
   sessionLookup = new Map<string, Session>(),
   tabs,
 }: {
+  codexState?: CodexState;
   onCloseTab?: (paneId: string, tabId: string) => void;
   onRenameSessionRequest?: (
     sessionId: string,
@@ -235,7 +270,7 @@ function renderPaneTabs({
   return render(
     <PaneTabs
       activeTabId={tabs[0]?.id ?? null}
-      codexState={{}}
+      codexState={codexState}
       draggedTab={null}
       onCloseTab={onCloseTab}
       onRenameSessionRequest={onRenameSessionRequest}

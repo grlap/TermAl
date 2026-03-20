@@ -89,8 +89,21 @@ export type CodexRateLimits = {
   secondary?: CodexRateLimitWindow | null;
 };
 
+export type CodexNoticeKind = "configWarning" | "deprecationNotice" | "runtimeNotice";
+export type CodexNoticeLevel = "info" | "warning";
+
+export type CodexNotice = {
+  kind: CodexNoticeKind;
+  level: CodexNoticeLevel;
+  title: string;
+  detail: string;
+  timestamp: string;
+  code?: string | null;
+};
+
 export type CodexState = {
   rateLimits?: CodexRateLimits | null;
+  notices?: CodexNotice[] | null;
 };
 
 export type RemoteTransport = "local" | "ssh";
@@ -135,11 +148,14 @@ export type Session = {
   claudeApprovalMode?: ClaudeApprovalMode | null;
   geminiApprovalMode?: GeminiApprovalMode | null;
   externalSessionId?: string | null;
+  codexThreadState?: CodexThreadState | null;
   status: SessionStatus;
   preview: string;
   messages: Message[];
   pendingPrompts?: PendingPrompt[];
 };
+
+export type CodexThreadState = "active" | "archived";
 
 export type Message =
   | TextMessage
@@ -149,7 +165,10 @@ export type Message =
   | MarkdownMessage
   | ParallelAgentsMessage
   | SubagentResultMessage
-  | ApprovalMessage;
+  | ApprovalMessage
+  | UserInputRequestMessage
+  | McpElicitationRequestMessage
+  | CodexAppRequestMessage;
 
 export type ImageAttachment = {
   fileName: string;
@@ -246,6 +265,143 @@ export type ApprovalMessage = BaseMessage & {
   commandLanguage?: string | null;
   detail: string;
   decision: ApprovalDecision;
+};
+
+export type UserInputQuestionOption = {
+  description: string;
+  label: string;
+};
+
+export type UserInputQuestion = {
+  header: string;
+  id: string;
+  isOther?: boolean;
+  isSecret?: boolean;
+  options?: UserInputQuestionOption[] | null;
+  question: string;
+};
+
+export type InteractionRequestState = "pending" | "submitted" | "interrupted" | "canceled";
+
+export type JsonValue =
+  | null
+  | boolean
+  | number
+  | string
+  | JsonValue[]
+  | { [key: string]: JsonValue | undefined };
+
+export type UserInputRequestMessage = BaseMessage & {
+  type: "userInputRequest";
+  title: string;
+  detail: string;
+  questions: UserInputQuestion[];
+  state: InteractionRequestState;
+  submittedAnswers?: Record<string, string[]> | null;
+};
+
+export type McpElicitationAction = "accept" | "decline" | "cancel";
+
+export type McpElicitationConstOption = {
+  const: string;
+  title: string;
+};
+
+export type McpElicitationStringSchema = {
+  type: "string";
+  title?: string | null;
+  description?: string | null;
+  default?: string | null;
+  enum?: string[] | null;
+  enumNames?: string[] | null;
+  oneOf?: McpElicitationConstOption[] | null;
+  minLength?: number | null;
+  maxLength?: number | null;
+};
+
+export type McpElicitationNumberSchema = {
+  type: "number" | "integer";
+  title?: string | null;
+  description?: string | null;
+  default?: number | null;
+  minimum?: number | null;
+  maximum?: number | null;
+};
+
+export type McpElicitationBooleanSchema = {
+  type: "boolean";
+  title?: string | null;
+  description?: string | null;
+  default?: boolean | null;
+};
+
+export type McpElicitationArrayItems = {
+  type?: "string";
+  enum?: string[] | null;
+  anyOf?: McpElicitationConstOption[] | null;
+};
+
+export type McpElicitationArraySchema = {
+  type: "array";
+  title?: string | null;
+  description?: string | null;
+  default?: string[] | null;
+  items: McpElicitationArrayItems;
+  minItems?: number | null;
+  maxItems?: number | null;
+};
+
+export type McpElicitationPrimitiveSchema =
+  | McpElicitationStringSchema
+  | McpElicitationNumberSchema
+  | McpElicitationBooleanSchema
+  | McpElicitationArraySchema;
+
+export type McpElicitationSchema = {
+  $schema?: string | null;
+  type: "object";
+  properties: Record<string, McpElicitationPrimitiveSchema | undefined>;
+  required?: string[] | null;
+};
+
+export type McpElicitationRequestPayload = {
+  threadId: string;
+  turnId?: string | null;
+  serverName: string;
+} & (
+  | {
+      mode: "form";
+      _meta?: JsonValue | null;
+      message: string;
+      requestedSchema: McpElicitationSchema;
+    }
+  | {
+      mode: "url";
+      _meta?: JsonValue | null;
+      elicitationId: string;
+      message: string;
+      url: string;
+    }
+);
+
+export type McpElicitationRequestMessage = BaseMessage & {
+  type: "mcpElicitationRequest";
+  title: string;
+  detail: string;
+  request: McpElicitationRequestPayload;
+  state: InteractionRequestState;
+  submittedAction?: McpElicitationAction | null;
+  submittedContent?: JsonValue | null;
+};
+
+export type CodexAppRequestMessage = BaseMessage & {
+  type: "codexAppRequest";
+  title: string;
+  detail: string;
+  method: string;
+  params: JsonValue;
+  state: InteractionRequestState;
+  submittedResult?: JsonValue | null;
 };
 
 export type TextDeltaEvent = {

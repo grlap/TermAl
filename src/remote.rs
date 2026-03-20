@@ -960,6 +960,82 @@ impl AppState {
         Ok(self.snapshot())
     }
 
+    fn proxy_remote_submit_codex_user_input(
+        &self,
+        session_id: &str,
+        message_id: &str,
+        answers: BTreeMap<String, Vec<String>>,
+    ) -> Result<StateResponse, ApiError> {
+        let Some(target) = self.remote_session_target(session_id)? else {
+            return Err(ApiError::bad_request("session is not assigned to a remote"));
+        };
+        let remote_state: StateResponse = self.remote_registry.request_json(
+            &target.remote,
+            Method::POST,
+            &format!(
+                "/api/sessions/{}/user-input/{}",
+                encode_uri_component(&target.remote_session_id),
+                encode_uri_component(message_id)
+            ),
+            &[],
+            Some(json!({ "answers": answers })),
+        )?;
+        self.sync_remote_state_for_target(&target, remote_state)?;
+        Ok(self.snapshot())
+    }
+
+    fn proxy_remote_submit_codex_mcp_elicitation(
+        &self,
+        session_id: &str,
+        message_id: &str,
+        action: McpElicitationAction,
+        content: Option<Value>,
+    ) -> Result<StateResponse, ApiError> {
+        let Some(target) = self.remote_session_target(session_id)? else {
+            return Err(ApiError::bad_request("session is not assigned to a remote"));
+        };
+        let remote_state: StateResponse = self.remote_registry.request_json(
+            &target.remote,
+            Method::POST,
+            &format!(
+                "/api/sessions/{}/mcp-elicitation/{}",
+                encode_uri_component(&target.remote_session_id),
+                encode_uri_component(message_id)
+            ),
+            &[],
+            Some(json!({
+                "action": action,
+                "content": content,
+            })),
+        )?;
+        self.sync_remote_state_for_target(&target, remote_state)?;
+        Ok(self.snapshot())
+    }
+
+    fn proxy_remote_submit_codex_app_request(
+        &self,
+        session_id: &str,
+        message_id: &str,
+        result: Value,
+    ) -> Result<StateResponse, ApiError> {
+        let Some(target) = self.remote_session_target(session_id)? else {
+            return Err(ApiError::bad_request("session is not assigned to a remote"));
+        };
+        let remote_state: StateResponse = self.remote_registry.request_json(
+            &target.remote,
+            Method::POST,
+            &format!(
+                "/api/sessions/{}/codex/requests/{}",
+                encode_uri_component(&target.remote_session_id),
+                encode_uri_component(message_id)
+            ),
+            &[],
+            Some(json!({ "result": result })),
+        )?;
+        self.sync_remote_state_for_target(&target, remote_state)?;
+        Ok(self.snapshot())
+    }
+
     fn proxy_remote_list_agent_commands(
         &self,
         session_id: &str,
@@ -1344,6 +1420,7 @@ fn apply_remote_session_to_record(
     let local_session_id = record.session.id.clone();
     record.session = localize_remote_session(&local_session_id, local_project_id, remote_session);
     record.external_session_id = record.session.external_session_id.clone();
+    sync_codex_thread_state(record);
     record.codex_approval_policy = record
         .session
         .approval_policy
@@ -1360,6 +1437,9 @@ fn apply_remote_session_to_record(
     record.runtime_reset_required = false;
     record.pending_claude_approvals.clear();
     record.pending_codex_approvals.clear();
+    record.pending_codex_user_inputs.clear();
+    record.pending_codex_mcp_elicitations.clear();
+    record.pending_codex_app_requests.clear();
     record.pending_acp_approvals.clear();
     record.message_positions = build_message_positions(&record.session.messages);
 }
@@ -1379,7 +1459,7 @@ fn upsert_remote_proxy_session_record(
     inner.next_session_number += 1;
     let local_session_id = format!("session-{number}");
     let session = localize_remote_session(&local_session_id, local_project_id, remote_session);
-    let record = SessionRecord {
+    let mut record = SessionRecord {
         active_codex_approval_policy: None,
         active_codex_reasoning_effort: None,
         active_codex_sandbox_mode: None,
@@ -1395,6 +1475,9 @@ fn upsert_remote_proxy_session_record(
         external_session_id: session.external_session_id.clone(),
         pending_claude_approvals: HashMap::new(),
         pending_codex_approvals: HashMap::new(),
+        pending_codex_user_inputs: HashMap::new(),
+        pending_codex_mcp_elicitations: HashMap::new(),
+        pending_codex_app_requests: HashMap::new(),
         pending_acp_approvals: HashMap::new(),
         queued_prompts: VecDeque::new(),
         message_positions: build_message_positions(&session.messages),
@@ -1404,6 +1487,7 @@ fn upsert_remote_proxy_session_record(
         runtime_reset_required: false,
         session,
     };
+    sync_codex_thread_state(&mut record);
     inner.sessions.push(record);
     local_session_id
 }

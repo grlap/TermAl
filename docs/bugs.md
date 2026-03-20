@@ -3,7 +3,7 @@
 Updated against the current checked-in code in `src/main.rs`, `ui/src/App.tsx`,
 `ui/package.json`, and `ui/vite.config.ts`.
 
-The older entries for "No image paste support", Claude `control_request` fallthrough, "No SSE/WebSocket for real-time updates", "Codex receive has no streaming", "No queueing system for prompts", the stale `/api/state`-after-SSE bootstrap race, the false-positive delta SSE reconciliation drift when a message already existed locally, shared Codex turn-scoped subagent ordering, shared Codex `item_completed` multipart truncation, stale shared-Codex agent-event turn filtering, the shared Codex buffered-result flush edge, multiple simultaneous approvals, Windows `HOME`-only path resolution, process-exit polling, unhandled Codex rate-limit notifications, the stale "Backend persists full state on every streaming text delta" entry, the old unscoped `/api/file` read bug, and the old per-session Codex app-server/runtime note were stale. Those are implemented in the current tree.
+The older entries for "No image paste support", Claude `control_request` fallthrough, "No SSE/WebSocket for real-time updates", "Codex receive has no streaming", "No queueing system for prompts", the stale `/api/state`-after-SSE bootstrap race, the false-positive delta SSE reconciliation drift when a message already existed locally, shared Codex turn-scoped subagent ordering, shared Codex `item_completed` multipart truncation, stale shared-Codex agent-event turn filtering, the shared Codex buffered-result flush edge, multiple simultaneous approvals, Windows `HOME`-only path resolution, process-exit polling, unhandled Codex rate-limit notifications, the stale "Backend persists full state on every streaming text delta" entry, the old unscoped `/api/file` read bug, the legacy Codex REPL `exec --json` path, the old per-session / partial Codex app-server notes, the old Codex session-discovery note, the startup Codex home-discovery mismatch, the REPL Codex import leak, the discovery truncation bug, the startup discovery settings-clobber bug, the shared Codex lock-order deadlock, the Codex DB fallback-scan abort, the unbounded generic Codex app-request payload path, the MCP elicitation schema-enforcement gap, the uncapped Codex discovery query, the old interaction-request state name, and the stale architecture-doc API table note were stale. Those are implemented in the current tree.
 
 The newer shared Codex regressions where stale `task_complete` summaries could bleed into the next
 answer or a pre-answer summary insert could overwrite the final-answer preview are also fixed in
@@ -183,35 +183,6 @@ implies a narrower effect than the backend actually enforces.
   for existing bound projects
 - Add tests for the chosen semantics so the UI copy and backend behavior stay aligned
 
-## Codex archive state is not tracked locally
-
-**Severity:** Medium
-
-Codex thread actions now expose `archive`, `unarchive`, `compact`, `fork`, and `rollback`, but the
-session model still only tracks `external_session_id`. After an archive/unarchive action, TermAl
-appends a local note but does not persist any thread lifecycle state, and the shared Codex runtime
-still drops `thread/archived` / `thread/unarchived` notifications.
-
-**Current impact:**
-- The session card cannot tell whether the current Codex thread is active or archived
-- `Archive` and `Unarchive` remain enabled at the same time for any live thread
-- Prompt dispatch still treats an archived thread as resumable because the local session model does
-  not know it was archived
-- Remote or out-of-band archive state changes can drift from the local UI indefinitely
-
-**Affected code (`src/state.rs`, `src/runtime.rs`, `ui/src/App.tsx`, `ui/src/types.ts`):**
-- `archive_codex_thread()` / `unarchive_codex_thread()` only persist transcript notes
-- shared Codex event handling ignores `thread/archived` and `thread/unarchived`
-- `CodexPromptSettingsCard` gates thread actions only on `externalSessionId` and busy state
-- `Session` / persisted session snapshots have no archived/live thread state field
-
-**Fix:**
-- Add explicit Codex thread lifecycle state to the session model and persisted snapshots
-- Update that state on successful local actions and on runtime notifications
-- Disable contradictory controls and block prompt dispatch when the live thread is archived
-
-
-
 ## Failed Claude Task results lose full detail
 
 **Severity:** Low
@@ -283,6 +254,22 @@ manually maps from one to the other field-by-field.
 - Reuse `ParallelAgentProgress` directly in `ClaudeTurnState` instead of maintaining a separate
   type. The only difference is `Clone` vs `Serialize`/`Deserialize` derives, which can coexist.
 
+## `normalize_git_repo_relative_path` allows `..` path components
+
+**Severity:** Low
+
+The function validates that a git path is relative and does not contain `\0`, but allows paths
+like `../../etc/shadow`. This path is then passed directly to `git add -A`, `git restore
+--staged`, or `git diff` as a pathspec. While git operates within the repository root and does not
+typically follow `..` above the repo boundary in pathspecs, this is a defense-in-depth gap.
+
+**Affected code (`src/api.rs`):**
+- `normalize_git_repo_relative_path()` — input validation
+
+**Fix:**
+- Reject paths where any component is `..`:
+  `if trimmed.split('/').any(|c| c == "..") { return Err(...); }`
+
 ## Image attachment UX is inconsistent
 
 **Severity:** Low â€” the transport path works, but the product copy and interaction model lag behind it.
@@ -342,20 +329,6 @@ session pays process startup plus initialize-handshake latency on its first prom
 - Unhide that spare on session creation instead of cold-starting every new Claude conversation
 - Reap idle hidden sessions so the pool does not grow without bound
 
-## Legacy/testing Codex REPL path still uses one-shot `codex exec --json`
-
-**Severity:** Low â€” server mode is fixed, but the old testing path is not.
-
-The server path now uses persistent `codex app-server` JSON-RPC with streaming `item/agentMessage/delta` events. However, `run_turn_blocking()` still routes the Codex REPL/testing mode through `run_codex_turn()`, which shells out to `codex exec --json` or `codex exec resume --json`.
-
-**Impact:**
-- REPL mode does not share the persistent app-server runtime
-- REPL mode does not share the server approval flow
-- Legacy `handle_codex_event()` and rollout-fallback code still have to be maintained
-
----
-
-
 ## Node 24 deprecation warning from the legacy Vite dev proxy
 
 **Severity:** Low - local dev noise only.
@@ -397,30 +370,39 @@ noise.
 
 # Backlog
 
-## Single-file codebase
+## Recorder and pending-request clearing duplication
 
 **Severity:** Medium â€” maintainability concern, not a runtime bug.
 
-`src/main.rs` is now ~5,700 lines and still contains routes, persistence, session state, Claude integration, Codex integration, REPL code, and tests. The logical boundaries are clear, but the file is past the point where changes are easy to isolate or review.
+`SessionRecorder` and `BorrowedSessionRecorder` contain ~300 lines of near-identical
+implementations for `push_codex_approval`, `push_codex_user_input_request`,
+`push_codex_mcp_elicitation_request`, and `push_codex_app_request`. Every new Codex interactive
+request type requires copy-pasting the same block into both structs. If they diverge, bugs appear
+only in one runtime path (shared vs. dedicated).
 
-## Codex app-server integration is partial
+Separately, the four-line `pending_codex_*.clear()` block is repeated six times across
+`src/state.rs` and `src/remote.rs` wherever a runtime is cleared, reset, or rebuilt. Missing one
+site when adding a new pending request map causes stale requests that leak memory and could allow
+a response to a dead request.
 
-**Severity:** Medium â€” server-mode basics are in place, but protocol coverage is still incomplete.
+**Affected code (`src/turns.rs`, `src/state.rs`, `src/remote.rs`):**
+- `SessionRecorder` and `BorrowedSessionRecorder` recorder implementations
+- `pending_codex_*.clear()` blocks in session cleanup paths
 
-Server mode already uses `codex app-server` over stdio JSON-RPC with:
-- `initialize`
-- `thread/start` and `thread/resume`
-- `turn/start`
-- `item/agentMessage/delta`
-- approval handling for `item/commandExecution/requestApproval` and `item/fileChange/requestApproval`
+**Fix:**
+- Extract the recorder method bodies into free functions that accept `&AppState` and `&str`
+  (session_id), then have both impls delegate
+- Add a `clear_all_pending_requests(&mut SessionRecord)` helper and call it from all clearing
+  sites
 
-**Still missing:**
-- REPL migration off the legacy `codex exec --json` path
-- persisted session state for archived vs live Codex threads, including notification-driven updates
-- transcript backfill after `thread/fork` / `thread/rollback`
-- handling for additional app-server request types beyond command/file approvals
-- mapping for more notifications beyond the current subset, especially thread lifecycle changes
+## Backend module sizes are growing
 
+**Severity:** Medium â€” maintainability concern, not a runtime bug.
+
+The backend was split from a single `src/main.rs` into focused modules (`api.rs`, `state.rs`,
+`runtime.rs`, `turns.rs`, `remote.rs`, `tests.rs`), but several of those modules are already
+large. `src/state.rs` and `src/turns.rs` each carry substantial logic that could benefit from
+further decomposition as features stabilize.
 
 ## Session model controls still need polish
 
@@ -448,23 +430,6 @@ dispatch of the agents' own native slash commands.
 Gemini is implemented as a first-class ACP-backed agent now. The remaining work
 is hardening: clearer auth/setup recovery, broader ACP protocol coverage, and
 more end-to-end testing around model refresh and approval-mode changes.
-
-## Codex app-server and HTTP route coverage is still partial
-
-**Severity:** Medium
-
-There are unit tests for Claude parsing, for the legacy `handle_codex_event()` path, and for a
-small subset of the newer Codex app-server notifications. Coverage is still thin for
-`handle_codex_app_server_message()` request/item parsing, the new `/codex/thread/*` request flow,
-and the remote proxy path. There are still no HTTP route tests for the axum handlers.
-
-## Codex session discovery is reinvented
-
-**Severity:** Low â€” opportunity, not a runtime bug.
-
-Codex already maintains thread state in `~/.codex/state.db`. TermAl still persists its own session list instead of querying Codex's own thread metadata.
-
-If thread discovery eventually moves to Codex's database, TermAl could reuse existing metadata instead of maintaining a parallel index.
 
 ## Streaming refresh path is still heavier than necessary
 
@@ -556,16 +521,12 @@ Concrete work implied by the current TermAl parity gaps. Ordered by user impact 
 - [ ] Fix approval lifecycle bookkeeping:
   canceled Claude approvals should clear the session out of `Approval`, and resolving one approval
   must not hide other live approvals in the same session.
-
 - [ ] Add Gemini as a first-class agent in the backend and UI:
   `Agent` enum, session creation, session rendering, and persistence need to stop assuming the
   world is only Claude or Codex.
 - [ ] Implement a persistent Gemini runtime adapter:
   spawn `gemini` with `--output-format stream-json`, map stdout events into TermAl messages, and
   wire message dispatch through the same session runtime path used by Claude and Codex.
-- [ ] Expand Codex app-server request handling beyond command/file approvals:
-  TermAl should not silently fall back to "unhandled request" logging for additional interactive
-  request types.
 - [ ] Add territory visualization:
   track per-session file read/write activity in backend state, expose it through `/api/territory`,
   render a project-tree view color-coded by agent with recency decay, heatmap mode, conflict
@@ -600,15 +561,9 @@ Concrete work implied by the current TermAl parity gaps. Ordered by user impact 
   keep the current session-scoped model switching, but continue improving live
   metadata, validation, recovery flows, and create/clone defaults so the model
   UX feels intentional across Claude, Codex, Cursor, and Gemini.
-- [ ] Track Codex archived thread state in local sessions:
-  persist whether the live thread is archived, update it from `thread/archived` /
-  `thread/unarchived` notifications, and use it to gate prompt dispatch plus the
-  Archive/Unarchive controls.
-- [ ] Migrate REPL mode off legacy `codex exec --json` and onto the app-server path so server mode
-  and REPL mode share one implementation.
-- [ ] Hydrate Codex fork/rollback history into local session transcripts:
-  thread actions are exposed now, but TermAl only records a local note after `thread/fork` or
-  `thread/rollback`; it does not reconstruct the earlier Codex turn history into session messages.
+- [ ] Extract shared recorder logic and pending-request clearing helper:
+  deduplicate the ~300 lines shared between `SessionRecorder` and `BorrowedSessionRecorder`, and
+  add a `clear_all_pending_requests()` helper to replace the six duplicated clearing blocks.
 - [ ] Replace the `try_wait()` polling loops in the Claude and Codex runtime supervisors with
   blocking wait threads or async child handling.
 - [ ] Add Claude hidden session pool:
@@ -645,14 +600,20 @@ Concrete work implied by the current TermAl parity gaps. Ordered by user impact 
 - [ ] Refresh the frontend dev toolchain to remove the Node 24 `util._extend` deprecation from
   Vite's proxy path; upgrade `vite`, `@vitejs/plugin-react`, and `vitest` together and verify
   `npm run dev` with the existing `/api` proxy config.
-- [ ] Add unit tests for Codex app-server parsing:
-  cover request handling, streaming message assembly, notification filtering, and error paths.
-- [ ] Add HTTP route tests for the axum API:
-  session creation, message send, settings updates, approvals, kill, the new Codex thread-action
-  handlers, and SSE state events.
+- [ ] Expand HTTP route tests for the axum API:
+  Codex thread actions (archive, unarchive, fork, rollback) and interactive request submissions
+  (user input, MCP elicitation, generic app requests) now have HTTP route tests via
+  `tower::ServiceExt`. Still missing: session creation, message send, settings updates, Claude
+  approvals, kill, and SSE state events.
+- [ ] Add frontend reconcile tests for new interactive message types:
+  `userInputRequest`, `mcpElicitationRequest`, and `codexAppRequest` messages are handled by the
+  reconciler but have no test coverage verifying that state changes (e.g. pending → submitted)
+  correctly produce new message references.
 - [ ] Refresh `docs/claude-pair-spec.md` so the architecture and milestone tracking match the
   current axum + React implementation.
-- [ ] Split `src/main.rs` into focused modules once the feature work above stops churning large
-  integration surfaces.
+- [ ] Continue splitting backend modules as they grow:
+  `src/main.rs` was split into `api.rs`, `state.rs`, `runtime.rs`, `turns.rs`, `remote.rs`, and
+  `tests.rs`. Some of these modules (especially `state.rs` and `turns.rs`) are already large and
+  could benefit from further decomposition as features stabilize.
 
 ## Later

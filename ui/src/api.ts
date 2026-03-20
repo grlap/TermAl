@@ -13,6 +13,8 @@ import type {
   GeminiApprovalMode,
   ImageAttachment,
   InstructionSearchResponse,
+  JsonValue,
+  McpElicitationAction,
   Project,
   RemoteConfig,
   SandboxMode,
@@ -284,6 +286,49 @@ export function submitApproval(sessionId: string, messageId: string, decision: A
     {
       method: "POST",
       body: JSON.stringify({ decision }),
+    },
+  );
+}
+
+export function submitUserInput(
+  sessionId: string,
+  messageId: string,
+  answers: Record<string, string[]>,
+) {
+  return request<StateResponse>(
+    `/api/sessions/${encodeURIComponent(sessionId)}/user-input/${encodeURIComponent(messageId)}`,
+    {
+      method: "POST",
+      body: JSON.stringify({ answers }),
+    },
+  );
+}
+
+export function submitMcpElicitation(
+  sessionId: string,
+  messageId: string,
+  action: McpElicitationAction,
+  content?: JsonValue | null,
+) {
+  return request<StateResponse>(
+    `/api/sessions/${encodeURIComponent(sessionId)}/mcp-elicitation/${encodeURIComponent(messageId)}`,
+    {
+      method: "POST",
+      body: JSON.stringify({ action, content: content ?? null }),
+    },
+  );
+}
+
+export function submitCodexAppRequest(
+  sessionId: string,
+  messageId: string,
+  result: JsonValue,
+) {
+  return request<StateResponse>(
+    `/api/sessions/${encodeURIComponent(sessionId)}/codex/requests/${encodeURIComponent(messageId)}`,
+    {
+      method: "POST",
+      body: JSON.stringify({ result }),
     },
   );
 }

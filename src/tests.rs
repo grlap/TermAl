@@ -1,9 +1,25 @@
 use super::*;
+use axum::body::{Body, to_bytes};
+use axum::http::Request;
+use tower::util::ServiceExt;
 
 #[derive(Default)]
 struct TestRecorder {
     approvals: Vec<(String, String, String)>,
     codex_approvals: Vec<(String, String, String, CodexPendingApproval)>,
+    codex_user_input_requests: Vec<(
+        String,
+        String,
+        Vec<UserInputQuestion>,
+        CodexPendingUserInput,
+    )>,
+    codex_mcp_elicitation_requests: Vec<(
+        String,
+        String,
+        McpElicitationRequestPayload,
+        CodexPendingMcpElicitation,
+    )>,
+    codex_app_requests: Vec<(String, String, String, Value, CodexPendingAppRequest)>,
     commands: Vec<(String, String, CommandStatus)>,
     diffs: Vec<(String, String, String, ChangeType)>,
     parallel_agents: Vec<Vec<ParallelAgentProgress>>,
@@ -122,6 +138,56 @@ impl CodexTurnRecorder for TestRecorder {
         ));
         Ok(())
     }
+
+    fn push_codex_user_input_request(
+        &mut self,
+        title: &str,
+        detail: &str,
+        questions: Vec<UserInputQuestion>,
+        request: CodexPendingUserInput,
+    ) -> Result<()> {
+        self.codex_user_input_requests.push((
+            title.to_owned(),
+            detail.to_owned(),
+            questions,
+            request,
+        ));
+        Ok(())
+    }
+
+    fn push_codex_mcp_elicitation_request(
+        &mut self,
+        title: &str,
+        detail: &str,
+        request: McpElicitationRequestPayload,
+        pending: CodexPendingMcpElicitation,
+    ) -> Result<()> {
+        self.codex_mcp_elicitation_requests.push((
+            title.to_owned(),
+            detail.to_owned(),
+            request,
+            pending,
+        ));
+        Ok(())
+    }
+
+    fn push_codex_app_request(
+        &mut self,
+        title: &str,
+        detail: &str,
+        method: &str,
+        params: Value,
+        pending: CodexPendingAppRequest,
+    ) -> Result<()> {
+        self.codex_app_requests.push((
+            title.to_owned(),
+            detail.to_owned(),
+            method.to_owned(),
+            params,
+            pending,
+        ));
+        Ok(())
+    }
 }
 
 fn test_app_state() -> AppState {
@@ -146,6 +212,72 @@ fn test_remote_registry() -> Arc<RemoteRegistry> {
             .expect("remote registry init thread panicked")
             .expect("remote registry should initialize"),
     )
+}
+
+fn write_test_codex_threads_db(
+    codex_home: &FsPath,
+    rows: &[(
+        &str,
+        &str,
+        &str,
+        &str,
+        &str,
+        i64,
+        Option<&str>,
+        Option<&str>,
+        i64,
+    )],
+) {
+    fs::create_dir_all(codex_home).expect("test Codex home should be created");
+    let connection =
+        rusqlite::Connection::open(codex_home.join("state_5.sqlite")).expect("db should open");
+    connection
+        .execute_batch(
+            "create table threads (
+                id text primary key,
+                cwd text not null,
+                title text not null,
+                sandbox_policy text not null,
+                approval_mode text not null,
+                archived integer not null,
+                model text,
+                reasoning_effort text,
+                updated_at integer not null
+            );",
+        )
+        .expect("threads table should be created");
+
+    for (
+        id,
+        cwd,
+        title,
+        sandbox_policy,
+        approval_mode,
+        archived,
+        model,
+        reasoning_effort,
+        updated_at,
+    ) in rows
+    {
+        connection
+            .execute(
+                "insert into threads (
+                    id, cwd, title, sandbox_policy, approval_mode, archived, model, reasoning_effort, updated_at
+                ) values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                rusqlite::params![
+                    id,
+                    cwd,
+                    title,
+                    sandbox_policy,
+                    approval_mode,
+                    archived,
+                    model,
+                    reasoning_effort,
+                    updated_at
+                ],
+            )
+            .expect("thread row should insert");
+    }
 }
 
 fn test_session_id(state: &AppState, agent: Agent) -> String {
@@ -636,6 +768,23 @@ fn test_shared_codex_runtime(
         thread_sessions: Arc::new(Mutex::new(HashMap::new())),
     };
     (runtime, input_rx, process)
+}
+
+async fn request_json<T: for<'de> Deserialize<'de>>(
+    app: &Router,
+    request: Request<Body>,
+) -> (StatusCode, T) {
+    let response = app
+        .clone()
+        .oneshot(request)
+        .await
+        .expect("request should complete");
+    let status = response.status();
+    let body = to_bytes(response.into_body(), usize::MAX)
+        .await
+        .expect("response body should read");
+    let parsed = serde_json::from_slice(&body).expect("response body should be valid JSON");
+    (status, parsed)
 }
 
 #[test]
@@ -1889,6 +2038,64 @@ fn fork_codex_thread_creates_a_new_local_session() {
                         "id": "thread-forked",
                         "name": "Forked Review",
                         "preview": "Forked preview",
+                        "turns": [
+                            {
+                                "id": "turn-1",
+                                "status": "completed",
+                                "items": [
+                                    {
+                                        "id": "item-user-1",
+                                        "type": "userMessage",
+                                        "content": [
+                                            {
+                                                "type": "text",
+                                                "text": "Review src/state.rs"
+                                            },
+                                            {
+                                                "type": "mention",
+                                                "name": "docs/bugs.md",
+                                                "path": "docs/bugs.md"
+                                            }
+                                        ]
+                                    },
+                                    {
+                                        "id": "item-reasoning-1",
+                                        "type": "reasoning",
+                                        "summary": ["Inspect session state."],
+                                        "content": ["Watch archive transitions."]
+                                    },
+                                    {
+                                        "id": "item-agent-1",
+                                        "type": "agentMessage",
+                                        "text": "I found the bug."
+                                    },
+                                    {
+                                        "id": "item-command-1",
+                                        "type": "commandExecution",
+                                        "command": "git diff --stat",
+                                        "commandActions": [],
+                                        "cwd": "/tmp/forked",
+                                        "status": "completed",
+                                        "aggregatedOutput": "1 file changed",
+                                        "exitCode": 0
+                                    },
+                                    {
+                                        "id": "item-file-1",
+                                        "type": "fileChange",
+                                        "status": "completed",
+                                        "changes": [
+                                            {
+                                                "path": "src/state.rs",
+                                                "diff": "@@ -1 +1 @@\n-old\n+new",
+                                                "kind": {
+                                                    "type": "modify"
+                                                }
+                                            }
+                                        ]
+                                    }
+                                ]
+                            }
+                        ]
                     },
                     "model": "gpt-5.5",
                     "approvalPolicy": "on-request",
@@ -1930,14 +2137,136 @@ fn fork_codex_thread_creates_a_new_local_session() {
         forked_session.external_session_id.as_deref(),
         Some("thread-forked")
     );
+    assert_eq!(
+        forked_session.codex_thread_state,
+        Some(CodexThreadState::Active)
+    );
     assert_eq!(forked_session.workdir, "/tmp/forked");
     assert_eq!(
         forked_session.model_options,
         vec![SessionModelOption::plain("gpt-5.4", "gpt-5.4")]
     );
     assert!(matches!(
+        forked_session.messages.first(),
+        Some(Message::Text { author: Author::You, text, .. })
+            if text.contains("Review src/state.rs")
+                && text.contains("Mention: docs/bugs.md (docs/bugs.md)")
+    ));
+    assert!(matches!(
+        forked_session.messages.get(1),
+        Some(Message::Thinking { title, lines, .. })
+            if title == "Codex reasoning"
+                && lines == &vec![
+                    "Inspect session state.".to_owned(),
+                    "Watch archive transitions.".to_owned(),
+                ]
+    ));
+    assert!(matches!(
+        forked_session.messages.get(2),
+        Some(Message::Text { author: Author::Assistant, text, .. }) if text == "I found the bug."
+    ));
+    assert!(matches!(
+        forked_session.messages.get(3),
+        Some(Message::Command {
+            command,
+            output,
+            status,
+            ..
+        }) if command == "git diff --stat"
+            && output == "1 file changed"
+            && *status == CommandStatus::Success
+    ));
+    assert!(matches!(
+        forked_session.messages.get(4),
+        Some(Message::Diff {
+            file_path,
+            summary,
+            diff,
+            change_type,
+            ..
+        }) if file_path == "src/state.rs"
+            && summary == "Updated state.rs"
+            && diff.contains("+new")
+            && *change_type == ChangeType::Edit
+    ));
+    assert!(!forked_session.messages.iter().any(
+        |message| matches!(message, Message::Markdown { title, .. } if title == "Forked Codex thread")
+    ));
+}
+
+#[test]
+fn fork_codex_thread_falls_back_to_note_when_history_is_unavailable() {
+    let state = test_app_state();
+    let created = state
+        .create_session(CreateSessionRequest {
+            agent: Some(Agent::Codex),
+            name: Some("Codex Review".to_owned()),
+            workdir: Some("/tmp".to_owned()),
+            project_id: None,
+            model: Some("gpt-5.4".to_owned()),
+            approval_policy: Some(CodexApprovalPolicy::Never),
+            reasoning_effort: Some(CodexReasoningEffort::Medium),
+            sandbox_mode: Some(CodexSandboxMode::WorkspaceWrite),
+            cursor_mode: None,
+            claude_approval_mode: None,
+            claude_effort: None,
+            gemini_approval_mode: None,
+        })
+        .unwrap();
+    state
+        .set_external_session_id(&created.session_id, "thread-origin".to_owned())
+        .unwrap();
+
+    let (runtime, input_rx, _process) = test_shared_codex_runtime("shared-codex-fork-fallback");
+    *state
+        .shared_codex_runtime
+        .lock()
+        .expect("shared Codex runtime mutex poisoned") = Some(runtime);
+
+    std::thread::spawn(move || {
+        let command = input_rx
+            .recv_timeout(Duration::from_secs(1))
+            .expect("Codex fork command should arrive");
+        match command {
+            CodexRuntimeCommand::JsonRpcRequest {
+                method,
+                params,
+                response_tx,
+                ..
+            } => {
+                assert_eq!(method, "thread/fork");
+                assert_eq!(params["threadId"], "thread-origin");
+                let _ = response_tx.send(Ok(json!({
+                    "thread": {
+                        "id": "thread-forked",
+                        "name": "Forked Review",
+                        "preview": "Forked preview"
+                    },
+                    "model": "gpt-5.5",
+                    "approvalPolicy": "on-request",
+                    "sandbox": {
+                        "type": "workspaceWrite"
+                    },
+                    "reasoningEffort": "high",
+                    "cwd": "/tmp/forked"
+                })));
+            }
+            _ => panic!("expected shared Codex JSON-RPC request"),
+        }
+    });
+
+    let forked = state.fork_codex_thread(&created.session_id).unwrap();
+    let forked_session = forked
+        .state
+        .sessions
+        .iter()
+        .find(|session| session.id == forked.session_id)
+        .expect("forked session should be present");
+    assert!(matches!(
         forked_session.messages.last(),
-        Some(Message::Markdown { title, .. }) if title == "Forked Codex thread"
+        Some(Message::Markdown { title, markdown, .. })
+            if title == "Forked Codex thread"
+                && markdown.contains("Codex did not return the earlier thread history")
     ));
 }
 
@@ -1976,6 +2305,1353 @@ fn codex_thread_actions_require_a_live_idle_thread() {
             .message
             .contains("wait for the current Codex turn to finish")
     );
+
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(&session_id)
+            .expect("Codex session should exist");
+        inner.sessions[index].session.status = SessionStatus::Idle;
+        let queued_message_id = inner.next_message_id();
+        queue_prompt_on_record(
+            &mut inner.sessions[index],
+            PendingPrompt {
+                attachments: Vec::new(),
+                id: queued_message_id,
+                timestamp: stamp_now(),
+                text: "queued prompt".to_owned(),
+                expanded_text: None,
+            },
+            Vec::new(),
+        );
+    }
+
+    let queued_error = match state.archive_codex_thread(&session_id) {
+        Ok(_) => panic!("archive should fail while prompts are queued"),
+        Err(err) => err,
+    };
+    assert!(
+        queued_error
+            .message
+            .contains("wait for queued Codex prompts to finish")
+    );
+}
+
+#[test]
+fn codex_archive_and_unarchive_actions_update_thread_state_and_block_dispatch() {
+    let state = test_app_state();
+    let session_id = test_session_id(&state, Agent::Codex);
+    state
+        .set_external_session_id(&session_id, "thread-live".to_owned())
+        .unwrap();
+
+    let initial_session = state
+        .snapshot()
+        .sessions
+        .into_iter()
+        .find(|session| session.id == session_id)
+        .expect("Codex session should exist");
+    assert_eq!(
+        initial_session.codex_thread_state,
+        Some(CodexThreadState::Active)
+    );
+
+    let (runtime, input_rx, _process) = test_shared_codex_runtime("shared-codex-archive");
+    *state
+        .shared_codex_runtime
+        .lock()
+        .expect("shared Codex runtime mutex poisoned") = Some(runtime);
+
+    std::thread::spawn(move || {
+        for expected_method in ["thread/archive", "thread/unarchive"] {
+            let command = input_rx
+                .recv_timeout(Duration::from_secs(1))
+                .expect("Codex thread action should arrive");
+            match command {
+                CodexRuntimeCommand::JsonRpcRequest {
+                    method,
+                    params,
+                    response_tx,
+                    ..
+                } => {
+                    assert_eq!(method, expected_method);
+                    assert_eq!(params["threadId"], "thread-live");
+                    let _ = response_tx.send(Ok(json!({})));
+                }
+                _ => panic!("expected shared Codex JSON-RPC request"),
+            }
+        }
+    });
+
+    let archived = state.archive_codex_thread(&session_id).unwrap();
+    let archived_session = archived
+        .sessions
+        .iter()
+        .find(|session| session.id == session_id)
+        .expect("updated Codex session should be present");
+    assert_eq!(
+        archived_session.codex_thread_state,
+        Some(CodexThreadState::Archived)
+    );
+    assert!(matches!(
+        archived_session.messages.last(),
+        Some(Message::Markdown { title, .. }) if title == "Archived Codex thread"
+    ));
+
+    let archived_error = match state.dispatch_turn(
+        &session_id,
+        SendMessageRequest {
+            text: "resume the review".to_owned(),
+            expanded_text: None,
+            attachments: Vec::new(),
+        },
+    ) {
+        Ok(_) => panic!("archived Codex thread should reject new prompts"),
+        Err(err) => err,
+    };
+    assert_eq!(archived_error.status, StatusCode::CONFLICT);
+    assert!(
+        archived_error
+            .message
+            .contains("current Codex thread is archived")
+    );
+
+    let restored = state.unarchive_codex_thread(&session_id).unwrap();
+    let restored_session = restored
+        .sessions
+        .iter()
+        .find(|session| session.id == session_id)
+        .expect("updated Codex session should be present");
+    assert_eq!(
+        restored_session.codex_thread_state,
+        Some(CodexThreadState::Active)
+    );
+    assert!(matches!(
+        restored_session.messages.last(),
+        Some(Message::Markdown { title, .. }) if title == "Restored Codex thread"
+    ));
+}
+
+#[test]
+fn shared_codex_archive_notifications_update_thread_state() {
+    let state = test_app_state();
+    let session_id = test_session_id(&state, Agent::Codex);
+    state
+        .set_external_session_id(&session_id, "conversation-123".to_owned())
+        .unwrap();
+    let (runtime, _input_rx, process) = test_shared_codex_runtime("shared-codex-thread-state");
+
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(&session_id)
+            .expect("Codex session should exist");
+        inner.sessions[index].runtime = SessionRuntime::Codex(CodexRuntimeHandle {
+            runtime_id: runtime.runtime_id.clone(),
+            input_tx: runtime.input_tx.clone(),
+            process,
+            shared_session: Some(SharedCodexSessionHandle {
+                runtime: runtime.clone(),
+                session_id: session_id.clone(),
+            }),
+        });
+    }
+
+    runtime
+        .sessions
+        .lock()
+        .expect("shared Codex session mutex poisoned")
+        .insert(
+            session_id.clone(),
+            SharedCodexSessionState {
+                thread_id: Some("conversation-123".to_owned()),
+                ..SharedCodexSessionState::default()
+            },
+        );
+    runtime
+        .thread_sessions
+        .lock()
+        .expect("shared Codex thread mutex poisoned")
+        .insert("conversation-123".to_owned(), session_id.clone());
+
+    let pending_requests = Arc::new(Mutex::new(HashMap::new()));
+    let archived = json!({
+        "method": "thread/archived",
+        "params": {
+            "threadId": "conversation-123"
+        }
+    });
+    let unarchived = json!({
+        "method": "thread/unarchived",
+        "params": {
+            "threadId": "conversation-123"
+        }
+    });
+
+    handle_shared_codex_app_server_message(
+        &archived,
+        &state,
+        &runtime.runtime_id,
+        &pending_requests,
+        &runtime.sessions,
+        &runtime.thread_sessions,
+    )
+    .unwrap();
+
+    let archived_session = state
+        .snapshot()
+        .sessions
+        .into_iter()
+        .find(|session| session.id == session_id)
+        .expect("updated session should be present");
+    assert_eq!(
+        archived_session.codex_thread_state,
+        Some(CodexThreadState::Archived)
+    );
+
+    handle_shared_codex_app_server_message(
+        &unarchived,
+        &state,
+        &runtime.runtime_id,
+        &pending_requests,
+        &runtime.sessions,
+        &runtime.thread_sessions,
+    )
+    .unwrap();
+
+    let restored_session = state
+        .snapshot()
+        .sessions
+        .into_iter()
+        .find(|session| session.id == session_id)
+        .expect("updated session should be present");
+    assert_eq!(
+        restored_session.codex_thread_state,
+        Some(CodexThreadState::Active)
+    );
+}
+
+#[test]
+fn shared_codex_model_rerouted_notification_records_notice() {
+    let state = test_app_state();
+    let session_id = test_session_id(&state, Agent::Codex);
+    state
+        .set_external_session_id(&session_id, "conversation-reroute".to_owned())
+        .unwrap();
+    let (runtime, _input_rx, process) = test_shared_codex_runtime("shared-codex-reroute");
+
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(&session_id)
+            .expect("Codex session should exist");
+        inner.sessions[index].runtime = SessionRuntime::Codex(CodexRuntimeHandle {
+            runtime_id: runtime.runtime_id.clone(),
+            input_tx: runtime.input_tx.clone(),
+            process,
+            shared_session: Some(SharedCodexSessionHandle {
+                runtime: runtime.clone(),
+                session_id: session_id.clone(),
+            }),
+        });
+    }
+
+    runtime
+        .sessions
+        .lock()
+        .expect("shared Codex session mutex poisoned")
+        .insert(
+            session_id.clone(),
+            SharedCodexSessionState {
+                thread_id: Some("conversation-reroute".to_owned()),
+                turn_id: Some("turn-reroute".to_owned()),
+                ..SharedCodexSessionState::default()
+            },
+        );
+    runtime
+        .thread_sessions
+        .lock()
+        .expect("shared Codex thread mutex poisoned")
+        .insert("conversation-reroute".to_owned(), session_id.clone());
+
+    let pending_requests = Arc::new(Mutex::new(HashMap::new()));
+    let rerouted = json!({
+        "method": "model/rerouted",
+        "params": {
+            "threadId": "conversation-reroute",
+            "turnId": "turn-reroute",
+            "fromModel": "gpt-5.4",
+            "toModel": "gpt-5.4-mini",
+            "reason": "highRiskCyberActivity"
+        }
+    });
+
+    handle_shared_codex_app_server_message(
+        &rerouted,
+        &state,
+        &runtime.runtime_id,
+        &pending_requests,
+        &runtime.sessions,
+        &runtime.thread_sessions,
+    )
+    .unwrap();
+
+    let session = state
+        .snapshot()
+        .sessions
+        .into_iter()
+        .find(|session| session.id == session_id)
+        .expect("updated session should be present");
+    assert!(matches!(
+        session.messages.last(),
+        Some(Message::Text { text, .. })
+            if text == "Codex rerouted this turn from `gpt-5.4` to `gpt-5.4-mini` because it detected high-risk cyber activity."
+    ));
+}
+
+#[test]
+fn shared_codex_compaction_notice_inserts_before_visible_assistant_output() {
+    let state = test_app_state();
+    let session_id = test_session_id(&state, Agent::Codex);
+    state
+        .set_external_session_id(&session_id, "conversation-compact".to_owned())
+        .unwrap();
+    let (runtime, _input_rx, process) = test_shared_codex_runtime("shared-codex-compact");
+
+    let assistant_message_id = state.allocate_message_id();
+    state
+        .push_message(
+            &session_id,
+            Message::Text {
+                attachments: Vec::new(),
+                id: assistant_message_id.clone(),
+                timestamp: stamp_now(),
+                author: Author::Assistant,
+                text: "Existing assistant output".to_owned(),
+                expanded_text: None,
+            },
+        )
+        .unwrap();
+
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(&session_id)
+            .expect("Codex session should exist");
+        inner.sessions[index].runtime = SessionRuntime::Codex(CodexRuntimeHandle {
+            runtime_id: runtime.runtime_id.clone(),
+            input_tx: runtime.input_tx.clone(),
+            process,
+            shared_session: Some(SharedCodexSessionHandle {
+                runtime: runtime.clone(),
+                session_id: session_id.clone(),
+            }),
+        });
+    }
+
+    runtime
+        .sessions
+        .lock()
+        .expect("shared Codex session mutex poisoned")
+        .insert(
+            session_id.clone(),
+            SharedCodexSessionState {
+                thread_id: Some("conversation-compact".to_owned()),
+                turn_id: Some("turn-compact".to_owned()),
+                turn_state: CodexTurnState {
+                    assistant_output_started: true,
+                    first_visible_assistant_message_id: Some(assistant_message_id.clone()),
+                    ..CodexTurnState::default()
+                },
+                ..SharedCodexSessionState::default()
+            },
+        );
+    runtime
+        .thread_sessions
+        .lock()
+        .expect("shared Codex thread mutex poisoned")
+        .insert("conversation-compact".to_owned(), session_id.clone());
+
+    let pending_requests = Arc::new(Mutex::new(HashMap::new()));
+    let compacted = json!({
+        "method": "thread/compacted",
+        "params": {
+            "threadId": "conversation-compact",
+            "turnId": "turn-compact"
+        }
+    });
+
+    handle_shared_codex_app_server_message(
+        &compacted,
+        &state,
+        &runtime.runtime_id,
+        &pending_requests,
+        &runtime.sessions,
+        &runtime.thread_sessions,
+    )
+    .unwrap();
+
+    let session = state
+        .snapshot()
+        .sessions
+        .into_iter()
+        .find(|session| session.id == session_id)
+        .expect("updated session should be present");
+    let compact_notice_index = session
+        .messages
+        .iter()
+        .position(|message| {
+            matches!(
+                message,
+                Message::Text { text, .. }
+                    if text == "Codex compacted the thread context for this turn."
+            )
+        })
+        .expect("compaction notice should be present");
+    let assistant_index = session
+        .messages
+        .iter()
+        .position(|message| {
+            matches!(
+                message,
+                Message::Text { id, text, .. }
+                    if id == &assistant_message_id && text == "Existing assistant output"
+            )
+        })
+        .expect("assistant output should remain present");
+    assert!(compact_notice_index < assistant_index);
+}
+
+#[test]
+fn shared_codex_global_notices_update_codex_state() {
+    let state = test_app_state();
+    let (runtime, _input_rx, _process) = test_shared_codex_runtime("shared-codex-global-notices");
+    let pending_requests = Arc::new(Mutex::new(HashMap::new()));
+
+    let config_warning = json!({
+        "method": "configWarning",
+        "params": {
+            "message": "Codex is using fallback sandbox defaults.",
+            "code": "sandbox_fallback"
+        }
+    });
+    let deprecation_notice = json!({
+        "method": "deprecationNotice",
+        "params": {
+            "title": "Legacy model alias",
+            "detail": "`gpt-4` will be removed soon.",
+            "code": "legacy_model_alias"
+        }
+    });
+
+    handle_shared_codex_app_server_message(
+        &config_warning,
+        &state,
+        &runtime.runtime_id,
+        &pending_requests,
+        &runtime.sessions,
+        &runtime.thread_sessions,
+    )
+    .unwrap();
+    handle_shared_codex_app_server_message(
+        &config_warning,
+        &state,
+        &runtime.runtime_id,
+        &pending_requests,
+        &runtime.sessions,
+        &runtime.thread_sessions,
+    )
+    .unwrap();
+    handle_shared_codex_app_server_message(
+        &deprecation_notice,
+        &state,
+        &runtime.runtime_id,
+        &pending_requests,
+        &runtime.sessions,
+        &runtime.thread_sessions,
+    )
+    .unwrap();
+
+    let codex = state.snapshot().codex;
+    assert_eq!(codex.notices.len(), 2);
+    assert!(matches!(
+        codex.notices.first(),
+        Some(CodexNotice {
+            kind: CodexNoticeKind::DeprecationNotice,
+            level: CodexNoticeLevel::Info,
+            title,
+            detail,
+            code,
+            ..
+        }) if title == "Legacy model alias"
+            && detail == "`gpt-4` will be removed soon."
+            && code.as_deref() == Some("legacy_model_alias")
+    ));
+    assert!(matches!(
+        codex.notices.get(1),
+        Some(CodexNotice {
+            kind: CodexNoticeKind::ConfigWarning,
+            level: CodexNoticeLevel::Warning,
+            title,
+            detail,
+            code,
+            ..
+        }) if title == "Config warning"
+            && detail == "Codex is using fallback sandbox defaults."
+            && code.as_deref() == Some("sandbox_fallback")
+    ));
+}
+
+#[test]
+fn shared_codex_threadless_runtime_notice_is_recorded() {
+    let state = test_app_state();
+    let (runtime, _input_rx, _process) = test_shared_codex_runtime("shared-codex-runtime-notice");
+    let pending_requests = Arc::new(Mutex::new(HashMap::new()));
+    let runtime_notice = json!({
+        "method": "authRequired",
+        "params": {
+            "message": "Sign in again before continuing.",
+            "code": "auth_required",
+            "level": "warning"
+        }
+    });
+
+    handle_shared_codex_app_server_message(
+        &runtime_notice,
+        &state,
+        &runtime.runtime_id,
+        &pending_requests,
+        &runtime.sessions,
+        &runtime.thread_sessions,
+    )
+    .unwrap();
+
+    let codex = state.snapshot().codex;
+    assert!(matches!(
+        codex.notices.first(),
+        Some(CodexNotice {
+            kind: CodexNoticeKind::RuntimeNotice,
+            level: CodexNoticeLevel::Warning,
+            title,
+            detail,
+            code,
+            ..
+        }) if title == "Codex notice: authRequired"
+            && detail == "Sign in again before continuing."
+            && code.as_deref() == Some("auth_required")
+    ));
+}
+
+#[test]
+fn discover_codex_threads_from_home_reads_latest_database() {
+    let codex_home = std::env::temp_dir().join(format!("termal-codex-home-{}", Uuid::new_v4()));
+    fs::write(codex_home.join("state.db"), b"").unwrap_or_default();
+    write_test_codex_threads_db(
+        &codex_home,
+        &[(
+            "thread-1",
+            "/tmp/project",
+            "Review local repo",
+            r#"{"type":"danger-full-access"}"#,
+            "on-request",
+            1,
+            Some("gpt-5-codex"),
+            Some("high"),
+            10,
+        )],
+    );
+
+    let threads = discover_codex_threads_from_home(&codex_home, &[PathBuf::from("/tmp/project")])
+        .expect("threads should load");
+
+    assert_eq!(
+        threads,
+        vec![DiscoveredCodexThread {
+            approval_policy: Some(CodexApprovalPolicy::OnRequest),
+            archived: true,
+            cwd: "/tmp/project".to_owned(),
+            id: "thread-1".to_owned(),
+            model: Some("gpt-5-codex".to_owned()),
+            reasoning_effort: Some(CodexReasoningEffort::High),
+            sandbox_mode: Some(CodexSandboxMode::DangerFullAccess),
+            title: "Review local repo".to_owned(),
+        }]
+    );
+
+    let _ = fs::remove_dir_all(&codex_home);
+}
+
+#[test]
+fn resolve_codex_threads_database_path_skips_unrelated_entries() {
+    let codex_home =
+        std::env::temp_dir().join(format!("termal-codex-home-scan-{}", Uuid::new_v4()));
+    fs::create_dir_all(&codex_home).expect("test Codex home should be created");
+    fs::write(codex_home.join("state_9.sqlite"), b"sqlite").expect("valid state db should exist");
+    fs::write(codex_home.join("state_preview.sqlite"), b"broken")
+        .expect("unrelated sqlite file should be created");
+
+    let path = resolve_codex_threads_database_path(&codex_home)
+        .expect("database discovery should skip unrelated entries");
+
+    assert_eq!(
+        path.file_name().and_then(|value| value.to_str()),
+        Some("state_9.sqlite")
+    );
+
+    let _ = fs::remove_dir_all(&codex_home);
+}
+
+#[test]
+fn discover_codex_threads_from_sources_skips_repl_home_and_uses_shared_runtime_home() {
+    let root = std::env::temp_dir().join(format!("termal-codex-discovery-{}", Uuid::new_v4()));
+    let source_home = root.join(".codex");
+    let termal_root = root.join(".termal").join("codex-home");
+    let shared_home = termal_root.join("shared-app-server");
+    let repl_home = termal_root.join("repl");
+
+    write_test_codex_threads_db(
+        &shared_home,
+        &[(
+            "thread-shared",
+            "/tmp/project-shared",
+            "Shared runtime thread",
+            r#"{"type":"workspace-write"}"#,
+            "on-request",
+            0,
+            Some("gpt-5-codex"),
+            Some("medium"),
+            30,
+        )],
+    );
+    write_test_codex_threads_db(
+        &repl_home,
+        &[(
+            "thread-repl",
+            "/tmp/project-repl",
+            "REPL thread",
+            r#"{"type":"read-only"}"#,
+            "never",
+            0,
+            Some("gpt-5-mini"),
+            Some("low"),
+            20,
+        )],
+    );
+    write_test_codex_threads_db(
+        &source_home,
+        &[
+            (
+                "thread-shared",
+                "/tmp/project-source",
+                "Older source copy",
+                r#"{"type":"danger-full-access"}"#,
+                "never",
+                1,
+                Some("gpt-5"),
+                Some("high"),
+                10,
+            ),
+            (
+                "thread-source",
+                "/tmp/project-source-only",
+                "Source-only thread",
+                r#"{"type":"workspace-write"}"#,
+                "on-failure",
+                0,
+                Some("gpt-5-codex"),
+                Some("minimal"),
+                5,
+            ),
+        ],
+    );
+
+    let threads = discover_codex_threads_from_sources(
+        Some(&source_home),
+        &termal_root,
+        &[
+            PathBuf::from("/tmp/project-shared"),
+            PathBuf::from("/tmp/project-source-only"),
+        ],
+    )
+    .expect("threads should load");
+
+    assert_eq!(
+        threads
+            .iter()
+            .map(|thread| thread.id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["thread-shared", "thread-source"]
+    );
+    assert!(matches!(
+        threads.first(),
+        Some(DiscoveredCodexThread {
+            title,
+            sandbox_mode: Some(CodexSandboxMode::WorkspaceWrite),
+            ..
+        }) if title == "Shared runtime thread"
+    ));
+    assert!(threads.iter().all(|thread| thread.id != "thread-repl"));
+
+    let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
+fn discover_codex_threads_from_home_filters_scopes_before_limiting_results() {
+    let codex_home =
+        std::env::temp_dir().join(format!("termal-codex-home-large-{}", Uuid::new_v4()));
+    fs::create_dir_all(&codex_home).expect("test Codex home should be created");
+    let connection =
+        rusqlite::Connection::open(codex_home.join("state_5.sqlite")).expect("db should open");
+    connection
+        .execute_batch(
+            "create table threads (
+                id text primary key,
+                cwd text not null,
+                title text not null,
+                sandbox_policy text not null,
+                approval_mode text not null,
+                archived integer not null,
+                model text,
+                reasoning_effort text,
+                updated_at integer not null
+            );",
+        )
+        .expect("threads table should be created");
+
+    for index in 0..101 {
+        connection
+            .execute(
+                "insert into threads (
+                    id, cwd, title, sandbox_policy, approval_mode, archived, model, reasoning_effort, updated_at
+                ) values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                rusqlite::params![
+                    format!("thread-other-{index}"),
+                    "/tmp/out-of-scope",
+                    format!("Out-of-scope thread {index}"),
+                    r#"{"type":"workspace-write"}"#,
+                    "never",
+                    0,
+                    "gpt-5-codex",
+                    "low",
+                    1_000 - index,
+                ],
+            )
+            .expect("thread row should insert");
+    }
+    connection
+        .execute(
+            "insert into threads (
+                id, cwd, title, sandbox_policy, approval_mode, archived, model, reasoning_effort, updated_at
+            ) values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+            rusqlite::params![
+                "thread-target",
+                "/tmp/termal",
+                "Older in-scope thread",
+                r#"{"type":"danger-full-access"}"#,
+                "on-request",
+                0,
+                "gpt-5-codex",
+                "medium",
+                1,
+            ],
+        )
+        .expect("target row should insert");
+
+    let threads = discover_codex_threads_from_home(&codex_home, &[PathBuf::from("/tmp/termal")])
+        .expect("threads should load");
+
+    assert_eq!(threads.len(), 1);
+    assert_eq!(threads[0].id, "thread-target");
+
+    let _ = fs::remove_dir_all(&codex_home);
+}
+
+#[test]
+fn discover_codex_threads_from_home_limits_in_scope_results_per_home() {
+    let codex_home =
+        std::env::temp_dir().join(format!("termal-codex-home-limited-{}", Uuid::new_v4()));
+    fs::create_dir_all(&codex_home).expect("test Codex home should be created");
+    let connection =
+        rusqlite::Connection::open(codex_home.join("state_7.sqlite")).expect("db should open");
+    connection
+        .execute_batch(
+            "create table threads (
+                id text primary key,
+                cwd text not null,
+                title text not null,
+                sandbox_policy text not null,
+                approval_mode text not null,
+                archived integer not null,
+                model text,
+                reasoning_effort text,
+                updated_at integer not null
+            );",
+        )
+        .expect("threads table should be created");
+
+    for index in 0..(MAX_DISCOVERED_CODEX_THREADS_PER_HOME + 25) {
+        connection
+            .execute(
+                "insert into threads (
+                    id, cwd, title, sandbox_policy, approval_mode, archived, model, reasoning_effort, updated_at
+                ) values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                rusqlite::params![
+                    format!("thread-in-scope-{index}"),
+                    "/tmp/termal/subdir",
+                    format!("In-scope thread {index}"),
+                    r#"{"type":"workspace-write"}"#,
+                    "on-request",
+                    0,
+                    "gpt-5-codex",
+                    "medium",
+                    10_000 - index as i64,
+                ],
+            )
+            .expect("thread row should insert");
+    }
+
+    let threads = discover_codex_threads_from_home(&codex_home, &[PathBuf::from("/tmp/termal")])
+        .expect("threads should load");
+    let last_expected_id = format!(
+        "thread-in-scope-{}",
+        MAX_DISCOVERED_CODEX_THREADS_PER_HOME - 1
+    );
+
+    assert_eq!(threads.len(), MAX_DISCOVERED_CODEX_THREADS_PER_HOME);
+    assert_eq!(
+        threads.first().map(|thread| thread.id.as_str()),
+        Some("thread-in-scope-0")
+    );
+    assert_eq!(
+        threads.last().map(|thread| thread.id.as_str()),
+        Some(last_expected_id.as_str()),
+    );
+
+    let _ = fs::remove_dir_all(&codex_home);
+}
+
+#[test]
+fn import_discovered_codex_threads_adds_project_scoped_sessions_without_duplicates() {
+    let mut inner = StateInner::new();
+    let project = inner.create_project(
+        Some("TermAl".to_owned()),
+        "/tmp/termal".to_owned(),
+        default_local_remote_id(),
+    );
+    inner.create_session(
+        Agent::Codex,
+        Some("Codex Live".to_owned()),
+        "/tmp/termal".to_owned(),
+        Some(project.id.clone()),
+        None,
+    );
+
+    let discovered = vec![
+        DiscoveredCodexThread {
+            approval_policy: Some(CodexApprovalPolicy::Never),
+            archived: true,
+            cwd: "/tmp/termal".to_owned(),
+            id: "thread-local".to_owned(),
+            model: Some("gpt-5-codex".to_owned()),
+            reasoning_effort: Some(CodexReasoningEffort::Low),
+            sandbox_mode: Some(CodexSandboxMode::DangerFullAccess),
+            title: "Read bugs".to_owned(),
+        },
+        DiscoveredCodexThread {
+            approval_policy: Some(CodexApprovalPolicy::Never),
+            archived: false,
+            cwd: "/tmp/elsewhere".to_owned(),
+            id: "thread-other".to_owned(),
+            model: Some("gpt-5-codex".to_owned()),
+            reasoning_effort: None,
+            sandbox_mode: Some(CodexSandboxMode::WorkspaceWrite),
+            title: "Ignore me".to_owned(),
+        },
+    ];
+
+    inner.import_discovered_codex_threads("/tmp/termal", discovered.clone());
+    inner.import_discovered_codex_threads("/tmp/termal", discovered);
+
+    let discovered_session = inner
+        .sessions
+        .iter()
+        .find(|record| record.external_session_id.as_deref() == Some("thread-local"))
+        .expect("project-scoped discovered thread should be imported");
+    assert_eq!(discovered_session.session.agent, Agent::Codex);
+    assert_eq!(discovered_session.session.workdir, "/tmp/termal");
+    assert_eq!(
+        discovered_session.session.project_id.as_deref(),
+        Some(project.id.as_str())
+    );
+    assert_eq!(discovered_session.session.model, "gpt-5-codex");
+    assert_eq!(
+        discovered_session.session.codex_thread_state,
+        Some(CodexThreadState::Archived)
+    );
+    assert_eq!(
+        discovered_session.session.preview,
+        "Archived Codex thread ready to reopen."
+    );
+    assert_eq!(
+        discovered_session.session.reasoning_effort,
+        Some(CodexReasoningEffort::Low)
+    );
+    assert_eq!(
+        discovered_session.session.sandbox_mode,
+        Some(CodexSandboxMode::DangerFullAccess)
+    );
+    assert_eq!(
+        discovered_session.session.approval_policy,
+        Some(CodexApprovalPolicy::Never)
+    );
+    assert_eq!(
+        inner
+            .sessions
+            .iter()
+            .filter(|record| record.external_session_id.as_deref() == Some("thread-local"))
+            .count(),
+        1
+    );
+    assert!(
+        inner
+            .sessions
+            .iter()
+            .all(|record| record.external_session_id.as_deref() != Some("thread-other"))
+    );
+}
+
+#[test]
+fn import_discovered_codex_threads_preserves_existing_prompt_settings() {
+    let mut inner = StateInner::new();
+    let project = inner.create_project(
+        Some("TermAl".to_owned()),
+        "/tmp/termal".to_owned(),
+        default_local_remote_id(),
+    );
+    let mut record = inner.create_session(
+        Agent::Codex,
+        Some("Codex Live".to_owned()),
+        "/tmp/termal".to_owned(),
+        Some(project.id.clone()),
+        Some("gpt-5-mini".to_owned()),
+    );
+    record.codex_sandbox_mode = CodexSandboxMode::ReadOnly;
+    record.session.sandbox_mode = Some(CodexSandboxMode::ReadOnly);
+    record.codex_approval_policy = CodexApprovalPolicy::OnFailure;
+    record.session.approval_policy = Some(CodexApprovalPolicy::OnFailure);
+    record.codex_reasoning_effort = CodexReasoningEffort::Minimal;
+    record.session.reasoning_effort = Some(CodexReasoningEffort::Minimal);
+    set_record_external_session_id(&mut record, Some("thread-existing".to_owned()));
+    if let Some(slot) = inner
+        .find_session_index(&record.session.id)
+        .and_then(|index| inner.sessions.get_mut(index))
+    {
+        *slot = record;
+    }
+
+    inner.import_discovered_codex_threads(
+        "/tmp/termal",
+        vec![DiscoveredCodexThread {
+            approval_policy: Some(CodexApprovalPolicy::Never),
+            archived: true,
+            cwd: "/tmp/termal".to_owned(),
+            id: "thread-existing".to_owned(),
+            model: Some("gpt-5-codex".to_owned()),
+            reasoning_effort: Some(CodexReasoningEffort::High),
+            sandbox_mode: Some(CodexSandboxMode::DangerFullAccess),
+            title: "Existing thread".to_owned(),
+        }],
+    );
+
+    let record = inner
+        .sessions
+        .iter()
+        .find(|entry| entry.external_session_id.as_deref() == Some("thread-existing"))
+        .expect("existing discovered thread should still be present");
+    assert_eq!(record.session.model, "gpt-5-mini");
+    assert_eq!(
+        record.session.sandbox_mode,
+        Some(CodexSandboxMode::ReadOnly)
+    );
+    assert_eq!(
+        record.session.approval_policy,
+        Some(CodexApprovalPolicy::OnFailure)
+    );
+    assert_eq!(
+        record.session.reasoning_effort,
+        Some(CodexReasoningEffort::Minimal)
+    );
+    assert_eq!(
+        record.session.codex_thread_state,
+        Some(CodexThreadState::Archived)
+    );
+}
+
+#[tokio::test]
+async fn codex_thread_action_routes_update_session_state() {
+    let state = test_app_state();
+    let session_id = test_session_id(&state, Agent::Codex);
+    state
+        .set_external_session_id(&session_id, "thread-live".to_owned())
+        .unwrap();
+    state
+        .push_message(
+            &session_id,
+            Message::Text {
+                attachments: Vec::new(),
+                id: state.allocate_message_id(),
+                timestamp: stamp_now(),
+                author: Author::Assistant,
+                text: "stale local message".to_owned(),
+                expanded_text: None,
+            },
+        )
+        .unwrap();
+    let (runtime, input_rx, _process) = test_shared_codex_runtime("shared-codex-route-actions");
+    *state
+        .shared_codex_runtime
+        .lock()
+        .expect("shared Codex runtime mutex poisoned") = Some(runtime);
+
+    std::thread::spawn(move || {
+        for expected_method in ["thread/archive", "thread/unarchive", "thread/rollback"] {
+            let command = input_rx
+                .recv_timeout(Duration::from_secs(1))
+                .expect("Codex thread action should arrive");
+            match command {
+                CodexRuntimeCommand::JsonRpcRequest {
+                    method,
+                    params,
+                    response_tx,
+                    ..
+                } => {
+                    assert_eq!(method, expected_method);
+                    assert_eq!(params["threadId"], "thread-live");
+                    if method == "thread/rollback" {
+                        assert_eq!(params["numTurns"], 2);
+                        let _ = response_tx.send(Ok(json!({
+                            "thread": {
+                                "preview": "Rolled back preview",
+                                "turns": [
+                                    {
+                                        "id": "turn-rollback",
+                                        "status": "completed",
+                                        "items": [
+                                            {
+                                                "id": "rollback-user",
+                                                "type": "userMessage",
+                                                "content": [
+                                                    {
+                                                        "type": "text",
+                                                        "text": "Current diff state"
+                                                    }
+                                                ]
+                                            },
+                                            {
+                                                "id": "rollback-agent",
+                                                "type": "agentMessage",
+                                                "text": "Rollback synced."
+                                            }
+                                        ]
+                                    }
+                                ]
+                            }
+                        })));
+                        continue;
+                    }
+                    let _ = response_tx.send(Ok(json!({})));
+                }
+                _ => panic!("expected shared Codex JSON-RPC request"),
+            }
+        }
+    });
+
+    let app = app_router(state);
+    let (archive_status, archive_response): (StatusCode, StateResponse) = request_json(
+        &app,
+        Request::builder()
+            .method("POST")
+            .uri(format!("/api/sessions/{session_id}/codex/thread/archive"))
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(archive_status, StatusCode::OK);
+    let archived_session = archive_response
+        .sessions
+        .iter()
+        .find(|session| session.id == session_id)
+        .expect("updated session should be present");
+    assert_eq!(
+        archived_session.codex_thread_state,
+        Some(CodexThreadState::Archived)
+    );
+
+    let (unarchive_status, unarchive_response): (StatusCode, StateResponse) = request_json(
+        &app,
+        Request::builder()
+            .method("POST")
+            .uri(format!("/api/sessions/{session_id}/codex/thread/unarchive"))
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(unarchive_status, StatusCode::OK);
+    let restored_session = unarchive_response
+        .sessions
+        .iter()
+        .find(|session| session.id == session_id)
+        .expect("updated session should be present");
+    assert_eq!(
+        restored_session.codex_thread_state,
+        Some(CodexThreadState::Active)
+    );
+
+    let (rollback_status, rollback_response): (StatusCode, StateResponse) = request_json(
+        &app,
+        Request::builder()
+            .method("POST")
+            .uri(format!("/api/sessions/{session_id}/codex/thread/rollback"))
+            .header("content-type", "application/json")
+            .body(Body::from(r#"{"numTurns":2}"#))
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(rollback_status, StatusCode::OK);
+    let rollback_session = rollback_response
+        .sessions
+        .iter()
+        .find(|session| session.id == session_id)
+        .expect("updated session should be present");
+    assert!(matches!(
+        rollback_session.messages.first(),
+        Some(Message::Text { author: Author::You, text, .. }) if text == "Current diff state"
+    ));
+    assert!(matches!(
+        rollback_session.messages.get(1),
+        Some(Message::Text { author: Author::Assistant, text, .. }) if text == "Rollback synced."
+    ));
+    assert!(!rollback_session.messages.iter().any(
+        |message| matches!(message, Message::Markdown { title, .. }
+            if title == "Archived Codex thread"
+                || title == "Restored Codex thread"
+                || title == "Rolled back Codex thread")
+    ));
+    assert!(!rollback_session.messages.iter().any(
+        |message| matches!(message, Message::Text { text, .. } if text == "stale local message")
+    ));
+}
+
+#[tokio::test]
+async fn codex_thread_rollback_route_falls_back_when_history_is_unavailable() {
+    let state = test_app_state();
+    let session_id = test_session_id(&state, Agent::Codex);
+    state
+        .set_external_session_id(&session_id, "thread-live".to_owned())
+        .unwrap();
+    state
+        .push_message(
+            &session_id,
+            Message::Text {
+                attachments: Vec::new(),
+                id: state.allocate_message_id(),
+                timestamp: stamp_now(),
+                author: Author::Assistant,
+                text: "local history".to_owned(),
+                expanded_text: None,
+            },
+        )
+        .unwrap();
+    let (runtime, input_rx, _process) =
+        test_shared_codex_runtime("shared-codex-route-rollback-fallback");
+    *state
+        .shared_codex_runtime
+        .lock()
+        .expect("shared Codex runtime mutex poisoned") = Some(runtime);
+
+    std::thread::spawn(move || {
+        let command = input_rx
+            .recv_timeout(Duration::from_secs(1))
+            .expect("Codex rollback command should arrive");
+        match command {
+            CodexRuntimeCommand::JsonRpcRequest {
+                method,
+                params,
+                response_tx,
+                ..
+            } => {
+                assert_eq!(method, "thread/rollback");
+                assert_eq!(params["threadId"], "thread-live");
+                assert_eq!(params["numTurns"], 1);
+                let _ = response_tx.send(Ok(json!({
+                    "thread": {
+                        "preview": "Fallback preview"
+                    }
+                })));
+            }
+            _ => panic!("expected shared Codex JSON-RPC request"),
+        }
+    });
+
+    let app = app_router(state);
+    let (status, response): (StatusCode, StateResponse) = request_json(
+        &app,
+        Request::builder()
+            .method("POST")
+            .uri(format!("/api/sessions/{session_id}/codex/thread/rollback"))
+            .header("content-type", "application/json")
+            .body(Body::from(r#"{"numTurns":1}"#))
+            .unwrap(),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::OK);
+    let session = response
+        .sessions
+        .iter()
+        .find(|session| session.id == session_id)
+        .expect("updated session should be present");
+    assert!(matches!(
+        session.messages.first(),
+        Some(Message::Text { text, .. }) if text == "local history"
+    ));
+    assert!(matches!(
+        session.messages.last(),
+        Some(Message::Markdown { title, markdown, .. })
+            if title == "Rolled back Codex thread"
+                && markdown.contains("Codex did not return the updated thread history")
+    ));
+}
+
+#[tokio::test]
+async fn codex_thread_fork_route_returns_created_response() {
+    let state = test_app_state();
+    let created = state
+        .create_session(CreateSessionRequest {
+            agent: Some(Agent::Codex),
+            name: Some("Codex Route Review".to_owned()),
+            workdir: Some("/tmp".to_owned()),
+            project_id: None,
+            model: Some("gpt-5.4".to_owned()),
+            approval_policy: Some(CodexApprovalPolicy::Never),
+            reasoning_effort: Some(CodexReasoningEffort::Medium),
+            sandbox_mode: Some(CodexSandboxMode::WorkspaceWrite),
+            cursor_mode: None,
+            claude_approval_mode: None,
+            claude_effort: None,
+            gemini_approval_mode: None,
+        })
+        .unwrap();
+    state
+        .set_external_session_id(&created.session_id, "thread-origin".to_owned())
+        .unwrap();
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(&created.session_id)
+            .expect("source Codex session should exist");
+        inner.sessions[index].session.model_options =
+            vec![SessionModelOption::plain("gpt-5.4", "gpt-5.4")];
+    }
+
+    let (runtime, input_rx, _process) = test_shared_codex_runtime("shared-codex-route-fork");
+    *state
+        .shared_codex_runtime
+        .lock()
+        .expect("shared Codex runtime mutex poisoned") = Some(runtime);
+
+    std::thread::spawn(move || {
+        let command = input_rx
+            .recv_timeout(Duration::from_secs(1))
+            .expect("Codex fork command should arrive");
+        match command {
+            CodexRuntimeCommand::JsonRpcRequest {
+                method,
+                params,
+                response_tx,
+                ..
+            } => {
+                assert_eq!(method, "thread/fork");
+                assert_eq!(params["threadId"], "thread-origin");
+                let _ = response_tx.send(Ok(json!({
+                    "thread": {
+                        "id": "thread-forked",
+                        "name": "Forked Review",
+                        "preview": "Forked preview",
+                        "turns": [
+                            {
+                                "id": "turn-forked",
+                                "status": "completed",
+                                "items": [
+                                    {
+                                        "id": "fork-user",
+                                        "type": "userMessage",
+                                        "content": [
+                                            {
+                                                "type": "text",
+                                                "text": "Fork context"
+                                            }
+                                        ]
+                                    },
+                                    {
+                                        "id": "fork-agent",
+                                        "type": "agentMessage",
+                                        "text": "Ready to continue."
+                                    }
+                                ]
+                            }
+                        ]
+                    },
+                    "model": "gpt-5.5",
+                    "approvalPolicy": "on-request",
+                    "sandbox": {
+                        "type": "workspaceWrite"
+                    },
+                    "reasoningEffort": "high",
+                    "cwd": "/tmp/forked",
+                })));
+            }
+            _ => panic!("expected shared Codex JSON-RPC request"),
+        }
+    });
+
+    let app = app_router(state);
+    let (status, response): (StatusCode, CreateSessionResponse) = request_json(
+        &app,
+        Request::builder()
+            .method("POST")
+            .uri(format!(
+                "/api/sessions/{}/codex/thread/fork",
+                created.session_id
+            ))
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::CREATED);
+    let forked_session = response
+        .state
+        .sessions
+        .iter()
+        .find(|session| session.id == response.session_id)
+        .expect("forked session should be present");
+    assert_eq!(
+        forked_session.codex_thread_state,
+        Some(CodexThreadState::Active)
+    );
+    assert_eq!(
+        forked_session.external_session_id.as_deref(),
+        Some("thread-forked")
+    );
+    assert!(matches!(
+        forked_session.messages.first(),
+        Some(Message::Text { author: Author::You, text, .. }) if text == "Fork context"
+    ));
+    assert!(matches!(
+        forked_session.messages.get(1),
+        Some(Message::Text { author: Author::Assistant, text, .. }) if text == "Ready to continue."
+    ));
 }
 
 #[test]
@@ -3942,6 +5618,374 @@ fn codex_app_server_file_change_approval_request_records_pending_approval() {
                 && matches!(approval.kind, CodexApprovalKind::FileChange)
                 && approval.request_id == json!("req-2")
     ));
+}
+
+#[test]
+fn codex_app_server_permissions_approval_request_records_pending_approval() {
+    let mut recorder = TestRecorder::default();
+    let requested_permissions = json!({
+        "fileSystem": {
+            "read": ["/repo/docs"],
+            "write": ["/repo/src"]
+        },
+        "network": {
+            "enabled": true
+        },
+        "macos": {
+            "preferences": "system",
+            "automations": {
+                "bundle_ids": ["com.apple.Terminal"]
+            }
+        }
+    });
+    let message = json!({
+        "id": "req-3",
+        "params": {
+            "permissions": requested_permissions,
+            "reason": "Need access to update build scripts."
+        }
+    });
+
+    handle_codex_app_server_request("item/permissions/requestApproval", &message, &mut recorder)
+        .unwrap();
+
+    assert_eq!(recorder.codex_approvals.len(), 1);
+    let (title, command, detail, approval) = recorder
+        .codex_approvals
+        .first()
+        .expect("Codex permissions approval should be recorded");
+    assert_eq!(title, "Codex needs approval");
+    assert_eq!(command, "Grant additional permissions");
+    assert_eq!(
+        detail,
+        "Codex requested approval to grant additional permissions: read access to `/repo/docs`, write access to `/repo/src`, network access, macOS preferences access (system), macOS automation access for `com.apple.Terminal`. Reason: Need access to update build scripts."
+    );
+    match &approval.kind {
+        CodexApprovalKind::Permissions {
+            requested_permissions,
+        } => {
+            assert_eq!(
+                requested_permissions,
+                &json!({
+                    "fileSystem": {
+                        "read": ["/repo/docs"],
+                        "write": ["/repo/src"]
+                    },
+                    "network": {
+                        "enabled": true
+                    },
+                    "macos": {
+                        "preferences": "system",
+                        "automations": {
+                            "bundle_ids": ["com.apple.Terminal"]
+                        }
+                    }
+                })
+            );
+        }
+        _ => panic!("expected Codex permissions approval"),
+    }
+    assert_eq!(approval.request_id, json!("req-3"));
+}
+
+#[test]
+fn codex_app_server_user_input_request_records_pending_request() {
+    let mut recorder = TestRecorder::default();
+    let message = json!({
+        "id": "req-input-1",
+        "params": {
+            "questions": [
+                {
+                    "header": "Environment",
+                    "id": "environment",
+                    "question": "Which environment should I use?",
+                    "options": [
+                        {
+                            "label": "Production",
+                            "description": "Use the production cluster."
+                        },
+                        {
+                            "label": "Staging",
+                            "description": "Use the staging environment."
+                        }
+                    ]
+                },
+                {
+                    "header": "API token",
+                    "id": "apiToken",
+                    "question": "Paste the temporary token.",
+                    "isSecret": true
+                }
+            ]
+        }
+    });
+
+    handle_codex_app_server_request("item/tool/requestUserInput", &message, &mut recorder).unwrap();
+
+    assert_eq!(recorder.codex_user_input_requests.len(), 1);
+    let (title, detail, questions, request) = recorder
+        .codex_user_input_requests
+        .first()
+        .expect("Codex user input request should be recorded");
+    assert_eq!(title, "Codex needs input");
+    assert_eq!(detail, "Codex requested additional input for 2 questions.");
+    assert_eq!(questions.len(), 2);
+    assert_eq!(questions[0].header, "Environment");
+    assert_eq!(questions[1].id, "apiToken");
+    assert!(questions[1].is_secret);
+    assert_eq!(request.request_id, json!("req-input-1"));
+    assert_eq!(request.questions, questions.clone());
+}
+
+#[test]
+fn codex_app_server_mcp_elicitation_request_records_pending_request() {
+    let mut recorder = TestRecorder::default();
+    let message = json!({
+        "id": "req-elicit-1",
+        "params": {
+            "threadId": "thread-1",
+            "turnId": "turn-1",
+            "serverName": "deployment-helper",
+            "mode": "form",
+            "message": "Confirm the deployment settings.",
+            "requestedSchema": {
+                "type": "object",
+                "properties": {
+                    "environment": {
+                        "type": "string",
+                        "title": "Environment",
+                        "oneOf": [
+                            { "const": "production", "title": "Production" },
+                            { "const": "staging", "title": "Staging" }
+                        ]
+                    },
+                    "replicas": {
+                        "type": "integer",
+                        "title": "Replicas"
+                    }
+                },
+                "required": ["environment", "replicas"]
+            }
+        }
+    });
+
+    handle_codex_app_server_request("mcpServer/elicitation/request", &message, &mut recorder)
+        .unwrap();
+
+    assert_eq!(recorder.codex_mcp_elicitation_requests.len(), 1);
+    let (title, detail, request, pending) = recorder
+        .codex_mcp_elicitation_requests
+        .first()
+        .expect("MCP elicitation request should be recorded");
+    assert_eq!(title, "Codex needs MCP input");
+    assert_eq!(
+        detail,
+        "MCP server deployment-helper requested additional structured input. Confirm the deployment settings."
+    );
+    assert_eq!(request.server_name, "deployment-helper");
+    assert_eq!(request.thread_id, "thread-1");
+    assert_eq!(request.turn_id.as_deref(), Some("turn-1"));
+    assert!(matches!(
+        request.mode,
+        McpElicitationRequestMode::Form { .. }
+    ));
+    assert_eq!(pending.request_id, json!("req-elicit-1"));
+    assert_eq!(pending.request, *request);
+}
+
+#[test]
+fn codex_app_server_generic_request_records_pending_request() {
+    let mut recorder = TestRecorder::default();
+    let message = json!({
+        "id": "req-tool-1",
+        "params": {
+            "toolName": "search_workspace",
+            "arguments": {
+                "pattern": "Codex"
+            }
+        }
+    });
+
+    handle_codex_app_server_request("item/tool/call", &message, &mut recorder).unwrap();
+
+    assert_eq!(recorder.codex_app_requests.len(), 1);
+    let (title, detail, method, params, pending) = recorder
+        .codex_app_requests
+        .first()
+        .expect("generic Codex app request should be recorded");
+    assert_eq!(title, "Codex needs a tool result");
+    assert_eq!(
+        detail,
+        "Codex requested a result for `search_workspace`. Review the request payload and submit the JSON result to continue."
+    );
+    assert_eq!(method, "item/tool/call");
+    assert_eq!(
+        params,
+        &json!({
+            "toolName": "search_workspace",
+            "arguments": {
+                "pattern": "Codex"
+            }
+        })
+    );
+    assert_eq!(pending.request_id, json!("req-tool-1"));
+}
+
+#[test]
+fn repl_codex_task_complete_event_buffers_subagent_result_until_final_message() {
+    let mut recorder = TestRecorder::default();
+    let mut repl_state = ReplCodexSessionState::default();
+    let turn_started = json!({
+        "method": "turn/started",
+        "params": {
+            "threadId": "conversation-123",
+            "turn": {
+                "id": "turn-sub-1"
+            }
+        }
+    });
+    let task_complete = json!({
+        "method": "codex/event/task_complete",
+        "params": {
+            "conversationId": "conversation-123",
+            "msg": {
+                "last_agent_message": "Reviewer found a real bug.",
+                "turn_id": "turn-sub-1",
+                "type": "task_complete"
+            }
+        }
+    });
+    let final_message = json!({
+        "method": "codex/event/agent_message",
+        "params": {
+            "conversationId": "conversation-123",
+            "id": "turn-sub-1",
+            "msg": {
+                "message": "Final REPL Codex answer.",
+                "phase": "final_answer",
+                "type": "agent_message"
+            }
+        }
+    });
+
+    handle_repl_codex_app_server_notification(
+        "turn/started",
+        &turn_started,
+        &mut repl_state,
+        &mut recorder,
+    )
+    .unwrap();
+    handle_repl_codex_app_server_notification(
+        "codex/event/task_complete",
+        &task_complete,
+        &mut repl_state,
+        &mut recorder,
+    )
+    .unwrap();
+
+    assert!(recorder.subagent_results.is_empty());
+    assert!(recorder.texts.is_empty());
+
+    handle_repl_codex_app_server_notification(
+        "codex/event/agent_message",
+        &final_message,
+        &mut repl_state,
+        &mut recorder,
+    )
+    .unwrap();
+
+    assert_eq!(
+        recorder.subagent_results,
+        vec![(
+            "Subagent completed".to_owned(),
+            "Reviewer found a real bug.".to_owned(),
+        )]
+    );
+    assert_eq!(
+        recorder.texts,
+        vec![
+            "Subagent completed\nReviewer found a real bug.".to_owned(),
+            "Final REPL Codex answer.".to_owned(),
+        ]
+    );
+}
+
+#[test]
+fn repl_codex_streamed_agent_message_skips_duplicate_completed_text() {
+    let mut recorder = TestRecorder::default();
+    let mut repl_state = ReplCodexSessionState::default();
+    let turn_started = json!({
+        "method": "turn/started",
+        "params": {
+            "threadId": "conversation-123",
+            "turn": {
+                "id": "turn-stream-1"
+            }
+        }
+    });
+    let delta = json!({
+        "method": "item/agentMessage/delta",
+        "params": {
+            "threadId": "conversation-123",
+            "itemId": "item-1",
+            "delta": "Hello from REPL."
+        }
+    });
+    let completed = json!({
+        "method": "item/completed",
+        "params": {
+            "threadId": "conversation-123",
+            "item": {
+                "id": "item-1",
+                "type": "agentMessage",
+                "text": "Hello from REPL."
+            }
+        }
+    });
+    let turn_completed = json!({
+        "method": "turn/completed",
+        "params": {
+            "threadId": "conversation-123",
+            "turn": {
+                "id": "turn-stream-1",
+                "error": null
+            }
+        }
+    });
+
+    handle_repl_codex_app_server_notification(
+        "turn/started",
+        &turn_started,
+        &mut repl_state,
+        &mut recorder,
+    )
+    .unwrap();
+    handle_repl_codex_app_server_notification(
+        "item/agentMessage/delta",
+        &delta,
+        &mut repl_state,
+        &mut recorder,
+    )
+    .unwrap();
+    handle_repl_codex_app_server_notification(
+        "item/completed",
+        &completed,
+        &mut repl_state,
+        &mut recorder,
+    )
+    .unwrap();
+    handle_repl_codex_app_server_notification(
+        "turn/completed",
+        &turn_completed,
+        &mut repl_state,
+        &mut recorder,
+    )
+    .unwrap();
+
+    assert_eq!(recorder.text_deltas, vec!["Hello from REPL.".to_owned()]);
+    assert!(recorder.texts.is_empty());
+    assert!(repl_state.turn_completed);
+    assert!(repl_state.current_turn_id.is_none());
 }
 
 #[test]
@@ -6269,7 +8313,7 @@ fn resolving_one_of_multiple_pending_codex_approvals_keeps_session_waiting() {
         .unwrap();
 
     match input_rx.recv_timeout(Duration::from_secs(1)).unwrap() {
-        CodexRuntimeCommand::ApprovalResponse { response } => {
+        CodexRuntimeCommand::JsonRpcResponse { response } => {
             assert_eq!(response.request_id, json!("req-1"));
             assert_eq!(response.result, json!({ "decision": "accept" }));
         }
@@ -6303,6 +8347,674 @@ fn resolving_one_of_multiple_pending_codex_approvals_keeps_session_waiting() {
         record.session.messages.get(1),
         Some(Message::Approval { decision, .. }) if *decision == ApprovalDecision::Pending
     ));
+}
+
+#[test]
+fn codex_permissions_approval_decisions_map_to_expected_runtime_payloads() {
+    let state = test_app_state();
+    let session_id = test_session_id(&state, Agent::Codex);
+    let (runtime, input_rx) = test_codex_runtime_handle("codex-permissions-approval");
+
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner.find_session_index(&session_id).unwrap();
+        inner.sessions[index].runtime = SessionRuntime::Codex(runtime);
+    }
+
+    let requested_permissions = json!({
+        "fileSystem": {
+            "read": ["/repo/docs"]
+        },
+        "network": {
+            "enabled": true
+        }
+    });
+
+    let first_message_id = state.allocate_message_id();
+    state
+        .push_message(
+            &session_id,
+            Message::Approval {
+                id: first_message_id.clone(),
+                timestamp: stamp_now(),
+                author: Author::Assistant,
+                title: "Grant additional permissions".to_owned(),
+                command: "Grant additional permissions".to_owned(),
+                command_language: Some(shell_language().to_owned()),
+                detail: "Approval required.".to_owned(),
+                decision: ApprovalDecision::Pending,
+            },
+        )
+        .unwrap();
+    state
+        .register_codex_pending_approval(
+            &session_id,
+            first_message_id.clone(),
+            CodexPendingApproval {
+                kind: CodexApprovalKind::Permissions {
+                    requested_permissions: requested_permissions.clone(),
+                },
+                request_id: json!("req-permissions-session"),
+            },
+        )
+        .unwrap();
+
+    state
+        .update_approval(
+            &session_id,
+            &first_message_id,
+            ApprovalDecision::AcceptedForSession,
+        )
+        .unwrap();
+
+    match input_rx.recv_timeout(Duration::from_secs(1)).unwrap() {
+        CodexRuntimeCommand::JsonRpcResponse { response } => {
+            assert_eq!(response.request_id, json!("req-permissions-session"));
+            assert_eq!(
+                response.result,
+                json!({
+                    "permissions": requested_permissions,
+                    "scope": "session"
+                })
+            );
+        }
+        _ => panic!("expected Codex approval response"),
+    }
+
+    let second_message_id = state.allocate_message_id();
+    state
+        .push_message(
+            &session_id,
+            Message::Approval {
+                id: second_message_id.clone(),
+                timestamp: stamp_now(),
+                author: Author::Assistant,
+                title: "Grant additional permissions".to_owned(),
+                command: "Grant additional permissions".to_owned(),
+                command_language: Some(shell_language().to_owned()),
+                detail: "Approval required.".to_owned(),
+                decision: ApprovalDecision::Pending,
+            },
+        )
+        .unwrap();
+    state
+        .register_codex_pending_approval(
+            &session_id,
+            second_message_id.clone(),
+            CodexPendingApproval {
+                kind: CodexApprovalKind::Permissions {
+                    requested_permissions: json!({
+                        "fileSystem": {
+                            "write": ["/repo/src"]
+                        }
+                    }),
+                },
+                request_id: json!("req-permissions-rejected"),
+            },
+        )
+        .unwrap();
+
+    state
+        .update_approval(&session_id, &second_message_id, ApprovalDecision::Rejected)
+        .unwrap();
+
+    match input_rx.recv_timeout(Duration::from_secs(1)).unwrap() {
+        CodexRuntimeCommand::JsonRpcResponse { response } => {
+            assert_eq!(response.request_id, json!("req-permissions-rejected"));
+            assert_eq!(
+                response.result,
+                json!({
+                    "permissions": {},
+                    "scope": "turn"
+                })
+            );
+        }
+        _ => panic!("expected Codex approval response"),
+    }
+}
+
+#[tokio::test]
+async fn codex_user_input_route_submits_answers_and_redacts_secret_values() {
+    let state = test_app_state();
+    let session_id = test_session_id(&state, Agent::Codex);
+    let (runtime, input_rx) = test_codex_runtime_handle("codex-user-input");
+    let questions = vec![
+        UserInputQuestion {
+            header: "Environment".to_owned(),
+            id: "environment".to_owned(),
+            is_other: false,
+            is_secret: false,
+            options: Some(vec![
+                UserInputQuestionOption {
+                    label: "Production".to_owned(),
+                    description: "Use the production cluster.".to_owned(),
+                },
+                UserInputQuestionOption {
+                    label: "Staging".to_owned(),
+                    description: "Use the staging cluster.".to_owned(),
+                },
+            ]),
+            question: "Which environment should I use?".to_owned(),
+        },
+        UserInputQuestion {
+            header: "API token".to_owned(),
+            id: "apiToken".to_owned(),
+            is_other: false,
+            is_secret: true,
+            options: None,
+            question: "Paste the temporary token.".to_owned(),
+        },
+    ];
+
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner.find_session_index(&session_id).unwrap();
+        inner.sessions[index].runtime = SessionRuntime::Codex(runtime);
+    }
+
+    let message_id = state.allocate_message_id();
+    state
+        .push_message(
+            &session_id,
+            Message::UserInputRequest {
+                id: message_id.clone(),
+                timestamp: stamp_now(),
+                author: Author::Assistant,
+                title: "Codex needs input".to_owned(),
+                detail: "Codex requested additional input.".to_owned(),
+                questions: questions.clone(),
+                state: InteractionRequestState::Pending,
+                submitted_answers: None,
+            },
+        )
+        .unwrap();
+    state
+        .register_codex_pending_user_input(
+            &session_id,
+            message_id.clone(),
+            CodexPendingUserInput {
+                questions: questions.clone(),
+                request_id: json!("req-input-1"),
+            },
+        )
+        .unwrap();
+
+    let app = app_router(state);
+    let (status, response): (StatusCode, StateResponse) = request_json(
+        &app,
+        Request::builder()
+            .method("POST")
+            .uri(format!(
+                "/api/sessions/{session_id}/user-input/{message_id}"
+            ))
+            .header("content-type", "application/json")
+            .body(Body::from(
+                r#"{
+                    "answers": {
+                        "environment": ["Production"],
+                        "apiToken": ["secret-123"]
+                    }
+                }"#,
+            ))
+            .unwrap(),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::OK);
+
+    match input_rx.recv_timeout(Duration::from_secs(1)).unwrap() {
+        CodexRuntimeCommand::JsonRpcResponse { response } => {
+            assert_eq!(response.request_id, json!("req-input-1"));
+            assert_eq!(
+                response.result,
+                json!({
+                    "answers": {
+                        "environment": {
+                            "answers": ["Production"]
+                        },
+                        "apiToken": {
+                            "answers": ["secret-123"]
+                        }
+                    }
+                })
+            );
+        }
+        _ => panic!("expected Codex JSON-RPC response"),
+    }
+
+    let session = response
+        .sessions
+        .iter()
+        .find(|session| session.id == session_id)
+        .expect("updated session should be present");
+    assert_eq!(session.status, SessionStatus::Active);
+    assert_eq!(session.preview, "Input submitted. Codex is continuing…");
+    assert!(matches!(
+        session.messages.last(),
+        Some(Message::UserInputRequest {
+            state,
+            submitted_answers: Some(submitted_answers),
+            ..
+        }) if *state == InteractionRequestState::Submitted
+            && submitted_answers.get("environment") == Some(&vec!["Production".to_owned()])
+            && submitted_answers.get("apiToken") == Some(&vec!["[secret provided]".to_owned()])
+    ));
+}
+
+#[tokio::test]
+async fn codex_mcp_elicitation_route_submits_structured_content() {
+    let state = test_app_state();
+    let session_id = test_session_id(&state, Agent::Codex);
+    let (runtime, input_rx) = test_codex_runtime_handle("runtime-mcp-elicitation");
+    let request = McpElicitationRequestPayload {
+        thread_id: "thread-1".to_owned(),
+        turn_id: Some("turn-1".to_owned()),
+        server_name: "deployment-helper".to_owned(),
+        mode: McpElicitationRequestMode::Form {
+            meta: None,
+            message: "Confirm the deployment settings.".to_owned(),
+            requested_schema: json!({
+                "type": "object",
+                "properties": {
+                    "environment": {
+                        "type": "string",
+                        "title": "Environment",
+                        "oneOf": [
+                            { "const": "production", "title": "Production" },
+                            { "const": "staging", "title": "Staging" }
+                        ]
+                    },
+                    "replicas": {
+                        "type": "integer",
+                        "title": "Replicas"
+                    },
+                    "notify": {
+                        "type": "boolean",
+                        "title": "Notify"
+                    }
+                },
+                "required": ["environment", "replicas"]
+            }),
+        },
+    };
+
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner.find_session_index(&session_id).unwrap();
+        inner.sessions[index].runtime = SessionRuntime::Codex(runtime);
+    }
+
+    let message_id = state.allocate_message_id();
+    state
+        .push_message(
+            &session_id,
+            Message::McpElicitationRequest {
+                id: message_id.clone(),
+                timestamp: stamp_now(),
+                author: Author::Assistant,
+                title: "Codex needs MCP input".to_owned(),
+                detail: "MCP server deployment-helper requested additional structured input."
+                    .to_owned(),
+                request: request.clone(),
+                state: InteractionRequestState::Pending,
+                submitted_action: None,
+                submitted_content: None,
+            },
+        )
+        .unwrap();
+    state
+        .register_codex_pending_mcp_elicitation(
+            &session_id,
+            message_id.clone(),
+            CodexPendingMcpElicitation {
+                request: request.clone(),
+                request_id: json!("req-elicit-1"),
+            },
+        )
+        .unwrap();
+
+    let app = app_router(state);
+    let (status, response): (StatusCode, StateResponse) = request_json(
+        &app,
+        Request::builder()
+            .method("POST")
+            .uri(format!(
+                "/api/sessions/{session_id}/mcp-elicitation/{message_id}"
+            ))
+            .header("content-type", "application/json")
+            .body(Body::from(
+                r#"{
+                    "action": "accept",
+                    "content": {
+                        "environment": "production",
+                        "replicas": 3,
+                        "notify": true
+                    }
+                }"#,
+            ))
+            .unwrap(),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::OK);
+
+    match input_rx.recv_timeout(Duration::from_secs(1)).unwrap() {
+        CodexRuntimeCommand::JsonRpcResponse { response } => {
+            assert_eq!(response.request_id, json!("req-elicit-1"));
+            assert_eq!(
+                response.result,
+                json!({
+                    "action": "accept",
+                    "content": {
+                        "environment": "production",
+                        "replicas": 3,
+                        "notify": true
+                    }
+                })
+            );
+        }
+        _ => panic!("expected Codex JSON-RPC response"),
+    }
+
+    let session = response
+        .sessions
+        .iter()
+        .find(|session| session.id == session_id)
+        .expect("updated session should be present");
+    assert_eq!(session.status, SessionStatus::Active);
+    assert_eq!(session.preview, "MCP input submitted. Codex is continuing…");
+    assert!(matches!(
+        session.messages.last(),
+        Some(Message::McpElicitationRequest {
+            state,
+            submitted_action: Some(McpElicitationAction::Accept),
+            submitted_content: Some(submitted_content),
+            ..
+        }) if *state == InteractionRequestState::Submitted
+            && submitted_content == &json!({
+                "environment": "production",
+                "replicas": 3,
+                "notify": true
+            })
+    ));
+}
+
+#[tokio::test]
+async fn codex_mcp_elicitation_route_rejects_out_of_range_numbers() {
+    let state = test_app_state();
+    let session_id = test_session_id(&state, Agent::Codex);
+    let (runtime, input_rx) = test_codex_runtime_handle("runtime-mcp-elicitation-range");
+    let request = McpElicitationRequestPayload {
+        thread_id: "thread-1".to_owned(),
+        turn_id: Some("turn-1".to_owned()),
+        server_name: "deployment-helper".to_owned(),
+        mode: McpElicitationRequestMode::Form {
+            meta: None,
+            message: "Confirm the deployment settings.".to_owned(),
+            requested_schema: json!({
+                "type": "object",
+                "properties": {
+                    "replicas": {
+                        "type": "integer",
+                        "title": "Replicas",
+                        "minimum": 2,
+                        "maximum": 5
+                    }
+                },
+                "required": ["replicas"]
+            }),
+        },
+    };
+
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner.find_session_index(&session_id).unwrap();
+        inner.sessions[index].runtime = SessionRuntime::Codex(runtime);
+    }
+
+    let message_id = state.allocate_message_id();
+    state
+        .push_message(
+            &session_id,
+            Message::McpElicitationRequest {
+                id: message_id.clone(),
+                timestamp: stamp_now(),
+                author: Author::Assistant,
+                title: "Codex needs MCP input".to_owned(),
+                detail: "MCP server deployment-helper requested additional structured input."
+                    .to_owned(),
+                request: request.clone(),
+                state: InteractionRequestState::Pending,
+                submitted_action: None,
+                submitted_content: None,
+            },
+        )
+        .unwrap();
+    state
+        .register_codex_pending_mcp_elicitation(
+            &session_id,
+            message_id.clone(),
+            CodexPendingMcpElicitation {
+                request,
+                request_id: json!("req-elicit-range"),
+            },
+        )
+        .unwrap();
+
+    let app = app_router(state);
+    let (status, response): (StatusCode, ErrorResponse) = request_json(
+        &app,
+        Request::builder()
+            .method("POST")
+            .uri(format!(
+                "/api/sessions/{session_id}/mcp-elicitation/{message_id}"
+            ))
+            .header("content-type", "application/json")
+            .body(Body::from(
+                r#"{
+                    "action": "accept",
+                    "content": {
+                        "replicas": 1
+                    }
+                }"#,
+            ))
+            .unwrap(),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(response.error, "field `replicas` must be at least 2");
+    assert!(input_rx.recv_timeout(Duration::from_millis(100)).is_err());
+}
+
+#[tokio::test]
+async fn codex_generic_app_request_route_submits_json_result() {
+    let state = test_app_state();
+    let session_id = test_session_id(&state, Agent::Codex);
+    let (runtime, input_rx) = test_codex_runtime_handle("runtime-generic-request");
+
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner.find_session_index(&session_id).unwrap();
+        inner.sessions[index].runtime = SessionRuntime::Codex(runtime);
+    }
+
+    let message_id = state.allocate_message_id();
+    let params = json!({
+        "toolName": "search_workspace",
+        "arguments": {
+            "pattern": "Codex"
+        }
+    });
+    state
+        .push_message(
+            &session_id,
+            Message::CodexAppRequest {
+                id: message_id.clone(),
+                timestamp: stamp_now(),
+                author: Author::Assistant,
+                title: "Codex needs a tool result".to_owned(),
+                detail: "Codex requested a result for `search_workspace`.".to_owned(),
+                method: "item/tool/call".to_owned(),
+                params: params.clone(),
+                state: InteractionRequestState::Pending,
+                submitted_result: None,
+            },
+        )
+        .unwrap();
+    state
+        .register_codex_pending_app_request(
+            &session_id,
+            message_id.clone(),
+            CodexPendingAppRequest {
+                request_id: json!("req-tool-1"),
+            },
+        )
+        .unwrap();
+
+    let app = app_router(state);
+    let (status, response): (StatusCode, StateResponse) = request_json(
+        &app,
+        Request::builder()
+            .method("POST")
+            .uri(format!(
+                "/api/sessions/{session_id}/codex/requests/{message_id}"
+            ))
+            .header("content-type", "application/json")
+            .body(Body::from(
+                r#"{
+                    "result": {
+                        "matches": ["docs/bugs.md", "src/runtime.rs"]
+                    }
+                }"#,
+            ))
+            .unwrap(),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::OK);
+
+    match input_rx.recv_timeout(Duration::from_secs(1)).unwrap() {
+        CodexRuntimeCommand::JsonRpcResponse { response } => {
+            assert_eq!(response.request_id, json!("req-tool-1"));
+            assert_eq!(
+                response.result,
+                json!({
+                    "matches": ["docs/bugs.md", "src/runtime.rs"]
+                })
+            );
+        }
+        _ => panic!("expected Codex JSON-RPC response"),
+    }
+
+    let session = response
+        .sessions
+        .iter()
+        .find(|session| session.id == session_id)
+        .expect("updated session should be present");
+    assert_eq!(session.status, SessionStatus::Active);
+    assert_eq!(
+        session.preview,
+        "Codex response submitted. Codex is continuing…"
+    );
+    assert!(matches!(
+        session.messages.last(),
+        Some(Message::CodexAppRequest {
+            state,
+            submitted_result: Some(submitted_result),
+            ..
+        }) if *state == InteractionRequestState::Submitted
+            && submitted_result == &json!({
+                "matches": ["docs/bugs.md", "src/runtime.rs"]
+            })
+    ));
+}
+
+#[test]
+fn validate_codex_app_request_result_rejects_excessive_depth() {
+    let mut result = json!("leaf");
+    for depth in 0..=CODEX_APP_REQUEST_RESULT_MAX_DEPTH {
+        result = json!({
+            format!("level-{depth}"): result
+        });
+    }
+
+    let error = validate_codex_app_request_result(result)
+        .expect_err("deep generic app request payload should be rejected");
+    assert_eq!(error.status, StatusCode::BAD_REQUEST);
+    assert!(error.message.contains("levels deep"));
+}
+
+#[tokio::test]
+async fn codex_generic_app_request_route_rejects_oversized_json_result() {
+    let state = test_app_state();
+    let session_id = test_session_id(&state, Agent::Codex);
+    let (runtime, input_rx) = test_codex_runtime_handle("runtime-generic-request-limit");
+
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner.find_session_index(&session_id).unwrap();
+        inner.sessions[index].runtime = SessionRuntime::Codex(runtime);
+    }
+
+    let message_id = state.allocate_message_id();
+    state
+        .push_message(
+            &session_id,
+            Message::CodexAppRequest {
+                id: message_id.clone(),
+                timestamp: stamp_now(),
+                author: Author::Assistant,
+                title: "Codex needs a tool result".to_owned(),
+                detail: "Codex requested a result for `search_workspace`.".to_owned(),
+                method: "item/tool/call".to_owned(),
+                params: json!({
+                    "toolName": "search_workspace",
+                    "arguments": {
+                        "pattern": "Codex"
+                    }
+                }),
+                state: InteractionRequestState::Pending,
+                submitted_result: None,
+            },
+        )
+        .unwrap();
+    state
+        .register_codex_pending_app_request(
+            &session_id,
+            message_id.clone(),
+            CodexPendingAppRequest {
+                request_id: json!("req-tool-limit"),
+            },
+        )
+        .unwrap();
+
+    let oversized = "x".repeat(CODEX_APP_REQUEST_RESULT_MAX_BYTES + 1);
+    let body = json!({
+        "result": {
+            "blob": oversized
+        }
+    });
+    let app = app_router(state);
+    let (status, response): (StatusCode, ErrorResponse) = request_json(
+        &app,
+        Request::builder()
+            .method("POST")
+            .uri(format!(
+                "/api/sessions/{session_id}/codex/requests/{message_id}"
+            ))
+            .header("content-type", "application/json")
+            .body(Body::from(body.to_string()))
+            .unwrap(),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(
+        response.error,
+        "Codex app request result must be at most 64 KB"
+    );
+    assert!(input_rx.recv_timeout(Duration::from_millis(100)).is_err());
 }
 
 #[test]

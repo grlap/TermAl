@@ -112,13 +112,33 @@ All routes are under `/api`. The backend serves JSON; the frontend proxies throu
 | GET | `/api/health` | Health check |
 | GET | `/api/state` | Full state snapshot |
 | GET | `/api/events` | SSE stream (state + delta events) |
+| POST | `/api/settings` | Update app-wide preferences/settings |
+| GET | `/api/instructions/search` | Search instruction files for a session/workdir |
+| GET | `/api/reviews/{changeSetId}` | Read a persisted diff review document |
+| PUT | `/api/reviews/{changeSetId}` | Save a persisted diff review document |
+| GET | `/api/reviews/{changeSetId}/summary` | Read review thread summary counts |
+| POST | `/api/git/diff` | Build a structured git diff preview |
+| POST | `/api/git/file` | Apply a file-level git action from the status view |
+| POST | `/api/git/commit` | Create a git commit from the staged changes |
+| POST | `/api/projects` | Create project → `CreateProjectResponse` |
+| POST | `/api/projects/pick` | Pick a local project root |
 | POST | `/api/sessions` | Create session → `CreateSessionResponse` |
 | POST | `/api/sessions/{id}/settings` | Update session config → `StateResponse` |
+| POST | `/api/sessions/{id}/model-options/refresh` | Refresh live model list/options |
+| POST | `/api/sessions/{id}/codex/thread/fork` | Fork the live Codex thread into a new session |
+| POST | `/api/sessions/{id}/codex/thread/archive` | Archive the live Codex thread |
+| POST | `/api/sessions/{id}/codex/thread/unarchive` | Restore an archived Codex thread |
+| POST | `/api/sessions/{id}/codex/thread/compact` | Request Codex thread compaction |
+| POST | `/api/sessions/{id}/codex/thread/rollback` | Roll back the live Codex thread |
+| GET | `/api/sessions/{id}/agent-commands` | Read local agent-command shortcuts |
 | POST | `/api/sessions/{id}/messages` | Send message → `StateResponse` (202) |
 | POST | `/api/sessions/{id}/queued-prompts/{pid}/cancel` | Cancel queued prompt |
 | POST | `/api/sessions/{id}/stop` | Stop active turn |
 | POST | `/api/sessions/{id}/kill` | Kill and remove session |
 | POST | `/api/sessions/{id}/approvals/{mid}` | Submit approval decision |
+| POST | `/api/sessions/{id}/user-input/{mid}` | Submit structured Codex user-input answers |
+| POST | `/api/sessions/{id}/mcp-elicitation/{mid}` | Submit an MCP elicitation response |
+| POST | `/api/sessions/{id}/codex/requests/{mid}` | Reply to a generic Codex app-server request |
 | GET | `/api/file?path=...` | Read file content |
 | PUT | `/api/file` | Write file content |
 | GET | `/api/fs?path=...` | List directory entries |
@@ -136,6 +156,7 @@ Both carry a `revision: u64` field. The frontend uses this to reject stale snaps
 ```
 DeltaEvent::TextDelta    { revision, session_id, message_id, delta, preview }
 DeltaEvent::CommandUpdate { revision, session_id, message_id, command, output, status, preview, ... }
+DeltaEvent::ParallelAgentsUpdate { revision, session_id, message_id, message_index, agents, preview }
 ```
 
 On broadcast channel lag, the backend falls back to sending a full state snapshot.

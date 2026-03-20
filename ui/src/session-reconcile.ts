@@ -1,16 +1,21 @@
 import type {
   ApprovalMessage,
+  CodexAppRequestMessage,
   CommandMessage,
   DiffMessage,
   ImageAttachment,
   MarkdownMessage,
   Message,
+  McpElicitationRequestMessage,
+  McpElicitationRequestPayload,
   ParallelAgentsMessage,
   PendingPrompt,
   Session,
   SubagentResultMessage,
   TextMessage,
   ThinkingMessage,
+  UserInputQuestion,
+  UserInputRequestMessage,
 } from "./types";
 
 export function reconcileSessions(previous: Session[], next: Session[]): Session[] {
@@ -53,6 +58,7 @@ function reconcileSession(previous: Session, next: Session): Session {
     previous.claudeApprovalMode === next.claudeApprovalMode &&
     previous.geminiApprovalMode === next.geminiApprovalMode &&
     previous.externalSessionId === next.externalSessionId &&
+    previous.codexThreadState === next.codexThreadState &&
     previous.status === next.status &&
     previous.preview === next.preview &&
     messages === previous.messages &&
@@ -158,7 +164,18 @@ function reconcileMessage(previous: Message, next: Message): Message {
       return reconcileSubagentResultMessage(previous as SubagentResultMessage, next);
     case "approval":
       return reconcileApprovalMessage(previous as ApprovalMessage, next);
+    case "userInputRequest":
+      return reconcileUserInputRequestMessage(previous as UserInputRequestMessage, next);
+    case "mcpElicitationRequest":
+      return reconcileMcpElicitationRequestMessage(
+        previous as McpElicitationRequestMessage,
+        next,
+      );
+    case "codexAppRequest":
+      return reconcileCodexAppRequestMessage(previous as CodexAppRequestMessage, next);
   }
+
+  return next;
 }
 
 function reconcileTextMessage(previous: TextMessage, next: TextMessage): TextMessage {
@@ -297,6 +314,126 @@ function reconcileApprovalMessage(previous: ApprovalMessage, next: ApprovalMessa
   }
 
   return next;
+}
+
+function reconcileUserInputRequestMessage(
+  previous: UserInputRequestMessage,
+  next: UserInputRequestMessage,
+): UserInputRequestMessage {
+  if (
+    previous.timestamp === next.timestamp &&
+    previous.author === next.author &&
+    previous.title === next.title &&
+    previous.detail === next.detail &&
+    previous.state === next.state &&
+    sameUserInputQuestions(previous.questions, next.questions) &&
+    sameSubmittedAnswers(previous.submittedAnswers, next.submittedAnswers)
+  ) {
+    return previous;
+  }
+
+  return next;
+}
+
+function reconcileMcpElicitationRequestMessage(
+  previous: McpElicitationRequestMessage,
+  next: McpElicitationRequestMessage,
+): McpElicitationRequestMessage {
+  if (
+    previous.timestamp === next.timestamp &&
+    previous.author === next.author &&
+    previous.title === next.title &&
+    previous.detail === next.detail &&
+    previous.state === next.state &&
+    previous.submittedAction === next.submittedAction &&
+    sameMcpElicitationRequest(previous.request, next.request) &&
+    sameJsonValue(previous.submittedContent, next.submittedContent)
+  ) {
+    return previous;
+  }
+
+  return next;
+}
+
+function reconcileCodexAppRequestMessage(
+  previous: CodexAppRequestMessage,
+  next: CodexAppRequestMessage,
+): CodexAppRequestMessage {
+  if (
+    previous.timestamp === next.timestamp &&
+    previous.author === next.author &&
+    previous.title === next.title &&
+    previous.detail === next.detail &&
+    previous.method === next.method &&
+    previous.state === next.state &&
+    sameJsonValue(previous.params, next.params) &&
+    sameJsonValue(previous.submittedResult, next.submittedResult)
+  ) {
+    return previous;
+  }
+
+  return next;
+}
+
+function sameUserInputQuestions(previous: UserInputQuestion[], next: UserInputQuestion[]) {
+  return (
+    previous.length === next.length &&
+    previous.every((question, index) => {
+      const nextQuestion = next[index];
+      if (!nextQuestion) {
+        return false;
+      }
+
+      const previousOptions = question.options ?? [];
+      const nextOptions = nextQuestion.options ?? [];
+      return (
+        question.header === nextQuestion.header &&
+        question.id === nextQuestion.id &&
+        question.isOther === nextQuestion.isOther &&
+        question.isSecret === nextQuestion.isSecret &&
+        question.question === nextQuestion.question &&
+        previousOptions.length === nextOptions.length &&
+        previousOptions.every(
+          (option, optionIndex) =>
+            option.label === nextOptions[optionIndex]?.label &&
+            option.description === nextOptions[optionIndex]?.description,
+        )
+      );
+    })
+  );
+}
+
+function sameSubmittedAnswers(
+  previous?: UserInputRequestMessage["submittedAnswers"],
+  next?: UserInputRequestMessage["submittedAnswers"],
+) {
+  const previousEntries = Object.entries(previous ?? {});
+  const nextEntries = Object.entries(next ?? {});
+  return (
+    previousEntries.length === nextEntries.length &&
+    previousEntries.every(([key, value]) => {
+      const nextValue = next?.[key];
+      return (
+        !!nextValue &&
+        value.length === nextValue.length &&
+        value.every((entry, index) => entry === nextValue[index])
+      );
+    })
+  );
+}
+
+function sameMcpElicitationRequest(
+  previous: McpElicitationRequestPayload,
+  next: McpElicitationRequestPayload,
+) {
+  return sameJsonValue(previous, next);
+}
+
+function sameJsonValue(previous: unknown, next: unknown) {
+  if (previous === next) {
+    return true;
+  }
+  return JSON.stringify(previous ?? null) === JSON.stringify(next ?? null);
 }
 
 function reconcilePendingPrompts(

@@ -26,7 +26,9 @@ import type {
   DiffMessage,
   GeminiApprovalMode,
   ImageAttachment,
+  JsonValue,
   Message,
+  McpElicitationAction,
   PendingPrompt,
   SandboxMode,
   Session,
@@ -38,6 +40,47 @@ type DraftImageAttachment = ImageAttachment & {
   id: string;
   previewUrl: string;
 };
+
+type UserInputSubmitHandler = (
+  sessionId: string,
+  messageId: string,
+  answers: Record<string, string[]>,
+) => void;
+
+type BoundUserInputSubmitHandler = (
+  messageId: string,
+  answers: Record<string, string[]>,
+) => void;
+
+type McpElicitationSubmitHandler = (
+  sessionId: string,
+  messageId: string,
+  action: McpElicitationAction,
+  content?: JsonValue,
+) => void;
+
+type BoundMcpElicitationSubmitHandler = (
+  messageId: string,
+  action: McpElicitationAction,
+  content?: JsonValue,
+) => void;
+
+type CodexAppRequestSubmitHandler = (
+  sessionId: string,
+  messageId: string,
+  result: JsonValue,
+) => void;
+
+type BoundCodexAppRequestSubmitHandler = (messageId: string, result: JsonValue) => void;
+
+type RenderMessageCard = (
+  message: Message,
+  preferImmediateHeavyRender: boolean,
+  onApprovalDecision: (messageId: string, decision: ApprovalDecision) => void,
+  onUserInputSubmit: BoundUserInputSubmitHandler,
+  onMcpElicitationSubmit: BoundMcpElicitationSubmitHandler,
+  onCodexAppRequestSubmit: BoundCodexAppRequestSubmitHandler,
+) => JSX.Element | null;
 
 type PromptHistoryState = {
   index: number;
@@ -885,6 +928,9 @@ export function AgentSessionPanel({
   diffMessages,
   scrollContainerRef,
   onApprovalDecision,
+  onUserInputSubmit,
+  onMcpElicitationSubmit,
+  onCodexAppRequestSubmit,
   onCancelQueuedPrompt,
   onSessionSettingsChange,
   conversationSearchQuery,
@@ -908,6 +954,9 @@ export function AgentSessionPanel({
   diffMessages: DiffMessage[];
   scrollContainerRef: RefObject<HTMLElement | null>;
   onApprovalDecision: (sessionId: string, messageId: string, decision: ApprovalDecision) => void;
+  onUserInputSubmit: UserInputSubmitHandler;
+  onMcpElicitationSubmit: McpElicitationSubmitHandler;
+  onCodexAppRequestSubmit: CodexAppRequestSubmitHandler;
   onCancelQueuedPrompt: (sessionId: string, promptId: string) => void;
   onSessionSettingsChange: (
       sessionId: string,
@@ -920,11 +969,7 @@ export function AgentSessionPanel({
   onConversationSearchItemMount: (itemKey: string, node: HTMLElement | null) => void;
   renderCommandCard: (message: CommandMessage) => JSX.Element | null;
   renderDiffCard: (message: DiffMessage) => JSX.Element | null;
-  renderMessageCard: (
-    message: Message,
-    preferImmediateHeavyRender: boolean,
-    onApprovalDecision: (messageId: string, decision: ApprovalDecision) => void,
-  ) => JSX.Element | null;
+  renderMessageCard: RenderMessageCard;
   renderPromptSettings: (
     paneId: string,
     session: Session,
@@ -950,6 +995,9 @@ export function AgentSessionPanel({
       commandMessages={commandMessages}
       diffMessages={diffMessages}
       onApprovalDecision={onApprovalDecision}
+      onUserInputSubmit={onUserInputSubmit}
+      onMcpElicitationSubmit={onMcpElicitationSubmit}
+      onCodexAppRequestSubmit={onCodexAppRequestSubmit}
       onCancelQueuedPrompt={onCancelQueuedPrompt}
       onSessionSettingsChange={onSessionSettingsChange}
       conversationSearchQuery={conversationSearchQuery}
@@ -1082,6 +1130,9 @@ const SessionBody = memo(function SessionBody({
   commandMessages,
   diffMessages,
   onApprovalDecision,
+  onUserInputSubmit,
+  onMcpElicitationSubmit,
+  onCodexAppRequestSubmit,
   onCancelQueuedPrompt,
   onSessionSettingsChange,
   conversationSearchQuery,
@@ -1105,6 +1156,9 @@ const SessionBody = memo(function SessionBody({
   commandMessages: CommandMessage[];
   diffMessages: DiffMessage[];
   onApprovalDecision: (sessionId: string, messageId: string, decision: ApprovalDecision) => void;
+  onUserInputSubmit: UserInputSubmitHandler;
+  onMcpElicitationSubmit: McpElicitationSubmitHandler;
+  onCodexAppRequestSubmit: CodexAppRequestSubmitHandler;
   onCancelQueuedPrompt: (sessionId: string, promptId: string) => void;
   onSessionSettingsChange: (
     sessionId: string,
@@ -1117,11 +1171,7 @@ const SessionBody = memo(function SessionBody({
   onConversationSearchItemMount: (itemKey: string, node: HTMLElement | null) => void;
   renderCommandCard: (message: CommandMessage) => JSX.Element | null;
   renderDiffCard: (message: DiffMessage) => JSX.Element | null;
-  renderMessageCard: (
-    message: Message,
-    preferImmediateHeavyRender: boolean,
-    onApprovalDecision: (messageId: string, decision: ApprovalDecision) => void,
-  ) => JSX.Element | null;
+  renderMessageCard: RenderMessageCard;
   renderPromptSettings: (
     paneId: string,
     session: Session,
@@ -1170,6 +1220,9 @@ const SessionBody = memo(function SessionBody({
             showWaitingIndicator={showWaitingIndicator && session.id === activeSession.id}
             waitingIndicatorPrompt={session.id === activeSession.id ? waitingIndicatorPrompt : null}
             onApprovalDecision={onApprovalDecision}
+            onUserInputSubmit={onUserInputSubmit}
+            onMcpElicitationSubmit={onMcpElicitationSubmit}
+            onCodexAppRequestSubmit={onCodexAppRequestSubmit}
             onCancelQueuedPrompt={onCancelQueuedPrompt}
             conversationSearchQuery={session.id === activeSession.id ? conversationSearchQuery : ""}
             conversationSearchMatchedItemKeys={
@@ -1237,6 +1290,8 @@ const SessionBody = memo(function SessionBody({
   previous.mountedSessions === next.mountedSessions &&
   previous.commandMessages === next.commandMessages &&
   previous.diffMessages === next.diffMessages &&
+  previous.onUserInputSubmit === next.onUserInputSubmit &&
+  previous.onMcpElicitationSubmit === next.onMcpElicitationSubmit &&
   previous.conversationSearchQuery === next.conversationSearchQuery &&
   previous.conversationSearchMatchedItemKeys === next.conversationSearchMatchedItemKeys &&
   previous.conversationSearchActiveItemKey === next.conversationSearchActiveItemKey &&
@@ -1256,17 +1311,16 @@ const SessionConversationPage = memo(function SessionConversationPage({
   showWaitingIndicator,
   waitingIndicatorPrompt,
   onApprovalDecision,
+  onUserInputSubmit,
+  onMcpElicitationSubmit,
+  onCodexAppRequestSubmit,
   onCancelQueuedPrompt,
   conversationSearchQuery,
   conversationSearchMatchedItemKeys,
   conversationSearchActiveItemKey,
   onConversationSearchItemMount,
 }: {
-  renderMessageCard: (
-    message: Message,
-    preferImmediateHeavyRender: boolean,
-    onApprovalDecision: (messageId: string, decision: ApprovalDecision) => void,
-  ) => JSX.Element | null;
+  renderMessageCard: RenderMessageCard;
   session: Session;
   scrollContainerRef: RefObject<HTMLElement | null>;
   isActive: boolean;
@@ -1274,6 +1328,9 @@ const SessionConversationPage = memo(function SessionConversationPage({
   showWaitingIndicator: boolean;
   waitingIndicatorPrompt: string | null;
   onApprovalDecision: (sessionId: string, messageId: string, decision: ApprovalDecision) => void;
+  onUserInputSubmit: UserInputSubmitHandler;
+  onMcpElicitationSubmit: McpElicitationSubmitHandler;
+  onCodexAppRequestSubmit: CodexAppRequestSubmitHandler;
   onCancelQueuedPrompt: (sessionId: string, promptId: string) => void;
   conversationSearchQuery: string;
   conversationSearchMatchedItemKeys: ReadonlySet<string>;
@@ -1306,6 +1363,9 @@ const SessionConversationPage = memo(function SessionConversationPage({
         scrollContainerRef={scrollContainerRef}
         isActive={isActive}
         onApprovalDecision={onApprovalDecision}
+        onUserInputSubmit={onUserInputSubmit}
+        onMcpElicitationSubmit={onMcpElicitationSubmit}
+        onCodexAppRequestSubmit={onCodexAppRequestSubmit}
         conversationSearchQuery={conversationSearchQuery}
         conversationSearchMatchedItemKeys={conversationSearchMatchedItemKeys}
         conversationSearchActiveItemKey={conversationSearchActiveItemKey}
@@ -1347,6 +1407,9 @@ const SessionConversationPage = memo(function SessionConversationPage({
   previous.isLoading === next.isLoading &&
   previous.showWaitingIndicator === next.showWaitingIndicator &&
   previous.waitingIndicatorPrompt === next.waitingIndicatorPrompt &&
+  previous.onUserInputSubmit === next.onUserInputSubmit &&
+  previous.onMcpElicitationSubmit === next.onMcpElicitationSubmit &&
+  previous.onCodexAppRequestSubmit === next.onCodexAppRequestSubmit &&
   previous.conversationSearchQuery === next.conversationSearchQuery &&
   previous.conversationSearchMatchedItemKeys === next.conversationSearchMatchedItemKeys &&
   previous.conversationSearchActiveItemKey === next.conversationSearchActiveItemKey &&
@@ -1360,21 +1423,23 @@ function ConversationMessageList({
   scrollContainerRef,
   isActive,
   onApprovalDecision,
+  onUserInputSubmit,
+  onMcpElicitationSubmit,
+  onCodexAppRequestSubmit,
   conversationSearchQuery,
   conversationSearchMatchedItemKeys,
   conversationSearchActiveItemKey,
   onConversationSearchItemMount,
 }: {
-  renderMessageCard: (
-    message: Message,
-    preferImmediateHeavyRender: boolean,
-    onApprovalDecision: (messageId: string, decision: ApprovalDecision) => void,
-  ) => JSX.Element | null;
+  renderMessageCard: RenderMessageCard;
   sessionId: string;
   messages: Message[];
   scrollContainerRef: RefObject<HTMLElement | null>;
   isActive: boolean;
   onApprovalDecision: (sessionId: string, messageId: string, decision: ApprovalDecision) => void;
+  onUserInputSubmit: UserInputSubmitHandler;
+  onMcpElicitationSubmit: McpElicitationSubmitHandler;
+  onCodexAppRequestSubmit: CodexAppRequestSubmitHandler;
   conversationSearchQuery: string;
   conversationSearchMatchedItemKeys: ReadonlySet<string>;
   conversationSearchActiveItemKey: string | null;
@@ -1398,6 +1463,10 @@ function ConversationMessageList({
               message,
               isActive && index >= messages.length - 2,
               (messageId, decision) => onApprovalDecision(sessionId, messageId, decision),
+              (messageId, answers) => onUserInputSubmit(sessionId, messageId, answers),
+              (messageId, action, content) =>
+                onMcpElicitationSubmit(sessionId, messageId, action, content),
+              (messageId, result) => onCodexAppRequestSubmit(sessionId, messageId, result),
             )}
           </MessageSlot>
         ))}
@@ -1411,8 +1480,11 @@ function ConversationMessageList({
       sessionId={sessionId}
       messages={messages}
       scrollContainerRef={scrollContainerRef}
-      onApprovalDecision={onApprovalDecision}
-    />
+          onApprovalDecision={onApprovalDecision}
+          onUserInputSubmit={onUserInputSubmit}
+          onMcpElicitationSubmit={onMcpElicitationSubmit}
+          onCodexAppRequestSubmit={onCodexAppRequestSubmit}
+        />
   );
 }
 
@@ -1422,16 +1494,18 @@ function VirtualizedConversationMessageList({
   messages,
   scrollContainerRef,
   onApprovalDecision,
+  onUserInputSubmit,
+  onMcpElicitationSubmit,
+  onCodexAppRequestSubmit,
 }: {
-  renderMessageCard: (
-    message: Message,
-    preferImmediateHeavyRender: boolean,
-    onApprovalDecision: (messageId: string, decision: ApprovalDecision) => void,
-  ) => JSX.Element | null;
+  renderMessageCard: RenderMessageCard;
   sessionId: string;
   messages: Message[];
   scrollContainerRef: RefObject<HTMLElement | null>;
   onApprovalDecision: (sessionId: string, messageId: string, decision: ApprovalDecision) => void;
+  onUserInputSubmit: UserInputSubmitHandler;
+  onMcpElicitationSubmit: McpElicitationSubmitHandler;
+  onCodexAppRequestSubmit: CodexAppRequestSubmitHandler;
 }) {
   const messageHeightsRef = useRef<Record<string, number>>({});
   const visibleRangeRef = useRef({
@@ -1553,6 +1627,11 @@ function VirtualizedConversationMessageList({
               preferImmediateHeavyRender={messageIndex >= messages.length - 2}
               top={layout.tops[messageIndex] ?? 0}
               onApprovalDecision={(messageId, decision) => onApprovalDecision(sessionId, messageId, decision)}
+              onUserInputSubmit={(messageId, answers) => onUserInputSubmit(sessionId, messageId, answers)}
+              onMcpElicitationSubmit={(messageId, action, content) =>
+                onMcpElicitationSubmit(sessionId, messageId, action, content)}
+              onCodexAppRequestSubmit={(messageId, result) =>
+                onCodexAppRequestSubmit(sessionId, messageId, result)}
               onHeightChange={handleHeightChange}
             />
           );
@@ -1566,17 +1645,19 @@ function MeasuredMessageCard({
   message,
   preferImmediateHeavyRender,
   onApprovalDecision,
+  onUserInputSubmit,
+  onMcpElicitationSubmit,
+  onCodexAppRequestSubmit,
   onHeightChange,
   top,
 }: {
-  renderMessageCard: (
-    message: Message,
-    preferImmediateHeavyRender: boolean,
-    onApprovalDecision: (messageId: string, decision: ApprovalDecision) => void,
-  ) => ReactNode;
+  renderMessageCard: RenderMessageCard;
   message: Message;
   preferImmediateHeavyRender: boolean;
   onApprovalDecision: (messageId: string, decision: ApprovalDecision) => void;
+  onUserInputSubmit: BoundUserInputSubmitHandler;
+  onMcpElicitationSubmit: BoundMcpElicitationSubmitHandler;
+  onCodexAppRequestSubmit: BoundCodexAppRequestSubmitHandler;
   onHeightChange: (messageId: string, nextHeight: number) => void;
   top: number;
 }) {
@@ -1614,7 +1695,14 @@ function MeasuredMessageCard({
 
   return (
     <div ref={slotRef} className="virtualized-message-slot" style={{ top }}>
-      {renderMessageCard(message, preferImmediateHeavyRender, onApprovalDecision)}
+      {renderMessageCard(
+        message,
+        preferImmediateHeavyRender,
+        onApprovalDecision,
+        onUserInputSubmit,
+        onMcpElicitationSubmit,
+        onCodexAppRequestSubmit,
+      )}
     </div>
   );
 }
