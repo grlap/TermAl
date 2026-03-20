@@ -5284,6 +5284,118 @@ textarea {
   background: var(--approval-bg);
 }
 
+.parallel-agents-card {
+  padding-block: 0.78rem;
+  font-family: var(--code-font);
+}
+
+.parallel-agents-card .message-meta {
+  margin-bottom: 0.12rem;
+}
+
+.parallel-agents-card-label {
+  margin-bottom: 0.18rem;
+}
+
+.parallel-agents-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.parallel-agents-header h3 {
+  margin: 0;
+}
+
+.parallel-agents-summary {
+  color: var(--text-muted);
+  font-size: 0.94rem;
+  white-space: nowrap;
+}
+
+.parallel-agents-toggle {
+  inline-size: 6.7rem;
+  min-block-size: 1.8rem;
+  padding-block: 0.14rem;
+  font-size: 0.86rem;
+  line-height: 1.1;
+  text-align: center;
+}
+
+.parallel-agents-tree {
+  list-style: none;
+  margin: 0.6rem 0 0;
+  padding: 0;
+  display: grid;
+  gap: 0.34rem;
+}
+
+.parallel-agent-line {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.55rem;
+}
+
+.parallel-agent-branch,
+.parallel-agent-branch-child {
+  color: var(--text-muted);
+  flex: 0 0 auto;
+  inline-size: 0.9rem;
+  text-align: center;
+}
+
+.parallel-agent-copy {
+  min-width: 0;
+  flex: 1 1 auto;
+  display: grid;
+  gap: 0.14rem;
+}
+
+.parallel-agent-title-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.8rem;
+}
+
+.parallel-agent-title {
+  min-width: 0;
+  font-weight: 600;
+}
+
+.parallel-agent-status {
+  color: var(--text-muted);
+  font-size: 0.92rem;
+  text-transform: lowercase;
+  white-space: nowrap;
+}
+
+.parallel-agent-status-active {
+  color: var(--signal-blue);
+}
+
+.parallel-agent-status-idle {
+  color: var(--signal-green);
+}
+
+.parallel-agent-status-error {
+  color: var(--signal-red);
+}
+
+.parallel-agent-detail-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.55rem;
+}
+
+.parallel-agent-detail {
+  color: var(--text-muted);
+}
+
+.parallel-agent-row-error .parallel-agent-title {
+  color: var(--signal-red);
+}
 .subagent-result-card {
   padding-block: 0.72rem;
 }

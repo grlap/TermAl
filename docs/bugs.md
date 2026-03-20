@@ -3,7 +3,13 @@
 Updated against the current checked-in code in `src/main.rs`, `ui/src/App.tsx`,
 `ui/package.json`, and `ui/vite.config.ts`.
 
-The older entries for "No image paste support", Claude `control_request` fallthrough, "No SSE/WebSocket for real-time updates", "Codex receive has no streaming", "No queueing system for prompts", the stale `/api/state`-after-SSE bootstrap race, the false-positive delta SSE reconciliation drift when a message already existed locally, Windows `HOME`-only path resolution, and unhandled Codex rate-limit notifications were stale. Those are implemented in the current tree.
+The older entries for "No image paste support", Claude `control_request` fallthrough, "No SSE/WebSocket for real-time updates", "Codex receive has no streaming", "No queueing system for prompts", the stale `/api/state`-after-SSE bootstrap race, the false-positive delta SSE reconciliation drift when a message already existed locally, shared Codex turn-scoped subagent ordering, shared Codex `item_completed` multipart truncation, Windows `HOME`-only path resolution, and unhandled Codex rate-limit notifications were stale. Those are implemented in the current tree.
+
+The newer shared Codex regressions where stale `task_complete` summaries could bleed into the next
+answer or a pre-answer summary insert could overwrite the final-answer preview are also fixed in
+the current tree. Shared Codex turn filtering is still incomplete for some other event shapes, the
+`turn/completed` success path still has a theoretical buffered-result drop edge case, and the new
+parallel-agents progress path skips the delta event system — see the entries below.
 
 The earlier command-card UX issue where `OUT` could render as an empty dark block was also fixed.
 Command messages now use a compact `IN` / `OUT` layout with copy controls, a collapsible output
@@ -178,49 +184,169 @@ implies a narrower effect than the backend actually enforces.
   for existing bound projects
 - Add tests for the chosen semantics so the UI copy and backend behavior stay aligned
 
-## Shared Codex subagent ordering is not turn-scoped
 
-**Severity:** High - hidden review trace messages can be inserted into the wrong part of the conversation.
 
-The shared Codex path now inserts `SubagentResult` messages before the last assistant text in the
-session so the UI can show `Agent THINKING` before the visible answer. That heuristic is global to
-the whole session, not scoped to the active turn.
-
-**Current impact:**
-- If a future/shared Codex run emits the hidden review event before the current turn's final answer,
-  the inserted card can land before the previous turn's response instead of inside the current turn
-- Cross-turn ordering can become impossible to reason about because insertion is anchored to the
-  last assistant text anywhere in the transcript
-- The current tests only cover the simple single-response case, not the multi-turn edge case
-
-**Affected code (`src/main.rs`):**
-- `preferred_message_insert_index()`
-- `push_message()` / `insert_message_on_record()`
-
-**Fix:**
-- Buffer subagent-review summaries in turn-local state and flush them when the current turn's final
-  answer is committed, instead of inserting relative to the last assistant text globally
-- Add a regression test where a new turn has older assistant messages already in the transcript
-
-## Shared Codex `item_completed` parsing can truncate multipart agent messages
+## Buffered subagent results can be silently dropped on turn/completed success path
 
 **Severity:** Medium
 
-The new `codex/event/item_completed` handler reads `params.msg.item.content` and currently keeps
-only the first `Text` block it finds. If Codex emits a final answer as multiple text parts, TermAl
-will silently drop everything after the first part.
+The `turn/completed` success path only flushes buffered subagent results when
+`assistant_output_started` is false. If `begin_codex_assistant_output` runs (setting the flag to
+true) but `remember_codex_first_assistant_message_id` fails before recording the anchor, a later
+`task_complete` event would buffer its result (since `first_visible_assistant_message_id` is
+`None`). Then `turn/completed` skips the flush because the flag is true, and
+`clear_codex_turn_state` drops the buffer.
+
+In practice this is very unlikely — `remember_codex_first_assistant_message_id` just reads the
+mutex and gets a message ID, so the `?` would propagate and fail the handler. But the defensive
+gap exists.
 
 **Current impact:**
-- Shared Codex final answers can be truncated in the transcript
-- The bug is silent because the handler still records a valid-looking assistant message
-- Current tests only cover a single `Text` block payload
+- Under a narrow failure window, a subagent result could be silently lost from the transcript
+- The bug is silent — no error is surfaced to the user
 
-**Affected code (`src/main.rs`):**
-- `handle_shared_codex_event_item_completed()`
+**Affected code (`src/runtime.rs`):**
+- `turn/completed` success branch in `handle_shared_codex_app_server_notification()`
+- `flush_pending_codex_subagent_results()`
+- `clear_codex_turn_state()`
 
 **Fix:**
-- Concatenate all `Text` parts in order before calling `push_text()`
-- Add a regression test with multiple text blocks in one `AgentMessage`
+- Unconditionally flush pending results before `clear_codex_turn_state` on the success path:
+  ```rust
+  if !turn_state.pending_subagent_results.is_empty() {
+      flush_pending_codex_subagent_results(turn_state, recorder)?;
+  }
+  ```
+
+## Shared Codex turn filter still accepts stale agent events
+
+**Severity:** High
+
+The shared Codex turn guard now blocks stale `task_complete` summaries, but the other
+turn-scoped handlers still have gaps:
+
+- `shared_codex_event_matches_active_turn()` treats `event_turn_id == None` as a match for the
+  current turn
+- `handle_shared_codex_event_agent_message()`,
+  `handle_shared_codex_event_agent_message_content_delta()`, and
+  `handle_shared_codex_event_item_completed()` only read `/params/msg/turn_id`
+- some observed payloads carry the turn id somewhere else, such as `/params/id`
+- after `turn/completed`, `current_turn_id` becomes `None`, and those handlers still treat that as
+  "match anything"
+
+That means a stale shared Codex final answer, delta, or `item_completed` payload can still be
+recorded into the wrong turn if it arrives late or if its turn id is omitted from the specific
+field those handlers read.
+
+**Current impact:**
+- A stale shared Codex answer or delta can still be attached to the wrong turn
+- Cross-turn transcript ordering can still drift even though stale `task_complete` is fixed
+- The current regression tests cover stale `task_complete`, but not stale `agent_message`,
+  `agent_message_content_delta`, or `item_completed`
+
+**Affected code (`src/runtime.rs`):**
+- `shared_codex_event_matches_active_turn()`
+- `handle_shared_codex_event_item_completed()`
+- `handle_shared_codex_event_agent_message_content_delta()`
+- `handle_shared_codex_event_agent_message()`
+
+**Fix:**
+- Resolve the event turn id from every observed payload location, not just `/params/msg/turn_id`
+- Ignore turn-scoped shared Codex events when there is no active turn
+- Add regression tests for stale `agent_message`, `agent_message_content_delta`, and
+  `item_completed` events
+
+## Parallel-agents progress updates publish full-state SSE snapshots
+
+**Severity:** Medium
+
+The new `parallelAgents` message path uses `commit_locked()` inside
+`upsert_parallel_agents_message()`. Unlike command and text streaming updates, that publishes a
+full `StateResponse` snapshot every time an agent status changes instead of a targeted delta.
+
+**Current impact:**
+- Every task-agent progress change forces a full-state SSE broadcast
+- Long sessions pay a larger live-update cost than the existing command/text paths
+- The new message type does not follow the current delta-first hot-path pattern
+
+**Affected code (`src/state.rs`):**
+- `upsert_parallel_agents_message()`
+- `commit_locked()`
+
+**Fix:**
+- Mirror `upsert_command_message()` with a targeted create/update delta path
+- Use a persisted delta for initial message creation and delta-only revision bumps for updates
+
+## Failed Claude Task results lose full detail
+
+**Severity:** Low
+
+Completed Claude Task results still emit a full `SubagentResult`, but failed tasks only keep the
+preview text stored on the `parallelAgents` row. `summarize_claude_task_detail()` truncates that
+detail to the first line / preview limit, and `handle_claude_task_result()` does not emit any
+expandable failure message.
+
+**Current impact:**
+- A failed task can lose most of its diagnostic output in the transcript
+- Users may only see the first line or first ~88 characters of the failure
+- Debugging reviewer/subagent failures is harder than debugging successful ones
+
+**Affected code (`src/turns.rs`):**
+- `handle_claude_task_result()`
+- `summarize_claude_task_detail()`
+
+**Fix:**
+- Preserve the full failure detail on the stored parallel-agent state, or
+- Emit an expandable failure message alongside the status update
+
+## `insert_message_before` does not update session preview or status
+
+**Severity:** Low
+
+The `push_message` path updates `record.session.preview` and `record.session.status` (e.g. for
+`Approval` messages), but `insert_message_before` was refactored to skip those side effects.
+Currently safe because `insert_message_before` is only called for `SubagentResult` messages, which
+return `None` from `preview_text()`. But the two methods share an identical-looking API surface
+while having different behavioral contracts.
+
+**Current impact:**
+- No runtime impact today — `SubagentResult` does not produce a preview
+- If `insert_message_before` is ever reused for a message type that does have a preview (e.g.
+  `Approval`), the session preview will silently not update
+- The `DeltaEvent::MessageCreated` published by `insert_message_before` carries the *previous*
+  preview and status, which is correct for subagent results but would be stale for other types
+
+**Affected code (`src/state.rs`):**
+- `insert_message_before()`
+- `push_message()`
+
+**Fix:**
+- Add an inline comment documenting that `insert_message_before` intentionally does not update
+  preview/status because it is only used for subagent results inserted before existing content
+- Alternatively, restore the preview/status logic for consistency and future-proofing
+
+## `ClaudeParallelAgentState` duplicates `ParallelAgentProgress`
+
+**Severity:** Low
+
+`ClaudeParallelAgentState` (in `src/turns.rs`) has the same four fields (`detail`, `id`, `status`,
+`title`) as `ParallelAgentProgress` (in `src/api.rs`). The `sync_claude_parallel_agents` function
+manually maps from one to the other field-by-field.
+
+**Current impact:**
+- If a field is added to `ParallelAgentProgress` (e.g. a new status variant), the
+  `ClaudeParallelAgentState` mapping must be updated in lockstep or the new field is silently
+  dropped
+- Mild code duplication across modules
+
+**Affected code (`src/turns.rs`, `src/api.rs`):**
+- `ClaudeParallelAgentState` definition
+- `sync_claude_parallel_agents()` mapping logic
+- `ParallelAgentProgress` definition
+
+**Fix:**
+- Reuse `ParallelAgentProgress` directly in `ClaudeTurnState` instead of maintaining a separate
+  type. The only difference is `Clone` vs `Serialize`/`Deserialize` derives, which can coexist.
 
 ## Image attachment UX is inconsistent
 
@@ -663,6 +789,30 @@ Concrete work implied by the current TermAl parity gaps. Ordered by user impact 
 
 ## P1
 
+- [ ] Close shared Codex turn-filter gaps:
+  apply the `current_turn_id.is_none()` guard to `handle_shared_codex_event_item_completed`,
+  `handle_shared_codex_event_agent_message_content_delta`, and
+  `handle_shared_codex_event_agent_message` (or change `shared_codex_event_matches_active_turn` to
+  return `false` when `current_turn_id` is `None`). Add regression tests for stale `agent_message`,
+  `agent_message_content_delta`, and `item_completed` events.
+- [ ] Fix the `turn/completed` success-path conditional flush:
+  unconditionally flush pending subagent results before `clear_codex_turn_state` instead of gating
+  on `!assistant_output_started`. Add a dedicated test: `turn/started` → `task_complete` (buffers
+  result) → `turn/completed` (no error, no assistant output) → assert buffered result appears.
+- [ ] Add parallel-agents delta event path:
+  add a `ParallelAgentsUpdate` variant to `DeltaEvent`, switch `upsert_parallel_agents_message` to
+  `commit_persisted_delta_locked` + `publish_delta`, and handle the new delta type in the
+  frontend's `applyDeltaToSessions`.
+- [ ] Add Claude Task error-result test:
+  test that a `tool_result` with `is_error: true` for a Task tool sets
+  `ParallelAgentStatus::Error`, does not call `push_subagent_result`, and falls back to "Task
+  failed." when detail is empty.
+- [ ] Deduplicate `ClaudeParallelAgentState` / `ParallelAgentProgress`:
+  reuse `ParallelAgentProgress` in `ClaudeTurnState` and remove the manual field-by-field mapping
+  in `sync_claude_parallel_agents`.
+- [ ] Document `insert_message_before` contract:
+  add an inline comment clarifying that preview/status is intentionally not updated, since the
+  method is only used for subagent results inserted before existing content.
 - [ ] Make create-session fully project-first for remote routing:
   remove or block the `Current workspace` / `Default workspace` path when it cannot be mapped to a
   concrete project owner, and surface a clear validation error in the dialog.

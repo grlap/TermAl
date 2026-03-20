@@ -77,6 +77,11 @@ trait TurnRecorder {
         output: &str,
         status: CommandStatus,
     ) -> Result<()>;
+    fn upsert_parallel_agents(
+        &mut self,
+        key: &str,
+        agents: &[ParallelAgentProgress],
+    ) -> Result<()>;
     fn error(&mut self, detail: &str) -> Result<()>;
 }
 
@@ -440,6 +445,21 @@ impl TurnRecorder for SessionRecorder {
             .upsert_command_message(&self.session_id, &message_id, command, output, status)
     }
 
+    fn upsert_parallel_agents(
+        &mut self,
+        key: &str,
+        agents: &[ParallelAgentProgress],
+    ) -> Result<()> {
+        let message_id = self
+            .recorder_state
+            .parallel_agents_messages
+            .entry(key.to_owned())
+            .or_insert_with(|| self.state.allocate_message_id())
+            .clone();
+
+        self.state
+            .upsert_parallel_agents_message(&self.session_id, &message_id, agents.to_vec())
+    }
     fn error(&mut self, detail: &str) -> Result<()> {
         let cleaned = detail.trim();
         if cleaned.is_empty() {
@@ -647,6 +667,21 @@ impl TurnRecorder for BorrowedSessionRecorder<'_> {
             .upsert_command_message(self.session_id, &message_id, command, output, status)
     }
 
+    fn upsert_parallel_agents(
+        &mut self,
+        key: &str,
+        agents: &[ParallelAgentProgress],
+    ) -> Result<()> {
+        let message_id = self
+            .recorder_state
+            .parallel_agents_messages
+            .entry(key.to_owned())
+            .or_insert_with(|| self.state.allocate_message_id())
+            .clone();
+
+        self.state
+            .upsert_parallel_agents_message(self.session_id, &message_id, agents.to_vec())
+    }
     fn error(&mut self, detail: &str) -> Result<()> {
         let cleaned = detail.trim();
         if cleaned.is_empty() {
@@ -703,6 +738,23 @@ impl TurnRecorder for ReplPrinter {
     ) -> Result<()> {
         println!("subagent> {title}");
         println!("{summary}");
+        Ok(())
+    }
+
+    fn upsert_parallel_agents(
+        &mut self,
+        _key: &str,
+        agents: &[ParallelAgentProgress],
+    ) -> Result<()> {
+        let count = agents.len();
+        let label = if count == 1 { "agent" } else { "agents" };
+        println!("parallel> Running {count} {label}");
+        for agent in agents {
+            println!("- {} ({:?})", agent.title, agent.status);
+            if let Some(detail) = agent.detail.as_deref() {
+                println!("  {detail}");
+            }
+        }
         Ok(())
     }
 
@@ -1401,9 +1453,20 @@ fn run_claude_turn(
     resolved_session_id.ok_or_else(|| anyhow!("Claude completed without emitting a session id"))
 }
 
+#[derive(Clone)]
+struct ClaudeParallelAgentState {
+    detail: Option<String>,
+    id: String,
+    status: ParallelAgentStatus,
+    title: String,
+}
+
 #[derive(Default)]
 struct ClaudeTurnState {
     approval_keys_this_turn: HashSet<String>,
+    parallel_agent_group_key: Option<String>,
+    parallel_agent_order: Vec<String>,
+    parallel_agents: HashMap<String, ClaudeParallelAgentState>,
     permission_denied_this_turn: bool,
     pending_tools: HashMap<String, ClaudeToolUse>,
     saw_text_delta: bool,
@@ -1411,8 +1474,10 @@ struct ClaudeTurnState {
 
 struct ClaudeToolUse {
     command: Option<String>,
+    description: Option<String>,
     file_path: Option<String>,
     name: String,
+    subagent_type: Option<String>,
 }
 
 struct ClaudeToolPermissionRequest {
@@ -1602,6 +1667,9 @@ fn handle_claude_event(
             recorder.finish_streaming_text()?;
             state.saw_text_delta = false;
             state.approval_keys_this_turn.clear();
+            state.parallel_agent_group_key = None;
+            state.parallel_agent_order.clear();
+            state.parallel_agents.clear();
             state.permission_denied_this_turn = false;
 
             if message
@@ -1635,8 +1703,16 @@ fn register_claude_tool_use(
         .and_then(|value| value.get("command"))
         .and_then(Value::as_str)
         .map(str::to_owned);
+    let description = input
+        .and_then(|value| value.get("description"))
+        .and_then(Value::as_str)
+        .map(str::to_owned);
     let file_path = input
         .and_then(|value| value.get("file_path").or_else(|| value.get("filePath")))
+        .and_then(Value::as_str)
+        .map(str::to_owned);
+    let subagent_type = input
+        .and_then(|value| value.get("subagent_type").or_else(|| value.get("subagentType")))
         .and_then(Value::as_str)
         .map(str::to_owned);
 
@@ -1644,22 +1720,44 @@ fn register_claude_tool_use(
         tool_id.to_owned(),
         ClaudeToolUse {
             command: command.clone(),
+            description: description.clone(),
             file_path,
             name: name.to_owned(),
+            subagent_type: subagent_type.clone(),
         },
     );
 
-    if name == "Bash" {
-        let description = input
-            .and_then(|value| value.get("description"))
-            .and_then(Value::as_str);
-        let command_label = command.as_deref().or(description).unwrap_or("Bash");
-        recorder.command_started(tool_id, command_label)?;
+    match name {
+        "Bash" => {
+            let command_label = command.as_deref().or(description.as_deref()).unwrap_or("Bash");
+            recorder.command_started(tool_id, command_label)?;
+        }
+        "Task" => {
+            if state.parallel_agent_group_key.is_none() {
+                state.parallel_agent_group_key = Some(format!("claude-task-group-{tool_id}"));
+            }
+            if !state.parallel_agents.contains_key(tool_id) {
+                state.parallel_agent_order.push(tool_id.to_owned());
+            }
+            state.parallel_agents.insert(
+                tool_id.to_owned(),
+                ClaudeParallelAgentState {
+                    detail: Some("Initializing...".to_owned()),
+                    id: tool_id.to_owned(),
+                    status: ParallelAgentStatus::Initializing,
+                    title: describe_claude_task_tool(
+                        description.as_deref(),
+                        subagent_type.as_deref(),
+                    ),
+                },
+            );
+            sync_claude_parallel_agents(state, recorder)?;
+        }
+        _ => {}
     }
 
     Ok(())
 }
-
 fn handle_claude_tool_result(
     message: &Value,
     state: &mut ClaudeTurnState,
@@ -1700,6 +1798,14 @@ fn handle_claude_tool_result(
                 state,
                 recorder,
             )?,
+            "Task" => handle_claude_task_result(
+                tool_use_id,
+                &tool_use,
+                &detail,
+                is_error,
+                state,
+                recorder,
+            )?,
             "Write" | "Edit" => handle_claude_file_result(
                 &tool_use,
                 message.get("tool_use_result"),
@@ -1718,7 +1824,107 @@ fn handle_claude_tool_result(
 
     Ok(())
 }
+fn handle_claude_task_result(
+    tool_use_id: &str,
+    tool_use: &ClaudeToolUse,
+    detail: &str,
+    is_error: bool,
+    state: &mut ClaudeTurnState,
+    recorder: &mut dyn TurnRecorder,
+) -> Result<()> {
+    let title = describe_claude_task_tool(
+        tool_use.description.as_deref(),
+        tool_use.subagent_type.as_deref(),
+    );
+    let summarized_detail = summarize_claude_task_detail(detail, is_error);
+    let status = if is_error {
+        ParallelAgentStatus::Error
+    } else {
+        ParallelAgentStatus::Completed
+    };
 
+    if let Some(agent) = state.parallel_agents.get_mut(tool_use_id) {
+        agent.detail = Some(summarized_detail.clone());
+        agent.status = status;
+        if agent.title.trim().is_empty() {
+            agent.title = title.clone();
+        }
+    } else {
+        state.parallel_agent_order.push(tool_use_id.to_owned());
+        state.parallel_agents.insert(
+            tool_use_id.to_owned(),
+            ClaudeParallelAgentState {
+                detail: Some(summarized_detail.clone()),
+                id: tool_use_id.to_owned(),
+                status,
+                title: title.clone(),
+            },
+        );
+    }
+
+    sync_claude_parallel_agents(state, recorder)?;
+
+    let trimmed = detail.trim();
+    if !is_error && !trimmed.is_empty() {
+        recorder.push_subagent_result(&title, trimmed, None, None)?;
+    }
+
+    Ok(())
+}
+
+fn sync_claude_parallel_agents(
+    state: &ClaudeTurnState,
+    recorder: &mut dyn TurnRecorder,
+) -> Result<()> {
+    let Some(key) = state.parallel_agent_group_key.as_deref() else {
+        return Ok(());
+    };
+
+    let agents = state
+        .parallel_agent_order
+        .iter()
+        .filter_map(|agent_id| {
+            state.parallel_agents.get(agent_id).map(|agent| ParallelAgentProgress {
+                detail: agent.detail.clone(),
+                id: agent.id.clone(),
+                status: agent.status,
+                title: agent.title.clone(),
+            })
+        })
+        .collect::<Vec<_>>();
+    if agents.is_empty() {
+        return Ok(());
+    }
+
+    recorder.upsert_parallel_agents(key, &agents)
+}
+
+fn describe_claude_task_tool(description: Option<&str>, subagent_type: Option<&str>) -> String {
+    let trimmed_description = description.unwrap_or("").trim();
+    if !trimmed_description.is_empty() {
+        return trimmed_description.to_owned();
+    }
+
+    let trimmed_subagent_type = subagent_type.unwrap_or("").trim();
+    if !trimmed_subagent_type.is_empty() {
+        return format!("{} agent", trimmed_subagent_type.replace('-', " "));
+    }
+
+    "Task agent".to_owned()
+}
+
+fn summarize_claude_task_detail(detail: &str, is_error: bool) -> String {
+    let trimmed = detail.trim();
+    if trimmed.is_empty() {
+        return if is_error {
+            "Task failed.".to_owned()
+        } else {
+            "Completed.".to_owned()
+        };
+    }
+
+    make_preview(trimmed)
+}
 fn handle_claude_bash_result(
     tool_use_id: &str,
     tool_use: &ClaudeToolUse,
@@ -1869,6 +2075,20 @@ fn extract_claude_tool_result_text(message: &Value, content: &Value) -> String {
     if let Some(text) = content.get("content").and_then(Value::as_str) {
         return text.to_owned();
     }
+    if let Some(parts) = content.get("content").and_then(Value::as_array) {
+        let combined = parts
+            .iter()
+            .filter_map(|part| {
+                part.get("text")
+                    .and_then(Value::as_str)
+                    .or_else(|| part.get("content").and_then(Value::as_str))
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        if !combined.trim().is_empty() {
+            return combined;
+        }
+    }
     if let Some(text) = message.get("tool_use_result").and_then(Value::as_str) {
         return text.to_owned();
     }
@@ -1882,7 +2102,6 @@ fn extract_claude_tool_result_text(message: &Value, content: &Value) -> String {
 
     "Claude tool call failed.".to_owned()
 }
-
 fn is_permission_denial(detail: &str) -> bool {
     detail.contains("requested permissions")
 }

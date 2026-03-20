@@ -2589,6 +2589,25 @@ enum ApprovalDecision {
     Rejected,
 }
 
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+enum ParallelAgentStatus {
+    Initializing,
+    Running,
+    Completed,
+    Error,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ParallelAgentProgress {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    detail: Option<String>,
+    id: String,
+    status: ParallelAgentStatus,
+    title: String,
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct MessageImageAttachment {
@@ -2700,6 +2719,13 @@ enum Message {
         #[serde(default, rename = "turnId", skip_serializing_if = "Option::is_none")]
         turn_id: Option<String>,
     },
+    #[serde(rename = "parallelAgents")]
+    ParallelAgents {
+        id: String,
+        timestamp: String,
+        author: Author,
+        agents: Vec<ParallelAgentProgress>,
+    },
     Approval {
         id: String,
         timestamp: String,
@@ -2726,6 +2752,7 @@ impl Message {
             | Self::Diff { id, .. }
             | Self::Markdown { id, .. }
             | Self::SubagentResult { id, .. }
+            | Self::ParallelAgents { id, .. }
             | Self::Approval { id, .. } => id,
         }
     }
@@ -2740,9 +2767,41 @@ impl Message {
             Self::Approval { title, .. } => Some(make_preview(title)),
             Self::Diff { summary, .. } => Some(make_preview(summary)),
             Self::SubagentResult { .. } => None,
+            Self::ParallelAgents { agents, .. } => Some(parallel_agents_preview_text(agents)),
             Self::Command { .. } => None,
         }
     }
+}
+
+fn parallel_agents_preview_text(agents: &[ParallelAgentProgress]) -> String {
+    let count = agents.len();
+    let label = if count == 1 { "agent" } else { "agents" };
+    let active_count = agents
+        .iter()
+        .filter(|agent| {
+            matches!(
+                agent.status,
+                ParallelAgentStatus::Initializing | ParallelAgentStatus::Running
+            )
+        })
+        .count();
+
+    if active_count > 0 {
+        return make_preview(&format!("Running {count} {label}"));
+    }
+
+    let error_count = agents
+        .iter()
+        .filter(|agent| agent.status == ParallelAgentStatus::Error)
+        .count();
+    if error_count > 0 {
+        let errors = if error_count == 1 { "error" } else { "errors" };
+        return make_preview(&format!(
+            "{count} {label} finished with {error_count} {errors}"
+        ));
+    }
+
+    make_preview(&format!("Completed {count} {label}"))
 }
 
 #[derive(Deserialize, Serialize)]

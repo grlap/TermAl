@@ -5,6 +5,8 @@ struct TestRecorder {
     approvals: Vec<(String, String, String)>,
     commands: Vec<(String, String, CommandStatus)>,
     diffs: Vec<(String, String, String, ChangeType)>,
+    parallel_agents: Vec<Vec<ParallelAgentProgress>>,
+    subagent_results: Vec<(String, String)>,
     thinking: Vec<(String, Vec<String>)>,
     texts: Vec<String>,
     text_deltas: Vec<String>,
@@ -27,6 +29,8 @@ impl TurnRecorder for TestRecorder {
         _conversation_id: Option<&str>,
         _turn_id: Option<&str>,
     ) -> Result<()> {
+        self.subagent_results
+            .push((title.to_owned(), summary.to_owned()));
         self.texts.push(format!("{title}\n{summary}"));
         Ok(())
     }
@@ -85,6 +89,15 @@ impl TurnRecorder for TestRecorder {
         Ok(())
     }
 
+    fn upsert_parallel_agents(
+        &mut self,
+        _key: &str,
+        agents: &[ParallelAgentProgress],
+    ) -> Result<()> {
+        self.parallel_agents.push(agents.to_vec());
+        Ok(())
+    }
+
     fn error(&mut self, _detail: &str) -> Result<()> {
         Ok(())
     }
@@ -100,7 +113,9 @@ fn test_app_state() -> AppState {
         state_events: broadcast::channel(16).0,
         delta_events: broadcast::channel(16).0,
         shared_codex_runtime: Arc::new(Mutex::new(None)),
-        remote_registry: Arc::new(RemoteRegistry::new().expect("remote registry should initialize")),
+        remote_registry: Arc::new(
+            RemoteRegistry::new().expect("remote registry should initialize"),
+        ),
         inner: Arc::new(Mutex::new(StateInner::new())),
     }
 }
@@ -239,6 +254,121 @@ fn cursor_permission_request(request_id: &str) -> Value {
     })
 }
 
+#[test]
+fn claude_task_tool_use_updates_parallel_agent_progress() {
+    let mut turn_state = ClaudeTurnState::default();
+    let mut recorder = TestRecorder::default();
+    let mut session_id = None;
+
+    handle_claude_event(
+        &json!({
+            "type": "assistant",
+            "message": {
+                "content": [
+                    {
+                        "type": "tool_use",
+                        "id": "task-1",
+                        "name": "Task",
+                        "input": {
+                            "description": "Rust code review",
+                            "subagent_type": "general-purpose"
+                        }
+                    },
+                    {
+                        "type": "tool_use",
+                        "id": "task-2",
+                        "name": "Task",
+                        "input": {
+                            "description": "Architecture code review",
+                            "subagent_type": "general-purpose"
+                        }
+                    }
+                ]
+            }
+        }),
+        &mut session_id,
+        &mut turn_state,
+        &mut recorder,
+    )
+    .unwrap();
+
+    let latest = recorder
+        .parallel_agents
+        .last()
+        .expect("parallel agents update should be recorded");
+    assert_eq!(latest.len(), 2);
+    assert_eq!(latest[0].title, "Rust code review");
+    assert_eq!(latest[0].detail.as_deref(), Some("Initializing..."));
+    assert_eq!(latest[0].status, ParallelAgentStatus::Initializing);
+    assert_eq!(latest[1].title, "Architecture code review");
+    assert_eq!(latest[1].status, ParallelAgentStatus::Initializing);
+}
+
+#[test]
+fn claude_task_tool_result_updates_parallel_agents_and_records_subagent_result() {
+    let mut turn_state = ClaudeTurnState::default();
+    let mut recorder = TestRecorder::default();
+    let mut session_id = None;
+
+    handle_claude_event(
+        &json!({
+            "type": "assistant",
+            "message": {
+                "content": [
+                    {
+                        "type": "tool_use",
+                        "id": "task-1",
+                        "name": "Task",
+                        "input": {
+                            "description": "Rust code review",
+                            "subagent_type": "general-purpose"
+                        }
+                    }
+                ]
+            }
+        }),
+        &mut session_id,
+        &mut turn_state,
+        &mut recorder,
+    )
+    .unwrap();
+
+    let detail = "Reviewer found a batching bug in location smoothing.\nRead src/state.rs for the stale preview path.";
+    handle_claude_event(
+        &json!({
+            "type": "user",
+            "message": {
+                "content": [
+                    {
+                        "type": "tool_result",
+                        "tool_use_id": "task-1",
+                        "content": detail
+                    }
+                ]
+            }
+        }),
+        &mut session_id,
+        &mut turn_state,
+        &mut recorder,
+    )
+    .unwrap();
+
+    let latest = recorder
+        .parallel_agents
+        .last()
+        .expect("completed parallel agent update should be recorded");
+    assert_eq!(latest.len(), 1);
+    assert_eq!(latest[0].title, "Rust code review");
+    assert_eq!(latest[0].status, ParallelAgentStatus::Completed);
+    assert_eq!(
+        latest[0].detail.as_deref(),
+        Some("Reviewer found a batching bug in location smoothing.")
+    );
+    assert_eq!(
+        recorder.subagent_results,
+        vec![("Rust code review".to_owned(), detail.to_owned())]
+    );
+}
 #[test]
 fn acp_json_rpc_request_without_timeout_waits_for_late_response() {
     let pending_requests = Arc::new(Mutex::new(HashMap::new()));
@@ -988,7 +1118,9 @@ fn persists_app_settings_and_applies_them_to_new_sessions() {
         state_events: broadcast::channel(16).0,
         delta_events: broadcast::channel(16).0,
         shared_codex_runtime: Arc::new(Mutex::new(None)),
-        remote_registry: Arc::new(RemoteRegistry::new().expect("remote registry should initialize")),
+        remote_registry: Arc::new(
+            RemoteRegistry::new().expect("remote registry should initialize"),
+        ),
         inner: Arc::new(Mutex::new(reloaded_inner)),
     };
 
@@ -1672,7 +1804,7 @@ fn refreshes_codex_model_options_from_runtime() {
 }
 
 #[test]
-fn shared_codex_task_complete_event_records_subagent_result() {
+fn shared_codex_task_complete_event_buffers_subagent_result_until_final_agent_message() {
     let state = test_app_state();
     let session_id = test_session_id(&state, Agent::Codex);
     let (runtime, _input_rx, process) = test_shared_codex_runtime("shared-codex-task-complete");
@@ -1712,7 +1844,16 @@ fn shared_codex_task_complete_event_records_subagent_result() {
         .insert("conversation-123".to_owned(), session_id.clone());
 
     let pending_requests = Arc::new(Mutex::new(HashMap::new()));
-    let message = json!({
+    let turn_started = json!({
+        "method": "turn/started",
+        "params": {
+            "threadId": "conversation-123",
+            "turn": {
+                "id": "turn-sub-1"
+            }
+        }
+    });
+    let task_complete = json!({
         "method": "codex/event/task_complete",
         "params": {
             "conversationId": "conversation-123",
@@ -1723,9 +1864,48 @@ fn shared_codex_task_complete_event_records_subagent_result() {
             }
         }
     });
+    let final_message = json!({
+        "method": "codex/event/agent_message",
+        "params": {
+            "conversationId": "conversation-123",
+            "id": "turn-sub-1",
+            "msg": {
+                "message": "Final shared Codex answer.",
+                "phase": "final_answer",
+                "type": "agent_message"
+            }
+        }
+    });
 
     handle_shared_codex_app_server_message(
-        &message,
+        &turn_started,
+        &state,
+        &runtime.runtime_id,
+        &pending_requests,
+        &runtime.sessions,
+        &runtime.thread_sessions,
+    )
+    .unwrap();
+    handle_shared_codex_app_server_message(
+        &task_complete,
+        &state,
+        &runtime.runtime_id,
+        &pending_requests,
+        &runtime.sessions,
+        &runtime.thread_sessions,
+    )
+    .unwrap();
+
+    let snapshot = state.snapshot();
+    let session = snapshot
+        .sessions
+        .iter()
+        .find(|session| session.id == session_id)
+        .expect("updated session should be present");
+    assert!(session.messages.is_empty());
+
+    handle_shared_codex_app_server_message(
+        &final_message,
         &state,
         &runtime.runtime_id,
         &pending_requests,
@@ -1741,8 +1921,10 @@ fn shared_codex_task_complete_event_records_subagent_result() {
         .find(|session| session.id == session_id)
         .expect("updated session should be present");
 
+    assert_eq!(session.preview, "Final shared Codex answer.");
+    assert_eq!(session.messages.len(), 2);
     assert!(matches!(
-        session.messages.last(),
+        session.messages.first(),
         Some(Message::SubagentResult {
             title,
             summary,
@@ -1753,6 +1935,754 @@ fn shared_codex_task_complete_event_records_subagent_result() {
             && summary == "Reviewer found a real bug."
             && conversation_id.as_deref() == Some("conversation-123")
             && turn_id.as_deref() == Some("turn-sub-1")
+    ));
+    assert!(matches!(
+        session.messages.last(),
+        Some(Message::Text { text, .. }) if text == "Final shared Codex answer."
+    ));
+}
+
+#[test]
+fn shared_codex_agent_message_event_without_turn_id_uses_active_turn() {
+    let state = test_app_state();
+    let session_id = test_session_id(&state, Agent::Codex);
+    let (runtime, _input_rx, process) =
+        test_shared_codex_runtime("shared-codex-agent-final-no-turn-id");
+
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(&session_id)
+            .expect("Codex session should exist");
+        inner.sessions[index].runtime = SessionRuntime::Codex(CodexRuntimeHandle {
+            runtime_id: runtime.runtime_id.clone(),
+            input_tx: runtime.input_tx.clone(),
+            process,
+            shared_session: Some(SharedCodexSessionHandle {
+                runtime: runtime.clone(),
+                session_id: session_id.clone(),
+            }),
+        });
+        inner.sessions[index].session.status = SessionStatus::Active;
+    }
+
+    runtime
+        .sessions
+        .lock()
+        .expect("shared Codex session mutex poisoned")
+        .insert(
+            session_id.clone(),
+            SharedCodexSessionState {
+                thread_id: Some("conversation-123".to_owned()),
+                ..SharedCodexSessionState::default()
+            },
+        );
+    runtime
+        .thread_sessions
+        .lock()
+        .expect("shared Codex thread mutex poisoned")
+        .insert("conversation-123".to_owned(), session_id.clone());
+
+    let pending_requests = Arc::new(Mutex::new(HashMap::new()));
+    let turn_started = json!({
+        "method": "turn/started",
+        "params": {
+            "threadId": "conversation-123",
+            "turn": {
+                "id": "turn-no-id"
+            }
+        }
+    });
+    let final_message = json!({
+        "method": "codex/event/agent_message",
+        "params": {
+            "conversationId": "conversation-123",
+            "msg": {
+                "message": "Final shared Codex answer.",
+                "phase": "final_answer",
+                "type": "agent_message"
+            }
+        }
+    });
+
+    handle_shared_codex_app_server_message(
+        &turn_started,
+        &state,
+        &runtime.runtime_id,
+        &pending_requests,
+        &runtime.sessions,
+        &runtime.thread_sessions,
+    )
+    .unwrap();
+    handle_shared_codex_app_server_message(
+        &final_message,
+        &state,
+        &runtime.runtime_id,
+        &pending_requests,
+        &runtime.sessions,
+        &runtime.thread_sessions,
+    )
+    .unwrap();
+
+    let snapshot = state.snapshot();
+    let session = snapshot
+        .sessions
+        .iter()
+        .find(|session| session.id == session_id)
+        .expect("updated session should be present");
+
+    assert_eq!(session.preview, "Final shared Codex answer.");
+    assert_eq!(session.messages.len(), 1);
+    assert!(matches!(
+        session.messages.first(),
+        Some(Message::Text { text, .. }) if text == "Final shared Codex answer."
+    ));
+}
+
+#[test]
+fn shared_codex_task_complete_event_stays_in_current_turn_after_prior_assistant_message() {
+    let state = test_app_state();
+    let session_id = test_session_id(&state, Agent::Codex);
+    state
+        .push_message(
+            &session_id,
+            Message::Text {
+                attachments: Vec::new(),
+                id: "assistant-previous".to_owned(),
+                timestamp: stamp_now(),
+                author: Author::Assistant,
+                text: "Previous shared Codex answer.".to_owned(),
+                expanded_text: None,
+            },
+        )
+        .unwrap();
+    let (runtime, _input_rx, process) =
+        test_shared_codex_runtime("shared-codex-task-complete-order");
+
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(&session_id)
+            .expect("Codex session should exist");
+        inner.sessions[index].runtime = SessionRuntime::Codex(CodexRuntimeHandle {
+            runtime_id: runtime.runtime_id.clone(),
+            input_tx: runtime.input_tx.clone(),
+            process,
+            shared_session: Some(SharedCodexSessionHandle {
+                runtime: runtime.clone(),
+                session_id: session_id.clone(),
+            }),
+        });
+        inner.sessions[index].session.status = SessionStatus::Active;
+    }
+
+    runtime
+        .sessions
+        .lock()
+        .expect("shared Codex session mutex poisoned")
+        .insert(
+            session_id.clone(),
+            SharedCodexSessionState {
+                thread_id: Some("conversation-123".to_owned()),
+                ..SharedCodexSessionState::default()
+            },
+        );
+    runtime
+        .thread_sessions
+        .lock()
+        .expect("shared Codex thread mutex poisoned")
+        .insert("conversation-123".to_owned(), session_id.clone());
+
+    let pending_requests = Arc::new(Mutex::new(HashMap::new()));
+    let turn_started = json!({
+        "method": "turn/started",
+        "params": {
+            "threadId": "conversation-123",
+            "turn": {
+                "id": "turn-sub-2"
+            }
+        }
+    });
+    let task_complete = json!({
+        "method": "codex/event/task_complete",
+        "params": {
+            "conversationId": "conversation-123",
+            "msg": {
+                "last_agent_message": "Reviewer found a real bug.",
+                "turn_id": "turn-sub-2",
+                "type": "task_complete"
+            }
+        }
+    });
+    let final_message = json!({
+        "method": "codex/event/agent_message",
+        "params": {
+            "conversationId": "conversation-123",
+            "id": "turn-sub-2",
+            "msg": {
+                "message": "Current shared Codex answer.",
+                "phase": "final_answer",
+                "type": "agent_message"
+            }
+        }
+    });
+
+    handle_shared_codex_app_server_message(
+        &turn_started,
+        &state,
+        &runtime.runtime_id,
+        &pending_requests,
+        &runtime.sessions,
+        &runtime.thread_sessions,
+    )
+    .unwrap();
+    handle_shared_codex_app_server_message(
+        &task_complete,
+        &state,
+        &runtime.runtime_id,
+        &pending_requests,
+        &runtime.sessions,
+        &runtime.thread_sessions,
+    )
+    .unwrap();
+
+    let snapshot = state.snapshot();
+    let session = snapshot
+        .sessions
+        .iter()
+        .find(|session| session.id == session_id)
+        .expect("updated session should be present");
+    assert!(matches!(
+        session.messages.as_slice(),
+        [Message::Text { text, .. }] if text == "Previous shared Codex answer."
+    ));
+
+    handle_shared_codex_app_server_message(
+        &final_message,
+        &state,
+        &runtime.runtime_id,
+        &pending_requests,
+        &runtime.sessions,
+        &runtime.thread_sessions,
+    )
+    .unwrap();
+
+    let snapshot = state.snapshot();
+    let session = snapshot
+        .sessions
+        .iter()
+        .find(|session| session.id == session_id)
+        .expect("updated session should be present");
+
+    assert_eq!(session.messages.len(), 3);
+    assert!(matches!(
+        session.messages.first(),
+        Some(Message::Text { text, .. }) if text == "Previous shared Codex answer."
+    ));
+    assert!(matches!(
+        session.messages.get(1),
+        Some(Message::SubagentResult {
+            title,
+            summary,
+            conversation_id,
+            turn_id,
+            ..
+        }) if title == "Subagent completed"
+            && summary == "Reviewer found a real bug."
+            && conversation_id.as_deref() == Some("conversation-123")
+            && turn_id.as_deref() == Some("turn-sub-2")
+    ));
+    assert!(matches!(
+        session.messages.last(),
+        Some(Message::Text { text, .. }) if text == "Current shared Codex answer."
+    ));
+}
+
+#[test]
+fn shared_codex_task_complete_event_without_active_turn_is_ignored() {
+    let state = test_app_state();
+    let session_id = test_session_id(&state, Agent::Codex);
+    let (runtime, _input_rx, process) =
+        test_shared_codex_runtime("shared-codex-task-complete-no-active-turn");
+
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(&session_id)
+            .expect("Codex session should exist");
+        inner.sessions[index].runtime = SessionRuntime::Codex(CodexRuntimeHandle {
+            runtime_id: runtime.runtime_id.clone(),
+            input_tx: runtime.input_tx.clone(),
+            process,
+            shared_session: Some(SharedCodexSessionHandle {
+                runtime: runtime.clone(),
+                session_id: session_id.clone(),
+            }),
+        });
+        inner.sessions[index].session.status = SessionStatus::Idle;
+    }
+
+    runtime
+        .sessions
+        .lock()
+        .expect("shared Codex session mutex poisoned")
+        .insert(
+            session_id.clone(),
+            SharedCodexSessionState {
+                thread_id: Some("conversation-123".to_owned()),
+                ..SharedCodexSessionState::default()
+            },
+        );
+    runtime
+        .thread_sessions
+        .lock()
+        .expect("shared Codex thread mutex poisoned")
+        .insert("conversation-123".to_owned(), session_id.clone());
+
+    let pending_requests = Arc::new(Mutex::new(HashMap::new()));
+    let task_complete = json!({
+        "method": "codex/event/task_complete",
+        "params": {
+            "conversationId": "conversation-123",
+            "msg": {
+                "last_agent_message": "Stale hidden summary.",
+                "type": "task_complete"
+            }
+        }
+    });
+
+    handle_shared_codex_app_server_message(
+        &task_complete,
+        &state,
+        &runtime.runtime_id,
+        &pending_requests,
+        &runtime.sessions,
+        &runtime.thread_sessions,
+    )
+    .unwrap();
+
+    let snapshot = state.snapshot();
+    let session = snapshot
+        .sessions
+        .iter()
+        .find(|session| session.id == session_id)
+        .expect("updated session should be present");
+
+    assert!(session.messages.is_empty());
+}
+
+#[test]
+fn shared_codex_task_complete_event_after_streaming_output_inserts_before_answer() {
+    let state = test_app_state();
+    let session_id = test_session_id(&state, Agent::Codex);
+    let (runtime, _input_rx, process) =
+        test_shared_codex_runtime("shared-codex-task-complete-late");
+
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(&session_id)
+            .expect("Codex session should exist");
+        inner.sessions[index].runtime = SessionRuntime::Codex(CodexRuntimeHandle {
+            runtime_id: runtime.runtime_id.clone(),
+            input_tx: runtime.input_tx.clone(),
+            process,
+            shared_session: Some(SharedCodexSessionHandle {
+                runtime: runtime.clone(),
+                session_id: session_id.clone(),
+            }),
+        });
+        inner.sessions[index].session.status = SessionStatus::Active;
+    }
+
+    runtime
+        .sessions
+        .lock()
+        .expect("shared Codex session mutex poisoned")
+        .insert(
+            session_id.clone(),
+            SharedCodexSessionState {
+                thread_id: Some("conversation-123".to_owned()),
+                ..SharedCodexSessionState::default()
+            },
+        );
+    runtime
+        .thread_sessions
+        .lock()
+        .expect("shared Codex thread mutex poisoned")
+        .insert("conversation-123".to_owned(), session_id.clone());
+
+    let pending_requests = Arc::new(Mutex::new(HashMap::new()));
+    let turn_started = json!({
+        "method": "turn/started",
+        "params": {
+            "threadId": "conversation-123",
+            "turn": {
+                "id": "turn-sub-3"
+            }
+        }
+    });
+    let delta_message = json!({
+        "method": "codex/event/agent_message_content_delta",
+        "params": {
+            "conversationId": "conversation-123",
+            "id": "turn-sub-3",
+            "msg": {
+                "delta": "Current shared Codex answer.",
+                "item_id": "msg-123",
+                "thread_id": "conversation-123",
+                "turn_id": "turn-sub-3",
+                "type": "agent_message_content_delta"
+            }
+        }
+    });
+    let task_complete = json!({
+        "method": "codex/event/task_complete",
+        "params": {
+            "conversationId": "conversation-123",
+            "msg": {
+                "last_agent_message": "Reviewer found a real bug.",
+                "turn_id": "turn-sub-3",
+                "type": "task_complete"
+            }
+        }
+    });
+    let turn_completed = json!({
+        "method": "turn/completed",
+        "params": {
+            "threadId": "conversation-123",
+            "turn": {
+                "id": "turn-sub-3",
+                "error": null
+            }
+        }
+    });
+
+    handle_shared_codex_app_server_message(
+        &turn_started,
+        &state,
+        &runtime.runtime_id,
+        &pending_requests,
+        &runtime.sessions,
+        &runtime.thread_sessions,
+    )
+    .unwrap();
+    handle_shared_codex_app_server_message(
+        &delta_message,
+        &state,
+        &runtime.runtime_id,
+        &pending_requests,
+        &runtime.sessions,
+        &runtime.thread_sessions,
+    )
+    .unwrap();
+    handle_shared_codex_app_server_message(
+        &task_complete,
+        &state,
+        &runtime.runtime_id,
+        &pending_requests,
+        &runtime.sessions,
+        &runtime.thread_sessions,
+    )
+    .unwrap();
+    handle_shared_codex_app_server_message(
+        &turn_completed,
+        &state,
+        &runtime.runtime_id,
+        &pending_requests,
+        &runtime.sessions,
+        &runtime.thread_sessions,
+    )
+    .unwrap();
+
+    let snapshot = state.snapshot();
+    let session = snapshot
+        .sessions
+        .iter()
+        .find(|session| session.id == session_id)
+        .expect("updated session should be present");
+
+    assert_eq!(session.preview, "Current shared Codex answer.");
+    assert_eq!(session.messages.len(), 2);
+    assert!(matches!(
+        session.messages.first(),
+        Some(Message::SubagentResult {
+            title,
+            summary,
+            conversation_id,
+            turn_id,
+            ..
+        }) if title == "Subagent completed"
+            && summary == "Reviewer found a real bug."
+            && conversation_id.as_deref() == Some("conversation-123")
+            && turn_id.as_deref() == Some("turn-sub-3")
+    ));
+    assert!(matches!(
+        session.messages.last(),
+        Some(Message::Text { text, .. }) if text == "Current shared Codex answer."
+    ));
+}
+
+#[test]
+fn shared_codex_task_complete_event_ignores_stale_summary_from_previous_turn() {
+    let state = test_app_state();
+    let session_id = test_session_id(&state, Agent::Codex);
+    let (runtime, _input_rx, process) =
+        test_shared_codex_runtime("shared-codex-task-complete-stale");
+
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(&session_id)
+            .expect("Codex session should exist");
+        inner.sessions[index].runtime = SessionRuntime::Codex(CodexRuntimeHandle {
+            runtime_id: runtime.runtime_id.clone(),
+            input_tx: runtime.input_tx.clone(),
+            process,
+            shared_session: Some(SharedCodexSessionHandle {
+                runtime: runtime.clone(),
+                session_id: session_id.clone(),
+            }),
+        });
+        inner.sessions[index].session.status = SessionStatus::Active;
+    }
+
+    runtime
+        .sessions
+        .lock()
+        .expect("shared Codex session mutex poisoned")
+        .insert(
+            session_id.clone(),
+            SharedCodexSessionState {
+                thread_id: Some("conversation-123".to_owned()),
+                ..SharedCodexSessionState::default()
+            },
+        );
+    runtime
+        .thread_sessions
+        .lock()
+        .expect("shared Codex thread mutex poisoned")
+        .insert("conversation-123".to_owned(), session_id.clone());
+
+    let pending_requests = Arc::new(Mutex::new(HashMap::new()));
+    let turn_started_previous = json!({
+        "method": "turn/started",
+        "params": {
+            "threadId": "conversation-123",
+            "turn": {
+                "id": "turn-stale"
+            }
+        }
+    });
+    let turn_started_current = json!({
+        "method": "turn/started",
+        "params": {
+            "threadId": "conversation-123",
+            "turn": {
+                "id": "turn-current"
+            }
+        }
+    });
+    let stale_task_complete = json!({
+        "method": "codex/event/task_complete",
+        "params": {
+            "conversationId": "conversation-123",
+            "msg": {
+                "last_agent_message": "Stale hidden summary.",
+                "turn_id": "turn-stale",
+                "type": "task_complete"
+            }
+        }
+    });
+    let final_message = json!({
+        "method": "codex/event/agent_message",
+        "params": {
+            "conversationId": "conversation-123",
+            "id": "turn-current",
+            "msg": {
+                "message": "Current shared Codex answer.",
+                "phase": "final_answer",
+                "type": "agent_message"
+            }
+        }
+    });
+
+    handle_shared_codex_app_server_message(
+        &turn_started_previous,
+        &state,
+        &runtime.runtime_id,
+        &pending_requests,
+        &runtime.sessions,
+        &runtime.thread_sessions,
+    )
+    .unwrap();
+    handle_shared_codex_app_server_message(
+        &turn_started_current,
+        &state,
+        &runtime.runtime_id,
+        &pending_requests,
+        &runtime.sessions,
+        &runtime.thread_sessions,
+    )
+    .unwrap();
+    handle_shared_codex_app_server_message(
+        &stale_task_complete,
+        &state,
+        &runtime.runtime_id,
+        &pending_requests,
+        &runtime.sessions,
+        &runtime.thread_sessions,
+    )
+    .unwrap();
+
+    let snapshot = state.snapshot();
+    let session = snapshot
+        .sessions
+        .iter()
+        .find(|session| session.id == session_id)
+        .expect("updated session should be present");
+    assert!(session.messages.is_empty());
+
+    handle_shared_codex_app_server_message(
+        &final_message,
+        &state,
+        &runtime.runtime_id,
+        &pending_requests,
+        &runtime.sessions,
+        &runtime.thread_sessions,
+    )
+    .unwrap();
+
+    let snapshot = state.snapshot();
+    let session = snapshot
+        .sessions
+        .iter()
+        .find(|session| session.id == session_id)
+        .expect("updated session should be present");
+
+    assert_eq!(session.preview, "Current shared Codex answer.");
+    assert_eq!(session.messages.len(), 1);
+    assert!(matches!(
+        session.messages.first(),
+        Some(Message::Text { text, .. }) if text == "Current shared Codex answer."
+    ));
+}
+
+#[test]
+fn shared_codex_task_complete_event_drops_buffered_summary_on_failed_turn() {
+    let state = test_app_state();
+    let session_id = test_session_id(&state, Agent::Codex);
+    let (runtime, _input_rx, process) =
+        test_shared_codex_runtime("shared-codex-task-complete-error");
+
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(&session_id)
+            .expect("Codex session should exist");
+        inner.sessions[index].runtime = SessionRuntime::Codex(CodexRuntimeHandle {
+            runtime_id: runtime.runtime_id.clone(),
+            input_tx: runtime.input_tx.clone(),
+            process,
+            shared_session: Some(SharedCodexSessionHandle {
+                runtime: runtime.clone(),
+                session_id: session_id.clone(),
+            }),
+        });
+        inner.sessions[index].session.status = SessionStatus::Active;
+    }
+
+    runtime
+        .sessions
+        .lock()
+        .expect("shared Codex session mutex poisoned")
+        .insert(
+            session_id.clone(),
+            SharedCodexSessionState {
+                thread_id: Some("conversation-123".to_owned()),
+                ..SharedCodexSessionState::default()
+            },
+        );
+    runtime
+        .thread_sessions
+        .lock()
+        .expect("shared Codex thread mutex poisoned")
+        .insert("conversation-123".to_owned(), session_id.clone());
+
+    let pending_requests = Arc::new(Mutex::new(HashMap::new()));
+    let turn_started = json!({
+        "method": "turn/started",
+        "params": {
+            "threadId": "conversation-123",
+            "turn": {
+                "id": "turn-sub-4"
+            }
+        }
+    });
+    let task_complete = json!({
+        "method": "codex/event/task_complete",
+        "params": {
+            "conversationId": "conversation-123",
+            "msg": {
+                "last_agent_message": "Reviewer found a real bug.",
+                "turn_id": "turn-sub-4",
+                "type": "task_complete"
+            }
+        }
+    });
+    let turn_completed = json!({
+        "method": "turn/completed",
+        "params": {
+            "threadId": "conversation-123",
+            "turn": {
+                "id": "turn-sub-4",
+                "error": {
+                    "message": "stream failed"
+                }
+            }
+        }
+    });
+
+    handle_shared_codex_app_server_message(
+        &turn_started,
+        &state,
+        &runtime.runtime_id,
+        &pending_requests,
+        &runtime.sessions,
+        &runtime.thread_sessions,
+    )
+    .unwrap();
+    handle_shared_codex_app_server_message(
+        &task_complete,
+        &state,
+        &runtime.runtime_id,
+        &pending_requests,
+        &runtime.sessions,
+        &runtime.thread_sessions,
+    )
+    .unwrap();
+    handle_shared_codex_app_server_message(
+        &turn_completed,
+        &state,
+        &runtime.runtime_id,
+        &pending_requests,
+        &runtime.sessions,
+        &runtime.thread_sessions,
+    )
+    .unwrap();
+
+    let snapshot = state.snapshot();
+    let session = snapshot
+        .sessions
+        .iter()
+        .find(|session| session.id == session_id)
+        .expect("updated session should be present");
+
+    assert_eq!(session.status, SessionStatus::Error);
+    assert_eq!(session.messages.len(), 1);
+    assert!(matches!(
+        session.messages.first(),
+        Some(Message::Text { text, .. }) if text == "Turn failed: stream failed"
     ));
 }
 
@@ -1841,6 +2771,105 @@ fn shared_codex_item_completed_event_records_agent_message() {
     assert!(matches!(
         session.messages.last(),
         Some(Message::Text { text, .. }) if text == "Hello."
+    ));
+}
+
+#[test]
+fn shared_codex_item_completed_event_concatenates_multipart_agent_message() {
+    let state = test_app_state();
+    let session_id = test_session_id(&state, Agent::Codex);
+    let (runtime, _input_rx, process) =
+        test_shared_codex_runtime("shared-codex-item-completed-multipart");
+
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(&session_id)
+            .expect("Codex session should exist");
+        inner.sessions[index].runtime = SessionRuntime::Codex(CodexRuntimeHandle {
+            runtime_id: runtime.runtime_id.clone(),
+            input_tx: runtime.input_tx.clone(),
+            process,
+            shared_session: Some(SharedCodexSessionHandle {
+                runtime: runtime.clone(),
+                session_id: session_id.clone(),
+            }),
+        });
+        inner.sessions[index].session.status = SessionStatus::Active;
+    }
+
+    runtime
+        .sessions
+        .lock()
+        .expect("shared Codex session mutex poisoned")
+        .insert(
+            session_id.clone(),
+            SharedCodexSessionState {
+                thread_id: Some("conversation-123".to_owned()),
+                ..SharedCodexSessionState::default()
+            },
+        );
+    runtime
+        .thread_sessions
+        .lock()
+        .expect("shared Codex thread mutex poisoned")
+        .insert("conversation-123".to_owned(), session_id.clone());
+
+    let pending_requests = Arc::new(Mutex::new(HashMap::new()));
+    let message = json!({
+        "method": "codex/event/item_completed",
+        "params": {
+            "conversationId": "conversation-123",
+            "id": "turn-123",
+            "msg": {
+                "item": {
+                    "content": [
+                        {
+                            "text": "Hello",
+                            "type": "Text"
+                        },
+                        {
+                            "metadata": {
+                                "ignored": true
+                            },
+                            "type": "Reasoning"
+                        },
+                        {
+                            "text": ", world.",
+                            "type": "Text"
+                        }
+                    ],
+                    "id": "msg-123",
+                    "phase": "final_answer",
+                    "type": "AgentMessage"
+                },
+                "thread_id": "conversation-123",
+                "turn_id": "turn-123",
+                "type": "item_completed"
+            }
+        }
+    });
+
+    handle_shared_codex_app_server_message(
+        &message,
+        &state,
+        &runtime.runtime_id,
+        &pending_requests,
+        &runtime.sessions,
+        &runtime.thread_sessions,
+    )
+    .unwrap();
+
+    let snapshot = state.snapshot();
+    let session = snapshot
+        .sessions
+        .iter()
+        .find(|session| session.id == session_id)
+        .expect("updated session should be present");
+
+    assert!(matches!(
+        session.messages.last(),
+        Some(Message::Text { text, .. }) if text == "Hello, world."
     ));
 }
 
@@ -2087,7 +3116,7 @@ fn shared_codex_agent_message_event_uses_conversation_id_for_session_routing() {
 }
 
 #[test]
-fn subagent_results_insert_before_trailing_assistant_text() {
+fn subagent_results_append_after_existing_assistant_text() {
     let state = test_app_state();
     let session_id = test_session_id(&state, Agent::Codex);
 
@@ -2128,11 +3157,11 @@ fn subagent_results_insert_before_trailing_assistant_text() {
 
     assert!(matches!(
         session.messages.first(),
-        Some(Message::SubagentResult { .. })
+        Some(Message::Text { text, .. }) if text == "Final answer"
     ));
     assert!(matches!(
         session.messages.last(),
-        Some(Message::Text { text, .. }) if text == "Final answer"
+        Some(Message::SubagentResult { .. })
     ));
 }
 
@@ -2933,12 +3962,17 @@ fn creates_sessions_for_remote_projects_over_ssh() {
         gemini_approval_mode: None,
     }) {
         Ok(_) => {
-            panic!("remote session creation should require a reachable SSH remote in this integration test")
+            panic!(
+                "remote session creation should require a reachable SSH remote in this integration test"
+            )
         }
         Err(error) => error,
     };
 
-    assert!(matches!(error.status, StatusCode::BAD_GATEWAY | StatusCode::BAD_REQUEST));
+    assert!(matches!(
+        error.status,
+        StatusCode::BAD_GATEWAY | StatusCode::BAD_REQUEST
+    ));
     assert!(!error.message.trim().is_empty());
 }
 

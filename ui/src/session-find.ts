@@ -5,8 +5,9 @@ import type {
   ImageAttachment,
   MarkdownMessage,
   Message,
-  SubagentResultMessage,
+  ParallelAgentsMessage,
   PendingPrompt,
+  SubagentResultMessage,
   Session,
   ThinkingMessage,
 } from "./types";
@@ -182,6 +183,8 @@ function collectMessageSearchText(message: Message) {
       return collectDiffSearchText(message);
     case "markdown":
       return collectMarkdownSearchText(message);
+    case "parallelAgents":
+      return collectParallelAgentsSearchText(message);
     case "subagentResult":
       return collectSubagentResultSearchText(message);
     case "approval":
@@ -207,6 +210,11 @@ function collectMarkdownSearchText(message: MarkdownMessage) {
   return joinSearchableParts([message.title, message.markdown]);
 }
 
+function collectParallelAgentsSearchText(message: ParallelAgentsMessage) {
+  return joinSearchableParts(
+    message.agents.flatMap((agent) => [agent.title, agent.detail]),
+  );
+}
 function collectSubagentResultSearchText(message: SubagentResultMessage) {
   return joinSearchableParts([message.title, message.summary, message.conversationId, message.turnId]);
 }

@@ -147,6 +147,7 @@ export type Message =
   | CommandMessage
   | DiffMessage
   | MarkdownMessage
+  | ParallelAgentsMessage
   | SubagentResultMessage
   | ApprovalMessage;
 
@@ -206,6 +207,20 @@ export type MarkdownMessage = BaseMessage & {
   type: "markdown";
   title: string;
   markdown: string;
+};
+
+export type ParallelAgentStatus = "initializing" | "running" | "completed" | "error";
+
+export type ParallelAgentProgress = {
+  detail?: string | null;
+  id: string;
+  status: ParallelAgentStatus;
+  title: string;
+};
+
+export type ParallelAgentsMessage = BaseMessage & {
+  type: "parallelAgents";
+  agents: ParallelAgentProgress[];
 };
 
 export type SubagentResultMessage = BaseMessage & {

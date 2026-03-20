@@ -488,16 +488,27 @@ struct PendingAcpJsonRpcRequest {
     response_rx: mpsc::Receiver<std::result::Result<Value, String>>,
 }
 
+struct PendingSubagentResult {
+    title: String,
+    summary: String,
+    conversation_id: Option<String>,
+    turn_id: Option<String>,
+}
+
 #[derive(Default)]
 struct CodexTurnState {
     current_agent_message_id: Option<String>,
     streamed_agent_message_text_by_item_id: HashMap<String, String>,
     streamed_agent_message_item_ids: HashSet<String>,
+    pending_subagent_results: Vec<PendingSubagentResult>,
+    assistant_output_started: bool,
+    first_visible_assistant_message_id: Option<String>,
 }
 
 #[derive(Default)]
 struct SessionRecorderState {
     command_messages: HashMap<String, String>,
+    parallel_agents_messages: HashMap<String, String>,
     streaming_text_message_id: Option<String>,
 }
 
@@ -764,7 +775,8 @@ fn spawn_acp_runtime(
                         break;
                     }
                     Ok(Some(status)) => {
-                        let detail = format!("{} session exited with status {status}", agent.label());
+                        let detail =
+                            format!("{} session exited with status {status}", agent.label());
                         fail_pending_acp_requests(&wait_pending_requests, &detail);
                         let _ = wait_state.handle_runtime_exit_if_matches(
                             &wait_session_id,
@@ -901,8 +913,8 @@ fn handle_acp_prompt_command(
 
         match result {
             Ok(_) => {
-                let _ =
-                    wait_state.finish_turn_ok_if_runtime_matches(&wait_session_id, &wait_runtime_token);
+                let _ = wait_state
+                    .finish_turn_ok_if_runtime_matches(&wait_session_id, &wait_runtime_token);
             }
             Err(err) => {
                 let _ = wait_state.handle_runtime_exit_if_matches(
@@ -1590,8 +1602,18 @@ fn parse_cursor_mode_acp_value(value: &str) -> Option<CursorMode> {
 
 fn acp_cursor_mode(update: &Value) -> Option<CursorMode> {
     current_acp_config_option_value(update, "mode")
-        .or_else(|| update.get("mode").and_then(Value::as_str).map(str::to_owned))
-        .or_else(|| update.get("value").and_then(Value::as_str).map(str::to_owned))
+        .or_else(|| {
+            update
+                .get("mode")
+                .and_then(Value::as_str)
+                .map(str::to_owned)
+        })
+        .or_else(|| {
+            update
+                .get("value")
+                .and_then(Value::as_str)
+                .map(str::to_owned)
+        })
         .and_then(|value| parse_cursor_mode_acp_value(&value))
 }
 
@@ -2137,7 +2159,11 @@ fn shared_codex_session_thread_id<'a>(method: &str, message: &'a Value) -> Optio
         _ if method.starts_with("codex/event/") => message
             .pointer("/params/msg/thread_id")
             .and_then(Value::as_str)
-            .or_else(|| message.pointer("/params/conversationId").and_then(Value::as_str)),
+            .or_else(|| {
+                message
+                    .pointer("/params/conversationId")
+                    .and_then(Value::as_str)
+            }),
         _ => None,
     })
 }
@@ -2386,9 +2412,7 @@ fn handle_shared_codex_app_server_notification(
             }
         }
         "turn/started" => {
-            turn_state.current_agent_message_id = None;
-            turn_state.streamed_agent_message_text_by_item_id.clear();
-            turn_state.streamed_agent_message_item_ids.clear();
+            clear_codex_turn_state(turn_state);
             *turn_id = message
                 .pointer("/params/turn/id")
                 .and_then(Value::as_str)
@@ -2396,12 +2420,11 @@ fn handle_shared_codex_app_server_notification(
             recorder.finish_streaming_text()?;
         }
         "turn/completed" => {
-            *turn_id = None;
-            turn_state.current_agent_message_id = None;
-            turn_state.streamed_agent_message_text_by_item_id.clear();
-            recorder.finish_streaming_text()?;
             if let Some(error) = message.pointer("/params/turn/error") {
                 if !error.is_null() {
+                    *turn_id = None;
+                    clear_codex_turn_state(turn_state);
+                    recorder.finish_streaming_text()?;
                     state.fail_turn_if_runtime_matches(
                         session_id,
                         runtime_token,
@@ -2410,6 +2433,13 @@ fn handle_shared_codex_app_server_notification(
                     return Ok(());
                 }
             }
+
+            *turn_id = None;
+            if !turn_state.assistant_output_started {
+                flush_pending_codex_subagent_results(turn_state, recorder)?;
+            }
+            clear_codex_turn_state(turn_state);
+            recorder.finish_streaming_text()?;
             state.finish_turn_ok_if_runtime_matches(session_id, runtime_token)?;
         }
         "item/started" => {
@@ -2419,7 +2449,7 @@ fn handle_shared_codex_app_server_notification(
         }
         "item/completed" => {
             if let Some(item) = message.get("params").and_then(|params| params.get("item")) {
-                handle_codex_app_server_item_completed(item, turn_state, recorder)?;
+                handle_codex_app_server_item_completed(item, state, session_id, turn_state, recorder)?;
             }
         }
         "item/agentMessage/delta" => {
@@ -2429,7 +2459,7 @@ fn handle_shared_codex_app_server_notification(
             let Some(item_id) = message.pointer("/params/itemId").and_then(Value::as_str) else {
                 return Ok(());
             };
-            record_codex_agent_message_delta(turn_state, recorder, item_id, delta)?;
+            record_codex_agent_message_delta(turn_state, recorder, state, session_id, item_id, delta)?;
         }
         "thread/status/changed"
         | "turn/diff/updated"
@@ -2454,6 +2484,7 @@ fn handle_shared_codex_app_server_notification(
         | "thread/realtime/closed" => {}
         "error" => {
             *turn_id = None;
+            clear_codex_turn_state(turn_state);
             let payload = message.get("params").unwrap_or(message);
             let detail = summarize_error(payload);
 
@@ -2464,16 +2495,43 @@ fn handle_shared_codex_app_server_notification(
             }
         }
         "codex/event/item_completed" => {
-            handle_shared_codex_event_item_completed(message, turn_state, recorder)?;
+            handle_shared_codex_event_item_completed(
+                message,
+                state,
+                session_id,
+                turn_id.as_deref(),
+                turn_state,
+                recorder,
+            )?;
         }
         "codex/event/agent_message_content_delta" => {
-            handle_shared_codex_event_agent_message_content_delta(message, turn_state, recorder)?;
+            handle_shared_codex_event_agent_message_content_delta(
+                message,
+                turn_id.as_deref(),
+                turn_state,
+                recorder,
+                state,
+                session_id,
+            )?;
         }
         "codex/event/agent_message" => {
-            handle_shared_codex_event_agent_message(message, turn_state, recorder)?;
+            handle_shared_codex_event_agent_message(
+                message,
+                state,
+                session_id,
+                turn_id.as_deref(),
+                turn_state,
+                recorder,
+            )?;
         }
         "codex/event/task_complete" => {
-            handle_shared_codex_task_complete(message, recorder)?;
+            handle_shared_codex_task_complete(
+                message,
+                state,
+                session_id,
+                turn_id.as_deref(),
+                turn_state,
+            )?;
         }
         _ if method.starts_with("codex/event/") => {}
         _ => {
@@ -2489,7 +2547,10 @@ fn handle_shared_codex_app_server_notification(
 
 fn handle_shared_codex_task_complete(
     message: &Value,
-    recorder: &mut impl TurnRecorder,
+    state: &AppState,
+    session_id: &str,
+    current_turn_id: Option<&str>,
+    turn_state: &mut CodexTurnState,
 ) -> Result<()> {
     let Some(summary) = message
         .pointer("/params/msg/last_agent_message")
@@ -2497,23 +2558,77 @@ fn handle_shared_codex_task_complete(
     else {
         return Ok(());
     };
+    let trimmed = summary.trim();
+    if trimmed.is_empty() {
+        return Ok(());
+    }
 
-    recorder.push_subagent_result(
+    let conversation_id = message
+        .pointer("/params/conversationId")
+        .and_then(Value::as_str);
+    let turn_id = message
+        .pointer("/params/msg/turn_id")
+        .and_then(Value::as_str)
+        .or_else(|| message.pointer("/params/turn_id").and_then(Value::as_str));
+    if current_turn_id.is_none() {
+        return Ok(());
+    }
+    if !shared_codex_event_matches_active_turn(current_turn_id, turn_id) {
+        return Ok(());
+    }
+
+    if let Some(anchor_message_id) = turn_state.first_visible_assistant_message_id.as_deref() {
+        state.insert_message_before(
+            session_id,
+            anchor_message_id,
+            Message::SubagentResult {
+                id: state.allocate_message_id(),
+                timestamp: stamp_now(),
+                author: Author::Assistant,
+                title: "Subagent completed".to_owned(),
+                summary: trimmed.to_owned(),
+                conversation_id: conversation_id.map(str::to_owned),
+                turn_id: turn_id.map(str::to_owned),
+            },
+        )?;
+        return Ok(());
+    }
+
+    buffer_codex_subagent_result(
+        turn_state,
         "Subagent completed",
-        summary,
-        message.pointer("/params/conversationId").and_then(Value::as_str),
-        message
-            .pointer("/params/msg/turn_id")
-            .and_then(Value::as_str)
-            .or_else(|| message.pointer("/params/turn_id").and_then(Value::as_str)),
-    )
+        trimmed,
+        conversation_id,
+        turn_id,
+    );
+    Ok(())
+}
+
+fn shared_codex_event_matches_active_turn(
+    current_turn_id: Option<&str>,
+    event_turn_id: Option<&str>,
+) -> bool {
+    match current_turn_id {
+        Some(current) => {
+            event_turn_id.is_none() || matches!(event_turn_id, Some(event) if current == event)
+        }
+        None => true,
+    }
 }
 
 fn handle_shared_codex_event_item_completed(
     message: &Value,
-    turn_state: &CodexTurnState,
+    state: &AppState,
+    session_id: &str,
+    current_turn_id: Option<&str>,
+    turn_state: &mut CodexTurnState,
     recorder: &mut impl TurnRecorder,
 ) -> Result<()> {
+    let event_turn_id = message.pointer("/params/msg/turn_id").and_then(Value::as_str);
+    if !shared_codex_event_matches_active_turn(current_turn_id, event_turn_id) {
+        return Ok(());
+    }
+
     let Some(item) = message.pointer("/params/msg/item") else {
         return Ok(());
     };
@@ -2528,15 +2643,12 @@ fn handle_shared_codex_event_item_completed(
             let text = item
                 .get("content")
                 .and_then(Value::as_array)
-                .and_then(|content| {
-                    content.iter().find_map(|part| match part.get("type").and_then(Value::as_str) {
-                        Some("Text") => part.get("text").and_then(Value::as_str),
-                        _ => None,
-                    })
-                });
+                .and_then(|content| concatenate_codex_text_parts(content));
 
-            if let Some(text) = text {
+            if let Some(text) = text.as_deref() {
+                begin_codex_assistant_output(turn_state, recorder)?;
                 recorder.push_text(text)?;
+                remember_codex_first_assistant_message_id(state, session_id, turn_state)?;
             }
         }
         Some("CommandExecution") => {
@@ -2547,7 +2659,9 @@ fn handle_shared_codex_event_item_completed(
                     .and_then(Value::as_str)
                     .unwrap_or("");
                 let status = match item.get("status").and_then(Value::as_str) {
-                    Some("completed") if item.get("exitCode").and_then(Value::as_i64) == Some(0) => {
+                    Some("completed")
+                        if item.get("exitCode").and_then(Value::as_i64) == Some(0) =>
+                    {
                         CommandStatus::Success
                     }
                     Some("completed") => CommandStatus::Error,
@@ -2563,31 +2677,143 @@ fn handle_shared_codex_event_item_completed(
     Ok(())
 }
 
-fn handle_shared_codex_event_agent_message_content_delta(
-    message: &Value,
+fn concatenate_codex_text_parts(content: &[Value]) -> Option<String> {
+    let mut combined = String::new();
+
+    for part in content {
+        if part.get("type").and_then(Value::as_str) != Some("Text") {
+            continue;
+        }
+        let Some(text) = part.get("text").and_then(Value::as_str) else {
+            continue;
+        };
+        combined.push_str(text);
+    }
+
+    if combined.is_empty() {
+        None
+    } else {
+        Some(combined)
+    }
+}
+
+fn clear_codex_turn_state(turn_state: &mut CodexTurnState) {
+    turn_state.current_agent_message_id = None;
+    turn_state.streamed_agent_message_text_by_item_id.clear();
+    turn_state.streamed_agent_message_item_ids.clear();
+    turn_state.pending_subagent_results.clear();
+    turn_state.assistant_output_started = false;
+    turn_state.first_visible_assistant_message_id = None;
+}
+
+fn buffer_codex_subagent_result(
+    turn_state: &mut CodexTurnState,
+    title: &str,
+    summary: &str,
+    conversation_id: Option<&str>,
+    turn_id: Option<&str>,
+) {
+    let trimmed = summary.trim();
+    if trimmed.is_empty() {
+        return;
+    }
+
+    turn_state
+        .pending_subagent_results
+        .push(PendingSubagentResult {
+            title: title.to_owned(),
+            summary: trimmed.to_owned(),
+            conversation_id: conversation_id.map(str::to_owned),
+            turn_id: turn_id.map(str::to_owned),
+        });
+}
+
+fn flush_pending_codex_subagent_results(
     turn_state: &mut CodexTurnState,
     recorder: &mut impl TurnRecorder,
 ) -> Result<()> {
+    for pending in std::mem::take(&mut turn_state.pending_subagent_results) {
+        recorder.push_subagent_result(
+            &pending.title,
+            &pending.summary,
+            pending.conversation_id.as_deref(),
+            pending.turn_id.as_deref(),
+        )?;
+    }
+
+    Ok(())
+}
+
+fn begin_codex_assistant_output(
+    turn_state: &mut CodexTurnState,
+    recorder: &mut impl TurnRecorder,
+) -> Result<()> {
+    if !turn_state.assistant_output_started {
+        flush_pending_codex_subagent_results(turn_state, recorder)?;
+        turn_state.assistant_output_started = true;
+    }
+
+    Ok(())
+}
+
+fn remember_codex_first_assistant_message_id(
+    state: &AppState,
+    session_id: &str,
+    turn_state: &mut CodexTurnState,
+) -> Result<()> {
+    if turn_state.first_visible_assistant_message_id.is_none() {
+        turn_state.first_visible_assistant_message_id = state.last_message_id(session_id)?;
+    }
+    Ok(())
+}
+
+fn handle_shared_codex_event_agent_message_content_delta(
+    message: &Value,
+    current_turn_id: Option<&str>,
+    turn_state: &mut CodexTurnState,
+    recorder: &mut impl TurnRecorder,
+    state: &AppState,
+    session_id: &str,
+) -> Result<()> {
+    let event_turn_id = message.pointer("/params/msg/turn_id").and_then(Value::as_str);
+    if !shared_codex_event_matches_active_turn(current_turn_id, event_turn_id) {
+        return Ok(());
+    }
+
     let Some(delta) = message.pointer("/params/msg/delta").and_then(Value::as_str) else {
         return Ok(());
     };
-    let Some(item_id) = message.pointer("/params/msg/item_id").and_then(Value::as_str) else {
+    let Some(item_id) = message
+        .pointer("/params/msg/item_id")
+        .and_then(Value::as_str)
+    else {
         return Ok(());
     };
 
-    record_codex_agent_message_delta(turn_state, recorder, item_id, delta)
+    record_codex_agent_message_delta(turn_state, recorder, state, session_id, item_id, delta)
 }
 
 fn handle_shared_codex_event_agent_message(
     message: &Value,
-    turn_state: &CodexTurnState,
+    state: &AppState,
+    session_id: &str,
+    current_turn_id: Option<&str>,
+    turn_state: &mut CodexTurnState,
     recorder: &mut impl TurnRecorder,
 ) -> Result<()> {
+    let event_turn_id = message.pointer("/params/msg/turn_id").and_then(Value::as_str);
+    if !shared_codex_event_matches_active_turn(current_turn_id, event_turn_id) {
+        return Ok(());
+    }
+
     if !turn_state.streamed_agent_message_item_ids.is_empty() {
         return Ok(());
     }
 
-    let Some(text) = message.pointer("/params/msg/message").and_then(Value::as_str) else {
+    let Some(text) = message
+        .pointer("/params/msg/message")
+        .and_then(Value::as_str)
+    else {
         return Ok(());
     };
     let trimmed = text.trim();
@@ -2595,12 +2821,16 @@ fn handle_shared_codex_event_agent_message(
         return Ok(());
     }
 
-    recorder.push_text(trimmed)
+    begin_codex_assistant_output(turn_state, recorder)?;
+    recorder.push_text(trimmed)?;
+    remember_codex_first_assistant_message_id(state, session_id, turn_state)
 }
 
 fn record_codex_agent_message_delta(
     turn_state: &mut CodexTurnState,
     recorder: &mut impl TurnRecorder,
+    state: &AppState,
+    session_id: &str,
     item_id: &str,
     delta: &str,
 ) -> Result<()> {
@@ -2615,10 +2845,13 @@ fn record_codex_agent_message_delta(
     let Some(unseen_suffix) = next_codex_delta_suffix(entry, delta) else {
         return Ok(());
     };
+
+    begin_codex_assistant_output(turn_state, recorder)?;
     turn_state
         .streamed_agent_message_item_ids
         .insert(item_id.to_owned());
-    recorder.text_delta(&unseen_suffix)
+    recorder.text_delta(&unseen_suffix)?;
+    remember_codex_first_assistant_message_id(state, session_id, turn_state)
 }
 
 fn next_codex_delta_suffix(existing: &mut String, incoming: &str) -> Option<String> {
@@ -2641,7 +2874,11 @@ fn next_codex_delta_suffix(existing: &mut String, incoming: &str) -> Option<Stri
         let suffix = incoming[split..].to_owned();
         existing.clear();
         existing.push_str(incoming);
-        return if suffix.is_empty() { None } else { Some(suffix) };
+        return if suffix.is_empty() {
+            None
+        } else {
+            Some(suffix)
+        };
     }
 
     if existing.ends_with(incoming) {
@@ -2771,7 +3008,9 @@ fn handle_codex_app_server_item_started(
 
 fn handle_codex_app_server_item_completed(
     item: &Value,
-    turn_state: &CodexTurnState,
+    state: &AppState,
+    session_id: &str,
+    turn_state: &mut CodexTurnState,
     recorder: &mut impl TurnRecorder,
 ) -> Result<()> {
     match item.get("type").and_then(Value::as_str) {
@@ -2779,7 +3018,9 @@ fn handle_codex_app_server_item_completed(
             let item_id = item.get("id").and_then(Value::as_str).unwrap_or("");
             if !turn_state.streamed_agent_message_item_ids.contains(item_id) {
                 if let Some(text) = item.get("text").and_then(Value::as_str) {
+                    begin_codex_assistant_output(turn_state, recorder)?;
                     recorder.push_text(text)?;
+                    remember_codex_first_assistant_message_id(state, session_id, turn_state)?;
                 }
             }
         }
@@ -4241,4 +4482,3 @@ fn write_claude_message(writer: &mut impl Write, message: &Value) -> Result<()> 
         .context("failed to write Claude message delimiter")?;
     writer.flush().context("failed to flush Claude stdin")
 }
-

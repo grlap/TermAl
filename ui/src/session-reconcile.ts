@@ -5,6 +5,7 @@ import type {
   ImageAttachment,
   MarkdownMessage,
   Message,
+  ParallelAgentsMessage,
   PendingPrompt,
   Session,
   SubagentResultMessage,
@@ -151,6 +152,8 @@ function reconcileMessage(previous: Message, next: Message): Message {
       return reconcileDiffMessage(previous as DiffMessage, next);
     case "markdown":
       return reconcileMarkdownMessage(previous as MarkdownMessage, next);
+    case "parallelAgents":
+      return reconcileParallelAgentsMessage(previous as ParallelAgentsMessage, next);
     case "subagentResult":
       return reconcileSubagentResultMessage(previous as SubagentResultMessage, next);
     case "approval":
@@ -239,6 +242,29 @@ function reconcileMarkdownMessage(previous: MarkdownMessage, next: MarkdownMessa
   return next;
 }
 
+function reconcileParallelAgentsMessage(
+  previous: ParallelAgentsMessage,
+  next: ParallelAgentsMessage,
+): ParallelAgentsMessage {
+  if (
+    previous.timestamp === next.timestamp &&
+    previous.author === next.author &&
+    previous.agents.length === next.agents.length &&
+    previous.agents.every((agent, index) => {
+      const nextAgent = next.agents[index];
+      return (
+        nextAgent?.id === agent.id &&
+        nextAgent.title === agent.title &&
+        nextAgent.status === agent.status &&
+        (nextAgent.detail ?? null) === (agent.detail ?? null)
+      );
+    })
+  ) {
+    return previous;
+  }
+
+  return next;
+}
 function reconcileSubagentResultMessage(
   previous: SubagentResultMessage,
   next: SubagentResultMessage,

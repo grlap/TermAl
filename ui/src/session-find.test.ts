@@ -122,6 +122,41 @@ describe("session find helpers", () => {
     expect(buildSessionSearchMatches(session, "turn-sub-1")).toHaveLength(1);
   });
 
+  it("indexes parallel agent messages for conversation search", () => {
+    const session = createSession({
+      messages: [
+        {
+          id: "message-parallel",
+          type: "parallelAgents",
+          author: "assistant",
+          timestamp: "09:00",
+          agents: [
+            {
+              id: "task-1",
+              title: "Rust code review",
+              status: "completed",
+              detail: "Reviewer found a batching bug in location smoothing.",
+            },
+            {
+              id: "task-2",
+              title: "Architecture code review",
+              status: "initializing",
+              detail: "Initializing...",
+            },
+          ],
+        },
+      ],
+    });
+
+    expect(buildSessionSearchMatches(session, "batching")).toEqual([
+      expect.objectContaining({
+        itemId: "message-parallel",
+        itemKey: sessionSearchItemKey("message", "message-parallel"),
+        itemKind: "message",
+      }),
+    ]);
+    expect(buildSessionSearchMatches(session, "Architecture")).toHaveLength(1);
+  });
   it("returns no results for blank queries", () => {
     const session = createSession({
       messages: [

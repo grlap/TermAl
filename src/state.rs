@@ -14,7 +14,8 @@ impl AppState {
         let persistence_path = resolve_persistence_path(&default_workdir);
         let inner = load_state(&persistence_path)?.unwrap_or_else(|| {
             let mut inner = StateInner::new();
-            let default_project = inner.create_project(None, default_workdir.clone(), default_local_remote_id());
+            let default_project =
+                inner.create_project(None, default_workdir.clone(), default_local_remote_id());
             inner.create_session(
                 Agent::Codex,
                 Some("Codex Live".to_owned()),
@@ -38,9 +39,11 @@ impl AppState {
             state_events: broadcast::channel(128).0,
             delta_events: broadcast::channel(256).0,
             shared_codex_runtime: Arc::new(Mutex::new(None)),
-            remote_registry: Arc::new(std::thread::spawn(RemoteRegistry::new)
-                .join()
-                .expect("remote registry init thread panicked")?),
+            remote_registry: Arc::new(
+                std::thread::spawn(RemoteRegistry::new)
+                    .join()
+                    .expect("remote registry init thread panicked")?,
+            ),
             inner: Arc::new(Mutex::new(inner)),
         };
         {
@@ -136,8 +139,7 @@ impl AppState {
             }
         }
         let agent = request.agent.unwrap_or(Agent::Codex);
-        validate_agent_session_setup(agent, &workdir)
-            .map_err(ApiError::bad_request)?;
+        validate_agent_session_setup(agent, &workdir).map_err(ApiError::bad_request)?;
         let mut inner = self.inner.lock().expect("state mutex poisoned");
         let mut record = inner.create_session(
             agent,
@@ -2064,8 +2066,60 @@ impl AppState {
                 if matches!(message, Message::Approval { .. }) {
                     record.session.status = SessionStatus::Approval;
                 }
-                let insert_index = preferred_message_insert_index(record, &message);
-                let message_index = insert_message_on_record(record, insert_index, message.clone());
+                let message_index = push_message_on_record(record, message.clone());
+                (
+                    message_index,
+                    record.session.preview.clone(),
+                    record.session.status,
+                )
+            };
+            let revision = self.commit_persisted_delta_locked(&mut inner)?;
+            (revision, message, message_index, preview, status)
+        };
+
+        self.publish_delta(&DeltaEvent::MessageCreated {
+            revision,
+            session_id: session_id.to_owned(),
+            message_id: message.id().to_owned(),
+            message_index,
+            message,
+            preview,
+            status,
+        });
+        Ok(())
+    }
+
+    pub(crate) fn last_message_id(&self, session_id: &str) -> Result<Option<String>> {
+        let inner = self.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(session_id)
+            .ok_or_else(|| anyhow!("session `{session_id}` not found"))?;
+        Ok(inner.sessions[index]
+            .session
+            .messages
+            .last()
+            .map(|message| message.id().to_owned()))
+    }
+
+    pub(crate) fn insert_message_before(
+        &self,
+        session_id: &str,
+        anchor_message_id: &str,
+        message: Message,
+    ) -> Result<()> {
+        let (revision, message, message_index, preview, status) = {
+            let mut inner = self.inner.lock().expect("state mutex poisoned");
+            let index = inner
+                .find_session_index(session_id)
+                .ok_or_else(|| anyhow!("session `{session_id}` not found"))?;
+            let (message_index, preview, status) = {
+                let record = &mut inner.sessions[index];
+                let anchor_index = message_index_on_record(record, anchor_message_id).ok_or_else(|| {
+                    anyhow!(
+                        "session `{session_id}` anchor message `{anchor_message_id}` not found"
+                    )
+                })?;
+                let message_index = insert_message_on_record(record, anchor_index, message.clone());
                 (
                     message_index,
                     record.session.preview.clone(),
@@ -2268,6 +2322,55 @@ impl AppState {
             });
         }
 
+        Ok(())
+    }
+
+    fn upsert_parallel_agents_message(
+        &self,
+        session_id: &str,
+        message_id: &str,
+        agents: Vec<ParallelAgentProgress>,
+    ) -> Result<()> {
+        let mut inner = self.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(session_id)
+            .ok_or_else(|| anyhow!("session `{session_id}` not found"))?;
+        let record = &mut inner.sessions[index];
+
+        if let Some(message_index) = message_index_on_record(record, message_id) {
+            let Some(message) = record.session.messages.get_mut(message_index) else {
+                return Err(anyhow!(
+                    "session `{session_id}` message index `{message_index}` is out of bounds"
+                ));
+            };
+            match message {
+                Message::ParallelAgents {
+                    id,
+                    agents: existing_agents,
+                    ..
+                } if id == message_id => {
+                    *existing_agents = agents.clone();
+                }
+                _ => {
+                    return Err(anyhow!(
+                        "session `{session_id}` message `{message_id}` is not a parallel-agents message"
+                    ));
+                }
+            }
+        } else {
+            push_message_on_record(
+                record,
+                Message::ParallelAgents {
+                    id: message_id.to_owned(),
+                    timestamp: stamp_now(),
+                    author: Author::Assistant,
+                    agents: agents.clone(),
+                },
+            );
+        }
+
+        record.session.preview = parallel_agents_preview_text(&agents);
+        self.commit_locked(&mut inner)?;
         Ok(())
     }
 
@@ -2585,7 +2688,9 @@ fn normalize_remote_configs(remotes: Vec<RemoteConfig>) -> Result<Vec<RemoteConf
 
         let name = remote.name.trim();
         if name.is_empty() {
-            return Err(ApiError::bad_request(format!("remote `{id}` must have a name")));
+            return Err(ApiError::bad_request(format!(
+                "remote `{id}` must have a name"
+            )));
         }
 
         match remote.transport {
@@ -2651,7 +2756,12 @@ impl StateInner {
         }
     }
 
-    fn create_project(&mut self, name: Option<String>, root_path: String, remote_id: String) -> Project {
+    fn create_project(
+        &mut self,
+        name: Option<String>,
+        root_path: String,
+        remote_id: String,
+    ) -> Project {
         if let Some(existing) = self
             .projects
             .iter()
@@ -2784,7 +2894,9 @@ impl StateInner {
         let target = FsPath::new(workdir);
         self.projects
             .iter()
-            .filter(|project| project.remote_id == LOCAL_REMOTE_ID && path_contains(&project.root_path, target))
+            .filter(|project| {
+                project.remote_id == LOCAL_REMOTE_ID && path_contains(&project.root_path, target)
+            })
             .max_by_key(|project| project.root_path.len())
     }
 
@@ -2825,7 +2937,10 @@ impl StateInner {
             let project_id = self
                 .find_project_for_workdir(&workdir)
                 .map(|project| project.id.clone())
-                .unwrap_or_else(|| self.create_project(None, workdir, default_local_remote_id()).id);
+                .unwrap_or_else(|| {
+                    self.create_project(None, workdir, default_local_remote_id())
+                        .id
+                });
             self.sessions[index].session.project_id = Some(project_id);
         }
     }
@@ -3118,7 +3233,9 @@ fn approval_preview_text(agent_name: &str, decision: ApprovalDecision) -> String
     match decision {
         ApprovalDecision::Pending => "Approval pending.".to_owned(),
         ApprovalDecision::Interrupted => "Approval expired after TermAl restarted.".to_owned(),
-        ApprovalDecision::Canceled => format!("Approval canceled. {agent_name} is continuing\u{2026}"),
+        ApprovalDecision::Canceled => {
+            format!("Approval canceled. {agent_name} is continuing\u{2026}")
+        }
         ApprovalDecision::Accepted => {
             format!("Approval granted. {agent_name} is continuing\u{2026}")
         }
@@ -3249,24 +3366,6 @@ fn insert_message_on_record(record: &mut SessionRecord, index: usize, message: M
 
 fn push_message_on_record(record: &mut SessionRecord, message: Message) -> usize {
     insert_message_on_record(record, record.session.messages.len(), message)
-}
-
-fn preferred_message_insert_index(record: &SessionRecord, message: &Message) -> usize {
-    if matches!(message, Message::SubagentResult { .. }) {
-        if let Some(index) = record.session.messages.iter().rposition(|existing| {
-            matches!(
-                existing,
-                Message::Text {
-                    author: Author::Assistant,
-                    ..
-                }
-            )
-        }) {
-            return index;
-        }
-    }
-
-    record.session.messages.len()
 }
 
 #[derive(Clone)]
@@ -3498,4 +3597,3 @@ fn kill_child_process(process: &Arc<Mutex<Child>>, label: &str) -> Result<()> {
         Err(err) => Err(anyhow!("failed to inspect {label} process state: {err}")),
     }
 }
-

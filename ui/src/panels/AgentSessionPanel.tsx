@@ -2821,6 +2821,12 @@ function estimateConversationMessageHeight(message: Message) {
         message.markdown.length === 0 ? 1 : message.markdown.split("\n").length;
       return Math.min(1600, Math.max(140, 124 + markdownLineCount * 24));
     }
+    case "parallelAgents": {
+      const detailLineCount = message.agents.reduce((count, agent) => {
+        return count + (agent.detail?.split("\n").length ?? 1);
+      }, 0);
+      return Math.min(900, Math.max(168, 136 + message.agents.length * 52 + detailLineCount * 18));
+    }
     case "subagentResult":
       return Math.min(720, Math.max(132, 128 + Math.min(message.summary.split("\n").length, 4) * 24));
     case "approval":

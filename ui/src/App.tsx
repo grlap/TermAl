@@ -109,6 +109,7 @@ import type {
   ImageAttachment,
   MarkdownMessage,
   Message,
+  ParallelAgentsMessage,
   SubagentResultMessage,
   PendingPrompt,
   Project,
@@ -8574,6 +8575,14 @@ export const MessageCard = memo(function MessageCard({
           workspaceRoot={workspaceRoot}
         />
       );
+    case "parallelAgents":
+      return (
+        <ParallelAgentsCard
+          message={message}
+          searchQuery={searchQuery}
+          searchHighlightTone={searchHighlightTone}
+        />
+      );
     case "subagentResult":
       return (
         <SubagentResultCard
@@ -9382,6 +9391,179 @@ function MarkdownCard({
   );
 }
 
+function parallelAgentsHeading(message: ParallelAgentsMessage) {
+  const count = message.agents.length;
+  const label = count === 1 ? "agent" : "agents";
+  const activeCount = message.agents.filter(
+    (agent) => agent.status === "initializing" || agent.status === "running",
+  ).length;
+  if (activeCount > 0) {
+    return `Running ${count} ${label}`;
+  }
+
+  const errorCount = message.agents.filter((agent) => agent.status === "error").length;
+  if (errorCount > 0) {
+    return `${count} ${label} finished with ${errorCount} error${errorCount === 1 ? "" : "s"}`;
+  }
+
+  return `${count} ${label} completed`;
+}
+
+function parallelAgentsSummary(message: ParallelAgentsMessage) {
+  const activeCount = message.agents.filter(
+    (agent) => agent.status === "initializing" || agent.status === "running",
+  ).length;
+  const completedCount = message.agents.filter((agent) => agent.status === "completed").length;
+  const errorCount = message.agents.filter((agent) => agent.status === "error").length;
+
+  if (activeCount > 0) {
+    const parts = [];
+    if (completedCount > 0) {
+      parts.push(`${completedCount} done`);
+    }
+    if (errorCount > 0) {
+      parts.push(`${errorCount} failed`);
+    }
+    parts.push(`${activeCount} active`);
+    return parts.join(" · ");
+  }
+
+  if (errorCount > 0 && completedCount > 0) {
+    return `${completedCount} completed · ${errorCount} failed`;
+  }
+  if (errorCount > 0) {
+    return `${errorCount} failed`;
+  }
+
+  return "All task agents completed.";
+}
+
+function parallelAgentStatusLabel(status: ParallelAgentsMessage["agents"][number]["status"]) {
+  switch (status) {
+    case "initializing":
+      return "initializing";
+    case "running":
+      return "running";
+    case "completed":
+      return "completed";
+    case "error":
+      return "failed";
+  }
+}
+
+function parallelAgentStatusTone(status: ParallelAgentsMessage["agents"][number]["status"]) {
+  switch (status) {
+    case "initializing":
+    case "running":
+      return "active";
+    case "completed":
+      return "idle";
+    case "error":
+      return "error";
+  }
+}
+
+function parallelAgentDetail(agent: ParallelAgentsMessage["agents"][number]) {
+  if (agent.detail?.trim()) {
+    return agent.detail;
+  }
+
+  return agent.status === "error" ? "Task failed." : "Initializing...";
+}
+
+function ParallelAgentsCard({
+  message,
+  searchQuery = "",
+  searchHighlightTone = "match",
+}: {
+  message: ParallelAgentsMessage;
+  searchQuery?: string;
+  searchHighlightTone?: SearchHighlightTone;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const isSearchExpanded = searchQuery.trim().length > 0;
+  const hasActiveAgents = message.agents.some(
+    (agent) => agent.status === "initializing" || agent.status === "running",
+  );
+  useEffect(() => {
+    if (hasActiveAgents) {
+      setExpanded(true);
+    }
+  }, [hasActiveAgents]);
+  const canCollapse = !hasActiveAgents && !isSearchExpanded;
+  const isExpanded = hasActiveAgents || isSearchExpanded || expanded;
+  const heading = parallelAgentsHeading(message);
+  const summary = parallelAgentsSummary(message);
+
+  return (
+    <article className={`message-card reasoning-card parallel-agents-card${isExpanded ? " is-expanded" : ""}`}>
+      <MessageMeta
+        author={message.author}
+        timestamp={message.timestamp}
+        trailing={
+          canCollapse ? (
+            <button
+              className="ghost-button parallel-agents-toggle"
+              type="button"
+              onClick={() => setExpanded((open) => !open)}
+              aria-expanded={isExpanded}
+            >
+              {isExpanded ? "Hide tasks" : "Show tasks"}
+            </button>
+          ) : undefined
+        }
+      />
+      <div className="card-label parallel-agents-card-label">Parallel agents</div>
+      <div className="parallel-agents-header">
+        <h3>{renderHighlightedText(heading, searchQuery, searchHighlightTone)}</h3>
+        <span className="parallel-agents-summary">{summary}</span>
+      </div>
+      {isExpanded ? (
+        <ol className="parallel-agents-tree">
+          {message.agents.map((agent, index) => {
+            const isLast = index === message.agents.length - 1;
+            return (
+              <li
+                key={agent.id}
+                className={`parallel-agent-row parallel-agent-row-${parallelAgentStatusTone(agent.status)}`}
+              >
+                <div className="parallel-agent-line">
+                  <span className="parallel-agent-branch" aria-hidden="true">
+                    {isLast ? "└" : "├"}
+                  </span>
+                  <div className="parallel-agent-copy">
+                    <div className="parallel-agent-title-row">
+                      <span className="parallel-agent-title">
+                        {renderHighlightedText(agent.title, searchQuery, searchHighlightTone)}
+                      </span>
+                      <span
+                        className={`parallel-agent-status parallel-agent-status-${parallelAgentStatusTone(agent.status)}`}
+                      >
+                        {parallelAgentStatusLabel(agent.status)}
+                      </span>
+                    </div>
+                    <div className="parallel-agent-detail-row">
+                      <span className="parallel-agent-branch-child" aria-hidden="true">
+                        {isLast ? " " : "│"}
+                      </span>
+                      <span className="parallel-agent-detail">
+                        {renderHighlightedText(
+                          parallelAgentDetail(agent),
+                          searchQuery,
+                          searchHighlightTone,
+                        )}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              </li>
+            );
+          })}
+        </ol>
+      ) : null}
+    </article>
+  );
+}
 function SubagentResultCard({
   message,
   onOpenSourceLink,
@@ -10181,6 +10363,10 @@ function messageChangeMarker(message: Message) {
       return `${message.type}:${message.filePath}:${message.diff.length}`;
     case "markdown":
       return `${message.type}:${message.title.length}:${message.markdown.length}`;
+    case "parallelAgents":
+      return `${message.type}:${message.agents.length}:${message.agents
+        .map((agent) => `${agent.id}:${agent.status}:${agent.detail?.length ?? 0}`)
+        .join("|")}`;
     case "subagentResult":
       return `${message.type}:${message.title.length}:${message.summary.length}`;
     case "approval":
