@@ -306,6 +306,12 @@ enum CodexRuntimeCommand {
         session_id: String,
         command: CodexPromptCommand,
     },
+    JsonRpcRequest {
+        method: String,
+        params: Value,
+        timeout: Duration,
+        response_tx: Sender<std::result::Result<Value, String>>,
+    },
     ApprovalResponse {
         response: CodexApprovalResponseCommand,
     },
@@ -1896,6 +1902,23 @@ fn spawn_shared_codex_runtime(state: AppState) -> Result<SharedCodexRuntime> {
                         &session_id,
                         command,
                     ),
+                    CodexRuntimeCommand::JsonRpcRequest {
+                        method,
+                        params,
+                        timeout,
+                        response_tx,
+                    } => {
+                        let request_result = send_codex_json_rpc_request(
+                            &mut stdin,
+                            &writer_pending_requests,
+                            &method,
+                            params,
+                            timeout,
+                        )
+                        .map_err(|err| format!("{err:#}"));
+                        let _ = response_tx.send(request_result.clone());
+                        request_result.map(|_| ()).map_err(anyhow::Error::msg)
+                    }
                     CodexRuntimeCommand::ApprovalResponse { response } => {
                         write_codex_json_rpc_message(
                             &mut stdin,

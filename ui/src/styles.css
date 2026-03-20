@@ -2395,6 +2395,56 @@ textarea {
   color: var(--muted);
 }
 
+.session-thread-controls {
+  grid-column: 1 / -1;
+}
+
+.session-action-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  align-items: center;
+}
+
+.session-action-row-rollback .session-control-label {
+  margin-right: 0.15rem;
+}
+
+.session-action-input {
+  width: 5.5rem;
+  min-width: 0;
+}
+
+.session-action-button {
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface-white);
+  color: var(--ink);
+  cursor: pointer;
+  font: inherit;
+  padding: 0.58rem 0.9rem;
+  transition:
+    background-color 160ms ease,
+    border-color 160ms ease,
+    color 160ms ease,
+    transform 160ms ease;
+}
+
+.session-action-button:hover {
+  border-color: var(--accent-blue-border);
+  background: var(--accent-blue-bg);
+  color: var(--signal-blue);
+}
+
+.session-action-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.session-thread-hint {
+  margin-top: 0.1rem;
+}
+
 .themed-input,
 .session-select {
   width: 100%;

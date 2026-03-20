@@ -1,4 +1,4 @@
-import type { CommandMessage, DeltaEvent, Session, TextMessage } from "./types";
+import type { CommandMessage, DeltaEvent, ParallelAgentsMessage, Session, TextMessage } from "./types";
 
 export type DeltaApplyResult =
   | { kind: "applied"; sessions: Session[] }
@@ -98,6 +98,37 @@ export function applyDeltaToSessions(sessions: Session[], delta: DeltaEvent): De
         output: delta.output,
         outputLanguage: delta.outputLanguage,
         status: delta.status,
+      };
+      const updatedMessages = session.messages.slice();
+      updatedMessages[messageIndex] = updatedMessage;
+
+      return {
+        kind: "applied",
+        sessions: replaceSession(sessions, sessionIndex, {
+          ...session,
+          messages: updatedMessages,
+          preview: delta.preview,
+        }),
+      };
+    }
+
+    case "parallelAgentsUpdate": {
+      const messageIndex = findMessageIndex(session.messages, delta.messageId, delta.messageIndex);
+      if (messageIndex === -1) {
+        return { kind: "needsResync" };
+      }
+
+      const message = session.messages[messageIndex];
+      if (!message || message.id !== delta.messageId) {
+        return { kind: "needsResync" };
+      }
+      if (message.type !== "parallelAgents") {
+        return { kind: "needsResync" };
+      }
+
+      const updatedMessage: ParallelAgentsMessage = {
+        ...message,
+        agents: delta.agents,
       };
       const updatedMessages = session.messages.slice();
       updatedMessages[messageIndex] = updatedMessage;

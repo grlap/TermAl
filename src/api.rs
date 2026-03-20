@@ -1917,6 +1917,49 @@ async fn refresh_session_model_options(
     Ok(Json(response))
 }
 
+async fn fork_codex_thread(
+    AxumPath(session_id): AxumPath<String>,
+    State(state): State<AppState>,
+) -> Result<(StatusCode, Json<CreateSessionResponse>), ApiError> {
+    let response = run_blocking_api(move || state.fork_codex_thread(&session_id)).await?;
+    Ok((StatusCode::CREATED, Json(response)))
+}
+
+async fn archive_codex_thread(
+    AxumPath(session_id): AxumPath<String>,
+    State(state): State<AppState>,
+) -> Result<Json<StateResponse>, ApiError> {
+    let response = run_blocking_api(move || state.archive_codex_thread(&session_id)).await?;
+    Ok(Json(response))
+}
+
+async fn unarchive_codex_thread(
+    AxumPath(session_id): AxumPath<String>,
+    State(state): State<AppState>,
+) -> Result<Json<StateResponse>, ApiError> {
+    let response = run_blocking_api(move || state.unarchive_codex_thread(&session_id)).await?;
+    Ok(Json(response))
+}
+
+async fn compact_codex_thread(
+    AxumPath(session_id): AxumPath<String>,
+    State(state): State<AppState>,
+) -> Result<Json<StateResponse>, ApiError> {
+    let response = run_blocking_api(move || state.compact_codex_thread(&session_id)).await?;
+    Ok(Json(response))
+}
+
+async fn rollback_codex_thread(
+    AxumPath(session_id): AxumPath<String>,
+    State(state): State<AppState>,
+    Json(request): Json<CodexThreadRollbackRequest>,
+) -> Result<Json<StateResponse>, ApiError> {
+    let response =
+        run_blocking_api(move || state.rollback_codex_thread(&session_id, request.num_turns))
+            .await?;
+    Ok(Json(response))
+}
+
 async fn send_message(
     AxumPath(session_id): AxumPath<String>,
     State(state): State<AppState>,
@@ -2868,6 +2911,17 @@ struct ReviewQuery {
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
+struct CodexThreadRollbackRequest {
+    #[serde(default = "default_codex_thread_rollback_turns")]
+    num_turns: usize,
+}
+
+fn default_codex_thread_rollback_turns() -> usize {
+    1
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct WriteFileRequest {
     path: String,
     content: String,
@@ -3443,6 +3497,17 @@ enum DeltaEvent {
         #[serde(rename = "outputLanguage", skip_serializing_if = "Option::is_none")]
         output_language: Option<String>,
         status: CommandStatus,
+        preview: String,
+    },
+    ParallelAgentsUpdate {
+        revision: u64,
+        #[serde(rename = "sessionId")]
+        session_id: String,
+        #[serde(rename = "messageId")]
+        message_id: String,
+        #[serde(rename = "messageIndex")]
+        message_index: usize,
+        agents: Vec<ParallelAgentProgress>,
         preview: String,
     },
 }

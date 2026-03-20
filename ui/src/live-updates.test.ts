@@ -311,6 +311,95 @@ describe("applyDeltaToSessions", () => {
     expect(applyDeltaToSessions(sessions, delta)).toEqual({ kind: "needsResync" });
   });
 
+  it("applies parallel-agent deltas when the message exists at a different index", () => {
+    const sessions = [
+      makeSession("session-a", {
+        preview: "Running 1 agent",
+        messages: [
+          {
+            id: "message-1",
+            type: "text",
+            timestamp: "10:04",
+            author: "assistant",
+            text: "Preparing reviewer",
+          },
+          {
+            id: "parallel-1",
+            type: "parallelAgents",
+            timestamp: "10:05",
+            author: "assistant",
+            agents: [
+              {
+                id: "reviewer",
+                title: "Reviewer",
+                status: "initializing",
+              },
+            ],
+          },
+        ],
+      }),
+    ];
+    const delta: DeltaEvent = {
+      type: "parallelAgentsUpdate",
+      revision: 5,
+      sessionId: "session-a",
+      messageId: "parallel-1",
+      messageIndex: 0,
+      agents: [
+        {
+          id: "reviewer",
+          title: "Reviewer",
+          status: "running",
+          detail: "Checking diffs",
+        },
+      ],
+      preview: "Running 1 agent",
+    };
+
+    const result = applyDeltaToSessions(sessions, delta);
+
+    expect(result.kind).toBe("applied");
+    if (result.kind !== "applied") {
+      throw new Error("expected delta to apply");
+    }
+
+    expect(result.sessions[0].preview).toBe("Running 1 agent");
+    expect(result.sessions[0].messages[1]).toMatchObject({
+      id: "parallel-1",
+      type: "parallelAgents",
+      timestamp: "10:05",
+      agents: [
+        {
+          id: "reviewer",
+          title: "Reviewer",
+          status: "running",
+          detail: "Checking diffs",
+        },
+      ],
+    });
+  });
+
+  it("requests a resync when a parallel-agent delta arrives before the message exists", () => {
+    const sessions = [makeSession("session-a")];
+    const delta: DeltaEvent = {
+      type: "parallelAgentsUpdate",
+      revision: 6,
+      sessionId: "session-a",
+      messageId: "parallel-1",
+      messageIndex: 0,
+      agents: [
+        {
+          id: "reviewer",
+          title: "Reviewer",
+          status: "running",
+        },
+      ],
+      preview: "Running 1 agent",
+    };
+
+    expect(applyDeltaToSessions(sessions, delta)).toEqual({ kind: "needsResync" });
+  });
+
   it("reorders an existing message when a replayed messageCreated arrives with the correct index", () => {
     const sessions = [
       makeSession("session-a", {

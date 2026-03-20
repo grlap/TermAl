@@ -419,6 +419,94 @@ impl AppState {
         Ok(runtime)
     }
 
+    fn perform_codex_json_rpc_request(
+        &self,
+        method: &str,
+        params: Value,
+        timeout: Duration,
+    ) -> Result<Value, ApiError> {
+        let runtime = self.shared_codex_runtime().map_err(|err| {
+            ApiError::internal(format!("failed to start shared Codex runtime: {err:#}"))
+        })?;
+        let (response_tx, response_rx) = mpsc::channel::<std::result::Result<Value, String>>();
+        runtime
+            .input_tx
+            .send(CodexRuntimeCommand::JsonRpcRequest {
+                method: method.to_owned(),
+                params,
+                timeout,
+                response_tx,
+            })
+            .map_err(|err| {
+                ApiError::internal(format!("failed to queue Codex request `{method}`: {err}"))
+            })?;
+
+        match response_rx.recv_timeout(timeout + Duration::from_secs(1)) {
+            Ok(Ok(result)) => Ok(result),
+            Ok(Err(detail)) => Err(ApiError::bad_request(format!(
+                "Codex request `{method}` failed: {detail}"
+            ))),
+            Err(mpsc::RecvTimeoutError::Timeout) => Err(ApiError::internal(format!(
+                "timed out waiting for Codex request `{method}`"
+            ))),
+            Err(mpsc::RecvTimeoutError::Disconnected) => Err(ApiError::internal(format!(
+                "Codex request `{method}` did not return a result"
+            ))),
+        }
+    }
+
+    fn resolve_codex_thread_action_context(
+        &self,
+        session_id: &str,
+    ) -> Result<CodexThreadActionContext, ApiError> {
+        let inner = self.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(session_id)
+            .ok_or_else(|| ApiError::not_found("session not found"))?;
+        let record = &inner.sessions[index];
+
+        if record.session.agent != Agent::Codex {
+            return Err(ApiError::bad_request(
+                "Codex thread actions are only available for Codex sessions",
+            ));
+        }
+        if matches!(
+            record.session.status,
+            SessionStatus::Active | SessionStatus::Approval
+        ) {
+            return Err(ApiError::conflict(
+                "wait for the current Codex turn to finish before using thread actions",
+            ));
+        }
+
+        let thread_id = record.external_session_id.clone().ok_or_else(|| {
+            ApiError::bad_request(
+                "Codex thread actions are only available after the session has started a thread",
+            )
+        })?;
+
+        Ok(CodexThreadActionContext {
+            approval_policy: record
+                .session
+                .approval_policy
+                .unwrap_or(record.codex_approval_policy),
+            model: record.session.model.clone(),
+            model_options: record.session.model_options.clone(),
+            name: record.session.name.clone(),
+            project_id: record.session.project_id.clone(),
+            reasoning_effort: record
+                .session
+                .reasoning_effort
+                .unwrap_or(record.codex_reasoning_effort),
+            sandbox_mode: record
+                .session
+                .sandbox_mode
+                .unwrap_or(record.codex_sandbox_mode),
+            thread_id,
+            workdir: record.session.workdir.clone(),
+        })
+    }
+
     fn clear_shared_codex_runtime_if_matches(&self, runtime_id: &str) {
         let mut shared_runtime = self
             .shared_codex_runtime
@@ -1378,6 +1466,255 @@ impl AppState {
         }
     }
 
+    fn fork_codex_thread(&self, session_id: &str) -> std::result::Result<CreateSessionResponse, ApiError> {
+        if self.remote_session_target(session_id)?.is_some() {
+            return self.proxy_remote_fork_codex_thread(session_id);
+        }
+
+        let context = self.resolve_codex_thread_action_context(session_id)?;
+        let fork_result = self.perform_codex_json_rpc_request(
+            "thread/fork",
+            json!({
+                "threadId": context.thread_id,
+            }),
+            Duration::from_secs(30),
+        )?;
+
+        let fork_thread_id = fork_result
+            .pointer("/thread/id")
+            .and_then(Value::as_str)
+            .ok_or_else(|| ApiError::internal("Codex thread fork did not return a thread id"))?
+            .to_owned();
+        let fork_name = default_forked_codex_session_name(
+            &context.name,
+            fork_result.pointer("/thread/name").and_then(Value::as_str),
+        );
+        let fork_model = fork_result
+            .get("model")
+            .and_then(Value::as_str)
+            .unwrap_or(&context.model)
+            .to_owned();
+        let fork_workdir = resolve_forked_codex_workdir(
+            fork_result.get("cwd").and_then(Value::as_str),
+            &context.workdir,
+            context.project_id.as_deref(),
+            self,
+        )?;
+        let approval_policy = fork_result
+            .get("approvalPolicy")
+            .and_then(codex_approval_policy_from_json_value)
+            .unwrap_or(context.approval_policy);
+        let sandbox_mode = fork_result
+            .get("sandbox")
+            .and_then(codex_sandbox_mode_from_json_value)
+            .unwrap_or(context.sandbox_mode);
+        let reasoning_effort = fork_result
+            .get("reasoningEffort")
+            .and_then(codex_reasoning_effort_from_json_value)
+            .unwrap_or(context.reasoning_effort);
+        let fork_preview = fork_result
+            .pointer("/thread/preview")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .unwrap_or("No thread preview was returned.");
+
+        let mut inner = self.inner.lock().expect("state mutex poisoned");
+        let mut record = inner.create_session(
+            Agent::Codex,
+            Some(fork_name),
+            fork_workdir,
+            context.project_id.clone(),
+            Some(fork_model),
+        );
+        record.session.model_options = context.model_options.clone();
+        record.codex_approval_policy = approval_policy;
+        record.session.approval_policy = Some(approval_policy);
+        record.codex_sandbox_mode = sandbox_mode;
+        record.session.sandbox_mode = Some(sandbox_mode);
+        record.codex_reasoning_effort = reasoning_effort;
+        record.session.reasoning_effort = Some(reasoning_effort);
+        record.external_session_id = Some(fork_thread_id.clone());
+        record.session.external_session_id = Some(fork_thread_id.clone());
+        let note_message_id = inner.next_message_id();
+        push_session_markdown_note_on_record(
+            &mut record,
+            note_message_id,
+            "Forked Codex thread",
+            format!(
+                "Forked from `{}` into live Codex thread `{}`.\n\nPreview: {}\n\nTermAl does not backfill the earlier Codex transcript into this new session yet. New prompts here continue on the forked thread from this point forward.",
+                context.name, fork_thread_id, fork_preview
+            ),
+        );
+
+        if let Some(slot) = inner
+            .find_session_index(&record.session.id)
+            .and_then(|index| inner.sessions.get_mut(index))
+        {
+            *slot = record.clone();
+        }
+        self.commit_locked(&mut inner).map_err(|err| {
+            ApiError::internal(format!("failed to persist forked Codex session: {err:#}"))
+        })?;
+
+        Ok(CreateSessionResponse {
+            session_id: record.session.id,
+            state: self.snapshot_from_inner(&inner),
+        })
+    }
+
+    fn archive_codex_thread(&self, session_id: &str) -> std::result::Result<StateResponse, ApiError> {
+        if self.remote_session_target(session_id)?.is_some() {
+            return self.proxy_remote_archive_codex_thread(session_id);
+        }
+
+        let context = self.resolve_codex_thread_action_context(session_id)?;
+        self.perform_codex_json_rpc_request(
+            "thread/archive",
+            json!({
+                "threadId": context.thread_id,
+            }),
+            Duration::from_secs(30),
+        )?;
+
+        let mut inner = self.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(session_id)
+            .ok_or_else(|| ApiError::not_found("session not found"))?;
+        let note_message_id = inner.next_message_id();
+        push_session_markdown_note_on_record(
+            &mut inner.sessions[index],
+            note_message_id,
+            "Archived Codex thread",
+            format!(
+                "Archived the live Codex thread `{}`.\n\nUse **Unarchive** to restore it later before sending more prompts.",
+                context.thread_id
+            ),
+        );
+        self.commit_locked(&mut inner).map_err(|err| {
+            ApiError::internal(format!("failed to persist archived Codex thread note: {err:#}"))
+        })?;
+        Ok(self.snapshot_from_inner(&inner))
+    }
+
+    fn unarchive_codex_thread(
+        &self,
+        session_id: &str,
+    ) -> std::result::Result<StateResponse, ApiError> {
+        if self.remote_session_target(session_id)?.is_some() {
+            return self.proxy_remote_unarchive_codex_thread(session_id);
+        }
+
+        let context = self.resolve_codex_thread_action_context(session_id)?;
+        self.perform_codex_json_rpc_request(
+            "thread/unarchive",
+            json!({
+                "threadId": context.thread_id,
+            }),
+            Duration::from_secs(30),
+        )?;
+
+        let mut inner = self.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(session_id)
+            .ok_or_else(|| ApiError::not_found("session not found"))?;
+        let note_message_id = inner.next_message_id();
+        push_session_markdown_note_on_record(
+            &mut inner.sessions[index],
+            note_message_id,
+            "Restored Codex thread",
+            format!(
+                "Restored the archived Codex thread `{}` so the session can continue using it.",
+                context.thread_id
+            ),
+        );
+        self.commit_locked(&mut inner).map_err(|err| {
+            ApiError::internal(format!(
+                "failed to persist restored Codex thread note: {err:#}"
+            ))
+        })?;
+        Ok(self.snapshot_from_inner(&inner))
+    }
+
+    fn compact_codex_thread(&self, session_id: &str) -> std::result::Result<StateResponse, ApiError> {
+        if self.remote_session_target(session_id)?.is_some() {
+            return self.proxy_remote_compact_codex_thread(session_id);
+        }
+
+        let context = self.resolve_codex_thread_action_context(session_id)?;
+        self.perform_codex_json_rpc_request(
+            "thread/compact/start",
+            json!({
+                "threadId": context.thread_id,
+            }),
+            Duration::from_secs(30),
+        )?;
+
+        let mut inner = self.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(session_id)
+            .ok_or_else(|| ApiError::not_found("session not found"))?;
+        let note_message_id = inner.next_message_id();
+        push_session_markdown_note_on_record(
+            &mut inner.sessions[index],
+            note_message_id,
+            "Started Codex compaction",
+            format!(
+                "Started Codex context compaction for live thread `{}`.\n\nThe TermAl transcript stays intact, but the live Codex thread may now rely on a compacted summary internally.",
+                context.thread_id
+            ),
+        );
+        self.commit_locked(&mut inner).map_err(|err| {
+            ApiError::internal(format!(
+                "failed to persist Codex compaction note: {err:#}"
+            ))
+        })?;
+        Ok(self.snapshot_from_inner(&inner))
+    }
+
+    fn rollback_codex_thread(
+        &self,
+        session_id: &str,
+        num_turns: usize,
+    ) -> std::result::Result<StateResponse, ApiError> {
+        if self.remote_session_target(session_id)?.is_some() {
+            return self.proxy_remote_rollback_codex_thread(session_id, num_turns);
+        }
+        if num_turns == 0 {
+            return Err(ApiError::bad_request("rollback requires at least one turn"));
+        }
+
+        let context = self.resolve_codex_thread_action_context(session_id)?;
+        self.perform_codex_json_rpc_request(
+            "thread/rollback",
+            json!({
+                "threadId": context.thread_id,
+                "numTurns": num_turns,
+            }),
+            Duration::from_secs(30),
+        )?;
+
+        let mut inner = self.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(session_id)
+            .ok_or_else(|| ApiError::not_found("session not found"))?;
+        let turn_label = if num_turns == 1 { "turn" } else { "turns" };
+        let note_message_id = inner.next_message_id();
+        push_session_markdown_note_on_record(
+            &mut inner.sessions[index],
+            note_message_id,
+            "Rolled back Codex thread",
+            format!(
+                "Rolled back the live Codex thread `{}` by {} {}.\n\nTermAl keeps the earlier transcript above as a local record, so it may not exactly match the live Codex thread history after this point.",
+                context.thread_id, num_turns, turn_label
+            ),
+        );
+        self.commit_locked(&mut inner).map_err(|err| {
+            ApiError::internal(format!("failed to persist Codex rollback note: {err:#}"))
+        })?;
+        Ok(self.snapshot_from_inner(&inner))
+    }
+
     fn allocate_message_id(&self) -> String {
         let mut inner = self.inner.lock().expect("state mutex poisoned");
         inner.next_message_id()
@@ -2331,46 +2668,92 @@ impl AppState {
         message_id: &str,
         agents: Vec<ParallelAgentProgress>,
     ) -> Result<()> {
-        let mut inner = self.inner.lock().expect("state mutex poisoned");
-        let index = inner
-            .find_session_index(session_id)
-            .ok_or_else(|| anyhow!("session `{session_id}` not found"))?;
-        let record = &mut inner.sessions[index];
+        let (preview, revision, message_index, created_message, session_status) = {
+            let mut inner = self.inner.lock().expect("state mutex poisoned");
+            let index = inner
+                .find_session_index(session_id)
+                .ok_or_else(|| anyhow!("session `{session_id}` not found"))?;
+            let (message_index, created_message, preview, session_status) = {
+                let record = &mut inner.sessions[index];
 
-        if let Some(message_index) = message_index_on_record(record, message_id) {
-            let Some(message) = record.session.messages.get_mut(message_index) else {
-                return Err(anyhow!(
-                    "session `{session_id}` message index `{message_index}` is out of bounds"
-                ));
+                let (message_index, created_message) = if let Some(message_index) =
+                    message_index_on_record(record, message_id)
+                {
+                    let Some(message) = record.session.messages.get_mut(message_index) else {
+                        return Err(anyhow!(
+                            "session `{session_id}` message index `{message_index}` is out of bounds"
+                        ));
+                    };
+                    match message {
+                        Message::ParallelAgents {
+                            id,
+                            agents: existing_agents,
+                            ..
+                        } if id == message_id => {
+                            *existing_agents = agents.clone();
+                            (message_index, None)
+                        }
+                        _ => {
+                            return Err(anyhow!(
+                                "session `{session_id}` message `{message_id}` is not a parallel-agents message"
+                            ));
+                        }
+                    }
+                } else {
+                    let message = Message::ParallelAgents {
+                        id: message_id.to_owned(),
+                        timestamp: stamp_now(),
+                        author: Author::Assistant,
+                        agents: agents.clone(),
+                    };
+                    let message_index = push_message_on_record(record, message.clone());
+                    (message_index, Some(message))
+                };
+
+                let preview = parallel_agents_preview_text(&agents);
+                record.session.preview = preview.clone();
+                (
+                    message_index,
+                    created_message,
+                    preview,
+                    record.session.status,
+                )
             };
-            match message {
-                Message::ParallelAgents {
-                    id,
-                    agents: existing_agents,
-                    ..
-                } if id == message_id => {
-                    *existing_agents = agents.clone();
-                }
-                _ => {
-                    return Err(anyhow!(
-                        "session `{session_id}` message `{message_id}` is not a parallel-agents message"
-                    ));
-                }
-            }
+            let revision = if created_message.is_some() {
+                self.commit_persisted_delta_locked(&mut inner)?
+            } else {
+                self.commit_delta_locked(&mut inner)?
+            };
+            (
+                preview,
+                revision,
+                message_index,
+                created_message,
+                session_status,
+            )
+        };
+
+        if let Some(message) = created_message {
+            self.publish_delta(&DeltaEvent::MessageCreated {
+                revision,
+                session_id: session_id.to_owned(),
+                message_id: message_id.to_owned(),
+                message_index,
+                message,
+                preview,
+                status: session_status,
+            });
         } else {
-            push_message_on_record(
-                record,
-                Message::ParallelAgents {
-                    id: message_id.to_owned(),
-                    timestamp: stamp_now(),
-                    author: Author::Assistant,
-                    agents: agents.clone(),
-                },
-            );
+            self.publish_delta(&DeltaEvent::ParallelAgentsUpdate {
+                revision,
+                session_id: session_id.to_owned(),
+                message_id: message_id.to_owned(),
+                message_index,
+                agents,
+                preview,
+            });
         }
 
-        record.session.preview = parallel_agents_preview_text(&agents);
-        self.commit_locked(&mut inner)?;
         Ok(())
     }
 
@@ -3366,6 +3749,117 @@ fn insert_message_on_record(record: &mut SessionRecord, index: usize, message: M
 
 fn push_message_on_record(record: &mut SessionRecord, message: Message) -> usize {
     insert_message_on_record(record, record.session.messages.len(), message)
+}
+
+fn push_session_markdown_note_on_record(
+    record: &mut SessionRecord,
+    message_id: String,
+    title: &str,
+    markdown: String,
+) {
+    let message = Message::Markdown {
+        id: message_id,
+        timestamp: stamp_now(),
+        author: Author::Assistant,
+        title: title.to_owned(),
+        markdown,
+    };
+    if let Some(preview) = message.preview_text() {
+        record.session.preview = preview;
+    }
+    push_message_on_record(record, message);
+}
+
+fn codex_approval_policy_from_json_value(value: &Value) -> Option<CodexApprovalPolicy> {
+    match value {
+        Value::String(raw) => match raw.as_str() {
+            "untrusted" => Some(CodexApprovalPolicy::Untrusted),
+            "on-failure" => Some(CodexApprovalPolicy::OnFailure),
+            "on-request" => Some(CodexApprovalPolicy::OnRequest),
+            "never" => Some(CodexApprovalPolicy::Never),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+fn codex_reasoning_effort_from_json_value(value: &Value) -> Option<CodexReasoningEffort> {
+    match value {
+        Value::String(raw) => match raw.as_str() {
+            "none" => Some(CodexReasoningEffort::None),
+            "minimal" => Some(CodexReasoningEffort::Minimal),
+            "low" => Some(CodexReasoningEffort::Low),
+            "medium" => Some(CodexReasoningEffort::Medium),
+            "high" => Some(CodexReasoningEffort::High),
+            "xhigh" => Some(CodexReasoningEffort::XHigh),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+fn codex_sandbox_mode_from_json_value(value: &Value) -> Option<CodexSandboxMode> {
+    match value {
+        Value::String(raw) => match raw.as_str() {
+            "danger-full-access" => Some(CodexSandboxMode::DangerFullAccess),
+            "read-only" => Some(CodexSandboxMode::ReadOnly),
+            "workspace-write" => Some(CodexSandboxMode::WorkspaceWrite),
+            _ => None,
+        },
+        Value::Object(_) => match value.get("type").and_then(Value::as_str) {
+            Some("dangerFullAccess") => Some(CodexSandboxMode::DangerFullAccess),
+            Some("readOnly") => Some(CodexSandboxMode::ReadOnly),
+            Some("workspaceWrite") => Some(CodexSandboxMode::WorkspaceWrite),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+fn default_forked_codex_session_name(current_name: &str, thread_name: Option<&str>) -> String {
+    let trimmed_thread_name = thread_name
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    let trimmed_current_name = current_name.trim();
+    let base = trimmed_thread_name.unwrap_or(trimmed_current_name);
+    format!("{base} Fork")
+}
+
+fn resolve_forked_codex_workdir(
+    requested_workdir: Option<&str>,
+    fallback_workdir: &str,
+    project_id: Option<&str>,
+    state: &AppState,
+) -> Result<String, ApiError> {
+    let Some(requested_workdir) = requested_workdir
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    else {
+        return Ok(fallback_workdir.to_owned());
+    };
+
+    let project_id = match project_id {
+        Some(project_id) => project_id,
+        None => return Ok(requested_workdir.to_owned()),
+    };
+    let project_root = resolve_project_root_path_by_id(state, project_id)?;
+    if path_contains(project_root.to_string_lossy().as_ref(), FsPath::new(requested_workdir)) {
+        Ok(requested_workdir.to_owned())
+    } else {
+        Ok(fallback_workdir.to_owned())
+    }
+}
+
+struct CodexThreadActionContext {
+    approval_policy: CodexApprovalPolicy,
+    model: String,
+    model_options: Vec<SessionModelOption>,
+    name: String,
+    project_id: Option<String>,
+    reasoning_effort: CodexReasoningEffort,
+    sandbox_mode: CodexSandboxMode,
+    thread_id: String,
+    workdir: String,
 }
 
 #[derive(Clone)]

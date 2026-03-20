@@ -24,6 +24,12 @@ function makeSession(id: string, overrides?: Partial<Session>): Session {
   };
 }
 
+const noopArchiveThread = () => {};
+const noopCompactThread = () => {};
+const noopForkThread = () => {};
+const noopRollbackThread = () => {};
+const noopUnarchiveThread = () => {};
+
 describe("session model refresh controls", () => {
   it("auto-requests Codex model options when the session card opens without a live list", async () => {
     const onRequestModelOptions = vi.fn();
@@ -42,8 +48,13 @@ describe("session model refresh controls", () => {
         isRefreshingModelOptions={false}
         modelOptionsError={null}
         sessionNotice={null}
+        onArchiveThread={noopArchiveThread}
+        onCompactThread={noopCompactThread}
+        onForkThread={noopForkThread}
         onRequestModelOptions={onRequestModelOptions}
+        onRollbackThread={noopRollbackThread}
         onSessionSettingsChange={() => {}}
+        onUnarchiveThread={noopUnarchiveThread}
       />,
     );
 
@@ -80,8 +91,13 @@ describe("session model refresh controls", () => {
         isRefreshingModelOptions={false}
         modelOptionsError={null}
         sessionNotice="GPT-5 Codex Mini only supports medium and high reasoning, so TermAl reset effort from minimal to medium."
+        onArchiveThread={noopArchiveThread}
+        onCompactThread={noopCompactThread}
+        onForkThread={noopForkThread}
         onRequestModelOptions={() => {}}
+        onRollbackThread={noopRollbackThread}
         onSessionSettingsChange={() => {}}
+        onUnarchiveThread={noopUnarchiveThread}
       />,
     );
 
@@ -202,8 +218,13 @@ describe("session model refresh controls", () => {
         isRefreshingModelOptions={false}
         modelOptionsError={null}
         sessionNotice={null}
+        onArchiveThread={noopArchiveThread}
+        onCompactThread={noopCompactThread}
+        onForkThread={noopForkThread}
         onRequestModelOptions={() => {}}
+        onRollbackThread={noopRollbackThread}
         onSessionSettingsChange={onSessionSettingsChange}
+        onUnarchiveThread={noopUnarchiveThread}
       />,
     );
 
@@ -222,6 +243,86 @@ describe("session model refresh controls", () => {
       "model",
       "gpt-5.5-preview",
     );
+  });
+
+  it("disables Codex thread actions until the session has a live thread id", () => {
+    render(
+      <CodexPromptSettingsCard
+        paneId="pane-codex"
+        session={makeSession("codex-session", {
+          agent: "Codex",
+          approvalPolicy: "never",
+          reasoningEffort: "medium",
+          sandboxMode: "workspace-write",
+          model: "gpt-5.4",
+        })}
+        isUpdating={false}
+        isRefreshingModelOptions={false}
+        modelOptionsError={null}
+        sessionNotice={null}
+        onArchiveThread={noopArchiveThread}
+        onCompactThread={noopCompactThread}
+        onForkThread={noopForkThread}
+        onRequestModelOptions={() => {}}
+        onRollbackThread={noopRollbackThread}
+        onSessionSettingsChange={() => {}}
+        onUnarchiveThread={noopUnarchiveThread}
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: "Fork thread" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Compact" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Archive" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Unarchive" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Roll back" })).toBeDisabled();
+  });
+
+  it("fires Codex thread actions from the session card when a live thread exists", () => {
+    const onArchiveThread = vi.fn();
+    const onCompactThread = vi.fn();
+    const onForkThread = vi.fn();
+    const onRollbackThread = vi.fn();
+    const onUnarchiveThread = vi.fn();
+
+    render(
+      <CodexPromptSettingsCard
+        paneId="pane-codex"
+        session={makeSession("codex-session", {
+          agent: "Codex",
+          approvalPolicy: "never",
+          reasoningEffort: "medium",
+          sandboxMode: "workspace-write",
+          model: "gpt-5.4",
+          externalSessionId: "thread-live",
+        })}
+        isUpdating={false}
+        isRefreshingModelOptions={false}
+        modelOptionsError={null}
+        sessionNotice={null}
+        onArchiveThread={onArchiveThread}
+        onCompactThread={onCompactThread}
+        onForkThread={onForkThread}
+        onRequestModelOptions={() => {}}
+        onRollbackThread={onRollbackThread}
+        onSessionSettingsChange={() => {}}
+        onUnarchiveThread={onUnarchiveThread}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Fork thread" }));
+    fireEvent.click(screen.getByRole("button", { name: "Compact" }));
+    fireEvent.click(screen.getByRole("button", { name: "Archive" }));
+    fireEvent.click(screen.getByRole("button", { name: "Unarchive" }));
+    fireEvent.change(screen.getByLabelText("Roll back turns"), {
+      target: { value: "3" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Roll back" }));
+
+    expect(onForkThread).toHaveBeenCalledWith("codex-session", "pane-codex");
+    expect(onCompactThread).toHaveBeenCalledWith("codex-session");
+    expect(onArchiveThread).toHaveBeenCalledWith("codex-session");
+    expect(onUnarchiveThread).toHaveBeenCalledWith("codex-session");
+    expect(onRollbackThread).toHaveBeenCalledWith("codex-session", 3);
   });
 
   it("auto-requests Cursor model options when the session card opens without a live list", async () => {

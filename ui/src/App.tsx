@@ -22,17 +22,21 @@ import { createPortal, flushSync } from "react-dom";
 import ReactMarkdown, { uriTransformer } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import {
+  archiveCodexThread,
   cancelQueuedPrompt,
+  compactCodexThread,
   createProject,
   createSession,
   fetchAgentCommands,
   fetchFile,
   fetchGitStatus,
   fetchState,
+  forkCodexThread,
   killSession,
   pickProjectRoot,
   refreshSessionModelOptions,
   renameSession,
+  rollbackCodexThread,
   saveFile,
   sendMessage,
   stopSession,
@@ -40,6 +44,7 @@ import {
   type GitDiffSection,
   type GitDiffResponse,
   type StateResponse,
+  unarchiveCodexThread,
   updateAppSettings,
   updateSessionSettings,
 } from "./api";
@@ -2972,6 +2977,105 @@ export default function App() {
     }
   }
 
+  async function runCodexThreadStateAction(
+    sessionId: string,
+    request: () => Promise<StateResponse>,
+    successNotice: string,
+  ) {
+    setRequestError(null);
+    setUpdatingSessionIds((current) => setSessionFlag(current, sessionId, true));
+    try {
+      const state = await request();
+      if (!isMountedRef.current) {
+        return;
+      }
+      adoptState(state);
+      setSessionSettingNotices((current) => ({
+        ...current,
+        [sessionId]: successNotice,
+      }));
+    } catch (error) {
+      if (!isMountedRef.current) {
+        return;
+      }
+      setRequestError(getErrorMessage(error));
+    } finally {
+      if (isMountedRef.current) {
+        setUpdatingSessionIds((current) => setSessionFlag(current, sessionId, false));
+      }
+    }
+  }
+
+  async function handleForkCodexThread(sessionId: string, preferredPaneId: string | null) {
+    setRequestError(null);
+    setUpdatingSessionIds((current) => setSessionFlag(current, sessionId, true));
+    try {
+      const created = await forkCodexThread(sessionId);
+      if (!isMountedRef.current) {
+        return;
+      }
+      const adopted = adoptState(created.state, {
+        openSessionId: created.sessionId,
+        paneId: preferredPaneId,
+      });
+      if (!adopted) {
+        setWorkspace((current) =>
+          applyControlPanelLayout(
+            openSessionInWorkspaceState(current, created.sessionId, preferredPaneId),
+          ),
+        );
+      }
+      setSessionSettingNotices((current) => ({
+        ...current,
+        [sessionId]: "Forked the live Codex thread into a new session.",
+        [created.sessionId]:
+          "This session is attached to a forked Codex thread. Earlier Codex history is not backfilled into TermAl yet.",
+      }));
+    } catch (error) {
+      if (!isMountedRef.current) {
+        return;
+      }
+      setRequestError(getErrorMessage(error));
+    } finally {
+      if (isMountedRef.current) {
+        setUpdatingSessionIds((current) => setSessionFlag(current, sessionId, false));
+      }
+    }
+  }
+
+  async function handleArchiveCodexThread(sessionId: string) {
+    await runCodexThreadStateAction(
+      sessionId,
+      () => archiveCodexThread(sessionId),
+      "Archived the live Codex thread for this session.",
+    );
+  }
+
+  async function handleUnarchiveCodexThread(sessionId: string) {
+    await runCodexThreadStateAction(
+      sessionId,
+      () => unarchiveCodexThread(sessionId),
+      "Restored the archived Codex thread for this session.",
+    );
+  }
+
+  async function handleCompactCodexThread(sessionId: string) {
+    await runCodexThreadStateAction(
+      sessionId,
+      () => compactCodexThread(sessionId),
+      "Started Codex context compaction for this session.",
+    );
+  }
+
+  async function handleRollbackCodexThread(sessionId: string, numTurns: number) {
+    const turnLabel = numTurns === 1 ? "turn" : "turns";
+    await runCodexThreadStateAction(
+      sessionId,
+      () => rollbackCodexThread(sessionId, numTurns),
+      `Rolled the live Codex thread back by ${numTurns} ${turnLabel}.`,
+    );
+  }
+
   async function handleRefreshAgentCommands(sessionId: string) {
     if (refreshingAgentCommandSessionIdsRef.current[sessionId]) {
       return;
@@ -3918,8 +4022,13 @@ export default function App() {
               onRenameSessionRequest={handleSessionRenameRequest}
               onScrollToBottomRequestHandled={handleScrollToBottomRequestHandled}
               onSessionSettingsChange={handleSessionSettingsChange}
+              onArchiveCodexThread={handleArchiveCodexThread}
+              onCompactCodexThread={handleCompactCodexThread}
+              onForkCodexThread={handleForkCodexThread}
               onRefreshSessionModelOptions={handleRefreshSessionModelOptions}
               onRefreshAgentCommands={handleRefreshAgentCommands}
+              onRollbackCodexThread={handleRollbackCodexThread}
+              onUnarchiveCodexThread={handleUnarchiveCodexThread}
               renderControlPanel={(paneId) => renderWorkspaceControlSurface(paneId)}
               backendConnectionState={backendConnectionState}
             />
@@ -5702,8 +5811,13 @@ function WorkspaceNodeView({
   onRenameSessionRequest,
   onScrollToBottomRequestHandled,
   onSessionSettingsChange,
+  onArchiveCodexThread,
+  onCompactCodexThread,
+  onForkCodexThread,
   onRefreshSessionModelOptions,
   onRefreshAgentCommands,
+  onRollbackCodexThread,
+  onUnarchiveCodexThread,
   renderControlPanel,
   backendConnectionState,
 }: {
@@ -5822,8 +5936,13 @@ function WorkspaceNodeView({
     field: SessionSettingsField,
     value: SessionSettingsValue,
   ) => void;
+  onArchiveCodexThread: (sessionId: string) => void;
+  onCompactCodexThread: (sessionId: string) => void;
+  onForkCodexThread: (sessionId: string, preferredPaneId: string | null) => void;
   onRefreshSessionModelOptions: (sessionId: string) => void;
   onRefreshAgentCommands: (sessionId: string) => void;
+  onRollbackCodexThread: (sessionId: string, numTurns: number) => void;
+  onUnarchiveCodexThread: (sessionId: string) => void;
   renderControlPanel: (paneId: string) => JSX.Element;
   backendConnectionState: BackendConnectionState;
 }) {
@@ -5911,8 +6030,13 @@ function WorkspaceNodeView({
         onRenameSessionRequest={onRenameSessionRequest}
         onScrollToBottomRequestHandled={onScrollToBottomRequestHandled}
         onSessionSettingsChange={onSessionSettingsChange}
+        onArchiveCodexThread={onArchiveCodexThread}
+        onCompactCodexThread={onCompactCodexThread}
+        onForkCodexThread={onForkCodexThread}
         onRefreshSessionModelOptions={onRefreshSessionModelOptions}
         onRefreshAgentCommands={onRefreshAgentCommands}
+        onRollbackCodexThread={onRollbackCodexThread}
+        onUnarchiveCodexThread={onUnarchiveCodexThread}
         renderControlPanel={renderControlPanel}
         backendConnectionState={backendConnectionState}
       />
@@ -5996,8 +6120,13 @@ function WorkspaceNodeView({
           onRenameSessionRequest={onRenameSessionRequest}
           onScrollToBottomRequestHandled={onScrollToBottomRequestHandled}
           onSessionSettingsChange={onSessionSettingsChange}
+          onArchiveCodexThread={onArchiveCodexThread}
+          onCompactCodexThread={onCompactCodexThread}
+          onForkCodexThread={onForkCodexThread}
           onRefreshSessionModelOptions={onRefreshSessionModelOptions}
           onRefreshAgentCommands={onRefreshAgentCommands}
+          onRollbackCodexThread={onRollbackCodexThread}
+          onUnarchiveCodexThread={onUnarchiveCodexThread}
           renderControlPanel={renderControlPanel}
           backendConnectionState={backendConnectionState}
         />
@@ -6070,8 +6199,13 @@ function WorkspaceNodeView({
           onRenameSessionRequest={onRenameSessionRequest}
           onScrollToBottomRequestHandled={onScrollToBottomRequestHandled}
           onSessionSettingsChange={onSessionSettingsChange}
+          onArchiveCodexThread={onArchiveCodexThread}
+          onCompactCodexThread={onCompactCodexThread}
+          onForkCodexThread={onForkCodexThread}
           onRefreshSessionModelOptions={onRefreshSessionModelOptions}
           onRefreshAgentCommands={onRefreshAgentCommands}
+          onRollbackCodexThread={onRollbackCodexThread}
+          onUnarchiveCodexThread={onUnarchiveCodexThread}
           renderControlPanel={renderControlPanel}
           backendConnectionState={backendConnectionState}
         />
@@ -6137,8 +6271,13 @@ function SessionPaneView({
   onRenameSessionRequest,
   onScrollToBottomRequestHandled,
   onSessionSettingsChange,
+  onArchiveCodexThread,
+  onCompactCodexThread,
+  onForkCodexThread,
   onRefreshSessionModelOptions,
   onRefreshAgentCommands,
+  onRollbackCodexThread,
+  onUnarchiveCodexThread,
   renderControlPanel,
   backendConnectionState,
 }: {
@@ -6252,8 +6391,13 @@ function SessionPaneView({
     field: SessionSettingsField,
     value: SessionSettingsValue,
   ) => void;
+  onArchiveCodexThread: (sessionId: string) => void;
+  onCompactCodexThread: (sessionId: string) => void;
+  onForkCodexThread: (sessionId: string, preferredPaneId: string | null) => void;
   onRefreshSessionModelOptions: (sessionId: string) => void;
   onRefreshAgentCommands: (sessionId: string) => void;
+  onRollbackCodexThread: (sessionId: string, numTurns: number) => void;
+  onUnarchiveCodexThread: (sessionId: string) => void;
   renderControlPanel: (paneId: string) => JSX.Element;
   backendConnectionState: BackendConnectionState;
 }) {
@@ -7491,7 +7635,12 @@ function SessionPaneView({
                     modelOptionsError={modelOptionsError}
                     sessionNotice={session.id === activeSession?.id ? sessionSettingNotice : null}
                     onRequestModelOptions={onRefreshSessionModelOptions}
+                    onArchiveThread={onArchiveCodexThread}
+                    onCompactThread={onCompactCodexThread}
+                    onForkThread={onForkCodexThread}
+                    onRollbackThread={onRollbackCodexThread}
                     onSessionSettingsChange={handleSettingsChange}
+                    onUnarchiveThread={onUnarchiveCodexThread}
                   />
                 );
               }
@@ -7794,8 +7943,13 @@ export function CodexPromptSettingsCard({
   isRefreshingModelOptions,
   modelOptionsError,
   sessionNotice,
+  onArchiveThread,
+  onCompactThread,
+  onForkThread,
   onRequestModelOptions,
+  onRollbackThread,
   onSessionSettingsChange,
+  onUnarchiveThread,
 }: {
   paneId: string;
   session: Session;
@@ -7803,13 +7957,20 @@ export function CodexPromptSettingsCard({
   isRefreshingModelOptions: boolean;
   modelOptionsError: string | null;
   sessionNotice: string | null;
+  onArchiveThread: (sessionId: string) => void;
+  onCompactThread: (sessionId: string) => void;
+  onForkThread: (sessionId: string, preferredPaneId: string | null) => void;
   onRequestModelOptions: (sessionId: string) => void;
+  onRollbackThread: (sessionId: string, numTurns: number) => void;
   onSessionSettingsChange: (
     sessionId: string,
     field: SessionSettingsField,
     value: SessionSettingsValue,
   ) => void;
+  onUnarchiveThread: (sessionId: string) => void;
 }) {
+  const [rollbackTurnsText, setRollbackTurnsText] = useState("1");
+
   useSessionModelOptionsAutoRefresh({
     isRefreshingModelOptions,
     onRequestModelOptions,
@@ -7822,6 +7983,15 @@ export function CodexPromptSettingsCard({
   const reasoningEffortOptions = codexReasoningEffortComboboxOptions(session);
   const currentReasoningEffort = normalizedCodexReasoningEffort(session);
   const modelCapabilityHint = codexReasoningEffortHint(session);
+  const hasLiveThread = Boolean(session.externalSessionId);
+  const sessionBusy = session.status === "active" || session.status === "approval";
+  const threadActionsDisabled = isUpdating || isRefreshingModelOptions || !hasLiveThread || sessionBusy;
+  const rollbackTurns = Number.parseInt(rollbackTurnsText, 10);
+  const hasValidRollbackTurns = Number.isInteger(rollbackTurns) && rollbackTurns > 0;
+
+  useEffect(() => {
+    setRollbackTurnsText("1");
+  }, [session.id]);
 
   return (
     <article className="message-card prompt-settings-card">
@@ -7911,6 +8081,87 @@ export function CodexPromptSettingsCard({
               )
             }
           />
+        </div>
+        <div className="session-control-group session-thread-controls">
+          <div className="session-control-label">Thread actions</div>
+          <div className="session-action-row">
+            <button
+              className="session-action-button"
+              type="button"
+              disabled={threadActionsDisabled}
+              onClick={() => void onForkThread(session.id, paneId)}
+            >
+              Fork thread
+            </button>
+            <button
+              className="session-action-button"
+              type="button"
+              disabled={threadActionsDisabled}
+              onClick={() => void onCompactThread(session.id)}
+            >
+              Compact
+            </button>
+          </div>
+          <div className="session-action-row">
+            <button
+              className="session-action-button"
+              type="button"
+              disabled={threadActionsDisabled}
+              onClick={() => void onArchiveThread(session.id)}
+            >
+              Archive
+            </button>
+            <button
+              className="session-action-button"
+              type="button"
+              disabled={threadActionsDisabled}
+              onClick={() => void onUnarchiveThread(session.id)}
+            >
+              Unarchive
+            </button>
+          </div>
+          <div className="session-action-row session-action-row-rollback">
+            <label className="session-control-label" htmlFor={`codex-rollback-turns-${paneId}`}>
+              Roll back turns
+            </label>
+            <input
+              id={`codex-rollback-turns-${paneId}`}
+              className="themed-input session-action-input"
+              type="number"
+              min={1}
+              step={1}
+              value={rollbackTurnsText}
+              disabled={isUpdating || isRefreshingModelOptions}
+              onChange={(event) => setRollbackTurnsText(event.currentTarget.value)}
+            />
+            <button
+              className="session-action-button"
+              type="button"
+              disabled={threadActionsDisabled || !hasValidRollbackTurns}
+              onClick={() => {
+                if (!hasValidRollbackTurns) {
+                  return;
+                }
+                void onRollbackThread(session.id, rollbackTurns);
+              }}
+            >
+              Roll back
+            </button>
+          </div>
+          {!hasLiveThread ? (
+            <p className="session-control-status">
+              Thread actions unlock after the first Codex prompt creates a live thread for this session.
+            </p>
+          ) : sessionBusy ? (
+            <p className="session-control-status">
+              Wait for the current Codex turn or approval to finish before changing the live thread.
+            </p>
+          ) : (
+            <p className="session-control-hint session-thread-hint">
+              Fork creates a new TermAl session attached to a new Codex thread. Archive, unarchive,
+              compact, and rollback act on the live Codex thread behind this session.
+            </p>
+          )}
         </div>
         {sessionNotice ? <p className="session-control-notice">{sessionNotice}</p> : null}
         <p className="session-control-hint">

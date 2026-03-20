@@ -316,6 +316,52 @@ export function refreshSessionModelOptions(sessionId: string) {
   );
 }
 
+export function forkCodexThread(sessionId: string) {
+  return request<CreateSessionResponse>(
+    `/api/sessions/${encodeURIComponent(sessionId)}/codex/thread/fork`,
+    {
+      method: "POST",
+    },
+  );
+}
+
+export function archiveCodexThread(sessionId: string) {
+  return request<StateResponse>(
+    `/api/sessions/${encodeURIComponent(sessionId)}/codex/thread/archive`,
+    {
+      method: "POST",
+    },
+  );
+}
+
+export function unarchiveCodexThread(sessionId: string) {
+  return request<StateResponse>(
+    `/api/sessions/${encodeURIComponent(sessionId)}/codex/thread/unarchive`,
+    {
+      method: "POST",
+    },
+  );
+}
+
+export function compactCodexThread(sessionId: string) {
+  return request<StateResponse>(
+    `/api/sessions/${encodeURIComponent(sessionId)}/codex/thread/compact`,
+    {
+      method: "POST",
+    },
+  );
+}
+
+export function rollbackCodexThread(sessionId: string, numTurns: number) {
+  return request<StateResponse>(
+    `/api/sessions/${encodeURIComponent(sessionId)}/codex/thread/rollback`,
+    {
+      method: "POST",
+      body: JSON.stringify({ numTurns }),
+    },
+  );
+}
+
 export function fetchAgentCommands(sessionId: string) {
   return request<AgentCommandsResponse>(
     `/api/sessions/${encodeURIComponent(sessionId)}/agent-commands`,

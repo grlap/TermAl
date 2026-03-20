@@ -16,5 +16,5 @@ Use the files here for the detailed feature design and implementation notes.
 - [Concurrent Session Link Cards](./concurrent-session-link-cards.md)
 - [Instruction Debugger](./instruction-debugger.md)
 - [Territory Visualization](./territory-visualization.md)
+- [WhatsApp Integration](./whatsapp-integration.md)
 - [Agent Integration Comparison](./agent-integration-comparison.md)
-

@@ -1835,6 +1835,150 @@ fn refreshes_codex_model_options_from_runtime() {
 }
 
 #[test]
+fn fork_codex_thread_creates_a_new_local_session() {
+    let state = test_app_state();
+    let created = state
+        .create_session(CreateSessionRequest {
+            agent: Some(Agent::Codex),
+            name: Some("Codex Review".to_owned()),
+            workdir: Some("/tmp".to_owned()),
+            project_id: None,
+            model: Some("gpt-5.4".to_owned()),
+            approval_policy: Some(CodexApprovalPolicy::Never),
+            reasoning_effort: Some(CodexReasoningEffort::Medium),
+            sandbox_mode: Some(CodexSandboxMode::WorkspaceWrite),
+            cursor_mode: None,
+            claude_approval_mode: None,
+            claude_effort: None,
+            gemini_approval_mode: None,
+        })
+        .unwrap();
+    state
+        .set_external_session_id(&created.session_id, "thread-origin".to_owned())
+        .unwrap();
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(&created.session_id)
+            .expect("source Codex session should exist");
+        inner.sessions[index].session.model_options =
+            vec![SessionModelOption::plain("gpt-5.4", "gpt-5.4")];
+    }
+
+    let (runtime, input_rx, _process) = test_shared_codex_runtime("shared-codex-fork");
+    *state
+        .shared_codex_runtime
+        .lock()
+        .expect("shared Codex runtime mutex poisoned") = Some(runtime);
+
+    std::thread::spawn(move || {
+        let command = input_rx
+            .recv_timeout(Duration::from_secs(1))
+            .expect("Codex fork command should arrive");
+        match command {
+            CodexRuntimeCommand::JsonRpcRequest {
+                method,
+                params,
+                response_tx,
+                ..
+            } => {
+                assert_eq!(method, "thread/fork");
+                assert_eq!(params["threadId"], "thread-origin");
+                let _ = response_tx.send(Ok(json!({
+                    "thread": {
+                        "id": "thread-forked",
+                        "name": "Forked Review",
+                        "preview": "Forked preview",
+                    },
+                    "model": "gpt-5.5",
+                    "approvalPolicy": "on-request",
+                    "sandbox": {
+                        "type": "workspaceWrite"
+                    },
+                    "reasoningEffort": "high",
+                    "cwd": "/tmp/forked",
+                })));
+            }
+            _ => panic!("expected shared Codex JSON-RPC request"),
+        }
+    });
+
+    let forked = state.fork_codex_thread(&created.session_id).unwrap();
+    assert_ne!(forked.session_id, created.session_id);
+
+    let forked_session = forked
+        .state
+        .sessions
+        .iter()
+        .find(|session| session.id == forked.session_id)
+        .expect("forked session should be present");
+    assert_eq!(forked_session.name, "Forked Review Fork");
+    assert_eq!(forked_session.model, "gpt-5.5");
+    assert_eq!(
+        forked_session.approval_policy,
+        Some(CodexApprovalPolicy::OnRequest)
+    );
+    assert_eq!(
+        forked_session.reasoning_effort,
+        Some(CodexReasoningEffort::High)
+    );
+    assert_eq!(
+        forked_session.sandbox_mode,
+        Some(CodexSandboxMode::WorkspaceWrite)
+    );
+    assert_eq!(
+        forked_session.external_session_id.as_deref(),
+        Some("thread-forked")
+    );
+    assert_eq!(forked_session.workdir, "/tmp/forked");
+    assert_eq!(
+        forked_session.model_options,
+        vec![SessionModelOption::plain("gpt-5.4", "gpt-5.4")]
+    );
+    assert!(matches!(
+        forked_session.messages.last(),
+        Some(Message::Markdown { title, .. }) if title == "Forked Codex thread"
+    ));
+}
+
+#[test]
+fn codex_thread_actions_require_a_live_idle_thread() {
+    let state = test_app_state();
+    let session_id = test_session_id(&state, Agent::Codex);
+
+    let missing_thread_error = match state.archive_codex_thread(&session_id) {
+        Ok(_) => panic!("archive should fail without a live Codex thread"),
+        Err(err) => err,
+    };
+    assert!(
+        missing_thread_error
+            .message
+            .contains("only available after the session has started a thread")
+    );
+
+    state
+        .set_external_session_id(&session_id, "thread-live".to_owned())
+        .unwrap();
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(&session_id)
+            .expect("Codex session should exist");
+        inner.sessions[index].session.status = SessionStatus::Active;
+    }
+
+    let busy_error = match state.compact_codex_thread(&session_id) {
+        Ok(_) => panic!("compact should fail while the session is active"),
+        Err(err) => err,
+    };
+    assert!(
+        busy_error
+            .message
+            .contains("wait for the current Codex turn to finish")
+    );
+}
+
+#[test]
 fn shared_codex_task_complete_event_buffers_subagent_result_until_final_agent_message() {
     let state = test_app_state();
     let session_id = test_session_id(&state, Agent::Codex);
@@ -5456,6 +5600,59 @@ fn delta_events_include_monotonic_revisions() {
     assert_eq!(event["type"], "textDelta");
     assert_eq!(event["revision"], json!(baseline + 1));
     assert_eq!(event["messageIndex"], json!(0));
+    assert_eq!(state.snapshot().revision, baseline + 1);
+}
+
+#[test]
+fn parallel_agent_updates_publish_targeted_deltas() {
+    let state = test_app_state();
+    let session_id = test_session_id(&state, Agent::Codex);
+    let mut delta_events = state.subscribe_delta_events();
+
+    state
+        .upsert_parallel_agents_message(
+            &session_id,
+            "parallel-1",
+            vec![ParallelAgentProgress {
+                id: "reviewer".to_owned(),
+                title: "Reviewer".to_owned(),
+                status: ParallelAgentStatus::Initializing,
+                detail: None,
+            }],
+        )
+        .unwrap();
+    let baseline = state.snapshot().revision;
+
+    let created_payload = delta_events
+        .try_recv()
+        .expect("parallel-agent message-created delta payload should exist");
+    let created_event: Value =
+        serde_json::from_str(&created_payload).expect("delta should be valid json");
+    assert_eq!(created_event["type"], "messageCreated");
+    assert_eq!(created_event["messageIndex"], json!(0));
+
+    state
+        .upsert_parallel_agents_message(
+            &session_id,
+            "parallel-1",
+            vec![ParallelAgentProgress {
+                id: "reviewer".to_owned(),
+                title: "Reviewer".to_owned(),
+                status: ParallelAgentStatus::Running,
+                detail: Some("Checking diffs".to_owned()),
+            }],
+        )
+        .unwrap();
+
+    let payload = delta_events
+        .try_recv()
+        .expect("parallel-agent delta payload should exist");
+    let event: Value = serde_json::from_str(&payload).expect("delta should be valid json");
+
+    assert_eq!(event["type"], "parallelAgentsUpdate");
+    assert_eq!(event["revision"], json!(baseline + 1));
+    assert_eq!(event["messageIndex"], json!(0));
+    assert_eq!(event["agents"][0]["status"], json!("running"));
     assert_eq!(state.snapshot().revision, baseline + 1);
 }
 

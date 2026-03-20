@@ -91,6 +91,26 @@ async fn run_server() -> Result<()> {
             post(refresh_session_model_options),
         )
         .route(
+            "/api/sessions/{id}/codex/thread/fork",
+            post(fork_codex_thread),
+        )
+        .route(
+            "/api/sessions/{id}/codex/thread/archive",
+            post(archive_codex_thread),
+        )
+        .route(
+            "/api/sessions/{id}/codex/thread/unarchive",
+            post(unarchive_codex_thread),
+        )
+        .route(
+            "/api/sessions/{id}/codex/thread/compact",
+            post(compact_codex_thread),
+        )
+        .route(
+            "/api/sessions/{id}/codex/thread/rollback",
+            post(rollback_codex_thread),
+        )
+        .route(
             "/api/sessions/{id}/agent-commands",
             get(list_agent_commands),
         )

@@ -283,4 +283,18 @@ export type CommandUpdateEvent = {
   preview: string;
 };
 
-export type DeltaEvent = MessageCreatedEvent | TextDeltaEvent | CommandUpdateEvent;
+export type ParallelAgentsUpdateEvent = {
+  type: "parallelAgentsUpdate";
+  revision: number;
+  sessionId: string;
+  messageId: string;
+  messageIndex: number;
+  agents: ParallelAgentProgress[];
+  preview: string;
+};
+
+export type DeltaEvent =
+  | MessageCreatedEvent
+  | TextDeltaEvent
+  | CommandUpdateEvent
+  | ParallelAgentsUpdateEvent;

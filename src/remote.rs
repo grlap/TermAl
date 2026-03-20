@@ -641,6 +641,151 @@ impl AppState {
             state: self.snapshot(),
         })
     }
+
+    fn proxy_remote_fork_codex_thread(
+        &self,
+        session_id: &str,
+    ) -> Result<CreateSessionResponse, ApiError> {
+        let Some(target) = self.remote_session_target(session_id)? else {
+            return Err(ApiError::bad_request("session is not assigned to a remote"));
+        };
+        let remote_response: CreateSessionResponse = self.remote_registry.request_json(
+            &target.remote,
+            Method::POST,
+            &format!(
+                "/api/sessions/{}/codex/thread/fork",
+                encode_uri_component(&target.remote_session_id)
+            ),
+            &[],
+            None,
+        )?;
+        let remote_session = remote_response
+            .state
+            .sessions
+            .iter()
+            .find(|session| session.id == remote_response.session_id)
+            .cloned()
+            .ok_or_else(|| ApiError::bad_gateway("remote forked session was not returned"))?;
+        let local_project_id = {
+            let inner = self.inner.lock().expect("state mutex poisoned");
+            let index = inner
+                .find_session_index(&target.local_session_id)
+                .ok_or_else(|| ApiError::not_found("session not found"))?;
+            inner.sessions[index].session.project_id.clone()
+        };
+        let local_session_id = {
+            let mut inner = self.inner.lock().expect("state mutex poisoned");
+            sync_remote_state_inner(
+                &mut inner,
+                &target.remote.id,
+                &remote_response.state,
+                Some(&target.remote_session_id),
+            );
+            let local_session_id = upsert_remote_proxy_session_record(
+                &mut inner,
+                &target.remote.id,
+                &remote_session,
+                local_project_id,
+            );
+            self.commit_locked(&mut inner).map_err(|err| {
+                ApiError::internal(format!(
+                    "failed to persist remote forked session proxy: {err:#}"
+                ))
+            })?;
+            local_session_id
+        };
+
+        Ok(CreateSessionResponse {
+            session_id: local_session_id,
+            state: self.snapshot(),
+        })
+    }
+
+    fn proxy_remote_archive_codex_thread(
+        &self,
+        session_id: &str,
+    ) -> Result<StateResponse, ApiError> {
+        let Some(target) = self.remote_session_target(session_id)? else {
+            return Err(ApiError::bad_request("session is not assigned to a remote"));
+        };
+        let remote_state: StateResponse = self.remote_registry.request_json(
+            &target.remote,
+            Method::POST,
+            &format!(
+                "/api/sessions/{}/codex/thread/archive",
+                encode_uri_component(&target.remote_session_id)
+            ),
+            &[],
+            None,
+        )?;
+        self.sync_remote_state_for_target(&target, remote_state)?;
+        Ok(self.snapshot())
+    }
+
+    fn proxy_remote_unarchive_codex_thread(
+        &self,
+        session_id: &str,
+    ) -> Result<StateResponse, ApiError> {
+        let Some(target) = self.remote_session_target(session_id)? else {
+            return Err(ApiError::bad_request("session is not assigned to a remote"));
+        };
+        let remote_state: StateResponse = self.remote_registry.request_json(
+            &target.remote,
+            Method::POST,
+            &format!(
+                "/api/sessions/{}/codex/thread/unarchive",
+                encode_uri_component(&target.remote_session_id)
+            ),
+            &[],
+            None,
+        )?;
+        self.sync_remote_state_for_target(&target, remote_state)?;
+        Ok(self.snapshot())
+    }
+
+    fn proxy_remote_compact_codex_thread(
+        &self,
+        session_id: &str,
+    ) -> Result<StateResponse, ApiError> {
+        let Some(target) = self.remote_session_target(session_id)? else {
+            return Err(ApiError::bad_request("session is not assigned to a remote"));
+        };
+        let remote_state: StateResponse = self.remote_registry.request_json(
+            &target.remote,
+            Method::POST,
+            &format!(
+                "/api/sessions/{}/codex/thread/compact",
+                encode_uri_component(&target.remote_session_id)
+            ),
+            &[],
+            None,
+        )?;
+        self.sync_remote_state_for_target(&target, remote_state)?;
+        Ok(self.snapshot())
+    }
+
+    fn proxy_remote_rollback_codex_thread(
+        &self,
+        session_id: &str,
+        num_turns: usize,
+    ) -> Result<StateResponse, ApiError> {
+        let Some(target) = self.remote_session_target(session_id)? else {
+            return Err(ApiError::bad_request("session is not assigned to a remote"));
+        };
+        let remote_state: StateResponse = self.remote_registry.request_json(
+            &target.remote,
+            Method::POST,
+            &format!(
+                "/api/sessions/{}/codex/thread/rollback",
+                encode_uri_component(&target.remote_session_id)
+            ),
+            &[],
+            Some(json!({ "numTurns": num_turns })),
+        )?;
+        self.sync_remote_state_for_target(&target, remote_state)?;
+        Ok(self.snapshot())
+    }
+
     fn proxy_remote_session_settings(
         &self,
         session_id: &str,
@@ -1060,6 +1205,83 @@ impl AppState {
                         output,
                         output_language,
                         status,
+                        preview,
+                    });
+                }
+            }
+            DeltaEvent::ParallelAgentsUpdate {
+                agents,
+                message_id,
+                message_index,
+                preview,
+                session_id,
+                ..
+            } => {
+                let (local_session_id, created_message, revision, session_status) = {
+                    let mut inner = self.inner.lock().expect("state mutex poisoned");
+                    let index = inner
+                        .find_remote_session_index(remote_id, &session_id)
+                        .ok_or_else(|| anyhow!("remote session `{session_id}` not found"))?;
+                    let record = &mut inner.sessions[index];
+                    let created_message = if let Some(existing_index) =
+                        message_index_on_record(record, &message_id)
+                    {
+                        let Some(message) = record.session.messages.get_mut(existing_index) else {
+                            return Err(anyhow!(
+                                "remote message index `{existing_index}` is out of bounds"
+                            ));
+                        };
+                        match message {
+                            Message::ParallelAgents {
+                                agents: existing_agents,
+                                ..
+                            } => {
+                                *existing_agents = agents.clone();
+                                None
+                            }
+                            _ => {
+                                return Err(anyhow!(
+                                    "remote message `{message_id}` is not a parallel-agents message"
+                                ));
+                            }
+                        }
+                    } else {
+                        let message = Message::ParallelAgents {
+                            id: message_id.clone(),
+                            timestamp: stamp_now(),
+                            author: Author::Assistant,
+                            agents: agents.clone(),
+                        };
+                        insert_message_on_record(record, message_index, message.clone());
+                        Some(message)
+                    };
+                    record.session.preview = preview.clone();
+                    let local_session_id = record.session.id.clone();
+                    let session_status = record.session.status;
+                    let revision = if created_message.is_some() {
+                        self.commit_persisted_delta_locked(&mut inner)?
+                    } else {
+                        self.commit_delta_locked(&mut inner)?
+                    };
+                    (local_session_id, created_message, revision, session_status)
+                };
+                if let Some(message) = created_message {
+                    self.publish_delta(&DeltaEvent::MessageCreated {
+                        revision,
+                        session_id: local_session_id,
+                        message_id,
+                        message_index,
+                        message,
+                        preview,
+                        status: session_status,
+                    });
+                } else {
+                    self.publish_delta(&DeltaEvent::ParallelAgentsUpdate {
+                        revision,
+                        session_id: local_session_id,
+                        message_id,
+                        message_index,
+                        agents,
                         preview,
                     });
                 }

@@ -3,12 +3,12 @@
 Updated against the current checked-in code in `src/main.rs`, `ui/src/App.tsx`,
 `ui/package.json`, and `ui/vite.config.ts`.
 
-The older entries for "No image paste support", Claude `control_request` fallthrough, "No SSE/WebSocket for real-time updates", "Codex receive has no streaming", "No queueing system for prompts", the stale `/api/state`-after-SSE bootstrap race, the false-positive delta SSE reconciliation drift when a message already existed locally, shared Codex turn-scoped subagent ordering, shared Codex `item_completed` multipart truncation, stale shared-Codex agent-event turn filtering, the shared Codex buffered-result flush edge, multiple simultaneous approvals, Windows `HOME`-only path resolution, process-exit polling, unhandled Codex rate-limit notifications, and the stale "Backend persists full state on every streaming text delta" entry were stale. Those are implemented in the current tree.
+The older entries for "No image paste support", Claude `control_request` fallthrough, "No SSE/WebSocket for real-time updates", "Codex receive has no streaming", "No queueing system for prompts", the stale `/api/state`-after-SSE bootstrap race, the false-positive delta SSE reconciliation drift when a message already existed locally, shared Codex turn-scoped subagent ordering, shared Codex `item_completed` multipart truncation, stale shared-Codex agent-event turn filtering, the shared Codex buffered-result flush edge, multiple simultaneous approvals, Windows `HOME`-only path resolution, process-exit polling, unhandled Codex rate-limit notifications, the stale "Backend persists full state on every streaming text delta" entry, the old unscoped `/api/file` read bug, and the old per-session Codex app-server/runtime note were stale. Those are implemented in the current tree.
 
 The newer shared Codex regressions where stale `task_complete` summaries could bleed into the next
 answer or a pre-answer summary insert could overwrite the final-answer preview are also fixed in
-the current tree. The new parallel-agents progress path still skips the delta event system — see
-the entry below.
+the current tree. Parallel-agent progress updates now also use the targeted delta SSE path instead
+of forcing full-state snapshots.
 
 The earlier command-card UX issue where `OUT` could render as an empty dark block was also fixed.
 Command messages now use a compact `IN` / `OUT` layout with copy controls, a collapsible output
@@ -183,28 +183,34 @@ implies a narrower effect than the backend actually enforces.
   for existing bound projects
 - Add tests for the chosen semantics so the UI copy and backend behavior stay aligned
 
-
-
-## Parallel-agents progress updates publish full-state SSE snapshots
+## Codex archive state is not tracked locally
 
 **Severity:** Medium
 
-The new `parallelAgents` message path uses `commit_locked()` inside
-`upsert_parallel_agents_message()`. Unlike command and text streaming updates, that publishes a
-full `StateResponse` snapshot every time an agent status changes instead of a targeted delta.
+Codex thread actions now expose `archive`, `unarchive`, `compact`, `fork`, and `rollback`, but the
+session model still only tracks `external_session_id`. After an archive/unarchive action, TermAl
+appends a local note but does not persist any thread lifecycle state, and the shared Codex runtime
+still drops `thread/archived` / `thread/unarchived` notifications.
 
 **Current impact:**
-- Every task-agent progress change forces a full-state SSE broadcast
-- Long sessions pay a larger live-update cost than the existing command/text paths
-- The new message type does not follow the current delta-first hot-path pattern
+- The session card cannot tell whether the current Codex thread is active or archived
+- `Archive` and `Unarchive` remain enabled at the same time for any live thread
+- Prompt dispatch still treats an archived thread as resumable because the local session model does
+  not know it was archived
+- Remote or out-of-band archive state changes can drift from the local UI indefinitely
 
-**Affected code (`src/state.rs`):**
-- `upsert_parallel_agents_message()`
-- `commit_locked()`
+**Affected code (`src/state.rs`, `src/runtime.rs`, `ui/src/App.tsx`, `ui/src/types.ts`):**
+- `archive_codex_thread()` / `unarchive_codex_thread()` only persist transcript notes
+- shared Codex event handling ignores `thread/archived` and `thread/unarchived`
+- `CodexPromptSettingsCard` gates thread actions only on `externalSessionId` and busy state
+- `Session` / persisted session snapshots have no archived/live thread state field
 
 **Fix:**
-- Mirror `upsert_command_message()` with a targeted create/update delta path
-- Use a persisted delta for initial message creation and delta-only revision bumps for updates
+- Add explicit Codex thread lifecycle state to the session model and persisted snapshots
+- Update that state on successful local actions and on runtime notifications
+- Disable contradictory controls and block prompt dispatch when the live thread is archived
+
+
 
 ## Failed Claude Task results lose full detail
 
@@ -296,29 +302,6 @@ forwards attachments to both Claude and Codex sessions.
 **Tasks:**
 - Implement drag-and-drop attachment support, or explicitly document paste-only behavior in the UI
 
-## Source file reads are not scoped to the active session or workspace
-
-**Severity:** High - source mode can read the wrong file and currently trusts arbitrary absolute paths.
-
-The source viewer sends a raw `path` to `GET /api/file`. The backend accepts any absolute path as-is
-and resolves relative paths against the backend process cwd rather than the session's `workdir`.
-That means source-mode correctness depends on where TermAl was launched, not on the active session.
-
-**Current impact:**
-- Relative diff paths from sessions rooted in another project can resolve to the wrong file
-- The source viewer can read files outside the active project if a diff path or manual entry points there
-- Multi-project behavior is inconsistent because file lookup is not tied to session context
-
-**Affected code (`src/main.rs`, `ui/src/App.tsx`, `ui/src/api.ts`):**
-- `resolve_requested_path()` resolves relative paths against `std::env::current_dir()`
-- `/api/file` does not validate that a requested path stays inside an allowed root
-- `fetchFile()` and the source-view loader forward only a path, with no session/workdir context
-
-**Fix:**
-- Change file reads to resolve relative paths against the requesting session's `workdir`
-- Reject reads outside the allowed project root set instead of accepting arbitrary absolute paths
-- Consider including `sessionId` in the file-read route so validation has the right context
-
 ## Claude approval cancel can leave a session stuck in Approval
 
 **Severity:** Medium
@@ -342,62 +325,22 @@ without another state transition, the session can remain stuck in `Approval`.
 - Recompute session status from the remaining live approvals instead of leaving it at `Approval`
 - Add a regression test for canceled approvals
 
-## No runtime pre-warming / session pooling
+## Claude hidden session pool is still missing
 
-**Severity:** Medium â€” first message still pays startup cost.
+**Severity:** Medium â€” first Claude message still pays startup cost.
 
-Runtime processes are created lazily inside `dispatch_turn()`. When a session has
-`SessionRuntime::None`, the first message spawns `spawn_claude_runtime()` or
-`spawn_codex_runtime()`. With multi-project support (3â€“6 projects, each with multiple concurrent
-sessions), naive pre-warming per project does not scale â€” holding idle processes for every
-project is wasteful.
+Codex sessions already share a single long-lived app-server. The remaining runtime startup gap is
+on the Claude side: runtimes are still created lazily inside `dispatch_turn()`, so a new Claude
+session pays process startup plus initialize-handshake latency on its first prompt.
 
 **Current impact:**
-- Every new session pays process startup plus initialize-handshake latency on the first prompt
-- Users running multiple concurrent sessions per project hit the cold start repeatedly
+- Every new Claude session pays process startup plus initialize-handshake latency on the first prompt
+- Users running multiple concurrent Claude sessions per project hit the cold start repeatedly
 
-**Design: two strategies, split by agent protocol**
-
-**Codex â€” single shared app-server (no pool needed).**
-The Codex app-server is a long-lived JSON-RPC process. Each conversation is a `thread/start` call
-that accepts its own `cwd`. A single app-server process can serve multiple sessions across
-different projects â€” just call `thread/start` again with a different working directory. The current
-architecture spawns one app-server per session with a session-scoped `CODEX_HOME`, which is
-unnecessary overhead.
-
-Refactor to:
-1. Spawn one global Codex app-server on first Codex session creation (or on app start).
-2. All Codex sessions share the single app-server process.
-3. Each session calls `thread/start` with its own project `cwd`.
-4. Session creation becomes near-instant â€” no process spawn, just a JSON-RPC call.
-5. The session-scoped `CODEX_HOME` setup needs to be rethought (shared home, or per-project home
-   instead of per-session).
-
-**Claude â€” hidden session pool per `(project, agent)` tuple.**
-The Claude protocol has no session reset â€” each process is one conversation. A process cannot be
-reused for a new session. Pre-warming means spawning spare processes.
-
-The pool strategy:
-1. When the first Claude session spawns in a project directory, also create a **hidden session**
-   for the same `(project, agent)` with a fully initialized runtime (reader threads, writer
-   threads, initialize handshake â€” everything).
-2. Hidden sessions are real sessions with real runtimes, just not visible in the UI.
-3. When the user creates a new Claude session in that project, **unhide** the spare instead of
-   cold-starting. Session #2 onwards is instant.
-4. After unhiding, spawn the next hidden spare in the background.
-5. Pool size of 1 spare per active `(project, agent)` is enough â€” the user rarely creates two
-   sessions simultaneously.
-
-Backend changes:
-- Add a `hidden: bool` field to `Session` (or a `SessionVisibility` enum).
-- The server filters hidden sessions from UI-facing API responses.
-- "Create session" checks the pool first, unhides if a match exists, falls back to cold spawn.
-- After any session spawn (visible or hidden), trigger spare creation for the same key.
-- Hidden sessions that sit idle too long can be reaped to avoid unbounded resource use.
-
-**Why not pre-warm on app startup:**
-With 3â€“6 projects, spawning spares for all of them upfront wastes resources for projects the user
-may not touch. The pool only activates for projects already in use, which is the right trade-off.
+**Fix:**
+- Add a hidden spare session per active `(project, agent)` tuple
+- Unhide that spare on session creation instead of cold-starting every new Claude conversation
+- Reap idle hidden sessions so the pool does not grow without bound
 
 ## Legacy/testing Codex REPL path still uses one-shot `codex exec --json`
 
@@ -473,9 +416,10 @@ Server mode already uses `codex app-server` over stdio JSON-RPC with:
 
 **Still missing:**
 - REPL migration off the legacy `codex exec --json` path
-- UI actions for fork, rollback, archive, unarchive, and compaction
+- persisted session state for archived vs live Codex threads, including notification-driven updates
+- transcript backfill after `thread/fork` / `thread/rollback`
 - handling for additional app-server request types beyond command/file approvals
-- mapping for more notifications beyond the current subset
+- mapping for more notifications beyond the current subset, especially thread lifecycle changes
 
 
 ## Session model controls still need polish
@@ -511,8 +455,8 @@ more end-to-end testing around model refresh and approval-mode changes.
 
 There are unit tests for Claude parsing, for the legacy `handle_codex_event()` path, and for a
 small subset of the newer Codex app-server notifications. Coverage is still thin for
-`handle_codex_app_server_message()` request/item parsing, and there are still no HTTP route tests
-for the axum handlers.
+`handle_codex_app_server_message()` request/item parsing, the new `/codex/thread/*` request flow,
+and the remote proxy path. There are still no HTTP route tests for the axum handlers.
 
 ## Codex session discovery is reinvented
 
@@ -609,9 +553,6 @@ Concrete work implied by the current TermAl parity gaps. Ordered by user impact 
 - [ ] Reconcile remote snapshot deletions:
   when a remote session disappears from the latest snapshot, remove the matching local proxy
   session instead of leaving a ghost record behind.
-- [ ] Lock down `/api/file`:
-  resolve relative paths against the requesting session's `workdir`, reject reads outside allowed
-  roots, and stop treating arbitrary absolute paths as valid source-view targets.
 - [ ] Fix approval lifecycle bookkeeping:
   canceled Claude approvals should clear the session out of `Approval`, and resolving one approval
   must not hide other live approvals in the same session.
@@ -622,9 +563,6 @@ Concrete work implied by the current TermAl parity gaps. Ordered by user impact 
 - [ ] Implement a persistent Gemini runtime adapter:
   spawn `gemini` with `--output-format stream-json`, map stdout events into TermAl messages, and
   wire message dispatch through the same session runtime path used by Claude and Codex.
-- [ ] Expose Codex thread actions in the product:
-  add backend routes and UI actions for `thread/fork`, `thread/rollback`, `thread/archive`,
-  `thread/unarchive`, and `thread/compact/start`.
 - [ ] Expand Codex app-server request handling beyond command/file approvals:
   TermAl should not silently fall back to "unhandled request" logging for additional interactive
   request types.
@@ -636,10 +574,6 @@ Concrete work implied by the current TermAl parity gaps. Ordered by user impact 
 
 ## P1
 
-- [ ] Add parallel-agents delta event path:
-  add a `ParallelAgentsUpdate` variant to `DeltaEvent`, switch `upsert_parallel_agents_message` to
-  `commit_persisted_delta_locked` + `publish_delta`, and handle the new delta type in the
-  frontend's `applyDeltaToSessions`.
 - [ ] Add Claude Task error-result test:
   test that a `tool_result` with `is_error: true` for a Task tool sets
   `ParallelAgentStatus::Error`, does not call `push_subagent_result`, and falls back to "Task
@@ -666,13 +600,17 @@ Concrete work implied by the current TermAl parity gaps. Ordered by user impact 
   keep the current session-scoped model switching, but continue improving live
   metadata, validation, recovery flows, and create/clone defaults so the model
   UX feels intentional across Claude, Codex, Cursor, and Gemini.
+- [ ] Track Codex archived thread state in local sessions:
+  persist whether the live thread is archived, update it from `thread/archived` /
+  `thread/unarchived` notifications, and use it to gate prompt dispatch plus the
+  Archive/Unarchive controls.
 - [ ] Migrate REPL mode off legacy `codex exec --json` and onto the app-server path so server mode
   and REPL mode share one implementation.
+- [ ] Hydrate Codex fork/rollback history into local session transcripts:
+  thread actions are exposed now, but TermAl only records a local note after `thread/fork` or
+  `thread/rollback`; it does not reconstruct the earlier Codex turn history into session messages.
 - [ ] Replace the `try_wait()` polling loops in the Claude and Codex runtime supervisors with
   blocking wait threads or async child handling.
-- [ ] Refactor Codex to a single shared app-server:
-  replace per-session app-server spawning with one long-lived process that serves all Codex
-  sessions via `thread/start` with per-session `cwd`. Rethink session-scoped `CODEX_HOME`.
 - [ ] Add Claude hidden session pool:
   when the first Claude session spawns in a project, create a hidden spare session with a fully
   initialized runtime for the same `(project, cwd)`. On new session creation, unhide the spare
@@ -704,19 +642,17 @@ Concrete work implied by the current TermAl parity gaps. Ordered by user impact 
 
 ## P2
 
-- [ ] Handle Codex `account/rateLimits/updated` explicitly:
-  at minimum ignore it as known noise; preferably persist it and expose it in the UI.
 - [ ] Refresh the frontend dev toolchain to remove the Node 24 `util._extend` deprecation from
   Vite's proxy path; upgrade `vite`, `@vitejs/plugin-react`, and `vitest` together and verify
   `npm run dev` with the existing `/api` proxy config.
 - [ ] Add unit tests for Codex app-server parsing:
   cover request handling, streaming message assembly, notification filtering, and error paths.
 - [ ] Add HTTP route tests for the axum API:
-  session creation, message send, settings updates, approvals, kill, and SSE state events.
+  session creation, message send, settings updates, approvals, kill, the new Codex thread-action
+  handlers, and SSE state events.
 - [ ] Refresh `docs/claude-pair-spec.md` so the architecture and milestone tracking match the
   current axum + React implementation.
 - [ ] Split `src/main.rs` into focused modules once the feature work above stops churning large
   integration surfaces.
 
 ## Later
-
