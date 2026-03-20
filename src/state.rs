@@ -3686,6 +3686,7 @@ fn discover_codex_threads_from_home(
         rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
     )
     .with_context(|| format!("failed to open `{}`", database_path.display()))?;
+    let thread_columns = codex_threads_table_columns(&connection)?;
     let query_scopes = collect_codex_discovery_query_scope_strings(discovery_scopes);
     let normalized_scopes = discovery_scopes
         .iter()
@@ -3697,11 +3698,16 @@ fn discover_codex_threads_from_home(
         .collect::<Vec<_>>()
         .join(" OR ");
     let query = format!(
-        "select id, cwd, title, sandbox_policy, approval_mode, archived, model, reasoning_effort
+        "select id, cwd, title, {}, {}, {}, {}, {}
          from threads
          where {scope_sql}
          order by updated_at desc
-         limit ?"
+         limit ?",
+        codex_threads_select_column(&thread_columns, "sandbox_policy", "NULL"),
+        codex_threads_select_column(&thread_columns, "approval_mode", "NULL"),
+        codex_threads_select_column(&thread_columns, "archived", "0"),
+        codex_threads_select_column(&thread_columns, "model", "NULL"),
+        codex_threads_select_column(&thread_columns, "reasoning_effort", "NULL"),
     );
     let mut statement = connection.prepare(&query)?;
     let mut params = Vec::with_capacity((query_scopes.len() * 2) + 1);
@@ -3756,6 +3762,28 @@ fn discover_codex_threads_from_home(
         threads.push(thread);
     }
     Ok(threads)
+}
+
+fn codex_threads_table_columns(connection: &rusqlite::Connection) -> Result<HashSet<String>> {
+    let mut statement = connection.prepare("pragma table_info(threads)")?;
+    let rows = statement.query_map([], |row| row.get::<_, String>(1))?;
+    let mut columns = HashSet::new();
+    for row in rows {
+        columns.insert(row?);
+    }
+    Ok(columns)
+}
+
+fn codex_threads_select_column(
+    columns: &HashSet<String>,
+    column_name: &str,
+    default_sql: &str,
+) -> String {
+    if columns.contains(column_name) {
+        column_name.to_owned()
+    } else {
+        format!("{default_sql} as {column_name}")
+    }
 }
 
 fn collect_codex_discovery_query_scope_strings(discovery_scopes: &[PathBuf]) -> Vec<String> {

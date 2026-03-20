@@ -2882,6 +2882,63 @@ fn discover_codex_threads_from_home_reads_latest_database() {
 }
 
 #[test]
+fn discover_codex_threads_from_home_supports_legacy_schema_without_optional_columns() {
+    let codex_home =
+        std::env::temp_dir().join(format!("termal-codex-home-legacy-{}", Uuid::new_v4()));
+    fs::create_dir_all(&codex_home).expect("test Codex home should be created");
+    let connection =
+        rusqlite::Connection::open(codex_home.join("state_5.sqlite")).expect("db should open");
+    connection
+        .execute_batch(
+            "create table threads (
+                id text primary key,
+                cwd text not null,
+                title text not null,
+                sandbox_policy text,
+                approval_mode text,
+                archived integer not null,
+                updated_at integer not null
+            );",
+        )
+        .expect("legacy threads table should be created");
+    connection
+        .execute(
+            "insert into threads (
+                id, cwd, title, sandbox_policy, approval_mode, archived, updated_at
+            ) values (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            rusqlite::params![
+                "thread-legacy",
+                "/tmp/project",
+                "Legacy thread",
+                r#"{"type":"workspace-write"}"#,
+                "on-request",
+                0,
+                10,
+            ],
+        )
+        .expect("legacy thread row should insert");
+
+    let threads = discover_codex_threads_from_home(&codex_home, &[PathBuf::from("/tmp/project")])
+        .expect("legacy threads should load");
+
+    assert_eq!(
+        threads,
+        vec![DiscoveredCodexThread {
+            approval_policy: Some(CodexApprovalPolicy::OnRequest),
+            archived: false,
+            cwd: "/tmp/project".to_owned(),
+            id: "thread-legacy".to_owned(),
+            model: None,
+            reasoning_effort: None,
+            sandbox_mode: Some(CodexSandboxMode::WorkspaceWrite),
+            title: "Legacy thread".to_owned(),
+        }]
+    );
+
+    let _ = fs::remove_dir_all(&codex_home);
+}
+
+#[test]
 fn resolve_codex_threads_database_path_skips_unrelated_entries() {
     let codex_home =
         std::env::temp_dir().join(format!("termal-codex-home-scan-{}", Uuid::new_v4()));
