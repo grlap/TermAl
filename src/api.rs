@@ -493,10 +493,12 @@ fn read_claude_agent_commands(workdir: &FsPath) -> Result<Vec<AgentCommand>, Api
             .to_owned();
 
         commands.push(AgentCommand {
+            kind: AgentCommandKind::PromptTemplate,
             name: stem.to_owned(),
             description,
             content,
             source: format!(".claude/commands/{}.md", stem),
+            argument_hint: None,
         });
     }
 
@@ -2458,6 +2460,8 @@ struct Session {
     gemini_approval_mode: Option<GeminiApprovalMode>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     external_session_id: Option<String>,
+    #[serde(default)]
+    agent_commands_revision: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     codex_thread_state: Option<CodexThreadState>,
     status: SessionStatus,
@@ -3593,16 +3597,33 @@ struct CreateProjectResponse {
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct AgentCommand {
+    #[serde(default)]
+    kind: AgentCommandKind,
     name: String,
     description: String,
     content: String,
     source: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    argument_hint: Option<String>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct AgentCommandsResponse {
     commands: Vec<AgentCommand>,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+enum AgentCommandKind {
+    PromptTemplate,
+    NativeSlash,
+}
+
+impl Default for AgentCommandKind {
+    fn default() -> Self {
+        Self::PromptTemplate
+    }
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
@@ -3780,6 +3801,9 @@ fn resolve_session_project_root_path(
             .find_session_index(session_id)
             .ok_or_else(|| ApiError::not_found("session not found"))?;
         let record = &inner.sessions[index];
+        if record.hidden {
+            return Err(ApiError::not_found("session not found"));
+        }
         if let Some(project) = record
             .session
             .project_id

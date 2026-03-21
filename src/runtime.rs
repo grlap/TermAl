@@ -3563,6 +3563,60 @@ fn claude_model_options(message: &Value) -> Option<Vec<SessionModelOption>> {
     )
 }
 
+fn claude_agent_commands(message: &Value) -> Option<Vec<AgentCommand>> {
+    let commands = message.pointer("/response/response/commands")?.as_array()?;
+    let parsed = commands
+        .iter()
+        .filter_map(|entry| {
+            let name = entry
+                .get("name")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|value| !value.is_empty())?
+                .to_owned();
+            let raw_description = entry
+                .get("description")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .unwrap_or("");
+            let (description, source) = normalize_claude_agent_command_description(raw_description);
+            let argument_hint = entry
+                .get("argumentHint")
+                .or_else(|| entry.get("argument_hint"))
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(str::to_owned);
+            Some(AgentCommand {
+                kind: AgentCommandKind::NativeSlash,
+                name: name.clone(),
+                description,
+                content: format!("/{name}"),
+                source,
+                argument_hint,
+            })
+        })
+        .collect::<Vec<_>>();
+    if parsed.is_empty() {
+        return None;
+    }
+    Some(dedupe_agent_commands(parsed))
+}
+
+fn normalize_claude_agent_command_description(raw: &str) -> (String, String) {
+    let trimmed = raw.trim();
+    for (suffix, source) in [
+        ("(bundled)", "Claude bundled command"),
+        ("(project)", "Claude project command"),
+        ("(user)", "Claude user command"),
+    ] {
+        if let Some(stripped) = trimmed.strip_suffix(suffix) {
+            return (stripped.trim().to_owned(), source.to_owned());
+        }
+    }
+    (trimmed.to_owned(), "Claude native command".to_owned())
+}
+
 fn claude_model_badges(entry: &Value) -> Vec<String> {
     let mut badges = Vec::new();
     let display_name = entry
@@ -4519,6 +4573,19 @@ fn spawn_claude_runtime(
                     .and_then(Value::as_bool)
                     .unwrap_or(false);
                 let error_summary = is_result.then(|| summarize_error(&message));
+
+                if let Some(agent_commands) = claude_agent_commands(&message) {
+                    if let Err(err) =
+                        reader_state.sync_session_agent_commands(&reader_session_id, agent_commands)
+                    {
+                        let _ = reader_state.fail_turn_if_runtime_matches(
+                            &reader_session_id,
+                            &reader_runtime_token,
+                            &format!("failed to sync Claude agent commands: {err:#}"),
+                        );
+                        break;
+                    }
+                }
 
                 if let Some(model_options) = claude_model_options(&message) {
                     if let Err(err) = reader_state.sync_session_model_options(

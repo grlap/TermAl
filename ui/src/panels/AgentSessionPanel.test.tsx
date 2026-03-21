@@ -42,10 +42,12 @@ function renderFooter({
   onDraftCommit?: (sessionId: string, nextValue: string) => void;
   modelOptionsError?: string | null;
   agentCommands?: {
+    kind?: "promptTemplate" | "nativeSlash";
     name: string;
     description: string;
     content: string;
     source: string;
+    argumentHint?: string | null;
   }[];
   hasLoadedAgentCommands?: boolean;
   isRefreshingAgentCommands?: boolean;
@@ -269,6 +271,60 @@ describe("AgentSessionPanelFooter", () => {
     });
   });
 
+  it("re-requests Claude agent commands when the command revision changes", async () => {
+    const onRefreshAgentCommands = vi.fn();
+    const { rerender } = render(
+      renderFooter({
+        onRefreshAgentCommands,
+        hasLoadedAgentCommands: true,
+        session: makeSession("session-a", {
+          agent: "Claude",
+          model: "sonnet",
+          agentCommandsRevision: 0,
+        }),
+        agentCommands: [
+          {
+            kind: "promptTemplate",
+            name: "review-local",
+            description: "Review local changes.",
+            content: "Review local changes.",
+            source: ".claude/commands/review-local.md",
+          },
+        ],
+      }),
+    );
+
+    fireEvent.change(screen.getByLabelText("Message session-a"), {
+      target: { value: "/" },
+    });
+    expect(onRefreshAgentCommands).not.toHaveBeenCalled();
+
+    rerender(
+      renderFooter({
+        onRefreshAgentCommands,
+        hasLoadedAgentCommands: true,
+        session: makeSession("session-a", {
+          agent: "Claude",
+          model: "sonnet",
+          agentCommandsRevision: 1,
+        }),
+        agentCommands: [
+          {
+            kind: "promptTemplate",
+            name: "review-local",
+            description: "Review local changes.",
+            content: "Review local changes.",
+            source: ".claude/commands/review-local.md",
+          },
+        ],
+      }),
+    );
+
+    await waitFor(() => {
+      expect(onRefreshAgentCommands).toHaveBeenCalledWith("session-a");
+    });
+  });
+
   it("requests project agent commands for Codex when slash menu opens", async () => {
     const onRefreshAgentCommands = vi.fn();
 
@@ -332,10 +388,11 @@ describe("AgentSessionPanelFooter", () => {
         }),
         agentCommands: [
           {
+            kind: "nativeSlash",
             name: "review-local",
             description: "Review staged and unstaged changes.",
-            content: "Review staged and unstaged changes.",
-            source: ".claude/commands/review-local.md",
+            content: "/review-local",
+            source: "Claude project command",
           },
         ],
       }),
@@ -345,11 +402,7 @@ describe("AgentSessionPanelFooter", () => {
     fireEvent.change(textarea, { target: { value: "/rev" } });
     fireEvent.keyDown(textarea, { key: "Enter" });
 
-    expect(onSend).toHaveBeenCalledWith(
-      "session-a",
-      "/review-local",
-      "Review staged and unstaged changes.",
-    );
+    expect(onSend).toHaveBeenCalledWith("session-a", "/review-local");
     expect(textarea).toHaveValue("");
   });
 
@@ -365,6 +418,7 @@ describe("AgentSessionPanelFooter", () => {
         }),
         agentCommands: [
           {
+            kind: "promptTemplate",
             name: "fix-bug",
             description: "Fix a bug from docs/bugs.md by number.",
             content: `Fix the requested bug:
@@ -395,6 +449,42 @@ Verify the fix.`,
 
 Verify the fix.`,
     );
+    expect(textarea).toHaveValue("");
+  });
+
+  it("expands a native Claude command with arguments and sends the slash prompt", () => {
+    const onSend = vi.fn(() => true);
+
+    render(
+      renderFooter({
+        onSend,
+        session: makeSession("session-a", {
+          agent: "Claude",
+          model: "sonnet",
+        }),
+        agentCommands: [
+          {
+            kind: "nativeSlash",
+            name: "review",
+            description: "Review the current changes.",
+            content: "/review",
+            source: "Claude bundled command",
+            argumentHint: "[scope]",
+          },
+        ],
+      }),
+    );
+
+    const textarea = screen.getByLabelText("Message session-a");
+    fireEvent.change(textarea, { target: { value: "/rev" } });
+    fireEvent.keyDown(textarea, { key: "Enter" });
+    expect(textarea).toHaveValue("/review ");
+    expect(onSend).not.toHaveBeenCalled();
+
+    fireEvent.change(textarea, { target: { value: "/review staged files" } });
+    fireEvent.keyDown(textarea, { key: "Enter" });
+
+    expect(onSend).toHaveBeenCalledWith("session-a", "/review staged files");
     expect(textarea).toHaveValue("");
   });
 

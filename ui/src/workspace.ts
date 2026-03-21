@@ -739,6 +739,7 @@ export function closeWorkspaceTab(
     return workspace;
   }
 
+  const closedTabIndex = pane.tabs.findIndex((candidate) => candidate.id === tabId);
   const nextTabs = pane.tabs.filter((candidate) => candidate.id !== tabId);
   if (nextTabs.length === 0) {
     const panes = workspace.panes.filter((candidate) => candidate.id !== paneId);
@@ -765,7 +766,9 @@ export function closeWorkspaceTab(
         ...candidate,
         tabs: nextTabs,
         activeTabId:
-          candidate.activeTabId === tabId ? (nextTabs[0]?.id ?? null) : candidate.activeTabId,
+          candidate.activeTabId === tabId
+            ? (nextTabs[Math.min(Math.max(closedTabIndex, 0), nextTabs.length - 1)]?.id ?? null)
+            : candidate.activeTabId,
       });
     }),
     activePaneId: paneId,

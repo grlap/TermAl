@@ -55,6 +55,7 @@ impl AppState {
             ),
             inner: Arc::new(Mutex::new(inner)),
         };
+        state.seed_hidden_claude_spares();
         {
             let inner = state.inner.lock().expect("state mutex poisoned");
             state.persist_internal_locked(&inner)?;
@@ -76,17 +77,25 @@ impl AppState {
             return self.proxy_remote_list_agent_commands(session_id);
         }
 
-        let session = {
+        let (session, cached_agent_commands) = {
             let inner = self.inner.lock().expect("state mutex poisoned");
             let index = inner
-                .find_session_index(session_id)
+                .find_visible_session_index(session_id)
                 .ok_or_else(|| ApiError::not_found("session not found"))?;
-            inner.sessions[index].session.clone()
+            (
+                inner.sessions[index].session.clone(),
+                inner.sessions[index].agent_commands.clone(),
+            )
         };
 
-        Ok(AgentCommandsResponse {
-            commands: read_claude_agent_commands(FsPath::new(&session.workdir))?,
-        })
+        let filesystem_commands = read_claude_agent_commands(FsPath::new(&session.workdir))?;
+        let commands = if session.agent == Agent::Claude {
+            merge_agent_commands(&cached_agent_commands, &filesystem_commands)
+        } else {
+            filesystem_commands
+        };
+
+        Ok(AgentCommandsResponse { commands })
     }
 
     fn search_instructions(
@@ -101,7 +110,7 @@ impl AppState {
         let session = {
             let inner = self.inner.lock().expect("state mutex poisoned");
             let index = inner
-                .find_session_index(session_id)
+                .find_visible_session_index(session_id)
                 .ok_or_else(|| ApiError::not_found("session not found"))?;
             inner.sessions[index].session.clone()
         };
@@ -113,11 +122,24 @@ impl AppState {
         &self,
         request: CreateSessionRequest,
     ) -> Result<CreateSessionResponse, ApiError> {
+        let agent = request.agent.unwrap_or(Agent::Codex);
         let requested_workdir = request
             .workdir
             .as_deref()
             .map(resolve_session_workdir)
             .transpose()?;
+        let requested_model = request
+            .model
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_owned);
+        let requested_name = request
+            .name
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_owned);
         let project = {
             let inner = self.inner.lock().expect("state mutex poisoned");
             if let Some(project_id) = request.project_id.as_deref() {
@@ -147,51 +169,8 @@ impl AppState {
                 )));
             }
         }
-        let agent = request.agent.unwrap_or(Agent::Codex);
         validate_agent_session_setup(agent, &workdir).map_err(ApiError::bad_request)?;
-        let mut inner = self.inner.lock().expect("state mutex poisoned");
-        let mut record = inner.create_session(
-            agent,
-            request.name,
-            workdir,
-            project.as_ref().map(|entry| entry.id.clone()),
-            request
-                .model
-                .as_deref()
-                .map(str::trim)
-                .filter(|value| !value.is_empty())
-                .map(str::to_owned),
-        );
-        if record.session.agent.supports_codex_prompt_settings() {
-            if let Some(sandbox_mode) = request.sandbox_mode {
-                record.codex_sandbox_mode = sandbox_mode;
-                record.session.sandbox_mode = Some(sandbox_mode);
-            }
-            if let Some(approval_policy) = request.approval_policy {
-                record.codex_approval_policy = approval_policy;
-                record.session.approval_policy = Some(approval_policy);
-            }
-            if let Some(reasoning_effort) = request.reasoning_effort {
-                record.codex_reasoning_effort = reasoning_effort;
-                record.session.reasoning_effort = Some(reasoning_effort);
-            }
-        } else if record.session.agent.supports_claude_approval_mode() {
-            if let Some(claude_approval_mode) = request.claude_approval_mode {
-                record.session.claude_approval_mode = Some(claude_approval_mode);
-            }
-            if let Some(claude_effort) = request.claude_effort {
-                record.session.claude_effort = Some(claude_effort);
-            }
-        } else if record.session.agent.supports_cursor_mode() {
-            if let Some(cursor_mode) = request.cursor_mode {
-                record.session.cursor_mode = Some(cursor_mode);
-            }
-        } else if record.session.agent.supports_gemini_approval_mode() {
-            if let Some(gemini_approval_mode) = request.gemini_approval_mode {
-                record.session.gemini_approval_mode = Some(gemini_approval_mode);
-            }
-        }
-        match record.session.agent {
+        match agent {
             agent if agent.supports_codex_prompt_settings() => {
                 if request.claude_approval_mode.is_some()
                     || request.claude_effort.is_some()
@@ -243,6 +222,97 @@ impl AppState {
             }
             _ => {}
         }
+        let mut inner = self.inner.lock().expect("state mutex poisoned");
+        let project_id = project.as_ref().map(|entry| entry.id.clone());
+        let mut hidden_claude_spare_to_spawn = None;
+        let mut record = if agent == Agent::Claude {
+            let final_model = requested_model
+                .clone()
+                .unwrap_or_else(|| agent.default_model().to_owned());
+            let final_approval_mode = request
+                .claude_approval_mode
+                .unwrap_or_else(default_claude_approval_mode);
+            let final_effort = request
+                .claude_effort
+                .unwrap_or(inner.preferences.default_claude_effort);
+            if let Some(index) = inner.find_matching_hidden_claude_spare(
+                &workdir,
+                project_id.as_deref(),
+                &final_model,
+                final_approval_mode,
+                final_effort,
+            ) {
+                let record = &mut inner.sessions[index];
+                // Hidden Claude spares intentionally keep their warmed runtime alive when claimed.
+                // Only the visible conversation state is reset here before the session is unhidden.
+                reset_hidden_claude_spare_record(record);
+                record.hidden = false;
+                if let Some(name) = requested_name.clone() {
+                    record.session.name = name;
+                }
+                record.clone()
+            } else {
+                inner.create_session(
+                    agent,
+                    requested_name.clone(),
+                    workdir.clone(),
+                    project_id.clone(),
+                    requested_model.clone(),
+                )
+            }
+        } else {
+            inner.create_session(
+                agent,
+                requested_name.clone(),
+                workdir.clone(),
+                project_id.clone(),
+                requested_model.clone(),
+            )
+        };
+        if record.session.agent.supports_codex_prompt_settings() {
+            if let Some(sandbox_mode) = request.sandbox_mode {
+                record.codex_sandbox_mode = sandbox_mode;
+                record.session.sandbox_mode = Some(sandbox_mode);
+            }
+            if let Some(approval_policy) = request.approval_policy {
+                record.codex_approval_policy = approval_policy;
+                record.session.approval_policy = Some(approval_policy);
+            }
+            if let Some(reasoning_effort) = request.reasoning_effort {
+                record.codex_reasoning_effort = reasoning_effort;
+                record.session.reasoning_effort = Some(reasoning_effort);
+            }
+        } else if record.session.agent.supports_claude_approval_mode() {
+            if let Some(claude_approval_mode) = request.claude_approval_mode {
+                record.session.claude_approval_mode = Some(claude_approval_mode);
+            }
+            if let Some(claude_effort) = request.claude_effort {
+                record.session.claude_effort = Some(claude_effort);
+            }
+        } else if record.session.agent.supports_cursor_mode() {
+            if let Some(cursor_mode) = request.cursor_mode {
+                record.session.cursor_mode = Some(cursor_mode);
+            }
+        } else if record.session.agent.supports_gemini_approval_mode() {
+            if let Some(gemini_approval_mode) = request.gemini_approval_mode {
+                record.session.gemini_approval_mode = Some(gemini_approval_mode);
+            }
+        }
+        if agent == Agent::Claude {
+            hidden_claude_spare_to_spawn = inner.ensure_hidden_claude_spare(
+                workdir.clone(),
+                project_id.clone(),
+                record.session.model.clone(),
+                record
+                    .session
+                    .claude_approval_mode
+                    .unwrap_or_else(default_claude_approval_mode),
+                record
+                    .session
+                    .claude_effort
+                    .unwrap_or_else(default_claude_effort),
+            );
+        }
         if let Some(slot) = inner
             .find_session_index(&record.session.id)
             .and_then(|index| inner.sessions.get_mut(index))
@@ -251,9 +321,16 @@ impl AppState {
         }
         self.commit_locked(&mut inner)
             .map_err(|err| ApiError::internal(format!("failed to persist session: {err:#}")))?;
+        drop(inner);
+        if let Some(session_id) = hidden_claude_spare_to_spawn {
+            self.try_start_hidden_claude_spare(&session_id);
+        }
         Ok(CreateSessionResponse {
             session_id: record.session.id,
-            state: self.snapshot_from_inner(&inner),
+            state: {
+                let inner = self.inner.lock().expect("state mutex poisoned");
+                self.snapshot_from_inner(&inner)
+            },
         })
     }
 
@@ -470,7 +547,7 @@ impl AppState {
     ) -> Result<CodexThreadActionContext, ApiError> {
         let inner = self.inner.lock().expect("state mutex poisoned");
         let index = inner
-            .find_session_index(session_id)
+            .find_visible_session_index(session_id)
             .ok_or_else(|| ApiError::not_found("session not found"))?;
         let record = &inner.sessions[index];
 
@@ -576,9 +653,125 @@ impl AppState {
             sessions: inner
                 .sessions
                 .iter()
+                .filter(|record| !record.hidden)
                 .map(|record| record.session.clone())
                 .collect(),
         }
+    }
+
+    fn seed_hidden_claude_spares(&self) {
+        let spare_ids = {
+            let mut inner = self.inner.lock().expect("state mutex poisoned");
+            let contexts = inner
+                .sessions
+                .iter()
+                .filter(|record| {
+                    !record.hidden
+                        && !record.is_remote_proxy()
+                        && record.session.agent == Agent::Claude
+                })
+                .map(|record| {
+                    (
+                        record.session.workdir.clone(),
+                        record.session.project_id.clone(),
+                        record.session.model.clone(),
+                        record
+                            .session
+                            .claude_approval_mode
+                            .unwrap_or_else(default_claude_approval_mode),
+                        record
+                            .session
+                            .claude_effort
+                            .unwrap_or_else(default_claude_effort),
+                    )
+                })
+                .collect::<Vec<_>>();
+            let mut spare_ids = Vec::new();
+            for (workdir, project_id, model, approval_mode, effort) in contexts {
+                if let Some(session_id) = inner.ensure_hidden_claude_spare(
+                    workdir,
+                    project_id,
+                    model,
+                    approval_mode,
+                    effort,
+                ) {
+                    spare_ids.push(session_id);
+                }
+            }
+            spare_ids
+        };
+
+        for session_id in spare_ids {
+            self.try_start_hidden_claude_spare(&session_id);
+        }
+    }
+
+    fn try_start_hidden_claude_spare(&self, session_id: &str) {
+        let spawn_request = {
+            let mut inner = self.inner.lock().expect("state mutex poisoned");
+            let Some(index) = inner.find_session_index(session_id) else {
+                return;
+            };
+            let record = &mut inner.sessions[index];
+            if !record.hidden
+                || record.is_remote_proxy()
+                || record.session.agent != Agent::Claude
+                || !matches!(record.runtime, SessionRuntime::None)
+            {
+                return;
+            }
+
+            reset_hidden_claude_spare_record(record);
+            Some((
+                record.session.id.clone(),
+                record.session.workdir.clone(),
+                record.session.model.clone(),
+                record
+                    .session
+                    .claude_approval_mode
+                    .unwrap_or_else(default_claude_approval_mode),
+                record
+                    .session
+                    .claude_effort
+                    .unwrap_or_else(default_claude_effort),
+                record.external_session_id.clone(),
+            ))
+        };
+
+        let Some((session_id, cwd, model, approval_mode, effort, resume_session_id)) =
+            spawn_request
+        else {
+            return;
+        };
+
+        let handle = match spawn_claude_runtime(
+            self.clone(),
+            session_id.clone(),
+            cwd,
+            model,
+            approval_mode,
+            effort,
+            resume_session_id,
+            None,
+        ) {
+            Ok(handle) => handle,
+            Err(err) => {
+                eprintln!("claude hidden pool> failed to warm spare `{session_id}`: {err:#}");
+                return;
+            }
+        };
+
+        let mut inner = self.inner.lock().expect("state mutex poisoned");
+        let Some(index) = inner.find_session_index(&session_id) else {
+            let _ = handle.kill();
+            return;
+        };
+        let record = &mut inner.sessions[index];
+        if record.session.agent != Agent::Claude || !matches!(record.runtime, SessionRuntime::None) {
+            let _ = handle.kill();
+            return;
+        }
+        record.runtime = SessionRuntime::Claude(handle);
     }
 
     fn start_turn_on_record(
@@ -859,7 +1052,7 @@ impl AppState {
         }
         let mut inner = self.inner.lock().expect("state mutex poisoned");
         let index = inner
-            .find_session_index(session_id)
+            .find_visible_session_index(session_id)
             .ok_or_else(|| ApiError::not_found("session not found"))?;
 
         let prompt = request.text.trim().to_owned();
@@ -944,7 +1137,7 @@ impl AppState {
         }
         let mut inner = self.inner.lock().expect("state mutex poisoned");
         let index = inner
-            .find_session_index(session_id)
+            .find_visible_session_index(session_id)
             .ok_or_else(|| ApiError::not_found("session not found"))?;
         let record = &mut inner.sessions[index];
         let mut claude_model_update: Option<(ClaudeRuntimeHandle, String)> = None;
@@ -1221,7 +1414,7 @@ impl AppState {
         }
         let mut inner = self.inner.lock().expect("state mutex poisoned");
         let index = inner
-            .find_session_index(session_id)
+            .find_visible_session_index(session_id)
             .ok_or_else(|| ApiError::not_found("session not found"))?;
         let record = &mut inner.sessions[index];
         let agent = record.session.agent;
@@ -1873,6 +2066,36 @@ impl AppState {
         Ok(())
     }
 
+    fn sync_session_agent_commands(
+        &self,
+        session_id: &str,
+        agent_commands: Vec<AgentCommand>,
+    ) -> Result<()> {
+        let mut inner = self.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(session_id)
+            .ok_or_else(|| anyhow!("session `{session_id}` not found"))?;
+        let next_commands = dedupe_agent_commands(agent_commands);
+        let should_publish = {
+            let record = &mut inner.sessions[index];
+            if record.agent_commands == next_commands {
+                return Ok(());
+            }
+            record.agent_commands = next_commands;
+            if record.hidden {
+                false
+            } else {
+                record.session.agent_commands_revision =
+                    record.session.agent_commands_revision.saturating_add(1);
+                true
+            }
+        };
+        if should_publish {
+            self.commit_locked(&mut inner)?;
+        }
+        Ok(())
+    }
+
     fn sync_session_cursor_mode(
         &self,
         session_id: &str,
@@ -1990,12 +2213,7 @@ impl AppState {
             .ok_or_else(|| anyhow!("session `{session_id}` not found"))?;
         inner.sessions[index].runtime = SessionRuntime::None;
         inner.sessions[index].runtime_reset_required = false;
-        inner.sessions[index].pending_claude_approvals.clear();
-        inner.sessions[index].pending_codex_approvals.clear();
-        inner.sessions[index].pending_codex_user_inputs.clear();
-        inner.sessions[index].pending_codex_mcp_elicitations.clear();
-        inner.sessions[index].pending_codex_app_requests.clear();
-        inner.sessions[index].pending_acp_approvals.clear();
+        clear_all_pending_requests(&mut inner.sessions[index]);
         Ok(())
     }
 
@@ -2195,12 +2413,7 @@ impl AppState {
             let record = &mut inner.sessions[index];
             record.runtime = SessionRuntime::None;
             record.runtime_reset_required = false;
-            record.pending_claude_approvals.clear();
-            record.pending_codex_approvals.clear();
-            record.pending_codex_user_inputs.clear();
-            record.pending_codex_mcp_elicitations.clear();
-            record.pending_codex_app_requests.clear();
-            record.pending_acp_approvals.clear();
+            clear_all_pending_requests(record);
 
             if !cleaned.is_empty() || was_busy {
                 let detail = if !cleaned.is_empty() {
@@ -2382,11 +2595,14 @@ impl AppState {
         if self.remote_session_target(session_id)?.is_some() {
             return self.proxy_remote_kill_session(session_id);
         }
-        let runtime_to_kill = {
+        let (runtime_to_kill, hidden_runtimes_to_kill) = {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
             let index = inner
-                .find_session_index(session_id)
+                .find_visible_session_index(session_id)
                 .ok_or_else(|| ApiError::not_found("session not found"))?;
+            let workdir = inner.sessions[index].session.workdir.clone();
+            let project_id = inner.sessions[index].session.project_id.clone();
+            let agent = inner.sessions[index].session.agent;
             let record = &mut inner.sessions[index];
 
             let runtime = match &record.runtime {
@@ -2408,8 +2624,45 @@ impl AppState {
                     ApiError::internal(format!("failed to persist session state: {err:#}"))
                 })?;
             }
+            inner.sessions.remove(index);
 
-            runtime
+            let mut hidden_runtimes = Vec::new();
+            if agent == Agent::Claude {
+                let visible_profiles = inner
+                    .sessions
+                    .iter()
+                    .filter(|session_record| {
+                        !session_record.hidden
+                            && !session_record.is_remote_proxy()
+                            && session_record.session.agent == Agent::Claude
+                            && session_record.session.workdir == workdir
+                            && session_record.session.project_id == project_id
+                    })
+                    .map(claude_spare_profile)
+                    .collect::<Vec<_>>();
+                inner.sessions.retain(|session_record| {
+                    let should_consider = session_record.hidden
+                        && !session_record.is_remote_proxy()
+                        && session_record.session.agent == Agent::Claude
+                        && session_record.session.workdir == workdir
+                        && session_record.session.project_id == project_id;
+                    if !should_consider {
+                        return true;
+                    }
+
+                    let keep = visible_profiles
+                        .iter()
+                        .any(|profile| *profile == claude_spare_profile(session_record));
+                    if !keep {
+                        if let SessionRuntime::Claude(handle) = &session_record.runtime {
+                            hidden_runtimes.push(KillableRuntime::Claude(handle.clone()));
+                        }
+                    }
+                    keep
+                });
+            }
+
+            (runtime, hidden_runtimes)
         };
 
         if let Some(runtime) = runtime_to_kill {
@@ -2433,13 +2686,11 @@ impl AppState {
                 })?,
             }
         }
+        for runtime in hidden_runtimes_to_kill {
+            let _ = runtime.kill();
+        }
 
         let mut inner = self.inner.lock().expect("state mutex poisoned");
-        let index = inner
-            .find_session_index(session_id)
-            .ok_or_else(|| ApiError::not_found("session not found"))?;
-        inner.sessions.remove(index);
-
         self.commit_locked(&mut inner).map_err(|err| {
             ApiError::internal(format!("failed to persist session state: {err:#}"))
         })?;
@@ -2456,7 +2707,7 @@ impl AppState {
         }
         let mut inner = self.inner.lock().expect("state mutex poisoned");
         let index = inner
-            .find_session_index(session_id)
+            .find_visible_session_index(session_id)
             .ok_or_else(|| ApiError::not_found("session not found"))?;
         let record = &mut inner.sessions[index];
         let original_len = record.queued_prompts.len();
@@ -2481,7 +2732,7 @@ impl AppState {
         let runtime_to_stop = {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
             let index = inner
-                .find_session_index(session_id)
+                .find_visible_session_index(session_id)
                 .ok_or_else(|| ApiError::not_found("session not found"))?;
             let record = &mut inner.sessions[index];
 
@@ -2953,7 +3204,7 @@ impl AppState {
         let mut acp_runtime_action: Option<(AcpRuntimeHandle, AcpPendingApproval)> = None;
         let mut inner = self.inner.lock().expect("state mutex poisoned");
         let index = inner
-            .find_session_index(session_id)
+            .find_visible_session_index(session_id)
             .ok_or_else(|| ApiError::not_found("session not found"))?;
         let record = &mut inner.sessions[index];
         if record.session.status != SessionStatus::Approval {
@@ -3179,7 +3430,7 @@ impl AppState {
         let (handle, pending, response_answers, display_answers) = {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
             let index = inner
-                .find_session_index(session_id)
+                .find_visible_session_index(session_id)
                 .ok_or_else(|| ApiError::not_found("session not found"))?;
             let record = &mut inner.sessions[index];
             if record.session.status != SessionStatus::Approval {
@@ -3268,7 +3519,7 @@ impl AppState {
         let (handle, pending, normalized_content) = {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
             let index = inner
-                .find_session_index(session_id)
+                .find_visible_session_index(session_id)
                 .ok_or_else(|| ApiError::not_found("session not found"))?;
             let record = &mut inner.sessions[index];
             if record.session.status != SessionStatus::Approval {
@@ -3357,7 +3608,7 @@ impl AppState {
         let (handle, pending) = {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
             let index = inner
-                .find_session_index(session_id)
+                .find_visible_session_index(session_id)
                 .ok_or_else(|| ApiError::not_found("session not found"))?;
             let record = &mut inner.sessions[index];
             if record.session.status != SessionStatus::Approval {
@@ -4072,6 +4323,7 @@ impl StateInner {
             active_codex_approval_policy: None,
             active_codex_reasoning_effort: None,
             active_codex_sandbox_mode: None,
+            agent_commands: Vec::new(),
             codex_approval_policy: default_codex_approval_policy(),
             codex_reasoning_effort: self.preferences.default_codex_reasoning_effort,
             codex_sandbox_mode: default_codex_sandbox_mode(),
@@ -4088,6 +4340,7 @@ impl StateInner {
             remote_session_id: None,
             runtime: SessionRuntime::None,
             runtime_reset_required: false,
+            hidden: false,
             session: Session {
                 id: format!("session-{number}"),
                 name: name.unwrap_or_else(|| format!("{} {}", agent.name(), number)),
@@ -4113,6 +4366,7 @@ impl StateInner {
                     .supports_gemini_approval_mode()
                     .then_some(default_gemini_approval_mode()),
                 external_session_id: None,
+                agent_commands_revision: 0,
                 codex_thread_state: None,
                 status: SessionStatus::Idle,
                 preview: "Ready for a prompt.".to_owned(),
@@ -4134,6 +4388,59 @@ impl StateInner {
         record
     }
 
+    fn find_matching_hidden_claude_spare(
+        &self,
+        workdir: &str,
+        project_id: Option<&str>,
+        model: &str,
+        approval_mode: ClaudeApprovalMode,
+        effort: ClaudeEffortLevel,
+    ) -> Option<usize> {
+        self.sessions.iter().position(|record| {
+            record.hidden
+                && !record.is_remote_proxy()
+                && record.session.agent == Agent::Claude
+                && record.session.workdir == workdir
+                && record.session.project_id.as_deref() == project_id
+                && record.session.model == model
+                && record.session.claude_approval_mode == Some(approval_mode)
+                && record.session.claude_effort == Some(effort)
+        })
+    }
+
+    fn ensure_hidden_claude_spare(
+        &mut self,
+        workdir: String,
+        project_id: Option<String>,
+        model: String,
+        approval_mode: ClaudeApprovalMode,
+        effort: ClaudeEffortLevel,
+    ) -> Option<String> {
+        if let Some(index) = self.find_matching_hidden_claude_spare(
+            &workdir,
+            project_id.as_deref(),
+            &model,
+            approval_mode,
+            effort,
+        ) {
+            let record = &mut self.sessions[index];
+            reset_hidden_claude_spare_record(record);
+            return matches!(record.runtime, SessionRuntime::None)
+                .then(|| record.session.id.clone());
+        }
+
+        self.create_session(Agent::Claude, None, workdir, project_id, Some(model));
+        let record = self
+            .sessions
+            .last_mut()
+            .expect("create_session should append a session record");
+        record.hidden = true;
+        record.session.claude_approval_mode = Some(approval_mode);
+        record.session.claude_effort = Some(effort);
+        reset_hidden_claude_spare_record(record);
+        Some(record.session.id.clone())
+    }
+
     fn next_message_id(&mut self) -> String {
         let id = format!("message-{}", self.next_message_number);
         self.next_message_number += 1;
@@ -4144,6 +4451,12 @@ impl StateInner {
         self.sessions
             .iter()
             .position(|record| record.session.id == session_id)
+    }
+
+    fn find_visible_session_index(&self, session_id: &str) -> Option<usize> {
+        self.sessions
+            .iter()
+            .position(|record| !record.hidden && record.session.id == session_id)
     }
 
     fn find_remote_session_index(&self, remote_id: &str, remote_session_id: &str) -> Option<usize> {
@@ -4349,6 +4662,7 @@ impl PersistedState {
             sessions: inner
                 .sessions
                 .iter()
+                .filter(|record| !record.hidden)
                 .map(PersistedSessionRecord::from_record)
                 .collect(),
         }
@@ -4473,6 +4787,7 @@ impl PersistedSessionRecord {
             active_codex_approval_policy: self.active_codex_approval_policy,
             active_codex_reasoning_effort: self.active_codex_reasoning_effort,
             active_codex_sandbox_mode: self.active_codex_sandbox_mode,
+            agent_commands: Vec::new(),
             codex_approval_policy: self.codex_approval_policy,
             codex_reasoning_effort: self.codex_reasoning_effort,
             codex_sandbox_mode: self.codex_sandbox_mode,
@@ -4489,6 +4804,7 @@ impl PersistedSessionRecord {
             remote_session_id: self.remote_session_id,
             runtime: SessionRuntime::None,
             runtime_reset_required: false,
+            hidden: false,
             session,
         };
         sync_codex_thread_state(&mut record);
@@ -4502,6 +4818,7 @@ struct SessionRecord {
     active_codex_approval_policy: Option<CodexApprovalPolicy>,
     active_codex_reasoning_effort: Option<CodexReasoningEffort>,
     active_codex_sandbox_mode: Option<CodexSandboxMode>,
+    agent_commands: Vec<AgentCommand>,
     codex_approval_policy: CodexApprovalPolicy,
     codex_reasoning_effort: CodexReasoningEffort,
     codex_sandbox_mode: CodexSandboxMode,
@@ -4518,6 +4835,7 @@ struct SessionRecord {
     remote_session_id: Option<String>,
     runtime: SessionRuntime,
     runtime_reset_required: bool,
+    hidden: bool,
     session: Session,
 }
 
@@ -4525,6 +4843,82 @@ impl SessionRecord {
     fn is_remote_proxy(&self) -> bool {
         self.remote_id.is_some() && self.remote_session_id.is_some()
     }
+}
+
+fn reset_hidden_claude_spare_record(record: &mut SessionRecord) {
+    if record.session.agent != Agent::Claude {
+        return;
+    }
+
+    record.session.messages.clear();
+    record.session.pending_prompts.clear();
+    record.session.status = SessionStatus::Idle;
+    record.session.preview = "Ready for a prompt.".to_owned();
+    clear_all_pending_requests(record);
+    record.queued_prompts.clear();
+    record.message_positions.clear();
+    record.runtime_reset_required = false;
+}
+
+fn clear_all_pending_requests(record: &mut SessionRecord) {
+    record.pending_claude_approvals.clear();
+    record.pending_codex_approvals.clear();
+    record.pending_codex_user_inputs.clear();
+    record.pending_codex_mcp_elicitations.clear();
+    record.pending_codex_app_requests.clear();
+    record.pending_acp_approvals.clear();
+}
+
+fn merge_agent_commands(
+    preferred: &[AgentCommand],
+    fallback: &[AgentCommand],
+) -> Vec<AgentCommand> {
+    if preferred.is_empty() {
+        return dedupe_agent_commands(fallback.to_vec());
+    }
+    if fallback.is_empty() {
+        return dedupe_agent_commands(preferred.to_vec());
+    }
+
+    let mut commands = preferred.to_vec();
+    commands.extend(fallback.iter().cloned());
+    dedupe_agent_commands(commands)
+}
+
+fn dedupe_agent_commands(commands: Vec<AgentCommand>) -> Vec<AgentCommand> {
+    let mut seen = HashSet::new();
+    let mut deduped = Vec::new();
+    for command in commands {
+        let key = command.name.trim().to_ascii_lowercase();
+        if key.is_empty() || !seen.insert(key) {
+            continue;
+        }
+        deduped.push(command);
+    }
+    deduped.sort_by(|left, right| {
+        left.name
+            .to_ascii_lowercase()
+            .cmp(&right.name.to_ascii_lowercase())
+    });
+    deduped
+}
+
+fn claude_spare_profile(
+    record: &SessionRecord,
+) -> (String, Option<String>, String, ClaudeApprovalMode, ClaudeEffortLevel) {
+    (
+        record.session.workdir.clone(),
+        record.session.project_id.clone(),
+        record.session.model.clone(),
+        record
+            .session
+            .claude_approval_mode
+            .unwrap_or_else(default_claude_approval_mode),
+        record
+            .session
+            .claude_effort
+            .unwrap_or_else(default_claude_effort),
+    )
 }
 
 fn normalized_codex_thread_state(
@@ -6084,11 +6478,59 @@ impl SessionRuntime {
 }
 
 fn kill_child_process(process: &Arc<SharedChild>, label: &str) -> Result<()> {
+    if wait_for_shared_child_exit_timeout(
+        process,
+        Duration::from_millis(50),
+        label,
+    )?
+    .is_some()
+    {
+        return Ok(());
+    }
+
+    match process.kill() {
+        Ok(()) => Ok(()),
+        Err(err) => {
+            if wait_for_shared_child_exit_timeout(
+                process,
+                Duration::from_millis(50),
+                label,
+            )?
+            .is_some()
+            {
+                Ok(())
+            } else {
+                Err(err).with_context(|| format!("failed to terminate {label} process"))
+            }
+        }
+    }
+}
+
+fn wait_for_shared_child_exit_timeout(
+    process: &Arc<SharedChild>,
+    timeout: Duration,
+    label: &str,
+) -> Result<Option<std::process::ExitStatus>> {
     match process.try_wait() {
-        Ok(Some(_)) => Ok(()),
-        Ok(None) => process
-            .kill()
-            .with_context(|| format!("failed to terminate {label} process")),
-        Err(err) => Err(anyhow!("failed to inspect {label} process state: {err}")),
+        Ok(Some(status)) => return Ok(Some(status)),
+        Ok(None) => {}
+        Err(err) => return Err(anyhow!("failed waiting for {label} process: {err}")),
+    }
+
+    let wait_process = process.clone();
+    let (status_tx, status_rx) = mpsc::sync_channel(1);
+    // If the timeout elapses, callers either terminate the process immediately or continue with
+    // a long-lived shared child. The waiter is detached so we never block the caller thread.
+    std::thread::spawn(move || {
+        let _ = status_tx.send(wait_process.wait());
+    });
+
+    match status_rx.recv_timeout(timeout) {
+        Ok(Ok(status)) => Ok(Some(status)),
+        Ok(Err(err)) => Err(anyhow!("failed waiting for {label} process: {err}")),
+        Err(mpsc::RecvTimeoutError::Timeout) => Ok(None),
+        Err(mpsc::RecvTimeoutError::Disconnected) => Err(anyhow!(
+            "failed waiting for {label} process: wait thread disconnected"
+        )),
     }
 }

@@ -321,6 +321,17 @@ fn test_exit_success_child() -> Child {
     }
 }
 
+fn test_sleep_child() -> Child {
+    if cfg!(windows) {
+        Command::new("cmd")
+            .args(["/C", "ping -n 6 127.0.0.1 >NUL"])
+            .spawn()
+            .unwrap()
+    } else {
+        Command::new("sh").arg("-c").arg("sleep 5").spawn().unwrap()
+    }
+}
+
 fn test_codex_runtime_handle(
     runtime_id: &str,
 ) -> (CodexRuntimeHandle, mpsc::Receiver<CodexRuntimeCommand>) {
@@ -919,6 +930,43 @@ async fn request_json<T: for<'de> Deserialize<'de>>(
 }
 
 #[test]
+fn wait_for_shared_child_exit_timeout_returns_status_for_completed_process() {
+    let child = test_exit_success_child();
+    let process = Arc::new(SharedChild::new(child).unwrap());
+
+    let status = wait_for_shared_child_exit_timeout(&process, Duration::from_secs(1), "test child")
+        .unwrap()
+        .expect("completed process should return a status");
+
+    assert!(status.success());
+}
+
+#[test]
+fn wait_for_shared_child_exit_timeout_returns_none_for_running_process() {
+    let child = test_sleep_child();
+    let process = Arc::new(SharedChild::new(child).unwrap());
+
+    let status =
+        wait_for_shared_child_exit_timeout(&process, Duration::from_millis(10), "test child")
+            .unwrap();
+
+    assert!(status.is_none());
+    process.kill().unwrap();
+    process.wait().unwrap();
+}
+
+#[test]
+fn shutdown_repl_codex_process_forces_running_process_after_timeout() {
+    let child = test_sleep_child();
+    let process = Arc::new(SharedChild::new(child).unwrap());
+
+    let (status, forced_shutdown) = shutdown_repl_codex_process(&process).unwrap();
+
+    assert!(forced_shutdown);
+    assert!(!status.success());
+}
+
+#[test]
 fn reads_claude_agent_commands_from_markdown_files() {
     let root = std::env::temp_dir().join(format!("termal-agent-commands-{}", Uuid::new_v4()));
     let commands_dir = root.join(".claude").join("commands");
@@ -951,6 +999,7 @@ $ARGUMENTS
         commands,
         vec![
             AgentCommand {
+                kind: AgentCommandKind::PromptTemplate,
                 name: "fix-bug".to_owned(),
                 description: "Fix a bug from docs/bugs.md by number.".to_owned(),
                 content: "
@@ -960,8 +1009,10 @@ $ARGUMENTS
 "
                 .to_owned(),
                 source: ".claude/commands/fix-bug.md".to_owned(),
+                argument_hint: None,
             },
             AgentCommand {
+                kind: AgentCommandKind::PromptTemplate,
                 name: "review-local".to_owned(),
                 description: "Review local changes.".to_owned(),
                 content: "Review local changes.
@@ -971,6 +1022,7 @@ Inspect diffs.
 "
                 .to_owned(),
                 source: ".claude/commands/review-local.md".to_owned(),
+                argument_hint: None,
             },
         ]
     );
@@ -1026,8 +1078,242 @@ Use the active agent's tools.
     assert_eq!(response.commands.len(), 1);
     assert_eq!(response.commands[0].name, "review-local");
     assert_eq!(response.commands[0].description, "Review local changes.");
+    assert_eq!(response.commands[0].kind, AgentCommandKind::PromptTemplate);
 
     fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn extracts_claude_native_agent_commands_from_initialize_response() {
+    let message = json!({
+        "type": "control_response",
+        "response": {
+            "subtype": "success",
+            "response": {
+                "commands": [
+                    {
+                        "name": "review",
+                        "description": "Review the current changes. (bundled)",
+                        "argumentHint": ""
+                    },
+                    {
+                        "name": "review-local",
+                        "description": "Review local changes. (project)",
+                        "argumentHint": "[scope]"
+                    }
+                ]
+            }
+        }
+    });
+
+    assert_eq!(
+        claude_agent_commands(&message),
+        Some(vec![
+            AgentCommand {
+                kind: AgentCommandKind::NativeSlash,
+                name: "review".to_owned(),
+                description: "Review the current changes.".to_owned(),
+                content: "/review".to_owned(),
+                source: "Claude bundled command".to_owned(),
+                argument_hint: None,
+            },
+            AgentCommand {
+                kind: AgentCommandKind::NativeSlash,
+                name: "review-local".to_owned(),
+                description: "Review local changes.".to_owned(),
+                content: "/review-local".to_owned(),
+                source: "Claude project command".to_owned(),
+                argument_hint: Some("[scope]".to_owned()),
+            },
+        ])
+    );
+}
+
+#[test]
+fn extracts_claude_native_agent_commands_filters_empty_names_and_normalizes_user_suffix() {
+    let message = json!({
+        "type": "control_response",
+        "response": {
+            "subtype": "success",
+            "response": {
+                "commands": [
+                    {
+                        "name": "   ",
+                        "description": "Should be filtered."
+                    },
+                    {
+                        "name": "release-notes",
+                        "description": "Draft release notes. (user)"
+                    }
+                ]
+            }
+        }
+    });
+
+    assert_eq!(
+        claude_agent_commands(&message),
+        Some(vec![AgentCommand {
+            kind: AgentCommandKind::NativeSlash,
+            name: "release-notes".to_owned(),
+            description: "Draft release notes.".to_owned(),
+            content: "/release-notes".to_owned(),
+            source: "Claude user command".to_owned(),
+            argument_hint: None,
+        }])
+    );
+}
+
+#[test]
+fn extracts_claude_native_agent_commands_returns_none_for_empty_command_list() {
+    let message = json!({
+        "type": "control_response",
+        "response": {
+            "subtype": "success",
+            "response": {
+                "commands": []
+            }
+        }
+    });
+
+    assert_eq!(claude_agent_commands(&message), None);
+}
+
+#[test]
+fn returns_cached_claude_native_commands_alongside_template_fallbacks() {
+    let root = std::env::temp_dir().join(format!(
+        "termal-agent-commands-claude-native-{}",
+        Uuid::new_v4()
+    ));
+    let commands_dir = root.join(".claude").join("commands");
+    fs::create_dir_all(&commands_dir).unwrap();
+    fs::write(
+        commands_dir.join("review-local.md"),
+        "Review local changes from the filesystem template.",
+    )
+    .unwrap();
+    fs::write(
+        commands_dir.join("fix-bug.md"),
+        "Fix a bug from docs/bugs.md by number.\n\n$ARGUMENTS\n",
+    )
+    .unwrap();
+
+    let state = test_app_state();
+    let created = state
+        .create_session(CreateSessionRequest {
+            agent: Some(Agent::Claude),
+            name: Some("Claude Session".to_owned()),
+            workdir: Some(root.to_string_lossy().into_owned()),
+            project_id: None,
+            model: None,
+            approval_policy: None,
+            reasoning_effort: None,
+            sandbox_mode: None,
+            cursor_mode: None,
+            claude_approval_mode: None,
+            claude_effort: None,
+            gemini_approval_mode: None,
+        })
+        .unwrap();
+
+    state
+        .sync_session_agent_commands(
+            &created.session_id,
+            vec![
+                AgentCommand {
+                    kind: AgentCommandKind::NativeSlash,
+                    name: "review".to_owned(),
+                    description: "Review the current changes.".to_owned(),
+                    content: "/review".to_owned(),
+                    source: "Claude bundled command".to_owned(),
+                    argument_hint: None,
+                },
+                AgentCommand {
+                    kind: AgentCommandKind::NativeSlash,
+                    name: "review-local".to_owned(),
+                    description: "Review local changes.".to_owned(),
+                    content: "/review-local".to_owned(),
+                    source: "Claude project command".to_owned(),
+                    argument_hint: Some("[scope]".to_owned()),
+                },
+            ],
+        )
+        .unwrap();
+
+    let response = state.list_agent_commands(&created.session_id).unwrap();
+
+    assert_eq!(
+        response
+            .commands
+            .iter()
+            .map(|command| command.name.as_str())
+            .collect::<Vec<_>>(),
+        vec!["fix-bug", "review", "review-local"]
+    );
+    assert_eq!(response.commands[0].kind, AgentCommandKind::PromptTemplate);
+    assert_eq!(response.commands[1].kind, AgentCommandKind::NativeSlash);
+    assert_eq!(response.commands[2].kind, AgentCommandKind::NativeSlash);
+    assert_eq!(
+        response.commands[2].argument_hint.as_deref(),
+        Some("[scope]")
+    );
+    assert_eq!(response.commands[2].source, "Claude project command");
+
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn sync_session_agent_commands_bumps_visible_session_command_revision() {
+    let state = test_app_state();
+    let created = state
+        .create_session(CreateSessionRequest {
+            agent: Some(Agent::Claude),
+            name: Some("Claude Session".to_owned()),
+            workdir: Some("/tmp".to_owned()),
+            project_id: None,
+            model: None,
+            approval_policy: None,
+            reasoning_effort: None,
+            sandbox_mode: None,
+            cursor_mode: None,
+            claude_approval_mode: None,
+            claude_effort: None,
+            gemini_approval_mode: None,
+        })
+        .unwrap();
+    let starting_revision = created.state.revision;
+    let starting_session_revision = created
+        .state
+        .sessions
+        .iter()
+        .find(|session| session.id == created.session_id)
+        .expect("created Claude session should exist")
+        .agent_commands_revision;
+
+    state
+        .sync_session_agent_commands(
+            &created.session_id,
+            vec![AgentCommand {
+                kind: AgentCommandKind::NativeSlash,
+                name: "review".to_owned(),
+                description: "Review the current changes.".to_owned(),
+                content: "/review".to_owned(),
+                source: "Claude bundled command".to_owned(),
+                argument_hint: None,
+            }],
+        )
+        .unwrap();
+
+    let snapshot = state.snapshot();
+    let session = snapshot
+        .sessions
+        .iter()
+        .find(|session| session.id == created.session_id)
+        .expect("updated Claude session should exist");
+    assert!(snapshot.revision > starting_revision);
+    assert_eq!(
+        session.agent_commands_revision,
+        starting_session_revision.saturating_add(1)
+    );
 }
 
 #[test]
@@ -1388,6 +1674,262 @@ fn creates_claude_sessions_with_requested_plan_mode() {
 
     assert_eq!(session.claude_approval_mode, Some(ClaudeApprovalMode::Plan));
     assert_eq!(session.claude_effort, Some(ClaudeEffortLevel::High));
+}
+
+#[test]
+fn hidden_claude_spares_are_filtered_from_snapshots_and_persistence() {
+    let state = test_app_state();
+    let workdir = resolve_session_workdir("/tmp").expect("test workdir should resolve");
+    let hidden_session_id = {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        inner
+            .ensure_hidden_claude_spare(
+                workdir,
+                None,
+                Agent::Claude.default_model().to_owned(),
+                ClaudeApprovalMode::Ask,
+                ClaudeEffortLevel::Default,
+            )
+            .expect("hidden Claude spare should be created")
+    };
+
+    let snapshot = state.snapshot();
+    assert!(
+        snapshot
+            .sessions
+            .iter()
+            .all(|session| session.id != hidden_session_id)
+    );
+
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    assert!(
+        inner
+            .sessions
+            .iter()
+            .any(|record| record.hidden && record.session.id == hidden_session_id)
+    );
+    let persisted = PersistedState::from_inner(&inner);
+    assert!(
+        persisted
+            .sessions
+            .iter()
+            .all(|record| record.session.id != hidden_session_id)
+    );
+}
+
+#[test]
+fn create_session_promotes_matching_hidden_claude_spare_and_replenishes_pool() {
+    let state = test_app_state();
+    let workdir = resolve_session_workdir("/tmp").expect("test workdir should resolve");
+    let hidden_session_id = {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        inner
+            .ensure_hidden_claude_spare(
+                workdir.clone(),
+                None,
+                Agent::Claude.default_model().to_owned(),
+                ClaudeApprovalMode::Ask,
+                ClaudeEffortLevel::Default,
+            )
+            .expect("hidden Claude spare should be created")
+    };
+
+    let response = state
+        .create_session(CreateSessionRequest {
+            agent: Some(Agent::Claude),
+            name: Some("Visible Claude".to_owned()),
+            workdir: Some(workdir.clone()),
+            project_id: None,
+            model: None,
+            approval_policy: None,
+            reasoning_effort: None,
+            sandbox_mode: None,
+            cursor_mode: None,
+            claude_approval_mode: None,
+            claude_effort: None,
+            gemini_approval_mode: None,
+        })
+        .unwrap();
+
+    assert_eq!(response.session_id, hidden_session_id);
+    let session = response
+        .state
+        .sessions
+        .iter()
+        .find(|session| session.id == hidden_session_id)
+        .expect("promoted hidden session should be visible");
+    assert_eq!(session.name, "Visible Claude");
+
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    let promoted = inner
+        .sessions
+        .iter()
+        .find(|record| record.session.id == hidden_session_id)
+        .expect("promoted session record should exist");
+    assert!(!promoted.hidden);
+
+    let hidden_spares = inner
+        .sessions
+        .iter()
+        .filter(|record| {
+            record.hidden
+                && record.session.agent == Agent::Claude
+                && record.session.workdir == workdir
+                && record.session.project_id.is_none()
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(hidden_spares.len(), 1);
+    assert_ne!(hidden_spares[0].session.id, hidden_session_id);
+}
+
+#[test]
+fn create_session_promotes_matching_non_default_hidden_claude_spare() {
+    let state = test_app_state();
+    let workdir = resolve_session_workdir("/tmp").expect("test workdir should resolve");
+    let hidden_session_id = {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        inner
+            .ensure_hidden_claude_spare(
+                workdir.clone(),
+                None,
+                "claude-custom".to_owned(),
+                ClaudeApprovalMode::Plan,
+                ClaudeEffortLevel::High,
+            )
+            .expect("hidden Claude spare should be created")
+    };
+
+    let response = state
+        .create_session(CreateSessionRequest {
+            agent: Some(Agent::Claude),
+            name: Some("Plan Claude".to_owned()),
+            workdir: Some(workdir.clone()),
+            project_id: None,
+            model: Some("claude-custom".to_owned()),
+            approval_policy: None,
+            reasoning_effort: None,
+            sandbox_mode: None,
+            cursor_mode: None,
+            claude_approval_mode: Some(ClaudeApprovalMode::Plan),
+            claude_effort: Some(ClaudeEffortLevel::High),
+            gemini_approval_mode: None,
+        })
+        .unwrap();
+
+    assert_eq!(response.session_id, hidden_session_id);
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    let hidden_spares = inner
+        .sessions
+        .iter()
+        .filter(|record| {
+            record.hidden
+                && record.session.agent == Agent::Claude
+                && record.session.workdir == workdir
+                && record.session.model == "claude-custom"
+                && record.session.claude_approval_mode == Some(ClaudeApprovalMode::Plan)
+                && record.session.claude_effort == Some(ClaudeEffortLevel::High)
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(hidden_spares.len(), 1);
+    assert_ne!(hidden_spares[0].session.id, hidden_session_id);
+}
+
+#[test]
+fn killing_last_visible_claude_session_reaps_hidden_spare_for_context() {
+    let state = test_app_state();
+    let workdir = resolve_session_workdir("/tmp").expect("test workdir should resolve");
+    let created = state
+        .create_session(CreateSessionRequest {
+            agent: Some(Agent::Claude),
+            name: Some("Claude Visible".to_owned()),
+            workdir: Some(workdir.clone()),
+            project_id: None,
+            model: None,
+            approval_policy: None,
+            reasoning_effort: None,
+            sandbox_mode: None,
+            cursor_mode: None,
+            claude_approval_mode: None,
+            claude_effort: None,
+            gemini_approval_mode: None,
+        })
+        .unwrap();
+
+    {
+        let inner = state.inner.lock().expect("state mutex poisoned");
+        assert!(inner.sessions.iter().any(|record| {
+            record.hidden
+                && record.session.agent == Agent::Claude
+                && record.session.workdir == workdir
+        }));
+    }
+
+    let killed = state.kill_session(&created.session_id).unwrap();
+    assert!(
+        killed
+            .sessions
+            .iter()
+            .all(|session| session.id != created.session_id)
+    );
+
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    assert!(inner.sessions.iter().all(|record| {
+        !(record.session.agent == Agent::Claude && record.session.workdir == workdir)
+    }));
+}
+
+#[test]
+fn killing_one_visible_claude_session_keeps_hidden_spares_when_another_visible_session_remains() {
+    let state = test_app_state();
+    let workdir = resolve_session_workdir("/tmp").expect("test workdir should resolve");
+    let first = state
+        .create_session(CreateSessionRequest {
+            agent: Some(Agent::Claude),
+            name: Some("Claude A".to_owned()),
+            workdir: Some(workdir.clone()),
+            project_id: None,
+            model: None,
+            approval_policy: None,
+            reasoning_effort: None,
+            sandbox_mode: None,
+            cursor_mode: None,
+            claude_approval_mode: None,
+            claude_effort: None,
+            gemini_approval_mode: None,
+        })
+        .unwrap();
+    let second = state
+        .create_session(CreateSessionRequest {
+            agent: Some(Agent::Claude),
+            name: Some("Claude B".to_owned()),
+            workdir: Some(workdir.clone()),
+            project_id: None,
+            model: None,
+            approval_policy: None,
+            reasoning_effort: None,
+            sandbox_mode: None,
+            cursor_mode: None,
+            claude_approval_mode: None,
+            claude_effort: None,
+            gemini_approval_mode: None,
+        })
+        .unwrap();
+
+    state.kill_session(&first.session_id).unwrap();
+
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    assert!(
+        inner
+            .sessions
+            .iter()
+            .any(|record| !record.hidden && record.session.id == second.session_id)
+    );
+    assert!(inner.sessions.iter().any(|record| {
+        record.hidden
+            && record.session.agent == Agent::Claude
+            && record.session.workdir == workdir
+            && record.session.project_id.is_none()
+    }));
 }
 
 #[test]
@@ -6906,6 +7448,82 @@ fn syncs_cursor_mode_from_mode_updates() {
         .find(|record| record.session.id == created.session_id)
         .expect("Cursor session should exist");
     assert_eq!(record.session.cursor_mode, Some(CursorMode::Plan));
+}
+
+#[test]
+fn borrowed_session_recorder_uses_shared_message_and_request_logic() {
+    let state = test_app_state();
+    let session_id = test_session_id(&state, Agent::Codex);
+    let questions = vec![UserInputQuestion {
+        header: "Scope".to_owned(),
+        id: "scope".to_owned(),
+        is_other: false,
+        is_secret: false,
+        options: None,
+        question: "What should Codex review?".to_owned(),
+    }];
+    let mut recorder_state = SessionRecorderState::default();
+    let mut recorder = BorrowedSessionRecorder::new(&state, &session_id, &mut recorder_state);
+
+    recorder.push_text("Initial text").unwrap();
+    recorder.text_delta("streamed text").unwrap();
+    recorder.finish_streaming_text().unwrap();
+    recorder.command_started("cmd-1", "pwd").unwrap();
+    recorder
+        .command_completed("cmd-1", "pwd", "/tmp", CommandStatus::Success)
+        .unwrap();
+    recorder
+        .push_codex_user_input_request(
+            "Need input",
+            "Choose the review scope.",
+            questions.clone(),
+            CodexPendingUserInput {
+                questions: questions.clone(),
+                request_id: json!("request-1"),
+            },
+        )
+        .unwrap();
+
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    let record = inner
+        .sessions
+        .iter()
+        .find(|record| record.session.id == session_id)
+        .expect("Codex session should exist");
+
+    assert!(record.session.messages.iter().any(|message| {
+        matches!(message, Message::Text { text, .. } if text == "Initial text")
+    }));
+    assert!(record.session.messages.iter().any(|message| {
+        matches!(message, Message::Text { text, .. } if text == "streamed text")
+    }));
+    assert!(record.session.messages.iter().any(|message| {
+        matches!(
+            message,
+            Message::Command {
+                command,
+                output,
+                status,
+                ..
+            } if command == "pwd" && output == "/tmp" && *status == CommandStatus::Success
+        )
+    }));
+    assert!(record.session.messages.iter().any(|message| {
+        matches!(
+            message,
+            Message::UserInputRequest {
+                title,
+                detail,
+                questions: message_questions,
+                state,
+                ..
+            } if title == "Need input"
+                && detail == "Choose the review scope."
+                && message_questions == &questions
+                && *state == InteractionRequestState::Pending
+        )
+    }));
+    assert_eq!(record.pending_codex_user_inputs.len(), 1);
 }
 
 #[test]

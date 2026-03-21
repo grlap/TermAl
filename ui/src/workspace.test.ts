@@ -397,6 +397,56 @@ describe("workspace helpers", () => {
     expect(next.activePaneId).toBe("pane-a");
   });
 
+  it("closeWorkspaceTab selects the adjacent tab instead of jumping to the end", () => {
+    const next = closeWorkspaceTab(
+      makeSinglePaneWorkspace(
+        makePane(
+          "pane-a",
+          [
+            makeSessionTab("tab-a", "session-a"),
+            makeSessionTab("tab-b", "session-b"),
+            makeSessionTab("tab-c", "session-c"),
+          ],
+          {
+            activeTabId: "tab-a",
+            activeSessionId: "session-a",
+          },
+        ),
+      ),
+      "pane-a",
+      "tab-a",
+    );
+
+    expect(next.panes[0].tabs.map((tab) => tab.id)).toEqual(["tab-b", "tab-c"]);
+    expect(next.panes[0].activeTabId).toBe("tab-b");
+    expect(next.panes[0].activeSessionId).toBe("session-b");
+  });
+
+  it("closeWorkspaceTab selects the following tab when closing a middle tab", () => {
+    const next = closeWorkspaceTab(
+      makeSinglePaneWorkspace(
+        makePane(
+          "pane-a",
+          [
+            makeSessionTab("tab-a", "session-a"),
+            makeSessionTab("tab-b", "session-b"),
+            makeSessionTab("tab-c", "session-c"),
+          ],
+          {
+            activeTabId: "tab-b",
+            activeSessionId: "session-b",
+          },
+        ),
+      ),
+      "pane-a",
+      "tab-b",
+    );
+
+    expect(next.panes[0].tabs.map((tab) => tab.id)).toEqual(["tab-a", "tab-c"]);
+    expect(next.panes[0].activeTabId).toBe("tab-c");
+    expect(next.panes[0].activeSessionId).toBe("session-c");
+  });
+
   it("closeWorkspaceTab removes the pane when its last tab closes", () => {
     const next = closeWorkspaceTab(
       makeSinglePaneWorkspace(makePane("pane-a", [makeSessionTab("tab-a", "session-a")])),

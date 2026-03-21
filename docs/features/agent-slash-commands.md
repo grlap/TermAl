@@ -4,22 +4,27 @@ Backlog source: [`docs/bugs.md`](../bugs.md)
 
 ## Status
 
-Implemented for all session types. TermAl now discovers `.claude/commands/*.md` via
-`GET /api/sessions/{id}/agent-commands`, shows those agent commands alongside the existing
-session-control slash commands, and sends the command content with `$ARGUMENTS` replaced by the
-rest of the composer draft after the command token.
+Implemented. `GET /api/sessions/{id}/agent-commands` now serves:
+
+- live Claude native slash commands discovered from Claude's initialize metadata
+- `.claude/commands/*.md` prompt templates from the session workdir
+
+The slash palette shows those commands alongside the existing session-control
+commands. Native Claude commands are sent as slash prompts such as `/review`,
+while markdown templates still expand `$ARGUMENTS` locally before send.
 
 See [`slash-commands.md`](slash-commands.md) for the existing session-control implementation.
 
 ## Problem
 
-Claude Code supports custom slash commands defined as `.md` files in `.claude/commands/`.
-These are powerful automation prompts — multi-step workflows like `/review-local` (parallel
-code review with specialist sub-agents) or `/fix-bug` (guided bug fix with verification).
+Claude exposes two useful command surfaces:
 
-Today the only way to trigger these is by running Claude Code directly in a terminal. TermAl
-users cannot access them from the composer. This is a gap: TermAl is the primary interface
-for running agents, but lacks access to the agent's own command system.
+- custom prompt templates from `.claude/commands/*.md`
+- native slash commands advertised by the live runtime, such as `/review`,
+  `/release-notes`, or `/security-review`
+
+TermAl now supports both for Claude sessions. This brief remains useful as the
+design record for that work.
 
 ## Goals
 
@@ -35,24 +40,20 @@ for running agents, but lacks access to the agent's own command system.
 - No command output formatting beyond what the agent naturally produces.
 - No command-specific UI (progress bars, step indicators).
 
-## Current constraints
+## Implemented architecture
 
 - The slash palette in `AgentSessionPanel.tsx` uses a static `SLASH_COMMANDS` array
   with hardcoded `SlashCommandId` values (`"model" | "mode" | "sandbox" | ...`).
 - Palette items are either `"command"` (expands text) or `"choice"` (applies a setting).
-  Agent commands need a third kind: `"agent-command"` (sends prompt text).
-- The backend has no endpoint to list files from the session's workdir — it has
-  `GET /api/fs?path=...` for directory listing and `GET /api/file?path=...` for file
-  reads, but no dedicated command-discovery endpoint.
-- Claude Code's command format is simple: the filename (minus `.md`) is the command name,
-  the first line is the description, the full content is the prompt. `$ARGUMENTS` in the
-  content is replaced with user-provided arguments.
-
-## Proposed architecture
+  Agent commands use the third kind: `"agent-command"`.
+- The backend command-discovery endpoint merges two sources for Claude sessions:
+  live native-command metadata from the initialized runtime and filesystem
+  templates from `.claude/commands`.
+- Claude Code's command-template format remains simple: the filename (minus `.md`)
+  is the command name, the first line is the description, the full content is
+  the prompt, and `$ARGUMENTS` is replaced with user-provided arguments.
 
 ### 1. Backend: command discovery endpoint
-
-Add a new endpoint that discovers agent commands for a session's project:
 
 ```
 GET /api/sessions/{id}/agent-commands
@@ -82,9 +83,11 @@ Response:
 Implementation:
 - Look up the session's `workdir` from `SessionRecord`.
 - Read `{workdir}/.claude/commands/*.md` on each request.
-- For each file: name = filename without `.md`, description = first non-empty line,
-  content = full file text.
-- Return empty array if the directory doesn't exist.
+- For Claude sessions, merge those templates with any native commands cached from
+  the live Claude initialize response.
+- Prefer native Claude commands over same-name filesystem templates so `/review`
+  and runtime-backed project commands dispatch natively when available.
+- Return empty array if neither source is available.
 - Frontend caches results per session and invalidates on workdir change or explicit refresh.
 
 ### 2. Frontend: agent command type

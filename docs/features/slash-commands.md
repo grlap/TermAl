@@ -7,8 +7,7 @@ Backlog source: [`docs/bugs.md`](../bugs.md)
 
 ## Status
 
-Implemented for session controls. Native agent slash-command discovery is still
-future work.
+Implemented for session controls and Claude-native slash commands.
 
 ## What TermAl supports today
 
@@ -46,9 +45,7 @@ For Claude, Codex, Cursor, and Gemini, the slash palette can:
 
 ## What is not implemented yet
 
-This is not full Claude Code or Cursor command parity. TermAl does not yet
-discover and dispatch the agents' native slash commands such as Claude's
-`/review`, `/release-notes`, or `/security-review`.
-
-The remaining work is native command discovery and metadata plumbing, not basic
-session-control slash behavior.
+This is not full cross-agent slash-command parity. TermAl now discovers
+Claude's native slash commands from the live runtime when available and falls
+back to `.claude/commands` prompt templates, but it still does not have
+equivalent native-command discovery for Codex, Cursor, or Gemini.

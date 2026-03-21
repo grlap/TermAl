@@ -1,6 +1,7 @@
-# Feature Brief: WhatsApp Integration
+# Feature Brief: Mobile Notifications & Remote Steering
 
-This document describes a summary-first WhatsApp integration for TermAl.
+This document describes a transport-agnostic mobile notification and steering
+layer for TermAl, replacing the earlier WhatsApp-only proposal.
 
 Backlog source: [`docs/bugs.md`](../bugs.md)
 
@@ -13,14 +14,16 @@ project, session, and approval flows.
 
 TermAl's current UI is rich, desktop-oriented, and optimized for supervising
 agent work with typed cards, split panes, diffs, files, and git state. A raw
-mirror of that UI into WhatsApp would be noisy and hard to act on.
+mirror of that UI into a mobile notification channel would be noisy and hard
+to act on.
 
 We need a mobile surface that helps a user stay in the loop without forcing
 them back to the full workspace for every update.
 
 ## Core idea
 
-Treat WhatsApp as a project status relay, not as a full TermAl client.
+Treat the mobile channel as a project status relay, not as a full TermAl
+client.
 
 For each linked project, TermAl should send a short digest that answers three
 questions:
@@ -34,8 +37,8 @@ project state. Rich review still happens in TermAl itself.
 
 ## Why summary-first is the right shape
 
-- WhatsApp is good at concise, asynchronous updates and simple actions.
-- It is bad at streaming dense command output, large diffs, and complex
+- Mobile channels are good at concise, asynchronous updates and simple actions.
+- They are bad at streaming dense command output, large diffs, and complex
   workspace state.
 - TermAl already has the raw ingredients for summaries: sessions, pending
   approvals, diffs, git status, and project routing.
@@ -53,30 +56,102 @@ project state. Rich review still happens in TermAl itself.
 ## Non-goals for v1
 
 - Full card-by-card mirroring of the desktop conversation.
-- Token-by-token streaming over WhatsApp.
+- Token-by-token streaming over a mobile channel.
 - Full workspace management from mobile.
 - Multi-user routing, RBAC, or enterprise account management.
 - Perfect natural-language planning from the relay itself.
 
+## Transport evaluation
+
+The digest model and status synthesis rules are transport-agnostic. The
+transport layer is the delivery mechanism. Here is a comparison of options
+ordered by fit for TermAl's single-user local-first Phase 1:
+
+### Phase 0: PWA push notifications (recommended first)
+
+| Dimension       | Assessment |
+|-----------------|------------|
+| Cost            | Free — no external service |
+| Setup           | Add a service worker + VAPID keys to the existing TermAl web frontend |
+| Approval        | None — browser permission grant only |
+| Actions         | Notification action buttons (Approve / Open / Stop) |
+| Bidirectional   | No — one-way push only, tap opens TermAl |
+| Privacy         | No third-party involvement at all |
+| Limitation      | Requires the browser to be installed and permission granted; no conversation thread |
+
+Since TermAl is already a web app, this is the lowest-friction option. The
+backend emits a Web Push message when project state changes meaningfully, and
+the browser shows a native notification with action buttons. iOS supports PWA
+push since 16.4.
+
+### Phase 1: Telegram bot (recommended for bidirectional)
+
+| Dimension       | Assessment |
+|-----------------|------------|
+| Cost            | Free — no per-message fees, no BSP |
+| Setup           | Create bot via @BotFather, get token — done in 60 seconds |
+| Approval        | None — no template review, no business verification |
+| API             | Simple HTTP REST; polling or webhooks; inline keyboard buttons built-in |
+| Actions         | Inline keyboard buttons map directly to Approve / Reject / Continue |
+| Bidirectional   | Yes — full conversation thread with free-text and button replies |
+| Deep links      | `t.me/yourbot?start=project-xyz` works natively |
+| Rate limits     | 30 msgs/sec to different users — more than enough for a single developer |
+| Gateway         | Not needed — Telegram handles delivery; TermAl just POSTs to the Bot API |
+
+The entire gateway described in the original WhatsApp doc can be replaced by a
+~200-line adapter that polls the Telegram Bot API or listens for webhooks via
+an ngrok/cloudflare tunnel. No Meta business verification, no template
+approval, no per-message cost.
+
+### Phase 2: ntfy (alternative self-hosted push)
+
+| Dimension       | Assessment |
+|-----------------|------------|
+| Cost            | Free — self-hosted or use ntfy.sh |
+| Setup           | One HTTP call: `curl -d "message" ntfy.sh/your-topic` |
+| Actions         | Supports action buttons in notifications (open URL, HTTP request) |
+| Bidirectional   | No — one-way push only |
+| Privacy         | Fully self-hosted option, no third-party accounts needed |
+| Limitation      | No conversation thread; better for "tap to open TermAl" than steering |
+
+Good for users who want self-hosted notifications without any external
+accounts. Can coexist with Telegram or PWA push.
+
+### Phase 3: WhatsApp (later, for teams)
+
+| Dimension       | Assessment |
+|-----------------|------------|
+| Cost            | $0.01–$0.13 per message depending on country + BSP markup |
+| Setup           | Meta Business verification (days/weeks), BSP account, phone number lockdown |
+| Approval        | Every outbound digest template must be pre-approved by Meta |
+| 24-hour window  | After 24h without user reply, only pre-approved templates can be sent |
+| Gateway         | Public webhook endpoint + signature validation + tunnel to local TermAl |
+| Bidirectional   | Yes — but constrained by templates and 24-hour windows |
+| Advantage       | Ubiquitous; natural fit for teams already using WhatsApp for coordination |
+
+WhatsApp is the right choice when TermAl moves to multi-user or team
+scenarios where WhatsApp is the existing coordination channel. The overhead is
+not justified for single-user local-first use.
+
 ## Current constraints
 
 - TermAl is currently a local-first backend and should not be exposed directly
-  as a public WhatsApp webhook target.
+  as a public webhook target without a tunnel or relay.
 - Existing session APIs are already sufficient for a relay to create sessions,
   send prompts, observe updates, and submit approvals.
-- Prompt attachments are image-only today, so WhatsApp documents, audio, and
-  other media would need separate handling.
-- WhatsApp actions are intentionally limited, so action suggestions must stay
+- Prompt attachments are image-only today, so media from mobile channels would
+  need separate handling.
+- Mobile actions are intentionally limited, so action suggestions must stay
   short and high-signal.
 
 ## User experience
 
 ### Project thread model
 
-Each WhatsApp thread is linked to one TermAl project by default.
+Each notification channel is linked to one TermAl project by default.
 
-That thread becomes the user's mobile control channel for the project, not for
-an arbitrary session. Internally, the relay can target the most relevant
+That channel becomes the user's mobile control surface for the project, not
+for an arbitrary session. Internally, the relay can target the most relevant
 session in that project or create one when needed.
 
 ### Outbound digest
@@ -116,7 +191,7 @@ Examples:
 
 The action list should be state-driven rather than fixed.
 
-### Inbound replies
+### Inbound replies (Telegram / WhatsApp only)
 
 The relay should support:
 
@@ -197,28 +272,48 @@ If the project is idle and unblocked:
 
 ## Proposed architecture
 
-### 1. WhatsApp gateway
+```
+┌──────────────┐      SSE       ┌──────────────────┐   HTTP   ┌─────────────┐
+│  TermAl      │ ──────────────>│  Transport       │ ────────>│  Telegram   │
+│  Backend     │<───── REST ────│  Adapter         │<─────────│  Bot API    │
+│  :6543       │                │  (small process) │          │  (or PWA /  │
+└──────────────┘                └──────────────────┘          │   ntfy)     │
+                                         │                    └─────────────┘
+                                         │                          │
+                                         │    push digests          │
+                                         │    inline buttons        │
+                                         └──────────────────────────┘
+                                                    │
+                                             ┌──────▼──────┐
+                                             │  Your Phone │
+                                             └─────────────┘
+```
 
-Run a small public-facing gateway that:
+The adapter subscribes to TermAl's SSE stream (`/api/events`) for state
+changes, builds a digest when something meaningful happens, sends it to the
+transport with action buttons, and maps inbound replies back to TermAl REST
+calls (approve, send prompt, stop).
 
-- receives inbound WhatsApp webhooks
-- validates provider signatures
-- maps a sender to a linked project
-- talks to the existing TermAl REST and SSE APIs
-- sends outbound digests and action messages back to WhatsApp
+### 1. Digest builder (backend)
 
-This keeps the public webhook boundary outside the current TermAl server.
-
-### 2. Project digest builder
-
-The gateway or TermAl backend needs a digest builder that collapses rich
-session state into:
+The TermAl backend needs a digest builder that collapses rich session state
+into:
 
 - a short done summary
 - a current project status
 - up to three proposed actions
 
 The digest builder should prefer deterministic rules over a second LLM call.
+This logic lives in the backend regardless of transport.
+
+### 2. Transport adapter
+
+A thin adapter per transport that:
+
+- receives inbound messages (Telegram webhook, PWA service worker message)
+- maps a sender/topic to a linked project
+- calls the digest and action APIs
+- sends outbound digests and action buttons in the transport's native format
 
 ### 3. Action dispatcher
 
@@ -228,7 +323,7 @@ Suggested actions should resolve to one of:
 - a canned prompt injected into the active project session
 - a deep link back into TermAl
 
-This keeps WhatsApp interactions shallow while still allowing user control.
+This keeps mobile interactions shallow while still allowing user control.
 
 ### 4. Deep links back to TermAl
 
@@ -241,13 +336,13 @@ Examples:
 - compare multiple sessions in a project
 - read a long assistant explanation
 
-WhatsApp should accelerate awareness and steering, not replace the main review
-surface.
+The mobile channel should accelerate awareness and steering, not replace the
+main review surface.
 
 ## API plan
 
-The first pass can be implemented by a gateway using existing APIs, but a
-cleaner backend contract would be:
+The first pass can be implemented by a transport adapter using existing APIs,
+but a cleaner backend contract would be:
 
 ### `GET /api/projects/{id}/digest`
 
@@ -269,33 +364,30 @@ Executes a suggested action such as:
 - reject
 - ask-agent-to-commit
 
-This avoids pushing too much state interpretation into the gateway.
+This avoids pushing too much state interpretation into the transport adapter.
 
 ### `GET /api/projects/{id}/events`
 
 Optional later endpoint for project-scoped event aggregation if session-level
 SSE becomes too low-level for the relay.
 
-## Provider strategy
-
-The transport layer should be provider-agnostic, but v1 should target one
-provider first instead of trying to abstract multiple services immediately.
-
-The provider adapter is responsible for:
-
-- webhook verification
-- inbound message normalization
-- outbound text and action delivery
-- contact and message id bookkeeping
-
 ## Implementation phases
 
-### Phase 1: gateway and manual project linking
+### Phase 0: PWA push notifications
 
-- add a small WhatsApp gateway service
-- link one phone number to one project
+- add a service worker to the TermAl frontend with VAPID key registration
+- emit Web Push messages from the backend when a project reaches a meaningful
+  state change (turn complete, approval needed, idle with changes)
+- include notification action buttons for common actions (Open, Approve, Stop)
+- no external service, no account, no cost
+
+### Phase 1: Telegram bot adapter
+
+- add a small Telegram bot adapter (polling or webhook)
+- link one Telegram chat to one project
 - forward inbound text to the project's active session
-- send one short digest when a turn completes
+- send one short digest with inline keyboard buttons when a turn completes
+- support approve, reject, continue, stop actions via button taps
 
 ### Phase 2: deterministic digest builder
 
@@ -303,34 +395,53 @@ The provider adapter is responsible for:
 - derive up to three proposed actions
 - suppress low-signal updates and duplicate digests
 
-### Phase 3: action execution and deep links
+### Phase 3: WhatsApp adapter (optional, for teams)
 
-- support approve, reject, continue, stop, and commit-oriented actions
-- add deep links back into TermAl for richer review
+- add a WhatsApp Business API adapter via a BSP (Twilio or similar)
+- Meta business verification and template approval
+- same digest model and action dispatcher as Telegram
+- justified only when TermAl serves multi-user or team workflows
+
+## Transport comparison
+
+| Dimension              | PWA Push          | Telegram Bot      | ntfy              | WhatsApp Business |
+|------------------------|-------------------|-------------------|-------------------|-------------------|
+| Cost                   | Free              | Free              | Free              | $0.01–$0.13/msg + BSP |
+| Setup time             | Minutes           | 60 seconds        | Minutes           | Days–weeks        |
+| Approval / verification | Browser permission | None              | None              | Meta Business verification + template approval |
+| Action buttons         | Notification actions | Inline keyboard  | URL / HTTP actions | Quick replies only |
+| Bidirectional          | No (tap opens app) | Yes (full thread) | No (push only)    | Yes (24h window)  |
+| Edit sent messages     | No                | Yes               | No                | No                |
+| Free-text replies      | No                | Yes               | No                | Only within 24h   |
+| External gateway       | No                | No (long polling) | No                | Yes (public HTTPS) |
+| Change message format  | Instant           | Instant           | Instant           | Resubmit template |
+| Best for               | Phase 0 — zero deps | Phase 1 — full steering | Self-hosted push | Teams / multi-user |
 
 ### Phase 4: polish
 
 - scheduled heartbeat digests
 - better project-level heuristics
-- per-project notification preferences
+- per-project notification preferences and transport selection
 - optional escalation rules for blocked work
 
 ## Testing plan
 
 - backend tests for project digest synthesis across idle, active, approval, and
   error states
-- gateway tests for sender-to-project routing and idempotent webhook handling
+- transport adapter tests for sender-to-project routing and idempotent message
+  handling
 - integration tests for action dispatch into existing TermAl APIs
 - snapshot tests for digest text and action suggestions
-- manual tests on real WhatsApp threads for notification readability and
-  action latency
+- manual tests on real Telegram threads and PWA notifications for readability
+  and action latency
 
 ## Acceptance criteria
 
-- A linked project can send a concise WhatsApp digest after meaningful work.
+- A linked project can send a concise mobile digest after meaningful work.
 - Each digest includes what was done and at least one proposed next action.
 - Approval-blocked work produces approval-focused suggestions.
-- Free-text replies from WhatsApp can steer the active project session.
+- Bidirectional channels (Telegram) allow free-text replies to steer the
+  active project session.
 - The user can jump from a digest back into the right TermAl project or
   session for full review.
-- The WhatsApp thread remains readable without mirroring every raw card.
+- The mobile thread remains readable without mirroring every raw card.

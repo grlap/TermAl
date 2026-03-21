@@ -58,6 +58,7 @@ function reconcileSession(previous: Session, next: Session): Session {
     previous.claudeApprovalMode === next.claudeApprovalMode &&
     previous.geminiApprovalMode === next.geminiApprovalMode &&
     previous.externalSessionId === next.externalSessionId &&
+    previous.agentCommandsRevision === next.agentCommandsRevision &&
     previous.codexThreadState === next.codexThreadState &&
     previous.status === next.status &&
     previous.preview === next.preview &&

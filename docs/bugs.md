@@ -3,7 +3,7 @@
 Updated against the current checked-in code in `src/main.rs`, `ui/src/App.tsx`,
 `ui/package.json`, and `ui/vite.config.ts`.
 
-The older entries for "No image paste support", the image-attachment UX mismatch, Claude `control_request` fallthrough, "No SSE/WebSocket for real-time updates", "Codex receive has no streaming", "No queueing system for prompts", the stale `/api/state`-after-SSE bootstrap race, the false-positive delta SSE reconciliation drift when a message already existed locally, shared Codex turn-scoped subagent ordering, shared Codex `item_completed` multipart truncation, stale shared-Codex agent-event turn filtering, the shared Codex buffered-result flush edge, multiple simultaneous approvals, Windows `HOME`-only path resolution, process-exit polling, unhandled Codex rate-limit notifications, the stale "Backend persists full state on every streaming text delta" entry, the old unscoped `/api/file` read bug, the legacy Codex REPL `exec --json` path, the old per-session / partial Codex app-server notes, the old Codex session-discovery note, the startup Codex home-discovery mismatch, the REPL Codex import leak, the discovery truncation bug, the startup discovery settings-clobber bug, the shared Codex lock-order deadlock, the Codex DB fallback-scan abort, the unbounded generic Codex app-request payload path, the MCP elicitation schema-enforcement gap, the uncapped Codex discovery query, the old interaction-request state name, the stale command-delta timestamp note, agent replies in diff review comments, the spec-drift note for `docs/claude-pair-spec.md`, the SSH remote-host injection bug, the remote review scope-routing bug, the remote bridge lifecycle bug, the remote ghost-session snapshot bug, the Remotes draft-reset bug, the workspace-first remote create-session bug, the remote-toggle copy mismatch, the stale Claude approval-cancel item, the `..` git pathspec validation gap, the failed Claude Task detail-loss bug, the stale `insert_message_before` contract note, the stale Claude parallel-agent type-duplication note, and the stale architecture-doc API table note were stale. Those are implemented in the current tree.
+The older entries for "No image paste support", the image-attachment UX mismatch, Claude `control_request` fallthrough, "No SSE/WebSocket for real-time updates", "Codex receive has no streaming", "No queueing system for prompts", the stale `/api/state`-after-SSE bootstrap race, the false-positive delta SSE reconciliation drift when a message already existed locally, shared Codex turn-scoped subagent ordering, shared Codex `item_completed` multipart truncation, stale shared-Codex agent-event turn filtering, the shared Codex buffered-result flush edge, multiple simultaneous approvals, Windows `HOME`-only path resolution, process-exit polling, unhandled Codex rate-limit notifications, the stale "Backend persists full state on every streaming text delta" entry, the old unscoped `/api/file` read bug, the legacy Codex REPL `exec --json` path, the old per-session / partial Codex app-server notes, the old Codex session-discovery note, the startup Codex home-discovery mismatch, the REPL Codex import leak, the discovery truncation bug, the startup discovery settings-clobber bug, the shared Codex lock-order deadlock, the Codex DB fallback-scan abort, the unbounded generic Codex app-request payload path, the MCP elicitation schema-enforcement gap, the uncapped Codex discovery query, the old interaction-request state name, the stale command-delta timestamp note, agent replies in diff review comments, the spec-drift note for `docs/claude-pair-spec.md`, the Claude hidden-session pool note, the old agent-native slash-command note, the stale runtime `try_wait()` polling note, the stale recorder-duplication note, the SSH remote-host injection bug, the remote review scope-routing bug, the remote bridge lifecycle bug, the remote ghost-session snapshot bug, the Remotes draft-reset bug, the workspace-first remote create-session bug, the remote-toggle copy mismatch, the stale Claude approval-cancel item, the `..` git pathspec validation gap, the failed Claude Task detail-loss bug, the stale `insert_message_before` contract note, the stale Claude parallel-agent type-duplication note, the streaming-refresh UI performance entry (render callback stabilization, mountedSessions referential stability, box-shadow transition scoping, MeasuredMessageCard memoization, sameJsonValue rewrite), and the stale architecture-doc API table note were stale. Those are implemented in the current tree.
 
 The newer shared Codex regressions where stale `task_complete` summaries could bleed into the next
 answer or a pre-answer summary insert could overwrite the final-answer preview are also fixed in
@@ -13,23 +13,6 @@ of forcing full-state snapshots.
 The earlier command-card UX issue where `OUT` could render as an empty dark block was also fixed.
 Command messages now use a compact `IN` / `OUT` layout with copy controls, a collapsible output
 view for longer results, and a plain placeholder when there is no command output.
-
-## Claude hidden session pool is still missing
-
-**Severity:** Medium â€” first Claude message still pays startup cost.
-
-Codex sessions already share a single long-lived app-server. The remaining runtime startup gap is
-on the Claude side: runtimes are still created lazily inside `dispatch_turn()`, so a new Claude
-session pays process startup plus initialize-handshake latency on its first prompt.
-
-**Current impact:**
-- Every new Claude session pays process startup plus initialize-handshake latency on the first prompt
-- Users running multiple concurrent Claude sessions per project hit the cold start repeatedly
-
-**Fix:**
-- Add a hidden spare session per active `(project, agent)` tuple
-- Unhide that spare on session creation instead of cold-starting every new Claude conversation
-- Reap idle hidden sessions so the pool does not grow without bound
 
 ## Node 24 deprecation warning from the legacy Vite dev proxy
 
@@ -72,31 +55,6 @@ noise.
 
 # Backlog
 
-## Recorder and pending-request clearing duplication
-
-**Severity:** Medium â€” maintainability concern, not a runtime bug.
-
-`SessionRecorder` and `BorrowedSessionRecorder` contain ~300 lines of near-identical
-implementations for `push_codex_approval`, `push_codex_user_input_request`,
-`push_codex_mcp_elicitation_request`, and `push_codex_app_request`. Every new Codex interactive
-request type requires copy-pasting the same block into both structs. If they diverge, bugs appear
-only in one runtime path (shared vs. dedicated).
-
-Separately, the four-line `pending_codex_*.clear()` block is repeated six times across
-`src/state.rs` and `src/remote.rs` wherever a runtime is cleared, reset, or rebuilt. Missing one
-site when adding a new pending request map causes stale requests that leak memory and could allow
-a response to a dead request.
-
-**Affected code (`src/turns.rs`, `src/state.rs`, `src/remote.rs`):**
-- `SessionRecorder` and `BorrowedSessionRecorder` recorder implementations
-- `pending_codex_*.clear()` blocks in session cleanup paths
-
-**Fix:**
-- Extract the recorder method bodies into free functions that accept `&AppState` and `&str`
-  (session_id), then have both impls delegate
-- Add a `clear_all_pending_requests(&mut SessionRecord)` helper and call it from all clearing
-  sites
-
 ## Backend module sizes are growing
 
 **Severity:** Medium â€” maintainability concern, not a runtime bug.
@@ -115,15 +73,6 @@ Session-scoped model switching is implemented for Claude, Codex, Cursor, and
 Gemini. The remaining work is polish: richer capability metadata, stronger
 refresh recovery, and deeper end-to-end coverage.
 
-## Agent-native slash commands are still missing
-
-**Severity:** Medium - detailed brief:
-- [Slash Commands](./features/slash-commands.md)
-
-TermAl now ships a session-control slash palette for `/model`, `/mode`,
-`/sandbox`, `/approvals`, and `/effort`. What is still missing is discovery and
-dispatch of the agents' own native slash commands.
-
 ## Gemini ACP integration still needs hardening
 
 **Severity:** Medium - detailed brief:
@@ -132,61 +81,6 @@ dispatch of the agents' own native slash commands.
 Gemini is implemented as a first-class ACP-backed agent now. The remaining work
 is hardening: clearer auth/setup recovery, broader ACP protocol coverage, and
 more end-to-end testing around model refresh and approval-mode changes.
-
-## Streaming refresh path is still heavier than necessary
-
-**Severity:** Medium â€” noticeable when one session is streaming and the user is typing in another.
-
-Prompt queueing, queued-prompt cancel, and `Stop` are implemented now. The biggest remaining
-latency issue is the refresh path during live streaming.
-
-**What improved already:**
-- Draft keystrokes are now local to the composer instead of updating top-level app state on every key
-- Session/message identity is preserved across many SSE updates so unchanged cards do not fully churn
-- Streamed text and command updates now have a dedicated SSE delta path instead of forcing a full
-  state snapshot for every chunk
-- Active long conversations now use a windowed message list instead of mounting every message card
-- Heavy markdown and code blocks now defer their expensive render work until near the viewport
-- Cached conversation pages per pane are now bounded so hidden long tabs do not grow without limit
-- Once the UI has a live revision, EventSource reconnects now wait for the stream's initial
-  `state` event instead of immediately forcing an extra `/api/state` fetch on every stream error
-- Inactive cached sessions with 80+ messages no longer render the full non-virtualized message
-  list — they return `null` and rebuild via the virtualized path on tab activation, eliminating
-  the multi-second DOM churn that made tab switching slow
-
-**What still happens:**
-- `renderMessageCard` is an inline JSX callback in `SessionPaneView` (App.tsx line 7769). Its
-  identity changes on every render, which defeats the `SessionBody` memo comparator
-  (`previous.renderMessageCard === next.renderMessageCard` always fails). An SSE delta that
-  updates session B still triggers full message-list work for the pane showing session A.
-- `mountedSessions` (App.tsx line 6615) always returns a new array from `.filter()`, even when
-  the same sessions are cached. This is the first check in the `SessionBody` memo and it always
-  fails, compounding the `renderMessageCard` instability above.
-- `box-shadow 180ms ease` in the global CSS transition rule (styles.css line 86) applies to
-  `.message-card` and 15 other selectors. `box-shadow` transitions require full repaint of the
-  element and its stacking context. During streaming, cards update rapidly and this creates
-  unnecessary GPU work. The `background`, `border-color`, and `color` transitions are cheap;
-  only `box-shadow` is expensive.
-- Inline handler closures inside `VirtualizedConversationMessageList` (AgentSessionPanel.tsx
-  lines 1638-1643) create new arrow functions per-render for `onApprovalDecision`,
-  `onUserInputSubmit`, etc. Since `MeasuredMessageCard` is not memoized this does not break
-  anything today, but it prevents future memoization of that component.
-- `sameJsonValue` in `session-reconcile.ts` (line 436) compares `CodexAppRequest` and
-  `McpElicitationRequest` message fields by serializing both sides to JSON strings. Objects are
-  typically small, but a large MCP elicitation `requestedSchema` would serialize on every SSE
-  reconciliation pass.
-
-**Tasks:**
-- Wrap `renderMessageCard` in `useCallback` and stabilize its closure dependencies so the
-  `SessionBody` memo can skip re-renders for unchanged sessions
-- Add a referential stability check to `mountedSessions` so `SessionBody` receives the same
-  array reference when the cached session set has not changed
-- Remove `box-shadow` from the `.message-card` transition shorthand (keep it on button selectors
-  where the repaint cost is negligible)
-- Memoize `MeasuredMessageCard` and lift the per-message handler closures out of the `.map()`
-  loop in `VirtualizedConversationMessageList`
-- Replace `JSON.stringify` comparison in `sameJsonValue` with a shallow recursive equality check
-  or cache the serialized form
 
 ## No territory visualization
 
@@ -219,24 +113,10 @@ Concrete work implied by the current TermAl parity gaps. Ordered by user impact 
 
 ## P1
 
-- [ ] Add native slash command discovery:
-  keep the existing session-control slash palette, but also parse and expose
-  native agent commands such as Claude's `commands` metadata so TermAl can offer
-  `/review`-style workflows directly from the composer.
 - [ ] Polish session model controls:
   keep the current session-scoped model switching, but continue improving live
   metadata, validation, recovery flows, and create/clone defaults so the model
   UX feels intentional across Claude, Codex, Cursor, and Gemini.
-- [ ] Extract shared recorder logic and pending-request clearing helper:
-  deduplicate the ~300 lines shared between `SessionRecorder` and `BorrowedSessionRecorder`, and
-  add a `clear_all_pending_requests()` helper to replace the six duplicated clearing blocks.
-- [ ] Replace the `try_wait()` polling loops in the Claude and Codex runtime supervisors with
-  blocking wait threads or async child handling.
-- [ ] Add Claude hidden session pool:
-  when the first Claude session spawns in a project, create a hidden spare session with a fully
-  initialized runtime for the same `(project, cwd)`. On new session creation, unhide the spare
-  and spawn the next one. Add `hidden` field to `Session`, filter from UI responses, and add
-  idle reaping.
 - [ ] Add drag-and-drop image attachments:
   pasted image attachments are documented in the composer now, but drag-and-drop is still missing.
 - [ ] Debounce delta persistence:
@@ -244,13 +124,6 @@ Concrete work implied by the current TermAl parity gaps. Ordered by user impact 
   and flush periodically (e.g. 500 ms) or on turn completion. Index messages by ID for O(1)
   lookup. Cache `collect_agent_readiness` instead of re-scanning PATH on every snapshot. Move
   disk I/O outside the mutex lock.
-- [ ] Reduce streaming refresh overhead:
-  wrap `renderMessageCard` in `useCallback` so the `SessionBody` memo can skip re-renders for
-  unchanged sessions. Add a referential stability check to `mountedSessions` so `.filter()` does
-  not break the memo when the cached set is unchanged. Remove `box-shadow` from the
-  `.message-card` CSS transition rule. Memoize `MeasuredMessageCard` and lift per-message handler
-  closures out of the virtualized list `.map()`. Replace `JSON.stringify` in `sameJsonValue` with
-  a shallow recursive equality check.
 - [ ] Add post-edit diff preview from agent messages:
   when an agent reports that it updated a file, let the user open a new tab with a diff preview of
   those changes and include a link back to the originating conversation or message.

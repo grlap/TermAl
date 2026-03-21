@@ -17,11 +17,15 @@ export type AgentReadiness = {
   commandPath?: string | null;
 };
 
+export type AgentCommandKind = "promptTemplate" | "nativeSlash";
+
 export type AgentCommand = {
+  kind?: AgentCommandKind;
   name: string;
   description: string;
   content: string;
   source: string;
+  argumentHint?: string | null;
 };
 
 export type InstructionDocumentKind =
@@ -148,6 +152,7 @@ export type Session = {
   claudeApprovalMode?: ClaudeApprovalMode | null;
   geminiApprovalMode?: GeminiApprovalMode | null;
   externalSessionId?: string | null;
+  agentCommandsRevision?: number;
   codexThreadState?: CodexThreadState | null;
   status: SessionStatus;
   preview: string;

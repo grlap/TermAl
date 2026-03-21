@@ -1498,12 +1498,7 @@ fn apply_remote_session_to_record(
         .unwrap_or_else(default_codex_sandbox_mode);
     record.runtime = SessionRuntime::None;
     record.runtime_reset_required = false;
-    record.pending_claude_approvals.clear();
-    record.pending_codex_approvals.clear();
-    record.pending_codex_user_inputs.clear();
-    record.pending_codex_mcp_elicitations.clear();
-    record.pending_codex_app_requests.clear();
-    record.pending_acp_approvals.clear();
+    clear_all_pending_requests(record);
     record.message_positions = build_message_positions(&record.session.messages);
 }
 
@@ -1526,6 +1521,7 @@ fn upsert_remote_proxy_session_record(
         active_codex_approval_policy: None,
         active_codex_reasoning_effort: None,
         active_codex_sandbox_mode: None,
+        agent_commands: Vec::new(),
         codex_approval_policy: session
             .approval_policy
             .unwrap_or_else(default_codex_approval_policy),
@@ -1548,6 +1544,7 @@ fn upsert_remote_proxy_session_record(
         remote_session_id: Some(remote_session.id.clone()),
         runtime: SessionRuntime::None,
         runtime_reset_required: false,
+        hidden: false,
         session,
     };
     sync_codex_thread_state(&mut record);

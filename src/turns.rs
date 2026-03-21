@@ -140,130 +140,9 @@ impl SessionRecorder {
         detail: &str,
         approval: ClaudePendingApproval,
     ) -> Result<()> {
-        self.finish_streaming_text()?;
-        let message_id = self.state.allocate_message_id();
-        self.state.push_message(
-            &self.session_id,
-            Message::Approval {
-                id: message_id.clone(),
-                timestamp: stamp_now(),
-                author: Author::Assistant,
-                title: title.to_owned(),
-                command: command.to_owned(),
-                command_language: Some(shell_language().to_owned()),
-                detail: detail.to_owned(),
-                decision: ApprovalDecision::Pending,
-            },
-        )?;
-        self.state
-            .register_claude_pending_approval(&self.session_id, message_id, approval)
-    }
-
-    fn push_codex_approval(
-        &mut self,
-        title: &str,
-        command: &str,
-        detail: &str,
-        approval: CodexPendingApproval,
-    ) -> Result<()> {
-        self.finish_streaming_text()?;
-        let message_id = self.state.allocate_message_id();
-        self.state.push_message(
-            &self.session_id,
-            Message::Approval {
-                id: message_id.clone(),
-                timestamp: stamp_now(),
-                author: Author::Assistant,
-                title: title.to_owned(),
-                command: command.to_owned(),
-                command_language: Some(shell_language().to_owned()),
-                detail: detail.to_owned(),
-                decision: ApprovalDecision::Pending,
-            },
-        )?;
-        self.state
-            .register_codex_pending_approval(&self.session_id, message_id, approval)
-    }
-
-    fn push_codex_user_input_request(
-        &mut self,
-        title: &str,
-        detail: &str,
-        questions: Vec<UserInputQuestion>,
-        request: CodexPendingUserInput,
-    ) -> Result<()> {
-        self.finish_streaming_text()?;
-        let message_id = self.state.allocate_message_id();
-        self.state.push_message(
-            &self.session_id,
-            Message::UserInputRequest {
-                id: message_id.clone(),
-                timestamp: stamp_now(),
-                author: Author::Assistant,
-                title: title.to_owned(),
-                detail: detail.to_owned(),
-                questions,
-                state: InteractionRequestState::Pending,
-                submitted_answers: None,
-            },
-        )?;
-        self.state
-            .register_codex_pending_user_input(&self.session_id, message_id, request)
-    }
-
-    fn push_codex_mcp_elicitation_request(
-        &mut self,
-        title: &str,
-        detail: &str,
-        request: McpElicitationRequestPayload,
-        pending: CodexPendingMcpElicitation,
-    ) -> Result<()> {
-        self.finish_streaming_text()?;
-        let message_id = self.state.allocate_message_id();
-        self.state.push_message(
-            &self.session_id,
-            Message::McpElicitationRequest {
-                id: message_id.clone(),
-                timestamp: stamp_now(),
-                author: Author::Assistant,
-                title: title.to_owned(),
-                detail: detail.to_owned(),
-                request,
-                state: InteractionRequestState::Pending,
-                submitted_action: None,
-                submitted_content: None,
-            },
-        )?;
-        self.state
-            .register_codex_pending_mcp_elicitation(&self.session_id, message_id, pending)
-    }
-
-    fn push_codex_app_request(
-        &mut self,
-        title: &str,
-        detail: &str,
-        method: &str,
-        params: Value,
-        pending: CodexPendingAppRequest,
-    ) -> Result<()> {
-        self.finish_streaming_text()?;
-        let message_id = self.state.allocate_message_id();
-        self.state.push_message(
-            &self.session_id,
-            Message::CodexAppRequest {
-                id: message_id.clone(),
-                timestamp: stamp_now(),
-                author: Author::Assistant,
-                title: title.to_owned(),
-                detail: detail.to_owned(),
-                method: method.to_owned(),
-                params,
-                state: InteractionRequestState::Pending,
-                submitted_result: None,
-            },
-        )?;
-        self.state
-            .register_codex_pending_app_request(&self.session_id, message_id, pending)
+        recorder_push_pending_approval(self, title, command, detail, approval, |state, session_id, message_id, approval| {
+            state.register_claude_pending_approval(session_id, message_id, approval)
+        })
     }
 
     fn push_acp_approval(
@@ -273,24 +152,398 @@ impl SessionRecorder {
         detail: &str,
         approval: AcpPendingApproval,
     ) -> Result<()> {
-        self.finish_streaming_text()?;
-        let message_id = self.state.allocate_message_id();
-        self.state.push_message(
-            &self.session_id,
-            Message::Approval {
-                id: message_id.clone(),
-                timestamp: stamp_now(),
-                author: Author::Assistant,
-                title: title.to_owned(),
-                command: command.to_owned(),
-                command_language: Some(shell_language().to_owned()),
-                detail: detail.to_owned(),
-                decision: ApprovalDecision::Pending,
-            },
-        )?;
-        self.state
-            .register_acp_pending_approval(&self.session_id, message_id, approval)
+        recorder_push_pending_approval(self, title, command, detail, approval, |state, session_id, message_id, approval| {
+            state.register_acp_pending_approval(session_id, message_id, approval)
+        })
     }
+}
+
+trait SessionRecorderAccess {
+    fn state(&self) -> &AppState;
+    fn session_id(&self) -> &str;
+    fn recorder_state_mut(&mut self) -> &mut SessionRecorderState;
+}
+
+impl SessionRecorderAccess for SessionRecorder {
+    fn state(&self) -> &AppState {
+        &self.state
+    }
+
+    fn session_id(&self) -> &str {
+        &self.session_id
+    }
+
+    fn recorder_state_mut(&mut self) -> &mut SessionRecorderState {
+        &mut self.recorder_state
+    }
+}
+
+fn recorder_push_pending_approval<R, T, F>(
+    recorder: &mut R,
+    title: &str,
+    command: &str,
+    detail: &str,
+    pending: T,
+    register: F,
+) -> Result<()>
+where
+    R: SessionRecorderAccess,
+    F: FnOnce(&AppState, &str, String, T) -> Result<()>,
+{
+    recorder_finish_streaming_text(recorder)?;
+    let state = recorder.state().clone();
+    let session_id = recorder.session_id().to_owned();
+    let message_id = state.allocate_message_id();
+    state.push_message(
+        &session_id,
+        Message::Approval {
+            id: message_id.clone(),
+            timestamp: stamp_now(),
+            author: Author::Assistant,
+            title: title.to_owned(),
+            command: command.to_owned(),
+            command_language: Some(shell_language().to_owned()),
+            detail: detail.to_owned(),
+            decision: ApprovalDecision::Pending,
+        },
+    )?;
+    register(&state, &session_id, message_id, pending)
+}
+
+fn recorder_push_codex_user_input_request<R: SessionRecorderAccess>(
+    recorder: &mut R,
+    title: &str,
+    detail: &str,
+    questions: Vec<UserInputQuestion>,
+    request: CodexPendingUserInput,
+) -> Result<()> {
+    recorder_finish_streaming_text(recorder)?;
+    let state = recorder.state().clone();
+    let session_id = recorder.session_id().to_owned();
+    let message_id = state.allocate_message_id();
+    state.push_message(
+        &session_id,
+        Message::UserInputRequest {
+            id: message_id.clone(),
+            timestamp: stamp_now(),
+            author: Author::Assistant,
+            title: title.to_owned(),
+            detail: detail.to_owned(),
+            questions,
+            state: InteractionRequestState::Pending,
+            submitted_answers: None,
+        },
+    )?;
+    state.register_codex_pending_user_input(&session_id, message_id, request)
+}
+
+fn recorder_push_codex_mcp_elicitation_request<R: SessionRecorderAccess>(
+    recorder: &mut R,
+    title: &str,
+    detail: &str,
+    request: McpElicitationRequestPayload,
+    pending: CodexPendingMcpElicitation,
+) -> Result<()> {
+    recorder_finish_streaming_text(recorder)?;
+    let state = recorder.state().clone();
+    let session_id = recorder.session_id().to_owned();
+    let message_id = state.allocate_message_id();
+    state.push_message(
+        &session_id,
+        Message::McpElicitationRequest {
+            id: message_id.clone(),
+            timestamp: stamp_now(),
+            author: Author::Assistant,
+            title: title.to_owned(),
+            detail: detail.to_owned(),
+            request,
+            state: InteractionRequestState::Pending,
+            submitted_action: None,
+            submitted_content: None,
+        },
+    )?;
+    state.register_codex_pending_mcp_elicitation(&session_id, message_id, pending)
+}
+
+fn recorder_push_codex_app_request<R: SessionRecorderAccess>(
+    recorder: &mut R,
+    title: &str,
+    detail: &str,
+    method: &str,
+    params: Value,
+    pending: CodexPendingAppRequest,
+) -> Result<()> {
+    recorder_finish_streaming_text(recorder)?;
+    let state = recorder.state().clone();
+    let session_id = recorder.session_id().to_owned();
+    let message_id = state.allocate_message_id();
+    state.push_message(
+        &session_id,
+        Message::CodexAppRequest {
+            id: message_id.clone(),
+            timestamp: stamp_now(),
+            author: Author::Assistant,
+            title: title.to_owned(),
+            detail: detail.to_owned(),
+            method: method.to_owned(),
+            params,
+            state: InteractionRequestState::Pending,
+            submitted_result: None,
+        },
+    )?;
+    state.register_codex_pending_app_request(&session_id, message_id, pending)
+}
+
+fn recorder_note_external_session<R: SessionRecorderAccess>(
+    recorder: &mut R,
+    session_id: &str,
+) -> Result<()> {
+    let state = recorder.state().clone();
+    let current_session_id = recorder.session_id().to_owned();
+    state.set_external_session_id(&current_session_id, session_id.to_owned())
+}
+
+fn recorder_push_approval<R: SessionRecorderAccess>(
+    recorder: &mut R,
+    title: &str,
+    command: &str,
+    detail: &str,
+) -> Result<()> {
+    recorder_finish_streaming_text(recorder)?;
+    let state = recorder.state().clone();
+    let session_id = recorder.session_id().to_owned();
+    state.push_message(
+        &session_id,
+        Message::Approval {
+            id: state.allocate_message_id(),
+            timestamp: stamp_now(),
+            author: Author::Assistant,
+            title: title.to_owned(),
+            command: command.to_owned(),
+            command_language: Some(shell_language().to_owned()),
+            detail: detail.to_owned(),
+            decision: ApprovalDecision::Pending,
+        },
+    )
+}
+
+fn recorder_push_text<R: SessionRecorderAccess>(recorder: &mut R, text: &str) -> Result<()> {
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        return Ok(());
+    }
+
+    recorder_finish_streaming_text(recorder)?;
+    let state = recorder.state().clone();
+    let session_id = recorder.session_id().to_owned();
+    state.push_message(
+        &session_id,
+        Message::Text {
+            attachments: Vec::new(),
+            id: state.allocate_message_id(),
+            timestamp: stamp_now(),
+            author: Author::Assistant,
+            text: trimmed.to_owned(),
+            expanded_text: None,
+        },
+    )
+}
+
+fn recorder_push_subagent_result<R: SessionRecorderAccess>(
+    recorder: &mut R,
+    title: &str,
+    summary: &str,
+    conversation_id: Option<&str>,
+    turn_id: Option<&str>,
+) -> Result<()> {
+    let trimmed = summary.trim();
+    if trimmed.is_empty() {
+        return Ok(());
+    }
+
+    recorder_finish_streaming_text(recorder)?;
+    let state = recorder.state().clone();
+    let session_id = recorder.session_id().to_owned();
+    state.push_message(
+        &session_id,
+        Message::SubagentResult {
+            id: state.allocate_message_id(),
+            timestamp: stamp_now(),
+            author: Author::Assistant,
+            title: title.to_owned(),
+            summary: trimmed.to_owned(),
+            conversation_id: conversation_id.map(str::to_owned),
+            turn_id: turn_id.map(str::to_owned),
+        },
+    )
+}
+
+fn recorder_text_delta<R: SessionRecorderAccess>(recorder: &mut R, delta: &str) -> Result<()> {
+    if delta.is_empty() {
+        return Ok(());
+    }
+
+    let state = recorder.state().clone();
+    let session_id = recorder.session_id().to_owned();
+    let message_id = match recorder.recorder_state_mut().streaming_text_message_id.clone() {
+        Some(message_id) => message_id,
+        None => {
+            let message_id = state.allocate_message_id();
+            state.push_message(
+                &session_id,
+                Message::Text {
+                    attachments: Vec::new(),
+                    id: message_id.clone(),
+                    timestamp: stamp_now(),
+                    author: Author::Assistant,
+                    text: String::new(),
+                    expanded_text: None,
+                },
+            )?;
+            recorder.recorder_state_mut().streaming_text_message_id = Some(message_id.clone());
+            message_id
+        }
+    };
+
+    state.append_text_delta(&session_id, &message_id, delta)
+}
+
+fn recorder_push_thinking<R: SessionRecorderAccess>(
+    recorder: &mut R,
+    title: &str,
+    lines: Vec<String>,
+) -> Result<()> {
+    if lines.is_empty() {
+        return Ok(());
+    }
+
+    recorder_finish_streaming_text(recorder)?;
+    let state = recorder.state().clone();
+    let session_id = recorder.session_id().to_owned();
+    state.push_message(
+        &session_id,
+        Message::Thinking {
+            id: state.allocate_message_id(),
+            timestamp: stamp_now(),
+            author: Author::Assistant,
+            title: title.to_owned(),
+            lines,
+        },
+    )
+}
+
+fn recorder_push_diff<R: SessionRecorderAccess>(
+    recorder: &mut R,
+    file_path: &str,
+    summary: &str,
+    diff: &str,
+    change_type: ChangeType,
+) -> Result<()> {
+    if diff.trim().is_empty() {
+        return Ok(());
+    }
+
+    recorder_finish_streaming_text(recorder)?;
+    let state = recorder.state().clone();
+    let session_id = recorder.session_id().to_owned();
+    let message_id = state.allocate_message_id();
+    state.push_message(
+        &session_id,
+        Message::Diff {
+            id: message_id.clone(),
+            timestamp: stamp_now(),
+            author: Author::Assistant,
+            change_set_id: Some(diff_change_set_id(&message_id)),
+            file_path: file_path.to_owned(),
+            summary: summary.to_owned(),
+            diff: diff.to_owned(),
+            language: Some("diff".to_owned()),
+            change_type,
+        },
+    )
+}
+
+fn recorder_finish_streaming_text<R: SessionRecorderAccess>(recorder: &mut R) -> Result<()> {
+    recorder.recorder_state_mut().streaming_text_message_id = None;
+    Ok(())
+}
+
+fn recorder_command_started<R: SessionRecorderAccess>(
+    recorder: &mut R,
+    key: &str,
+    command: &str,
+) -> Result<()> {
+    let state = recorder.state().clone();
+    let session_id = recorder.session_id().to_owned();
+    let state_for_entry = state.clone();
+    let message_id = recorder
+        .recorder_state_mut()
+        .command_messages
+        .entry(key.to_owned())
+        .or_insert_with(|| state_for_entry.allocate_message_id())
+        .clone();
+
+    state.upsert_command_message(&session_id, &message_id, command, "", CommandStatus::Running)
+}
+
+fn recorder_command_completed<R: SessionRecorderAccess>(
+    recorder: &mut R,
+    key: &str,
+    command: &str,
+    output: &str,
+    status: CommandStatus,
+) -> Result<()> {
+    let state = recorder.state().clone();
+    let session_id = recorder.session_id().to_owned();
+    let state_for_entry = state.clone();
+    let message_id = recorder
+        .recorder_state_mut()
+        .command_messages
+        .entry(key.to_owned())
+        .or_insert_with(|| state_for_entry.allocate_message_id())
+        .clone();
+
+    state.upsert_command_message(&session_id, &message_id, command, output, status)
+}
+
+fn recorder_upsert_parallel_agents<R: SessionRecorderAccess>(
+    recorder: &mut R,
+    key: &str,
+    agents: &[ParallelAgentProgress],
+) -> Result<()> {
+    let state = recorder.state().clone();
+    let session_id = recorder.session_id().to_owned();
+    let state_for_entry = state.clone();
+    let message_id = recorder
+        .recorder_state_mut()
+        .parallel_agents_messages
+        .entry(key.to_owned())
+        .or_insert_with(|| state_for_entry.allocate_message_id())
+        .clone();
+
+    state.upsert_parallel_agents_message(&session_id, &message_id, agents.to_vec())
+}
+
+fn recorder_error<R: SessionRecorderAccess>(recorder: &mut R, detail: &str) -> Result<()> {
+    let cleaned = detail.trim();
+    if cleaned.is_empty() {
+        return Ok(());
+    }
+
+    recorder_finish_streaming_text(recorder)?;
+    let state = recorder.state().clone();
+    let session_id = recorder.session_id().to_owned();
+    state.push_message(
+        &session_id,
+        Message::Text {
+            attachments: Vec::new(),
+            id: state.allocate_message_id(),
+            timestamp: stamp_now(),
+            author: Author::Assistant,
+            text: format!("Error: {cleaned}"),
+            expanded_text: None,
+        },
+    )
 }
 
 impl CodexTurnRecorder for SessionRecorder {
@@ -301,7 +554,9 @@ impl CodexTurnRecorder for SessionRecorder {
         detail: &str,
         approval: CodexPendingApproval,
     ) -> Result<()> {
-        SessionRecorder::push_codex_approval(self, title, command, detail, approval)
+        recorder_push_pending_approval(self, title, command, detail, approval, |state, session_id, message_id, approval| {
+            state.register_codex_pending_approval(session_id, message_id, approval)
+        })
     }
 
     fn push_codex_user_input_request(
@@ -311,7 +566,7 @@ impl CodexTurnRecorder for SessionRecorder {
         questions: Vec<UserInputQuestion>,
         request: CodexPendingUserInput,
     ) -> Result<()> {
-        SessionRecorder::push_codex_user_input_request(self, title, detail, questions, request)
+        recorder_push_codex_user_input_request(self, title, detail, questions, request)
     }
 
     fn push_codex_mcp_elicitation_request(
@@ -321,13 +576,7 @@ impl CodexTurnRecorder for SessionRecorder {
         request: McpElicitationRequestPayload,
         pending: CodexPendingMcpElicitation,
     ) -> Result<()> {
-        SessionRecorder::push_codex_mcp_elicitation_request(
-            self,
-            title,
-            detail,
-            request,
-            pending,
-        )
+        recorder_push_codex_mcp_elicitation_request(self, title, detail, request, pending)
     }
 
     fn push_codex_app_request(
@@ -338,7 +587,7 @@ impl CodexTurnRecorder for SessionRecorder {
         params: Value,
         pending: CodexPendingAppRequest,
     ) -> Result<()> {
-        SessionRecorder::push_codex_app_request(self, title, detail, method, params, pending)
+        recorder_push_codex_app_request(self, title, detail, method, params, pending)
     }
 }
 
@@ -361,111 +610,19 @@ impl<'a> BorrowedSessionRecorder<'a> {
         }
     }
 
-    fn push_codex_approval(
-        &mut self,
-        title: &str,
-        command: &str,
-        detail: &str,
-        approval: CodexPendingApproval,
-    ) -> Result<()> {
-        self.finish_streaming_text()?;
-        let message_id = self.state.allocate_message_id();
-        self.state.push_message(
-            self.session_id,
-            Message::Approval {
-                id: message_id.clone(),
-                timestamp: stamp_now(),
-                author: Author::Assistant,
-                title: title.to_owned(),
-                command: command.to_owned(),
-                command_language: Some(shell_language().to_owned()),
-                detail: detail.to_owned(),
-                decision: ApprovalDecision::Pending,
-            },
-        )?;
+}
+
+impl SessionRecorderAccess for BorrowedSessionRecorder<'_> {
+    fn state(&self) -> &AppState {
         self.state
-            .register_codex_pending_approval(self.session_id, message_id, approval)
     }
 
-    fn push_codex_user_input_request(
-        &mut self,
-        title: &str,
-        detail: &str,
-        questions: Vec<UserInputQuestion>,
-        request: CodexPendingUserInput,
-    ) -> Result<()> {
-        self.finish_streaming_text()?;
-        let message_id = self.state.allocate_message_id();
-        self.state.push_message(
-            self.session_id,
-            Message::UserInputRequest {
-                id: message_id.clone(),
-                timestamp: stamp_now(),
-                author: Author::Assistant,
-                title: title.to_owned(),
-                detail: detail.to_owned(),
-                questions,
-                state: InteractionRequestState::Pending,
-                submitted_answers: None,
-            },
-        )?;
-        self.state
-            .register_codex_pending_user_input(self.session_id, message_id, request)
+    fn session_id(&self) -> &str {
+        self.session_id
     }
 
-    fn push_codex_mcp_elicitation_request(
-        &mut self,
-        title: &str,
-        detail: &str,
-        request: McpElicitationRequestPayload,
-        pending: CodexPendingMcpElicitation,
-    ) -> Result<()> {
-        self.finish_streaming_text()?;
-        let message_id = self.state.allocate_message_id();
-        self.state.push_message(
-            self.session_id,
-            Message::McpElicitationRequest {
-                id: message_id.clone(),
-                timestamp: stamp_now(),
-                author: Author::Assistant,
-                title: title.to_owned(),
-                detail: detail.to_owned(),
-                request,
-                state: InteractionRequestState::Pending,
-                submitted_action: None,
-                submitted_content: None,
-            },
-        )?;
-        self.state
-            .register_codex_pending_mcp_elicitation(self.session_id, message_id, pending)
-    }
-
-    fn push_codex_app_request(
-        &mut self,
-        title: &str,
-        detail: &str,
-        method: &str,
-        params: Value,
-        pending: CodexPendingAppRequest,
-    ) -> Result<()> {
-        self.finish_streaming_text()?;
-        let message_id = self.state.allocate_message_id();
-        self.state.push_message(
-            self.session_id,
-            Message::CodexAppRequest {
-                id: message_id.clone(),
-                timestamp: stamp_now(),
-                author: Author::Assistant,
-                title: title.to_owned(),
-                detail: detail.to_owned(),
-                method: method.to_owned(),
-                params,
-                state: InteractionRequestState::Pending,
-                submitted_result: None,
-            },
-        )?;
-        self.state
-            .register_codex_pending_app_request(self.session_id, message_id, pending)
+    fn recorder_state_mut(&mut self) -> &mut SessionRecorderState {
+        self.recorder_state
     }
 }
 
@@ -477,7 +634,9 @@ impl CodexTurnRecorder for BorrowedSessionRecorder<'_> {
         detail: &str,
         approval: CodexPendingApproval,
     ) -> Result<()> {
-        BorrowedSessionRecorder::push_codex_approval(self, title, command, detail, approval)
+        recorder_push_pending_approval(self, title, command, detail, approval, |state, session_id, message_id, approval| {
+            state.register_codex_pending_approval(session_id, message_id, approval)
+        })
     }
 
     fn push_codex_user_input_request(
@@ -487,13 +646,7 @@ impl CodexTurnRecorder for BorrowedSessionRecorder<'_> {
         questions: Vec<UserInputQuestion>,
         request: CodexPendingUserInput,
     ) -> Result<()> {
-        BorrowedSessionRecorder::push_codex_user_input_request(
-            self,
-            title,
-            detail,
-            questions,
-            request,
-        )
+        recorder_push_codex_user_input_request(self, title, detail, questions, request)
     }
 
     fn push_codex_mcp_elicitation_request(
@@ -503,13 +656,7 @@ impl CodexTurnRecorder for BorrowedSessionRecorder<'_> {
         request: McpElicitationRequestPayload,
         pending: CodexPendingMcpElicitation,
     ) -> Result<()> {
-        BorrowedSessionRecorder::push_codex_mcp_elicitation_request(
-            self,
-            title,
-            detail,
-            request,
-            pending,
-        )
+        recorder_push_codex_mcp_elicitation_request(self, title, detail, request, pending)
     }
 
     fn push_codex_app_request(
@@ -520,58 +667,21 @@ impl CodexTurnRecorder for BorrowedSessionRecorder<'_> {
         params: Value,
         pending: CodexPendingAppRequest,
     ) -> Result<()> {
-        BorrowedSessionRecorder::push_codex_app_request(
-            self,
-            title,
-            detail,
-            method,
-            params,
-            pending,
-        )
+        recorder_push_codex_app_request(self, title, detail, method, params, pending)
     }
 }
 
 impl TurnRecorder for SessionRecorder {
     fn note_external_session(&mut self, session_id: &str) -> Result<()> {
-        self.state
-            .set_external_session_id(&self.session_id, session_id.to_owned())
+        recorder_note_external_session(self, session_id)
     }
 
     fn push_approval(&mut self, title: &str, command: &str, detail: &str) -> Result<()> {
-        self.finish_streaming_text()?;
-        self.state.push_message(
-            &self.session_id,
-            Message::Approval {
-                id: self.state.allocate_message_id(),
-                timestamp: stamp_now(),
-                author: Author::Assistant,
-                title: title.to_owned(),
-                command: command.to_owned(),
-                command_language: Some(shell_language().to_owned()),
-                detail: detail.to_owned(),
-                decision: ApprovalDecision::Pending,
-            },
-        )
+        recorder_push_approval(self, title, command, detail)
     }
 
     fn push_text(&mut self, text: &str) -> Result<()> {
-        let trimmed = text.trim();
-        if trimmed.is_empty() {
-            return Ok(());
-        }
-
-        self.finish_streaming_text()?;
-        self.state.push_message(
-            &self.session_id,
-            Message::Text {
-                attachments: Vec::new(),
-                id: self.state.allocate_message_id(),
-                timestamp: stamp_now(),
-                author: Author::Assistant,
-                text: trimmed.to_owned(),
-                expanded_text: None,
-            },
-        )
+        recorder_push_text(self, text)
     }
 
     fn push_subagent_result(
@@ -581,71 +691,15 @@ impl TurnRecorder for SessionRecorder {
         conversation_id: Option<&str>,
         turn_id: Option<&str>,
     ) -> Result<()> {
-        let trimmed = summary.trim();
-        if trimmed.is_empty() {
-            return Ok(());
-        }
-
-        self.finish_streaming_text()?;
-        self.state.push_message(
-            &self.session_id,
-            Message::SubagentResult {
-                id: self.state.allocate_message_id(),
-                timestamp: stamp_now(),
-                author: Author::Assistant,
-                title: title.to_owned(),
-                summary: trimmed.to_owned(),
-                conversation_id: conversation_id.map(str::to_owned),
-                turn_id: turn_id.map(str::to_owned),
-            },
-        )
+        recorder_push_subagent_result(self, title, summary, conversation_id, turn_id)
     }
 
     fn text_delta(&mut self, delta: &str) -> Result<()> {
-        if delta.is_empty() {
-            return Ok(());
-        }
-
-        let message_id = match &self.recorder_state.streaming_text_message_id {
-            Some(message_id) => message_id.clone(),
-            None => {
-                let message_id = self.state.allocate_message_id();
-                self.state.push_message(
-                    &self.session_id,
-                    Message::Text {
-                        attachments: Vec::new(),
-                        id: message_id.clone(),
-                        timestamp: stamp_now(),
-                        author: Author::Assistant,
-                        text: String::new(),
-                        expanded_text: None,
-                    },
-                )?;
-                self.recorder_state.streaming_text_message_id = Some(message_id.clone());
-                message_id
-            }
-        };
-
-        self.state
-            .append_text_delta(&self.session_id, &message_id, delta)
+        recorder_text_delta(self, delta)
     }
 
     fn push_thinking(&mut self, title: &str, lines: Vec<String>) -> Result<()> {
-        if lines.is_empty() {
-            return Ok(());
-        }
-
-        self.finish_streaming_text()?;
-        self.state.push_message(
-            &self.session_id,
-            Message::Thinking {
-                id: self.state.allocate_message_id(),
-                timestamp: stamp_now(),
-                author: Author::Assistant,
-                title: title.to_owned(),
-                lines,
-            },
-        )
+        recorder_push_thinking(self, title, lines)
     }
 
     fn push_diff(
@@ -655,48 +709,15 @@ impl TurnRecorder for SessionRecorder {
         diff: &str,
         change_type: ChangeType,
     ) -> Result<()> {
-        if diff.trim().is_empty() {
-            return Ok(());
-        }
-
-        self.finish_streaming_text()?;
-        let message_id = self.state.allocate_message_id();
-        self.state.push_message(
-            &self.session_id,
-            Message::Diff {
-                id: message_id.clone(),
-                timestamp: stamp_now(),
-                author: Author::Assistant,
-                change_set_id: Some(diff_change_set_id(&message_id)),
-                file_path: file_path.to_owned(),
-                summary: summary.to_owned(),
-                diff: diff.to_owned(),
-                language: Some("diff".to_owned()),
-                change_type,
-            },
-        )
+        recorder_push_diff(self, file_path, summary, diff, change_type)
     }
 
     fn finish_streaming_text(&mut self) -> Result<()> {
-        self.recorder_state.streaming_text_message_id = None;
-        Ok(())
+        recorder_finish_streaming_text(self)
     }
 
     fn command_started(&mut self, key: &str, command: &str) -> Result<()> {
-        let message_id = self
-            .recorder_state
-            .command_messages
-            .entry(key.to_owned())
-            .or_insert_with(|| self.state.allocate_message_id())
-            .clone();
-
-        self.state.upsert_command_message(
-            &self.session_id,
-            &message_id,
-            command,
-            "",
-            CommandStatus::Running,
-        )
+        recorder_command_started(self, key, command)
     }
 
     fn command_completed(
@@ -706,15 +727,7 @@ impl TurnRecorder for SessionRecorder {
         output: &str,
         status: CommandStatus,
     ) -> Result<()> {
-        let message_id = self
-            .recorder_state
-            .command_messages
-            .entry(key.to_owned())
-            .or_insert_with(|| self.state.allocate_message_id())
-            .clone();
-
-        self.state
-            .upsert_command_message(&self.session_id, &message_id, command, output, status)
+        recorder_command_completed(self, key, command, output, status)
     }
 
     fn upsert_parallel_agents(
@@ -722,78 +735,25 @@ impl TurnRecorder for SessionRecorder {
         key: &str,
         agents: &[ParallelAgentProgress],
     ) -> Result<()> {
-        let message_id = self
-            .recorder_state
-            .parallel_agents_messages
-            .entry(key.to_owned())
-            .or_insert_with(|| self.state.allocate_message_id())
-            .clone();
-
-        self.state
-            .upsert_parallel_agents_message(&self.session_id, &message_id, agents.to_vec())
+        recorder_upsert_parallel_agents(self, key, agents)
     }
-    fn error(&mut self, detail: &str) -> Result<()> {
-        let cleaned = detail.trim();
-        if cleaned.is_empty() {
-            return Ok(());
-        }
 
-        self.finish_streaming_text()?;
-        self.state.push_message(
-            &self.session_id,
-            Message::Text {
-                attachments: Vec::new(),
-                id: self.state.allocate_message_id(),
-                timestamp: stamp_now(),
-                author: Author::Assistant,
-                text: format!("Error: {cleaned}"),
-                expanded_text: None,
-            },
-        )
+    fn error(&mut self, detail: &str) -> Result<()> {
+        recorder_error(self, detail)
     }
 }
 
 impl TurnRecorder for BorrowedSessionRecorder<'_> {
     fn note_external_session(&mut self, session_id: &str) -> Result<()> {
-        self.state
-            .set_external_session_id(self.session_id, session_id.to_owned())
+        recorder_note_external_session(self, session_id)
     }
 
     fn push_approval(&mut self, title: &str, command: &str, detail: &str) -> Result<()> {
-        self.finish_streaming_text()?;
-        self.state.push_message(
-            self.session_id,
-            Message::Approval {
-                id: self.state.allocate_message_id(),
-                timestamp: stamp_now(),
-                author: Author::Assistant,
-                title: title.to_owned(),
-                command: command.to_owned(),
-                command_language: Some(shell_language().to_owned()),
-                detail: detail.to_owned(),
-                decision: ApprovalDecision::Pending,
-            },
-        )
+        recorder_push_approval(self, title, command, detail)
     }
 
     fn push_text(&mut self, text: &str) -> Result<()> {
-        let trimmed = text.trim();
-        if trimmed.is_empty() {
-            return Ok(());
-        }
-
-        self.finish_streaming_text()?;
-        self.state.push_message(
-            self.session_id,
-            Message::Text {
-                attachments: Vec::new(),
-                id: self.state.allocate_message_id(),
-                timestamp: stamp_now(),
-                author: Author::Assistant,
-                text: trimmed.to_owned(),
-                expanded_text: None,
-            },
-        )
+        recorder_push_text(self, text)
     }
 
     fn push_subagent_result(
@@ -803,71 +763,15 @@ impl TurnRecorder for BorrowedSessionRecorder<'_> {
         conversation_id: Option<&str>,
         turn_id: Option<&str>,
     ) -> Result<()> {
-        let trimmed = summary.trim();
-        if trimmed.is_empty() {
-            return Ok(());
-        }
-
-        self.finish_streaming_text()?;
-        self.state.push_message(
-            self.session_id,
-            Message::SubagentResult {
-                id: self.state.allocate_message_id(),
-                timestamp: stamp_now(),
-                author: Author::Assistant,
-                title: title.to_owned(),
-                summary: trimmed.to_owned(),
-                conversation_id: conversation_id.map(str::to_owned),
-                turn_id: turn_id.map(str::to_owned),
-            },
-        )
+        recorder_push_subagent_result(self, title, summary, conversation_id, turn_id)
     }
 
     fn text_delta(&mut self, delta: &str) -> Result<()> {
-        if delta.is_empty() {
-            return Ok(());
-        }
-
-        let message_id = match &self.recorder_state.streaming_text_message_id {
-            Some(message_id) => message_id.clone(),
-            None => {
-                let message_id = self.state.allocate_message_id();
-                self.state.push_message(
-                    self.session_id,
-                    Message::Text {
-                        attachments: Vec::new(),
-                        id: message_id.clone(),
-                        timestamp: stamp_now(),
-                        author: Author::Assistant,
-                        text: String::new(),
-                        expanded_text: None,
-                    },
-                )?;
-                self.recorder_state.streaming_text_message_id = Some(message_id.clone());
-                message_id
-            }
-        };
-
-        self.state
-            .append_text_delta(self.session_id, &message_id, delta)
+        recorder_text_delta(self, delta)
     }
 
     fn push_thinking(&mut self, title: &str, lines: Vec<String>) -> Result<()> {
-        if lines.is_empty() {
-            return Ok(());
-        }
-
-        self.finish_streaming_text()?;
-        self.state.push_message(
-            self.session_id,
-            Message::Thinking {
-                id: self.state.allocate_message_id(),
-                timestamp: stamp_now(),
-                author: Author::Assistant,
-                title: title.to_owned(),
-                lines,
-            },
-        )
+        recorder_push_thinking(self, title, lines)
     }
 
     fn push_diff(
@@ -877,48 +781,15 @@ impl TurnRecorder for BorrowedSessionRecorder<'_> {
         diff: &str,
         change_type: ChangeType,
     ) -> Result<()> {
-        if diff.trim().is_empty() {
-            return Ok(());
-        }
-
-        self.finish_streaming_text()?;
-        let message_id = self.state.allocate_message_id();
-        self.state.push_message(
-            self.session_id,
-            Message::Diff {
-                id: message_id.clone(),
-                timestamp: stamp_now(),
-                author: Author::Assistant,
-                change_set_id: Some(diff_change_set_id(&message_id)),
-                file_path: file_path.to_owned(),
-                summary: summary.to_owned(),
-                diff: diff.to_owned(),
-                language: Some("diff".to_owned()),
-                change_type,
-            },
-        )
+        recorder_push_diff(self, file_path, summary, diff, change_type)
     }
 
     fn finish_streaming_text(&mut self) -> Result<()> {
-        self.recorder_state.streaming_text_message_id = None;
-        Ok(())
+        recorder_finish_streaming_text(self)
     }
 
     fn command_started(&mut self, key: &str, command: &str) -> Result<()> {
-        let message_id = self
-            .recorder_state
-            .command_messages
-            .entry(key.to_owned())
-            .or_insert_with(|| self.state.allocate_message_id())
-            .clone();
-
-        self.state.upsert_command_message(
-            self.session_id,
-            &message_id,
-            command,
-            "",
-            CommandStatus::Running,
-        )
+        recorder_command_started(self, key, command)
     }
 
     fn command_completed(
@@ -928,15 +799,7 @@ impl TurnRecorder for BorrowedSessionRecorder<'_> {
         output: &str,
         status: CommandStatus,
     ) -> Result<()> {
-        let message_id = self
-            .recorder_state
-            .command_messages
-            .entry(key.to_owned())
-            .or_insert_with(|| self.state.allocate_message_id())
-            .clone();
-
-        self.state
-            .upsert_command_message(self.session_id, &message_id, command, output, status)
+        recorder_command_completed(self, key, command, output, status)
     }
 
     fn upsert_parallel_agents(
@@ -944,34 +807,11 @@ impl TurnRecorder for BorrowedSessionRecorder<'_> {
         key: &str,
         agents: &[ParallelAgentProgress],
     ) -> Result<()> {
-        let message_id = self
-            .recorder_state
-            .parallel_agents_messages
-            .entry(key.to_owned())
-            .or_insert_with(|| self.state.allocate_message_id())
-            .clone();
-
-        self.state
-            .upsert_parallel_agents_message(self.session_id, &message_id, agents.to_vec())
+        recorder_upsert_parallel_agents(self, key, agents)
     }
-    fn error(&mut self, detail: &str) -> Result<()> {
-        let cleaned = detail.trim();
-        if cleaned.is_empty() {
-            return Ok(());
-        }
 
-        self.finish_streaming_text()?;
-        self.state.push_message(
-            self.session_id,
-            Message::Text {
-                attachments: Vec::new(),
-                id: self.state.allocate_message_id(),
-                timestamp: stamp_now(),
-                author: Author::Assistant,
-                text: format!("Error: {cleaned}"),
-                expanded_text: None,
-            },
-        )
+    fn error(&mut self, detail: &str) -> Result<()> {
+        recorder_error(self, detail)
     }
 }
 
@@ -2306,16 +2146,12 @@ fn record_repl_codex_agent_message_delta(
 }
 
 fn shutdown_repl_codex_process(process: &Arc<SharedChild>) -> Result<(std::process::ExitStatus, bool)> {
-    for _ in 0..20 {
-        match process.try_wait() {
-            Ok(Some(status)) => return Ok((status, false)),
-            Ok(None) => std::thread::sleep(Duration::from_millis(50)),
-            Err(err) => {
-                return Err(anyhow!(
-                    "failed to inspect Codex app-server process state: {err}"
-                ));
-            }
-        }
+    if let Some(status) = wait_for_shared_child_exit_timeout(
+        process,
+        Duration::from_secs(1),
+        "Codex app-server",
+    )? {
+        return Ok((status, false));
     }
 
     kill_child_process(process, "Codex app-server")?;

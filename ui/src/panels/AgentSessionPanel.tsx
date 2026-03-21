@@ -223,7 +223,7 @@ type SlashPaletteItem =
       sectionLabel?: string;
     }
   | {
-      content: string;
+      command: AgentCommand;
       detail: string;
       hasArguments: boolean;
       key: string;
@@ -471,8 +471,18 @@ function supportsAgentSlashCommands(_session: Session): boolean {
   return true;
 }
 
+function normalizedAgentCommandKind(command: AgentCommand) {
+  return command.kind ?? "promptTemplate";
+}
+
 function agentCommandLabel(command: AgentCommand) {
   return `/${command.name}`;
+}
+
+function agentCommandHasArguments(command: AgentCommand) {
+  return normalizedAgentCommandKind(command) === "nativeSlash"
+    ? Boolean(command.argumentHint?.trim())
+    : command.content.includes("$ARGUMENTS");
 }
 
 function matchAgentCommand(command: AgentCommand, query: string) {
@@ -798,9 +808,9 @@ function buildSlashPaletteState(
       ? agentCommands
           .filter((command) => matchAgentCommand(command, commandQuery))
           .map<SlashPaletteItem>((command, index) => ({
-            content: command.content,
+            command,
             detail: command.description || command.source,
-            hasArguments: command.content.includes("$ARGUMENTS"),
+            hasArguments: agentCommandHasArguments(command),
             key: `agent:${command.name}`,
             kind: "agent-command",
             label: agentCommandLabel(command),
@@ -819,13 +829,19 @@ function buildSlashPaletteState(
         sectionLabel: index === 0 ? "Session Controls" : undefined,
       }));
     const items = [...agentCommandItems, ...sessionCommandItems];
+    const commandSourceLabel =
+      session.agent === "Claude"
+        ? "Claude slash commands for this session."
+        : "project agent commands from .claude/commands.";
     const statusText = supportsAgentCommands
       ? isRefreshingAgentCommands
-        ? "Loading project agent commands from .claude/commands."
+        ? `Loading ${commandSourceLabel}`
         : !hasLoadedAgentCommands
-          ? "Load project agent commands from .claude/commands for this session."
+          ? `Load ${commandSourceLabel}`
           : agentCommands.length === 0
-            ? "No project agent commands found in .claude/commands."
+            ? session.agent === "Claude"
+              ? "No Claude slash commands are available for this session."
+              : "No project agent commands found in .claude/commands."
             : undefined
       : undefined;
 
@@ -1996,16 +2012,19 @@ const SessionComposer = memo(function SessionComposer({
       return;
     }
 
-    const requestKey = `${session.id}:${session.workdir}`;
-    if (hasLoadedAgentCommands) {
+    const requestKey = `${session.id}:${session.workdir}:${session.agentCommandsRevision ?? 0}`;
+    const requestKeyBase = `${session.id}:${session.workdir}:`;
+    const alreadyRequested = requestedSlashAgentCommandsRef.current === requestKey;
+    const isSameSessionRequest =
+      requestedSlashAgentCommandsRef.current?.startsWith(requestKeyBase) ?? false;
+    if (hasLoadedAgentCommands && !alreadyRequested && !isSameSessionRequest) {
       requestedSlashAgentCommandsRef.current = requestKey;
       return;
     }
-
     if (
+      (hasLoadedAgentCommands && alreadyRequested) ||
       isRefreshingAgentCommands ||
-      agentCommandsError ||
-      requestedSlashAgentCommandsRef.current === requestKey
+      (agentCommandsError && alreadyRequested)
     ) {
       return;
     }
@@ -2187,7 +2206,7 @@ const SessionComposer = memo(function SessionComposer({
       return;
     }
 
-    const requestKey = `${session.id}:${session.workdir}`;
+    const requestKey = `${session.id}:${session.workdir}:${session.agentCommandsRevision ?? 0}`;
     if (!force && requestedSlashAgentCommandsRef.current === requestKey) {
       return;
     }
@@ -2232,6 +2251,7 @@ const SessionComposer = memo(function SessionComposer({
         return;
       }
 
+      const agentCommand = item.command;
       const parsedDraft = parseAgentCommandDraft(getComposerDraftValue());
       const matchesSelectedCommand =
         parsedDraft?.commandName.toLowerCase() === item.name.toLowerCase();
@@ -2243,13 +2263,19 @@ const SessionComposer = memo(function SessionComposer({
         return;
       }
 
-      const prompt = item.content.split("$ARGUMENTS").join(
-        matchesSelectedCommand ? (parsedDraft?.argumentsText ?? "") : "",
-      );
-      const visiblePrompt = matchesSelectedCommand
-        ? getComposerDraftValue().trim()
-        : `/${item.name}`;
-      const accepted = onSend(session.id, visiblePrompt, prompt);
+      const visiblePrompt = (matchesSelectedCommand
+        ? getComposerDraftValue()
+        : `/${item.name}`).trim();
+      const accepted =
+        normalizedAgentCommandKind(agentCommand) === "nativeSlash"
+          ? onSend(session.id, visiblePrompt)
+          : onSend(
+              session.id,
+              visiblePrompt,
+              agentCommand.content.split("$ARGUMENTS").join(
+                matchesSelectedCommand ? (parsedDraft?.argumentsText ?? "") : "",
+              ),
+            );
       if (!accepted) {
         focusComposerInput();
         return;
