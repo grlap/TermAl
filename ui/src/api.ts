@@ -20,6 +20,7 @@ import type {
   SandboxMode,
   Session,
 } from "./types";
+import { sanitizeUserFacingErrorMessage } from "./error-messages";
 
 export type StateResponse = {
   revision: number;
@@ -595,10 +596,10 @@ function extractError(raw: string, status: number) {
   try {
     const parsed = JSON.parse(raw) as { error?: string };
     if (parsed.error) {
-      return parsed.error;
+      return sanitizeUserFacingErrorMessage(parsed.error);
     }
   } catch {
-    return raw;
+    return sanitizeUserFacingErrorMessage(raw);
   }
 
   return `Request failed with status ${status}.`;
@@ -618,3 +619,4 @@ function formatUnavailableApiMessage(path: string, status: number) {
   const statusSuffix = status > 0 ? ` (HTTP ${status})` : "";
   return `The running backend does not expose ${endpoint}${statusSuffix}. Restart TermAl so the latest API routes are loaded.`;
 }
+

@@ -126,7 +126,8 @@ export type WorkspaceState = {
 };
 
 export type TabDropPlacement = "left" | "right" | "top" | "bottom" | "tabs";
-const DEFAULT_CONTROL_PANEL_DOCK_WIDTH_RATIO = 0.24;
+export const DEFAULT_CONTROL_PANEL_DOCK_WIDTH_RATIO = 0.24;
+const DEFAULT_ADJACENT_PANE_SPLIT_RATIO = 0.5;
 
 export function createSessionTab(sessionId: string): WorkspaceSessionTab {
   return {
@@ -576,6 +577,7 @@ export function ensureControlPanelInWorkspaceState(workspace: WorkspaceState): W
 export function dockControlPanelAtWorkspaceEdge(
   workspace: WorkspaceState,
   side: "left" | "right",
+  preferredControlPanelWidthRatio: number | null = null,
 ): WorkspaceState {
   const controlPanel = findControlPanelTab(workspace);
   if (!controlPanel || !workspace.root) {
@@ -598,10 +600,13 @@ export function dockControlPanelAtWorkspaceEdge(
       isPaneNode(workspace.root.second, controlPanel.paneId))
       ? workspace.root
       : null;
-  const controlPanelWidthRatio = getDockedControlPanelWidthRatio(workspace.root, controlPanel.paneId);
+  const controlPanelWidthRatio =
+    preferredControlPanelWidthRatio ??
+    getDockedControlPanelWidthRatio(workspace.root, controlPanel.paneId) ??
+    DEFAULT_CONTROL_PANEL_DOCK_WIDTH_RATIO;
   const nextRatio = side === "left"
-    ? controlPanelWidthRatio ?? DEFAULT_CONTROL_PANEL_DOCK_WIDTH_RATIO
-    : 1 - (controlPanelWidthRatio ?? DEFAULT_CONTROL_PANEL_DOCK_WIDTH_RATIO);
+    ? controlPanelWidthRatio
+    : 1 - controlPanelWidthRatio;
 
   return {
     ...workspace,
@@ -1853,7 +1858,7 @@ function insertPaneAdjacent(
       id: crypto.randomUUID(),
       type: "split",
       direction,
-      ratio: 0.5,
+      ratio: DEFAULT_ADJACENT_PANE_SPLIT_RATIO,
       first: placeBefore ? insertedPane : node,
       second: placeBefore ? node : insertedPane,
     };

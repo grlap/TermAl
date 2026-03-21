@@ -3911,6 +3911,7 @@ fn resolve_project_scoped_requested_path(
     Ok(normalize_user_facing_path(&resolved_path))
 }
 
+#[cfg(test)]
 fn resolve_session_scoped_requested_path(
     state: &AppState,
     session_id: &str,

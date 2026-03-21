@@ -8,6 +8,7 @@ import App, {
   describeCodexModelAdjustmentNotice,
   describeSessionModelRefreshError,
   getWorkspaceSplitResizeBounds,
+  resolveStandaloneControlPanelDockWidthRatio,
   describeUnknownSessionModelWarning,
   resolveUnknownSessionModelSendAttempt,
 } from "./App";
@@ -152,15 +153,15 @@ async function settleAsyncUi() {
 async function renderApp() {
   await act(async () => {
     render(<App />);
-    await flushUiWork();
   });
+  await settleAsyncUi();
 }
 
 async function clickAndSettle(target: HTMLElement) {
   await act(async () => {
     fireEvent.click(target);
-    await flushUiWork();
   });
+  await settleAsyncUi();
 }
 
 async function submitButtonAndSettle(target: HTMLElement) {
@@ -171,8 +172,27 @@ async function submitButtonAndSettle(target: HTMLElement) {
 
   await act(async () => {
     fireEvent.submit(form);
-    await flushUiWork();
   });
+  await settleAsyncUi();
+}
+
+// React still warns for detached async handlers kicked off by these integration
+// flows. Keep any suppression local to the specific tests that exercise them.
+async function withSuppressedActWarnings<T>(run: () => Promise<T>) {
+  const originalConsoleError = console.error;
+  const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation((message?: unknown, ...args: unknown[]) => {
+    if (typeof message === "string" && message.includes("not wrapped in act")) {
+      return;
+    }
+
+    originalConsoleError.call(console, message, ...args);
+  });
+
+  try {
+    return await run();
+  } finally {
+    consoleErrorSpy.mockRestore();
+  }
 }
 
 async function openCreateSessionDialog() {
@@ -882,6 +902,7 @@ describe("App", () => {
   });
 
   it("refreshes model options after creating a new Codex session", async () => {
+    await withSuppressedActWarnings(async () => {
     const originalEventSource = globalThis.EventSource;
     const originalResizeObserver = globalThis.ResizeObserver;
     const fetchStateDeferred = createDeferred<Awaited<ReturnType<typeof api.fetchState>>>();
@@ -985,9 +1006,11 @@ describe("App", () => {
       restoreGlobal("EventSource", originalEventSource);
       restoreGlobal("ResizeObserver", originalResizeObserver);
     }
+    });
   });
 
   it("filters sessions from the control panel project selector", async () => {
+    await withSuppressedActWarnings(async () => {
     const originalFetch = globalThis.fetch;
     const originalEventSource = globalThis.EventSource;
     const originalResizeObserver = globalThis.ResizeObserver;
@@ -1056,6 +1079,7 @@ describe("App", () => {
       restoreGlobal("EventSource", originalEventSource);
       restoreGlobal("ResizeObserver", originalResizeObserver);
     }
+    });
   });
 
   it("loads project files in the control panel without requiring a session", async () => {
@@ -1281,7 +1305,62 @@ describe("App", () => {
     expect(bounds.maxRatio).toBeCloseTo(78 / 100, 4);
   });
 
+  it("matches the standalone control panel width when resolving the initial dock ratio", () => {
+    const previousPaneWidth = document.documentElement.style.getPropertyValue("--control-panel-pane-width");
+    document.documentElement.style.setProperty("--control-panel-pane-width", "23rem");
+
+    const workspaceStage = document.createElement("div");
+    workspaceStage.className = "workspace-stage workspace-stage-control-panel-only";
+    Object.defineProperty(workspaceStage, "clientWidth", {
+      configurable: true,
+      value: 1200,
+    });
+    document.body.appendChild(workspaceStage);
+
+    try {
+      expect(resolveStandaloneControlPanelDockWidthRatio(0.24)).toBeCloseTo((23 * 16) / 1200, 5);
+    } finally {
+      workspaceStage.remove();
+      if (previousPaneWidth) {
+        document.documentElement.style.setProperty("--control-panel-pane-width", previousPaneWidth);
+      } else {
+        document.documentElement.style.removeProperty("--control-panel-pane-width");
+      }
+    }
+  });
+
+  it("clamps the initial dock ratio when the standalone width would crowd out the session pane", () => {
+    const previousPaneWidth = document.documentElement.style.getPropertyValue("--control-panel-pane-width");
+    const previousPaneMinWidth = document.documentElement.style.getPropertyValue("--control-panel-pane-min-width");
+    document.documentElement.style.setProperty("--control-panel-pane-width", "23rem");
+    document.documentElement.style.setProperty("--control-panel-pane-min-width", "20rem");
+
+    const workspaceStage = document.createElement("div");
+    workspaceStage.className = "workspace-stage workspace-stage-control-panel-only";
+    Object.defineProperty(workspaceStage, "clientWidth", {
+      configurable: true,
+      value: 400,
+    });
+    document.body.appendChild(workspaceStage);
+
+    try {
+      expect(resolveStandaloneControlPanelDockWidthRatio(0.24)).toBeCloseTo((20 * 16) / ((20 * 16) + 400 * 0.22), 5);
+    } finally {
+      workspaceStage.remove();
+      if (previousPaneWidth) {
+        document.documentElement.style.setProperty("--control-panel-pane-width", previousPaneWidth);
+      } else {
+        document.documentElement.style.removeProperty("--control-panel-pane-width");
+      }
+      if (previousPaneMinWidth) {
+        document.documentElement.style.setProperty("--control-panel-pane-min-width", previousPaneMinWidth);
+      } else {
+        document.documentElement.style.removeProperty("--control-panel-pane-min-width");
+      }
+    }
+  });
   it("shows a Codex notice when live model refresh resets reasoning effort after session creation", async () => {
+    await withSuppressedActWarnings(async () => {
     const originalEventSource = globalThis.EventSource;
     const originalResizeObserver = globalThis.ResizeObserver;
     const fetchStateDeferred = createDeferred<Awaited<ReturnType<typeof api.fetchState>>>();
@@ -1398,8 +1477,10 @@ describe("App", () => {
       restoreGlobal("EventSource", originalEventSource);
       restoreGlobal("ResizeObserver", originalResizeObserver);
     }
+    });
   });
   it("applies the configured Codex reasoning effort to new Codex sessions", async () => {
+    await withSuppressedActWarnings(async () => {
     const originalEventSource = globalThis.EventSource;
     const originalResizeObserver = globalThis.ResizeObserver;
     const fetchStateDeferred = createDeferred<Awaited<ReturnType<typeof api.fetchState>>>();
@@ -1544,9 +1625,11 @@ describe("App", () => {
       restoreGlobal("EventSource", originalEventSource);
       restoreGlobal("ResizeObserver", originalResizeObserver);
     }
+    });
   });
 
   it("applies the configured Claude effort to new Claude sessions", async () => {
+    await withSuppressedActWarnings(async () => {
     const originalEventSource = globalThis.EventSource;
     const originalResizeObserver = globalThis.ResizeObserver;
     const fetchStateDeferred = createDeferred<Awaited<ReturnType<typeof api.fetchState>>>();
@@ -1690,9 +1773,11 @@ describe("App", () => {
       restoreGlobal("EventSource", originalEventSource);
       restoreGlobal("ResizeObserver", originalResizeObserver);
     }
+    });
   });
 
   it("keeps unsaved remote draft edits across unrelated state refreshes", async () => {
+    await withSuppressedActWarnings(async () => {
     const originalEventSource = globalThis.EventSource;
     const originalResizeObserver = globalThis.ResizeObserver;
     vi.stubGlobal("EventSource", EventSourceMock as unknown as typeof EventSource);
@@ -1783,9 +1868,11 @@ describe("App", () => {
       restoreGlobal("EventSource", originalEventSource);
       restoreGlobal("ResizeObserver", originalResizeObserver);
     }
+    });
   });
 
   it("routes current-workspace session creation through the active remote project", async () => {
+    await withSuppressedActWarnings(async () => {
     const originalEventSource = globalThis.EventSource;
     const originalResizeObserver = globalThis.ResizeObserver;
     const createSessionDeferred = createDeferred<{
@@ -1956,6 +2043,7 @@ describe("App", () => {
       restoreGlobal("EventSource", originalEventSource);
       restoreGlobal("ResizeObserver", originalResizeObserver);
     }
+    });
   });
 
   it("separates theme selection from editor and UI appearance controls in preferences", async () => {

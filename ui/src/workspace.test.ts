@@ -1427,4 +1427,44 @@ describe("workspace helpers", () => {
       paneId: rebuilt.panes[0].id,
     });
   });
+
+  it("dockControlPanelAtWorkspaceEdge uses a preferred control panel width ratio when provided", () => {
+    const workspace = {
+      root: {
+        id: "split-1",
+        type: "split" as const,
+        direction: "row" as const,
+        ratio: 0.5,
+        first: {
+          type: "pane" as const,
+          paneId: "pane-control",
+        },
+        second: {
+          type: "pane" as const,
+          paneId: "pane-session",
+        },
+      },
+      panes: [
+        makePane("pane-control", [makeControlPanelTab("control-a", null)], {
+          activeTabId: "control-a",
+          activeSessionId: null,
+          viewMode: "controlPanel",
+        }),
+        makePane("pane-session", [makeSessionTab("tab-a", "session-a")], {
+          activeTabId: "tab-a",
+          activeSessionId: "session-a",
+          viewMode: "session",
+        }),
+      ],
+      activePaneId: "pane-session",
+    };
+
+    const next = dockControlPanelAtWorkspaceEdge(workspace, "left", 0.31);
+
+    expect(next.root).toMatchObject({
+      type: "split",
+      direction: "row",
+      ratio: 0.31,
+    });
+  });
 });

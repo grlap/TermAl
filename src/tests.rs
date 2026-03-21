@@ -7898,6 +7898,22 @@ fn rejects_remote_settings_with_invalid_ssh_user() {
 }
 
 #[test]
+fn remote_connection_issue_message_hides_transport_details() {
+    assert_eq!(
+        remote_connection_issue_message("SSH Lab"),
+        "Could not connect to remote \"SSH Lab\" over SSH. Check the host, network, and SSH settings, then try again."
+    );
+}
+
+#[test]
+fn local_ssh_start_issue_message_hides_transport_details() {
+    assert_eq!(
+        local_ssh_start_issue_message("SSH Lab"),
+        "Could not start the local SSH client for remote \"SSH Lab\". Verify OpenSSH is installed and available on PATH, then try again."
+    );
+}
+
+#[test]
 fn remote_ssh_command_args_insert_double_dash_before_target() {
     let remote = RemoteConfig {
         id: "ssh-lab".to_owned(),

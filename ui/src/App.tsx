@@ -55,6 +55,7 @@ import { AgentIcon } from "./agent-icon";
 import { ExpandedPromptPanel } from "./ExpandedPromptPanel";
 import { copyTextToClipboard } from "./clipboard";
 import { buildDiffPreviewModel } from "./diff-preview";
+import { formatUserFacingError } from "./error-messages";
 import { highlightCode } from "./highlight";
 import { applyDeltaToSessions } from "./live-updates";
 import {
@@ -138,6 +139,7 @@ import type {
 import {
   activatePane,
   closeWorkspaceTab,
+  DEFAULT_CONTROL_PANEL_DOCK_WIDTH_RATIO,
   dockControlPanelAtWorkspaceEdge,
   ensureControlPanelInWorkspaceState,
   findWorkspacePaneIdForSession,
@@ -252,6 +254,7 @@ const PENDING_SESSION_RENAME_CLOSE_DELAY_MS = 300;
 const DEFAULT_SPLIT_MIN_RATIO = 0.22;
 const DEFAULT_SPLIT_MAX_RATIO = 0.78;
 const CONTROL_PANEL_PANE_MIN_WIDTH_FALLBACK_PX = 20 * 16;
+const CONTROL_PANEL_PANE_WIDTH_FALLBACK_PX = 23 * 16;
 
 type SessionConversationItem =
   | {
@@ -1048,11 +1051,8 @@ export default function App() {
     [workspace.panes],
   );
   const workspaceHasOnlyControlPanel = useMemo(
-    () =>
-      workspace.panes.length === 1 &&
-      workspace.panes[0]?.tabs.length === 1 &&
-      workspace.panes[0]?.tabs[0]?.kind === "controlPanel",
-    [workspace.panes],
+    () => workspaceContainsOnlyControlPanel(workspace),
+    [workspace],
   );
   const selectedProject =
     selectedProjectId === ALL_PROJECTS_FILTER_ID
@@ -1340,9 +1340,15 @@ export default function App() {
     nextWorkspace: WorkspaceState,
     side: "left" | "right" = controlPanelSide,
   ) {
+    const preferredControlPanelWidthRatio =
+      workspaceHasOnlyControlPanel && !workspaceContainsOnlyControlPanel(nextWorkspace)
+        ? resolveStandaloneControlPanelDockWidthRatio(DEFAULT_CONTROL_PANEL_DOCK_WIDTH_RATIO)
+        : null;
+
     return dockControlPanelAtWorkspaceEdge(
       ensureControlPanelInWorkspaceState(nextWorkspace),
       side,
+      preferredControlPanelWidthRatio,
     );
   }
 
@@ -1369,7 +1375,7 @@ export default function App() {
         return reconciled;
       }
 
-      return openSessionInWorkspaceState(reconciled, options.openSessionId, options.paneId ?? null);
+      return applyControlPanelLayout(openSessionInWorkspaceState(reconciled, options.openSessionId, options.paneId ?? null));
     });
     setDraftsBySessionId((current) => pruneSessionValues(current, availableSessionIds));
     setDraftAttachmentsBySessionId((current) =>
@@ -7965,6 +7971,51 @@ function findWorkspaceSplitNode(
   );
 }
 
+function workspaceContainsOnlyControlPanel(workspace: WorkspaceState) {
+  return (
+    workspace.panes.length === 1 &&
+    workspace.panes[0]?.tabs.length === 1 &&
+    workspace.panes[0]?.tabs[0]?.kind === "controlPanel"
+  );
+}
+
+export function resolveStandaloneControlPanelDockWidthRatio(fallbackRatio: number): number {
+  if (typeof document === "undefined") {
+    return fallbackRatio;
+  }
+
+  const workspaceStage =
+    document.querySelector(".workspace-stage.workspace-stage-control-panel-only") ??
+    document.querySelector(".workspace-stage");
+  const stageWidth = workspaceStage instanceof HTMLElement ? workspaceStage.clientWidth : 0;
+  if (stageWidth <= 0) {
+    return fallbackRatio;
+  }
+
+  const controlPanelWidthRatio =
+    resolveRootCssLengthPx("--control-panel-pane-width", CONTROL_PANEL_PANE_WIDTH_FALLBACK_PX) / stageWidth;
+  const controlPanelMinRatio = clamp(
+    resolveRootCssLengthPx(
+      "--control-panel-pane-min-width",
+      CONTROL_PANEL_PANE_MIN_WIDTH_FALLBACK_PX,
+    ) / stageWidth,
+    0,
+    1,
+  );
+  const sessionMinRatio = DEFAULT_SPLIT_MIN_RATIO;
+  const maxRatio = 1 - sessionMinRatio;
+
+  if (controlPanelMinRatio <= maxRatio) {
+    return clamp(controlPanelWidthRatio, controlPanelMinRatio, maxRatio);
+  }
+
+  return clamp(
+    controlPanelMinRatio / Math.max(controlPanelMinRatio + sessionMinRatio, Number.EPSILON),
+    0,
+    1,
+  );
+}
+
 function resolveRootCssLengthPx(cssVariableName: string, fallbackPx: number): number {
   if (typeof window === "undefined" || typeof document === "undefined") {
     return fallbackPx;
@@ -11482,11 +11533,7 @@ function mapCommandStatus(status: CommandMessage["status"]): Session["status"] {
 }
 
 function getErrorMessage(error: unknown) {
-  if (error instanceof Error) {
-    return error.message;
-  }
-
-  return "The request failed.";
+  return formatUserFacingError(error);
 }
 
 function readNavigatorOnline() {

@@ -116,11 +116,12 @@ impl RemoteRegistry {
             request = request.json(&payload);
         }
         let response = request.send().map_err(|err| {
-            ApiError::bad_gateway(format!(
+            eprintln!(
                 "failed to contact remote `{}` at {}: {err}",
                 remote.name,
                 remote.host.as_deref().unwrap_or("unknown host")
-            ))
+            );
+            ApiError::bad_gateway(remote_connection_issue_message(&remote.name))
         })?;
         decode_remote_json(response)
     }
@@ -249,10 +250,13 @@ impl RemoteConnection {
                         *process = Some(handle);
                         Ok(base_url)
                     }
-                    Err(tunnel_error) => Err(ApiError::bad_gateway(format!(
-                        "failed to reach remote `{}` over SSH. managed start failed: {managed_error}. tunnel-only fallback failed: {tunnel_error}",
-                        remote.name
-                    ))),
+                    Err(tunnel_error) => {
+                        eprintln!(
+                            "remote SSH connection failed for `{}`. managed start failed: {}. tunnel-only fallback failed: {}",
+                            remote.name, managed_error, tunnel_error
+                        );
+                        Err(ApiError::bad_gateway(remote_connection_issue_message(&remote.name)))
+                    },
                 }
             }
         }
@@ -272,10 +276,8 @@ impl RemoteConnection {
             .stdout(Stdio::null())
             .stderr(Stdio::piped());
         let child = command.spawn().map_err(|err| {
-            ApiError::bad_gateway(format!(
-                "failed to start SSH connection for remote `{}`: {err}",
-                remote.name
-            ))
+            eprintln!("failed to start SSH connection for remote `{}`: {err}", remote.name);
+            ApiError::bad_gateway(local_ssh_start_issue_message(&remote.name))
         })?;
         Ok(RemoteProcessHandle { child, mode })
     }
@@ -1855,6 +1857,18 @@ fn wait_for_remote_health(
         }
         thread::sleep(REMOTE_HEALTH_POLL_INTERVAL);
     }
+}
+
+fn remote_connection_issue_message(remote_name: &str) -> String {
+    format!(
+        "Could not connect to remote \"{remote_name}\" over SSH. Check the host, network, and SSH settings, then try again."
+    )
+}
+
+fn local_ssh_start_issue_message(remote_name: &str) -> String {
+    format!(
+        "Could not start the local SSH client for remote \"{remote_name}\". Verify OpenSSH is installed and available on PATH, then try again."
+    )
 }
 
 fn read_process_stderr_suffix(child: &mut Child) -> String {

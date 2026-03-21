@@ -1514,6 +1514,7 @@ fn send_acp_json_rpc_request(
     )
 }
 
+#[cfg(test)]
 fn send_acp_json_rpc_request_without_timeout(
     writer: &mut impl Write,
     pending_requests: &AcpPendingRequestMap,
