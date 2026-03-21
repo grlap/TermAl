@@ -91,6 +91,318 @@ async fn get_state(State(state): State<AppState>) -> Json<StateResponse> {
     Json(state.snapshot())
 }
 
+impl AppState {
+    fn project_digest(&self, project_id: &str) -> Result<ProjectDigestResponse, ApiError> {
+        Ok(self
+            .build_project_digest_summary(project_id)?
+            .into_response())
+    }
+
+    fn execute_project_action(
+        &self,
+        project_id: &str,
+        action_id: &str,
+    ) -> Result<ProjectDigestResponse, ApiError> {
+        let action = ProjectActionId::parse(action_id)?;
+        let summary = self.build_project_digest_summary(project_id)?;
+        if !summary.proposed_actions.contains(&action) {
+            return Err(ApiError::conflict(format!(
+                "action `{}` is not currently available for project `{}`",
+                action.as_str(),
+                summary.headline
+            )));
+        }
+
+        match action {
+            ProjectActionId::Approve => {
+                let target = summary
+                    .pending_approval_target
+                    .ok_or_else(|| ApiError::conflict("project does not have a live approval"))?;
+                let _ = self.update_approval(
+                    &target.session_id,
+                    &target.message_id,
+                    ApprovalDecision::Accepted,
+                )?;
+            }
+            ProjectActionId::Reject => {
+                let target = summary
+                    .pending_approval_target
+                    .ok_or_else(|| ApiError::conflict("project does not have a live approval"))?;
+                let _ = self.update_approval(
+                    &target.session_id,
+                    &target.message_id,
+                    ApprovalDecision::Rejected,
+                )?;
+            }
+            ProjectActionId::Continue
+            | ProjectActionId::FixIt
+            | ProjectActionId::KeepIterating
+            | ProjectActionId::AskAgentToCommit => {
+                let session_id = summary
+                    .primary_session_id
+                    .clone()
+                    .ok_or_else(|| ApiError::conflict("project does not have a session to target"))?;
+                let prompt = action
+                    .prompt()
+                    .ok_or_else(|| ApiError::internal("project action prompt is missing"))?;
+                let dispatch = self.dispatch_turn(
+                    &session_id,
+                    SendMessageRequest {
+                        text: prompt.to_owned(),
+                        expanded_text: None,
+                        attachments: Vec::new(),
+                    },
+                )?;
+                if let DispatchTurnResult::Dispatched(dispatch) = dispatch {
+                    deliver_turn_dispatch(self, dispatch)?;
+                }
+            }
+            ProjectActionId::Stop => {
+                let session_id = summary
+                    .primary_session_id
+                    .clone()
+                    .ok_or_else(|| ApiError::conflict("project does not have a session to stop"))?;
+                let _ = self.stop_session(&session_id)?;
+            }
+            ProjectActionId::ReviewInTermal => {}
+        }
+
+        self.project_digest(project_id)
+    }
+
+    fn build_project_digest_summary(
+        &self,
+        project_id: &str,
+    ) -> Result<ProjectDigestSummary, ApiError> {
+        let inputs = self.project_digest_inputs(project_id)?;
+        let git_status = self.load_project_git_status_best_effort(&inputs.project);
+        let pending_approval = find_latest_project_pending_approval(&inputs.sessions);
+        let pending_interaction = if pending_approval.is_none() {
+            find_latest_project_pending_nonapproval_interaction(&inputs.sessions)
+        } else {
+            None
+        };
+        let error_session = if pending_approval.is_none() && pending_interaction.is_none() {
+            inputs
+                .sessions
+                .iter()
+                .rev()
+                .find(|record| record.session.status == SessionStatus::Error)
+        } else {
+            None
+        };
+        let active_session = if pending_approval.is_none()
+            && pending_interaction.is_none()
+            && error_session.is_none()
+        {
+            inputs
+                .sessions
+                .iter()
+                .rev()
+                .find(|record| record.session.status == SessionStatus::Active)
+        } else {
+            None
+        };
+        let primary_session = pending_approval
+            .as_ref()
+            .map(|(record, _)| *record)
+            .or_else(|| pending_interaction.as_ref().map(|(record, _)| *record))
+            .or(error_session)
+            .or(active_session)
+            .or_else(|| {
+                inputs
+                    .sessions
+                    .iter()
+                    .rev()
+                    .find(|record| !record.session.messages.is_empty())
+            })
+            .or_else(|| inputs.sessions.last());
+        let primary_session_id = primary_session.map(|record| record.session.id.clone());
+        let deep_link = Some(build_project_deep_link(
+            &inputs.project.id,
+            primary_session_id.as_deref(),
+        ));
+        let worktree_dirty = git_status.as_ref().is_some_and(|status| !status.is_clean);
+
+        if let Some((record, message_id)) = pending_approval {
+            let (done_summary, mut source_message_ids) =
+                select_project_done_summary(primary_session, git_status.as_ref(), false);
+            if !source_message_ids.contains(&message_id) {
+                source_message_ids.insert(0, message_id.clone());
+            }
+            return Ok(ProjectDigestSummary {
+                headline: inputs.project.name,
+                project_id: inputs.project.id,
+                primary_session_id,
+                done_summary: normalize_project_done_summary(
+                    &done_summary,
+                    "Work paused while waiting for approval.",
+                ),
+                current_status: "Waiting on your decision.".to_owned(),
+                proposed_actions: vec![
+                    ProjectActionId::Approve,
+                    ProjectActionId::Reject,
+                    ProjectActionId::ReviewInTermal,
+                ],
+                deep_link,
+                pending_approval_target: Some(ProjectApprovalTarget {
+                    session_id: record.session.id.clone(),
+                    message_id,
+                }),
+                source_message_ids,
+            });
+        }
+
+        if let Some((record, message_id)) = pending_interaction {
+            let (done_summary, mut source_message_ids) =
+                select_project_done_summary(primary_session, git_status.as_ref(), false);
+            if !source_message_ids.contains(&message_id) {
+                source_message_ids.insert(0, message_id);
+            }
+            let mut proposed_actions = vec![ProjectActionId::ReviewInTermal];
+            if primary_session_id.is_some() {
+                proposed_actions.push(ProjectActionId::Stop);
+            }
+            return Ok(ProjectDigestSummary {
+                headline: inputs.project.name,
+                project_id: inputs.project.id,
+                primary_session_id,
+                done_summary: normalize_project_done_summary(
+                    &done_summary,
+                    "Work is waiting on a response in TermAl.",
+                ),
+                current_status: normalize_project_status(
+                    &record.session.preview,
+                    "Waiting on input in TermAl.",
+                ),
+                proposed_actions,
+                deep_link,
+                pending_approval_target: None,
+                source_message_ids,
+            });
+        }
+
+        if let Some(record) = error_session {
+            let (done_summary, source_message_ids) =
+                select_project_done_summary(primary_session, git_status.as_ref(), false);
+            let mut proposed_actions = vec![ProjectActionId::ReviewInTermal];
+            if primary_session_id.is_some() {
+                proposed_actions.insert(0, ProjectActionId::FixIt);
+            }
+            return Ok(ProjectDigestSummary {
+                headline: inputs.project.name,
+                project_id: inputs.project.id,
+                primary_session_id,
+                done_summary: normalize_project_done_summary(
+                    &done_summary,
+                    "The last turn ended in an error.",
+                ),
+                current_status: normalize_project_status(&record.session.preview, "Needs attention."),
+                proposed_actions,
+                deep_link,
+                pending_approval_target: None,
+                source_message_ids,
+            });
+        }
+
+        if let Some(record) = active_session {
+            let (done_summary, source_message_ids) =
+                select_project_done_summary(primary_session, git_status.as_ref(), false);
+            return Ok(ProjectDigestSummary {
+                headline: inputs.project.name,
+                project_id: inputs.project.id,
+                primary_session_id,
+                done_summary: normalize_project_done_summary(
+                    &done_summary,
+                    "The agent is still working.",
+                ),
+                current_status: active_project_status_text(record),
+                proposed_actions: vec![ProjectActionId::Stop, ProjectActionId::ReviewInTermal],
+                deep_link,
+                pending_approval_target: None,
+                source_message_ids,
+            });
+        }
+
+        if worktree_dirty {
+            let (done_summary, source_message_ids) =
+                select_project_done_summary(primary_session, git_status.as_ref(), true);
+            let mut proposed_actions = vec![ProjectActionId::ReviewInTermal];
+            if primary_session_id.is_some() {
+                proposed_actions.push(ProjectActionId::AskAgentToCommit);
+                proposed_actions.push(ProjectActionId::KeepIterating);
+            }
+            return Ok(ProjectDigestSummary {
+                headline: inputs.project.name,
+                project_id: inputs.project.id,
+                primary_session_id,
+                done_summary: normalize_project_done_summary(
+                    &done_summary,
+                    "The working tree has changes ready for review.",
+                ),
+                current_status: "Changes are ready for review.".to_owned(),
+                proposed_actions,
+                deep_link,
+                pending_approval_target: None,
+                source_message_ids,
+            });
+        }
+
+        let (done_summary, source_message_ids) =
+            select_project_done_summary(primary_session, git_status.as_ref(), false);
+        let proposed_actions = if primary_session_id.is_some() {
+            vec![ProjectActionId::Continue, ProjectActionId::ReviewInTermal]
+        } else {
+            vec![ProjectActionId::ReviewInTermal]
+        };
+        Ok(ProjectDigestSummary {
+            headline: inputs.project.name,
+            project_id: inputs.project.id,
+            primary_session_id,
+            done_summary: normalize_project_done_summary(
+                &done_summary,
+                "No agent work has started yet.",
+            ),
+            current_status: "Idle and unblocked.".to_owned(),
+            proposed_actions,
+            deep_link,
+            pending_approval_target: None,
+            source_message_ids,
+        })
+    }
+
+    fn project_digest_inputs(&self, project_id: &str) -> Result<ProjectDigestInputs, ApiError> {
+        let inner = self.inner.lock().expect("state mutex poisoned");
+        let project = inner
+            .find_project(project_id)
+            .cloned()
+            .ok_or_else(|| ApiError::not_found("project not found"))?;
+        let sessions = inner
+            .sessions
+            .iter()
+            .filter(|record| !record.hidden && record.session.project_id.as_deref() == Some(project_id))
+            .cloned()
+            .collect();
+        Ok(ProjectDigestInputs { project, sessions })
+    }
+
+    fn load_project_git_status_best_effort(&self, project: &Project) -> Option<GitStatusResponse> {
+        if project.remote_id == LOCAL_REMOTE_ID {
+            return load_git_status_for_path(FsPath::new(&project.root_path)).ok();
+        }
+        let scope = self
+            .remote_scope_for_request(None, Some(project.id.as_str()))
+            .ok()
+            .flatten()?;
+        self.remote_get_json(
+            &scope,
+            "/api/git/status",
+            vec![("path".to_owned(), project.root_path.clone())],
+        )
+        .ok()
+    }
+}
+
 async fn run_blocking_api<T, F>(operation: F) -> Result<T, ApiError>
 where
     T: Send + 'static,
@@ -1878,6 +2190,23 @@ async fn create_project(
     Ok((StatusCode::CREATED, Json(response)))
 }
 
+async fn get_project_digest(
+    AxumPath(project_id): AxumPath<String>,
+    State(state): State<AppState>,
+) -> Result<Json<ProjectDigestResponse>, ApiError> {
+    let response = run_blocking_api(move || state.project_digest(&project_id)).await?;
+    Ok(Json(response))
+}
+
+async fn dispatch_project_action(
+    AxumPath((project_id, action_id)): AxumPath<(String, String)>,
+    State(state): State<AppState>,
+) -> Result<Json<ProjectDigestResponse>, ApiError> {
+    let response =
+        run_blocking_api(move || state.execute_project_action(&project_id, &action_id)).await?;
+    Ok(Json(response))
+}
+
 async fn update_app_settings(
     State(state): State<AppState>,
     Json(request): Json<UpdateAppSettingsRequest>,
@@ -3596,6 +3925,163 @@ struct CreateProjectResponse {
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
+struct ProjectDigestAction {
+    id: String,
+    label: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    prompt: Option<String>,
+    requires_confirmation: bool,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ProjectDigestResponse {
+    project_id: String,
+    headline: String,
+    done_summary: String,
+    current_status: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    primary_session_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    proposed_actions: Vec<ProjectDigestAction>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    deep_link: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    source_message_ids: Vec<String>,
+}
+
+#[derive(Clone)]
+struct ProjectDigestInputs {
+    project: Project,
+    sessions: Vec<SessionRecord>,
+}
+
+#[derive(Clone)]
+struct ProjectApprovalTarget {
+    session_id: String,
+    message_id: String,
+}
+
+struct ProjectDigestSummary {
+    project_id: String,
+    headline: String,
+    done_summary: String,
+    current_status: String,
+    primary_session_id: Option<String>,
+    proposed_actions: Vec<ProjectActionId>,
+    deep_link: Option<String>,
+    pending_approval_target: Option<ProjectApprovalTarget>,
+    source_message_ids: Vec<String>,
+}
+
+impl ProjectDigestSummary {
+    fn into_response(self) -> ProjectDigestResponse {
+        ProjectDigestResponse {
+            project_id: self.project_id,
+            headline: self.headline,
+            done_summary: self.done_summary,
+            current_status: self.current_status,
+            primary_session_id: self.primary_session_id,
+            proposed_actions: self
+                .proposed_actions
+                .into_iter()
+                .map(ProjectActionId::into_digest_action)
+                .collect(),
+            deep_link: self.deep_link,
+            source_message_ids: self.source_message_ids,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ProjectActionId {
+    Approve,
+    Reject,
+    ReviewInTermal,
+    FixIt,
+    Stop,
+    AskAgentToCommit,
+    KeepIterating,
+    Continue,
+}
+
+impl ProjectActionId {
+    fn parse(value: &str) -> Result<Self, ApiError> {
+        match value.trim() {
+            "approve" => Ok(Self::Approve),
+            "reject" => Ok(Self::Reject),
+            "review-in-termal" => Ok(Self::ReviewInTermal),
+            "fix-it" => Ok(Self::FixIt),
+            "stop" => Ok(Self::Stop),
+            "ask-agent-to-commit" => Ok(Self::AskAgentToCommit),
+            "keep-iterating" => Ok(Self::KeepIterating),
+            "continue" => Ok(Self::Continue),
+            other => Err(ApiError::bad_request(format!(
+                "unknown project action `{other}`"
+            ))),
+        }
+    }
+
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Approve => "approve",
+            Self::Reject => "reject",
+            Self::ReviewInTermal => "review-in-termal",
+            Self::FixIt => "fix-it",
+            Self::Stop => "stop",
+            Self::AskAgentToCommit => "ask-agent-to-commit",
+            Self::KeepIterating => "keep-iterating",
+            Self::Continue => "continue",
+        }
+    }
+
+    fn label(self) -> &'static str {
+        match self {
+            Self::Approve => "Approve",
+            Self::Reject => "Reject",
+            Self::ReviewInTermal => "Review in TermAl",
+            Self::FixIt => "Fix It",
+            Self::Stop => "Stop",
+            Self::AskAgentToCommit => "Ask Agent to Commit",
+            Self::KeepIterating => "Keep Iterating",
+            Self::Continue => "Continue",
+        }
+    }
+
+    fn prompt(self) -> Option<&'static str> {
+        match self {
+            Self::FixIt => Some(
+                "The last run failed. Fix the issue, rerun the relevant verification, and summarize what changed.",
+            ),
+            Self::AskAgentToCommit => Some(
+                "If the current changes are ready, create a git commit with a concise message and summarize the result.",
+            ),
+            Self::KeepIterating => Some(
+                "Keep iterating on the current task and report back when the next review point is ready.",
+            ),
+            Self::Continue => Some(
+                "Continue the work on this project and report back when the next review point is ready.",
+            ),
+            Self::Approve | Self::Reject | Self::ReviewInTermal | Self::Stop => None,
+        }
+    }
+
+    fn requires_confirmation(self) -> bool {
+        matches!(self, Self::Stop)
+    }
+
+    fn into_digest_action(self) -> ProjectDigestAction {
+        ProjectDigestAction {
+            id: self.as_str().to_owned(),
+            label: self.label().to_owned(),
+            prompt: self.prompt().map(str::to_owned),
+            requires_confirmation: self.requires_confirmation(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
 struct AgentCommand {
     #[serde(default)]
     kind: AgentCommandKind,
@@ -3697,6 +4183,186 @@ struct InstructionSearchGraph {
 #[serde(rename_all = "camelCase")]
 struct PickProjectRootResponse {
     path: Option<String>,
+}
+
+fn build_project_deep_link(project_id: &str, session_id: Option<&str>) -> String {
+    let mut query = format!("/?projectId={}", encode_uri_component(project_id));
+    if let Some(session_id) = session_id {
+        query.push_str("&sessionId=");
+        query.push_str(&encode_uri_component(session_id));
+    }
+    query
+}
+
+fn normalize_project_status(value: &str, fallback: &str) -> String {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        fallback.to_owned()
+    } else {
+        make_preview(trimmed)
+    }
+}
+
+fn normalize_project_done_summary(value: &str, fallback: &str) -> String {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        fallback.to_owned()
+    } else {
+        make_preview(trimmed)
+    }
+}
+
+fn active_project_status_text(record: &SessionRecord) -> String {
+    let queued_count = record.session.pending_prompts.len();
+    match queued_count {
+        0 => "Agent is working.".to_owned(),
+        1 => "Agent is working with 1 queued follow-up.".to_owned(),
+        count => format!("Agent is working with {count} queued follow-ups."),
+    }
+}
+
+fn select_project_done_summary(
+    primary_session: Option<&SessionRecord>,
+    git_status: Option<&GitStatusResponse>,
+    prefer_git: bool,
+) -> (String, Vec<String>) {
+    let message_summary = primary_session.and_then(latest_project_progress_summary);
+    let git_summary = git_status.and_then(project_git_done_summary);
+    if prefer_git {
+        if let Some(summary) = git_summary.clone() {
+            return (summary, Vec::new());
+        }
+    }
+    if let Some((message_id, summary)) = message_summary {
+        return (summary, vec![message_id]);
+    }
+    if let Some(summary) = git_summary {
+        return (summary, Vec::new());
+    }
+    (
+        primary_session
+            .map(default_project_done_summary)
+            .unwrap_or_else(|| "No agent work has started yet.".to_owned()),
+        Vec::new(),
+    )
+}
+
+fn default_project_done_summary(record: &SessionRecord) -> String {
+    if record.session.messages.is_empty() {
+        return "Ready for the next prompt.".to_owned();
+    }
+    let preview = record.session.preview.trim();
+    if preview.is_empty() {
+        "Ready for the next prompt.".to_owned()
+    } else {
+        make_preview(preview)
+    }
+}
+
+fn project_git_done_summary(status: &GitStatusResponse) -> Option<String> {
+    let changed_files = status.files.len();
+    if changed_files == 0 {
+        return None;
+    }
+    Some(match changed_files {
+        1 => "Working tree has 1 changed file ready for review.".to_owned(),
+        count => format!("Working tree has {count} changed files ready for review."),
+    })
+}
+
+fn latest_project_progress_summary(record: &SessionRecord) -> Option<(String, String)> {
+    record
+        .session
+        .messages
+        .iter()
+        .rev()
+        .find_map(|message| {
+            project_progress_summary_for_message(message)
+                .map(|summary| (message.id().to_owned(), summary))
+        })
+}
+
+fn project_progress_summary_for_message(message: &Message) -> Option<String> {
+    match message {
+        Message::Text {
+            author: Author::Assistant,
+            text,
+            attachments,
+            ..
+        } => Some(prompt_preview_text(text, attachments)),
+        Message::Thinking { title, .. } => Some(make_preview(title)),
+        Message::Command {
+            command, status, ..
+        } => match status {
+            CommandStatus::Running => None,
+            CommandStatus::Success => Some(format!("Ran {} successfully.", make_preview(command))),
+            CommandStatus::Error => Some(format!("Command failed: {}.", make_preview(command))),
+        },
+        Message::Diff { summary, .. } => Some(make_preview(summary)),
+        Message::Markdown { title, .. } => Some(make_preview(title)),
+        Message::SubagentResult { summary, title, .. } => {
+            let detail = summary.trim();
+            if detail.is_empty() {
+                Some(make_preview(title))
+            } else {
+                Some(make_preview(detail))
+            }
+        }
+        Message::ParallelAgents { agents, .. } => Some(parallel_agents_preview_text(agents)),
+        Message::Approval { .. }
+        | Message::UserInputRequest { .. }
+        | Message::McpElicitationRequest { .. }
+        | Message::CodexAppRequest { .. }
+        | Message::Text {
+            author: Author::You, ..
+        } => None,
+    }
+}
+
+fn find_latest_project_pending_approval<'a>(
+    sessions: &'a [SessionRecord],
+) -> Option<(&'a SessionRecord, String)> {
+    sessions.iter().rev().find_map(|record| {
+        record.session.messages.iter().rev().find_map(|message| match message {
+            Message::Approval { id, decision, .. }
+                if *decision == ApprovalDecision::Pending && has_live_pending_approval(record, id) =>
+            {
+                Some((record, id.clone()))
+            }
+            _ => None,
+        })
+    })
+}
+
+fn has_live_pending_approval(record: &SessionRecord, message_id: &str) -> bool {
+    record.pending_claude_approvals.contains_key(message_id)
+        || record.pending_codex_approvals.contains_key(message_id)
+        || record.pending_acp_approvals.contains_key(message_id)
+}
+
+fn find_latest_project_pending_nonapproval_interaction<'a>(
+    sessions: &'a [SessionRecord],
+) -> Option<(&'a SessionRecord, String)> {
+    sessions.iter().rev().find_map(|record| {
+        record.session.messages.iter().rev().find_map(|message| match message {
+            Message::UserInputRequest { id, state, .. }
+                if *state == InteractionRequestState::Pending =>
+            {
+                Some((record, id.clone()))
+            }
+            Message::McpElicitationRequest { id, state, .. }
+                if *state == InteractionRequestState::Pending =>
+            {
+                Some((record, id.clone()))
+            }
+            Message::CodexAppRequest { id, state, .. }
+                if *state == InteractionRequestState::Pending =>
+            {
+                Some((record, id.clone()))
+            }
+            _ => None,
+        })
+    })
 }
 
 #[derive(Deserialize, Serialize)]

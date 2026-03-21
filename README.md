@@ -188,6 +188,25 @@ cargo run -- --repl
 
 Runs an interactive terminal loop — reads prompts from stdin, runs one agent turn at a time. Useful for testing.
 
+### Telegram relay (experimental)
+
+Run the backend first, then start the Telegram relay in a separate terminal:
+
+```bash
+TERMAL_TELEGRAM_BOT_TOKEN=... \
+TERMAL_TELEGRAM_PROJECT_ID=project-1 \
+cargo run -- telegram
+```
+
+Optional environment variables:
+
+- `TERMAL_TELEGRAM_CHAT_ID` — lock the relay to one Telegram chat ID
+- `TERMAL_TELEGRAM_API_BASE_URL` — override the local TermAl backend URL (default `http://127.0.0.1:8787`)
+- `TERMAL_TELEGRAM_PUBLIC_BASE_URL` — public URL used for `Review in TermAl` deep links
+- `TERMAL_TELEGRAM_POLL_TIMEOUT_SECS` — long-poll timeout for Telegram Bot API requests
+
+If `TERMAL_TELEGRAM_CHAT_ID` is not set, the first `/start` message links the bot to one chat and that binding is persisted in `~/.termal/telegram-bot.json`.
+
 ## Project structure
 
 ```
@@ -198,6 +217,7 @@ termal/
 │   ├── state.rs             # AppState, sessions, persistence
 │   ├── runtime.rs           # Agent runtimes (Claude, Codex, Gemini, Cursor)
 │   ├── remote.rs            # SSH tunnels, remote registry, SSE bridge
+│   ├── telegram.rs          # Telegram polling relay for project digests and actions
 │   ├── turns.rs             # Turn lifecycle, types, shared structures
 │   └── tests.rs             # Rust unit tests
 ├── ui/

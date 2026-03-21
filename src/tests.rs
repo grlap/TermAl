@@ -295,6 +295,36 @@ fn test_session_id(state: &AppState, agent: Agent) -> String {
     session_id
 }
 
+fn create_test_project(state: &AppState, root_path: &FsPath, name: &str) -> String {
+    state
+        .create_project(CreateProjectRequest {
+            name: Some(name.to_owned()),
+            root_path: root_path.to_string_lossy().into_owned(),
+            remote_id: default_local_remote_id(),
+        })
+        .unwrap()
+        .project_id
+}
+
+fn create_test_project_session(
+    state: &AppState,
+    agent: Agent,
+    project_id: &str,
+    workdir: &FsPath,
+) -> String {
+    let mut inner = state.inner.lock().expect("state mutex poisoned");
+    let record = inner.create_session(
+        agent,
+        Some("Test".to_owned()),
+        workdir.to_string_lossy().into_owned(),
+        Some(project_id.to_owned()),
+        None,
+    );
+    let session_id = record.session.id.clone();
+    state.commit_locked(&mut inner).unwrap();
+    session_id
+}
+
 fn run_git_test_command(repo_root: &FsPath, args: &[&str]) {
     let output = Command::new("git")
         .arg("-C")
@@ -8804,6 +8834,304 @@ async fn read_and_write_file_accept_project_id_without_session() {
     );
 
     fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn project_digest_surfaces_pending_approval_actions() {
+    let state = test_app_state();
+    let root = std::env::temp_dir().join(format!("termal-project-digest-{}", Uuid::new_v4()));
+    fs::create_dir_all(&root).unwrap();
+
+    let project_id = create_test_project(&state, &root, "Digest Project");
+    let session_id = create_test_project_session(&state, Agent::Codex, &project_id, &root);
+
+    state
+        .push_message(
+            &session_id,
+            Message::Text {
+                attachments: Vec::new(),
+                id: state.allocate_message_id(),
+                timestamp: stamp_now(),
+                author: Author::Assistant,
+                text: "Implemented the requested fix.".to_owned(),
+                expanded_text: None,
+            },
+        )
+        .unwrap();
+
+    let approval_message_id = state.allocate_message_id();
+    state
+        .push_message(
+            &session_id,
+            Message::Approval {
+                id: approval_message_id.clone(),
+                timestamp: stamp_now(),
+                author: Author::Assistant,
+                title: "Approve command".to_owned(),
+                command: "cargo test".to_owned(),
+                command_language: Some(shell_language().to_owned()),
+                detail: "Approval required.".to_owned(),
+                decision: ApprovalDecision::Pending,
+            },
+        )
+        .unwrap();
+    state
+        .register_codex_pending_approval(
+            &session_id,
+            approval_message_id.clone(),
+            CodexPendingApproval {
+                kind: CodexApprovalKind::CommandExecution,
+                request_id: json!("req-project-digest"),
+            },
+        )
+        .unwrap();
+
+    let digest = state.project_digest(&project_id).unwrap();
+    let action_ids = digest
+        .proposed_actions
+        .iter()
+        .map(|action| action.id.as_str())
+        .collect::<Vec<_>>();
+
+    assert_eq!(
+        digest.primary_session_id.as_deref(),
+        Some(session_id.as_str())
+    );
+    assert_eq!(digest.current_status, "Waiting on your decision.");
+    assert_eq!(digest.done_summary, "Implemented the requested fix.");
+    assert_eq!(digest.source_message_ids[0], approval_message_id);
+    assert_eq!(action_ids, vec!["approve", "reject", "review-in-termal"]);
+
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn project_digest_prefers_review_actions_for_dirty_idle_project() {
+    let state = test_app_state();
+    let repo_root = std::env::temp_dir().join(format!("termal-project-review-{}", Uuid::new_v4()));
+    fs::create_dir_all(repo_root.join("src")).unwrap();
+    fs::write(
+        repo_root.join("src/lib.rs"),
+        "pub fn value() -> u32 { 1 }\n",
+    )
+    .unwrap();
+
+    run_git_test_command(&repo_root, &["init"]);
+    run_git_test_command(&repo_root, &["config", "user.email", "termal@example.com"]);
+    run_git_test_command(&repo_root, &["config", "user.name", "TermAl"]);
+    run_git_test_command(&repo_root, &["add", "."]);
+    run_git_test_command(&repo_root, &["commit", "-m", "init"]);
+
+    fs::write(
+        repo_root.join("src/lib.rs"),
+        "pub fn value() -> u32 { 2 }\n",
+    )
+    .unwrap();
+
+    let project_id = create_test_project(&state, &repo_root, "Review Project");
+    let session_id = create_test_project_session(&state, Agent::Codex, &project_id, &repo_root);
+
+    let digest = state.project_digest(&project_id).unwrap();
+    let action_ids = digest
+        .proposed_actions
+        .iter()
+        .map(|action| action.id.as_str())
+        .collect::<Vec<_>>();
+
+    assert_eq!(
+        digest.primary_session_id.as_deref(),
+        Some(session_id.as_str())
+    );
+    assert_eq!(digest.current_status, "Changes are ready for review.");
+    assert!(digest.done_summary.contains("1 changed file"));
+    assert_eq!(
+        action_ids,
+        vec!["review-in-termal", "ask-agent-to-commit", "keep-iterating"]
+    );
+
+    fs::remove_dir_all(repo_root).unwrap();
+}
+
+#[test]
+fn project_action_approve_routes_to_the_live_project_approval() {
+    let state = test_app_state();
+    let root = std::env::temp_dir().join(format!("termal-project-approve-{}", Uuid::new_v4()));
+    fs::create_dir_all(&root).unwrap();
+
+    let project_id = create_test_project(&state, &root, "Approval Project");
+    let session_id = create_test_project_session(&state, Agent::Codex, &project_id, &root);
+    let (runtime, input_rx) = test_codex_runtime_handle("project-approve");
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner.find_session_index(&session_id).unwrap();
+        inner.sessions[index].runtime = SessionRuntime::Codex(runtime);
+    }
+
+    let approval_message_id = state.allocate_message_id();
+    state
+        .push_message(
+            &session_id,
+            Message::Approval {
+                id: approval_message_id.clone(),
+                timestamp: stamp_now(),
+                author: Author::Assistant,
+                title: "Approve command".to_owned(),
+                command: "cargo test".to_owned(),
+                command_language: Some(shell_language().to_owned()),
+                detail: "Approval required.".to_owned(),
+                decision: ApprovalDecision::Pending,
+            },
+        )
+        .unwrap();
+    state
+        .register_codex_pending_approval(
+            &session_id,
+            approval_message_id.clone(),
+            CodexPendingApproval {
+                kind: CodexApprovalKind::CommandExecution,
+                request_id: json!("req-project-approve"),
+            },
+        )
+        .unwrap();
+
+    let digest = state
+        .execute_project_action(&project_id, "approve")
+        .unwrap();
+
+    match input_rx.recv_timeout(Duration::from_secs(1)).unwrap() {
+        CodexRuntimeCommand::JsonRpcResponse { response } => {
+            assert_eq!(response.request_id, json!("req-project-approve"));
+            assert_eq!(response.result, json!({ "decision": "accept" }));
+        }
+        _ => panic!("expected approval response"),
+    }
+
+    assert_eq!(digest.current_status, "Agent is working.");
+    assert!(
+        !digest
+            .proposed_actions
+            .iter()
+            .any(|action| action.id == "approve")
+    );
+
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn project_action_keep_iterating_dispatches_a_follow_up_prompt() {
+    let state = test_app_state();
+    let repo_root = std::env::temp_dir().join(format!("termal-project-iterate-{}", Uuid::new_v4()));
+    fs::create_dir_all(repo_root.join("src")).unwrap();
+    fs::write(
+        repo_root.join("src/lib.rs"),
+        "pub fn value() -> u32 { 1 }\n",
+    )
+    .unwrap();
+
+    run_git_test_command(&repo_root, &["init"]);
+    run_git_test_command(&repo_root, &["config", "user.email", "termal@example.com"]);
+    run_git_test_command(&repo_root, &["config", "user.name", "TermAl"]);
+    run_git_test_command(&repo_root, &["add", "."]);
+    run_git_test_command(&repo_root, &["commit", "-m", "init"]);
+
+    fs::write(
+        repo_root.join("src/lib.rs"),
+        "pub fn value() -> u32 { 2 }\n",
+    )
+    .unwrap();
+
+    let project_id = create_test_project(&state, &repo_root, "Iterate Project");
+    let session_id = create_test_project_session(&state, Agent::Codex, &project_id, &repo_root);
+    let (runtime, input_rx) = test_codex_runtime_handle("project-iterate");
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner.find_session_index(&session_id).unwrap();
+        inner.sessions[index].runtime = SessionRuntime::Codex(runtime);
+    }
+
+    let digest = state
+        .execute_project_action(&project_id, "keep-iterating")
+        .unwrap();
+
+    match input_rx.recv_timeout(Duration::from_secs(1)).unwrap() {
+        CodexRuntimeCommand::Prompt {
+            session_id: runtime_session_id,
+            command,
+        } => {
+            assert_eq!(runtime_session_id, session_id);
+            assert_eq!(
+                command.prompt,
+                ProjectActionId::KeepIterating.prompt().unwrap()
+            );
+        }
+        _ => panic!("expected prompt dispatch"),
+    }
+
+    assert_eq!(digest.current_status, "Agent is working.");
+    assert_eq!(
+        digest
+            .proposed_actions
+            .iter()
+            .map(|action| action.id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["stop", "review-in-termal"]
+    );
+
+    fs::remove_dir_all(repo_root).unwrap();
+}
+
+#[test]
+fn telegram_command_parser_supports_suffixes_and_aliases() {
+    let parsed =
+        parse_telegram_command("/commit@termal_bot   now please").expect("command should parse");
+    assert_eq!(
+        parsed.command,
+        TelegramIncomingCommand::Action(ProjectActionId::AskAgentToCommit)
+    );
+    assert_eq!(parsed.args, "now please");
+
+    let parsed = parse_telegram_command("/status").expect("status should parse");
+    assert_eq!(parsed.command, TelegramIncomingCommand::Status);
+}
+
+#[test]
+fn telegram_command_parser_rejects_unknown_slash_commands() {
+    assert!(parse_telegram_command("/unknown").is_none());
+}
+
+#[test]
+fn telegram_digest_renderer_includes_actions_and_public_link() {
+    let digest = ProjectDigestResponse {
+        project_id: "project-1".to_owned(),
+        headline: "termal".to_owned(),
+        done_summary: "Updated the digest API.".to_owned(),
+        current_status: "Changes are ready for review.".to_owned(),
+        primary_session_id: Some("session-1".to_owned()),
+        proposed_actions: vec![
+            ProjectActionId::ReviewInTermal.into_digest_action(),
+            ProjectActionId::AskAgentToCommit.into_digest_action(),
+        ],
+        deep_link: Some("/?projectId=project-1&sessionId=session-1".to_owned()),
+        source_message_ids: vec!["message-1".to_owned()],
+    };
+
+    let rendered = render_telegram_digest(&digest, Some("https://termal.local"));
+    assert!(rendered.contains("Project: termal"));
+    assert!(rendered.contains("Next: Review in TermAl, Ask Agent to Commit"));
+    assert!(
+        rendered.contains("Open: https://termal.local/?projectId=project-1&sessionId=session-1")
+    );
+
+    let keyboard = build_telegram_digest_keyboard(&digest).expect("keyboard should exist");
+    assert_eq!(keyboard.inline_keyboard.len(), 1);
+    assert_eq!(
+        keyboard.inline_keyboard[0][0].callback_data,
+        "review-in-termal"
+    );
+    assert_eq!(
+        keyboard.inline_keyboard[0][1].callback_data,
+        "ask-agent-to-commit"
+    );
 }
 
 #[test]

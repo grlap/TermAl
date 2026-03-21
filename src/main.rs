@@ -42,6 +42,9 @@ async fn run() -> Result<()> {
     match Mode::parse(args)? {
         Mode::Server => run_server().await,
         Mode::Repl { agent } => run_repl(agent),
+        Mode::Telegram => tokio::task::spawn_blocking(run_telegram_bot)
+            .await
+            .map_err(|err| anyhow!("telegram adapter task failed: {err}"))?,
     }
 }
 
@@ -115,6 +118,11 @@ fn app_router(state: AppState) -> Router {
             get(get_review_summary),
         )
         .route("/api/projects", post(create_project))
+        .route("/api/projects/{id}/digest", get(get_project_digest))
+        .route(
+            "/api/projects/{id}/actions/{action_id}",
+            post(dispatch_project_action),
+        )
         .route("/api/projects/pick", post(pick_project_root))
         .route("/api/sessions", post(create_session))
         .route("/api/sessions/{id}/settings", post(update_session_settings))
@@ -248,12 +256,14 @@ fn run_repl(agent: Agent) -> Result<()> {
 enum Mode {
     Server,
     Repl { agent: Agent },
+    Telegram,
 }
 
 impl Mode {
     fn parse(args: Vec<String>) -> Result<Self> {
         match args.first().map(String::as_str) {
             None | Some("server") => Ok(Self::Server),
+            Some("telegram") | Some("telegram-bot") => Ok(Self::Telegram),
             Some("repl") | Some("cli") => Ok(Self::Repl {
                 agent: Agent::parse(args.into_iter().skip(1))?,
             }),
@@ -269,6 +279,7 @@ include!("state.rs");
 include!("runtime.rs");
 include!("turns.rs");
 include!("api.rs");
+include!("telegram.rs");
 
 #[cfg(test)]
 mod tests;
