@@ -1306,6 +1306,10 @@ describe("App", () => {
         await clickAndSettle(await screen.findByRole("button", { name: "Git status" }));
         await clickAndSettle(await screen.findByRole("button", { name: "Open tab" }));
         expect(within(getSessionTablist()).getByText(/^Git:/)).toBeInTheDocument();
+
+        await clickAndSettle(await screen.findByRole("button", { name: "Projects" }));
+        expect(screen.getByRole("combobox", { name: "Project" })).toHaveTextContent("TermAl");
+        expect(screen.queryByRole("button", { name: /Load repo/i })).not.toBeInTheDocument();
       } finally {
         window.localStorage.clear();
         HTMLElement.prototype.scrollIntoView = originalScrollIntoView;

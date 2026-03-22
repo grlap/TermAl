@@ -27,6 +27,7 @@ const applyGitFileActionMock = vi.mocked(applyGitFileAction);
 const commitGitChangesMock = vi.mocked(commitGitChanges);
 const fetchGitDiffMock = vi.mocked(fetchGitDiff);
 const fetchGitStatusMock = vi.mocked(fetchGitStatus);
+const PROJECT_ID = "project-1";
 const SESSION_ID = "session-1";
 
 async function clickAndSettle(target: HTMLElement, eventInit?: MouseEventInit) {
@@ -78,7 +79,7 @@ describe("GitStatusPanel", () => {
     );
 
     await waitFor(() => {
-      expect(fetchGitStatusMock).toHaveBeenCalledWith("/repo", null);
+      expect(fetchGitStatusMock).toHaveBeenCalledWith("/repo", SESSION_ID, { projectId: null });
     });
 
     expect(await screen.findByRole("button", { name: /^Staged\b/i })).toBeInTheDocument();
@@ -92,7 +93,9 @@ describe("GitStatusPanel", () => {
       expect(fetchGitDiffMock).toHaveBeenCalledWith({
         originalPath: undefined,
         path: "ui/src/panels/ControlPanelSurface.tsx",
+        projectId: null,
         sectionId: "staged",
+        sessionId: SESSION_ID,
         statusCode: "A",
         workdir: "/repo",
       });
@@ -377,6 +380,8 @@ describe("GitStatusPanel", () => {
     await waitFor(() => {
       expect(commitGitChangesMock).toHaveBeenCalledWith({
         message: "Tighten git footer",
+        projectId: null,
+        sessionId: SESSION_ID,
         workdir: "/repo",
       });
     });
@@ -399,9 +404,31 @@ describe("GitStatusPanel", () => {
     );
 
     await waitFor(() => {
-      expect(fetchGitStatusMock).toHaveBeenCalledWith("/repo", null);
+      expect(fetchGitStatusMock).toHaveBeenCalledWith("/repo", null, { projectId: null });
     });
 
+    expect(await screen.findByText("Working tree clean.")).toBeInTheDocument();
+  });
+
+  it("loads git status with project scope when a project tab provides one", async () => {
+    fetchGitStatusMock.mockResolvedValue(makeStatusResponse([]));
+
+    render(
+      <GitStatusPanel
+        projectId={PROJECT_ID}
+        sessionId={null}
+        workdir="/repo"
+        showPathControls={false}
+        onOpenDiff={() => {}}
+        onOpenWorkdir={() => {}}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(fetchGitStatusMock).toHaveBeenCalledWith("/repo", null, { projectId: PROJECT_ID });
+    });
+
+    expect(screen.queryByRole("button", { name: /Load repo/i })).not.toBeInTheDocument();
     expect(await screen.findByText("Working tree clean.")).toBeInTheDocument();
   });
 
@@ -427,7 +454,7 @@ describe("GitStatusPanel", () => {
     );
 
     await waitFor(() => {
-      expect(fetchGitStatusMock).toHaveBeenCalledWith("/repo", null);
+      expect(fetchGitStatusMock).toHaveBeenCalledWith("/repo", null, { projectId: null });
     });
 
     await clickAndSettle(await screen.findByRole("button", { name: /^main\.rs$/i }));
@@ -436,7 +463,9 @@ describe("GitStatusPanel", () => {
       expect(fetchGitDiffMock).toHaveBeenCalledWith({
         originalPath: undefined,
         path: "src/main.rs",
+        projectId: null,
         sectionId: "unstaged",
+        sessionId: null,
         statusCode: "M",
         workdir: "/repo",
       });
@@ -616,6 +645,8 @@ describe("GitStatusPanel", () => {
         action: "stage",
         originalPath: undefined,
         path: "scratch.txt",
+        projectId: null,
+        sessionId: SESSION_ID,
         statusCode: "?",
         workdir: "/repo",
       });
@@ -674,6 +705,8 @@ describe("GitStatusPanel", () => {
           action: "stage",
           originalPath: undefined,
           path: "ui/src/App.tsx",
+          projectId: null,
+          sessionId: SESSION_ID,
           statusCode: "M",
           workdir: "/repo",
         },
@@ -681,6 +714,8 @@ describe("GitStatusPanel", () => {
           action: "stage",
           originalPath: "legacy/Widget.tsx",
           path: "ui/src/Widget.tsx",
+          projectId: null,
+          sessionId: SESSION_ID,
           statusCode: "R",
           workdir: "/repo",
         },
@@ -824,6 +859,8 @@ describe("GitStatusPanel", () => {
           action: "unstage",
           originalPath: undefined,
           path: "ui/src/App.tsx",
+          projectId: null,
+          sessionId: SESSION_ID,
           statusCode: "M",
           workdir: "/repo",
         },
@@ -831,6 +868,8 @@ describe("GitStatusPanel", () => {
           action: "unstage",
           originalPath: "legacy/Widget.tsx",
           path: "ui/src/Widget.tsx",
+          projectId: null,
+          sessionId: SESSION_ID,
           statusCode: "R",
           workdir: "/repo",
         },

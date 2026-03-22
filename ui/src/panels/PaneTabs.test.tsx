@@ -244,6 +244,59 @@ describe("PaneTabs", () => {
     expect(screen.getByTitle("1 Codex notice")).toBeInTheDocument();
   });
 
+  it("scrolls overflowing tabs with the mouse wheel", () => {
+    renderPaneTabs({
+      sessionLookup: new Map([
+        ["session-1", makeSession("session-1", "C:/repo", "Session One")],
+        ["session-2", makeSession("session-2", "C:/repo", "Session Two")],
+        ["session-3", makeSession("session-3", "C:/repo", "Session Three")],
+      ]),
+      tabs: [
+        {
+          id: "tab-session-1",
+          kind: "session",
+          sessionId: "session-1",
+        },
+        {
+          id: "tab-session-2",
+          kind: "session",
+          sessionId: "session-2",
+        },
+        {
+          id: "tab-session-3",
+          kind: "session",
+          sessionId: "session-3",
+        },
+      ],
+    });
+
+    const tablist = screen.getByRole("tablist", { name: "Tile tabs" });
+    let scrollLeft = 40;
+    Object.defineProperty(tablist, "clientWidth", {
+      configurable: true,
+      value: 220,
+    });
+    Object.defineProperty(tablist, "scrollWidth", {
+      configurable: true,
+      value: 620,
+    });
+    Object.defineProperty(tablist, "scrollLeft", {
+      configurable: true,
+      get: () => scrollLeft,
+      set: (value: number) => {
+        scrollLeft = value;
+      },
+    });
+
+    const wheelEvent = new WheelEvent("wheel", {
+      bubbles: true,
+      cancelable: true,
+      deltaY: 96,
+    });
+    tablist.dispatchEvent(wheelEvent);
+    expect(scrollLeft).toBe(136);
+  });
+
   it("shows project and remote info in the status tooltip", async () => {
     renderPaneTabs({
       projectLookup: new Map([

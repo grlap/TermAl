@@ -40,17 +40,21 @@ export function GitStatusPanel({
   onStatusChange,
   onOpenDiff,
   onOpenWorkdir,
-  sessionId: _sessionId = null,
+  projectId = null,
+  sessionId = null,
   workdir,
   showPathControls = true,
 }: {
   onStatusChange?: (status: GitStatusResponse | null) => void;
   onOpenDiff: (diff: GitDiffResponse, options?: GitDiffOpenOptions) => void;
   onOpenWorkdir: (path: string) => void;
+  projectId?: string | null;
   sessionId?: string | null;
   workdir: string | null;
   showPathControls?: boolean;
 }) {
+  const normalizedProjectId = projectId?.trim() ?? "";
+  const normalizedSessionId = sessionId?.trim() ?? "";
   const normalizedWorkdir = workdir?.trim() ?? "";
   const cachedPanelState = normalizedWorkdir ? gitStatusPanelCache.get(normalizedWorkdir) ?? null : null;
   const [workdirDraft, setWorkdirDraft] = useState(workdir ?? "");
@@ -139,7 +143,9 @@ export function GitStatusPanel({
     setIsLoading(true);
     setError(null);
     try {
-      const response = await fetchGitStatus(path, null);
+      const response = await fetchGitStatus(path, normalizedSessionId || null, {
+        projectId: normalizedProjectId || null,
+      });
       if (latestLoadRequestIdRef.current !== requestId) {
         return;
       }
@@ -179,7 +185,9 @@ export function GitStatusPanel({
         const diff = await fetchGitDiff({
           originalPath: node.originalPath,
           path: node.path,
+          projectId: normalizedProjectId || null,
           sectionId,
+          sessionId: normalizedSessionId || null,
           statusCode: node.statusCode,
           workdir: activeWorkdir,
         });
@@ -194,7 +202,7 @@ export function GitStatusPanel({
         setPendingActionKey((current) => (current === actionKey ? null : current));
       }
     },
-    [normalizedWorkdir, onOpenDiff, visibleStatus?.workdir],
+    [normalizedProjectId, normalizedSessionId, normalizedWorkdir, onOpenDiff, visibleStatus?.workdir],
   );
 
   const handleTreeAction = useCallback(
@@ -222,6 +230,8 @@ export function GitStatusPanel({
             action,
             originalPath: target.originalPath,
             path: target.path,
+            projectId: normalizedProjectId || null,
+            sessionId: normalizedSessionId || null,
             statusCode: target.statusCode,
             workdir: activeWorkdir,
           });
@@ -236,7 +246,9 @@ export function GitStatusPanel({
         setError(getErrorMessage(nextError));
         if (targets.length > 1) {
           try {
-            const refreshedStatus = await fetchGitStatus(activeWorkdir, null);
+            const refreshedStatus = await fetchGitStatus(activeWorkdir, normalizedSessionId || null, {
+              projectId: normalizedProjectId || null,
+            });
             setStatus(refreshedStatus);
             setStatusCacheKey(normalizedWorkdir || activeWorkdir);
             onStatusChangeRef.current?.(refreshedStatus);
@@ -248,7 +260,7 @@ export function GitStatusPanel({
         setPendingActionKey((current) => (current === actionKey ? null : current));
       }
     },
-    [normalizedWorkdir, visibleStatus?.workdir],
+    [normalizedProjectId, normalizedSessionId, normalizedWorkdir, visibleStatus?.workdir],
   );
 
   const handleFileAction = useCallback(
@@ -314,6 +326,8 @@ export function GitStatusPanel({
     try {
       const response = await commitGitChanges({
         message: nextMessage,
+        projectId: normalizedProjectId || null,
+        sessionId: normalizedSessionId || null,
         workdir: activeWorkdir,
       });
       setStatus(response.status);

@@ -5,6 +5,7 @@ import {
   useState,
   type CSSProperties,
   type DragEvent as ReactDragEvent,
+  type WheelEvent as ReactWheelEvent,
 } from "react";
 import { createPortal } from "react-dom";
 import { AgentIcon } from "../agent-icon";
@@ -206,6 +207,32 @@ export function PaneTabs({
       left: distance * direction,
       behavior: "smooth",
     });
+  }
+
+  function handleTabRailWheel(event: ReactWheelEvent<HTMLDivElement>) {
+    const node = paneTabsRef.current;
+    if (!node || event.ctrlKey) {
+      return;
+    }
+
+    const maxScrollLeft = Math.max(node.scrollWidth - node.clientWidth, 0);
+    if (maxScrollLeft <= 0) {
+      return;
+    }
+
+    const dominantDelta =
+      Math.abs(event.deltaX) > Math.abs(event.deltaY) ? event.deltaX : event.deltaY;
+    if (Math.abs(dominantDelta) < 0.5) {
+      return;
+    }
+
+    const nextScrollLeft = Math.min(Math.max(node.scrollLeft + dominantDelta, 0), maxScrollLeft);
+    if (Math.abs(nextScrollLeft - node.scrollLeft) < 0.5) {
+      return;
+    }
+
+    event.preventDefault();
+    node.scrollLeft = nextScrollLeft;
   }
 
   function resolveTabInsertIndex(clientX: number) {
@@ -442,6 +469,7 @@ export function PaneTabs({
         onDragOver={handleTabRailDragOver}
         onDragLeave={handleTabRailDragLeave}
         onDrop={handleTabRailDrop}
+        onWheel={handleTabRailWheel}
       >
         {tabs.length > 0 ? (
           tabs.map((tab, index) => {

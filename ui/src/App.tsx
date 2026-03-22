@@ -871,6 +871,42 @@ export function resolveControlPanelWorkspaceRoot(
   return isLocalRemoteId(resolveProjectRemoteId(selectedProject)) ? selectedProject.rootPath : null;
 }
 
+function resolveWorkspaceScopedProjectId(
+  originProjectId: string | null,
+  originSessionId: string | null,
+  sessionLookup: ReadonlyMap<string, Session>,
+  projectLookup: ReadonlyMap<string, Project>,
+) {
+  const normalizedOriginProjectId = originProjectId?.trim() ?? "";
+  if (normalizedOriginProjectId && projectLookup.has(normalizedOriginProjectId)) {
+    return normalizedOriginProjectId;
+  }
+
+  const originSessionProjectId = originSessionId
+    ? (sessionLookup.get(originSessionId)?.projectId?.trim() ?? "")
+    : "";
+  return originSessionProjectId && projectLookup.has(originSessionProjectId) ? originSessionProjectId : null;
+}
+
+function resolveWorkspaceScopedSessionId(
+  projectId: string,
+  preferredSessionId: string | null,
+  activeSession: Session | null,
+  sessions: readonly Session[],
+  sessionLookup: ReadonlyMap<string, Session>,
+) {
+  const preferredSession = preferredSessionId ? (sessionLookup.get(preferredSessionId) ?? null) : null;
+  if (preferredSession?.projectId === projectId) {
+    return preferredSession.id;
+  }
+
+  if (activeSession?.projectId === projectId) {
+    return activeSession.id;
+  }
+
+  return sessions.find((session) => session.projectId === projectId)?.id ?? null;
+}
+
 function createInitialWorkspaceBootstrap() {
   const storedLayout = getStoredWorkspaceLayout();
   const controlPanelSide: ControlPanelSide = storedLayout?.controlPanelSide ?? "left";
@@ -1264,7 +1300,9 @@ export default function App() {
       return;
     }
 
-    void fetchGitStatus(normalizedGitWorkdir, null)
+    void fetchGitStatus(normalizedGitWorkdir, controlPanelSessionId, {
+      projectId: selectedProject?.id ?? null,
+    })
       .then((status) => {
         if (cancelled) {
           return;
@@ -1281,7 +1319,7 @@ export default function App() {
     return () => {
       cancelled = true;
     };
-  }, [controlPanelGitWorkdir]);
+  }, [controlPanelGitWorkdir, controlPanelSessionId, selectedProject?.id]);
 
   const sessionListSearchResults = useMemo(() => {
     if (!hasSessionListSearch || !sessionListSearchIndex) {
@@ -3887,6 +3925,7 @@ export default function App() {
             <section className="control-panel-section-stack control-panel-section-git" aria-label="Git status">
               {renderControlPanelProjectScope()}
               <GitStatusPanel
+                projectId={selectedProject?.id ?? null}
                 sessionId={controlPanelSessionId}
                 workdir={controlPanelGitWorkdir}
                 showPathControls={false}
@@ -6395,6 +6434,7 @@ function WorkspaceNodeView({
           node={node.second}
           codexState={codexState}
           projectLookup={projectLookup}
+          remoteLookup={remoteLookup}
           paneLookup={paneLookup}
           sessionLookup={sessionLookup}
           activePaneId={activePaneId}
@@ -6722,7 +6762,64 @@ function SessionPaneView({
     (pane.activeSessionId ? sessionLookup.get(pane.activeSessionId) : null) ??
     sessionTabs[0]?.session ??
     null;
+  const allKnownSessions = useMemo(() => Array.from(sessionLookup.values()), [sessionLookup]);
+  const workspaceProjectOptions = useMemo<readonly ComboboxOption[]>(
+    () =>
+      Array.from(projectLookup.values()).map((project) => ({
+        label: project.name,
+        value: project.id,
+        description: project.rootPath,
+      })),
+    [projectLookup],
+  );
   const sessions = useMemo(() => sessionTabs.map(({ session }) => session), [sessionTabs]);
+  const activeFilesystemScopeProjectId = activeFilesystemTab
+    ? resolveWorkspaceScopedProjectId(
+        activeFilesystemOriginProjectId,
+        activeFilesystemOriginSessionId,
+        sessionLookup,
+        projectLookup,
+      )
+    : null;
+  const activeGitScopeProjectId = activeGitStatusTab
+    ? resolveWorkspaceScopedProjectId(
+        activeGitStatusOriginProjectId,
+        activeGitStatusOriginSessionId,
+        sessionLookup,
+        projectLookup,
+      )
+    : null;
+  const activeFilesystemScopedSessionId = activeFilesystemScopeProjectId
+    ? resolveWorkspaceScopedSessionId(
+        activeFilesystemScopeProjectId,
+        activeFilesystemOriginSessionId,
+        activeSession,
+        allKnownSessions,
+        sessionLookup,
+      )
+    : activeFilesystemOriginSessionId;
+  const activeGitScopedSessionId = activeGitScopeProjectId
+    ? resolveWorkspaceScopedSessionId(
+        activeGitScopeProjectId,
+        activeGitStatusOriginSessionId,
+        activeSession,
+        allKnownSessions,
+        sessionLookup,
+      )
+    : activeGitStatusOriginSessionId;
+  const activeFilesystemScopedRootPath =
+    activeFilesystemTab?.rootPath ??
+    (activeFilesystemScopeProjectId
+      ? resolveControlPanelWorkspaceRoot(projectLookup.get(activeFilesystemScopeProjectId) ?? null, null)
+      : null);
+  const activeGitScopedWorkdir =
+    activeGitStatusTab?.workdir ??
+    (activeGitScopeProjectId
+      ? resolveControlPanelWorkspaceRoot(projectLookup.get(activeGitScopeProjectId) ?? null, null)
+      : null);
+  const shouldRenderFilesystemProjectScope =
+    !!activeFilesystemScopeProjectId && workspaceProjectOptions.length > 0;
+  const shouldRenderGitProjectScope = !!activeGitScopeProjectId && workspaceProjectOptions.length > 0;
   const [sourceDraft, setSourceDraft] = useState(pane.sourcePath ?? "");
   const [fileState, setFileState] = useState<SourceFileState>({
     status: "idle",
@@ -6738,6 +6835,28 @@ function SessionPaneView({
   const [newResponseIndicatorByKey, setNewResponseIndicatorByKey] = useState<
     Record<string, true | undefined>
   >({});
+
+  function renderWorkspaceTabProjectScope(
+    scopeId: string,
+    value: string,
+    onChange: (nextValue: string) => void,
+  ) {
+    return (
+      <div className="control-panel-scope-control">
+        <label className="control-panel-scope-label" htmlFor={scopeId}>
+          Project
+        </label>
+        <ThemedCombobox
+          id={scopeId}
+          className="control-panel-scope-combobox"
+          value={value}
+          options={workspaceProjectOptions}
+          onChange={onChange}
+          aria-label="Project"
+        />
+      </div>
+    );
+  }
   const [isSessionFindOpen, setIsSessionFindOpen] = useState(false);
   const [sessionFindQuery, setSessionFindQuery] = useState("");
   const [sessionFindActiveIndex, setSessionFindActiveIndex] = useState(0);
@@ -7769,45 +7888,143 @@ function SessionPaneView({
             }
           />
         ) : activeFilesystemTab ? (
-          <FileSystemPanel
-            rootPath={activeFilesystemTab.rootPath}
-            sessionId={activeFilesystemOriginSessionId}
-            projectId={activeFilesystemOriginProjectId}
-            onOpenPath={(path, options) =>
-              onOpenSourceTab(
-                pane.id,
-                path,
-                activeFilesystemOriginSessionId,
-                activeFilesystemOriginProjectId,
-                options,
-              )
-            }
-            onOpenRootPath={(path) =>
-              onOpenFilesystemTab(
-                pane.id,
-                path,
-                activeFilesystemOriginSessionId,
-                activeFilesystemOriginProjectId,
-              )
-            }
-          />
+          shouldRenderFilesystemProjectScope ? (
+            <section className="control-panel-section-stack control-panel-section-files" aria-label="Files">
+              {renderWorkspaceTabProjectScope(
+                `workspace-project-scope-${pane.id}-filesystem`,
+                activeFilesystemScopeProjectId,
+                (nextProjectId) => {
+                  const nextProject = projectLookup.get(nextProjectId) ?? null;
+                  if (!nextProject) {
+                    return;
+                  }
+
+                  onOpenFilesystemTab(
+                    pane.id,
+                    resolveControlPanelWorkspaceRoot(nextProject, null),
+                    resolveWorkspaceScopedSessionId(
+                      nextProjectId,
+                      null,
+                      activeSession,
+                      allKnownSessions,
+                      sessionLookup,
+                    ),
+                    nextProject.id,
+                  );
+                },
+              )}
+              <FileSystemPanel
+                rootPath={activeFilesystemScopedRootPath}
+                sessionId={activeFilesystemScopedSessionId}
+                projectId={activeFilesystemScopeProjectId}
+                showPathControls={false}
+                onOpenPath={(path, options) =>
+                  onOpenSourceTab(
+                    pane.id,
+                    path,
+                    activeFilesystemScopedSessionId,
+                    activeFilesystemScopeProjectId,
+                    options,
+                  )
+                }
+                onOpenRootPath={(path) =>
+                  onOpenFilesystemTab(
+                    pane.id,
+                    path,
+                    activeFilesystemScopedSessionId,
+                    activeFilesystemScopeProjectId,
+                  )
+                }
+              />
+            </section>
+          ) : (
+            <FileSystemPanel
+              rootPath={activeFilesystemTab.rootPath}
+              sessionId={activeFilesystemOriginSessionId}
+              projectId={activeFilesystemOriginProjectId}
+              onOpenPath={(path, options) =>
+                onOpenSourceTab(
+                  pane.id,
+                  path,
+                  activeFilesystemOriginSessionId,
+                  activeFilesystemOriginProjectId,
+                  options,
+                )
+              }
+              onOpenRootPath={(path) =>
+                onOpenFilesystemTab(
+                  pane.id,
+                  path,
+                  activeFilesystemOriginSessionId,
+                  activeFilesystemOriginProjectId,
+                )
+              }
+            />
+          )
         ) : activeGitStatusTab ? (
-          <GitStatusPanel
-            sessionId={activeGitStatusOriginSessionId}
-            workdir={activeGitStatusTab.workdir}
-            onOpenDiff={(diff, options) =>
-              onOpenGitStatusDiffPreviewTab(
-                pane.id,
-                diff,
-                activeGitStatusOriginSessionId,
-                activeGitStatusOriginProjectId,
-                options,
-              )
-            }
-            onOpenWorkdir={(path) =>
-              onOpenGitStatusTab(pane.id, path, activeGitStatusOriginSessionId, activeGitStatusOriginProjectId)
-            }
-          />
+          shouldRenderGitProjectScope ? (
+            <section className="control-panel-section-stack control-panel-section-git" aria-label="Git status">
+              {renderWorkspaceTabProjectScope(
+                `workspace-project-scope-${pane.id}-git`,
+                activeGitScopeProjectId,
+                (nextProjectId) => {
+                  const nextProject = projectLookup.get(nextProjectId) ?? null;
+                  if (!nextProject) {
+                    return;
+                  }
+
+                  onOpenGitStatusTab(
+                    pane.id,
+                    resolveControlPanelWorkspaceRoot(nextProject, null),
+                    resolveWorkspaceScopedSessionId(
+                      nextProjectId,
+                      null,
+                      activeSession,
+                      allKnownSessions,
+                      sessionLookup,
+                    ),
+                    nextProject.id,
+                  );
+                },
+              )}
+              <GitStatusPanel
+                projectId={activeGitScopeProjectId}
+                sessionId={activeGitScopedSessionId}
+                showPathControls={false}
+                workdir={activeGitScopedWorkdir}
+                onOpenDiff={(diff, options) =>
+                  onOpenGitStatusDiffPreviewTab(
+                    pane.id,
+                    diff,
+                    activeGitScopedSessionId,
+                    activeGitScopeProjectId,
+                    options,
+                  )
+                }
+                onOpenWorkdir={(path) =>
+                  onOpenGitStatusTab(pane.id, path, activeGitScopedSessionId, activeGitScopeProjectId)
+                }
+              />
+            </section>
+          ) : (
+            <GitStatusPanel
+              projectId={activeGitStatusOriginProjectId}
+              sessionId={activeGitStatusOriginSessionId}
+              workdir={activeGitStatusTab.workdir}
+              onOpenDiff={(diff, options) =>
+                onOpenGitStatusDiffPreviewTab(
+                  pane.id,
+                  diff,
+                  activeGitStatusOriginSessionId,
+                  activeGitStatusOriginProjectId,
+                  options,
+                )
+              }
+              onOpenWorkdir={(path) =>
+                onOpenGitStatusTab(pane.id, path, activeGitStatusOriginSessionId, activeGitStatusOriginProjectId)
+              }
+            />
+          )
         ) : activeInstructionDebuggerTab ? (
           <InstructionDebuggerPanel
             session={activeInstructionDebuggerSession}
