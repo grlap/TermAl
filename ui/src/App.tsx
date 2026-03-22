@@ -4185,6 +4185,7 @@ export default function App() {
               node={workspace.root}
               codexState={codexState}
               projectLookup={projectLookup}
+              remoteLookup={remoteLookup}
               paneLookup={paneLookup}
               sessionLookup={sessionLookup}
               activePaneId={workspace.activePaneId}
@@ -5977,6 +5978,7 @@ function WorkspaceNodeView({
   node,
   codexState,
   projectLookup,
+  remoteLookup,
   paneLookup,
   sessionLookup,
   activePaneId,
@@ -6047,6 +6049,7 @@ function WorkspaceNodeView({
   node: WorkspaceNode;
   codexState: CodexState;
   projectLookup: Map<string, Project>;
+  remoteLookup: Map<string, RemoteConfig>;
   paneLookup: Map<string, WorkspacePane>;
   sessionLookup: Map<string, Session>;
   activePaneId: string | null;
@@ -6196,6 +6199,7 @@ function WorkspaceNodeView({
         pane={pane}
         codexState={codexState}
         projectLookup={projectLookup}
+        remoteLookup={remoteLookup}
         sessionLookup={sessionLookup}
         isActive={pane.id === activePaneId}
         isLoading={isLoading}
@@ -6308,6 +6312,7 @@ function WorkspaceNodeView({
           node={node.first}
           codexState={codexState}
           projectLookup={projectLookup}
+          remoteLookup={remoteLookup}
           paneLookup={paneLookup}
           sessionLookup={sessionLookup}
           activePaneId={activePaneId}
@@ -6466,6 +6471,7 @@ function SessionPaneView({
   pane,
   codexState,
   projectLookup,
+  remoteLookup,
   sessionLookup,
   isActive,
   isLoading,
@@ -6535,6 +6541,7 @@ function SessionPaneView({
   pane: WorkspacePane;
   codexState: CodexState;
   projectLookup: Map<string, Project>;
+  remoteLookup: Map<string, RemoteConfig>;
   sessionLookup: Map<string, Session>;
   isActive: boolean;
   isLoading: boolean;
@@ -7590,6 +7597,7 @@ function SessionPaneView({
               activeTabId={activeTab?.id ?? null}
               codexState={codexState}
               projectLookup={projectLookup}
+              remoteLookup={remoteLookup}
               sessionLookup={sessionLookup}
               draggedTab={draggedTab}
               onSelectTab={onSelectTab}

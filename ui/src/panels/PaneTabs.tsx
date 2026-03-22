@@ -16,12 +16,19 @@ import {
   relativizePathToWorkspace,
 } from "../path-display";
 import {
+  createBuiltinLocalRemote,
+  isLocalRemoteId,
+  remoteConnectionLabel,
+  remoteDisplayName,
+  resolveProjectRemoteId,
+} from "../remotes";
+import {
   attachWorkspaceTabDragData,
   createWorkspaceTabDrag,
   type WorkspaceTabDrag,
 } from "../tab-drag";
 import { measurePaneTabStatusTooltipPosition } from "../pane-tab-status-tooltip";
-import type { CodexRateLimitWindow, CodexState, Project, Session } from "../types";
+import type { CodexRateLimitWindow, CodexState, Project, RemoteConfig, Session } from "../types";
 import type { TabDropPlacement, WorkspaceTab } from "../workspace";
 
 type ActiveCodexTooltipState = {
@@ -45,6 +52,7 @@ export function PaneTabs({
   activeTabId,
   codexState,
   projectLookup,
+  remoteLookup,
   sessionLookup,
   draggedTab,
   onSelectTab,
@@ -60,6 +68,7 @@ export function PaneTabs({
   activeTabId: string | null;
   codexState: CodexState;
   projectLookup: Map<string, Project>;
+  remoteLookup: Map<string, RemoteConfig>;
   sessionLookup: Map<string, Session>;
   draggedTab: WorkspaceTabDrag | null;
   onSelectTab: (paneId: string, tabId: string) => void;
@@ -438,11 +447,7 @@ export function PaneTabs({
           tabs.map((tab, index) => {
             const session = tab.kind === "session" ? (sessionLookup.get(tab.sessionId) ?? null) : null;
             const tabActive = tab.id === activeTabId;
-            const showCodexStatus = Boolean(
-              session &&
-                session.agent === "Codex" &&
-                (session.externalSessionId || codexState.rateLimits || hasCodexNotices),
-            );
+            const showCodexStatus = Boolean(session && hasCodexTabStatusTooltip(session));
             const showDropBefore = activeTabInsertIndex === index;
             const showDropAfter = activeTabInsertIndex === tabs.length && index === tabs.length - 1;
             const codexStatusTooltipId = showCodexStatus ? `codex-status-${paneId}-${tab.id}` : undefined;
@@ -611,6 +616,8 @@ export function PaneTabs({
               id={activeCodexTooltip.id}
               session={activeCodexTooltipSession}
               codexState={codexState}
+              projectLookup={projectLookup}
+              remoteLookup={remoteLookup}
               style={activeCodexTooltipStyle}
             />,
             document.body,
@@ -678,17 +685,25 @@ async function handleCopyTabPath(path: string | null, onDone: () => void) {
 function CodexTabStatusTooltip({
   codexState,
   id,
+  projectLookup,
+  remoteLookup,
   session,
   style,
 }: {
   codexState: CodexState;
   id: string;
+  projectLookup: ReadonlyMap<string, Project>;
+  remoteLookup: ReadonlyMap<string, RemoteConfig>;
   session: Session;
   style: CSSProperties;
 }) {
   const rateLimits = codexState.rateLimits;
   const notices = codexState.notices ?? [];
-  const hasStatusGrid = Boolean(session.externalSessionId || rateLimits?.primary || rateLimits?.secondary);
+  const projectLabel = formatCodexTooltipProjectLabel(session, projectLookup);
+  const locationLabel = formatCodexTooltipLocationLabel(session, projectLookup, remoteLookup);
+  const hasStatusGrid = Boolean(
+    projectLabel || locationLabel || session.externalSessionId || rateLimits?.primary || rateLimits?.secondary,
+  );
 
   return (
     <div id={id} className="pane-tab-status-tooltip" role="tooltip" style={style}>
@@ -698,6 +713,18 @@ function CodexTabStatusTooltip({
       </div>
       {hasStatusGrid ? (
         <div className="pane-tab-status-grid">
+          {projectLabel ? (
+            <>
+              <div className="pane-tab-status-key">Project:</div>
+              <div className="pane-tab-status-value">{projectLabel}</div>
+            </>
+          ) : null}
+          {locationLabel ? (
+            <>
+              <div className="pane-tab-status-key">Location:</div>
+              <div className="pane-tab-status-value">{locationLabel}</div>
+            </>
+          ) : null}
           {session.externalSessionId ? (
             <>
               <div className="pane-tab-status-key">Session:</div>
@@ -749,6 +776,52 @@ function CodexTabStatusTooltip({
 
 function formatCodexNoticeBadgeLabel(count: number) {
   return `${count} Codex notice${count === 1 ? "" : "s"}`;
+}
+
+function hasCodexTabStatusTooltip(session: Session) {
+  return session.agent === "Codex";
+}
+
+function formatCodexTooltipProjectLabel(
+  session: Session,
+  projectLookup: ReadonlyMap<string, Project>,
+) {
+  const projectId = session.projectId?.trim() ?? "";
+  if (!projectId) {
+    return "Workspace only";
+  }
+
+  return projectLookup.get(projectId)?.name ?? "Missing project";
+}
+
+function formatCodexTooltipLocationLabel(
+  session: Session,
+  projectLookup: ReadonlyMap<string, Project>,
+  remoteLookup: ReadonlyMap<string, RemoteConfig>,
+) {
+  const projectId = session.projectId?.trim() ?? "";
+  if (projectId) {
+    const project = projectLookup.get(projectId);
+    if (!project) {
+      return "Unknown (missing project)";
+    }
+
+    const remoteId = resolveProjectRemoteId(project);
+    const remote = remoteLookup.get(remoteId);
+    if (!remote) {
+      if (isLocalRemoteId(remoteId)) {
+        const localRemote = createBuiltinLocalRemote();
+        return `${remoteDisplayName(localRemote, localRemote.id)} (${remoteConnectionLabel(localRemote)})`;
+      }
+
+      return `${remoteId} (missing remote)`;
+    }
+
+    return `${remoteDisplayName(remote, remoteId)} (${remoteConnectionLabel(remote)})`;
+  }
+
+  const localRemote = createBuiltinLocalRemote();
+  return `${remoteDisplayName(localRemote, localRemote.id)} (${remoteConnectionLabel(localRemote)})`;
 }
 
 function CodexRateLimitMeter({

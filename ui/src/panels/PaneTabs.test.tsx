@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { copyTextToClipboard } from "../clipboard";
 import { PaneTabs } from "./PaneTabs";
-import type { CodexState, Project, Session } from "../types";
+import type { CodexState, Project, RemoteConfig, Session } from "../types";
 import type { WorkspaceTab } from "../workspace";
 
 vi.mock("../clipboard", () => ({
@@ -243,6 +243,52 @@ describe("PaneTabs", () => {
     expect(tooltip).toHaveTextContent("Codex is using fallback sandbox defaults.");
     expect(screen.getByTitle("1 Codex notice")).toBeInTheDocument();
   });
+
+  it("shows project and remote info in the status tooltip", async () => {
+    renderPaneTabs({
+      projectLookup: new Map([
+        ["project-1", makeProject("project-1", "/remote/repo", "Questica", "ssh-lab")],
+      ]),
+      remoteLookup: new Map([
+        [
+          "ssh-lab",
+          {
+            id: "ssh-lab",
+            name: "SSH Lab",
+            transport: "ssh",
+            enabled: true,
+            host: "lab.internal",
+            port: 22,
+            user: "grzeg",
+          },
+        ],
+      ]),
+      sessionLookup: new Map([
+        [
+          "session-1",
+          {
+            ...makeSession("session-1", "/remote/repo", "Codex Remote"),
+            projectId: "project-1",
+          },
+        ],
+      ]),
+      tabs: [
+        {
+          id: "tab-session",
+          kind: "session",
+          sessionId: "session-1",
+        },
+      ],
+    });
+
+    fireEvent.mouseEnter(screen.getByRole("tab", { name: /Codex Remote/i }));
+
+    const tooltip = await screen.findByRole("tooltip");
+    expect(tooltip).toHaveTextContent("Project:");
+    expect(tooltip).toHaveTextContent("Questica");
+    expect(tooltip).toHaveTextContent("Location:");
+    expect(tooltip).toHaveTextContent("SSH Lab (grzeg@lab.internal)");
+  });
 });
 
 function renderPaneTabs({
@@ -251,6 +297,7 @@ function renderPaneTabs({
   onRenameSessionRequest = vi.fn(),
   onSelectTab = vi.fn(),
   projectLookup = new Map<string, Project>(),
+  remoteLookup = new Map<string, RemoteConfig>(),
   sessionLookup = new Map<string, Session>(),
   tabs,
 }: {
@@ -264,6 +311,7 @@ function renderPaneTabs({
   ) => void;
   onSelectTab?: (paneId: string, tabId: string) => void;
   projectLookup?: Map<string, Project>;
+  remoteLookup?: Map<string, RemoteConfig>;
   sessionLookup?: Map<string, Session>;
   tabs: WorkspaceTab[];
 }) {
@@ -280,6 +328,7 @@ function renderPaneTabs({
       onTabDrop={() => {}}
       paneId="pane-1"
       projectLookup={projectLookup}
+      remoteLookup={remoteLookup}
       sessionLookup={sessionLookup}
       tabs={tabs}
       windowId="window-1"
@@ -287,10 +336,11 @@ function renderPaneTabs({
   );
 }
 
-function makeProject(id: string, rootPath: string): Project {
+function makeProject(id: string, rootPath: string, name = "Repo", remoteId?: string): Project {
   return {
     id,
-    name: "Repo",
+    name,
+    remoteId,
     rootPath,
   };
 }
