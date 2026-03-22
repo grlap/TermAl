@@ -13,7 +13,9 @@ import {
   openFilesystemInWorkspaceState,
   openGitStatusInWorkspaceState,
   openInstructionDebuggerInWorkspaceState,
+  openProjectListInWorkspaceState,
   openSessionInWorkspaceState,
+  openSessionListInWorkspaceState,
   openSourceInWorkspaceState,
   placeDraggedTab,
   placeExternalTab,
@@ -80,6 +82,32 @@ function makeGitStatusTab(
     kind: "gitStatus",
     workdir,
     originSessionId,
+  };
+}
+
+function makeSessionListTab(
+  id: string,
+  originSessionId: string | null,
+  originProjectId: string | null = null,
+): WorkspaceTab {
+  return {
+    id,
+    kind: "sessionList",
+    originSessionId,
+    ...(originProjectId ? { originProjectId } : {}),
+  };
+}
+
+function makeProjectListTab(
+  id: string,
+  originSessionId: string | null,
+  originProjectId: string | null = null,
+): WorkspaceTab {
+  return {
+    id,
+    kind: "projectList",
+    originSessionId,
+    ...(originProjectId ? { originProjectId } : {}),
   };
 }
 
@@ -757,6 +785,98 @@ describe("workspace helpers", () => {
     expect(next.panes.find((pane) => pane.id === "pane-a")?.activeTabId).toBe("git-a");
   });
 
+  it("openSessionListInWorkspaceState creates a sessions tab and switches the pane mode", () => {
+    const next = openSessionListInWorkspaceState(
+      makeSinglePaneWorkspace(makePane("pane-a", [makeSessionTab("tab-a", "session-a")])),
+      "pane-a",
+      "session-a",
+      "project-a",
+    );
+
+    expect(next.panes[0].tabs).toHaveLength(2);
+    expect(next.panes[0].tabs[1]).toEqual({
+      id: expect.any(String),
+      kind: "sessionList",
+      originSessionId: "session-a",
+      originProjectId: "project-a",
+    });
+    expect(next.panes[0].activeTabId).toBe(next.panes[0].tabs[1]?.id ?? null);
+    expect(next.panes[0].viewMode).toBe("sessionList");
+    expect(next.panes[0].activeSessionId).toBe("session-a");
+  });
+
+  it("openSessionListInWorkspaceState focuses the existing sessions tab instead of duplicating it", () => {
+    const paneA = makePane("pane-a", [makeSessionListTab("sessions-a", "session-a")], {
+      activeTabId: "sessions-a",
+      activeSessionId: "session-a",
+      viewMode: "sessionList",
+    });
+    const paneB = makePane("pane-b", [makeSessionTab("tab-b", "session-b")]);
+
+    const next = openSessionListInWorkspaceState(
+      makeSplitWorkspace(paneA, paneB, paneB.id),
+      paneB.id,
+      "session-b",
+      "project-b",
+    );
+
+    expect(next.activePaneId).toBe("pane-a");
+    expect(next.panes.find((pane) => pane.id === "pane-a")).toMatchObject({
+      activeTabId: "sessions-a",
+      activeSessionId: "session-a",
+      viewMode: "sessionList",
+    });
+    expect(next.panes.find((pane) => pane.id === "pane-a")?.tabs).toEqual([
+      makeSessionListTab("sessions-a", "session-a"),
+    ]);
+  });
+
+  it("openProjectListInWorkspaceState creates a projects tab and switches the pane mode", () => {
+    const next = openProjectListInWorkspaceState(
+      makeSinglePaneWorkspace(makePane("pane-a", [makeSessionTab("tab-a", "session-a")])),
+      "pane-a",
+      "session-a",
+      "project-a",
+    );
+
+    expect(next.panes[0].tabs).toHaveLength(2);
+    expect(next.panes[0].tabs[1]).toEqual({
+      id: expect.any(String),
+      kind: "projectList",
+      originSessionId: "session-a",
+      originProjectId: "project-a",
+    });
+    expect(next.panes[0].activeTabId).toBe(next.panes[0].tabs[1]?.id ?? null);
+    expect(next.panes[0].viewMode).toBe("projectList");
+    expect(next.panes[0].activeSessionId).toBe("session-a");
+  });
+
+  it("openProjectListInWorkspaceState focuses the existing projects tab instead of duplicating it", () => {
+    const paneA = makePane("pane-a", [makeProjectListTab("projects-a", "session-a")], {
+      activeTabId: "projects-a",
+      activeSessionId: "session-a",
+      viewMode: "projectList",
+    });
+    const paneB = makePane("pane-b", [makeSessionTab("tab-b", "session-b")]);
+
+    const next = openProjectListInWorkspaceState(
+      makeSplitWorkspace(paneA, paneB, paneB.id),
+      paneB.id,
+      "session-b",
+      "project-b",
+    );
+
+    expect(next.activePaneId).toBe("pane-a");
+    expect(next.panes.find((pane) => pane.id === "pane-a")).toMatchObject({
+      activeTabId: "projects-a",
+      activeSessionId: "session-a",
+      viewMode: "projectList",
+    });
+    expect(next.panes.find((pane) => pane.id === "pane-a")?.tabs).toEqual([
+      makeProjectListTab("projects-a", "session-a"),
+    ]);
+  });
+
   it("openControlPanelInWorkspaceState creates a control panel pane and preserves session context", () => {
     const next = openControlPanelInWorkspaceState(
       makeSinglePaneWorkspace(makePane("pane-a", [makeSessionTab("tab-a", "session-a")])),
@@ -1425,6 +1545,49 @@ describe("workspace helpers", () => {
     expect(rebuilt.root).toEqual({
       type: "pane",
       paneId: rebuilt.panes[0].id,
+    });
+  });
+
+  it("reconcileWorkspaceState updates origin fields for session and project list tabs", () => {
+    const next = reconcileWorkspaceState(
+      makeSinglePaneWorkspace(
+        makePane(
+          "pane-a",
+          [
+            makeSessionListTab("sessions-a", "session-a", "  project-a  "),
+            makeProjectListTab("projects-a", "session-b", "  project-b  "),
+          ],
+          {
+            activeTabId: "projects-a",
+            activeSessionId: "session-a",
+            viewMode: "projectList",
+          },
+        ),
+      ),
+      [{
+        ...makeSession("session-b"),
+        projectId: "project-b",
+      }],
+    );
+
+    expect(next.panes[0].tabs).toEqual([
+      {
+        id: "sessions-a",
+        kind: "sessionList",
+        originSessionId: null,
+        originProjectId: "project-a",
+      },
+      {
+        id: "projects-a",
+        kind: "projectList",
+        originSessionId: "session-b",
+        originProjectId: "project-b",
+      },
+    ]);
+    expect(next.panes[0]).toMatchObject({
+      activeTabId: "projects-a",
+      activeSessionId: "session-b",
+      viewMode: "projectList",
     });
   });
 

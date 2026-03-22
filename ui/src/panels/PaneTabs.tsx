@@ -797,6 +797,14 @@ function formatTabLabel(tab: WorkspaceTab, session: Session | null) {
     return "Control panel";
   }
 
+  if (tab.kind === "sessionList") {
+    return "Sessions";
+  }
+
+  if (tab.kind === "projectList") {
+    return "Projects";
+  }
+
   if (tab.kind === "instructionDebugger") {
     return `Instructions: ${formatPathTabLabel(tab.workdir, "Workspace")}`;
   }

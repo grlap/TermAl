@@ -5,6 +5,8 @@ export type SessionPaneViewMode = "session" | "prompt" | "commands" | "diffs";
 export type PaneViewMode =
   | SessionPaneViewMode
   | "controlPanel"
+  | "sessionList"
+  | "projectList"
   | "source"
   | "filesystem"
   | "gitStatus"
@@ -51,6 +53,20 @@ export type WorkspaceControlPanelTab = {
   originProjectId?: string | null;
 };
 
+export type WorkspaceSessionListTab = {
+  id: string;
+  kind: "sessionList";
+  originSessionId: string | null;
+  originProjectId?: string | null;
+};
+
+export type WorkspaceProjectListTab = {
+  id: string;
+  kind: "projectList";
+  originSessionId: string | null;
+  originProjectId?: string | null;
+};
+
 export type WorkspaceInstructionDebuggerTab = {
   id: string;
   kind: "instructionDebugger";
@@ -80,8 +96,15 @@ export type WorkspaceTab =
   | WorkspaceFilesystemTab
   | WorkspaceGitStatusTab
   | WorkspaceControlPanelTab
+  | WorkspaceSessionListTab
+  | WorkspaceProjectListTab
   | WorkspaceInstructionDebuggerTab
   | WorkspaceDiffPreviewTab;
+
+type WorkspaceOriginOnlyTab =
+  | WorkspaceControlPanelTab
+  | WorkspaceSessionListTab
+  | WorkspaceProjectListTab;
 
 export type WorkspacePane = {
   id: string;
@@ -197,6 +220,34 @@ export function createControlPanelTab(
   return {
     id: crypto.randomUUID(),
     kind: "controlPanel",
+    originSessionId,
+    ...projectOriginProps(normalizedOriginProjectId),
+  };
+}
+
+export function createSessionListTab(
+  originSessionId: string | null = null,
+  originProjectId: string | null = null,
+): WorkspaceSessionListTab {
+  const normalizedOriginProjectId = normalizeWorkspaceIdentifier(originProjectId);
+
+  return {
+    id: crypto.randomUUID(),
+    kind: "sessionList",
+    originSessionId,
+    ...projectOriginProps(normalizedOriginProjectId),
+  };
+}
+
+export function createProjectListTab(
+  originSessionId: string | null = null,
+  originProjectId: string | null = null,
+): WorkspaceProjectListTab {
+  const normalizedOriginProjectId = normalizeWorkspaceIdentifier(originProjectId);
+
+  return {
+    id: crypto.randomUUID(),
+    kind: "projectList",
     originSessionId,
     ...projectOriginProps(normalizedOriginProjectId),
   };
@@ -324,15 +375,8 @@ export function reconcileWorkspaceState(current: WorkspaceState, sessions: Sessi
           ];
         }
 
-        if (tab.kind === "controlPanel") {
-          const { originProjectId: _ignoredOriginProjectId, ...tabWithoutOriginProjectId } = tab;
-          return [
-            {
-              ...tabWithoutOriginProjectId,
-              originSessionId,
-              ...projectOriginProps(originProjectId),
-            },
-          ];
+        if (tab.kind === "controlPanel" || tab.kind === "sessionList" || tab.kind === "projectList") {
+          return [reconcileOriginOnlyTab(tab, originSessionId, originProjectId)];
         }
 
         if (tab.kind === "instructionDebugger") {
@@ -538,6 +582,42 @@ export function openControlPanelInWorkspaceState(
   return openTabInWorkspaceState(
     workspace,
     createControlPanelTab(originSessionId, originProjectId),
+    preferredPaneId,
+  );
+}
+
+export function openSessionListInWorkspaceState(
+  workspace: WorkspaceState,
+  preferredPaneId: string | null,
+  originSessionId: string | null,
+  originProjectId: string | null = null,
+): WorkspaceState {
+  const existing = findSessionListTab(workspace);
+  if (existing) {
+    return activatePane(workspace, existing.paneId, existing.tab.id);
+  }
+
+  return openTabInWorkspaceState(
+    workspace,
+    createSessionListTab(originSessionId, originProjectId),
+    preferredPaneId,
+  );
+}
+
+export function openProjectListInWorkspaceState(
+  workspace: WorkspaceState,
+  preferredPaneId: string | null,
+  originSessionId: string | null,
+  originProjectId: string | null = null,
+): WorkspaceState {
+  const existing = findProjectListTab(workspace);
+  if (existing) {
+    return activatePane(workspace, existing.paneId, existing.tab.id);
+  }
+
+  return openTabInWorkspaceState(
+    workspace,
+    createProjectListTab(originSessionId, originProjectId),
     preferredPaneId,
   );
 }
@@ -1231,14 +1311,8 @@ function syncPaneState(pane: WorkspacePane): WorkspacePane {
     };
   }
 
-  if (activeTab.kind === "controlPanel") {
-    return {
-      ...pane,
-      activeTabId: activeTab.id,
-      activeSessionId: resolveOriginSessionId(activeTab.originSessionId, pane.activeSessionId, pane.tabs),
-      viewMode: "controlPanel",
-      sourcePath: null,
-    };
+  if (activeTab.kind === "controlPanel" || activeTab.kind === "sessionList" || activeTab.kind === "projectList") {
+    return syncOriginOnlyPaneState(pane, activeTab);
   }
 
   if (activeTab.kind === "instructionDebugger") {
@@ -1342,6 +1416,58 @@ function findControlPanelTab(workspace: WorkspaceState) {
   }
 
   return null;
+}
+
+function findSessionListTab(workspace: WorkspaceState) {
+  for (const pane of workspace.panes) {
+    const tab = pane.tabs.find(
+      (candidate): candidate is WorkspaceSessionListTab => candidate.kind === "sessionList",
+    );
+    if (tab) {
+      return { paneId: pane.id, tab };
+    }
+  }
+
+  return null;
+}
+
+function findProjectListTab(workspace: WorkspaceState) {
+  for (const pane of workspace.panes) {
+    const tab = pane.tabs.find(
+      (candidate): candidate is WorkspaceProjectListTab => candidate.kind === "projectList",
+    );
+    if (tab) {
+      return { paneId: pane.id, tab };
+    }
+  }
+
+  return null;
+}
+
+function reconcileOriginOnlyTab(
+  tab: WorkspaceOriginOnlyTab,
+  originSessionId: string | null,
+  originProjectId: string | null,
+): WorkspaceOriginOnlyTab {
+  const { originProjectId: _ignoredOriginProjectId, ...tabWithoutOriginProjectId } = tab;
+  return {
+    ...tabWithoutOriginProjectId,
+    originSessionId,
+    ...projectOriginProps(originProjectId),
+  };
+}
+
+function syncOriginOnlyPaneState(
+  pane: WorkspacePane,
+  activeTab: WorkspaceOriginOnlyTab,
+): WorkspacePane {
+  return {
+    ...pane,
+    activeTabId: activeTab.id,
+    activeSessionId: resolveOriginSessionId(activeTab.originSessionId, pane.activeSessionId, pane.tabs),
+    viewMode: activeTab.kind,
+    sourcePath: null,
+  };
 }
 
 function findInstructionDebuggerTab(

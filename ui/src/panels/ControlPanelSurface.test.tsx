@@ -1,7 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 
-import { ControlPanelSurface } from "./ControlPanelSurface";
+import { createRef } from "react";
+
+import { ControlPanelSurface, type ControlPanelSurfaceHandle } from "./ControlPanelSurface";
 
 describe("ControlPanelSurface", () => {
   beforeEach(() => {
@@ -58,6 +60,36 @@ describe("ControlPanelSurface", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Files" }));
     expect(screen.queryByRole("button", { name: "New" })).not.toBeInTheDocument();
+  });
+
+  it("locks fixed sections without showing the dock or persisting order", () => {
+    const ref = createRef<ControlPanelSurfaceHandle>();
+
+    render(
+      <ControlPanelSurface
+        ref={ref}
+        fixedSection="sessions"
+        gitStatusCount={5}
+        isPreferencesOpen={false}
+        onOpenPreferences={() => {}}
+        projectCount={3}
+        sessionCount={7}
+        renderSection={(sectionId) => <div data-testid="section-body">{sectionId}</div>}
+      />,
+    );
+
+    expect(screen.queryByRole("navigation", { name: "Control panel dock" })).not.toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 2, name: "Sessions" })).toBeInTheDocument();
+    expect(screen.getByTestId("section-body")).toHaveTextContent("sessions");
+    expect(window.localStorage.getItem("termal-control-panel-section-order-v2")).toBeNull();
+
+    act(() => {
+      ref.current?.selectSection("git");
+    });
+
+    expect(screen.getByRole("heading", { level: 2, name: "Sessions" })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { level: 2, name: "Git status" })).not.toBeInTheDocument();
+    expect(screen.getByTestId("section-body")).toHaveTextContent("sessions");
   });
 
   it("uses Projects, Sessions, Files, Git status as the default dock order", () => {

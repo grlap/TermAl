@@ -51,5 +51,61 @@ describe("workspace tab drag channel messages", () => {
       }),
     ).toBe(false);
   });
+
+  it("rejects origin-only tab payloads with invalid originProjectId values", () => {
+    expect(
+      isWorkspaceTabDragChannelMessage({
+        type: "drag-start",
+        payload: {
+          dragId: "drag-1",
+          sourceWindowId: "window-a",
+          sourcePaneId: "pane-a",
+          tabId: "tab-a",
+          tab: {
+            id: "tab-a",
+            kind: "controlPanel",
+            originSessionId: null,
+            originProjectId: 7,
+          },
+        },
+      }),
+    ).toBe(false);
+
+    expect(
+      isWorkspaceTabDragChannelMessage({
+        type: "drag-start",
+        payload: {
+          dragId: "drag-2",
+          sourceWindowId: "window-a",
+          sourcePaneId: "pane-a",
+          tabId: "tab-b",
+          tab: {
+            id: "tab-b",
+            kind: "sessionList",
+            originSessionId: null,
+            originProjectId: { bad: true },
+          },
+        },
+      }),
+    ).toBe(false);
+
+    expect(
+      isWorkspaceTabDragChannelMessage({
+        type: "drag-start",
+        payload: {
+          dragId: "drag-3",
+          sourceWindowId: "window-a",
+          sourcePaneId: "pane-a",
+          tabId: "tab-c",
+          tab: {
+            id: "tab-c",
+            kind: "projectList",
+            originSessionId: null,
+            originProjectId: ["bad"],
+          },
+        },
+      }),
+    ).toBe(false);
+  });
 });
 

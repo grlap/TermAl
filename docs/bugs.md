@@ -43,6 +43,7 @@ path still calls the deprecated `util._extend` helper. TermAl hits that path bec
 noise.
 
 ---
+
 ## Feature briefs
 
 - [Project-Scoped Remotes](./features/project-scoped-remotes.md)

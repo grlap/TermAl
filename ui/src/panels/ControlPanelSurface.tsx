@@ -27,6 +27,7 @@ const LEGACY_FILES_FIRST_CONTROL_PANEL_SECTION_ORDER: readonly ControlPanelSecti
 ];
 
 type ControlPanelSurfaceProps = {
+  fixedSection?: ControlPanelSectionId | null;
   gitStatusCount: number;
   isPreferencesOpen: boolean;
   onOpenPreferences: () => void;
@@ -67,6 +68,7 @@ const PREFERENCES_ACTION: ControlPanelActionDefinition = {
 };
 
 export const ControlPanelSurface = forwardRef<ControlPanelSurfaceHandle, ControlPanelSurfaceProps>(function ControlPanelSurface({
+  fixedSection = null,
   gitStatusCount,
   isPreferencesOpen,
   onOpenPreferences,
@@ -75,7 +77,7 @@ export const ControlPanelSurface = forwardRef<ControlPanelSurfaceHandle, Control
   renderSection,
   sessionCount,
 }, ref): JSX.Element {
-  const [activeSection, setActiveSection] = useState<ControlPanelSectionId>("sessions");
+  const [activeSection, setActiveSection] = useState<ControlPanelSectionId>(fixedSection ?? "sessions");
   const [sectionOrder, setSectionOrder] = useState<ControlPanelSectionId[]>(() => getStoredControlPanelSectionOrder());
   const [draggedSectionId, setDraggedSectionId] = useState<ControlPanelSectionId | null>(null);
   const [dropTarget, setDropTarget] = useState<DockDropTarget | null>(null);
@@ -105,20 +107,38 @@ export const ControlPanelSurface = forwardRef<ControlPanelSurfaceHandle, Control
       icon: <GitStatusIcon />,
     },
   };
-  const sectionDefinitions = sectionOrder.map((sectionId) => sectionDefinitionLookup[sectionId]);
-  const activeSectionDefinition =
-    sectionDefinitions.find((definition) => definition.id === activeSection) ?? sectionDefinitions[0];
+  const sectionDefinitions = fixedSection
+    ? [sectionDefinitionLookup[fixedSection]]
+    : sectionOrder.map((sectionId) => sectionDefinitionLookup[sectionId]);
+  const activeSectionDefinition = fixedSection
+    ? sectionDefinitionLookup[fixedSection]
+    : (sectionDefinitions.find((definition) => definition.id === activeSection) ?? sectionDefinitions[0]);
   const headerActions = renderHeaderActions?.(activeSectionDefinition.id) ?? null;
 
   useImperativeHandle(ref, () => ({
     selectSection(sectionId) {
+      if (fixedSection) {
+        return;
+      }
       setActiveSection(sectionId);
     },
-  }));
+  }), [fixedSection]);
 
   useEffect(() => {
+    if (fixedSection) {
+      return;
+    }
+
     persistControlPanelSectionOrder(sectionOrder);
-  }, [sectionOrder]);
+  }, [fixedSection, sectionOrder]);
+
+  useEffect(() => {
+    if (!fixedSection) {
+      return;
+    }
+
+    setActiveSection(fixedSection);
+  }, [fixedSection]);
 
   useEffect(() => {
     if (bodyRef.current) {
@@ -173,32 +193,34 @@ export const ControlPanelSurface = forwardRef<ControlPanelSurfaceHandle, Control
 
   return (
     <div className="control-panel-shell">
-      <nav className="control-panel-activity-rail" aria-label="Control panel dock">
-        <div className="control-panel-activity-group">
-          {sectionDefinitions.map((definition) => (
-            <ControlPanelActivityButton
-              key={definition.id}
-              definition={definition}
-              dropPosition={dropTarget?.sectionId === definition.id ? dropTarget.position : null}
-              isActive={activeSection === definition.id}
-              isDragging={draggedSectionId === definition.id}
-              onDragEnd={clearDragState}
-              onDragOver={handleSectionDragOver}
-              onDragStart={handleSectionDragStart}
-              onDrop={handleSectionDrop}
-              onSelect={setActiveSection}
+      {fixedSection ? null : (
+        <nav className="control-panel-activity-rail" aria-label="Control panel dock">
+          <div className="control-panel-activity-group">
+            {sectionDefinitions.map((definition) => (
+              <ControlPanelActivityButton
+                key={definition.id}
+                definition={definition}
+                dropPosition={dropTarget?.sectionId === definition.id ? dropTarget.position : null}
+                isActive={activeSection === definition.id}
+                isDragging={draggedSectionId === definition.id}
+                onDragEnd={clearDragState}
+                onDragOver={handleSectionDragOver}
+                onDragStart={handleSectionDragStart}
+                onDrop={handleSectionDrop}
+                onSelect={setActiveSection}
+              />
+            ))}
+          </div>
+          <div className="control-panel-activity-spacer" />
+          <div className="control-panel-activity-group">
+            <ControlPanelActionButton
+              definition={PREFERENCES_ACTION}
+              isExpanded={isPreferencesOpen}
+              onClick={onOpenPreferences}
             />
-          ))}
-        </div>
-        <div className="control-panel-activity-spacer" />
-        <div className="control-panel-activity-group">
-          <ControlPanelActionButton
-            definition={PREFERENCES_ACTION}
-            isExpanded={isPreferencesOpen}
-            onClick={onOpenPreferences}
-          />
-        </div>
-      </nav>
+          </div>
+        </nav>
+      )}
 
       <section className="control-panel-content">
         <header className="control-panel-header">

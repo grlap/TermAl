@@ -89,6 +89,10 @@ function formatWorkspaceTabDragLabel(drag: WorkspaceTabDrag) {
       return `TermAl git ${drag.tab.workdir ?? "workspace"}`;
     case "controlPanel":
       return "TermAl control panel";
+    case "sessionList":
+      return "TermAl sessions";
+    case "projectList":
+      return "TermAl projects";
     case "instructionDebugger":
       return `TermAl instructions ${drag.tab.workdir ?? "workspace"}`;
     case "diffPreview":
@@ -122,7 +126,11 @@ function isWorkspaceTab(value: unknown): value is WorkspaceTab {
     case "gitStatus":
       return isNullableString(value.workdir) && isNullableString(value.originSessionId);
     case "controlPanel":
-      return isNullableString(value.originSessionId);
+      return isNullableString(value.originSessionId) && isOptionalNullableString(value.originProjectId);
+    case "sessionList":
+      return isNullableString(value.originSessionId) && isOptionalNullableString(value.originProjectId);
+    case "projectList":
+      return isNullableString(value.originSessionId) && isOptionalNullableString(value.originProjectId);
     case "instructionDebugger":
       return isNullableString(value.workdir) && isNullableString(value.originSessionId);
     case "diffPreview":

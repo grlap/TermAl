@@ -8,6 +8,7 @@ import App, {
   describeCodexModelAdjustmentNotice,
   describeSessionModelRefreshError,
   getWorkspaceSplitResizeBounds,
+  resolveControlPanelWorkspaceRoot,
   resolveStandaloneControlPanelDockWidthRatio,
   describeUnknownSessionModelWarning,
   resolveUnknownSessionModelSendAttempt,
@@ -197,7 +198,11 @@ async function withSuppressedActWarnings<T>(run: () => Promise<T>) {
 
 async function openCreateSessionDialog() {
   await clickAndSettle(await screen.findByRole("button", { name: "Sessions" }));
-  await clickAndSettle(await screen.findByRole("button", { name: "New" }));
+  const [newButton] = await screen.findAllByRole("button", { name: "New" });
+  if (!newButton) {
+    throw new Error("New session button not found.");
+  }
+  await clickAndSettle(newButton);
   await screen.findByRole("heading", { level: 2, name: "New session" });
 }
 
@@ -557,6 +562,34 @@ describe("App", () => {
     ).toBe(
       "GPT-5 Codex Mini only supports medium and high reasoning, so TermAl reset effort from minimal to medium.",
     );
+  });
+
+  it("derives control panel workspace roots only from the active workspace or a local project", () => {
+    expect(resolveControlPanelWorkspaceRoot(null, null)).toBeNull();
+    expect(resolveControlPanelWorkspaceRoot(null, "")).toBeNull();
+    expect(resolveControlPanelWorkspaceRoot(null, "   ")).toBeNull();
+    expect(resolveControlPanelWorkspaceRoot(null, "  /workspace/current  ")).toBe("/workspace/current");
+    expect(
+      resolveControlPanelWorkspaceRoot(
+        {
+          id: "project-api",
+          name: "API",
+          rootPath: "/projects/api",
+        },
+        null,
+      ),
+    ).toBe("/projects/api");
+    expect(
+      resolveControlPanelWorkspaceRoot(
+        {
+          id: "project-remote",
+          name: "Remote",
+          rootPath: "/remote/repo",
+          remoteId: "ssh-lab",
+        },
+        "/workspace/current",
+      ),
+    ).toBeNull();
   });
 
   it("rewrites model refresh failures into agent-specific guidance", () => {
@@ -1179,6 +1212,109 @@ describe("App", () => {
     }
   });
 
+  it("opens standalone tabs for sessions, projects, and git from the control panel", async () => {
+    await withSuppressedActWarnings(async () => {
+      const originalFetch = globalThis.fetch;
+      const originalEventSource = globalThis.EventSource;
+      const originalResizeObserver = globalThis.ResizeObserver;
+      const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+        const requestUrl = new URL(String(input), "http://localhost");
+        if (requestUrl.pathname === "/api/state") {
+          return jsonResponse({
+            revision: 1,
+            projects: [
+              {
+                id: "project-termal",
+                name: "TermAl",
+                rootPath: "/projects/termal",
+              },
+            ],
+            sessions: [
+              makeSession("session-1", {
+                name: "Session 1",
+                projectId: "project-termal",
+                workdir: "/projects/termal",
+              }),
+            ],
+          });
+        }
+
+        if (requestUrl.pathname === "/api/git/status") {
+          return jsonResponse({
+            ahead: 0,
+            behind: 0,
+            branch: "main",
+            files: [],
+            isClean: true,
+            repoRoot: "/projects/termal",
+            upstream: "origin/main",
+            workdir: "/projects/termal",
+          });
+        }
+
+        throw new Error(`Unexpected fetch: ${requestUrl.pathname}${requestUrl.search}`);
+      });
+
+      function getSessionTablist() {
+        const sessionTablist = screen
+          .getAllByRole("tablist")
+          .find((candidate) => within(candidate).queryByText("Session 1"));
+
+        if (!sessionTablist) {
+          throw new Error("Session tablist not found");
+        }
+
+        return sessionTablist;
+      }
+
+      window.localStorage.clear();
+      vi.stubGlobal("fetch", fetchMock);
+      vi.stubGlobal("EventSource", EventSourceMock as unknown as typeof EventSource);
+      vi.stubGlobal("ResizeObserver", ResizeObserverMock as unknown as typeof ResizeObserver);
+      const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
+      HTMLElement.prototype.scrollIntoView = vi.fn();
+
+      try {
+        await renderApp();
+        const eventSource = EventSourceMock.instances[0];
+        expect(eventSource).toBeTruthy();
+        act(() => {
+          eventSource.dispatchError();
+        });
+        await settleAsyncUi();
+
+        const sessionList = document.querySelector(".session-list");
+        if (!(sessionList instanceof HTMLDivElement)) {
+          throw new Error("Session list not found");
+        }
+
+        const sessionRowLabel = await within(sessionList).findByText("Session 1");
+        const sessionRowButton = sessionRowLabel.closest("button");
+        if (!sessionRowButton) {
+          throw new Error("Session row button not found");
+        }
+
+        await clickAndSettle(sessionRowButton);
+
+        await clickAndSettle(await screen.findByRole("button", { name: "Open tab" }));
+        expect(within(getSessionTablist()).getByText("Sessions")).toBeInTheDocument();
+
+        await clickAndSettle(await screen.findByRole("button", { name: "Projects" }));
+        await clickAndSettle(await screen.findByRole("button", { name: "Open tab" }));
+        expect(within(getSessionTablist()).getByText("Projects")).toBeInTheDocument();
+
+        await clickAndSettle(await screen.findByRole("button", { name: "Git status" }));
+        await clickAndSettle(await screen.findByRole("button", { name: "Open tab" }));
+        expect(within(getSessionTablist()).getByText(/^Git:/)).toBeInTheDocument();
+      } finally {
+        window.localStorage.clear();
+        HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
+        restoreGlobal("fetch", originalFetch);
+        restoreGlobal("EventSource", originalEventSource);
+        restoreGlobal("ResizeObserver", originalResizeObserver);
+      }
+    });
+  });
   it("keeps the control panel divider resizable when a session pane is open", async () => {
     const originalFetch = globalThis.fetch;
     const originalEventSource = globalThis.EventSource;

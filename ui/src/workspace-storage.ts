@@ -25,6 +25,8 @@ const SESSION_PANE_VIEW_MODES: readonly SessionPaneViewMode[] = [
 const PANE_VIEW_MODES: readonly PaneViewMode[] = [
   ...SESSION_PANE_VIEW_MODES,
   "controlPanel",
+  "sessionList",
+  "projectList",
   "source",
   "filesystem",
   "gitStatus",
@@ -129,6 +131,10 @@ function isWorkspaceTab(value: unknown): value is WorkspaceTab {
     case "gitStatus":
       return isNullableString(value.workdir) && isNullableString(value.originSessionId) && isOptionalNullableString(value.originProjectId);
     case "controlPanel":
+      return isNullableString(value.originSessionId) && isOptionalNullableString(value.originProjectId);
+    case "sessionList":
+      return isNullableString(value.originSessionId) && isOptionalNullableString(value.originProjectId);
+    case "projectList":
       return isNullableString(value.originSessionId) && isOptionalNullableString(value.originProjectId);
     case "instructionDebugger":
       return (

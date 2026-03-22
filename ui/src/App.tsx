@@ -148,7 +148,9 @@ import {
   openFilesystemInWorkspaceState,
   openGitStatusInWorkspaceState,
   openInstructionDebuggerInWorkspaceState,
+  openProjectListInWorkspaceState,
   openSessionInWorkspaceState,
+  openSessionListInWorkspaceState,
   openSourceInWorkspaceState,
   placeDraggedTab,
   placeExternalTab,
@@ -857,6 +859,18 @@ export function describeCodexModelAdjustmentNotice(previousSession: Session, nex
   return `${currentModelLabel} reset Codex reasoning effort from ${previousEffort} to ${nextEffort}.`;
 }
 
+export function resolveControlPanelWorkspaceRoot(
+  selectedProject: Project | null,
+  activeSessionWorkdir: string | null,
+) {
+  if (!selectedProject) {
+    const normalizedWorkdir = activeSessionWorkdir?.trim() ?? "";
+    return normalizedWorkdir || null;
+  }
+
+  return isLocalRemoteId(resolveProjectRemoteId(selectedProject)) ? selectedProject.rootPath : null;
+}
+
 function createInitialWorkspaceBootstrap() {
   const storedLayout = getStoredWorkspaceLayout();
   const controlPanelSide: ControlPanelSide = storedLayout?.controlPanelSide ?? "left";
@@ -1154,12 +1168,10 @@ export default function App() {
     ? null
     : agentReadinessByAgent.get(newSessionAgent) ?? null;
   const createSessionBlocked = createSessionAgentReadiness?.blocking ?? false;
-  const selectedProjectRemoteId = selectedProject ? resolveProjectRemoteId(selectedProject) : null;
-  const derivedControlPanelWorkspaceRoot = selectedProject
-    ? selectedProjectRemoteId && isLocalRemoteId(selectedProjectRemoteId)
-      ? selectedProject.rootPath
-      : null
-    : activeSession?.workdir ?? sessions[0]?.workdir ?? null;
+  const derivedControlPanelWorkspaceRoot = resolveControlPanelWorkspaceRoot(
+    selectedProject,
+    activeSession?.workdir ?? null,
+  );
   const derivedControlPanelFilesystemRoot = derivedControlPanelWorkspaceRoot;
   const derivedControlPanelGitWorkdir = derivedControlPanelWorkspaceRoot;
   const projectScopedSessions = useMemo(() => {
@@ -3673,6 +3685,30 @@ export default function App() {
     );
   }
 
+  function handleOpenSessionListTab(
+    paneId: string,
+    originSessionId: string | null,
+    originProjectId: string | null,
+  ) {
+    setWorkspace((current) =>
+      applyControlPanelLayout(
+        openSessionListInWorkspaceState(current, paneId, originSessionId, originProjectId),
+      ),
+    );
+  }
+
+  function handleOpenProjectListTab(
+    paneId: string,
+    originSessionId: string | null,
+    originProjectId: string | null,
+  ) {
+    setWorkspace((current) =>
+      applyControlPanelLayout(
+        openProjectListInWorkspaceState(current, paneId, originSessionId, originProjectId),
+      ),
+    );
+  }
+
   function handleOpenInstructionDebuggerTab(
     paneId: string,
     workdir: string | null,
@@ -3692,8 +3728,8 @@ export default function App() {
     );
   }
 
-  function renderWorkspaceControlSurface(paneId: string): JSX.Element {
-    const surfaceId = paneId;
+  function renderWorkspaceControlSurface(paneId: string, fixedSection: ControlPanelSectionId | null = null): JSX.Element {
+    const surfaceId = fixedSection ? `${paneId}-${fixedSection}` : paneId;
     const controlPanelProjectFilterId = `control-panel-project-scope-${surfaceId}`;
 
     function renderControlPanelProjectScope() {
@@ -3714,57 +3750,112 @@ export default function App() {
       );
     }
 
+    function renderOpenTabAction(onClick: () => void, disabled: boolean): JSX.Element {
+      return (
+        <button
+          className="control-panel-header-action control-panel-header-open-button"
+          type="button"
+          onClick={onClick}
+          disabled={disabled}
+        >
+          <span className="control-panel-header-action-icon" aria-hidden="true">
+            <svg viewBox="0 0 16 16" focusable="false" aria-hidden="true">
+              <path
+                d="M3.5 4.25h4l1.15 1.25h4A1.25 1.25 0 0 1 13.9 6.75v5.5a1.25 1.25 0 0 1-1.25 1.25H3.5A1.25 1.25 0 0 1 2.25 12.25v-6.75A1.25 1.25 0 0 1 3.5 4.25Z"
+                fill="none"
+                stroke="currentColor"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth="1.35"
+              />
+              <path
+                d="M8.75 3.25v4.5M6.5 5.5h4.5"
+                fill="none"
+                stroke="currentColor"
+                strokeLinecap="round"
+                strokeWidth="1.35"
+              />
+            </svg>
+          </span>
+          <span>Open tab</span>
+        </button>
+      );
+    }
+
     function renderControlPanelHeaderActions(sectionId: ControlPanelSectionId) {
       switch (sectionId) {
         case "files":
-          return (
-            <button
-              className="control-panel-header-action control-panel-header-open-button"
-              type="button"
-              onClick={() => handleOpenFilesystemTab(paneId, controlPanelFilesystemRoot, controlPanelSessionId, selectedProject?.id ?? null)}
-              disabled={!(controlPanelFilesystemRoot?.trim() ?? "")}
-            >
-              <span className="control-panel-header-action-icon" aria-hidden="true">
-                <svg viewBox="0 0 16 16" focusable="false" aria-hidden="true">
-                  <path
-                    d="M3.5 4.25h4l1.15 1.25h4A1.25 1.25 0 0 1 13.9 6.75v5.5a1.25 1.25 0 0 1-1.25 1.25H3.5A1.25 1.25 0 0 1 2.25 12.25v-6.75A1.25 1.25 0 0 1 3.5 4.25Z"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth="1.35"
-                  />
-                  <path
-                    d="M8.75 3.25v4.5M6.5 5.5h4.5"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeLinecap="round"
-                    strokeWidth="1.35"
-                  />
-                </svg>
-              </span>
-              <span>Open tab</span>
-            </button>
-          );
+          return fixedSection
+            ? null
+            : renderOpenTabAction(
+                () =>
+                  handleOpenFilesystemTab(
+                    paneId,
+                    controlPanelFilesystemRoot,
+                    controlPanelSessionId,
+                    selectedProject?.id ?? null,
+                  ),
+                !(controlPanelFilesystemRoot?.trim() ?? ""),
+              );
+
+        case "git":
+          return fixedSection
+            ? null
+            : renderOpenTabAction(
+                () =>
+                  handleOpenGitStatusTab(
+                    paneId,
+                    controlPanelGitWorkdir,
+                    controlPanelSessionId,
+                    selectedProject?.id ?? null,
+                  ),
+                !(controlPanelGitWorkdir?.trim() ?? ""),
+              );
+
+        case "projects":
+          return fixedSection
+            ? null
+            : renderOpenTabAction(
+                () =>
+                  handleOpenProjectListTab(
+                    paneId,
+                    controlPanelSessionId,
+                    selectedProject?.id ?? null,
+                  ),
+                false,
+              );
 
         case "sessions":
           return (
-            <button
-              className="control-panel-header-action control-panel-header-new-session-button"
-              type="button"
-              onClick={() => openCreateSessionDialog(paneId)}
-              aria-haspopup="dialog"
-              aria-expanded={isCreateSessionOpen}
-              aria-controls="create-session-dialog"
-              disabled={isCreating}
-            >
-              <span className="control-panel-header-action-icon control-panel-header-action-icon-play" aria-hidden="true">
-                <svg viewBox="0 0 16 16" focusable="false" aria-hidden="true">
-                  <path d="M5 3.5 12.25 8 5 12.5Z" fill="currentColor" />
-                </svg>
-              </span>
-              <span>{isCreating ? "Creating" : "New"}</span>
-            </button>
+            <>
+              {fixedSection
+                ? null
+                : renderOpenTabAction(
+                    () =>
+                      handleOpenSessionListTab(
+                        paneId,
+                        controlPanelSessionId,
+                        selectedProject?.id ?? null,
+                      ),
+                    false,
+                  )}
+              <button
+                className="control-panel-header-action control-panel-header-new-session-button"
+                type="button"
+                onClick={() => openCreateSessionDialog(paneId)}
+                aria-haspopup="dialog"
+                aria-expanded={isCreateSessionOpen}
+                aria-controls="create-session-dialog"
+                disabled={isCreating}
+              >
+                <span className="control-panel-header-action-icon control-panel-header-action-icon-play" aria-hidden="true">
+                  <svg viewBox="0 0 16 16" focusable="false" aria-hidden="true">
+                    <path d="M5 3.5 12.25 8 5 12.5Z" fill="currentColor" />
+                  </svg>
+                </span>
+                <span>{isCreating ? "Creating" : "New"}</span>
+              </button>
+            </>
           );
 
         default:
@@ -4054,7 +4145,8 @@ export default function App() {
     return (
       <div className="sidebar sidebar-panel">
         <ControlPanelSurface
-          ref={controlPanelSurfaceRef}
+          ref={fixedSection ? undefined : controlPanelSurfaceRef}
+          fixedSection={fixedSection}
           gitStatusCount={controlPanelGitStatusCount}
           isPreferencesOpen={isSettingsOpen}
           onOpenPreferences={() => setIsSettingsOpen(true)}
@@ -4157,7 +4249,7 @@ export default function App() {
               onRefreshAgentCommands={handleRefreshAgentCommands}
               onRollbackCodexThread={handleRollbackCodexThread}
               onUnarchiveCodexThread={handleUnarchiveCodexThread}
-              renderControlPanel={(paneId) => renderWorkspaceControlSurface(paneId)}
+              renderControlPanel={renderWorkspaceControlSurface}
               backendConnectionState={backendConnectionState}
             />
           ) : (
@@ -6090,7 +6182,7 @@ function WorkspaceNodeView({
   onRefreshAgentCommands: (sessionId: string) => void;
   onRollbackCodexThread: (sessionId: string, numTurns: number) => void;
   onUnarchiveCodexThread: (sessionId: string) => void;
-  renderControlPanel: (paneId: string) => JSX.Element;
+  renderControlPanel: (paneId: string, fixedSection?: ControlPanelSectionId | null) => JSX.Element;
   backendConnectionState: BackendConnectionState;
 }) {
   if (node.type === "pane") {
@@ -6573,11 +6665,14 @@ function SessionPaneView({
   onRefreshAgentCommands: (sessionId: string) => void;
   onRollbackCodexThread: (sessionId: string, numTurns: number) => void;
   onUnarchiveCodexThread: (sessionId: string) => void;
-  renderControlPanel: (paneId: string) => JSX.Element;
+  renderControlPanel: (paneId: string, fixedSection?: ControlPanelSectionId | null) => JSX.Element;
   backendConnectionState: BackendConnectionState;
 }) {
   const activeTab = pane.tabs.find((tab) => tab.id === pane.activeTabId) ?? pane.tabs[0] ?? null;
   const activeControlPanelTab = activeTab?.kind === "controlPanel" ? activeTab : null;
+  const activeSessionListTab = activeTab?.kind === "sessionList" ? activeTab : null;
+  const activeProjectListTab = activeTab?.kind === "projectList" ? activeTab : null;
+  const activeControlSurfaceTab = activeControlPanelTab ?? activeSessionListTab ?? activeProjectListTab;
   const activeSourceTab = activeTab?.kind === "source" ? activeTab : null;
   const activeFilesystemTab = activeTab?.kind === "filesystem" ? activeTab : null;
   const activeGitStatusTab = activeTab?.kind === "gitStatus" ? activeTab : null;
@@ -7610,7 +7705,7 @@ function SessionPaneView({
 
       <section
         ref={messageStackRef}
-        className={`message-stack${activeControlPanelTab ? " control-panel-stack" : ""}${activeSourceTab || activeDiffPreviewTab ? " editor-panel-stack" : ""}`}
+        className={`message-stack${activeControlSurfaceTab ? " control-panel-stack" : ""}${activeSourceTab || activeDiffPreviewTab ? " editor-panel-stack" : ""}`}
         onWheel={handleMessageStackWheel}
         onScroll={(event) => {
           const node = event.currentTarget;
@@ -7627,6 +7722,10 @@ function SessionPaneView({
       >
         {activeControlPanelTab ? (
           renderControlPanel(pane.id)
+        ) : activeSessionListTab ? (
+          renderControlPanel(pane.id, "sessions")
+        ) : activeProjectListTab ? (
+          renderControlPanel(pane.id, "projects")
         ) : activeSourceTab ? (
           <SourcePanel
             candidatePaths={sourceCandidatePaths}
@@ -7894,7 +7993,7 @@ function SessionPaneView({
           />
         )}
       </section>
-      {activeControlPanelTab || activeSourceTab || activeFilesystemTab || activeGitStatusTab || activeInstructionDebuggerTab || activeDiffPreviewTab ? null : (
+      {activeControlSurfaceTab || activeSourceTab || activeFilesystemTab || activeGitStatusTab || activeInstructionDebuggerTab || activeDiffPreviewTab ? null : (
         <AgentSessionPanelFooter
           paneId={pane.id}
           viewMode={pane.viewMode}
@@ -11495,6 +11594,10 @@ function labelForPaneViewMode(viewMode: PaneViewMode) {
       return "Diffs";
     case "controlPanel":
       return "Control panel";
+    case "sessionList":
+      return "Sessions";
+    case "projectList":
+      return "Projects";
     case "source":
       return "Source";
     case "filesystem":
