@@ -707,6 +707,269 @@ fn claude_task_tool_error_without_detail_records_fallback_failure_message() {
 }
 
 #[test]
+fn claude_streamed_text_appends_missing_final_suffix_after_message_stop() {
+    let state = test_app_state();
+    let session_id = test_session_id(&state, Agent::Claude);
+    let mut recorder = SessionRecorder::new(state.clone(), session_id.clone());
+    let mut turn_state = ClaudeTurnState::default();
+    let mut external_session_id = None;
+
+    handle_claude_event(
+        &json!({
+            "type": "stream_event",
+            "event": {
+                "type": "content_block_delta",
+                "delta": {
+                    "text": "Hello"
+                }
+            }
+        }),
+        &mut external_session_id,
+        &mut turn_state,
+        &mut recorder,
+    )
+    .unwrap();
+    handle_claude_event(
+        &json!({
+            "type": "stream_event",
+            "event": {
+                "type": "message_stop"
+            }
+        }),
+        &mut external_session_id,
+        &mut turn_state,
+        &mut recorder,
+    )
+    .unwrap();
+    handle_claude_event(
+        &json!({
+            "type": "assistant",
+            "message": {
+                "content": [
+                    {
+                        "type": "text",
+                        "text": "Hello there."
+                    }
+                ]
+            }
+        }),
+        &mut external_session_id,
+        &mut turn_state,
+        &mut recorder,
+    )
+    .unwrap();
+    handle_claude_event(
+        &json!({
+            "type": "result",
+            "is_error": false
+        }),
+        &mut external_session_id,
+        &mut turn_state,
+        &mut recorder,
+    )
+    .unwrap();
+
+    let snapshot = state.snapshot();
+    let session = snapshot
+        .sessions
+        .iter()
+        .find(|session| session.id == session_id)
+        .expect("Claude session should exist");
+
+    assert_eq!(session.messages.len(), 1);
+    assert!(matches!(
+        session.messages.first(),
+        Some(Message::Text { text, .. }) if text == "Hello there."
+    ));
+}
+
+#[test]
+fn claude_streamed_text_skips_duplicate_final_text_after_message_stop() {
+    let state = test_app_state();
+    let session_id = test_session_id(&state, Agent::Claude);
+    let mut recorder = SessionRecorder::new(state.clone(), session_id.clone());
+    let mut turn_state = ClaudeTurnState::default();
+    let mut external_session_id = None;
+
+    handle_claude_event(
+        &json!({
+            "type": "stream_event",
+            "event": {
+                "type": "content_block_delta",
+                "delta": {
+                    "text": "Hello there."
+                }
+            }
+        }),
+        &mut external_session_id,
+        &mut turn_state,
+        &mut recorder,
+    )
+    .unwrap();
+    handle_claude_event(
+        &json!({
+            "type": "stream_event",
+            "event": {
+                "type": "message_stop"
+            }
+        }),
+        &mut external_session_id,
+        &mut turn_state,
+        &mut recorder,
+    )
+    .unwrap();
+    handle_claude_event(
+        &json!({
+            "type": "assistant",
+            "message": {
+                "content": [
+                    {
+                        "type": "text",
+                        "text": "Hello there."
+                    }
+                ]
+            }
+        }),
+        &mut external_session_id,
+        &mut turn_state,
+        &mut recorder,
+    )
+    .unwrap();
+    handle_claude_event(
+        &json!({
+            "type": "result",
+            "is_error": false
+        }),
+        &mut external_session_id,
+        &mut turn_state,
+        &mut recorder,
+    )
+    .unwrap();
+
+    let snapshot = state.snapshot();
+    let session = snapshot
+        .sessions
+        .iter()
+        .find(|session| session.id == session_id)
+        .expect("Claude session should exist");
+
+    assert_eq!(session.messages.len(), 1);
+    assert!(matches!(
+        session.messages.first(),
+        Some(Message::Text { text, .. }) if text == "Hello there."
+    ));
+}
+
+#[test]
+fn claude_tool_use_after_streamed_text_starts_followup_in_new_message() {
+    let state = test_app_state();
+    let session_id = test_session_id(&state, Agent::Claude);
+    let mut recorder = SessionRecorder::new(state.clone(), session_id.clone());
+    let mut turn_state = ClaudeTurnState::default();
+    let mut external_session_id = None;
+
+    handle_claude_event(
+        &json!({
+            "type": "stream_event",
+            "event": {
+                "type": "content_block_delta",
+                "delta": {
+                    "text": "Hello"
+                }
+            }
+        }),
+        &mut external_session_id,
+        &mut turn_state,
+        &mut recorder,
+    )
+    .unwrap();
+    handle_claude_event(
+        &json!({
+            "type": "stream_event",
+            "event": {
+                "type": "message_stop"
+            }
+        }),
+        &mut external_session_id,
+        &mut turn_state,
+        &mut recorder,
+    )
+    .unwrap();
+    handle_claude_event(
+        &json!({
+            "type": "assistant",
+            "message": {
+                "content": [
+                    {
+                        "type": "tool_use",
+                        "id": "bash-1",
+                        "name": "Bash",
+                        "input": {
+                            "command": "pwd"
+                        }
+                    }
+                ]
+            }
+        }),
+        &mut external_session_id,
+        &mut turn_state,
+        &mut recorder,
+    )
+    .unwrap();
+    handle_claude_event(
+        &json!({
+            "type": "stream_event",
+            "event": {
+                "type": "content_block_delta",
+                "delta": {
+                    "text": "World"
+                }
+            }
+        }),
+        &mut external_session_id,
+        &mut turn_state,
+        &mut recorder,
+    )
+    .unwrap();
+    handle_claude_event(
+        &json!({
+            "type": "result",
+            "is_error": false
+        }),
+        &mut external_session_id,
+        &mut turn_state,
+        &mut recorder,
+    )
+    .unwrap();
+
+    let snapshot = state.snapshot();
+    let session = snapshot
+        .sessions
+        .iter()
+        .find(|session| session.id == session_id)
+        .expect("Claude session should exist");
+
+    assert_eq!(session.messages.len(), 3);
+    assert!(matches!(
+        session.messages.first(),
+        Some(Message::Text { text, .. }) if text == "Hello"
+    ));
+    assert!(matches!(
+        session.messages.get(1),
+        Some(Message::Command {
+            command,
+            output,
+            status,
+            ..
+        }) if command == "pwd" && output.is_empty() && *status == CommandStatus::Running
+    ));
+    assert!(matches!(
+        session.messages.get(2),
+        Some(Message::Text { text, .. }) if text == "World"
+    ));
+}
+
+#[test]
 fn acp_json_rpc_request_without_timeout_waits_for_late_response() {
     let pending_requests = Arc::new(Mutex::new(HashMap::new()));
     let (result_tx, result_rx) = mpsc::channel();
@@ -6078,6 +6341,125 @@ fn shared_codex_agent_message_content_delta_event_ignores_stale_turn_id_from_par
 }
 
 #[test]
+fn shared_codex_agent_message_final_event_appends_missing_suffix_after_streamed_delta() {
+    let state = test_app_state();
+    let session_id = test_session_id(&state, Agent::Codex);
+    let (runtime, _input_rx, process) = test_shared_codex_runtime("shared-codex-agent-final-suffix");
+
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(&session_id)
+            .expect("Codex session should exist");
+        inner.sessions[index].runtime = SessionRuntime::Codex(CodexRuntimeHandle {
+            runtime_id: runtime.runtime_id.clone(),
+            input_tx: runtime.input_tx.clone(),
+            process,
+            shared_session: Some(SharedCodexSessionHandle {
+                runtime: runtime.clone(),
+                session_id: session_id.clone(),
+            }),
+        });
+        inner.sessions[index].session.status = SessionStatus::Active;
+    }
+
+    runtime
+        .sessions
+        .lock()
+        .expect("shared Codex session mutex poisoned")
+        .insert(
+            session_id.clone(),
+            SharedCodexSessionState {
+                thread_id: Some("conversation-123".to_owned()),
+                ..SharedCodexSessionState::default()
+            },
+        );
+    runtime
+        .thread_sessions
+        .lock()
+        .expect("shared Codex thread mutex poisoned")
+        .insert("conversation-123".to_owned(), session_id.clone());
+
+    let pending_requests = Arc::new(Mutex::new(HashMap::new()));
+    let turn_started = json!({
+        "method": "turn/started",
+        "params": {
+            "threadId": "conversation-123",
+            "turn": {
+                "id": "turn-123"
+            }
+        }
+    });
+    let delta_message = json!({
+        "method": "codex/event/agent_message_content_delta",
+        "params": {
+            "conversationId": "conversation-123",
+            "id": "turn-123",
+            "msg": {
+                "delta": "Hello",
+                "item_id": "msg-123",
+                "thread_id": "conversation-123",
+                "turn_id": "turn-123",
+                "type": "agent_message_content_delta"
+            }
+        }
+    });
+    let final_message = json!({
+        "method": "codex/event/agent_message",
+        "params": {
+            "conversationId": "conversation-123",
+            "id": "turn-123",
+            "msg": {
+                "message": "Hello there.",
+                "phase": "final_answer",
+                "type": "agent_message"
+            }
+        }
+    });
+
+    handle_shared_codex_app_server_message(
+        &turn_started,
+        &state,
+        &runtime.runtime_id,
+        &pending_requests,
+        &runtime.sessions,
+        &runtime.thread_sessions,
+    )
+    .unwrap();
+    handle_shared_codex_app_server_message(
+        &delta_message,
+        &state,
+        &runtime.runtime_id,
+        &pending_requests,
+        &runtime.sessions,
+        &runtime.thread_sessions,
+    )
+    .unwrap();
+    handle_shared_codex_app_server_message(
+        &final_message,
+        &state,
+        &runtime.runtime_id,
+        &pending_requests,
+        &runtime.sessions,
+        &runtime.thread_sessions,
+    )
+    .unwrap();
+
+    let snapshot = state.snapshot();
+    let session = snapshot
+        .sessions
+        .iter()
+        .find(|session| session.id == session_id)
+        .expect("updated session should be present");
+
+    assert_eq!(session.messages.len(), 1);
+    assert!(matches!(
+        session.messages.last(),
+        Some(Message::Text { text, .. }) if text == "Hello there."
+    ));
+}
+
+#[test]
 fn shared_codex_agent_message_content_delta_streams_without_duplicate_final_message() {
     let state = test_app_state();
     let session_id = test_session_id(&state, Agent::Codex);
@@ -6668,6 +7050,84 @@ fn repl_codex_task_complete_event_buffers_subagent_result_until_final_message() 
             "Final REPL Codex answer.".to_owned(),
         ]
     );
+}
+
+#[test]
+fn repl_codex_streamed_agent_message_appends_missing_completed_suffix() {
+    let mut recorder = TestRecorder::default();
+    let mut repl_state = ReplCodexSessionState::default();
+    let turn_started = json!({
+        "method": "turn/started",
+        "params": {
+            "threadId": "conversation-123",
+            "turn": {
+                "id": "turn-stream-1"
+            }
+        }
+    });
+    let delta = json!({
+        "method": "item/agentMessage/delta",
+        "params": {
+            "threadId": "conversation-123",
+            "itemId": "item-1",
+            "delta": "Hello"
+        }
+    });
+    let completed = json!({
+        "method": "item/completed",
+        "params": {
+            "threadId": "conversation-123",
+            "item": {
+                "id": "item-1",
+                "type": "agentMessage",
+                "text": "Hello from REPL."
+            }
+        }
+    });
+    let turn_completed = json!({
+        "method": "turn/completed",
+        "params": {
+            "threadId": "conversation-123",
+            "turn": {
+                "id": "turn-stream-1",
+                "error": null
+            }
+        }
+    });
+
+    handle_repl_codex_app_server_notification(
+        "turn/started",
+        &turn_started,
+        &mut repl_state,
+        &mut recorder,
+    )
+    .unwrap();
+    handle_repl_codex_app_server_notification(
+        "item/agentMessage/delta",
+        &delta,
+        &mut repl_state,
+        &mut recorder,
+    )
+    .unwrap();
+    handle_repl_codex_app_server_notification(
+        "item/completed",
+        &completed,
+        &mut repl_state,
+        &mut recorder,
+    )
+    .unwrap();
+    handle_repl_codex_app_server_notification(
+        "turn/completed",
+        &turn_completed,
+        &mut repl_state,
+        &mut recorder,
+    )
+    .unwrap();
+
+    assert_eq!(recorder.text_deltas, vec!["Hello".to_owned(), " from REPL.".to_owned()]);
+    assert!(recorder.texts.is_empty());
+    assert!(repl_state.turn_completed);
+    assert!(repl_state.current_turn_id.is_none());
 }
 
 #[test]

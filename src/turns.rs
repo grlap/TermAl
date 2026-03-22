@@ -1936,6 +1936,41 @@ fn handle_repl_codex_thread_compacted(
     recorder.push_text("Codex compacted the thread context for this turn.")
 }
 
+fn record_repl_codex_completed_agent_message(
+    turn_state: &mut CodexTurnState,
+    recorder: &mut dyn TurnRecorder,
+    item_id: &str,
+    text: &str,
+) -> Result<()> {
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        return Ok(());
+    }
+
+    if turn_state.current_agent_message_id.as_deref() != Some(item_id) {
+        recorder.finish_streaming_text()?;
+        turn_state.current_agent_message_id = Some(item_id.to_owned());
+    }
+
+    if !turn_state.streamed_agent_message_item_ids.contains(item_id) {
+        let mut recorder_ref = DynTurnRecorderRef::new(recorder);
+        begin_codex_assistant_output(turn_state, &mut recorder_ref)?;
+        return recorder.push_text(trimmed);
+    }
+
+    let entry = turn_state
+        .streamed_agent_message_text_by_item_id
+        .entry(item_id.to_owned())
+        .or_default();
+    let Some(unseen_suffix) = next_codex_delta_suffix(entry, trimmed) else {
+        return Ok(());
+    };
+
+    let mut recorder_ref = DynTurnRecorderRef::new(recorder);
+    begin_codex_assistant_output(turn_state, &mut recorder_ref)?;
+    recorder.text_delta(&unseen_suffix)
+}
+
 fn handle_repl_codex_event_item_completed(
     message: &Value,
     current_turn_id: Option<&str>,
@@ -1952,18 +1987,12 @@ fn handle_repl_codex_event_item_completed(
     match item.get("type").and_then(Value::as_str) {
         Some("AgentMessage") => {
             let item_id = item.get("id").and_then(Value::as_str).unwrap_or("");
-            if turn_state.streamed_agent_message_item_ids.contains(item_id) {
-                return Ok(());
-            }
-
             let text = item
                 .get("content")
                 .and_then(Value::as_array)
                 .and_then(|content| concatenate_codex_text_parts(content));
             if let Some(text) = text.as_deref() {
-                let mut recorder_ref = DynTurnRecorderRef::new(recorder);
-                begin_codex_assistant_output(turn_state, &mut recorder_ref)?;
-                recorder.push_text(text)?;
+                record_repl_codex_completed_agent_message(turn_state, recorder, item_id, text)?;
             }
         }
         Some("CommandExecution") => {
@@ -2022,9 +2051,6 @@ fn handle_repl_codex_event_agent_message(
     if !shared_codex_event_matches_active_turn(current_turn_id, shared_codex_event_turn_id(message)) {
         return Ok(());
     }
-    if !turn_state.streamed_agent_message_item_ids.is_empty() {
-        return Ok(());
-    }
 
     let Some(text) = message
         .pointer("/params/msg/message")
@@ -2035,6 +2061,10 @@ fn handle_repl_codex_event_agent_message(
     let trimmed = text.trim();
     if trimmed.is_empty() {
         return Ok(());
+    }
+
+    if let Some(item_id) = turn_state.current_agent_message_id.clone() {
+        return record_repl_codex_completed_agent_message(turn_state, recorder, &item_id, trimmed);
     }
 
     let mut recorder_ref = DynTurnRecorderRef::new(recorder);
@@ -2050,12 +2080,8 @@ fn handle_repl_codex_app_server_item_completed(
     match item.get("type").and_then(Value::as_str) {
         Some("agentMessage") => {
             let item_id = item.get("id").and_then(Value::as_str).unwrap_or("");
-            if !turn_state.streamed_agent_message_item_ids.contains(item_id) {
-                if let Some(text) = item.get("text").and_then(Value::as_str) {
-                    let mut recorder_ref = DynTurnRecorderRef::new(recorder);
-                    begin_codex_assistant_output(turn_state, &mut recorder_ref)?;
-                    recorder.push_text(text)?;
-                }
+            if let Some(text) = item.get("text").and_then(Value::as_str) {
+                record_repl_codex_completed_agent_message(turn_state, recorder, item_id, text)?;
             }
         }
         Some("commandExecution") => {
@@ -2399,6 +2425,7 @@ struct ClaudeTurnState {
     parallel_agents: HashMap<String, ParallelAgentProgress>,
     permission_denied_this_turn: bool,
     pending_tools: HashMap<String, ClaudeToolUse>,
+    streamed_assistant_text: String,
     saw_text_delta: bool,
 }
 
@@ -2506,6 +2533,60 @@ fn parse_claude_tool_permission_request(message: &Value) -> Option<ClaudeToolPer
     })
 }
 
+fn record_claude_assistant_text_delta(
+    state: &mut ClaudeTurnState,
+    recorder: &mut dyn TurnRecorder,
+    text: &str,
+) -> Result<()> {
+    let delta = if state.saw_text_delta {
+        text
+    } else {
+        text.trim_start_matches('\n')
+    };
+    if delta.is_empty() {
+        return Ok(());
+    }
+
+    recorder.text_delta(delta)?;
+    state.saw_text_delta = true;
+    state.streamed_assistant_text.push_str(delta);
+    Ok(())
+}
+
+fn record_claude_completed_assistant_text(
+    state: &mut ClaudeTurnState,
+    recorder: &mut dyn TurnRecorder,
+    text: &str,
+) -> Result<()> {
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        return Ok(());
+    }
+
+    if !state.saw_text_delta {
+        state.streamed_assistant_text.clear();
+        state.streamed_assistant_text.push_str(trimmed);
+        return recorder.push_text(trimmed);
+    }
+
+    let Some(unseen_suffix) = next_codex_delta_suffix(&mut state.streamed_assistant_text, trimmed)
+    else {
+        return Ok(());
+    };
+
+    recorder.text_delta(&unseen_suffix)
+}
+
+fn finish_claude_assistant_text_stream<R: TurnRecorder + ?Sized>(
+    state: &mut ClaudeTurnState,
+    recorder: &mut R,
+) -> Result<()> {
+    recorder.finish_streaming_text()?;
+    state.streamed_assistant_text.clear();
+    state.saw_text_delta = false;
+    Ok(())
+}
+
 fn handle_claude_event(
     message: &Value,
     session_id: &mut Option<String>,
@@ -2538,20 +2619,13 @@ fn handle_claude_event(
                             .or_else(|| message.pointer("/event/delta/text_delta"))
                             .and_then(Value::as_str)
                         {
-                            let text = if state.saw_text_delta {
-                                text
-                            } else {
-                                text.trim_start_matches('\n')
-                            };
-                            if !text.is_empty() {
-                                recorder.text_delta(text)?;
-                                state.saw_text_delta = true;
-                            }
+                            record_claude_assistant_text_delta(state, recorder, text)?;
                         }
                     }
                 }
                 "message_stop" => {
-                    recorder.finish_streaming_text()?;
+                    // Claude can emit the final assistant payload after `message_stop`.
+                    // Keep the current text bubble open so any unseen suffix lands in it.
                 }
                 _ => {}
             }
@@ -2567,22 +2641,24 @@ fn handle_claude_event(
                     };
 
                     match content_type {
-                        "text" if !state.saw_text_delta => {
+                        "text" => {
                             if let Some(text) = content.get("text").and_then(Value::as_str) {
                                 if state.permission_denied_this_turn {
                                     continue;
                                 }
-                                recorder.push_text(text)?;
+                                record_claude_completed_assistant_text(state, recorder, text)?;
                             }
                         }
                         "thinking" => {
                             if let Some(thinking) = content.get("thinking").and_then(Value::as_str)
                             {
+                                finish_claude_assistant_text_stream(state, recorder)?;
                                 let lines = split_thinking_lines(thinking);
                                 recorder.push_thinking("Thinking", lines)?;
                             }
                         }
                         "tool_use" => {
+                            finish_claude_assistant_text_stream(state, recorder)?;
                             register_claude_tool_use(content, state, recorder)?;
                         }
                         _ => {}
@@ -2594,8 +2670,7 @@ fn handle_claude_event(
             handle_claude_tool_result(message, state, recorder)?;
         }
         "result" => {
-            recorder.finish_streaming_text()?;
-            state.saw_text_delta = false;
+            finish_claude_assistant_text_stream(state, recorder)?;
             state.approval_keys_this_turn.clear();
             state.parallel_agent_group_key = None;
             state.parallel_agent_order.clear();

@@ -2738,6 +2738,43 @@ fn handle_shared_codex_thread_compacted(
     push_shared_codex_turn_notice(state, session_id, turn_state, "Codex compacted the thread context for this turn.")
 }
 
+fn record_completed_codex_agent_message(
+    turn_state: &mut CodexTurnState,
+    recorder: &mut impl TurnRecorder,
+    state: &AppState,
+    session_id: &str,
+    item_id: &str,
+    text: &str,
+) -> Result<()> {
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        return Ok(());
+    }
+
+    if turn_state.current_agent_message_id.as_deref() != Some(item_id) {
+        recorder.finish_streaming_text()?;
+        turn_state.current_agent_message_id = Some(item_id.to_owned());
+    }
+
+    if !turn_state.streamed_agent_message_item_ids.contains(item_id) {
+        begin_codex_assistant_output(turn_state, recorder)?;
+        recorder.push_text(trimmed)?;
+        return remember_codex_first_assistant_message_id(state, session_id, turn_state);
+    }
+
+    let entry = turn_state
+        .streamed_agent_message_text_by_item_id
+        .entry(item_id.to_owned())
+        .or_default();
+    let Some(unseen_suffix) = next_codex_delta_suffix(entry, trimmed) else {
+        return Ok(());
+    };
+
+    begin_codex_assistant_output(turn_state, recorder)?;
+    recorder.text_delta(&unseen_suffix)?;
+    remember_codex_first_assistant_message_id(state, session_id, turn_state)
+}
+
 fn handle_shared_codex_event_item_completed(
     message: &Value,
     state: &AppState,
@@ -2758,19 +2795,20 @@ fn handle_shared_codex_event_item_completed(
     match item.get("type").and_then(Value::as_str) {
         Some("AgentMessage") => {
             let item_id = item.get("id").and_then(Value::as_str).unwrap_or("");
-            if turn_state.streamed_agent_message_item_ids.contains(item_id) {
-                return Ok(());
-            }
-
             let text = item
                 .get("content")
                 .and_then(Value::as_array)
                 .and_then(|content| concatenate_codex_text_parts(content));
 
             if let Some(text) = text.as_deref() {
-                begin_codex_assistant_output(turn_state, recorder)?;
-                recorder.push_text(text)?;
-                remember_codex_first_assistant_message_id(state, session_id, turn_state)?;
+                record_completed_codex_agent_message(
+                    turn_state,
+                    recorder,
+                    state,
+                    session_id,
+                    item_id,
+                    text,
+                )?;
             }
         }
         Some("CommandExecution") => {
@@ -2928,10 +2966,6 @@ fn handle_shared_codex_event_agent_message(
         return Ok(());
     }
 
-    if !turn_state.streamed_agent_message_item_ids.is_empty() {
-        return Ok(());
-    }
-
     let Some(text) = message
         .pointer("/params/msg/message")
         .and_then(Value::as_str)
@@ -2941,6 +2975,17 @@ fn handle_shared_codex_event_agent_message(
     let trimmed = text.trim();
     if trimmed.is_empty() {
         return Ok(());
+    }
+
+    if let Some(item_id) = turn_state.current_agent_message_id.clone() {
+        return record_completed_codex_agent_message(
+            turn_state,
+            recorder,
+            state,
+            session_id,
+            &item_id,
+            trimmed,
+        );
     }
 
     begin_codex_assistant_output(turn_state, recorder)?;
@@ -3368,12 +3413,15 @@ fn handle_codex_app_server_item_completed(
     match item.get("type").and_then(Value::as_str) {
         Some("agentMessage") => {
             let item_id = item.get("id").and_then(Value::as_str).unwrap_or("");
-            if !turn_state.streamed_agent_message_item_ids.contains(item_id) {
-                if let Some(text) = item.get("text").and_then(Value::as_str) {
-                    begin_codex_assistant_output(turn_state, recorder)?;
-                    recorder.push_text(text)?;
-                    remember_codex_first_assistant_message_id(state, session_id, turn_state)?;
-                }
+            if let Some(text) = item.get("text").and_then(Value::as_str) {
+                record_completed_codex_agent_message(
+                    turn_state,
+                    recorder,
+                    state,
+                    session_id,
+                    item_id,
+                    text,
+                )?;
             }
         }
         Some("commandExecution") => {
@@ -4644,7 +4692,11 @@ fn spawn_claude_runtime(
                     };
 
                     if let Some(action) = action {
-                        let action_result = match action {
+                        let action_result = finish_claude_assistant_text_stream(
+                            &mut turn_state,
+                            &mut recorder,
+                        )
+                        .and_then(|_| match action {
                             ClaudeControlRequestAction::QueueApproval {
                                 title,
                                 command,
@@ -4656,7 +4708,7 @@ fn spawn_claude_runtime(
                                 .map_err(|err| {
                                     anyhow!("failed to auto-approve Claude tool request: {err}")
                                 }),
-                        };
+                        });
 
                         if let Err(err) = action_result {
                             let _ = reader_state.fail_turn_if_runtime_matches(
