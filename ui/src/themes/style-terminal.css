@@ -95,15 +95,6 @@
 [data-ui-style="terminal-style"] .bubble-assistant {
   max-width: 100%;
   margin-left: 0;
-  background: var(--surface-card);
-}
-
-[data-ui-style="terminal-style"] .bubble-you {
-  border-inline-start: 0.24rem solid color-mix(in srgb, var(--signal-green) 68%, var(--line));
-}
-
-[data-ui-style="terminal-style"] .bubble-assistant {
-  border-inline-start: 0.24rem solid color-mix(in srgb, var(--signal-blue) 52%, var(--line));
 }
 
 
@@ -119,31 +110,16 @@
   width: 100%;
   max-width: 100%;
   justify-self: stretch;
-  background: var(--code-bg);
-  color: var(--code-fg);
   border-radius: var(--terminal-card-radius);
-  border-color: color-mix(in srgb, var(--signal-green) 18%, var(--line));
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, white 2%, transparent);
 }
 
 [data-ui-style="terminal-style"] .command-card .message-meta {
   margin-bottom: 0.45rem;
-  color: color-mix(in srgb, var(--code-fg) 58%, var(--signal-green));
-}
-
-[data-ui-style="terminal-style"] .command-card .message-meta-end {
-  color: color-mix(in srgb, var(--code-fg) 54%, var(--signal-green));
-}
-
-[data-ui-style="terminal-style"] .command-card .command-card-label {
-  color: var(--signal-green);
 }
 
 [data-ui-style="terminal-style"] .command-card .command-panel {
   margin-top: 0.5rem;
-  border: 0;
   border-radius: 0;
-  background: transparent;
 }
 
 [data-ui-style="terminal-style"] .command-card .command-row {
@@ -151,19 +127,9 @@
   gap: calc(0.7rem * var(--density-scale));
 }
 
-[data-ui-style="terminal-style"] .command-card .command-row + .command-row {
-  border-top-color: color-mix(in srgb, var(--line) 72%, transparent);
-}
-
-[data-ui-style="terminal-style"] .command-card .command-row-label {
-  color: var(--signal-green);
-}
-
 [data-ui-style="terminal-style"] .command-card .command-row-body {
   padding: 0;
-  border: 0;
   border-radius: 0;
-  background: transparent;
   box-shadow: none;
 }
 
@@ -171,40 +137,14 @@
 [data-ui-style="terminal-style"] .command-card .command-output-shell,
 [data-ui-style="terminal-style"] .command-card .command-output-shell.empty {
   border-radius: 0;
-  background: transparent;
-}
-
-[data-ui-style="terminal-style"] .command-card .command-input-shell.collapsed::after,
-[data-ui-style="terminal-style"] .command-card .command-output-shell.collapsed::after {
-  background: linear-gradient(180deg, transparent, var(--code-bg));
 }
 
 [data-ui-style="terminal-style"] .command-card .command-text-input,
 [data-ui-style="terminal-style"] .command-card .command-text-output,
 [data-ui-style="terminal-style"] .command-card .command-text-placeholder {
   padding: 0;
-  color: var(--code-fg);
-}
-
-[data-ui-style="terminal-style"] .command-card .command-text-placeholder {
-  color: color-mix(in srgb, var(--muted) 74%, var(--code-fg));
 }
 
 [data-ui-style="terminal-style"] .command-card .command-icon-button {
   border-radius: var(--terminal-control-radius);
-  background: color-mix(in srgb, var(--paper) 8%, var(--code-bg));
-  border-color: color-mix(in srgb, var(--signal-green) 18%, var(--line));
-  color: color-mix(in srgb, var(--code-fg) 54%, var(--signal-green));
-}
-
-[data-ui-style="terminal-style"] .command-card .command-icon-button:hover {
-  border-color: color-mix(in srgb, var(--signal-green) 34%, transparent);
-  background: color-mix(in srgb, var(--signal-green) 8%, var(--code-bg));
-  color: var(--code-fg);
-}
-
-[data-ui-style="terminal-style"] .command-card .command-icon-button.copied {
-  border-color: color-mix(in srgb, var(--signal-green) 36%, transparent);
-  background: color-mix(in srgb, var(--signal-green) 12%, var(--code-bg));
-  color: var(--signal-green);
 }
