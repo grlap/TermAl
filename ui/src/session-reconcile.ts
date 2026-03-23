@@ -186,6 +186,7 @@ function reconcileTextMessage(previous: TextMessage, next: TextMessage): TextMes
     previous.timestamp === next.timestamp &&
     previous.author === next.author &&
     previous.text === next.text &&
+    (previous.expandedText ?? null) === (next.expandedText ?? null) &&
     attachments === previous.attachments
   ) {
     return previous;
@@ -492,6 +493,7 @@ function reconcilePendingPrompts(
     if (
       previousPrompt.timestamp === nextPrompt.timestamp &&
       previousPrompt.text === nextPrompt.text &&
+      (previousPrompt.expandedText ?? null) === (nextPrompt.expandedText ?? null) &&
       attachments === previousPrompt.attachments
     ) {
       if (previous[index]?.id !== nextPrompt.id) {
