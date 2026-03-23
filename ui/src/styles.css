@@ -21,6 +21,10 @@
   --control-size-sm: calc(2rem * var(--density-scale));
   --control-size-md: calc(2.1rem * var(--density-scale));
   --control-size-lg: calc(2.35rem * var(--density-scale));
+  --control-panel-rail-width: calc(53px * var(--density-scale));
+  --control-panel-activity-button-size: calc(34px * var(--density-scale));
+  --control-panel-activity-icon-size: calc(20px * var(--density-scale));
+  --control-panel-activity-badge-size: calc(18px * var(--density-scale));
   --icon-size-2xs: calc(8px * var(--density-scale));
   --icon-size-xs: calc(12px * var(--density-scale));
   --icon-size-sm: calc(14px * var(--density-scale));
@@ -129,7 +133,7 @@ textarea {
 .control-panel-shell {
   display: grid;
   flex: 1 1 auto;
-  grid-template-columns: calc(3.3rem * var(--density-scale)) minmax(0, 1fr);
+  grid-template-columns: var(--control-panel-rail-width) minmax(0, 1fr);
   height: 100%;
   min-height: 0;
   overflow: hidden;
@@ -165,10 +169,10 @@ textarea {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: var(--control-size-md);
-  height: var(--control-size-md);
+  width: var(--control-panel-activity-button-size);
+  height: var(--control-panel-activity-button-size);
   border: 0;
-  border-radius: calc(0.8rem * var(--density-scale));
+  border-radius: calc(13px * var(--density-scale));
   background: transparent;
   color: var(--muted);
   cursor: pointer;
@@ -186,9 +190,9 @@ textarea {
 .control-panel-activity-button::before {
   content: "";
   position: absolute;
-  left: calc(-0.45rem * var(--density-scale));
-  top: var(--space-sm);
-  bottom: var(--space-sm);
+  left: calc(-7px * var(--density-scale));
+  top: calc(7px * var(--density-scale));
+  bottom: calc(7px * var(--density-scale));
   width: 3px;
   border-radius: 999px;
   background: transparent;
@@ -231,8 +235,8 @@ textarea {
 
 .control-panel-activity-icon {
   display: inline-flex;
-  width: var(--icon-size-lg);
-  height: var(--icon-size-lg);
+  width: var(--control-panel-activity-icon-size);
+  height: var(--control-panel-activity-icon-size);
 }
 
 .control-panel-activity-icon svg {
@@ -319,18 +323,18 @@ textarea {
 
 .control-panel-activity-badge {
   position: absolute;
-  right: -0.14rem;
-  bottom: -0.04rem;
+  right: calc(-2px * var(--density-scale));
+  bottom: calc(-1px * var(--density-scale));
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-width: var(--icon-size-md);
-  height: var(--icon-size-md);
+  min-width: var(--control-panel-activity-badge-size);
+  height: var(--control-panel-activity-badge-size);
   padding: 0 0.24rem;
   border-radius: 999px;
   background: var(--button-primary-bg);
   color: white;
-  font-size: calc(10px * var(--density-scale));
+  font-size: calc(11px * var(--density-scale));
   font-weight: 700;
   line-height: 1;
   box-shadow: 0 6px 16px var(--button-primary-shadow);
@@ -6499,10 +6503,10 @@ textarea {
   }
 
   .control-panel-activity-button::before {
-    left: 0.45rem;
-    right: 0.45rem;
+    left: calc(7px * var(--density-scale));
+    right: calc(7px * var(--density-scale));
     top: auto;
-    bottom: -0.7rem;
+    bottom: calc(-10px * var(--density-scale));
     width: auto;
     height: 3px;
   }
