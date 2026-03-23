@@ -9,6 +9,7 @@
   --control-radius-button: min(var(--button-radius-tight), 0.66rem);
   --control-radius-large: min(var(--button-radius-large), 1rem);
   --control-radius-pill: min(var(--button-radius-tight), 0.72rem);
+  --code-surface-radius: var(--control-radius-large);
   --density-scale: 1;
   --space-2xs: calc(0.15rem * var(--density-scale));
   --space-xs: calc(0.3rem * var(--density-scale));
@@ -3545,7 +3546,7 @@ textarea {
 .command-panel {
   margin-top: 0.85rem;
   border: 1px solid var(--line);
-  border-radius: 1rem;
+  border-radius: var(--code-surface-radius);
   background: var(--surface-white-soft);
   overflow: hidden;
 }
@@ -3702,7 +3703,7 @@ textarea {
 
 .command-output-shell {
   position: relative;
-  border-radius: 1rem;
+  border-radius: var(--code-surface-radius);
   background: var(--code-bg);
   color: var(--code-fg);
 }
@@ -5212,7 +5213,7 @@ textarea {
 .approval-command {
   display: block;
   margin: 0.85rem 0 0;
-  border-radius: 1rem;
+  border-radius: var(--code-surface-radius);
   background: var(--code-bg);
   color: var(--code-fg);
   padding: 1rem;
@@ -5357,7 +5358,7 @@ textarea {
 
 .diff-preview-shell {
   position: relative;
-  border-radius: 1rem;
+  border-radius: var(--code-surface-radius);
   background: linear-gradient(180deg, var(--diff-bg-start), var(--diff-bg-end));
   color: var(--diff-fg);
 }
@@ -5581,7 +5582,7 @@ textarea {
 
 .markdown-copy pre {
   margin: 0;
-  border-radius: 1rem;
+  border-radius: var(--code-surface-radius);
   background: var(--code-bg);
   color: var(--code-fg);
   padding: 1rem;
