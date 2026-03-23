@@ -2766,12 +2766,19 @@ fn record_completed_codex_agent_message(
         .streamed_agent_message_text_by_item_id
         .entry(item_id.to_owned())
         .or_default();
-    let Some(unseen_suffix) = next_codex_delta_suffix(entry, trimmed) else {
+    let update = next_completed_codex_text_update(entry, trimmed);
+    if matches!(update, CompletedTextUpdate::NoChange) {
         return Ok(());
-    };
+    }
 
     begin_codex_assistant_output(turn_state, recorder)?;
-    recorder.text_delta(&unseen_suffix)?;
+    match update {
+        CompletedTextUpdate::NoChange => Ok(()),
+        CompletedTextUpdate::Append(unseen_suffix) => recorder.text_delta(&unseen_suffix),
+        CompletedTextUpdate::Replace(replacement_text) => {
+            recorder.replace_streaming_text(&replacement_text)
+        }
+    }?;
     remember_codex_first_assistant_message_id(state, session_id, turn_state)
 }
 
@@ -3019,6 +3026,48 @@ fn record_codex_agent_message_delta(
         .insert(item_id.to_owned());
     recorder.text_delta(&unseen_suffix)?;
     remember_codex_first_assistant_message_id(state, session_id, turn_state)
+}
+
+enum CompletedTextUpdate {
+    NoChange,
+    Append(String),
+    Replace(String),
+}
+
+fn next_completed_codex_text_update(existing: &mut String, incoming: &str) -> CompletedTextUpdate {
+    if incoming.is_empty() {
+        return CompletedTextUpdate::NoChange;
+    }
+
+    if existing.is_empty() {
+        existing.push_str(incoming);
+        return CompletedTextUpdate::Replace(incoming.to_owned());
+    }
+
+    if incoming == existing {
+        return CompletedTextUpdate::NoChange;
+    }
+
+    if incoming.starts_with(existing.as_str()) {
+        let split = existing.len();
+        debug_assert!(incoming.is_char_boundary(split));
+        let suffix = incoming[split..].to_owned();
+        existing.clear();
+        existing.push_str(incoming);
+        return if suffix.is_empty() {
+            CompletedTextUpdate::NoChange
+        } else {
+            CompletedTextUpdate::Append(suffix)
+        };
+    }
+
+    if existing.ends_with(incoming) {
+        return CompletedTextUpdate::NoChange;
+    }
+
+    existing.clear();
+    existing.push_str(incoming);
+    CompletedTextUpdate::Replace(incoming.to_owned())
 }
 
 fn next_codex_delta_suffix(existing: &mut String, incoming: &str) -> Option<String> {

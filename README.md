@@ -15,7 +15,7 @@ TermAl gives you one place to run, supervise, review, and steer long-running sof
 - **SSH remotes** — connect to remote machines over SSH tunnels; run agents on a build server while supervising from your laptop
 - **Session persistence** — sessions and message history survive restart (`~/.termal/sessions.json`)
 - **Filesystem and git panels** — browse files, view git status, and open source or diff views directly from the workspace
-- **17 themes** — hand-crafted CSS themes, switchable at runtime
+- **17 themes + style presets** - hand-crafted palettes, independent chrome styles, and a density control switchable at runtime
 
 ## Agent support
 

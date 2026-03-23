@@ -1,0 +1,10 @@
+[data-ui-style="studio"] {
+  --heading-font: "Avenir Next", "Segoe UI", "Helvetica Neue", sans-serif;
+  --body-font: "Avenir Next", "Segoe UI", "Helvetica Neue", sans-serif;
+  --code-font: "IBM Plex Mono", "SFMono-Regular", Consolas, monospace;
+  --button-radius: 0.9rem;
+  --button-radius-tight: 0.72rem;
+  --button-radius-large: 1.02rem;
+  --shadow: 0 22px 54px color-mix(in srgb, var(--ink) 12%, transparent);
+  --texture-mask: linear-gradient(180deg, rgba(0, 0, 0, 0.8), transparent);
+}

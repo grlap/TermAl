@@ -1,12 +1,50 @@
 export const THEME_STORAGE_KEY = "termal-ui-theme";
+export const STYLE_STORAGE_KEY = "termal-ui-style";
 export const FONT_SIZE_STORAGE_KEY = "termal-ui-font-size";
 export const EDITOR_FONT_SIZE_STORAGE_KEY = "termal-editor-font-size";
+export const DENSITY_STORAGE_KEY = "termal-ui-density";
 export const DEFAULT_FONT_SIZE_PX = 16;
-export const MIN_FONT_SIZE_PX = 13;
+export const MIN_FONT_SIZE_PX = 11;
 export const MAX_FONT_SIZE_PX = 20;
 export const DEFAULT_EDITOR_FONT_SIZE_PX = 13;
 export const MIN_EDITOR_FONT_SIZE_PX = 11;
 export const MAX_EDITOR_FONT_SIZE_PX = 24;
+export const DEFAULT_DENSITY_PERCENT = 100;
+export const MIN_DENSITY_PERCENT = 80;
+export const MAX_DENSITY_PERCENT = 120;
+export const DENSITY_STEP_PERCENT = 5;
+
+export const STYLES = [
+  {
+    id: "theme-default",
+    name: "Match Theme",
+    description: "Use the visual treatment bundled with the selected theme.",
+  },
+  {
+    id: "editorial",
+    name: "Editorial",
+    description: "Soft paper surfaces, serif hierarchy, and warmer rounded chrome.",
+  },
+  {
+    id: "studio",
+    name: "Studio",
+    description: "Clean sans-serif surfaces with polished glass and restrained depth.",
+  },
+  {
+    id: "terminal-style",
+    name: "Terminal",
+    description: "Monospace chrome, tighter corners, and flatter control-room surfaces.",
+  },
+  {
+    id: "blueprint-style",
+    name: "Blueprint",
+    description: "Technical mono styling with sharper drafting-table geometry.",
+  },
+] as const;
+
+export type StyleId = (typeof STYLES)[number]["id"];
+
+export const DEFAULT_STYLE_ID: StyleId = "theme-default";
 
 export const THEMES = [
   {
@@ -105,6 +143,10 @@ export type ThemeId = (typeof THEMES)[number]["id"];
 
 export const DEFAULT_THEME_ID: ThemeId = "warm-light";
 
+export function isStyleId(value: string | null | undefined): value is StyleId {
+  return STYLES.some((style) => style.id === value);
+}
+
 export function isThemeId(value: string | null | undefined): value is ThemeId {
   return THEMES.some((theme) => theme.id === value);
 }
@@ -118,6 +160,15 @@ export function getStoredThemePreference(): ThemeId {
   return isThemeId(storedTheme) ? storedTheme : DEFAULT_THEME_ID;
 }
 
+export function getStoredStylePreference(): StyleId {
+  if (typeof window === "undefined") {
+    return DEFAULT_STYLE_ID;
+  }
+
+  const storedStyle = window.localStorage.getItem(STYLE_STORAGE_KEY);
+  return isStyleId(storedStyle) ? storedStyle : DEFAULT_STYLE_ID;
+}
+
 export function persistThemePreference(themeId: ThemeId) {
   if (typeof window === "undefined") {
     return;
@@ -126,12 +177,28 @@ export function persistThemePreference(themeId: ThemeId) {
   window.localStorage.setItem(THEME_STORAGE_KEY, themeId);
 }
 
+export function persistStylePreference(styleId: StyleId) {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  window.localStorage.setItem(STYLE_STORAGE_KEY, styleId);
+}
+
 export function applyThemePreference(themeId: ThemeId) {
   if (typeof document === "undefined") {
     return;
   }
 
   document.documentElement.dataset.theme = themeId;
+}
+
+export function applyStylePreference(styleId: StyleId) {
+  if (typeof document === "undefined") {
+    return;
+  }
+
+  document.documentElement.dataset.uiStyle = styleId;
 }
 
 export function clampFontSizePreference(value: number): number {
@@ -203,5 +270,49 @@ export function persistEditorFontSizePreference(fontSizePx: number) {
   window.localStorage.setItem(
     EDITOR_FONT_SIZE_STORAGE_KEY,
     clampEditorFontSizePreference(fontSizePx).toString(),
+  );
+}
+
+export function clampDensityPreference(value: number): number {
+  if (!Number.isFinite(value)) {
+    return DEFAULT_DENSITY_PERCENT;
+  }
+
+  const snappedValue = Math.round(value / DENSITY_STEP_PERCENT) * DENSITY_STEP_PERCENT;
+  return Math.min(MAX_DENSITY_PERCENT, Math.max(MIN_DENSITY_PERCENT, snappedValue));
+}
+
+export function getStoredDensityPreference(): number {
+  if (typeof window === "undefined") {
+    return DEFAULT_DENSITY_PERCENT;
+  }
+
+  const storedDensity = window.localStorage.getItem(DENSITY_STORAGE_KEY);
+  if (!storedDensity) {
+    return DEFAULT_DENSITY_PERCENT;
+  }
+
+  return clampDensityPreference(Number.parseInt(storedDensity, 10));
+}
+
+export function persistDensityPreference(densityPercent: number) {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  window.localStorage.setItem(
+    DENSITY_STORAGE_KEY,
+    clampDensityPreference(densityPercent).toString(),
+  );
+}
+
+export function applyDensityPreference(densityPercent: number) {
+  if (typeof document === "undefined") {
+    return;
+  }
+
+  document.documentElement.style.setProperty(
+    "--density-scale",
+    (clampDensityPreference(densityPercent) / 100).toFixed(2),
   );
 }

@@ -16,7 +16,7 @@
   --button-radius: 0.35rem;
   --button-radius-tight: 0.25rem;
   --button-radius-large: 0.45rem;
-  --heading-font: "IBM Plex Mono", "SFMono-Regular", Consolas, monospace;
+  --heading-font: "Fira Code", "IBM Plex Mono", "SFMono-Regular", Consolas, monospace;
 
   /* Background & texture */
   --bg-gradient-start: #041008;

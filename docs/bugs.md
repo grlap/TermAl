@@ -14,6 +14,11 @@ The earlier command-card UX issue where `OUT` could render as an empty dark bloc
 Command messages now use a compact `IN` / `OUT` layout with copy controls, a collapsible output
 view for longer results, and a plain placeholder when there is no command output.
 
+The stale `reconcileSession` `projectId` note, the `clear_runtime()` revision note, the file
+read/write size-limit note, the missing CORS note, the remote-delta diagnostic note, the duplicate
+project-text normalizer note, the `should_dispatch_next` consistency note, the Codex completed-text
+reconciliation note, and the `TextReplace` architecture-doc note are also fixed in the current tree.
+
 ## Node 24 deprecation warning from the legacy Vite dev proxy
 
 **Severity:** Low - local dev noise only.
@@ -45,7 +50,6 @@ noise.
 ---
 
 ## Feature briefs
-
 - [Project-Scoped Remotes](./features/project-scoped-remotes.md)
 - [Session Model Switching](./features/model-switching.md)
 - [Slash Commands](./features/slash-commands.md)
@@ -139,6 +143,9 @@ Concrete work implied by the current TermAl parity gaps. Ordered by user impact 
   (user input, MCP elicitation, generic app requests) now have HTTP route tests via
   `tower::ServiceExt`. Still missing: session creation, message send, settings updates, Claude
   approvals, kill, and SSE state events.
+- [ ] Add backend regression tests for divergent completed-text replacement in Codex streaming:
+  cover both shared-Codex and REPL-Codex paths where the final authoritative text must replace,
+  not append to, previously streamed content.
 - [ ] Add frontend reconcile tests for new interactive message types:
   `userInputRequest`, `mcpElicitationRequest`, and `codexAppRequest` messages are handled by the
   reconciler but have no test coverage verifying that state changes (e.g. pending → submitted)

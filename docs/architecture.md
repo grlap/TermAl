@@ -149,15 +149,18 @@ All routes are under `/api`. The backend serves JSON; the frontend proxies throu
 `GET /api/events` returns a Server-Sent Events stream with two event types:
 
 - **`state`** — full `StateResponse` JSON. Sent on initial connect, after `commit_locked()`, and as a recovery when the client falls behind.
-- **`delta`** — incremental `DeltaEvent` JSON. Sent during streaming (text deltas, command output updates). Cheaper than full state.
+- **`delta`** ? incremental `DeltaEvent` JSON. Sent during streaming (text deltas, text replacements, command output updates). Cheaper than full state.
 
 Both carry a `revision: u64` field. The frontend uses this to reject stale snapshots and detect gaps in the delta sequence.
 
 ```
-DeltaEvent::TextDelta    { revision, session_id, message_id, delta, preview }
-DeltaEvent::CommandUpdate { revision, session_id, message_id, command, output, status, preview, ... }
+DeltaEvent::TextDelta            { revision, session_id, message_id, delta, preview }
+DeltaEvent::TextReplace          { revision, session_id, message_id, message_index, text, preview }
+DeltaEvent::CommandUpdate        { revision, session_id, message_id, command, output, status, preview, ... }
 DeltaEvent::ParallelAgentsUpdate { revision, session_id, message_id, message_index, agents, preview }
 ```
+
+`TextDelta` appends streaming text to an in-progress message. `TextReplace` overwrites the full message text when the backend receives an authoritative completed payload that diverges from the streamed draft, so clients should replace the target message body instead of appending.
 
 On broadcast channel lag, the backend falls back to sending a full state snapshot.
 

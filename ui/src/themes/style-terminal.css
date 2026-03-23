@@ -1,0 +1,209 @@
+[data-ui-style="terminal-style"] {
+  --heading-font: "Fira Code", "IBM Plex Mono", "SFMono-Regular", Consolas, monospace;
+  --body-font: "Fira Code", "IBM Plex Mono", "SFMono-Regular", Consolas, monospace;
+  --code-font: "Fira Code", "IBM Plex Mono", "SFMono-Regular", Consolas, monospace;
+  --button-radius: 0.2rem;
+  --button-radius-tight: 0.1rem;
+  --button-radius-large: 0.28rem;
+  --shadow: 0 18px 44px color-mix(in srgb, var(--ink) 22%, transparent);
+  --texture-mask: linear-gradient(180deg, rgba(255, 255, 255, 0.08), transparent);
+  --terminal-shell-radius: calc(0.28rem + 0.04rem * var(--density-scale));
+  --terminal-card-radius: calc(0.22rem + 0.04rem * var(--density-scale));
+  --terminal-control-radius: calc(0.16rem + 0.04rem * var(--density-scale));
+}
+
+[data-ui-style="terminal-style"] .panel,
+[data-ui-style="terminal-style"] .dialog-card,
+[data-ui-style="terminal-style"] .theme-panel,
+[data-ui-style="terminal-style"] .message-card,
+[data-ui-style="terminal-style"] .thread-notice,
+[data-ui-style="terminal-style"] .activity-card,
+[data-ui-style="terminal-style"] .composer-attachment-card,
+[data-ui-style="terminal-style"] .composer-slash-menu,
+[data-ui-style="terminal-style"] .pane-tab-context-menu,
+[data-ui-style="terminal-style"] .pane-tab-status-tooltip,
+[data-ui-style="terminal-style"] .session-kill-popover,
+[data-ui-style="terminal-style"] .session-rename-popover,
+[data-ui-style="terminal-style"] .diff-review-section,
+[data-ui-style="terminal-style"] .diff-review-composer,
+[data-ui-style="terminal-style"] .diff-review-thread {
+  border-radius: var(--terminal-shell-radius);
+}
+
+[data-ui-style="terminal-style"] .control-panel-activity-button,
+[data-ui-style="terminal-style"] .control-panel-scope-combobox.session-select,
+[data-ui-style="terminal-style"] .project-row,
+[data-ui-style="terminal-style"] .session-row,
+[data-ui-style="terminal-style"] .theme-option,
+[data-ui-style="terminal-style"] .pane-view-button,
+[data-ui-style="terminal-style"] .pane-tab-scroll,
+[data-ui-style="terminal-style"] .pane-tab-shell,
+[data-ui-style="terminal-style"] .pane-tab-close,
+[data-ui-style="terminal-style"] .control-panel-header-action,
+[data-ui-style="terminal-style"] .control-panel-action-button,
+[data-ui-style="terminal-style"] .settings-tab,
+[data-ui-style="terminal-style"] .session-row-status-button,
+[data-ui-style="terminal-style"] .session-row-kill,
+[data-ui-style="terminal-style"] .session-kill-popover-cancel,
+[data-ui-style="terminal-style"] .session-kill-popover-confirm,
+[data-ui-style="terminal-style"] .session-rename-new,
+[data-ui-style="terminal-style"] .session-rename-kill,
+[data-ui-style="terminal-style"] .session-rename-cancel,
+[data-ui-style="terminal-style"] .session-rename-save,
+[data-ui-style="terminal-style"] .composer-attachment-remove,
+[data-ui-style="terminal-style"] .composer-input,
+[data-ui-style="terminal-style"] .composer-slash-option,
+[data-ui-style="terminal-style"] .structured-diff-comment-button,
+[data-ui-style="terminal-style"] .diff-review-action-button,
+[data-ui-style="terminal-style"] .diff-review-composer-label textarea {
+  border-radius: var(--terminal-control-radius);
+}
+
+[data-ui-style="terminal-style"] .project-count-badge,
+[data-ui-style="terminal-style"] .session-list-scope,
+[data-ui-style="terminal-style"] .theme-active-badge,
+[data-ui-style="terminal-style"] .theme-option-status,
+[data-ui-style="terminal-style"] .workspace-connection-chip,
+[data-ui-style="terminal-style"] .sidebar-status-chip,
+[data-ui-style="terminal-style"] .composer-slash-option-badge,
+[data-ui-style="terminal-style"] .status-agent-badge,
+[data-ui-style="terminal-style"] .theme-option-swatch,
+[data-ui-style="terminal-style"] .theme-option-scrollbar,
+[data-ui-style="terminal-style"] .theme-option-scrollbar-thumb,
+[data-ui-style="terminal-style"] .composer-attachment-preview,
+[data-ui-style="terminal-style"] .pending-prompt-dismiss,
+[data-ui-style="terminal-style"] .settings-dialog-close,
+[data-ui-style="terminal-style"] .pane-tab-status-notice,
+[data-ui-style="terminal-style"] .codex-limit-bar,
+[data-ui-style="terminal-style"] .codex-limit-bar-fill,
+[data-ui-style="terminal-style"] .codex-limit-bar-used {
+  border-radius: var(--terminal-control-radius);
+}
+
+
+[data-ui-style="terminal-style"] .message-card.bubble {
+  border-radius: var(--terminal-card-radius);
+  padding-block: var(--message-card-padding-y);
+}
+
+[data-ui-style="terminal-style"] .message-card.bubble .message-meta {
+  margin-bottom: 0.55rem;
+}
+
+[data-ui-style="terminal-style"] .bubble-you,
+[data-ui-style="terminal-style"] .bubble-assistant {
+  max-width: 100%;
+  margin-left: 0;
+  background: var(--surface-card);
+}
+
+[data-ui-style="terminal-style"] .bubble-you {
+  border-inline-start: 0.24rem solid color-mix(in srgb, var(--signal-green) 68%, var(--line));
+}
+
+[data-ui-style="terminal-style"] .bubble-assistant {
+  border-inline-start: 0.24rem solid color-mix(in srgb, var(--signal-blue) 52%, var(--line));
+}
+
+
+@supports selector(:has(*)) {
+  [data-ui-style="terminal-style"] .bubble-assistant:has(.markdown-copy pre),
+  [data-ui-style="terminal-style"] .bubble-assistant:has(.markdown-table-scroll) {
+    max-width: 100%;
+  }
+}
+
+
+[data-ui-style="terminal-style"] .command-card {
+  width: 100%;
+  max-width: 100%;
+  justify-self: stretch;
+  background: var(--code-bg);
+  color: var(--code-fg);
+  border-radius: var(--terminal-card-radius);
+  border-color: color-mix(in srgb, var(--signal-green) 18%, var(--line));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, white 2%, transparent);
+}
+
+[data-ui-style="terminal-style"] .command-card .message-meta {
+  margin-bottom: 0.45rem;
+  color: color-mix(in srgb, var(--code-fg) 58%, var(--signal-green));
+}
+
+[data-ui-style="terminal-style"] .command-card .message-meta-end {
+  color: color-mix(in srgb, var(--code-fg) 54%, var(--signal-green));
+}
+
+[data-ui-style="terminal-style"] .command-card .command-card-label {
+  color: var(--signal-green);
+}
+
+[data-ui-style="terminal-style"] .command-card .command-panel {
+  margin-top: 0.5rem;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+[data-ui-style="terminal-style"] .command-card .command-row {
+  padding-inline: 0;
+  gap: calc(0.7rem * var(--density-scale));
+}
+
+[data-ui-style="terminal-style"] .command-card .command-row + .command-row {
+  border-top-color: color-mix(in srgb, var(--line) 72%, transparent);
+}
+
+[data-ui-style="terminal-style"] .command-card .command-row-label {
+  color: var(--signal-green);
+}
+
+[data-ui-style="terminal-style"] .command-card .command-row-body {
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+[data-ui-style="terminal-style"] .command-card .command-input-shell,
+[data-ui-style="terminal-style"] .command-card .command-output-shell,
+[data-ui-style="terminal-style"] .command-card .command-output-shell.empty {
+  border-radius: 0;
+  background: transparent;
+}
+
+[data-ui-style="terminal-style"] .command-card .command-input-shell.collapsed::after,
+[data-ui-style="terminal-style"] .command-card .command-output-shell.collapsed::after {
+  background: linear-gradient(180deg, transparent, var(--code-bg));
+}
+
+[data-ui-style="terminal-style"] .command-card .command-text-input,
+[data-ui-style="terminal-style"] .command-card .command-text-output,
+[data-ui-style="terminal-style"] .command-card .command-text-placeholder {
+  padding: 0;
+  color: var(--code-fg);
+}
+
+[data-ui-style="terminal-style"] .command-card .command-text-placeholder {
+  color: color-mix(in srgb, var(--muted) 74%, var(--code-fg));
+}
+
+[data-ui-style="terminal-style"] .command-card .command-icon-button {
+  border-radius: var(--terminal-control-radius);
+  background: color-mix(in srgb, var(--paper) 8%, var(--code-bg));
+  border-color: color-mix(in srgb, var(--signal-green) 18%, var(--line));
+  color: color-mix(in srgb, var(--code-fg) 54%, var(--signal-green));
+}
+
+[data-ui-style="terminal-style"] .command-card .command-icon-button:hover {
+  border-color: color-mix(in srgb, var(--signal-green) 34%, transparent);
+  background: color-mix(in srgb, var(--signal-green) 8%, var(--code-bg));
+  color: var(--code-fg);
+}
+
+[data-ui-style="terminal-style"] .command-card .command-icon-button.copied {
+  border-color: color-mix(in srgb, var(--signal-green) 36%, transparent);
+  background: color-mix(in srgb, var(--signal-green) 12%, var(--code-bg));
+  color: var(--signal-green);
+}

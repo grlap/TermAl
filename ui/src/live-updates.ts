@@ -77,6 +77,37 @@ export function applyDeltaToSessions(sessions: Session[], delta: DeltaEvent): De
       };
     }
 
+    case "textReplace": {
+      const messageIndex = findMessageIndex(session.messages, delta.messageId, delta.messageIndex);
+      if (messageIndex === -1) {
+        return { kind: "needsResync" };
+      }
+
+      const message = session.messages[messageIndex];
+      if (!message || message.id !== delta.messageId) {
+        return { kind: "needsResync" };
+      }
+      if (message.type !== "text") {
+        return { kind: "needsResync" };
+      }
+
+      const updatedMessage: TextMessage = {
+        ...message,
+        text: delta.text,
+      };
+      const updatedMessages = session.messages.slice();
+      updatedMessages[messageIndex] = updatedMessage;
+
+      return {
+        kind: "applied",
+        sessions: replaceSession(sessions, sessionIndex, {
+          ...session,
+          messages: updatedMessages,
+          preview: delta.preview ?? session.preview,
+        }),
+      };
+    }
+
     case "commandUpdate": {
       const messageIndex = findMessageIndex(session.messages, delta.messageId, delta.messageIndex);
       if (messageIndex === -1) {

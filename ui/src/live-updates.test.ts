@@ -135,6 +135,48 @@ describe("applyDeltaToSessions", () => {
     });
   });
 
+  it("replaces text when a final authoritative update arrives", () => {
+    const sessions = [
+      makeSession("session-a", {
+        preview: "Draft answer",
+        messages: [
+          {
+            id: "message-1",
+            type: "text",
+            timestamp: "10:00",
+            author: "assistant",
+            text: "Draft answer",
+          },
+        ],
+      }),
+    ];
+    const delta: DeltaEvent = {
+      type: "textReplace",
+      revision: 2,
+      sessionId: "session-a",
+      messageId: "message-1",
+      messageIndex: 0,
+      text: "Final answer",
+      preview: "Final answer",
+    };
+
+    const result = applyDeltaToSessions(sessions, delta);
+
+    expect(result.kind).toBe("applied");
+    if (result.kind !== "applied") {
+      throw new Error("expected delta to apply");
+    }
+
+    expect(result.sessions[0].preview).toBe("Final answer");
+    expect(result.sessions[0].messages[0]).toMatchObject({
+      id: "message-1",
+      type: "text",
+      text: "Final answer",
+      timestamp: "10:00",
+    });
+  });
+
+
   it("applies text deltas when the message exists at a different index", () => {
     const sessions = [
       makeSession("session-a", {

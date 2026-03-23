@@ -175,23 +175,36 @@ import { reconcileSessions } from "./session-reconcile";
 
 const TAB_DRAG_STALE_TIMEOUT_MS = 15000;
 import {
-  clampEditorFontSizePreference,
-  clampFontSizePreference,
+  DENSITY_STEP_PERCENT,
+  DEFAULT_DENSITY_PERCENT,
   DEFAULT_EDITOR_FONT_SIZE_PX,
   DEFAULT_FONT_SIZE_PX,
+  MAX_DENSITY_PERCENT,
   MAX_EDITOR_FONT_SIZE_PX,
   MAX_FONT_SIZE_PX,
+  MIN_DENSITY_PERCENT,
   MIN_EDITOR_FONT_SIZE_PX,
   MIN_FONT_SIZE_PX,
-  applyFontSizePreference,
+  STYLES,
   THEMES,
+  applyDensityPreference,
+  applyFontSizePreference,
+  applyStylePreference,
+  applyThemePreference,
+  clampDensityPreference,
+  clampEditorFontSizePreference,
+  clampFontSizePreference,
+  getStoredDensityPreference,
   getStoredEditorFontSizePreference,
   getStoredFontSizePreference,
-  applyThemePreference,
+  getStoredStylePreference,
+  getStoredThemePreference,
+  persistDensityPreference,
   persistEditorFontSizePreference,
   persistFontSizePreference,
-  getStoredThemePreference,
+  persistStylePreference,
   persistThemePreference,
+  type StyleId,
   type ThemeId,
 } from "./themes";
 import type { MonacoAppearance } from "./monaco";
@@ -984,8 +997,10 @@ export default function App() {
   const [newProjectRemoteId, setNewProjectRemoteId] = useState<string>(LOCAL_REMOTE_ID);
   const [isCreatingProject, setIsCreatingProject] = useState(false);
   const [themeId, setThemeId] = useState<ThemeId>(() => getStoredThemePreference());
+  const [styleId, setStyleId] = useState<StyleId>(() => getStoredStylePreference());
   const [fontSizePx, setFontSizePx] = useState<number>(() => getStoredFontSizePreference());
   const [editorFontSizePx, setEditorFontSizePx] = useState<number>(() => getStoredEditorFontSizePreference());
+  const [densityPercent, setDensityPercent] = useState<number>(() => getStoredDensityPreference());
   const [defaultCodexSandboxMode, setDefaultCodexSandboxMode] =
     useState<SandboxMode>("workspace-write");
   const [defaultCodexApprovalPolicy, setDefaultCodexApprovalPolicy] =
@@ -1364,6 +1379,7 @@ export default function App() {
     return counts;
   }, [sessions]);
   const activeTheme = THEMES.find((theme) => theme.id === themeId) ?? THEMES[0];
+  const activeStyle = STYLES.find((style) => style.id === styleId) ?? STYLES[0];
   const editorAppearance: MonacoAppearance = isHexColorDark(activeTheme.swatches[0]) ? "dark" : "light";
   const activeDraggedTab = draggedTab ?? externalDraggedTab;
 
@@ -1934,9 +1950,19 @@ export default function App() {
   }, [themeId]);
 
   useLayoutEffect(() => {
+    applyStylePreference(styleId);
+    persistStylePreference(styleId);
+  }, [styleId]);
+
+  useLayoutEffect(() => {
     applyFontSizePreference(fontSizePx);
     persistFontSizePreference(fontSizePx);
   }, [fontSizePx]);
+
+  useLayoutEffect(() => {
+    applyDensityPreference(densityPercent);
+    persistDensityPreference(densityPercent);
+  }, [densityPercent]);
 
   useEffect(() => {
     persistEditorFontSizePreference(editorFontSizePx);
@@ -4906,15 +4932,22 @@ export default function App() {
                 aria-labelledby={`settings-tab-${settingsTab}`}
               >
                 {settingsTab === "themes" ? (
-                  <ThemePicker
+                  <ThemePreferencesPanel
+                    activeStyle={activeStyle}
                     activeTheme={activeTheme}
+                    styleId={styleId}
                     themeId={themeId}
+                    onSelectStyle={setStyleId}
                     onSelectTheme={setThemeId}
                   />
                 ) : settingsTab === "appearance" ? (
                   <AppearancePreferencesPanel
+                    densityPercent={densityPercent}
                     editorFontSizePx={editorFontSizePx}
                     fontSizePx={fontSizePx}
+                    onSelectDensity={(nextValue) =>
+                      setDensityPercent(clampDensityPreference(nextValue))
+                    }
                     onSelectEditorFontSize={(nextValue) =>
                       setEditorFontSizePx(clampEditorFontSizePreference(nextValue))
                     }
@@ -4952,6 +4985,34 @@ export default function App() {
         </div>
       ) : null}
     </div>
+  );
+}
+
+function ThemePreferencesPanel({
+  activeStyle,
+  activeTheme,
+  styleId,
+  themeId,
+  onSelectStyle,
+  onSelectTheme,
+}: {
+  activeStyle: (typeof STYLES)[number];
+  activeTheme: (typeof THEMES)[number];
+  styleId: StyleId;
+  themeId: ThemeId;
+  onSelectStyle: (styleId: StyleId) => void;
+  onSelectTheme: (themeId: ThemeId) => void;
+}) {
+  return (
+    <section className="settings-panel-stack theme-preferences-layout">
+      <StylePicker
+        activeStyle={activeStyle}
+        styleId={styleId}
+        onSelectStyle={onSelectStyle}
+        compact
+      />
+      <ThemePicker activeTheme={activeTheme} themeId={themeId} onSelectTheme={onSelectTheme} />
+    </section>
   );
 }
 
@@ -5135,7 +5196,7 @@ function ThemePicker({
     <section className="theme-panel">
       <div className="theme-panel-header">
         <div>
-          <p className="session-control-label">Appearance</p>
+          <p className="session-control-label">Theme</p>
           <p className="theme-panel-copy">{activeTheme.description}</p>
         </div>
         <span className="theme-active-badge">{activeTheme.name}</span>
@@ -5196,14 +5257,92 @@ function ThemePicker({
   );
 }
 
+function StyleTreatmentPreview({ styleId }: { styleId: StyleId }) {
+  return (
+    <span
+      className={`theme-option-preview style-treatment-preview style-treatment-preview-${styleId}`.trim()}
+      aria-hidden="true"
+    >
+      <span className="style-treatment-preview-frame">
+        <span className="style-treatment-preview-header">
+          <span className="style-treatment-preview-dot" />
+          <span className="style-treatment-preview-line" />
+        </span>
+        <span className="style-treatment-preview-block style-treatment-preview-block-primary" />
+        <span className="style-treatment-preview-block style-treatment-preview-block-secondary" />
+      </span>
+    </span>
+  );
+}
+
+function StylePicker({
+  activeStyle,
+  compact = false,
+  styleId,
+  onSelectStyle,
+}: {
+  activeStyle: (typeof STYLES)[number];
+  compact?: boolean;
+  styleId: StyleId;
+  onSelectStyle: (styleId: StyleId) => void;
+}) {
+  return (
+    <section className={`theme-panel style-panel ${compact ? "style-panel-compact" : ""}`.trim()}>
+      <div className="theme-panel-header">
+        <div>
+          <p className="session-control-label">Style</p>
+          <p className="theme-panel-copy">{activeStyle.description}</p>
+        </div>
+        <span className="theme-active-badge">{activeStyle.name}</span>
+      </div>
+
+      <div className="theme-option-list-shell">
+        <div
+          className={`theme-option-list style-option-list ${compact ? "style-option-list-compact" : ""}`.trim()}
+          role="radiogroup"
+          aria-label="UI style"
+        >
+          {STYLES.map((style) => {
+            const isSelected = style.id === styleId;
+
+            return (
+              <button
+                key={style.id}
+                className={`theme-option ${isSelected ? "selected" : ""}`}
+                type="button"
+                role="radio"
+                aria-checked={isSelected}
+                onClick={() => onSelectStyle(style.id)}
+              >
+                <span className="theme-option-main">
+                  <span className="theme-option-title-row">
+                    <strong className="theme-option-title">{style.name}</strong>
+                    {isSelected ? <span className="theme-option-status">Live</span> : null}
+                  </span>
+                  <span className="theme-option-copy">{style.description}</span>
+                </span>
+                <StyleTreatmentPreview styleId={style.id} />
+              </button>
+            );
+          })}
+        </div>
+      </div>
+    </section>
+  );
+}
+
 function AppearancePreferencesPanel({
+  densityPercent,
   editorFontSizePx,
   fontSizePx,
+  onSelectDensity,
   onSelectEditorFontSize,
   onSelectFontSize,
 }: {
+  densityPercent: number;
   editorFontSizePx: number;
   fontSizePx: number;
+  onSelectDensity: (densityPercent: number) => void;
   onSelectEditorFontSize: (fontSizePx: number) => void;
   onSelectFontSize: (fontSizePx: number) => void;
 }) {
@@ -5244,6 +5383,12 @@ function AppearancePreferencesPanel({
             UI changes apply across the interface. Editor changes affect source and diff editors. Both are saved in this browser.
           </p>
         </div>
+      </article>
+
+      <article className="message-card prompt-settings-card appearance-settings-card density-settings-card">
+        <div className="card-label">Layout</div>
+        <h3>Density</h3>
+        <DensityPreferenceControl densityPercent={densityPercent} onSelectDensity={onSelectDensity} />
       </article>
     </section>
   );
@@ -5318,6 +5463,80 @@ function FontSizePreferenceControl({
       </div>
     </>
   );
+}
+
+function DensityPreferenceControl({
+  densityPercent,
+  onSelectDensity,
+}: {
+  densityPercent: number;
+  onSelectDensity: (densityPercent: number) => void;
+}) {
+  const densityDescription = describeDensityPreference(densityPercent);
+
+  return (
+    <div className="prompt-settings-grid appearance-settings-grid density-settings-grid">
+      <div className="session-control-group density-range-group">
+        <label className="session-control-label" htmlFor="density-scale-slider">
+          UI density
+        </label>
+        <div className="density-slider-shell">
+          <input
+            id="density-scale-slider"
+            className="density-slider"
+            type="range"
+            min={MIN_DENSITY_PERCENT}
+            max={MAX_DENSITY_PERCENT}
+            step={DENSITY_STEP_PERCENT}
+            value={densityPercent}
+            aria-valuetext={`${densityPercent}% ${densityDescription}`}
+            onChange={(event) => onSelectDensity(Number.parseInt(event.target.value, 10))}
+          />
+          <div className="density-slider-labels" aria-hidden="true">
+            <span>Compact</span>
+            <span>Default</span>
+            <span>Comfortable</span>
+          </div>
+        </div>
+      </div>
+      <div className="session-control-group">
+        <p className="session-control-label">Current</p>
+        <div className="font-size-readout density-readout" aria-live="polite">
+          <strong className="font-size-readout-value">{densityPercent}%</strong>
+          <span className="font-size-readout-copy">{densityDescription}</span>
+        </div>
+      </div>
+      <div className="session-control-group">
+        <label className="session-control-label" htmlFor="density-reset">
+          Reset
+        </label>
+        <button
+          id="density-reset"
+          className="ghost-button font-size-reset"
+          type="button"
+          onClick={() => onSelectDensity(DEFAULT_DENSITY_PERCENT)}
+          disabled={densityPercent === DEFAULT_DENSITY_PERCENT}
+        >
+          Use default
+        </button>
+      </div>
+      <p className="session-control-hint">
+        Density scales spacing, control sizes, and pane widths without changing your font settings. It is saved in this browser.
+      </p>
+    </div>
+  );
+}
+
+function describeDensityPreference(densityPercent: number) {
+  if (densityPercent < DEFAULT_DENSITY_PERCENT) {
+    return densityPercent <= 85 ? "Compact" : "Tight";
+  }
+
+  if (densityPercent > DEFAULT_DENSITY_PERCENT) {
+    return densityPercent >= 115 ? "Airy" : "Comfortable";
+  }
+
+  return "Default";
 }
 
 function validateRemoteDrafts(remotes: RemoteConfig[]): string | null {

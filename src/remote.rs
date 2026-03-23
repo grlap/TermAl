@@ -1236,6 +1236,54 @@ impl AppState {
                     preview,
                 });
             }
+            DeltaEvent::TextReplace {
+                message_id,
+                preview,
+                session_id,
+                text,
+                ..
+            } => {
+                let (local_session_id, message_index, revision) = {
+                    let mut inner = self.inner.lock().expect("state mutex poisoned");
+                    let index = inner
+                        .find_remote_session_index(remote_id, &session_id)
+                        .ok_or_else(|| anyhow!("remote session `{session_id}` not found"))?;
+                    let record = &mut inner.sessions[index];
+                    let message_index = message_index_on_record(record, &message_id).ok_or_else(|| {
+                        anyhow!("remote message `{message_id}` not found")
+                    })?;
+                    let Some(message) = record.session.messages.get_mut(message_index) else {
+                        return Err(anyhow!(
+                            "remote message index `{message_index}` is out of bounds"
+                        ));
+                    };
+                    match message {
+                        Message::Text { text: current_text, .. } => {
+                            current_text.clear();
+                            current_text.push_str(&text);
+                        }
+                        _ => {
+                            return Err(anyhow!(
+                                "remote message `{message_id}` is not a text message"
+                            ));
+                        }
+                    }
+                    if let Some(next_preview) = preview.as_ref() {
+                        record.session.preview = next_preview.clone();
+                    }
+                    let local_session_id = record.session.id.clone();
+                    let revision = self.commit_delta_locked(&mut inner)?;
+                    (local_session_id, message_index, revision)
+                };
+                self.publish_delta(&DeltaEvent::TextReplace {
+                    revision,
+                    session_id: local_session_id,
+                    message_id,
+                    message_index,
+                    text,
+                    preview,
+                });
+            }
             DeltaEvent::CommandUpdate {
                 command,
                 command_language,
@@ -1619,7 +1667,8 @@ fn dispatch_remote_event(
         "delta" => {
             let delta: DeltaEvent = serde_json::from_str(&payload)
                 .with_context(|| format!("failed to decode remote delta event `{remote_id}`"))?;
-            if let Err(_) = state.apply_remote_delta_event(remote_id, delta) {
+            if let Err(err) = state.apply_remote_delta_event(remote_id, delta) {
+                eprintln!("remote delta apply failed for `{remote_id}`: {err:#}");
                 let remote = state
                     .lookup_remote_config(remote_id)
                     .map_err(|err| anyhow!(err.message))?;

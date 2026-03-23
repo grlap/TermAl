@@ -1,0 +1,10 @@
+[data-ui-style="blueprint-style"] {
+  --heading-font: "IBM Plex Mono", "SFMono-Regular", Consolas, monospace;
+  --body-font: "Avenir Next", "Segoe UI", "Helvetica Neue", sans-serif;
+  --code-font: "IBM Plex Mono", "SFMono-Regular", Consolas, monospace;
+  --button-radius: 0.5rem;
+  --button-radius-tight: 0.38rem;
+  --button-radius-large: 0.62rem;
+  --shadow: 0 22px 52px color-mix(in srgb, var(--ink) 15%, transparent);
+  --texture-mask: linear-gradient(180deg, rgba(255, 255, 255, 0.08), transparent);
+}

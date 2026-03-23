@@ -262,4 +262,21 @@ describe("reconcileSessions", () => {
     expect(merged[0]).not.toBe(previous[0]);
     expect(merged[0].codexThreadState).toBe("archived");
   });
+  it("replaces a session when the project id changes", () => {
+    const previous = [makeSession("session-a", { projectId: "project-a", preview: "ready" })];
+
+    const next = [
+      makeSession("session-a", {
+        projectId: "project-b",
+        preview: "ready",
+      }),
+    ];
+
+    const merged = reconcileSessions(previous, next);
+
+    expect(merged).not.toBe(previous);
+    expect(merged[0]).not.toBe(previous[0]);
+    expect(merged[0].projectId).toBe("project-b");
+  });
+
 });

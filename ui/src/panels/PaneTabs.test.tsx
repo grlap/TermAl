@@ -342,6 +342,54 @@ describe("PaneTabs", () => {
     expect(tooltip).toHaveTextContent("Location:");
     expect(tooltip).toHaveTextContent("SSH Lab (grzeg@lab.internal)");
   });
+
+  it("shows generic status details for non-Codex agents", async () => {
+    renderPaneTabs({
+      sessionLookup: new Map([
+        [
+          "session-1",
+          makeSession("session-1", "C:/repo", "Claude Main", {
+            agent: "Claude",
+            approvalPolicy: "on-request",
+            claudeApprovalMode: "ask",
+            claudeEffort: "high",
+            externalSessionId: "claude-session-1",
+            model: "claude-sonnet-4-5",
+            status: "active",
+          }),
+        ],
+      ]),
+      tabs: [
+        {
+          id: "tab-session",
+          kind: "session",
+          sessionId: "session-1",
+        },
+      ],
+    });
+
+    fireEvent.mouseEnter(screen.getByRole("tab", { name: /Claude Main/i }));
+
+    const tooltip = await screen.findByRole("tooltip");
+    expect(tooltip).toHaveTextContent("Agent:");
+    expect(tooltip).toHaveTextContent("Claude");
+    expect(tooltip).toHaveTextContent("State:");
+    expect(tooltip).toHaveTextContent("Active");
+    expect(tooltip).toHaveTextContent("Project:");
+    expect(tooltip).toHaveTextContent("Workspace only");
+    expect(tooltip).toHaveTextContent("Location:");
+    expect(tooltip).toHaveTextContent("Local (This machine)");
+    expect(tooltip).toHaveTextContent("Model:");
+    expect(tooltip).toHaveTextContent("claude-sonnet-4-5");
+    expect(tooltip).toHaveTextContent("Session:");
+    expect(tooltip).toHaveTextContent("claude-session-1");
+    expect(tooltip).toHaveTextContent("Policy:");
+    expect(tooltip).toHaveTextContent("On Request");
+    expect(tooltip).toHaveTextContent("Approval:");
+    expect(tooltip).toHaveTextContent("Ask");
+    expect(tooltip).toHaveTextContent("Effort:");
+    expect(tooltip).toHaveTextContent("High");
+  });
 });
 
 function renderPaneTabs({
@@ -398,7 +446,12 @@ function makeProject(id: string, rootPath: string, name = "Repo", remoteId?: str
   };
 }
 
-function makeSession(id: string, workdir: string, name = "Session"): Session {
+function makeSession(
+  id: string,
+  workdir: string,
+  name = "Session",
+  overrides: Partial<Session> = {},
+): Session {
   return {
     agent: "Codex",
     emoji: "O",
@@ -409,5 +462,6 @@ function makeSession(id: string, workdir: string, name = "Session"): Session {
     preview: "Ready",
     status: "idle",
     workdir,
+    ...overrides,
   };
 }

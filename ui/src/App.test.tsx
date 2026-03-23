@@ -2214,12 +2214,103 @@ describe("App", () => {
       await clickAndSettle(await screen.findByRole("button", { name: "Open preferences" }));
 
       expect(screen.getByRole("radiogroup", { name: "UI theme" })).toBeInTheDocument();
+      expect(screen.getByRole("radiogroup", { name: "UI style" })).toBeInTheDocument();
       expect(screen.queryByRole("heading", { level: 3, name: "Font sizes" })).not.toBeInTheDocument();
 
       await clickAndSettle(screen.getByRole("tab", { name: "Editor & UI appearance" }));
 
       expect(screen.getByRole("heading", { level: 3, name: "Font sizes" })).toBeInTheDocument();
       expect(screen.queryByRole("radiogroup", { name: "UI theme" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("radiogroup", { name: "UI style" })).not.toBeInTheDocument();
+    } finally {
+      HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
+      fetchStateSpy.mockRestore();
+      restoreGlobal("EventSource", originalEventSource);
+      restoreGlobal("ResizeObserver", originalResizeObserver);
+    }
+  });
+
+  it("persists UI density changes from the appearance preferences", async () => {
+    const originalEventSource = globalThis.EventSource;
+    const originalResizeObserver = globalThis.ResizeObserver;
+    const fetchStateDeferred = createDeferred<Awaited<ReturnType<typeof api.fetchState>>>();
+    const fetchStateSpy = vi.spyOn(api, "fetchState").mockImplementation(() => fetchStateDeferred.promise);
+    vi.stubGlobal("EventSource", EventSourceMock as unknown as typeof EventSource);
+    vi.stubGlobal("ResizeObserver", ResizeObserverMock as unknown as typeof ResizeObserver);
+    const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
+    HTMLElement.prototype.scrollIntoView = vi.fn();
+    window.localStorage.clear();
+    document.documentElement.style.removeProperty("--density-scale");
+
+    try {
+      await renderApp();
+      await act(async () => {
+        fetchStateDeferred.resolve({
+          revision: 1,
+          preferences: {
+            defaultCodexReasoningEffort: "medium",
+            defaultClaudeEffort: "default",
+          },
+          projects: [],
+          sessions: [],
+        });
+        await flushUiWork();
+      });
+
+      await clickAndSettle(await screen.findByRole("button", { name: "Open preferences" }));
+      await clickAndSettle(screen.getByRole("tab", { name: "Editor & UI appearance" }));
+
+      const densitySlider = screen.getByRole("slider", { name: "UI density" });
+      expect((densitySlider as HTMLInputElement).value).toBe("100");
+
+      await act(async () => {
+        fireEvent.change(densitySlider, { target: { value: "85" } });
+      });
+      await settleAsyncUi();
+
+      expect(document.documentElement.style.getPropertyValue("--density-scale")).toBe("0.85");
+      expect(window.localStorage.getItem("termal-ui-density")).toBe("85");
+    } finally {
+      HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
+      fetchStateSpy.mockRestore();
+      restoreGlobal("EventSource", originalEventSource);
+      restoreGlobal("ResizeObserver", originalResizeObserver);
+    }
+  });
+
+  it("persists UI style changes from the themes preferences", async () => {
+    const originalEventSource = globalThis.EventSource;
+    const originalResizeObserver = globalThis.ResizeObserver;
+    const fetchStateDeferred = createDeferred<Awaited<ReturnType<typeof api.fetchState>>>();
+    const fetchStateSpy = vi.spyOn(api, "fetchState").mockImplementation(() => fetchStateDeferred.promise);
+    vi.stubGlobal("EventSource", EventSourceMock as unknown as typeof EventSource);
+    vi.stubGlobal("ResizeObserver", ResizeObserverMock as unknown as typeof ResizeObserver);
+    const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
+    HTMLElement.prototype.scrollIntoView = vi.fn();
+    window.localStorage.clear();
+    document.documentElement.removeAttribute("data-ui-style");
+
+    try {
+      await renderApp();
+      await act(async () => {
+        fetchStateDeferred.resolve({
+          revision: 1,
+          preferences: {
+            defaultCodexReasoningEffort: "medium",
+            defaultClaudeEffort: "default",
+          },
+          projects: [],
+          sessions: [],
+        });
+        await flushUiWork();
+      });
+
+      await clickAndSettle(await screen.findByRole("button", { name: "Open preferences" }));
+      const styleGroup = screen.getByRole("radiogroup", { name: "UI style" });
+      await clickAndSettle(within(styleGroup).getByRole("radio", { name: /Blueprint/i }));
+
+      expect(document.documentElement.dataset.uiStyle).toBe("blueprint-style");
+      expect(window.localStorage.getItem("termal-ui-style")).toBe("blueprint-style");
     } finally {
       HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
       fetchStateSpy.mockRestore();

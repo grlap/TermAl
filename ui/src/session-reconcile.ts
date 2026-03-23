@@ -48,6 +48,7 @@ function reconcileSession(previous: Session, next: Session): Session {
     previous.emoji === next.emoji &&
     previous.agent === next.agent &&
     previous.workdir === next.workdir &&
+    previous.projectId === next.projectId &&
     previous.model === next.model &&
     sameModelOptions(previous.modelOptions, next.modelOptions) &&
     previous.approvalPolicy === next.approvalPolicy &&

@@ -419,6 +419,16 @@ export type TextDeltaEvent = {
   preview?: string | null;
 };
 
+export type TextReplaceEvent = {
+  type: "textReplace";
+  revision: number;
+  sessionId: string;
+  messageId: string;
+  messageIndex: number;
+  text: string;
+  preview?: string | null;
+};
+
 export type MessageCreatedEvent = {
   type: "messageCreated";
   revision: number;
@@ -457,5 +467,6 @@ export type ParallelAgentsUpdateEvent = {
 export type DeltaEvent =
   | MessageCreatedEvent
   | TextDeltaEvent
+  | TextReplaceEvent
   | CommandUpdateEvent
   | ParallelAgentsUpdateEvent;

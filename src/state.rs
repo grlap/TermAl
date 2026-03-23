@@ -2211,9 +2211,18 @@ impl AppState {
         let index = inner
             .find_session_index(session_id)
             .ok_or_else(|| anyhow!("session `{session_id}` not found"))?;
-        inner.sessions[index].runtime = SessionRuntime::None;
-        inner.sessions[index].runtime_reset_required = false;
-        clear_all_pending_requests(&mut inner.sessions[index]);
+        let record = &mut inner.sessions[index];
+        let had_changes = !matches!(record.runtime, SessionRuntime::None)
+            || record.runtime_reset_required
+            || has_pending_requests(record);
+        if !had_changes {
+            return Ok(());
+        }
+
+        record.runtime = SessionRuntime::None;
+        record.runtime_reset_required = false;
+        clear_all_pending_requests(record);
+        self.commit_locked(&mut inner)?;
         Ok(())
     }
 
@@ -2338,8 +2347,9 @@ impl AppState {
             if !cleaned.is_empty() {
                 record.session.preview = make_preview(cleaned);
             }
+            let has_queued_prompts = !record.queued_prompts.is_empty();
             self.commit_locked(&mut inner)?;
-            true
+            has_queued_prompts
         };
 
         if should_dispatch_next {
@@ -2949,6 +2959,63 @@ impl AppState {
             message_id: message_id.to_owned(),
             message_index,
             delta: delta.to_owned(),
+            preview,
+        });
+
+        Ok(())
+    }
+
+    fn replace_text_message(&self, session_id: &str, message_id: &str, text: &str) -> Result<()> {
+        let (preview, revision, message_index, replacement_text) = {
+            let mut inner = self.inner.lock().expect("state mutex poisoned");
+            let index = inner
+                .find_session_index(session_id)
+                .ok_or_else(|| anyhow!("session `{session_id}` not found"))?;
+            let record = &mut inner.sessions[index];
+            let message_index = message_index_on_record(record, message_id).ok_or_else(|| {
+                anyhow!("session `{session_id}` message `{message_id}` not found")
+            })?;
+            let session = &mut record.session;
+
+            let mut preview = None;
+            let Some(message) = session.messages.get_mut(message_index) else {
+                return Err(anyhow!(
+                    "session `{session_id}` message index `{message_index}` is out of bounds"
+                ));
+            };
+            match message {
+                Message::Text {
+                    id,
+                    text: current_text,
+                    ..
+                } if id == message_id => {
+                    current_text.clear();
+                    current_text.push_str(text);
+                    let trimmed = current_text.trim();
+                    if !trimmed.is_empty() {
+                        preview = Some(make_preview(trimmed));
+                    }
+                }
+                _ => {
+                    return Err(anyhow!(
+                        "session `{session_id}` message `{message_id}` is not a text message"
+                    ));
+                }
+            }
+
+            if let Some(next_preview) = preview.as_ref() {
+                session.preview = next_preview.clone();
+            }
+            let revision = self.commit_delta_locked(&mut inner)?;
+            (preview, revision, message_index, text.to_owned())
+        };
+
+        self.publish_delta(&DeltaEvent::TextReplace {
+            revision,
+            session_id: session_id.to_owned(),
+            message_id: message_id.to_owned(),
+            message_index,
+            text: replacement_text,
             preview,
         });
 
@@ -3942,11 +4009,15 @@ fn discover_codex_threads_from_home(
     .with_context(|| format!("failed to open `{}`", database_path.display()))?;
     let thread_columns = codex_threads_table_columns(&connection)?;
     let query_scopes = collect_codex_discovery_query_scope_strings(discovery_scopes);
+    let query_scope_patterns = query_scopes
+        .iter()
+        .flat_map(|scope| codex_discovery_scope_query_patterns(scope))
+        .collect::<Vec<_>>();
     let normalized_scopes = discovery_scopes
         .iter()
         .map(|scope| normalize_codex_discovery_path(scope))
         .collect::<Vec<_>>();
-    let scope_sql = query_scopes
+    let scope_sql = query_scope_patterns
         .iter()
         .map(|_| "(cwd = ? OR cwd LIKE ? ESCAPE '\\')")
         .collect::<Vec<_>>()
@@ -3964,12 +4035,10 @@ fn discover_codex_threads_from_home(
         codex_threads_select_column(&thread_columns, "reasoning_effort", "NULL"),
     );
     let mut statement = connection.prepare(&query)?;
-    let mut params = Vec::with_capacity((query_scopes.len() * 2) + 1);
-    for scope in &query_scopes {
+    let mut params = Vec::with_capacity((query_scope_patterns.len() * 2) + 1);
+    for (scope, like_pattern) in &query_scope_patterns {
         params.push(rusqlite::types::Value::from(scope.clone()));
-        params.push(rusqlite::types::Value::from(codex_discovery_like_pattern(
-            scope,
-        )));
+        params.push(rusqlite::types::Value::from(like_pattern.clone()));
     }
     params.push(rusqlite::types::Value::from(
         MAX_DISCOVERED_CODEX_THREADS_PER_HOME as i64,
@@ -4058,12 +4127,35 @@ fn collect_codex_discovery_query_scope_strings(discovery_scopes: &[PathBuf]) -> 
     scopes
 }
 
+fn codex_discovery_scope_query_patterns(scope: &str) -> Vec<(String, String)> {
+    let mut patterns = Vec::new();
+    let mut seen = HashSet::new();
+    let mut candidates = vec![scope.to_owned()];
+    if scope.contains('/') {
+        candidates.push(scope.replace('/', "\\"));
+    }
+    if scope.contains('\\') {
+        candidates.push(scope.replace('\\', "/"));
+    }
+
+    for candidate in candidates {
+        if seen.insert(candidate.clone()) {
+            patterns.push((
+                candidate.clone(),
+                codex_discovery_like_pattern(&candidate),
+            ));
+        }
+    }
+
+    patterns
+}
+
 fn codex_discovery_like_pattern(scope: &str) -> String {
     let escaped_scope = scope
         .replace('\\', "\\\\")
         .replace('%', "\\%")
         .replace('_', "\\_");
-    let separator = std::path::MAIN_SEPARATOR;
+    let separator = if scope.contains('\\') { '\\' } else { '/' };
     if escaped_scope.ends_with(separator) {
         format!("{escaped_scope}%")
     } else {
@@ -4858,6 +4950,15 @@ fn reset_hidden_claude_spare_record(record: &mut SessionRecord) {
     record.queued_prompts.clear();
     record.message_positions.clear();
     record.runtime_reset_required = false;
+}
+
+fn has_pending_requests(record: &SessionRecord) -> bool {
+    !record.pending_claude_approvals.is_empty()
+        || !record.pending_codex_approvals.is_empty()
+        || !record.pending_codex_user_inputs.is_empty()
+        || !record.pending_codex_mcp_elicitations.is_empty()
+        || !record.pending_codex_app_requests.is_empty()
+        || !record.pending_acp_approvals.is_empty()
 }
 
 fn clear_all_pending_requests(record: &mut SessionRecord) {

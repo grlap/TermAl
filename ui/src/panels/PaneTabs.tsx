@@ -1,4 +1,5 @@
 import {
+  Fragment,
   useEffect,
   useLayoutEffect,
   useRef,
@@ -32,7 +33,7 @@ import { measurePaneTabStatusTooltipPosition } from "../pane-tab-status-tooltip"
 import type { CodexRateLimitWindow, CodexState, Project, RemoteConfig, Session } from "../types";
 import type { TabDropPlacement, WorkspaceTab } from "../workspace";
 
-type ActiveCodexTooltipState = {
+type ActiveSessionTooltipState = {
   id: string;
   sessionId: string;
 };
@@ -85,7 +86,7 @@ export function PaneTabs({
   ) => void;
 }) {
   const paneTabsRef = useRef<HTMLDivElement | null>(null);
-  const activeCodexTooltipAnchorRef = useRef<HTMLElement | null>(null);
+  const activeStatusTooltipAnchorRef = useRef<HTMLElement | null>(null);
   const fileTabContextMenuRef = useRef<HTMLDivElement | null>(null);
   const paneHasControlPanel = tabs.some((tab) => tab.kind === "controlPanel");
   const codexNotices = codexState.notices ?? [];
@@ -99,14 +100,14 @@ export function PaneTabs({
     canScrollNext: false,
   });
   const [activeTabInsertIndex, setActiveTabInsertIndex] = useState<number | null>(null);
-  const [activeCodexTooltip, setActiveCodexTooltip] = useState<ActiveCodexTooltipState | null>(null);
-  const [activeCodexTooltipStyle, setActiveCodexTooltipStyle] = useState<CSSProperties | null>(null);
+  const [activeStatusTooltip, setActiveStatusTooltip] = useState<ActiveSessionTooltipState | null>(null);
+  const [activeStatusTooltipStyle, setActiveStatusTooltipStyle] = useState<CSSProperties | null>(null);
   const [fileTabContextMenu, setFileTabContextMenu] = useState<FileTabContextMenuState | null>(null);
   const [fileTabContextMenuStyle, setFileTabContextMenuStyle] = useState<CSSProperties | null>(null);
 
-  function updateActiveCodexTooltipPosition(anchor = activeCodexTooltipAnchorRef.current) {
+  function updateActiveStatusTooltipPosition(anchor = activeStatusTooltipAnchorRef.current) {
     if (!anchor || typeof window === "undefined") {
-      setActiveCodexTooltipStyle(null);
+      setActiveStatusTooltipStyle(null);
       return;
     }
 
@@ -117,21 +118,21 @@ export function PaneTabs({
       width: `${position.width}px`,
       ["--pane-tab-status-arrow-left"]: `${position.arrowLeft}px`,
     } as CSSProperties;
-    setActiveCodexTooltipStyle(nextStyle);
+    setActiveStatusTooltipStyle(nextStyle);
   }
 
-  function openCodexStatusTooltip(id: string, sessionId: string, anchor: HTMLElement) {
-    activeCodexTooltipAnchorRef.current = anchor;
-    setActiveCodexTooltip((current) =>
+  function openStatusTooltip(id: string, sessionId: string, anchor: HTMLElement) {
+    activeStatusTooltipAnchorRef.current = anchor;
+    setActiveStatusTooltip((current) =>
       current?.id === id && current.sessionId === sessionId ? current : { id, sessionId },
     );
-    updateActiveCodexTooltipPosition(anchor);
+    updateActiveStatusTooltipPosition(anchor);
   }
 
-  function closeCodexStatusTooltip() {
-    activeCodexTooltipAnchorRef.current = null;
-    setActiveCodexTooltip(null);
-    setActiveCodexTooltipStyle(null);
+  function closeStatusTooltip() {
+    activeStatusTooltipAnchorRef.current = null;
+    setActiveStatusTooltip(null);
+    setActiveStatusTooltipStyle(null);
   }
 
   function closeFileTabContextMenu() {
@@ -400,18 +401,18 @@ export function PaneTabs({
   }, [fileTabContextMenu, tabs]);
 
   useLayoutEffect(() => {
-    if (!activeCodexTooltip) {
+    if (!activeStatusTooltip) {
       return;
     }
 
     const updateTooltipPosition = () => {
-      const anchor = activeCodexTooltipAnchorRef.current;
+      const anchor = activeStatusTooltipAnchorRef.current;
       if (!anchor || !anchor.isConnected) {
-        closeCodexStatusTooltip();
+        closeStatusTooltip();
         return;
       }
 
-      updateActiveCodexTooltipPosition(anchor);
+      updateActiveStatusTooltipPosition(anchor);
     };
 
     updateTooltipPosition();
@@ -426,7 +427,7 @@ export function PaneTabs({
       window.removeEventListener("scroll", updateTooltipPosition, true);
       node?.removeEventListener("scroll", updateTooltipPosition);
     };
-  }, [activeCodexTooltip, activeTabId, tabs.length]);
+  }, [activeStatusTooltip, activeTabId, tabs.length]);
 
   useLayoutEffect(() => {
     if (!fileTabContextMenu) {
@@ -437,15 +438,15 @@ export function PaneTabs({
   }, [fileTabContextMenu]);
 
   useEffect(() => {
-    if (!activeCodexTooltip || sessionLookup.has(activeCodexTooltip.sessionId)) {
+    if (!activeStatusTooltip || sessionLookup.has(activeStatusTooltip.sessionId)) {
       return;
     }
 
-    closeCodexStatusTooltip();
-  }, [activeCodexTooltip, sessionLookup]);
+    closeStatusTooltip();
+  }, [activeStatusTooltip, sessionLookup]);
 
-  const activeCodexTooltipSession = activeCodexTooltip
-    ? (sessionLookup.get(activeCodexTooltip.sessionId) ?? null)
+  const activeStatusTooltipSession = activeStatusTooltip
+    ? (sessionLookup.get(activeStatusTooltip.sessionId) ?? null)
     : null;
 
   return (
@@ -475,31 +476,31 @@ export function PaneTabs({
           tabs.map((tab, index) => {
             const session = tab.kind === "session" ? (sessionLookup.get(tab.sessionId) ?? null) : null;
             const tabActive = tab.id === activeTabId;
-            const showCodexStatus = Boolean(session && hasCodexTabStatusTooltip(session));
+            const showStatusTooltip = Boolean(session && hasSessionTabStatusTooltip(session));
             const showDropBefore = activeTabInsertIndex === index;
             const showDropAfter = activeTabInsertIndex === tabs.length && index === tabs.length - 1;
-            const codexStatusTooltipId = showCodexStatus ? `codex-status-${paneId}-${tab.id}` : undefined;
+            const statusTooltipId = showStatusTooltip ? `session-status-${paneId}-${tab.id}` : undefined;
             const tabLabel = formatTabLabel(tab, session);
 
             return (
               <div
                 key={tab.id}
-                className={`pane-tab-shell ${tabActive ? "active" : ""} ${showCodexStatus ? "has-status-tooltip" : ""} ${showDropBefore ? "drop-before" : ""} ${showDropAfter ? "drop-after" : ""}`}
+                className={`pane-tab-shell ${tabActive ? "active" : ""} ${showStatusTooltip ? "has-status-tooltip" : ""} ${showDropBefore ? "drop-before" : ""} ${showDropAfter ? "drop-after" : ""}`}
                 role="tab"
                 aria-selected={tabActive}
-                aria-describedby={activeCodexTooltip?.id === codexStatusTooltipId ? codexStatusTooltipId : undefined}
+                aria-describedby={activeStatusTooltip?.id === statusTooltipId ? statusTooltipId : undefined}
                 tabIndex={0}
                 onMouseEnter={(event) => {
-                  if (showCodexStatus && session && codexStatusTooltipId) {
-                    openCodexStatusTooltip(codexStatusTooltipId, session.id, event.currentTarget);
+                  if (showStatusTooltip && session && statusTooltipId) {
+                    openStatusTooltip(statusTooltipId, session.id, event.currentTarget);
                   }
                 }}
                 onMouseLeave={() => {
-                  closeCodexStatusTooltip();
+                  closeStatusTooltip();
                 }}
                 onFocus={(event) => {
-                  if (showCodexStatus && session && codexStatusTooltipId) {
-                    openCodexStatusTooltip(codexStatusTooltipId, session.id, event.currentTarget);
+                  if (showStatusTooltip && session && statusTooltipId) {
+                    openStatusTooltip(statusTooltipId, session.id, event.currentTarget);
                   }
                 }}
                 onBlur={(event) => {
@@ -508,7 +509,7 @@ export function PaneTabs({
                     return;
                   }
 
-                  closeCodexStatusTooltip();
+                  closeStatusTooltip();
                 }}
                 onClick={() => onSelectTab(paneId, tab.id)}
                 onKeyDown={(event) => {
@@ -638,15 +639,15 @@ export function PaneTabs({
           &gt;
         </button>
       ) : null}
-      {activeCodexTooltip && activeCodexTooltipStyle && activeCodexTooltipSession
+      {activeStatusTooltip && activeStatusTooltipStyle && activeStatusTooltipSession
         ? createPortal(
-            <CodexTabStatusTooltip
-              id={activeCodexTooltip.id}
-              session={activeCodexTooltipSession}
+            <SessionTabStatusTooltip
+              id={activeStatusTooltip.id}
+              session={activeStatusTooltipSession}
               codexState={codexState}
               projectLookup={projectLookup}
               remoteLookup={remoteLookup}
-              style={activeCodexTooltipStyle}
+              style={activeStatusTooltipStyle}
             />,
             document.body,
           )
@@ -710,7 +711,7 @@ async function handleCopyTabPath(path: string | null, onDone: () => void) {
   }
 }
 
-function CodexTabStatusTooltip({
+function SessionTabStatusTooltip({
   codexState,
   id,
   projectLookup,
@@ -725,13 +726,10 @@ function CodexTabStatusTooltip({
   session: Session;
   style: CSSProperties;
 }) {
-  const rateLimits = codexState.rateLimits;
-  const notices = codexState.notices ?? [];
-  const projectLabel = formatCodexTooltipProjectLabel(session, projectLookup);
-  const locationLabel = formatCodexTooltipLocationLabel(session, projectLookup, remoteLookup);
-  const hasStatusGrid = Boolean(
-    projectLabel || locationLabel || session.externalSessionId || rateLimits?.primary || rateLimits?.secondary,
-  );
+  const rateLimits = session.agent === "Codex" ? codexState.rateLimits : null;
+  const notices = session.agent === "Codex" ? (codexState.notices ?? []) : [];
+  const statusRows = buildSessionTooltipRows(session, projectLookup, remoteLookup);
+  const hasStatusGrid = Boolean(statusRows.length || rateLimits?.primary || rateLimits?.secondary);
 
   return (
     <div id={id} className="pane-tab-status-tooltip" role="tooltip" style={style}>
@@ -741,26 +739,14 @@ function CodexTabStatusTooltip({
       </div>
       {hasStatusGrid ? (
         <div className="pane-tab-status-grid">
-          {projectLabel ? (
-            <>
-              <div className="pane-tab-status-key">Project:</div>
-              <div className="pane-tab-status-value">{projectLabel}</div>
-            </>
-          ) : null}
-          {locationLabel ? (
-            <>
-              <div className="pane-tab-status-key">Location:</div>
-              <div className="pane-tab-status-value">{locationLabel}</div>
-            </>
-          ) : null}
-          {session.externalSessionId ? (
-            <>
-              <div className="pane-tab-status-key">Session:</div>
-              <div className="pane-tab-status-value pane-tab-status-mono">
-                {session.externalSessionId}
+          {statusRows.map((row) => (
+            <Fragment key={row.key}>
+              <div className="pane-tab-status-key">{row.key}:</div>
+              <div className={`pane-tab-status-value${row.mono ? " pane-tab-status-mono" : ""}`}>
+                {row.value}
               </div>
-            </>
-          ) : null}
+            </Fragment>
+          ))}
           {rateLimits?.primary ? (
             <>
               <div className="pane-tab-status-key">5h limit:</div>
@@ -806,11 +792,11 @@ function formatCodexNoticeBadgeLabel(count: number) {
   return `${count} Codex notice${count === 1 ? "" : "s"}`;
 }
 
-function hasCodexTabStatusTooltip(session: Session) {
-  return session.agent === "Codex";
+function hasSessionTabStatusTooltip(_session: Session) {
+  return true;
 }
 
-function formatCodexTooltipProjectLabel(
+function formatSessionTooltipProjectLabel(
   session: Session,
   projectLookup: ReadonlyMap<string, Project>,
 ) {
@@ -822,7 +808,7 @@ function formatCodexTooltipProjectLabel(
   return projectLookup.get(projectId)?.name ?? "Missing project";
 }
 
-function formatCodexTooltipLocationLabel(
+function formatSessionTooltipLocationLabel(
   session: Session,
   projectLookup: ReadonlyMap<string, Project>,
   remoteLookup: ReadonlyMap<string, RemoteConfig>,
@@ -850,6 +836,108 @@ function formatCodexTooltipLocationLabel(
 
   const localRemote = createBuiltinLocalRemote();
   return `${remoteDisplayName(localRemote, localRemote.id)} (${remoteConnectionLabel(localRemote)})`;
+}
+
+type SessionTooltipRow = {
+  key: string;
+  value: string;
+  mono?: boolean;
+};
+
+function buildSessionTooltipRows(
+  session: Session,
+  projectLookup: ReadonlyMap<string, Project>,
+  remoteLookup: ReadonlyMap<string, RemoteConfig>,
+): SessionTooltipRow[] {
+  const rows: SessionTooltipRow[] = [
+    { key: "Agent", value: session.agent },
+    { key: "State", value: formatTooltipEnumLabel(session.status) },
+    { key: "Project", value: formatSessionTooltipProjectLabel(session, projectLookup) },
+    { key: "Location", value: formatSessionTooltipLocationLabel(session, projectLookup, remoteLookup) },
+    { key: "Model", value: session.model, mono: true },
+  ];
+
+  if (session.externalSessionId) {
+    rows.push({
+      key: "Session",
+      value: session.externalSessionId,
+      mono: true,
+    });
+  }
+
+  if (session.approvalPolicy) {
+    rows.push({
+      key: "Policy",
+      value: formatTooltipEnumLabel(session.approvalPolicy),
+    });
+  }
+
+  if (session.agent === "Codex") {
+    if (session.sandboxMode) {
+      rows.push({
+        key: "Sandbox",
+        value: formatTooltipEnumLabel(session.sandboxMode),
+      });
+    }
+    if (session.reasoningEffort) {
+      rows.push({
+        key: "Reasoning",
+        value: formatTooltipEnumLabel(session.reasoningEffort),
+      });
+    }
+    if (session.codexThreadState) {
+      rows.push({
+        key: "Thread",
+        value: formatTooltipEnumLabel(session.codexThreadState),
+      });
+    }
+  }
+
+  if (session.agent === "Claude") {
+    if (session.claudeApprovalMode) {
+      rows.push({
+        key: "Approval",
+        value: formatTooltipEnumLabel(session.claudeApprovalMode),
+      });
+    }
+    if (session.claudeEffort) {
+      rows.push({
+        key: "Effort",
+        value: formatTooltipEnumLabel(session.claudeEffort),
+      });
+    }
+  }
+
+  if (session.agent === "Cursor" && session.cursorMode) {
+    rows.push({
+      key: "Mode",
+      value: formatTooltipEnumLabel(session.cursorMode),
+    });
+  }
+
+  if (session.agent === "Gemini" && session.geminiApprovalMode) {
+    rows.push({
+      key: "Approval",
+      value: formatTooltipEnumLabel(session.geminiApprovalMode),
+    });
+  }
+
+  return rows;
+}
+
+function formatTooltipEnumLabel(value: string) {
+  if (value === "xhigh") {
+    return "XHigh";
+  }
+
+  if (value === "yolo") {
+    return "YOLO";
+  }
+
+  return value
+    .split(/[-_]/)
+    .map((part) => (part ? `${part.charAt(0).toUpperCase()}${part.slice(1)}` : part))
+    .join(" ");
 }
 
 function CodexRateLimitMeter({

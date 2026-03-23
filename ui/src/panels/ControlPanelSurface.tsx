@@ -192,7 +192,7 @@ export const ControlPanelSurface = forwardRef<ControlPanelSurfaceHandle, Control
   }
 
   return (
-    <div className="control-panel-shell">
+    <div className={`control-panel-shell${fixedSection ? " fixed-section" : ""}`}>
       {fixedSection ? null : (
         <nav className="control-panel-activity-rail" aria-label="Control panel dock">
           <div className="control-panel-activity-group">

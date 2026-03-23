@@ -28,6 +28,8 @@ struct TestRecorder {
     thinking: Vec<(String, Vec<String>)>,
     texts: Vec<String>,
     text_deltas: Vec<String>,
+    streaming_text_delta_start: Option<usize>,
+    streaming_text_active: bool,
 }
 
 impl TurnRecorder for TestRecorder {
@@ -81,11 +83,29 @@ impl TurnRecorder for TestRecorder {
     }
 
     fn text_delta(&mut self, delta: &str) -> Result<()> {
+        if !self.streaming_text_active {
+            self.streaming_text_delta_start = Some(self.text_deltas.len());
+            self.streaming_text_active = true;
+        }
         self.text_deltas.push(delta.to_owned());
         Ok(())
     }
 
+    fn replace_streaming_text(&mut self, text: &str) -> Result<()> {
+        if let Some(start) = self.streaming_text_delta_start {
+            self.text_deltas.truncate(start);
+            self.text_deltas.push(text.to_owned());
+            self.streaming_text_active = true;
+            return Ok(());
+        }
+
+        self.texts.push(text.to_owned());
+        Ok(())
+    }
+
     fn finish_streaming_text(&mut self) -> Result<()> {
+        self.streaming_text_delta_start = None;
+        self.streaming_text_active = false;
         Ok(())
     }
 
@@ -861,6 +881,73 @@ fn claude_streamed_text_skips_duplicate_final_text_after_message_stop() {
 }
 
 #[test]
+fn claude_streamed_text_replaces_divergent_final_text() {
+    let state = test_app_state();
+    let session_id = test_session_id(&state, Agent::Claude);
+    let mut recorder = SessionRecorder::new(state.clone(), session_id.clone());
+    let mut turn_state = ClaudeTurnState::default();
+    let mut external_session_id = None;
+
+    handle_claude_event(
+        &json!({
+            "type": "stream_event",
+            "event": {
+                "type": "content_block_delta",
+                "delta": {
+                    "text": "Draft answer."
+                }
+            }
+        }),
+        &mut external_session_id,
+        &mut turn_state,
+        &mut recorder,
+    )
+    .unwrap();
+
+    handle_claude_event(
+        &json!({
+            "type": "assistant",
+            "message": {
+                "content": [
+                    {
+                        "type": "text",
+                        "text": "Final answer."
+                    }
+                ]
+            }
+        }),
+        &mut external_session_id,
+        &mut turn_state,
+        &mut recorder,
+    )
+    .unwrap();
+
+    handle_claude_event(
+        &json!({
+            "type": "result",
+            "is_error": false
+        }),
+        &mut external_session_id,
+        &mut turn_state,
+        &mut recorder,
+    )
+    .unwrap();
+
+    let snapshot = state.snapshot();
+    let session = snapshot
+        .sessions
+        .iter()
+        .find(|session| session.id == session_id)
+        .expect("Claude session should exist");
+
+    assert_eq!(session.messages.len(), 1);
+    assert!(matches!(
+        session.messages.first(),
+        Some(Message::Text { text, .. }) if text == "Final answer."
+    ));
+}
+
+#[test]
 fn claude_tool_use_after_streamed_text_starts_followup_in_new_message() {
     let state = test_app_state();
     let session_id = test_session_id(&state, Agent::Claude);
@@ -1551,7 +1638,10 @@ fn returns_cached_claude_native_commands_alongside_template_fallbacks() {
     );
     assert_eq!(response.commands[2].source, "Claude project command");
 
-    fs::remove_dir_all(root).unwrap();
+    drop(response);
+    drop(created);
+    drop(state);
+    let _ = fs::remove_dir_all(&root);
 }
 
 #[test]
@@ -6344,7 +6434,8 @@ fn shared_codex_agent_message_content_delta_event_ignores_stale_turn_id_from_par
 fn shared_codex_agent_message_final_event_appends_missing_suffix_after_streamed_delta() {
     let state = test_app_state();
     let session_id = test_session_id(&state, Agent::Codex);
-    let (runtime, _input_rx, process) = test_shared_codex_runtime("shared-codex-agent-final-suffix");
+    let (runtime, _input_rx, process) =
+        test_shared_codex_runtime("shared-codex-agent-final-suffix");
 
     {
         let mut inner = state.inner.lock().expect("state mutex poisoned");
@@ -7124,7 +7215,10 @@ fn repl_codex_streamed_agent_message_appends_missing_completed_suffix() {
     )
     .unwrap();
 
-    assert_eq!(recorder.text_deltas, vec!["Hello".to_owned(), " from REPL.".to_owned()]);
+    assert_eq!(
+        recorder.text_deltas,
+        vec!["Hello".to_owned(), " from REPL.".to_owned()]
+    );
     assert!(recorder.texts.is_empty());
     assert!(repl_state.turn_completed);
     assert!(repl_state.current_turn_id.is_none());
@@ -7500,6 +7594,37 @@ fn subagent_results_append_after_existing_assistant_text() {
 }
 
 #[test]
+fn clear_runtime_commits_revision_when_it_resets_state() {
+    let state = test_app_state();
+    let session_id = test_session_id(&state, Agent::Claude);
+    let (runtime, _input_rx) = test_claude_runtime_handle("clear-runtime");
+
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner.find_session_index(&session_id).unwrap();
+        inner.sessions[index].runtime = SessionRuntime::Claude(runtime);
+        inner.sessions[index].runtime_reset_required = true;
+        state.commit_locked(&mut inner).unwrap();
+    }
+
+    let baseline = state.snapshot().revision;
+    state.clear_runtime(&session_id).unwrap();
+
+    {
+        let inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner.find_session_index(&session_id).unwrap();
+        let record = &inner.sessions[index];
+        assert!(matches!(record.runtime, SessionRuntime::None));
+        assert!(!record.runtime_reset_required);
+    }
+    assert_eq!(state.snapshot().revision, baseline + 1);
+
+    let stable_revision = state.snapshot().revision;
+    state.clear_runtime(&session_id).unwrap();
+    assert_eq!(state.snapshot().revision, stable_revision);
+}
+
+#[test]
 fn reuses_shared_codex_runtime_across_sessions() {
     let state = test_app_state();
     let (runtime, _input_rx, process) = test_shared_codex_runtime("shared-codex");
@@ -7521,8 +7646,9 @@ fn reuses_shared_codex_runtime_across_sessions() {
         .sessions
         .lock()
         .expect("shared Codex session mutex poisoned");
-    assert!(shared_sessions.contains_key("session-a"));
-    assert!(shared_sessions.contains_key("session-b"));
+    assert!(!shared_sessions.contains_key("session-a"));
+    assert!(!shared_sessions.contains_key("session-b"));
+    assert!(shared_sessions.is_empty());
 }
 
 #[test]
@@ -9234,6 +9360,28 @@ async fn read_directory_accepts_project_id_without_session() {
 }
 
 #[tokio::test]
+async fn api_router_sets_local_cors_headers() {
+    let response = app_router(test_app_state())
+        .oneshot(
+            Request::builder()
+                .uri("/api/health")
+                .header(axum::http::header::ORIGIN, "http://127.0.0.1:8787")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .expect("request should complete");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        response
+            .headers()
+            .get(axum::http::header::ACCESS_CONTROL_ALLOW_ORIGIN),
+        Some(&HeaderValue::from_static("http://127.0.0.1:8787")),
+    );
+}
+
+#[tokio::test]
 async fn read_and_write_file_accept_project_id_without_session() {
     let state = test_app_state();
     let root =
@@ -9292,6 +9440,86 @@ async fn read_and_write_file_accept_project_id_without_session() {
         "pub fn generated() {}
 "
     );
+
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[tokio::test]
+async fn read_file_rejects_content_over_size_limit() {
+    let state = test_app_state();
+    let root =
+        std::env::temp_dir().join(format!("termal-project-file-read-limit-{}", Uuid::new_v4()));
+    let oversized_file = root.join("big.txt");
+
+    fs::create_dir_all(&root).unwrap();
+    fs::write(&oversized_file, "a".repeat(MAX_FILE_CONTENT_BYTES + 1)).unwrap();
+
+    let project = state
+        .create_project(CreateProjectRequest {
+            name: Some("Project Files".to_owned()),
+            root_path: root.to_string_lossy().into_owned(),
+            remote_id: default_local_remote_id(),
+        })
+        .unwrap();
+
+    let error = match read_file(
+        State(state),
+        Query(FileQuery {
+            path: oversized_file.to_string_lossy().into_owned(),
+            project_id: Some(project.project_id),
+            session_id: None,
+        }),
+    )
+    .await
+    {
+        Ok(_) => panic!("oversized read should fail"),
+        Err(error) => error,
+    };
+
+    assert_eq!(error.status, StatusCode::BAD_REQUEST);
+    assert!(error.message.contains("read limit"));
+
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[tokio::test]
+async fn write_file_rejects_content_over_size_limit() {
+    let state = test_app_state();
+    let root = std::env::temp_dir().join(format!(
+        "termal-project-file-write-limit-{}",
+        Uuid::new_v4()
+    ));
+    let output_file = root.join("generated").join("output.rs");
+    let oversized_content = "b".repeat(MAX_FILE_CONTENT_BYTES + 1);
+
+    fs::create_dir_all(&root).unwrap();
+
+    let project = state
+        .create_project(CreateProjectRequest {
+            name: Some("Project Files".to_owned()),
+            root_path: root.to_string_lossy().into_owned(),
+            remote_id: default_local_remote_id(),
+        })
+        .unwrap();
+
+    let error = match write_file(
+        State(state),
+        Json(WriteFileRequest {
+            path: output_file.to_string_lossy().into_owned(),
+            content: oversized_content,
+            project_id: Some(project.project_id),
+            session_id: None,
+        }),
+    )
+    .await
+    {
+        Ok(_) => panic!("oversized write should fail"),
+        Err(error) => error,
+    };
+
+    assert_eq!(error.status, StatusCode::BAD_REQUEST);
+    assert!(error.message.contains("write limit"));
+    assert!(!output_file.exists());
 
     fs::remove_dir_all(root).unwrap();
 }
@@ -9668,6 +9896,56 @@ fn delta_events_include_monotonic_revisions() {
     assert_eq!(event["revision"], json!(baseline + 1));
     assert_eq!(event["messageIndex"], json!(0));
     assert_eq!(state.snapshot().revision, baseline + 1);
+}
+
+#[test]
+fn replace_text_message_publishes_targeted_replace_delta() {
+    let state = test_app_state();
+    let session_id = test_session_id(&state, Agent::Codex);
+    let mut delta_events = state.subscribe_delta_events();
+
+    state
+        .push_message(
+            &session_id,
+            Message::Text {
+                attachments: Vec::new(),
+                id: "message-1".to_owned(),
+                timestamp: stamp_now(),
+                author: Author::Assistant,
+                text: "Draft answer.".to_owned(),
+                expanded_text: None,
+            },
+        )
+        .unwrap();
+    let baseline = state.snapshot().revision;
+
+    let _created_payload = delta_events
+        .try_recv()
+        .expect("message-created delta payload should exist");
+
+    state
+        .replace_text_message(&session_id, "message-1", "Final answer.")
+        .unwrap();
+
+    let payload = delta_events
+        .try_recv()
+        .expect("replace delta payload should exist");
+    let event: Value = serde_json::from_str(&payload).expect("delta should be valid json");
+
+    assert_eq!(event["type"], json!("textReplace"));
+    assert_eq!(event["revision"], json!(baseline + 1));
+    assert_eq!(event["messageIndex"], json!(0));
+    assert_eq!(event["text"], json!("Final answer."));
+    assert_eq!(state.snapshot().revision, baseline + 1);
+    assert!(matches!(
+        state
+            .snapshot()
+            .sessions
+            .iter()
+            .find(|session| session.id == session_id)
+            .and_then(|session| session.messages.first()),
+        Some(Message::Text { text, .. }) if text == "Final answer."
+    ));
 }
 
 #[test]

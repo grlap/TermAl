@@ -234,7 +234,7 @@ impl AppState {
                 headline: inputs.project.name,
                 project_id: inputs.project.id,
                 primary_session_id,
-                done_summary: normalize_project_done_summary(
+                done_summary: normalize_project_text(
                     &done_summary,
                     "Work paused while waiting for approval.",
                 ),
@@ -267,11 +267,11 @@ impl AppState {
                 headline: inputs.project.name,
                 project_id: inputs.project.id,
                 primary_session_id,
-                done_summary: normalize_project_done_summary(
+                done_summary: normalize_project_text(
                     &done_summary,
                     "Work is waiting on a response in TermAl.",
                 ),
-                current_status: normalize_project_status(
+                current_status: normalize_project_text(
                     &record.session.preview,
                     "Waiting on input in TermAl.",
                 ),
@@ -293,11 +293,11 @@ impl AppState {
                 headline: inputs.project.name,
                 project_id: inputs.project.id,
                 primary_session_id,
-                done_summary: normalize_project_done_summary(
+                done_summary: normalize_project_text(
                     &done_summary,
                     "The last turn ended in an error.",
                 ),
-                current_status: normalize_project_status(&record.session.preview, "Needs attention."),
+                current_status: normalize_project_text(&record.session.preview, "Needs attention."),
                 proposed_actions,
                 deep_link,
                 pending_approval_target: None,
@@ -312,7 +312,7 @@ impl AppState {
                 headline: inputs.project.name,
                 project_id: inputs.project.id,
                 primary_session_id,
-                done_summary: normalize_project_done_summary(
+                done_summary: normalize_project_text(
                     &done_summary,
                     "The agent is still working.",
                 ),
@@ -336,7 +336,7 @@ impl AppState {
                 headline: inputs.project.name,
                 project_id: inputs.project.id,
                 primary_session_id,
-                done_summary: normalize_project_done_summary(
+                done_summary: normalize_project_text(
                     &done_summary,
                     "The working tree has changes ready for review.",
                 ),
@@ -359,7 +359,7 @@ impl AppState {
             headline: inputs.project.name,
             project_id: inputs.project.id,
             primary_session_id,
-            done_summary: normalize_project_done_summary(
+            done_summary: normalize_project_text(
                 &done_summary,
                 "No agent work has started yet.",
             ),
@@ -554,6 +554,22 @@ async fn read_file(
             &query.path,
             ScopedPathMode::ExistingFile,
         )?;
+        let metadata = fs::metadata(&resolved_path).map_err(|err| match err.kind() {
+            io::ErrorKind::NotFound => {
+                ApiError::bad_request(format!("file not found: {}", resolved_path.display()))
+            }
+            _ => ApiError::internal(format!(
+                "failed to stat file {}: {err}",
+                resolved_path.display()
+            )),
+        })?;
+        if metadata.len() > MAX_FILE_CONTENT_BYTES as u64 {
+            return Err(ApiError::bad_request(format!(
+                "file exceeds the {} MB read limit: {}",
+                MAX_FILE_CONTENT_BYTES / (1024 * 1024),
+                resolved_path.display()
+            )));
+        }
         let content = fs::read_to_string(&resolved_path).map_err(|err| match err.kind() {
             io::ErrorKind::NotFound => {
                 ApiError::bad_request(format!("file not found: {}", resolved_path.display()))
@@ -595,6 +611,13 @@ async fn write_file(
                     "content": request.content.clone(),
                 }),
             );
+        }
+
+        if request.content.as_bytes().len() > MAX_FILE_CONTENT_BYTES {
+            return Err(ApiError::bad_request(format!(
+                "file content exceeds the {} MB write limit",
+                MAX_FILE_CONTENT_BYTES / (1024 * 1024)
+            )));
         }
 
         let resolved_path = resolve_project_scoped_requested_path(
@@ -4194,16 +4217,7 @@ fn build_project_deep_link(project_id: &str, session_id: Option<&str>) -> String
     query
 }
 
-fn normalize_project_status(value: &str, fallback: &str) -> String {
-    let trimmed = value.trim();
-    if trimmed.is_empty() {
-        fallback.to_owned()
-    } else {
-        make_preview(trimmed)
-    }
-}
-
-fn normalize_project_done_summary(value: &str, fallback: &str) -> String {
+fn normalize_project_text(value: &str, fallback: &str) -> String {
     let trimmed = value.trim();
     if trimmed.is_empty() {
         fallback.to_owned()
@@ -4389,6 +4403,18 @@ enum DeltaEvent {
         #[serde(rename = "messageIndex")]
         message_index: usize,
         delta: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        preview: Option<String>,
+    },
+    TextReplace {
+        revision: u64,
+        #[serde(rename = "sessionId")]
+        session_id: String,
+        #[serde(rename = "messageId")]
+        message_id: String,
+        #[serde(rename = "messageIndex")]
+        message_index: usize,
+        text: String,
         #[serde(skip_serializing_if = "Option::is_none")]
         preview: Option<String>,
     },

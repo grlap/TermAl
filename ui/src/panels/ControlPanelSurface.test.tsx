@@ -79,6 +79,7 @@ describe("ControlPanelSurface", () => {
     );
 
     expect(screen.queryByRole("navigation", { name: "Control panel dock" })).not.toBeInTheDocument();
+    expect(document.querySelector(".control-panel-shell")).toHaveClass("fixed-section");
     expect(screen.getByRole("heading", { level: 2, name: "Sessions" })).toBeInTheDocument();
     expect(screen.getByTestId("section-body")).toHaveTextContent("sessions");
     expect(window.localStorage.getItem("termal-control-panel-section-order-v2")).toBeNull();

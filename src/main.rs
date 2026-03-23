@@ -12,7 +12,7 @@ use std::time::Duration;
 
 use anyhow::{Context, Result, anyhow, bail};
 use axum::extract::{Path as AxumPath, Query, State};
-use axum::http::StatusCode;
+use axum::http::{HeaderValue, StatusCode};
 use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
@@ -24,10 +24,12 @@ use serde_json::{Value, json};
 use shared_child::SharedChild;
 use tokio::net::TcpListener;
 use tokio::sync::broadcast;
+use tower_http::cors::CorsLayer;
 use tower_http::services::{ServeDir, ServeFile};
 use uuid::Uuid;
 
 const MAX_IMAGE_ATTACHMENT_BYTES: usize = 5 * 1024 * 1024;
+const MAX_FILE_CONTENT_BYTES: usize = 10 * 1024 * 1024;
 
 #[tokio::main]
 async fn main() {
@@ -97,6 +99,18 @@ async fn run_server() -> Result<()> {
 }
 
 fn app_router(state: AppState) -> Router {
+    let cors = CorsLayer::new()
+        .allow_origin([
+            HeaderValue::from_static("http://127.0.0.1:8787"),
+            HeaderValue::from_static("http://localhost:8787"),
+        ])
+        .allow_methods([
+            axum::http::Method::GET,
+            axum::http::Method::POST,
+            axum::http::Method::PUT,
+        ])
+        .allow_headers([axum::http::header::ACCEPT, axum::http::header::CONTENT_TYPE]);
+
     Router::new()
         .route("/api/health", get(health))
         .route("/api/file", get(read_file).put(write_file))
@@ -178,6 +192,7 @@ fn app_router(state: AppState) -> Router {
             post(submit_codex_app_request),
         )
         .with_state(state)
+        .layer(cors)
 }
 
 fn diff_change_set_id(message_id: &str) -> String {

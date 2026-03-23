@@ -66,6 +66,7 @@ trait TurnRecorder {
         change_type: ChangeType,
     ) -> Result<()>;
     fn text_delta(&mut self, delta: &str) -> Result<()>;
+    fn replace_streaming_text(&mut self, text: &str) -> Result<()>;
     fn finish_streaming_text(&mut self) -> Result<()>;
     fn command_started(&mut self, key: &str, command: &str) -> Result<()>;
     fn command_completed(
@@ -408,6 +409,37 @@ fn recorder_text_delta<R: SessionRecorderAccess>(recorder: &mut R, delta: &str) 
     state.append_text_delta(&session_id, &message_id, delta)
 }
 
+fn recorder_replace_streaming_text<R: SessionRecorderAccess>(
+    recorder: &mut R,
+    text: &str,
+) -> Result<()> {
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        return Ok(());
+    }
+
+    let state = recorder.state().clone();
+    let session_id = recorder.session_id().to_owned();
+    let message_id = match recorder.recorder_state_mut().streaming_text_message_id.clone() {
+        Some(message_id) => message_id,
+        None => {
+            return state.push_message(
+                &session_id,
+                Message::Text {
+                    attachments: Vec::new(),
+                    id: state.allocate_message_id(),
+                    timestamp: stamp_now(),
+                    author: Author::Assistant,
+                    text: trimmed.to_owned(),
+                    expanded_text: None,
+                },
+            );
+        }
+    };
+
+    state.replace_text_message(&session_id, &message_id, trimmed)
+}
+
 fn recorder_push_thinking<R: SessionRecorderAccess>(
     recorder: &mut R,
     title: &str,
@@ -698,6 +730,10 @@ impl TurnRecorder for SessionRecorder {
         recorder_text_delta(self, delta)
     }
 
+    fn replace_streaming_text(&mut self, text: &str) -> Result<()> {
+        recorder_replace_streaming_text(self, text)
+    }
+
     fn push_thinking(&mut self, title: &str, lines: Vec<String>) -> Result<()> {
         recorder_push_thinking(self, title, lines)
     }
@@ -768,6 +804,10 @@ impl TurnRecorder for BorrowedSessionRecorder<'_> {
 
     fn text_delta(&mut self, delta: &str) -> Result<()> {
         recorder_text_delta(self, delta)
+    }
+
+    fn replace_streaming_text(&mut self, text: &str) -> Result<()> {
+        recorder_replace_streaming_text(self, text)
     }
 
     fn push_thinking(&mut self, title: &str, lines: Vec<String>) -> Result<()> {
@@ -882,6 +922,11 @@ impl TurnRecorder for ReplPrinter {
         print!("{delta}");
         io::stdout().flush().context("failed to flush stdout")?;
         Ok(())
+    }
+
+    fn replace_streaming_text(&mut self, text: &str) -> Result<()> {
+        self.finish_streaming_text()?;
+        self.push_text(text)
     }
 
     fn push_thinking(&mut self, title: &str, lines: Vec<String>) -> Result<()> {
@@ -1243,6 +1288,10 @@ impl TurnRecorder for DynTurnRecorderRef<'_> {
 
     fn text_delta(&mut self, delta: &str) -> Result<()> {
         self.inner.text_delta(delta)
+    }
+
+    fn replace_streaming_text(&mut self, text: &str) -> Result<()> {
+        self.inner.replace_streaming_text(text)
     }
 
     fn finish_streaming_text(&mut self) -> Result<()> {
@@ -1962,13 +2011,20 @@ fn record_repl_codex_completed_agent_message(
         .streamed_agent_message_text_by_item_id
         .entry(item_id.to_owned())
         .or_default();
-    let Some(unseen_suffix) = next_codex_delta_suffix(entry, trimmed) else {
+    let update = next_completed_codex_text_update(entry, trimmed);
+    if matches!(update, CompletedTextUpdate::NoChange) {
         return Ok(());
-    };
+    }
 
     let mut recorder_ref = DynTurnRecorderRef::new(recorder);
     begin_codex_assistant_output(turn_state, &mut recorder_ref)?;
-    recorder.text_delta(&unseen_suffix)
+    match update {
+        CompletedTextUpdate::NoChange => Ok(()),
+        CompletedTextUpdate::Append(unseen_suffix) => recorder.text_delta(&unseen_suffix),
+        CompletedTextUpdate::Replace(replacement_text) => {
+            recorder.replace_streaming_text(&replacement_text)
+        }
+    }
 }
 
 fn handle_repl_codex_event_item_completed(
@@ -2569,12 +2625,13 @@ fn record_claude_completed_assistant_text(
         return recorder.push_text(trimmed);
     }
 
-    let Some(unseen_suffix) = next_codex_delta_suffix(&mut state.streamed_assistant_text, trimmed)
-    else {
-        return Ok(());
-    };
-
-    recorder.text_delta(&unseen_suffix)
+    match next_completed_codex_text_update(&mut state.streamed_assistant_text, trimmed) {
+        CompletedTextUpdate::NoChange => Ok(()),
+        CompletedTextUpdate::Append(unseen_suffix) => recorder.text_delta(&unseen_suffix),
+        CompletedTextUpdate::Replace(replacement_text) => {
+            recorder.replace_streaming_text(&replacement_text)
+        }
+    }
 }
 
 fn finish_claude_assistant_text_stream<R: TurnRecorder + ?Sized>(

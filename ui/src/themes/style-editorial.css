@@ -1,0 +1,10 @@
+[data-ui-style="editorial"] {
+  --heading-font: "Iowan Old Style", "Palatino Linotype", "Book Antiqua", Georgia, serif;
+  --body-font: "Avenir Next", "Segoe UI", "Helvetica Neue", sans-serif;
+  --code-font: "IBM Plex Mono", "SFMono-Regular", Consolas, monospace;
+  --button-radius: 1.2rem;
+  --button-radius-tight: 0.96rem;
+  --button-radius-large: 1.3rem;
+  --shadow: 0 24px 60px color-mix(in srgb, var(--ink) 14%, transparent);
+  --texture-mask: linear-gradient(180deg, rgba(0, 0, 0, 0.84), transparent);
+}
