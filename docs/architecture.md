@@ -213,8 +213,9 @@ local server remains the control plane and exposes the single browser-facing
 ┌──────────────────────────────┐   ┌──────────────────────────────────────────┐
 │ Local machine runtime        │   │ Remote machine                           │
 │ LocalConnector               │   │ sshd                                     │
-│ - local projects             │   │  └─ starts or reuses `termal server`     │
-│ - local agent processes      │   │     bound to 127.0.0.1 on remote host    │
+│ - local projects             │   │  └─ runs bootstrap script, then          │
+│ - local agent processes      │   │     starts or reuses `termal server`     │
+│                              │   │     bound to 127.0.0.1 on remote host    │
 └──────────────────────────────┘   └───────────────────┬──────────────────────┘
                                                        │ tunneled HTTP + SSE
                                                        ▼
@@ -248,15 +249,24 @@ projectId -> remoteId lookup in local control plane
 For a remote machine:
 
 1. The local TermAl server uses SSH to connect to the remote host.
-2. SSH starts or reuses a remote `termal server` process.
-3. The remote TermAl server listens on `127.0.0.1` only on the remote machine.
-4. The local TermAl server keeps a persistent SSH tunnel to that remote server.
-5. The local TermAl server speaks the normal TermAl HTTP and SSE protocol over
+2. For managed SSH remotes, SSH can run a bootstrap script in a configured
+   TermAl checkout on the remote machine.
+3. The bootstrap script updates that checkout (`git fetch`, `git checkout`,
+   `git pull --ff-only`) and starts the backend from source.
+4. The first useful version can use `cargo run -- server` for convenience,
+   though `cargo build --release && ./target/release/termal server` is the
+   better long-lived default.
+5. The remote TermAl server listens on `127.0.0.1` only on the remote machine.
+6. The local TermAl server keeps a persistent SSH tunnel to that remote server.
+7. The local TermAl server speaks the normal TermAl HTTP and SSE protocol over
    that tunnel.
 
 This is intentionally similar to the Remote-SSH shape used by editor tooling:
 SSH is used to reach the machine, start the remote server, and carry the
 transport. The browser still only talks to the local control plane.
+For the first managed iteration, the control plane updates source on the remote
+instead of copying prebuilt binaries. That avoids cross-compilation while still
+letting one laptop manage multiple machines.
 
 ### Control Plane Responsibilities
 
@@ -338,6 +348,30 @@ Design constraints:
   `termal server` lifecycle.
 - System `ssh` and `ssh-agent` should be preferred over custom browser-managed
   key handling.
+
+### V0 Managed Bootstrap
+
+The first managed-remote bootstrap should optimize for developer-controlled
+machines rather than general-purpose machine provisioning.
+
+Assumptions:
+
+- The remote machine already has `git`, `cargo`, and the Rust toolchain
+  installed.
+- The remote machine already has a local TermAl checkout at a configured path.
+- The local machine can push commits before asking a remote to update.
+
+Recommended flow:
+
+1. SSH into the remote machine.
+2. `cd` to the configured TermAl checkout.
+3. Fast-forward that checkout to the desired branch, tag, or commit.
+4. Start `termal server` from source in that checkout.
+5. Reuse the existing tunnel, health check, and SSE bridge design.
+
+This keeps the remote-control-plane design intact while deferring binary
+distribution, artifact caching, checksums, and cross-compilation support to a
+later iteration.
 
 ### API Shape
 

@@ -24,6 +24,7 @@ import {
   remoteDisplayName,
   resolveProjectRemoteId,
 } from "../remotes";
+import { matchingSessionModelOption } from "../session-model-options";
 import {
   attachWorkspaceTabDragData,
   createWorkspaceTabDrag,
@@ -844,6 +845,38 @@ type SessionTooltipRow = {
   mono?: boolean;
 };
 
+function formatSessionTooltipModelRow(session: Session): SessionTooltipRow {
+  const currentModel = session.model.trim();
+  const modelOption = matchingSessionModelOption(session.modelOptions, session.model);
+
+  if (modelOption?.label.trim()) {
+    return {
+      key: "Model",
+      value: modelOption.label.trim(),
+    };
+  }
+
+  if (currentModel.toLowerCase() === "auto") {
+    return {
+      key: "Model",
+      value: "Auto",
+    };
+  }
+
+  if (currentModel.toLowerCase() === "default") {
+    return {
+      key: "Model",
+      value: "Default",
+    };
+  }
+
+  return {
+    key: "Model",
+    value: currentModel,
+    mono: true,
+  };
+}
+
 function buildSessionTooltipRows(
   session: Session,
   projectLookup: ReadonlyMap<string, Project>,
@@ -854,7 +887,7 @@ function buildSessionTooltipRows(
     { key: "State", value: formatTooltipEnumLabel(session.status) },
     { key: "Project", value: formatSessionTooltipProjectLabel(session, projectLookup) },
     { key: "Location", value: formatSessionTooltipLocationLabel(session, projectLookup, remoteLookup) },
-    { key: "Model", value: session.model, mono: true },
+    formatSessionTooltipModelRow(session),
   ];
 
   if (session.externalSessionId) {

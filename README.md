@@ -55,6 +55,37 @@ Browser (React + TypeScript)        Rust Backend (axum + tokio)
 
 TermAl can manage agent sessions on remote machines over SSH. The browser always connects to the local backend; remote operations are transparently proxied through persistent SSH tunnels.
 
+### SSH authentication setup
+
+TermAl currently launches SSH non-interactively, so the simplest setup is
+key-based auth with your normal system `ssh` / `ssh-agent` flow.
+
+If you do not already have an SSH key on your laptop:
+
+```bash
+ssh-keygen -t ed25519
+```
+
+Install that public key on the remote machine:
+
+```bash
+ssh-copy-id user@host
+```
+
+Then verify normal SSH works before configuring the remote in TermAl:
+
+```bash
+ssh user@host
+```
+
+Notes:
+
+- `ssh-copy-id` copies your public key into the remote account's
+  `~/.ssh/authorized_keys`.
+- This is a public key, not a certificate.
+- If `ssh-copy-id` is unavailable, append the contents of
+  `~/.ssh/id_ed25519.pub` to `~/.ssh/authorized_keys` on the remote manually.
+
 ### How it works
 
 ```
@@ -69,7 +100,8 @@ Your laptop                              Remote build server
                                                           └────────────────────────┘
 ```
 
-1. **Configure a remote** in Settings > Remotes — give it a name, SSH host, user, and optional port.
+1. **Configure a remote** in Settings > Remotes — give it a name, SSH host,
+   user, and optional port.
 2. **Create a project** bound to that remote. Sessions created inside the project run on the remote.
 3. **TermAl opens an SSH tunnel** (`ssh -L {local_port}:127.0.0.1:8787`) and optionally starts a TermAl server process on the remote host.
 4. All session operations (messages, approvals, stop/kill) are **proxied through the tunnel** as regular REST calls.
@@ -141,6 +173,21 @@ Remote TermAl                    Local TermAl                     Browser
 ```
 
 The local backend is the single source of truth for the browser. It rewrites session and project IDs so the frontend sees a unified namespace — remote sessions look identical to local ones.
+
+### Remote settings
+
+SSH remotes currently store only the connection settings needed to reach the
+machine:
+
+- remote name
+- SSH host
+- optional SSH user
+- optional SSH port
+- enabled/disabled state
+
+When a remote is used, TermAl first tries to start `termal server` over SSH. If
+that fails, it falls back to tunnel-only mode and expects a TermAl server to
+already be running on the remote host.
 
 ### Configuration reference
 

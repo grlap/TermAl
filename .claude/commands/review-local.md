@@ -114,3 +114,44 @@ After all reviewers complete, merge their findings into a single review note:
 Deduplicate: if two reviewers flag the same issue, merge them (note which reviewers caught it).
 
 Present the consolidated note directly to the user (do NOT write it to a file unless asked).
+
+## Step 6: Update `docs/bugs.md`
+
+After presenting the review to the user, update `docs/bugs.md` to reflect the findings. Read the file first to understand the current structure, then apply these three operations:
+
+### 6a. Mark resolved bugs as fixed
+
+If the reviewed changes fix any **active bug entries** (the `## Heading` sections with Severity/Current behavior/Proposal), move them into the "also fixed in the current tree" preamble paragraphs at the top of the file. Write a brief summary of how each was fixed, matching the existing preamble style.
+
+### 6b. Add new bug entries
+
+For each finding from the review (any severity: Critical, High, Medium, Low, or Note) that is NOT already tracked in bugs.md, add a new bug entry in the active section (between the preamble and the first existing bug entry, or wherever severity-ordering fits). Use the existing format:
+
+```markdown
+## Short description of the issue
+
+**Severity:** [Critical/High/Medium/Low/Note] - brief impact summary.
+
+[1-2 paragraph explanation of the problem.]
+
+**Current behavior:**
+- [bullet points describing what happens now]
+
+**Proposal:**
+- [bullet points describing the recommended fix]
+```
+
+### 6c. Add or update task list items
+
+For **test gaps and coverage improvements** identified by the review, add P2 task items to the Implementation Tasks section. Match the existing format:
+
+```markdown
+- [ ] Short task description:
+  longer explanation spanning one or two lines if needed.
+```
+
+Remove any task items that the reviewed changes have completed (e.g., if a test gap was filled, remove that task).
+
+### 6d. Skip if clean
+
+If the review found no actionable findings (no new bugs, no resolved bugs, no new tasks), do NOT touch bugs.md. Tell the user "bugs.md is up to date — no changes needed."

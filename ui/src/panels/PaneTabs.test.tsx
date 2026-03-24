@@ -390,6 +390,101 @@ describe("PaneTabs", () => {
     expect(tooltip).toHaveTextContent("Effort:");
     expect(tooltip).toHaveTextContent("High");
   });
+
+  it("prefers the live model label in the status tooltip", async () => {
+    renderPaneTabs({
+      sessionLookup: new Map([
+        [
+          "session-1",
+          makeSession("session-1", "C:/repo", "Claude Default", {
+            agent: "Claude",
+            model: "default",
+            modelOptions: [
+              {
+                label: "Default (recommended)",
+                value: "default",
+                description: "Opus 4.6",
+                badges: ["Recommended"],
+              },
+              {
+                label: "Sonnet",
+                value: "sonnet",
+              },
+            ],
+          }),
+        ],
+      ]),
+      tabs: [
+        {
+          id: "tab-session",
+          kind: "session",
+          sessionId: "session-1",
+        },
+      ],
+    });
+
+    fireEvent.mouseEnter(screen.getByRole("tab", { name: /Claude Default/i }));
+
+    const tooltip = await screen.findByRole("tooltip");
+    expect(tooltip).toHaveTextContent("Model:");
+    expect(tooltip).toHaveTextContent("Default (recommended)");
+  });
+
+  it("shows Auto in the status tooltip when the session uses the auto sentinel", async () => {
+    renderPaneTabs({
+      sessionLookup: new Map([
+        [
+          "session-1",
+          makeSession("session-1", "C:/repo", "Cursor Auto", {
+            agent: "Cursor",
+            cursorMode: "agent",
+            model: "auto",
+          }),
+        ],
+      ]),
+      tabs: [
+        {
+          id: "tab-session",
+          kind: "session",
+          sessionId: "session-1",
+        },
+      ],
+    });
+
+    fireEvent.mouseEnter(screen.getByRole("tab", { name: /Cursor Auto/i }));
+
+    const tooltip = await screen.findByRole("tooltip");
+    expect(tooltip).toHaveTextContent("Model:");
+    expect(tooltip).toHaveTextContent("Auto");
+  });
+
+  it("falls back to the raw model string in the status tooltip when no live option matches", async () => {
+    renderPaneTabs({
+      sessionLookup: new Map([
+        [
+          "session-1",
+          makeSession("session-1", "C:/repo", "Claude Custom", {
+            agent: "Claude",
+            model: "claude-custom-build",
+            modelOptions: [{ label: "Sonnet", value: "sonnet" }],
+          }),
+        ],
+      ]),
+      tabs: [
+        {
+          id: "tab-session",
+          kind: "session",
+          sessionId: "session-1",
+        },
+      ],
+    });
+
+    fireEvent.mouseEnter(screen.getByRole("tab", { name: /Claude Custom/i }));
+
+    const tooltip = await screen.findByRole("tooltip");
+    expect(tooltip).toHaveTextContent("Model:");
+    expect(tooltip).toHaveTextContent("claude-custom-build");
+  });
 });
 
 function renderPaneTabs({

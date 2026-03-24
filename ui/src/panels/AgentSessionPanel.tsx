@@ -11,6 +11,7 @@ import {
   type RefObject,
 } from "react";
 import { ExpandedPromptPanel } from "../ExpandedPromptPanel";
+import { matchingSessionModelOption } from "../session-model-options";
 import {
   renderHighlightedText,
   type SearchHighlightTone,
@@ -345,18 +346,7 @@ function claudeEffortChoice(effort: ClaudeEffortLevel) {
 }
 
 function currentSessionModelCapabilities(session: Session) {
-  const normalizedSessionModel = session.model.trim().toLowerCase();
-  if (!normalizedSessionModel) {
-    return null;
-  }
-
-  return (
-    session.modelOptions?.find(
-      (option) =>
-        option.value.toLowerCase() === normalizedSessionModel ||
-        option.label.toLowerCase() === normalizedSessionModel,
-    ) ?? null
-  );
+  return matchingSessionModelOption(session.modelOptions, session.model);
 }
 
 function supportedCodexReasoningEfforts(session: Session) {

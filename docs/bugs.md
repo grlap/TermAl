@@ -19,6 +19,47 @@ read/write size-limit note, the missing CORS note, the remote-delta diagnostic n
 project-text normalizer note, the `should_dispatch_next` consistency note, the Codex completed-text
 reconciliation note, and the `TextReplace` architecture-doc note are also fixed in the current tree.
 
+The shared Codex kill-isolation note, the committed-kill response-contract note, and the stale
+killed-thread ignore-list growth note are also fixed in the current tree. Shared-session kill
+failures now detach locally instead of tearing down the shared Codex runtime, kill now returns the
+committed authoritative state while post-removal cleanup warnings are logged server-side, and
+discovery import prunes ignored Codex thread IDs that no longer exist.
+
+The non-Codex external-session tombstone leak, the shared-Codex `stop_session` detach gap, the
+shared-Codex post-interrupt cleanup gap, and the tooltip vs. session-panel model-option trim
+divergence are also fixed in the current tree. Codex tombstone clearing is now scoped to Codex
+sessions only, `stop_session` now always detaches shared Codex session bookkeeping after an
+interrupt attempt and continues through runtime cleanup/stop-message recording even if that
+interrupt fails, and tooltip/panel model-option matching now uses one shared lookup utility.
+
+## `stop_session` error handling is asymmetric across runtime types
+
+**Severity:** Low - inconsistent API contract, not data loss.
+
+`stop_session` now treats a shared Codex `interrupt_and_detach` failure as a warning (logs to
+stderr, returns HTTP 200 with the cleaned-up snapshot). However, a non-shared Codex `handle.kill()`
+failure and all non-Codex `runtime.kill()` failures still propagate as HTTP 500. The same endpoint
+has two error contracts depending on an internal implementation detail (shared vs. non-shared
+runtime).
+
+This is pragmatically correct — `detach()` handles authoritative cleanup for shared runtimes, so
+the interrupt is best-effort, while killing a dedicated child process is not best-effort (a failure
+leaves an orphan). But `kill_session` already takes the warn-and-continue approach for all runtime
+types.
+
+**Current behavior:**
+- shared Codex stop with interrupt failure → HTTP 200, warning logged to stderr
+- non-shared Codex stop with kill failure → HTTP 500
+- Claude/ACP stop with kill failure → HTTP 500
+- the frontend sees no signal that a shared Codex interrupt partially failed
+
+**Proposal:**
+- consider applying the same best-effort pattern to non-shared kills in `stop_session` for
+  consistency with the shared path and with `kill_session`
+- alternatively, document the asymmetry as intentional if the orphan-process risk justifies it
+- optionally amend the stop message text to indicate the interrupt may still be in progress, or add
+  a warning-level field to the response
+
 ## Node 24 deprecation warning from the legacy Vite dev proxy
 
 **Severity:** Low - local dev noise only.
@@ -104,12 +145,6 @@ Concrete work implied by the current TermAl parity gaps. Ordered by user impact 
 
 ## P0
 
-- [ ] Add Gemini as a first-class agent in the backend and UI:
-  `Agent` enum, session creation, session rendering, and persistence need to stop assuming the
-  world is only Claude or Codex.
-- [ ] Implement a persistent Gemini runtime adapter:
-  spawn `gemini` with `--output-format stream-json`, map stdout events into TermAl messages, and
-  wire message dispatch through the same session runtime path used by Claude and Codex.
 - [ ] Add territory visualization:
   track per-session file read/write activity in backend state, expose it through `/api/territory`,
   render a project-tree view color-coded by agent with recency decay, heatmap mode, conflict
@@ -142,10 +177,13 @@ Concrete work implied by the current TermAl parity gaps. Ordered by user impact 
   Codex thread actions (archive, unarchive, fork, rollback) and interactive request submissions
   (user input, MCP elicitation, generic app requests) now have HTTP route tests via
   `tower::ServiceExt`. Still missing: session creation, message send, settings updates, Claude
-  approvals, kill, and SSE state events.
+  approvals, and SSE state events.
 - [ ] Add backend regression tests for divergent completed-text replacement in Codex streaming:
   cover both shared-Codex and REPL-Codex paths where the final authoritative text must replace,
   not append to, previously streamed content.
+- [ ] Add a `stop_session` test with a queued prompt pending when a shared Codex interrupt fails:
+  verify that `dispatch_next_queued_turn` fires and the queued prompt is dispatched after the
+  best-effort cleanup completes.
 - [ ] Add frontend reconcile tests for new interactive message types:
   `userInputRequest`, `mcpElicitationRequest`, and `codexAppRequest` messages are handled by the
   reconciler but have no test coverage verifying that state changes (e.g. pending → submitted)

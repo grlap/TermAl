@@ -66,19 +66,61 @@ their project.
 
 ## Suggested remote config shape
 
-The exact schema can evolve, but the first useful version is:
+The exact schema can evolve, but the first useful SSH-backed version is:
 
 - `id`
 - `name`
-- `baseUrl`
+- `transport` (`local` or `ssh`)
 - `enabled`
-- `auth` or token placeholder for later expansion
+- `host`
+- `port`
+- `user`
+- `bootstrapMode` (`manual` or `gitRepo`)
+- `repoPath` (required for `gitRepo`)
+- `gitRef` (optional branch, tag, or commit to check out before launch)
+- `serverCommand` (optional override for remote startup)
 
 The local remote should be represented explicitly, for example:
 
 - `id: "local"`
 - `name: "Local"`
 - no removable toggle
+
+For the first managed SSH pass, `bootstrapMode: "gitRepo"` is the important
+addition. It means the local control plane owns the SSH connection, but the
+remote machine owns the checkout and toolchain.
+
+## V0 remote bootstrap strategy
+
+The first managed-remote implementation should avoid cross-compiling and avoid
+copying prebuilt binaries.
+
+Instead, each SSH remote can optionally declare a TermAl checkout that the local
+machine updates and runs over SSH.
+
+Proposed flow:
+
+1. The user configures a remote host plus a machine-scoped TermAl `repoPath`.
+2. The local TermAl server connects over SSH and runs a small bootstrap script.
+3. The bootstrap script enters `repoPath`, fetches the configured `gitRef`, and
+   fast-forwards the checkout.
+4. The bootstrap script starts the backend from source, initially with
+   `cargo run -- server` for convenience.
+5. A more stable follow-up can switch the default to
+   `cargo build --release && ./target/release/termal server`.
+6. The existing SSH tunnel, health check, REST proxying, and SSE bridge stay
+   the same.
+
+Why this is the right v0:
+
+- It lets one laptop manage multiple remotes without solving artifact
+  distribution first.
+- It avoids cross-compilation requirements for macOS -> Linux or Linux ->
+  Windows combinations.
+- It assumes only trusted machines where `git` and the Rust toolchain are
+  already installed.
+- It preserves the later option to replace the bootstrap step with managed
+  binary installation once artifact distribution is worth the complexity.
 
 ## Task list
 
@@ -88,6 +130,8 @@ The local remote should be represented explicitly, for example:
 - [ ] Add a backend `RemoteConfig` type and serde migration for old state files.
 - [ ] Keep existing preference fields working unchanged.
 - [ ] Reserve a built-in local remote entry and recreate it if missing.
+- [ ] Persist SSH bootstrap fields such as `bootstrapMode`, `repoPath`, `gitRef`,
+      and `serverCommand`.
 - [ ] Extend frontend `AppPreferences` types to include remote configs.
 - [ ] Extend settings API request and response payloads to read and write remotes.
 - [ ] Add tests for preference persistence and migration.
@@ -117,6 +161,8 @@ The local remote should be represented explicitly, for example:
 - [ ] Add a remote client layer in the local backend.
 - [ ] Support a built-in in-process adapter for the local remote.
 - [ ] Support HTTP clients for configured remote backends.
+- [ ] Add an SSH bootstrap path that can update and launch a remote checkout
+      before the HTTP client starts proxying requests.
 - [ ] Define a common interface for `get state`, `create project`, `create
       session`, `send message`, `stop`, `kill`, file access, git access, and
       review access.
@@ -196,6 +242,8 @@ The local remote should be represented explicitly, for example:
 
 - [ ] Stop treating agent readiness as one global local-machine value.
 - [ ] Track readiness per remote.
+- [ ] Distinguish "SSH reachable but checkout/toolchain/bootstrap failed" from
+      ordinary connection failures.
 - [ ] Decide how project creation should behave when the selected remote is
       reachable but missing an agent binary.
 - [ ] Decide whether model lists and capability hints should be fetched lazily
@@ -215,6 +263,8 @@ The local remote should be represented explicitly, for example:
 
 - [ ] Decide how local development runs with one control-plane server and one or
       more remote servers.
+- [ ] Add a helper path for remotes backed by a checked-out TermAl repo plus
+      installed Rust toolchain.
 - [ ] Add helpers or scripts for launching a local server plus mock remotes.
 - [ ] Add integration coverage for:
 - [ ] local project
@@ -239,6 +289,10 @@ The local remote should be represented explicitly, for example:
 
 - Should the target remote own the canonical project record, or should the local
   server own project records and push only execution requests outward?
+- For `gitRepo` bootstrap, should the local control plane allow any branch, or
+  only a configured branch/ref per remote?
+- Should `cargo run -- server` ship first for convenience, or should the first
+  managed version require `cargo build --release` for startup stability?
 - Do remote projects need a remote file-picker endpoint, or is manual path entry
   acceptable for v1?
 - Should the browser show remote-specific offline badges inside project and

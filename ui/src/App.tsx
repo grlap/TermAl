@@ -58,6 +58,7 @@ import { buildDiffPreviewModel } from "./diff-preview";
 import { formatUserFacingError } from "./error-messages";
 import { highlightCode } from "./highlight";
 import { applyDeltaToSessions } from "./live-updates";
+import { matchingSessionModelOption } from "./session-model-options";
 import {
   looksLikeWindowsPath,
   normalizeDisplayPath,
@@ -444,25 +445,6 @@ function sessionModelComboboxOptions(
       value: currentModel,
     },
   ];
-}
-
-function matchingSessionModelOption(
-  modelOptions: Session["modelOptions"] | undefined,
-  requestedModel: string,
-) {
-  const trimmedModel = requestedModel.trim();
-  if (!trimmedModel) {
-    return null;
-  }
-
-  const normalizedRequestedModel = trimmedModel.toLowerCase();
-  return (
-    modelOptions?.find(
-      (option) =>
-        option.value.toLowerCase() === normalizedRequestedModel ||
-        option.label.toLowerCase() === normalizedRequestedModel,
-    ) ?? null
-  );
 }
 
 function normalizedRequestedSessionModel(session: Session, requestedModel: string) {

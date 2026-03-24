@@ -1987,6 +1987,14 @@ impl AppState {
             .find_session_index(session_id)
             .ok_or_else(|| anyhow!("session `{session_id}` not found"))?;
         set_record_external_session_id(&mut inner.sessions[index], Some(external_session_id));
+        if inner.sessions[index]
+            .session
+            .agent
+            .supports_codex_prompt_settings()
+        {
+            let external_session_id = inner.sessions[index].external_session_id.clone();
+            inner.allow_discovered_codex_thread(external_session_id.as_deref());
+        }
         self.commit_locked(&mut inner)?;
         Ok(())
     }
@@ -2605,7 +2613,7 @@ impl AppState {
         if self.remote_session_target(session_id)?.is_some() {
             return self.proxy_remote_kill_session(session_id);
         }
-        let (runtime_to_kill, hidden_runtimes_to_kill) = {
+        let (snapshot, runtime_to_kill, hidden_runtimes_to_kill) = {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
             let index = inner
                 .find_visible_session_index(session_id)
@@ -2613,6 +2621,7 @@ impl AppState {
             let workdir = inner.sessions[index].session.workdir.clone();
             let project_id = inner.sessions[index].session.project_id.clone();
             let agent = inner.sessions[index].session.agent;
+            let external_session_id = inner.sessions[index].external_session_id.clone();
             let record = &mut inner.sessions[index];
 
             let runtime = match &record.runtime {
@@ -2621,19 +2630,6 @@ impl AppState {
                 SessionRuntime::Acp(handle) => Some(KillableRuntime::Acp(handle.clone())),
                 SessionRuntime::None => None,
             };
-
-            if runtime.is_some()
-                && matches!(
-                    record.session.status,
-                    SessionStatus::Active | SessionStatus::Approval
-                )
-            {
-                record.session.status = SessionStatus::Idle;
-                record.session.preview = "Stopping session\u{2026}".to_owned();
-                self.commit_locked(&mut inner).map_err(|err| {
-                    ApiError::internal(format!("failed to persist session state: {err:#}"))
-                })?;
-            }
             inner.sessions.remove(index);
 
             let mut hidden_runtimes = Vec::new();
@@ -2672,39 +2668,32 @@ impl AppState {
                 });
             }
 
-            (runtime, hidden_runtimes)
+            if agent.supports_codex_prompt_settings() {
+                inner.ignore_discovered_codex_thread(external_session_id.as_deref());
+            }
+
+            self.commit_locked(&mut inner).map_err(|err| {
+                ApiError::internal(format!("failed to persist session state: {err:#}"))
+            })?;
+            (
+                self.snapshot_from_inner(&inner),
+                runtime,
+                hidden_runtimes,
+            )
         };
 
         if let Some(runtime) = runtime_to_kill {
-            match runtime {
-                KillableRuntime::Codex(handle) => {
-                    if let Some(shared_session) = &handle.shared_session {
-                        shared_session.interrupt_turn().map_err(|err| {
-                            ApiError::internal(format!(
-                                "failed to interrupt Codex session: {err:#}"
-                            ))
-                        })?;
-                        shared_session.detach();
-                    } else {
-                        handle.kill().map_err(|err| {
-                            ApiError::internal(format!("failed to kill session: {err:#}"))
-                        })?;
-                    }
-                }
-                runtime => runtime.kill().map_err(|err| {
-                    ApiError::internal(format!("failed to kill session: {err:#}"))
-                })?,
+            if let Err(err) = shutdown_removed_runtime(runtime, &format!("session `{session_id}`")) {
+                eprintln!("session cleanup warning> {err:#}");
             }
         }
         for runtime in hidden_runtimes_to_kill {
-            let _ = runtime.kill();
+            if let Err(err) = shutdown_removed_runtime(runtime, "a hidden Claude spare") {
+                eprintln!("session cleanup warning> {err:#}");
+            }
         }
 
-        let mut inner = self.inner.lock().expect("state mutex poisoned");
-        self.commit_locked(&mut inner).map_err(|err| {
-            ApiError::internal(format!("failed to persist session state: {err:#}"))
-        })?;
-        Ok(self.snapshot_from_inner(&inner))
+        Ok(snapshot)
     }
 
     fn cancel_queued_prompt(
@@ -2773,22 +2762,28 @@ impl AppState {
             runtime
         };
 
-        match runtime_to_stop {
+        let shared_interrupt_warning = match runtime_to_stop {
             KillableRuntime::Codex(handle) => {
                 if let Some(shared_session) = &handle.shared_session {
-                    shared_session.interrupt_turn().map_err(|err| {
-                        ApiError::internal(format!("failed to stop session: {err:#}"))
-                    })?;
-                    shared_session.detach();
+                    shared_session.interrupt_and_detach().err()
                 } else {
                     handle.kill().map_err(|err| {
                         ApiError::internal(format!("failed to stop session: {err:#}"))
                     })?;
+                    None
                 }
             }
-            runtime => runtime
-                .kill()
-                .map_err(|err| ApiError::internal(format!("failed to stop session: {err:#}")))?,
+            runtime => {
+                runtime
+                    .kill()
+                    .map_err(|err| ApiError::internal(format!("failed to stop session: {err:#}")))?;
+                None
+            }
+        };
+        if let Some(err) = shared_interrupt_warning {
+            eprintln!(
+                "session cleanup warning> shared Codex stop interrupt failed for session `{session_id}`: {err:#}"
+            );
         }
         self.clear_runtime(session_id)
             .map_err(|err| ApiError::internal(format!("failed to clear runtime: {err:#}")))?;
@@ -4354,6 +4349,7 @@ struct StateInner {
     next_session_number: usize,
     next_message_number: u64,
     projects: Vec<Project>,
+    ignored_discovered_codex_thread_ids: BTreeSet<String>,
     sessions: Vec<SessionRecord>,
 }
 
@@ -4367,6 +4363,7 @@ impl StateInner {
             next_session_number: 1,
             next_message_number: 1,
             projects: Vec::new(),
+            ignored_discovered_codex_thread_ids: BTreeSet::new(),
             sessions: Vec::new(),
         }
     }
@@ -4480,6 +4477,19 @@ impl StateInner {
         record
     }
 
+    fn ignore_discovered_codex_thread(&mut self, thread_id: Option<&str>) {
+        if let Some(thread_id) = normalize_optional_identifier(thread_id) {
+            self.ignored_discovered_codex_thread_ids
+                .insert(thread_id.to_owned());
+        }
+    }
+
+    fn allow_discovered_codex_thread(&mut self, thread_id: Option<&str>) {
+        if let Some(thread_id) = normalize_optional_identifier(thread_id) {
+            self.ignored_discovered_codex_thread_ids.remove(thread_id);
+        }
+    }
+
     fn find_matching_hidden_claude_spare(
         &self,
         workdir: &str,
@@ -4587,6 +4597,14 @@ impl StateInner {
         default_workdir: &str,
         threads: Vec<DiscoveredCodexThread>,
     ) {
+        let discovered_thread_ids = threads
+            .iter()
+            .filter_map(|thread| normalize_optional_identifier(Some(thread.id.as_str())))
+            .map(str::to_owned)
+            .collect::<BTreeSet<_>>();
+        self.ignored_discovered_codex_thread_ids
+            .retain(|thread_id| discovered_thread_ids.contains(thread_id));
+
         for thread in threads {
             let target_path = FsPath::new(&thread.cwd);
             let within_scope = codex_discovery_scope_contains(default_workdir, target_path)
@@ -4613,6 +4631,7 @@ impl StateInner {
             });
 
             if let Some(index) = existing_index {
+                self.allow_discovered_codex_thread(Some(thread.id.as_str()));
                 let record = &mut self.sessions[index];
                 if record.session.workdir != thread.cwd {
                     record.session.workdir = thread.cwd.clone();
@@ -4621,6 +4640,13 @@ impl StateInner {
                     record.session.project_id = Some(project_id);
                 }
                 apply_discovered_codex_thread(record, &thread, false);
+                continue;
+            }
+
+            if self
+                .ignored_discovered_codex_thread_ids
+                .contains(thread.id.as_str())
+            {
                 continue;
             }
 
@@ -4738,6 +4764,8 @@ struct PersistedState {
     next_message_number: u64,
     #[serde(default)]
     projects: Vec<Project>,
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    ignored_discovered_codex_thread_ids: BTreeSet<String>,
     sessions: Vec<PersistedSessionRecord>,
 }
 
@@ -4751,6 +4779,9 @@ impl PersistedState {
             next_session_number: inner.next_session_number,
             next_message_number: inner.next_message_number,
             projects: inner.projects.clone(),
+            ignored_discovered_codex_thread_ids: inner
+                .ignored_discovered_codex_thread_ids
+                .clone(),
             sessions: inner
                 .sessions
                 .iter()
@@ -4772,6 +4803,7 @@ impl PersistedState {
             next_session_number: self.next_session_number,
             next_message_number: self.next_message_number,
             projects: self.projects,
+            ignored_discovered_codex_thread_ids: self.ignored_discovered_codex_thread_ids,
             sessions: self
                 .sessions
                 .into_iter()
@@ -6482,6 +6514,12 @@ impl SharedCodexSessionHandle {
             }
         }
     }
+
+    fn interrupt_and_detach(&self) -> Result<()> {
+        let result = self.interrupt_turn();
+        self.detach();
+        result
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -6556,6 +6594,41 @@ impl KillableRuntime {
     }
 }
 
+fn shutdown_removed_runtime(runtime: KillableRuntime, context: &str) -> Result<()> {
+    match runtime {
+        KillableRuntime::Codex(handle) => {
+            if let Some(shared_session) = &handle.shared_session {
+                match shared_session.interrupt_and_detach() {
+                    Ok(()) => {
+                        Ok(())
+                    }
+                    Err(interrupt_err) => {
+                        if shared_child_has_exited(&handle.process, "shared Codex runtime")? {
+                            Err(anyhow!(
+                                "shared Codex runtime had already exited while removing {context}: {interrupt_err:#}"
+                            ))
+                        } else {
+                            Err(anyhow!(
+                                "failed to interrupt shared Codex turn for {context}: {interrupt_err:#}"
+                            ))
+                        }
+                    }
+                }
+            } else {
+                handle
+                    .kill()
+                    .with_context(|| format!("failed to kill Codex runtime for {context}"))
+            }
+        }
+        KillableRuntime::Claude(handle) => handle
+            .kill()
+            .with_context(|| format!("failed to kill Claude runtime for {context}")),
+        KillableRuntime::Acp(handle) => handle
+            .kill()
+            .with_context(|| format!("failed to kill {} runtime for {context}", handle.agent.label())),
+    }
+}
+
 #[derive(Clone)]
 enum RuntimeToken {
     Claude(String),
@@ -6604,6 +6677,14 @@ fn kill_child_process(process: &Arc<SharedChild>, label: &str) -> Result<()> {
                 Err(err).with_context(|| format!("failed to terminate {label} process"))
             }
         }
+    }
+}
+
+fn shared_child_has_exited(process: &Arc<SharedChild>, label: &str) -> Result<bool> {
+    match process.try_wait() {
+        Ok(Some(_)) => Ok(true),
+        Ok(None) => Ok(false),
+        Err(err) => Err(anyhow!("failed checking {label} process status: {err}")),
     }
 }
 
