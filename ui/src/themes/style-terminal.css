@@ -9,6 +9,11 @@
   --terminal-card-radius: calc(0.22rem + 0.04rem * var(--density-scale));
   --terminal-control-radius: calc(0.16rem + 0.04rem * var(--density-scale));
   --code-surface-radius: var(--terminal-card-radius);
+  --terminal-diff-card-bg: linear-gradient(180deg, var(--diff-bg-start), var(--diff-bg-end));
+  --terminal-diff-card-bg-color: var(--diff-bg-end);
+}
+
+[data-theme="warm-light"][data-ui-style="terminal-style"] {
   --terminal-diff-card-bg: var(--code-bg);
   --terminal-diff-card-bg-color: var(--code-bg);
 }
@@ -187,7 +192,6 @@
 [data-ui-style="terminal-style"] .command-card .command-panel {
   border: 1px solid color-mix(in srgb, var(--line) 88%, transparent);
   border-radius: 0;
-  background: var(--code-bg);
 }
 
 [data-ui-style="terminal-style"] .command-card .command-input-shell,
@@ -263,4 +267,5 @@
 }
 
 [data-ui-style="terminal-style"] .diff-card .diff-preview-shell.collapsed::after {
+  background: linear-gradient(180deg, transparent, var(--terminal-diff-card-bg-color));
 }

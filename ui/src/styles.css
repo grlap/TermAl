@@ -55,6 +55,7 @@
 [data-theme="violet-night"],
 [data-theme="blueprint"],
 [data-theme="ember"] {
+  --command-panel-bg: var(--code-bg);
   --command-input-bg: var(--code-bg);
   --command-input-fg: var(--code-fg);
   --command-output-bg: var(--code-bg);
