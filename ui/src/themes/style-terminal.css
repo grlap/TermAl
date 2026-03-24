@@ -5,13 +5,12 @@
   --button-radius: 0.2rem;
   --button-radius-tight: 0.1rem;
   --button-radius-large: 0.28rem;
-  --shadow: 0 18px 44px color-mix(in srgb, var(--ink) 22%, transparent);
-  --texture-mask: linear-gradient(180deg, rgba(255, 255, 255, 0.08), transparent);
   --terminal-shell-radius: calc(0.28rem + 0.04rem * var(--density-scale));
   --terminal-card-radius: calc(0.22rem + 0.04rem * var(--density-scale));
   --terminal-control-radius: calc(0.16rem + 0.04rem * var(--density-scale));
   --code-surface-radius: var(--terminal-card-radius);
-  --command-panel-bg: color-mix(in srgb, var(--surface-white) 94%, var(--paper) 6%);
+  --terminal-diff-card-bg: var(--code-bg);
+  --terminal-diff-card-bg-color: var(--code-bg);
 }
 
 [data-ui-style="terminal-style"] .panel,
@@ -94,8 +93,6 @@
   height: 0.42rem;
   border-radius: 999px;
   flex: none;
-  background: var(--signal-green);
-  box-shadow: 0 0 0 1px color-mix(in srgb, var(--signal-green) 20%, transparent);
 }
 
 [data-ui-style="terminal-style"] .message-card.bubble .message-meta {
@@ -152,7 +149,6 @@
 
 [data-ui-style="terminal-style"] .message-card.utility-card .card-label {
   margin-bottom: 0.22rem;
-  color: color-mix(in srgb, var(--signal-green) 72%, var(--muted));
 }
 
 [data-ui-style="terminal-style"] .message-card.utility-card .command-panel {
@@ -186,6 +182,12 @@
   padding: 0;
   border-radius: 0;
   box-shadow: none;
+}
+
+[data-ui-style="terminal-style"] .command-card .command-panel {
+  border: 1px solid color-mix(in srgb, var(--line) 88%, transparent);
+  border-radius: 0;
+  background: var(--code-bg);
 }
 
 [data-ui-style="terminal-style"] .command-card .command-input-shell,
@@ -238,4 +240,27 @@
 [data-ui-style="terminal-style"] .message-card.utility-card .command-icon-button:disabled {
   background: transparent;
   border-color: color-mix(in srgb, var(--line) 82%, transparent);
+}
+
+[data-ui-style="terminal-style"] .message-card.utility-card.diff-card {
+  background: var(--terminal-diff-card-bg);
+  background-color: var(--terminal-diff-card-bg-color);
+}
+
+[data-ui-style="terminal-style"] .diff-card .command-panel,
+[data-ui-style="terminal-style"] .diff-card .command-row,
+[data-ui-style="terminal-style"] .diff-card .command-row-body,
+[data-ui-style="terminal-style"] .diff-card .command-row-actions,
+[data-ui-style="terminal-style"] .diff-card .command-row-label {
+  background: var(--terminal-diff-card-bg);
+  background-color: var(--terminal-diff-card-bg-color);
+}
+
+[data-ui-style="terminal-style"] .diff-card .diff-preview-shell,
+[data-ui-style="terminal-style"] .diff-card .diff-block,
+[data-ui-style="terminal-style"] .diff-card .diff-preview-text {
+  background: transparent;
+}
+
+[data-ui-style="terminal-style"] .diff-card .diff-preview-shell.collapsed::after {
 }
