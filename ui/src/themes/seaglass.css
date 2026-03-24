@@ -37,9 +37,9 @@
   /* Code blocks */
   --code-bg: #132630;
   --code-fg: #eaf4f7;
-  --diff-bg-start: #163732;
-  --diff-bg-end: #112a27;
-  --diff-fg: #d0f0e6;
+  --diff-bg-start: color-mix(in srgb, var(--signal-green) 10%, var(--paper-strong));
+  --diff-bg-end: color-mix(in srgb, var(--signal-green) 6%, var(--surface-white));
+  --diff-fg: color-mix(in srgb, var(--ink) 88%, var(--signal-green));
   --inline-code-bg: rgba(19, 38, 48, 0.08);
   --inline-code-fg: #245870;
 

@@ -11,6 +11,7 @@
   --terminal-card-radius: calc(0.22rem + 0.04rem * var(--density-scale));
   --terminal-control-radius: calc(0.16rem + 0.04rem * var(--density-scale));
   --code-surface-radius: var(--terminal-card-radius);
+  --command-panel-bg: color-mix(in srgb, var(--surface-white) 94%, var(--paper) 6%);
 }
 
 [data-ui-style="terminal-style"] .panel,
@@ -158,7 +159,6 @@
   margin-top: 0.5rem;
   border: 1px solid color-mix(in srgb, var(--line) 88%, transparent);
   border-radius: 0;
-  background: color-mix(in srgb, var(--surface-white) 94%, var(--paper) 6%);
   overflow: hidden;
 }
 

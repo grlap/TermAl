@@ -40,6 +40,25 @@
   --bubble-card-padding-y: calc(0.62rem * var(--density-scale));
   --message-copy-size: 0.88rem;
   --message-meta-size: 0.82rem;
+  --command-panel-bg: var(--surface-white);
+  --command-input-bg: var(--surface-white);
+  --command-input-fg: var(--ink);
+  --command-output-bg: var(--surface-white);
+  --command-output-fg: var(--ink);
+}
+
+[data-theme="dark"],
+[data-theme="obsidian-black"],
+[data-theme="oxide-black"],
+[data-theme="evergreen-night"],
+[data-theme="terminal"],
+[data-theme="violet-night"],
+[data-theme="blueprint"],
+[data-theme="ember"] {
+  --command-input-bg: var(--code-bg);
+  --command-input-fg: var(--code-fg);
+  --command-output-bg: var(--code-bg);
+  --command-output-fg: var(--code-fg);
 }
 
 html,
@@ -3545,7 +3564,7 @@ textarea {
   margin-top: 0.85rem;
   border: 1px solid var(--line);
   border-radius: var(--code-surface-radius);
-  background: var(--surface-white-soft);
+  background: var(--command-panel-bg);
   overflow: hidden;
 }
 
@@ -3672,17 +3691,27 @@ textarea {
 .command-text-output {
   margin: 0;
   padding: 0.72rem 0.9rem;
-  color: var(--code-fg);
   min-height: 2.6rem;
   word-break: break-word;
+}
+
+.command-text-input {
+  color: var(--command-input-fg);
+}
+
+.command-text-output {
+  color: var(--command-output-fg);
 }
 
 .command-input-shell {
   position: relative;
   width: 100%;
   border-radius: var(--code-surface-radius);
-  background: var(--code-bg);
-  color: var(--code-fg);
+  background: var(--command-input-bg);
+  color: var(--command-input-fg);
+  --syntax-plain: var(--command-input-fg);
+  --syntax-variable: var(--command-input-fg);
+  --syntax-emphasis: var(--command-input-fg);
 }
 
 .command-input-shell.collapsed {
@@ -3697,7 +3726,7 @@ textarea {
   right: 0;
   bottom: 0;
   height: 2.6rem;
-  background: linear-gradient(180deg, transparent, var(--code-bg));
+  background: linear-gradient(180deg, transparent, var(--command-input-bg));
   pointer-events: none;
 }
 
@@ -3709,12 +3738,15 @@ textarea {
 .command-output-shell {
   position: relative;
   border-radius: var(--code-surface-radius);
-  background: var(--code-bg);
-  color: var(--code-fg);
+  background: var(--command-output-bg);
+  color: var(--command-output-fg);
+  --syntax-plain: var(--command-output-fg);
+  --syntax-variable: var(--command-output-fg);
+  --syntax-emphasis: var(--command-output-fg);
 }
 
 .command-output-shell.empty {
-  background: var(--surface-white);
+  background: var(--command-output-bg);
   color: var(--muted);
 }
 
@@ -3734,7 +3766,7 @@ textarea {
   right: 0;
   bottom: 0;
   height: 2.8rem;
-  background: linear-gradient(180deg, transparent, var(--code-bg));
+  background: linear-gradient(180deg, transparent, var(--command-output-bg));
   pointer-events: none;
 }
 
