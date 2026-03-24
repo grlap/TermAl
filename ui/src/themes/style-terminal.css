@@ -156,10 +156,10 @@
 
 [data-ui-style="terminal-style"] .message-card.utility-card .command-panel {
   margin-top: 0.5rem;
-  border: 0;
+  border: 1px solid color-mix(in srgb, var(--line) 88%, transparent);
   border-radius: 0;
-  background: transparent;
-  overflow: visible;
+  background: color-mix(in srgb, var(--surface-white) 94%, var(--paper) 6%);
+  overflow: hidden;
 }
 
 [data-ui-style="terminal-style"] .message-card.utility-card .command-row {
@@ -169,8 +169,8 @@
 }
 
 [data-ui-style="terminal-style"] .message-card.utility-card .command-row + .command-row {
-  margin-top: calc(0.16rem * var(--density-scale));
-  border-top: 0;
+  margin-top: 0;
+  border-top: 1px solid color-mix(in srgb, var(--line) 88%, transparent);
 }
 
 [data-ui-style="terminal-style"] .message-card.utility-card .command-row-label {
@@ -178,16 +178,8 @@
   align-items: center;
   gap: 0.45rem;
   min-width: 2.8rem;
+  padding-left: calc(6px * var(--density-scale));
   color: color-mix(in srgb, var(--signal-green) 88%, var(--muted));
-}
-
-[data-ui-style="terminal-style"] .message-card.utility-card .command-row-label::before {
-  content: "";
-  width: 0.34rem;
-  height: 0.34rem;
-  border-radius: 999px;
-  flex: none;
-  background: var(--signal-green);
 }
 
 [data-ui-style="terminal-style"] .message-card.utility-card .command-row-body {
@@ -199,7 +191,10 @@
 [data-ui-style="terminal-style"] .command-card .command-input-shell,
 [data-ui-style="terminal-style"] .command-card .command-output-shell,
 [data-ui-style="terminal-style"] .command-card .command-output-shell.empty {
+  border: 0;
   border-radius: 0;
+  background: transparent;
+  box-shadow: none;
 }
 
 [data-ui-style="terminal-style"] .command-card .command-text-input,
@@ -209,15 +204,15 @@
 }
 
 [data-ui-style="terminal-style"] .command-card .command-text-input {
-  padding-block: 0.12rem;
+  padding: 0.28rem 0;
 }
 
 [data-ui-style="terminal-style"] .command-card .command-text-output {
-  padding: 0.56rem 0.72rem;
+  padding: 0.28rem 0;
 }
 
 [data-ui-style="terminal-style"] .command-card .command-text-placeholder {
-  padding: 0.52rem 0.72rem;
+  padding: 0.28rem 0;
 }
 
 [data-ui-style="terminal-style"] .message-card.utility-card .command-icon-button {

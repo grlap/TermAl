@@ -31,21 +31,34 @@
   /* Surfaces */
   --surface-white: rgba(255, 255, 255, 0.72);
   --surface-white-strong: rgba(255, 255, 255, 0.56);
-  --surface-white-soft: rgba(255, 255, 255, 0.6);
+  --surface-white-soft: rgba(255, 247, 233, 0.72);
   --surface-warm: rgba(255, 250, 241, 0.58);
   --surface-warm-bar: rgba(255, 250, 241, 0.68);
-  --surface-card: rgba(255, 252, 246, 0.82);
+  --surface-card: rgba(255, 246, 232, 0.86);
   --surface-composer: rgba(255, 248, 236, 0.7);
   --surface-footer: rgba(255, 248, 236, 0.5);
 
   /* Code blocks */
-  --code-bg: #1d1712;
-  --code-fg: #f6efdf;
-  --diff-bg-start: #182019;
-  --diff-bg-end: #141714;
-  --diff-fg: #d4efd7;
-  --inline-code-bg: rgba(29, 23, 18, 0.08);
+  --code-bg: #fffdf8;
+  --code-fg: #2b2118;
+  --diff-bg-start: #f4faf2;
+  --diff-bg-end: #edf7ea;
+  --diff-fg: #264638;
+  --inline-code-bg: rgba(203, 90, 49, 0.08);
   --inline-code-fg: #8e3d25;
+  --syntax-plain: #2b2118;
+  --syntax-comment: #8b7e72;
+  --syntax-keyword: #b04b2f;
+  --syntax-string: #946a14;
+  --syntax-function: #2f6286;
+  --syntax-type: #2d6f63;
+  --syntax-variable: #3a2c20;
+  --syntax-number: #7b4f22;
+  --syntax-operator: #7d6f62;
+  --syntax-tag: #9b5361;
+  --syntax-emphasis: #2b2118;
+  --syntax-inserted: #2c7258;
+  --syntax-deleted: #b24834;
 
   /* Borders & decorations */
   --orbit-border: rgba(42, 30, 16, 0.08);

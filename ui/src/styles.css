@@ -3668,14 +3668,21 @@ textarea {
   height: var(--icon-size-md);
 }
 
-.command-text-input {
+.command-text-input,
+.command-text-output {
   margin: 0;
+  padding: 0.72rem 0.9rem;
+  color: var(--code-fg);
+  min-height: 2.6rem;
   word-break: break-word;
 }
 
 .command-input-shell {
   position: relative;
   width: 100%;
+  border-radius: var(--code-surface-radius);
+  background: var(--code-bg);
+  color: var(--code-fg);
 }
 
 .command-input-shell.collapsed {
@@ -3690,7 +3697,7 @@ textarea {
   right: 0;
   bottom: 0;
   height: 2.6rem;
-  background: linear-gradient(180deg, transparent, var(--surface-card));
+  background: linear-gradient(180deg, transparent, var(--code-bg));
   pointer-events: none;
 }
 
@@ -3738,14 +3745,6 @@ textarea {
 .command-output-shell.expanded {
   max-height: min(22rem, 55vh);
   overflow: auto;
-}
-
-.command-text-output {
-  margin: 0;
-  padding: 0.72rem 0.9rem;
-  color: var(--code-fg);
-  min-height: 2.6rem;
-  word-break: break-word;
 }
 
 .command-text-placeholder {
