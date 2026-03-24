@@ -9776,9 +9776,15 @@ function MessageMeta({
   timestamp: string;
   trailing?: ReactNode;
 }) {
+  const isUser = author === "you";
+
   return (
     <div className="message-meta">
-      <span>{author === "you" ? "You" : "Agent"}</span>
+      <span
+        className={`message-meta-author ${isUser ? "message-meta-author-user" : "message-meta-author-agent"}`}
+      >
+        {isUser ? "You" : "Agent"}
+      </span>
       <span className="message-meta-end">
         {trailing}
         <span>{timestamp}</span>

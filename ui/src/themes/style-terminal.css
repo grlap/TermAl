@@ -87,6 +87,16 @@
   padding-block: var(--message-card-padding-y);
 }
 
+[data-ui-style="terminal-style"] .message-meta-author-agent::before {
+  content: "";
+  width: 0.42rem;
+  height: 0.42rem;
+  border-radius: 999px;
+  flex: none;
+  background: var(--signal-green);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--signal-green) 20%, transparent);
+}
+
 [data-ui-style="terminal-style"] .message-card.bubble .message-meta {
   margin-bottom: 0.55rem;
 }
@@ -95,6 +105,28 @@
 [data-ui-style="terminal-style"] .bubble-assistant {
   max-width: 100%;
   margin-left: 0;
+}
+
+[data-ui-style="terminal-style"] .message-card.bubble.bubble-assistant,
+[data-ui-style="terminal-style"] .message-card.reasoning-card,
+[data-ui-style="terminal-style"] .message-card.utility-card,
+[data-ui-style="terminal-style"] .message-card.approval-card,
+[data-ui-style="terminal-style"] .message-card.markdown-card,
+[data-ui-style="terminal-style"] .message-card.user-input-card {
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
+  padding-inline: 0;
+}
+
+[data-ui-style="terminal-style"] .message-card.reasoning-card,
+[data-ui-style="terminal-style"] .message-card.utility-card,
+[data-ui-style="terminal-style"] .message-card.approval-card,
+[data-ui-style="terminal-style"] .message-card.markdown-card,
+[data-ui-style="terminal-style"] .message-card.user-input-card {
+  width: 100%;
+  max-width: 100%;
+  justify-self: stretch;
 }
 
 
@@ -113,21 +145,52 @@
   border-radius: var(--terminal-card-radius);
 }
 
-[data-ui-style="terminal-style"] .command-card .message-meta {
+[data-ui-style="terminal-style"] .message-card.utility-card .message-meta {
   margin-bottom: 0.45rem;
 }
 
-[data-ui-style="terminal-style"] .command-card .command-panel {
-  margin-top: 0.5rem;
-  border-radius: 0;
+[data-ui-style="terminal-style"] .message-card.utility-card .card-label {
+  margin-bottom: 0.22rem;
+  color: color-mix(in srgb, var(--signal-green) 72%, var(--muted));
 }
 
-[data-ui-style="terminal-style"] .command-card .command-row {
+[data-ui-style="terminal-style"] .message-card.utility-card .command-panel {
+  margin-top: 0.5rem;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  overflow: visible;
+}
+
+[data-ui-style="terminal-style"] .message-card.utility-card .command-row {
+  padding-block: calc(0.32rem * var(--density-scale));
   padding-inline: 0;
   gap: calc(0.7rem * var(--density-scale));
 }
 
-[data-ui-style="terminal-style"] .command-card .command-row-body {
+[data-ui-style="terminal-style"] .message-card.utility-card .command-row + .command-row {
+  margin-top: calc(0.16rem * var(--density-scale));
+  border-top: 0;
+}
+
+[data-ui-style="terminal-style"] .message-card.utility-card .command-row-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  min-width: 2.8rem;
+  color: color-mix(in srgb, var(--signal-green) 88%, var(--muted));
+}
+
+[data-ui-style="terminal-style"] .message-card.utility-card .command-row-label::before {
+  content: "";
+  width: 0.34rem;
+  height: 0.34rem;
+  border-radius: 999px;
+  flex: none;
+  background: var(--signal-green);
+}
+
+[data-ui-style="terminal-style"] .message-card.utility-card .command-row-body {
   padding: 0;
   border-radius: 0;
   box-shadow: none;
@@ -145,6 +208,39 @@
   padding: 0;
 }
 
-[data-ui-style="terminal-style"] .command-card .command-icon-button {
+[data-ui-style="terminal-style"] .command-card .command-text-input {
+  padding-block: 0.12rem;
+}
+
+[data-ui-style="terminal-style"] .command-card .command-text-output {
+  padding: 0.56rem 0.72rem;
+}
+
+[data-ui-style="terminal-style"] .command-card .command-text-placeholder {
+  padding: 0.52rem 0.72rem;
+}
+
+[data-ui-style="terminal-style"] .message-card.utility-card .command-icon-button {
   border-radius: var(--terminal-control-radius);
+  border-color: color-mix(in srgb, var(--signal-green) 22%, var(--line));
+  background: transparent;
+  color: color-mix(in srgb, var(--signal-green) 72%, var(--muted));
+}
+
+[data-ui-style="terminal-style"] .message-card.utility-card .command-icon-button:hover {
+  border-color: color-mix(in srgb, var(--signal-green) 44%, var(--line));
+  background: color-mix(in srgb, var(--signal-green) 10%, transparent);
+  color: var(--signal-green);
+  transform: none;
+}
+
+[data-ui-style="terminal-style"] .message-card.utility-card .command-icon-button.copied {
+  border-color: color-mix(in srgb, var(--signal-green) 38%, var(--line));
+  background: color-mix(in srgb, var(--signal-green) 12%, transparent);
+  color: var(--signal-green);
+}
+
+[data-ui-style="terminal-style"] .message-card.utility-card .command-icon-button:disabled {
+  background: transparent;
+  border-color: color-mix(in srgb, var(--line) 82%, transparent);
 }

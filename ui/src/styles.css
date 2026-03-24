@@ -3446,6 +3446,12 @@ textarea {
   color: var(--muted);
 }
 
+.message-meta-author {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+
 .message-card.bubble .message-meta {
   margin-bottom: 0.24rem;
 }
