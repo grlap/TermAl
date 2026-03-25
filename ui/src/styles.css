@@ -45,6 +45,10 @@
   --command-input-fg: var(--ink);
   --command-output-bg: var(--surface-white);
   --command-output-fg: var(--ink);
+  --cursor-grab: url("./assets/cursors/grab.svg") 12 9, grab;
+  --cursor-grabbing: url("./assets/cursors/grabbing.svg") 12 9, grabbing;
+  --cursor-resize-col: url("./assets/cursors/resize-col.svg") 16 16, col-resize;
+  --cursor-resize-row: url("./assets/cursors/resize-row.svg") 16 16, row-resize;
 }
 
 [data-theme="dark"],
@@ -200,12 +204,12 @@ textarea {
 }
 
 .control-panel-section-button {
-  cursor: grab;
+  cursor: var(--cursor-grab);
 }
 
 .control-panel-section-button:active,
 .control-panel-section-button.dragging {
-  cursor: grabbing;
+  cursor: var(--cursor-grabbing);
 }
 
 .control-panel-activity-button::before {
@@ -621,12 +625,12 @@ textarea {
   box-shadow:
     0 0 0 1px rgba(255, 255, 255, 0.08),
     0 8px 16px var(--accent-blue-soft);
-  cursor: grab;
+  cursor: var(--cursor-grab);
   touch-action: none;
 }
 
 .theme-option-scrollbar.dragging .theme-option-scrollbar-thumb {
-  cursor: grabbing;
+  cursor: var(--cursor-grabbing);
 }
 
 .theme-option {
@@ -1548,7 +1552,7 @@ textarea {
 
 .tile-divider-row {
   width: 0.9rem;
-  cursor: col-resize;
+  cursor: var(--cursor-resize-col);
 }
 
 .tile-divider-row::before {
@@ -1561,7 +1565,7 @@ textarea {
 
 .tile-divider-column {
   height: 0.9rem;
-  cursor: row-resize;
+  cursor: var(--cursor-resize-row);
 }
 
 .tile-divider-column::before {
@@ -1844,7 +1848,7 @@ textarea {
   padding: 0;
   align-self: stretch;
   border-radius: var(--control-radius-tight);
-  cursor: grab;
+  cursor: var(--cursor-grab);
   appearance: none;
   -webkit-appearance: none;
   background-color: transparent;
@@ -1860,11 +1864,11 @@ textarea {
 }
 
 .pane-tab-grip[draggable="true"] {
-  cursor: grab;
+  cursor: var(--cursor-grab);
 }
 
 .pane-tab-grip[draggable="true"]:active {
-  cursor: grabbing;
+  cursor: var(--cursor-grabbing);
 }
 
 .pane-tab-shell.active {
@@ -6511,7 +6515,7 @@ textarea {
 
 .session-canvas-scale-frame.panning,
 .session-canvas-scale-frame.panning * {
-  cursor: grabbing;
+  cursor: var(--cursor-grabbing);
   user-select: none;
 }
 
@@ -6605,13 +6609,13 @@ textarea {
 .session-canvas-card-grab {
   display: grid;
   gap: 0.45rem;
-  cursor: grab;
+  cursor: var(--cursor-grab);
   user-select: none;
   touch-action: none;
 }
 
 .session-canvas-card.dragging .session-canvas-card-grab {
-  cursor: grabbing;
+  cursor: var(--cursor-grabbing);
 }
 
 .session-canvas-card-topline {
@@ -6819,7 +6823,7 @@ textarea {
   .tile-divider {
     width: auto;
     height: 0.9rem;
-    cursor: row-resize;
+    cursor: var(--cursor-resize-row);
   }
 
   .tile-divider::before {
