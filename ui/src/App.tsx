@@ -85,6 +85,7 @@ import { FileSystemPanel } from "./panels/FileSystemPanel";
 import { GitStatusPanel } from "./panels/GitStatusPanel";
 import { InstructionDebuggerPanel } from "./panels/InstructionDebuggerPanel";
 import { PaneTabs } from "./panels/PaneTabs";
+import { SessionCanvasPanel } from "./panels/SessionCanvasPanel";
 import { SourcePanel, type SourceFileState } from "./panels/SourcePanel";
 import {
   containsSearchMatch,
@@ -145,6 +146,7 @@ import {
   ensureControlPanelInWorkspaceState,
   findWorkspacePaneIdForSession,
   getSplitRatio,
+  openCanvasInWorkspaceState,
   openDiffPreviewInWorkspaceState,
   openFilesystemInWorkspaceState,
   openGitStatusInWorkspaceState,
@@ -156,10 +158,13 @@ import {
   placeDraggedTab,
   placeExternalTab,
   reconcileWorkspaceState,
+  removeCanvasSessionCard,
+  setCanvasZoom,
   setPaneSourcePath,
   setPaneViewMode,
   splitPane,
   updateSplitRatio,
+  upsertCanvasSessionCard,
   type PaneViewMode,
   type SessionPaneViewMode,
   type TabDropPlacement,
@@ -173,6 +178,7 @@ import {
   type ControlPanelSide,
 } from "./workspace-storage";
 import { reconcileSessions } from "./session-reconcile";
+import { attachSessionDragData } from "./session-drag";
 
 const TAB_DRAG_STALE_TIMEOUT_MS = 15000;
 import {
@@ -3755,6 +3761,40 @@ export default function App() {
     );
   }
 
+  function handleOpenCanvasTab(
+    paneId: string,
+    originSessionId: string | null,
+    originProjectId: string | null,
+  ) {
+    setWorkspace((current) =>
+      applyControlPanelLayout(
+        openCanvasInWorkspaceState(current, paneId, originSessionId, originProjectId),
+      ),
+    );
+  }
+
+  function handleUpsertCanvasSessionCard(
+    canvasTabId: string,
+    sessionId: string,
+    position: { x: number; y: number },
+  ) {
+    setWorkspace((current) =>
+      upsertCanvasSessionCard(current, canvasTabId, {
+        sessionId,
+        x: position.x,
+        y: position.y,
+      }),
+    );
+  }
+
+  function handleRemoveCanvasSessionCard(canvasTabId: string, sessionId: string) {
+    setWorkspace((current) => removeCanvasSessionCard(current, canvasTabId, sessionId));
+  }
+
+  function handleSetCanvasZoom(canvasTabId: string, zoom: number) {
+    setWorkspace((current) => setCanvasZoom(current, canvasTabId, zoom));
+  }
+
   function handleOpenInstructionDebuggerTab(
     paneId: string,
     workdir: string | null,
@@ -3828,6 +3868,29 @@ export default function App() {
       );
     }
 
+    function renderCanvasTabAction(onClick: () => void): JSX.Element {
+      return (
+        <button
+          className="control-panel-header-action control-panel-header-open-button"
+          type="button"
+          onClick={onClick}
+        >
+          <span className="control-panel-header-action-icon" aria-hidden="true">
+            <svg viewBox="0 0 16 16" focusable="false" aria-hidden="true">
+              <path
+                d="M3 3.25h4.25V7.5H3Zm5.75 0H13v4.25H8.75ZM3 8.75h4.25V13H3Zm5.75 0H13V13H8.75Z"
+                fill="none"
+                stroke="currentColor"
+                strokeLinejoin="round"
+                strokeWidth="1.2"
+              />
+            </svg>
+          </span>
+          <span>Canvas</span>
+        </button>
+      );
+    }
+
     function renderControlPanelHeaderActions(sectionId: ControlPanelSectionId) {
       switch (sectionId) {
         case "files":
@@ -3885,6 +3948,13 @@ export default function App() {
                       ),
                     false,
                   )}
+              {renderCanvasTabAction(() =>
+                handleOpenCanvasTab(
+                  paneId,
+                  controlPanelSessionId,
+                  selectedProject?.id ?? null,
+                )
+              )}
               <button
                 className="control-panel-header-action control-panel-header-new-session-button"
                 type="button"
@@ -4070,8 +4140,19 @@ export default function App() {
                           <button
                             className={`session-row ${isActive ? "selected" : ""} ${isOpen ? "open" : ""}`}
                             type="button"
+                            draggable
                             onClick={() => handleSidebarSessionClick(session.id, paneId)}
                             title={`${session.agent} / ${session.workdir}`}
+                            onDragStart={(event) => {
+                              event.dataTransfer.effectAllowed = "copy";
+                              attachSessionDragData(event.dataTransfer, session.id, session.name);
+                              const rect = event.currentTarget.getBoundingClientRect();
+                              event.dataTransfer.setDragImage(
+                                event.currentTarget,
+                                Math.max(12, event.clientX - rect.left),
+                                Math.max(12, event.clientY - rect.top),
+                              );
+                            }}
                             onContextMenu={(event) => {
                               event.preventDefault();
                               handleSessionRenameRequest(
@@ -4272,6 +4353,10 @@ export default function App() {
               onOpenFilesystemTab={handleOpenFilesystemTab}
               onOpenGitStatusTab={handleOpenGitStatusTab}
               onOpenInstructionDebuggerTab={handleOpenInstructionDebuggerTab}
+              onOpenCanvasTab={handleOpenCanvasTab}
+              onUpsertCanvasSessionCard={handleUpsertCanvasSessionCard}
+              onRemoveCanvasSessionCard={handleRemoveCanvasSessionCard}
+              onSetCanvasZoom={handleSetCanvasZoom}
               onPaneSourcePathChange={handlePaneSourcePathChange}
               onOpenConversationFromDiff={handleOpenConversationFromDiff}
               onInsertReviewIntoPrompt={handleInsertReviewIntoPrompt}
@@ -5181,7 +5266,6 @@ function ThemePicker({
           <p className="session-control-label">Theme</p>
           <p className="theme-panel-copy">{activeTheme.description}</p>
         </div>
-        <span className="theme-active-badge">{activeTheme.name}</span>
       </div>
 
       <div className="theme-option-list-shell">
@@ -5201,7 +5285,6 @@ function ThemePicker({
                 <span className="theme-option-main">
                   <span className="theme-option-title-row">
                     <strong className="theme-option-title">{theme.name}</strong>
-                    {isSelected ? <span className="theme-option-status">Live</span> : null}
                   </span>
                   <span className="theme-option-copy">{theme.description}</span>
                 </span>
@@ -5275,7 +5358,6 @@ function StylePicker({
           <p className="session-control-label">Style</p>
           <p className="theme-panel-copy">{activeStyle.description}</p>
         </div>
-        <span className="theme-active-badge">{activeStyle.name}</span>
       </div>
 
       <div className="theme-option-list-shell">
@@ -5294,16 +5376,15 @@ function StylePicker({
                 type="button"
                 role="radio"
                 aria-checked={isSelected}
+                title={style.description}
                 onClick={() => onSelectStyle(style.id)}
               >
+                <StyleTreatmentPreview styleId={style.id} />
                 <span className="theme-option-main">
                   <span className="theme-option-title-row">
                     <strong className="theme-option-title">{style.name}</strong>
-                    {isSelected ? <span className="theme-option-status">Live</span> : null}
                   </span>
-                  <span className="theme-option-copy">{style.description}</span>
                 </span>
-                <StyleTreatmentPreview styleId={style.id} />
               </button>
             );
           })}
@@ -6258,6 +6339,10 @@ function WorkspaceNodeView({
   onOpenFilesystemTab,
   onOpenGitStatusTab,
   onOpenInstructionDebuggerTab,
+  onOpenCanvasTab,
+  onUpsertCanvasSessionCard,
+  onRemoveCanvasSessionCard,
+  onSetCanvasZoom,
   onPaneSourcePathChange,
   onOpenConversationFromDiff,
   onInsertReviewIntoPrompt,
@@ -6370,6 +6455,18 @@ function WorkspaceNodeView({
     originSessionId: string | null,
     originProjectId: string | null,
   ) => void;
+  onOpenCanvasTab: (
+    paneId: string,
+    originSessionId: string | null,
+    originProjectId: string | null,
+  ) => void;
+  onUpsertCanvasSessionCard: (
+    canvasTabId: string,
+    sessionId: string,
+    position: { x: number; y: number },
+  ) => void;
+  onRemoveCanvasSessionCard: (canvasTabId: string, sessionId: string) => void;
+  onSetCanvasZoom: (canvasTabId: string, zoom: number) => void;
   onPaneSourcePathChange: (paneId: string, path: string) => void;
   onOpenConversationFromDiff: (sessionId: string, preferredPaneId: string | null) => void;
   onInsertReviewIntoPrompt: (
@@ -6498,6 +6595,10 @@ function WorkspaceNodeView({
         onOpenFilesystemTab={onOpenFilesystemTab}
         onOpenGitStatusTab={onOpenGitStatusTab}
         onOpenInstructionDebuggerTab={onOpenInstructionDebuggerTab}
+        onOpenCanvasTab={onOpenCanvasTab}
+        onUpsertCanvasSessionCard={onUpsertCanvasSessionCard}
+        onRemoveCanvasSessionCard={onRemoveCanvasSessionCard}
+        onSetCanvasZoom={onSetCanvasZoom}
         onPaneSourcePathChange={onPaneSourcePathChange}
         onOpenConversationFromDiff={onOpenConversationFromDiff}
         onInsertReviewIntoPrompt={onInsertReviewIntoPrompt}
@@ -6592,6 +6693,10 @@ function WorkspaceNodeView({
           onOpenFilesystemTab={onOpenFilesystemTab}
           onOpenGitStatusTab={onOpenGitStatusTab}
           onOpenInstructionDebuggerTab={onOpenInstructionDebuggerTab}
+          onOpenCanvasTab={onOpenCanvasTab}
+          onUpsertCanvasSessionCard={onUpsertCanvasSessionCard}
+          onRemoveCanvasSessionCard={onRemoveCanvasSessionCard}
+          onSetCanvasZoom={onSetCanvasZoom}
           onPaneSourcePathChange={onPaneSourcePathChange}
           onOpenConversationFromDiff={onOpenConversationFromDiff}
           onInsertReviewIntoPrompt={onInsertReviewIntoPrompt}
@@ -6675,6 +6780,10 @@ function WorkspaceNodeView({
           onOpenFilesystemTab={onOpenFilesystemTab}
           onOpenGitStatusTab={onOpenGitStatusTab}
           onOpenInstructionDebuggerTab={onOpenInstructionDebuggerTab}
+          onOpenCanvasTab={onOpenCanvasTab}
+          onUpsertCanvasSessionCard={onUpsertCanvasSessionCard}
+          onRemoveCanvasSessionCard={onRemoveCanvasSessionCard}
+          onSetCanvasZoom={onSetCanvasZoom}
           onPaneSourcePathChange={onPaneSourcePathChange}
           onOpenConversationFromDiff={onOpenConversationFromDiff}
           onInsertReviewIntoPrompt={onInsertReviewIntoPrompt}
@@ -6751,6 +6860,10 @@ function SessionPaneView({
   onOpenFilesystemTab,
   onOpenGitStatusTab,
   onOpenInstructionDebuggerTab,
+  onOpenCanvasTab,
+  onUpsertCanvasSessionCard,
+  onRemoveCanvasSessionCard,
+  onSetCanvasZoom,
   onPaneSourcePathChange,
   onOpenConversationFromDiff,
   onInsertReviewIntoPrompt,
@@ -6858,6 +6971,18 @@ function SessionPaneView({
     originSessionId: string | null,
     originProjectId: string | null,
   ) => void;
+  onOpenCanvasTab: (
+    paneId: string,
+    originSessionId: string | null,
+    originProjectId: string | null,
+  ) => void;
+  onUpsertCanvasSessionCard: (
+    canvasTabId: string,
+    sessionId: string,
+    position: { x: number; y: number },
+  ) => void;
+  onRemoveCanvasSessionCard: (canvasTabId: string, sessionId: string) => void;
+  onSetCanvasZoom: (canvasTabId: string, zoom: number) => void;
   onPaneSourcePathChange: (paneId: string, path: string) => void;
   onOpenConversationFromDiff: (sessionId: string, preferredPaneId: string | null) => void;
   onInsertReviewIntoPrompt: (
@@ -6920,6 +7045,7 @@ function SessionPaneView({
   const activeControlPanelTab = activeTab?.kind === "controlPanel" ? activeTab : null;
   const activeSessionListTab = activeTab?.kind === "sessionList" ? activeTab : null;
   const activeProjectListTab = activeTab?.kind === "projectList" ? activeTab : null;
+  const activeCanvasTab = activeTab?.kind === "canvas" ? activeTab : null;
   const activeControlSurfaceTab = activeControlPanelTab ?? activeSessionListTab ?? activeProjectListTab;
   const activeSourceTab = activeTab?.kind === "source" ? activeTab : null;
   const activeFilesystemTab = activeTab?.kind === "filesystem" ? activeTab : null;
@@ -7078,7 +7204,7 @@ function SessionPaneView({
     draggedTab?.sourceWindowId === windowId &&
     draggedTab?.sourcePaneId === pane.id &&
     pane.tabs.length <= 1
-  );
+  ) && !(activeCanvasTab && draggedTab?.tab.kind === "session");
   const sourceCandidatePaths = useMemo(
     () => (activeSourceTab && activeSession ? collectCandidateSourcePaths(activeSession) : []),
     [activeSession, activeSourceTab],
@@ -7176,6 +7302,8 @@ function SessionPaneView({
   const composerSendDisabled = !activeSession || isSending || isStopping;
   const scrollStateKey = activeSourceTab
     ? `${pane.id}:source:${activeSourceTab.path ?? "empty"}`
+    : activeCanvasTab
+      ? `${pane.id}:canvas:${activeCanvasTab.id}`
     : activeFilesystemTab
       ? `${pane.id}:filesystem:${activeFilesystemTab.rootPath ?? "empty"}`
       : activeGitStatusTab
@@ -8002,6 +8130,19 @@ function SessionPaneView({
                 >
                   Instructions
                 </button>
+                <button
+                  className="pane-view-button"
+                  type="button"
+                  onClick={() =>
+                    onOpenCanvasTab(
+                      pane.id,
+                      activeSession?.id ?? null,
+                      activeSession?.projectId ?? null,
+                    )
+                  }
+                >
+                  Canvas
+                </button>
                 {canFindInSession ? (
                   <button
                     className={`pane-view-button${isSessionFindOpen ? " selected" : ""}`}
@@ -8054,6 +8195,18 @@ function SessionPaneView({
           renderControlPanel(pane.id, "sessions")
         ) : activeProjectListTab ? (
           renderControlPanel(pane.id, "projects")
+        ) : activeCanvasTab ? (
+          <SessionCanvasPanel
+            tab={activeCanvasTab}
+            sessionLookup={sessionLookup}
+            draggedTab={draggedTab}
+            onOpenSession={(sessionId) => onOpenConversationFromDiff(sessionId, pane.id)}
+            onRemoveCard={(sessionId) => onRemoveCanvasSessionCard(activeCanvasTab.id, sessionId)}
+            onSetZoom={(zoom) => onSetCanvasZoom(activeCanvasTab.id, zoom)}
+            onUpsertCard={(sessionId, position) =>
+              onUpsertCanvasSessionCard(activeCanvasTab.id, sessionId, position)
+            }
+          />
         ) : activeSourceTab ? (
           <SourcePanel
             candidatePaths={sourceCandidatePaths}
@@ -8419,7 +8572,7 @@ function SessionPaneView({
           />
         )}
       </section>
-      {activeControlSurfaceTab || activeSourceTab || activeFilesystemTab || activeGitStatusTab || activeInstructionDebuggerTab || activeDiffPreviewTab ? null : (
+      {activeControlSurfaceTab || activeCanvasTab || activeSourceTab || activeFilesystemTab || activeGitStatusTab || activeInstructionDebuggerTab || activeDiffPreviewTab ? null : (
         <AgentSessionPanelFooter
           paneId={pane.id}
           viewMode={pane.viewMode}
@@ -12024,6 +12177,8 @@ function labelForPaneViewMode(viewMode: PaneViewMode) {
       return "Commands";
     case "diffs":
       return "Diffs";
+    case "canvas":
+      return "Canvas";
     case "controlPanel":
       return "Control panel";
     case "sessionList":

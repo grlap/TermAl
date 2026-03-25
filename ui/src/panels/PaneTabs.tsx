@@ -9,6 +9,12 @@ import {
   type WheelEvent as ReactWheelEvent,
 } from "react";
 import { createPortal } from "react-dom";
+import {
+  fetchGitStatus,
+  pushGitChanges,
+  syncGitChanges,
+  type GitStatusResponse,
+} from "../api";
 import { AgentIcon } from "../agent-icon";
 import { copyTextToClipboard } from "../clipboard";
 import { FileTabIcon } from "../file-tab-icon";
@@ -32,7 +38,7 @@ import {
 } from "../tab-drag";
 import { measurePaneTabStatusTooltipPosition } from "../pane-tab-status-tooltip";
 import type { CodexRateLimitWindow, CodexState, Project, RemoteConfig, Session } from "../types";
-import type { TabDropPlacement, WorkspaceTab } from "../workspace";
+import type { TabDropPlacement, WorkspaceGitStatusTab, WorkspaceTab } from "../workspace";
 
 type ActiveSessionTooltipState = {
   id: string;
@@ -46,6 +52,22 @@ type FileTabContextMenuState = {
   path: string;
   relativePath: string | null;
   tabId: string;
+};
+
+type GitTabContextMenuAction = "push" | "sync";
+
+type GitTabContextMenuState = {
+  clientX: number;
+  clientY: number;
+  isLoadingStatus: boolean;
+  pendingAction: GitTabContextMenuAction | null;
+  projectId: string | null;
+  sessionId: string | null;
+  status: GitStatusResponse | null;
+  statusError: string | null;
+  statusMessage: string | null;
+  tabId: string;
+  workdir: string;
 };
 
 export function PaneTabs({
@@ -89,6 +111,8 @@ export function PaneTabs({
   const paneTabsRef = useRef<HTMLDivElement | null>(null);
   const activeStatusTooltipAnchorRef = useRef<HTMLElement | null>(null);
   const fileTabContextMenuRef = useRef<HTMLDivElement | null>(null);
+  const gitTabContextMenuRef = useRef<HTMLDivElement | null>(null);
+  const gitTabContextMenuRequestIdRef = useRef(0);
   const paneHasControlPanel = tabs.some((tab) => tab.kind === "controlPanel");
   const codexNotices = codexState.notices ?? [];
   const hasCodexNotices = codexNotices.length > 0;
@@ -105,6 +129,8 @@ export function PaneTabs({
   const [activeStatusTooltipStyle, setActiveStatusTooltipStyle] = useState<CSSProperties | null>(null);
   const [fileTabContextMenu, setFileTabContextMenu] = useState<FileTabContextMenuState | null>(null);
   const [fileTabContextMenuStyle, setFileTabContextMenuStyle] = useState<CSSProperties | null>(null);
+  const [gitTabContextMenu, setGitTabContextMenu] = useState<GitTabContextMenuState | null>(null);
+  const [gitTabContextMenuStyle, setGitTabContextMenuStyle] = useState<CSSProperties | null>(null);
 
   function updateActiveStatusTooltipPosition(anchor = activeStatusTooltipAnchorRef.current) {
     if (!anchor || typeof window === "undefined") {
@@ -141,6 +167,61 @@ export function PaneTabs({
     setFileTabContextMenuStyle(null);
   }
 
+  function closeGitTabContextMenu() {
+    gitTabContextMenuRequestIdRef.current += 1;
+    setGitTabContextMenu(null);
+    setGitTabContextMenuStyle(null);
+  }
+
+  function patchGitTabContextMenu(
+    updater: (current: GitTabContextMenuState) => GitTabContextMenuState,
+  ) {
+    setGitTabContextMenu((current) => (current ? updater(current) : current));
+  }
+
+  async function handleGitTabRepoAction(action: GitTabContextMenuAction) {
+    if (!gitTabContextMenu || gitTabContextMenu.pendingAction || gitTabContextMenu.isLoadingStatus) {
+      return;
+    }
+
+    const requestId = gitTabContextMenuRequestIdRef.current;
+    const { projectId, sessionId, workdir } = gitTabContextMenu;
+    patchGitTabContextMenu((current) => ({
+      ...current,
+      pendingAction: action,
+      statusError: null,
+      statusMessage: null,
+    }));
+
+    try {
+      const response = action === "push"
+        ? await pushGitChanges({ projectId, sessionId, workdir })
+        : await syncGitChanges({ projectId, sessionId, workdir });
+
+      if (gitTabContextMenuRequestIdRef.current !== requestId) {
+        return;
+      }
+
+      patchGitTabContextMenu((current) => ({
+        ...current,
+        pendingAction: null,
+        status: response.status,
+        statusError: null,
+        statusMessage: response.summary,
+      }));
+    } catch (error) {
+      if (gitTabContextMenuRequestIdRef.current !== requestId) {
+        return;
+      }
+
+      patchGitTabContextMenu((current) => ({
+        ...current,
+        pendingAction: null,
+        statusError: formatGitTabContextMenuError(error),
+      }));
+    }
+  }
+
   function updateFileTabContextMenuPosition(
     menu = fileTabContextMenu,
     node = fileTabContextMenuRef.current,
@@ -162,6 +243,32 @@ export function PaneTabs({
     );
 
     setFileTabContextMenuStyle({
+      left: `${left}px`,
+      top: `${top}px`,
+    });
+  }
+
+  function updateGitTabContextMenuPosition(
+    menu = gitTabContextMenu,
+    node = gitTabContextMenuRef.current,
+  ) {
+    if (!menu || !node || typeof window === "undefined") {
+      setGitTabContextMenuStyle(null);
+      return;
+    }
+
+    const menuRect = node.getBoundingClientRect();
+    const viewportPadding = 12;
+    const left = Math.max(
+      viewportPadding,
+      Math.min(menu.clientX, window.innerWidth - menuRect.width - viewportPadding),
+    );
+    const top = Math.max(
+      viewportPadding,
+      Math.min(menu.clientY, window.innerHeight - menuRect.height - viewportPadding),
+    );
+
+    setGitTabContextMenuStyle({
       left: `${left}px`,
       top: `${top}px`,
     });
@@ -391,6 +498,42 @@ export function PaneTabs({
     };
   }, [fileTabContextMenu]);
 
+
+  useEffect(() => {
+    if (!gitTabContextMenu) {
+      return;
+    }
+
+    const handlePointerDown = (event: PointerEvent) => {
+      const target = event.target;
+      if (target instanceof Node && gitTabContextMenuRef.current?.contains(target)) {
+        return;
+      }
+
+      closeGitTabContextMenu();
+    };
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        closeGitTabContextMenu();
+      }
+    };
+    const handleViewportChange = () => {
+      closeGitTabContextMenu();
+    };
+
+    window.addEventListener("pointerdown", handlePointerDown, true);
+    window.addEventListener("keydown", handleKeyDown);
+    window.addEventListener("resize", handleViewportChange);
+    window.addEventListener("scroll", handleViewportChange, true);
+
+    return () => {
+      window.removeEventListener("pointerdown", handlePointerDown, true);
+      window.removeEventListener("keydown", handleKeyDown);
+      window.removeEventListener("resize", handleViewportChange);
+      window.removeEventListener("scroll", handleViewportChange, true);
+    };
+  }, [gitTabContextMenu]);
+
   useEffect(() => {
     if (!fileTabContextMenu) {
       return;
@@ -400,6 +543,62 @@ export function PaneTabs({
       closeFileTabContextMenu();
     }
   }, [fileTabContextMenu, tabs]);
+
+
+  useEffect(() => {
+    if (!gitTabContextMenu) {
+      return;
+    }
+
+    if (!tabs.some((tab) => tab.id === gitTabContextMenu.tabId)) {
+      closeGitTabContextMenu();
+    }
+  }, [gitTabContextMenu, tabs]);
+
+  useEffect(() => {
+    if (!gitTabContextMenu) {
+      return;
+    }
+
+    const requestId = gitTabContextMenuRequestIdRef.current;
+    let cancelled = false;
+
+    void fetchGitStatus(gitTabContextMenu.workdir, gitTabContextMenu.sessionId, {
+      projectId: gitTabContextMenu.projectId,
+    })
+      .then((status) => {
+        if (cancelled || gitTabContextMenuRequestIdRef.current !== requestId) {
+          return;
+        }
+
+        patchGitTabContextMenu((current) => ({
+          ...current,
+          isLoadingStatus: false,
+          status,
+          statusError: null,
+        }));
+      })
+      .catch((error) => {
+        if (cancelled || gitTabContextMenuRequestIdRef.current !== requestId) {
+          return;
+        }
+
+        patchGitTabContextMenu((current) => ({
+          ...current,
+          isLoadingStatus: false,
+          statusError: formatGitTabContextMenuError(error),
+        }));
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    gitTabContextMenu?.projectId,
+    gitTabContextMenu?.sessionId,
+    gitTabContextMenu?.tabId,
+    gitTabContextMenu?.workdir,
+  ]);
 
   useLayoutEffect(() => {
     if (!activeStatusTooltip) {
@@ -437,6 +636,15 @@ export function PaneTabs({
 
     updateFileTabContextMenuPosition();
   }, [fileTabContextMenu]);
+
+
+  useLayoutEffect(() => {
+    if (!gitTabContextMenu) {
+      return;
+    }
+
+    updateGitTabContextMenuPosition();
+  }, [gitTabContextMenu]);
 
   useEffect(() => {
     if (!activeStatusTooltip || sessionLookup.has(activeStatusTooltip.sessionId)) {
@@ -521,6 +729,32 @@ export function PaneTabs({
                 }}
                 onContextMenu={(event) => {
                   closeFileTabContextMenu();
+                  closeGitTabContextMenu();
+
+                  const gitTabContext = buildGitTabContextMenu(tab, sessionLookup, projectLookup);
+                  if (gitTabContext) {
+                    event.preventDefault();
+                    gitTabContextMenuRequestIdRef.current += 1;
+                    setGitTabContextMenu({
+                      clientX: event.clientX,
+                      clientY: event.clientY,
+                      isLoadingStatus: true,
+                      pendingAction: null,
+                      projectId: gitTabContext.projectId,
+                      sessionId: gitTabContext.sessionId,
+                      status: null,
+                      statusError: null,
+                      statusMessage: null,
+                      tabId: tab.id,
+                      workdir: gitTabContext.workdir,
+                    });
+                    setGitTabContextMenuStyle({
+                      left: `${event.clientX}px`,
+                      top: `${event.clientY}px`,
+                    });
+                    return;
+                  }
+
                   const fileTabContext = buildFileTabContextMenu(tab, sessionLookup, projectLookup);
                   if (fileTabContext) {
                     event.preventDefault();
@@ -575,6 +809,7 @@ export function PaneTabs({
                       );
                     }
                     closeFileTabContextMenu();
+                    closeGitTabContextMenu();
                     onTabDragStart(drag);
                   }}
                   onDragEnd={onTabDragEnd}
@@ -688,6 +923,93 @@ export function PaneTabs({
                 onClick={() => {
                   closeFileTabContextMenu();
                   onCloseTab(fileTabContextMenu.paneId, fileTabContextMenu.tabId);
+                }}
+              >
+                Close
+              </button>
+            </div>,
+            document.body,
+          )
+        : null}
+
+      {gitTabContextMenu && gitTabContextMenuStyle
+        ? createPortal(
+            <div
+              ref={gitTabContextMenuRef}
+              className="pane-tab-context-menu panel"
+              role="menu"
+              aria-label="Git tab actions"
+              style={gitTabContextMenuStyle}
+            >
+              <button
+                className="pane-tab-context-menu-item"
+                type="button"
+                role="menuitem"
+                disabled
+              >
+                {formatGitTabBranchMenuLabel(gitTabContextMenu.status, gitTabContextMenu.isLoadingStatus)}
+              </button>
+              <button
+                className="pane-tab-context-menu-item"
+                type="button"
+                role="menuitem"
+                disabled
+              >
+                {formatGitTabUpstreamMenuLabel(gitTabContextMenu.status, gitTabContextMenu.isLoadingStatus)}
+              </button>
+              <button
+                className="pane-tab-context-menu-item"
+                type="button"
+                role="menuitem"
+                disabled
+              >
+                {formatGitTabWorktreeMenuLabel(gitTabContextMenu.status, gitTabContextMenu.isLoadingStatus)}
+              </button>
+              {gitTabContextMenu.statusError ? (
+                <button
+                  className="pane-tab-context-menu-item"
+                  type="button"
+                  role="menuitem"
+                  disabled
+                >
+                  {gitTabContextMenu.statusError}
+                </button>
+              ) : null}
+              {gitTabContextMenu.statusMessage ? (
+                <button
+                  className="pane-tab-context-menu-item"
+                  type="button"
+                  role="menuitem"
+                  disabled
+                >
+                  {gitTabContextMenu.statusMessage}
+                </button>
+              ) : null}
+              <button
+                className="pane-tab-context-menu-item"
+                type="button"
+                role="menuitem"
+                disabled={!canSyncGitTabContextMenu(gitTabContextMenu)}
+                onClick={() => void handleGitTabRepoAction("sync")}
+              >
+                {gitTabContextMenu.pendingAction === "sync" ? "Syncing..." : "Git Sync"}
+              </button>
+              <button
+                className="pane-tab-context-menu-item"
+                type="button"
+                role="menuitem"
+                disabled={!canPushGitTabContextMenu(gitTabContextMenu)}
+                onClick={() => void handleGitTabRepoAction("push")}
+              >
+                {gitTabContextMenu.pendingAction === "push" ? "Pushing..." : "Git Push"}
+              </button>
+              <button
+                className="pane-tab-context-menu-item pane-tab-context-menu-item-danger"
+                type="button"
+                role="menuitem"
+                onClick={() => {
+                  closeGitTabContextMenu();
+                  onCloseTab(paneId, gitTabContextMenu.tabId);
                 }}
               >
                 Close
@@ -1019,6 +1341,10 @@ function formatTabLabel(tab: WorkspaceTab, session: Session | null) {
     return "Control panel";
   }
 
+  if (tab.kind === "canvas") {
+    return "Canvas";
+  }
+
   if (tab.kind === "sessionList") {
     return "Sessions";
   }
@@ -1075,6 +1401,140 @@ function formatRateLimitResetLabel(resetsAt: number | null, label: string) {
 
 function clamp(value: number, min: number, max: number) {
   return Math.min(Math.max(value, min), max);
+}
+
+
+function formatGitTabContextMenuError(error: unknown) {
+  if (error instanceof Error) {
+    const message = error.message.trim();
+    if (message) {
+      return message;
+    }
+  }
+
+  return "Git action failed.";
+}
+
+function formatGitTabBranchMenuLabel(
+  status: GitStatusResponse | null,
+  isLoadingStatus: boolean,
+) {
+  if (isLoadingStatus && !status) {
+    return "Branch: Loading...";
+  }
+
+  if (!status) {
+    return "Branch: Unavailable";
+  }
+
+  const branch = status.branch?.trim();
+  return `Branch: ${branch || "Detached HEAD"}`;
+}
+
+function formatGitTabUpstreamMenuLabel(
+  status: GitStatusResponse | null,
+  isLoadingStatus: boolean,
+) {
+  if (isLoadingStatus && !status) {
+    return "Upstream: Loading...";
+  }
+
+  if (!status) {
+    return "Upstream: Unavailable";
+  }
+
+  const upstream = status.upstream?.trim();
+  if (!upstream) {
+    return "Upstream: Not tracking";
+  }
+
+  const position: string[] = [];
+  if (status.ahead > 0) {
+    position.push(`ahead ${status.ahead}`);
+  }
+  if (status.behind > 0) {
+    position.push(`behind ${status.behind}`);
+  }
+
+  const suffix = position.length > 0 ? ` (${position.join(", ")})` : " (up to date)";
+  return `Upstream: ${upstream}${suffix}`;
+}
+
+function formatGitTabWorktreeMenuLabel(
+  status: GitStatusResponse | null,
+  isLoadingStatus: boolean,
+) {
+  if (isLoadingStatus && !status) {
+    return "Status: Loading...";
+  }
+
+  if (!status) {
+    return "Status: Unavailable";
+  }
+
+  if (status.isClean) {
+    return "Status: Clean";
+  }
+
+  const count = status.files.length;
+  return `Status: ${count} changed ${count === 1 ? "file" : "files"}`;
+}
+
+function canPushGitTabContextMenu(menu: GitTabContextMenuState | null) {
+  return Boolean(
+    menu &&
+      !menu.isLoadingStatus &&
+      !menu.pendingAction &&
+      menu.status?.branch?.trim(),
+  );
+}
+
+function canSyncGitTabContextMenu(menu: GitTabContextMenuState | null) {
+  return Boolean(
+    menu &&
+      !menu.isLoadingStatus &&
+      !menu.pendingAction &&
+      menu.status?.upstream?.trim(),
+  );
+}
+
+function buildGitTabContextMenu(
+  tab: WorkspaceTab,
+  sessionLookup: ReadonlyMap<string, Session>,
+  projectLookup: ReadonlyMap<string, Project>,
+) {
+  if (tab.kind !== "gitStatus") {
+    return null;
+  }
+
+  const workdir = tab.workdir?.trim() || resolveGitTabWorkspaceRoot(tab, sessionLookup, projectLookup);
+  if (!workdir) {
+    return null;
+  }
+
+  const originSession =
+    tab.originSessionId ? (sessionLookup.get(tab.originSessionId) ?? null) : null;
+  const projectId = tab.originProjectId ?? originSession?.projectId ?? null;
+  return {
+    projectId,
+    sessionId: tab.originSessionId ?? null,
+    workdir,
+  };
+}
+
+function resolveGitTabWorkspaceRoot(
+  tab: WorkspaceGitStatusTab,
+  sessionLookup: ReadonlyMap<string, Session>,
+  projectLookup: ReadonlyMap<string, Project>,
+) {
+  const originSession =
+    tab.originSessionId ? (sessionLookup.get(tab.originSessionId) ?? null) : null;
+  if (originSession?.workdir) {
+    return originSession.workdir;
+  }
+
+  const originProjectId = tab.originProjectId ?? originSession?.projectId ?? null;
+  return originProjectId ? (projectLookup.get(originProjectId)?.rootPath ?? null) : null;
 }
 
 function buildFileTabContextMenu(

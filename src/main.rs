@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
+﻿use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
 use std::convert::Infallible;
 use std::fs;
 use std::io::{self, BufRead, BufReader, Write};
@@ -89,7 +89,7 @@ async fn run_server() -> Result<()> {
 
     // Drop the AppState (which contains reqwest::blocking::Client) on a
     // regular thread so its internal Tokio runtime isn't dropped inside our
-    // async context — that would panic with "Cannot drop a runtime in a
+    // async context â€” that would panic with "Cannot drop a runtime in a
     // context where blocking is not allowed".
     std::thread::spawn(move || drop(shutdown_state))
         .join()
@@ -119,6 +119,8 @@ fn app_router(state: AppState) -> Router {
         .route("/api/git/diff", post(read_git_diff))
         .route("/api/git/file", post(apply_git_file_action))
         .route("/api/git/commit", post(commit_git_changes))
+        .route("/api/git/push", post(push_git_changes))
+        .route("/api/git/sync", post(sync_git_changes))
         .route("/api/state", get(get_state))
         .route("/api/settings", post(update_app_settings))
         .route("/api/instructions/search", get(search_instructions))
@@ -298,3 +300,7 @@ include!("telegram.rs");
 
 #[cfg(test)]
 mod tests;
+
+
+
+

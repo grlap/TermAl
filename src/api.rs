@@ -1799,6 +1799,55 @@ async fn commit_git_changes(
     Ok(Json(response))
 }
 
+async fn push_git_changes(
+    State(state): State<AppState>,
+    Json(request): Json<GitRepoActionRequest>,
+) -> Result<Json<GitRepoActionResponse>, ApiError> {
+    let response = run_blocking_api(move || {
+        if let Some(scope) = state.remote_scope_for_request(
+            request.session_id.as_deref(),
+            request.project_id.as_deref(),
+        )? {
+            return state.remote_post_json(
+                &scope,
+                "/api/git/push",
+                json!({
+                    "workdir": request.workdir,
+                }),
+            );
+        }
+
+        let workdir = resolve_existing_requested_path(&request.workdir, "path")?;
+        push_git_repo(&workdir)
+    })
+    .await?;
+    Ok(Json(response))
+}
+
+async fn sync_git_changes(
+    State(state): State<AppState>,
+    Json(request): Json<GitRepoActionRequest>,
+) -> Result<Json<GitRepoActionResponse>, ApiError> {
+    let response = run_blocking_api(move || {
+        if let Some(scope) = state.remote_scope_for_request(
+            request.session_id.as_deref(),
+            request.project_id.as_deref(),
+        )? {
+            return state.remote_post_json(
+                &scope,
+                "/api/git/sync",
+                json!({
+                    "workdir": request.workdir,
+                }),
+            );
+        }
+
+        let workdir = resolve_existing_requested_path(&request.workdir, "path")?;
+        sync_git_repo(&workdir)
+    })
+    .await?;
+    Ok(Json(response))
+}
 fn load_git_diff_for_request(
     workdir: &FsPath,
     request: &GitDiffRequest,
@@ -2110,9 +2159,7 @@ fn run_git_pathspec_command(
         return Ok(());
     }
 
-    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_owned();
-    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_owned();
-    let detail = if stderr.is_empty() { stdout } else { stderr };
+    let detail = extract_git_command_error(&output);
 
     if detail.is_empty() {
         Err(ApiError::internal(error_context))
@@ -2143,6 +2190,96 @@ fn build_git_commit_summary(message: &str) -> String {
     }
 }
 
+fn push_git_repo(workdir: &FsPath) -> Result<GitRepoActionResponse, ApiError> {
+    let workdir = normalize_git_workdir_path(workdir)?;
+    let Some(repo_root) = resolve_git_repo_root(&workdir)? else {
+        return Err(ApiError::bad_request("no git repository found"));
+    };
+
+    let status_before = load_git_status_for_path(&workdir)?;
+    run_git_repo_command(&repo_root, &["push"], "failed to push git changes")?;
+    let status = load_git_status_for_path(&workdir)?;
+    Ok(GitRepoActionResponse {
+        summary: build_git_push_summary(&status_before, &status),
+        status,
+    })
+}
+
+fn sync_git_repo(workdir: &FsPath) -> Result<GitRepoActionResponse, ApiError> {
+    let workdir = normalize_git_workdir_path(workdir)?;
+    let Some(repo_root) = resolve_git_repo_root(&workdir)? else {
+        return Err(ApiError::bad_request("no git repository found"));
+    };
+
+    let status_before = load_git_status_for_path(&workdir)?;
+    if status_before.upstream.is_none() {
+        return Err(ApiError::bad_request(
+            "git sync requires a tracking upstream branch",
+        ));
+    }
+
+    run_git_repo_command(&repo_root, &["pull", "--ff-only"], "failed to pull git changes")?;
+    run_git_repo_command(&repo_root, &["push"], "failed to push git changes")?;
+    let status = load_git_status_for_path(&workdir)?;
+    Ok(GitRepoActionResponse {
+        summary: build_git_sync_summary(&status_before, &status),
+        status,
+    })
+}
+
+fn run_git_repo_command(
+    repo_root: &FsPath,
+    args: &[&str],
+    error_context: &str,
+) -> Result<(), ApiError> {
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(repo_root)
+        .args(args)
+        .output()
+        .map_err(|err| ApiError::internal(format!("{error_context}: {err}")))?;
+
+    if output.status.success() {
+        return Ok(());
+    }
+
+    let detail = extract_git_command_error(&output);
+    if detail.is_empty() {
+        Err(ApiError::bad_request(error_context))
+    } else {
+        Err(ApiError::bad_request(format!("{error_context}: {detail}")))
+    }
+}
+
+fn build_git_push_summary(
+    status_before: &GitStatusResponse,
+    status_after: &GitStatusResponse,
+) -> String {
+    let branch = status_after.branch.as_deref().or(status_before.branch.as_deref());
+    let upstream = status_after.upstream.as_deref().or(status_before.upstream.as_deref());
+    build_git_repo_action_summary("Pushed", branch, upstream)
+}
+
+fn build_git_sync_summary(
+    status_before: &GitStatusResponse,
+    status_after: &GitStatusResponse,
+) -> String {
+    let branch = status_after.branch.as_deref().or(status_before.branch.as_deref());
+    let upstream = status_after.upstream.as_deref().or(status_before.upstream.as_deref());
+    build_git_repo_action_summary("Synced", branch, upstream)
+}
+
+fn build_git_repo_action_summary(
+    verb: &str,
+    branch: Option<&str>,
+    upstream: Option<&str>,
+) -> String {
+    match (branch, upstream) {
+        (Some(branch), Some(upstream)) => format!("{verb} {branch} with {upstream}."),
+        (Some(branch), None) => format!("{verb} {branch}."),
+        _ => format!("{verb} git repository."),
+    }
+}
 fn stable_text_hash(value: &str) -> String {
     let mut hash = 0xcbf29ce484222325_u64;
     for byte in value.as_bytes() {
@@ -3612,6 +3749,13 @@ struct GitCommitResponse {
     summary: String,
 }
 
+#[derive(Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct GitRepoActionResponse {
+    status: GitStatusResponse,
+    summary: String,
+}
+
 const REVIEW_DOCUMENT_VERSION: u32 = 1;
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
@@ -3748,6 +3892,16 @@ struct GitFileActionRequest {
 #[serde(rename_all = "camelCase")]
 struct GitCommitRequest {
     message: String,
+    workdir: String,
+    #[serde(default)]
+    project_id: Option<String>,
+    #[serde(default)]
+    session_id: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct GitRepoActionRequest {
     workdir: String,
     #[serde(default)]
     project_id: Option<String>,

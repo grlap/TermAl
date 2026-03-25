@@ -98,6 +98,7 @@
   height: 0.42rem;
   border-radius: 999px;
   flex: none;
+  background: color-mix(in srgb, var(--signal-green) 88%, white 12%);
 }
 
 [data-ui-style="terminal-style"] .message-card.bubble .message-meta {

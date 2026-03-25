@@ -1,15 +1,34 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import {
+  fetchGitStatus,
+  pushGitChanges,
+  syncGitChanges,
+  type GitStatusResponse,
+} from "../api";
 import { copyTextToClipboard } from "../clipboard";
 import { PaneTabs } from "./PaneTabs";
 import type { CodexState, Project, RemoteConfig, Session } from "../types";
 import type { WorkspaceTab } from "../workspace";
 
+vi.mock("../api", async () => {
+  const actual = await vi.importActual<typeof import("../api")>("../api");
+  return {
+    ...actual,
+    fetchGitStatus: vi.fn(),
+    pushGitChanges: vi.fn(),
+    syncGitChanges: vi.fn(),
+  };
+});
+
 vi.mock("../clipboard", () => ({
   copyTextToClipboard: vi.fn(() => Promise.resolve()),
 }));
 
+const fetchGitStatusMock = vi.mocked(fetchGitStatus);
+const pushGitChangesMock = vi.mocked(pushGitChanges);
+const syncGitChangesMock = vi.mocked(syncGitChanges);
 const copyTextToClipboardMock = vi.mocked(copyTextToClipboard);
 
 class ResizeObserverMock {
@@ -29,7 +48,11 @@ describe("PaneTabs", () => {
   const originalResizeObserver = globalThis.ResizeObserver;
 
   beforeEach(() => {
+    fetchGitStatusMock.mockReset();
+    pushGitChangesMock.mockReset();
+    syncGitChangesMock.mockReset();
     copyTextToClipboardMock.mockReset();
+
     copyTextToClipboardMock.mockResolvedValue(undefined);
     vi.stubGlobal("ResizeObserver", ResizeObserverMock as unknown as typeof ResizeObserver);
   });
@@ -82,6 +105,70 @@ describe("PaneTabs", () => {
       expect(copyTextToClipboardMock).toHaveBeenCalledWith("C:/repo/src/main.rs");
     });
     expect(screen.queryByRole("menu", { name: "File tab actions" })).not.toBeInTheDocument();
+  });
+
+  it("opens a dedicated git tab context menu with repo actions", async () => {
+    const onSelectTab = vi.fn();
+    fetchGitStatusMock.mockResolvedValue(
+      makeGitStatus("C:/repo/packages/app", {
+        ahead: 2,
+        behind: 1,
+        files: [{ path: "src/main.ts", indexStatus: "M", worktreeStatus: "M" }],
+        isClean: false,
+      }),
+    );
+    pushGitChangesMock.mockResolvedValue({
+      status: makeGitStatus("C:/repo/packages/app"),
+      summary: "Pushed current branch to origin/main.",
+    });
+
+    renderPaneTabs({
+      onSelectTab,
+      sessionLookup: new Map([
+        ["session-1", makeSession("session-1", "C:/repo")],
+        ["session-2", makeSession("session-2", "C:/repo", "Other Session")],
+      ]),
+      tabs: [
+        {
+          id: "tab-session",
+          kind: "session",
+          sessionId: "session-2",
+        },
+        {
+          id: "tab-git",
+          kind: "gitStatus",
+          workdir: "C:/repo/packages/app",
+          originSessionId: "session-1",
+        },
+      ],
+    });
+
+    fireEvent.contextMenu(screen.getByRole("tab", { name: /Git: app/i }), {
+      clientX: 120,
+      clientY: 80,
+    });
+
+    expect(onSelectTab).not.toHaveBeenCalled();
+    expect(await screen.findByRole("menu", { name: "Git tab actions" })).toBeInTheDocument();
+    expect(await screen.findByText("Branch: main")).toBeInTheDocument();
+    expect(screen.getByText("Upstream: origin/main (ahead 2, behind 1)")).toBeInTheDocument();
+    expect(screen.getByText("Status: 1 changed file")).toBeInTheDocument();
+    expect(screen.queryByRole("menuitem", { name: "Copy Path" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("menuitem", { name: "Copy Relative Path" })).not.toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "Git Sync" })).toBeEnabled();
+    expect(screen.getByRole("menuitem", { name: "Git Push" })).toBeEnabled();
+
+    await clickAndSettle(screen.getByRole("menuitem", { name: "Git Push" }));
+
+    await waitFor(() => {
+      expect(pushGitChangesMock).toHaveBeenCalledWith({
+        projectId: null,
+        sessionId: "session-1",
+        workdir: "C:/repo/packages/app",
+      });
+    });
+    expect(syncGitChangesMock).not.toHaveBeenCalled();
+    expect(await screen.findByText("Pushed current branch to origin/main.")).toBeInTheDocument();
   });
 
   it("copies a workspace-relative path for project-backed file tabs", async () => {
@@ -556,6 +643,24 @@ function makeSession(
     name,
     preview: "Ready",
     status: "idle",
+    workdir,
+    ...overrides,
+  };
+}
+
+
+function makeGitStatus(
+  workdir: string,
+  overrides: Partial<GitStatusResponse> = {},
+): GitStatusResponse {
+  return {
+    ahead: 0,
+    behind: 0,
+    branch: "main",
+    files: [],
+    isClean: true,
+    repoRoot: "C:/repo",
+    upstream: "origin/main",
     workdir,
     ...overrides,
   };

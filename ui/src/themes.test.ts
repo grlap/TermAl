@@ -135,6 +135,7 @@ describe("theme helpers", () => {
     expect(themeIds).toEqual(
       expect.arrayContaining([
         "gallery-white",
+        "workbench-light",
         "porcelain-white",
         "obsidian-black",
         "oxide-black",

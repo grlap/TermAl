@@ -60,6 +60,12 @@ export const THEMES = [
     swatches: ["#f8fbff", "#2b6cb0", "#d1573b"],
   },
   {
+    id: "workbench-light",
+    name: "Workbench Light",
+    description: "Neutral editor whites with cool slate chrome and muted coral accents.",
+    swatches: ["#f3f4f6", "#607d93", "#d86f58"],
+  },
+  {
     id: "porcelain-white",
     name: "Porcelain White",
     description: "Polished porcelain surfaces with jade, plum, and brushed-silver accents.",

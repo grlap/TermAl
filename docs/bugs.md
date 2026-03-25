@@ -32,6 +32,54 @@ sessions only, `stop_session` now always detaches shared Codex session bookkeepi
 interrupt attempt and continues through runtime cleanup/stop-message recording even if that
 interrupt fails, and tooltip/panel model-option matching now uses one shared lookup utility.
 
+## `tab-drag.ts` and `workspace-storage.ts` validators have drifted
+
+**Severity:** Medium — correctness risk on cross-window tab drags.
+
+Both files contain independent `isWorkspaceTab` switch statements with near-identical validation
+logic, but they have diverged:
+
+- `tab-drag.ts` does not validate `originProjectId` on `source`, `filesystem`, `gitStatus`, or
+  `diffPreview` tab kinds, while `workspace-storage.ts` does.
+- `tab-drag.ts` checks `diffPreview.language` with `isNullableString`, while
+  `workspace-storage.ts` checks it with `isOptionalNullableString`.
+
+A tab payload with a numeric `originProjectId` on a `source` tab would pass the drag validator
+but fail the storage validator, potentially causing a silent drop on persist.
+
+**Current behavior:**
+- a cross-window drag of a `source` tab with a corrupted `originProjectId` is accepted by the
+  drag channel but rejected by the storage layer on the next persist cycle
+- the `tab-drag.test.ts` tests only cover `originProjectId` validation for `controlPanel`,
+  `sessionList`, and `projectList` tab kinds
+
+**Proposal:**
+- extract shared tab-shape validation into a common module (e.g. `tab-validation.ts`) and
+  import from both `tab-drag.ts` and `workspace-storage.ts`
+- alternatively, align the two validators manually and add tests for `originProjectId` on all
+  tab kinds in `tab-drag.test.ts`
+
+---
+
+## `read_file` returns HTTP 400 for file-not-found instead of 404
+
+**Severity:** Low — semantic mismatch, not a runtime bug.
+
+When `fs::read_to_string` fails with `io::ErrorKind::NotFound`, the `read_file` handler returns
+`ApiError::bad_request(...)` (HTTP 400) instead of `ApiError::not_found(...)` (HTTP 404). The
+same pattern appears in `read_directory` and the instruction file read path. A missing resource
+is semantically a 404, not a malformed request.
+
+**Current behavior:**
+- `GET /api/file?path=/nonexistent` returns HTTP 400 with `{"error": "File not found: ..."}`
+- the frontend does not currently distinguish 400 from 404, so no user-visible bug
+
+**Proposal:**
+- use `ApiError::not_found(...)` for `io::ErrorKind::NotFound` in `read_file`, `read_directory`,
+  and the instruction file read path
+
+---
+
 ## `stop_session` error handling is asymmetric across runtime types
 
 **Severity:** Low - inconsistent API contract, not data loss.
@@ -59,34 +107,6 @@ types.
 - alternatively, document the asymmetry as intentional if the orphan-process risk justifies it
 - optionally amend the stop message text to indicate the interrupt may still be in progress, or add
   a warning-level field to the response
-
-## Node 24 deprecation warning from the legacy Vite dev proxy
-
-**Severity:** Low - local dev noise only.
-
-The UI toolchain is still on an older Vite stack:
-- `vite` 2.9.18
-- `@vitejs/plugin-react` 1.3.2
-- `vitest` 0.18.1
-
-When the dev server runs on modern Node releases such as Node 24, Vite's bundled `http-proxy`
-path still calls the deprecated `util._extend` helper. TermAl hits that path because
-`ui/vite.config.ts` configures `server.proxy` for `/api` and `/api/events`.
-
-**Current behavior:**
-- `npm run dev` can print `(node:...) [DEP0060] DeprecationWarning: The util._extend API is deprecated`
-- the warning comes from Vite's dev proxy implementation, not from TermAl application code
-- `npm run build` and `npm run test` still pass, so this does not block production output
-
-**Proposal:**
-- upgrade the frontend dev toolchain together instead of patching `node_modules`
-- include at least `vite`, `@vitejs/plugin-react`, and `vitest` in the same refresh
-- verify the dev proxy path after the upgrade on current Node, since the warning is tied to the
-  proxy code path rather than to React or app logic
-- do not spend time replacing the proxy configuration in TermAl just to hide the warning
-
-**Temporary stance:** Until the toolchain refresh is scheduled, treat this as expected local dev
-noise.
 
 ---
 
@@ -164,15 +184,9 @@ Concrete work implied by the current TermAl parity gaps. Ordered by user impact 
   and flush periodically (e.g. 500 ms) or on turn completion. Index messages by ID for O(1)
   lookup. Cache `collect_agent_readiness` instead of re-scanning PATH on every snapshot. Move
   disk I/O outside the mutex lock.
-- [ ] Add post-edit diff preview from agent messages:
-  when an agent reports that it updated a file, let the user open a new tab with a diff preview of
-  those changes and include a link back to the originating conversation or message.
 
 ## P2
 
-- [ ] Refresh the frontend dev toolchain to remove the Node 24 `util._extend` deprecation from
-  Vite's proxy path; upgrade `vite`, `@vitejs/plugin-react`, and `vitest` together and verify
-  `npm run dev` with the existing `/api` proxy config.
 - [ ] Expand HTTP route tests for the axum API:
   Codex thread actions (archive, unarchive, fork, rollback) and interactive request submissions
   (user input, MCP elicitation, generic app requests) now have HTTP route tests via
@@ -188,6 +202,19 @@ Concrete work implied by the current TermAl parity gaps. Ordered by user impact 
   `userInputRequest`, `mcpElicitationRequest`, and `codexAppRequest` messages are handled by the
   reconciler but have no test coverage verifying that state changes (e.g. pending → submitted)
   correctly produce new message references.
+- [ ] Add `tab-drag.test.ts` coverage for `originProjectId` on all tab kinds and `drag-end` message:
+  the drag channel validator is missing `originProjectId` checks on `source`, `filesystem`,
+  `gitStatus`, `canvas`, `instructionDebugger`, and `diffPreview` tabs. The `drag-end` message
+  type in the discriminated union has no test at all.
+- [ ] Add `SessionCanvasPanel.test.tsx` afterEach cleanup:
+  other test files (`PaneTabs.test.tsx`, `App.test.tsx`) explicitly call `cleanup()` in
+  `afterEach`; this file should match the project convention.
+- [ ] Add PaneTabs test for "Git Sync" context menu action:
+  only the "Git Push" path is exercised; add a test that clicks "Git Sync" and verifies
+  `syncGitChanges` is called with the expected workdir.
+- [ ] Add PaneTabs test for git status fetch failure in context menu:
+  the `statusError` / `statusMessage` state fields exist but the error rendering path when
+  `fetchGitStatus` rejects is uncovered.
 - [ ] Continue splitting backend modules as they grow:
   `src/main.rs` was split into `api.rs`, `state.rs`, `runtime.rs`, `turns.rs`, `remote.rs`, and
   `tests.rs`. Some of these modules (especially `state.rs` and `turns.rs`) are already large and

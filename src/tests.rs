@@ -363,6 +363,26 @@ fn run_git_test_command(repo_root: &FsPath, args: &[&str]) {
     }
 }
 
+fn run_git_test_command_output(repo_root: &FsPath, args: &[&str]) -> String {
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(repo_root)
+        .args(args)
+        .output()
+        .unwrap_or_else(|err| panic!("failed to run git {:?}: {err}", args));
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_owned();
+        let stdout = String::from_utf8_lossy(&output.stdout).trim().to_owned();
+        panic!(
+            "git {:?} failed with status {}.\nstdout: {}\nstderr: {}",
+            args, output.status, stdout, stderr
+        );
+    }
+
+    String::from_utf8_lossy(&output.stdout).trim().to_owned()
+}
+
 fn test_exit_success_child() -> Child {
     if cfg!(windows) {
         Command::new("cmd").args(["/C", "exit 0"]).spawn().unwrap()
@@ -9823,6 +9843,88 @@ fn git_status_file_actions_support_paths_with_spaces() {
 }
 
 #[test]
+fn push_git_repo_updates_tracking_branch() {
+    let root = std::env::temp_dir().join(format!("termal-git-push-{}", Uuid::new_v4()));
+    let remote_root = root.join("remote.git");
+    let repo_root = root.join("local");
+    let remote_root_string = remote_root.to_string_lossy().into_owned();
+    let repo_root_string = repo_root.to_string_lossy().into_owned();
+
+    fs::create_dir_all(&root).unwrap();
+    fs::create_dir_all(&remote_root).unwrap();
+
+    run_git_test_command(&remote_root, &["init", "--bare"]);
+    run_git_test_command(&root, &["clone", remote_root_string.as_str(), repo_root_string.as_str()]);
+    run_git_test_command(&repo_root, &["config", "user.email", "termal@example.com"]);
+    run_git_test_command(&repo_root, &["config", "user.name", "TermAl"]);
+
+    fs::write(repo_root.join("README.md"), "# Init\n").unwrap();
+    run_git_test_command(&repo_root, &["add", "README.md"]);
+    run_git_test_command(&repo_root, &["commit", "-m", "init"]);
+    run_git_test_command(&repo_root, &["push", "-u", "origin", "HEAD"]);
+
+    fs::write(repo_root.join("README.md"), "# Updated\n").unwrap();
+    run_git_test_command(&repo_root, &["commit", "-am", "update"]);
+
+    let response = push_git_repo(&repo_root).unwrap();
+    let local_head = run_git_test_command_output(&repo_root, &["rev-parse", "HEAD"]);
+    let remote_head = run_git_test_command_output(&remote_root, &["rev-parse", "HEAD"]);
+
+    assert_eq!(local_head, remote_head);
+    assert_eq!(response.status.ahead, 0);
+    assert_eq!(response.status.behind, 0);
+    assert!(response.summary.starts_with("Pushed "));
+
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn sync_git_repo_pulls_remote_changes() {
+    let root = std::env::temp_dir().join(format!("termal-git-sync-{}", Uuid::new_v4()));
+    let remote_root = root.join("remote.git");
+    let repo_root = root.join("local");
+    let peer_root = root.join("peer");
+    let remote_root_string = remote_root.to_string_lossy().into_owned();
+    let repo_root_string = repo_root.to_string_lossy().into_owned();
+    let peer_root_string = peer_root.to_string_lossy().into_owned();
+
+    fs::create_dir_all(&root).unwrap();
+    fs::create_dir_all(&remote_root).unwrap();
+
+    run_git_test_command(&remote_root, &["init", "--bare"]);
+    run_git_test_command(&root, &["clone", remote_root_string.as_str(), repo_root_string.as_str()]);
+    run_git_test_command(&repo_root, &["config", "user.email", "termal@example.com"]);
+    run_git_test_command(&repo_root, &["config", "user.name", "TermAl"]);
+
+    fs::write(repo_root.join("README.md"), "# Init\n").unwrap();
+    run_git_test_command(&repo_root, &["add", "README.md"]);
+    run_git_test_command(&repo_root, &["commit", "-m", "init"]);
+    run_git_test_command(&repo_root, &["push", "-u", "origin", "HEAD"]);
+
+    run_git_test_command(&root, &["clone", remote_root_string.as_str(), peer_root_string.as_str()]);
+    run_git_test_command(&peer_root, &["config", "user.email", "termal@example.com"]);
+    run_git_test_command(&peer_root, &["config", "user.name", "TermAl"]);
+    fs::write(peer_root.join("README.md"), "# Peer\n").unwrap();
+    run_git_test_command(&peer_root, &["commit", "-am", "peer update"]);
+    run_git_test_command(&peer_root, &["push"]);
+
+    let response = sync_git_repo(&repo_root).unwrap();
+    let local_head = run_git_test_command_output(&repo_root, &["rev-parse", "HEAD"]);
+    let remote_head = run_git_test_command_output(&remote_root, &["rev-parse", "HEAD"]);
+
+    assert_eq!(
+        fs::read_to_string(repo_root.join("README.md")).unwrap().replace("\r\n", "\n"),
+        "# Peer\n",
+    );
+    assert_eq!(local_head, remote_head);
+    assert_eq!(response.status.ahead, 0);
+    assert_eq!(response.status.behind, 0);
+    assert!(response.summary.starts_with("Synced "));
+
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn project_scoped_paths_require_a_session_or_project_identifier() {
     let state = test_app_state();
     let error = resolve_project_scoped_requested_path(
@@ -11412,7 +11514,7 @@ async fn codex_user_input_route_submits_answers_and_redacts_secret_values() {
         .find(|session| session.id == session_id)
         .expect("updated session should be present");
     assert_eq!(session.status, SessionStatus::Active);
-    assert_eq!(session.preview, "Input submitted. Codex is continuing…");
+    assert_eq!(session.preview, "Input submitted. Codex is continuingâ€¦");
     assert!(matches!(
         session.messages.last(),
         Some(Message::UserInputRequest {
@@ -11546,7 +11648,7 @@ async fn codex_mcp_elicitation_route_submits_structured_content() {
         .find(|session| session.id == session_id)
         .expect("updated session should be present");
     assert_eq!(session.status, SessionStatus::Active);
-    assert_eq!(session.preview, "MCP input submitted. Codex is continuing…");
+    assert_eq!(session.preview, "MCP input submitted. Codex is continuingâ€¦");
     assert!(matches!(
         session.messages.last(),
         Some(Message::McpElicitationRequest {
@@ -11739,7 +11841,7 @@ async fn codex_generic_app_request_route_submits_json_result() {
     assert_eq!(session.status, SessionStatus::Active);
     assert_eq!(
         session.preview,
-        "Codex response submitted. Codex is continuing…"
+        "Codex response submitted. Codex is continuingâ€¦"
     );
     assert!(matches!(
         session.messages.last(),

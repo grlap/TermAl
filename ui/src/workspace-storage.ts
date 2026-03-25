@@ -24,6 +24,7 @@ const SESSION_PANE_VIEW_MODES: readonly SessionPaneViewMode[] = [
 ];
 const PANE_VIEW_MODES: readonly PaneViewMode[] = [
   ...SESSION_PANE_VIEW_MODES,
+  "canvas",
   "controlPanel",
   "sessionList",
   "projectList",
@@ -132,6 +133,14 @@ function isWorkspaceTab(value: unknown): value is WorkspaceTab {
       return isNullableString(value.workdir) && isNullableString(value.originSessionId) && isOptionalNullableString(value.originProjectId);
     case "controlPanel":
       return isNullableString(value.originSessionId) && isOptionalNullableString(value.originProjectId);
+    case "canvas":
+      return (
+        Array.isArray(value.cards) &&
+        value.cards.every((card) => isWorkspaceCanvasCard(card)) &&
+        isOptionalWorkspaceCanvasZoom(value.zoom) &&
+        isNullableString(value.originSessionId) &&
+        isOptionalNullableString(value.originProjectId)
+      );
     case "sessionList":
       return isNullableString(value.originSessionId) && isOptionalNullableString(value.originProjectId);
     case "projectList":
@@ -187,6 +196,25 @@ function isPaneViewMode(value: unknown): value is PaneViewMode {
 
 function isSessionPaneViewMode(value: unknown): value is SessionPaneViewMode {
   return SESSION_PANE_VIEW_MODES.includes(value as SessionPaneViewMode);
+}
+
+function isWorkspaceCanvasCard(value: unknown) {
+  return (
+    isRecord(value) &&
+    isString(value.sessionId) &&
+    typeof value.x === "number" &&
+    Number.isFinite(value.x) &&
+    typeof value.y === "number" &&
+    Number.isFinite(value.y)
+  );
+}
+
+function isOptionalWorkspaceCanvasZoom(value: unknown) {
+  return typeof value === "undefined" || isWorkspaceCanvasZoom(value);
+}
+
+function isWorkspaceCanvasZoom(value: unknown) {
+  return typeof value === "number" && Number.isFinite(value) && value > 0;
 }
 
 function isDiffChangeType(value: unknown): value is (typeof DIFF_CHANGE_TYPES)[number] {

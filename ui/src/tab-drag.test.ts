@@ -32,6 +32,27 @@ describe("workspace tab drag channel messages", () => {
     expect(isWorkspaceTabDragChannelMessage(dropCommit)).toBe(true);
   });
 
+  it("accepts canvas tab payloads with persisted cards", () => {
+    expect(
+      isWorkspaceTabDragChannelMessage({
+        type: "drag-start",
+        payload: {
+          dragId: "drag-canvas",
+          sourceWindowId: "window-a",
+          sourcePaneId: "pane-a",
+          tabId: "canvas-a",
+          tab: {
+            id: "canvas-a",
+            kind: "canvas",
+            cards: [{ sessionId: "session-a", x: 160, y: 220 }],
+            zoom: 1.4,
+            originSessionId: "session-a",
+          },
+        },
+      }),
+    ).toBe(true);
+  });
+
   it("rejects malformed tab payloads", () => {
     // diffPreview tabs require changeType, diff, filePath, originSessionId, and summary.
     expect(
@@ -46,6 +67,47 @@ describe("workspace tab drag channel messages", () => {
             id: "tab-a",
             kind: "diffPreview",
             diffMessageId: "diff-1",
+          },
+        },
+      }),
+    ).toBe(false);
+  });
+
+  it("rejects malformed canvas card payloads", () => {
+    expect(
+      isWorkspaceTabDragChannelMessage({
+        type: "drag-start",
+        payload: {
+          dragId: "drag-bad-canvas",
+          sourceWindowId: "window-a",
+          sourcePaneId: "pane-a",
+          tabId: "canvas-a",
+          tab: {
+            id: "canvas-a",
+            kind: "canvas",
+            cards: [{ sessionId: "session-a", x: "bad", y: 220 }],
+            originSessionId: null,
+          },
+        },
+      }),
+    ).toBe(false);
+  });
+
+  it("rejects malformed canvas zoom payloads", () => {
+    expect(
+      isWorkspaceTabDragChannelMessage({
+        type: "drag-start",
+        payload: {
+          dragId: "drag-bad-canvas-zoom",
+          sourceWindowId: "window-a",
+          sourcePaneId: "pane-a",
+          tabId: "canvas-a",
+          tab: {
+            id: "canvas-a",
+            kind: "canvas",
+            cards: [{ sessionId: "session-a", x: 160, y: 220 }],
+            zoom: "bad",
+            originSessionId: null,
           },
         },
       }),

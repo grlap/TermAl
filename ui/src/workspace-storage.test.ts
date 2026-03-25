@@ -70,6 +70,13 @@ describe("workspace storage", () => {
                 path: "C:/repo/src/main.ts",
                 originSessionId: "session-1",
               },
+              {
+                id: "tab-canvas",
+                kind: "canvas",
+                cards: [{ sessionId: "session-1", x: 160, y: 200 }],
+                zoom: 1.35,
+                originSessionId: "session-1",
+              },
             ],
             activeTabId: "tab-source",
             activeSessionId: "session-1",
@@ -86,6 +93,77 @@ describe("workspace storage", () => {
 
     expect(window.localStorage.getItem(WORKSPACE_LAYOUT_STORAGE_KEY)).not.toBeNull();
     expect(getStoredWorkspaceLayout()).toEqual(layout);
+  });
+
+  it("rejects malformed canvas tabs", () => {
+    const malformed = {
+      controlPanelSide: "left",
+      workspace: {
+        root: {
+          type: "pane",
+          paneId: "pane-a",
+        },
+        panes: [
+          {
+            id: "pane-a",
+            tabs: [
+              {
+                id: "tab-canvas",
+                kind: "canvas",
+                cards: [{ sessionId: "session-1", x: "bad", y: 200 }],
+                originSessionId: null,
+              },
+            ],
+            activeTabId: "tab-canvas",
+            activeSessionId: null,
+            viewMode: "canvas",
+            lastSessionViewMode: "session",
+            sourcePath: null,
+          },
+        ],
+        activePaneId: "pane-a",
+      },
+    };
+
+    window.localStorage.setItem(WORKSPACE_LAYOUT_STORAGE_KEY, JSON.stringify(malformed));
+
+    expect(getStoredWorkspaceLayout()).toBeNull();
+  });
+
+  it("rejects malformed canvas zoom values", () => {
+    const malformed = {
+      controlPanelSide: "left",
+      workspace: {
+        root: {
+          type: "pane",
+          paneId: "pane-a",
+        },
+        panes: [
+          {
+            id: "pane-a",
+            tabs: [
+              {
+                id: "tab-canvas",
+                kind: "canvas",
+                cards: [{ sessionId: "session-1", x: 160, y: 200 }],
+                zoom: "bad",
+                originSessionId: null,
+              },
+            ],
+            activeTabId: "tab-canvas",
+            activeSessionId: null,
+            viewMode: "canvas",
+            lastSessionViewMode: "session",
+            sourcePath: null,
+          },
+        ],
+        activePaneId: "pane-a",
+      },
+    };
+
+    window.localStorage.setItem(WORKSPACE_LAYOUT_STORAGE_KEY, JSON.stringify(malformed));
+
+    expect(getStoredWorkspaceLayout()).toBeNull();
   });
 
   it("rejects malformed workspace trees", () => {

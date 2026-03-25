@@ -5,6 +5,7 @@ import {
   closeWorkspaceTab,
   createPane,
   dockControlPanelAtWorkspaceEdge,
+  openCanvasInWorkspaceState,
   ensureControlPanelInWorkspaceState,
   findWorkspacePaneIdForSession,
   openControlPanelInWorkspaceState,
@@ -20,9 +21,12 @@ import {
   placeDraggedTab,
   placeExternalTab,
   reconcileWorkspaceState,
+  removeCanvasSessionCard,
+  setCanvasZoom,
   setPaneSourcePath,
   splitPane,
   updateSplitRatio,
+  upsertCanvasSessionCard,
   type WorkspacePane,
   type WorkspaceState,
   type WorkspaceTab,
@@ -116,6 +120,23 @@ function makeControlPanelTab(id: string, originSessionId: string | null): Worksp
     id,
     kind: "controlPanel",
     originSessionId,
+  };
+}
+
+function makeCanvasTab(
+  id: string,
+  cards: Array<{ sessionId: string; x: number; y: number }>,
+  originSessionId: string | null,
+  originProjectId: string | null = null,
+  zoom?: number,
+): WorkspaceTab {
+  return {
+    id,
+    kind: "canvas",
+    cards,
+    ...(typeof zoom === "number" ? { zoom } : {}),
+    originSessionId,
+    ...(originProjectId ? { originProjectId } : {}),
   };
 }
 
@@ -269,6 +290,33 @@ describe("workspace helpers", () => {
       type: "pane",
       paneId: next.panes[0].id,
     });
+  });
+
+  it("openCanvasInWorkspaceState opens a canvas tab and reuses the same tab later", () => {
+    const opened = openCanvasInWorkspaceState(
+      makeSinglePaneWorkspace(makePane("pane-a", [makeSessionTab("tab-a", "session-a")])),
+      "pane-a",
+      "session-a",
+      "project-a",
+    );
+
+    expect(opened.panes[0]?.tabs).toEqual([
+      makeSessionTab("tab-a", "session-a"),
+      {
+        id: expect.any(String),
+        kind: "canvas",
+        cards: [],
+        originSessionId: "session-a",
+        originProjectId: "project-a",
+      },
+    ]);
+
+    const reused = openCanvasInWorkspaceState(opened, "pane-a", null, null);
+    const canvasTab = opened.panes[0]?.tabs[1];
+
+    expect(reused.activePaneId).toBe("pane-a");
+    expect(reused.panes[0]?.activeTabId).toBe(canvasTab?.id ?? null);
+    expect(reused.panes[0]?.tabs).toHaveLength(2);
   });
 
   it("openSessionInWorkspaceState focuses the existing session tab instead of duplicating it", () => {
@@ -1320,6 +1368,81 @@ describe("workspace helpers", () => {
     expect(next.panes[0].sourcePath).toBe("/tmp/next.ts");
   });
 
+  it("upsertCanvasSessionCard adds and moves canvas cards without duplicates", () => {
+    const workspace = makeSinglePaneWorkspace(
+      makePane(
+        "pane-a",
+        [makeCanvasTab("canvas-a", [{ sessionId: "session-a", x: 80, y: 90 }], null)],
+        {
+          activeTabId: "canvas-a",
+          activeSessionId: null,
+          viewMode: "canvas",
+        },
+      ),
+    );
+
+    const withNewCard = upsertCanvasSessionCard(workspace, "canvas-a", {
+      sessionId: "session-b",
+      x: 240.2,
+      y: 360.7,
+    });
+    expect(withNewCard.panes[0]?.tabs[0]).toEqual(
+      makeCanvasTab(
+        "canvas-a",
+        [
+          { sessionId: "session-a", x: 80, y: 90 },
+          { sessionId: "session-b", x: 240, y: 361 },
+        ],
+        null,
+      ),
+    );
+
+    const moved = upsertCanvasSessionCard(withNewCard, "canvas-a", {
+      sessionId: "session-a",
+      x: 400,
+      y: 420,
+    });
+    expect(moved.panes[0]?.tabs[0]).toEqual(
+      makeCanvasTab(
+        "canvas-a",
+        [
+          { sessionId: "session-a", x: 400, y: 420 },
+          { sessionId: "session-b", x: 240, y: 361 },
+        ],
+        null,
+      ),
+    );
+
+    const removed = removeCanvasSessionCard(moved, "canvas-a", "session-b");
+    expect(removed.panes[0]?.tabs[0]).toEqual(
+      makeCanvasTab("canvas-a", [{ sessionId: "session-a", x: 400, y: 420 }], null),
+    );
+  });
+
+  it("setCanvasZoom stores normalized zoom and omits the default value", () => {
+    const workspace = makeSinglePaneWorkspace(
+      makePane(
+        "pane-a",
+        [makeCanvasTab("canvas-a", [{ sessionId: "session-a", x: 80, y: 90 }], null)],
+        {
+          activeTabId: "canvas-a",
+          activeSessionId: null,
+          viewMode: "canvas",
+        },
+      ),
+    );
+
+    const zoomed = setCanvasZoom(workspace, "canvas-a", 1.2376);
+    expect(zoomed.panes[0]?.tabs[0]).toEqual(
+      makeCanvasTab("canvas-a", [{ sessionId: "session-a", x: 80, y: 90 }], null, null, 1.238),
+    );
+
+    const reset = setCanvasZoom(zoomed, "canvas-a", 1);
+    expect(reset.panes[0]?.tabs[0]).toEqual(
+      makeCanvasTab("canvas-a", [{ sessionId: "session-a", x: 80, y: 90 }], null),
+    );
+  });
+
   it("setPaneSourcePath focuses an existing source tab for the same path instead of duplicating it", () => {
     const workspace = makeSinglePaneWorkspace(
       makePane(
@@ -1545,6 +1668,49 @@ describe("workspace helpers", () => {
     expect(rebuilt.root).toEqual({
       type: "pane",
       paneId: rebuilt.panes[0].id,
+    });
+  });
+
+  it("reconcileWorkspaceState prunes missing canvas cards and normalizes canvas origin metadata", () => {
+    const next = reconcileWorkspaceState(
+      makeSinglePaneWorkspace(
+        makePane(
+          "pane-a",
+          [
+            makeCanvasTab(
+              "canvas-a",
+              [
+                { sessionId: "session-a", x: 120.4, y: 200.2 },
+                { sessionId: "session-missing", x: 480, y: 520 },
+              ],
+              "session-a",
+              "  project-a  ",
+            ),
+          ],
+          {
+            activeTabId: "canvas-a",
+            activeSessionId: null,
+            viewMode: "canvas",
+          },
+        ),
+      ),
+      [{
+        ...makeSession("session-a"),
+        projectId: "project-a",
+      }],
+    );
+
+    expect(next.panes[0]).toMatchObject({
+      activeTabId: "canvas-a",
+      activeSessionId: "session-a",
+      viewMode: "canvas",
+    });
+    expect(next.panes[0]?.tabs[0]).toEqual({
+      id: "canvas-a",
+      kind: "canvas",
+      cards: [{ sessionId: "session-a", x: 120, y: 200 }],
+      originSessionId: "session-a",
+      originProjectId: "project-a",
     });
   });
 

@@ -4,6 +4,7 @@ import type { DiffMessage, Session } from "./types";
 export type SessionPaneViewMode = "session" | "prompt" | "commands" | "diffs";
 export type PaneViewMode =
   | SessionPaneViewMode
+  | "canvas"
   | "controlPanel"
   | "sessionList"
   | "projectList"
@@ -53,6 +54,21 @@ export type WorkspaceControlPanelTab = {
   originProjectId?: string | null;
 };
 
+export type WorkspaceCanvasCard = {
+  sessionId: string;
+  x: number;
+  y: number;
+};
+
+export type WorkspaceCanvasTab = {
+  id: string;
+  kind: "canvas";
+  cards: WorkspaceCanvasCard[];
+  zoom?: number;
+  originSessionId: string | null;
+  originProjectId?: string | null;
+};
+
 export type WorkspaceSessionListTab = {
   id: string;
   kind: "sessionList";
@@ -96,6 +112,7 @@ export type WorkspaceTab =
   | WorkspaceFilesystemTab
   | WorkspaceGitStatusTab
   | WorkspaceControlPanelTab
+  | WorkspaceCanvasTab
   | WorkspaceSessionListTab
   | WorkspaceProjectListTab
   | WorkspaceInstructionDebuggerTab
@@ -150,6 +167,9 @@ export type WorkspaceState = {
 
 export type TabDropPlacement = "left" | "right" | "top" | "bottom" | "tabs";
 export const DEFAULT_CONTROL_PANEL_DOCK_WIDTH_RATIO = 0.24;
+export const WORKSPACE_CANVAS_DEFAULT_ZOOM = 1;
+export const WORKSPACE_CANVAS_MIN_ZOOM = 0.5;
+export const WORKSPACE_CANVAS_MAX_ZOOM = 2;
 const DEFAULT_ADJACENT_PANE_SPLIT_RATIO = 0.5;
 
 export function createSessionTab(sessionId: string): WorkspaceSessionTab {
@@ -220,6 +240,24 @@ export function createControlPanelTab(
   return {
     id: crypto.randomUUID(),
     kind: "controlPanel",
+    originSessionId,
+    ...projectOriginProps(normalizedOriginProjectId),
+  };
+}
+
+export function createCanvasTab(
+  originSessionId: string | null = null,
+  originProjectId: string | null = null,
+  cards: readonly WorkspaceCanvasCard[] = [],
+  zoom: number = WORKSPACE_CANVAS_DEFAULT_ZOOM,
+): WorkspaceCanvasTab {
+  const normalizedOriginProjectId = normalizeWorkspaceIdentifier(originProjectId);
+
+  return {
+    id: crypto.randomUUID(),
+    kind: "canvas",
+    cards: normalizeWorkspaceCanvasCards(cards),
+    ...canvasZoomProps(normalizeWorkspaceCanvasZoom(zoom)),
     originSessionId,
     ...projectOriginProps(normalizedOriginProjectId),
   };
@@ -377,6 +415,21 @@ export function reconcileWorkspaceState(current: WorkspaceState, sessions: Sessi
 
         if (tab.kind === "controlPanel" || tab.kind === "sessionList" || tab.kind === "projectList") {
           return [reconcileOriginOnlyTab(tab, originSessionId, originProjectId)];
+        }
+
+        if (tab.kind === "canvas") {
+          const { originProjectId: _ignoredOriginProjectId, zoom: _ignoredZoom, ...tabWithoutOriginProjectId } = tab;
+          return [
+            {
+              ...tabWithoutOriginProjectId,
+              cards: normalizeWorkspaceCanvasCards(tab.cards).filter((card) =>
+                availableSessionIds.has(card.sessionId)
+              ),
+              ...canvasZoomProps(normalizeWorkspaceCanvasZoom(tab.zoom)),
+              originSessionId,
+              ...projectOriginProps(originProjectId),
+            },
+          ];
         }
 
         if (tab.kind === "instructionDebugger") {
@@ -582,6 +635,24 @@ export function openControlPanelInWorkspaceState(
   return openTabInWorkspaceState(
     workspace,
     createControlPanelTab(originSessionId, originProjectId),
+    preferredPaneId,
+  );
+}
+
+export function openCanvasInWorkspaceState(
+  workspace: WorkspaceState,
+  preferredPaneId: string | null,
+  originSessionId: string | null,
+  originProjectId: string | null = null,
+): WorkspaceState {
+  const existing = findCanvasTab(workspace);
+  if (existing) {
+    return activatePane(workspace, existing.paneId, existing.tab.id);
+  }
+
+  return openTabInWorkspaceState(
+    workspace,
+    createCanvasTab(originSessionId, originProjectId),
     preferredPaneId,
   );
 }
@@ -1013,6 +1084,85 @@ export function createPane(
   });
 }
 
+export function upsertCanvasSessionCard(
+  workspace: WorkspaceState,
+  canvasTabId: string,
+  card: WorkspaceCanvasCard,
+): WorkspaceState {
+  const normalizedCard = normalizeWorkspaceCanvasCard(card);
+  if (!normalizedCard) {
+    return workspace;
+  }
+
+  return updateCanvasTab(workspace, canvasTabId, (tab) => {
+    const existingCardIndex = tab.cards.findIndex(
+      (candidate) => candidate.sessionId === normalizedCard.sessionId,
+    );
+    if (existingCardIndex < 0) {
+      return {
+        ...tab,
+        cards: [...tab.cards, normalizedCard],
+      };
+    }
+
+    const existingCard = tab.cards[existingCardIndex];
+    if (
+      existingCard.x === normalizedCard.x &&
+      existingCard.y === normalizedCard.y
+    ) {
+      return tab;
+    }
+
+    return {
+      ...tab,
+      cards: tab.cards.map((candidate, index) =>
+        index === existingCardIndex ? normalizedCard : candidate,
+      ),
+    };
+  });
+}
+
+export function removeCanvasSessionCard(
+  workspace: WorkspaceState,
+  canvasTabId: string,
+  sessionId: string,
+): WorkspaceState {
+  const normalizedSessionId = normalizeWorkspaceIdentifier(sessionId);
+  if (!normalizedSessionId) {
+    return workspace;
+  }
+
+  return updateCanvasTab(workspace, canvasTabId, (tab) => {
+    const cards = tab.cards.filter((card) => card.sessionId !== normalizedSessionId);
+    return cards.length === tab.cards.length
+      ? tab
+      : {
+          ...tab,
+          cards,
+        };
+  });
+}
+
+export function setCanvasZoom(
+  workspace: WorkspaceState,
+  canvasTabId: string,
+  zoom: number,
+): WorkspaceState {
+  const normalizedZoom = normalizeWorkspaceCanvasZoom(zoom);
+
+  return updateCanvasTab(workspace, canvasTabId, (tab) => {
+    if (normalizeWorkspaceCanvasZoom(tab.zoom) === normalizedZoom) {
+      return tab;
+    }
+
+    const { zoom: _ignoredZoom, ...tabWithoutZoom } = tab;
+    return {
+      ...tabWithoutZoom,
+      ...canvasZoomProps(normalizedZoom),
+    };
+  });
+}
+
 export function setPaneViewMode(
   workspace: WorkspaceState,
   paneId: string,
@@ -1301,6 +1451,16 @@ function syncPaneState(pane: WorkspacePane): WorkspacePane {
     };
   }
 
+  if (activeTab.kind === "canvas") {
+    return {
+      ...pane,
+      activeTabId: activeTab.id,
+      activeSessionId: resolveOriginSessionId(activeTab.originSessionId, pane.activeSessionId, pane.tabs),
+      viewMode: "canvas",
+      sourcePath: null,
+    };
+  }
+
   if (activeTab.kind === "filesystem") {
     return {
       ...pane,
@@ -1409,6 +1569,19 @@ function findControlPanelTab(workspace: WorkspaceState) {
   for (const pane of workspace.panes) {
     const tab = pane.tabs.find(
       (candidate): candidate is WorkspaceControlPanelTab => candidate.kind === "controlPanel",
+    );
+    if (tab) {
+      return { paneId: pane.id, tab };
+    }
+  }
+
+  return null;
+}
+
+function findCanvasTab(workspace: WorkspaceState) {
+  for (const pane of workspace.panes) {
+    const tab = pane.tabs.find(
+      (candidate): candidate is WorkspaceCanvasTab => candidate.kind === "canvas",
     );
     if (tab) {
       return { paneId: pane.id, tab };
@@ -1681,6 +1854,42 @@ function cloneWorkspaceTab(tab: WorkspaceTab): WorkspaceTab {
   };
 }
 
+function updateCanvasTab(
+  workspace: WorkspaceState,
+  canvasTabId: string,
+  update: (tab: WorkspaceCanvasTab) => WorkspaceCanvasTab,
+): WorkspaceState {
+  let hasChanged = false;
+  const panes = workspace.panes.map((pane) => {
+    const canvasTabIndex = pane.tabs.findIndex(
+      (tab) => tab.id === canvasTabId && tab.kind === "canvas",
+    );
+    if (canvasTabIndex < 0) {
+      return pane;
+    }
+
+    const canvasTab = pane.tabs[canvasTabIndex];
+    if (canvasTab.kind !== "canvas") {
+      return pane;
+    }
+
+    const nextTab = update(canvasTab);
+    if (nextTab === canvasTab) {
+      return pane;
+    }
+
+    hasChanged = true;
+    const nextTabs = [...pane.tabs];
+    nextTabs[canvasTabIndex] = nextTab;
+    return syncPaneState({
+      ...pane,
+      tabs: nextTabs,
+    });
+  });
+
+  return hasChanged ? { ...workspace, panes } : workspace;
+}
+
 function insertTabAtIndex(tabs: WorkspaceTab[], tab: WorkspaceTab, tabIndex: number): WorkspaceTab[] {
   const nextTabs = tabs.filter((candidate) => candidate.id !== tab.id);
   const nextTabIndex = clampIndex(tabIndex, 0, nextTabs.length);
@@ -1884,6 +2093,57 @@ function normalizeWorkspaceIdentifier(value: string | null | undefined) {
 
 function projectOriginProps(originProjectId: string | null) {
   return originProjectId ? { originProjectId } : {};
+}
+
+function canvasZoomProps(zoom: number) {
+  return zoom === WORKSPACE_CANVAS_DEFAULT_ZOOM ? {} : { zoom };
+}
+
+export function normalizeWorkspaceCanvasZoom(value: number | null | undefined) {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return WORKSPACE_CANVAS_DEFAULT_ZOOM;
+  }
+
+  const clamped = Math.min(Math.max(value, WORKSPACE_CANVAS_MIN_ZOOM), WORKSPACE_CANVAS_MAX_ZOOM);
+  return Math.round(clamped * 1000) / 1000;
+}
+
+function normalizeWorkspaceCanvasCards(cards: readonly WorkspaceCanvasCard[]) {
+  const seenSessionIds = new Set<string>();
+  const normalizedCards: WorkspaceCanvasCard[] = [];
+
+  for (const card of cards) {
+    const normalizedCard = normalizeWorkspaceCanvasCard(card);
+    if (!normalizedCard || seenSessionIds.has(normalizedCard.sessionId)) {
+      continue;
+    }
+
+    seenSessionIds.add(normalizedCard.sessionId);
+    normalizedCards.push(normalizedCard);
+  }
+
+  return normalizedCards;
+}
+
+function normalizeWorkspaceCanvasCard(card: WorkspaceCanvasCard | null | undefined) {
+  const sessionId = normalizeWorkspaceIdentifier(card?.sessionId);
+  if (!sessionId) {
+    return null;
+  }
+
+  return {
+    sessionId,
+    x: normalizeWorkspaceCanvasCoordinate(card?.x),
+    y: normalizeWorkspaceCanvasCoordinate(card?.y),
+  };
+}
+
+function normalizeWorkspaceCanvasCoordinate(value: number | null | undefined) {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return 0;
+  }
+
+  return Math.round(value);
 }
 
 function resolveOriginSessionId(

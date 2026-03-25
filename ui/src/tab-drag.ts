@@ -89,6 +89,8 @@ function formatWorkspaceTabDragLabel(drag: WorkspaceTabDrag) {
       return `TermAl git ${drag.tab.workdir ?? "workspace"}`;
     case "controlPanel":
       return "TermAl control panel";
+    case "canvas":
+      return "TermAl canvas";
     case "sessionList":
       return "TermAl sessions";
     case "projectList":
@@ -127,6 +129,14 @@ function isWorkspaceTab(value: unknown): value is WorkspaceTab {
       return isNullableString(value.workdir) && isNullableString(value.originSessionId);
     case "controlPanel":
       return isNullableString(value.originSessionId) && isOptionalNullableString(value.originProjectId);
+    case "canvas":
+      return (
+        Array.isArray(value.cards) &&
+        value.cards.every((card) => isWorkspaceCanvasCard(card)) &&
+        isOptionalWorkspaceCanvasZoom(value.zoom) &&
+        isNullableString(value.originSessionId) &&
+        isOptionalNullableString(value.originProjectId)
+      );
     case "sessionList":
       return isNullableString(value.originSessionId) && isOptionalNullableString(value.originProjectId);
     case "projectList":
@@ -147,6 +157,25 @@ function isWorkspaceTab(value: unknown): value is WorkspaceTab {
     default:
       return false;
   }
+}
+
+function isWorkspaceCanvasCard(value: unknown) {
+  return (
+    isRecord(value) &&
+    typeof value.sessionId === "string" &&
+    typeof value.x === "number" &&
+    Number.isFinite(value.x) &&
+    typeof value.y === "number" &&
+    Number.isFinite(value.y)
+  );
+}
+
+function isOptionalWorkspaceCanvasZoom(value: unknown) {
+  return typeof value === "undefined" || isWorkspaceCanvasZoom(value);
+}
+
+function isWorkspaceCanvasZoom(value: unknown) {
+  return typeof value === "number" && Number.isFinite(value) && value > 0;
 }
 
 function isNullableString(value: unknown): value is string | null {

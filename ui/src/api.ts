@@ -99,6 +99,11 @@ export type GitCommitResponse = {
   summary: string;
 };
 
+export type GitRepoActionResponse = {
+  status: GitStatusResponse;
+  summary: string;
+};
+
 export type ReviewCommentAuthor = "user" | "agent";
 export type ReviewThreadStatus = "open" | "resolved" | "applied" | "dismissed";
 
@@ -588,6 +593,28 @@ export function commitGitChanges(payload: {
   });
 }
 
+export function pushGitChanges(payload: {
+  sessionId?: string | null;
+  projectId?: string | null;
+  workdir: string;
+}) {
+  return request<GitRepoActionResponse>("/api/git/push", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function syncGitChanges(payload: {
+  sessionId?: string | null;
+  projectId?: string | null;
+  workdir: string;
+}) {
+  return request<GitRepoActionResponse>("/api/git/sync", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
 function extractError(raw: string, status: number) {
   if (!raw) {
     return `Request failed with status ${status}.`;
@@ -619,4 +646,3 @@ function formatUnavailableApiMessage(path: string, status: number) {
   const statusSuffix = status > 0 ? ` (HTTP ${status})` : "";
   return `The running backend does not expose ${endpoint}${statusSuffix}. Restart TermAl so the latest API routes are loaded.`;
 }
-
