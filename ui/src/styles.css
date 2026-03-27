@@ -7544,7 +7544,8 @@ textarea {
 }
 
 .orchestrator-template-description-group,
-.orchestrator-form-textarea-group {
+.orchestrator-form-textarea-group,
+.orchestrator-form-full-width {
   grid-column: 1 / -1;
 }
 
@@ -7630,6 +7631,20 @@ textarea {
   stroke-linecap: round;
   stroke-width: 2;
   opacity: 0.52;
+  pointer-events: none;
+}
+
+.orchestrator-board-edge.selected {
+  stroke: var(--signal-blue);
+  opacity: 0.82;
+}
+
+.orchestrator-board-edge-hitarea {
+  fill: none;
+  stroke: transparent;
+  stroke-width: 16;
+  pointer-events: stroke;
+  cursor: pointer;
 }
 
 .orchestrator-board-arrowhead {
@@ -7663,6 +7678,15 @@ textarea {
 .orchestrator-board-edge-endpoint-handle:hover {
   opacity: 0.72;
   transform: scale(1.3);
+}
+
+.orchestrator-board-arrowhead-selected {
+  fill: none;
+  stroke: var(--signal-blue);
+  stroke-width: 1.5;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+  opacity: 0.82;
 }
 
 .orchestrator-board-arrowhead-draft {
@@ -7714,10 +7738,10 @@ textarea {
 }
 
 .orchestrator-board-card.selected {
+  border-color: var(--signal-blue);
   box-shadow:
-    0 0 0 1px color-mix(in srgb, var(--theme-accent) 42%, transparent),
-    0 24px 52px rgba(0, 0, 0, 0.12),
-    inset 0 0 0 1px color-mix(in srgb, var(--theme-accent) 16%, transparent);
+    0 0 0 1px color-mix(in srgb, var(--signal-blue) 42%, transparent),
+    0 24px 52px rgba(0, 0, 0, 0.12);
 }
 
 .orchestrator-board-card.dragging {

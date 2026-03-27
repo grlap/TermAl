@@ -133,7 +133,20 @@ export function OrchestratorTemplatesPanel({
   const [templates, setTemplates] = useState<OrchestratorTemplate[]>([]);
   const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>(null);
   const [draft, setDraft] = useState<OrchestratorTemplateDraft>(emptyDraft);
-  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
+  const [selectedNodeId, setSelectedNodeId_raw] = useState<string | null>(null);
+  const [selectedTransitionId, setSelectedTransitionId_raw] = useState<string | null>(null);
+  function setSelectedNodeId(id: string | null | ((prev: string | null) => string | null)) {
+    setSelectedNodeId_raw(id);
+    if (typeof id === "function" ? id(selectedNodeId) : id) {
+      setSelectedTransitionId_raw(null);
+    }
+  }
+  function setSelectedTransitionId(id: string | null) {
+    setSelectedTransitionId_raw(id);
+    if (id) {
+      setSelectedNodeId_raw(null);
+    }
+  }
   const [dragState, setDragState] = useState<DragState | null>(null);
   const [isPanning, setIsPanning] = useState(false);
   const [connectionDrag, setConnectionDrag] = useState<ConnectionDragState | null>(null);
@@ -626,19 +639,20 @@ export function OrchestratorTemplatesPanel({
         );
         if (!alreadyExists) {
           const toAnchor = nearestAnchorSide(targetSession, canvasX, canvasY);
-          setDraft((current) => ({
-            ...current,
-            transitions: [
-              ...current.transitions,
-              createTransitionBetween(
-                connectionDrag.fromSessionId,
-                targetSession.id,
-                connectionDrag.anchorSide,
-                toAnchor,
-                current.transitions,
-              ),
-            ],
-          }));
+          setDraft((current) => {
+            const newTransition = createTransitionBetween(
+              connectionDrag.fromSessionId,
+              targetSession.id,
+              connectionDrag.anchorSide,
+              toAnchor,
+              current.transitions,
+            );
+            setSelectedTransitionId(newTransition.id);
+            return {
+              ...current,
+              transitions: [...current.transitions, newTransition],
+            };
+          });
         }
       }
     }
@@ -817,6 +831,7 @@ export function OrchestratorTemplatesPanel({
                   onPointerUp={(event) => finishCanvasPan(event)}
                   onPointerCancel={(event) => finishCanvasPan(event, true)}
                   onContextMenu={handleCanvasContextMenu}
+                  onClick={(event) => { if (event.target === event.currentTarget) { setSelectedNodeId(null); setSelectedTransitionId(null); } }}
                 >
                 <div
                   ref={surfaceRef}
@@ -825,11 +840,15 @@ export function OrchestratorTemplatesPanel({
                   onPointerMove={connectionDrag ? updateConnectionDrag : undefined}
                   onPointerUp={connectionDrag ? finishConnectionDrag : undefined}
                   onPointerCancel={connectionDrag ? () => setConnectionDrag(null) : undefined}
+                  onClick={(event) => { if (event.target === event.currentTarget) { setSelectedNodeId(null); setSelectedTransitionId(null); } }}
                 >
                   <svg className="orchestrator-board-edges" width={BOARD_WIDTH} height={BOARD_HEIGHT} viewBox={`0 0 ${BOARD_WIDTH} ${BOARD_HEIGHT}`} aria-hidden="true">
                     <defs>
                       <marker id="orchestrator-arrowhead" markerWidth="6" markerHeight="5" refX="5.5" refY="2.5" orient="auto" markerUnits="strokeWidth">
                         <path d="M 0 0.5 L 5.5 2.5 L 0 4.5" className="orchestrator-board-arrowhead" />
+                      </marker>
+                      <marker id="orchestrator-arrowhead-selected" markerWidth="6" markerHeight="5" refX="5.5" refY="2.5" orient="auto" markerUnits="strokeWidth">
+                        <path d="M 0 0.5 L 5.5 2.5 L 0 4.5" className="orchestrator-board-arrowhead-selected" />
                       </marker>
                       <marker id="orchestrator-arrowhead-draft" markerWidth="6" markerHeight="5" refX="5.5" refY="2.5" orient="auto" markerUnits="strokeWidth">
                         <path d="M 0 0.5 L 5.5 2.5 L 0 4.5" className="orchestrator-board-arrowhead-draft" />
@@ -841,8 +860,9 @@ export function OrchestratorTemplatesPanel({
                         return null;
                       }
                       return (
-                        <g key={geometry.transition.id}>
-                          <path className="orchestrator-board-edge" d={geometry.path} markerEnd="url(#orchestrator-arrowhead)" />
+                        <g key={geometry.transition.id} className={selectedTransitionId === geometry.transition.id ? "selected" : undefined}>
+                          <path className="orchestrator-board-edge-hitarea" d={geometry.path} onClick={() => setSelectedTransitionId(geometry.transition.id)} />
+                          <path className={`orchestrator-board-edge${selectedTransitionId === geometry.transition.id ? " selected" : ""}`} d={geometry.path} markerEnd={selectedTransitionId === geometry.transition.id ? "url(#orchestrator-arrowhead-selected)" : "url(#orchestrator-arrowhead)"} />
                         </g>
                       );
                     })}
@@ -923,9 +943,10 @@ export function OrchestratorTemplatesPanel({
                     {transitionGeometries.map((geometry) => (
                       <div
                         key={`${geometry.transition.id}-note`}
-                        className="orchestrator-board-transition-note"
+                        className={`orchestrator-board-transition-note${selectedTransitionId === geometry.transition.id ? " selected" : ""}`}
                         style={{ left: `${geometry.noteX}px`, top: `${geometry.noteY}px` }}
                         title={geometry.title}
+                        onClick={() => setSelectedTransitionId(geometry.transition.id)}
                       >
                         <TransitionNoteIcon />
                       </div>
@@ -963,16 +984,6 @@ export function OrchestratorTemplatesPanel({
                           <p className="orchestrator-board-card-snippet">
                             {session.instructions.trim() || "No instructions yet."}
                           </p>
-                        </div>
-                        <div className="orchestrator-board-card-body">
-                          <div className="orchestrator-board-card-meta-block">
-                            <span>Session id</span>
-                            <strong>{session.id}</strong>
-                          </div>
-                          <div className="orchestrator-board-card-meta-block">
-                            <span>Model</span>
-                            <strong>{session.model?.trim() ? session.model : "Agent default"}</strong>
-                          </div>
                         </div>
                         {!isDragging ? (
                           ANCHOR_SIDES.map((side) => (
@@ -1015,36 +1026,28 @@ export function OrchestratorTemplatesPanel({
               </div>
             </section>
             <div className="orchestrator-template-inspectors">
-              <article className="message-card prompt-settings-card orchestrator-form-card">
-                <div className="orchestrator-form-card-header">
-                  <div><div className="card-label">Nodes</div><h3>Session nodes</h3></div>
-                  <button className="ghost-button" type="button" onClick={addSession}>Add session</button>
-                </div>
-                <div className="orchestrator-session-list">
-                  {draft.sessions.length === 0 ? <p className="session-control-hint">No sessions yet. Add at least one session before saving.</p> : draft.sessions.map((session, index) => (
-                    <article key={session.id} className={`orchestrator-session-row${selectedNodeId === session.id ? " selected" : ""}`} onClick={() => setSelectedNodeId(session.id)}>
-                      <div className="orchestrator-session-row-header">
-                        <strong>{session.name || `Session ${index + 1}`}</strong>
+              {(() => {
+                const selectedSession = selectedNodeId ? draft.sessions.find((s) => s.id === selectedNodeId) : null;
+                const selectedTransition = selectedTransitionId ? draft.transitions.find((t) => t.id === selectedTransitionId) : null;
+
+                if (selectedSession) {
+                  const session = selectedSession;
+                  return (
+                    <article className="message-card prompt-settings-card orchestrator-form-card">
+                      <div className="orchestrator-form-card-header">
+                        <div><div className="card-label">Session</div><h3>{session.name || session.id}</h3></div>
                         <button className="ghost-button" type="button" onClick={(event) => { event.stopPropagation(); removeSession(session.id); }}>Remove</button>
                       </div>
                       <div className="orchestrator-form-grid">
-                        <div className="session-control-group">
-                          <label className="session-control-label" htmlFor={`session-id-${session.id}`}>Session id</label>
-                          <input id={`session-id-${session.id}`} className="themed-input" type="text" value={session.id} onChange={(event) => setSessionId(session.id, event.target.value)} />
-                        </div>
-                        <div className="session-control-group">
+                        <div className="session-control-group orchestrator-form-full-width">
                           <label className="session-control-label" htmlFor={`session-name-${session.id}`}>Name</label>
                           <input id={`session-name-${session.id}`} className="themed-input" type="text" value={session.name} onChange={(event) => setSessionField(session.id, "name", event.target.value)} />
                         </div>
-                        <div className="session-control-group">
+                        <div className="session-control-group orchestrator-form-full-width">
                           <label className="session-control-label" htmlFor={`session-agent-${session.id}`}>Agent</label>
                           <select id={`session-agent-${session.id}`} className="themed-input orchestrator-select" value={session.agent} onChange={(event) => setSessionField(session.id, "agent", event.target.value as AgentType)}>
                             {AGENT_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
                           </select>
-                        </div>
-                        <div className="session-control-group">
-                          <label className="session-control-label" htmlFor={`session-model-${session.id}`}>Model override</label>
-                          <input id={`session-model-${session.id}`} className="themed-input" type="text" value={session.model ?? ""} onChange={(event) => setSessionField(session.id, "model", event.target.value || null)} placeholder="Use the agent default" />
                         </div>
                         <div className="session-control-group orchestrator-toggle-group">
                           <label className="session-control-label" htmlFor={`session-auto-approve-${session.id}`}>Automation</label>
@@ -1059,20 +1062,16 @@ export function OrchestratorTemplatesPanel({
                         </div>
                       </div>
                     </article>
-                  ))}
-                </div>
-              </article>
-              <article className="message-card prompt-settings-card orchestrator-form-card">
-                <div className="orchestrator-form-card-header">
-                  <div><div className="card-label">Edges</div><h3>Transitions</h3></div>
-                  <button className="ghost-button" type="button" onClick={addTransition} disabled={draft.sessions.length < 2}>Add transition</button>
-                </div>
-                <div className="orchestrator-transition-list">
-                  {draft.transitions.length === 0 ? <p className="session-control-hint">No transitions yet. Add one to route completed results into another session's next prompt.</p> : draft.transitions.map((transition) => (
-                    <article key={transition.id} className="orchestrator-transition-row">
-                      <div className="orchestrator-session-row-header">
-                        <strong>{transition.id}</strong>
-                        <button className="ghost-button" type="button" onClick={() => setDraft((current) => ({ ...current, transitions: current.transitions.filter((candidate) => candidate.id !== transition.id) }))}>Remove</button>
+                  );
+                }
+
+                if (selectedTransition) {
+                  const transition = selectedTransition;
+                  return (
+                    <article className="message-card prompt-settings-card orchestrator-form-card">
+                      <div className="orchestrator-form-card-header">
+                        <div><div className="card-label">Transition</div><h3>{transition.id}</h3></div>
+                        <button className="ghost-button" type="button" onClick={() => { setDraft((current) => ({ ...current, transitions: current.transitions.filter((c) => c.id !== transition.id) })); setSelectedTransitionId(null); }}>Remove</button>
                       </div>
                       <div className="orchestrator-form-grid">
                         <div className="session-control-group">
@@ -1107,9 +1106,18 @@ export function OrchestratorTemplatesPanel({
                         </div>
                       </div>
                     </article>
-                  ))}
-                </div>
-              </article>
+                  );
+                }
+
+                return (
+                  <div className="orchestrator-inspector-empty">
+                    <p className="session-control-hint">Select a session or transition on the canvas to edit its properties.</p>
+                    <div className="orchestrator-inspector-empty-actions">
+                      <button className="ghost-button" type="button" onClick={addSession}>Add session</button>
+                    </div>
+                  </div>
+                );
+              })()}
             </div>
           </div>
         </div>
