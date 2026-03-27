@@ -81,6 +81,20 @@ type DragState = {
   startClientY: number;
 };
 
+type ConnectionDragState = {
+  fromSessionId: string;
+  anchorSide: AnchorSide;
+  pointerId: number;
+  cursorX: number;
+  cursorY: number;
+};
+
+type AnchorSide = "top" | "right" | "bottom" | "left";
+
+const ANCHOR_SIDES: readonly AnchorSide[] = ["top", "right", "bottom", "left"];
+
+const CONNECTOR_DOT_OFFSET = 18;
+
 type TransitionGeometry = {
   transition: OrchestratorTemplateTransition;
   path: string;
@@ -112,6 +126,7 @@ export function OrchestratorTemplatesPanel({
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [dragState, setDragState] = useState<DragState | null>(null);
   const [isPanning, setIsPanning] = useState(false);
+  const [connectionDrag, setConnectionDrag] = useState<ConnectionDragState | null>(null);
   const [zoom, setZoom] = useState(DEFAULT_ZOOM);
   const panDragStateRef = useRef<PanDragState | null>(null);
   const suppressPanContextMenuRef = useRef(false);
@@ -436,6 +451,93 @@ export function OrchestratorTemplatesPanel({
     });
   }
 
+  function startConnectionDrag(sessionId: string, side: AnchorSide, event: ReactPointerEvent<HTMLDivElement>) {
+    if (event.button !== 0) {
+      return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+    event.currentTarget.setPointerCapture(event.pointerId);
+
+    const surfaceNode = event.currentTarget.closest(".orchestrator-board-surface");
+    if (!surfaceNode) {
+      return;
+    }
+    const surfaceRect = surfaceNode.getBoundingClientRect();
+    const canvasX = (event.clientX - surfaceRect.left) / zoom;
+    const canvasY = (event.clientY - surfaceRect.top) / zoom;
+
+    setConnectionDrag({
+      fromSessionId: sessionId,
+      anchorSide: side,
+      pointerId: event.pointerId,
+      cursorX: canvasX,
+      cursorY: canvasY,
+    });
+  }
+
+  function updateConnectionDrag(event: ReactPointerEvent<HTMLDivElement>) {
+    setConnectionDrag((current) => {
+      if (!current || current.pointerId !== event.pointerId) {
+        return current;
+      }
+      const surfaceNode = event.currentTarget.closest(".orchestrator-board-surface");
+      if (!surfaceNode) {
+        return current;
+      }
+      const surfaceRect = surfaceNode.getBoundingClientRect();
+      return {
+        ...current,
+        cursorX: (event.clientX - surfaceRect.left) / zoom,
+        cursorY: (event.clientY - surfaceRect.top) / zoom,
+      };
+    });
+  }
+
+  function finishConnectionDrag(event: ReactPointerEvent<HTMLDivElement>) {
+    if (!connectionDrag || connectionDrag.pointerId !== event.pointerId) {
+      return;
+    }
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+
+    const surfaceNode = event.currentTarget.closest(".orchestrator-board-surface");
+    if (surfaceNode) {
+      const surfaceRect = surfaceNode.getBoundingClientRect();
+      const canvasX = (event.clientX - surfaceRect.left) / zoom;
+      const canvasY = (event.clientY - surfaceRect.top) / zoom;
+
+      const targetSession = renderedSessions.find(
+        (session) =>
+          session.id !== connectionDrag.fromSessionId &&
+          canvasX >= session.position.x &&
+          canvasX <= session.position.x + CARD_WIDTH &&
+          canvasY >= session.position.y &&
+          canvasY <= session.position.y + CARD_HEIGHT,
+      );
+
+      if (targetSession) {
+        const alreadyExists = draft.transitions.some(
+          (transition) =>
+            transition.fromSessionId === connectionDrag.fromSessionId &&
+            transition.toSessionId === targetSession.id,
+        );
+        if (!alreadyExists) {
+          setDraft((current) => ({
+            ...current,
+            transitions: [
+              ...current.transitions,
+              createTransitionBetween(connectionDrag.fromSessionId, targetSession.id, current.transitions),
+            ],
+          }));
+        }
+      }
+    }
+
+    setConnectionDrag(null);
+  }
+
   function startCanvasPan(event: ReactPointerEvent<HTMLDivElement>) {
     if (event.button !== 2) {
       return;
@@ -619,6 +721,19 @@ export function OrchestratorTemplatesPanel({
                         <circle className="orchestrator-board-edge-anchor" cx={geometry.midpointX} cy={geometry.midpointY} r="5" />
                       </g>
                     ))}
+                    {connectionDrag ? (() => {
+                      const fromSession = renderedSessions.find((s) => s.id === connectionDrag.fromSessionId);
+                      if (!fromSession) {
+                        return null;
+                      }
+                      const anchor = anchorPosition(fromSession, connectionDrag.anchorSide);
+                      return (
+                        <path
+                          className="orchestrator-board-edge orchestrator-board-edge-draft"
+                          d={`M ${anchor.x} ${anchor.y} L ${connectionDrag.cursorX} ${connectionDrag.cursorY}`}
+                        />
+                      );
+                    })() : null}
                   </svg>
                   <div className="orchestrator-board-transition-layer">
                     {transitionGeometries.map((geometry) => (
@@ -675,6 +790,21 @@ export function OrchestratorTemplatesPanel({
                             <strong>{session.model?.trim() ? session.model : "Agent default"}</strong>
                           </div>
                         </div>
+                        {selectedNodeId === session.id && !isDragging ? (
+                          ANCHOR_SIDES.map((side) => (
+                            <div
+                              key={side}
+                              className={`orchestrator-board-connector orchestrator-board-connector-${side}`}
+                              onPointerDown={(event) => startConnectionDrag(session.id, side, event)}
+                              onPointerMove={updateConnectionDrag}
+                              onPointerUp={finishConnectionDrag}
+                              onPointerCancel={() => setConnectionDrag(null)}
+                            >
+                              <div className="orchestrator-board-connector-dot" />
+                              <div className="orchestrator-board-connector-arrow" />
+                            </div>
+                          ))
+                        ) : null}
                       </article>
                     );
                   })}
@@ -977,6 +1107,25 @@ function createTransition(
   };
 }
 
+function createTransitionBetween(
+  fromSessionId: string,
+  toSessionId: string,
+  existingTransitions: OrchestratorTemplateTransition[],
+): OrchestratorTemplateTransition {
+  const nextNumber = nextSequenceNumber(
+    existingTransitions.map((transition) => transition.id),
+    "transition-",
+  );
+  return {
+    id: `transition-${nextNumber}`,
+    fromSessionId,
+    toSessionId,
+    trigger: "onCompletion",
+    resultMode: "lastResponse",
+    promptTemplate: "Continue with:\n{{result}}",
+  };
+}
+
 function nextSequenceNumber(values: string[], prefix: string) {
   let next = 1;
   const seen = new Set(values);
@@ -1094,6 +1243,24 @@ function projectCardEdge(
     x: from.x + dx * scale,
     y: from.y + dy * scale,
   };
+}
+
+function anchorPosition(
+  session: OrchestratorSessionTemplate,
+  side: AnchorSide,
+): OrchestratorNodePosition {
+  const cx = session.position.x + CARD_WIDTH / 2;
+  const cy = session.position.y + CARD_HEIGHT / 2;
+  switch (side) {
+    case "top":
+      return { x: cx, y: session.position.y - CONNECTOR_DOT_OFFSET };
+    case "bottom":
+      return { x: cx, y: session.position.y + CARD_HEIGHT + CONNECTOR_DOT_OFFSET };
+    case "left":
+      return { x: session.position.x - CONNECTOR_DOT_OFFSET, y: cy };
+    case "right":
+      return { x: session.position.x + CARD_WIDTH + CONNECTOR_DOT_OFFSET, y: cy };
+  }
 }
 
 function TransitionNoteIcon() {

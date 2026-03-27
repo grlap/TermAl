@@ -1856,7 +1856,7 @@ export default function App() {
           latestStateRevisionRef.current = delta.revision;
           sessionsRef.current = result.sessions;
           startTransition(() => {
-            setSessions(result.sessions);
+            setSessions(sessionsRef.current);
           });
           setRequestError(null);
           return;

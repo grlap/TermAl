@@ -7683,6 +7683,101 @@ textarea {
   opacity: 0.92;
 }
 
+/* Connector dots on selected cards */
+
+.orchestrator-board-connector {
+  position: absolute;
+  z-index: 4;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  cursor: crosshair;
+  touch-action: none;
+}
+
+.orchestrator-board-connector-top {
+  top: -14px;
+  left: calc(50% - 14px);
+}
+
+.orchestrator-board-connector-bottom {
+  bottom: -14px;
+  left: calc(50% - 14px);
+}
+
+.orchestrator-board-connector-left {
+  left: -14px;
+  top: calc(50% - 14px);
+}
+
+.orchestrator-board-connector-right {
+  right: -14px;
+  top: calc(50% - 14px);
+}
+
+.orchestrator-board-connector-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  background: var(--signal-blue);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--signal-blue) 22%, transparent);
+  transition: transform 120ms ease;
+}
+
+.orchestrator-board-connector:hover .orchestrator-board-connector-dot {
+  transform: scale(1.3);
+}
+
+.orchestrator-board-connector-arrow {
+  position: absolute;
+  width: 0;
+  height: 0;
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+
+.orchestrator-board-connector:hover .orchestrator-board-connector-arrow {
+  opacity: 0.7;
+}
+
+.orchestrator-board-connector-top .orchestrator-board-connector-arrow {
+  top: -6px;
+  border-left: 5px solid transparent;
+  border-right: 5px solid transparent;
+  border-bottom: 6px solid var(--signal-blue);
+}
+
+.orchestrator-board-connector-bottom .orchestrator-board-connector-arrow {
+  bottom: -6px;
+  border-left: 5px solid transparent;
+  border-right: 5px solid transparent;
+  border-top: 6px solid var(--signal-blue);
+}
+
+.orchestrator-board-connector-left .orchestrator-board-connector-arrow {
+  left: -6px;
+  border-top: 5px solid transparent;
+  border-bottom: 5px solid transparent;
+  border-right: 6px solid var(--signal-blue);
+}
+
+.orchestrator-board-connector-right .orchestrator-board-connector-arrow {
+  right: -6px;
+  border-top: 5px solid transparent;
+  border-bottom: 5px solid transparent;
+  border-left: 6px solid var(--signal-blue);
+}
+
+/* Draft connection line */
+
+.orchestrator-board-edge-draft {
+  stroke: var(--signal-blue);
+  stroke-dasharray: 6 4;
+  opacity: 0.72;
+}
+
 .orchestrator-board-card-grab {
   display: grid;
   gap: 0.55rem;
