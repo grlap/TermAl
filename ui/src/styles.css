@@ -22,10 +22,10 @@
   --control-size-sm: calc(2rem * var(--density-scale));
   --control-size-md: calc(2.1rem * var(--density-scale));
   --control-size-lg: calc(2.35rem * var(--density-scale));
-  --control-panel-rail-width: calc(53px * var(--density-scale));
-  --control-panel-activity-button-size: calc(34px * var(--density-scale));
-  --control-panel-activity-icon-size: calc(20px * var(--density-scale));
-  --control-panel-activity-badge-size: calc(18px * var(--density-scale));
+  --control-panel-rail-width: calc(59px * var(--density-scale));
+  --control-panel-activity-button-size: calc(40px * var(--density-scale));
+  --control-panel-activity-icon-size: calc(24px * var(--density-scale));
+  --control-panel-activity-badge-size: calc(19px * var(--density-scale));
   --icon-size-2xs: calc(8px * var(--density-scale));
   --icon-size-xs: calc(12px * var(--density-scale));
   --icon-size-sm: calc(14px * var(--density-scale));
@@ -260,8 +260,13 @@ textarea {
 
 .control-panel-activity-icon {
   display: inline-flex;
+  align-items: center;
+  justify-content: center;
   width: var(--control-panel-activity-icon-size);
   height: var(--control-panel-activity-icon-size);
+  flex: none;
+  font-size: 0;
+  line-height: 0;
 }
 
 .control-panel-activity-icon svg {
