@@ -32,6 +32,10 @@ sessions only, `stop_session` now always detaches shared Codex session bookkeepi
 interrupt attempt and continues through runtime cleanup/stop-message recording even if that
 interrupt fails, and tooltip/panel model-option matching now uses one shared lookup utility.
 
+The CORS `allow_methods` missing DELETE and the orchestrator card grab handle missing keyboard
+support are also fixed in the current tree. DELETE is now included in the CORS method list, and
+the card grab handle responds to Enter and Space key presses.
+
 ## `tab-drag.ts` and `workspace-storage.ts` validators have drifted
 
 **Severity:** Medium — correctness risk on cross-window tab drags.
@@ -215,6 +219,16 @@ Concrete work implied by the current TermAl parity gaps. Ordered by user impact 
 - [ ] Add PaneTabs test for git status fetch failure in context menu:
   the `statusError` / `statusMessage` state fields exist but the error rendering path when
   `fetchGitStatus` rejects is uncovered.
+- [ ] Add OrchestratorTemplatesPanel tests for update, delete, and validation error flows:
+  mocks for `updateOrchestratorTemplate` and `deleteOrchestratorTemplate` are set up but no test
+  exercises them. Also cover the validation error display path when saving an invalid draft.
+- [ ] Add OrchestratorTemplateLibraryPanel tests for fetch error and event-driven re-fetch:
+  the error branch (`getErrorMessage`) and the `ORCHESTRATOR_TEMPLATES_CHANGED_EVENT` re-load
+  path have no test coverage.
+- [ ] Add backend orchestrator validation tests for self-loop, duplicate ID, and empty-sessions:
+  `normalize_orchestrator_template_draft` rejects self-referencing transitions, duplicate
+  session/transition IDs, and drafts with zero sessions, but only the unknown-target case is
+  tested.
 - [ ] Continue splitting backend modules as they grow:
   `src/main.rs` was split into `api.rs`, `state.rs`, `runtime.rs`, `turns.rs`, `remote.rs`, and
   `tests.rs`. Some of these modules (especially `state.rs` and `turns.rs`) are already large and

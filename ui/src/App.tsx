@@ -84,7 +84,9 @@ import { DiffPanel } from "./panels/DiffPanel";
 import { FileSystemPanel } from "./panels/FileSystemPanel";
 import { GitStatusPanel } from "./panels/GitStatusPanel";
 import { InstructionDebuggerPanel } from "./panels/InstructionDebuggerPanel";
+import { OrchestratorTemplateLibraryPanel } from "./panels/OrchestratorTemplateLibraryPanel";
 import { PaneTabs } from "./panels/PaneTabs";
+import { OrchestratorTemplatesPanel } from "./panels/OrchestratorTemplatesPanel";
 import { SessionCanvasPanel } from "./panels/SessionCanvasPanel";
 import { SourcePanel, type SourceFileState } from "./panels/SourcePanel";
 import {
@@ -151,6 +153,8 @@ import {
   openFilesystemInWorkspaceState,
   openGitStatusInWorkspaceState,
   openInstructionDebuggerInWorkspaceState,
+  openOrchestratorCanvasInWorkspaceState,
+  openOrchestratorListInWorkspaceState,
   openProjectListInWorkspaceState,
   openSessionInWorkspaceState,
   openSessionListInWorkspaceState,
@@ -251,7 +255,7 @@ type SessionErrorMap = Record<string, string | undefined>;
 type SessionNoticeMap = Record<string, string | undefined>;
 type BackendConnectionState = "connecting" | "connected" | "reconnecting" | "offline";
 type SessionAgentCommandMap = Record<string, AgentCommand[] | undefined>;
-type PreferencesTabId = "themes" | "appearance" | "remotes" | "codex-prompts" | "claude-approvals";
+type PreferencesTabId = "themes" | "appearance" | "remotes" | "orchestrators" | "codex-prompts" | "claude-approvals";
 type DraftImageAttachment = ImageAttachment & {
   base64Data: string;
   id: string;
@@ -379,6 +383,7 @@ const PREFERENCES_TABS: ReadonlyArray<{ id: PreferencesTabId; label: string }> =
   { id: "themes", label: "Themes" },
   { id: "appearance", label: "Editor & UI appearance" },
   { id: "remotes", label: "Remotes" },
+  { id: "orchestrators", label: "Orchestrators" },
   { id: "codex-prompts", label: "Codex defaults" },
   { id: "claude-approvals", label: "Claude defaults" },
 ];
@@ -3773,6 +3778,40 @@ export default function App() {
     );
   }
 
+  function handleOpenOrchestratorListTab(
+    paneId: string,
+    originSessionId: string | null,
+    originProjectId: string | null,
+  ) {
+    setWorkspace((current) =>
+      applyControlPanelLayout(
+        openOrchestratorListInWorkspaceState(current, paneId, originSessionId, originProjectId),
+      ),
+    );
+  }
+
+  function handleOpenOrchestratorCanvasTab(
+    paneId: string,
+    originSessionId: string | null,
+    originProjectId: string | null,
+    options: {
+      startMode?: "new" | null;
+      templateId?: string | null;
+    } = {},
+  ) {
+    setWorkspace((current) =>
+      applyControlPanelLayout(
+        openOrchestratorCanvasInWorkspaceState(
+          current,
+          paneId,
+          originSessionId,
+          originProjectId,
+          options,
+        ),
+      ),
+    );
+  }
+
   function handleUpsertCanvasSessionCard(
     canvasTabId: string,
     sessionId: string,
@@ -3934,6 +3973,42 @@ export default function App() {
                 false,
               );
 
+        case "orchestrators":
+          return (
+            <>
+              {fixedSection
+                ? null
+                : renderOpenTabAction(
+                    () =>
+                      handleOpenOrchestratorListTab(
+                        paneId,
+                        controlPanelSessionId,
+                        selectedProject?.id ?? null,
+                      ),
+                    false,
+                  )}
+              <button
+                className="control-panel-header-action control-panel-header-new-session-button"
+                type="button"
+                onClick={() =>
+                  handleOpenOrchestratorCanvasTab(
+                    paneId,
+                    controlPanelSessionId,
+                    selectedProject?.id ?? null,
+                    { startMode: "new" },
+                  )
+                }
+              >
+                <span className="control-panel-header-action-icon control-panel-header-action-icon-play" aria-hidden="true">
+                  <svg viewBox="0 0 16 16" focusable="false" aria-hidden="true">
+                    <path d="M3.25 3.25h4.5V7.75h-4.5Zm5 0h4.5V7.75h-4.5Zm-5 5h4.5v4.5h-4.5Zm5.9 1.95h1.4v-1.4h1.3v1.4h1.4v1.3h-1.4v1.4h-1.3v-1.4h-1.4Z" fill="currentColor" />
+                  </svg>
+                </span>
+                <span>New canvas</span>
+              </button>
+            </>
+          );
+
         case "sessions":
           return (
             <>
@@ -3996,6 +4071,28 @@ export default function App() {
                 onOpenRootPath={(path) => setControlPanelFilesystemRoot(path.trim() || null)}
               />
             </section>
+          );
+
+        case "orchestrators":
+          return (
+            <OrchestratorTemplateLibraryPanel
+              onNewCanvas={() =>
+                handleOpenOrchestratorCanvasTab(
+                  paneId,
+                  controlPanelSessionId,
+                  selectedProject?.id ?? null,
+                  { startMode: "new" },
+                )
+              }
+              onOpenCanvas={(templateId) =>
+                handleOpenOrchestratorCanvasTab(
+                  paneId,
+                  controlPanelSessionId,
+                  selectedProject?.id ?? null,
+                  { templateId },
+                )
+              }
+            />
           );
 
         case "git":
@@ -4953,7 +5050,7 @@ export default function App() {
                 <div className="card-label">Preferences</div>
                 <h2 id="settings-dialog-title">Settings</h2>
                 <p className="dialog-copy settings-dialog-copy">
-                  Tune the interface without disturbing active sessions.
+                  Tune the interface and manage reusable orchestrator templates without disturbing active sessions.
                 </p>
               </div>
 
@@ -5029,6 +5126,8 @@ export default function App() {
                       void persistAppPreferences({ remotes: nextRemotes });
                     }}
                   />
+                ) : settingsTab === "orchestrators" ? (
+                  <OrchestratorTemplatesPanel />
                 ) : settingsTab === "codex-prompts" ? (
                   <CodexPromptPreferencesPanel
                     defaultApprovalPolicy={defaultCodexApprovalPolicy}
@@ -7043,10 +7142,13 @@ function SessionPaneView({
 }) {
   const activeTab = pane.tabs.find((tab) => tab.id === pane.activeTabId) ?? pane.tabs[0] ?? null;
   const activeControlPanelTab = activeTab?.kind === "controlPanel" ? activeTab : null;
+  const activeOrchestratorListTab = activeTab?.kind === "orchestratorList" ? activeTab : null;
   const activeSessionListTab = activeTab?.kind === "sessionList" ? activeTab : null;
   const activeProjectListTab = activeTab?.kind === "projectList" ? activeTab : null;
   const activeCanvasTab = activeTab?.kind === "canvas" ? activeTab : null;
-  const activeControlSurfaceTab = activeControlPanelTab ?? activeSessionListTab ?? activeProjectListTab;
+  const activeOrchestratorCanvasTab = activeTab?.kind === "orchestratorCanvas" ? activeTab : null;
+  const activeControlSurfaceTab =
+    activeControlPanelTab ?? activeOrchestratorListTab ?? activeSessionListTab ?? activeProjectListTab;
   const activeSourceTab = activeTab?.kind === "source" ? activeTab : null;
   const activeFilesystemTab = activeTab?.kind === "filesystem" ? activeTab : null;
   const activeGitStatusTab = activeTab?.kind === "gitStatus" ? activeTab : null;
@@ -7304,6 +7406,8 @@ function SessionPaneView({
     ? `${pane.id}:source:${activeSourceTab.path ?? "empty"}`
     : activeCanvasTab
       ? `${pane.id}:canvas:${activeCanvasTab.id}`
+    : activeOrchestratorCanvasTab
+      ? `${pane.id}:orchestratorCanvas:${activeOrchestratorCanvasTab.id}`
     : activeFilesystemTab
       ? `${pane.id}:filesystem:${activeFilesystemTab.rootPath ?? "empty"}`
       : activeGitStatusTab
@@ -8174,7 +8278,7 @@ function SessionPaneView({
 
       <section
         ref={messageStackRef}
-        className={`message-stack${activeControlSurfaceTab ? " control-panel-stack" : ""}${activeSourceTab || activeDiffPreviewTab ? " editor-panel-stack" : ""}`}
+        className={`message-stack${activeControlSurfaceTab || activeOrchestratorCanvasTab ? " control-panel-stack" : ""}${activeSourceTab || activeDiffPreviewTab ? " editor-panel-stack" : ""}`}
         onWheel={handleMessageStackWheel}
         onScroll={(event) => {
           const node = event.currentTarget;
@@ -8191,6 +8295,8 @@ function SessionPaneView({
       >
         {activeControlPanelTab ? (
           renderControlPanel(pane.id)
+        ) : activeOrchestratorListTab ? (
+          renderControlPanel(pane.id, "orchestrators")
         ) : activeSessionListTab ? (
           renderControlPanel(pane.id, "sessions")
         ) : activeProjectListTab ? (
@@ -8205,6 +8311,18 @@ function SessionPaneView({
             onSetZoom={(zoom) => onSetCanvasZoom(activeCanvasTab.id, zoom)}
             onUpsertCard={(sessionId, position) =>
               onUpsertCanvasSessionCard(activeCanvasTab.id, sessionId, position)
+            }
+          />
+        ) : activeOrchestratorCanvasTab ? (
+          <OrchestratorTemplatesPanel
+            initialTemplateId={activeOrchestratorCanvasTab.templateId ?? null}
+            persistenceKey={activeOrchestratorCanvasTab.id}
+            startMode={
+              activeOrchestratorCanvasTab.startMode === "new"
+                ? "new"
+                : activeOrchestratorCanvasTab.templateId
+                  ? "edit"
+                  : "browse"
             }
           />
         ) : activeSourceTab ? (
@@ -8572,7 +8690,7 @@ function SessionPaneView({
           />
         )}
       </section>
-      {activeControlSurfaceTab || activeCanvasTab || activeSourceTab || activeFilesystemTab || activeGitStatusTab || activeInstructionDebuggerTab || activeDiffPreviewTab ? null : (
+      {activeControlSurfaceTab || activeCanvasTab || activeOrchestratorCanvasTab || activeSourceTab || activeFilesystemTab || activeGitStatusTab || activeInstructionDebuggerTab || activeDiffPreviewTab ? null : (
         <AgentSessionPanelFooter
           paneId={pane.id}
           viewMode={pane.viewMode}
@@ -12181,6 +12299,10 @@ function labelForPaneViewMode(viewMode: PaneViewMode) {
       return "Canvas";
     case "controlPanel":
       return "Control panel";
+    case "orchestratorList":
+      return "Orchestrators";
+    case "orchestratorCanvas":
+      return "Orchestration";
     case "sessionList":
       return "Sessions";
     case "projectList":

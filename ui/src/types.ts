@@ -135,6 +135,50 @@ export type Project = {
   remoteId?: string | null;
 };
 
+export type OrchestratorNodePosition = {
+  x: number;
+  y: number;
+};
+
+export type OrchestratorSessionTemplate = {
+  id: string;
+  name: string;
+  agent: AgentType;
+  model?: string | null;
+  instructions: string;
+  autoApprove: boolean;
+  position: OrchestratorNodePosition;
+};
+
+export type OrchestratorTransitionTrigger = "onCompletion";
+export type OrchestratorTransitionResultMode =
+  | "none"
+  | "lastResponse"
+  | "summary"
+  | "summaryAndLastResponse";
+
+export type OrchestratorTemplateTransition = {
+  id: string;
+  fromSessionId: string;
+  toSessionId: string;
+  trigger: OrchestratorTransitionTrigger;
+  resultMode: OrchestratorTransitionResultMode;
+  promptTemplate?: string | null;
+};
+
+export type OrchestratorTemplateDraft = {
+  name: string;
+  description: string;
+  sessions: OrchestratorSessionTemplate[];
+  transitions: OrchestratorTemplateTransition[];
+};
+
+export type OrchestratorTemplate = OrchestratorTemplateDraft & {
+  id: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
 export type Session = {
   id: string;
   name: string;

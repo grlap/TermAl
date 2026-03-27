@@ -89,8 +89,14 @@ function formatWorkspaceTabDragLabel(drag: WorkspaceTabDrag) {
       return `TermAl git ${drag.tab.workdir ?? "workspace"}`;
     case "controlPanel":
       return "TermAl control panel";
+    case "orchestratorList":
+      return "TermAl orchestrators";
     case "canvas":
       return "TermAl canvas";
+    case "orchestratorCanvas":
+      return drag.tab.templateId
+        ? `TermAl orchestration ${drag.tab.templateId}`
+        : "TermAl orchestration canvas";
     case "sessionList":
       return "TermAl sessions";
     case "projectList":
@@ -129,6 +135,8 @@ function isWorkspaceTab(value: unknown): value is WorkspaceTab {
       return isNullableString(value.workdir) && isNullableString(value.originSessionId);
     case "controlPanel":
       return isNullableString(value.originSessionId) && isOptionalNullableString(value.originProjectId);
+    case "orchestratorList":
+      return isNullableString(value.originSessionId) && isOptionalNullableString(value.originProjectId);
     case "canvas":
       return (
         Array.isArray(value.cards) &&
@@ -136,6 +144,13 @@ function isWorkspaceTab(value: unknown): value is WorkspaceTab {
         isOptionalWorkspaceCanvasZoom(value.zoom) &&
         isNullableString(value.originSessionId) &&
         isOptionalNullableString(value.originProjectId)
+      );
+    case "orchestratorCanvas":
+      return (
+        isNullableString(value.originSessionId) &&
+        isOptionalNullableString(value.originProjectId) &&
+        isOptionalNullableString(value.templateId) &&
+        (typeof value.startMode === "undefined" || value.startMode === "new")
       );
     case "sessionList":
       return isNullableString(value.originSessionId) && isOptionalNullableString(value.originProjectId);

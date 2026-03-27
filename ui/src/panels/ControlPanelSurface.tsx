@@ -9,11 +9,12 @@ import {
   type ReactNode,
 } from "react";
 
-export type ControlPanelSectionId = "files" | "sessions" | "projects" | "git";
+export type ControlPanelSectionId = "files" | "sessions" | "projects" | "orchestrators" | "git";
 
 const DEFAULT_CONTROL_PANEL_SECTION_ORDER: readonly ControlPanelSectionId[] = [
   "projects",
   "sessions",
+  "orchestrators",
   "files",
   "git",
 ];
@@ -99,6 +100,11 @@ export const ControlPanelSurface = forwardRef<ControlPanelSurfaceHandle, Control
       id: "projects",
       label: "Projects",
       icon: <ProjectsIcon />,
+    },
+    orchestrators: {
+      id: "orchestrators",
+      label: "Orchestrators",
+      icon: <OrchestratorsIcon />,
     },
     git: {
       badgeCount: gitStatusCount,
@@ -527,6 +533,24 @@ function ProjectsIcon() {
         strokeWidth="1.5"
       />
       <path d="M3.5 8.5h13" fill="none" stroke="currentColor" strokeWidth="1.5" />
+    </svg>
+  );
+}
+
+function OrchestratorsIcon() {
+  return (
+    <svg viewBox="0 0 20 20" focusable="false" aria-hidden="true">
+      <circle cx="4.75" cy="5" r="1.65" fill="none" stroke="currentColor" strokeWidth="1.5" />
+      <circle cx="15.25" cy="5" r="1.65" fill="none" stroke="currentColor" strokeWidth="1.5" />
+      <circle cx="10" cy="14.5" r="1.65" fill="none" stroke="currentColor" strokeWidth="1.5" />
+      <path
+        d="M6.2 6.1 8.8 12M13.8 6.1 11.2 12M6.55 5h6.9"
+        fill="none"
+        stroke="currentColor"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth="1.5"
+      />
     </svg>
   );
 }

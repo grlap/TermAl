@@ -1341,8 +1341,16 @@ function formatTabLabel(tab: WorkspaceTab, session: Session | null) {
     return "Control panel";
   }
 
+  if (tab.kind === "orchestratorList") {
+    return "Orchestrators";
+  }
+
   if (tab.kind === "canvas") {
     return "Canvas";
+  }
+
+  if (tab.kind === "orchestratorCanvas") {
+    return tab.templateId ? `Orchestration: ${tab.templateId}` : "New orchestration";
   }
 
   if (tab.kind === "sessionList") {

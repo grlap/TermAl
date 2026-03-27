@@ -15,6 +15,8 @@ import type {
   InstructionSearchResponse,
   JsonValue,
   McpElicitationAction,
+  OrchestratorTemplate,
+  OrchestratorTemplateDraft,
   Project,
   RemoteConfig,
   SandboxMode,
@@ -41,6 +43,13 @@ export type CreateProjectResponse = {
   state: StateResponse;
 };
 
+export type OrchestratorTemplatesResponse = {
+  templates: OrchestratorTemplate[];
+};
+
+export type OrchestratorTemplateResponse = {
+  template: OrchestratorTemplate;
+};
 export type PickProjectRootResponse = {
   path?: string | null;
 };
@@ -255,6 +264,38 @@ export function createProject(payload: CreateProjectRequest) {
   });
 }
 
+export function fetchOrchestratorTemplates() {
+  return request<OrchestratorTemplatesResponse>("/api/orchestrators/templates");
+}
+
+export function createOrchestratorTemplate(payload: OrchestratorTemplateDraft) {
+  return request<OrchestratorTemplateResponse>("/api/orchestrators/templates", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function updateOrchestratorTemplate(
+  templateId: string,
+  payload: OrchestratorTemplateDraft,
+) {
+  return request<OrchestratorTemplateResponse>(
+    `/api/orchestrators/templates/${encodeURIComponent(templateId)}`,
+    {
+      method: "PUT",
+      body: JSON.stringify(payload),
+    },
+  );
+}
+
+export function deleteOrchestratorTemplate(templateId: string) {
+  return request<OrchestratorTemplatesResponse>(
+    `/api/orchestrators/templates/${encodeURIComponent(templateId)}`,
+    {
+      method: "DELETE",
+    },
+  );
+}
 export function pickProjectRoot() {
   return request<PickProjectRootResponse>("/api/projects/pick", {
     method: "POST",

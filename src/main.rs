@@ -108,6 +108,7 @@ fn app_router(state: AppState) -> Router {
             axum::http::Method::GET,
             axum::http::Method::POST,
             axum::http::Method::PUT,
+            axum::http::Method::DELETE,
         ])
         .allow_headers([axum::http::header::ACCEPT, axum::http::header::CONTENT_TYPE]);
 
@@ -123,6 +124,16 @@ fn app_router(state: AppState) -> Router {
         .route("/api/git/sync", post(sync_git_changes))
         .route("/api/state", get(get_state))
         .route("/api/settings", post(update_app_settings))
+        .route(
+            "/api/orchestrators/templates",
+            get(list_orchestrator_templates).post(create_orchestrator_template),
+        )
+        .route(
+            "/api/orchestrators/templates/{id}",
+            get(get_orchestrator_template)
+                .put(update_orchestrator_template)
+                .delete(delete_orchestrator_template),
+        )
         .route("/api/instructions/search", get(search_instructions))
         .route("/api/events", get(state_events))
         .route(
@@ -296,6 +307,7 @@ include!("state.rs");
 include!("runtime.rs");
 include!("turns.rs");
 include!("api.rs");
+include!("orchestrators.rs");
 include!("telegram.rs");
 
 #[cfg(test)]

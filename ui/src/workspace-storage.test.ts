@@ -49,6 +49,11 @@ describe("workspace storage", () => {
                 kind: "controlPanel",
                 originSessionId: null,
               },
+              {
+                id: "tab-orchestrators",
+                kind: "orchestratorList",
+                originSessionId: null,
+              },
             ],
             activeTabId: "tab-control",
             activeSessionId: null,
@@ -76,6 +81,13 @@ describe("workspace storage", () => {
                 cards: [{ sessionId: "session-1", x: 160, y: 200 }],
                 zoom: 1.35,
                 originSessionId: "session-1",
+              },
+              {
+                id: "tab-orchestrator-canvas",
+                kind: "orchestratorCanvas",
+                originSessionId: "session-1",
+                originProjectId: "project-1",
+                templateId: "template-1",
               },
             ],
             activeTabId: "tab-source",
@@ -153,6 +165,41 @@ describe("workspace storage", () => {
             activeTabId: "tab-canvas",
             activeSessionId: null,
             viewMode: "canvas",
+            lastSessionViewMode: "session",
+            sourcePath: null,
+          },
+        ],
+        activePaneId: "pane-a",
+      },
+    };
+
+    window.localStorage.setItem(WORKSPACE_LAYOUT_STORAGE_KEY, JSON.stringify(malformed));
+
+    expect(getStoredWorkspaceLayout()).toBeNull();
+  });
+
+  it("rejects malformed orchestrator canvas tabs", () => {
+    const malformed = {
+      controlPanelSide: "left",
+      workspace: {
+        root: {
+          type: "pane",
+          paneId: "pane-a",
+        },
+        panes: [
+          {
+            id: "pane-a",
+            tabs: [
+              {
+                id: "tab-orchestrator-canvas",
+                kind: "orchestratorCanvas",
+                originSessionId: null,
+                templateId: ["bad"],
+              },
+            ],
+            activeTabId: "tab-orchestrator-canvas",
+            activeSessionId: null,
+            viewMode: "orchestratorCanvas",
             lastSessionViewMode: "session",
             sourcePath: null,
           },

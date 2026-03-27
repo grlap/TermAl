@@ -1252,6 +1252,32 @@ describe("App", () => {
           });
         }
 
+        if (requestUrl.pathname === "/api/orchestrators/templates") {
+          return jsonResponse({
+            templates: [
+              {
+                id: "delivery-flow",
+                name: "Delivery Flow",
+                description: "Implement and review a change.",
+                createdAt: "2026-03-26 10:00:00",
+                updatedAt: "2026-03-26 10:15:00",
+                sessions: [
+                  {
+                    id: "builder",
+                    name: "Builder",
+                    agent: "Codex",
+                    model: null,
+                    instructions: "Implement the change.",
+                    autoApprove: true,
+                    position: { x: 220, y: 420 },
+                  },
+                ],
+                transitions: [],
+              },
+            ],
+          });
+        }
+
         throw new Error(`Unexpected fetch: ${requestUrl.pathname}${requestUrl.search}`);
       });
 
@@ -1310,6 +1336,11 @@ describe("App", () => {
         await clickAndSettle(await screen.findByRole("button", { name: "Projects" }));
         expect(screen.getByRole("combobox", { name: "Project" })).toHaveTextContent("TermAl");
         expect(screen.queryByRole("button", { name: /Load repo/i })).not.toBeInTheDocument();
+
+        await clickAndSettle(await screen.findByRole("button", { name: "Orchestrators" }));
+        await clickAndSettle(await screen.findByRole("button", { name: "Edit canvas" }));
+        expect(within(getSessionTablist()).getByText("Orchestration: delivery-flow")).toBeInTheDocument();
+        expect(await screen.findByRole("heading", { level: 3, name: "Edit template" })).toBeInTheDocument();
       } finally {
         window.localStorage.clear();
         HTMLElement.prototype.scrollIntoView = originalScrollIntoView;

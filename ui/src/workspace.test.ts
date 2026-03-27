@@ -14,6 +14,8 @@ import {
   openFilesystemInWorkspaceState,
   openGitStatusInWorkspaceState,
   openInstructionDebuggerInWorkspaceState,
+  openOrchestratorCanvasInWorkspaceState,
+  openOrchestratorListInWorkspaceState,
   openProjectListInWorkspaceState,
   openSessionInWorkspaceState,
   openSessionListInWorkspaceState,
@@ -123,6 +125,19 @@ function makeControlPanelTab(id: string, originSessionId: string | null): Worksp
   };
 }
 
+function makeOrchestratorListTab(
+  id: string,
+  originSessionId: string | null,
+  originProjectId: string | null = null,
+): WorkspaceTab {
+  return {
+    id,
+    kind: "orchestratorList",
+    originSessionId,
+    ...(originProjectId ? { originProjectId } : {}),
+  };
+}
+
 function makeCanvasTab(
   id: string,
   cards: Array<{ sessionId: string; x: number; y: number }>,
@@ -137,6 +152,25 @@ function makeCanvasTab(
     ...(typeof zoom === "number" ? { zoom } : {}),
     originSessionId,
     ...(originProjectId ? { originProjectId } : {}),
+  };
+}
+
+function makeOrchestratorCanvasTab(
+  id: string,
+  originSessionId: string | null,
+  options: {
+    originProjectId?: string | null;
+    startMode?: "new";
+    templateId?: string | null;
+  } = {},
+): WorkspaceTab {
+  return {
+    id,
+    kind: "orchestratorCanvas",
+    originSessionId,
+    ...(options.originProjectId ? { originProjectId: options.originProjectId } : {}),
+    ...(options.templateId ? { templateId: options.templateId } : {}),
+    ...(options.startMode ? { startMode: options.startMode } : {}),
   };
 }
 
@@ -317,6 +351,57 @@ describe("workspace helpers", () => {
     expect(reused.activePaneId).toBe("pane-a");
     expect(reused.panes[0]?.activeTabId).toBe(canvasTab?.id ?? null);
     expect(reused.panes[0]?.tabs).toHaveLength(2);
+  });
+
+  it("openOrchestratorListInWorkspaceState opens a reusable orchestrator library tab", () => {
+    const opened = openOrchestratorListInWorkspaceState(
+      makeSinglePaneWorkspace(makePane("pane-a", [makeSessionTab("tab-a", "session-a")])),
+      "pane-a",
+      "session-a",
+      "project-a",
+    );
+
+    expect(opened.panes[0]?.tabs).toEqual([
+      makeSessionTab("tab-a", "session-a"),
+      {
+        id: expect.any(String),
+        kind: "orchestratorList",
+        originSessionId: "session-a",
+        originProjectId: "project-a",
+      },
+    ]);
+
+    const reused = openOrchestratorListInWorkspaceState(opened, "pane-a", null, null);
+    const orchestratorTab = opened.panes[0]?.tabs[1];
+
+    expect(reused.activePaneId).toBe("pane-a");
+    expect(reused.panes[0]?.activeTabId).toBe(orchestratorTab?.id ?? null);
+    expect(reused.panes[0]?.tabs).toHaveLength(2);
+  });
+
+  it("openOrchestratorCanvasInWorkspaceState creates a dedicated canvas tab for new drafts", () => {
+    const next = openOrchestratorCanvasInWorkspaceState(
+      makeSinglePaneWorkspace(makePane("pane-a", [makeSessionTab("tab-a", "session-a")])),
+      "pane-a",
+      "session-a",
+      "project-a",
+      { startMode: "new" },
+    );
+
+    expect(next.panes[0]?.tabs).toEqual([
+      makeSessionTab("tab-a", "session-a"),
+      {
+        id: expect.any(String),
+        kind: "orchestratorCanvas",
+        originSessionId: "session-a",
+        originProjectId: "project-a",
+        startMode: "new",
+      },
+    ]);
+    expect(next.panes[0]).toMatchObject({
+      activeSessionId: "session-a",
+      viewMode: "orchestratorCanvas",
+    });
   });
 
   it("openSessionInWorkspaceState focuses the existing session tab instead of duplicating it", () => {

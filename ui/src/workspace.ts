@@ -6,6 +6,8 @@ export type PaneViewMode =
   | SessionPaneViewMode
   | "canvas"
   | "controlPanel"
+  | "orchestratorList"
+  | "orchestratorCanvas"
   | "sessionList"
   | "projectList"
   | "source"
@@ -54,6 +56,13 @@ export type WorkspaceControlPanelTab = {
   originProjectId?: string | null;
 };
 
+export type WorkspaceOrchestratorListTab = {
+  id: string;
+  kind: "orchestratorList";
+  originSessionId: string | null;
+  originProjectId?: string | null;
+};
+
 export type WorkspaceCanvasCard = {
   sessionId: string;
   x: number;
@@ -67,6 +76,15 @@ export type WorkspaceCanvasTab = {
   zoom?: number;
   originSessionId: string | null;
   originProjectId?: string | null;
+};
+
+export type WorkspaceOrchestratorCanvasTab = {
+  id: string;
+  kind: "orchestratorCanvas";
+  originSessionId: string | null;
+  originProjectId?: string | null;
+  templateId?: string | null;
+  startMode?: "new";
 };
 
 export type WorkspaceSessionListTab = {
@@ -112,7 +130,9 @@ export type WorkspaceTab =
   | WorkspaceFilesystemTab
   | WorkspaceGitStatusTab
   | WorkspaceControlPanelTab
+  | WorkspaceOrchestratorListTab
   | WorkspaceCanvasTab
+  | WorkspaceOrchestratorCanvasTab
   | WorkspaceSessionListTab
   | WorkspaceProjectListTab
   | WorkspaceInstructionDebuggerTab
@@ -120,6 +140,7 @@ export type WorkspaceTab =
 
 type WorkspaceOriginOnlyTab =
   | WorkspaceControlPanelTab
+  | WorkspaceOrchestratorListTab
   | WorkspaceSessionListTab
   | WorkspaceProjectListTab;
 
@@ -245,6 +266,20 @@ export function createControlPanelTab(
   };
 }
 
+export function createOrchestratorListTab(
+  originSessionId: string | null = null,
+  originProjectId: string | null = null,
+): WorkspaceOrchestratorListTab {
+  const normalizedOriginProjectId = normalizeWorkspaceIdentifier(originProjectId);
+
+  return {
+    id: crypto.randomUUID(),
+    kind: "orchestratorList",
+    originSessionId,
+    ...projectOriginProps(normalizedOriginProjectId),
+  };
+}
+
 export function createCanvasTab(
   originSessionId: string | null = null,
   originProjectId: string | null = null,
@@ -260,6 +295,25 @@ export function createCanvasTab(
     ...canvasZoomProps(normalizeWorkspaceCanvasZoom(zoom)),
     originSessionId,
     ...projectOriginProps(normalizedOriginProjectId),
+  };
+}
+
+export function createOrchestratorCanvasTab(
+  originSessionId: string | null = null,
+  originProjectId: string | null = null,
+  templateId: string | null = null,
+  startMode: "new" | null = null,
+): WorkspaceOrchestratorCanvasTab {
+  const normalizedOriginProjectId = normalizeWorkspaceIdentifier(originProjectId);
+  const normalizedTemplateId = normalizeWorkspaceIdentifier(templateId);
+
+  return {
+    id: crypto.randomUUID(),
+    kind: "orchestratorCanvas",
+    originSessionId,
+    ...projectOriginProps(normalizedOriginProjectId),
+    ...(normalizedTemplateId ? { templateId: normalizedTemplateId } : {}),
+    ...(startMode === "new" ? { startMode } : {}),
   };
 }
 
@@ -413,7 +467,12 @@ export function reconcileWorkspaceState(current: WorkspaceState, sessions: Sessi
           ];
         }
 
-        if (tab.kind === "controlPanel" || tab.kind === "sessionList" || tab.kind === "projectList") {
+        if (
+          tab.kind === "controlPanel" ||
+          tab.kind === "orchestratorList" ||
+          tab.kind === "sessionList" ||
+          tab.kind === "projectList"
+        ) {
           return [reconcileOriginOnlyTab(tab, originSessionId, originProjectId)];
         }
 
@@ -428,6 +487,25 @@ export function reconcileWorkspaceState(current: WorkspaceState, sessions: Sessi
               ...canvasZoomProps(normalizeWorkspaceCanvasZoom(tab.zoom)),
               originSessionId,
               ...projectOriginProps(originProjectId),
+            },
+          ];
+        }
+
+        if (tab.kind === "orchestratorCanvas") {
+          const {
+            originProjectId: _ignoredOriginProjectId,
+            templateId: _ignoredTemplateId,
+            startMode: _ignoredStartMode,
+            ...tabWithoutSpecialFields
+          } = tab;
+          const normalizedTemplateId = normalizeWorkspaceIdentifier(tab.templateId);
+          return [
+            {
+              ...tabWithoutSpecialFields,
+              originSessionId,
+              ...projectOriginProps(originProjectId),
+              ...(normalizedTemplateId ? { templateId: normalizedTemplateId } : {}),
+              ...(tab.startMode === "new" ? { startMode: "new" as const } : {}),
             },
           ];
         }
@@ -653,6 +731,46 @@ export function openCanvasInWorkspaceState(
   return openTabInWorkspaceState(
     workspace,
     createCanvasTab(originSessionId, originProjectId),
+    preferredPaneId,
+  );
+}
+
+export function openOrchestratorListInWorkspaceState(
+  workspace: WorkspaceState,
+  preferredPaneId: string | null,
+  originSessionId: string | null,
+  originProjectId: string | null = null,
+): WorkspaceState {
+  const existing = findOrchestratorListTab(workspace);
+  if (existing) {
+    return activatePane(workspace, existing.paneId, existing.tab.id);
+  }
+
+  return openTabInWorkspaceState(
+    workspace,
+    createOrchestratorListTab(originSessionId, originProjectId),
+    preferredPaneId,
+  );
+}
+
+export function openOrchestratorCanvasInWorkspaceState(
+  workspace: WorkspaceState,
+  preferredPaneId: string | null,
+  originSessionId: string | null,
+  originProjectId: string | null = null,
+  options: {
+    startMode?: "new" | null;
+    templateId?: string | null;
+  } = {},
+): WorkspaceState {
+  return openTabInWorkspaceState(
+    workspace,
+    createOrchestratorCanvasTab(
+      originSessionId,
+      originProjectId,
+      options.templateId ?? null,
+      options.startMode ?? null,
+    ),
     preferredPaneId,
   );
 }
@@ -1461,6 +1579,16 @@ function syncPaneState(pane: WorkspacePane): WorkspacePane {
     };
   }
 
+  if (activeTab.kind === "orchestratorCanvas") {
+    return {
+      ...pane,
+      activeTabId: activeTab.id,
+      activeSessionId: resolveOriginSessionId(activeTab.originSessionId, pane.activeSessionId, pane.tabs),
+      viewMode: "orchestratorCanvas",
+      sourcePath: null,
+    };
+  }
+
   if (activeTab.kind === "filesystem") {
     return {
       ...pane,
@@ -1471,7 +1599,12 @@ function syncPaneState(pane: WorkspacePane): WorkspacePane {
     };
   }
 
-  if (activeTab.kind === "controlPanel" || activeTab.kind === "sessionList" || activeTab.kind === "projectList") {
+  if (
+    activeTab.kind === "controlPanel" ||
+    activeTab.kind === "orchestratorList" ||
+    activeTab.kind === "sessionList" ||
+    activeTab.kind === "projectList"
+  ) {
     return syncOriginOnlyPaneState(pane, activeTab);
   }
 
@@ -1569,6 +1702,20 @@ function findControlPanelTab(workspace: WorkspaceState) {
   for (const pane of workspace.panes) {
     const tab = pane.tabs.find(
       (candidate): candidate is WorkspaceControlPanelTab => candidate.kind === "controlPanel",
+    );
+    if (tab) {
+      return { paneId: pane.id, tab };
+    }
+  }
+
+  return null;
+}
+
+function findOrchestratorListTab(workspace: WorkspaceState) {
+  for (const pane of workspace.panes) {
+    const tab = pane.tabs.find(
+      (candidate): candidate is WorkspaceOrchestratorListTab =>
+        candidate.kind === "orchestratorList",
     );
     if (tab) {
       return { paneId: pane.id, tab };

@@ -2,6 +2,7 @@
 struct AppState {
     default_workdir: String,
     persistence_path: Arc<PathBuf>,
+    orchestrator_templates_path: Arc<PathBuf>,
     state_events: broadcast::Sender<String>,
     delta_events: broadcast::Sender<String>,
     shared_codex_runtime: Arc<Mutex<Option<SharedCodexRuntime>>>,
@@ -12,6 +13,7 @@ struct AppState {
 impl AppState {
     fn new(default_workdir: String) -> Result<Self> {
         let persistence_path = resolve_persistence_path(&default_workdir);
+        let orchestrator_templates_path = resolve_orchestrator_templates_path(&default_workdir);
         let mut inner = load_state(&persistence_path)?.unwrap_or_else(|| {
             let mut inner = StateInner::new();
             let default_project =
@@ -45,6 +47,7 @@ impl AppState {
         let state = Self {
             default_workdir,
             persistence_path: Arc::new(persistence_path),
+            orchestrator_templates_path: Arc::new(orchestrator_templates_path),
             state_events: broadcast::channel(128).0,
             delta_events: broadcast::channel(256).0,
             shared_codex_runtime: Arc::new(Mutex::new(None)),

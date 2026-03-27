@@ -53,6 +53,26 @@ describe("workspace tab drag channel messages", () => {
     ).toBe(true);
   });
 
+  it("accepts orchestrator canvas tab payloads", () => {
+    expect(
+      isWorkspaceTabDragChannelMessage({
+        type: "drag-start",
+        payload: {
+          dragId: "drag-orchestrator",
+          sourceWindowId: "window-a",
+          sourcePaneId: "pane-a",
+          tabId: "orchestrator-a",
+          tab: {
+            id: "orchestrator-a",
+            kind: "orchestratorCanvas",
+            originSessionId: null,
+            templateId: "template-a",
+          },
+        },
+      }),
+    ).toBe(true);
+  });
+
   it("rejects malformed tab payloads", () => {
     // diffPreview tabs require changeType, diff, filePath, originSessionId, and summary.
     expect(
@@ -168,6 +188,23 @@ describe("workspace tab drag channel messages", () => {
         },
       }),
     ).toBe(false);
+
+    expect(
+      isWorkspaceTabDragChannelMessage({
+        type: "drag-start",
+        payload: {
+          dragId: "drag-4",
+          sourceWindowId: "window-a",
+          sourcePaneId: "pane-a",
+          tabId: "tab-d",
+          tab: {
+            id: "tab-d",
+            kind: "orchestratorList",
+            originSessionId: null,
+            originProjectId: { bad: true },
+          },
+        },
+      }),
+    ).toBe(false);
   });
 });
-

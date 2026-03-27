@@ -218,6 +218,9 @@ fn test_app_state() -> AppState {
     AppState {
         default_workdir: "/tmp".to_owned(),
         persistence_path: Arc::new(persistence_path),
+        orchestrator_templates_path: Arc::new(
+            std::env::temp_dir().join(format!("termal-orchestrators-test-{}.json", Uuid::new_v4())),
+        ),
         state_events: broadcast::channel(16).0,
         delta_events: broadcast::channel(16).0,
         shared_codex_runtime: Arc::new(Mutex::new(None)),
@@ -2803,6 +2806,7 @@ fn persists_app_settings_and_applies_them_to_new_sessions() {
     let reloaded_state = AppState {
         default_workdir: "/tmp".to_owned(),
         persistence_path: state.persistence_path.clone(),
+        orchestrator_templates_path: state.orchestrator_templates_path.clone(),
         state_events: broadcast::channel(16).0,
         delta_events: broadcast::channel(16).0,
         shared_codex_runtime: Arc::new(Mutex::new(None)),
@@ -12240,4 +12244,134 @@ fn review_summary_counts_only_resolved_threads_as_resolved() {
     assert_eq!(summary.open_thread_count, 1);
     assert_eq!(summary.resolved_thread_count, 1);
     assert_eq!(summary.comment_count, 4);
+}
+
+fn sample_orchestrator_template_draft() -> OrchestratorTemplateDraft {
+    OrchestratorTemplateDraft {
+        name: "Feature Delivery Flow".to_owned(),
+        description: "Coordinate implementation and review.".to_owned(),
+        sessions: vec![
+            OrchestratorSessionTemplate {
+                id: "planner".to_owned(),
+                name: "Planner".to_owned(),
+                agent: Agent::Claude,
+                model: Some("claude-sonnet-4-5".to_owned()),
+                instructions: "Plan the work and decide the next action.".to_owned(),
+                auto_approve: false,
+                position: OrchestratorNodePosition { x: 620.0, y: 120.0 },
+            },
+            OrchestratorSessionTemplate {
+                id: "builder".to_owned(),
+                name: "Builder".to_owned(),
+                agent: Agent::Codex,
+                model: Some("gpt-5".to_owned()),
+                instructions: "Implement the requested changes.".to_owned(),
+                auto_approve: true,
+                position: OrchestratorNodePosition { x: 180.0, y: 420.0 },
+            },
+            OrchestratorSessionTemplate {
+                id: "reviewer".to_owned(),
+                name: "Reviewer".to_owned(),
+                agent: Agent::Claude,
+                model: Some("claude-sonnet-4-5".to_owned()),
+                instructions: "Review the produced changes and summarize issues.".to_owned(),
+                auto_approve: false,
+                position: OrchestratorNodePosition { x: 980.0, y: 420.0 },
+            },
+        ],
+        transitions: vec![
+            OrchestratorTemplateTransition {
+                id: "planner-to-builder".to_owned(),
+                from_session_id: "planner".to_owned(),
+                to_session_id: "builder".to_owned(),
+                trigger: OrchestratorTransitionTrigger::OnCompletion,
+                result_mode: OrchestratorTransitionResultMode::LastResponse,
+                prompt_template: Some(
+                    "Use this plan and implement it:\n\n{{result}}".to_owned(),
+                ),
+            },
+            OrchestratorTemplateTransition {
+                id: "builder-to-reviewer".to_owned(),
+                from_session_id: "builder".to_owned(),
+                to_session_id: "reviewer".to_owned(),
+                trigger: OrchestratorTransitionTrigger::OnCompletion,
+                result_mode: OrchestratorTransitionResultMode::SummaryAndLastResponse,
+                prompt_template: Some(
+                    "Review this implementation:\n\n{{result}}".to_owned(),
+                ),
+            },
+        ],
+    }
+}
+
+#[test]
+fn orchestrator_template_crud_persists_in_the_separate_store() {
+    let state = test_app_state();
+    let templates_path = state.orchestrator_templates_path.as_path().to_path_buf();
+
+    let created = state
+        .create_orchestrator_template(sample_orchestrator_template_draft())
+        .expect("template should be created");
+    assert_eq!(created.template.id, "orchestrator-template-1");
+    assert_eq!(created.template.sessions.len(), 3);
+    assert!(templates_path.exists());
+
+    let persisted: OrchestratorTemplateStore = serde_json::from_slice(
+        &fs::read(&templates_path).expect("template store should be readable"),
+    )
+    .expect("template store should deserialize");
+    assert_eq!(persisted.templates.len(), 1);
+    assert_eq!(persisted.templates[0].name, "Feature Delivery Flow");
+
+    let mut update = sample_orchestrator_template_draft();
+    update.name = "Feature Delivery Flow v2".to_owned();
+    update.sessions[1].name = "Builder Prime".to_owned();
+    update.transitions[0].result_mode = OrchestratorTransitionResultMode::SummaryAndLastResponse;
+
+    let updated = state
+        .update_orchestrator_template(&created.template.id, update)
+        .expect("template update should succeed");
+    assert_eq!(updated.template.id, created.template.id);
+    assert_eq!(updated.template.created_at, created.template.created_at);
+    assert_eq!(updated.template.name, "Feature Delivery Flow v2");
+    assert_eq!(updated.template.sessions[1].name, "Builder Prime");
+    assert_eq!(
+        updated.template.transitions[0].result_mode,
+        OrchestratorTransitionResultMode::SummaryAndLastResponse
+    );
+
+    let fetched = state
+        .get_orchestrator_template(&created.template.id)
+        .expect("template fetch should succeed");
+    assert_eq!(fetched.template.name, "Feature Delivery Flow v2");
+
+    let listed = state
+        .list_orchestrator_templates()
+        .expect("template listing should succeed");
+    assert_eq!(listed.templates.len(), 1);
+
+    let deleted = state
+        .delete_orchestrator_template(&created.template.id)
+        .expect("template delete should succeed");
+    assert!(deleted.templates.is_empty());
+
+    let persisted_after_delete: OrchestratorTemplateStore = serde_json::from_slice(
+        &fs::read(&templates_path).expect("template store should still be readable"),
+    )
+    .expect("template store should deserialize after delete");
+    assert!(persisted_after_delete.templates.is_empty());
+}
+
+#[test]
+fn orchestrator_templates_reject_unknown_transition_nodes() {
+    let state = test_app_state();
+    let mut draft = sample_orchestrator_template_draft();
+    draft.transitions[0].to_session_id = "missing-session".to_owned();
+
+    let error = state
+        .create_orchestrator_template(draft)
+        .expect_err("template creation should reject unknown transition targets");
+
+    assert_eq!(error.status, StatusCode::BAD_REQUEST);
+    assert!(error.message.contains("unknown target `missing-session`"));
 }

@@ -26,6 +26,11 @@ describe("ControlPanelSurface", () => {
     expect(screen.getByRole("heading", { level: 2, name: "Projects" })).toBeInTheDocument();
     expect(screen.getByTestId("section-body")).toHaveTextContent("projects");
 
+    fireEvent.click(screen.getByRole("button", { name: "Orchestrators" }));
+
+    expect(screen.getByRole("heading", { level: 2, name: "Orchestrators" })).toBeInTheDocument();
+    expect(screen.getByTestId("section-body")).toHaveTextContent("orchestrators");
+
     fireEvent.click(screen.getByRole("button", { name: "Git status" }));
 
     expect(screen.getByRole("heading", { level: 2, name: "Git status" })).toBeInTheDocument();
@@ -93,10 +98,16 @@ describe("ControlPanelSurface", () => {
     expect(screen.getByTestId("section-body")).toHaveTextContent("sessions");
   });
 
-  it("uses Projects, Sessions, Files, Git status as the default dock order", () => {
+  it("uses Projects, Sessions, Orchestrators, Files, Git status as the default dock order", () => {
     renderSurface();
 
-    expect(getDockSectionLabels()).toEqual(["Projects", "Sessions", "Files", "Git status"]);
+    expect(getDockSectionLabels()).toEqual([
+      "Projects",
+      "Sessions",
+      "Orchestrators",
+      "Files",
+      "Git status",
+    ]);
   });
 
   it("migrates the legacy dock order so Files lands directly above Git status", () => {
@@ -107,7 +118,13 @@ describe("ControlPanelSurface", () => {
 
     renderSurface();
 
-    expect(getDockSectionLabels()).toEqual(["Projects", "Sessions", "Files", "Git status"]);
+    expect(getDockSectionLabels()).toEqual([
+      "Projects",
+      "Sessions",
+      "Files",
+      "Git status",
+      "Orchestrators",
+    ]);
   });
 
   it("reorders the dock sections by drag and drop and restores that order on remount", () => {
@@ -123,12 +140,24 @@ describe("ControlPanelSurface", () => {
     fireEvent.drop(projectsButton, { clientY: 36, dataTransfer });
     fireEvent.dragEnd(gitButton, { dataTransfer });
 
-    expect(getDockSectionLabels()).toEqual(["Projects", "Git status", "Sessions", "Files"]);
+    expect(getDockSectionLabels()).toEqual([
+      "Projects",
+      "Git status",
+      "Sessions",
+      "Orchestrators",
+      "Files",
+    ]);
 
     unmount();
     renderSurface();
 
-    expect(getDockSectionLabels()).toEqual(["Projects", "Git status", "Sessions", "Files"]);
+    expect(getDockSectionLabels()).toEqual([
+      "Projects",
+      "Git status",
+      "Sessions",
+      "Orchestrators",
+      "Files",
+    ]);
   });
 });
 

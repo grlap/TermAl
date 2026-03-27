@@ -26,6 +26,8 @@ const PANE_VIEW_MODES: readonly PaneViewMode[] = [
   ...SESSION_PANE_VIEW_MODES,
   "canvas",
   "controlPanel",
+  "orchestratorList",
+  "orchestratorCanvas",
   "sessionList",
   "projectList",
   "source",
@@ -133,6 +135,8 @@ function isWorkspaceTab(value: unknown): value is WorkspaceTab {
       return isNullableString(value.workdir) && isNullableString(value.originSessionId) && isOptionalNullableString(value.originProjectId);
     case "controlPanel":
       return isNullableString(value.originSessionId) && isOptionalNullableString(value.originProjectId);
+    case "orchestratorList":
+      return isNullableString(value.originSessionId) && isOptionalNullableString(value.originProjectId);
     case "canvas":
       return (
         Array.isArray(value.cards) &&
@@ -140,6 +144,13 @@ function isWorkspaceTab(value: unknown): value is WorkspaceTab {
         isOptionalWorkspaceCanvasZoom(value.zoom) &&
         isNullableString(value.originSessionId) &&
         isOptionalNullableString(value.originProjectId)
+      );
+    case "orchestratorCanvas":
+      return (
+        isNullableString(value.originSessionId) &&
+        isOptionalNullableString(value.originProjectId) &&
+        isOptionalNullableString(value.templateId) &&
+        (typeof value.startMode === "undefined" || value.startMode === "new")
       );
     case "sessionList":
       return isNullableString(value.originSessionId) && isOptionalNullableString(value.originProjectId);
