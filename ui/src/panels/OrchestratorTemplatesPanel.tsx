@@ -16,6 +16,7 @@ import type {
   OrchestratorTemplate,
   OrchestratorTemplateDraft,
   OrchestratorTemplateTransition,
+  OrchestratorTransitionAnchor,
   OrchestratorTransitionResultMode,
 } from "../types";
 
@@ -87,17 +88,26 @@ type ConnectionDragState = {
   pointerId: number;
   cursorX: number;
   cursorY: number;
+  /** When reconnecting an existing transition, tracks which end is fixed. */
+  reconnect?: {
+    transitionId: string;
+    movingEnd: "from" | "to";
+    fixedSessionId: string;
+    fixedAnchor: AnchorSide;
+  };
 };
 
-type AnchorSide = "top" | "right" | "bottom" | "left";
+type AnchorSide = OrchestratorTransitionAnchor;
 
-const ANCHOR_SIDES: readonly AnchorSide[] = ["top", "right", "bottom", "left"];
-
-const CONNECTOR_DOT_OFFSET = 18;
+const ANCHOR_SIDES: readonly AnchorSide[] = ["top", "top-right", "right", "bottom-right", "bottom", "bottom-left", "left", "top-left"];
 
 type TransitionGeometry = {
   transition: OrchestratorTemplateTransition;
   path: string;
+  startX: number;
+  startY: number;
+  endX: number;
+  endY: number;
   midpointX: number;
   midpointY: number;
   noteX: number;
@@ -132,11 +142,14 @@ export function OrchestratorTemplatesPanel({
   const suppressPanContextMenuRef = useRef(false);
   const zoomAnchorRef = useRef<ZoomAnchor | null>(null);
   const scaleFrameRef = useRef<HTMLDivElement | null>(null);
+  const surfaceRef = useRef<HTMLDivElement | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
+  const isMountedRef = useRef(true);
+  useEffect(() => () => { isMountedRef.current = false; }, []);
 
   const selectedTemplate = useMemo(
     () => templates.find((template) => template.id === selectedTemplateId) ?? null,
@@ -298,6 +311,7 @@ export function OrchestratorTemplatesPanel({
     try {
       if (selectedTemplateId) {
         const response = await updateOrchestratorTemplate(selectedTemplateId, draft);
+        if (!isMountedRef.current) return;
         setTemplates((current) => current.map((template) => (
           template.id === response.template.id ? response.template : template
         )));
@@ -306,6 +320,7 @@ export function OrchestratorTemplatesPanel({
         setStatusMessage("Template saved.");
       } else {
         const response = await createOrchestratorTemplate(draft);
+        if (!isMountedRef.current) return;
         setTemplates((current) => [response.template, ...current]);
         setSelectedTemplateId(response.template.id);
         setDraft(templateToDraft(response.template));
@@ -314,9 +329,10 @@ export function OrchestratorTemplatesPanel({
       }
       dispatchOrchestratorTemplatesChangedEvent();
     } catch (error) {
+      if (!isMountedRef.current) return;
       setErrorMessage(getErrorMessage(error));
     } finally {
-      setIsSaving(false);
+      if (isMountedRef.current) setIsSaving(false);
     }
   }
 
@@ -329,6 +345,7 @@ export function OrchestratorTemplatesPanel({
     setStatusMessage(null);
     try {
       const response = await deleteOrchestratorTemplate(selectedTemplateId);
+      if (!isMountedRef.current) return;
       setTemplates(response.templates);
       const nextTemplate = response.templates[0] ?? null;
       if (nextTemplate) {
@@ -343,9 +360,10 @@ export function OrchestratorTemplatesPanel({
       setStatusMessage("Template deleted.");
       dispatchOrchestratorTemplatesChangedEvent();
     } catch (error) {
+      if (!isMountedRef.current) return;
       setErrorMessage(getErrorMessage(error));
     } finally {
-      setIsDeleting(false);
+      if (isMountedRef.current) setIsDeleting(false);
     }
   }
 
@@ -457,12 +475,12 @@ export function OrchestratorTemplatesPanel({
     }
     event.preventDefault();
     event.stopPropagation();
-    event.currentTarget.setPointerCapture(event.pointerId);
 
-    const surfaceNode = event.currentTarget.closest(".orchestrator-board-surface");
+    const surfaceNode = surfaceRef.current;
     if (!surfaceNode) {
       return;
     }
+    surfaceNode.setPointerCapture(event.pointerId);
     const surfaceRect = surfaceNode.getBoundingClientRect();
     const canvasX = (event.clientX - surfaceRect.left) / zoom;
     const canvasY = (event.clientY - surfaceRect.top) / zoom;
@@ -476,12 +494,59 @@ export function OrchestratorTemplatesPanel({
     });
   }
 
+  function startReconnectDrag(
+    transitionId: string,
+    movingEnd: "from" | "to",
+    event: ReactPointerEvent<Element>,
+  ) {
+    if (event.button !== 0) {
+      return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+
+    const transition = draft.transitions.find((t) => t.id === transitionId);
+    if (!transition) {
+      return;
+    }
+
+    const surfaceNode = surfaceRef.current;
+    if (!surfaceNode) {
+      return;
+    }
+    surfaceNode.setPointerCapture(event.pointerId);
+    const surfaceRect = surfaceNode.getBoundingClientRect();
+    const canvasX = (event.clientX - surfaceRect.left) / zoom;
+    const canvasY = (event.clientY - surfaceRect.top) / zoom;
+
+    const fixedSessionId = movingEnd === "from" ? transition.toSessionId : transition.fromSessionId;
+    const fixedAnchorRaw = movingEnd === "from" ? transition.toAnchor : transition.fromAnchor;
+    const movingSessionId = movingEnd === "from" ? transition.fromSessionId : transition.toSessionId;
+    const movingAnchorRaw = movingEnd === "from" ? transition.fromAnchor : transition.toAnchor;
+    const movingAnchor: AnchorSide = isValidAnchor(movingAnchorRaw) ? movingAnchorRaw : "right";
+    const fixedAnchor: AnchorSide = isValidAnchor(fixedAnchorRaw) ? fixedAnchorRaw : "left";
+
+    setConnectionDrag({
+      fromSessionId: movingSessionId,
+      anchorSide: movingAnchor,
+      pointerId: event.pointerId,
+      cursorX: canvasX,
+      cursorY: canvasY,
+      reconnect: {
+        transitionId,
+        movingEnd,
+        fixedSessionId,
+        fixedAnchor,
+      },
+    });
+  }
+
   function updateConnectionDrag(event: ReactPointerEvent<HTMLDivElement>) {
     setConnectionDrag((current) => {
       if (!current || current.pointerId !== event.pointerId) {
         return current;
       }
-      const surfaceNode = event.currentTarget.closest(".orchestrator-board-surface");
+      const surfaceNode = surfaceRef.current;
       if (!surfaceNode) {
         return current;
       }
@@ -498,37 +563,80 @@ export function OrchestratorTemplatesPanel({
     if (!connectionDrag || connectionDrag.pointerId !== event.pointerId) {
       return;
     }
-    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
-      event.currentTarget.releasePointerCapture(event.pointerId);
+    const surfaceNode = surfaceRef.current;
+    if (surfaceNode?.hasPointerCapture(event.pointerId)) {
+      surfaceNode.releasePointerCapture(event.pointerId);
     }
 
-    const surfaceNode = event.currentTarget.closest(".orchestrator-board-surface");
     if (surfaceNode) {
       const surfaceRect = surfaceNode.getBoundingClientRect();
       const canvasX = (event.clientX - surfaceRect.left) / zoom;
       const canvasY = (event.clientY - surfaceRect.top) / zoom;
 
+      const reconnect = connectionDrag.reconnect;
+
+      // For reconnect: exclude both the moving session AND the fixed session (no self-loops).
+      const excludeIds = new Set([connectionDrag.fromSessionId]);
+      if (reconnect) {
+        excludeIds.add(reconnect.fixedSessionId);
+      }
+
       const targetSession = renderedSessions.find(
         (session) =>
-          session.id !== connectionDrag.fromSessionId &&
+          !excludeIds.has(session.id) &&
           canvasX >= session.position.x &&
           canvasX <= session.position.x + CARD_WIDTH &&
           canvasY >= session.position.y &&
           canvasY <= session.position.y + CARD_HEIGHT,
       );
 
-      if (targetSession) {
+      // Also allow dropping back on the same card to just reposition the anchor.
+      const sameCardDrop = !targetSession
+        ? renderedSessions.find(
+            (session) =>
+              session.id === connectionDrag.fromSessionId &&
+              canvasX >= session.position.x &&
+              canvasX <= session.position.x + CARD_WIDTH &&
+              canvasY >= session.position.y &&
+              canvasY <= session.position.y + CARD_HEIGHT,
+          )
+        : null;
+
+      const dropSession = targetSession ?? (reconnect ? sameCardDrop : null);
+
+      if (reconnect && dropSession) {
+        const dropAnchor = nearestAnchorSide(dropSession, canvasX, canvasY);
+        setDraft((current) => ({
+          ...current,
+          transitions: current.transitions.map((t) => {
+            if (t.id !== reconnect.transitionId) {
+              return t;
+            }
+            if (reconnect.movingEnd === "from") {
+              return { ...t, fromSessionId: dropSession.id, fromAnchor: dropAnchor };
+            }
+            return { ...t, toSessionId: dropSession.id, toAnchor: dropAnchor };
+          }),
+        }));
+      } else if (!reconnect && targetSession) {
         const alreadyExists = draft.transitions.some(
           (transition) =>
             transition.fromSessionId === connectionDrag.fromSessionId &&
             transition.toSessionId === targetSession.id,
         );
         if (!alreadyExists) {
+          const toAnchor = nearestAnchorSide(targetSession, canvasX, canvasY);
           setDraft((current) => ({
             ...current,
             transitions: [
               ...current.transitions,
-              createTransitionBetween(connectionDrag.fromSessionId, targetSession.id, current.transitions),
+              createTransitionBetween(
+                connectionDrag.fromSessionId,
+                targetSession.id,
+                connectionDrag.anchorSide,
+                toAnchor,
+                current.transitions,
+              ),
             ],
           }));
         }
@@ -711,27 +819,103 @@ export function OrchestratorTemplatesPanel({
                   onContextMenu={handleCanvasContextMenu}
                 >
                 <div
+                  ref={surfaceRef}
                   className="orchestrator-board-surface"
                   style={{ width: `${BOARD_WIDTH}px`, height: `${BOARD_HEIGHT}px`, transform: `scale(${zoom})`, transformOrigin: "top left" }}
+                  onPointerMove={connectionDrag ? updateConnectionDrag : undefined}
+                  onPointerUp={connectionDrag ? finishConnectionDrag : undefined}
+                  onPointerCancel={connectionDrag ? () => setConnectionDrag(null) : undefined}
                 >
                   <svg className="orchestrator-board-edges" width={BOARD_WIDTH} height={BOARD_HEIGHT} viewBox={`0 0 ${BOARD_WIDTH} ${BOARD_HEIGHT}`} aria-hidden="true">
-                    {transitionGeometries.map((geometry) => (
-                      <g key={geometry.transition.id}>
-                        <path className="orchestrator-board-edge" d={geometry.path} />
-                        <circle className="orchestrator-board-edge-anchor" cx={geometry.midpointX} cy={geometry.midpointY} r="5" />
-                      </g>
-                    ))}
-                    {connectionDrag ? (() => {
-                      const fromSession = renderedSessions.find((s) => s.id === connectionDrag.fromSessionId);
-                      if (!fromSession) {
+                    <defs>
+                      <marker id="orchestrator-arrowhead" markerWidth="6" markerHeight="5" refX="5.5" refY="2.5" orient="auto" markerUnits="strokeWidth">
+                        <path d="M 0 0.5 L 5.5 2.5 L 0 4.5" className="orchestrator-board-arrowhead" />
+                      </marker>
+                      <marker id="orchestrator-arrowhead-draft" markerWidth="6" markerHeight="5" refX="5.5" refY="2.5" orient="auto" markerUnits="strokeWidth">
+                        <path d="M 0 0.5 L 5.5 2.5 L 0 4.5" className="orchestrator-board-arrowhead-draft" />
+                      </marker>
+                    </defs>
+                    {transitionGeometries.map((geometry) => {
+                      const isBeingReconnected = connectionDrag?.reconnect?.transitionId === geometry.transition.id;
+                      if (isBeingReconnected) {
                         return null;
                       }
-                      const anchor = anchorPosition(fromSession, connectionDrag.anchorSide);
                       return (
-                        <path
-                          className="orchestrator-board-edge orchestrator-board-edge-draft"
-                          d={`M ${anchor.x} ${anchor.y} L ${connectionDrag.cursorX} ${connectionDrag.cursorY}`}
-                        />
+                        <g key={geometry.transition.id}>
+                          <path className="orchestrator-board-edge" d={geometry.path} markerEnd="url(#orchestrator-arrowhead)" />
+                        </g>
+                      );
+                    })}
+                    {connectionDrag ? (() => {
+                      const reconnect = connectionDrag.reconnect;
+
+                      // Determine the fixed end and the moving end.
+                      let fixedPoint: OrchestratorNodePosition | null = null;
+                      if (reconnect) {
+                        const fixedSession = renderedSessions.find((s) => s.id === reconnect.fixedSessionId);
+                        if (fixedSession) {
+                          fixedPoint = anchorPosition(fixedSession, reconnect.fixedAnchor);
+                        }
+                      }
+
+                      const movingSession = renderedSessions.find((s) => s.id === connectionDrag.fromSessionId);
+                      const movingAnchor = movingSession
+                        ? anchorPosition(movingSession, connectionDrag.anchorSide)
+                        : null;
+
+                      // Find what we're hovering over.
+                      const excludeIds = new Set([connectionDrag.fromSessionId]);
+                      if (reconnect) {
+                        excludeIds.add(reconnect.fixedSessionId);
+                      }
+                      const hoverTarget = renderedSessions.find(
+                        (s) =>
+                          !excludeIds.has(s.id) &&
+                          connectionDrag.cursorX >= s.position.x &&
+                          connectionDrag.cursorX <= s.position.x + CARD_WIDTH &&
+                          connectionDrag.cursorY >= s.position.y &&
+                          connectionDrag.cursorY <= s.position.y + CARD_HEIGHT,
+                      );
+                      // Also allow hovering over the same card (for reconnect anchor repositioning).
+                      const sameCardHover = !hoverTarget && reconnect
+                        ? renderedSessions.find(
+                            (s) =>
+                              s.id === connectionDrag.fromSessionId &&
+                              connectionDrag.cursorX >= s.position.x &&
+                              connectionDrag.cursorX <= s.position.x + CARD_WIDTH &&
+                              connectionDrag.cursorY >= s.position.y &&
+                              connectionDrag.cursorY <= s.position.y + CARD_HEIGHT,
+                          )
+                        : null;
+                      const snapTarget = hoverTarget ?? sameCardHover;
+                      const movingEndPoint = snapTarget
+                        ? nearestAnchorPosition(snapTarget, connectionDrag.cursorX, connectionDrag.cursorY)
+                        : { x: connectionDrag.cursorX, y: connectionDrag.cursorY };
+
+                      // For new connections: line from source anchor → cursor/snap.
+                      // For reconnect: line from fixed anchor → cursor/snap.
+                      const lineStart = reconnect
+                        ? (fixedPoint ?? movingEndPoint)
+                        : (movingAnchor ?? movingEndPoint);
+                      const lineEnd = movingEndPoint;
+
+                      // Arrow direction: for reconnect "from", the moving end is the source,
+                      // so the arrow points from cursor → fixed end. Swap line direction.
+                      const drawStart = reconnect?.movingEnd === "from" ? lineEnd : lineStart;
+                      const drawEnd = reconnect?.movingEnd === "from" ? lineStart : lineEnd;
+
+                      return (
+                        <g>
+                          <path
+                            className="orchestrator-board-edge orchestrator-board-edge-draft"
+                            d={`M ${drawStart.x} ${drawStart.y} L ${drawEnd.x} ${drawEnd.y}`}
+                            markerEnd="url(#orchestrator-arrowhead-draft)"
+                          />
+                          <circle className="orchestrator-board-connector-dot-svg" cx={drawStart.x} cy={drawStart.y} r="5" />
+                          {snapTarget ? (
+                            <circle className="orchestrator-board-connector-dot-svg" cx={drawEnd.x} cy={drawEnd.y} r="5" />
+                          ) : null}
+                        </g>
                       );
                     })() : null}
                   </svg>
@@ -790,24 +974,42 @@ export function OrchestratorTemplatesPanel({
                             <strong>{session.model?.trim() ? session.model : "Agent default"}</strong>
                           </div>
                         </div>
-                        {selectedNodeId === session.id && !isDragging ? (
+                        {!isDragging ? (
                           ANCHOR_SIDES.map((side) => (
                             <div
                               key={side}
                               className={`orchestrator-board-connector orchestrator-board-connector-${side}`}
                               onPointerDown={(event) => startConnectionDrag(session.id, side, event)}
-                              onPointerMove={updateConnectionDrag}
-                              onPointerUp={finishConnectionDrag}
-                              onPointerCancel={() => setConnectionDrag(null)}
                             >
                               <div className="orchestrator-board-connector-dot" />
-                              <div className="orchestrator-board-connector-arrow" />
                             </div>
                           ))
                         ) : null}
                       </article>
                     );
                   })}
+                  <div className="orchestrator-board-endpoint-layer">
+                    {transitionGeometries.map((geometry) => {
+                      const isBeingReconnected = connectionDrag?.reconnect?.transitionId === geometry.transition.id;
+                      if (isBeingReconnected) {
+                        return null;
+                      }
+                      return (
+                        <div key={`${geometry.transition.id}-endpoints`}>
+                          <div
+                            className="orchestrator-board-edge-endpoint-handle"
+                            style={{ left: `${geometry.startX - 7}px`, top: `${geometry.startY - 7}px` }}
+                            onPointerDown={(event) => startReconnectDrag(geometry.transition.id, "from", event )}
+                          />
+                          <div
+                            className="orchestrator-board-edge-endpoint-handle"
+                            style={{ left: `${geometry.endX - 7}px`, top: `${geometry.endY - 7}px` }}
+                            onPointerDown={(event) => startReconnectDrag(geometry.transition.id, "to", event )}
+                          />
+                        </div>
+                      );
+                    })}
+                  </div>
                 </div>
                 </div>
               </div>
@@ -1110,6 +1312,8 @@ function createTransition(
 function createTransitionBetween(
   fromSessionId: string,
   toSessionId: string,
+  fromAnchor: AnchorSide,
+  toAnchor: AnchorSide,
   existingTransitions: OrchestratorTemplateTransition[],
 ): OrchestratorTemplateTransition {
   const nextNumber = nextSequenceNumber(
@@ -1120,6 +1324,8 @@ function createTransitionBetween(
     id: `transition-${nextNumber}`,
     fromSessionId,
     toSessionId,
+    fromAnchor,
+    toAnchor,
     trigger: "onCompletion",
     resultMode: "lastResponse",
     promptTemplate: "Continue with:\n{{result}}",
@@ -1191,21 +1397,29 @@ function clampPosition(x: number, y: number): OrchestratorNodePosition {
   };
 }
 
+function isValidAnchor(value: string | null | undefined): value is AnchorSide {
+  return ANCHOR_SIDES.includes(value as AnchorSide);
+}
+
 function buildTransitionGeometry(
   transition: OrchestratorTemplateTransition,
   fromNode: OrchestratorSessionTemplate,
   toNode: OrchestratorSessionTemplate,
 ): TransitionGeometry {
-  const startCenter = {
-    x: fromNode.position.x + CARD_WIDTH / 2,
-    y: fromNode.position.y + CARD_HEIGHT / 2,
-  };
-  const endCenter = {
+  const toCenter = {
     x: toNode.position.x + CARD_WIDTH / 2,
     y: toNode.position.y + CARD_HEIGHT / 2,
   };
-  const start = projectCardEdge(startCenter, endCenter);
-  const end = projectCardEdge(endCenter, startCenter);
+  const fromCenter = {
+    x: fromNode.position.x + CARD_WIDTH / 2,
+    y: fromNode.position.y + CARD_HEIGHT / 2,
+  };
+  const start = isValidAnchor(transition.fromAnchor)
+    ? anchorPosition(fromNode, transition.fromAnchor)
+    : nearestAnchorPosition(fromNode, toCenter.x, toCenter.y);
+  const end = isValidAnchor(transition.toAnchor)
+    ? anchorPosition(toNode, transition.toAnchor)
+    : nearestAnchorPosition(toNode, fromCenter.x, fromCenter.y);
   const midpointX = (start.x + end.x) / 2;
   const midpointY = (start.y + end.y) / 2;
   const dx = end.x - start.x;
@@ -1217,6 +1431,10 @@ function buildTransitionGeometry(
   return {
     transition,
     path: `M ${start.x} ${start.y} L ${end.x} ${end.y}`,
+    startX: start.x,
+    startY: start.y,
+    endX: end.x,
+    endY: end.y,
     midpointX,
     midpointY,
     noteX,
@@ -1225,42 +1443,68 @@ function buildTransitionGeometry(
   };
 }
 
-function projectCardEdge(
-  from: OrchestratorNodePosition,
-  to: OrchestratorNodePosition,
-): OrchestratorNodePosition {
-  const dx = to.x - from.x;
-  const dy = to.y - from.y;
-  if (dx === 0 && dy === 0) {
-    return { ...from };
-  }
-
-  const halfWidth = CARD_WIDTH / 2;
-  const halfHeight = CARD_HEIGHT / 2;
-  const scale = 1 / Math.max(Math.abs(dx) / halfWidth, Math.abs(dy) / halfHeight);
-
-  return {
-    x: from.x + dx * scale,
-    y: from.y + dy * scale,
-  };
-}
-
 function anchorPosition(
   session: OrchestratorSessionTemplate,
   side: AnchorSide,
 ): OrchestratorNodePosition {
-  const cx = session.position.x + CARD_WIDTH / 2;
-  const cy = session.position.y + CARD_HEIGHT / 2;
+  const x = session.position.x;
+  const y = session.position.y;
+  const cx = x + CARD_WIDTH / 2;
+  const cy = y + CARD_HEIGHT / 2;
   switch (side) {
     case "top":
-      return { x: cx, y: session.position.y - CONNECTOR_DOT_OFFSET };
-    case "bottom":
-      return { x: cx, y: session.position.y + CARD_HEIGHT + CONNECTOR_DOT_OFFSET };
-    case "left":
-      return { x: session.position.x - CONNECTOR_DOT_OFFSET, y: cy };
+      return { x: cx, y };
+    case "top-right":
+      return { x: x + CARD_WIDTH, y };
     case "right":
-      return { x: session.position.x + CARD_WIDTH + CONNECTOR_DOT_OFFSET, y: cy };
+      return { x: x + CARD_WIDTH, y: cy };
+    case "bottom-right":
+      return { x: x + CARD_WIDTH, y: y + CARD_HEIGHT };
+    case "bottom":
+      return { x: cx, y: y + CARD_HEIGHT };
+    case "bottom-left":
+      return { x, y: y + CARD_HEIGHT };
+    case "left":
+      return { x, y: cy };
+    case "top-left":
+      return { x, y };
   }
+}
+
+function nearestAnchorSide(
+  session: OrchestratorSessionTemplate,
+  cursorX: number,
+  cursorY: number,
+): AnchorSide {
+  let bestSide: AnchorSide = "top";
+  let bestDist = Infinity;
+  for (const side of ANCHOR_SIDES) {
+    const anchor = anchorPosition(session, side);
+    const dist = Math.hypot(cursorX - anchor.x, cursorY - anchor.y);
+    if (dist < bestDist) {
+      bestDist = dist;
+      bestSide = side;
+    }
+  }
+  return bestSide;
+}
+
+function nearestAnchorPosition(
+  session: OrchestratorSessionTemplate,
+  cursorX: number,
+  cursorY: number,
+): OrchestratorNodePosition {
+  let bestAnchor: OrchestratorNodePosition | null = null;
+  let bestDist = Infinity;
+  for (const side of ANCHOR_SIDES) {
+    const anchor = anchorPosition(session, side);
+    const dist = Math.hypot(cursorX - anchor.x, cursorY - anchor.y);
+    if (dist < bestDist) {
+      bestDist = dist;
+      bestAnchor = anchor;
+    }
+  }
+  return bestAnchor ?? { x: session.position.x + CARD_WIDTH / 2, y: session.position.y + CARD_HEIGHT / 2 };
 }
 
 function TransitionNoteIcon() {

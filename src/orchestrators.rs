@@ -119,6 +119,10 @@ struct OrchestratorTemplateTransition {
     id: String,
     from_session_id: String,
     to_session_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    from_anchor: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    to_anchor: Option<String>,
     #[serde(default)]
     trigger: OrchestratorTransitionTrigger,
     result_mode: OrchestratorTransitionResultMode,
@@ -435,6 +439,8 @@ fn normalize_orchestrator_transition(
             &transition.to_session_id,
             "transition target",
         )?,
+        from_anchor: transition.from_anchor,
+        to_anchor: transition.to_anchor,
         trigger: transition.trigger,
         result_mode: transition.result_mode,
         prompt_template: normalize_optional_orchestrator_text(transition.prompt_template),

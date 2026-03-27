@@ -157,10 +157,14 @@ export type OrchestratorTransitionResultMode =
   | "summary"
   | "summaryAndLastResponse";
 
+export type OrchestratorTransitionAnchor = "top" | "top-right" | "right" | "bottom-right" | "bottom" | "bottom-left" | "left" | "top-left";
+
 export type OrchestratorTemplateTransition = {
   id: string;
   fromSessionId: string;
   toSessionId: string;
+  fromAnchor?: OrchestratorTransitionAnchor | null;
+  toAnchor?: OrchestratorTransitionAnchor | null;
   trigger: OrchestratorTransitionTrigger;
   resultMode: OrchestratorTransitionResultMode;
   promptTemplate?: string | null;

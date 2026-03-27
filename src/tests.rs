@@ -12284,6 +12284,8 @@ fn sample_orchestrator_template_draft() -> OrchestratorTemplateDraft {
                 id: "planner-to-builder".to_owned(),
                 from_session_id: "planner".to_owned(),
                 to_session_id: "builder".to_owned(),
+                from_anchor: Some("bottom".to_owned()),
+                to_anchor: Some("top".to_owned()),
                 trigger: OrchestratorTransitionTrigger::OnCompletion,
                 result_mode: OrchestratorTransitionResultMode::LastResponse,
                 prompt_template: Some(
@@ -12294,6 +12296,8 @@ fn sample_orchestrator_template_draft() -> OrchestratorTemplateDraft {
                 id: "builder-to-reviewer".to_owned(),
                 from_session_id: "builder".to_owned(),
                 to_session_id: "reviewer".to_owned(),
+                from_anchor: Some("right".to_owned()),
+                to_anchor: Some("left".to_owned()),
                 trigger: OrchestratorTransitionTrigger::OnCompletion,
                 result_mode: OrchestratorTransitionResultMode::SummaryAndLastResponse,
                 prompt_template: Some(
