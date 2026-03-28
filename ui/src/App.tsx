@@ -176,6 +176,7 @@ import {
   type WorkspaceNode,
   type WorkspacePane,
   type WorkspaceState,
+  type WorkspaceTab,
 } from "./workspace";
 import {
   getStoredWorkspaceLayout,
@@ -1112,6 +1113,10 @@ export default function App() {
   const workspaceHasOnlyControlPanel = useMemo(
     () => workspaceContainsOnlyControlPanel(workspace),
     [workspace],
+  );
+  const workspaceHasControlPanelTab = useMemo(
+    () => workspace.panes.some((pane) => pane.tabs.some((tab) => tab.kind === "controlPanel")),
+    [workspace.panes],
   );
   const selectedProject =
     selectedProjectId === ALL_PROJECTS_FILTER_ID
@@ -3394,6 +3399,12 @@ export default function App() {
     const tab = pane?.tabs.find((candidate) => candidate.id === tabId);
     if (tab?.kind === "session") {
       requestScrollToBottom(tab.sessionId);
+    }
+    if (workspaceHasControlPanelTab) {
+      const projectId = resolveWorkspaceTabProjectId(tab, sessionLookup);
+      if (projectId && projectLookup.has(projectId)) {
+        setSelectedProjectId(projectId);
+      }
     }
 
     setWorkspace((current) => activatePane(current, paneId, tabId));
@@ -10770,6 +10781,25 @@ function MarkdownCard({
       />
     </article>
   );
+}
+
+function resolveWorkspaceTabProjectId(
+  tab: WorkspaceTab | undefined,
+  sessionLookup: Map<string, Session>,
+): string | null {
+  if (!tab) {
+    return null;
+  }
+
+  if (tab.kind === "session") {
+    return sessionLookup.get(tab.sessionId)?.projectId ?? null;
+  }
+
+  const originSession =
+    "originSessionId" in tab && tab.originSessionId
+      ? (sessionLookup.get(tab.originSessionId) ?? null)
+      : null;
+  return ("originProjectId" in tab ? tab.originProjectId : null) ?? originSession?.projectId ?? null;
 }
 
 function parallelAgentsHeading(message: ParallelAgentsMessage) {

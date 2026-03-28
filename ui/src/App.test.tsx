@@ -1400,6 +1400,157 @@ describe("App", () => {
       }
     });
   });
+  it("switches the control panel project when selecting a project-scoped tab", async () => {
+    await withSuppressedActWarnings(async () => {
+      const originalFetch = globalThis.fetch;
+      const originalEventSource = globalThis.EventSource;
+      const originalResizeObserver = globalThis.ResizeObserver;
+      const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+        const requestUrl = new URL(String(input), "http://localhost");
+        if (requestUrl.pathname === "/api/state") {
+          return jsonResponse({
+            revision: 1,
+            projects: [
+              {
+                id: "project-termal",
+                name: "TermAl",
+                rootPath: "/projects/termal",
+              },
+              {
+                id: "project-api",
+                name: "API",
+                rootPath: "/projects/api",
+              },
+            ],
+            sessions: [
+              makeSession("session-1", {
+                name: "Session 1",
+                projectId: "project-termal",
+                workdir: "/projects/termal",
+              }),
+            ],
+          });
+        }
+
+        if (requestUrl.pathname === "/api/git/status") {
+          const repoPath = requestUrl.searchParams.get("path") ?? "";
+          const repoSegments = repoPath.split("/").filter(Boolean);
+          const repoName = repoSegments[repoSegments.length - 1] ?? "workspace";
+          return jsonResponse({
+            ahead: 0,
+            behind: 0,
+            branch: "main",
+            files: [],
+            isClean: true,
+            repoRoot: repoPath,
+            upstream: "origin/main",
+            workdir: repoPath,
+            statusMessage: `${repoName} ready`,
+          });
+        }
+
+        throw new Error(`Unexpected fetch: ${requestUrl.pathname}${requestUrl.search}`);
+      });
+
+      function getSessionTablist() {
+        const sessionTablist = screen
+          .getAllByRole("tablist")
+          .find((candidate) => within(candidate).queryByText("Session 1"));
+
+        if (!sessionTablist) {
+          throw new Error("Session tablist not found");
+        }
+
+        return sessionTablist;
+      }
+
+      function getControlPanelShell() {
+        const controlPanelShell = document.querySelector(".control-panel-shell");
+        if (!(controlPanelShell instanceof HTMLDivElement)) {
+          throw new Error("Control panel shell not found");
+        }
+
+        return controlPanelShell;
+      }
+
+      async function selectControlPanelProject(optionName: string | RegExp) {
+        const combobox = within(getControlPanelShell()).getByRole("combobox", { name: "Project" });
+        await clickAndSettle(combobox);
+
+        const listbox = await screen.findByRole("listbox");
+        const option = within(listbox)
+          .getAllByRole("option")
+          .find((candidate) => {
+            const label =
+              candidate.querySelector(".combo-option-label")?.textContent?.trim() ??
+              candidate.textContent?.trim() ??
+              "";
+
+            return typeof optionName === "string" ? label === optionName : optionName.test(label);
+          });
+
+        if (!option) {
+          throw new Error(`Control panel project option not found for ${String(optionName)}`);
+        }
+
+        await clickAndSettle(option);
+      }
+
+      window.localStorage.clear();
+      vi.stubGlobal("fetch", fetchMock);
+      vi.stubGlobal("EventSource", EventSourceMock as unknown as typeof EventSource);
+      vi.stubGlobal("ResizeObserver", ResizeObserverMock as unknown as typeof ResizeObserver);
+      const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
+      HTMLElement.prototype.scrollIntoView = vi.fn();
+
+      try {
+        await renderApp();
+        const eventSource = EventSourceMock.instances[0];
+        expect(eventSource).toBeTruthy();
+        act(() => {
+          eventSource.dispatchError();
+        });
+        await settleAsyncUi();
+        await clickAndSettle(await screen.findByRole("button", { name: "Sessions" }));
+
+        const sessionList = document.querySelector(".session-list");
+        if (!(sessionList instanceof HTMLDivElement)) {
+          throw new Error("Session list not found");
+        }
+
+        const sessionRowLabel = await within(sessionList).findByText("Session 1");
+        const sessionRowButton = sessionRowLabel.closest("button");
+        if (!sessionRowButton) {
+          throw new Error("Session row button not found");
+        }
+
+        await clickAndSettle(sessionRowButton);
+        await clickAndSettle(await screen.findByRole("button", { name: "Git status" }));
+
+        expect(within(getControlPanelShell()).getByRole("combobox", { name: "Project" })).toHaveTextContent("TermAl");
+
+        await selectControlPanelProject(/^API$/i);
+        await clickAndSettle(await screen.findByRole("button", { name: "Open tab" }));
+
+        const sessionTablist = getSessionTablist();
+        expect(within(sessionTablist).getByText("Git: api")).toBeInTheDocument();
+
+        await selectControlPanelProject(/^TermAl$/i);
+        await clickAndSettle(await screen.findByRole("button", { name: "Open tab" }));
+        expect(within(sessionTablist).getByText("Git: termal")).toBeInTheDocument();
+        expect(within(getControlPanelShell()).getByRole("combobox", { name: "Project" })).toHaveTextContent("TermAl");
+
+        await clickAndSettle(within(sessionTablist).getByRole("tab", { name: /Git: api/i }));
+        expect(within(getControlPanelShell()).getByRole("combobox", { name: "Project" })).toHaveTextContent("API");
+      } finally {
+        window.localStorage.clear();
+        HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
+        restoreGlobal("fetch", originalFetch);
+        restoreGlobal("EventSource", originalEventSource);
+        restoreGlobal("ResizeObserver", originalResizeObserver);
+      }
+    });
+  });
   it("keeps the control panel divider resizable when a session pane is open", async () => {
     const originalFetch = globalThis.fetch;
     const originalEventSource = globalThis.EventSource;
