@@ -36,6 +36,67 @@ The CORS `allow_methods` missing DELETE and the orchestrator card grab handle mi
 support are also fixed in the current tree. DELETE is now included in the CORS method list, and
 the card grab handle responds to Enter and Space key presses.
 
+The newer orchestration runtime issues around entry-session instruction injection, transition
+handoff durability, per-turn result extraction, template-read serialization during instance
+creation, kill cleanup, and agent readiness validation are also fixed in the current tree.
+Runtime orchestration sessions now inject template instructions on their first prompt whether it
+comes from a user kickoff or a transition, transition handoff now goes through a persist-first
+queued prompt before any runtime send, transition result extraction is scoped to the current
+turn, template loading is serialized under the state mutex during instance creation, kill cleanup
+immediately normalizes owning orchestrator instances, and orchestrator-spawned sessions now
+validate local agent readiness before they are created.
+
+The follow-up orchestration regressions around duplicate replay after dispatch, silent stalled
+pending transitions, and resume-loop starvation are also fixed in the current tree. Failed
+transition dispatch now becomes a visible destination-session error instead of leaving hidden
+pending work behind, runtime completion handlers log orchestration-finalization failures, and one
+instance's failed dispatch no longer prevents other orchestrators from draining their own pending
+work.
+
+The missing axum coverage for orchestrator instance routes is also fixed in the current tree.
+`GET /api/orchestrators`, `POST /api/orchestrators`, and `GET /api/orchestrators/{id}` now have
+route-level tests in addition to the direct state-level orchestration tests.
+
+The `ApprovalDecision::Pending` panic and the cyclic transition graph resource exhaustion are also
+fixed in the current tree. `Pending` is now rejected by the early guard alongside `Interrupted`
+and `Canceled`, and template validation runs a DFS-based cycle detection that rejects non-DAG
+transition graphs.
+
+The orchestrator handoff restart recovery gap is also fixed in the current tree. On startup,
+`dispatch_orphaned_queued_prompts` scans for idle sessions with queued prompts and no active
+runtime, and auto-dispatches them. This covers the window where a transition was committed
+(queued prompt persisted, pending transition removed) but the process crashed before
+`dispatch_next_queued_turn` ran. A backend regression now covers that exact restart window.
+
+---
+
+## Orchestrator transitions fire on stop and error paths, not only on completed replies
+
+**Severity:** High - downstream automation can run on failure text instead of a completed result.
+
+The current runtime fans out `OnCompletion` transitions from `stop_session`, runtime-exit
+handling, and error paths like `fail_turn_if_runtime_matches` / `mark_turn_error_if_runtime_matches`.
+That contradicts the current orchestration contract, which defines `OnCompletion` as a source
+session becoming prompt-ready after the agent replied. A manually stopped turn or a crashed/error
+turn did not produce a completed agent reply, so routing their failure text downstream changes the
+meaning of the graph and can cascade invalid follow-up work.
+
+The problem is reinforced by the new tests: the backend now explicitly asserts that
+`stop_session` and runtime-exit failures should enqueue downstream prompts. That gives false
+confidence around behavior that the feature brief says should not happen.
+
+**Current behavior:**
+- `stop_session` schedules downstream transitions and forwards `"Turn stopped by user."`
+- runtime exits and turn-error paths schedule downstream transitions even when the source turn did
+  not complete normally
+- tests codify this behavior as the expected contract
+
+**Proposal:**
+- only fire `OnCompletion` transitions from the successful reply -> idle completion path
+- treat stop/error/exit paths as terminal or retryable failure states without downstream fan-out
+- replace the current stop/error orchestration tests with regressions that assert transitions do
+  not fire for non-completed turns
+
 ## `tab-drag.ts` and `workspace-storage.ts` validators have drifted
 
 **Severity:** Medium — correctness risk on cross-window tab drags.
@@ -229,6 +290,22 @@ Concrete work implied by the current TermAl parity gaps. Ordered by user impact 
   `normalize_orchestrator_template_draft` rejects self-referencing transitions, duplicate
   session/transition IDs, and drafts with zero sessions, but only the unknown-target case is
   tested.
+- [ ] Add orchestrator lifecycle endpoints (stop, pause, resume):
+  `OrchestratorInstanceStatus` defines `Running`, `Paused`, and `Stopped` but no API endpoint
+  transitions between them. Users cannot stop a running orchestration except by killing
+  individual sessions.
+- [ ] Add orchestrator instances to `StateResponse` or a dedicated SSE delta:
+  the frontend currently has no push notification for orchestrator state changes (transitions
+  fired, instances completed). It must poll `GET /api/orchestrators`.
+- [ ] Add session/transition count limits to orchestrator template validation:
+  `normalize_orchestrator_template_draft` has no upper bounds on `sessions.len()` or
+  `transitions.len()`. Cap at ~50 sessions and ~200 transitions.
+- [ ] Add unit tests for orchestrator geometry functions:
+  `anchorPosition`, `nearestAnchorSide`, `nearestAnchorPosition`, `buildTransitionGeometry`,
+  and `isValidAnchor` are pure deterministic functions with no DOM dependencies.
+- [ ] Add backend regressions that transitions only fire on real completions:
+  replace the current stop-session and runtime-error orchestration expectations with coverage that
+  only the successful reply -> idle path triggers `OnCompletion` fan-out.
 - [ ] Continue splitting backend modules as they grow:
   `src/main.rs` was split into `api.rs`, `state.rs`, `runtime.rs`, `turns.rs`, `remote.rs`, and
   `tests.rs`. Some of these modules (especially `state.rs` and `turns.rs`) are already large and

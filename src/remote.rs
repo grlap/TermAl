@@ -1571,6 +1571,7 @@ fn upsert_remote_proxy_session_record(
         active_codex_approval_policy: None,
         active_codex_reasoning_effort: None,
         active_codex_sandbox_mode: None,
+        active_turn_start_message_count: None,
         agent_commands: Vec::new(),
         codex_approval_policy: session
             .approval_policy

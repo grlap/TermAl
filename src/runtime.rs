@@ -778,8 +778,14 @@ fn handle_acp_prompt_command(
 
         match result {
             Ok(_) => {
-                let _ = wait_state
-                    .finish_turn_ok_if_runtime_matches(&wait_session_id, &wait_runtime_token);
+                if let Err(err) = wait_state
+                    .finish_turn_ok_if_runtime_matches(&wait_session_id, &wait_runtime_token)
+                {
+                    eprintln!(
+                        "runtime state warning> failed to finalize ACP turn for session `{}`: {err:#}",
+                        wait_session_id
+                    );
+                }
             }
             Err(err) => {
                 let _ = wait_state.handle_runtime_exit_if_matches(
@@ -4803,10 +4809,15 @@ fn spawn_claude_runtime(
                             );
                         }
                     } else {
-                        let _ = reader_state.finish_turn_ok_if_runtime_matches(
+                        if let Err(err) = reader_state.finish_turn_ok_if_runtime_matches(
                             &reader_session_id,
                             &reader_runtime_token,
-                        );
+                        ) {
+                            eprintln!(
+                                "runtime state warning> failed to finalize Claude turn for session `{}`: {err:#}",
+                                reader_session_id
+                            );
+                        }
                     }
                 }
             }

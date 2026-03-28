@@ -134,6 +134,14 @@ fn app_router(state: AppState) -> Router {
                 .put(update_orchestrator_template)
                 .delete(delete_orchestrator_template),
         )
+        .route(
+            "/api/orchestrators",
+            get(list_orchestrator_instances).post(create_orchestrator_instance),
+        )
+        .route(
+            "/api/orchestrators/{id}",
+            get(get_orchestrator_instance),
+        )
         .route("/api/instructions/search", get(search_instructions))
         .route("/api/events", get(state_events))
         .route(

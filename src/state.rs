@@ -64,6 +64,10 @@ impl AppState {
             state.persist_internal_locked(&inner)?;
         }
         state.restore_remote_event_bridges();
+        if let Err(err) = state.resume_pending_orchestrator_transitions() {
+            eprintln!("orchestrator> failed resuming pending transitions: {err:#}");
+        }
+        state.dispatch_orphaned_queued_prompts();
         Ok(state)
     }
 
@@ -789,6 +793,7 @@ impl AppState {
             .iter()
             .map(|attachment| attachment.metadata.clone())
             .collect::<Vec<_>>();
+        record.active_turn_start_message_count = Some(record.session.messages.len());
         let expanded_prompt = expanded_prompt
             .as_deref()
             .map(str::trim)
@@ -1017,6 +1022,45 @@ impl AppState {
         Ok(dispatch)
     }
 
+    /// On startup, find idle sessions that have orphaned queued prompts (e.g. from an
+    /// orchestrator transition that was committed but not dispatched before a crash) and
+    /// auto-dispatch them.
+    fn dispatch_orphaned_queued_prompts(&self) {
+        let session_ids: Vec<String> = {
+            let inner = self.inner.lock().expect("state mutex poisoned");
+            inner
+                .sessions
+                .iter()
+                .filter(|record| {
+                    !record.is_remote_proxy()
+                        && record.session.status == SessionStatus::Idle
+                        && !record.queued_prompts.is_empty()
+                        && matches!(record.runtime, SessionRuntime::None)
+                })
+                .map(|record| record.session.id.clone())
+                .collect()
+        };
+
+        for session_id in session_ids {
+            match self.dispatch_next_queued_turn(&session_id) {
+                Ok(Some(dispatch)) => {
+                    if let Err(err) = deliver_turn_dispatch(self, dispatch) {
+                        eprintln!(
+                            "startup> failed dispatching orphaned queued prompt for `{session_id}`: {}",
+                            err.message
+                        );
+                    }
+                }
+                Ok(None) => {}
+                Err(err) => {
+                    eprintln!(
+                        "startup> failed dispatching orphaned queued prompt for `{session_id}`: {err:#}"
+                    );
+                }
+            }
+        }
+    }
+
     fn dispatch_next_queued_turn(&self, session_id: &str) -> Result<Option<TurnDispatch>> {
         let mut inner = self.inner.lock().expect("state mutex poisoned");
         let index = inner
@@ -1058,21 +1102,36 @@ impl AppState {
             .find_visible_session_index(session_id)
             .ok_or_else(|| ApiError::not_found("session not found"))?;
 
-        let prompt = request.text.trim().to_owned();
-        let expanded_prompt = request
+        let mut prompt = request.text.trim().to_owned();
+        let mut expanded_prompt = request
             .expanded_text
             .as_deref()
             .map(str::trim)
             .filter(|value| !value.is_empty() && *value != prompt)
             .map(str::to_owned);
         let attachments = parse_prompt_image_attachments(&request.attachments)?;
-        if prompt.is_empty() && attachments.is_empty() {
-            return Err(ApiError::bad_request("prompt cannot be empty"));
-        }
         if record_has_archived_codex_thread(&inner.sessions[index]) {
             return Err(ApiError::conflict(
                 "the current Codex thread is archived; unarchive it before sending another prompt",
             ));
+        }
+        if let Some(template_session) =
+            orchestrator_template_session_for_runtime_session(&inner, session_id)
+        {
+            let rendered_prompt = build_orchestrator_destination_prompt(
+                &inner.sessions[index],
+                &template_session.instructions,
+                expanded_prompt.as_deref().unwrap_or(&prompt),
+            );
+            if expanded_prompt.is_some() {
+                prompt = rendered_prompt.clone();
+                expanded_prompt = Some(rendered_prompt);
+            } else {
+                prompt = rendered_prompt;
+            }
+        }
+        if prompt.is_empty() && attachments.is_empty() {
+            return Err(ApiError::bad_request("prompt cannot be empty"));
         }
 
         let session_is_busy = matches!(
@@ -2232,6 +2291,7 @@ impl AppState {
 
         record.runtime = SessionRuntime::None;
         record.runtime_reset_required = false;
+        record.active_turn_start_message_count = None;
         clear_all_pending_requests(record);
         self.commit_locked(&mut inner)?;
         Ok(())
@@ -2268,11 +2328,21 @@ impl AppState {
 
             record.session.status = SessionStatus::Error;
             record.session.preview = make_preview(cleaned);
+            record.active_turn_start_message_count = None;
+            let completion_revision = inner.revision.saturating_add(1);
+            schedule_orchestrator_transitions_for_completed_session(
+                &mut inner,
+                session_id,
+                completion_revision,
+            );
             self.commit_locked(&mut inner)?;
             true
         };
 
         if should_dispatch_next {
+            if let Err(err) = self.resume_pending_orchestrator_transitions() {
+                eprintln!("orchestrator> failed resuming pending transitions after fail_turn_if_runtime_matches: {err:#}");
+            }
             if let Some(dispatch) = self.dispatch_next_queued_turn(session_id)? {
                 deliver_turn_dispatch(self, dispatch).map_err(|err| {
                     anyhow!("failed to deliver queued turn dispatch: {}", err.message)
@@ -2358,12 +2428,22 @@ impl AppState {
             if !cleaned.is_empty() {
                 record.session.preview = make_preview(cleaned);
             }
-            let has_queued_prompts = !record.queued_prompts.is_empty();
+            let completion_revision = inner.revision.saturating_add(1);
+            schedule_orchestrator_transitions_for_completed_session(
+                &mut inner,
+                session_id,
+                completion_revision,
+            );
+            inner.sessions[index].active_turn_start_message_count = None;
+            let has_queued_prompts = !inner.sessions[index].queued_prompts.is_empty();
             self.commit_locked(&mut inner)?;
             has_queued_prompts
         };
 
         if should_dispatch_next {
+            if let Err(err) = self.resume_pending_orchestrator_transitions() {
+                eprintln!("orchestrator> failed resuming pending transitions after mark_turn_error: {err:#}");
+            }
             if let Some(dispatch) = self.dispatch_next_queued_turn(session_id)? {
                 deliver_turn_dispatch(self, dispatch).map_err(|err| {
                     anyhow!("failed to deliver queued turn dispatch: {}", err.message)
@@ -2395,11 +2475,19 @@ impl AppState {
             if record.session.preview.trim().is_empty() {
                 record.session.preview = "Turn completed.".to_owned();
             }
+            let completion_revision = inner.revision.saturating_add(1);
+            schedule_orchestrator_transitions_for_completed_session(
+                &mut inner,
+                session_id,
+                completion_revision,
+            );
+            inner.sessions[index].active_turn_start_message_count = None;
             self.commit_locked(&mut inner)?;
             true
         };
 
         if should_dispatch_next {
+            self.resume_pending_orchestrator_transitions()?;
             if let Some(dispatch) = self.dispatch_next_queued_turn(session_id)? {
                 deliver_turn_dispatch(self, dispatch).map_err(|err| {
                     anyhow!("failed to deliver queued turn dispatch: {}", err.message)
@@ -2417,7 +2505,7 @@ impl AppState {
         error_message: Option<&str>,
     ) -> Result<()> {
         let cleaned = error_message.map(str::trim).unwrap_or("");
-        let should_dispatch_next = {
+        let (should_resume_orchestrator, should_dispatch_next) = {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
             let index = inner
                 .find_session_index(session_id)
@@ -2431,13 +2519,8 @@ impl AppState {
                 SessionStatus::Active | SessionStatus::Approval
             );
             let message_id = (was_busy || !cleaned.is_empty()).then(|| inner.next_message_id());
-            let record = &mut inner.sessions[index];
-            record.runtime = SessionRuntime::None;
-            record.runtime_reset_required = false;
-            clear_all_pending_requests(record);
-
-            if !cleaned.is_empty() || was_busy {
-                let detail = if !cleaned.is_empty() {
+            let detail = if !cleaned.is_empty() || was_busy {
+                Some(if !cleaned.is_empty() {
                     cleaned.to_owned()
                 } else {
                     match token {
@@ -2451,26 +2534,48 @@ impl AppState {
                             "Agent session exited before the active turn completed".to_owned()
                         }
                     }
-                };
-                if let Some(message_id) = message_id {
-                    record.session.messages.push(Message::Text {
-                        attachments: Vec::new(),
-                        id: message_id,
-                        timestamp: stamp_now(),
-                        author: Author::Assistant,
-                        text: format!("Turn failed: {detail}"),
-                        expanded_text: None,
-                    });
-                }
-                record.session.status = SessionStatus::Error;
-                record.session.preview = make_preview(&detail);
-            }
+                })
+            } else {
+                None
+            };
+            let has_queued_prompts = {
+                let record = &mut inner.sessions[index];
+                record.runtime = SessionRuntime::None;
+                record.runtime_reset_required = false;
+                clear_all_pending_requests(record);
 
-            let has_queued_prompts = !record.queued_prompts.is_empty();
+                if let Some(detail) = detail.as_ref() {
+                    if let Some(message_id) = message_id {
+                        record.session.messages.push(Message::Text {
+                            attachments: Vec::new(),
+                            id: message_id,
+                            timestamp: stamp_now(),
+                            author: Author::Assistant,
+                            text: format!("Turn failed: {detail}"),
+                            expanded_text: None,
+                        });
+                    }
+                    record.session.status = SessionStatus::Error;
+                    record.session.preview = make_preview(detail);
+                }
+                !record.queued_prompts.is_empty()
+            };
+            if was_busy {
+                let completion_revision = inner.revision.saturating_add(1);
+                schedule_orchestrator_transitions_for_completed_session(
+                    &mut inner,
+                    session_id,
+                    completion_revision,
+                );
+            }
+            inner.sessions[index].active_turn_start_message_count = None;
             self.commit_locked(&mut inner)?;
-            has_queued_prompts
+            (was_busy, has_queued_prompts)
         };
 
+        if should_resume_orchestrator {
+            self.resume_pending_orchestrator_transitions()?;
+        }
         if should_dispatch_next {
             if let Some(dispatch) = self.dispatch_next_queued_turn(session_id)? {
                 deliver_turn_dispatch(self, dispatch).map_err(|err| {
@@ -2674,6 +2779,7 @@ impl AppState {
             if agent.supports_codex_prompt_settings() {
                 inner.ignore_discovered_codex_thread(external_session_id.as_deref());
             }
+            inner.normalize_orchestrator_instances();
 
             self.commit_locked(&mut inner).map_err(|err| {
                 ApiError::internal(format!("failed to persist session state: {err:#}"))
@@ -2788,25 +2894,54 @@ impl AppState {
                 "session cleanup warning> shared Codex stop interrupt failed for session `{session_id}`: {err:#}"
             );
         }
-        self.clear_runtime(session_id)
-            .map_err(|err| ApiError::internal(format!("failed to clear runtime: {err:#}")))?;
-        self.push_message(
-            session_id,
-            Message::Text {
-                attachments: Vec::new(),
-                id: self.allocate_message_id(),
-                timestamp: stamp_now(),
-                author: Author::Assistant,
-                text: "Turn stopped by user.".to_owned(),
-                expanded_text: None,
-            },
-        )
-        .map_err(|err| ApiError::internal(format!("failed to record stop message: {err:#}")))?;
+        let should_dispatch_next = {
+            let mut inner = self.inner.lock().expect("state mutex poisoned");
+            let index = inner
+                .find_visible_session_index(session_id)
+                .ok_or_else(|| ApiError::not_found("session not found"))?;
+            let message_id = inner.next_message_id();
+            {
+                let record = &mut inner.sessions[index];
+                record.runtime = SessionRuntime::None;
+                record.runtime_reset_required = false;
+                clear_all_pending_requests(record);
+                record.session.status = SessionStatus::Idle;
+                record.session.preview = "Turn stopped by user.".to_owned();
+                record.session.messages.push(Message::Text {
+                    attachments: Vec::new(),
+                    id: message_id,
+                    timestamp: stamp_now(),
+                    author: Author::Assistant,
+                    text: "Turn stopped by user.".to_owned(),
+                    expanded_text: None,
+                });
+            }
 
-        if let Some(dispatch) = self.dispatch_next_queued_turn(session_id).map_err(|err| {
-            ApiError::internal(format!("failed to dispatch queued prompt: {err:#}"))
-        })? {
-            deliver_turn_dispatch(self, dispatch)?;
+            let completion_revision = inner.revision.saturating_add(1);
+            schedule_orchestrator_transitions_for_completed_session(
+                &mut inner,
+                session_id,
+                completion_revision,
+            );
+            inner.sessions[index].active_turn_start_message_count = None;
+            let has_queued_prompts = !inner.sessions[index].queued_prompts.is_empty();
+            self.commit_locked(&mut inner).map_err(|err| {
+                ApiError::internal(format!("failed to persist session state: {err:#}"))
+            })?;
+            has_queued_prompts
+        };
+
+        self.resume_pending_orchestrator_transitions()
+            .map_err(|err| ApiError::internal(format!(
+                "failed to resume orchestrator transitions after stop: {err:#}"
+            )))?;
+
+        if should_dispatch_next {
+            if let Some(dispatch) = self.dispatch_next_queued_turn(session_id).map_err(|err| {
+                ApiError::internal(format!("failed to dispatch queued prompt: {err:#}"))
+            })? {
+                deliver_turn_dispatch(self, dispatch)?;
+            }
         }
 
         Ok(self.snapshot())
@@ -3257,10 +3392,10 @@ impl AppState {
         }
         if matches!(
             decision,
-            ApprovalDecision::Interrupted | ApprovalDecision::Canceled
+            ApprovalDecision::Pending | ApprovalDecision::Interrupted | ApprovalDecision::Canceled
         ) {
             return Err(ApiError::bad_request(
-                "approval decisions cannot be marked interrupted or canceled manually",
+                "approval decisions cannot be marked pending, interrupted, or canceled manually",
             ));
         }
 
@@ -3741,6 +3876,9 @@ impl AppState {
         Ok(self.snapshot_from_inner(&inner))
     }
 
+    /// Mark a turn as failed with an error message. Note: callers (e.g. `deliver_turn_dispatch`)
+    /// are responsible for scheduling orchestrator transitions after calling this if the failed
+    /// turn belongs to an orchestrated session.
     fn fail_turn(&self, session_id: &str, error_message: &str) -> Result<()> {
         let cleaned = error_message.trim();
         if !cleaned.is_empty() {
@@ -3762,9 +3900,10 @@ impl AppState {
             let index = inner
                 .find_session_index(session_id)
                 .ok_or_else(|| anyhow!("session `{session_id}` not found"))?;
-            let session = &mut inner.sessions[index].session;
-            session.status = SessionStatus::Error;
-            session.preview = make_preview(cleaned);
+            let record = &mut inner.sessions[index];
+            record.session.status = SessionStatus::Error;
+            record.session.preview = make_preview(cleaned);
+            record.active_turn_start_message_count = None;
             self.commit_locked(&mut inner)?;
         }
 
@@ -4354,6 +4493,7 @@ struct StateInner {
     projects: Vec<Project>,
     ignored_discovered_codex_thread_ids: BTreeSet<String>,
     sessions: Vec<SessionRecord>,
+    orchestrator_instances: Vec<OrchestratorInstance>,
 }
 
 impl StateInner {
@@ -4368,6 +4508,7 @@ impl StateInner {
             projects: Vec::new(),
             ignored_discovered_codex_thread_ids: BTreeSet::new(),
             sessions: Vec::new(),
+            orchestrator_instances: Vec::new(),
         }
     }
 
@@ -4415,6 +4556,7 @@ impl StateInner {
             active_codex_approval_policy: None,
             active_codex_reasoning_effort: None,
             active_codex_sandbox_mode: None,
+            active_turn_start_message_count: None,
             agent_commands: Vec::new(),
             codex_approval_policy: default_codex_approval_policy(),
             codex_reasoning_effort: self.preferences.default_codex_reasoning_effort,
@@ -4769,6 +4911,8 @@ struct PersistedState {
     projects: Vec<Project>,
     #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
     ignored_discovered_codex_thread_ids: BTreeSet<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    orchestrator_instances: Vec<OrchestratorInstance>,
     sessions: Vec<PersistedSessionRecord>,
 }
 
@@ -4785,6 +4929,7 @@ impl PersistedState {
             ignored_discovered_codex_thread_ids: inner
                 .ignored_discovered_codex_thread_ids
                 .clone(),
+            orchestrator_instances: inner.orchestrator_instances.clone(),
             sessions: inner
                 .sessions
                 .iter()
@@ -4807,6 +4952,7 @@ impl PersistedState {
             next_message_number: self.next_message_number,
             projects: self.projects,
             ignored_discovered_codex_thread_ids: self.ignored_discovered_codex_thread_ids,
+            orchestrator_instances: self.orchestrator_instances,
             sessions: self
                 .sessions
                 .into_iter()
@@ -4815,6 +4961,7 @@ impl PersistedState {
         };
         inner.ensure_projects_consistent();
         inner.recover_interrupted_sessions();
+        inner.normalize_orchestrator_instances();
         inner
     }
 }
@@ -4914,6 +5061,7 @@ impl PersistedSessionRecord {
             active_codex_approval_policy: self.active_codex_approval_policy,
             active_codex_reasoning_effort: self.active_codex_reasoning_effort,
             active_codex_sandbox_mode: self.active_codex_sandbox_mode,
+            active_turn_start_message_count: None,
             agent_commands: Vec::new(),
             codex_approval_policy: self.codex_approval_policy,
             codex_reasoning_effort: self.codex_reasoning_effort,
@@ -4945,6 +5093,7 @@ struct SessionRecord {
     active_codex_approval_policy: Option<CodexApprovalPolicy>,
     active_codex_reasoning_effort: Option<CodexReasoningEffort>,
     active_codex_sandbox_mode: Option<CodexSandboxMode>,
+    active_turn_start_message_count: Option<usize>,
     agent_commands: Vec<AgentCommand>,
     codex_approval_policy: CodexApprovalPolicy,
     codex_reasoning_effort: CodexReasoningEffort,
@@ -4985,6 +5134,7 @@ fn reset_hidden_claude_spare_record(record: &mut SessionRecord) {
     record.queued_prompts.clear();
     record.message_positions.clear();
     record.runtime_reset_required = false;
+    record.active_turn_start_message_count = None;
 }
 
 fn has_pending_requests(record: &SessionRecord) -> bool {
