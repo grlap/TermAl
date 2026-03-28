@@ -1,11 +1,13 @@
 import type {
-  PaneViewMode,
-  SessionPaneViewMode,
   WorkspaceNode,
   WorkspacePane,
   WorkspaceState,
-  WorkspaceTab,
 } from "./workspace";
+import {
+  isPaneViewMode,
+  isSessionPaneViewMode,
+  isWorkspaceTab,
+} from "./workspace-tab-validation";
 
 export const WORKSPACE_LAYOUT_STORAGE_KEY = "termal-workspace-layout";
 
@@ -15,28 +17,6 @@ export type StoredWorkspaceLayout = {
   controlPanelSide: ControlPanelSide;
   workspace: WorkspaceState;
 };
-
-const SESSION_PANE_VIEW_MODES: readonly SessionPaneViewMode[] = [
-  "session",
-  "prompt",
-  "commands",
-  "diffs",
-];
-const PANE_VIEW_MODES: readonly PaneViewMode[] = [
-  ...SESSION_PANE_VIEW_MODES,
-  "canvas",
-  "controlPanel",
-  "orchestratorList",
-  "orchestratorCanvas",
-  "sessionList",
-  "projectList",
-  "source",
-  "filesystem",
-  "gitStatus",
-  "instructionDebugger",
-  "diffPreview",
-];
-const DIFF_CHANGE_TYPES = ["edit", "create"] as const;
 
 export function getStoredWorkspaceLayout(): StoredWorkspaceLayout | null {
   if (typeof window === "undefined") {
@@ -119,66 +99,6 @@ function isWorkspacePane(value: unknown): value is WorkspacePane {
   );
 }
 
-function isWorkspaceTab(value: unknown): value is WorkspaceTab {
-  if (!isRecord(value) || !isString(value.id) || !isString(value.kind)) {
-    return false;
-  }
-
-  switch (value.kind) {
-    case "session":
-      return isString(value.sessionId);
-    case "source":
-      return isNullableString(value.path) && isNullableString(value.originSessionId) && isOptionalNullableString(value.originProjectId);
-    case "filesystem":
-      return isNullableString(value.rootPath) && isNullableString(value.originSessionId) && isOptionalNullableString(value.originProjectId);
-    case "gitStatus":
-      return isNullableString(value.workdir) && isNullableString(value.originSessionId) && isOptionalNullableString(value.originProjectId);
-    case "controlPanel":
-      return isNullableString(value.originSessionId) && isOptionalNullableString(value.originProjectId);
-    case "orchestratorList":
-      return isNullableString(value.originSessionId) && isOptionalNullableString(value.originProjectId);
-    case "canvas":
-      return (
-        Array.isArray(value.cards) &&
-        value.cards.every((card) => isWorkspaceCanvasCard(card)) &&
-        isOptionalWorkspaceCanvasZoom(value.zoom) &&
-        isNullableString(value.originSessionId) &&
-        isOptionalNullableString(value.originProjectId)
-      );
-    case "orchestratorCanvas":
-      return (
-        isNullableString(value.originSessionId) &&
-        isOptionalNullableString(value.originProjectId) &&
-        isOptionalNullableString(value.templateId) &&
-        (typeof value.startMode === "undefined" || value.startMode === "new")
-      );
-    case "sessionList":
-      return isNullableString(value.originSessionId) && isOptionalNullableString(value.originProjectId);
-    case "projectList":
-      return isNullableString(value.originSessionId) && isOptionalNullableString(value.originProjectId);
-    case "instructionDebugger":
-      return (
-        isNullableString(value.workdir) &&
-        isNullableString(value.originSessionId) &&
-        isOptionalNullableString(value.originProjectId)
-      );
-    case "diffPreview":
-      return (
-        isString(value.diff) &&
-        isOptionalNullableString(value.changeSetId) &&
-        isString(value.diffMessageId) &&
-        isNullableString(value.filePath) &&
-        isOptionalNullableString(value.language) &&
-        isNullableString(value.originSessionId) &&
-        isOptionalNullableString(value.originProjectId) &&
-        isString(value.summary) &&
-        isDiffChangeType(value.changeType)
-      );
-    default:
-      return false;
-  }
-}
-
 function isWorkspaceNode(value: unknown, paneIds: ReadonlySet<string>): value is WorkspaceNode {
   if (!isRecord(value) || !isString(value.type)) {
     return false;
@@ -201,43 +121,8 @@ function isWorkspaceNode(value: unknown, paneIds: ReadonlySet<string>): value is
   return false;
 }
 
-function isPaneViewMode(value: unknown): value is PaneViewMode {
-  return PANE_VIEW_MODES.includes(value as PaneViewMode);
-}
-
-function isSessionPaneViewMode(value: unknown): value is SessionPaneViewMode {
-  return SESSION_PANE_VIEW_MODES.includes(value as SessionPaneViewMode);
-}
-
-function isWorkspaceCanvasCard(value: unknown) {
-  return (
-    isRecord(value) &&
-    isString(value.sessionId) &&
-    typeof value.x === "number" &&
-    Number.isFinite(value.x) &&
-    typeof value.y === "number" &&
-    Number.isFinite(value.y)
-  );
-}
-
-function isOptionalWorkspaceCanvasZoom(value: unknown) {
-  return typeof value === "undefined" || isWorkspaceCanvasZoom(value);
-}
-
-function isWorkspaceCanvasZoom(value: unknown) {
-  return typeof value === "number" && Number.isFinite(value) && value > 0;
-}
-
-function isDiffChangeType(value: unknown): value is (typeof DIFF_CHANGE_TYPES)[number] {
-  return DIFF_CHANGE_TYPES.includes(value as (typeof DIFF_CHANGE_TYPES)[number]);
-}
-
 function isValidSplitRatio(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value) && value > 0 && value < 1;
-}
-
-function isOptionalNullableString(value: unknown): value is string | null | undefined {
-  return typeof value === "undefined" || isNullableString(value);
 }
 
 function isNullableString(value: unknown): value is string | null {

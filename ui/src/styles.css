@@ -7946,6 +7946,15 @@ textarea {
   margin: 0;
 }
 
+.orchestrator-run-button {
+  background: var(--signal-green) !important;
+  border-color: var(--signal-green) !important;
+}
+
+.orchestrator-run-button:disabled {
+  opacity: 0.5;
+}
+
 .orchestrator-toggle {
   display: inline-flex;
   align-items: center;

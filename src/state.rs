@@ -2329,20 +2329,12 @@ impl AppState {
             record.session.status = SessionStatus::Error;
             record.session.preview = make_preview(cleaned);
             record.active_turn_start_message_count = None;
-            let completion_revision = inner.revision.saturating_add(1);
-            schedule_orchestrator_transitions_for_completed_session(
-                &mut inner,
-                session_id,
-                completion_revision,
-            );
+            let has_queued_prompts = !record.queued_prompts.is_empty();
             self.commit_locked(&mut inner)?;
-            true
+            has_queued_prompts
         };
 
         if should_dispatch_next {
-            if let Err(err) = self.resume_pending_orchestrator_transitions() {
-                eprintln!("orchestrator> failed resuming pending transitions after fail_turn_if_runtime_matches: {err:#}");
-            }
             if let Some(dispatch) = self.dispatch_next_queued_turn(session_id)? {
                 deliver_turn_dispatch(self, dispatch).map_err(|err| {
                     anyhow!("failed to deliver queued turn dispatch: {}", err.message)
@@ -2428,12 +2420,6 @@ impl AppState {
             if !cleaned.is_empty() {
                 record.session.preview = make_preview(cleaned);
             }
-            let completion_revision = inner.revision.saturating_add(1);
-            schedule_orchestrator_transitions_for_completed_session(
-                &mut inner,
-                session_id,
-                completion_revision,
-            );
             inner.sessions[index].active_turn_start_message_count = None;
             let has_queued_prompts = !inner.sessions[index].queued_prompts.is_empty();
             self.commit_locked(&mut inner)?;
@@ -2441,9 +2427,6 @@ impl AppState {
         };
 
         if should_dispatch_next {
-            if let Err(err) = self.resume_pending_orchestrator_transitions() {
-                eprintln!("orchestrator> failed resuming pending transitions after mark_turn_error: {err:#}");
-            }
             if let Some(dispatch) = self.dispatch_next_queued_turn(session_id)? {
                 deliver_turn_dispatch(self, dispatch).map_err(|err| {
                     anyhow!("failed to deliver queued turn dispatch: {}", err.message)
@@ -2505,7 +2488,7 @@ impl AppState {
         error_message: Option<&str>,
     ) -> Result<()> {
         let cleaned = error_message.map(str::trim).unwrap_or("");
-        let (should_resume_orchestrator, should_dispatch_next) = {
+        let should_dispatch_next = {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
             let index = inner
                 .find_session_index(session_id)
@@ -2560,22 +2543,11 @@ impl AppState {
                 }
                 !record.queued_prompts.is_empty()
             };
-            if was_busy {
-                let completion_revision = inner.revision.saturating_add(1);
-                schedule_orchestrator_transitions_for_completed_session(
-                    &mut inner,
-                    session_id,
-                    completion_revision,
-                );
-            }
             inner.sessions[index].active_turn_start_message_count = None;
             self.commit_locked(&mut inner)?;
-            (was_busy, has_queued_prompts)
+            has_queued_prompts
         };
 
-        if should_resume_orchestrator {
-            self.resume_pending_orchestrator_transitions()?;
-        }
         if should_dispatch_next {
             if let Some(dispatch) = self.dispatch_next_queued_turn(session_id)? {
                 deliver_turn_dispatch(self, dispatch).map_err(|err| {
@@ -2871,27 +2843,10 @@ impl AppState {
             runtime
         };
 
-        let shared_interrupt_warning = match runtime_to_stop {
-            KillableRuntime::Codex(handle) => {
-                if let Some(shared_session) = &handle.shared_session {
-                    shared_session.interrupt_and_detach().err()
-                } else {
-                    handle.kill().map_err(|err| {
-                        ApiError::internal(format!("failed to stop session: {err:#}"))
-                    })?;
-                    None
-                }
-            }
-            runtime => {
-                runtime
-                    .kill()
-                    .map_err(|err| ApiError::internal(format!("failed to stop session: {err:#}")))?;
-                None
-            }
-        };
-        if let Some(err) = shared_interrupt_warning {
+        if let Err(err) = shutdown_removed_runtime(runtime_to_stop, &format!("session `{session_id}`"))
+        {
             eprintln!(
-                "session cleanup warning> shared Codex stop interrupt failed for session `{session_id}`: {err:#}"
+                "session cleanup warning> failed to stop session `{session_id}` cleanly: {err:#}"
             );
         }
         let should_dispatch_next = {
@@ -2917,12 +2872,6 @@ impl AppState {
                 });
             }
 
-            let completion_revision = inner.revision.saturating_add(1);
-            schedule_orchestrator_transitions_for_completed_session(
-                &mut inner,
-                session_id,
-                completion_revision,
-            );
             inner.sessions[index].active_turn_start_message_count = None;
             let has_queued_prompts = !inner.sessions[index].queued_prompts.is_empty();
             self.commit_locked(&mut inner).map_err(|err| {
@@ -2930,11 +2879,6 @@ impl AppState {
             })?;
             has_queued_prompts
         };
-
-        self.resume_pending_orchestrator_transitions()
-            .map_err(|err| ApiError::internal(format!(
-                "failed to resume orchestrator transitions after stop: {err:#}"
-            )))?;
 
         if should_dispatch_next {
             if let Some(dispatch) = self.dispatch_next_queued_turn(session_id).map_err(|err| {
@@ -6735,16 +6679,6 @@ enum KillableRuntime {
     Claude(ClaudeRuntimeHandle),
     Codex(CodexRuntimeHandle),
     Acp(AcpRuntimeHandle),
-}
-
-impl KillableRuntime {
-    fn kill(&self) -> Result<()> {
-        match self {
-            Self::Claude(handle) => handle.kill(),
-            Self::Codex(handle) => handle.kill(),
-            Self::Acp(handle) => handle.kill(),
-        }
-    }
 }
 
 fn shutdown_removed_runtime(runtime: KillableRuntime, context: &str) -> Result<()> {

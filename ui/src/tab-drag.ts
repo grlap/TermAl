@@ -1,4 +1,5 @@
 import type { WorkspaceTab } from "./workspace";
+import { isWorkspaceTab } from "./workspace-tab-validation";
 
 export const TAB_DRAG_CHANNEL_NAME = "termal-workspace-tab-drag";
 export const TAB_DRAG_MIME_TYPE = "application/x-termal-workspace-tab";
@@ -117,88 +118,6 @@ function isWorkspaceTabDrag(value: unknown): value is WorkspaceTabDrag {
     typeof value.tabId === "string" &&
     isWorkspaceTab(value.tab)
   );
-}
-
-function isWorkspaceTab(value: unknown): value is WorkspaceTab {
-  if (!isRecord(value) || typeof value.id !== "string" || typeof value.kind !== "string") {
-    return false;
-  }
-
-  switch (value.kind) {
-    case "session":
-      return typeof value.sessionId === "string";
-    case "source":
-      return isNullableString(value.path) && isNullableString(value.originSessionId);
-    case "filesystem":
-      return isNullableString(value.rootPath) && isNullableString(value.originSessionId);
-    case "gitStatus":
-      return isNullableString(value.workdir) && isNullableString(value.originSessionId);
-    case "controlPanel":
-      return isNullableString(value.originSessionId) && isOptionalNullableString(value.originProjectId);
-    case "orchestratorList":
-      return isNullableString(value.originSessionId) && isOptionalNullableString(value.originProjectId);
-    case "canvas":
-      return (
-        Array.isArray(value.cards) &&
-        value.cards.every((card) => isWorkspaceCanvasCard(card)) &&
-        isOptionalWorkspaceCanvasZoom(value.zoom) &&
-        isNullableString(value.originSessionId) &&
-        isOptionalNullableString(value.originProjectId)
-      );
-    case "orchestratorCanvas":
-      return (
-        isNullableString(value.originSessionId) &&
-        isOptionalNullableString(value.originProjectId) &&
-        isOptionalNullableString(value.templateId) &&
-        (typeof value.startMode === "undefined" || value.startMode === "new")
-      );
-    case "sessionList":
-      return isNullableString(value.originSessionId) && isOptionalNullableString(value.originProjectId);
-    case "projectList":
-      return isNullableString(value.originSessionId) && isOptionalNullableString(value.originProjectId);
-    case "instructionDebugger":
-      return isNullableString(value.workdir) && isNullableString(value.originSessionId);
-    case "diffPreview":
-      return (
-        (value.changeType === "create" || value.changeType === "edit") &&
-        isOptionalNullableString(value.changeSetId) &&
-        typeof value.diff === "string" &&
-        typeof value.diffMessageId === "string" &&
-        isNullableString(value.filePath) &&
-        isNullableString(value.language) &&
-        isNullableString(value.originSessionId) &&
-        typeof value.summary === "string"
-      );
-    default:
-      return false;
-  }
-}
-
-function isWorkspaceCanvasCard(value: unknown) {
-  return (
-    isRecord(value) &&
-    typeof value.sessionId === "string" &&
-    typeof value.x === "number" &&
-    Number.isFinite(value.x) &&
-    typeof value.y === "number" &&
-    Number.isFinite(value.y)
-  );
-}
-
-function isOptionalWorkspaceCanvasZoom(value: unknown) {
-  return typeof value === "undefined" || isWorkspaceCanvasZoom(value);
-}
-
-function isWorkspaceCanvasZoom(value: unknown) {
-  return typeof value === "number" && Number.isFinite(value) && value > 0;
-}
-
-function isNullableString(value: unknown): value is string | null {
-  return value === null || typeof value === "string";
-}
-
-function isOptionalNullableString(value: unknown): value is string | null | undefined {
-  return typeof value === "undefined" || isNullableString(value);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

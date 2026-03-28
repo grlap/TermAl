@@ -2,12 +2,14 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent 
 
 import { AgentIcon } from "../agent-icon";
 import {
+  createOrchestratorInstance,
   createOrchestratorTemplate,
   deleteOrchestratorTemplate,
   fetchOrchestratorTemplates,
   updateOrchestratorTemplate,
 } from "../api";
 import { sanitizeUserFacingErrorMessage } from "../error-messages";
+import { isLocalRemoteId } from "../remotes";
 import { dispatchOrchestratorTemplatesChangedEvent } from "../orchestrator-templates-events";
 import type {
   AgentType,
@@ -18,6 +20,7 @@ import type {
   OrchestratorTemplateTransition,
   OrchestratorTransitionAnchor,
   OrchestratorTransitionResultMode,
+  Project,
 } from "../types";
 
 const BOARD_WIDTH = 2560;
@@ -124,10 +127,14 @@ type PanelState = {
 export function OrchestratorTemplatesPanel({
   initialTemplateId = null,
   persistenceKey = null,
+  projects = [],
+  onStateUpdated,
   startMode = "browse",
 }: {
   initialTemplateId?: string | null;
   persistenceKey?: string | null;
+  projects?: Project[];
+  onStateUpdated?: (state: import("../api").StateResponse) => void;
   startMode?: "browse" | "edit" | "new";
 }) {
   const [templates, setTemplates] = useState<OrchestratorTemplate[]>([]);
@@ -205,6 +212,8 @@ export function OrchestratorTemplatesPanel({
   const referenceDraft = selectedTemplate ? templateToDraft(selectedTemplate) : emptyDraft();
   const isDirty = JSON.stringify(draft) !== JSON.stringify(referenceDraft);
   const isCanvasMode = startMode !== "browse";
+  const selectedProject = projects.find((project) => project.id === draft.projectId) ?? null;
+  const selectedProjectIsLocal = isLocalRemoteId(selectedProject?.remoteId);
 
   useEffect(() => {
     let cancelled = false;
@@ -377,6 +386,28 @@ export function OrchestratorTemplatesPanel({
       setErrorMessage(getErrorMessage(error));
     } finally {
       if (isMountedRef.current) setIsDeleting(false);
+    }
+  }
+
+  const [isRunning, setIsRunning] = useState(false);
+
+  async function runTemplate() {
+    if (!selectedTemplateId) {
+      return;
+    }
+    setIsRunning(true);
+    setErrorMessage(null);
+    setStatusMessage(null);
+    try {
+      const response = await createOrchestratorInstance(selectedTemplateId, draft.projectId ?? null);
+      if (!isMountedRef.current) return;
+      onStateUpdated?.(response.state);
+      setStatusMessage(`Orchestration started: ${response.orchestrator.id}`);
+    } catch (error) {
+      if (!isMountedRef.current) return;
+      setErrorMessage(getErrorMessage(error));
+    } finally {
+      if (isMountedRef.current) setIsRunning(false);
     }
   }
 
@@ -796,15 +827,60 @@ export function OrchestratorTemplatesPanel({
                   setErrorMessage(null);
                 }} disabled={!isDirty || isSaving}>Reset draft</button>
                 <button className="ghost-button" type="button" onClick={() => void removeTemplate()} disabled={!selectedTemplateId || isDeleting || isSaving}>Delete</button>
-                <button className="send-button" type="button" onClick={() => void saveTemplate()} disabled={isSaving || isDeleting || !!validationError || !isDirty}>
+                <button
+                  className="send-button"
+                  type="button"
+                  onClick={() => void saveTemplate()}
+                  disabled={isSaving || isDeleting || !isDirty}
+                  title={
+                    !isDirty
+                      ? "No unsaved changes"
+                      : validationError ?? undefined
+                  }
+                >
                   {selectedTemplateId ? (isSaving ? "Saving..." : "Save template") : isSaving ? "Creating..." : "Create template"}
                 </button>
+                {selectedTemplateId ? (
+                  <button
+                    className="send-button orchestrator-run-button"
+                    type="button"
+                    onClick={() => void runTemplate()}
+                    disabled={isRunning || isDirty || !draft.projectId || !selectedProjectIsLocal}
+                    title={
+                      !draft.projectId
+                        ? "Select a project in the template first"
+                        : !selectedProjectIsLocal
+                          ? "Runtime orchestrations currently require a local project"
+                          : isDirty
+                            ? "Save changes before running"
+                            : `Run on ${selectedProject?.name ?? draft.projectId}`
+                    }
+                  >
+                    {isRunning ? "Starting..." : "▶ Run"}
+                  </button>
+                ) : null}
               </div>
             </div>
             <div className="orchestrator-template-meta-grid">
               <div className="session-control-group">
                 <label className="session-control-label" htmlFor="orchestrator-template-name">Template name</label>
                 <input id="orchestrator-template-name" className="themed-input" type="text" value={draft.name} onChange={(event) => setDraft((current) => ({ ...current, name: event.target.value }))} placeholder="Feature delivery" />
+              </div>
+              <div className="session-control-group">
+                <label className="session-control-label" htmlFor="orchestrator-template-project">Project</label>
+                <select
+                  id="orchestrator-template-project"
+                  className="themed-input"
+                  value={draft.projectId ?? ""}
+                  onChange={(event) => setDraft((current) => ({ ...current, projectId: event.target.value || null }))}
+                >
+                  <option value="">Select a project…</option>
+                  {projects.map((project) => (
+                    <option key={project.id} value={project.id}>
+                      {project.name}{project.remoteId && project.remoteId !== "local" ? ` (${project.remoteId})` : ""}
+                    </option>
+                  ))}
+                </select>
               </div>
               <div className="session-control-group orchestrator-template-description-group">
                 <label className="session-control-label" htmlFor="orchestrator-template-description">Description</label>
@@ -1127,13 +1203,14 @@ export function OrchestratorTemplatesPanel({
 }
 
 function emptyDraft(): OrchestratorTemplateDraft {
-  return { name: "", description: "", sessions: [], transitions: [] };
+  return { name: "", description: "", projectId: null, sessions: [], transitions: [] };
 }
 
 function templateToDraft(template: OrchestratorTemplate): OrchestratorTemplateDraft {
   return {
     name: template.name,
     description: template.description,
+    projectId: template.projectId ?? null,
     sessions: template.sessions.map((session) => ({
       ...session,
       model: session.model ?? "",
@@ -1224,6 +1301,10 @@ function readState(stateKey: string): PanelState | null {
       {
         name: draft.name,
         description: draft.description,
+        projectId:
+          typeof draft.projectId === "string" && draft.projectId.trim()
+            ? draft.projectId
+            : null,
         sessions: draft.sessions
           .filter(isSessionTemplate)
           .map((session) => ({
@@ -1392,6 +1473,39 @@ function validateDraft(draft: OrchestratorTemplateDraft) {
     }
     if (transition.fromSessionId === transition.toSessionId) {
       return `Transition \`${transition.id.trim()}\` must connect two different sessions.`;
+    }
+  }
+
+  const adjacency = new Map<string, string[]>();
+  for (const transition of draft.transitions) {
+    const next = adjacency.get(transition.fromSessionId) ?? [];
+    next.push(transition.toSessionId);
+    adjacency.set(transition.fromSessionId, next);
+  }
+
+  const color = new Map<string, 0 | 1 | 2>();
+  for (const sessionId of sessionIds) {
+    color.set(sessionId, 0);
+  }
+
+  function hasCycle(sessionId: string): boolean {
+    color.set(sessionId, 1);
+    for (const neighbor of adjacency.get(sessionId) ?? []) {
+      const nextColor = color.get(neighbor) ?? 0;
+      if (nextColor === 1) {
+        return true;
+      }
+      if (nextColor === 0 && hasCycle(neighbor)) {
+        return true;
+      }
+    }
+    color.set(sessionId, 2);
+    return false;
+  }
+
+  for (const sessionId of sessionIds) {
+    if ((color.get(sessionId) ?? 0) === 0 && hasCycle(sessionId)) {
+      return "Transitions must form a directed acyclic graph.";
     }
   }
 

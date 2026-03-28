@@ -173,6 +173,7 @@ export type OrchestratorTemplateTransition = {
 export type OrchestratorTemplateDraft = {
   name: string;
   description: string;
+  projectId?: string | null;
   sessions: OrchestratorSessionTemplate[];
   transitions: OrchestratorTemplateTransition[];
 };
@@ -181,6 +182,37 @@ export type OrchestratorTemplate = OrchestratorTemplateDraft & {
   id: string;
   createdAt: string;
   updatedAt: string;
+};
+
+export type OrchestratorInstanceStatus = "running" | "paused" | "stopped";
+
+export type OrchestratorSessionInstance = {
+  templateSessionId: string;
+  sessionId: string;
+  lastCompletionRevision?: number | null;
+  lastDeliveredCompletionRevision?: number | null;
+};
+
+export type PendingTransition = {
+  id: string;
+  transitionId: string;
+  sourceSessionId: string;
+  destinationSessionId: string;
+  completionRevision: number;
+  renderedPrompt: string;
+  createdAt: string;
+};
+
+export type OrchestratorInstance = {
+  id: string;
+  templateId: string;
+  projectId: string;
+  templateSnapshot: OrchestratorTemplate;
+  status: OrchestratorInstanceStatus;
+  sessionInstances: OrchestratorSessionInstance[];
+  pendingTransitions: PendingTransition[];
+  createdAt: string;
+  completedAt?: string | null;
 };
 
 export type Session = {

@@ -340,6 +340,56 @@ describe("MarkdownContent", () => {
     });
   });
 
+  it("opens localhost app file URLs through the source callback", () => {
+    const onOpenSourceLink = vi.fn();
+
+    render(
+      <MarkdownContent
+        markdown="[20260322000004_child_provisioning_rpcs.sql](http://127.0.0.1:4173/C:/github/Personal/questly/supabase/migrations/20260322000004_child_provisioning_rpcs.sql#L15C1)"
+        onOpenSourceLink={onOpenSourceLink}
+        workspaceRoot="C:/github/Personal/questly"
+      />,
+    );
+
+    const link = screen.getByRole("link", { name: "20260322000004_child_provisioning_rpcs.sql" });
+    expect(link).not.toHaveAttribute("target");
+
+    fireEvent.click(link);
+
+    expect(onOpenSourceLink).toHaveBeenCalledWith({
+      path: "C:/github/Personal/questly/supabase/migrations/20260322000004_child_provisioning_rpcs.sql",
+      line: 15,
+      column: 1,
+      openInNewTab: false,
+    });
+  });
+
+  it("renders bare localhost app file URLs with workspace-relative labels", () => {
+    const onOpenSourceLink = vi.fn();
+
+    render(
+      <MarkdownContent
+        markdown="http://127.0.0.1:4173/C:/github/Personal/questly/supabase/migrations/20260322000004_child_provisioning_rpcs.sql#L15C1"
+        onOpenSourceLink={onOpenSourceLink}
+        workspaceRoot="C:/github/Personal/questly"
+      />,
+    );
+
+    const link = screen.getByRole("link", {
+      name: "supabase/migrations/20260322000004_child_provisioning_rpcs.sql#L15C1",
+    });
+    expect(link).not.toHaveAttribute("target");
+
+    fireEvent.click(link);
+
+    expect(onOpenSourceLink).toHaveBeenCalledWith({
+      path: "C:/github/Personal/questly/supabase/migrations/20260322000004_child_provisioning_rpcs.sql",
+      line: 15,
+      column: 1,
+      openInNewTab: false,
+    });
+  });
+
   it("autolinks bare file references with line targets", () => {
     const onOpenSourceLink = vi.fn();
 

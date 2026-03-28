@@ -8,6 +8,7 @@ import {
   updateOrchestratorTemplate,
 } from "../api";
 import type {
+  Project,
   OrchestratorSessionTemplate,
   OrchestratorTemplate,
   OrchestratorTemplateTransition,
@@ -62,16 +63,20 @@ describe("OrchestratorTemplatesPanel", () => {
       template: makeTemplate({
         id: "orchestrator-template-1",
         name: "Launch Flow",
+        projectId: "project-a",
         sessions: [makeSession({ id: "session-1", name: "Session 1" })],
       }),
     });
 
-    render(<OrchestratorTemplatesPanel />);
+    render(<OrchestratorTemplatesPanel projects={[makeProject()]} />);
 
     await screen.findByText("No orchestration templates yet. Start a new one and save it here.");
 
     fireEvent.change(screen.getByLabelText("Template name"), {
       target: { value: "Launch Flow" },
+    });
+    fireEvent.change(screen.getByLabelText("Project"), {
+      target: { value: "project-a" },
     });
     fireEvent.click(screen.getByRole("button", { name: "Add session" }));
     fireEvent.click(screen.getByRole("button", { name: "Create template" }));
@@ -80,6 +85,7 @@ describe("OrchestratorTemplatesPanel", () => {
       expect(createTemplateMock).toHaveBeenCalledWith(
         expect.objectContaining({
           name: "Launch Flow",
+          projectId: "project-a",
           sessions: [
             expect.objectContaining({
               id: "session-1",
@@ -90,6 +96,66 @@ describe("OrchestratorTemplatesPanel", () => {
       );
     });
     expect(screen.getByText("Template created.")).toBeInTheDocument();
+  });
+
+  it("restores the selected project from persisted draft state", async () => {
+    fetchTemplatesMock.mockResolvedValue({ templates: [] });
+    window.localStorage.setItem(
+      "termal-orchestrator-panel-state:orchestrator-test",
+      JSON.stringify({
+        draft: {
+          name: "Recovered Flow",
+          description: "",
+          projectId: "project-a",
+          sessions: [makeSession({ id: "session-1", name: "Session 1" })],
+          transitions: [],
+        },
+        selectedNodeId: "session-1",
+        selectedTemplateId: null,
+      }),
+    );
+
+    render(
+      <OrchestratorTemplatesPanel
+        persistenceKey="orchestrator-test"
+        projects={[makeProject()]}
+      />,
+    );
+
+    expect(await screen.findByDisplayValue("Recovered Flow")).toBeInTheDocument();
+    expect(screen.getByLabelText("Project")).toHaveValue("project-a");
+  });
+
+  it("shows a validation error for cyclic transition drafts", async () => {
+    fetchTemplatesMock.mockResolvedValue({ templates: [] });
+    window.localStorage.setItem(
+      "termal-orchestrator-panel-state:orchestrator-cycle",
+      JSON.stringify({
+        draft: {
+          name: "Cycle Flow",
+          description: "",
+          projectId: null,
+          sessions: [
+            makeSession({ id: "a", name: "Session A" }),
+            makeSession({ id: "b", name: "Session B" }),
+          ],
+          transitions: [
+            makeTransition({ id: "a-to-b", fromSessionId: "a", toSessionId: "b" }),
+            makeTransition({ id: "b-to-a", fromSessionId: "b", toSessionId: "a" }),
+          ],
+        },
+        selectedNodeId: "a",
+        selectedTemplateId: null,
+      }),
+    );
+
+    render(<OrchestratorTemplatesPanel persistenceKey="orchestrator-cycle" />);
+
+    expect(await screen.findByDisplayValue("Cycle Flow")).toBeInTheDocument();
+    expect(
+      screen.getByText("Transitions must form a directed acyclic graph."),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Create template" })).toBeEnabled();
   });
 
   it("starts on a blank draft when requested", async () => {
@@ -229,6 +295,16 @@ function makeTransition(
     trigger: "onCompletion",
     resultMode: "lastResponse",
     promptTemplate: "Continue with:\n{{result}}",
+    ...overrides,
+  };
+}
+
+function makeProject(overrides: Partial<Project> = {}): Project {
+  return {
+    id: "project-a",
+    name: "Project A",
+    rootPath: "/repo",
+    remoteId: "local",
     ...overrides,
   };
 }

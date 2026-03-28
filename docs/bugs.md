@@ -68,112 +68,121 @@ runtime, and auto-dispatches them. This covers the window where a transition was
 (queued prompt persisted, pending transition removed) but the process crashed before
 `dispatch_next_queued_turn` ran. A backend regression now covers that exact restart window.
 
----
-
-## Orchestrator transitions fire on stop and error paths, not only on completed replies
-
-**Severity:** High - downstream automation can run on failure text instead of a completed result.
-
-The current runtime fans out `OnCompletion` transitions from `stop_session`, runtime-exit
-handling, and error paths like `fail_turn_if_runtime_matches` / `mark_turn_error_if_runtime_matches`.
-That contradicts the current orchestration contract, which defines `OnCompletion` as a source
-session becoming prompt-ready after the agent replied. A manually stopped turn or a crashed/error
-turn did not produce a completed agent reply, so routing their failure text downstream changes the
-meaning of the graph and can cascade invalid follow-up work.
-
-The problem is reinforced by the new tests: the backend now explicitly asserts that
-`stop_session` and runtime-exit failures should enqueue downstream prompts. That gives false
-confidence around behavior that the feature brief says should not happen.
-
-**Current behavior:**
-- `stop_session` schedules downstream transitions and forwards `"Turn stopped by user."`
-- runtime exits and turn-error paths schedule downstream transitions even when the source turn did
-  not complete normally
-- tests codify this behavior as the expected contract
-
-**Proposal:**
-- only fire `OnCompletion` transitions from the successful reply -> idle completion path
-- treat stop/error/exit paths as terminal or retryable failure states without downstream fan-out
-- replace the current stop/error orchestration tests with regressions that assert transitions do
-  not fire for non-completed turns
-
-## `tab-drag.ts` and `workspace-storage.ts` validators have drifted
-
-**Severity:** Medium — correctness risk on cross-window tab drags.
-
-Both files contain independent `isWorkspaceTab` switch statements with near-identical validation
-logic, but they have diverged:
-
-- `tab-drag.ts` does not validate `originProjectId` on `source`, `filesystem`, `gitStatus`, or
-  `diffPreview` tab kinds, while `workspace-storage.ts` does.
-- `tab-drag.ts` checks `diffPreview.language` with `isNullableString`, while
-  `workspace-storage.ts` checks it with `isOptionalNullableString`.
-
-A tab payload with a numeric `originProjectId` on a `source` tab would pass the drag validator
-but fail the storage validator, potentially causing a silent drop on persist.
-
-**Current behavior:**
-- a cross-window drag of a `source` tab with a corrupted `originProjectId` is accepted by the
-  drag channel but rejected by the storage layer on the next persist cycle
-- the `tab-drag.test.ts` tests only cover `originProjectId` validation for `controlPanel`,
-  `sessionList`, and `projectList` tab kinds
-
-**Proposal:**
-- extract shared tab-shape validation into a common module (e.g. `tab-validation.ts`) and
-  import from both `tab-drag.ts` and `workspace-storage.ts`
-- alternatively, align the two validators manually and add tests for `originProjectId` on all
-  tab kinds in `tab-drag.test.ts`
+The orchestration stop/error fan-out bug, the shared workspace-tab validator drift, the
+file-not-found 400/404 mismatch, and the `stop_session` cleanup-contract asymmetry are also
+fixed in the current tree.
 
 ---
 
-## `read_file` returns HTTP 400 for file-not-found instead of 404
+## `stop_session` treats failed dedicated-runtime kills as successful stops
 
-**Severity:** Low — semantic mismatch, not a runtime bug.
+**Severity:** High - the UI can report a session stopped while the agent process is still running,
+and queued follow-up work can be dispatched on the same session.
 
-When `fs::read_to_string` fails with `io::ErrorKind::NotFound`, the `read_file` handler returns
-`ApiError::bad_request(...)` (HTTP 400) instead of `ApiError::not_found(...)` (HTTP 404). The
-same pattern appears in `read_directory` and the instruction file read path. A missing resource
-is semantically a 404, not a malformed request.
+`stop_session` now routes all runtime shutdown failures through `shutdown_removed_runtime(...)`, logs
+any error, and then continues clearing the runtime, marking the session idle, and dispatching the
+next queued prompt. For dedicated Claude/Codex/ACP runtimes, `kill_child_process()` only returns an
+error after the child is still alive even after a kill attempt. In that case the UI says the turn
+stopped, but the old agent process can continue running out of band.
 
-**Current behavior:**
-- `GET /api/file?path=/nonexistent` returns HTTP 400 with `{"error": "File not found: ..."}`
-- the frontend does not currently distinguish 400 from 404, so no user-visible bug
-
-**Proposal:**
-- use `ApiError::not_found(...)` for `io::ErrorKind::NotFound` in `read_file`, `read_directory`,
-  and the instruction file read path
-
----
-
-## `stop_session` error handling is asymmetric across runtime types
-
-**Severity:** Low - inconsistent API contract, not data loss.
-
-`stop_session` now treats a shared Codex `interrupt_and_detach` failure as a warning (logs to
-stderr, returns HTTP 200 with the cleaned-up snapshot). However, a non-shared Codex `handle.kill()`
-failure and all non-Codex `runtime.kill()` failures still propagate as HTTP 500. The same endpoint
-has two error contracts depending on an internal implementation detail (shared vs. non-shared
-runtime).
-
-This is pragmatically correct — `detach()` handles authoritative cleanup for shared runtimes, so
-the interrupt is best-effort, while killing a dedicated child process is not best-effort (a failure
-leaves an orphan). But `kill_session` already takes the warn-and-continue approach for all runtime
-types.
+That is materially different from the old shared-Codex detach warning path. A failed dedicated kill
+means TermAl no longer owns the session state for a process that may still be executing tools or
+editing files, and a queued prompt can be launched as if the stop had succeeded.
 
 **Current behavior:**
-- shared Codex stop with interrupt failure → HTTP 200, warning logged to stderr
-- non-shared Codex stop with kill failure → HTTP 500
-- Claude/ACP stop with kill failure → HTTP 500
-- the frontend sees no signal that a shared Codex interrupt partially failed
+- `stop_session` logs dedicated runtime kill failures as cleanup warnings and still returns HTTP 200
+- the session runtime is cleared and the session is marked `Idle` even when the child process did
+  not stop
+- queued prompts can dispatch immediately after the failed cleanup path
 
 **Proposal:**
-- consider applying the same best-effort pattern to non-shared kills in `stop_session` for
-  consistency with the shared path and with `kill_session`
-- alternatively, document the asymmetry as intentional if the orphan-process risk justifies it
-- optionally amend the stop message text to indicate the interrupt may still be in progress, or add
-  a warning-level field to the response
+- keep dedicated-runtime kill failures as hard stop failures instead of treating them as best-effort
+- reserve the warn-and-continue behavior for shared-runtime detach paths that intentionally do not
+  own process lifetime the same way
+- add a regression that covers queued-prompt behavior when a dedicated runtime fails to stop
 
----
+## Orchestrator start only adopts sessions from the returned `StateResponse`
+
+**Severity:** Medium - starting an orchestration can leave frontend revision tracking stale and
+force unnecessary resyncs on the next SSE update.
+
+`createOrchestratorInstance()` returns a full `StateResponse`, and `OrchestratorTemplatesPanel`
+forwards that snapshot through `onStateUpdated`. However, `App` handles the callback by calling
+`adoptSessions(state.sessions)` instead of `adoptState(state)`. The newly-created sessions appear,
+but the frontend never records the returned revision or any other non-session fields that changed
+with the same snapshot.
+
+That leaves `latestStateRevisionRef` behind the backend and makes the next delta look like a gap.
+At best that triggers an avoidable resync; at worst any non-session metadata in the returned state
+stays stale until some later full snapshot arrives.
+
+**Current behavior:**
+- starting an orchestration only replaces the in-memory session list
+- the returned `revision`, `projects`, readiness metadata, and other `StateResponse` fields are not
+  adopted through the normal snapshot path
+- the next SSE delta can appear to skip a revision even though the client already received the
+  state-changing response
+
+**Proposal:**
+- route orchestrator start responses through `adoptState(response.state)` instead of `adoptSessions`
+- add an App-level regression that verifies orchestrator starts advance revision tracking
+- cover any non-session metadata returned with the same response so the callback stays aligned with
+  the rest of the snapshot adoption flow
+
+## Markdown localhost file-link normalization overmatches same-origin web URLs
+
+**Severity:** Low - legitimate app-origin web links with file-like paths can be rewritten as local
+source links.
+
+The new markdown helper normalizes any URL whose `origin` matches `window.location.origin` before
+checking whether the pathname "looks like" a file path. That is broad enough to catch ordinary
+same-origin documentation or asset URLs such as `/docs/architecture.md` or `/assets/logo.svg`,
+because they also end in dotted path segments.
+
+The localhost Windows-path case from the Questly/Supabase link is valid and should stay clickable,
+but same-origin web routes should not be reinterpreted as source-file links just because they have
+an extension.
+
+**Current behavior:**
+- same-origin HTTP URLs with file-like pathnames are treated as non-external by the markdown link
+  helper
+- raw same-origin URL text can be collapsed into a workspace-style file label even when the target
+  is ordinary web content
+- current tests cover localhost file URLs, but not same-origin docs/assets URLs that should remain
+  normal anchors
+
+**Proposal:**
+- restrict the normalization to loopback/file-shaped URLs instead of all same-origin file-like paths
+- require an explicit absolute filesystem path shape before converting an HTTP URL into a source
+  link target
+- add regression coverage for both localhost file URLs and ordinary same-origin web URLs
+
+## Orchestrator template `Run` button treats unknown project IDs as local
+
+**Severity:** Low - stale template project IDs can expose a runnable action that only fails after
+submission.
+
+`OrchestratorTemplatesPanel` derives `selectedProjectIsLocal` by calling
+`isLocalRemoteId(selectedProject?.remoteId)`. Because `isLocalRemoteId(undefined)` returns `true`,
+a template draft whose `projectId` is set but missing from the loaded project list is treated like
+a runnable local project. That can happen with persisted draft state or templates that still
+reference a deleted project.
+
+The backend still rejects the launch because `create_orchestrator_instance` requires the project ID
+to resolve to a real local project. The result is an enabled `Run` button that produces a backend
+error instead of being blocked in the UI.
+
+**Current behavior:**
+- a draft/template with an unknown `projectId` can enable `Run`
+- clicking `Run` sends `POST /api/orchestrators` and fails with an avoidable backend validation
+  error
+- current panel tests cover template CRUD/persistence/validation, but not stale-project `Run`
+  behavior
+
+**Proposal:**
+- only enable `Run` when `draft.projectId` resolves to a known `Project`
+- treat missing project metadata as non-runnable instead of implicitly local
+- add frontend tests for stale/unknown project IDs and `Run`-button error/disable states
 
 ## Feature briefs
 - [Project-Scoped Remotes](./features/project-scoped-remotes.md)
@@ -263,14 +272,13 @@ Concrete work implied by the current TermAl parity gaps. Ordered by user impact 
 - [ ] Add a `stop_session` test with a queued prompt pending when a shared Codex interrupt fails:
   verify that `dispatch_next_queued_turn` fires and the queued prompt is dispatched after the
   best-effort cleanup completes.
+- [ ] Add a `stop_session` regression for failed dedicated-runtime kills:
+  cover Claude/Codex/ACP kill failures where the child process is still alive and assert the
+  session is not treated as cleanly stopped or allowed to dispatch queued follow-up work.
 - [ ] Add frontend reconcile tests for new interactive message types:
   `userInputRequest`, `mcpElicitationRequest`, and `codexAppRequest` messages are handled by the
   reconciler but have no test coverage verifying that state changes (e.g. pending → submitted)
   correctly produce new message references.
-- [ ] Add `tab-drag.test.ts` coverage for `originProjectId` on all tab kinds and `drag-end` message:
-  the drag channel validator is missing `originProjectId` checks on `source`, `filesystem`,
-  `gitStatus`, `canvas`, `instructionDebugger`, and `diffPreview` tabs. The `drag-end` message
-  type in the discriminated union has no test at all.
 - [ ] Add `SessionCanvasPanel.test.tsx` afterEach cleanup:
   other test files (`PaneTabs.test.tsx`, `App.test.tsx`) explicitly call `cleanup()` in
   `afterEach`; this file should match the project convention.
@@ -280,16 +288,26 @@ Concrete work implied by the current TermAl parity gaps. Ordered by user impact 
 - [ ] Add PaneTabs test for git status fetch failure in context menu:
   the `statusError` / `statusMessage` state fields exist but the error rendering path when
   `fetchGitStatus` rejects is uncovered.
-- [ ] Add OrchestratorTemplatesPanel tests for update, delete, and validation error flows:
+- [ ] Add OrchestratorTemplatesPanel tests for update, delete, and run flows:
   mocks for `updateOrchestratorTemplate` and `deleteOrchestratorTemplate` are set up but no test
-  exercises them. Also cover the validation error display path when saving an invalid draft.
+  exercises them. Also cover `createOrchestratorInstance`, `onStateUpdated`, and stale/unknown
+  project handling for the `Run` action.
+- [ ] Add an App-level orchestrator-start adoption regression:
+  verify that starting an orchestration adopts the full returned `StateResponse` revision and other
+  metadata instead of only replacing the session list.
+- [ ] Add MarkdownContent regression coverage for localhost file URLs vs. same-origin web links:
+  keep `http://127.0.0.1/.../C:/...#L15C1` links opening source files, but ensure ordinary
+  same-origin docs/assets URLs remain normal anchors.
 - [ ] Add OrchestratorTemplateLibraryPanel tests for fetch error and event-driven re-fetch:
   the error branch (`getErrorMessage`) and the `ORCHESTRATOR_TEMPLATES_CHANGED_EVENT` re-load
   path have no test coverage.
 - [ ] Add backend orchestrator validation tests for self-loop, duplicate ID, and empty-sessions:
   `normalize_orchestrator_template_draft` rejects self-referencing transitions, duplicate
-  session/transition IDs, and drafts with zero sessions, but only the unknown-target case is
-  tested.
+  session/transition IDs, and drafts with zero sessions. Unknown-target and cyclic-transition
+  coverage now exists; keep filling in the remaining validation cases.
+- [ ] Add backend tests for template-level orchestrator project fallback:
+  current `create_orchestrator_instance` coverage still passes `projectId` explicitly in the
+  request. Add state/route tests where the template supplies `projectId` and the request omits it.
 - [ ] Add orchestrator lifecycle endpoints (stop, pause, resume):
   `OrchestratorInstanceStatus` defines `Running`, `Paused`, and `Stopped` but no API endpoint
   transitions between them. Users cannot stop a running orchestration except by killing
@@ -303,9 +321,6 @@ Concrete work implied by the current TermAl parity gaps. Ordered by user impact 
 - [ ] Add unit tests for orchestrator geometry functions:
   `anchorPosition`, `nearestAnchorSide`, `nearestAnchorPosition`, `buildTransitionGeometry`,
   and `isValidAnchor` are pure deterministic functions with no DOM dependencies.
-- [ ] Add backend regressions that transitions only fire on real completions:
-  replace the current stop-session and runtime-error orchestration expectations with coverage that
-  only the successful reply -> idle path triggers `OnCompletion` fan-out.
 - [ ] Continue splitting backend modules as they grow:
   `src/main.rs` was split into `api.rs`, `state.rs`, `runtime.rs`, `turns.rs`, `remote.rs`, and
   `tests.rs`. Some of these modules (especially `state.rs` and `turns.rs`) are already large and

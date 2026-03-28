@@ -15,6 +15,7 @@ import type {
   InstructionSearchResponse,
   JsonValue,
   McpElicitationAction,
+  OrchestratorInstance,
   OrchestratorTemplate,
   OrchestratorTemplateDraft,
   Project,
@@ -49,6 +50,19 @@ export type OrchestratorTemplatesResponse = {
 
 export type OrchestratorTemplateResponse = {
   template: OrchestratorTemplate;
+};
+
+export type OrchestratorInstancesResponse = {
+  orchestrators: OrchestratorInstance[];
+};
+
+export type OrchestratorInstanceResponse = {
+  orchestrator: OrchestratorInstance;
+};
+
+export type CreateOrchestratorInstanceResponse = {
+  orchestrator: OrchestratorInstance;
+  state: StateResponse;
 };
 export type PickProjectRootResponse = {
   path?: string | null;
@@ -296,6 +310,24 @@ export function deleteOrchestratorTemplate(templateId: string) {
     },
   );
 }
+
+export function fetchOrchestratorInstances() {
+  return request<OrchestratorInstancesResponse>("/api/orchestrators");
+}
+
+export function fetchOrchestratorInstance(instanceId: string) {
+  return request<OrchestratorInstanceResponse>(
+    `/api/orchestrators/${encodeURIComponent(instanceId)}`,
+  );
+}
+
+export function createOrchestratorInstance(templateId: string, projectId?: string | null) {
+  return request<CreateOrchestratorInstanceResponse>("/api/orchestrators", {
+    method: "POST",
+    body: JSON.stringify({ templateId, ...(projectId ? { projectId } : {}) }),
+  });
+}
+
 export function pickProjectRoot() {
   return request<PickProjectRootResponse>("/api/projects/pick", {
     method: "POST",

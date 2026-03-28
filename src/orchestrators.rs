@@ -136,6 +136,8 @@ struct OrchestratorTemplateDraft {
     name: String,
     #[serde(default)]
     description: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    project_id: Option<String>,
     #[serde(default)]
     sessions: Vec<OrchestratorSessionTemplate>,
     #[serde(default)]
@@ -149,6 +151,8 @@ struct OrchestratorTemplate {
     name: String,
     #[serde(default)]
     description: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    project_id: Option<String>,
     #[serde(default)]
     sessions: Vec<OrchestratorSessionTemplate>,
     #[serde(default)]
@@ -221,6 +225,7 @@ impl AppState {
             id,
             name: normalized.name,
             description: normalized.description,
+            project_id: normalized.project_id,
             sessions: normalized.sessions,
             transitions: normalized.transitions,
             created_at: now.clone(),
@@ -259,6 +264,7 @@ impl AppState {
             id: template_id.to_owned(),
             name: normalized.name,
             description: normalized.description,
+            project_id: normalized.project_id,
             sessions: normalized.sessions,
             transitions: normalized.transitions,
             created_at,
@@ -453,9 +459,17 @@ fn normalize_orchestrator_template_draft(
         }
     }
 
+    let project_id = draft
+        .project_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(String::from);
+
     Ok(OrchestratorTemplateDraft {
         name,
         description,
+        project_id,
         sessions,
         transitions,
     })
@@ -560,6 +574,7 @@ struct PendingTransition {
 struct OrchestratorInstance {
     id: String,
     template_id: String,
+    #[serde(default)]
     project_id: String,
     template_snapshot: OrchestratorTemplate,
     #[serde(default)]
@@ -577,7 +592,8 @@ struct OrchestratorInstance {
 #[serde(rename_all = "camelCase")]
 struct CreateOrchestratorInstanceRequest {
     template_id: String,
-    project_id: String,
+    #[serde(default)]
+    project_id: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
@@ -658,7 +674,6 @@ impl AppState {
     ) -> Result<CreateOrchestratorInstanceResponse, ApiError> {
         let template_id =
             normalize_required_orchestrator_text(&request.template_id, "template id")?;
-        let project_id = normalize_required_orchestrator_text(&request.project_id, "project id")?;
 
         let mut inner = self.inner.lock().expect("state mutex poisoned");
         let template = {
@@ -675,10 +690,21 @@ impl AppState {
                 .find(|template| template.id == template_id)
                 .ok_or_else(|| ApiError::not_found("orchestrator template not found"))?
         };
+        let project_id = request
+            .project_id
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .or(template.project_id.as_deref())
+            .ok_or_else(|| {
+                ApiError::bad_request(
+                    "no project specified — set a project on the template or provide one in the request",
+                )
+            })?;
         let project = inner
-            .find_project(&project_id)
+            .find_project(project_id)
             .cloned()
-            .ok_or_else(|| ApiError::bad_request(format!("unknown project `{project_id}`")))?;
+            .ok_or_else(|| ApiError::not_found(format!("unknown project `{project_id}`")))?;
         if project.remote_id != LOCAL_REMOTE_ID {
             return Err(ApiError::bad_request(
                 "runtime orchestrations currently require a local project",

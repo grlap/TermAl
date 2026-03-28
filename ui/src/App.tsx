@@ -1,4 +1,5 @@
 import {
+  isValidElement,
   memo,
   startTransition,
   useDeferredValue,
@@ -3834,6 +3835,10 @@ export default function App() {
     setWorkspace((current) => setCanvasZoom(current, canvasTabId, zoom));
   }
 
+  function handleOrchestratorStateUpdated(state: StateResponse) {
+    adoptSessions(state.sessions);
+  }
+
   function handleOpenInstructionDebuggerTab(
     paneId: string,
     workdir: string | null,
@@ -4479,6 +4484,7 @@ export default function App() {
               onRefreshAgentCommands={handleRefreshAgentCommands}
               onRollbackCodexThread={handleRollbackCodexThread}
               onUnarchiveCodexThread={handleUnarchiveCodexThread}
+              onOrchestratorStateUpdated={handleOrchestratorStateUpdated}
               renderControlPanel={renderWorkspaceControlSurface}
               backendConnectionState={backendConnectionState}
             />
@@ -5127,7 +5133,7 @@ export default function App() {
                     }}
                   />
                 ) : settingsTab === "orchestrators" ? (
-                  <OrchestratorTemplatesPanel />
+                  <OrchestratorTemplatesPanel projects={projects} onStateUpdated={(state) => adoptSessions(state.sessions)} />
                 ) : settingsTab === "codex-prompts" ? (
                   <CodexPromptPreferencesPanel
                     defaultApprovalPolicy={defaultCodexApprovalPolicy}
@@ -6467,6 +6473,7 @@ function WorkspaceNodeView({
   onRefreshAgentCommands,
   onRollbackCodexThread,
   onUnarchiveCodexThread,
+  onOrchestratorStateUpdated,
   renderControlPanel,
   backendConnectionState,
 }: {
@@ -6621,6 +6628,7 @@ function WorkspaceNodeView({
   onRefreshAgentCommands: (sessionId: string) => void;
   onRollbackCodexThread: (sessionId: string, numTurns: number) => void;
   onUnarchiveCodexThread: (sessionId: string) => void;
+  onOrchestratorStateUpdated: (state: StateResponse) => void;
   renderControlPanel: (paneId: string, fixedSection?: ControlPanelSectionId | null) => JSX.Element;
   backendConnectionState: BackendConnectionState;
 }) {
@@ -6723,6 +6731,7 @@ function WorkspaceNodeView({
         onRefreshAgentCommands={onRefreshAgentCommands}
         onRollbackCodexThread={onRollbackCodexThread}
         onUnarchiveCodexThread={onUnarchiveCodexThread}
+        onOrchestratorStateUpdated={onOrchestratorStateUpdated}
         renderControlPanel={renderControlPanel}
         backendConnectionState={backendConnectionState}
       />
@@ -6821,6 +6830,7 @@ function WorkspaceNodeView({
           onRefreshAgentCommands={onRefreshAgentCommands}
           onRollbackCodexThread={onRollbackCodexThread}
           onUnarchiveCodexThread={onUnarchiveCodexThread}
+          onOrchestratorStateUpdated={onOrchestratorStateUpdated}
           renderControlPanel={renderControlPanel}
           backendConnectionState={backendConnectionState}
         />
@@ -6908,6 +6918,7 @@ function WorkspaceNodeView({
           onRefreshAgentCommands={onRefreshAgentCommands}
           onRollbackCodexThread={onRollbackCodexThread}
           onUnarchiveCodexThread={onUnarchiveCodexThread}
+          onOrchestratorStateUpdated={onOrchestratorStateUpdated}
           renderControlPanel={renderControlPanel}
           backendConnectionState={backendConnectionState}
         />
@@ -6988,6 +6999,7 @@ function SessionPaneView({
   onRefreshAgentCommands,
   onRollbackCodexThread,
   onUnarchiveCodexThread,
+  onOrchestratorStateUpdated,
   renderControlPanel,
   backendConnectionState,
 }: {
@@ -7137,6 +7149,7 @@ function SessionPaneView({
   onRefreshAgentCommands: (sessionId: string) => void;
   onRollbackCodexThread: (sessionId: string, numTurns: number) => void;
   onUnarchiveCodexThread: (sessionId: string) => void;
+  onOrchestratorStateUpdated: (state: StateResponse) => void;
   renderControlPanel: (paneId: string, fixedSection?: ControlPanelSectionId | null) => JSX.Element;
   backendConnectionState: BackendConnectionState;
 }) {
@@ -8317,6 +8330,8 @@ function SessionPaneView({
           <OrchestratorTemplatesPanel
             initialTemplateId={activeOrchestratorCanvasTab.templateId ?? null}
             persistenceKey={activeOrchestratorCanvasTab.id}
+            projects={Array.from(projectLookup.values())}
+            onStateUpdated={onOrchestratorStateUpdated}
             startMode={
               activeOrchestratorCanvasTab.startMode === "new"
                 ? "new"
@@ -11940,6 +11955,7 @@ export function MarkdownContent({
           a: ({ href, children, ...props }) => {
             const isExternalLink = isExternalMarkdownHref(href ?? "");
             const fileLinkTarget = resolveMarkdownFileLinkTarget(href, workspaceRoot);
+            const displayLabel = buildMarkdownHrefDisplayLabel(href, children, workspaceRoot);
             const handleClick = (event: ReactMouseEvent<HTMLAnchorElement>) => {
               props.onClick?.(event);
               if (event.defaultPrevented || !fileLinkTarget || !onOpenSourceLink) {
@@ -11961,7 +11977,7 @@ export function MarkdownContent({
                 rel={isExternalLink ? "noreferrer" : undefined}
                 onClick={handleClick}
               >
-                {highlightChildren(children)}
+                {highlightChildren(displayLabel ?? children)}
               </a>
             );
           },
@@ -12051,12 +12067,12 @@ function resolveMarkdownFileLinkTarget(
   href: string | undefined,
   workspaceRoot: string | null,
 ): Omit<MarkdownFileLinkTarget, "openInNewTab"> | null {
-  const trimmedHref = href?.trim();
-  if (!trimmedHref || isExternalMarkdownHref(trimmedHref) || trimmedHref.startsWith("#")) {
+  const normalizedHref = normalizeMarkdownLocalFileHref(href);
+  if (!normalizedHref || isExternalMarkdownHref(normalizedHref) || normalizedHref.startsWith("#")) {
     return null;
   }
 
-  let candidate = safeDecodeMarkdownHref(trimmedHref).replace(/^file:\/\//i, "");
+  let candidate = safeDecodeMarkdownHref(normalizedHref).replace(/^file:\/\//i, "");
   let line: number | undefined;
   let column: number | undefined;
 
@@ -12119,15 +12135,20 @@ function parseMarkdownFileLinkFragment(fragment: string) {
 }
 
 function isExternalMarkdownHref(href: string) {
-  if (!href) {
+  const normalizedHref = normalizeMarkdownLocalFileHref(href);
+  if (!normalizedHref) {
     return false;
   }
 
-  if (/^file:\/\//i.test(href) || /^[A-Za-z]:[\\/]/.test(href)) {
+  if (
+    /^file:\/\//i.test(normalizedHref) ||
+    /^\/[A-Za-z]:[\\/]/.test(normalizedHref) ||
+    /^[A-Za-z]:[\\/]/.test(normalizedHref)
+  ) {
     return false;
   }
 
-  return /^\/\//.test(href) || /^[a-z][a-z\d+.-]*:/i.test(href);
+  return /^\/\//.test(normalizedHref) || /^[a-z][a-z\d+.-]*:/i.test(normalizedHref);
 }
 
 function transformMarkdownLinkUri(href: string) {
@@ -12140,6 +12161,102 @@ function safeDecodeMarkdownHref(href: string) {
   } catch {
     return href;
   }
+}
+
+function normalizeMarkdownLocalFileHref(href: string | undefined) {
+  const trimmedHref = href?.trim();
+  if (!trimmedHref) {
+    return null;
+  }
+
+  let parsedHref: URL;
+  try {
+    parsedHref = new URL(trimmedHref);
+  } catch {
+    return trimmedHref;
+  }
+
+  if (!isMarkdownLocalFileUrl(parsedHref)) {
+    return trimmedHref;
+  }
+
+  const normalizedPath = normalizeMarkdownFileLinkAbsolutePath(safeDecodeMarkdownHref(parsedHref.pathname));
+  if (!looksLikeAbsoluteMarkdownFilePath(normalizedPath, null)) {
+    return trimmedHref;
+  }
+
+  return `${normalizedPath}${parsedHref.hash}`;
+}
+
+function isMarkdownLocalFileUrl(url: URL) {
+  if (!/^https?:$/i.test(url.protocol)) {
+    return false;
+  }
+
+  if (typeof window !== "undefined" && url.origin === window.location.origin) {
+    return true;
+  }
+
+  return isLoopbackMarkdownHostname(url.hostname);
+}
+
+function isLoopbackMarkdownHostname(hostname: string) {
+  const normalizedHostname = hostname.trim().replace(/^\[/, "").replace(/\]$/, "").toLowerCase();
+  return (
+    normalizedHostname === "localhost" ||
+    normalizedHostname === "127.0.0.1" ||
+    normalizedHostname === "0.0.0.0" ||
+    normalizedHostname === "::1"
+  );
+}
+
+function buildMarkdownHrefDisplayLabel(
+  href: string | undefined,
+  children: ReactNode,
+  workspaceRoot: string | null,
+) {
+  const trimmedHref = href?.trim();
+  const renderedText = extractMarkdownTextContent(children).trim();
+  if (!trimmedHref || !renderedText || renderedText !== trimmedHref) {
+    return null;
+  }
+
+  const normalizedHref = normalizeMarkdownLocalFileHref(trimmedHref);
+  if (!normalizedHref || normalizedHref === trimmedHref) {
+    return null;
+  }
+
+  const fileLinkTarget = resolveMarkdownFileLinkTarget(normalizedHref, workspaceRoot);
+  if (!fileLinkTarget) {
+    return null;
+  }
+
+  const displayPath = normalizeDisplayPath(relativizePathToWorkspace(fileLinkTarget.path, workspaceRoot));
+  return `${displayPath}${formatMarkdownFileDisplayLocation(fileLinkTarget.line, fileLinkTarget.column)}`;
+}
+
+function extractMarkdownTextContent(node: ReactNode): string {
+  if (typeof node === "string" || typeof node === "number") {
+    return String(node);
+  }
+
+  if (Array.isArray(node)) {
+    return node.map((child) => extractMarkdownTextContent(child)).join("");
+  }
+
+  if (isValidElement<{ children?: ReactNode }>(node)) {
+    return extractMarkdownTextContent(node.props.children ?? null);
+  }
+
+  return "";
+}
+
+function formatMarkdownFileDisplayLocation(line: number | undefined, column: number | undefined) {
+  if (!line) {
+    return "";
+  }
+
+  return column ? `#L${line}C${column}` : `#L${line}`;
 }
 
 function looksLikeAbsoluteMarkdownFilePath(path: string, workspaceRoot: string | null) {

@@ -9858,7 +9858,14 @@ fn push_git_repo_updates_tracking_branch() {
     fs::create_dir_all(&remote_root).unwrap();
 
     run_git_test_command(&remote_root, &["init", "--bare"]);
-    run_git_test_command(&root, &["clone", remote_root_string.as_str(), repo_root_string.as_str()]);
+    run_git_test_command(
+        &root,
+        &[
+            "clone",
+            remote_root_string.as_str(),
+            repo_root_string.as_str(),
+        ],
+    );
     run_git_test_command(&repo_root, &["config", "user.email", "termal@example.com"]);
     run_git_test_command(&repo_root, &["config", "user.name", "TermAl"]);
 
@@ -9896,7 +9903,14 @@ fn sync_git_repo_pulls_remote_changes() {
     fs::create_dir_all(&remote_root).unwrap();
 
     run_git_test_command(&remote_root, &["init", "--bare"]);
-    run_git_test_command(&root, &["clone", remote_root_string.as_str(), repo_root_string.as_str()]);
+    run_git_test_command(
+        &root,
+        &[
+            "clone",
+            remote_root_string.as_str(),
+            repo_root_string.as_str(),
+        ],
+    );
     run_git_test_command(&repo_root, &["config", "user.email", "termal@example.com"]);
     run_git_test_command(&repo_root, &["config", "user.name", "TermAl"]);
 
@@ -9905,7 +9919,14 @@ fn sync_git_repo_pulls_remote_changes() {
     run_git_test_command(&repo_root, &["commit", "-m", "init"]);
     run_git_test_command(&repo_root, &["push", "-u", "origin", "HEAD"]);
 
-    run_git_test_command(&root, &["clone", remote_root_string.as_str(), peer_root_string.as_str()]);
+    run_git_test_command(
+        &root,
+        &[
+            "clone",
+            remote_root_string.as_str(),
+            peer_root_string.as_str(),
+        ],
+    );
     run_git_test_command(&peer_root, &["config", "user.email", "termal@example.com"]);
     run_git_test_command(&peer_root, &["config", "user.name", "TermAl"]);
     fs::write(peer_root.join("README.md"), "# Peer\n").unwrap();
@@ -9917,7 +9938,9 @@ fn sync_git_repo_pulls_remote_changes() {
     let remote_head = run_git_test_command_output(&remote_root, &["rev-parse", "HEAD"]);
 
     assert_eq!(
-        fs::read_to_string(repo_root.join("README.md")).unwrap().replace("\r\n", "\n"),
+        fs::read_to_string(repo_root.join("README.md"))
+            .unwrap()
+            .replace("\r\n", "\n"),
         "# Peer\n",
     );
     assert_eq!(local_head, remote_head);
@@ -10071,6 +10094,98 @@ async fn read_and_write_file_accept_project_id_without_session() {
     );
 
     fs::remove_dir_all(root).unwrap();
+}
+
+#[tokio::test]
+async fn read_file_returns_not_found_for_missing_project_file() {
+    let state = test_app_state();
+    let root = std::env::temp_dir().join(format!("termal-project-file-missing-{}", Uuid::new_v4()));
+    let missing_file = root.join("missing.rs");
+
+    fs::create_dir_all(&root).unwrap();
+
+    let project = state
+        .create_project(CreateProjectRequest {
+            name: Some("Project Files".to_owned()),
+            root_path: root.to_string_lossy().into_owned(),
+            remote_id: default_local_remote_id(),
+        })
+        .unwrap();
+
+    let error = match read_file(
+        State(state),
+        Query(FileQuery {
+            path: missing_file.to_string_lossy().into_owned(),
+            project_id: Some(project.project_id),
+            session_id: None,
+        }),
+    )
+    .await
+    {
+        Ok(_) => panic!("missing file read should fail"),
+        Err(error) => error,
+    };
+
+    assert_eq!(error.status, StatusCode::NOT_FOUND);
+    assert!(error.message.contains("file not found"));
+
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[tokio::test]
+async fn read_directory_returns_not_found_for_missing_project_path() {
+    let state = test_app_state();
+    let root = std::env::temp_dir().join(format!(
+        "termal-project-directory-missing-{}",
+        Uuid::new_v4()
+    ));
+    let missing_dir = root.join("missing");
+
+    fs::create_dir_all(&root).unwrap();
+
+    let project = state
+        .create_project(CreateProjectRequest {
+            name: Some("Project Files".to_owned()),
+            root_path: root.to_string_lossy().into_owned(),
+            remote_id: default_local_remote_id(),
+        })
+        .unwrap();
+
+    let error = match read_directory(
+        State(state),
+        Query(FileQuery {
+            path: missing_dir.to_string_lossy().into_owned(),
+            project_id: Some(project.project_id),
+            session_id: None,
+        }),
+    )
+    .await
+    {
+        Ok(_) => panic!("missing directory read should fail"),
+        Err(error) => error,
+    };
+
+    assert_eq!(error.status, StatusCode::NOT_FOUND);
+    assert!(error.message.contains("path not found"));
+
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn read_instruction_document_returns_not_found_for_missing_file() {
+    let workdir =
+        std::env::temp_dir().join(format!("termal-instruction-missing-{}", Uuid::new_v4()));
+    let missing_file = workdir.join("AGENTS.md");
+
+    fs::create_dir_all(&workdir).unwrap();
+
+    let error = read_instruction_document(&missing_file, &workdir)
+        .expect_err("missing instruction file should fail");
+
+    assert_eq!(error.status, StatusCode::NOT_FOUND);
+    assert!(error.message.contains("instruction file not found"));
+
+    fs::remove_dir_all(workdir).unwrap();
 }
 
 #[tokio::test]
@@ -11652,7 +11767,10 @@ async fn codex_mcp_elicitation_route_submits_structured_content() {
         .find(|session| session.id == session_id)
         .expect("updated session should be present");
     assert_eq!(session.status, SessionStatus::Active);
-    assert_eq!(session.preview, "MCP input submitted. Codex is continuingâ€¦");
+    assert_eq!(
+        session.preview,
+        "MCP input submitted. Codex is continuingâ€¦"
+    );
     assert!(matches!(
         session.messages.last(),
         Some(Message::McpElicitationRequest {
@@ -12250,6 +12368,7 @@ fn sample_orchestrator_template_draft() -> OrchestratorTemplateDraft {
     OrchestratorTemplateDraft {
         name: "Feature Delivery Flow".to_owned(),
         description: "Coordinate implementation and review.".to_owned(),
+        project_id: None,
         sessions: vec![
             OrchestratorSessionTemplate {
                 id: "planner".to_owned(),
@@ -12288,9 +12407,7 @@ fn sample_orchestrator_template_draft() -> OrchestratorTemplateDraft {
                 to_anchor: Some("top".to_owned()),
                 trigger: OrchestratorTransitionTrigger::OnCompletion,
                 result_mode: OrchestratorTransitionResultMode::LastResponse,
-                prompt_template: Some(
-                    "Use this plan and implement it:\n\n{{result}}".to_owned(),
-                ),
+                prompt_template: Some("Use this plan and implement it:\n\n{{result}}".to_owned()),
             },
             OrchestratorTemplateTransition {
                 id: "builder-to-reviewer".to_owned(),
@@ -12300,9 +12417,7 @@ fn sample_orchestrator_template_draft() -> OrchestratorTemplateDraft {
                 to_anchor: Some("left".to_owned()),
                 trigger: OrchestratorTransitionTrigger::OnCompletion,
                 result_mode: OrchestratorTransitionResultMode::SummaryAndLastResponse,
-                prompt_template: Some(
-                    "Review this implementation:\n\n{{result}}".to_owned(),
-                ),
+                prompt_template: Some("Review this implementation:\n\n{{result}}".to_owned()),
             },
         ],
     }
@@ -12312,12 +12427,15 @@ fn sample_orchestrator_template_draft() -> OrchestratorTemplateDraft {
 fn orchestrator_template_crud_persists_in_the_separate_store() {
     let state = test_app_state();
     let templates_path = state.orchestrator_templates_path.as_path().to_path_buf();
+    let mut create_draft = sample_orchestrator_template_draft();
+    create_draft.project_id = Some("project-a".to_owned());
 
     let created = state
-        .create_orchestrator_template(sample_orchestrator_template_draft())
+        .create_orchestrator_template(create_draft)
         .expect("template should be created");
     assert_eq!(created.template.id, "orchestrator-template-1");
     assert_eq!(created.template.sessions.len(), 3);
+    assert_eq!(created.template.project_id.as_deref(), Some("project-a"));
     assert!(templates_path.exists());
 
     let persisted: OrchestratorTemplateStore = serde_json::from_slice(
@@ -12326,9 +12444,14 @@ fn orchestrator_template_crud_persists_in_the_separate_store() {
     .expect("template store should deserialize");
     assert_eq!(persisted.templates.len(), 1);
     assert_eq!(persisted.templates[0].name, "Feature Delivery Flow");
+    assert_eq!(
+        persisted.templates[0].project_id.as_deref(),
+        Some("project-a")
+    );
 
     let mut update = sample_orchestrator_template_draft();
     update.name = "Feature Delivery Flow v2".to_owned();
+    update.project_id = Some("project-b".to_owned());
     update.sessions[1].name = "Builder Prime".to_owned();
     update.transitions[0].result_mode = OrchestratorTransitionResultMode::SummaryAndLastResponse;
 
@@ -12338,6 +12461,7 @@ fn orchestrator_template_crud_persists_in_the_separate_store() {
     assert_eq!(updated.template.id, created.template.id);
     assert_eq!(updated.template.created_at, created.template.created_at);
     assert_eq!(updated.template.name, "Feature Delivery Flow v2");
+    assert_eq!(updated.template.project_id.as_deref(), Some("project-b"));
     assert_eq!(updated.template.sessions[1].name, "Builder Prime");
     assert_eq!(
         updated.template.transitions[0].result_mode,
@@ -12386,6 +12510,7 @@ fn orchestrator_templates_reject_cyclic_transitions() {
     let draft = OrchestratorTemplateDraft {
         name: "Cycle Test".to_owned(),
         description: String::new(),
+        project_id: None,
         sessions: vec![
             OrchestratorSessionTemplate {
                 id: "a".to_owned(),
@@ -12441,10 +12566,8 @@ fn orchestrator_templates_reject_cyclic_transitions() {
 #[tokio::test]
 async fn list_orchestrator_instances_route_returns_runtime_instances() {
     let state = test_app_state();
-    let project_root = std::env::temp_dir().join(format!(
-        "termal-orchestrator-route-list-{}",
-        Uuid::new_v4()
-    ));
+    let project_root =
+        std::env::temp_dir().join(format!("termal-orchestrator-route-list-{}", Uuid::new_v4()));
     fs::create_dir_all(&project_root).expect("route-list project root should exist");
     let project_id = create_test_project(&state, &project_root, "Route List Project");
     let template = state
@@ -12454,7 +12577,7 @@ async fn list_orchestrator_instances_route_returns_runtime_instances() {
     let created = state
         .create_orchestrator_instance(CreateOrchestratorInstanceRequest {
             template_id: template.id,
-            project_id,
+            project_id: Some(project_id),
         })
         .expect("orchestrator instance should be created")
         .orchestrator;
@@ -12508,20 +12631,20 @@ async fn create_orchestrator_instance_route_creates_runtime_sessions() {
 
     assert_eq!(status, StatusCode::CREATED);
     assert_eq!(response.orchestrator.session_instances.len(), 3);
-    assert!(response
-        .state
-        .sessions
-        .iter()
-        .any(|session| session.id == response.orchestrator.session_instances[0].session_id));
+    assert!(
+        response
+            .state
+            .sessions
+            .iter()
+            .any(|session| session.id == response.orchestrator.session_instances[0].session_id)
+    );
 }
 
 #[tokio::test]
 async fn get_orchestrator_instance_route_returns_the_requested_instance() {
     let state = test_app_state();
-    let project_root = std::env::temp_dir().join(format!(
-        "termal-orchestrator-route-get-{}",
-        Uuid::new_v4()
-    ));
+    let project_root =
+        std::env::temp_dir().join(format!("termal-orchestrator-route-get-{}", Uuid::new_v4()));
     fs::create_dir_all(&project_root).expect("route-get project root should exist");
     let project_id = create_test_project(&state, &project_root, "Route Get Project");
     let template = state
@@ -12531,7 +12654,7 @@ async fn get_orchestrator_instance_route_returns_the_requested_instance() {
     let created = state
         .create_orchestrator_instance(CreateOrchestratorInstanceRequest {
             template_id: template.id,
-            project_id,
+            project_id: Some(project_id),
         })
         .expect("orchestrator instance should be created")
         .orchestrator;
@@ -12554,10 +12677,8 @@ async fn get_orchestrator_instance_route_returns_the_requested_instance() {
 #[test]
 fn orchestrator_instance_creation_creates_runtime_sessions() {
     let state = test_app_state();
-    let project_root = std::env::temp_dir().join(format!(
-        "termal-orchestrator-runtime-{}",
-        Uuid::new_v4()
-    ));
+    let project_root =
+        std::env::temp_dir().join(format!("termal-orchestrator-runtime-{}", Uuid::new_v4()));
     fs::create_dir_all(&project_root).expect("runtime project root should exist");
     let project_id = state
         .create_project(CreateProjectRequest {
@@ -12575,7 +12696,7 @@ fn orchestrator_instance_creation_creates_runtime_sessions() {
     let response = state
         .create_orchestrator_instance(CreateOrchestratorInstanceRequest {
             template_id: template.id.clone(),
-            project_id: project_id.clone(),
+            project_id: Some(project_id.clone()),
         })
         .expect("orchestrator instance should be created");
 
@@ -12593,7 +12714,10 @@ fn orchestrator_instance_creation_creates_runtime_sessions() {
             .iter()
             .find(|record| record.session.id == session_instance.session_id)
             .expect("runtime session should exist");
-        assert_eq!(record.session.project_id.as_deref(), Some(project_id.as_str()));
+        assert_eq!(
+            record.session.project_id.as_deref(),
+            Some(project_id.as_str())
+        );
         assert_eq!(record.session.workdir, project_root.to_string_lossy());
     }
 }
@@ -12601,10 +12725,8 @@ fn orchestrator_instance_creation_creates_runtime_sessions() {
 #[test]
 fn orchestrator_entry_session_dispatch_prefixes_template_instructions() {
     let state = test_app_state();
-    let project_root = std::env::temp_dir().join(format!(
-        "termal-orchestrator-entry-{}",
-        Uuid::new_v4()
-    ));
+    let project_root =
+        std::env::temp_dir().join(format!("termal-orchestrator-entry-{}", Uuid::new_v4()));
     fs::create_dir_all(&project_root).expect("entry project root should exist");
     let project_id = state
         .create_project(CreateProjectRequest {
@@ -12621,7 +12743,7 @@ fn orchestrator_entry_session_dispatch_prefixes_template_instructions() {
     let orchestrator = state
         .create_orchestrator_instance(CreateOrchestratorInstanceRequest {
             template_id: template.id,
-            project_id,
+            project_id: Some(project_id),
         })
         .expect("orchestrator instance should be created")
         .orchestrator;
@@ -12688,7 +12810,7 @@ fn completed_session_routes_transition_prompt_into_destination_queue() {
     let orchestrator = state
         .create_orchestrator_instance(CreateOrchestratorInstanceRequest {
             template_id: template.id,
-            project_id,
+            project_id: Some(project_id),
         })
         .expect("orchestrator instance should be created")
         .orchestrator;
@@ -12777,16 +12899,18 @@ fn completed_session_routes_transition_prompt_into_destination_queue() {
         planner_instance.last_delivered_completion_revision,
         Some(completion_revision)
     );
-    assert!(inner.orchestrator_instances[0].pending_transitions.is_empty());
+    assert!(
+        inner.orchestrator_instances[0]
+            .pending_transitions
+            .is_empty()
+    );
 }
 
 #[test]
 fn persisted_pending_orchestrator_transitions_resume_once_after_reload() {
     let state = test_app_state();
-    let project_root = std::env::temp_dir().join(format!(
-        "termal-orchestrator-recovery-{}",
-        Uuid::new_v4()
-    ));
+    let project_root =
+        std::env::temp_dir().join(format!("termal-orchestrator-recovery-{}", Uuid::new_v4()));
     fs::create_dir_all(&project_root).expect("recovery project root should exist");
     let project_id = state
         .create_project(CreateProjectRequest {
@@ -12803,7 +12927,7 @@ fn persisted_pending_orchestrator_transitions_resume_once_after_reload() {
     let orchestrator = state
         .create_orchestrator_instance(CreateOrchestratorInstanceRequest {
             template_id: template.id,
-            project_id,
+            project_id: Some(project_id),
         })
         .expect("orchestrator instance should be created")
         .orchestrator;
@@ -12900,7 +13024,11 @@ fn persisted_pending_orchestrator_transitions_resume_once_after_reload() {
             .text
             .contains("Finish the toolbar polish.")
     );
-    assert!(inner.orchestrator_instances[0].pending_transitions.is_empty());
+    assert!(
+        inner.orchestrator_instances[0]
+            .pending_transitions
+            .is_empty()
+    );
 }
 
 #[test]
@@ -12926,7 +13054,7 @@ fn startup_recovery_dispatches_orphaned_orchestrator_queued_prompt() {
     let orchestrator = state
         .create_orchestrator_instance(CreateOrchestratorInstanceRequest {
             template_id: template.id,
-            project_id,
+            project_id: Some(project_id),
         })
         .expect("orchestrator instance should be created")
         .orchestrator;
@@ -13097,7 +13225,7 @@ fn failed_orchestrator_transition_dispatch_becomes_a_visible_destination_error()
     let orchestrator = state
         .create_orchestrator_instance(CreateOrchestratorInstanceRequest {
             template_id: template.id,
-            project_id,
+            project_id: Some(project_id),
         })
         .expect("orchestrator instance should be created")
         .orchestrator;
@@ -13191,7 +13319,11 @@ fn failed_orchestrator_transition_dispatch_becomes_a_visible_destination_error()
             ..
         }) if text.contains("failed to queue prompt for Codex session")
     ));
-    assert!(inner.orchestrator_instances[0].pending_transitions.is_empty());
+    assert!(
+        inner.orchestrator_instances[0]
+            .pending_transitions
+            .is_empty()
+    );
 }
 
 #[test]
@@ -13202,14 +13334,10 @@ fn failed_orchestrator_transition_dispatch_does_not_block_other_instances() {
         .expect("template should be created")
         .template;
 
-    let project_root_a = std::env::temp_dir().join(format!(
-        "termal-orchestrator-multi-a-{}",
-        Uuid::new_v4()
-    ));
-    let project_root_b = std::env::temp_dir().join(format!(
-        "termal-orchestrator-multi-b-{}",
-        Uuid::new_v4()
-    ));
+    let project_root_a =
+        std::env::temp_dir().join(format!("termal-orchestrator-multi-a-{}", Uuid::new_v4()));
+    let project_root_b =
+        std::env::temp_dir().join(format!("termal-orchestrator-multi-b-{}", Uuid::new_v4()));
     fs::create_dir_all(&project_root_a).expect("first project root should exist");
     fs::create_dir_all(&project_root_b).expect("second project root should exist");
 
@@ -13219,14 +13347,14 @@ fn failed_orchestrator_transition_dispatch_does_not_block_other_instances() {
     let orchestrator_a = state
         .create_orchestrator_instance(CreateOrchestratorInstanceRequest {
             template_id: template.id.clone(),
-            project_id: project_id_a,
+            project_id: Some(project_id_a),
         })
         .expect("first orchestrator instance should be created")
         .orchestrator;
     let orchestrator_b = state
         .create_orchestrator_instance(CreateOrchestratorInstanceRequest {
             template_id: template.id,
-            project_id: project_id_b,
+            project_id: Some(project_id_b),
         })
         .expect("second orchestrator instance should be created")
         .orchestrator;
@@ -13341,17 +13469,21 @@ fn failed_orchestrator_transition_dispatch_does_not_block_other_instances() {
 
     assert_eq!(builder_a.session.status, SessionStatus::Error);
     assert_eq!(builder_b.session.pending_prompts.len(), 1);
-    assert!(builder_b.session.pending_prompts[0]
-        .text
-        .contains("Audit the orchestration editor UI."));
-    assert!(inner
-        .orchestrator_instances
-        .iter()
-        .all(|instance| instance.pending_transitions.is_empty()));
+    assert!(
+        builder_b.session.pending_prompts[0]
+            .text
+            .contains("Audit the orchestration editor UI.")
+    );
+    assert!(
+        inner
+            .orchestrator_instances
+            .iter()
+            .all(|instance| instance.pending_transitions.is_empty())
+    );
 }
 
 #[test]
-fn stop_session_schedules_orchestrator_transitions() {
+fn stop_session_does_not_schedule_orchestrator_transitions() {
     let state = test_app_state();
     let project_root = std::env::temp_dir().join(format!(
         "termal-orchestrator-stop-transition-{}",
@@ -13366,7 +13498,7 @@ fn stop_session_schedules_orchestrator_transitions() {
     let orchestrator = state
         .create_orchestrator_instance(CreateOrchestratorInstanceRequest {
             template_id: template.id,
-            project_id,
+            project_id: Some(project_id),
         })
         .expect("orchestrator instance should be created")
         .orchestrator;
@@ -13427,11 +13559,171 @@ fn stop_session_schedules_orchestrator_transitions() {
         message,
         Message::Text { text, .. } if text == "Turn stopped by user."
     )));
-    assert_eq!(builder.session.pending_prompts.len(), 1);
-    assert!(builder.session.pending_prompts[0]
-        .text
-        .contains("Turn stopped by user."));
-    assert!(inner.orchestrator_instances[0].pending_transitions.is_empty());
+    assert!(builder.session.pending_prompts.is_empty());
+    assert!(
+        inner.orchestrator_instances[0]
+            .pending_transitions
+            .is_empty()
+    );
+}
+
+#[test]
+fn fail_turn_does_not_schedule_orchestrator_transitions() {
+    let state = test_app_state();
+    let project_root =
+        std::env::temp_dir().join(format!("termal-orchestrator-fail-turn-{}", Uuid::new_v4()));
+    fs::create_dir_all(&project_root).expect("fail-turn project root should exist");
+    let project_id = create_test_project(&state, &project_root, "Fail Turn Project");
+    let template = state
+        .create_orchestrator_template(sample_orchestrator_template_draft())
+        .expect("template should be created")
+        .template;
+    let orchestrator = state
+        .create_orchestrator_instance(CreateOrchestratorInstanceRequest {
+            template_id: template.id,
+            project_id: Some(project_id),
+        })
+        .expect("orchestrator instance should be created")
+        .orchestrator;
+
+    let planner_session_id = orchestrator
+        .session_instances
+        .iter()
+        .find(|instance| instance.template_session_id == "planner")
+        .expect("planner session should be mapped")
+        .session_id
+        .clone();
+    let builder_session_id = orchestrator
+        .session_instances
+        .iter()
+        .find(|instance| instance.template_session_id == "builder")
+        .expect("builder session should be mapped")
+        .session_id
+        .clone();
+    let (runtime, _input_rx) = test_claude_runtime_handle("orchestrator-fail-turn");
+    let runtime_token = RuntimeToken::Claude(runtime.runtime_id.clone());
+
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let planner_index = inner
+            .find_session_index(&planner_session_id)
+            .expect("planner session should exist");
+        inner.sessions[planner_index].runtime = SessionRuntime::Claude(runtime);
+        inner.sessions[planner_index].session.status = SessionStatus::Active;
+        inner.sessions[planner_index].active_turn_start_message_count =
+            Some(inner.sessions[planner_index].session.messages.len());
+    }
+
+    state
+        .fail_turn_if_runtime_matches(
+            &planner_session_id,
+            &runtime_token,
+            "planner turn failed before completion",
+        )
+        .expect("turn failure should be handled");
+
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    let planner = inner
+        .sessions
+        .iter()
+        .find(|record| record.session.id == planner_session_id)
+        .expect("planner session should exist");
+    let builder = inner
+        .sessions
+        .iter()
+        .find(|record| record.session.id == builder_session_id)
+        .expect("builder session should exist");
+
+    assert!(planner.session.messages.iter().any(|message| matches!(
+        message,
+        Message::Text { text, .. } if text == "Turn failed: planner turn failed before completion"
+    )));
+    assert!(builder.session.pending_prompts.is_empty());
+    assert!(
+        inner.orchestrator_instances[0]
+            .pending_transitions
+            .is_empty()
+    );
+}
+
+#[test]
+fn mark_turn_error_does_not_schedule_orchestrator_transitions() {
+    let state = test_app_state();
+    let project_root =
+        std::env::temp_dir().join(format!("termal-orchestrator-mark-error-{}", Uuid::new_v4()));
+    fs::create_dir_all(&project_root).expect("mark-error project root should exist");
+    let project_id = create_test_project(&state, &project_root, "Mark Error Project");
+    let template = state
+        .create_orchestrator_template(sample_orchestrator_template_draft())
+        .expect("template should be created")
+        .template;
+    let orchestrator = state
+        .create_orchestrator_instance(CreateOrchestratorInstanceRequest {
+            template_id: template.id,
+            project_id: Some(project_id),
+        })
+        .expect("orchestrator instance should be created")
+        .orchestrator;
+
+    let planner_session_id = orchestrator
+        .session_instances
+        .iter()
+        .find(|instance| instance.template_session_id == "planner")
+        .expect("planner session should be mapped")
+        .session_id
+        .clone();
+    let builder_session_id = orchestrator
+        .session_instances
+        .iter()
+        .find(|instance| instance.template_session_id == "builder")
+        .expect("builder session should be mapped")
+        .session_id
+        .clone();
+    let (runtime, _input_rx) = test_claude_runtime_handle("orchestrator-mark-error");
+    let runtime_token = RuntimeToken::Claude(runtime.runtime_id.clone());
+
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let planner_index = inner
+            .find_session_index(&planner_session_id)
+            .expect("planner session should exist");
+        inner.sessions[planner_index].runtime = SessionRuntime::Claude(runtime);
+        inner.sessions[planner_index].session.status = SessionStatus::Active;
+        inner.sessions[planner_index].active_turn_start_message_count =
+            Some(inner.sessions[planner_index].session.messages.len());
+    }
+
+    state
+        .mark_turn_error_if_runtime_matches(
+            &planner_session_id,
+            &runtime_token,
+            "planner runtime entered an error state",
+        )
+        .expect("turn error should be handled");
+
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    let planner = inner
+        .sessions
+        .iter()
+        .find(|record| record.session.id == planner_session_id)
+        .expect("planner session should exist");
+    let builder = inner
+        .sessions
+        .iter()
+        .find(|record| record.session.id == builder_session_id)
+        .expect("builder session should exist");
+
+    assert_eq!(planner.session.status, SessionStatus::Error);
+    assert_eq!(
+        planner.session.preview,
+        "planner runtime entered an error state"
+    );
+    assert!(builder.session.pending_prompts.is_empty());
+    assert!(
+        inner.orchestrator_instances[0]
+            .pending_transitions
+            .is_empty()
+    );
 }
 
 #[test]
@@ -13457,7 +13749,7 @@ fn orchestrator_transition_uses_only_messages_from_the_current_turn() {
     let orchestrator = state
         .create_orchestrator_instance(CreateOrchestratorInstanceRequest {
             template_id: template.id,
-            project_id,
+            project_id: Some(project_id),
         })
         .expect("orchestrator instance should be created")
         .orchestrator;
@@ -13536,16 +13828,20 @@ fn orchestrator_transition_uses_only_messages_from_the_current_turn() {
         .find(|record| record.session.id == builder_session_id)
         .expect("builder session should exist");
     assert_eq!(builder.session.pending_prompts.len(), 1);
-    assert!(!builder.session.pending_prompts[0]
-        .text
-        .contains("Old plan from yesterday."));
-    assert!(builder.session.pending_prompts[0]
-        .text
-        .contains("Use this plan and implement it:"));
+    assert!(
+        !builder.session.pending_prompts[0]
+            .text
+            .contains("Old plan from yesterday.")
+    );
+    assert!(
+        builder.session.pending_prompts[0]
+            .text
+            .contains("Use this plan and implement it:")
+    );
 }
 
 #[test]
-fn runtime_exit_schedules_orchestrator_transitions() {
+fn runtime_exit_does_not_schedule_orchestrator_transitions() {
     let state = test_app_state();
     let project_root = std::env::temp_dir().join(format!(
         "termal-orchestrator-runtime-exit-{}",
@@ -13567,7 +13863,7 @@ fn runtime_exit_schedules_orchestrator_transitions() {
     let orchestrator = state
         .create_orchestrator_instance(CreateOrchestratorInstanceRequest {
             template_id: template.id,
-            project_id,
+            project_id: Some(project_id),
         })
         .expect("orchestrator instance should be created")
         .orchestrator;
@@ -13616,11 +13912,22 @@ fn runtime_exit_schedules_orchestrator_transitions() {
         .iter()
         .find(|record| record.session.id == builder_session_id)
         .expect("builder session should exist");
-    assert_eq!(builder.session.pending_prompts.len(), 1);
-    assert!(builder.session.pending_prompts[0]
-        .text
-        .contains("Turn failed: planner runtime crashed"));
-    assert!(inner.orchestrator_instances[0].pending_transitions.is_empty());
+    let planner = inner
+        .sessions
+        .iter()
+        .find(|record| record.session.id == planner_session_id)
+        .expect("planner session should exist");
+
+    assert!(planner.session.messages.iter().any(|message| matches!(
+        message,
+        Message::Text { text, .. } if text == "Turn failed: planner runtime crashed"
+    )));
+    assert!(builder.session.pending_prompts.is_empty());
+    assert!(
+        inner.orchestrator_instances[0]
+            .pending_transitions
+            .is_empty()
+    );
 }
 
 #[test]
@@ -13646,7 +13953,7 @@ fn killing_a_session_prunes_its_orchestrator_links() {
     let orchestrator = state
         .create_orchestrator_instance(CreateOrchestratorInstanceRequest {
             template_id: template.id,
-            project_id,
+            project_id: Some(project_id),
         })
         .expect("orchestrator instance should be created")
         .orchestrator;
@@ -13691,18 +13998,16 @@ fn killing_a_session_prunes_its_orchestrator_links() {
         .expect("session should be killed");
 
     let inner = state.inner.lock().expect("state mutex poisoned");
-    assert!(inner
-        .orchestrator_instances
-        .iter()
-        .all(|instance| instance
+    assert!(inner.orchestrator_instances.iter().all(|instance| {
+        instance
             .session_instances
             .iter()
-            .all(|session| session.session_id != planner_session_id)));
-    assert!(inner
-        .orchestrator_instances
-        .iter()
-        .all(|instance| instance.pending_transitions.iter().all(|pending| {
+            .all(|session| session.session_id != planner_session_id)
+    }));
+    assert!(inner.orchestrator_instances.iter().all(|instance| {
+        instance.pending_transitions.iter().all(|pending| {
             pending.source_session_id != planner_session_id
                 && pending.destination_session_id != planner_session_id
-        })));
+        })
+    }));
 }

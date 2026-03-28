@@ -556,7 +556,7 @@ async fn read_file(
         )?;
         let metadata = fs::metadata(&resolved_path).map_err(|err| match err.kind() {
             io::ErrorKind::NotFound => {
-                ApiError::bad_request(format!("file not found: {}", resolved_path.display()))
+                ApiError::not_found(format!("file not found: {}", resolved_path.display()))
             }
             _ => ApiError::internal(format!(
                 "failed to stat file {}: {err}",
@@ -572,7 +572,7 @@ async fn read_file(
         }
         let content = fs::read_to_string(&resolved_path).map_err(|err| match err.kind() {
             io::ErrorKind::NotFound => {
-                ApiError::bad_request(format!("file not found: {}", resolved_path.display()))
+                ApiError::not_found(format!("file not found: {}", resolved_path.display()))
             }
             io::ErrorKind::InvalidData => ApiError::bad_request(format!(
                 "file is not valid UTF-8: {}",
@@ -678,7 +678,7 @@ async fn read_directory(
         )?;
         let metadata = fs::metadata(&resolved_path).map_err(|err| match err.kind() {
             io::ErrorKind::NotFound => {
-                ApiError::bad_request(format!("path not found: {}", resolved_path.display()))
+                ApiError::not_found(format!("path not found: {}", resolved_path.display()))
             }
             _ => ApiError::internal(format!(
                 "failed to stat path {}: {err}",
@@ -1105,7 +1105,7 @@ fn read_instruction_document(
 ) -> Result<InstructionDocumentInternal, ApiError> {
     let content = fs::read_to_string(path).map_err(|err| match err.kind() {
         io::ErrorKind::NotFound => {
-            ApiError::bad_request(format!("instruction file not found: {}", path.display()))
+            ApiError::not_found(format!("instruction file not found: {}", path.display()))
         }
         io::ErrorKind::InvalidData => ApiError::bad_request(format!(
             "instruction file is not valid UTF-8: {}",
@@ -4772,7 +4772,7 @@ fn canonicalize_existing_path(path: &FsPath, label: &str) -> Result<PathBuf, Api
         .map(|path| normalize_user_facing_path(&path))
         .map_err(|err| match err.kind() {
             io::ErrorKind::NotFound => {
-                ApiError::bad_request(format!("{label} not found: {}", path.display()))
+                ApiError::not_found(format!("{label} not found: {}", path.display()))
             }
             _ => ApiError::internal(format!(
                 "failed to resolve {label} {}: {err}",
