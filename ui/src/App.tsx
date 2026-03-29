@@ -4266,10 +4266,25 @@ export default function App() {
           onDragEnd={handleControlPanelLauncherDragEnd}
           disabled={disabled}
         >
-          <span className="control-panel-header-action-icon" aria-hidden="true">
-            <ControlPanelSectionIcon sectionId={sectionId} />
+          <span className="control-panel-header-action-icon control-panel-header-action-icon-open-tab" aria-hidden="true">
+            <svg viewBox="0 0 16 16" focusable="false" aria-hidden="true">
+              <path
+                d="M3.5 4.25h4l1.15 1.25h4A1.25 1.25 0 0 1 13.9 6.75v5.5a1.25 1.25 0 0 1-1.25 1.25H3.5A1.25 1.25 0 0 1 2.25 12.25v-6.75A1.25 1.25 0 0 1 3.5 4.25Z"
+                fill="none"
+                stroke="currentColor"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth="1.35"
+              />
+              <path
+                d="M8.75 3.25v4.5M6.5 5.5h4.5"
+                fill="none"
+                stroke="currentColor"
+                strokeLinecap="round"
+                strokeWidth="1.35"
+              />
+            </svg>
           </span>
-          <span>Open tab</span>
         </button>
       );
     }

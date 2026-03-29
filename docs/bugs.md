@@ -1,4 +1,4 @@
-﻿# Bugs & Known Issues
+# Bugs & Known Issues
 
 Updated against the current checked-in code in `src/main.rs`, `ui/src/App.tsx`,
 `ui/package.json`, and `ui/vite.config.ts`.
@@ -58,6 +58,10 @@ The missing axum coverage for orchestrator instance routes is also fixed in the 
 route-level tests in addition to the direct state-level orchestration tests.
 
 The settings-tab selection-frame padding issue is also fixed in the current tree.
+
+The frontend workspace-layout `controlPanelSide` typing note is also fixed in the current tree. The
+workspace layout API types now narrow `controlPanelSide` to `"left" | "right"` in `ui/src/api.ts`,
+matching the backend enum contract.
 
 The `ApprovalDecision::Pending` panic and the cyclic transition graph resource exhaustion are also
 fixed in the current tree. `Pending` is now rejected by the early guard alongside `Interrupted`
@@ -139,7 +143,7 @@ The `handleTabRailDragOver` handler in `PaneTabs.tsx` and the pane body `onDragO
 `App.tsx` fall back to checking `dataTransfer.types.includes("text/plain")` when the custom MIME
 type is absent. This means any drag that carries `text/plain` data (selected text, browser
 bookmarks, OS file drops) will show drop indicators on the tab rail and pane body. The actual
-drop is safe — `readWorkspaceTabDragData` validates — but the visual affordance is misleading.
+drop is safe � `readWorkspaceTabDragData` validates � but the visual affordance is misleading.
 
 **Current behavior:**
 - dragging selected text over a tab rail or pane body shows a drop indicator
@@ -172,20 +176,52 @@ workspace layout is local-only and not persisted to the backend.
 - update `docs/architecture.md` so the persistence section and API table reflect server-backed
   workspace layouts
 
-## Frontend `controlPanelSide` response type is loosely typed
+## Switching workspaces in the current tab can drop the last debounced server save
 
-**Severity:** Low - type fidelity issue only.
+**Severity:** Medium - the latest layout can be persisted only to browser-local storage and never
+reach the server-backed workspace record.
 
-The `WorkspaceLayoutDocument` and `WorkspaceLayoutSummary` types in `api.ts` declare
-`controlPanelSide: string` instead of `"left" | "right"`, diverging from the backend Rust enum
-`WorkspaceControlPanelSide`.
+Workspace switching now persists layouts to the backend with a debounced `PUT /api/workspaces/{id}`
+write, but `navigateToWorkspace()` immediately calls `window.location.assign(...)` for same-tab
+navigation. The save effect cleanup clears any pending timeout on unmount, so a quick workspace
+switch can cancel the last pending backend write even though the layout already changed locally.
+
+That means the current browser can often recover from `localStorage`, but other browsers, fresh
+profiles, and any later server-driven bootstrap can still see a stale workspace layout because the
+authoritative backend copy never received the final update.
 
 **Current behavior:**
-- callers must narrow the string type themselves
-- `saveWorkspaceLayout` correctly narrows at the call site
+- same-tab workspace navigation can happen before the debounced server save fires
+- unmount cleanup clears the pending persistence timer instead of flushing it
+- the latest layout may exist only in browser-local storage while the backend still serves an
+  older workspace snapshot
 
 **Proposal:**
-- change `controlPanelSide` to `"left" | "right"` in both response types
+- flush pending workspace saves before same-tab navigation or persist them during `pagehide`
+- consider `navigator.sendBeacon` or an explicit synchronous handoff path for the final save
+- add a regression that changes a layout, switches workspaces immediately, and asserts the backend
+  still receives the last `PUT /api/workspaces/{id}`
+
+## Dropping a session on the tab rail ignores the hovered insertion index
+
+**Severity:** Low - tab re-targeting works, but the visual insertion affordance is inaccurate.
+
+`placeSessionDropInWorkspaceState()` accepts a `tabIndex`, and the tab rail computes hovered drop
+positions, but the `placement === "tabs"` path forwards session drops through
+`openSessionInWorkspaceState(...)`, which does not take the insertion index. As a result, the drop
+indicator can show a specific slot while the actual session placement falls back to the existing
+open/focus behavior.
+
+**Current behavior:**
+- dropping a session onto a highlighted tab position does not honor the computed insertion index
+- existing sessions are focused and new sessions are appended/opened using the default path
+- the UI can preview one tab position while committing another
+
+**Proposal:**
+- thread the `tabIndex` through the session-drop tab-placement path
+- route tab-rail session drops through the insertion-aware tab open helper instead of the generic
+  open/focus path
+
 
 ## Markdown localhost file-link normalization overmatches same-origin web URLs
 
@@ -256,7 +292,7 @@ error instead of being blocked in the UI.
 
 ## Backend module sizes are growing
 
-**Severity:** Medium â€” maintainability concern, not a runtime bug.
+**Severity:** Medium — maintainability concern, not a runtime bug.
 
 The backend was split from a single `src/main.rs` into focused modules (`api.rs`, `state.rs`,
 `runtime.rs`, `turns.rs`, `remote.rs`, `tests.rs`), but several of those modules are already
@@ -336,7 +372,7 @@ Concrete work implied by the current TermAl parity gaps. Ordered by user impact 
   session is not treated as cleanly stopped or allowed to dispatch queued follow-up work.
 - [ ] Add frontend reconcile tests for new interactive message types:
   `userInputRequest`, `mcpElicitationRequest`, and `codexAppRequest` messages are handled by the
-  reconciler but have no test coverage verifying that state changes (e.g. pending → submitted)
+  reconciler but have no test coverage verifying that state changes (e.g. pending ? submitted)
   correctly produce new message references.
 - [ ] Add `SessionCanvasPanel.test.tsx` afterEach cleanup:
   other test files (`PaneTabs.test.tsx`, `App.test.tsx`) explicitly call `cleanup()` in
@@ -385,6 +421,12 @@ Concrete work implied by the current TermAl parity gaps. Ordered by user impact 
   `list_workspace_layouts_route_returns_saved_workspaces` checks presence but not the documented
   `updated_at` descending sort order. Assert index positions after inserting workspaces with
   distinct timestamps.
+- [ ] Add workspace-navigation regression coverage for debounced server layout saves:
+  change a workspace layout, switch to another workspace in the current tab before the debounce
+  timer fires, and assert the last layout still reaches `PUT /api/workspaces/{id}`.
+- [ ] Add a tab-rail session-drop insertion-order regression:
+  cover `placeSessionDropInWorkspaceState` / App-level tab drops so a session dropped at a
+  specific tab index is inserted at that position instead of always falling back to append/focus.
 - [ ] Extract shared drag-drop test setup helper:
   the two drag-drop tests in `App.test.tsx` duplicate ~60 lines of identical fetch-mock and
   setup boilerplate. Extract a shared `renderAppWithProjectAndSession()` helper.
@@ -397,3 +439,6 @@ Concrete work implied by the current TermAl parity gaps. Ordered by user impact 
   could benefit from further decomposition as features stabilize.
 
 ## Later
+
+
+
