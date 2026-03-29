@@ -672,7 +672,20 @@ export function openSourceInWorkspaceState(
     return openTabInWorkspaceState(workspace, nextTab, targetPaneId);
   }
 
-  return openContextualTabInWorkspaceState(workspace, nextTab, null, preferredPaneId, originSessionId);
+  // When the preferred pane is a control panel, redirect the split anchor to a content pane
+  // so the new source tab appears next to the session, not at the workspace edge.
+  const splitAnchorPaneId = (() => {
+    if (!preferredPaneId) {
+      return preferredPaneId;
+    }
+    const preferredPane = workspace.panes.find((pane) => pane.id === preferredPaneId);
+    if (preferredPane && paneContainsControlPanel(preferredPane)) {
+      return findNonControlPanelPaneId(workspace, preferredPane.id) ?? preferredPaneId;
+    }
+    return preferredPaneId;
+  })();
+
+  return openContextualTabInWorkspaceState(workspace, nextTab, null, splitAnchorPaneId, originSessionId);
 }
 
 export function openFilesystemInWorkspaceState(
@@ -2168,6 +2181,11 @@ function findContextualTargetPaneId(
 
     if (preferredPane && paneContainsControlPanel(preferredPane)) {
       const nonControlPanelPaneId = findNonControlPanelPaneId(workspace, preferredPane.id);
+      if (nonControlPanelPaneId && shouldOpenTabInAdjacentPane(workspace, nonControlPanelPaneId, tabKind)) {
+        // Room to split — return null so the caller splits off the content pane.
+        // The caller will use the content pane (not the control panel) as the split anchor.
+        return null;
+      }
       if (nonControlPanelPaneId) {
         return nonControlPanelPaneId;
       }
