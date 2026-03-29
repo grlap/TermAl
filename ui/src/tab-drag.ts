@@ -53,6 +53,22 @@ export function attachWorkspaceTabDragData(
   dataTransfer.setData("text/plain", formatWorkspaceTabDragLabel(drag));
 }
 
+export function readWorkspaceTabDragData(
+  dataTransfer: Pick<DataTransfer, "getData"> | null | undefined,
+): WorkspaceTabDrag | null {
+  const raw = dataTransfer?.getData(TAB_DRAG_MIME_TYPE) ?? "";
+  if (!raw) {
+    return null;
+  }
+
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    return isWorkspaceTabDrag(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
 export function isWorkspaceTabDragChannelMessage(
   value: unknown,
 ): value is WorkspaceTabDragChannelMessage {

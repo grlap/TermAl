@@ -79,15 +79,21 @@ describe("Backend connection state", () => {
     const originalResizeObserver = globalThis.ResizeObserver;
     const ownNavigatorOnlineDescriptor = Object.getOwnPropertyDescriptor(window.navigator, "onLine");
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
-      if (String(input) === "/api/state") {
+      const target = String(input);
+      if (target === "/api/state") {
         return jsonResponse({
           revision: 1,
           projects: [],
           sessions: [],
         });
       }
+      if (target.startsWith("/api/workspaces/")) {
+        return new Response("", {
+          status: 404,
+        });
+      }
 
-      throw new Error(`Unexpected fetch: ${String(input)}`);
+      throw new Error(`Unexpected fetch: ${target}`);
     });
 
     Object.defineProperty(window.navigator, "onLine", {
@@ -103,7 +109,10 @@ describe("Backend connection state", () => {
 
       expect(screen.getByText("Connecting")).toBeInTheDocument();
       expect(container.querySelector(".workspace-status-strip")).toBeNull();
-      expect(screen.getByText("Connecting").closest(".pane-bar-right")).not.toBeNull();
+      const workspaceSwitcherTrigger = screen.getByRole("button", { name: /workspace /i });
+      expect(workspaceSwitcherTrigger).toBeInTheDocument();
+      expect(workspaceSwitcherTrigger.closest(".pane-bar-right")).not.toBeNull();
+      expect(container.querySelector(".control-panel-header-actions .workspace-switcher")).toBeNull();
 
       const eventSource = EventSourceMock.instances[EventSourceMock.instances.length - 1];
       expect(eventSource).toBeDefined();
@@ -129,7 +138,8 @@ describe("Backend connection state", () => {
       await waitFor(() => {
         expect(screen.getByText("Reconnecting")).toBeInTheDocument();
       });
-      expect(fetchMock).not.toHaveBeenCalled();
+      const reconnectFetchCount = fetchMock.mock.calls.length;
+      expect(reconnectFetchCount).toBeGreaterThanOrEqual(1);
 
       Object.defineProperty(window.navigator, "onLine", {
         configurable: true,
@@ -144,6 +154,7 @@ describe("Backend connection state", () => {
       });
       fireEvent(window, new Event("online"));
       expect(screen.getByText("Reconnecting")).toBeInTheDocument();
+      expect(fetchMock).toHaveBeenCalledTimes(reconnectFetchCount);
 
       act(() => {
         eventSource?.dispatchOpen();

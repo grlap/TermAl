@@ -12674,6 +12674,152 @@ async fn get_orchestrator_instance_route_returns_the_requested_instance() {
     assert_eq!(response.orchestrator.id, created.id);
 }
 
+#[tokio::test]
+async fn workspace_layout_routes_round_trip_without_bumping_state_revision() {
+    let state = test_app_state();
+    let app = app_router(state.clone());
+    let payload = json!({
+        "controlPanelSide": "right",
+        "workspace": {
+            "root": null,
+            "panes": [],
+            "activePaneId": null
+        }
+    });
+
+    let (put_status, put_response): (StatusCode, WorkspaceLayoutResponse) = request_json(
+        &app,
+        Request::builder()
+            .method("PUT")
+            .uri("/api/workspaces/monitor-right")
+            .header("Content-Type", "application/json")
+            .body(Body::from(payload.to_string()))
+            .unwrap(),
+    )
+    .await;
+
+    assert_eq!(put_status, StatusCode::OK);
+    assert_eq!(put_response.layout.id, "monitor-right");
+    assert_eq!(put_response.layout.revision, 1);
+    assert_eq!(
+        put_response.layout.control_panel_side,
+        WorkspaceControlPanelSide::Right
+    );
+    assert_eq!(put_response.layout.workspace, payload["workspace"]);
+
+    let persisted = load_state(state.persistence_path.as_path())
+        .expect("state should load")
+        .expect("persisted state should exist");
+    let persisted_layout = persisted
+        .workspace_layouts
+        .get("monitor-right")
+        .expect("workspace layout should persist");
+    assert_eq!(persisted_layout.workspace, payload["workspace"]);
+    assert_eq!(persisted.revision, 0);
+
+    let (get_status, get_response): (StatusCode, WorkspaceLayoutResponse) = request_json(
+        &app,
+        Request::builder()
+            .method("GET")
+            .uri("/api/workspaces/monitor-right")
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
+
+    assert_eq!(get_status, StatusCode::OK);
+    assert_eq!(get_response.layout.id, "monitor-right");
+    assert_eq!(get_response.layout.revision, 1);
+
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    assert_eq!(inner.revision, 0);
+}
+
+#[tokio::test]
+async fn list_workspace_layouts_route_returns_saved_workspaces() {
+    let state = test_app_state();
+    state
+        .put_workspace_layout(
+            "monitor-a",
+            PutWorkspaceLayoutRequest {
+                control_panel_side: WorkspaceControlPanelSide::Left,
+                theme_id: None,
+                style_id: None,
+                font_size_px: None,
+                editor_font_size_px: None,
+                density_percent: None,
+                workspace: json!({
+                    "root": null,
+                    "panes": [],
+                    "activePaneId": null
+                }),
+            },
+        )
+        .expect("first workspace should save");
+    state
+        .put_workspace_layout(
+            "monitor-b",
+            PutWorkspaceLayoutRequest {
+                control_panel_side: WorkspaceControlPanelSide::Right,
+                theme_id: None,
+                style_id: None,
+                font_size_px: None,
+                editor_font_size_px: None,
+                density_percent: None,
+                workspace: json!({
+                    "root": null,
+                    "panes": [],
+                    "activePaneId": null
+                }),
+            },
+        )
+        .expect("second workspace should save");
+    let app = app_router(state);
+
+    let (status, response): (StatusCode, WorkspaceLayoutsResponse) = request_json(
+        &app,
+        Request::builder()
+            .method("GET")
+            .uri("/api/workspaces")
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(response.workspaces.len(), 2);
+    assert!(
+        response
+            .workspaces
+            .iter()
+            .any(|workspace| workspace.id == "monitor-a")
+    );
+    assert!(
+        response
+            .workspaces
+            .iter()
+            .any(|workspace| workspace.id == "monitor-b")
+    );
+}
+
+#[tokio::test]
+async fn get_workspace_layout_route_returns_not_found_for_missing_workspace() {
+    let app = app_router(test_app_state());
+
+    let (status, response): (StatusCode, ErrorResponse) = request_json(
+        &app,
+        Request::builder()
+            .method("GET")
+            .uri("/api/workspaces/missing")
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    assert!(response.error.contains("workspace layout not found"));
+}
+
 #[test]
 fn orchestrator_instance_creation_creates_runtime_sessions() {
     let state = test_app_state();

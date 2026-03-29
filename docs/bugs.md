@@ -57,6 +57,8 @@ The missing axum coverage for orchestrator instance routes is also fixed in the 
 `GET /api/orchestrators`, `POST /api/orchestrators`, and `GET /api/orchestrators/{id}` now have
 route-level tests in addition to the direct state-level orchestration tests.
 
+The settings-tab selection-frame padding issue is also fixed in the current tree.
+
 The `ApprovalDecision::Pending` panic and the cyclic transition graph resource exhaustion are also
 fixed in the current tree. `Pending` is now rejected by the early guard alongside `Interrupted`
 and `Canceled`, and template validation runs a DFS-based cycle detection that rejects non-DAG
@@ -129,6 +131,62 @@ stays stale until some later full snapshot arrives.
 - cover any non-session metadata returned with the same response so the callback stays aligned with
   the rest of the snapshot adoption flow
 
+## Drag-over `text/plain` MIME fallback triggers false drop indicators
+
+**Severity:** Medium - visual confusion, no data corruption.
+
+The `handleTabRailDragOver` handler in `PaneTabs.tsx` and the pane body `onDragOver` handler in
+`App.tsx` fall back to checking `dataTransfer.types.includes("text/plain")` when the custom MIME
+type is absent. This means any drag that carries `text/plain` data (selected text, browser
+bookmarks, OS file drops) will show drop indicators on the tab rail and pane body. The actual
+drop is safe — `readWorkspaceTabDragData` validates — but the visual affordance is misleading.
+
+**Current behavior:**
+- dragging selected text over a tab rail or pane body shows a drop indicator
+- dropping non-tab content does nothing (correctly rejected by the drop handler)
+
+**Proposal:**
+- tighten the `hasTabDragType` guard to also check `launcherDraggedTabRef.current` is non-null
+  before accepting the `text/plain` fallback
+- consider setting a second custom MIME type (e.g. `application/x-termal-tab`) as a lightweight
+  flag that avoids the `text/plain` ambiguity
+
+## Workspace docs lag the server-backed layout implementation
+
+**Severity:** Note - documentation drift only, but it obscures the real API and persistence model.
+
+The new multi-browser workspace implementation is now in the codebase, but the docs are not fully
+aligned with what shipped. `docs/features/multi-browser-workspaces.md` still says Phase 1 only
+needs `GET /api/workspaces/{id}` and `PUT /api/workspaces/{id}`, while the implementation also
+adds `GET /api/workspaces` to drive the workspace switcher. `docs/architecture.md` still says the
+workspace layout is local-only and not persisted to the backend.
+
+**Current behavior:**
+- the feature brief understates the implemented workspace API surface
+- the architecture doc still describes workspace layout as browser-local state
+- readers cannot rely on the docs to understand the current server-backed workspace model
+
+**Proposal:**
+- update `docs/features/multi-browser-workspaces.md` to include the list route and switcher-driven
+  flow
+- update `docs/architecture.md` so the persistence section and API table reflect server-backed
+  workspace layouts
+
+## Frontend `controlPanelSide` response type is loosely typed
+
+**Severity:** Low - type fidelity issue only.
+
+The `WorkspaceLayoutDocument` and `WorkspaceLayoutSummary` types in `api.ts` declare
+`controlPanelSide: string` instead of `"left" | "right"`, diverging from the backend Rust enum
+`WorkspaceControlPanelSide`.
+
+**Current behavior:**
+- callers must narrow the string type themselves
+- `saveWorkspaceLayout` correctly narrows at the call site
+
+**Proposal:**
+- change `controlPanelSide` to `"left" | "right"` in both response types
+
 ## Markdown localhost file-link normalization overmatches same-origin web URLs
 
 **Severity:** Low - legitimate app-origin web links with file-like paths can be rewritten as local
@@ -192,6 +250,7 @@ error instead of being blocked in the UI.
 - [Diff Review Workflow](./features/diff-review-workflow.md)
 - [Territory Visualization](./features/territory-visualization.md)
 - [Agent Integration Comparison](./features/agent-integration-comparison.md)
+- [Multi-Browser Workspaces](./features/multi-browser-workspaces.md)
 
 # Backlog
 
@@ -318,6 +377,17 @@ Concrete work implied by the current TermAl parity gaps. Ordered by user impact 
 - [ ] Add session/transition count limits to orchestrator template validation:
   `normalize_orchestrator_template_draft` has no upper bounds on `sessions.len()` or
   `transitions.len()`. Cap at ~50 sessions and ~200 transitions.
+- [ ] Add unit tests for `ensureWorkspaceViewId` and `createWorkspaceViewId`:
+  `workspace-storage.ts` exports these functions for URL-param handling and workspace ID
+  generation. A round-trip test in jsdom would guard against regressions in workspace ID
+  normalization or URL-param handling.
+- [ ] Add sort-order assertion to `list_workspace_layouts` backend test:
+  `list_workspace_layouts_route_returns_saved_workspaces` checks presence but not the documented
+  `updated_at` descending sort order. Assert index positions after inserting workspaces with
+  distinct timestamps.
+- [ ] Extract shared drag-drop test setup helper:
+  the two drag-drop tests in `App.test.tsx` duplicate ~60 lines of identical fetch-mock and
+  setup boilerplate. Extract a shared `renderAppWithProjectAndSession()` helper.
 - [ ] Add unit tests for orchestrator geometry functions:
   `anchorPosition`, `nearestAnchorSide`, `nearestAnchorPosition`, `buildTransitionGeometry`,
   and `isValidAnchor` are pure deterministic functions with no DOM dependencies.

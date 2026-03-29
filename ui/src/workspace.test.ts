@@ -20,6 +20,7 @@ import {
   openSessionInWorkspaceState,
   openSessionListInWorkspaceState,
   openSourceInWorkspaceState,
+  placeSessionDropInWorkspaceState,
   placeDraggedTab,
   placeExternalTab,
   reconcileWorkspaceState,
@@ -417,6 +418,37 @@ describe("workspace helpers", () => {
     expect(next.activePaneId).toBe("pane-a");
     expect(next.panes.find((pane) => pane.id === "pane-a")?.activeTabId).toBe("tab-a");
     expect(next.panes.find((pane) => pane.id === "pane-b")?.tabs).toEqual([makeSessionTab("tab-b", "session-b")]);
+  });
+
+  it("placeSessionDropInWorkspaceState adds a dropped session to the target tab rail", () => {
+    const paneA = makePane("pane-a", [makeSessionTab("tab-a", "session-a")]);
+    const paneB = makePane("pane-b", [makeSessionListTab("tab-sessions", null)]);
+
+    const next = placeSessionDropInWorkspaceState(
+      makeSplitWorkspace(paneA, paneB, paneB.id),
+      "session-b",
+      paneB.id,
+      "tabs",
+    );
+
+    const targetPane = next.panes.find((pane) => pane.id === paneB.id);
+    expect(targetPane?.tabs.some((tab) => tab.kind === "session" && tab.sessionId === "session-b")).toBe(true);
+    expect(next.activePaneId).toBe(paneB.id);
+  });
+
+  it("placeSessionDropInWorkspaceState creates an adjacent pane for a side drop", () => {
+    const paneA = makePane("pane-a", [makeSessionTab("tab-a", "session-a")]);
+    const paneB = makePane("pane-b", [makeSessionListTab("tab-sessions", null)]);
+
+    const next = placeSessionDropInWorkspaceState(
+      makeSplitWorkspace(paneA, paneB, paneB.id),
+      "session-b",
+      paneB.id,
+      "right",
+    );
+
+    expect(next.panes.some((pane) => pane.tabs.some((tab) => tab.kind === "session" && tab.sessionId === "session-b"))).toBe(true);
+    expect(next.panes).toHaveLength(3);
   });
 
   it("openInstructionDebuggerInWorkspaceState focuses the existing debugger tab for the same session", () => {

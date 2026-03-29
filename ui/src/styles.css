@@ -24,8 +24,8 @@
   --control-size-lg: calc(2.35rem * var(--density-scale));
   --control-panel-rail-width: calc(59px * var(--density-scale));
   --control-panel-activity-button-size: calc(40px * var(--density-scale));
-  --control-panel-activity-icon-size: calc(24px * var(--density-scale));
-  --control-panel-activity-badge-size: calc(19px * var(--density-scale));
+  --control-panel-activity-icon-size: calc(32px * var(--density-scale));
+  --control-panel-activity-badge-size: calc(18px * var(--density-scale));
   --icon-size-2xs: calc(8px * var(--density-scale));
   --icon-size-xs: calc(12px * var(--density-scale));
   --icon-size-sm: calc(14px * var(--density-scale));
@@ -267,11 +267,15 @@ textarea {
   flex: none;
   font-size: 0;
   line-height: 0;
+  pointer-events: none;
+  user-select: none;
+  -webkit-user-drag: none;
 }
 
 .control-panel-activity-icon svg {
   width: 100%;
   height: 100%;
+  pointer-events: none;
 }
 
 .control-panel-activity-symbol {
@@ -368,6 +372,8 @@ textarea {
   font-weight: 700;
   line-height: 1;
   box-shadow: 0 6px 16px var(--button-primary-shadow);
+  pointer-events: none;
+  user-select: none;
 }
 
 .control-panel-content {
@@ -1015,6 +1021,7 @@ textarea {
   display: flex;
   justify-content: flex-end;
   align-items: center;
+  gap: 0.65rem;
   min-width: 0;
 }
 
@@ -1023,6 +1030,156 @@ textarea {
   align-items: center;
   gap: 0.55rem;
   min-width: 0;
+}
+
+.workspace-switcher {
+  position: relative;
+  flex: none;
+}
+
+.workspace-switcher-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.7rem;
+  min-width: 0;
+  padding: 0.45rem 0.72rem;
+  border-radius: 0.95rem;
+}
+
+.workspace-switcher-trigger.open {
+  border-color: var(--accent-blue-border);
+  background: var(--surface-white);
+  box-shadow: 0 0 0 0.24rem var(--accent-blue-soft);
+}
+
+.workspace-switcher-trigger-copy {
+  display: grid;
+  gap: 0.08rem;
+  min-width: 0;
+  text-align: left;
+}
+
+.workspace-switcher-trigger-label {
+  color: var(--muted);
+  font-size: 0.72rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.workspace-switcher-trigger-value {
+  font-family: var(--code-font);
+  font-size: 0.86rem;
+}
+
+.workspace-switcher-menu {
+  position: absolute;
+  top: calc(100% + 0.55rem);
+  right: 0;
+  z-index: 15;
+  display: grid;
+  gap: 0.8rem;
+  width: min(26rem, calc(100vw - 2rem));
+  padding: 0.95rem;
+}
+
+.workspace-switcher-menu-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.workspace-switcher-menu-header h3 {
+  margin: 0.18rem 0 0;
+  font-size: 1rem;
+}
+
+.workspace-switcher-current-id {
+  display: inline-flex;
+  align-items: center;
+  max-width: 12rem;
+  padding: 0.3rem 0.55rem;
+  border: 1px solid var(--line);
+  border-radius: var(--control-radius-pill);
+  background: var(--surface-white-soft);
+  color: var(--muted);
+  font-family: var(--code-font);
+  font-size: 0.74rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.workspace-switcher-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem;
+}
+
+.workspace-switcher-list {
+  display: grid;
+  gap: 0.55rem;
+  max-height: min(22rem, 50vh);
+  overflow: auto;
+}
+
+.workspace-switcher-item {
+  display: grid;
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 1rem;
+  background: var(--surface-white-soft);
+  color: inherit;
+  padding: 0.78rem 0.85rem;
+  text-align: left;
+}
+
+.workspace-switcher-item:hover,
+.workspace-switcher-item.selected {
+  border-color: var(--accent-blue-border);
+  background: var(--surface-white);
+}
+
+.workspace-switcher-item-copy {
+  display: grid;
+  gap: 0.18rem;
+  min-width: 0;
+}
+
+.workspace-switcher-item-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.55rem;
+}
+
+.workspace-switcher-item-title {
+  font-weight: 700;
+}
+
+.workspace-switcher-item-status {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.16rem 0.45rem;
+  border-radius: var(--control-radius-pill);
+  background: var(--accent-blue-bg);
+  color: var(--signal-blue);
+  font-size: 0.68rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.workspace-switcher-item-meta,
+.workspace-switcher-status,
+.workspace-switcher-error {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.78rem;
+  line-height: 1.4;
+}
+
+.workspace-switcher-error {
+  color: var(--signal-red);
 }
 
 .workspace-connection-chip {
@@ -1744,7 +1901,21 @@ textarea {
   display: flex;
   align-items: center;
   justify-content: flex-end;
+  gap: 0.5rem;
   flex: 0 0 auto;
+}
+
+.pane-bar-right .workspace-switcher-trigger {
+  gap: 0.5rem;
+  padding: 0.32rem 0.58rem;
+}
+
+.pane-bar-right .workspace-switcher-trigger-label {
+  font-size: 0.66rem;
+}
+
+.pane-bar-right .workspace-switcher-trigger-value {
+  font-size: 0.8rem;
 }
 
 .pane-bar-right .workspace-connection-status {
@@ -1981,6 +2152,14 @@ textarea {
   z-index: 1;
   width: calc(13px * var(--density-scale));
   height: calc(13px * var(--density-scale));
+}
+
+.pane-tab-kind-icon {
+  width: calc(13px * var(--density-scale));
+  height: calc(13px * var(--density-scale));
+  flex: none;
+  color: var(--muted);
+  opacity: 0.72;
 }
 
 .pane-tab-file-icon {
@@ -2406,6 +2585,14 @@ textarea {
   background: color-mix(in srgb, var(--accent-blue-bg) 82%, var(--surface-white));
   box-shadow: 0 10px 18px color-mix(in srgb, var(--accent-blue-soft) 88%, transparent);
   transform: translateY(-1px);
+}
+
+.control-panel-header-open-button[draggable="true"] {
+  cursor: var(--cursor-grab);
+}
+
+.control-panel-header-open-button[draggable="true"]:active {
+  cursor: var(--cursor-grabbing);
 }
 
 .control-panel-header-open-button:focus-visible {
@@ -6766,6 +6953,26 @@ textarea {
     order: 1;
     height: auto;
     min-height: auto;
+  }
+
+  .workspace-status-strip {
+    justify-content: stretch;
+    flex-wrap: wrap;
+  }
+
+  .workspace-switcher {
+    flex: 1 1 auto;
+  }
+
+  .workspace-switcher-trigger {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .workspace-switcher-menu {
+    left: 0;
+    right: 0;
+    width: auto;
   }
 
   .thread-actions {

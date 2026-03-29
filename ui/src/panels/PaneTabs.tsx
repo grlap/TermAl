@@ -31,9 +31,12 @@ import {
   resolveProjectRemoteId,
 } from "../remotes";
 import { matchingSessionModelOption } from "../session-model-options";
+import { dataTransferHasSessionDragType } from "../session-drag";
 import {
+  TAB_DRAG_MIME_TYPE,
   attachWorkspaceTabDragData,
   createWorkspaceTabDrag,
+  readWorkspaceTabDragData,
   type WorkspaceTabDrag,
 } from "../tab-drag";
 import { measurePaneTabStatusTooltipPosition } from "../pane-tab-status-tooltip";
@@ -100,7 +103,12 @@ export function PaneTabs({
   onCloseTab: (paneId: string, tabId: string) => void;
   onTabDragStart: (drag: WorkspaceTabDrag) => void;
   onTabDragEnd: () => void;
-  onTabDrop: (targetPaneId: string, placement: TabDropPlacement, tabIndex?: number) => void;
+  onTabDrop: (
+    targetPaneId: string,
+    placement: TabDropPlacement,
+    tabIndex?: number,
+    dataTransfer?: DataTransfer | null,
+  ) => void;
   onRenameSessionRequest: (
     sessionId: string,
     clientX: number,
@@ -381,13 +389,32 @@ export function PaneTabs({
   }
 
   function handleTabRailDragOver(event: ReactDragEvent<HTMLDivElement>) {
-    if (!draggedTab || !canDropInTabRail) {
+    const currentDraggedTab = draggedTab ?? readWorkspaceTabDragData(event.dataTransfer);
+    const hasSessionDragType = !paneHasControlPanel && dataTransferHasSessionDragType(event.dataTransfer);
+    // During dragover, browsers restrict getData() so readWorkspaceTabDragData may return null.
+    // Fall back to checking dataTransfer.types for the tab drag MIME type.
+    // During dragover, browsers protect drag data — getData() returns empty and some
+    // browsers omit custom MIME types from the types array.  Fall back to checking for
+    // text/plain (which we always set alongside the custom type).
+    const hasTabDragType = !currentDraggedTab &&
+      !paneHasControlPanel &&
+      (event.dataTransfer?.types?.includes(TAB_DRAG_MIME_TYPE) ||
+       event.dataTransfer?.types?.includes("text/plain"));
+    const canDropCurrentTab =
+      currentDraggedTab !== null &&
+      currentDraggedTab.tab.kind !== "controlPanel" &&
+      !paneHasControlPanel;
+    if (!canDropCurrentTab && !hasTabDragType && !hasSessionDragType) {
       setActiveTabInsertIndex(null);
       return;
     }
 
     event.preventDefault();
-    event.dataTransfer.dropEffect = "move";
+    event.stopPropagation();
+    event.dataTransfer.dropEffect = hasSessionDragType ||
+      currentDraggedTab?.sourcePaneId.startsWith("control-panel-launcher:")
+      ? "copy"
+      : hasTabDragType ? "copy" : "move";
     maybeAutoScrollTabRail(event.clientX);
 
     const nextTabInsertIndex = resolveTabInsertIndex(event.clientX);
@@ -404,13 +431,24 @@ export function PaneTabs({
   }
 
   function handleTabRailDrop(event: ReactDragEvent<HTMLDivElement>) {
-    if (!draggedTab || !canDropInTabRail) {
+    const currentDraggedTab = draggedTab ?? readWorkspaceTabDragData(event.dataTransfer);
+    const hasSessionDragType = !paneHasControlPanel && dataTransferHasSessionDragType(event.dataTransfer);
+    const hasTabDragType = !currentDraggedTab &&
+      !paneHasControlPanel &&
+      (event.dataTransfer?.types?.includes(TAB_DRAG_MIME_TYPE) ||
+       event.dataTransfer?.types?.includes("text/plain"));
+    const canDropCurrentTab =
+      currentDraggedTab !== null &&
+      currentDraggedTab.tab.kind !== "controlPanel" &&
+      !paneHasControlPanel;
+    if (!canDropCurrentTab && !hasTabDragType && !hasSessionDragType) {
       return;
     }
 
     event.preventDefault();
+    event.stopPropagation();
     setActiveTabInsertIndex(null);
-    onTabDrop(paneId, "tabs", resolveTabInsertIndex(event.clientX));
+    onTabDrop(paneId, "tabs", resolveTabInsertIndex(event.clientX), event.dataTransfer);
   }
 
   useLayoutEffect(() => {
@@ -659,7 +697,12 @@ export function PaneTabs({
     : null;
 
   return (
-    <div className="pane-tabs-shell">
+    <div
+      className="pane-tabs-shell"
+      onDragOverCapture={handleTabRailDragOver}
+      onDragLeave={handleTabRailDragLeave}
+      onDropCapture={handleTabRailDrop}
+    >
       {tabs.length > 1 ? (
         <button
           className={`pane-tab-scroll ${tabRailState.canScrollPrev ? "" : "inactive"}`}
@@ -676,9 +719,6 @@ export function PaneTabs({
         className={`pane-tabs ${activeTabInsertIndex === 0 && tabs.length === 0 ? "drop-empty" : ""}`}
         role="tablist"
         aria-label="Tile tabs"
-        onDragOver={handleTabRailDragOver}
-        onDragLeave={handleTabRailDragLeave}
-        onDrop={handleTabRailDrop}
         onWheel={handleTabRailWheel}
       >
         {tabs.length > 0 ? (
@@ -827,7 +867,9 @@ export function PaneTabs({
                       <FileTabIcon path={tab.path} />
                     ) : tab.kind === "diffPreview" ? (
                       <FileTabIcon language={tab.language ?? null} path={tab.filePath} />
-                    ) : null}
+                    ) : (
+                      <TabKindIcon kind={tab.kind} />
+                    )}
                     <span className="pane-tab-label">{tabLabel}</span>
                     {session?.agent === "Codex" && hasCodexNotices ? (
                       <span
@@ -1609,4 +1651,79 @@ function resolveRelativeTabPath(path: string, workspaceRoot: string | null) {
 
   const relativePath = relativizePathToWorkspace(trimmedPath, workspaceRoot);
   return relativePath === trimmedPath ? null : relativePath;
+}
+
+function TabKindIcon({ kind }: { kind: string }) {
+  const iconProps = { viewBox: "0 0 16 16", focusable: "false" as const, "aria-hidden": true as const, className: "pane-tab-kind-icon" };
+  switch (kind) {
+    case "gitStatus":
+      return (
+        <svg {...iconProps}>
+          <circle cx="8" cy="3.5" r="1.5" fill="none" stroke="currentColor" strokeWidth="1.3" />
+          <circle cx="4" cy="12.5" r="1.5" fill="none" stroke="currentColor" strokeWidth="1.3" />
+          <circle cx="12" cy="12.5" r="1.5" fill="none" stroke="currentColor" strokeWidth="1.3" />
+          <path d="M8 5v3.5c0 1.5-2.5 2.5-4 2.5M8 8.5c0 1.5 2.5 2.5 4 2.5" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
+        </svg>
+      );
+    case "filesystem":
+      return (
+        <svg {...iconProps}>
+          <path d="M3.5 4.25h4l1.15 1.25h4A1.25 1.25 0 0 1 13.9 6.75v5.5a1.25 1.25 0 0 1-1.25 1.25H3.5A1.25 1.25 0 0 1 2.25 12.25v-6.75A1.25 1.25 0 0 1 3.5 4.25Z" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.3" />
+        </svg>
+      );
+    case "controlPanel":
+      return (
+        <svg {...iconProps}>
+          <path d="M3 5h10M3 8h10M3 11h6" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
+        </svg>
+      );
+    case "sessionList":
+      return (
+        <svg {...iconProps}>
+          <path d="M4.5 4h7M4.5 8h7M4.5 12h7" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
+          <circle cx="2.5" cy="4" r="0.8" fill="currentColor" />
+          <circle cx="2.5" cy="8" r="0.8" fill="currentColor" />
+          <circle cx="2.5" cy="12" r="0.8" fill="currentColor" />
+        </svg>
+      );
+    case "projectList":
+      return (
+        <svg {...iconProps}>
+          <path d="M3.5 4.25h4l1.15 1.25h4A1.25 1.25 0 0 1 13.9 6.75v5.5a1.25 1.25 0 0 1-1.25 1.25H3.5A1.25 1.25 0 0 1 2.25 12.25v-6.75A1.25 1.25 0 0 1 3.5 4.25Z" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.3" />
+        </svg>
+      );
+    case "instructionDebugger":
+      return (
+        <svg {...iconProps}>
+          <path d="M5.5 3v10M10.5 3v10M3 5.5h10M3 10.5h10" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
+        </svg>
+      );
+    case "canvas":
+      return (
+        <svg {...iconProps}>
+          <rect x="2.5" y="2.5" width="4.5" height="4.5" rx="0.8" fill="none" stroke="currentColor" strokeWidth="1.3" />
+          <rect x="9" y="9" width="4.5" height="4.5" rx="0.8" fill="none" stroke="currentColor" strokeWidth="1.3" />
+          <path d="M7 5h2.5V9" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" fill="none" />
+        </svg>
+      );
+    case "orchestratorCanvas":
+      return (
+        <svg {...iconProps}>
+          <rect x="2.5" y="2.5" width="4.5" height="4.5" rx="0.8" fill="none" stroke="currentColor" strokeWidth="1.3" />
+          <rect x="9" y="9" width="4.5" height="4.5" rx="0.8" fill="none" stroke="currentColor" strokeWidth="1.3" />
+          <path d="M7 5h2.5V9" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" fill="none" />
+        </svg>
+      );
+    case "orchestratorList":
+      return (
+        <svg {...iconProps}>
+          <circle cx="8" cy="4" r="2" fill="none" stroke="currentColor" strokeWidth="1.3" />
+          <circle cx="4" cy="12" r="1.5" fill="none" stroke="currentColor" strokeWidth="1.3" />
+          <circle cx="12" cy="12" r="1.5" fill="none" stroke="currentColor" strokeWidth="1.3" />
+          <path d="M6.5 5.5L4.5 10.5M9.5 5.5l2 5" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
+        </svg>
+      );
+    default:
+      return null;
+  }
 }

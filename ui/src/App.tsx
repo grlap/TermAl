@@ -32,6 +32,8 @@ import {
   fetchFile,
   fetchGitStatus,
   fetchState,
+  fetchWorkspaceLayout,
+  fetchWorkspaceLayouts,
   forkCodexThread,
   killSession,
   pickProjectRoot,
@@ -39,6 +41,7 @@ import {
   renameSession,
   rollbackCodexThread,
   saveFile,
+  saveWorkspaceLayout,
   sendMessage,
   stopSession,
   submitApproval,
@@ -48,6 +51,7 @@ import {
   type GitDiffSection,
   type GitDiffResponse,
   type StateResponse,
+  type WorkspaceLayoutSummary,
   unarchiveCodexThread,
   updateAppSettings,
   updateSessionSettings,
@@ -77,6 +81,7 @@ import {
 import { resolvePaneScrollCommand } from "./pane-keyboard";
 import { AgentSessionPanel, AgentSessionPanelFooter } from "./panels/AgentSessionPanel";
 import {
+  ControlPanelSectionIcon,
   ControlPanelSurface,
   type ControlPanelSectionId,
   type ControlPanelSurfaceHandle,
@@ -144,6 +149,11 @@ import type {
 import {
   activatePane,
   closeWorkspaceTab,
+  createFilesystemTab,
+  createGitStatusTab,
+  createOrchestratorListTab,
+  createProjectListTab,
+  createSessionListTab,
   DEFAULT_CONTROL_PANEL_DOCK_WIDTH_RATIO,
   dockControlPanelAtWorkspaceEdge,
   ensureControlPanelInWorkspaceState,
@@ -160,6 +170,7 @@ import {
   openSessionInWorkspaceState,
   openSessionListInWorkspaceState,
   openSourceInWorkspaceState,
+  placeSessionDropInWorkspaceState,
   placeDraggedTab,
   placeExternalTab,
   reconcileWorkspaceState,
@@ -179,12 +190,20 @@ import {
   type WorkspaceTab,
 } from "./workspace";
 import {
+  createWorkspaceViewId,
+  ensureWorkspaceViewId,
   getStoredWorkspaceLayout,
+  parseStoredWorkspaceLayout,
   persistWorkspaceLayout,
   type ControlPanelSide,
+  WORKSPACE_VIEW_QUERY_PARAM,
 } from "./workspace-storage";
 import { reconcileSessions } from "./session-reconcile";
-import { attachSessionDragData } from "./session-drag";
+import {
+  attachSessionDragData,
+  dataTransferHasSessionDragType,
+  readSessionDragData,
+} from "./session-drag";
 
 const TAB_DRAG_STALE_TIMEOUT_MS = 15000;
 import {
@@ -229,12 +248,17 @@ import {
 import { decideDeltaRevisionAction, shouldAdoptStateRevision } from "./state-revision";
 import {
   TAB_DRAG_CHANNEL_NAME,
+  TAB_DRAG_MIME_TYPE,
+  attachWorkspaceTabDragData,
+  createWorkspaceTabDrag,
   isWorkspaceTabDragChannelMessage,
+  readWorkspaceTabDragData,
   type WorkspaceTabDrag,
   type WorkspaceTabDragChannelMessage,
 } from "./tab-drag";
 
 type SessionFlagMap = Record<string, true | undefined>;
+const WORKSPACE_LAYOUT_PERSIST_DELAY_MS = 150;
 type SessionSettingsField =
   | "model"
   | "sandboxMode"
@@ -879,6 +903,34 @@ export function resolveControlPanelWorkspaceRoot(
   return isLocalRemoteId(resolveProjectRemoteId(selectedProject)) ? selectedProject.rootPath : null;
 }
 
+function createControlPanelSectionLauncherTab(
+  sectionId: ControlPanelSectionId,
+  options: {
+    filesystemRoot: string | null;
+    gitWorkdir: string | null;
+    originProjectId: string | null;
+    originSessionId: string | null;
+  },
+): WorkspaceTab | null {
+  const { filesystemRoot, gitWorkdir, originProjectId, originSessionId } = options;
+  switch (sectionId) {
+    case "files":
+      return (filesystemRoot?.trim() ?? "")
+        ? createFilesystemTab(filesystemRoot, originSessionId, originProjectId)
+        : null;
+    case "git":
+      return (gitWorkdir?.trim() ?? "")
+        ? createGitStatusTab(gitWorkdir, originSessionId, originProjectId)
+        : null;
+    case "projects":
+      return createProjectListTab(originSessionId, originProjectId);
+    case "sessions":
+      return createSessionListTab(originSessionId, originProjectId);
+    case "orchestrators":
+      return createOrchestratorListTab(originSessionId, originProjectId);
+  }
+}
+
 function resolveWorkspaceScopedProjectId(
   originProjectId: string | null,
   originSessionId: string | null,
@@ -915,9 +967,14 @@ function resolveWorkspaceScopedSessionId(
   return sessions.find((session) => session.projectId === projectId)?.id ?? null;
 }
 
-function createInitialWorkspaceBootstrap() {
-  const storedLayout = getStoredWorkspaceLayout();
+function createInitialWorkspaceBootstrap(workspaceViewId: string) {
+  const storedLayout = getStoredWorkspaceLayout(workspaceViewId);
   const controlPanelSide: ControlPanelSide = storedLayout?.controlPanelSide ?? "left";
+  const themeId: ThemeId = storedLayout?.themeId ?? getStoredThemePreference();
+  const styleId: StyleId = storedLayout?.styleId ?? getStoredStylePreference();
+  const fontSizePx = storedLayout?.fontSizePx ?? getStoredFontSizePreference();
+  const editorFontSizePx = storedLayout?.editorFontSizePx ?? getStoredEditorFontSizePreference();
+  const densityPercent = storedLayout?.densityPercent ?? getStoredDensityPreference();
   const workspace = dockControlPanelAtWorkspaceEdge(
     ensureControlPanelInWorkspaceState(
       storedLayout?.workspace ?? {
@@ -931,11 +988,17 @@ function createInitialWorkspaceBootstrap() {
 
   return {
     controlPanelSide,
+    themeId,
+    styleId,
+    fontSizePx,
+    editorFontSizePx,
+    densityPercent,
     workspace,
   };
 }
 
 export default function App() {
+  const [workspaceViewId] = useState(() => ensureWorkspaceViewId());
   const [projects, setProjects] = useState<Project[]>([]);
   const [sessions, setSessions] = useState<Session[]>([]);
   const [codexState, setCodexState] = useState<CodexState>({});
@@ -944,13 +1007,18 @@ export default function App() {
     null,
   );
   if (!initialWorkspaceBootstrapRef.current) {
-    initialWorkspaceBootstrapRef.current = createInitialWorkspaceBootstrap();
+    initialWorkspaceBootstrapRef.current = createInitialWorkspaceBootstrap(workspaceViewId);
   }
   const initialWorkspaceBootstrap = initialWorkspaceBootstrapRef.current!;
   const [controlPanelSide, setControlPanelSide] = useState<ControlPanelSide>(
     initialWorkspaceBootstrap.controlPanelSide,
   );
   const [workspace, setWorkspace] = useState<WorkspaceState>(initialWorkspaceBootstrap.workspace);
+  const [isWorkspaceLayoutReady, setIsWorkspaceLayoutReady] = useState(false);
+  const [isWorkspaceSwitcherOpen, setIsWorkspaceSwitcherOpen] = useState(false);
+  const [workspaceSummaries, setWorkspaceSummaries] = useState<WorkspaceLayoutSummary[]>([]);
+  const [isWorkspaceSwitcherLoading, setIsWorkspaceSwitcherLoading] = useState(false);
+  const [workspaceSwitcherError, setWorkspaceSwitcherError] = useState<string | null>(null);
   const [draftsBySessionId, setDraftsBySessionId] = useState<Record<string, string>>({});
   const [draftAttachmentsBySessionId, setDraftAttachmentsBySessionId] = useState<
     Record<string, DraftImageAttachment[]>
@@ -991,11 +1059,11 @@ export default function App() {
   const [newProjectRootPath, setNewProjectRootPath] = useState("");
   const [newProjectRemoteId, setNewProjectRemoteId] = useState<string>(LOCAL_REMOTE_ID);
   const [isCreatingProject, setIsCreatingProject] = useState(false);
-  const [themeId, setThemeId] = useState<ThemeId>(() => getStoredThemePreference());
-  const [styleId, setStyleId] = useState<StyleId>(() => getStoredStylePreference());
-  const [fontSizePx, setFontSizePx] = useState<number>(() => getStoredFontSizePreference());
-  const [editorFontSizePx, setEditorFontSizePx] = useState<number>(() => getStoredEditorFontSizePreference());
-  const [densityPercent, setDensityPercent] = useState<number>(() => getStoredDensityPreference());
+  const [themeId, setThemeId] = useState<ThemeId>(initialWorkspaceBootstrap.themeId);
+  const [styleId, setStyleId] = useState<StyleId>(initialWorkspaceBootstrap.styleId);
+  const [fontSizePx, setFontSizePx] = useState<number>(initialWorkspaceBootstrap.fontSizePx);
+  const [editorFontSizePx, setEditorFontSizePx] = useState<number>(initialWorkspaceBootstrap.editorFontSizePx);
+  const [densityPercent, setDensityPercent] = useState<number>(initialWorkspaceBootstrap.densityPercent);
   const [defaultCodexSandboxMode, setDefaultCodexSandboxMode] =
     useState<SandboxMode>("workspace-write");
   const [defaultCodexApprovalPolicy, setDefaultCodexApprovalPolicy] =
@@ -1039,6 +1107,7 @@ export default function App() {
   } | null>(null);
   const [windowId] = useState(() => crypto.randomUUID());
   const [draggedTab, setDraggedTab] = useState<WorkspaceTabDrag | null>(null);
+  const [launcherDraggedTab, setLauncherDraggedTab] = useState<WorkspaceTabDrag | null>(null);
   const [externalDraggedTab, setExternalDraggedTab] = useState<WorkspaceTabDrag | null>(null);
   const resizeStateRef = useRef<{
     splitId: string;
@@ -1053,6 +1122,7 @@ export default function App() {
   const draftAttachmentsRef = useRef<Record<string, DraftImageAttachment[]>>({});
   const dragChannelRef = useRef<BroadcastChannel | null>(null);
   const draggedTabRef = useRef<WorkspaceTabDrag | null>(null);
+  const launcherDraggedTabRef = useRef<WorkspaceTabDrag | null>(null);
   const isMountedRef = useRef(true);
   const sessionListSearchInputRef = useRef<HTMLInputElement>(null);
   const pendingSessionRenameTriggerRef = useRef<HTMLElement | null>(null);
@@ -1069,6 +1139,7 @@ export default function App() {
   const controlPanelSurfaceRef = useRef<ControlPanelSurfaceHandle | null>(null);
   const lastDerivedControlPanelFilesystemRootRef = useRef<string | null>(null);
   const lastDerivedControlPanelGitWorkdirRef = useRef<string | null>(null);
+  const workspaceSwitcherRef = useRef<HTMLDivElement | null>(null);
   const sessionsRef = useRef<Session[]>([]);
   const latestStateRevisionRef = useRef<number | null>(null);
   const forceAdoptNextStateEventRef = useRef(false);
@@ -1380,7 +1451,7 @@ export default function App() {
   const activeTheme = THEMES.find((theme) => theme.id === themeId) ?? THEMES[0];
   const activeStyle = STYLES.find((style) => style.id === styleId) ?? STYLES[0];
   const editorAppearance: MonacoAppearance = isHexColorDark(activeTheme.swatches[0]) ? "dark" : "light";
-  const activeDraggedTab = draggedTab ?? externalDraggedTab;
+  const activeDraggedTab = draggedTab ?? launcherDraggedTab ?? externalDraggedTab;
 
   function focusSessionListSearch(selectAll = false) {
     controlPanelSurfaceRef.current?.selectSection("sessions");
@@ -1505,6 +1576,71 @@ export default function App() {
     setWorkspace((current) =>
       applyControlPanelLayout(reconcileWorkspaceState(current, nextSessions)),
     );
+  }
+
+  async function refreshWorkspaceSummaries() {
+    setIsWorkspaceSwitcherLoading(true);
+    setWorkspaceSwitcherError(null);
+    try {
+      const response = await fetchWorkspaceLayouts();
+      if (!isMountedRef.current) {
+        return;
+      }
+      setWorkspaceSummaries(response.workspaces);
+    } catch (error) {
+      if (!isMountedRef.current) {
+        return;
+      }
+      setWorkspaceSwitcherError(getErrorMessage(error));
+    } finally {
+      if (isMountedRef.current) {
+        setIsWorkspaceSwitcherLoading(false);
+      }
+    }
+  }
+
+  function navigateToWorkspace(nextWorkspaceViewId: string) {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    const url = new URL(window.location.href);
+    url.searchParams.set(WORKSPACE_VIEW_QUERY_PARAM, nextWorkspaceViewId);
+    window.location.assign(url.toString());
+  }
+
+  function handleWorkspaceSwitcherToggle() {
+    setIsWorkspaceSwitcherOpen((current) => {
+      const nextOpen = !current;
+      if (nextOpen) {
+        void refreshWorkspaceSummaries();
+      }
+      return nextOpen;
+    });
+  }
+
+  function handleOpenWorkspaceHere(nextWorkspaceViewId: string) {
+    setIsWorkspaceSwitcherOpen(false);
+    if (nextWorkspaceViewId === workspaceViewId) {
+      return;
+    }
+    navigateToWorkspace(nextWorkspaceViewId);
+  }
+
+  function handleOpenNewWorkspaceHere() {
+    handleOpenWorkspaceHere(createWorkspaceViewId());
+  }
+
+  function handleOpenNewWorkspaceWindow() {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    const nextWorkspaceViewId = createWorkspaceViewId();
+    const url = new URL(window.location.href);
+    url.searchParams.set(WORKSPACE_VIEW_QUERY_PARAM, nextWorkspaceViewId);
+    window.open(url.toString(), "_blank", "noopener");
+    setIsWorkspaceSwitcherOpen(false);
   }
 
   function buildOptimisticSessionSettingsUpdate(
@@ -1945,6 +2081,7 @@ export default function App() {
 
   useLayoutEffect(() => {
     applyThemePreference(themeId);
+    // Also update the global fallback key so main.tsx can use it for new workspaces
     persistThemePreference(themeId);
   }, [themeId]);
 
@@ -1968,11 +2105,128 @@ export default function App() {
   }, [editorFontSizePx]);
 
   useEffect(() => {
-    persistWorkspaceLayout({
+    let cancelled = false;
+    setIsWorkspaceLayoutReady(false);
+
+    void fetchWorkspaceLayout(workspaceViewId)
+      .then((response) => {
+        if (cancelled) {
+          return;
+        }
+
+        const nextLayout = response
+          ? parseStoredWorkspaceLayout(
+              JSON.stringify({
+                controlPanelSide: response.layout.controlPanelSide,
+                themeId: response.layout.themeId,
+                styleId: response.layout.styleId,
+                fontSizePx: response.layout.fontSizePx,
+                editorFontSizePx: response.layout.editorFontSizePx,
+                densityPercent: response.layout.densityPercent,
+                workspace: response.layout.workspace,
+              }),
+            )
+          : null;
+
+        if (nextLayout) {
+          setControlPanelSide(nextLayout.controlPanelSide);
+          if (nextLayout.themeId) {
+            setThemeId(nextLayout.themeId);
+          }
+          if (nextLayout.styleId) {
+            setStyleId(nextLayout.styleId);
+          }
+          if (nextLayout.fontSizePx !== undefined) {
+            setFontSizePx(nextLayout.fontSizePx);
+          }
+          if (nextLayout.editorFontSizePx !== undefined) {
+            setEditorFontSizePx(nextLayout.editorFontSizePx);
+          }
+          if (nextLayout.densityPercent !== undefined) {
+            setDensityPercent(nextLayout.densityPercent);
+          }
+          setWorkspace(
+            dockControlPanelAtWorkspaceEdge(
+              ensureControlPanelInWorkspaceState(nextLayout.workspace),
+              nextLayout.controlPanelSide,
+            ),
+          );
+          persistWorkspaceLayout(workspaceViewId, nextLayout);
+        }
+
+        setIsWorkspaceLayoutReady(true);
+      })
+      .catch((error) => {
+        console.warn("workspace layout warning> failed to load server workspace layout:", error);
+        if (!cancelled) {
+          setIsWorkspaceLayoutReady(true);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [workspaceViewId]);
+
+  useEffect(() => {
+    if (!isWorkspaceLayoutReady) {
+      return;
+    }
+
+    const layout = {
       controlPanelSide,
+      themeId,
+      styleId,
+      fontSizePx,
+      editorFontSizePx,
+      densityPercent,
       workspace: applyControlPanelLayout(workspace, controlPanelSide),
-    });
-  }, [controlPanelSide, workspace]);
+    };
+    persistWorkspaceLayout(workspaceViewId, layout);
+
+    const persistTimeout = window.setTimeout(() => {
+      void saveWorkspaceLayout(workspaceViewId, layout).catch((error) => {
+        console.warn("workspace layout warning> failed to save server workspace layout:", error);
+      });
+    }, WORKSPACE_LAYOUT_PERSIST_DELAY_MS);
+
+    return () => {
+      window.clearTimeout(persistTimeout);
+    };
+  }, [controlPanelSide, densityPercent, editorFontSizePx, fontSizePx, isWorkspaceLayoutReady, styleId, themeId, workspace, workspaceViewId]);
+
+  useEffect(() => {
+    if (!isWorkspaceSwitcherOpen) {
+      return;
+    }
+
+    function handlePointerDown(event: PointerEvent) {
+      const target = event.target;
+      if (!(target instanceof Node)) {
+        return;
+      }
+
+      if (workspaceSwitcherRef.current?.contains(target)) {
+        return;
+      }
+
+      setIsWorkspaceSwitcherOpen(false);
+    }
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        setIsWorkspaceSwitcherOpen(false);
+      }
+    }
+
+    document.addEventListener("pointerdown", handlePointerDown);
+    window.addEventListener("keydown", handleKeyDown);
+
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown);
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [isWorkspaceSwitcherOpen]);
 
   useEffect(() => {
     sessionsRef.current = sessions;
@@ -3489,10 +3743,33 @@ export default function App() {
     });
   }
 
+  function handleControlPanelLauncherDragStart(
+    event: ReactDragEvent<HTMLButtonElement>,
+    paneId: string,
+    sectionId: ControlPanelSectionId,
+    tab: WorkspaceTab,
+  ) {
+    const drag = createWorkspaceTabDrag(windowId, `control-panel-launcher:${paneId}:${sectionId}`, tab);
+    event.dataTransfer.effectAllowed = "copyMove";
+    attachWorkspaceTabDragData(event.dataTransfer, drag);
+    launcherDraggedTabRef.current = drag;
+    // Defer the React state update — Chrome cancels in-progress drags when DOM
+    // mutations happen during or immediately after dragstart.  setTimeout pushes
+    // the re-render to the next task, after Chrome has committed the drag.
+    setTimeout(() => setLauncherDraggedTab(drag), 0);
+  }
+
+  function handleControlPanelLauncherDragEnd() {
+    launcherDraggedTabRef.current = null;
+    setLauncherDraggedTab(null);
+  }
+
   function clearStaleTabDragState() {
     const endedDrag = draggedTabRef.current;
     draggedTabRef.current = null;
     setDraggedTab(null);
+    launcherDraggedTabRef.current = null;
+    setLauncherDraggedTab(null);
     setExternalDraggedTab(null);
     if (!endedDrag) {
       return;
@@ -3510,7 +3787,7 @@ export default function App() {
       return false;
     }
 
-    if (!draggedTabRef.current && !externalDraggedTab) {
+    if (!draggedTabRef.current && !launcherDraggedTabRef.current && !externalDraggedTab) {
       return false;
     }
 
@@ -3518,9 +3795,48 @@ export default function App() {
     return true;
   }
 
-  function handleTabDrop(targetPaneId: string, placement: TabDropPlacement, tabIndex?: number) {
-    if (draggedTab) {
-      const drop = draggedTab;
+  function handleTabDrop(
+    targetPaneId: string,
+    placement: TabDropPlacement,
+    tabIndex?: number,
+    dataTransfer?: DataTransfer | null,
+  ) {
+    const droppedSession = readSessionDragData(dataTransfer ?? null);
+    if (droppedSession) {
+      startTransition(() => {
+        setWorkspace((current) => {
+          const nextWorkspace = placeSessionDropInWorkspaceState(
+            current,
+            droppedSession.sessionId,
+            targetPaneId,
+            placement,
+            tabIndex,
+          );
+          return applyControlPanelLayout(nextWorkspace, controlPanelSide);
+        });
+      });
+      return;
+    }
+
+    const parsedDrag = readWorkspaceTabDragData(dataTransfer);
+    const sameWindowParsedDrag =
+      parsedDrag && parsedDrag.sourceWindowId === windowId ? parsedDrag : null;
+    const parsedLauncherDrag =
+      sameWindowParsedDrag?.sourcePaneId.startsWith("control-panel-launcher:")
+        ? sameWindowParsedDrag
+        : null;
+    const parsedPaneDrag =
+      sameWindowParsedDrag && !sameWindowParsedDrag.sourcePaneId.startsWith("control-panel-launcher:")
+        ? sameWindowParsedDrag
+        : null;
+    const currentDraggedTab = draggedTabRef.current ?? draggedTab ?? parsedPaneDrag;
+    const currentLauncherDraggedTab =
+      launcherDraggedTabRef.current ?? launcherDraggedTab ?? parsedLauncherDrag;
+    const currentExternalDraggedTab =
+      externalDraggedTab ?? (parsedDrag && parsedDrag.sourceWindowId !== windowId ? parsedDrag : null);
+
+    if (currentDraggedTab) {
+      const drop = currentDraggedTab;
       draggedTabRef.current = null;
       setDraggedTab(null);
       const nextControlPanelSide =
@@ -3548,11 +3864,23 @@ export default function App() {
       return;
     }
 
-    if (!externalDraggedTab) {
+    if (currentLauncherDraggedTab) {
+      const drop = currentLauncherDraggedTab;
+      launcherDraggedTabRef.current = null;
+      setLauncherDraggedTab(null);
+      flushSync(() => {
+        setWorkspace((current) =>
+          applyControlPanelLayout(placeExternalTab(current, drop.tab, targetPaneId, placement, tabIndex)),
+        );
+      });
       return;
     }
 
-    const drop = externalDraggedTab;
+    if (!currentExternalDraggedTab) {
+      return;
+    }
+
+    const drop = currentExternalDraggedTab;
     setExternalDraggedTab((current) => (current?.dragId === drop.dragId ? null : current));
     const nextControlPanelSide =
       drop.tab.kind === "controlPanel" && (placement === "left" || placement === "right")
@@ -3586,7 +3914,7 @@ export default function App() {
   }
 
   useEffect(() => {
-    if (!draggedTab && !externalDraggedTab) {
+    if (!draggedTab && !launcherDraggedTab && !externalDraggedTab) {
       return;
     }
 
@@ -3615,7 +3943,7 @@ export default function App() {
       window.removeEventListener("pagehide", handlePageHide);
       document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
-  }, [draggedTab, externalDraggedTab]);
+  }, [draggedTab, launcherDraggedTab, externalDraggedTab]);
 
   function handlePaneViewModeChange(paneId: string, viewMode: SessionPaneViewMode) {
     if (viewMode === "session") {
@@ -3872,6 +4200,29 @@ export default function App() {
   function renderWorkspaceControlSurface(paneId: string, fixedSection: ControlPanelSectionId | null = null): JSX.Element {
     const surfaceId = fixedSection ? `${paneId}-${fixedSection}` : paneId;
     const controlPanelProjectFilterId = `control-panel-project-scope-${surfaceId}`;
+    const controlPanelLauncherOriginProjectId = selectedProject?.id ?? null;
+    const controlPanelLauncherOriginSessionId = controlPanelSessionId;
+
+    function buildControlPanelLauncherTab(sectionId: ControlPanelSectionId) {
+      return createControlPanelSectionLauncherTab(sectionId, {
+        filesystemRoot: controlPanelFilesystemRoot,
+        gitWorkdir: controlPanelGitWorkdir,
+        originProjectId: controlPanelLauncherOriginProjectId,
+        originSessionId: controlPanelLauncherOriginSessionId,
+      });
+    }
+
+    function handleControlPanelSectionTabDragStart(
+      event: ReactDragEvent<HTMLButtonElement>,
+      sectionId: ControlPanelSectionId,
+    ) {
+      const tab = buildControlPanelLauncherTab(sectionId);
+      if (!tab) {
+        return;
+      }
+
+      handleControlPanelLauncherDragStart(event, paneId, sectionId, tab);
+    }
 
     function renderControlPanelProjectScope() {
       return (
@@ -3891,32 +4242,32 @@ export default function App() {
       );
     }
 
-    function renderOpenTabAction(onClick: () => void, disabled: boolean): JSX.Element {
+    function renderOpenTabAction(
+      sectionId: ControlPanelSectionId,
+      onClick: () => void,
+      disabled: boolean,
+      tab: WorkspaceTab | null,
+    ): JSX.Element {
       return (
         <button
           className="control-panel-header-action control-panel-header-open-button"
           type="button"
+          draggable={!disabled && tab !== null}
+          title={disabled ? "Open tab" : "Open tab or drag it into the workspace"}
           onClick={onClick}
+          onDragStart={(event) => {
+            if (!tab) {
+              event.preventDefault();
+              return;
+            }
+
+            handleControlPanelLauncherDragStart(event, paneId, sectionId, tab);
+          }}
+          onDragEnd={handleControlPanelLauncherDragEnd}
           disabled={disabled}
         >
           <span className="control-panel-header-action-icon" aria-hidden="true">
-            <svg viewBox="0 0 16 16" focusable="false" aria-hidden="true">
-              <path
-                d="M3.5 4.25h4l1.15 1.25h4A1.25 1.25 0 0 1 13.9 6.75v5.5a1.25 1.25 0 0 1-1.25 1.25H3.5A1.25 1.25 0 0 1 2.25 12.25v-6.75A1.25 1.25 0 0 1 3.5 4.25Z"
-                fill="none"
-                stroke="currentColor"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth="1.35"
-              />
-              <path
-                d="M8.75 3.25v4.5M6.5 5.5h4.5"
-                fill="none"
-                stroke="currentColor"
-                strokeLinecap="round"
-                strokeWidth="1.35"
-              />
-            </svg>
+            <ControlPanelSectionIcon sectionId={sectionId} />
           </span>
           <span>Open tab</span>
         </button>
@@ -3952,6 +4303,7 @@ export default function App() {
           return fixedSection
             ? null
             : renderOpenTabAction(
+                "files",
                 () =>
                   handleOpenFilesystemTab(
                     paneId,
@@ -3960,26 +4312,34 @@ export default function App() {
                     selectedProject?.id ?? null,
                   ),
                 !(controlPanelFilesystemRoot?.trim() ?? ""),
+                buildControlPanelLauncherTab("files"),
               );
 
         case "git":
-          return fixedSection
-            ? null
-            : renderOpenTabAction(
-                () =>
-                  handleOpenGitStatusTab(
-                    paneId,
-                    controlPanelGitWorkdir,
-                    controlPanelSessionId,
-                    selectedProject?.id ?? null,
-                  ),
-                !(controlPanelGitWorkdir?.trim() ?? ""),
-              );
+          return (
+            <>
+              {fixedSection
+                ? null
+                : renderOpenTabAction(
+                    "git",
+                    () =>
+                      handleOpenGitStatusTab(
+                        paneId,
+                        controlPanelGitWorkdir,
+                        controlPanelSessionId,
+                        selectedProject?.id ?? null,
+                      ),
+                    !(controlPanelGitWorkdir?.trim() ?? ""),
+                    buildControlPanelLauncherTab("git"),
+                  )}
+            </>
+          );
 
         case "projects":
           return fixedSection
             ? null
             : renderOpenTabAction(
+                "projects",
                 () =>
                   handleOpenProjectListTab(
                     paneId,
@@ -3987,6 +4347,7 @@ export default function App() {
                     selectedProject?.id ?? null,
                   ),
                 false,
+                buildControlPanelLauncherTab("projects"),
               );
 
         case "orchestrators":
@@ -3995,6 +4356,7 @@ export default function App() {
               {fixedSection
                 ? null
                 : renderOpenTabAction(
+                    "orchestrators",
                     () =>
                       handleOpenOrchestratorListTab(
                         paneId,
@@ -4002,6 +4364,7 @@ export default function App() {
                         selectedProject?.id ?? null,
                       ),
                     false,
+                    buildControlPanelLauncherTab("orchestrators"),
                   )}
               <button
                 className="control-panel-header-action control-panel-header-new-session-button"
@@ -4031,6 +4394,7 @@ export default function App() {
               {fixedSection
                 ? null
                 : renderOpenTabAction(
+                    "sessions",
                     () =>
                       handleOpenSessionListTab(
                         paneId,
@@ -4038,6 +4402,7 @@ export default function App() {
                         selectedProject?.id ?? null,
                       ),
                     false,
+                    buildControlPanelLauncherTab("sessions"),
                   )}
               {renderCanvasTabAction(() =>
                 handleOpenCanvasTab(
@@ -4391,12 +4756,43 @@ export default function App() {
           gitStatusCount={controlPanelGitStatusCount}
           isPreferencesOpen={isSettingsOpen}
           onOpenPreferences={() => setIsSettingsOpen(true)}
+          onSectionTabDragEnd={handleControlPanelLauncherDragEnd}
+          onSectionTabDragStart={handleControlPanelSectionTabDragStart}
           projectCount={projects.length}
           sessionCount={projectScopedSessions.length}
           renderHeaderActions={renderControlPanelHeaderActions}
           renderSection={renderControlPanelSection}
+          sectionLauncherTabs={{
+            files: buildControlPanelLauncherTab("files"),
+            git: buildControlPanelLauncherTab("git"),
+            projects: buildControlPanelLauncherTab("projects"),
+            sessions: buildControlPanelLauncherTab("sessions"),
+            orchestrators: buildControlPanelLauncherTab("orchestrators"),
+          }}
+          windowId={windowId}
+          launcherPaneId={paneId}
         />
       </div>
+    );
+  }
+
+  function renderControlPanelPaneBarActions(): JSX.Element {
+    return (
+      <>
+        <WorkspaceSwitcher
+          currentWorkspaceId={workspaceViewId}
+          error={workspaceSwitcherError}
+          isLoading={isWorkspaceSwitcherLoading}
+          isOpen={isWorkspaceSwitcherOpen}
+          summaries={workspaceSummaries}
+          switcherRef={workspaceSwitcherRef}
+          onOpenNewWorkspaceHere={handleOpenNewWorkspaceHere}
+          onOpenNewWorkspaceWindow={handleOpenNewWorkspaceWindow}
+          onOpenWorkspace={handleOpenWorkspaceHere}
+          onToggle={handleWorkspaceSwitcherToggle}
+        />
+        <BackendConnectionStatus state={backendConnectionState} />
+      </>
     );
   }
 
@@ -4406,7 +4802,6 @@ export default function App() {
       <div className="background-orbit background-orbit-right" />
 
       <main className="workspace-shell">
-
         {requestError ? (
           <article className="thread-notice workspace-notice">
             <div className="card-label">Backend</div>
@@ -4497,6 +4892,7 @@ export default function App() {
               onUnarchiveCodexThread={handleUnarchiveCodexThread}
               onOrchestratorStateUpdated={handleOrchestratorStateUpdated}
               renderControlPanel={renderWorkspaceControlSurface}
+              renderControlPanelPaneBarActions={renderControlPanelPaneBarActions}
               backendConnectionState={backendConnectionState}
             />
           ) : (
@@ -6486,6 +6882,7 @@ function WorkspaceNodeView({
   onUnarchiveCodexThread,
   onOrchestratorStateUpdated,
   renderControlPanel,
+  renderControlPanelPaneBarActions,
   backendConnectionState,
 }: {
   node: WorkspaceNode;
@@ -6532,7 +6929,12 @@ function WorkspaceNodeView({
   ) => void;
   onTabDragStart: (drag: WorkspaceTabDrag) => void;
   onTabDragEnd: () => void;
-  onTabDrop: (targetPaneId: string, placement: TabDropPlacement, tabIndex?: number) => void;
+  onTabDrop: (
+    targetPaneId: string,
+    placement: TabDropPlacement,
+    tabIndex?: number,
+    dataTransfer?: DataTransfer | null,
+  ) => void;
   onPaneViewModeChange: (paneId: string, viewMode: SessionPaneViewMode) => void;
   onOpenSourceTab: (
     paneId: string,
@@ -6641,6 +7043,7 @@ function WorkspaceNodeView({
   onUnarchiveCodexThread: (sessionId: string) => void;
   onOrchestratorStateUpdated: (state: StateResponse) => void;
   renderControlPanel: (paneId: string, fixedSection?: ControlPanelSectionId | null) => JSX.Element;
+  renderControlPanelPaneBarActions: () => JSX.Element;
   backendConnectionState: BackendConnectionState;
 }) {
   if (node.type === "pane") {
@@ -6744,6 +7147,7 @@ function WorkspaceNodeView({
         onUnarchiveCodexThread={onUnarchiveCodexThread}
         onOrchestratorStateUpdated={onOrchestratorStateUpdated}
         renderControlPanel={renderControlPanel}
+        renderControlPanelPaneBarActions={renderControlPanelPaneBarActions}
         backendConnectionState={backendConnectionState}
       />
     );
@@ -6843,6 +7247,7 @@ function WorkspaceNodeView({
           onUnarchiveCodexThread={onUnarchiveCodexThread}
           onOrchestratorStateUpdated={onOrchestratorStateUpdated}
           renderControlPanel={renderControlPanel}
+          renderControlPanelPaneBarActions={renderControlPanelPaneBarActions}
           backendConnectionState={backendConnectionState}
         />
       </div>
@@ -6931,6 +7336,7 @@ function WorkspaceNodeView({
           onUnarchiveCodexThread={onUnarchiveCodexThread}
           onOrchestratorStateUpdated={onOrchestratorStateUpdated}
           renderControlPanel={renderControlPanel}
+          renderControlPanelPaneBarActions={renderControlPanelPaneBarActions}
           backendConnectionState={backendConnectionState}
         />
       </div>
@@ -7012,6 +7418,7 @@ function SessionPaneView({
   onUnarchiveCodexThread,
   onOrchestratorStateUpdated,
   renderControlPanel,
+  renderControlPanelPaneBarActions,
   backendConnectionState,
 }: {
   pane: WorkspacePane;
@@ -7053,7 +7460,12 @@ function SessionPaneView({
   onSplitPane: (paneId: string, direction: "row" | "column") => void;
   onTabDragStart: (drag: WorkspaceTabDrag) => void;
   onTabDragEnd: () => void;
-  onTabDrop: (targetPaneId: string, placement: TabDropPlacement, tabIndex?: number) => void;
+  onTabDrop: (
+    targetPaneId: string,
+    placement: TabDropPlacement,
+    tabIndex?: number,
+    dataTransfer?: DataTransfer | null,
+  ) => void;
   onPaneViewModeChange: (paneId: string, viewMode: SessionPaneViewMode) => void;
   onOpenSourceTab: (
     paneId: string,
@@ -7162,6 +7574,7 @@ function SessionPaneView({
   onUnarchiveCodexThread: (sessionId: string) => void;
   onOrchestratorStateUpdated: (state: StateResponse) => void;
   renderControlPanel: (paneId: string, fixedSection?: ControlPanelSectionId | null) => JSX.Element;
+  renderControlPanelPaneBarActions: () => JSX.Element;
   backendConnectionState: BackendConnectionState;
 }) {
   const activeTab = pane.tabs.find((tab) => tab.id === pane.activeTabId) ?? pane.tabs[0] ?? null;
@@ -7282,7 +7695,9 @@ function SessionPaneView({
     language: null,
   });
   const messageStackRef = useRef<HTMLElement | null>(null);
+  const paneTopRef = useRef<HTMLDivElement | null>(null);
   const [activeDropPlacement, setActiveDropPlacement] = useState<Exclude<TabDropPlacement, "tabs"> | null>(null);
+  const [pointerDraggedTab, setPointerDraggedTab] = useState<WorkspaceTabDrag | null>(null);
   const [visitedSessionIds, setVisitedSessionIds] = useState<Record<string, true | undefined>>({});
   const [cachedSessionOrder, setCachedSessionOrder] = useState<string[]>([]);
   const [newResponseIndicatorByKey, setNewResponseIndicatorByKey] = useState<
@@ -7319,18 +7734,19 @@ function SessionPaneView({
     () => pane.tabs.some((tab) => tab.kind === "controlPanel"),
     [pane.tabs],
   );
+  const effectiveDraggedTab = draggedTab ?? pointerDraggedTab;
   const allowedDropPlacements = useMemo<Exclude<TabDropPlacement, "tabs">[]>(
     () =>
-      draggedTab && (draggedTab.tab.kind === "controlPanel" || paneHasControlPanel)
+      effectiveDraggedTab && (effectiveDraggedTab.tab.kind === "controlPanel" || paneHasControlPanel)
         ? ["left", "right"]
         : ["left", "top", "right", "bottom"],
-    [draggedTab, paneHasControlPanel],
+    [effectiveDraggedTab, paneHasControlPanel],
   );
-  const showDropOverlay = Boolean(draggedTab) && !(
-    draggedTab?.sourceWindowId === windowId &&
-    draggedTab?.sourcePaneId === pane.id &&
+  const showDropOverlay = Boolean(effectiveDraggedTab) && !(
+    effectiveDraggedTab?.sourceWindowId === windowId &&
+    effectiveDraggedTab?.sourcePaneId === pane.id &&
     pane.tabs.length <= 1
-  ) && !(activeCanvasTab && draggedTab?.tab.kind === "session");
+  ) && !(activeCanvasTab && effectiveDraggedTab?.tab.kind === "session");
   const sourceCandidatePaths = useMemo(
     () => (activeSourceTab && activeSession ? collectCandidateSourcePaths(activeSession) : []),
     [activeSession, activeSourceTab],
@@ -8119,6 +8535,7 @@ function SessionPaneView({
   useEffect(() => {
     if (!showDropOverlay) {
       setActiveDropPlacement(null);
+      setPointerDraggedTab(null);
     }
   }, [showDropOverlay]);
 
@@ -8129,6 +8546,78 @@ function SessionPaneView({
         if (!isActive) {
           onActivatePane(pane.id);
         }
+      }}
+      onDragLeave={(event) => {
+        const nextTarget = event.relatedTarget;
+        if (nextTarget instanceof Node && event.currentTarget.contains(nextTarget)) {
+          return;
+        }
+
+        setActiveDropPlacement(null);
+        setPointerDraggedTab(null);
+      }}
+      onDragOver={(event) => {
+        if (isPointerWithinPaneTopArea(paneTopRef.current, event.clientY)) {
+          setActiveDropPlacement(null);
+          return;
+        }
+
+        const currentDrag = draggedTab ?? readWorkspaceTabDragData(event.dataTransfer);
+        const hasSessionDragType = dataTransferHasSessionDragType(event.dataTransfer);
+        // During dragover, browsers restrict getData() so readWorkspaceTabDragData may
+        // return null.  Fall back to checking dataTransfer.types — some browsers omit
+        // custom MIME types, so also check for text/plain which we always set.
+        const dragTypes = event.dataTransfer?.types;
+        const hasTabDragType = dragTypes?.includes(TAB_DRAG_MIME_TYPE) ||
+          dragTypes?.includes("text/plain");
+        if (!currentDrag && !hasTabDragType && !hasSessionDragType) {
+          return;
+        }
+
+        event.preventDefault();
+        event.dataTransfer.dropEffect = hasSessionDragType ||
+          currentDrag?.sourcePaneId.startsWith("control-panel-launcher:")
+          ? "copy"
+          : currentDrag ? "move" : "copy";
+
+        if (!draggedTab && currentDrag) {
+          setPointerDraggedTab((existing) =>
+            existing?.dragId === currentDrag.dragId ? existing : currentDrag,
+          );
+        }
+
+        const nextPlacement = resolvePaneDropPlacementFromPointer(
+          event.currentTarget.getBoundingClientRect(),
+          event.clientX,
+          event.clientY,
+          allowedDropPlacements,
+        );
+        setActiveDropPlacement((current) => (current === nextPlacement ? current : nextPlacement));
+      }}
+      onDrop={(event) => {
+        if (isPointerWithinPaneTopArea(paneTopRef.current, event.clientY)) {
+          setActiveDropPlacement(null);
+          setPointerDraggedTab(null);
+          return;
+        }
+
+        const currentDrag = draggedTab ?? pointerDraggedTab ?? readWorkspaceTabDragData(event.dataTransfer);
+        if (!currentDrag && !dataTransferHasSessionDragType(event.dataTransfer)) {
+          return;
+        }
+
+        event.preventDefault();
+        const nextPlacement =
+          activeDropPlacement ??
+          resolvePaneDropPlacementFromPointer(
+            event.currentTarget.getBoundingClientRect(),
+            event.clientX,
+            event.clientY,
+            allowedDropPlacements,
+          );
+        setActiveDropPlacement(null);
+        setPointerDraggedTab(null);
+        onTabDrop(pane.id, nextPlacement, undefined, event.dataTransfer);
       }}
       onKeyDown={handlePaneKeyDown}
     >
@@ -8153,8 +8642,10 @@ function SessionPaneView({
               }}
               onDrop={(event) => {
                 event.preventDefault();
+                event.stopPropagation();
                 setActiveDropPlacement(null);
-                onTabDrop(pane.id, placement);
+                setPointerDraggedTab(null);
+                onTabDrop(pane.id, placement, undefined, event.dataTransfer);
               }}
             >
               <span>{dropLabelForPlacement(placement)}</span>
@@ -8163,7 +8654,7 @@ function SessionPaneView({
         </div>
       ) : null}
 
-      <div className="pane-top">
+      <div ref={paneTopRef} className="pane-top">
         <div className="pane-bar">
           <div className="pane-bar-left">
             <PaneTabs
@@ -8184,9 +8675,9 @@ function SessionPaneView({
               onRenameSessionRequest={onRenameSessionRequest}
             />
           </div>
-          {activeControlPanelTab ? (
+          {activeTab?.kind === "controlPanel" ? (
             <div className="pane-bar-right">
-              <BackendConnectionStatus state={backendConnectionState} />
+              {renderControlPanelPaneBarActions()}
             </div>
           ) : null}
         </div>
@@ -12467,6 +12958,45 @@ function labelForPaneViewMode(viewMode: PaneViewMode) {
   }
 }
 
+function resolvePaneDropPlacementFromPointer(
+  rect: DOMRect,
+  clientX: number,
+  clientY: number,
+  allowedPlacements: readonly Exclude<TabDropPlacement, "tabs">[],
+): Exclude<TabDropPlacement, "tabs"> {
+  if (allowedPlacements.length <= 1) {
+    return allowedPlacements[0] ?? "right";
+  }
+
+  if (
+    allowedPlacements.length === 2 &&
+    allowedPlacements.includes("left") &&
+    allowedPlacements.includes("right")
+  ) {
+    return clientX <= rect.left + rect.width / 2 ? "left" : "right";
+  }
+
+  const distances: Array<readonly [Exclude<TabDropPlacement, "tabs">, number]> = [
+    ["left", Math.max(clientX - rect.left, 0)],
+    ["right", Math.max(rect.right - clientX, 0)],
+    ["top", Math.max(clientY - rect.top, 0)],
+    ["bottom", Math.max(rect.bottom - clientY, 0)],
+  ];
+
+  return distances
+    .filter(([placement]) => allowedPlacements.includes(placement))
+    .sort((left, right) => left[1] - right[1])[0]?.[0] ?? allowedPlacements[0] ?? "right";
+}
+
+function isPointerWithinPaneTopArea(node: HTMLDivElement | null, clientY: number) {
+  if (!node) {
+    return false;
+  }
+
+  const rect = node.getBoundingClientRect();
+  return clientY >= rect.top && clientY <= rect.bottom;
+}
+
 function isHexColorDark(value: string) {
   const hex = value.trim().replace(/^#/, "");
   if (hex.length !== 6) {
@@ -12501,6 +13031,136 @@ function readNavigatorOnline() {
   }
 
   return navigator.onLine !== false;
+}
+
+function WorkspaceSwitcher({
+  currentWorkspaceId,
+  error,
+  isLoading,
+  isOpen,
+  summaries,
+  switcherRef,
+  onOpenNewWorkspaceHere,
+  onOpenNewWorkspaceWindow,
+  onOpenWorkspace,
+  onToggle,
+}: {
+  currentWorkspaceId: string;
+  error: string | null;
+  isLoading: boolean;
+  isOpen: boolean;
+  summaries: readonly WorkspaceLayoutSummary[];
+  switcherRef: RefObject<HTMLDivElement>;
+  onOpenNewWorkspaceHere: () => void;
+  onOpenNewWorkspaceWindow: () => void;
+  onOpenWorkspace: (workspaceId: string) => void;
+  onToggle: () => void;
+}) {
+  const visibleSummaries = useMemo(() => {
+    const byId = new Map(summaries.map((summary) => [summary.id, summary]));
+    if (!byId.has(currentWorkspaceId)) {
+      byId.set(currentWorkspaceId, {
+        id: currentWorkspaceId,
+        revision: 0,
+        updatedAt: "Current browser view",
+        controlPanelSide: "left",
+      });
+    }
+
+    return [...byId.values()];
+  }, [currentWorkspaceId, summaries]);
+
+  return (
+    <div ref={switcherRef} className="workspace-switcher">
+      <button
+        className={`ghost-button workspace-switcher-trigger ${isOpen ? "open" : ""}`}
+        type="button"
+        aria-expanded={isOpen}
+        aria-haspopup="dialog"
+        aria-label={`Workspace ${currentWorkspaceId}`}
+        onClick={onToggle}
+      >
+        <span className="workspace-switcher-trigger-copy">
+          <span className="workspace-switcher-trigger-label">Workspace</span>
+          <span className="workspace-switcher-trigger-value">
+            {formatWorkspaceSwitcherLabel(currentWorkspaceId)}
+          </span>
+        </span>
+        <span className={`combo-trigger-caret ${isOpen ? "open" : ""}`} aria-hidden="true">
+          v
+        </span>
+      </button>
+
+      {isOpen ? (
+        <div className="workspace-switcher-menu panel" role="dialog" aria-label="Workspace switcher">
+          <div className="workspace-switcher-menu-header">
+            <div>
+              <div className="card-label">Workspace</div>
+              <h3>Switch browser layout</h3>
+            </div>
+            <span className="workspace-switcher-current-id" title={currentWorkspaceId}>
+              {currentWorkspaceId}
+            </span>
+          </div>
+
+          <div className="workspace-switcher-actions">
+            <button className="ghost-button" type="button" onClick={onOpenNewWorkspaceHere}>
+              New here
+            </button>
+            <button className="ghost-button" type="button" onClick={onOpenNewWorkspaceWindow}>
+              New window
+            </button>
+          </div>
+
+          <div className="workspace-switcher-list" role="list">
+            {visibleSummaries.map((summary) => {
+              const isCurrent = summary.id === currentWorkspaceId;
+              return (
+                <button
+                  key={summary.id}
+                  className={`workspace-switcher-item ${isCurrent ? "selected" : ""}`}
+                  type="button"
+                  role="listitem"
+                  onClick={() => onOpenWorkspace(summary.id)}
+                >
+                  <span className="workspace-switcher-item-copy">
+                    <span className="workspace-switcher-item-title-row">
+                      <span className="workspace-switcher-item-title">
+                        {formatWorkspaceSwitcherLabel(summary.id)}
+                      </span>
+                      {isCurrent ? (
+                        <span className="workspace-switcher-item-status">Current</span>
+                      ) : null}
+                    </span>
+                    <span className="workspace-switcher-item-meta" title={summary.id}>
+                      {summary.id}
+                    </span>
+                    <span className="workspace-switcher-item-meta">
+                      {summary.updatedAt}
+                    </span>
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+
+          {isLoading ? (
+            <p className="workspace-switcher-status">Loading saved workspaces…</p>
+          ) : null}
+          {error ? <p className="workspace-switcher-error">{error}</p> : null}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function formatWorkspaceSwitcherLabel(workspaceId: string) {
+  const normalized = workspaceId.trim();
+  if (normalized.startsWith("workspace-") && normalized.length > "workspace-".length + 8) {
+    return normalized.slice("workspace-".length, "workspace-".length + 8);
+  }
+
+  return normalized;
 }
 
 function describeBackendConnectionState(state: BackendConnectionState) {

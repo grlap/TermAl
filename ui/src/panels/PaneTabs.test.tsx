@@ -8,6 +8,7 @@ import {
   type GitStatusResponse,
 } from "../api";
 import { copyTextToClipboard } from "../clipboard";
+import { SESSION_DRAG_MIME_TYPE } from "../session-drag";
 import { PaneTabs } from "./PaneTabs";
 import type { CodexState, Project, RemoteConfig, Session } from "../types";
 import type { WorkspaceTab } from "../workspace";
@@ -384,6 +385,37 @@ describe("PaneTabs", () => {
     expect(scrollLeft).toBe(136);
   });
 
+  it("accepts a dragged session on the tab rail", () => {
+    const onTabDrop = vi.fn();
+
+    renderPaneTabs({
+      onTabDrop,
+      sessionLookup: new Map([["session-1", makeSession("session-1", "C:/repo", "Session One")]]),
+      tabs: [
+        {
+          id: "tab-session-1",
+          kind: "session",
+          sessionId: "session-1",
+        },
+      ],
+    });
+
+    const dataTransfer = {
+      dropEffect: "move",
+      effectAllowed: "all",
+      getData: (format: string) =>
+        format === SESSION_DRAG_MIME_TYPE ? JSON.stringify({ sessionId: "session-2" }) : "",
+      setData: () => {},
+      types: [SESSION_DRAG_MIME_TYPE],
+    };
+
+    const tablist = screen.getByRole("tablist", { name: "Tile tabs" });
+    fireEvent.dragOver(tablist, { clientX: 180, dataTransfer });
+    fireEvent.drop(tablist, { clientX: 180, dataTransfer });
+
+    expect(onTabDrop).toHaveBeenCalledWith("pane-1", "tabs", 1, dataTransfer);
+  });
+
   it("shows project and remote info in the status tooltip", async () => {
     renderPaneTabs({
       projectLookup: new Map([
@@ -577,6 +609,7 @@ describe("PaneTabs", () => {
 function renderPaneTabs({
   codexState = {},
   onCloseTab = vi.fn(),
+  onTabDrop = vi.fn(),
   onRenameSessionRequest = vi.fn(),
   onSelectTab = vi.fn(),
   projectLookup = new Map<string, Project>(),
@@ -586,6 +619,12 @@ function renderPaneTabs({
 }: {
   codexState?: CodexState;
   onCloseTab?: (paneId: string, tabId: string) => void;
+  onTabDrop?: (
+    targetPaneId: string,
+    placement: "left" | "right" | "top" | "bottom" | "tabs",
+    tabIndex?: number,
+    dataTransfer?: DataTransfer | null,
+  ) => void;
   onRenameSessionRequest?: (
     sessionId: string,
     clientX: number,
@@ -608,7 +647,7 @@ function renderPaneTabs({
       onSelectTab={onSelectTab}
       onTabDragEnd={() => {}}
       onTabDragStart={() => {}}
-      onTabDrop={() => {}}
+      onTabDrop={onTabDrop}
       paneId="pane-1"
       projectLookup={projectLookup}
       remoteLookup={remoteLookup}

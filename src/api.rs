@@ -91,6 +91,31 @@ async fn get_state(State(state): State<AppState>) -> Json<StateResponse> {
     Json(state.snapshot())
 }
 
+async fn list_workspace_layouts(
+    State(state): State<AppState>,
+) -> Result<Json<WorkspaceLayoutsResponse>, ApiError> {
+    let response = run_blocking_api(move || state.list_workspace_layouts()).await?;
+    Ok(Json(response))
+}
+
+async fn get_workspace_layout(
+    State(state): State<AppState>,
+    AxumPath(workspace_id): AxumPath<String>,
+) -> Result<Json<WorkspaceLayoutResponse>, ApiError> {
+    let response =
+        run_blocking_api(move || state.get_workspace_layout(&workspace_id)).await?;
+    Ok(Json(response))
+}
+
+async fn put_workspace_layout(
+    State(state): State<AppState>,
+    AxumPath(workspace_id): AxumPath<String>,
+    Json(request): Json<PutWorkspaceLayoutRequest>,
+) -> Result<Json<WorkspaceLayoutResponse>, ApiError> {
+    let response = run_blocking_api(move || state.put_workspace_layout(&workspace_id, request)).await?;
+    Ok(Json(response))
+}
+
 impl AppState {
     fn project_digest(&self, project_id: &str) -> Result<ProjectDigestResponse, ApiError> {
         Ok(self
@@ -4084,6 +4109,81 @@ struct StateResponse {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     projects: Vec<Project>,
     sessions: Vec<Session>,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+enum WorkspaceControlPanelSide {
+    Left,
+    Right,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct WorkspaceLayoutDocument {
+    id: String,
+    revision: u64,
+    updated_at: String,
+    control_panel_side: WorkspaceControlPanelSide,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    theme_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    style_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    font_size_px: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    editor_font_size_px: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    density_percent: Option<u32>,
+    workspace: Value,
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct WorkspaceLayoutResponse {
+    layout: WorkspaceLayoutDocument,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct WorkspaceLayoutSummary {
+    id: String,
+    revision: u64,
+    updated_at: String,
+    control_panel_side: WorkspaceControlPanelSide,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    theme_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    style_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    font_size_px: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    editor_font_size_px: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    density_percent: Option<u32>,
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct WorkspaceLayoutsResponse {
+    workspaces: Vec<WorkspaceLayoutSummary>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PutWorkspaceLayoutRequest {
+    control_panel_side: WorkspaceControlPanelSide,
+    #[serde(default)]
+    theme_id: Option<String>,
+    #[serde(default)]
+    style_id: Option<String>,
+    #[serde(default)]
+    font_size_px: Option<u32>,
+    #[serde(default)]
+    editor_font_size_px: Option<u32>,
+    #[serde(default)]
+    density_percent: Option<u32>,
+    workspace: Value,
 }
 
 #[derive(Deserialize, Serialize)]

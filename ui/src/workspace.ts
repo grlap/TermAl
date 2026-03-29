@@ -604,6 +604,26 @@ export function openSessionInWorkspaceState(
   return openTabInWorkspaceState(workspace, createSessionTab(sessionId), preferredPaneId);
 }
 
+export function placeSessionDropInWorkspaceState(
+  workspace: WorkspaceState,
+  sessionId: string,
+  targetPaneId: string,
+  placement: TabDropPlacement,
+  tabIndex?: number,
+): WorkspaceState {
+  if (placement === "tabs" || findWorkspacePaneIdForSession(workspace, sessionId)) {
+    return openSessionInWorkspaceState(workspace, sessionId, targetPaneId);
+  }
+
+  return placeExternalTab(
+    workspace,
+    createSessionTab(sessionId),
+    targetPaneId,
+    placement,
+    tabIndex,
+  );
+}
+
 export function openSourceInWorkspaceState(
   workspace: WorkspaceState,
   path: string | null,

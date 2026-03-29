@@ -1,4 +1,4 @@
-﻿use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
 use std::convert::Infallible;
 use std::fs;
 use std::io::{self, BufRead, BufReader, Write};
@@ -123,6 +123,11 @@ fn app_router(state: AppState) -> Router {
         .route("/api/git/push", post(push_git_changes))
         .route("/api/git/sync", post(sync_git_changes))
         .route("/api/state", get(get_state))
+        .route("/api/workspaces", get(list_workspace_layouts))
+        .route(
+            "/api/workspaces/{id}",
+            get(get_workspace_layout).put(put_workspace_layout),
+        )
         .route("/api/settings", post(update_app_settings))
         .route(
             "/api/orchestrators/templates",
@@ -138,10 +143,7 @@ fn app_router(state: AppState) -> Router {
             "/api/orchestrators",
             get(list_orchestrator_instances).post(create_orchestrator_instance),
         )
-        .route(
-            "/api/orchestrators/{id}",
-            get(get_orchestrator_instance),
-        )
+        .route("/api/orchestrators/{id}", get(get_orchestrator_instance))
         .route("/api/instructions/search", get(search_instructions))
         .route("/api/events", get(state_events))
         .route(
@@ -320,6 +322,3 @@ include!("telegram.rs");
 
 #[cfg(test)]
 mod tests;
-
-
-

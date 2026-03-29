@@ -76,6 +76,81 @@ impl AppState {
         self.snapshot_from_inner(&inner)
     }
 
+    fn list_workspace_layouts(&self) -> Result<WorkspaceLayoutsResponse, ApiError> {
+        let inner = self.inner.lock().expect("state mutex poisoned");
+        let mut workspaces: Vec<_> = inner
+            .workspace_layouts
+            .values()
+            .map(|layout| WorkspaceLayoutSummary {
+                id: layout.id.clone(),
+                revision: layout.revision,
+                updated_at: layout.updated_at.clone(),
+                control_panel_side: layout.control_panel_side,
+                theme_id: layout.theme_id.clone(),
+                style_id: layout.style_id.clone(),
+                font_size_px: layout.font_size_px,
+                editor_font_size_px: layout.editor_font_size_px,
+                density_percent: layout.density_percent,
+            })
+            .collect();
+        workspaces.sort_by(|left, right| {
+            right
+                .updated_at
+                .cmp(&left.updated_at)
+                .then_with(|| left.id.cmp(&right.id))
+        });
+        Ok(WorkspaceLayoutsResponse { workspaces })
+    }
+
+    fn get_workspace_layout(
+        &self,
+        workspace_id: &str,
+    ) -> Result<WorkspaceLayoutResponse, ApiError> {
+        let workspace_id = normalize_optional_identifier(Some(workspace_id))
+            .ok_or_else(|| ApiError::bad_request("workspace id is required"))?;
+        let inner = self.inner.lock().expect("state mutex poisoned");
+        let layout = inner
+            .workspace_layouts
+            .get(workspace_id)
+            .cloned()
+            .ok_or_else(|| ApiError::not_found("workspace layout not found"))?;
+        Ok(WorkspaceLayoutResponse { layout })
+    }
+
+    fn put_workspace_layout(
+        &self,
+        workspace_id: &str,
+        request: PutWorkspaceLayoutRequest,
+    ) -> Result<WorkspaceLayoutResponse, ApiError> {
+        let workspace_id = normalize_optional_identifier(Some(workspace_id))
+            .ok_or_else(|| ApiError::bad_request("workspace id is required"))?
+            .to_owned();
+        let mut inner = self.inner.lock().expect("state mutex poisoned");
+        let next_revision = inner
+            .workspace_layouts
+            .get(&workspace_id)
+            .map(|layout| layout.revision.saturating_add(1))
+            .unwrap_or(1);
+        let layout = WorkspaceLayoutDocument {
+            id: workspace_id.clone(),
+            revision: next_revision,
+            updated_at: Local::now().format("%Y-%m-%d %H:%M:%S").to_string(),
+            control_panel_side: request.control_panel_side,
+            theme_id: request.theme_id,
+            style_id: request.style_id,
+            font_size_px: request.font_size_px,
+            editor_font_size_px: request.editor_font_size_px,
+            density_percent: request.density_percent,
+            workspace: request.workspace,
+        };
+        inner
+            .workspace_layouts
+            .insert(workspace_id, layout.clone());
+        self.persist_internal_locked(&inner)
+            .map_err(|err| ApiError::internal(format!("failed to persist workspace layout: {err:#}")))?;
+        Ok(WorkspaceLayoutResponse { layout })
+    }
+
     fn list_agent_commands(
         &self,
         session_id: &str,
@@ -4438,6 +4513,7 @@ struct StateInner {
     ignored_discovered_codex_thread_ids: BTreeSet<String>,
     sessions: Vec<SessionRecord>,
     orchestrator_instances: Vec<OrchestratorInstance>,
+    workspace_layouts: BTreeMap<String, WorkspaceLayoutDocument>,
 }
 
 impl StateInner {
@@ -4453,6 +4529,7 @@ impl StateInner {
             ignored_discovered_codex_thread_ids: BTreeSet::new(),
             sessions: Vec::new(),
             orchestrator_instances: Vec::new(),
+            workspace_layouts: BTreeMap::new(),
         }
     }
 
@@ -4857,6 +4934,8 @@ struct PersistedState {
     ignored_discovered_codex_thread_ids: BTreeSet<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     orchestrator_instances: Vec<OrchestratorInstance>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    workspace_layouts: BTreeMap<String, WorkspaceLayoutDocument>,
     sessions: Vec<PersistedSessionRecord>,
 }
 
@@ -4874,6 +4953,7 @@ impl PersistedState {
                 .ignored_discovered_codex_thread_ids
                 .clone(),
             orchestrator_instances: inner.orchestrator_instances.clone(),
+            workspace_layouts: inner.workspace_layouts.clone(),
             sessions: inner
                 .sessions
                 .iter()
@@ -4897,6 +4977,7 @@ impl PersistedState {
             projects: self.projects,
             ignored_discovered_codex_thread_ids: self.ignored_discovered_codex_thread_ids,
             orchestrator_instances: self.orchestrator_instances,
+            workspace_layouts: self.workspace_layouts,
             sessions: self
                 .sessions
                 .into_iter()

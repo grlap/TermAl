@@ -1,3 +1,5 @@
+import type { StyleId, ThemeId } from "./themes";
+import { isStyleId, isThemeId } from "./themes";
 import type {
   WorkspaceNode,
   WorkspacePane,
@@ -9,21 +11,68 @@ import {
   isWorkspaceTab,
 } from "./workspace-tab-validation";
 
-export const WORKSPACE_LAYOUT_STORAGE_KEY = "termal-workspace-layout";
+export const LEGACY_WORKSPACE_LAYOUT_STORAGE_KEY = "termal-workspace-layout";
+export const WORKSPACE_VIEW_QUERY_PARAM = "workspace";
 
 export type ControlPanelSide = "left" | "right";
 
 export type StoredWorkspaceLayout = {
   controlPanelSide: ControlPanelSide;
+  themeId?: ThemeId;
+  styleId?: StyleId;
+  fontSizePx?: number;
+  editorFontSizePx?: number;
+  densityPercent?: number;
   workspace: WorkspaceState;
 };
 
-export function getStoredWorkspaceLayout(): StoredWorkspaceLayout | null {
+export function createWorkspaceViewId(): string {
+  return `workspace-${crypto.randomUUID()}`;
+}
+
+export function ensureWorkspaceViewId(): string {
+  if (typeof window === "undefined") {
+    return "workspace-server";
+  }
+
+  const url = new URL(window.location.href);
+  const existing = normalizeWorkspaceViewId(url.searchParams.get(WORKSPACE_VIEW_QUERY_PARAM));
+  if (existing) {
+    return existing;
+  }
+
+  const generated = createWorkspaceViewId();
+  url.searchParams.set(WORKSPACE_VIEW_QUERY_PARAM, generated);
+  window.history.replaceState(window.history.state, "", url.toString());
+  return generated;
+}
+
+export function getStoredWorkspaceLayout(workspaceViewId: string): StoredWorkspaceLayout | null {
   if (typeof window === "undefined") {
     return null;
   }
 
-  const raw = window.localStorage.getItem(WORKSPACE_LAYOUT_STORAGE_KEY);
+  const storageKey = getWorkspaceLayoutStorageKey(workspaceViewId);
+  const namespaced = parseStoredWorkspaceLayout(window.localStorage.getItem(storageKey));
+  if (namespaced) {
+    return namespaced;
+  }
+
+  return parseStoredWorkspaceLayout(window.localStorage.getItem(LEGACY_WORKSPACE_LAYOUT_STORAGE_KEY));
+}
+
+export function persistWorkspaceLayout(workspaceViewId: string, layout: StoredWorkspaceLayout) {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  window.localStorage.setItem(
+    getWorkspaceLayoutStorageKey(workspaceViewId),
+    JSON.stringify(layout),
+  );
+}
+
+export function parseStoredWorkspaceLayout(raw: string | null | undefined): StoredWorkspaceLayout | null {
   if (!raw) {
     return null;
   }
@@ -36,24 +85,50 @@ export function getStoredWorkspaceLayout(): StoredWorkspaceLayout | null {
   }
 }
 
-export function persistWorkspaceLayout(layout: StoredWorkspaceLayout) {
-  if (typeof window === "undefined") {
-    return;
-  }
-
-  window.localStorage.setItem(WORKSPACE_LAYOUT_STORAGE_KEY, JSON.stringify(layout));
-}
-
 function isStoredWorkspaceLayout(value: unknown): value is StoredWorkspaceLayout {
   if (!isRecord(value)) {
     return false;
   }
 
-  return isControlPanelSide(value.controlPanelSide) && isWorkspaceState(value.workspace);
+  if (!isControlPanelSide(value.controlPanelSide) || !isWorkspaceState(value.workspace)) {
+    return false;
+  }
+
+  // themeId and styleId are optional — accept absent, reject invalid
+  if (value.themeId !== undefined && !isThemeId(value.themeId as string)) {
+    return false;
+  }
+  if (value.styleId !== undefined && !isStyleId(value.styleId as string)) {
+    return false;
+  }
+
+  // Numeric UI settings are optional — accept absent, reject non-finite
+  if (value.fontSizePx !== undefined && !isOptionalFiniteNumber(value.fontSizePx)) {
+    return false;
+  }
+  if (value.editorFontSizePx !== undefined && !isOptionalFiniteNumber(value.editorFontSizePx)) {
+    return false;
+  }
+  if (value.densityPercent !== undefined && !isOptionalFiniteNumber(value.densityPercent)) {
+    return false;
+  }
+
+  return true;
 }
 
 function isControlPanelSide(value: unknown): value is ControlPanelSide {
   return value === "left" || value === "right";
+}
+
+function getWorkspaceLayoutStorageKey(workspaceViewId: string) {
+  const normalizedWorkspaceViewId =
+    normalizeWorkspaceViewId(workspaceViewId) ?? "workspace-server";
+  return `${LEGACY_WORKSPACE_LAYOUT_STORAGE_KEY}:${normalizedWorkspaceViewId}`;
+}
+
+function normalizeWorkspaceViewId(value: string | null | undefined) {
+  const trimmed = value?.trim();
+  return trimmed ? trimmed : null;
 }
 
 function isWorkspaceState(value: unknown): value is WorkspaceState {
@@ -131,6 +206,10 @@ function isNullableString(value: unknown): value is string | null {
 
 function isString(value: unknown): value is string {
   return typeof value === "string";
+}
+
+function isOptionalFiniteNumber(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

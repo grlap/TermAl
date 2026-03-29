@@ -135,10 +135,10 @@ describe("ControlPanelSurface", () => {
 
     mockButtonBounds(projectsButton, { top: 0, height: 40 });
 
-    fireEvent.dragStart(gitButton, { dataTransfer });
-    fireEvent.dragOver(projectsButton, { clientY: 36, dataTransfer });
-    fireEvent.drop(projectsButton, { clientY: 36, dataTransfer });
-    fireEvent.dragEnd(gitButton, { dataTransfer });
+    fireEvent.dragStart(gitButton, { dataTransfer, shiftKey: true });
+    fireEvent.dragOver(projectsButton, { clientY: 36, dataTransfer, shiftKey: true });
+    fireEvent.drop(projectsButton, { clientY: 36, dataTransfer, shiftKey: true });
+    fireEvent.dragEnd(gitButton, { dataTransfer, shiftKey: true });
 
     expect(getDockSectionLabels()).toEqual([
       "Projects",

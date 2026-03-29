@@ -1,25 +1,34 @@
 import { beforeEach, describe, expect, it } from "vitest";
 
 import {
+  LEGACY_WORKSPACE_LAYOUT_STORAGE_KEY,
   getStoredWorkspaceLayout,
+  parseStoredWorkspaceLayout,
   persistWorkspaceLayout,
-  WORKSPACE_LAYOUT_STORAGE_KEY,
   type StoredWorkspaceLayout,
 } from "./workspace-storage";
 
 describe("workspace storage", () => {
+  const workspaceViewId = "workspace-test";
+
   beforeEach(() => {
     window.localStorage.clear();
   });
 
   it("returns null when storage is empty or invalid", () => {
-    expect(getStoredWorkspaceLayout()).toBeNull();
+    expect(getStoredWorkspaceLayout(workspaceViewId)).toBeNull();
 
-    window.localStorage.setItem(WORKSPACE_LAYOUT_STORAGE_KEY, "not-json");
-    expect(getStoredWorkspaceLayout()).toBeNull();
+    window.localStorage.setItem(
+      `${LEGACY_WORKSPACE_LAYOUT_STORAGE_KEY}:${workspaceViewId}`,
+      "not-json",
+    );
+    expect(getStoredWorkspaceLayout(workspaceViewId)).toBeNull();
 
-    window.localStorage.setItem(WORKSPACE_LAYOUT_STORAGE_KEY, JSON.stringify({ controlPanelSide: "up" }));
-    expect(getStoredWorkspaceLayout()).toBeNull();
+    window.localStorage.setItem(
+      `${LEGACY_WORKSPACE_LAYOUT_STORAGE_KEY}:${workspaceViewId}`,
+      JSON.stringify({ controlPanelSide: "up" }),
+    );
+    expect(getStoredWorkspaceLayout(workspaceViewId)).toBeNull();
   });
 
   it("persists and restores a valid workspace layout", () => {
@@ -101,10 +110,50 @@ describe("workspace storage", () => {
       },
     };
 
-    persistWorkspaceLayout(layout);
+    persistWorkspaceLayout(workspaceViewId, layout);
 
-    expect(window.localStorage.getItem(WORKSPACE_LAYOUT_STORAGE_KEY)).not.toBeNull();
-    expect(getStoredWorkspaceLayout()).toEqual(layout);
+    expect(
+      window.localStorage.getItem(`${LEGACY_WORKSPACE_LAYOUT_STORAGE_KEY}:${workspaceViewId}`),
+    ).not.toBeNull();
+    expect(getStoredWorkspaceLayout(workspaceViewId)).toEqual(layout);
+  });
+
+  it("falls back to the legacy global key", () => {
+    const layout: StoredWorkspaceLayout = {
+      controlPanelSide: "left",
+      workspace: {
+        root: null,
+        panes: [],
+        activePaneId: null,
+      },
+    };
+
+    window.localStorage.setItem(
+      LEGACY_WORKSPACE_LAYOUT_STORAGE_KEY,
+      JSON.stringify(layout),
+    );
+
+    expect(getStoredWorkspaceLayout(workspaceViewId)).toEqual(layout);
+  });
+
+  it("parses a valid raw layout payload", () => {
+    const raw = JSON.stringify({
+      controlPanelSide: "left",
+      workspace: {
+        root: null,
+        panes: [],
+        activePaneId: null,
+      },
+    });
+
+    expect(parseStoredWorkspaceLayout(raw)).toEqual({
+      controlPanelSide: "left",
+      workspace: {
+        root: null,
+        panes: [],
+        activePaneId: null,
+      },
+    });
   });
 
   it("rejects malformed canvas tabs", () => {
@@ -137,9 +186,12 @@ describe("workspace storage", () => {
       },
     };
 
-    window.localStorage.setItem(WORKSPACE_LAYOUT_STORAGE_KEY, JSON.stringify(malformed));
+    window.localStorage.setItem(
+      `${LEGACY_WORKSPACE_LAYOUT_STORAGE_KEY}:${workspaceViewId}`,
+      JSON.stringify(malformed),
+    );
 
-    expect(getStoredWorkspaceLayout()).toBeNull();
+    expect(getStoredWorkspaceLayout(workspaceViewId)).toBeNull();
   });
 
   it("rejects malformed canvas zoom values", () => {
@@ -173,9 +225,12 @@ describe("workspace storage", () => {
       },
     };
 
-    window.localStorage.setItem(WORKSPACE_LAYOUT_STORAGE_KEY, JSON.stringify(malformed));
+    window.localStorage.setItem(
+      `${LEGACY_WORKSPACE_LAYOUT_STORAGE_KEY}:${workspaceViewId}`,
+      JSON.stringify(malformed),
+    );
 
-    expect(getStoredWorkspaceLayout()).toBeNull();
+    expect(getStoredWorkspaceLayout(workspaceViewId)).toBeNull();
   });
 
   it("rejects malformed orchestrator canvas tabs", () => {
@@ -208,9 +263,12 @@ describe("workspace storage", () => {
       },
     };
 
-    window.localStorage.setItem(WORKSPACE_LAYOUT_STORAGE_KEY, JSON.stringify(malformed));
+    window.localStorage.setItem(
+      `${LEGACY_WORKSPACE_LAYOUT_STORAGE_KEY}:${workspaceViewId}`,
+      JSON.stringify(malformed),
+    );
 
-    expect(getStoredWorkspaceLayout()).toBeNull();
+    expect(getStoredWorkspaceLayout(workspaceViewId)).toBeNull();
   });
 
   it("rejects malformed workspace trees", () => {
@@ -242,8 +300,11 @@ describe("workspace storage", () => {
       },
     };
 
-    window.localStorage.setItem(WORKSPACE_LAYOUT_STORAGE_KEY, JSON.stringify(malformed));
+    window.localStorage.setItem(
+      `${LEGACY_WORKSPACE_LAYOUT_STORAGE_KEY}:${workspaceViewId}`,
+      JSON.stringify(malformed),
+    );
 
-    expect(getStoredWorkspaceLayout()).toBeNull();
+    expect(getStoredWorkspaceLayout(workspaceViewId)).toBeNull();
   });
 });

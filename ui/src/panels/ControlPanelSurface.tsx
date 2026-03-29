@@ -8,6 +8,13 @@ import {
   type DragEvent as ReactDragEvent,
   type ReactNode,
 } from "react";
+import {
+  TAB_DRAG_MIME_TYPE,
+  attachWorkspaceTabDragData,
+  createWorkspaceTabDrag,
+  type WorkspaceTabDrag,
+} from "../tab-drag";
+import type { WorkspaceTab } from "../workspace";
 
 export type ControlPanelSectionId = "files" | "sessions" | "projects" | "orchestrators" | "git";
 
@@ -32,10 +39,18 @@ type ControlPanelSurfaceProps = {
   gitStatusCount: number;
   isPreferencesOpen: boolean;
   onOpenPreferences: () => void;
+  onSectionTabDragEnd?: () => void;
+  onSectionTabDragStart?: (
+    event: ReactDragEvent<HTMLButtonElement>,
+    sectionId: ControlPanelSectionId,
+  ) => void;
   projectCount: number;
   renderHeaderActions?: (sectionId: ControlPanelSectionId) => ReactNode;
   renderSection: (sectionId: ControlPanelSectionId) => ReactNode;
+  sectionLauncherTabs?: Partial<Record<ControlPanelSectionId, WorkspaceTab | null>>;
   sessionCount: number;
+  windowId?: string;
+  launcherPaneId?: string;
 };
 
 export type ControlPanelSurfaceHandle = {
@@ -68,15 +83,35 @@ const PREFERENCES_ACTION: ControlPanelActionDefinition = {
   icon: <SettingsIcon />,
 };
 
+export function ControlPanelSectionIcon({ sectionId }: { sectionId: ControlPanelSectionId }) {
+  switch (sectionId) {
+    case "files":
+      return <FilesIcon />;
+    case "sessions":
+      return <SessionsIcon />;
+    case "projects":
+      return <ProjectsIcon />;
+    case "orchestrators":
+      return <OrchestratorsIcon />;
+    case "git":
+      return <GitStatusIcon />;
+  }
+}
+
 export const ControlPanelSurface = forwardRef<ControlPanelSurfaceHandle, ControlPanelSurfaceProps>(function ControlPanelSurface({
   fixedSection = null,
   gitStatusCount,
   isPreferencesOpen,
   onOpenPreferences,
+  onSectionTabDragEnd,
+  onSectionTabDragStart,
   projectCount,
   renderHeaderActions,
   renderSection,
+  sectionLauncherTabs,
   sessionCount,
+  windowId,
+  launcherPaneId,
 }, ref): JSX.Element {
   const [activeSection, setActiveSection] = useState<ControlPanelSectionId>(fixedSection ?? "sessions");
   const [sectionOrder, setSectionOrder] = useState<ControlPanelSectionId[]>(() => getStoredControlPanelSectionOrder());
@@ -87,30 +122,30 @@ export const ControlPanelSurface = forwardRef<ControlPanelSurfaceHandle, Control
     files: {
       id: "files",
       label: "Files",
-      icon: <FilesIcon />,
+      icon: <ControlPanelSectionIcon sectionId="files" />,
     },
     sessions: {
       badgeCount: sessionCount,
       id: "sessions",
       label: "Sessions",
-      icon: <SessionsIcon />,
+      icon: <ControlPanelSectionIcon sectionId="sessions" />,
     },
     projects: {
       badgeCount: projectCount,
       id: "projects",
       label: "Projects",
-      icon: <ProjectsIcon />,
+      icon: <ControlPanelSectionIcon sectionId="projects" />,
     },
     orchestrators: {
       id: "orchestrators",
       label: "Orchestrators",
-      icon: <OrchestratorsIcon />,
+      icon: <ControlPanelSectionIcon sectionId="orchestrators" />,
     },
     git: {
       badgeCount: gitStatusCount,
       id: "git",
       label: "Git status",
-      icon: <GitStatusIcon />,
+      icon: <ControlPanelSectionIcon sectionId="git" />,
     },
   };
   const sectionDefinitions = fixedSection
@@ -209,6 +244,11 @@ export const ControlPanelSurface = forwardRef<ControlPanelSurfaceHandle, Control
                 dropPosition={dropTarget?.sectionId === definition.id ? dropTarget.position : null}
                 isActive={activeSection === definition.id}
                 isDragging={draggedSectionId === definition.id}
+                launcherTab={sectionLauncherTabs?.[definition.id] ?? null}
+                windowId={windowId}
+                launcherPaneId={launcherPaneId}
+                onExternalDragEnd={onSectionTabDragEnd}
+                onExternalDragStart={onSectionTabDragStart}
                 onDragEnd={clearDragState}
                 onDragOver={handleSectionDragOver}
                 onDragStart={handleSectionDragStart}
@@ -250,6 +290,11 @@ function ControlPanelActivityButton({
   dropPosition,
   isActive,
   isDragging,
+  launcherTab,
+  windowId,
+  launcherPaneId,
+  onExternalDragEnd,
+  onExternalDragStart,
   onDragEnd,
   onDragOver,
   onDragStart,
@@ -260,6 +305,14 @@ function ControlPanelActivityButton({
   dropPosition: DockDropPosition | null;
   isActive: boolean;
   isDragging: boolean;
+  launcherTab: WorkspaceTab | null;
+  windowId?: string;
+  launcherPaneId?: string;
+  onExternalDragEnd?: () => void;
+  onExternalDragStart?: (
+    event: ReactDragEvent<HTMLButtonElement>,
+    sectionId: ControlPanelSectionId,
+  ) => void;
   onDragEnd: () => void;
   onDragOver: (event: ReactDragEvent<HTMLButtonElement>, sectionId: ControlPanelSectionId) => void;
   onDragStart: (event: ReactDragEvent<HTMLButtonElement>, sectionId: ControlPanelSectionId) => void;
@@ -276,11 +329,32 @@ function ControlPanelActivityButton({
       draggable
       aria-label={definition.label}
       aria-pressed={isActive}
-      title={`${definition.label} (drag to reorder)`}
+      title={`${definition.label} (drag to open as tab, Shift+drag to reorder)`}
       onClick={() => onSelect(definition.id)}
-      onDragEnd={onDragEnd}
+      onDragEnd={() => {
+        onDragEnd();
+        onExternalDragEnd?.();
+      }}
       onDragOver={(event) => onDragOver(event, definition.id)}
-      onDragStart={(event) => onDragStart(event, definition.id)}
+      onDragStart={(event) => {
+        if (event.shiftKey || !onExternalDragStart) {
+          onDragStart(event, definition.id);
+        } else {
+          // Attach drag data directly on the dataTransfer as a guarantee — the
+          // callback chain through onExternalDragStart also sets it, but this
+          // ensures the MIME type is present even if the callback fails to run.
+          if (launcherTab && windowId && launcherPaneId) {
+            const drag = createWorkspaceTabDrag(
+              windowId,
+              `control-panel-launcher:${launcherPaneId}:${definition.id}`,
+              launcherTab,
+            );
+            event.dataTransfer.effectAllowed = "copyMove";
+            attachWorkspaceTabDragData(event.dataTransfer, drag);
+          }
+          onExternalDragStart(event, definition.id);
+        }
+      }}
       onDrop={(event) => onDrop(event, definition.id)}
     >
       <span className="control-panel-activity-icon" aria-hidden="true">

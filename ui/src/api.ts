@@ -44,6 +44,39 @@ export type CreateProjectResponse = {
   state: StateResponse;
 };
 
+export type WorkspaceLayoutDocument = {
+  id: string;
+  revision: number;
+  updatedAt: string;
+  controlPanelSide: "left" | "right";
+  themeId?: string;
+  styleId?: string;
+  fontSizePx?: number;
+  editorFontSizePx?: number;
+  densityPercent?: number;
+  workspace: unknown;
+};
+
+export type WorkspaceLayoutResponse = {
+  layout: WorkspaceLayoutDocument;
+};
+
+export type WorkspaceLayoutSummary = {
+  id: string;
+  revision: number;
+  updatedAt: string;
+  controlPanelSide: "left" | "right";
+  themeId?: string;
+  styleId?: string;
+  fontSizePx?: number;
+  editorFontSizePx?: number;
+  densityPercent?: number;
+};
+
+export type WorkspaceLayoutsResponse = {
+  workspaces: WorkspaceLayoutSummary[];
+};
+
 export type OrchestratorTemplatesResponse = {
   templates: OrchestratorTemplate[];
 };
@@ -251,6 +284,52 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
 export function fetchState() {
   return request<StateResponse>("/api/state");
+}
+
+export async function fetchWorkspaceLayout(workspaceId: string) {
+  const response = await fetch(`/api/workspaces/${encodeURIComponent(workspaceId)}`, {
+    headers: {
+      "Content-Type": "application/json",
+    },
+  });
+
+  if (response.status === 404) {
+    return null;
+  }
+
+  const contentType = response.headers.get("content-type") ?? "";
+  const raw = await response.text();
+  if (looksLikeHtmlResponse(raw, contentType)) {
+    throw new Error(formatUnavailableApiMessage(`/api/workspaces/${workspaceId}`, response.status));
+  }
+
+  if (!response.ok) {
+    throw new Error(extractError(raw, response.status));
+  }
+
+  return raw ? (JSON.parse(raw) as WorkspaceLayoutResponse) : null;
+}
+
+export function fetchWorkspaceLayouts() {
+  return request<WorkspaceLayoutsResponse>("/api/workspaces");
+}
+
+export function saveWorkspaceLayout(
+  workspaceId: string,
+  payload: {
+    controlPanelSide: "left" | "right";
+    themeId?: string;
+    styleId?: string;
+    fontSizePx?: number;
+    editorFontSizePx?: number;
+    densityPercent?: number;
+    workspace: unknown;
+  },
+) {
+  return request<WorkspaceLayoutResponse>(`/api/workspaces/${encodeURIComponent(workspaceId)}`, {
+    method: "PUT",
+    body: JSON.stringify(payload),
+  });
 }
 
 export function updateAppSettings(payload: {

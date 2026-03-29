@@ -19,3 +19,4 @@ Use the files here for the detailed feature design and implementation notes.
 - [WhatsApp Integration](./whatsapp-integration.md)
 - [Agent Integration Comparison](./agent-integration-comparison.md)
 - [Orchestration](./orchestration.md)
+- [Multi-Browser Workspaces](./multi-browser-workspaces.md)

@@ -229,6 +229,22 @@ async function selectComboboxOption(name: string, optionName: string | RegExp) {
   await clickAndSettle(option);
 }
 
+function createDragDataTransfer() {
+  const data = new Map<string, string>();
+  return {
+    dropEffect: "move",
+    effectAllowed: "all",
+    getData: (format: string) => data.get(format) ?? "",
+    setData: (format: string, value: string) => {
+      data.set(format, value);
+    },
+    setDragImage: () => {},
+    get types() {
+      return Array.from(data.keys());
+    },
+  };
+}
+
 function makeSession(id: string, overrides?: Partial<Session>): Session {
   return {
     id,
@@ -984,6 +1000,94 @@ describe("App", () => {
     }
   });
 
+  it("shows a workspace switcher with saved workspaces and can open a new workspace window", async () => {
+    await withSuppressedActWarnings(async () => {
+      const originalFetch = globalThis.fetch;
+      const originalEventSource = globalThis.EventSource;
+      const originalResizeObserver = globalThis.ResizeObserver;
+      const openSpy = vi.spyOn(window, "open").mockImplementation(() => null);
+      const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const requestUrl = new URL(String(input), "http://localhost");
+        if (requestUrl.pathname === "/api/state") {
+          return jsonResponse({
+            revision: 1,
+            projects: [],
+            sessions: [],
+          });
+        }
+
+        if (requestUrl.pathname === "/api/workspaces") {
+          return jsonResponse({
+            workspaces: [
+              {
+                id: "monitor-left",
+                revision: 3,
+                updatedAt: "2026-03-28 18:00:00",
+                controlPanelSide: "left",
+              },
+              {
+                id: "monitor-right",
+                revision: 1,
+                updatedAt: "2026-03-28 17:30:00",
+                controlPanelSide: "right",
+              },
+            ],
+          });
+        }
+
+        if (requestUrl.pathname.startsWith("/api/workspaces/")) {
+          if ((init?.method ?? "GET").toUpperCase() === "PUT") {
+            const pathSegments = requestUrl.pathname.split("/");
+            return jsonResponse({
+              layout: {
+                id: pathSegments[pathSegments.length - 1] ?? "workspace",
+                revision: 1,
+                updatedAt: "2026-03-28 18:05:00",
+                controlPanelSide: "left",
+                workspace: {
+                  root: null,
+                  panes: [],
+                  activePaneId: null,
+                },
+              },
+            });
+          }
+
+          return new Response("", { status: 404 });
+        }
+
+        throw new Error(`Unexpected fetch: ${requestUrl.pathname}${requestUrl.search}`);
+      });
+
+      window.localStorage.clear();
+      vi.stubGlobal("fetch", fetchMock);
+      vi.stubGlobal("EventSource", EventSourceMock as unknown as typeof EventSource);
+      vi.stubGlobal("ResizeObserver", ResizeObserverMock as unknown as typeof ResizeObserver);
+
+      try {
+        await renderApp();
+
+        const switcherTrigger = await screen.findByRole("button", { name: /workspace /i });
+        await clickAndSettle(switcherTrigger);
+
+        const switcherDialog = await screen.findByRole("dialog", { name: "Workspace switcher" });
+        expect(within(switcherDialog).getAllByText("monitor-left").length).toBeGreaterThan(0);
+        expect(within(switcherDialog).getAllByText("monitor-right").length).toBeGreaterThan(0);
+
+        await clickAndSettle(await screen.findByRole("button", { name: "New window" }));
+
+        expect(openSpy).toHaveBeenCalledTimes(1);
+        expect(String(openSpy.mock.calls[0]?.[0] ?? "")).toContain("workspace=");
+      } finally {
+        openSpy.mockRestore();
+        window.localStorage.clear();
+        restoreGlobal("fetch", originalFetch);
+        restoreGlobal("EventSource", originalEventSource);
+        restoreGlobal("ResizeObserver", originalResizeObserver);
+      }
+    });
+  });
+
   it("refreshes model options after creating a new Codex session", async () => {
     await withSuppressedActWarnings(async () => {
     const originalEventSource = globalThis.EventSource;
@@ -1391,6 +1495,267 @@ describe("App", () => {
         await clickAndSettle(await screen.findByRole("button", { name: "Edit canvas" }));
         expect(within(getSessionTablist()).getByText("Orchestration: delivery-flow")).toBeInTheDocument();
         expect(await screen.findByRole("heading", { level: 3, name: "Edit template" })).toBeInTheDocument();
+      } finally {
+        window.localStorage.clear();
+        HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
+        restoreGlobal("fetch", originalFetch);
+        restoreGlobal("EventSource", originalEventSource);
+        restoreGlobal("ResizeObserver", originalResizeObserver);
+      }
+    });
+  });
+  it("drags control panel dock sections into the workspace", async () => {
+    await withSuppressedActWarnings(async () => {
+      const originalFetch = globalThis.fetch;
+      const originalEventSource = globalThis.EventSource;
+      const originalResizeObserver = globalThis.ResizeObserver;
+      const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const requestUrl = new URL(String(input), "http://localhost");
+        if (requestUrl.pathname === "/api/state") {
+          return jsonResponse({
+            revision: 1,
+            projects: [
+              {
+                id: "project-termal",
+                name: "TermAl",
+                rootPath: "/projects/termal",
+              },
+            ],
+            sessions: [
+              makeSession("session-1", {
+                name: "Session 1",
+                projectId: "project-termal",
+                workdir: "/projects/termal",
+              }),
+            ],
+          });
+        }
+
+        if (requestUrl.pathname === "/api/git/status") {
+          return jsonResponse({
+            ahead: 0,
+            behind: 0,
+            branch: "main",
+            files: [],
+            isClean: true,
+            repoRoot: "/projects/termal",
+            upstream: "origin/main",
+            workdir: "/projects/termal",
+          });
+        }
+
+        if (requestUrl.pathname.startsWith("/api/workspaces/")) {
+          if ((init?.method ?? "GET").toUpperCase() === "PUT") {
+            return jsonResponse({ ok: true });
+          }
+
+          return new Response("", { status: 404 });
+        }
+
+        throw new Error(`Unexpected fetch: ${requestUrl.pathname}${requestUrl.search}`);
+      });
+
+      window.localStorage.clear();
+      vi.stubGlobal("fetch", fetchMock);
+      vi.stubGlobal("EventSource", EventSourceMock as unknown as typeof EventSource);
+      vi.stubGlobal("ResizeObserver", ResizeObserverMock as unknown as typeof ResizeObserver);
+      const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
+      HTMLElement.prototype.scrollIntoView = vi.fn();
+
+      try {
+        await renderApp();
+        const eventSource = EventSourceMock.instances[0];
+        expect(eventSource).toBeTruthy();
+        act(() => {
+          eventSource.dispatchError();
+        });
+        await settleAsyncUi();
+
+        const sessionList = document.querySelector(".session-list");
+        if (!(sessionList instanceof HTMLDivElement)) {
+          throw new Error("Session list not found");
+        }
+
+        const sessionRowLabel = await within(sessionList).findByText("Session 1");
+        const sessionRowButton = sessionRowLabel.closest("button");
+        if (!sessionRowButton) {
+          throw new Error("Session row button not found");
+        }
+
+        await clickAndSettle(sessionRowButton);
+
+        async function dragDockSectionToWorkspace(buttonName: string, expectedTabName: RegExp) {
+          const dock = await screen.findByRole("navigation", { name: "Control panel dock" });
+          const sectionButton = await within(dock).findByRole("button", { name: buttonName });
+          expect(sectionButton).toHaveAttribute("draggable", "true");
+
+          const dataTransfer = createDragDataTransfer();
+          await act(async () => {
+            fireEvent.dragStart(sectionButton, { dataTransfer });
+          });
+          await settleAsyncUi();
+
+          const rightDropZone = document.querySelector(".pane-drop-zone-right");
+          if (!(rightDropZone instanceof HTMLDivElement)) {
+            throw new Error("Right drop zone not found");
+          }
+
+          await act(async () => {
+            fireEvent.dragEnter(rightDropZone, { dataTransfer });
+            fireEvent.dragOver(rightDropZone, { dataTransfer });
+            fireEvent.drop(rightDropZone, { dataTransfer });
+            fireEvent.dragEnd(sectionButton, { dataTransfer });
+          });
+          await settleAsyncUi();
+
+          await waitFor(() => {
+            expect(
+              screen
+                .getAllByRole("tab")
+                .some((tab) =>
+                  expectedTabName.test((tab.textContent ?? "").replace(/×/g, "").trim()),
+                ),
+            ).toBe(true);
+          });
+        }
+
+        await dragDockSectionToWorkspace("Sessions", /^Sessions$/i);
+        await dragDockSectionToWorkspace("Orchestrators", /^Orchestrators$/i);
+        await dragDockSectionToWorkspace("Files", /Files: termal/i);
+        await dragDockSectionToWorkspace("Git status", /Git: termal/i);
+      } finally {
+        window.localStorage.clear();
+        HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
+        restoreGlobal("fetch", originalFetch);
+        restoreGlobal("EventSource", originalEventSource);
+        restoreGlobal("ResizeObserver", originalResizeObserver);
+      }
+    });
+  });
+  it("drops control panel dock sections into the tab rail without splitting the pane", async () => {
+    await withSuppressedActWarnings(async () => {
+      const originalFetch = globalThis.fetch;
+      const originalEventSource = globalThis.EventSource;
+      const originalResizeObserver = globalThis.ResizeObserver;
+      const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const requestUrl = new URL(String(input), "http://localhost");
+        if (requestUrl.pathname === "/api/state") {
+          return jsonResponse({
+            revision: 1,
+            projects: [
+              {
+                id: "project-termal",
+                name: "TermAl",
+                rootPath: "/projects/termal",
+              },
+            ],
+            sessions: [
+              makeSession("session-1", {
+                name: "Session 1",
+                projectId: "project-termal",
+                workdir: "/projects/termal",
+              }),
+            ],
+          });
+        }
+
+        if (requestUrl.pathname === "/api/git/status") {
+          return jsonResponse({
+            ahead: 0,
+            behind: 0,
+            branch: "main",
+            files: [],
+            isClean: true,
+            repoRoot: "/projects/termal",
+            upstream: "origin/main",
+            workdir: "/projects/termal",
+          });
+        }
+
+        if (requestUrl.pathname.startsWith("/api/workspaces/")) {
+          if ((init?.method ?? "GET").toUpperCase() === "PUT") {
+            return jsonResponse({ ok: true });
+          }
+
+          return new Response("", { status: 404 });
+        }
+
+        throw new Error(`Unexpected fetch: ${requestUrl.pathname}${requestUrl.search}`);
+      });
+
+      window.localStorage.clear();
+      vi.stubGlobal("fetch", fetchMock);
+      vi.stubGlobal("EventSource", EventSourceMock as unknown as typeof EventSource);
+      vi.stubGlobal("ResizeObserver", ResizeObserverMock as unknown as typeof ResizeObserver);
+      const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
+      HTMLElement.prototype.scrollIntoView = vi.fn();
+
+      try {
+        await renderApp();
+        const eventSource = EventSourceMock.instances[0];
+        expect(eventSource).toBeTruthy();
+        act(() => {
+          eventSource.dispatchError();
+        });
+        await settleAsyncUi();
+
+        const sessionList = document.querySelector(".session-list");
+        if (!(sessionList instanceof HTMLDivElement)) {
+          throw new Error("Session list not found");
+        }
+
+        const sessionRowLabel = await within(sessionList).findByText("Session 1");
+        const sessionRowButton = sessionRowLabel.closest("button");
+        if (!sessionRowButton) {
+          throw new Error("Session row button not found");
+        }
+
+        await clickAndSettle(sessionRowButton);
+
+        const initialTabLists = screen.getAllByRole("tablist", { name: "Tile tabs" });
+        expect(initialTabLists).toHaveLength(2);
+
+        const workspaceTabList = initialTabLists.find((tabList) =>
+          /Session 1/i.test(tabList.textContent ?? ""),
+        );
+        if (!(workspaceTabList instanceof HTMLDivElement)) {
+          throw new Error("Workspace tab list not found");
+        }
+        const workspaceTabRail = workspaceTabList;
+
+        async function dragDockSectionToTabRail(buttonName: string, expectedTabLabel: RegExp) {
+          const dock = await screen.findByRole("navigation", { name: "Control panel dock" });
+          const sectionButton = await within(dock).findByRole("button", { name: buttonName });
+          const dataTransfer = createDragDataTransfer();
+
+          await act(async () => {
+            fireEvent.dragStart(sectionButton, { dataTransfer });
+          });
+          await settleAsyncUi();
+
+          await act(async () => {
+            fireEvent.dragEnter(workspaceTabRail, { clientX: 200, dataTransfer });
+            fireEvent.dragOver(workspaceTabRail, { clientX: 200, dataTransfer });
+            fireEvent.drop(workspaceTabRail, { clientX: 200, dataTransfer });
+            fireEvent.dragEnd(sectionButton, { dataTransfer });
+          });
+          await settleAsyncUi();
+
+          await waitFor(() => {
+            const tabLists = screen.getAllByRole("tablist", { name: "Tile tabs" });
+            expect(tabLists).toHaveLength(2);
+            const updatedWorkspaceTabList = tabLists.find((tabList) =>
+              /Session 1/i.test(tabList.textContent ?? ""),
+            );
+            expect(updatedWorkspaceTabList).toBeTruthy();
+            expect(updatedWorkspaceTabList?.textContent ?? "").toMatch(expectedTabLabel);
+          });
+        }
+
+        await dragDockSectionToTabRail("Sessions", /^.*Sessions.*$/i);
+        await dragDockSectionToTabRail("Orchestrators", /^.*Orchestrators.*$/i);
+        await dragDockSectionToTabRail("Files", /Files:\s*termal/i);
+        await dragDockSectionToTabRail("Git status", /Git:\s*termal/i);
       } finally {
         window.localStorage.clear();
         HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
