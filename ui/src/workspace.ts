@@ -1551,6 +1551,15 @@ function openContextualTabInWorkspaceState<T extends WorkspaceTab>(
     return openTabInAdjacentPane(workspace, preferredPaneId!, tab, "row", false);
   }
 
+  // Too many panes to split — try to find an adjacent content pane to reuse
+  // rather than replacing the current pane's content (e.g., don't replace git status with a source tab).
+  if (preferredPaneId) {
+    const siblingPaneId = findSiblingContentPaneId(workspace, preferredPaneId);
+    if (siblingPaneId) {
+      return openTabInWorkspaceState(workspace, tab, siblingPaneId);
+    }
+  }
+
   return openTabInWorkspaceState(workspace, tab, preferredPaneId);
 }
 
@@ -1862,6 +1871,32 @@ function findDefaultControlPanelAnchorPaneId(workspace: WorkspaceState) {
   );
 }
 
+function findSiblingContentPaneId(workspace: WorkspaceState, excludePaneId: string) {
+  // Find another pane that holds content (session, source, diff, etc.) — prefer the active pane.
+  // Skip control-panel-like panes (controlPanel, sessionList, projectList, orchestratorList).
+  const candidates = workspace.panes.filter((pane) => {
+    if (pane.id === excludePaneId) {
+      return false;
+    }
+    const activeTab = getActiveTab(pane);
+    if (!activeTab) {
+      return false;
+    }
+    return (
+      activeTab.kind !== "controlPanel" &&
+      activeTab.kind !== "sessionList" &&
+      activeTab.kind !== "projectList" &&
+      activeTab.kind !== "orchestratorList"
+    );
+  });
+  if (candidates.length === 0) {
+    return null;
+  }
+  // Prefer the workspace's active pane if it's in the candidate list.
+  const activePaneCandidate = candidates.find((pane) => pane.id === workspace.activePaneId);
+  return activePaneCandidate?.id ?? candidates[0]?.id ?? null;
+}
+
 function findNonControlPanelPaneId(workspace: WorkspaceState, excludePaneId: string | null) {
   const activePane =
     workspace.activePaneId && workspace.activePaneId !== excludePaneId
@@ -2064,6 +2099,8 @@ function insertTabAtIndex(tabs: WorkspaceTab[], tab: WorkspaceTab, tabIndex: num
   return nextTabs;
 }
 
+const MAX_AUTO_SPLIT_PANES = 3;
+
 function shouldOpenTabInAdjacentPane(
   workspace: WorkspaceState,
   preferredPaneId: string | null,
@@ -2079,7 +2116,29 @@ function shouldOpenTabInAdjacentPane(
   }
 
   const activeTab = getActiveTab(preferredPane);
-  return activeTab !== null && activeTab.kind !== tabKind;
+  if (!activeTab || activeTab.kind === tabKind) {
+    return false;
+  }
+
+  // Don't auto-split if there are already enough content panes.
+  // Only count panes that hold workspace content (sessions, source, diffs, etc.),
+  // not standalone control-surface tabs (controlPanel, sessionList, projectList,
+  // orchestratorList) which are lightweight panel views.
+  const contentPanes = workspace.panes.filter((pane) => {
+    const paneActiveTab = getActiveTab(pane);
+    if (!paneActiveTab) {
+      return true;
+    }
+    return paneActiveTab.kind !== "controlPanel"
+      && paneActiveTab.kind !== "sessionList"
+      && paneActiveTab.kind !== "projectList"
+      && paneActiveTab.kind !== "orchestratorList";
+  });
+  if (contentPanes.length >= MAX_AUTO_SPLIT_PANES) {
+    return false;
+  }
+
+  return true;
 }
 
 function findContextualTargetPaneId(

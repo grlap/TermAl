@@ -4295,19 +4295,16 @@ export default function App() {
           className="control-panel-header-action control-panel-header-open-button"
           type="button"
           onClick={onClick}
+          aria-label="Canvas"
+          title="Canvas"
         >
-          <span className="control-panel-header-action-icon" aria-hidden="true">
+          <span className="control-panel-header-action-icon control-panel-header-action-icon-open-tab" aria-hidden="true">
             <svg viewBox="0 0 16 16" focusable="false" aria-hidden="true">
-              <path
-                d="M3 3.25h4.25V7.5H3Zm5.75 0H13v4.25H8.75ZM3 8.75h4.25V13H3Zm5.75 0H13V13H8.75Z"
-                fill="none"
-                stroke="currentColor"
-                strokeLinejoin="round"
-                strokeWidth="1.2"
-              />
+              <rect x="2.5" y="4" width="11" height="7.5" rx="0.8" fill="none" stroke="currentColor" strokeWidth="1.35" />
+              <path d="M5.5 11.5L4 14.5M10.5 11.5l1.5 3M8 11.5V14" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
+              <path d="M7 2v2M9 2v2" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
             </svg>
           </span>
-          <span>Canvas</span>
         </button>
       );
     }
@@ -4393,12 +4390,20 @@ export default function App() {
                   )
                 }
               >
-                <span className="control-panel-header-action-icon control-panel-header-action-icon-play" aria-hidden="true">
-                  <svg viewBox="0 0 16 16" focusable="false" aria-hidden="true">
-                    <path d="M3.25 3.25h4.5V7.75h-4.5Zm5 0h4.5V7.75h-4.5Zm-5 5h4.5v4.5h-4.5Zm5.9 1.95h1.4v-1.4h1.3v1.4h1.4v1.3h-1.4v1.4h-1.3v-1.4h-1.4Z" fill="currentColor" />
+                <span className="control-panel-header-action-icon control-panel-header-action-icon-canvas" aria-hidden="true">
+                  <svg viewBox="-9 0 64 64" focusable="false" aria-hidden="true">
+                    <g transform="translate(1,1)" stroke="currentColor" strokeWidth="3.5" fill="none">
+                      <path d="M12.5,45 L7.8,62 L2.9,62 L7.6,45" />
+                      <path d="M30.5,45 L35.2,62 L40.1,62 L35.4,45" />
+                      <rect x="20" y="45" width="4" height="11" />
+                      <rect x="19" y="0" width="4" height="9" />
+                      <path d="M42,37 C43.1,37 44,37.9 44,39 L44,43 C44,44.1 43.1,45 42,45 L2,45 C0.9,45 0,44.1 0,43 L0,39 C0,37.9 0.9,37 2,37" />
+                      <path d="M40.2,41 L4,41 C2.9,41 2,40.1 2,39 L2,11 C2,9.9 2.9,9 4,9 L40.2,9 C41.3,9 42,9.9 42,11 L42,39 C42,40.1 41.3,41 40.2,41 Z" />
+                    </g>
+                    <line x1="24" y1="20" x2="34" y2="20" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
+                    <line x1="29" y1="15" x2="29" y2="25" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
                   </svg>
                 </span>
-                <span>New canvas</span>
               </button>
             </>
           );

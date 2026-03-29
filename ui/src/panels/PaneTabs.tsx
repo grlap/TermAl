@@ -1699,19 +1699,12 @@ function TabKindIcon({ kind }: { kind: string }) {
         </svg>
       );
     case "canvas":
-      return (
-        <svg {...iconProps}>
-          <rect x="2.5" y="2.5" width="4.5" height="4.5" rx="0.8" fill="none" stroke="currentColor" strokeWidth="1.3" />
-          <rect x="9" y="9" width="4.5" height="4.5" rx="0.8" fill="none" stroke="currentColor" strokeWidth="1.3" />
-          <path d="M7 5h2.5V9" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" fill="none" />
-        </svg>
-      );
     case "orchestratorCanvas":
       return (
         <svg {...iconProps}>
-          <rect x="2.5" y="2.5" width="4.5" height="4.5" rx="0.8" fill="none" stroke="currentColor" strokeWidth="1.3" />
-          <rect x="9" y="9" width="4.5" height="4.5" rx="0.8" fill="none" stroke="currentColor" strokeWidth="1.3" />
-          <path d="M7 5h2.5V9" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" fill="none" />
+          <rect x="2.5" y="4" width="11" height="7.5" rx="0.8" fill="none" stroke="currentColor" strokeWidth="1.3" />
+          <path d="M5.5 11.5L4 14.5M10.5 11.5l1.5 3M8 11.5V14" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
+          <path d="M7 2v2M9 2v2" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
         </svg>
       );
     case "orchestratorList":

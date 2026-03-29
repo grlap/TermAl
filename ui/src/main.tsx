@@ -14,6 +14,12 @@ applyStylePreference(earlyWorkspaceLayout?.styleId ?? getStoredStylePreference()
 applyFontSizePreference(earlyWorkspaceLayout?.fontSizePx ?? getStoredFontSizePreference());
 applyDensityPreference(earlyWorkspaceLayout?.densityPercent ?? getStoredDensityPreference());
 
+// Preload Monaco editor chunks in the background so the first file/diff open is instant.
+// The lazy() calls in SourcePanel/DiffPanel still gate rendering, but the network fetch
+// starts immediately rather than waiting for the user to open a file tab.
+void import("./MonacoCodeEditor");
+void import("./MonacoDiffEditor");
+
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
     <App />

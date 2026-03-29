@@ -15,6 +15,7 @@ use axum::extract::{Path as AxumPath, Query, State};
 use axum::http::{HeaderValue, StatusCode};
 use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::response::{IntoResponse, Response};
+use axum::extract::DefaultBodyLimit;
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use base64::Engine as _;
@@ -215,6 +216,7 @@ fn app_router(state: AppState) -> Router {
             post(submit_codex_app_request),
         )
         .with_state(state)
+        .layer(DefaultBodyLimit::max(10 * 1024 * 1024)) // 10 MB — image attachments are base64 in JSON
         .layer(cors)
 }
 
