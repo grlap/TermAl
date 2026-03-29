@@ -157,6 +157,7 @@ import {
   DEFAULT_CONTROL_PANEL_DOCK_WIDTH_RATIO,
   dockControlPanelAtWorkspaceEdge,
   ensureControlPanelInWorkspaceState,
+  findNearestControlSurfacePaneId,
   findWorkspacePaneIdForSession,
   getSplitRatio,
   openCanvasInWorkspaceState,
@@ -3654,7 +3655,12 @@ export default function App() {
     if (tab?.kind === "session") {
       requestScrollToBottom(tab.sessionId);
     }
-    if (workspaceHasControlPanelTab) {
+
+    // Sync the control panel project filter when a tab is selected, but only if
+    // there is a control-surface pane nearby (prefer left). This avoids updating
+    // the far-left control panel when a closer git/files pane should receive the change.
+    const nearestControlSurface = findNearestControlSurfacePaneId(workspace, paneId);
+    if (nearestControlSurface) {
       const projectId = resolveWorkspaceTabProjectId(tab, sessionLookup);
       if (projectId && projectLookup.has(projectId)) {
         setSelectedProjectId(projectId);

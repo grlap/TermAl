@@ -1940,6 +1940,65 @@ function paneContainsControlPanel(pane: WorkspacePane) {
   return pane.tabs.some((tab) => tab.kind === "controlPanel");
 }
 
+const CONTROL_SURFACE_KINDS: ReadonlySet<string> = new Set([
+  "controlPanel", "sessionList", "projectList", "orchestratorList",
+  "gitStatus", "filesystem",
+]);
+
+function paneIsControlSurface(pane: WorkspacePane) {
+  const activeTab = getActiveTab(pane);
+  return activeTab ? CONTROL_SURFACE_KINDS.has(activeTab.kind) : false;
+}
+
+function flattenPaneOrder(root: WorkspaceNode | null, paneLookup: Map<string, WorkspacePane>): string[] {
+  if (!root) {
+    return [];
+  }
+  if (root.type === "pane") {
+    return paneLookup.has(root.paneId) ? [root.paneId] : [];
+  }
+  return [
+    ...flattenPaneOrder(root.first, paneLookup),
+    ...flattenPaneOrder(root.second, paneLookup),
+  ];
+}
+
+/**
+ * Find the nearest pane containing a control-surface view (control panel, git, files,
+ * sessions, projects, orchestrators) relative to the given pane. Prefers left neighbors.
+ */
+export function findNearestControlSurfacePaneId(
+  workspace: WorkspaceState,
+  paneId: string,
+): string | null {
+  const paneLookup = new Map(workspace.panes.map((pane) => [pane.id, pane]));
+  const order = flattenPaneOrder(workspace.root, paneLookup);
+  const myIndex = order.indexOf(paneId);
+  if (myIndex === -1) {
+    return null;
+  }
+
+  // Search outward from the pane, preferring left.
+  for (let distance = 1; distance < order.length; distance++) {
+    const leftIndex = myIndex - distance;
+    if (leftIndex >= 0) {
+      const leftPane = paneLookup.get(order[leftIndex]!);
+      if (leftPane && paneIsControlSurface(leftPane)) {
+        return leftPane.id;
+      }
+    }
+    const rightIndex = myIndex + distance;
+    if (rightIndex < order.length) {
+      const rightPane = paneLookup.get(order[rightIndex]!);
+      if (rightPane && paneIsControlSurface(rightPane)) {
+        return rightPane.id;
+      }
+    }
+  }
+
+  return null;
+}
+
 function isAllowedControlPanelPlacement(
   targetPane: WorkspacePane,
   tab: WorkspaceTab,
