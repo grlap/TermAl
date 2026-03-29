@@ -2585,6 +2585,11 @@ textarea {
   height: calc(18px * var(--density-scale));
 }
 
+.control-panel-header-action-icon-new {
+  width: calc(18px * var(--density-scale));
+  height: calc(18px * var(--density-scale));
+}
+
 .control-panel-header-open-button:hover {
   border-color: var(--signal-blue);
   background: color-mix(in srgb, var(--accent-blue-bg) 82%, var(--surface-white));

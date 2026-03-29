@@ -4435,12 +4435,12 @@ export default function App() {
                 aria-controls="create-session-dialog"
                 disabled={isCreating}
               >
-                <span className="control-panel-header-action-icon control-panel-header-action-icon-play" aria-hidden="true">
+                <span className="control-panel-header-action-icon control-panel-header-action-icon-new" aria-hidden="true">
                   <svg viewBox="0 0 16 16" focusable="false" aria-hidden="true">
-                    <path d="M5 3.5 12.25 8 5 12.5Z" fill="currentColor" />
+                    <circle cx="8" cy="8" r="6.5" fill="none" stroke="currentColor" strokeWidth="1.3" />
+                    <path d="M8 5v6M5 8h6" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
                   </svg>
                 </span>
-                <span>{isCreating ? "Creating" : "New"}</span>
               </button>
             </>
           );
@@ -4524,9 +4524,16 @@ export default function App() {
                   aria-haspopup="dialog"
                   aria-expanded={isCreateProjectOpen}
                   aria-controls="create-project-dialog"
+                  aria-label="Add project"
+                  title={isCreatingProject ? "Adding project..." : "Add project"}
                   disabled={isCreatingProject}
                 >
-                  {isCreatingProject ? "Adding..." : "Add project"}
+                  <span className="control-panel-header-action-icon control-panel-header-action-icon-new" aria-hidden="true">
+                    <svg viewBox="0 0 16 16" focusable="false" aria-hidden="true">
+                      <circle cx="8" cy="8" r="6.5" fill="none" stroke="currentColor" strokeWidth="1.3" />
+                      <path d="M8 5v6M5 8h6" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
+                    </svg>
+                  </span>
                 </button>
                 <div className="project-list" role="list">
                   <button
