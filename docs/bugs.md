@@ -173,6 +173,60 @@ paths are fragile.
   only reverse-sync; otherwise, run only forward-sync
 - use a single discriminator at the top of the handler to clarify the control flow
 
+## Pane-local Files/Git control surfaces still use global root/workdir state
+
+**Severity:** Medium - a control-surface pane can look scoped to one session/project while opening
+or fetching another pane's filesystem or Git data.
+
+`renderWorkspaceControlSurface(...)` now derives `controlPanelLauncherOriginSessionId` and
+`controlPanelLauncherOriginProjectId` from the pane being rendered, which fixes the session/project
+metadata for pane-local launches. But the Files and Git sections still read
+`controlPanelFilesystemRoot` and `controlPanelGitWorkdir` from the shared top-level state seeded by
+the global selected project / active session.
+
+That means a pane-local Files or Git control surface can now combine one pane's origin
+session/project IDs with a different pane's root path or workdir. In multi-pane workspaces, the
+tab metadata says "open this near session A", but the actual path-scoped payload can still point at
+session B's project.
+
+**Current behavior:**
+- Files/Git launchers use pane-local `originSessionId` / `originProjectId`
+- the Files root path and Git workdir still come from shared global state
+- opening or rendering those sections can target the wrong project/workdir while appearing scoped to
+  the local pane
+
+**Proposal:**
+- derive Files/Git root state from the same pane-local session/project context used for the launcher
+  origin IDs
+- avoid mixing pane-local metadata with globally cached path state in `renderWorkspaceControlSurface`
+- add App-level regressions that cover left/right pane contexts for both Files and Git
+
+## Moving the shared canvas tab preserves stale origin session/project metadata
+
+**Severity:** Medium - the canvas can open in the right pane but still drive the wrong active
+session and project context afterward.
+
+`openCanvasInWorkspaceState(...)` now moves the singleton canvas tab into the nearest session pane
+when it is launched from a control surface. However, the move path reuses the existing tab object
+through `moveWorkspaceTabToPane(...)`, so the canvas keeps its old `originSessionId` and
+`originProjectId` even after it has been relocated for a different session.
+
+That stale metadata is not cosmetic. `syncPaneState(...)` derives the target pane's
+`activeSessionId` from the moved tab's origin session, and later project sync uses the same stale
+origin fields. The canvas can therefore land in the desired pane but immediately re-scope that pane
+back to the previous session/project.
+
+**Current behavior:**
+- opening Canvas from a control surface can move the existing canvas into the nearest session pane
+- the moved canvas keeps the previous pane's `originSessionId` / `originProjectId`
+- the target pane's `activeSessionId` and later project sync can still resolve to the old session
+
+**Proposal:**
+- when a contextual canvas open relocates an existing canvas, rewrite its origin session/project to
+  the new launch context
+- keep the shared-canvas singleton behavior, but do not preserve stale origin metadata across moves
+- add regression coverage for both pane placement and post-move active-session / project sync
+
 ## Drag-over `text/plain` MIME fallback triggers false drop indicators
 
 **Severity:** Medium - visual confusion, no data corruption.
@@ -259,6 +313,32 @@ open/focus behavior.
 - thread the `tabIndex` through the session-drop tab-placement path
 - route tab-rail session drops through the insertion-aware tab open helper instead of the generic
   open/focus path
+
+## Reusing an existing Sessions tab still jumps to its old pane
+
+**Severity:** Low - the new contextual targeting only applies when creating a fresh Sessions tab.
+
+`openSessionListInWorkspaceState(...)` now chooses a better pane for a newly created `sessionList`
+tab, which fixes the first-open path from a control surface. But if a reusable Sessions tab already
+exists anywhere in the workspace, the helper still returns `activatePane(existing.paneId, ...)`
+immediately and ignores the new contextual target entirely.
+
+That leaves the behavior inconsistent with `openSourceInWorkspaceState(...)`,
+`openSessionInWorkspaceState(...)`, and the new canvas move path. The first click can open Sessions
+near the relevant session, while the second click jumps back to whichever pane happened to own the
+reusable tab before.
+
+**Current behavior:**
+- first-open `sessionList` placement uses the new contextual target logic
+- reopening Sessions only activates the existing reusable tab in its old pane
+- current regression coverage only exercises the fresh-tab path
+
+**Proposal:**
+- give reused `sessionList` tabs the same contextual move/activate behavior as source, session, and
+  canvas tabs
+- preserve the singleton Sessions tab model, but move it when the launch context changes panes
+- add workspace-level regression coverage for reopening an existing Sessions tab from a control
+  surface
 
 
 ## Markdown localhost file-link normalization overmatches same-origin web URLs
@@ -464,6 +544,15 @@ Concrete work implied by the current TermAl parity gaps. Ordered by user impact 
   render a docked control panel plus standalone git/files panes with neighboring sessions, then
   verify selecting the control surface adopts the nearest session context instead of leaving stale
   origin-based project state behind.
+- [ ] Add App-level control-surface launch regressions for pane-local Files/Git roots:
+  render split panes with different session contexts, then verify Files/Git launchers and panels
+  use a root/workdir that matches the same pane-local session/project metadata they emit.
+- [ ] Add a canvas-move regression for post-relocation session/project sync:
+  when an existing shared canvas is moved into a new pane, assert its origin metadata and the
+  target pane's `activeSessionId` are updated to the new launch context instead of the old one.
+- [ ] Add a Sessions-tab reuse regression for contextual pane targeting:
+  cover reopening an existing singleton `sessionList` tab from a control surface and verify it
+  moves to the contextual pane instead of always reactivating its previous location.
 - [ ] Add unit tests for `ensureWorkspaceViewId` and `createWorkspaceViewId`:
   `workspace-storage.ts` exports these functions for URL-param handling and workspace ID
   generation. A round-trip test in jsdom would guard against regressions in workspace ID

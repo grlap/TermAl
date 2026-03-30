@@ -1371,7 +1371,7 @@ describe("App", () => {
       const originalFetch = globalThis.fetch;
       const originalEventSource = globalThis.EventSource;
       const originalResizeObserver = globalThis.ResizeObserver;
-      const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
         const requestUrl = new URL(String(input), "http://localhost");
         if (requestUrl.pathname === "/api/state") {
           return jsonResponse({
@@ -1770,7 +1770,7 @@ describe("App", () => {
       const originalFetch = globalThis.fetch;
       const originalEventSource = globalThis.EventSource;
       const originalResizeObserver = globalThis.ResizeObserver;
-      const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
         const requestUrl = new URL(String(input), "http://localhost");
         if (requestUrl.pathname === "/api/state") {
           return jsonResponse({
@@ -1812,6 +1812,14 @@ describe("App", () => {
             workdir: repoPath,
             statusMessage: `${repoName} ready`,
           });
+        }
+
+        if (requestUrl.pathname.startsWith("/api/workspaces/")) {
+          if ((init?.method ?? "GET").toUpperCase() === "PUT") {
+            return jsonResponse({ ok: true });
+          }
+
+          return new Response("", { status: 404 });
         }
 
         throw new Error(`Unexpected fetch: ${requestUrl.pathname}${requestUrl.search}`);
@@ -1895,19 +1903,219 @@ describe("App", () => {
         expect(within(getControlPanelShell()).getByRole("combobox", { name: "Project" })).toHaveTextContent("TermAl");
 
         await selectControlPanelProject(/^API$/i);
-        await clickAndSettle(await screen.findByRole("button", { name: "Open tab" }));
+        await clickAndSettle(
+          within(getControlPanelShell()).getByTitle("Open tab or drag it into the workspace"),
+        );
 
         const sessionTablist = getSessionTablist();
         expect(within(sessionTablist).getByText("Git: api")).toBeInTheDocument();
 
         await selectControlPanelProject(/^TermAl$/i);
-        await clickAndSettle(await screen.findByRole("button", { name: "Open tab" }));
+        await clickAndSettle(
+          within(getControlPanelShell()).getByTitle("Open tab or drag it into the workspace"),
+        );
         expect(within(sessionTablist).getByText("Git: termal")).toBeInTheDocument();
         expect(within(getControlPanelShell()).getByRole("combobox", { name: "Project" })).toHaveTextContent("TermAl");
 
         await clickAndSettle(within(sessionTablist).getByRole("tab", { name: /Git: api/i }));
         expect(within(getControlPanelShell()).getByRole("combobox", { name: "Project" })).toHaveTextContent("API");
       } finally {
+        window.localStorage.clear();
+        HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
+        restoreGlobal("fetch", originalFetch);
+        restoreGlobal("EventSource", originalEventSource);
+        restoreGlobal("ResizeObserver", originalResizeObserver);
+      }
+    });
+  });
+  it("opens canvas from the control panel using the pane-local session context", async () => {
+    await withSuppressedActWarnings(async () => {
+      const originalFetch = globalThis.fetch;
+      const originalEventSource = globalThis.EventSource;
+      const originalResizeObserver = globalThis.ResizeObserver;
+      const originalUrl = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+      const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const requestUrl = new URL(String(input), "http://localhost");
+        if (requestUrl.pathname === "/api/state") {
+          return jsonResponse({
+            revision: 1,
+            projects: [
+              {
+                id: "project-termal",
+                name: "TermAl",
+                rootPath: "/projects/termal",
+              },
+            ],
+            sessions: [
+              makeSession("session-1", {
+                name: "Main",
+                projectId: "project-termal",
+                workdir: "/projects/termal",
+              }),
+              makeSession("session-2", {
+                name: "Review",
+                projectId: "project-termal",
+                workdir: "/projects/termal",
+              }),
+            ],
+          });
+        }
+
+        if (requestUrl.pathname === "/api/git/status") {
+          return jsonResponse({
+            ahead: 0,
+            behind: 0,
+            branch: "main",
+            files: [],
+            isClean: true,
+            repoRoot: "/projects/termal",
+            upstream: "origin/main",
+            workdir: "/projects/termal",
+          });
+        }
+
+        if (requestUrl.pathname.startsWith("/api/workspaces/")) {
+          if ((init?.method ?? "GET").toUpperCase() === "PUT") {
+            return jsonResponse({ ok: true });
+          }
+
+          return new Response("", { status: 404 });
+        }
+
+        throw new Error(`Unexpected fetch: ${requestUrl.pathname}${requestUrl.search}`);
+      });
+
+      function getTablistForSession(name: string) {
+        const tablist = screen
+          .getAllByRole("tablist", { name: "Tile tabs" })
+          .find((candidate) => within(candidate).queryByText(name));
+
+        if (!tablist) {
+          throw new Error(`Tablist not found for session ${name}`);
+        }
+
+        return tablist;
+      }
+
+      window.history.replaceState(window.history.state, "", "/?workspace=test-pane-local-control-panel");
+      window.localStorage.clear();
+      window.localStorage.setItem(
+        "termal-workspace-layout:test-pane-local-control-panel",
+        JSON.stringify({
+          controlPanelSide: "left",
+          workspace: {
+            root: {
+              id: "split-root",
+              type: "split",
+              direction: "row",
+              ratio: 0.22,
+              first: {
+                type: "pane",
+                paneId: "pane-control",
+              },
+              second: {
+                id: "split-content",
+                type: "split",
+                direction: "row",
+                ratio: 0.5,
+                first: {
+                  type: "pane",
+                  paneId: "pane-main",
+                },
+                second: {
+                  type: "pane",
+                  paneId: "pane-review",
+                },
+              },
+            },
+            panes: [
+              {
+                id: "pane-control",
+                tabs: [
+                  {
+                    id: "tab-control",
+                    kind: "controlPanel",
+                    originSessionId: null,
+                  },
+                ],
+                activeTabId: "tab-control",
+                activeSessionId: null,
+                viewMode: "controlPanel",
+                lastSessionViewMode: "session",
+                sourcePath: null,
+              },
+              {
+                id: "pane-main",
+                tabs: [
+                  {
+                    id: "tab-main",
+                    kind: "session",
+                    sessionId: "session-1",
+                  },
+                  {
+                    id: "tab-canvas",
+                    kind: "canvas",
+                    cards: [],
+                    originSessionId: "session-1",
+                    originProjectId: "project-termal",
+                  },
+                ],
+                activeTabId: "tab-main",
+                activeSessionId: "session-1",
+                viewMode: "session",
+                lastSessionViewMode: "session",
+                sourcePath: null,
+              },
+              {
+                id: "pane-review",
+                tabs: [
+                  {
+                    id: "tab-review",
+                    kind: "session",
+                    sessionId: "session-2",
+                  },
+                ],
+                activeTabId: "tab-review",
+                activeSessionId: "session-2",
+                viewMode: "session",
+                lastSessionViewMode: "session",
+                sourcePath: null,
+              },
+            ],
+            activePaneId: "pane-review",
+          },
+        }),
+      );
+
+      vi.stubGlobal("fetch", fetchMock);
+      vi.stubGlobal("EventSource", EventSourceMock as unknown as typeof EventSource);
+      vi.stubGlobal("ResizeObserver", ResizeObserverMock as unknown as typeof ResizeObserver);
+      const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
+      HTMLElement.prototype.scrollIntoView = vi.fn();
+
+      try {
+        await renderApp();
+        const eventSource = EventSourceMock.instances[0];
+        expect(eventSource).toBeTruthy();
+        act(() => {
+          eventSource.dispatchError();
+        });
+        await settleAsyncUi();
+
+        const controlPanelShell = document.querySelector(".control-panel-shell");
+        if (!(controlPanelShell instanceof HTMLDivElement)) {
+          throw new Error("Control panel shell not found");
+        }
+
+        expect(within(getTablistForSession("Main")).getByRole("tab", { name: /Canvas/i })).toBeInTheDocument();
+        expect(within(getTablistForSession("Review")).queryByRole("tab", { name: /Canvas/i })).toBeNull();
+
+        await clickAndSettle(within(controlPanelShell).getByRole("button", { name: "Canvas" }));
+
+        expect(within(getTablistForSession("Main")).getByRole("tab", { name: /Canvas/i })).toBeInTheDocument();
+        expect(within(getTablistForSession("Review")).queryByRole("tab", { name: /Canvas/i })).toBeNull();
+      } finally {
+        window.history.replaceState(window.history.state, "", originalUrl);
         window.localStorage.clear();
         HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
         restoreGlobal("fetch", originalFetch);

@@ -4271,8 +4271,53 @@ export default function App() {
   function renderWorkspaceControlSurface(paneId: string, fixedSection: ControlPanelSectionId | null = null): JSX.Element {
     const surfaceId = fixedSection ? `${paneId}-${fixedSection}` : paneId;
     const controlPanelProjectFilterId = `control-panel-project-scope-${surfaceId}`;
-    const controlPanelLauncherOriginProjectId = selectedProject?.id ?? null;
-    const controlPanelLauncherOriginSessionId = controlPanelSessionId;
+    const controlSurfacePane = paneLookup.get(paneId) ?? null;
+    const controlSurfaceActiveTab = controlSurfacePane
+      ? (controlSurfacePane.tabs.find((tab) => tab.id === controlSurfacePane.activeTabId) ??
+        controlSurfacePane.tabs[0] ??
+        null)
+      : null;
+    const controlSurfaceOriginSession =
+      controlSurfaceActiveTab &&
+      "originSessionId" in controlSurfaceActiveTab &&
+      controlSurfaceActiveTab.originSessionId
+        ? (sessionLookup.get(controlSurfaceActiveTab.originSessionId) ?? null)
+        : null;
+    const controlSurfacePaneSession = controlSurfacePane?.activeSessionId
+      ? (sessionLookup.get(controlSurfacePane.activeSessionId) ?? null)
+      : null;
+    const nearestSessionPaneId = findNearestSessionPaneId(workspace, paneId);
+    const nearestSessionPane = nearestSessionPaneId ? (paneLookup.get(nearestSessionPaneId) ?? null) : null;
+    const nearestSessionTab = nearestSessionPane
+      ? (nearestSessionPane.tabs.find((tab) => tab.id === nearestSessionPane.activeTabId) ??
+        nearestSessionPane.tabs[0] ??
+        null)
+      : null;
+    const nearestSession =
+      nearestSessionTab?.kind === "session"
+        ? (sessionLookup.get(nearestSessionTab.sessionId) ?? null)
+        : null;
+    const controlSurfaceScopedProjectId =
+      selectedProject?.id ??
+      resolveWorkspaceTabProjectId(controlSurfaceActiveTab ?? undefined, sessionLookup) ??
+      null;
+    const controlSurfaceSessionCandidates = [
+      controlSurfaceOriginSession,
+      controlSurfacePaneSession,
+      nearestSession,
+      activeSession,
+    ].filter((session): session is Session => Boolean(session));
+    const controlSurfaceSession =
+      (controlSurfaceScopedProjectId
+        ? (controlSurfaceSessionCandidates.find(
+            (session) => session.projectId === controlSurfaceScopedProjectId,
+          ) ??
+          sessions.find((session) => session.projectId === controlSurfaceScopedProjectId) ??
+          null)
+        : (controlSurfaceSessionCandidates[0] ?? sessions[0] ?? null));
+    const controlPanelLauncherOriginProjectId =
+      controlSurfaceScopedProjectId ?? controlSurfaceSession?.projectId ?? null;
+    const controlPanelLauncherOriginSessionId = controlSurfaceSession?.id ?? null;
 
     function buildControlPanelLauncherTab(sectionId: ControlPanelSectionId) {
       return createControlPanelSectionLauncherTab(sectionId, {
@@ -4391,8 +4436,8 @@ export default function App() {
                   handleOpenFilesystemTab(
                     paneId,
                     controlPanelFilesystemRoot,
-                    controlPanelSessionId,
-                    selectedProject?.id ?? null,
+                    controlPanelLauncherOriginSessionId,
+                    controlPanelLauncherOriginProjectId,
                   ),
                 !(controlPanelFilesystemRoot?.trim() ?? ""),
                 buildControlPanelLauncherTab("files"),
@@ -4409,8 +4454,8 @@ export default function App() {
                       handleOpenGitStatusTab(
                         paneId,
                         controlPanelGitWorkdir,
-                        controlPanelSessionId,
-                        selectedProject?.id ?? null,
+                        controlPanelLauncherOriginSessionId,
+                        controlPanelLauncherOriginProjectId,
                       ),
                     !(controlPanelGitWorkdir?.trim() ?? ""),
                     buildControlPanelLauncherTab("git"),
@@ -4426,8 +4471,8 @@ export default function App() {
                 () =>
                   handleOpenProjectListTab(
                     paneId,
-                    controlPanelSessionId,
-                    selectedProject?.id ?? null,
+                    controlPanelLauncherOriginSessionId,
+                    controlPanelLauncherOriginProjectId,
                   ),
                 false,
                 buildControlPanelLauncherTab("projects"),
@@ -4443,8 +4488,8 @@ export default function App() {
                     () =>
                       handleOpenOrchestratorListTab(
                         paneId,
-                        controlPanelSessionId,
-                        selectedProject?.id ?? null,
+                        controlPanelLauncherOriginSessionId,
+                        controlPanelLauncherOriginProjectId,
                       ),
                     false,
                     buildControlPanelLauncherTab("orchestrators"),
@@ -4455,8 +4500,8 @@ export default function App() {
                 onClick={() =>
                   handleOpenOrchestratorCanvasTab(
                     paneId,
-                    controlPanelSessionId,
-                    selectedProject?.id ?? null,
+                    controlPanelLauncherOriginSessionId,
+                    controlPanelLauncherOriginProjectId,
                     { startMode: "new" },
                   )
                 }
@@ -4489,8 +4534,8 @@ export default function App() {
                     () =>
                       handleOpenSessionListTab(
                         paneId,
-                        controlPanelSessionId,
-                        selectedProject?.id ?? null,
+                        controlPanelLauncherOriginSessionId,
+                        controlPanelLauncherOriginProjectId,
                       ),
                     false,
                     buildControlPanelLauncherTab("sessions"),
@@ -4498,8 +4543,8 @@ export default function App() {
               {renderCanvasTabAction(() =>
                 handleOpenCanvasTab(
                   paneId,
-                  controlPanelSessionId,
-                  selectedProject?.id ?? null,
+                  controlPanelLauncherOriginSessionId,
+                  controlPanelLauncherOriginProjectId,
                 )
               )}
               <button
@@ -4534,11 +4579,17 @@ export default function App() {
               {renderControlPanelProjectScope()}
               <FileSystemPanel
                 rootPath={controlPanelFilesystemRoot}
-                sessionId={controlPanelSessionId}
-                projectId={selectedProject?.id ?? null}
+                sessionId={controlPanelLauncherOriginSessionId}
+                projectId={controlPanelLauncherOriginProjectId}
                 showPathControls={false}
                 onOpenPath={(path, options) =>
-                  handleOpenSourceTab(paneId, path, controlPanelSessionId, selectedProject?.id ?? null, options)
+                  handleOpenSourceTab(
+                    paneId,
+                    path,
+                    controlPanelLauncherOriginSessionId,
+                    controlPanelLauncherOriginProjectId,
+                    options,
+                  )
                 }
                 onOpenRootPath={(path) => setControlPanelFilesystemRoot(path.trim() || null)}
               />
@@ -4551,16 +4602,16 @@ export default function App() {
               onNewCanvas={() =>
                 handleOpenOrchestratorCanvasTab(
                   paneId,
-                  controlPanelSessionId,
-                  selectedProject?.id ?? null,
+                  controlPanelLauncherOriginSessionId,
+                  controlPanelLauncherOriginProjectId,
                   { startMode: "new" },
                 )
               }
               onOpenCanvas={(templateId) =>
                 handleOpenOrchestratorCanvasTab(
                   paneId,
-                  controlPanelSessionId,
-                  selectedProject?.id ?? null,
+                  controlPanelLauncherOriginSessionId,
+                  controlPanelLauncherOriginProjectId,
                   { templateId },
                 )
               }
@@ -4572,13 +4623,19 @@ export default function App() {
             <section className="control-panel-section-stack control-panel-section-git" aria-label="Git status">
               {renderControlPanelProjectScope()}
               <GitStatusPanel
-                projectId={selectedProject?.id ?? null}
-                sessionId={controlPanelSessionId}
+                projectId={controlPanelLauncherOriginProjectId}
+                sessionId={controlPanelLauncherOriginSessionId}
                 workdir={controlPanelGitWorkdir}
                 showPathControls={false}
                 onStatusChange={(status) => setControlPanelGitStatusCount(status?.files.length ?? 0)}
                 onOpenDiff={(diff, options) =>
-                  handleOpenGitStatusDiffPreviewTab(paneId, diff, controlPanelSessionId, selectedProject?.id ?? null, options)
+                  handleOpenGitStatusDiffPreviewTab(
+                    paneId,
+                    diff,
+                    controlPanelLauncherOriginSessionId,
+                    controlPanelLauncherOriginProjectId,
+                    options,
+                  )
                 }
                 onOpenWorkdir={(path) => setControlPanelGitWorkdir(path.trim() || null)}
               />

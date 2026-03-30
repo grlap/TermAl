@@ -596,12 +596,25 @@ export function openSessionInWorkspaceState(
   sessionId: string,
   preferredPaneId: string | null,
 ): WorkspaceState {
+  const targetPaneId = resolveSessionOpenTargetPaneId(workspace, preferredPaneId);
   const existing = findSessionTab(workspace, sessionId);
   if (existing) {
+    if (targetPaneId && existing.paneId !== targetPaneId) {
+      return activatePane(
+        moveWorkspaceTabToPane(workspace, existing.paneId, existing.tab.id, targetPaneId),
+        targetPaneId,
+        existing.tab.id,
+      );
+    }
+
     return activatePane(workspace, existing.paneId, existing.tab.id);
   }
 
-  return openTabInWorkspaceState(workspace, createSessionTab(sessionId), preferredPaneId);
+  return openTabInWorkspaceState(
+    workspace,
+    createSessionTab(sessionId),
+    targetPaneId ?? preferredPaneId,
+  );
 }
 
 export function placeSessionDropInWorkspaceState(
@@ -672,20 +685,22 @@ export function openSourceInWorkspaceState(
     return openTabInWorkspaceState(workspace, nextTab, targetPaneId);
   }
 
-  // When the preferred pane is a control panel, redirect the split anchor to a content pane
-  // so the new source tab appears next to the session, not at the workspace edge.
-  const splitAnchorPaneId = (() => {
-    if (!preferredPaneId) {
-      return preferredPaneId;
-    }
+  // When the preferred pane is a control panel and there's room to split,
+  // split off the content pane directly so the source tab appears adjacent to the session.
+  if (preferredPaneId) {
     const preferredPane = workspace.panes.find((pane) => pane.id === preferredPaneId);
-    if (preferredPane && paneContainsControlPanel(preferredPane)) {
-      return findNonControlPanelPaneId(workspace, preferredPane.id) ?? preferredPaneId;
+    if (preferredPane && (paneContainsControlPanel(preferredPane) || paneIsControlSurface(preferredPane))) {
+      const contentPaneId = findNonControlPanelPaneId(workspace, preferredPane.id);
+      if (contentPaneId && shouldOpenTabInAdjacentPane(workspace, contentPaneId, "source")) {
+        return openTabInAdjacentPane(workspace, contentPaneId, nextTab, "row", false);
+      }
+      if (contentPaneId) {
+        return openTabInWorkspaceState(workspace, nextTab, contentPaneId);
+      }
     }
-    return preferredPaneId;
-  })();
+  }
 
-  return openContextualTabInWorkspaceState(workspace, nextTab, null, splitAnchorPaneId, originSessionId);
+  return openContextualTabInWorkspaceState(workspace, nextTab, null, preferredPaneId, originSessionId);
 }
 
 export function openFilesystemInWorkspaceState(
@@ -756,15 +771,28 @@ export function openCanvasInWorkspaceState(
   originSessionId: string | null,
   originProjectId: string | null = null,
 ): WorkspaceState {
+  const targetPaneId = resolveCanvasOpenTargetPaneId(
+    workspace,
+    preferredPaneId,
+    originSessionId,
+  );
   const existing = findCanvasTab(workspace);
   if (existing) {
+    if (targetPaneId && existing.paneId !== targetPaneId) {
+      return activatePane(
+        moveWorkspaceTabToPane(workspace, existing.paneId, existing.tab.id, targetPaneId),
+        targetPaneId,
+        existing.tab.id,
+      );
+    }
+
     return activatePane(workspace, existing.paneId, existing.tab.id);
   }
 
   return openTabInWorkspaceState(
     workspace,
     createCanvasTab(originSessionId, originProjectId),
-    preferredPaneId,
+    targetPaneId ?? preferredPaneId,
   );
 }
 
@@ -796,6 +824,11 @@ export function openOrchestratorCanvasInWorkspaceState(
     templateId?: string | null;
   } = {},
 ): WorkspaceState {
+  const targetPaneId = resolveCanvasOpenTargetPaneId(
+    workspace,
+    preferredPaneId,
+    originSessionId,
+  );
   return openTabInWorkspaceState(
     workspace,
     createOrchestratorCanvasTab(
@@ -804,7 +837,7 @@ export function openOrchestratorCanvasInWorkspaceState(
       options.templateId ?? null,
       options.startMode ?? null,
     ),
-    preferredPaneId,
+    targetPaneId ?? preferredPaneId,
   );
 }
 
@@ -819,10 +852,38 @@ export function openSessionListInWorkspaceState(
     return activatePane(workspace, existing.paneId, existing.tab.id);
   }
 
-  return openTabInWorkspaceState(
+  const nextTab = createSessionListTab(originSessionId, originProjectId);
+  const targetPaneId = findContextualTargetPaneId(
     workspace,
-    createSessionListTab(originSessionId, originProjectId),
     preferredPaneId,
+    originSessionId,
+    nextTab.kind,
+  );
+  if (targetPaneId) {
+    return openTabInWorkspaceState(workspace, nextTab, targetPaneId);
+  }
+
+  // When opening from a control panel pane, split or reuse the related content pane
+  // instead of anchoring the new sessions tab at the workspace edge.
+  const splitAnchorPaneId = (() => {
+    if (!preferredPaneId) {
+      return preferredPaneId;
+    }
+
+    const preferredPane = workspace.panes.find((pane) => pane.id === preferredPaneId);
+    if (preferredPane && paneContainsControlPanel(preferredPane)) {
+      return findNonControlPanelPaneId(workspace, preferredPane.id) ?? preferredPaneId;
+    }
+
+    return preferredPaneId;
+  })();
+
+  return openContextualTabInWorkspaceState(
+    workspace,
+    nextTab,
+    null,
+    splitAnchorPaneId,
+    originSessionId,
   );
 }
 
@@ -986,24 +1047,26 @@ export function openDiffPreviewInWorkspaceState(
     }
   }
 
-  // When the preferred pane is a control surface, redirect the split anchor to a content pane
-  // so the diff opens adjacent to the session, not at the workspace edge.
-  const splitAnchorPaneId = (() => {
-    if (!preferredPaneId) {
-      return preferredPaneId;
-    }
+  // When the preferred pane is a control surface and there's room to split,
+  // split off the content pane directly so the diff appears adjacent to the session.
+  if (preferredPaneId) {
     const preferredPane = workspace.panes.find((pane) => pane.id === preferredPaneId);
     if (preferredPane && (paneContainsControlPanel(preferredPane) || paneIsControlSurface(preferredPane))) {
-      return findNonControlPanelPaneId(workspace, preferredPane.id) ?? preferredPaneId;
+      const contentPaneId = findNonControlPanelPaneId(workspace, preferredPane.id);
+      if (contentPaneId && shouldOpenTabInAdjacentPane(workspace, contentPaneId, "diffPreview")) {
+        return openTabInAdjacentPane(workspace, contentPaneId, nextTab, "row", false);
+      }
+      if (contentPaneId) {
+        return replaceActiveViewerTabInPane(workspace, contentPaneId, nextTab);
+      }
     }
-    return preferredPaneId;
-  })();
+  }
 
   return openContextualTabInWorkspaceState(
     workspace,
     nextTab,
     null,
-    splitAnchorPaneId,
+    preferredPaneId,
     tab.originSessionId,
   );
 }
@@ -1949,6 +2012,67 @@ function findNonControlPanelPaneId(workspace: WorkspaceState, excludePaneId: str
     )?.id ?? null
   );
 }
+
+function resolveSessionOpenTargetPaneId(
+  workspace: WorkspaceState,
+  preferredPaneId: string | null,
+) {
+  if (!preferredPaneId) {
+    return null;
+  }
+
+  const preferredPane = workspace.panes.find((pane) => pane.id === preferredPaneId) ?? null;
+  if (!preferredPane) {
+    return null;
+  }
+
+  if (!paneIsControlSurface(preferredPane)) {
+    return null;
+  }
+
+  return (
+    findNearestSessionPaneId(workspace, preferredPane.id) ??
+    findSiblingContentPaneId(workspace, preferredPane.id) ??
+    findNonControlPanelPaneId(workspace, preferredPane.id)
+  );
+}
+
+function resolveCanvasOpenTargetPaneId(
+  workspace: WorkspaceState,
+  preferredPaneId: string | null,
+  originSessionId: string | null,
+) {
+  if (!preferredPaneId) {
+    return null;
+  }
+
+  const preferredPane = workspace.panes.find((pane) => pane.id === preferredPaneId) ?? null;
+  if (!preferredPane) {
+    return null;
+  }
+
+  const preferredActiveTab = getActiveTab(preferredPane);
+  if (preferredActiveTab?.kind === "session") {
+    return preferredPane.id;
+  }
+
+  const originSessionPaneId = originSessionId
+    ? findSessionTab(workspace, originSessionId)?.paneId ?? null
+    : null;
+  if (originSessionPaneId) {
+    return originSessionPaneId;
+  }
+
+  if (!paneIsControlSurface(preferredPane)) {
+    return null;
+  }
+
+  return (
+    findNearestSessionPaneId(workspace, preferredPane.id) ??
+    findSiblingContentPaneId(workspace, preferredPane.id) ??
+    findNonControlPanelPaneId(workspace, preferredPane.id)
+  );
+}
 /**
  * Re-scope a control surface pane's active tab to a new session/project context.
  * Updates workdir, originSessionId, and originProjectId on standalone tabs
@@ -2336,6 +2460,30 @@ function findContextualTargetPaneId(
       if (nonControlPanelPaneId && shouldOpenTabInAdjacentPane(workspace, nonControlPanelPaneId, tabKind)) {
         // Room to split — return null so the caller splits off the content pane.
         // The caller will use the content pane (not the control panel) as the split anchor.
+        return null;
+      }
+      if (nonControlPanelPaneId) {
+        return nonControlPanelPaneId;
+      }
+    }
+  }
+
+  if (tabKind === "sessionList") {
+    if (preferredActiveTab?.kind === "session") {
+      return preferredPane!.id;
+    }
+
+    const originSessionPaneId = originSessionId ? findSessionTab(workspace, originSessionId)?.paneId ?? null : null;
+    if (originSessionPaneId) {
+      return originSessionPaneId;
+    }
+
+    if (preferredPane && paneContainsControlPanel(preferredPane)) {
+      const nonControlPanelPaneId = findNonControlPanelPaneId(workspace, preferredPane.id);
+      if (
+        nonControlPanelPaneId &&
+        shouldOpenTabInAdjacentPane(workspace, nonControlPanelPaneId, tabKind)
+      ) {
         return null;
       }
       if (nonControlPanelPaneId) {
