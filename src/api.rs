@@ -560,62 +560,74 @@ async fn read_file(
     State(state): State<AppState>,
     Query(query): Query<FileQuery>,
 ) -> Result<Json<FileResponse>, ApiError> {
-    let response = run_blocking_api(move || {
-        if let Some(scope) = state.remote_scope_for_request(
+    // Step 1: resolve the path (needs brief mutex access). Use a small blocking
+    // scope so we don't compete with streaming delta persists for pool time.
+    let resolved_path = {
+        let remote_scope = state.remote_scope_for_request(
             query.session_id.as_deref(),
             query.project_id.as_deref(),
-        )? {
-            return state.remote_get_json(
-                &scope,
-                "/api/file",
-                vec![("path".to_owned(), query.path.clone())],
-            );
+        )?;
+        if let Some(scope) = remote_scope {
+            let response: FileResponse = run_blocking_api({
+                let state = state.clone();
+                let query_path = query.path.clone();
+                move || {
+                    state.remote_get_json(
+                        &scope,
+                        "/api/file",
+                        vec![("path".to_owned(), query_path)],
+                    )
+                }
+            })
+            .await?;
+            return Ok(Json(response));
         }
 
-        let resolved_path = resolve_project_scoped_requested_path(
+        resolve_project_scoped_requested_path(
             &state,
             query.session_id.as_deref(),
             query.project_id.as_deref(),
             &query.path,
             ScopedPathMode::ExistingFile,
-        )?;
-        let metadata = fs::metadata(&resolved_path).map_err(|err| match err.kind() {
-            io::ErrorKind::NotFound => {
-                ApiError::not_found(format!("file not found: {}", resolved_path.display()))
-            }
-            _ => ApiError::internal(format!(
-                "failed to stat file {}: {err}",
-                resolved_path.display()
-            )),
-        })?;
-        if metadata.len() > MAX_FILE_CONTENT_BYTES as u64 {
-            return Err(ApiError::bad_request(format!(
-                "file exceeds the {} MB read limit: {}",
-                MAX_FILE_CONTENT_BYTES / (1024 * 1024),
-                resolved_path.display()
-            )));
-        }
-        let content = fs::read_to_string(&resolved_path).map_err(|err| match err.kind() {
-            io::ErrorKind::NotFound => {
-                ApiError::not_found(format!("file not found: {}", resolved_path.display()))
-            }
-            io::ErrorKind::InvalidData => ApiError::bad_request(format!(
-                "file is not valid UTF-8: {}",
-                resolved_path.display()
-            )),
-            _ => ApiError::internal(format!(
-                "failed to read file {}: {err}",
-                resolved_path.display()
-            )),
-        })?;
+        )?
+    };
 
-        Ok(FileResponse {
-            path: resolved_path.to_string_lossy().into_owned(),
-            content,
-            language: infer_language_from_path(&resolved_path).map(str::to_owned),
-        })
-    })
-    .await?;
+    // Step 2: read the file using tokio::fs (async, doesn't block the spawn_blocking pool).
+    let metadata = tokio::fs::metadata(&resolved_path).await.map_err(|err| match err.kind() {
+        io::ErrorKind::NotFound => {
+            ApiError::not_found(format!("file not found: {}", resolved_path.display()))
+        }
+        _ => ApiError::internal(format!(
+            "failed to stat file {}: {err}",
+            resolved_path.display()
+        )),
+    })?;
+    if metadata.len() > MAX_FILE_CONTENT_BYTES as u64 {
+        return Err(ApiError::bad_request(format!(
+            "file exceeds the {} MB read limit: {}",
+            MAX_FILE_CONTENT_BYTES / (1024 * 1024),
+            resolved_path.display()
+        )));
+    }
+    let content = tokio::fs::read_to_string(&resolved_path).await.map_err(|err| match err.kind() {
+        io::ErrorKind::NotFound => {
+            ApiError::not_found(format!("file not found: {}", resolved_path.display()))
+        }
+        io::ErrorKind::InvalidData => ApiError::bad_request(format!(
+            "file is not valid UTF-8: {}",
+            resolved_path.display()
+        )),
+        _ => ApiError::internal(format!(
+            "failed to read file {}: {err}",
+            resolved_path.display()
+        )),
+    })?;
+
+    let response = FileResponse {
+        path: resolved_path.to_string_lossy().into_owned(),
+        content,
+        language: infer_language_from_path(&resolved_path).map(str::to_owned),
+    };
     Ok(Json(response))
 }
 
@@ -1643,22 +1655,30 @@ async fn read_git_status(
     State(state): State<AppState>,
     Query(query): Query<FileQuery>,
 ) -> Result<Json<GitStatusResponse>, ApiError> {
-    let response = run_blocking_api(move || {
-        if let Some(scope) = state.remote_scope_for_request(
-            query.session_id.as_deref(),
-            query.project_id.as_deref(),
-        )? {
-            return state.remote_get_json(
+    // Check remote scope first (brief mutex access).
+    if let Some(scope) = state.remote_scope_for_request(
+        query.session_id.as_deref(),
+        query.project_id.as_deref(),
+    )? {
+        let response = run_blocking_api(move || {
+            state.remote_get_json(
                 &scope,
                 "/api/git/status",
                 vec![("path".to_owned(), query.path.clone())],
-            );
-        }
+            )
+        })
+        .await?;
+        return Ok(Json(response));
+    }
 
+    // Git status runs child processes — use a dedicated spawn_blocking so it
+    // doesn't compete with state-mutation tasks in run_blocking_api.
+    let response = tokio::task::spawn_blocking(move || {
         let workdir = resolve_existing_requested_path(&query.path, "path")?;
-        Ok(load_git_status_for_path(&workdir)?)
+        load_git_status_for_path(&workdir)
     })
-    .await?;
+    .await
+    .map_err(|err| ApiError::internal(format!("git status task failed: {err}")))??;
     Ok(Json(response))
 }
 
@@ -1666,12 +1686,12 @@ async fn read_git_diff(
     State(state): State<AppState>,
     Json(request): Json<GitDiffRequest>,
 ) -> Result<Json<GitDiffResponse>, ApiError> {
-    let response = run_blocking_api(move || {
-        if let Some(scope) = state.remote_scope_for_request(
-            request.session_id.as_deref(),
-            request.project_id.as_deref(),
-        )? {
-            return state.remote_post_json(
+    if let Some(scope) = state.remote_scope_for_request(
+        request.session_id.as_deref(),
+        request.project_id.as_deref(),
+    )? {
+        let response = run_blocking_api(move || {
+            state.remote_post_json(
                 &scope,
                 "/api/git/diff",
                 json!({
@@ -1681,13 +1701,18 @@ async fn read_git_diff(
                     "statusCode": request.status_code,
                     "workdir": request.workdir,
                 }),
-            );
-        }
+            )
+        })
+        .await?;
+        return Ok(Json(response));
+    }
 
+    let response = tokio::task::spawn_blocking(move || {
         let workdir = resolve_existing_requested_path(&request.workdir, "path")?;
-        Ok(load_git_diff_for_request(&workdir, &request)?)
+        load_git_diff_for_request(&workdir, &request)
     })
-    .await?;
+    .await
+    .map_err(|err| ApiError::internal(format!("git diff task failed: {err}")))??;
     Ok(Json(response))
 }
 

@@ -158,6 +158,7 @@ import {
   dockControlPanelAtWorkspaceEdge,
   ensureControlPanelInWorkspaceState,
   findNearestControlSurfacePaneId,
+  findNearestSessionPaneId,
   findWorkspacePaneIdForSession,
   getSplitRatio,
   openCanvasInWorkspaceState,
@@ -176,6 +177,7 @@ import {
   placeExternalTab,
   reconcileWorkspaceState,
   removeCanvasSessionCard,
+  rescopeControlSurfacePane,
   setCanvasZoom,
   setPaneSourcePath,
   setPaneViewMode,
@@ -415,6 +417,10 @@ const PREFERENCES_TABS: ReadonlyArray<{ id: PreferencesTabId; label: string }> =
   { id: "claude-approvals", label: "Claude defaults" },
 ];
 const ALL_PROJECTS_FILTER_ID = "__all__";
+const CONTROL_SURFACE_TAB_KINDS: ReadonlySet<string> = new Set([
+  "controlPanel", "sessionList", "projectList", "orchestratorList",
+  "gitStatus", "filesystem",
+]);
 const CREATE_SESSION_WORKSPACE_ID = "__workspace__";
 const SESSION_SCOPED_MODEL_AGENTS = new Set<AgentType>(["Claude", "Codex", "Cursor", "Gemini"]);
 
@@ -3656,14 +3662,73 @@ export default function App() {
       requestScrollToBottom(tab.sessionId);
     }
 
-    // Sync the control panel project filter when a tab is selected, but only if
-    // there is a control-surface pane nearby (prefer left). This avoids updating
-    // the far-left control panel when a closer git/files pane should receive the change.
+    // Sync the nearest control surface pane to the selected tab's project context.
+    // If the nearest is a standalone git/files tab, re-scope it directly.
+    // If the nearest is the docked control panel, update the global selectedProjectId.
     const nearestControlSurface = findNearestControlSurfacePaneId(workspace, paneId);
     if (nearestControlSurface) {
-      const projectId = resolveWorkspaceTabProjectId(tab, sessionLookup);
-      if (projectId && projectLookup.has(projectId)) {
-        setSelectedProjectId(projectId);
+      const session = tab?.kind === "session" ? sessionLookup.get(tab.sessionId) : null;
+      const nearestPane = paneLookup.get(nearestControlSurface);
+      const nearestActiveTab = nearestPane?.tabs.find((t) => t.id === nearestPane.activeTabId);
+      const nearestIsDockedControlPanel = nearestActiveTab?.kind === "controlPanel";
+
+      if (session) {
+        const projectId = session.projectId ?? null;
+        if (nearestIsDockedControlPanel) {
+          // Nearest is the docked control panel — update global project filter.
+          if (projectId && projectLookup.has(projectId)) {
+            setSelectedProjectId(projectId);
+          }
+        } else {
+          // Nearest is a standalone tab (git, files, etc.) — re-scope it to the session's workdir.
+          setWorkspace((current) =>
+            rescopeControlSurfacePane(
+              activatePane(current, paneId, tabId),
+              nearestControlSurface,
+              session.id,
+              projectId,
+              session.workdir ?? null,
+            ),
+          );
+          return;
+        }
+      } else {
+        // Non-session tab selected — sync project from the tab's origin.
+        const projectId = resolveWorkspaceTabProjectId(tab, sessionLookup);
+        if (projectId && projectLookup.has(projectId) && nearestIsDockedControlPanel) {
+          setSelectedProjectId(projectId);
+        }
+      }
+    }
+
+    // Reverse sync: when a control surface is selected, find the nearest session
+    // pane and re-scope this control surface to that session's project/workdir.
+    if (tab && CONTROL_SURFACE_TAB_KINDS.has(tab.kind)) {
+      const nearestSessionPaneId = findNearestSessionPaneId(workspace, paneId);
+      if (nearestSessionPaneId) {
+        const nearestSessionPane = paneLookup.get(nearestSessionPaneId);
+        const nearestSessionTab = nearestSessionPane?.tabs.find((t) => t.id === nearestSessionPane.activeTabId);
+        if (nearestSessionTab?.kind === "session") {
+          const nearestSession = sessionLookup.get(nearestSessionTab.sessionId);
+          if (nearestSession) {
+            const projectId = nearestSession.projectId ?? null;
+            if (projectId && projectLookup.has(projectId)) {
+              setSelectedProjectId(projectId);
+            }
+            if (tab.kind === "gitStatus" || tab.kind === "filesystem") {
+              setWorkspace((current) =>
+                rescopeControlSurfacePane(
+                  activatePane(current, paneId, tabId),
+                  paneId,
+                  nearestSession.id,
+                  projectId,
+                  nearestSession.workdir ?? null,
+                ),
+              );
+              return;
+            }
+          }
+        }
       }
     }
 

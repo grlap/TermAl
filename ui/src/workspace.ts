@@ -986,11 +986,24 @@ export function openDiffPreviewInWorkspaceState(
     }
   }
 
+  // When the preferred pane is a control surface, redirect the split anchor to a content pane
+  // so the diff opens adjacent to the session, not at the workspace edge.
+  const splitAnchorPaneId = (() => {
+    if (!preferredPaneId) {
+      return preferredPaneId;
+    }
+    const preferredPane = workspace.panes.find((pane) => pane.id === preferredPaneId);
+    if (preferredPane && (paneContainsControlPanel(preferredPane) || paneIsControlSurface(preferredPane))) {
+      return findNonControlPanelPaneId(workspace, preferredPane.id) ?? preferredPaneId;
+    }
+    return preferredPaneId;
+  })();
+
   return openContextualTabInWorkspaceState(
     workspace,
     nextTab,
     null,
-    preferredPaneId,
+    splitAnchorPaneId,
     tab.originSessionId,
   );
 }
@@ -1936,6 +1949,85 @@ function findNonControlPanelPaneId(workspace: WorkspaceState, excludePaneId: str
     )?.id ?? null
   );
 }
+/**
+ * Re-scope a control surface pane's active tab to a new session/project context.
+ * Updates workdir, originSessionId, and originProjectId on standalone tabs
+ * (gitStatus, filesystem) so they reflect the newly-selected session's project.
+ */
+export function rescopeControlSurfacePane(
+  workspace: WorkspaceState,
+  controlSurfacePaneId: string,
+  sessionId: string | null,
+  projectId: string | null,
+  workdir: string | null,
+): WorkspaceState {
+  const paneIndex = workspace.panes.findIndex((pane) => pane.id === controlSurfacePaneId);
+  if (paneIndex === -1) {
+    return workspace;
+  }
+  const pane = workspace.panes[paneIndex]!;
+  const activeTab = getActiveTab(pane);
+  if (!activeTab) {
+    return workspace;
+  }
+
+  let updatedTab: WorkspaceTab | null = null;
+
+  if (activeTab.kind === "gitStatus" && workdir) {
+    updatedTab = { ...activeTab, workdir, originSessionId: sessionId ?? activeTab.originSessionId, originProjectId: projectId };
+  } else if (activeTab.kind === "filesystem" && workdir) {
+    updatedTab = { ...activeTab, rootPath: workdir, originSessionId: sessionId ?? activeTab.originSessionId, originProjectId: projectId };
+  } else if (activeTab.kind === "controlPanel" || activeTab.kind === "sessionList" || activeTab.kind === "projectList" || activeTab.kind === "orchestratorList") {
+    updatedTab = { ...activeTab, originSessionId: sessionId ?? activeTab.originSessionId, originProjectId: projectId };
+  }
+
+  if (!updatedTab || updatedTab === activeTab) {
+    return workspace;
+  }
+
+  const updatedTabs = pane.tabs.map((tab) => (tab.id === activeTab.id ? updatedTab! : tab));
+  const updatedPane = syncPaneState({ ...pane, tabs: updatedTabs });
+  const updatedPanes = workspace.panes.slice();
+  updatedPanes[paneIndex] = updatedPane;
+  return { ...workspace, panes: updatedPanes };
+}
+
+/**
+ * Find the nearest pane containing a session tab relative to the given pane.
+ * Prefers left neighbors. Used for reverse-syncing: when a control surface is
+ * selected, find the closest session to derive project context from.
+ */
+export function findNearestSessionPaneId(
+  workspace: WorkspaceState,
+  paneId: string,
+): string | null {
+  const paneLookup = new Map(workspace.panes.map((pane) => [pane.id, pane]));
+  const order = flattenPaneOrder(workspace.root, paneLookup);
+  const myIndex = order.indexOf(paneId);
+  if (myIndex === -1) {
+    return null;
+  }
+
+  for (let distance = 1; distance < order.length; distance++) {
+    const leftIndex = myIndex - distance;
+    if (leftIndex >= 0) {
+      const leftPane = paneLookup.get(order[leftIndex]!);
+      if (leftPane && getActiveTab(leftPane)?.kind === "session") {
+        return leftPane.id;
+      }
+    }
+    const rightIndex = myIndex + distance;
+    if (rightIndex < order.length) {
+      const rightPane = paneLookup.get(order[rightIndex]!);
+      if (rightPane && getActiveTab(rightPane)?.kind === "session") {
+        return rightPane.id;
+      }
+    }
+  }
+
+  return null;
+}
+
 function paneContainsControlPanel(pane: WorkspacePane) {
   return pane.tabs.some((tab) => tab.kind === "controlPanel");
 }
@@ -1949,6 +2041,7 @@ function paneIsControlSurface(pane: WorkspacePane) {
   const activeTab = getActiveTab(pane);
   return activeTab ? CONTROL_SURFACE_KINDS.has(activeTab.kind) : false;
 }
+
 
 function flattenPaneOrder(root: WorkspaceNode | null, paneLookup: Map<string, WorkspacePane>): string[] {
   if (!root) {
@@ -2265,6 +2358,9 @@ function findContextualTargetPaneId(
 
     if (preferredPane && paneContainsControlPanel(preferredPane)) {
       const nonControlPanelPaneId = findNonControlPanelPaneId(workspace, preferredPane.id);
+      if (nonControlPanelPaneId && shouldOpenTabInAdjacentPane(workspace, nonControlPanelPaneId, tabKind)) {
+        return null;
+      }
       if (nonControlPanelPaneId) {
         return nonControlPanelPaneId;
       }
