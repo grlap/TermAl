@@ -252,52 +252,47 @@ export function FileSystemPanel({
           body="Open a workspace folder to browse files and directories in this tile."
         />
       ) : null}
-
-      {isRootLoading ? (
-        <article className="activity-card">
-          <div className="activity-spinner" aria-hidden="true" />
-          <div>
-            <div className="card-label">Files</div>
-            <h3>Loading folder</h3>
-            <p>{normalizedRootPath}</p>
-          </div>
-        </article>
-      ) : null}
-
       {rootError ? (
         <article className="thread-notice">
           <div className="card-label">Files</div>
           <p>{rootError}</p>
         </article>
       ) : null}
-
-      {rootDirectory ? (
+      {normalizedRootPath && (rootDirectory || isRootLoading) ? (
         <section className="filesystem-explorer" aria-label="Files">
-          <div className="filesystem-root-header">
+          <div
+            className={`filesystem-root-header${isRootLoading ? " filesystem-root-header-loading" : ""}`}
+            role={isRootLoading ? "status" : undefined}
+            aria-label={isRootLoading ? "Loading files" : undefined}
+          >
             <div className="filesystem-root-copy">
               <span className="filesystem-root-name">{rootDisplayName}</span>
-              <span className="filesystem-root-path" title={rootDirectory.path}>
-                {rootDirectory.path}
+              <span className="filesystem-root-path" title={rootDirectory?.path ?? normalizedRootPath}>
+                {rootDirectory?.path ?? normalizedRootPath}
               </span>
             </div>
-            {rootTone ? (
+            {isRootLoading ? (
+              <span className="activity-spinner filesystem-root-loading-spinner" aria-hidden="true" />
+            ) : rootTone ? (
               <span className={`filesystem-git-dot filesystem-git-dot-${rootTone}`} aria-hidden="true" />
             ) : null}
           </div>
-          {rootDirectory.entries.length > 0 ? (
-            <DirectoryTree
-              directoriesByPath={directoriesByPath}
-              entries={rootDirectory.entries}
-              errorsByPath={errorsByPath}
-              expandedPaths={expandedPaths}
-              gitDecorations={gitDecorations}
-              loadingPaths={loadingPaths}
-              onDirectoryToggle={handleDirectoryToggle}
-              onOpenPath={onOpenPath}
-            />
-          ) : (
-            <p className="support-copy filesystem-support-copy">This folder is empty.</p>
-          )}
+          {rootDirectory ? (
+            rootDirectory.entries.length > 0 ? (
+              <DirectoryTree
+                directoriesByPath={directoriesByPath}
+                entries={rootDirectory.entries}
+                errorsByPath={errorsByPath}
+                expandedPaths={expandedPaths}
+                gitDecorations={gitDecorations}
+                loadingPaths={loadingPaths}
+                onDirectoryToggle={handleDirectoryToggle}
+                onOpenPath={onOpenPath}
+              />
+            ) : (
+              <p className="support-copy filesystem-support-copy">This folder is empty.</p>
+            )
+          ) : null}
         </section>
       ) : null}
     </div>

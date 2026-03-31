@@ -4464,19 +4464,38 @@ export default function App() {
           );
 
         case "projects":
-          return fixedSection
-            ? null
-            : renderOpenTabAction(
-                "projects",
-                () =>
-                  handleOpenProjectListTab(
-                    paneId,
-                    controlPanelLauncherOriginSessionId,
-                    controlPanelLauncherOriginProjectId,
-                  ),
-                false,
-                buildControlPanelLauncherTab("projects"),
-              );
+          return (
+            <>
+              {fixedSection
+                ? null
+                : renderOpenTabAction(
+                    "projects",
+                    () =>
+                      handleOpenProjectListTab(
+                        paneId,
+                        controlPanelLauncherOriginSessionId,
+                        controlPanelLauncherOriginProjectId,
+                      ),
+                    false,
+                    buildControlPanelLauncherTab("projects"),
+                  )}
+              <button
+                className="control-panel-header-action control-panel-header-new-session-button"
+                type="button"
+                onClick={() => openCreateProjectDialog()}
+                aria-label="Add project"
+                title="Add project"
+                disabled={isCreatingProject}
+              >
+                <span className="control-panel-header-action-icon control-panel-header-action-icon-new" aria-hidden="true">
+                  <svg viewBox="0 0 16 16" focusable="false" aria-hidden="true">
+                    <circle cx="8" cy="8" r="6.5" fill="none" stroke="currentColor" strokeWidth="1.3" />
+                    <path d="M8 5v6M5 8h6" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
+                  </svg>
+                </span>
+              </button>
+            </>
+          );
 
         case "orchestrators":
           return (
@@ -4650,24 +4669,6 @@ export default function App() {
                   <div className="session-control-label">Projects</div>
                   <span className="project-count-badge">{projects.length}</span>
                 </div>
-                <button
-                  className="ghost-button project-create-launch"
-                  type="button"
-                  onClick={openCreateProjectDialog}
-                  aria-haspopup="dialog"
-                  aria-expanded={isCreateProjectOpen}
-                  aria-controls="create-project-dialog"
-                  aria-label="Add project"
-                  title={isCreatingProject ? "Adding project..." : "Add project"}
-                  disabled={isCreatingProject}
-                >
-                  <span className="control-panel-header-action-icon control-panel-header-action-icon-new" aria-hidden="true">
-                    <svg viewBox="0 0 16 16" focusable="false" aria-hidden="true">
-                      <circle cx="8" cy="8" r="6.5" fill="none" stroke="currentColor" strokeWidth="1.3" />
-                      <path d="M8 5v6M5 8h6" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
-                    </svg>
-                  </span>
-                </button>
                 <div className="project-list" role="list">
                   <button
                     className={`project-row ${selectedProjectId === ALL_PROJECTS_FILTER_ID ? "selected" : ""}`}
@@ -7841,7 +7842,6 @@ function SessionPaneView({
   const shouldRenderFilesystemProjectScope =
     !!activeFilesystemScopeProjectId && workspaceProjectOptions.length > 0;
   const shouldRenderGitProjectScope = !!activeGitScopeProjectId && workspaceProjectOptions.length > 0;
-  const [sourceDraft, setSourceDraft] = useState(pane.sourcePath ?? "");
   const [fileState, setFileState] = useState<SourceFileState>({
     status: "idle",
     path: "",
@@ -8589,10 +8589,6 @@ function SessionPaneView({
   ]);
 
   useEffect(() => {
-    setSourceDraft(pane.sourcePath ?? "");
-  }, [pane.id, pane.sourcePath]);
-
-  useEffect(() => {
     if (!isSending || pane.viewMode !== "session") {
       return;
     }
@@ -8999,11 +8995,9 @@ function SessionPaneView({
           />
         ) : activeSourceTab ? (
           <SourcePanel
-            candidatePaths={sourceCandidatePaths}
             editorAppearance={editorAppearance}
             editorFontSizePx={editorFontSizePx}
             fileState={fileState}
-            sourceDraft={sourceDraft}
             sourceFocus={
               activeSourceTab?.focusLineNumber
                 ? {
@@ -9014,7 +9008,6 @@ function SessionPaneView({
                 : null
             }
             sourcePath={activeSourceTab.path}
-            onDraftChange={setSourceDraft}
             onOpenInstructionDebugger={
               activeSourceOriginSessionId
                 ? () =>
@@ -9026,7 +9019,6 @@ function SessionPaneView({
                     )
                 : null
             }
-            onOpenPath={(path) => onPaneSourcePathChange(pane.id, path)}
             onSaveFile={(path, content) =>
               handleSourceFileSave(path, content, activeSourceOriginSessionId, activeSourceOriginProjectId)
             }

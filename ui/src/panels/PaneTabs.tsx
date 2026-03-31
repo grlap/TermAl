@@ -1708,12 +1708,13 @@ function TabKindIcon({ kind }: { kind: string }) {
         </svg>
       );
     case "orchestratorList":
+    case "orchestratorCanvas":
       return (
         <svg {...iconProps}>
-          <circle cx="8" cy="4" r="2" fill="none" stroke="currentColor" strokeWidth="1.3" />
-          <circle cx="4" cy="12" r="1.5" fill="none" stroke="currentColor" strokeWidth="1.3" />
-          <circle cx="12" cy="12" r="1.5" fill="none" stroke="currentColor" strokeWidth="1.3" />
-          <path d="M6.5 5.5L4.5 10.5M9.5 5.5l2 5" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
+          <circle cx="8" cy="4.5" r="2.2" fill="none" stroke="currentColor" strokeWidth="1.3" />
+          <circle cx="4" cy="13" r="1.5" fill="none" stroke="currentColor" strokeWidth="1.3" />
+          <circle cx="12" cy="13" r="1.5" fill="none" stroke="currentColor" strokeWidth="1.3" />
+          <path d="M6.5 6.2L4.5 11.5M9.5 6.2l2 5.3" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
         </svg>
       );
     default:

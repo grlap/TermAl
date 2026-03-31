@@ -614,15 +614,14 @@ function ProjectsIcon() {
 function OrchestratorsIcon() {
   return (
     <svg viewBox="0 0 20 20" focusable="false" aria-hidden="true">
-      <circle cx="4.75" cy="5" r="1.65" fill="none" stroke="currentColor" strokeWidth="1.5" />
-      <circle cx="15.25" cy="5" r="1.65" fill="none" stroke="currentColor" strokeWidth="1.5" />
-      <circle cx="10" cy="14.5" r="1.65" fill="none" stroke="currentColor" strokeWidth="1.5" />
+      <circle cx="10" cy="5.5" r="2.5" fill="none" stroke="currentColor" strokeWidth="1.5" />
+      <circle cx="5" cy="16.5" r="1.8" fill="none" stroke="currentColor" strokeWidth="1.5" />
+      <circle cx="15" cy="16.5" r="1.8" fill="none" stroke="currentColor" strokeWidth="1.5" />
       <path
-        d="M6.2 6.1 8.8 12M13.8 6.1 11.2 12M6.55 5h6.9"
+        d="M8.2 7.5 5.8 14.7M11.8 7.5l2.4 7.2"
         fill="none"
         stroke="currentColor"
         strokeLinecap="round"
-        strokeLinejoin="round"
         strokeWidth="1.5"
       />
     </svg>

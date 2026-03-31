@@ -4083,6 +4083,11 @@ textarea {
   gap: 0.4rem;
 }
 
+.source-path-display-row {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+}
+
 .source-path-input {
   width: 100%;
   border: 1px solid var(--line);
@@ -4090,6 +4095,44 @@ textarea {
   background: var(--surface-white);
   padding: 0.52rem 0.65rem;
   color: var(--ink);
+}
+
+.source-path-display {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 0.55rem;
+  background: var(--surface-white);
+  padding: 0.52rem 0.65rem;
+  color: var(--ink);
+}
+
+.source-path-display-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  user-select: text;
+}
+
+.source-path-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.source-path-copy-button svg {
+  width: var(--icon-size-sm);
+  height: var(--icon-size-sm);
+}
+
+.source-path-loading-spinner {
+  width: 0.8rem;
+  height: 0.8rem;
+  border-width: 2px;
+  flex: none;
 }
 
 .git-status-toolbar {
@@ -4131,25 +4174,6 @@ textarea {
 }
 
 
-.source-chip-row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.35rem;
-}
-
-.source-chip {
-  cursor: pointer;
-  max-width: 100%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.source-chip.selected {
-  border-color: var(--accent-blue-border);
-  color: var(--signal-blue);
-  font-weight: 700;
-}
 
 .file-viewer-summary {
   margin: 0;
@@ -5012,6 +5036,17 @@ textarea {
   justify-content: space-between;
   gap: 0.75rem;
   padding: 0.1rem 0.25rem 0.15rem;
+}
+
+.filesystem-root-header-loading {
+  align-items: center;
+}
+
+.filesystem-root-loading-spinner {
+  width: 1rem;
+  height: 1rem;
+  border-width: 2px;
+  margin-top: 0.02rem;
 }
 
 .filesystem-root-copy {

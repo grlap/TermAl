@@ -22,6 +22,30 @@ describe("FileSystemPanel", () => {
     fetchGitStatusMock.mockReset();
   });
 
+  it("renders a compact header spinner while the root folder is loading", async () => {
+    fetchDirectoryMock.mockReturnValue(new Promise<DirectoryResponse>(() => {}));
+    fetchGitStatusMock.mockReturnValue(new Promise<GitStatusResponse>(() => {}));
+
+    const { container } = render(
+      <FileSystemPanel
+        rootPath="/repo"
+        sessionId="session-1"
+        showPathControls={false}
+        onOpenPath={() => {}}
+        onOpenRootPath={() => {}}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(fetchDirectoryMock).toHaveBeenCalledWith("/repo", { sessionId: "session-1", projectId: null });
+    });
+
+    expect(await screen.findByRole("status", { name: "Loading files" })).toBeInTheDocument();
+    expect(screen.getByText("repo")).toBeInTheDocument();
+    expect(screen.getByText("/repo")).toBeInTheDocument();
+    expect(screen.queryByText("Loading folder")).not.toBeInTheDocument();
+    expect(container.querySelector(".filesystem-root-loading-spinner")).not.toBeNull();
+  });
   it("renders an explorer tree with git decorations when path controls are hidden", async () => {
     fetchDirectoryMock.mockImplementation(async (path) => {
       switch (path) {

@@ -1,4 +1,5 @@
-import { Suspense, lazy, useEffect, useState, type KeyboardEvent } from "react";
+import { Suspense, lazy, useEffect, useState } from "react";
+import { copyTextToClipboard } from "../clipboard";
 import type { MonacoCodeEditorStatus } from "../MonacoCodeEditor";
 import { resolveMonacoLanguage, type MonacoAppearance } from "../monaco";
 
@@ -50,34 +51,27 @@ export type SourcePanelFocus = {
 };
 
 export function SourcePanel({
-  candidatePaths,
   editorAppearance,
   editorFontSizePx,
   fileState,
-  sourceDraft,
   sourceFocus = null,
   sourcePath,
-  onDraftChange,
   onOpenInstructionDebugger,
-  onOpenPath,
   onSaveFile,
 }: {
-  candidatePaths: string[];
   editorAppearance: MonacoAppearance;
   editorFontSizePx: number;
   fileState: SourceFileState;
-  sourceDraft: string;
   sourceFocus?: SourcePanelFocus | null;
   sourcePath: string | null;
-  onDraftChange: (nextValue: string) => void;
   onOpenInstructionDebugger?: (() => void) | null;
-  onOpenPath: (path: string) => void;
   onSaveFile: (path: string, content: string) => Promise<void>;
 }) {
   const [editorValue, setEditorValue] = useState("");
   const [saveError, setSaveError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [editorStatus, setEditorStatus] = useState<MonacoCodeEditorStatus>(DEFAULT_EDITOR_STATUS);
+  const [copiedPath, setCopiedPath] = useState(false);
   const isDirty = fileState.status === "ready" && editorValue !== fileState.content;
 
   useEffect(() => {
@@ -93,6 +87,20 @@ export function SourcePanel({
       setEditorStatus(DEFAULT_EDITOR_STATUS);
     }
   }, [fileState.content, fileState.path, fileState.status]);
+
+  useEffect(() => {
+    if (!copiedPath) {
+      return;
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      setCopiedPath(false);
+    }, 1600);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+  }, [copiedPath]);
 
   async function handleSave() {
     if (fileState.status !== "ready" || !isDirty || isSaving) {
@@ -110,22 +118,23 @@ export function SourcePanel({
     }
   }
 
-  function handlePathKeyDown(event: KeyboardEvent<HTMLInputElement>) {
-    if (event.key !== "Enter") {
+  async function handleCopyPath() {
+    if (!displayPath) {
       return;
     }
 
-    const nextPath = sourceDraft.trim();
-    if (!nextPath) {
-      return;
+    try {
+      await copyTextToClipboard(displayPath);
+      setCopiedPath(true);
+    } catch {
+      setCopiedPath(false);
     }
-
-    event.preventDefault();
-    onOpenPath(nextPath);
   }
 
   const saveStateLabel = saveError ? "Save failed" : isSaving ? "Saving..." : isDirty ? "Unsaved changes" : null;
-  const activeInstructionPath = sourcePath?.trim() || fileState.path?.trim() || "";
+  const displayPath = fileState.path.trim() || sourcePath?.trim() || "";
+  const activeInstructionPath = displayPath;
+  const canCopyPath = displayPath.length > 0;
   const canDebugInstructions =
     typeof onOpenInstructionDebugger === "function" &&
     isInstructionLikePath(activeInstructionPath);
@@ -133,58 +142,51 @@ export function SourcePanel({
   return (
     <div className={`source-pane${fileState.status === "ready" ? " has-editor" : ""}`}>
       <div className="source-toolbar">
-        <div className="source-path-row">
-          <input
-            className="source-path-input"
-            type="text"
-            value={sourceDraft}
-            onChange={(event) => onDraftChange(event.target.value)}
-            onKeyDown={handlePathKeyDown}
-            placeholder="/absolute/path/to/file.rs"
-          />
-          {canDebugInstructions ? (
-            <button
-              className="ghost-button source-toolbar-action"
-              type="button"
-              onClick={onOpenInstructionDebugger}
-            >
-              Debug instructions
-            </button>
+        <div className="source-path-row source-path-display-row">
+          <div
+            className="source-path-display"
+            role={fileState.status === "loading" ? "status" : undefined}
+            aria-label={fileState.status === "loading" ? "Loading source file" : undefined}
+            aria-live={fileState.status === "loading" ? "polite" : undefined}
+            title={displayPath || undefined}
+          >
+            <span className="source-path-display-text">{displayPath || "No source file selected"}</span>
+            {fileState.status === "loading" ? (
+              <span className="activity-spinner source-path-loading-spinner" aria-hidden="true" />
+            ) : null}
+          </div>
+          {(canCopyPath || canDebugInstructions) ? (
+            <div className="source-path-actions">
+              {canCopyPath ? (
+                <button
+                  className={`command-icon-button source-path-copy-button${copiedPath ? " copied" : ""}`}
+                  type="button"
+                  onClick={() => void handleCopyPath()}
+                  aria-label={copiedPath ? "Path copied" : "Copy path"}
+                  title={copiedPath ? "Copied" : "Copy path"}
+                >
+                  {copiedPath ? <CheckIcon /> : <CopyIcon />}
+                </button>
+              ) : null}
+              {canDebugInstructions ? (
+                <button
+                  className="ghost-button source-toolbar-action"
+                  type="button"
+                  onClick={onOpenInstructionDebugger}
+                >
+                  Debug instructions
+                </button>
+              ) : null}
+            </div>
           ) : null}
         </div>
-
-        {candidatePaths.length > 0 ? (
-          <div className="source-chip-row">
-            {candidatePaths.map((path) => (
-              <button
-                key={path}
-                className={`chip source-chip ${path === sourcePath ? "selected" : ""}`}
-                type="button"
-                onClick={() => onOpenPath(path)}
-              >
-                {path}
-              </button>
-            ))}
-          </div>
-        ) : null}
       </div>
 
       {fileState.status === "idle" ? (
         <EmptyState
           title="No source file selected"
-          body="Pick a touched file above or enter a path manually to open the source in this tile."
+          body="Open a file from the workspace to show its source in this tile."
         />
-      ) : null}
-
-      {fileState.status === "loading" ? (
-        <article className="activity-card">
-          <div className="activity-spinner" aria-hidden="true" />
-          <div>
-            <div className="card-label">Source</div>
-            <h3>Loading file</h3>
-            <p>{fileState.path}</p>
-          </div>
-        </article>
       ) : null}
 
       {fileState.status === "error" ? (
@@ -302,4 +304,21 @@ function getErrorMessage(error: unknown) {
   }
 
   return "The request failed.";
+}
+
+function CopyIcon() {
+  return (
+    <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <rect x="5" y="3" width="8" height="10" rx="1.5" />
+      <path d="M3 11V5.5C3 4.67 3.67 4 4.5 4H10" />
+    </svg>
+  );
+}
+
+function CheckIcon() {
+  return (
+    <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M3.5 8.5 6.5 11.5 12.5 4.5" />
+    </svg>
+  );
 }
