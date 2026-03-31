@@ -4210,6 +4210,35 @@ textarea {
   background: var(--surface-white);
 }
 
+.diff-preview-loading-state {
+  padding: calc(1.2rem * var(--density-scale));
+}
+
+.diff-preview-loading-copy {
+  display: grid;
+  justify-items: center;
+  gap: calc(0.45rem * var(--density-scale));
+  text-align: center;
+}
+
+.diff-preview-loading-spinner {
+  width: calc(1.3rem * var(--density-scale));
+  height: calc(1.3rem * var(--density-scale));
+}
+
+.diff-preview-loading-path {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.diff-preview-loading-detail {
+  max-width: min(32rem, 88vw);
+}
+
+.diff-preview-loading-state.is-error .diff-preview-loading-detail {
+  color: var(--danger-text, var(--text));
+}
+
 .monaco-code-editor,
 .monaco-diff-editor {
   display: block;

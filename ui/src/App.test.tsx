@@ -135,6 +135,35 @@ function createDeferred<T>() {
   return { promise, resolve };
 }
 
+function makeWorkspaceLayoutResponse(
+  overrides: Partial<{
+    id: string;
+    revision: number;
+    updatedAt: string;
+    controlPanelSide: "left" | "right";
+    workspace: {
+      root: null;
+      panes: never[];
+      activePaneId: null;
+    };
+  }> = {},
+) {
+  return {
+    layout: {
+      id: "workspace-test",
+      revision: 1,
+      updatedAt: "2026-03-30 09:00:00",
+      controlPanelSide: "left" as const,
+      workspace: {
+        root: null,
+        panes: [],
+        activePaneId: null,
+      },
+      ...overrides,
+    },
+  };
+}
+
 async function flushUiWork() {
   for (let iteration = 0; iteration < 3; iteration += 1) {
     await Promise.resolve();
@@ -241,6 +270,19 @@ function createDragDataTransfer() {
     setDragImage: () => {},
     get types() {
       return Array.from(data.keys());
+    },
+  };
+}
+
+function createReducedMimeDragDataTransfer(dataTransfer: ReturnType<typeof createDragDataTransfer>) {
+  return {
+    dropEffect: dataTransfer.dropEffect,
+    effectAllowed: dataTransfer.effectAllowed,
+    getData: dataTransfer.getData,
+    setData: dataTransfer.setData,
+    setDragImage: dataTransfer.setDragImage,
+    get types() {
+      return ["text/plain"];
     },
   };
 }
@@ -406,6 +448,49 @@ describe("MarkdownContent", () => {
     });
   });
 
+  it("opens localhost Unix file URLs through the source callback", () => {
+    const onOpenSourceLink = vi.fn();
+
+    render(
+      <MarkdownContent
+        markdown="[service.rs](http://127.0.0.1:4173/home/grzeg/projects/fit_friends/src/service.rs#L12)"
+        onOpenSourceLink={onOpenSourceLink}
+        workspaceRoot="/home/grzeg/projects/fit_friends"
+      />,
+    );
+
+    const link = screen.getByRole("link", { name: "service.rs" });
+    expect(link).not.toHaveAttribute("target");
+
+    fireEvent.click(link);
+
+    expect(onOpenSourceLink).toHaveBeenCalledWith({
+      path: "/home/grzeg/projects/fit_friends/src/service.rs",
+      line: 12,
+      openInNewTab: false,
+    });
+  });
+  it("keeps same-origin docs URLs as normal external links", () => {
+    const onOpenSourceLink = vi.fn();
+
+    render(
+      <MarkdownContent
+        markdown="http://localhost/docs/architecture.md"
+        onOpenSourceLink={onOpenSourceLink}
+        workspaceRoot="/repo"
+      />,
+    );
+
+    const link = screen.getByRole("link", {
+      name: "http://localhost/docs/architecture.md",
+    });
+    expect(link).toHaveAttribute("target", "_blank");
+
+    fireEvent.click(link);
+
+    expect(onOpenSourceLink).not.toHaveBeenCalled();
+  });
+
   it("autolinks bare file references with line targets", () => {
     const onOpenSourceLink = vi.fn();
 
@@ -480,6 +565,9 @@ describe("App", () => {
     vi.stubGlobal("cancelAnimationFrame", cancelAnimationFrameMock);
     HTMLElement.prototype.scrollTo = vi.fn() as unknown as typeof HTMLElement.prototype.scrollTo;
     EventSourceMock.instances = [];
+    vi.spyOn(api, "fetchWorkspaceLayout").mockResolvedValue(null);
+    vi.spyOn(api, "fetchWorkspaceLayouts").mockResolvedValue({ workspaces: [] });
+    vi.spyOn(api, "saveWorkspaceLayout").mockResolvedValue(makeWorkspaceLayoutResponse());
   });
 
   afterEach(async () => {
@@ -498,6 +586,9 @@ describe("App", () => {
     } else {
       globalThis.cancelAnimationFrame = originalCancelAnimationFrame;
     }
+    window.localStorage.clear();
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
   });
 
   it("applies the active combobox option on space without closing the menu", () => {
@@ -1006,6 +1097,22 @@ describe("App", () => {
       const originalEventSource = globalThis.EventSource;
       const originalResizeObserver = globalThis.ResizeObserver;
       const openSpy = vi.spyOn(window, "open").mockImplementation(() => null);
+      const fetchWorkspaceLayoutsSpy = vi.mocked(api.fetchWorkspaceLayouts).mockResolvedValue({
+        workspaces: [
+          {
+            id: "monitor-left",
+            revision: 4,
+            updatedAt: "2026-03-28 18:00:00",
+            controlPanelSide: "left",
+          },
+          {
+            id: "monitor-right",
+            revision: 1,
+            updatedAt: "2026-03-28 17:30:00",
+            controlPanelSide: "right",
+          },
+        ],
+      });
       const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
         const requestUrl = new URL(String(input), "http://localhost");
         if (requestUrl.pathname === "/api/state") {
@@ -1014,46 +1121,6 @@ describe("App", () => {
             projects: [],
             sessions: [],
           });
-        }
-
-        if (requestUrl.pathname === "/api/workspaces") {
-          return jsonResponse({
-            workspaces: [
-              {
-                id: "monitor-left",
-                revision: 3,
-                updatedAt: "2026-03-28 18:00:00",
-                controlPanelSide: "left",
-              },
-              {
-                id: "monitor-right",
-                revision: 1,
-                updatedAt: "2026-03-28 17:30:00",
-                controlPanelSide: "right",
-              },
-            ],
-          });
-        }
-
-        if (requestUrl.pathname.startsWith("/api/workspaces/")) {
-          if ((init?.method ?? "GET").toUpperCase() === "PUT") {
-            const pathSegments = requestUrl.pathname.split("/");
-            return jsonResponse({
-              layout: {
-                id: pathSegments[pathSegments.length - 1] ?? "workspace",
-                revision: 1,
-                updatedAt: "2026-03-28 18:05:00",
-                controlPanelSide: "left",
-                workspace: {
-                  root: null,
-                  panes: [],
-                  activePaneId: null,
-                },
-              },
-            });
-          }
-
-          return new Response("", { status: 404 });
         }
 
         throw new Error(`Unexpected fetch: ${requestUrl.pathname}${requestUrl.search}`);
@@ -1067,6 +1134,9 @@ describe("App", () => {
       try {
         await renderApp();
 
+        await clickAndSettle(await screen.findByRole("button", { name: "Sessions" }));
+        await clickAndSettle(await screen.findByRole("button", { name: "Open tab" }));
+
         const switcherTrigger = await screen.findByRole("button", { name: /workspace /i });
         await clickAndSettle(switcherTrigger);
 
@@ -1079,9 +1149,70 @@ describe("App", () => {
         expect(openSpy).toHaveBeenCalledTimes(1);
         expect(String(openSpy.mock.calls[0]?.[0] ?? "")).toContain("workspace=");
       } finally {
+        fetchWorkspaceLayoutsSpy.mockRestore();
         openSpy.mockRestore();
         window.localStorage.clear();
         restoreGlobal("fetch", originalFetch);
+        restoreGlobal("EventSource", originalEventSource);
+        restoreGlobal("ResizeObserver", originalResizeObserver);
+      }
+    });
+  });
+
+  it("flushes a pending workspace layout save with keepalive on pagehide", async () => {
+    await withSuppressedActWarnings(async () => {
+      const originalEventSource = globalThis.EventSource;
+      const originalResizeObserver = globalThis.ResizeObserver;
+      const fetchStateSpy = vi.spyOn(api, "fetchState").mockResolvedValue({
+        revision: 1,
+        projects: [],
+        sessions: [],
+      });
+      const fetchWorkspaceLayoutSpy = vi.mocked(api.fetchWorkspaceLayout).mockResolvedValue(null);
+      const fetchWorkspaceLayoutsSpy = vi.mocked(api.fetchWorkspaceLayouts).mockResolvedValue({
+        workspaces: [
+          {
+            id: "workspace-next",
+            revision: 2,
+            updatedAt: "2026-03-30 09:30:00",
+            controlPanelSide: "right",
+          },
+        ],
+      });
+      const saveWorkspaceLayoutSpy = vi.mocked(api.saveWorkspaceLayout).mockResolvedValue(
+        makeWorkspaceLayoutResponse({
+          id: "workspace-current",
+          updatedAt: "2026-03-30 09:31:00",
+        }),
+      );
+      window.localStorage.clear();
+      vi.stubGlobal("EventSource", EventSourceMock as unknown as typeof EventSource);
+      vi.stubGlobal("ResizeObserver", ResizeObserverMock as unknown as typeof ResizeObserver);
+
+      try {
+        await renderApp();
+        saveWorkspaceLayoutSpy.mockClear();
+
+        saveWorkspaceLayoutSpy.mockClear();
+        act(() => {
+          window.dispatchEvent(new Event("pagehide"));
+        });
+
+        await waitFor(() => {
+          expect(saveWorkspaceLayoutSpy).toHaveBeenCalledWith(
+            expect.any(String),
+            expect.objectContaining({
+              workspace: expect.any(Object),
+            }),
+            { keepalive: true },
+          );
+        });
+      } finally {
+        window.localStorage.clear();
+        fetchStateSpy.mockRestore();
+        fetchWorkspaceLayoutSpy.mockRestore();
+        fetchWorkspaceLayoutsSpy.mockRestore();
+        saveWorkspaceLayoutSpy.mockRestore();
         restoreGlobal("EventSource", originalEventSource);
         restoreGlobal("ResizeObserver", originalResizeObserver);
       }
@@ -1196,6 +1327,186 @@ describe("App", () => {
     });
   });
 
+  it("adopts the full orchestrator-start state so the next delta does not force a resync", async () => {
+    await withSuppressedActWarnings(async () => {
+      const originalEventSource = globalThis.EventSource;
+      const originalResizeObserver = globalThis.ResizeObserver;
+      const fetchStateSpy = vi.spyOn(api, "fetchState").mockResolvedValue({
+        revision: 1,
+        projects: [],
+        sessions: [],
+      });
+      const fetchWorkspaceLayoutSpy = vi.mocked(api.fetchWorkspaceLayout).mockResolvedValue(null);
+      const saveWorkspaceLayoutSpy = vi.mocked(api.saveWorkspaceLayout).mockResolvedValue(
+        makeWorkspaceLayoutResponse({
+          updatedAt: "2026-03-30 09:01:00",
+        }),
+      );
+      const fetchTemplatesSpy = vi.spyOn(api, "fetchOrchestratorTemplates").mockResolvedValue({
+        templates: [
+          {
+            id: "delivery-flow",
+            name: "Delivery Flow",
+            description: "Implement and review a change.",
+            createdAt: "2026-03-30 09:00:00",
+            updatedAt: "2026-03-30 09:05:00",
+            projectId: "project-local",
+            sessions: [
+              {
+                id: "builder",
+                name: "Builder",
+                agent: "Codex",
+                model: null,
+                instructions: "Implement the change.",
+                autoApprove: true,
+                position: { x: 220, y: 420 },
+              },
+            ],
+            transitions: [],
+          },
+        ],
+      });
+      const createOrchestratorInstanceSpy = vi.spyOn(api, "createOrchestratorInstance").mockResolvedValue({
+        orchestrator: {
+          id: "orchestrator-1",
+          templateId: "delivery-flow",
+          projectId: "project-local",
+          templateSnapshot: {
+            id: "delivery-flow",
+            name: "Delivery Flow",
+            description: "Implement and review a change.",
+            createdAt: "2026-03-30 09:00:00",
+            updatedAt: "2026-03-30 09:05:00",
+            projectId: "project-local",
+            sessions: [
+              {
+                id: "builder",
+                name: "Builder",
+                agent: "Codex",
+                model: null,
+                instructions: "Implement the change.",
+                autoApprove: true,
+                position: { x: 220, y: 420 },
+              },
+            ],
+            transitions: [],
+          },
+          status: "running",
+          sessionInstances: [],
+          pendingTransitions: [],
+          createdAt: "2026-03-30 09:06:00",
+          completedAt: null,
+        },
+        state: {
+          revision: 3,
+          projects: [
+            {
+              id: "project-local",
+              name: "Local Project",
+              rootPath: "/repo",
+              remoteId: "local",
+            },
+            {
+              id: "project-added",
+              name: "Added By Start",
+              rootPath: "/repo-added",
+            },
+          ],
+          sessions: [
+            makeSession("session-orchestrated", {
+              name: "Orchestrated Builder",
+              projectId: "project-local",
+              preview: "Waiting for work",
+              status: "active",
+              workdir: "/repo",
+            }),
+          ],
+        },
+      });
+      vi.stubGlobal("EventSource", EventSourceMock as unknown as typeof EventSource);
+      vi.stubGlobal("ResizeObserver", ResizeObserverMock as unknown as typeof ResizeObserver);
+      const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
+      HTMLElement.prototype.scrollIntoView = vi.fn();
+
+      try {
+        await renderApp();
+
+        const eventSource = EventSourceMock.instances[0];
+        if (!eventSource) {
+          throw new Error("Event source not created");
+        }
+        act(() => {
+          eventSource.dispatchOpen();
+          eventSource.dispatchNamedEvent("state", {
+            revision: 2,
+            projects: [
+              {
+                id: "project-local",
+                name: "Local Project",
+                rootPath: "/repo",
+                remoteId: "local",
+              },
+            ],
+            sessions: [],
+          });
+        });
+        await settleAsyncUi();
+
+        await clickAndSettle(await screen.findByRole("button", { name: "Open preferences" }));
+        await clickAndSettle(screen.getByRole("tab", { name: "Orchestrators" }));
+        expect(await screen.findByDisplayValue("Delivery Flow")).toBeInTheDocument();
+
+        const templateProjectSelect = screen.getByLabelText("Project", {
+          selector: "select#orchestrator-template-project",
+        });
+        fireEvent.change(templateProjectSelect, { target: { value: "project-local" } });
+        expect(templateProjectSelect).toHaveValue("project-local");
+        const runButton = document.querySelector<HTMLButtonElement>(".orchestrator-run-button");
+        if (!runButton) {
+          throw new Error("Run button not found");
+        }
+        expect(runButton).toBeEnabled();
+        await clickAndSettle(runButton);
+
+        await waitFor(() => {
+          expect(createOrchestratorInstanceSpy).toHaveBeenCalledWith("delivery-flow", "project-local");
+        });
+        expect(await screen.findByText("Orchestrated Builder")).toBeInTheDocument();
+
+        act(() => {
+          eventSource.dispatchNamedEvent("delta", {
+            type: "messageCreated",
+            revision: 4,
+            sessionId: "session-orchestrated",
+            messageId: "message-1",
+            messageIndex: 0,
+            message: {
+              id: "message-1",
+              type: "text",
+              timestamp: "09:07",
+              author: "assistant",
+              text: "Orchestration delta applied.",
+            },
+            preview: "Orchestration delta applied.",
+            status: "active",
+          });
+        });
+
+        await screen.findByText("Orchestration delta applied.");
+        expect(fetchStateSpy).not.toHaveBeenCalled();
+      } finally {
+        HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
+        fetchStateSpy.mockRestore();
+        fetchWorkspaceLayoutSpy.mockRestore();
+        saveWorkspaceLayoutSpy.mockRestore();
+        fetchTemplatesSpy.mockRestore();
+        createOrchestratorInstanceSpy.mockRestore();
+        restoreGlobal("EventSource", originalEventSource);
+        restoreGlobal("ResizeObserver", originalResizeObserver);
+      }
+    });
+  });
+
   it("filters sessions from the control panel project selector", async () => {
     await withSuppressedActWarnings(async () => {
     const originalFetch = globalThis.fetch;
@@ -1266,6 +1577,92 @@ describe("App", () => {
       restoreGlobal("EventSource", originalEventSource);
       restoreGlobal("ResizeObserver", originalResizeObserver);
     }
+    });
+  });
+
+  it("keeps standalone project tabs independent from the docked control panel scope", async () => {
+    await withSuppressedActWarnings(async () => {
+      const originalFetch = globalThis.fetch;
+      const originalEventSource = globalThis.EventSource;
+      const originalResizeObserver = globalThis.ResizeObserver;
+      const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url === "/api/state") {
+          return jsonResponse({
+            revision: 1,
+            projects: [
+              {
+                id: "project-api",
+                name: "API",
+                rootPath: "/projects/api",
+              },
+              {
+                id: "project-web",
+                name: "Web",
+                rootPath: "/projects/web",
+              },
+            ],
+            sessions: [
+              makeSession("session-web", {
+                name: "Web Session",
+                projectId: "project-web",
+                workdir: "/projects/web",
+              }),
+              makeSession("session-api", {
+                name: "API Session",
+                projectId: "project-api",
+                workdir: "/projects/api",
+              }),
+            ],
+          });
+        }
+
+        throw new Error(`Unexpected fetch: ${url}`);
+      });
+
+      vi.stubGlobal("fetch", fetchMock);
+      vi.stubGlobal("EventSource", EventSourceMock as unknown as typeof EventSource);
+      vi.stubGlobal("ResizeObserver", ResizeObserverMock as unknown as typeof ResizeObserver);
+      const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
+      HTMLElement.prototype.scrollIntoView = vi.fn();
+
+      try {
+        await renderApp();
+        const eventSource = EventSourceMock.instances[0];
+        expect(eventSource).toBeTruthy();
+        act(() => {
+          eventSource.dispatchError();
+        });
+        await settleAsyncUi();
+
+        await clickAndSettle(await screen.findByRole("button", { name: "Projects" }));
+        await clickAndSettle(await screen.findByRole("button", { name: "Open tab" }));
+
+        const projectSurfaces = Array.from(document.querySelectorAll(".project-controls"));
+        const standaloneProjectsSurface = projectSurfaces[projectSurfaces.length - 1] ?? null;
+        if (!(standaloneProjectsSurface instanceof HTMLElement)) {
+          throw new Error("Standalone projects surface not found");
+        }
+
+        const apiRowLabel = within(standaloneProjectsSurface).getByText("API");
+        const apiRowButton = apiRowLabel.closest("button");
+        if (!apiRowButton) {
+          throw new Error("Standalone API project row not found");
+        }
+
+        await clickAndSettle(apiRowButton);
+        expect(apiRowButton).toHaveClass("selected");
+
+        await clickAndSettle(await screen.findByRole("button", { name: "Sessions" }));
+        expect(screen.getByRole("combobox", { name: "Project" })).toHaveTextContent("All projects");
+        expect(screen.getByText("Web Session")).toBeInTheDocument();
+        expect(screen.getByText("API Session")).toBeInTheDocument();
+      } finally {
+        HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
+        restoreGlobal("fetch", originalFetch);
+        restoreGlobal("EventSource", originalEventSource);
+        restoreGlobal("ResizeObserver", originalResizeObserver);
+      }
     });
   });
 
@@ -1632,6 +2029,113 @@ describe("App", () => {
       }
     });
   });
+  it("accepts control panel launcher drags in the pane body when dragover only exposes text/plain", async () => {
+    await withSuppressedActWarnings(async () => {
+      const originalFetch = globalThis.fetch;
+      const originalEventSource = globalThis.EventSource;
+      const originalResizeObserver = globalThis.ResizeObserver;
+      const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const requestUrl = new URL(String(input), "http://localhost");
+        if (requestUrl.pathname === "/api/state") {
+          return jsonResponse({
+            revision: 1,
+            projects: [
+              {
+                id: "project-termal",
+                name: "TermAl",
+                rootPath: "/projects/termal",
+              },
+            ],
+            sessions: [
+              makeSession("session-1", {
+                name: "Session 1",
+                projectId: "project-termal",
+                workdir: "/projects/termal",
+              }),
+            ],
+          });
+        }
+
+        if (requestUrl.pathname.startsWith("/api/workspaces/")) {
+          if ((init?.method ?? "GET").toUpperCase() === "PUT") {
+            return jsonResponse({ ok: true });
+          }
+
+          return new Response("", { status: 404 });
+        }
+
+        throw new Error(`Unexpected fetch: ${requestUrl.pathname}${requestUrl.search}`);
+      });
+
+      window.localStorage.clear();
+      vi.stubGlobal("fetch", fetchMock);
+      vi.stubGlobal("EventSource", EventSourceMock as unknown as typeof EventSource);
+      vi.stubGlobal("ResizeObserver", ResizeObserverMock as unknown as typeof ResizeObserver);
+      const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
+      HTMLElement.prototype.scrollIntoView = vi.fn();
+
+      try {
+        await renderApp();
+        const eventSource = EventSourceMock.instances[0];
+        expect(eventSource).toBeTruthy();
+        act(() => {
+          eventSource.dispatchError();
+        });
+        await settleAsyncUi();
+
+        const sessionList = document.querySelector(".session-list");
+        if (!(sessionList instanceof HTMLDivElement)) {
+          throw new Error("Session list not found");
+        }
+
+        const sessionRowLabel = await within(sessionList).findByText("Session 1");
+        const sessionRowButton = sessionRowLabel.closest("button");
+        if (!sessionRowButton) {
+          throw new Error("Session row button not found");
+        }
+
+        await clickAndSettle(sessionRowButton);
+
+        const dock = await screen.findByRole("navigation", { name: "Control panel dock" });
+        const sectionButton = await within(dock).findByRole("button", { name: "Sessions" });
+        const dataTransfer = createDragDataTransfer();
+
+        await act(async () => {
+          fireEvent.dragStart(sectionButton, { dataTransfer });
+        });
+
+        const reducedMimeDataTransfer = createReducedMimeDragDataTransfer(dataTransfer);
+        const workspaceTabList = screen.getAllByRole("tablist", { name: "Tile tabs" }).find((tabList) =>
+          within(tabList).queryByRole("tab", { name: /Session 1/i }),
+        );
+        if (!(workspaceTabList instanceof HTMLDivElement)) {
+          throw new Error("Workspace tab list not found");
+        }
+        const workspacePane = workspaceTabList.closest(".workspace-pane");
+        if (!(workspacePane instanceof HTMLElement)) {
+          throw new Error("Workspace pane not found");
+        }
+
+        await act(async () => {
+          fireEvent.dragEnter(workspacePane, { clientX: 240, clientY: 220, dataTransfer: reducedMimeDataTransfer });
+          fireEvent.dragOver(workspacePane, { clientX: 240, clientY: 220, dataTransfer: reducedMimeDataTransfer });
+          fireEvent.drop(workspacePane, { clientX: 240, clientY: 220, dataTransfer: reducedMimeDataTransfer });
+          fireEvent.dragEnd(sectionButton, { dataTransfer });
+        });
+        await settleAsyncUi();
+
+        await waitFor(() => {
+          expect(screen.getAllByRole("tab").some((tab) => /Sessions/i.test(tab.textContent ?? ""))).toBe(true);
+        });
+      } finally {
+        window.localStorage.clear();
+        HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
+        restoreGlobal("fetch", originalFetch);
+        restoreGlobal("EventSource", originalEventSource);
+        restoreGlobal("ResizeObserver", originalResizeObserver);
+      }
+    });
+  });
   it("drops control panel dock sections into the tab rail without splitting the pane", async () => {
     await withSuppressedActWarnings(async () => {
       const originalFetch = globalThis.fetch;
@@ -1765,7 +2269,7 @@ describe("App", () => {
       }
     });
   });
-  it("switches the control panel project when selecting a project-scoped tab", async () => {
+  it("keeps the control panel project aligned with the session when selecting a project-scoped tab", async () => {
     await withSuppressedActWarnings(async () => {
       const originalFetch = globalThis.fetch;
       const originalEventSource = globalThis.EventSource;
@@ -1918,7 +2422,7 @@ describe("App", () => {
         expect(within(getControlPanelShell()).getByRole("combobox", { name: "Project" })).toHaveTextContent("TermAl");
 
         await clickAndSettle(within(sessionTablist).getByRole("tab", { name: /Git: api/i }));
-        expect(within(getControlPanelShell()).getByRole("combobox", { name: "Project" })).toHaveTextContent("API");
+        expect(within(getControlPanelShell()).getByRole("combobox", { name: "Project" })).toHaveTextContent("TermAl");
       } finally {
         window.localStorage.clear();
         HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
@@ -2892,6 +3396,17 @@ describe("App", () => {
       });
       await screen.findAllByText("Remote Session");
 
+      const sessionList = document.querySelector(".session-list");
+      if (!(sessionList instanceof HTMLDivElement)) {
+        throw new Error("Session list not found");
+      }
+      const sessionRowLabel = await within(sessionList).findByText("Remote Session");
+      const sessionRowButton = sessionRowLabel.closest("button");
+      if (!sessionRowButton) {
+        throw new Error("Remote session row button not found");
+      }
+      await clickAndSettle(sessionRowButton);
+
       await openCreateSessionDialog();
       const createSessionDialog = screen.getByRole("dialog", { name: "New session" });
       const projectCombobox = within(createSessionDialog).getByRole("combobox", {
@@ -3145,3 +3660,4 @@ describe("App", () => {
     expect(secondAttempt.warning).toBeNull();
   });
 });
+

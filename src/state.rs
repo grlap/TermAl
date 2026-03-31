@@ -2150,6 +2150,9 @@ impl AppState {
         if !record.runtime.matches_runtime_token(token) {
             return Ok(());
         }
+        if record.runtime_stop_in_progress {
+            return Ok(());
+        }
 
         let next_state = normalized_codex_thread_state(
             record.session.agent,
@@ -2359,6 +2362,7 @@ impl AppState {
         let record = &mut inner.sessions[index];
         let had_changes = !matches!(record.runtime, SessionRuntime::None)
             || record.runtime_reset_required
+            || record.runtime_stop_in_progress
             || has_pending_requests(record);
         if !had_changes {
             return Ok(());
@@ -2366,6 +2370,7 @@ impl AppState {
 
         record.runtime = SessionRuntime::None;
         record.runtime_reset_required = false;
+        record.runtime_stop_in_progress = false;
         record.active_turn_start_message_count = None;
         clear_all_pending_requests(record);
         self.commit_locked(&mut inner)?;
@@ -2387,6 +2392,9 @@ impl AppState {
             let message_id = (!cleaned.is_empty()).then(|| inner.next_message_id());
             let record = &mut inner.sessions[index];
             if !record.runtime.matches_runtime_token(token) {
+                return Ok(());
+            }
+            if record.runtime_stop_in_progress {
                 return Ok(());
             }
 
@@ -2441,6 +2449,9 @@ impl AppState {
             if !record.runtime.matches_runtime_token(token) {
                 return Ok(());
             }
+            if record.runtime_stop_in_progress {
+                return Ok(());
+            }
 
             matches!(
                 record.session.messages.last(),
@@ -2490,6 +2501,9 @@ impl AppState {
             if !record.runtime.matches_runtime_token(token) {
                 return Ok(());
             }
+            if record.runtime_stop_in_progress {
+                return Ok(());
+            }
 
             record.session.status = SessionStatus::Error;
             if !cleaned.is_empty() {
@@ -2524,6 +2538,9 @@ impl AppState {
                 .ok_or_else(|| anyhow!("session `{session_id}` not found"))?;
             let record = &mut inner.sessions[index];
             if !record.runtime.matches_runtime_token(token) {
+                return Ok(());
+            }
+            if record.runtime_stop_in_progress {
                 return Ok(());
             }
 
@@ -2572,6 +2589,9 @@ impl AppState {
             if !matches_runtime {
                 return Ok(());
             }
+            if inner.sessions[index].runtime_stop_in_progress {
+                return Ok(());
+            }
             let was_busy = matches!(
                 inner.sessions[index].session.status,
                 SessionStatus::Active | SessionStatus::Approval
@@ -2600,6 +2620,8 @@ impl AppState {
                 let record = &mut inner.sessions[index];
                 record.runtime = SessionRuntime::None;
                 record.runtime_reset_required = false;
+                record.runtime_stop_in_progress = false;
+                cancel_pending_interaction_messages(&mut record.session.messages);
                 clear_all_pending_requests(record);
 
                 if let Some(detail) = detail.as_ref() {
@@ -2884,12 +2906,16 @@ impl AppState {
         if self.remote_session_target(session_id)?.is_some() {
             return self.proxy_remote_stop_session(session_id);
         }
-        let runtime_to_stop = {
+        let (runtime_to_stop, stop_failure_is_best_effort) = {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
             let index = inner
                 .find_visible_session_index(session_id)
                 .ok_or_else(|| ApiError::not_found("session not found"))?;
             let record = &mut inner.sessions[index];
+
+            if record.runtime_stop_in_progress {
+                return Err(ApiError::conflict("session is already stopping"));
+            }
 
             if !matches!(
                 record.session.status,
@@ -2897,8 +2923,6 @@ impl AppState {
             ) {
                 return Err(ApiError::conflict("session is not currently running"));
             }
-
-            cancel_pending_interaction_messages(&mut record.session.messages);
 
             let runtime = match &record.runtime {
                 SessionRuntime::Claude(handle) => KillableRuntime::Claude(handle.clone()),
@@ -2908,21 +2932,32 @@ impl AppState {
                     return Err(ApiError::conflict("session is not currently running"));
                 }
             };
+            let stop_failure_is_best_effort = runtime.stop_failure_is_best_effort();
 
-            record.session.status = SessionStatus::Idle;
-            record.session.preview = "Stopping turn\u{2026}".to_owned();
-            self.commit_locked(&mut inner).map_err(|err| {
-                ApiError::internal(format!("failed to persist session state: {err:#}"))
-            })?;
+            // Preserve the public session status until the stop succeeds so borrowed state reads
+            // never observe a contradictory transient Idle snapshot while shutdown is still pending.
+            record.runtime_stop_in_progress = true;
 
-            runtime
+            (runtime, stop_failure_is_best_effort)
         };
 
         if let Err(err) = shutdown_removed_runtime(runtime_to_stop, &format!("session `{session_id}`"))
         {
-            eprintln!(
-                "session cleanup warning> failed to stop session `{session_id}` cleanly: {err:#}"
-            );
+            if stop_failure_is_best_effort {
+                eprintln!(
+                    "session cleanup warning> failed to stop session `{session_id}` cleanly: {err:#}"
+                );
+            } else {
+                let mut inner = self.inner.lock().expect("state mutex poisoned");
+                let index = inner
+                    .find_visible_session_index(session_id)
+                    .ok_or_else(|| ApiError::not_found("session not found"))?;
+                let record = &mut inner.sessions[index];
+                record.runtime_stop_in_progress = false;
+                return Err(ApiError::internal(format!(
+                    "failed to stop session `{session_id}` cleanly: {err:#}"
+                )));
+            }
         }
         let should_dispatch_next = {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
@@ -2934,6 +2969,8 @@ impl AppState {
                 let record = &mut inner.sessions[index];
                 record.runtime = SessionRuntime::None;
                 record.runtime_reset_required = false;
+                record.runtime_stop_in_progress = false;
+                cancel_pending_interaction_messages(&mut record.session.messages);
                 clear_all_pending_requests(record);
                 record.session.status = SessionStatus::Idle;
                 record.session.preview = "Turn stopped by user.".to_owned();
@@ -4595,6 +4632,7 @@ impl StateInner {
             remote_session_id: None,
             runtime: SessionRuntime::None,
             runtime_reset_required: false,
+            runtime_stop_in_progress: false,
             hidden: false,
             session: Session {
                 id: format!("session-{number}"),
@@ -5104,6 +5142,7 @@ impl PersistedSessionRecord {
             remote_session_id: self.remote_session_id,
             runtime: SessionRuntime::None,
             runtime_reset_required: false,
+            runtime_stop_in_progress: false,
             hidden: false,
             session,
         };
@@ -5136,6 +5175,7 @@ struct SessionRecord {
     remote_session_id: Option<String>,
     runtime: SessionRuntime,
     runtime_reset_required: bool,
+    runtime_stop_in_progress: bool,
     hidden: bool,
     session: Session,
 }
@@ -5159,6 +5199,7 @@ fn reset_hidden_claude_spare_record(record: &mut SessionRecord) {
     record.queued_prompts.clear();
     record.message_positions.clear();
     record.runtime_reset_required = false;
+    record.runtime_stop_in_progress = false;
     record.active_turn_start_message_count = None;
 }
 
@@ -6762,6 +6803,12 @@ enum KillableRuntime {
     Acp(AcpRuntimeHandle),
 }
 
+impl KillableRuntime {
+    fn stop_failure_is_best_effort(&self) -> bool {
+        matches!(self, Self::Codex(handle) if handle.shared_session.is_some())
+    }
+}
+
 fn shutdown_removed_runtime(runtime: KillableRuntime, context: &str) -> Result<()> {
     match runtime {
         KillableRuntime::Codex(handle) => {
@@ -6819,7 +6866,51 @@ impl SessionRuntime {
     }
 }
 
+#[cfg(test)]
+#[derive(Clone)]
+struct ForcedKillChildProcessFailure {
+    label: String,
+    process_ptr: usize,
+}
+
+#[cfg(test)]
+fn forced_kill_child_process_failure() -> &'static Mutex<Option<ForcedKillChildProcessFailure>> {
+    static FORCED_KILL_CHILD_PROCESS_FAILURE: std::sync::OnceLock<
+        Mutex<Option<ForcedKillChildProcessFailure>>,
+    > = std::sync::OnceLock::new();
+    FORCED_KILL_CHILD_PROCESS_FAILURE.get_or_init(|| Mutex::new(None))
+}
+
+#[cfg(test)]
+fn set_test_kill_child_process_failure(label: Option<&str>, process: Option<&Arc<SharedChild>>) {
+    *forced_kill_child_process_failure()
+        .lock()
+        .expect("forced kill-child-process failure mutex poisoned") =
+        match (label, process) {
+            (Some(label), Some(process)) => Some(ForcedKillChildProcessFailure {
+                label: label.to_owned(),
+                process_ptr: Arc::as_ptr(process) as usize,
+            }),
+            _ => None,
+        };
+}
+
 fn kill_child_process(process: &Arc<SharedChild>, label: &str) -> Result<()> {
+    #[cfg(test)]
+    {
+        let forced_failure = forced_kill_child_process_failure()
+            .lock()
+            .expect("forced kill-child-process failure mutex poisoned")
+            .clone();
+        if let Some(forced_failure) = forced_failure {
+            if forced_failure.label == label
+                && forced_failure.process_ptr == Arc::as_ptr(process) as usize
+            {
+                return Err(anyhow!("forced {label} kill failure"));
+            }
+        }
+    }
+
     if wait_for_shared_child_exit_timeout(
         process,
         Duration::from_millis(50),
@@ -6884,3 +6975,4 @@ fn wait_for_shared_child_exit_timeout(
         )),
     }
 }
+

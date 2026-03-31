@@ -83,6 +83,7 @@ export function PaneTabs({
   remoteLookup,
   sessionLookup,
   draggedTab,
+  getKnownDraggedTab,
   onSelectTab,
   onCloseTab,
   onTabDragStart,
@@ -99,6 +100,7 @@ export function PaneTabs({
   remoteLookup: Map<string, RemoteConfig>;
   sessionLookup: Map<string, Session>;
   draggedTab: WorkspaceTabDrag | null;
+  getKnownDraggedTab: () => WorkspaceTabDrag | null;
   onSelectTab: (paneId: string, tabId: string) => void;
   onCloseTab: (paneId: string, tabId: string) => void;
   onTabDragStart: (drag: WorkspaceTabDrag) => void;
@@ -389,17 +391,19 @@ export function PaneTabs({
   }
 
   function handleTabRailDragOver(event: ReactDragEvent<HTMLDivElement>) {
-    const currentDraggedTab = draggedTab ?? readWorkspaceTabDragData(event.dataTransfer);
+    const knownDraggedTab = getKnownDraggedTab();
+    const currentDraggedTab = knownDraggedTab ?? readWorkspaceTabDragData(event.dataTransfer);
     const hasSessionDragType = !paneHasControlPanel && dataTransferHasSessionDragType(event.dataTransfer);
-    // During dragover, browsers restrict getData() so readWorkspaceTabDragData may return null.
-    // Fall back to checking dataTransfer.types for the tab drag MIME type.
-    // During dragover, browsers protect drag data — getData() returns empty and some
-    // browsers omit custom MIME types from the types array.  Fall back to checking for
-    // text/plain (which we always set alongside the custom type).
-    const hasTabDragType = !currentDraggedTab &&
+    const dragTypes = event.dataTransfer?.types;
+    // During dragover, some browsers expose only text/plain even for real TermAl drags.
+    // Allow that fallback only when the app already knows this drag originated from a workspace tab.
+    const hasTabDragType =
+      !currentDraggedTab &&
       !paneHasControlPanel &&
-      (event.dataTransfer?.types?.includes(TAB_DRAG_MIME_TYPE) ||
-       event.dataTransfer?.types?.includes("text/plain"));
+      Boolean(
+        dragTypes?.includes(TAB_DRAG_MIME_TYPE) ||
+        (knownDraggedTab && dragTypes?.includes("text/plain")),
+      );
     const canDropCurrentTab =
       currentDraggedTab !== null &&
       currentDraggedTab.tab.kind !== "controlPanel" &&
@@ -431,12 +435,17 @@ export function PaneTabs({
   }
 
   function handleTabRailDrop(event: ReactDragEvent<HTMLDivElement>) {
-    const currentDraggedTab = draggedTab ?? readWorkspaceTabDragData(event.dataTransfer);
+    const knownDraggedTab = getKnownDraggedTab();
+    const currentDraggedTab = knownDraggedTab ?? readWorkspaceTabDragData(event.dataTransfer);
     const hasSessionDragType = !paneHasControlPanel && dataTransferHasSessionDragType(event.dataTransfer);
-    const hasTabDragType = !currentDraggedTab &&
+    const dragTypes = event.dataTransfer?.types;
+    const hasTabDragType =
+      !currentDraggedTab &&
       !paneHasControlPanel &&
-      (event.dataTransfer?.types?.includes(TAB_DRAG_MIME_TYPE) ||
-       event.dataTransfer?.types?.includes("text/plain"));
+      Boolean(
+        dragTypes?.includes(TAB_DRAG_MIME_TYPE) ||
+        (knownDraggedTab && dragTypes?.includes("text/plain")),
+      );
     const canDropCurrentTab =
       currentDraggedTab !== null &&
       currentDraggedTab.tab.kind !== "controlPanel" &&
@@ -1708,7 +1717,6 @@ function TabKindIcon({ kind }: { kind: string }) {
         </svg>
       );
     case "orchestratorList":
-    case "orchestratorCanvas":
       return (
         <svg {...iconProps}>
           <circle cx="8" cy="4.5" r="2.2" fill="none" stroke="currentColor" strokeWidth="1.3" />

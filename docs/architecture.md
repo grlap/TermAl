@@ -10,10 +10,10 @@
 Browser (React)                      Rust Backend (axum)
 ┌──────────────────────┐             ┌──────────────────────────────────┐
 │  App.tsx             │  SSE /api   │  AppState                        │
-│  ├── Sidebar         │◄═══════════╡  ├── StateInner (Mutex)          │
-│  ├── Workspace       │  events +   │  │   ├── sessions: Vec<Record>  │
-│  │   ├── Pane[]      │  deltas     │  │   ├── revision: u64          │
-│  │   └── Tabs[]      │             │  │   └── codex: CodexState      │
+│  ├── Sidebar         │◄════════════╡  ├── StateInner (Mutex)          │
+│  ├── Workspace       │  events +   │  │   ├── sessions: Vec<Record>   │
+│  │   ├── Pane[]      │  deltas     │  │   ├── revision: u64           │
+│  │   └── Tabs[]      │             │  │   └── codex: CodexState       │
 │  └── Composer        │             │  ├── state_events (broadcast)    │
 │                      │  REST /api  │  ├── delta_events (broadcast)    │
 │  api.ts              │────────────>│  └── persistence_path            │
@@ -31,8 +31,7 @@ Browser (React)                      Rust Backend (axum)
 **Persistence:** Single JSON file at `~/.termal/sessions.json`.
 **Real-time:** Server-Sent Events with monotonic revision counter for ordering.
 
-**Current status:** The implementation in this document is the Phase 1 local-only
-architecture.
+**Current status:** The current implementation uses server-backed workspace layouts with per-workspace local cache warm starts.
 
 **Remote direction:** The long-term remote model keeps the browser on a single
 local TermAl server. That local server stores preferences, manages remote
@@ -112,6 +111,9 @@ All routes are under `/api`. The backend serves JSON; the frontend proxies throu
 | GET | `/api/health` | Health check |
 | GET | `/api/state` | Full state snapshot |
 | GET | `/api/events` | SSE stream (state + delta events) |
+| GET | `/api/workspaces` | List saved workspace layout summaries |
+| GET | `/api/workspaces/{id}` | Read a persisted workspace layout |
+| PUT | `/api/workspaces/{id}` | Save a persisted workspace layout |
 | POST | `/api/settings` | Update app-wide preferences/settings |
 | GET | `/api/instructions/search` | Search instruction files for a session/workdir |
 | GET | `/api/reviews/{changeSetId}` | Read a persisted diff review document |
@@ -171,7 +173,7 @@ On broadcast channel lag, the backend falls back to sending a full state snapsho
 └── sessions.json    # PersistedState (JSON)
 ```
 
-`PersistedState` is a projection of `StateInner` that excludes runtime handles, pending approval maps, and empty collections. It stores the revision counter, session configs, message history, and Codex state. On startup, the backend loads this file and reconstructs `StateInner`.
+`PersistedState` is a projection of `StateInner` that excludes runtime handles, pending approval maps, and empty collections. It stores the revision counter, session configs, message history, Codex state, and persisted workspace layout documents keyed by workspace ID. On startup, the backend loads this file and reconstructs `StateInner`.
 
 ---
 
@@ -198,7 +200,7 @@ local server remains the control plane and exposes the single browser-facing
 └──────────────┬───────────────┘
                │ HTTP + SSE
                ▼
-┌──────────────────────────────────────────────────────────────┐
+┌─────────────────────────────────────────────────────────────┐
 │ Local TermAl Server                                         │
 │ Control plane                                               │
 │ - stores preferences and remote config                      │
@@ -206,7 +208,7 @@ local server remains the control plane and exposes the single browser-facing
 │ - maps project -> remoteId                                  │
 │ - rewrites ids and aggregates state                         │
 │ - supervises SSH sessions and remote servers                │
-└──────────────┬───────────────────────────────┬───────────────┘
+└──────────────┬───────────────────────────────┬──────────────┘
                │                               │
                │ local execution               │ SSH bootstrap + persistent tunnel
                ▼                               ▼
@@ -545,7 +547,7 @@ immediately.
 No external state library. State lives in `App.tsx` via `useState` and `useRef`:
 
 - `sessions` — canonical session list from backend
-- `workspace` — pane/tab layout (local, not persisted to backend)
+- `workspace`: pane/tab layout for the active workspace ID, cached locally and persisted through `/api/workspaces/{id}`
 - `codexState` — shared Codex rate-limit info
 - `draftsBySessionId` — per-session message drafts (local)
 - `draftAttachmentsBySessionId` — per-session image attachments (local)

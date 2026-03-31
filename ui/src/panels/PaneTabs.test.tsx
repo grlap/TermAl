@@ -9,6 +9,7 @@ import {
 } from "../api";
 import { copyTextToClipboard } from "../clipboard";
 import { SESSION_DRAG_MIME_TYPE } from "../session-drag";
+import type { WorkspaceTabDrag } from "../tab-drag";
 import { PaneTabs } from "./PaneTabs";
 import type { CodexState, Project, RemoteConfig, Session } from "../types";
 import type { WorkspaceTab } from "../workspace";
@@ -416,6 +417,88 @@ describe("PaneTabs", () => {
     expect(onTabDrop).toHaveBeenCalledWith("pane-1", "tabs", 1, dataTransfer);
   });
 
+  it("ignores unrelated text drags on the tab rail", () => {
+    const onTabDrop = vi.fn();
+
+    renderPaneTabs({
+      onTabDrop,
+      sessionLookup: new Map([["session-1", makeSession("session-1", "C:/repo", "Session One")]]),
+      tabs: [
+        {
+          id: "tab-session-1",
+          kind: "session",
+          sessionId: "session-1",
+        },
+      ],
+    });
+
+    const dataTransfer = {
+      dropEffect: "move",
+      effectAllowed: "all",
+      getData: () => "",
+      setData: () => {},
+      types: ["text/plain"],
+    };
+
+    const tablist = screen.getByRole("tablist", { name: "Tile tabs" });
+    fireEvent.dragOver(tablist, { clientX: 180, dataTransfer });
+
+    expect(tablist.querySelector(".pane-tab-shell.drop-before")).toBeNull();
+    expect(tablist.querySelector(".pane-tab-shell.drop-after")).toBeNull();
+
+    fireEvent.drop(tablist, { clientX: 180, dataTransfer });
+
+    expect(onTabDrop).not.toHaveBeenCalled();
+  });
+
+  it("accepts a known workspace tab drag when browsers only expose text/plain", () => {
+    const onTabDrop = vi.fn();
+    const knownDraggedTab: WorkspaceTabDrag = {
+      dragId: "drag-1",
+      sourceWindowId: "window-2",
+      sourcePaneId: "pane-2",
+      tabId: "tab-session-2",
+      tab: {
+        id: "tab-session-2",
+        kind: "session",
+        sessionId: "session-2",
+      },
+    };
+
+    renderPaneTabs({
+      getKnownDraggedTab: () => knownDraggedTab,
+      onTabDrop,
+      sessionLookup: new Map([
+        ["session-1", makeSession("session-1", "C:/repo", "Session One")],
+        ["session-2", makeSession("session-2", "C:/repo", "Session Two")],
+      ]),
+      tabs: [
+        {
+          id: "tab-session-1",
+          kind: "session",
+          sessionId: "session-1",
+        },
+      ],
+    });
+
+    const dataTransfer = {
+      dropEffect: "move",
+      effectAllowed: "all",
+      getData: () => "",
+      setData: () => {},
+      types: ["text/plain"],
+    };
+
+    const tablist = screen.getByRole("tablist", { name: "Tile tabs" });
+    fireEvent.dragOver(tablist, { clientX: 180, dataTransfer });
+
+    expect(tablist.querySelector(".pane-tab-shell.drop-before, .pane-tab-shell.drop-after")).not.toBeNull();
+
+    fireEvent.drop(tablist, { clientX: 180, dataTransfer });
+
+    expect(onTabDrop).toHaveBeenCalledWith("pane-1", "tabs", expect.any(Number), dataTransfer);
+  });
+
   it("shows project and remote info in the status tooltip", async () => {
     renderPaneTabs({
       projectLookup: new Map([
@@ -612,6 +695,7 @@ function renderPaneTabs({
   onTabDrop = vi.fn(),
   onRenameSessionRequest = vi.fn(),
   onSelectTab = vi.fn(),
+  getKnownDraggedTab = () => null,
   projectLookup = new Map<string, Project>(),
   remoteLookup = new Map<string, RemoteConfig>(),
   sessionLookup = new Map<string, Session>(),
@@ -632,6 +716,7 @@ function renderPaneTabs({
     trigger?: HTMLElement | null,
   ) => void;
   onSelectTab?: (paneId: string, tabId: string) => void;
+  getKnownDraggedTab?: () => WorkspaceTabDrag | null;
   projectLookup?: Map<string, Project>;
   remoteLookup?: Map<string, RemoteConfig>;
   sessionLookup?: Map<string, Session>;
@@ -642,6 +727,7 @@ function renderPaneTabs({
       activeTabId={tabs[0]?.id ?? null}
       codexState={codexState}
       draggedTab={null}
+      getKnownDraggedTab={getKnownDraggedTab}
       onCloseTab={onCloseTab}
       onRenameSessionRequest={onRenameSessionRequest}
       onSelectTab={onSelectTab}

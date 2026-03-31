@@ -36,6 +36,9 @@ fn default_next_orchestrator_template_number() -> usize {
     1
 }
 
+const MAX_ORCHESTRATOR_TEMPLATE_SESSIONS: usize = 50;
+const MAX_ORCHESTRATOR_TEMPLATE_TRANSITIONS: usize = 200;
+
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct OrchestratorTemplateStore {
@@ -354,9 +357,22 @@ fn normalize_orchestrator_template_draft(
 ) -> Result<OrchestratorTemplateDraft, ApiError> {
     let name = normalize_required_orchestrator_text(&draft.name, "template name")?;
     let description = draft.description.trim().to_owned();
+    let session_count = draft.sessions.len();
+    let transition_count = draft.transitions.len();
+
+    if session_count > MAX_ORCHESTRATOR_TEMPLATE_SESSIONS {
+        return Err(ApiError::bad_request(format!(
+            "orchestrator templates support at most {MAX_ORCHESTRATOR_TEMPLATE_SESSIONS} sessions"
+        )));
+    }
+    if transition_count > MAX_ORCHESTRATOR_TEMPLATE_TRANSITIONS {
+        return Err(ApiError::bad_request(format!(
+            "orchestrator templates support at most {MAX_ORCHESTRATOR_TEMPLATE_TRANSITIONS} transitions"
+        )));
+    }
 
     let mut session_ids = HashSet::new();
-    let mut sessions = Vec::with_capacity(draft.sessions.len());
+    let mut sessions = Vec::with_capacity(session_count);
     for session in draft.sessions {
         let normalized = normalize_orchestrator_session_template(session)?;
         if !session_ids.insert(normalized.id.clone()) {
@@ -380,7 +396,7 @@ fn normalize_orchestrator_template_draft(
         .collect::<HashSet<_>>();
 
     let mut transition_ids = HashSet::new();
-    let mut transitions = Vec::with_capacity(draft.transitions.len());
+    let mut transitions = Vec::with_capacity(transition_count);
     for transition in draft.transitions {
         let normalized = normalize_orchestrator_transition(transition)?;
         if !transition_ids.insert(normalized.id.clone()) {

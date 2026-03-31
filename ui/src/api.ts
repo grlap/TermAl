@@ -325,10 +325,14 @@ export function saveWorkspaceLayout(
     densityPercent?: number;
     workspace: unknown;
   },
+  options?: {
+    keepalive?: boolean;
+  },
 ) {
   return request<WorkspaceLayoutResponse>(`/api/workspaces/${encodeURIComponent(workspaceId)}`, {
     method: "PUT",
     body: JSON.stringify(payload),
+    keepalive: options?.keepalive,
   });
 }
 
@@ -703,7 +707,7 @@ export function fetchGitStatus(
   return request<GitStatusResponse>(`/api/git/status?${query.toString()}`);
 }
 
-export function fetchGitDiff(payload: {
+export type GitDiffRequestPayload = {
   originalPath?: string | null;
   path: string;
   sectionId: GitDiffSection;
@@ -711,7 +715,9 @@ export function fetchGitDiff(payload: {
   projectId?: string | null;
   statusCode?: string | null;
   workdir: string;
-}) {
+};
+
+export function fetchGitDiff(payload: GitDiffRequestPayload) {
   return request<GitDiffResponse>("/api/git/diff", {
     method: "POST",
     body: JSON.stringify(payload),

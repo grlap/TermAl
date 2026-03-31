@@ -4,18 +4,14 @@ Backlog source: proposed feature brief; not yet linked from `docs/bugs.md`.
 
 ## Problem
 
-TermAl's workspace layout is currently stored only in browser `localStorage`.
-That works for a single browser window, but it breaks down once the user wants
-to spread TermAl across multiple monitors:
+This brief originally described workspace layout as browser-local only. The
+current implementation is more capable: each workspace view is cached per
+workspace in browser `localStorage` and persisted on the backend, and the UI
+now includes a workspace switcher backed by the server.
 
-- two browser windows in the same browser profile fight over one layout key
-- a second browser cannot pick up the same layout state from the server
-- there is no stable workspace identity beyond "whatever this browser last wrote"
-- layout persistence is tied to a device/browser cache instead of the TermAl
-  server that already owns the live sessions
-
-The result is that the app state is shared, but the workspace shell around it is
-not. That makes multi-monitor usage awkward.
+The remaining problem is documentation clarity. Readers need the actual
+multi-browser model and API surface that shipped, including the server list
+route and switcher-driven flow.
 
 ## Core idea
 
@@ -70,8 +66,9 @@ This supports:
 
 ### Local cache
 
-The browser may still keep a per-workspace local cache as a warm-start fallback,
-but the server is the source of truth.
+The browser still keeps a per-workspace local cache as a warm-start fallback,
+but the server is the source of truth. Same-tab workspace switches should flush
+any pending debounced save before navigation so the backend copy stays current.
 
 ## Data model
 
@@ -107,14 +104,16 @@ Phase 1. The frontend remains responsible for schema validation.
 
 ## API
 
-Phase 1 only needs direct get/put by ID.
+The shipped Phase 1 API includes a list route for the workspace switcher in
+addition to direct get/put by ID.
 
 ```text
+GET /api/workspaces
 GET /api/workspaces/{id}
 PUT /api/workspaces/{id}
 ```
 
-### GET
+### GET `/api/workspaces/{id}`
 
 Returns:
 
@@ -132,7 +131,12 @@ Returns:
 
 If the workspace view does not exist, return `404`.
 
-### PUT
+### GET `/api/workspaces`
+
+Returns a summary list ordered by most recent update. The frontend uses this to
+populate the workspace switcher and to reopen saved browser layouts.
+
+### PUT `/api/workspaces/{id}`
 
 Request:
 
@@ -193,7 +197,7 @@ The existing frontend workspace validation remains the gatekeeper:
 
 - collaborative live layout editing
 - visual presence indicators showing which browser owns which workspace
-- a full "workspace manager" UI for renaming, deleting, and listing views
+- rename/delete management beyond the current switcher list
 - server-side semantic understanding of every workspace tab variant
 
 Those can come later once the basic multi-browser workflow is solid.
@@ -205,8 +209,10 @@ Those can come later once the basic multi-browser workflow is solid.
 3. Generate or read `?workspace=<id>` in the frontend.
 4. Move workspace persistence from one global `localStorage` key to:
    - per-workspace local cache
-   - server-backed get/put
-5. Keep the current layout model and reconciliation logic unchanged.
+   - server-backed list/get/put routes
+5. Add a workspace switcher that can list saved layouts, open another workspace
+   in the current tab, or spawn a new browser window with a fresh workspace ID.
+6. Keep the current layout model and reconciliation logic unchanged.
 
 ## Acceptance criteria
 

@@ -1,4 +1,12 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from "react";
+import {
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type MouseEvent as ReactMouseEvent,
+  type PointerEvent as ReactPointerEvent,
+} from "react";
 
 import { AgentIcon } from "../agent-icon";
 import {
@@ -34,11 +42,22 @@ const DEFAULT_ZOOM = 1;
 const WHEEL_ZOOM_SENSITIVITY = 0.002;
 const PAN_CONTEXT_MENU_SUPPRESS_THRESHOLD_PX = 4;
 const STATE_KEY_PREFIX = "termal-orchestrator-panel-state:";
+const MAX_ORCHESTRATOR_TEMPLATE_SESSIONS = 50;
+const MAX_ORCHESTRATOR_TEMPLATE_TRANSITIONS = 200;
 
-function clampZoom(value: number): number {
-  return Math.round(Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, value)) * 1000) / 1000;
+function getOrchestratorTemplateSessionLimitError() {
+  return `Orchestrator templates support at most ${MAX_ORCHESTRATOR_TEMPLATE_SESSIONS} sessions.`;
 }
 
+function getOrchestratorTemplateTransitionLimitError() {
+  return `Orchestrator templates support at most ${MAX_ORCHESTRATOR_TEMPLATE_TRANSITIONS} transitions.`;
+}
+
+function clampZoom(value: number): number {
+  return (
+    Math.round(Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, value)) * 1000) / 1000
+  );
+}
 type ZoomAnchor = {
   canvasX: number;
   canvasY: number;
@@ -102,7 +121,16 @@ type ConnectionDragState = {
 
 type AnchorSide = OrchestratorTransitionAnchor;
 
-const ANCHOR_SIDES: readonly AnchorSide[] = ["top", "top-right", "right", "bottom-right", "bottom", "bottom-left", "left", "top-left"];
+const ANCHOR_SIDES: readonly AnchorSide[] = [
+  "top",
+  "top-right",
+  "right",
+  "bottom-right",
+  "bottom",
+  "bottom-left",
+  "left",
+  "top-left",
+];
 
 type TransitionGeometry = {
   transition: OrchestratorTemplateTransition;
@@ -138,11 +166,17 @@ export function OrchestratorTemplatesPanel({
   startMode?: "browse" | "edit" | "new";
 }) {
   const [templates, setTemplates] = useState<OrchestratorTemplate[]>([]);
-  const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>(null);
+  const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>(
+    null,
+  );
   const [draft, setDraft] = useState<OrchestratorTemplateDraft>(emptyDraft);
   const [selectedNodeId, setSelectedNodeId_raw] = useState<string | null>(null);
-  const [selectedTransitionId, setSelectedTransitionId_raw] = useState<string | null>(null);
-  function setSelectedNodeId(id: string | null | ((prev: string | null) => string | null)) {
+  const [selectedTransitionId, setSelectedTransitionId_raw] = useState<
+    string | null
+  >(null);
+  function setSelectedNodeId(
+    id: string | null | ((prev: string | null) => string | null),
+  ) {
     setSelectedNodeId_raw(id);
     if (typeof id === "function" ? id(selectedNodeId) : id) {
       setSelectedTransitionId_raw(null);
@@ -156,7 +190,8 @@ export function OrchestratorTemplatesPanel({
   }
   const [dragState, setDragState] = useState<DragState | null>(null);
   const [isPanning, setIsPanning] = useState(false);
-  const [connectionDrag, setConnectionDrag] = useState<ConnectionDragState | null>(null);
+  const [connectionDrag, setConnectionDrag] =
+    useState<ConnectionDragState | null>(null);
   const [zoom, setZoom] = useState(DEFAULT_ZOOM);
   const panDragStateRef = useRef<PanDragState | null>(null);
   const suppressPanContextMenuRef = useRef(false);
@@ -169,10 +204,16 @@ export function OrchestratorTemplatesPanel({
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const isMountedRef = useRef(true);
-  useEffect(() => () => { isMountedRef.current = false; }, []);
+  useEffect(
+    () => () => {
+      isMountedRef.current = false;
+    },
+    [],
+  );
 
   const selectedTemplate = useMemo(
-    () => templates.find((template) => template.id === selectedTemplateId) ?? null,
+    () =>
+      templates.find((template) => template.id === selectedTemplateId) ?? null,
     [selectedTemplateId, templates],
   );
   const renderedSessions = useMemo(
@@ -207,13 +248,31 @@ export function OrchestratorTemplatesPanel({
       }),
     [draft.transitions, sessionLookup],
   );
-  const stateKey = persistenceKey?.trim() ? `${STATE_KEY_PREFIX}${persistenceKey.trim()}` : null;
+  const stateKey = persistenceKey?.trim()
+    ? `${STATE_KEY_PREFIX}${persistenceKey.trim()}`
+    : null;
   const validationError = validateDraft(draft);
-  const referenceDraft = selectedTemplate ? templateToDraft(selectedTemplate) : emptyDraft();
+  const referenceDraft = selectedTemplate
+    ? templateToDraft(selectedTemplate)
+    : emptyDraft();
   const isDirty = JSON.stringify(draft) !== JSON.stringify(referenceDraft);
   const isCanvasMode = startMode !== "browse";
-  const selectedProject = projects.find((project) => project.id === draft.projectId) ?? null;
-  const selectedProjectIsLocal = isLocalRemoteId(selectedProject?.remoteId);
+  const [isRunning, setIsRunning] = useState(false);
+  const hasReachedSessionLimit =
+    draft.sessions.length >= MAX_ORCHESTRATOR_TEMPLATE_SESSIONS;
+  const selectedProject =
+    projects.find((project) => project.id === draft.projectId) ?? null;
+  const selectedProjectIsLocal = selectedProject
+    ? isLocalRemoteId(selectedProject.remoteId)
+    : false;
+  const canRunSelectedTemplate = Boolean(
+    selectedTemplateId &&
+    draft.projectId &&
+    selectedProject &&
+    selectedProjectIsLocal &&
+    !isDirty &&
+    !isRunning,
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -227,7 +286,12 @@ export function OrchestratorTemplatesPanel({
         }
         setTemplates(response.templates);
         const restored = stateKey ? readState(stateKey) : null;
-        const initial = resolveInitialState(response.templates, initialTemplateId, restored, startMode);
+        const initial = resolveInitialState(
+          response.templates,
+          initialTemplateId,
+          restored,
+          startMode,
+        );
         setDraft(initial.draft);
         setSelectedNodeId(initial.selectedNodeId);
         setSelectedTemplateId(initial.selectedTemplateId);
@@ -253,7 +317,11 @@ export function OrchestratorTemplatesPanel({
     }
     window.localStorage.setItem(
       stateKey,
-      JSON.stringify({ draft, selectedNodeId, selectedTemplateId } satisfies PanelState),
+      JSON.stringify({
+        draft,
+        selectedNodeId,
+        selectedTemplateId,
+      } satisfies PanelState),
     );
   }, [draft, isLoading, selectedNodeId, selectedTemplateId, stateKey]);
 
@@ -279,7 +347,9 @@ export function OrchestratorTemplatesPanel({
       }
 
       event.preventDefault();
-      const nextZoom = clampZoom(zoom * Math.exp(-event.deltaY * WHEEL_ZOOM_SENSITIVITY));
+      const nextZoom = clampZoom(
+        zoom * Math.exp(-event.deltaY * WHEEL_ZOOM_SENSITIVITY),
+      );
       if (nextZoom === zoom) {
         return;
       }
@@ -332,11 +402,16 @@ export function OrchestratorTemplatesPanel({
     setStatusMessage(null);
     try {
       if (selectedTemplateId) {
-        const response = await updateOrchestratorTemplate(selectedTemplateId, draft);
+        const response = await updateOrchestratorTemplate(
+          selectedTemplateId,
+          draft,
+        );
         if (!isMountedRef.current) return;
-        setTemplates((current) => current.map((template) => (
-          template.id === response.template.id ? response.template : template
-        )));
+        setTemplates((current) =>
+          current.map((template) =>
+            template.id === response.template.id ? response.template : template,
+          ),
+        );
         setDraft(templateToDraft(response.template));
         setSelectedNodeId(response.template.sessions[0]?.id ?? null);
         setStatusMessage("Template saved.");
@@ -389,17 +464,18 @@ export function OrchestratorTemplatesPanel({
     }
   }
 
-  const [isRunning, setIsRunning] = useState(false);
-
   async function runTemplate() {
-    if (!selectedTemplateId) {
+    if (!selectedTemplateId || !selectedProject || !selectedProjectIsLocal) {
       return;
     }
     setIsRunning(true);
     setErrorMessage(null);
     setStatusMessage(null);
     try {
-      const response = await createOrchestratorInstance(selectedTemplateId, draft.projectId ?? null);
+      const response = await createOrchestratorInstance(
+        selectedTemplateId,
+        draft.projectId ?? null,
+      );
       if (!isMountedRef.current) return;
       onStateUpdated?.(response.state);
       setStatusMessage(`Orchestration started: ${response.orchestrator.id}`);
@@ -418,24 +494,39 @@ export function OrchestratorTemplatesPanel({
   ) {
     setDraft((current) => ({
       ...current,
-      sessions: current.sessions.map((session) => session.id === sessionId ? { ...session, [key]: value } : session),
+      sessions: current.sessions.map((session) =>
+        session.id === sessionId ? { ...session, [key]: value } : session,
+      ),
     }));
   }
 
   function setSessionId(sessionId: string, nextId: string) {
     setDraft((current) => ({
       ...current,
-      sessions: current.sessions.map((session) => session.id === sessionId ? { ...session, id: nextId } : session),
+      sessions: current.sessions.map((session) =>
+        session.id === sessionId ? { ...session, id: nextId } : session,
+      ),
       transitions: current.transitions.map((transition) => ({
         ...transition,
-        fromSessionId: transition.fromSessionId === sessionId ? nextId : transition.fromSessionId,
-        toSessionId: transition.toSessionId === sessionId ? nextId : transition.toSessionId,
+        fromSessionId:
+          transition.fromSessionId === sessionId
+            ? nextId
+            : transition.fromSessionId,
+        toSessionId:
+          transition.toSessionId === sessionId
+            ? nextId
+            : transition.toSessionId,
       })),
     }));
-    setSelectedNodeId((current) => current === sessionId ? nextId : current);
+    setSelectedNodeId((current) => (current === sessionId ? nextId : current));
   }
 
   function addSession() {
+    if (draft.sessions.length >= MAX_ORCHESTRATOR_TEMPLATE_SESSIONS) {
+      setErrorMessage(getOrchestratorTemplateSessionLimitError());
+      return;
+    }
+
     setDraft((current) => {
       const nextSession = createSession(current.sessions);
       setSelectedNodeId(nextSession.id);
@@ -447,9 +538,13 @@ export function OrchestratorTemplatesPanel({
     setDraft((current) => ({
       ...current,
       sessions: current.sessions.filter((session) => session.id !== sessionId),
-      transitions: current.transitions.filter((transition) => transition.fromSessionId !== sessionId && transition.toSessionId !== sessionId),
+      transitions: current.transitions.filter(
+        (transition) =>
+          transition.fromSessionId !== sessionId &&
+          transition.toSessionId !== sessionId,
+      ),
     }));
-    setSelectedNodeId((current) => current === sessionId ? null : current);
+    setSelectedNodeId((current) => (current === sessionId ? null : current));
   }
 
   function setTransitionField<K extends keyof OrchestratorTemplateTransition>(
@@ -459,18 +554,28 @@ export function OrchestratorTemplatesPanel({
   ) {
     setDraft((current) => ({
       ...current,
-      transitions: current.transitions.map((transition) => transition.id === transitionId ? { ...transition, [key]: value } : transition),
+      transitions: current.transitions.map((transition) =>
+        transition.id === transitionId
+          ? { ...transition, [key]: value }
+          : transition,
+      ),
     }));
   }
 
   function addTransition() {
     setDraft((current) => ({
       ...current,
-      transitions: [...current.transitions, createTransition(current.sessions, current.transitions)],
+      transitions: [
+        ...current.transitions,
+        createTransition(current.sessions, current.transitions),
+      ],
     }));
   }
 
-  function startDrag(session: OrchestratorSessionTemplate, event: ReactPointerEvent<HTMLDivElement>) {
+  function startDrag(
+    session: OrchestratorSessionTemplate,
+    event: ReactPointerEvent<HTMLDivElement>,
+  ) {
     if (event.button !== 0) {
       return;
     }
@@ -489,31 +594,61 @@ export function OrchestratorTemplatesPanel({
     });
   }
 
-  function updateDrag(sessionId: string, event: ReactPointerEvent<HTMLDivElement>) {
+  function updateDrag(
+    sessionId: string,
+    event: ReactPointerEvent<HTMLDivElement>,
+  ) {
     setDragState((current) => {
-      if (!current || current.nodeId !== sessionId || current.pointerId !== event.pointerId) {
+      if (
+        !current ||
+        current.nodeId !== sessionId ||
+        current.pointerId !== event.pointerId
+      ) {
         return current;
       }
-      return { ...current, deltaX: event.clientX - current.startClientX, deltaY: event.clientY - current.startClientY };
+      return {
+        ...current,
+        deltaX: event.clientX - current.startClientX,
+        deltaY: event.clientY - current.startClientY,
+      };
     });
   }
 
-  function finishDrag(sessionId: string, event: ReactPointerEvent<HTMLDivElement>, cancelled = false) {
+  function finishDrag(
+    sessionId: string,
+    event: ReactPointerEvent<HTMLDivElement>,
+    cancelled = false,
+  ) {
     if (event.currentTarget.hasPointerCapture(event.pointerId)) {
       event.currentTarget.releasePointerCapture(event.pointerId);
     }
     setDragState((current) => {
-      if (!current || current.nodeId !== sessionId || current.pointerId !== event.pointerId) {
+      if (
+        !current ||
+        current.nodeId !== sessionId ||
+        current.pointerId !== event.pointerId
+      ) {
         return current;
       }
       if (!cancelled) {
-        setSessionField(sessionId, "position", clampPosition(current.originX + current.deltaX, current.originY + current.deltaY));
+        setSessionField(
+          sessionId,
+          "position",
+          clampPosition(
+            current.originX + current.deltaX,
+            current.originY + current.deltaY,
+          ),
+        );
       }
       return null;
     });
   }
 
-  function startConnectionDrag(sessionId: string, side: AnchorSide, event: ReactPointerEvent<HTMLDivElement>) {
+  function startConnectionDrag(
+    sessionId: string,
+    side: AnchorSide,
+    event: ReactPointerEvent<HTMLDivElement>,
+  ) {
     if (event.button !== 0) {
       return;
     }
@@ -563,12 +698,20 @@ export function OrchestratorTemplatesPanel({
     const canvasX = (event.clientX - surfaceRect.left) / zoom;
     const canvasY = (event.clientY - surfaceRect.top) / zoom;
 
-    const fixedSessionId = movingEnd === "from" ? transition.toSessionId : transition.fromSessionId;
-    const fixedAnchorRaw = movingEnd === "from" ? transition.toAnchor : transition.fromAnchor;
-    const movingSessionId = movingEnd === "from" ? transition.fromSessionId : transition.toSessionId;
-    const movingAnchorRaw = movingEnd === "from" ? transition.fromAnchor : transition.toAnchor;
-    const movingAnchor: AnchorSide = isValidAnchor(movingAnchorRaw) ? movingAnchorRaw : "right";
-    const fixedAnchor: AnchorSide = isValidAnchor(fixedAnchorRaw) ? fixedAnchorRaw : "left";
+    const fixedSessionId =
+      movingEnd === "from" ? transition.toSessionId : transition.fromSessionId;
+    const fixedAnchorRaw =
+      movingEnd === "from" ? transition.toAnchor : transition.fromAnchor;
+    const movingSessionId =
+      movingEnd === "from" ? transition.fromSessionId : transition.toSessionId;
+    const movingAnchorRaw =
+      movingEnd === "from" ? transition.fromAnchor : transition.toAnchor;
+    const movingAnchor: AnchorSide = isValidAnchor(movingAnchorRaw)
+      ? movingAnchorRaw
+      : "right";
+    const fixedAnchor: AnchorSide = isValidAnchor(fixedAnchorRaw)
+      ? fixedAnchorRaw
+      : "left";
 
     setConnectionDrag({
       fromSessionId: movingSessionId,
@@ -657,7 +800,11 @@ export function OrchestratorTemplatesPanel({
               return t;
             }
             if (reconnect.movingEnd === "from") {
-              return { ...t, fromSessionId: dropSession.id, fromAnchor: dropAnchor };
+              return {
+                ...t,
+                fromSessionId: dropSession.id,
+                fromAnchor: dropAnchor,
+              };
             }
             return { ...t, toSessionId: dropSession.id, toAnchor: dropAnchor };
           }),
@@ -696,7 +843,9 @@ export function OrchestratorTemplatesPanel({
       return;
     }
 
-    const scrollContainer = event.currentTarget.closest(".orchestrator-board-scroll");
+    const scrollContainer = event.currentTarget.closest(
+      ".orchestrator-board-scroll",
+    );
     if (!(scrollContainer instanceof HTMLElement)) {
       return;
     }
@@ -725,8 +874,14 @@ export function OrchestratorTemplatesPanel({
     event.preventDefault();
     const deltaX = event.clientX - current.startClientX;
     const deltaY = event.clientY - current.startClientY;
-    current.scrollContainer.scrollLeft = Math.max(current.originScrollLeft - deltaX, 0);
-    current.scrollContainer.scrollTop = Math.max(current.originScrollTop - deltaY, 0);
+    current.scrollContainer.scrollLeft = Math.max(
+      current.originScrollLeft - deltaX,
+      0,
+    );
+    current.scrollContainer.scrollTop = Math.max(
+      current.originScrollTop - deltaY,
+      0,
+    );
     if (
       !current.hasMoved &&
       (Math.abs(deltaX) >= PAN_CONTEXT_MENU_SUPPRESS_THRESHOLD_PX ||
@@ -737,7 +892,10 @@ export function OrchestratorTemplatesPanel({
     }
   }
 
-  function finishCanvasPan(event: ReactPointerEvent<HTMLDivElement>, cancelled = false) {
+  function finishCanvasPan(
+    event: ReactPointerEvent<HTMLDivElement>,
+    cancelled = false,
+  ) {
     const current = panDragStateRef.current;
     if (!current || current.pointerId !== event.pointerId) {
       return;
@@ -765,68 +923,111 @@ export function OrchestratorTemplatesPanel({
   }
 
   return (
-    <section className={`settings-panel-stack orchestrator-templates-panel${isCanvasMode ? " canvas-mode" : ""}`}>
+    <section
+      className={`settings-panel-stack orchestrator-templates-panel${isCanvasMode ? " canvas-mode" : ""}`}
+    >
       {isCanvasMode ? null : (
         <div className="settings-panel-intro">
           <div>
             <p className="session-control-label">Reusable session graphs</p>
             <p className="settings-panel-copy">
-              Design orchestration templates as connected sessions. Transitions fire when a source session replies and becomes prompt-ready again.
+              Design orchestration templates as connected sessions. Transitions
+              fire when a source session replies and becomes prompt-ready again.
             </p>
           </div>
         </div>
       )}
-      <div className={`orchestrator-template-shell${isCanvasMode ? " canvas-mode" : ""}`}>
+      <div
+        className={`orchestrator-template-shell${isCanvasMode ? " canvas-mode" : ""}`}
+      >
         {isCanvasMode ? null : (
           <aside className="orchestrator-template-sidebar message-card prompt-settings-card">
             <div className="orchestrator-template-sidebar-header">
-              <div><div className="card-label">Library</div><h3>Templates</h3></div>
-              <button className="ghost-button" type="button" onClick={() => {
-                setSelectedTemplateId(null);
-                setDraft(emptyDraft());
-                setSelectedNodeId(null);
-                setStatusMessage(null);
-                setErrorMessage(null);
-              }}>New template</button>
+              <div>
+                <div className="card-label">Library</div>
+                <h3>Templates</h3>
+              </div>
+              <button
+                className="ghost-button"
+                type="button"
+                onClick={() => {
+                  setSelectedTemplateId(null);
+                  setDraft(emptyDraft());
+                  setSelectedNodeId(null);
+                  setStatusMessage(null);
+                  setErrorMessage(null);
+                }}
+              >
+                New template
+              </button>
             </div>
             <div className="orchestrator-template-sidebar-list" role="list">
-              {isLoading ? <p className="session-control-hint">Loading templates...</p> : templates.length === 0 ? (
-                <p className="session-control-hint">No orchestration templates yet. Start a new one and save it here.</p>
-              ) : templates.map((template) => (
-                <button
-                  key={template.id}
-                  className={`orchestrator-template-list-item${template.id === selectedTemplateId ? " selected" : ""}`}
-                  type="button"
-                  onClick={() => {
-                    setSelectedTemplateId(template.id);
-                    setDraft(templateToDraft(template));
-                    setSelectedNodeId(template.sessions[0]?.id ?? null);
-                    setStatusMessage(null);
-                    setErrorMessage(null);
-                  }}
-                >
-                  <span className="orchestrator-template-list-item-copy">
-                    <strong>{template.name}</strong>
-                    <span>{template.sessions.length} sessions · {template.transitions.length} transitions</span>
-                  </span>
-                  <span className="orchestrator-template-list-item-meta">{template.updatedAt}</span>
-                </button>
-              ))}
+              {isLoading ? (
+                <p className="session-control-hint">Loading templates...</p>
+              ) : templates.length === 0 ? (
+                <p className="session-control-hint">
+                  No orchestration templates yet. Start a new one and save it
+                  here.
+                </p>
+              ) : (
+                templates.map((template) => (
+                  <button
+                    key={template.id}
+                    className={`orchestrator-template-list-item${template.id === selectedTemplateId ? " selected" : ""}`}
+                    type="button"
+                    onClick={() => {
+                      setSelectedTemplateId(template.id);
+                      setDraft(templateToDraft(template));
+                      setSelectedNodeId(template.sessions[0]?.id ?? null);
+                      setStatusMessage(null);
+                      setErrorMessage(null);
+                    }}
+                  >
+                    <span className="orchestrator-template-list-item-copy">
+                      <strong>{template.name}</strong>
+                      <span>
+                        {template.sessions.length} sessions ·{" "}
+                        {template.transitions.length} transitions
+                      </span>
+                    </span>
+                    <span className="orchestrator-template-list-item-meta">
+                      {template.updatedAt}
+                    </span>
+                  </button>
+                ))
+              )}
             </div>
           </aside>
         )}
         <div className="orchestrator-template-editor">
           <article className="message-card prompt-settings-card orchestrator-template-meta-card">
             <div className="orchestrator-template-meta-header">
-              <div><div className="card-label">Template</div><h3>{selectedTemplateId ? "Edit template" : "New template"}</h3></div>
+              <div>
+                <div className="card-label">Template</div>
+                <h3>{selectedTemplateId ? "Edit template" : "New template"}</h3>
+              </div>
               <div className="orchestrator-template-actions">
-                <button className="ghost-button" type="button" onClick={() => {
-                  setDraft(referenceDraft);
-                  setSelectedNodeId(referenceDraft.sessions[0]?.id ?? null);
-                  setStatusMessage(null);
-                  setErrorMessage(null);
-                }} disabled={!isDirty || isSaving}>Reset draft</button>
-                <button className="ghost-button" type="button" onClick={() => void removeTemplate()} disabled={!selectedTemplateId || isDeleting || isSaving}>Delete</button>
+                <button
+                  className="ghost-button"
+                  type="button"
+                  onClick={() => {
+                    setDraft(referenceDraft);
+                    setSelectedNodeId(referenceDraft.sessions[0]?.id ?? null);
+                    setStatusMessage(null);
+                    setErrorMessage(null);
+                  }}
+                  disabled={!isDirty || isSaving}
+                >
+                  Reset draft
+                </button>
+                <button
+                  className="ghost-button"
+                  type="button"
+                  onClick={() => void removeTemplate()}
+                  disabled={!selectedTemplateId || isDeleting || isSaving}
+                >
+                  Delete
+                </button>
                 <button
                   className="send-button"
                   type="button"
@@ -835,25 +1036,33 @@ export function OrchestratorTemplatesPanel({
                   title={
                     !isDirty
                       ? "No unsaved changes"
-                      : validationError ?? undefined
+                      : (validationError ?? undefined)
                   }
                 >
-                  {selectedTemplateId ? (isSaving ? "Saving..." : "Save template") : isSaving ? "Creating..." : "Create template"}
+                  {selectedTemplateId
+                    ? isSaving
+                      ? "Saving..."
+                      : "Save template"
+                    : isSaving
+                      ? "Creating..."
+                      : "Create template"}
                 </button>
                 {selectedTemplateId ? (
                   <button
                     className="send-button orchestrator-run-button"
                     type="button"
                     onClick={() => void runTemplate()}
-                    disabled={isRunning || isDirty || !draft.projectId || !selectedProjectIsLocal}
+                    disabled={!canRunSelectedTemplate}
                     title={
                       !draft.projectId
                         ? "Select a project in the template first"
-                        : !selectedProjectIsLocal
-                          ? "Runtime orchestrations currently require a local project"
-                          : isDirty
-                            ? "Save changes before running"
-                            : `Run on ${selectedProject?.name ?? draft.projectId}`
+                        : !selectedProject
+                          ? "The selected project is no longer available"
+                          : !selectedProjectIsLocal
+                            ? "Runtime orchestrations currently require a local project"
+                            : isDirty
+                              ? "Save changes before running"
+                              : `Run on ${selectedProject.name}`
                     }
                   >
                     {isRunning ? "Starting..." : "▶ Run"}
@@ -863,278 +1072,600 @@ export function OrchestratorTemplatesPanel({
             </div>
             <div className="orchestrator-template-meta-grid">
               <div className="session-control-group">
-                <label className="session-control-label" htmlFor="orchestrator-template-name">Template name</label>
-                <input id="orchestrator-template-name" className="themed-input" type="text" value={draft.name} onChange={(event) => setDraft((current) => ({ ...current, name: event.target.value }))} placeholder="Feature delivery" />
+                <label
+                  className="session-control-label"
+                  htmlFor="orchestrator-template-name"
+                >
+                  Template name
+                </label>
+                <input
+                  id="orchestrator-template-name"
+                  className="themed-input"
+                  type="text"
+                  value={draft.name}
+                  onChange={(event) =>
+                    setDraft((current) => ({
+                      ...current,
+                      name: event.target.value,
+                    }))
+                  }
+                  placeholder="Feature delivery"
+                />
               </div>
               <div className="session-control-group">
-                <label className="session-control-label" htmlFor="orchestrator-template-project">Project</label>
+                <label
+                  className="session-control-label"
+                  htmlFor="orchestrator-template-project"
+                >
+                  Project
+                </label>
                 <select
                   id="orchestrator-template-project"
                   className="themed-input"
                   value={draft.projectId ?? ""}
-                  onChange={(event) => setDraft((current) => ({ ...current, projectId: event.target.value || null }))}
+                  onChange={(event) =>
+                    setDraft((current) => ({
+                      ...current,
+                      projectId: event.target.value || null,
+                    }))
+                  }
                 >
                   <option value="">Select a project…</option>
                   {projects.map((project) => (
                     <option key={project.id} value={project.id}>
-                      {project.name}{project.remoteId && project.remoteId !== "local" ? ` (${project.remoteId})` : ""}
+                      {project.name}
+                      {project.remoteId && project.remoteId !== "local"
+                        ? ` (${project.remoteId})`
+                        : ""}
                     </option>
                   ))}
                 </select>
               </div>
               <div className="session-control-group orchestrator-template-description-group">
-                <label className="session-control-label" htmlFor="orchestrator-template-description">Description</label>
-                <textarea id="orchestrator-template-description" className="themed-input orchestrator-template-textarea" rows={3} value={draft.description} onChange={(event) => setDraft((current) => ({ ...current, description: event.target.value }))} placeholder="What does this orchestration coordinate?" />
+                <label
+                  className="session-control-label"
+                  htmlFor="orchestrator-template-description"
+                >
+                  Description
+                </label>
+                <textarea
+                  id="orchestrator-template-description"
+                  className="themed-input orchestrator-template-textarea"
+                  rows={3}
+                  value={draft.description}
+                  onChange={(event) =>
+                    setDraft((current) => ({
+                      ...current,
+                      description: event.target.value,
+                    }))
+                  }
+                  placeholder="What does this orchestration coordinate?"
+                />
               </div>
             </div>
-            <p className={`session-control-hint${errorMessage ? " error" : ""}`.trim()}>
-              {errorMessage ?? validationError ?? statusMessage ?? "Add sessions, connect them with transitions, and use {{result}} inside prompt templates."}
+            <p
+              className={`session-control-hint${errorMessage ? " error" : ""}`.trim()}
+            >
+              {errorMessage ??
+                validationError ??
+                statusMessage ??
+                "Add sessions, connect them with transitions, and use {{result}} inside prompt templates."}
             </p>
           </article>
           <div className="orchestrator-template-editor-grid">
             <section className="message-card prompt-settings-card orchestrator-board-panel">
               <div className="orchestrator-board-header">
-                <div><div className="card-label">Layout</div><h3>Canvas</h3></div>
-                <p className="session-control-hint">Drag cards to lay out the graph.</p>
+                <div>
+                  <div className="card-label">Layout</div>
+                  <h3>Canvas</h3>
+                </div>
+                <p className="session-control-hint">
+                  Drag cards to lay out the graph.
+                </p>
               </div>
               <div className="orchestrator-board-scroll">
                 <div
                   ref={scaleFrameRef}
                   className={`orchestrator-board-scale-frame${isPanning ? " panning" : ""}`}
-                  style={{ width: `${BOARD_WIDTH * zoom}px`, height: `${BOARD_HEIGHT * zoom}px` }}
+                  style={{
+                    width: `${BOARD_WIDTH * zoom}px`,
+                    height: `${BOARD_HEIGHT * zoom}px`,
+                  }}
                   onPointerDown={startCanvasPan}
                   onPointerMove={updateCanvasPan}
                   onPointerUp={(event) => finishCanvasPan(event)}
                   onPointerCancel={(event) => finishCanvasPan(event, true)}
                   onContextMenu={handleCanvasContextMenu}
-                  onClick={(event) => { if (event.target === event.currentTarget) { setSelectedNodeId(null); setSelectedTransitionId(null); } }}
+                  onClick={(event) => {
+                    if (event.target === event.currentTarget) {
+                      setSelectedNodeId(null);
+                      setSelectedTransitionId(null);
+                    }
+                  }}
                 >
-                <div
-                  ref={surfaceRef}
-                  className="orchestrator-board-surface"
-                  style={{ width: `${BOARD_WIDTH}px`, height: `${BOARD_HEIGHT}px`, transform: `scale(${zoom})`, transformOrigin: "top left" }}
-                  onPointerMove={connectionDrag ? updateConnectionDrag : undefined}
-                  onPointerUp={connectionDrag ? finishConnectionDrag : undefined}
-                  onPointerCancel={connectionDrag ? () => setConnectionDrag(null) : undefined}
-                  onClick={(event) => { if (event.target === event.currentTarget) { setSelectedNodeId(null); setSelectedTransitionId(null); } }}
-                >
-                  <svg className="orchestrator-board-edges" width={BOARD_WIDTH} height={BOARD_HEIGHT} viewBox={`0 0 ${BOARD_WIDTH} ${BOARD_HEIGHT}`} aria-hidden="true">
-                    <defs>
-                      <marker id="orchestrator-arrowhead" markerWidth="6" markerHeight="5" refX="5.5" refY="2.5" orient="auto" markerUnits="strokeWidth">
-                        <path d="M 0 0.5 L 5.5 2.5 L 0 4.5" className="orchestrator-board-arrowhead" />
-                      </marker>
-                      <marker id="orchestrator-arrowhead-selected" markerWidth="6" markerHeight="5" refX="5.5" refY="2.5" orient="auto" markerUnits="strokeWidth">
-                        <path d="M 0 0.5 L 5.5 2.5 L 0 4.5" className="orchestrator-board-arrowhead-selected" />
-                      </marker>
-                      <marker id="orchestrator-arrowhead-draft" markerWidth="6" markerHeight="5" refX="5.5" refY="2.5" orient="auto" markerUnits="strokeWidth">
-                        <path d="M 0 0.5 L 5.5 2.5 L 0 4.5" className="orchestrator-board-arrowhead-draft" />
-                      </marker>
-                    </defs>
-                    {transitionGeometries.map((geometry) => {
-                      const isBeingReconnected = connectionDrag?.reconnect?.transitionId === geometry.transition.id;
-                      if (isBeingReconnected) {
-                        return null;
+                  <div
+                    ref={surfaceRef}
+                    className="orchestrator-board-surface"
+                    style={{
+                      width: `${BOARD_WIDTH}px`,
+                      height: `${BOARD_HEIGHT}px`,
+                      transform: `scale(${zoom})`,
+                      transformOrigin: "top left",
+                    }}
+                    onPointerMove={
+                      connectionDrag ? updateConnectionDrag : undefined
+                    }
+                    onPointerUp={
+                      connectionDrag ? finishConnectionDrag : undefined
+                    }
+                    onPointerCancel={
+                      connectionDrag ? () => setConnectionDrag(null) : undefined
+                    }
+                    onClick={(event) => {
+                      if (event.target === event.currentTarget) {
+                        setSelectedNodeId(null);
+                        setSelectedTransitionId(null);
                       }
-                      return (
-                        <g key={geometry.transition.id} className={selectedTransitionId === geometry.transition.id ? "selected" : undefined}>
-                          <path className="orchestrator-board-edge-hitarea" d={geometry.path} onClick={() => setSelectedTransitionId(geometry.transition.id)} />
-                          <path className={`orchestrator-board-edge${selectedTransitionId === geometry.transition.id ? " selected" : ""}`} d={geometry.path} markerEnd={selectedTransitionId === geometry.transition.id ? "url(#orchestrator-arrowhead-selected)" : "url(#orchestrator-arrowhead)"} />
-                        </g>
-                      );
-                    })}
-                    {connectionDrag ? (() => {
-                      const reconnect = connectionDrag.reconnect;
-
-                      // Determine the fixed end and the moving end.
-                      let fixedPoint: OrchestratorNodePosition | null = null;
-                      if (reconnect) {
-                        const fixedSession = renderedSessions.find((s) => s.id === reconnect.fixedSessionId);
-                        if (fixedSession) {
-                          fixedPoint = anchorPosition(fixedSession, reconnect.fixedAnchor);
-                        }
-                      }
-
-                      const movingSession = renderedSessions.find((s) => s.id === connectionDrag.fromSessionId);
-                      const movingAnchor = movingSession
-                        ? anchorPosition(movingSession, connectionDrag.anchorSide)
-                        : null;
-
-                      // Find what we're hovering over.
-                      const excludeIds = new Set([connectionDrag.fromSessionId]);
-                      if (reconnect) {
-                        excludeIds.add(reconnect.fixedSessionId);
-                      }
-                      const hoverTarget = renderedSessions.find(
-                        (s) =>
-                          !excludeIds.has(s.id) &&
-                          connectionDrag.cursorX >= s.position.x &&
-                          connectionDrag.cursorX <= s.position.x + CARD_WIDTH &&
-                          connectionDrag.cursorY >= s.position.y &&
-                          connectionDrag.cursorY <= s.position.y + CARD_HEIGHT,
-                      );
-                      // Also allow hovering over the same card (for reconnect anchor repositioning).
-                      const sameCardHover = !hoverTarget && reconnect
-                        ? renderedSessions.find(
-                            (s) =>
-                              s.id === connectionDrag.fromSessionId &&
-                              connectionDrag.cursorX >= s.position.x &&
-                              connectionDrag.cursorX <= s.position.x + CARD_WIDTH &&
-                              connectionDrag.cursorY >= s.position.y &&
-                              connectionDrag.cursorY <= s.position.y + CARD_HEIGHT,
-                          )
-                        : null;
-                      const snapTarget = hoverTarget ?? sameCardHover;
-                      const movingEndPoint = snapTarget
-                        ? nearestAnchorPosition(snapTarget, connectionDrag.cursorX, connectionDrag.cursorY)
-                        : { x: connectionDrag.cursorX, y: connectionDrag.cursorY };
-
-                      // For new connections: line from source anchor → cursor/snap.
-                      // For reconnect: line from fixed anchor → cursor/snap.
-                      const lineStart = reconnect
-                        ? (fixedPoint ?? movingEndPoint)
-                        : (movingAnchor ?? movingEndPoint);
-                      const lineEnd = movingEndPoint;
-
-                      // Arrow direction: for reconnect "from", the moving end is the source,
-                      // so the arrow points from cursor → fixed end. Swap line direction.
-                      const drawStart = reconnect?.movingEnd === "from" ? lineEnd : lineStart;
-                      const drawEnd = reconnect?.movingEnd === "from" ? lineStart : lineEnd;
-
-                      return (
-                        <g>
-                          <path
-                            className="orchestrator-board-edge orchestrator-board-edge-draft"
-                            d={`M ${drawStart.x} ${drawStart.y} L ${drawEnd.x} ${drawEnd.y}`}
-                            markerEnd="url(#orchestrator-arrowhead-draft)"
-                          />
-                          <circle className="orchestrator-board-connector-dot-svg" cx={drawStart.x} cy={drawStart.y} r="5" />
-                          {snapTarget ? (
-                            <circle className="orchestrator-board-connector-dot-svg" cx={drawEnd.x} cy={drawEnd.y} r="5" />
-                          ) : null}
-                        </g>
-                      );
-                    })() : null}
-                  </svg>
-                  <div className="orchestrator-board-transition-layer">
-                    {transitionGeometries.map((geometry) => (
-                      <div
-                        key={`${geometry.transition.id}-note`}
-                        className={`orchestrator-board-transition-note${selectedTransitionId === geometry.transition.id ? " selected" : ""}`}
-                        style={{ left: `${geometry.noteX}px`, top: `${geometry.noteY}px` }}
-                        title={geometry.title}
-                        onClick={() => setSelectedTransitionId(geometry.transition.id)}
-                      >
-                        <TransitionNoteIcon />
-                      </div>
-                    ))}
-                  </div>
-                  {renderedSessions.map((session) => {
-                    const isDragging = dragState?.nodeId === session.id;
-                    return (
-                      <article
-                        key={session.id}
-                        className={`orchestrator-board-card${selectedNodeId === session.id ? " selected" : ""}${isDragging ? " dragging" : ""}`}
-                        style={{ left: `${session.position.x}px`, top: `${session.position.y}px`, width: `${CARD_WIDTH}px`, minHeight: `${CARD_HEIGHT}px` }}
-                      >
-                        <div
-                          className="orchestrator-board-card-grab"
-                          role="button"
-                          tabIndex={0}
-                          onClick={() => setSelectedNodeId(session.id)}
-                          onKeyDown={(event) => {
-                            if (event.key === "Enter" || event.key === " ") {
-                              event.preventDefault();
-                              setSelectedNodeId(session.id);
-                            }
-                          }}
-                          onPointerDown={(event) => startDrag(session, event)}
-                          onPointerMove={(event) => updateDrag(session.id, event)}
-                          onPointerUp={(event) => finishDrag(session.id, event)}
-                          onPointerCancel={(event) => finishDrag(session.id, event, true)}
+                    }}
+                  >
+                    <svg
+                      className="orchestrator-board-edges"
+                      width={BOARD_WIDTH}
+                      height={BOARD_HEIGHT}
+                      viewBox={`0 0 ${BOARD_WIDTH} ${BOARD_HEIGHT}`}
+                      aria-hidden="true"
+                    >
+                      <defs>
+                        <marker
+                          id="orchestrator-arrowhead"
+                          markerWidth="6"
+                          markerHeight="5"
+                          refX="5.5"
+                          refY="2.5"
+                          orient="auto"
+                          markerUnits="strokeWidth"
                         >
-                          <div className="orchestrator-board-card-topline">
-                            <span className="orchestrator-board-card-kind"><AgentIcon agent={session.agent} className="orchestrator-board-card-agent" /><span>Session</span></span>
-                            <span className="orchestrator-board-card-chip">{session.autoApprove ? "Auto" : "Review"}</span>
-                          </div>
-                          <h4>{session.name || session.id}</h4>
-                          <p className="orchestrator-board-card-snippet">
-                            {session.instructions.trim() || "No instructions yet."}
-                          </p>
+                          <path
+                            d="M 0 0.5 L 5.5 2.5 L 0 4.5"
+                            className="orchestrator-board-arrowhead"
+                          />
+                        </marker>
+                        <marker
+                          id="orchestrator-arrowhead-selected"
+                          markerWidth="6"
+                          markerHeight="5"
+                          refX="5.5"
+                          refY="2.5"
+                          orient="auto"
+                          markerUnits="strokeWidth"
+                        >
+                          <path
+                            d="M 0 0.5 L 5.5 2.5 L 0 4.5"
+                            className="orchestrator-board-arrowhead-selected"
+                          />
+                        </marker>
+                        <marker
+                          id="orchestrator-arrowhead-draft"
+                          markerWidth="6"
+                          markerHeight="5"
+                          refX="5.5"
+                          refY="2.5"
+                          orient="auto"
+                          markerUnits="strokeWidth"
+                        >
+                          <path
+                            d="M 0 0.5 L 5.5 2.5 L 0 4.5"
+                            className="orchestrator-board-arrowhead-draft"
+                          />
+                        </marker>
+                      </defs>
+                      {transitionGeometries.map((geometry) => {
+                        const isBeingReconnected =
+                          connectionDrag?.reconnect?.transitionId ===
+                          geometry.transition.id;
+                        if (isBeingReconnected) {
+                          return null;
+                        }
+                        return (
+                          <g
+                            key={geometry.transition.id}
+                            className={
+                              selectedTransitionId === geometry.transition.id
+                                ? "selected"
+                                : undefined
+                            }
+                          >
+                            <path
+                              className="orchestrator-board-edge-hitarea"
+                              d={geometry.path}
+                              onClick={() =>
+                                setSelectedTransitionId(geometry.transition.id)
+                              }
+                            />
+                            <path
+                              className={`orchestrator-board-edge${selectedTransitionId === geometry.transition.id ? " selected" : ""}`}
+                              d={geometry.path}
+                              markerEnd={
+                                selectedTransitionId === geometry.transition.id
+                                  ? "url(#orchestrator-arrowhead-selected)"
+                                  : "url(#orchestrator-arrowhead)"
+                              }
+                            />
+                          </g>
+                        );
+                      })}
+                      {connectionDrag
+                        ? (() => {
+                            const reconnect = connectionDrag.reconnect;
+
+                            // Determine the fixed end and the moving end.
+                            let fixedPoint: OrchestratorNodePosition | null =
+                              null;
+                            if (reconnect) {
+                              const fixedSession = renderedSessions.find(
+                                (s) => s.id === reconnect.fixedSessionId,
+                              );
+                              if (fixedSession) {
+                                fixedPoint = anchorPosition(
+                                  fixedSession,
+                                  reconnect.fixedAnchor,
+                                );
+                              }
+                            }
+
+                            const movingSession = renderedSessions.find(
+                              (s) => s.id === connectionDrag.fromSessionId,
+                            );
+                            const movingAnchor = movingSession
+                              ? anchorPosition(
+                                  movingSession,
+                                  connectionDrag.anchorSide,
+                                )
+                              : null;
+
+                            // Find what we're hovering over.
+                            const excludeIds = new Set([
+                              connectionDrag.fromSessionId,
+                            ]);
+                            if (reconnect) {
+                              excludeIds.add(reconnect.fixedSessionId);
+                            }
+                            const hoverTarget = renderedSessions.find(
+                              (s) =>
+                                !excludeIds.has(s.id) &&
+                                connectionDrag.cursorX >= s.position.x &&
+                                connectionDrag.cursorX <=
+                                  s.position.x + CARD_WIDTH &&
+                                connectionDrag.cursorY >= s.position.y &&
+                                connectionDrag.cursorY <=
+                                  s.position.y + CARD_HEIGHT,
+                            );
+                            // Also allow hovering over the same card (for reconnect anchor repositioning).
+                            const sameCardHover =
+                              !hoverTarget && reconnect
+                                ? renderedSessions.find(
+                                    (s) =>
+                                      s.id === connectionDrag.fromSessionId &&
+                                      connectionDrag.cursorX >= s.position.x &&
+                                      connectionDrag.cursorX <=
+                                        s.position.x + CARD_WIDTH &&
+                                      connectionDrag.cursorY >= s.position.y &&
+                                      connectionDrag.cursorY <=
+                                        s.position.y + CARD_HEIGHT,
+                                  )
+                                : null;
+                            const snapTarget = hoverTarget ?? sameCardHover;
+                            const movingEndPoint = snapTarget
+                              ? nearestAnchorPosition(
+                                  snapTarget,
+                                  connectionDrag.cursorX,
+                                  connectionDrag.cursorY,
+                                )
+                              : {
+                                  x: connectionDrag.cursorX,
+                                  y: connectionDrag.cursorY,
+                                };
+
+                            // For new connections: line from source anchor → cursor/snap.
+                            // For reconnect: line from fixed anchor → cursor/snap.
+                            const lineStart = reconnect
+                              ? (fixedPoint ?? movingEndPoint)
+                              : (movingAnchor ?? movingEndPoint);
+                            const lineEnd = movingEndPoint;
+
+                            // Arrow direction: for reconnect "from", the moving end is the source,
+                            // so the arrow points from cursor → fixed end. Swap line direction.
+                            const drawStart =
+                              reconnect?.movingEnd === "from"
+                                ? lineEnd
+                                : lineStart;
+                            const drawEnd =
+                              reconnect?.movingEnd === "from"
+                                ? lineStart
+                                : lineEnd;
+
+                            return (
+                              <g>
+                                <path
+                                  className="orchestrator-board-edge orchestrator-board-edge-draft"
+                                  d={`M ${drawStart.x} ${drawStart.y} L ${drawEnd.x} ${drawEnd.y}`}
+                                  markerEnd="url(#orchestrator-arrowhead-draft)"
+                                />
+                                <circle
+                                  className="orchestrator-board-connector-dot-svg"
+                                  cx={drawStart.x}
+                                  cy={drawStart.y}
+                                  r="5"
+                                />
+                                {snapTarget ? (
+                                  <circle
+                                    className="orchestrator-board-connector-dot-svg"
+                                    cx={drawEnd.x}
+                                    cy={drawEnd.y}
+                                    r="5"
+                                  />
+                                ) : null}
+                              </g>
+                            );
+                          })()
+                        : null}
+                    </svg>
+                    <div className="orchestrator-board-transition-layer">
+                      {transitionGeometries.map((geometry) => (
+                        <div
+                          key={`${geometry.transition.id}-note`}
+                          className={`orchestrator-board-transition-note${selectedTransitionId === geometry.transition.id ? " selected" : ""}`}
+                          style={{
+                            left: `${geometry.noteX}px`,
+                            top: `${geometry.noteY}px`,
+                          }}
+                          title={geometry.title}
+                          onClick={() =>
+                            setSelectedTransitionId(geometry.transition.id)
+                          }
+                        >
+                          <TransitionNoteIcon />
                         </div>
-                        {!isDragging ? (
-                          ANCHOR_SIDES.map((side) => (
-                            <div
-                              key={side}
-                              className={`orchestrator-board-connector orchestrator-board-connector-${side}`}
-                              onPointerDown={(event) => startConnectionDrag(session.id, side, event)}
-                            >
-                              <div className="orchestrator-board-connector-dot" />
-                            </div>
-                          ))
-                        ) : null}
-                      </article>
-                    );
-                  })}
-                  <div className="orchestrator-board-endpoint-layer">
-                    {transitionGeometries.map((geometry) => {
-                      const isBeingReconnected = connectionDrag?.reconnect?.transitionId === geometry.transition.id;
-                      if (isBeingReconnected) {
-                        return null;
-                      }
+                      ))}
+                    </div>
+                    {renderedSessions.map((session) => {
+                      const isDragging = dragState?.nodeId === session.id;
                       return (
-                        <div key={`${geometry.transition.id}-endpoints`}>
+                        <article
+                          key={session.id}
+                          className={`orchestrator-board-card${selectedNodeId === session.id ? " selected" : ""}${isDragging ? " dragging" : ""}`}
+                          style={{
+                            left: `${session.position.x}px`,
+                            top: `${session.position.y}px`,
+                            width: `${CARD_WIDTH}px`,
+                            minHeight: `${CARD_HEIGHT}px`,
+                          }}
+                        >
                           <div
-                            className="orchestrator-board-edge-endpoint-handle"
-                            style={{ left: `${geometry.startX - 7}px`, top: `${geometry.startY - 7}px` }}
-                            onPointerDown={(event) => startReconnectDrag(geometry.transition.id, "from", event )}
-                          />
-                          <div
-                            className="orchestrator-board-edge-endpoint-handle"
-                            style={{ left: `${geometry.endX - 7}px`, top: `${geometry.endY - 7}px` }}
-                            onPointerDown={(event) => startReconnectDrag(geometry.transition.id, "to", event )}
-                          />
-                        </div>
+                            className="orchestrator-board-card-grab"
+                            role="button"
+                            tabIndex={0}
+                            onClick={() => setSelectedNodeId(session.id)}
+                            onKeyDown={(event) => {
+                              if (event.key === "Enter" || event.key === " ") {
+                                event.preventDefault();
+                                setSelectedNodeId(session.id);
+                              }
+                            }}
+                            onPointerDown={(event) => startDrag(session, event)}
+                            onPointerMove={(event) =>
+                              updateDrag(session.id, event)
+                            }
+                            onPointerUp={(event) =>
+                              finishDrag(session.id, event)
+                            }
+                            onPointerCancel={(event) =>
+                              finishDrag(session.id, event, true)
+                            }
+                          >
+                            <div className="orchestrator-board-card-topline">
+                              <span className="orchestrator-board-card-kind">
+                                <AgentIcon
+                                  agent={session.agent}
+                                  className="orchestrator-board-card-agent"
+                                />
+                                <span>Session</span>
+                              </span>
+                              <span className="orchestrator-board-card-chip">
+                                {session.autoApprove ? "Auto" : "Review"}
+                              </span>
+                            </div>
+                            <h4>{session.name || session.id}</h4>
+                            <p className="orchestrator-board-card-snippet">
+                              {session.instructions.trim() ||
+                                "No instructions yet."}
+                            </p>
+                          </div>
+                          {!isDragging
+                            ? ANCHOR_SIDES.map((side) => (
+                                <div
+                                  key={side}
+                                  className={`orchestrator-board-connector orchestrator-board-connector-${side}`}
+                                  onPointerDown={(event) =>
+                                    startConnectionDrag(session.id, side, event)
+                                  }
+                                >
+                                  <div className="orchestrator-board-connector-dot" />
+                                </div>
+                              ))
+                            : null}
+                        </article>
                       );
                     })}
+                    <div className="orchestrator-board-endpoint-layer">
+                      {transitionGeometries.map((geometry) => {
+                        const isBeingReconnected =
+                          connectionDrag?.reconnect?.transitionId ===
+                          geometry.transition.id;
+                        if (isBeingReconnected) {
+                          return null;
+                        }
+                        return (
+                          <div key={`${geometry.transition.id}-endpoints`}>
+                            <div
+                              className="orchestrator-board-edge-endpoint-handle"
+                              style={{
+                                left: `${geometry.startX - 7}px`,
+                                top: `${geometry.startY - 7}px`,
+                              }}
+                              onPointerDown={(event) =>
+                                startReconnectDrag(
+                                  geometry.transition.id,
+                                  "from",
+                                  event,
+                                )
+                              }
+                            />
+                            <div
+                              className="orchestrator-board-edge-endpoint-handle"
+                              style={{
+                                left: `${geometry.endX - 7}px`,
+                                top: `${geometry.endY - 7}px`,
+                              }}
+                              onPointerDown={(event) =>
+                                startReconnectDrag(
+                                  geometry.transition.id,
+                                  "to",
+                                  event,
+                                )
+                              }
+                            />
+                          </div>
+                        );
+                      })}
+                    </div>
                   </div>
-                </div>
                 </div>
               </div>
             </section>
             <div className="orchestrator-template-inspectors">
               {(() => {
-                const selectedSession = selectedNodeId ? draft.sessions.find((s) => s.id === selectedNodeId) : null;
-                const selectedTransition = selectedTransitionId ? draft.transitions.find((t) => t.id === selectedTransitionId) : null;
+                const selectedSession = selectedNodeId
+                  ? draft.sessions.find((s) => s.id === selectedNodeId)
+                  : null;
+                const selectedTransition = selectedTransitionId
+                  ? draft.transitions.find((t) => t.id === selectedTransitionId)
+                  : null;
 
                 if (selectedSession) {
                   const session = selectedSession;
                   return (
                     <article className="message-card prompt-settings-card orchestrator-form-card">
                       <div className="orchestrator-form-card-header">
-                        <div><div className="card-label">Session</div><h3>{session.name || session.id}</h3></div>
-                        <button className="ghost-button" type="button" onClick={(event) => { event.stopPropagation(); removeSession(session.id); }}>Remove</button>
+                        <div>
+                          <div className="card-label">Session</div>
+                          <h3>{session.name || session.id}</h3>
+                        </div>
+                        <button
+                          className="ghost-button"
+                          type="button"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            removeSession(session.id);
+                          }}
+                        >
+                          Remove
+                        </button>
                       </div>
                       <div className="orchestrator-form-grid">
                         <div className="session-control-group orchestrator-form-full-width">
-                          <label className="session-control-label" htmlFor={`session-name-${session.id}`}>Name</label>
-                          <input id={`session-name-${session.id}`} className="themed-input" type="text" value={session.name} onChange={(event) => setSessionField(session.id, "name", event.target.value)} />
+                          <label
+                            className="session-control-label"
+                            htmlFor={`session-name-${session.id}`}
+                          >
+                            Name
+                          </label>
+                          <input
+                            id={`session-name-${session.id}`}
+                            className="themed-input"
+                            type="text"
+                            value={session.name}
+                            onChange={(event) =>
+                              setSessionField(
+                                session.id,
+                                "name",
+                                event.target.value,
+                              )
+                            }
+                          />
                         </div>
                         <div className="session-control-group orchestrator-form-full-width">
-                          <label className="session-control-label" htmlFor={`session-agent-${session.id}`}>Agent</label>
-                          <select id={`session-agent-${session.id}`} className="themed-input orchestrator-select" value={session.agent} onChange={(event) => setSessionField(session.id, "agent", event.target.value as AgentType)}>
-                            {AGENT_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+                          <label
+                            className="session-control-label"
+                            htmlFor={`session-agent-${session.id}`}
+                          >
+                            Agent
+                          </label>
+                          <select
+                            id={`session-agent-${session.id}`}
+                            className="themed-input orchestrator-select"
+                            value={session.agent}
+                            onChange={(event) =>
+                              setSessionField(
+                                session.id,
+                                "agent",
+                                event.target.value as AgentType,
+                              )
+                            }
+                          >
+                            {AGENT_OPTIONS.map((option) => (
+                              <option key={option.value} value={option.value}>
+                                {option.label}
+                              </option>
+                            ))}
                           </select>
                         </div>
                         <div className="session-control-group orchestrator-toggle-group">
-                          <label className="session-control-label" htmlFor={`session-auto-approve-${session.id}`}>Automation</label>
-                          <label className="orchestrator-toggle" htmlFor={`session-auto-approve-${session.id}`}>
-                            <input id={`session-auto-approve-${session.id}`} type="checkbox" checked={session.autoApprove} onChange={(event) => setSessionField(session.id, "autoApprove", event.target.checked)} />
+                          <label
+                            className="session-control-label"
+                            htmlFor={`session-auto-approve-${session.id}`}
+                          >
+                            Automation
+                          </label>
+                          <label
+                            className="orchestrator-toggle"
+                            htmlFor={`session-auto-approve-${session.id}`}
+                          >
+                            <input
+                              id={`session-auto-approve-${session.id}`}
+                              type="checkbox"
+                              checked={session.autoApprove}
+                              onChange={(event) =>
+                                setSessionField(
+                                  session.id,
+                                  "autoApprove",
+                                  event.target.checked,
+                                )
+                              }
+                            />
                             <span>Auto-approve this session's tool calls</span>
                           </label>
                         </div>
                         <div className="session-control-group orchestrator-form-textarea-group">
-                          <label className="session-control-label" htmlFor={`session-instructions-${session.id}`}>Instructions</label>
-                          <textarea id={`session-instructions-${session.id}`} className="themed-input orchestrator-template-textarea" rows={4} value={session.instructions} onChange={(event) => setSessionField(session.id, "instructions", event.target.value)} />
+                          <label
+                            className="session-control-label"
+                            htmlFor={`session-instructions-${session.id}`}
+                          >
+                            Instructions
+                          </label>
+                          <textarea
+                            id={`session-instructions-${session.id}`}
+                            className="themed-input orchestrator-template-textarea"
+                            rows={4}
+                            value={session.instructions}
+                            onChange={(event) =>
+                              setSessionField(
+                                session.id,
+                                "instructions",
+                                event.target.value,
+                              )
+                            }
+                          />
                         </div>
                       </div>
                     </article>
@@ -1146,39 +1677,169 @@ export function OrchestratorTemplatesPanel({
                   return (
                     <article className="message-card prompt-settings-card orchestrator-form-card">
                       <div className="orchestrator-form-card-header">
-                        <div><div className="card-label">Transition</div><h3>{transition.id}</h3></div>
-                        <button className="ghost-button" type="button" onClick={() => { setDraft((current) => ({ ...current, transitions: current.transitions.filter((c) => c.id !== transition.id) })); setSelectedTransitionId(null); }}>Remove</button>
+                        <div>
+                          <div className="card-label">Transition</div>
+                          <h3>{transition.id}</h3>
+                        </div>
+                        <button
+                          className="ghost-button"
+                          type="button"
+                          onClick={() => {
+                            setDraft((current) => ({
+                              ...current,
+                              transitions: current.transitions.filter(
+                                (c) => c.id !== transition.id,
+                              ),
+                            }));
+                            setSelectedTransitionId(null);
+                          }}
+                        >
+                          Remove
+                        </button>
                       </div>
                       <div className="orchestrator-form-grid">
                         <div className="session-control-group">
-                          <label className="session-control-label" htmlFor={`transition-id-${transition.id}`}>Transition id</label>
-                          <input id={`transition-id-${transition.id}`} className="themed-input" type="text" value={transition.id} onChange={(event) => setTransitionField(transition.id, "id", event.target.value)} />
+                          <label
+                            className="session-control-label"
+                            htmlFor={`transition-id-${transition.id}`}
+                          >
+                            Transition id
+                          </label>
+                          <input
+                            id={`transition-id-${transition.id}`}
+                            className="themed-input"
+                            type="text"
+                            value={transition.id}
+                            onChange={(event) =>
+                              setTransitionField(
+                                transition.id,
+                                "id",
+                                event.target.value,
+                              )
+                            }
+                          />
                         </div>
                         <div className="session-control-group">
-                          <label className="session-control-label" htmlFor={`transition-trigger-${transition.id}`}>Trigger</label>
-                          <input id={`transition-trigger-${transition.id}`} className="themed-input" type="text" value="On completion" readOnly />
+                          <label
+                            className="session-control-label"
+                            htmlFor={`transition-trigger-${transition.id}`}
+                          >
+                            Trigger
+                          </label>
+                          <input
+                            id={`transition-trigger-${transition.id}`}
+                            className="themed-input"
+                            type="text"
+                            value="On completion"
+                            readOnly
+                          />
                         </div>
                         <div className="session-control-group">
-                          <label className="session-control-label" htmlFor={`transition-from-${transition.id}`}>From</label>
-                          <select id={`transition-from-${transition.id}`} className="themed-input orchestrator-select" value={transition.fromSessionId} onChange={(event) => setTransitionField(transition.id, "fromSessionId", event.target.value)}>
-                            {draft.sessions.map((session) => <option key={`from-${session.id}`} value={session.id}>{session.name || session.id}</option>)}
+                          <label
+                            className="session-control-label"
+                            htmlFor={`transition-from-${transition.id}`}
+                          >
+                            From
+                          </label>
+                          <select
+                            id={`transition-from-${transition.id}`}
+                            className="themed-input orchestrator-select"
+                            value={transition.fromSessionId}
+                            onChange={(event) =>
+                              setTransitionField(
+                                transition.id,
+                                "fromSessionId",
+                                event.target.value,
+                              )
+                            }
+                          >
+                            {draft.sessions.map((session) => (
+                              <option
+                                key={`from-${session.id}`}
+                                value={session.id}
+                              >
+                                {session.name || session.id}
+                              </option>
+                            ))}
                           </select>
                         </div>
                         <div className="session-control-group">
-                          <label className="session-control-label" htmlFor={`transition-to-${transition.id}`}>To</label>
-                          <select id={`transition-to-${transition.id}`} className="themed-input orchestrator-select" value={transition.toSessionId} onChange={(event) => setTransitionField(transition.id, "toSessionId", event.target.value)}>
-                            {draft.sessions.map((session) => <option key={`to-${session.id}`} value={session.id}>{session.name || session.id}</option>)}
+                          <label
+                            className="session-control-label"
+                            htmlFor={`transition-to-${transition.id}`}
+                          >
+                            To
+                          </label>
+                          <select
+                            id={`transition-to-${transition.id}`}
+                            className="themed-input orchestrator-select"
+                            value={transition.toSessionId}
+                            onChange={(event) =>
+                              setTransitionField(
+                                transition.id,
+                                "toSessionId",
+                                event.target.value,
+                              )
+                            }
+                          >
+                            {draft.sessions.map((session) => (
+                              <option
+                                key={`to-${session.id}`}
+                                value={session.id}
+                              >
+                                {session.name || session.id}
+                              </option>
+                            ))}
                           </select>
                         </div>
                         <div className="session-control-group">
-                          <label className="session-control-label" htmlFor={`transition-result-mode-${transition.id}`}>Result mode</label>
-                          <select id={`transition-result-mode-${transition.id}`} className="themed-input orchestrator-select" value={transition.resultMode} onChange={(event) => setTransitionField(transition.id, "resultMode", event.target.value as OrchestratorTransitionResultMode)}>
-                            {RESULT_MODE_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+                          <label
+                            className="session-control-label"
+                            htmlFor={`transition-result-mode-${transition.id}`}
+                          >
+                            Result mode
+                          </label>
+                          <select
+                            id={`transition-result-mode-${transition.id}`}
+                            className="themed-input orchestrator-select"
+                            value={transition.resultMode}
+                            onChange={(event) =>
+                              setTransitionField(
+                                transition.id,
+                                "resultMode",
+                                event.target
+                                  .value as OrchestratorTransitionResultMode,
+                              )
+                            }
+                          >
+                            {RESULT_MODE_OPTIONS.map((option) => (
+                              <option key={option.value} value={option.value}>
+                                {option.label}
+                              </option>
+                            ))}
                           </select>
                         </div>
                         <div className="session-control-group orchestrator-form-textarea-group">
-                          <label className="session-control-label" htmlFor={`transition-prompt-${transition.id}`}>Prompt template</label>
-                          <textarea id={`transition-prompt-${transition.id}`} className="themed-input orchestrator-template-textarea" rows={3} value={transition.promptTemplate ?? ""} onChange={(event) => setTransitionField(transition.id, "promptTemplate", event.target.value || null)} placeholder="Use {{result}} to inject the processed source result." />
+                          <label
+                            className="session-control-label"
+                            htmlFor={`transition-prompt-${transition.id}`}
+                          >
+                            Prompt template
+                          </label>
+                          <textarea
+                            id={`transition-prompt-${transition.id}`}
+                            className="themed-input orchestrator-template-textarea"
+                            rows={3}
+                            value={transition.promptTemplate ?? ""}
+                            onChange={(event) =>
+                              setTransitionField(
+                                transition.id,
+                                "promptTemplate",
+                                event.target.value || null,
+                              )
+                            }
+                            placeholder="Use {{result}} to inject the processed source result."
+                          />
                         </div>
                       </div>
                     </article>
@@ -1187,9 +1848,24 @@ export function OrchestratorTemplatesPanel({
 
                 return (
                   <div className="orchestrator-inspector-empty">
-                    <p className="session-control-hint">Select a session or transition on the canvas to edit its properties.</p>
+                    <p className="session-control-hint">
+                      Select a session or transition on the canvas to edit its
+                      properties.
+                    </p>
                     <div className="orchestrator-inspector-empty-actions">
-                      <button className="ghost-button" type="button" onClick={addSession}>Add session</button>
+                      <button
+                        className="ghost-button"
+                        type="button"
+                        onClick={addSession}
+                        disabled={hasReachedSessionLimit}
+                        title={
+                          hasReachedSessionLimit
+                            ? getOrchestratorTemplateSessionLimitError()
+                            : undefined
+                        }
+                      >
+                        Add session
+                      </button>
                     </div>
                   </div>
                 );
@@ -1203,10 +1879,18 @@ export function OrchestratorTemplatesPanel({
 }
 
 function emptyDraft(): OrchestratorTemplateDraft {
-  return { name: "", description: "", projectId: null, sessions: [], transitions: [] };
+  return {
+    name: "",
+    description: "",
+    projectId: null,
+    sessions: [],
+    transitions: [],
+  };
 }
 
-function templateToDraft(template: OrchestratorTemplate): OrchestratorTemplateDraft {
+function templateToDraft(
+  template: OrchestratorTemplate,
+): OrchestratorTemplateDraft {
   return {
     name: template.name,
     description: template.description,
@@ -1231,10 +1915,15 @@ function resolveInitialState(
 ): PanelState {
   if (restored) {
     const selectedTemplateId =
-      restored.selectedTemplateId && templates.some((template) => template.id === restored.selectedTemplateId)
+      restored.selectedTemplateId &&
+      templates.some((template) => template.id === restored.selectedTemplateId)
         ? restored.selectedTemplateId
         : null;
-    return finalizePanelState(restored.draft, selectedTemplateId, restored.selectedNodeId);
+    return finalizePanelState(
+      restored.draft,
+      selectedTemplateId,
+      restored.selectedNodeId,
+    );
   }
 
   if (startMode === "new") {
@@ -1265,9 +1954,10 @@ function finalizePanelState(
   selectedNodeId: string | null,
 ): PanelState {
   const nextSelectedNodeId =
-    selectedNodeId && draft.sessions.some((session) => session.id === selectedNodeId)
+    selectedNodeId &&
+    draft.sessions.some((session) => session.id === selectedNodeId)
       ? selectedNodeId
-      : draft.sessions[0]?.id ?? null;
+      : (draft.sessions[0]?.id ?? null);
 
   return {
     draft,
@@ -1305,13 +1995,11 @@ function readState(stateKey: string): PanelState | null {
           typeof draft.projectId === "string" && draft.projectId.trim()
             ? draft.projectId
             : null,
-        sessions: draft.sessions
-          .filter(isSessionTemplate)
-          .map((session) => ({
-            ...session,
-            model: session.model ?? "",
-            position: { ...session.position },
-          })),
+        sessions: draft.sessions.filter(isSessionTemplate).map((session) => ({
+          ...session,
+          model: session.model ?? "",
+          position: { ...session.position },
+        })),
         transitions: draft.transitions
           .filter(isTransitionTemplate)
           .map((transition) => ({
@@ -1319,7 +2007,9 @@ function readState(stateKey: string): PanelState | null {
             promptTemplate: transition.promptTemplate ?? "",
           })),
       },
-      typeof parsed.selectedTemplateId === "string" ? parsed.selectedTemplateId : null,
+      typeof parsed.selectedTemplateId === "string"
+        ? parsed.selectedTemplateId
+        : null,
       typeof parsed.selectedNodeId === "string" ? parsed.selectedNodeId : null,
     );
   } catch {
@@ -1327,7 +2017,9 @@ function readState(stateKey: string): PanelState | null {
   }
 }
 
-function isSessionTemplate(value: unknown): value is OrchestratorSessionTemplate {
+function isSessionTemplate(
+  value: unknown,
+): value is OrchestratorSessionTemplate {
   if (!value || typeof value !== "object") {
     return false;
   }
@@ -1344,7 +2036,9 @@ function isSessionTemplate(value: unknown): value is OrchestratorSessionTemplate
   );
 }
 
-function isTransitionTemplate(value: unknown): value is OrchestratorTemplateTransition {
+function isTransitionTemplate(
+  value: unknown,
+): value is OrchestratorTemplateTransition {
   if (!value || typeof value !== "object") {
     return false;
   }
@@ -1361,10 +2055,15 @@ function isTransitionTemplate(value: unknown): value is OrchestratorTemplateTran
   );
 }
 
-function createSession(existingSessions: OrchestratorSessionTemplate[]): OrchestratorSessionTemplate {
-  const nextNumber = nextSequenceNumber(existingSessions.map((session) => session.id), "session-");
-  const nextX = BOARD_MARGIN + ((existingSessions.length % 4) * 380);
-  const nextY = 140 + (Math.floor(existingSessions.length / 4) * 250);
+function createSession(
+  existingSessions: OrchestratorSessionTemplate[],
+): OrchestratorSessionTemplate {
+  const nextNumber = nextSequenceNumber(
+    existingSessions.map((session) => session.id),
+    "session-",
+  );
+  const nextX = BOARD_MARGIN + (existingSessions.length % 4) * 380;
+  const nextY = 140 + Math.floor(existingSessions.length / 4) * 250;
 
   return {
     id: `session-${nextNumber}`,
@@ -1439,6 +2138,14 @@ function validateDraft(draft: OrchestratorTemplateDraft) {
     return "Add at least one session before saving.";
   }
 
+  if (draft.sessions.length > MAX_ORCHESTRATOR_TEMPLATE_SESSIONS) {
+    return getOrchestratorTemplateSessionLimitError();
+  }
+
+  if (draft.transitions.length > MAX_ORCHESTRATOR_TEMPLATE_TRANSITIONS) {
+    return getOrchestratorTemplateTransitionLimitError();
+  }
+
   const sessionIds = new Set<string>();
   for (const session of draft.sessions) {
     if (!session.id.trim()) {
@@ -1451,7 +2158,10 @@ function validateDraft(draft: OrchestratorTemplateDraft) {
       return `Duplicate session id \`${session.id.trim()}\`.`;
     }
     sessionIds.add(session.id.trim());
-    if (!Number.isFinite(session.position.x) || !Number.isFinite(session.position.y)) {
+    if (
+      !Number.isFinite(session.position.x) ||
+      !Number.isFinite(session.position.y)
+    ) {
       return `Session \`${session.id.trim()}\` has an invalid canvas position.`;
     }
   }
@@ -1514,8 +2224,14 @@ function validateDraft(draft: OrchestratorTemplateDraft) {
 
 function clampPosition(x: number, y: number): OrchestratorNodePosition {
   return {
-    x: Math.max(BOARD_MARGIN, Math.min(BOARD_WIDTH - CARD_WIDTH - BOARD_MARGIN, Math.round(x))),
-    y: Math.max(BOARD_MARGIN, Math.min(BOARD_HEIGHT - CARD_HEIGHT - BOARD_MARGIN, Math.round(y))),
+    x: Math.max(
+      BOARD_MARGIN,
+      Math.min(BOARD_WIDTH - CARD_WIDTH - BOARD_MARGIN, Math.round(x)),
+    ),
+    y: Math.max(
+      BOARD_MARGIN,
+      Math.min(BOARD_HEIGHT - CARD_HEIGHT - BOARD_MARGIN, Math.round(y)),
+    ),
   };
 }
 
@@ -1626,7 +2342,12 @@ function nearestAnchorPosition(
       bestAnchor = anchor;
     }
   }
-  return bestAnchor ?? { x: session.position.x + CARD_WIDTH / 2, y: session.position.y + CARD_HEIGHT / 2 };
+  return (
+    bestAnchor ?? {
+      x: session.position.x + CARD_WIDTH / 2,
+      y: session.position.y + CARD_HEIGHT / 2,
+    }
+  );
 }
 
 function TransitionNoteIcon() {

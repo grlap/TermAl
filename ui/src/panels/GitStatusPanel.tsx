@@ -2,10 +2,9 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   applyGitFileAction,
   commitGitChanges,
-  fetchGitDiff,
   fetchGitStatus,
+  type GitDiffRequestPayload,
   type GitDiffSection,
-  type GitDiffResponse,
   type GitFileAction,
   type GitStatusResponse,
 } from "../api";
@@ -46,7 +45,7 @@ export function GitStatusPanel({
   showPathControls = true,
 }: {
   onStatusChange?: (status: GitStatusResponse | null) => void;
-  onOpenDiff: (diff: GitDiffResponse, options?: GitDiffOpenOptions) => void;
+  onOpenDiff: (request: GitDiffRequestPayload, options?: GitDiffOpenOptions) => Promise<void> | void;
   onOpenWorkdir: (path: string) => void;
   projectId?: string | null;
   sessionId?: string | null;
@@ -182,7 +181,7 @@ export function GitStatusPanel({
       setCommitNotice(null);
 
       try {
-        const diff = await fetchGitDiff({
+        const request: GitDiffRequestPayload = {
           originalPath: node.originalPath,
           path: node.path,
           projectId: normalizedProjectId || null,
@@ -190,11 +189,11 @@ export function GitStatusPanel({
           sessionId: normalizedSessionId || null,
           statusCode: node.statusCode,
           workdir: activeWorkdir,
-        });
+        };
         if (options?.openInNewTab) {
-          onOpenDiff(diff, { openInNewTab: true, sectionId });
+          await onOpenDiff(request, { openInNewTab: true, sectionId });
         } else {
-          onOpenDiff(diff, { sectionId });
+          await onOpenDiff(request, { sectionId });
         }
       } catch (nextError) {
         setError(getErrorMessage(nextError));

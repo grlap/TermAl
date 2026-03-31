@@ -63,10 +63,13 @@ The frontend workspace-layout `controlPanelSide` typing note is also fixed in th
 workspace layout API types now narrow `controlPanelSide` to `"left" | "right"` in `ui/src/api.ts`,
 matching the backend enum contract.
 
-The `ApprovalDecision::Pending` panic and the cyclic transition graph resource exhaustion are also
-fixed in the current tree. `Pending` is now rejected by the early guard alongside `Interrupted`
-and `Canceled`, and template validation runs a DFS-based cycle detection that rejects non-DAG
-transition graphs.
+The `ApprovalDecision::Pending` panic, the cyclic transition graph resource exhaustion, the
+unbounded orchestrator template graph size, and the frontend/client-side template size drift are
+also fixed in the current tree. `Pending` is now rejected by the early guard alongside
+`Interrupted` and `Canceled`, template validation runs a DFS-based cycle detection that rejects
+non-DAG transition graphs while also capping templates at 50 sessions and 200 transitions, and
+`OrchestratorTemplatesPanel` now mirrors those limits locally while disabling the "Add session"
+affordance at the cap.
 
 The orchestrator handoff restart recovery gap is also fixed in the current tree. On startup,
 `dispatch_orphaned_queued_prompts` scans for idle sessions with queued prompts and no active
@@ -78,399 +81,82 @@ The orchestration stop/error fan-out bug, the shared workspace-tab validator dri
 file-not-found 400/404 mismatch, and the `stop_session` cleanup-contract asymmetry are also
 fixed in the current tree.
 
----
-
-## `stop_session` treats failed dedicated-runtime kills as successful stops
-
-**Severity:** High - the UI can report a session stopped while the agent process is still running,
-and queued follow-up work can be dispatched on the same session.
-
-`stop_session` now routes all runtime shutdown failures through `shutdown_removed_runtime(...)`, logs
-any error, and then continues clearing the runtime, marking the session idle, and dispatching the
-next queued prompt. For dedicated Claude/Codex/ACP runtimes, `kill_child_process()` only returns an
-error after the child is still alive even after a kill attempt. In that case the UI says the turn
-stopped, but the old agent process can continue running out of band.
-
-That is materially different from the old shared-Codex detach warning path. A failed dedicated kill
-means TermAl no longer owns the session state for a process that may still be executing tools or
-editing files, and a queued prompt can be launched as if the stop had succeeded.
-
-**Current behavior:**
-- `stop_session` logs dedicated runtime kill failures as cleanup warnings and still returns HTTP 200
-- the session runtime is cleared and the session is marked `Idle` even when the child process did
-  not stop
-- queued prompts can dispatch immediately after the failed cleanup path
-
-**Proposal:**
-- keep dedicated-runtime kill failures as hard stop failures instead of treating them as best-effort
-- reserve the warn-and-continue behavior for shared-runtime detach paths that intentionally do not
-  own process lifetime the same way
-- add a regression that covers queued-prompt behavior when a dedicated runtime fails to stop
-
-## Orchestrator start only adopts sessions from the returned `StateResponse`
-
-**Severity:** Medium - starting an orchestration can leave frontend revision tracking stale and
-force unnecessary resyncs on the next SSE update.
-
-`createOrchestratorInstance()` returns a full `StateResponse`, and `OrchestratorTemplatesPanel`
-forwards that snapshot through `onStateUpdated`. However, `App` handles the callback by calling
-`adoptSessions(state.sessions)` instead of `adoptState(state)`. The newly-created sessions appear,
-but the frontend never records the returned revision or any other non-session fields that changed
-with the same snapshot.
-
-That leaves `latestStateRevisionRef` behind the backend and makes the next delta look like a gap.
-At best that triggers an avoidable resync; at worst any non-session metadata in the returned state
-stays stale until some later full snapshot arrives.
-
-**Current behavior:**
-- starting an orchestration only replaces the in-memory session list
-- the returned `revision`, `projects`, readiness metadata, and other `StateResponse` fields are not
-  adopted through the normal snapshot path
-- the next SSE delta can appear to skip a revision even though the client already received the
-  state-changing response
-
-**Proposal:**
-- route orchestrator start responses through `adoptState(response.state)` instead of `adoptSessions`
-- add an App-level regression that verifies orchestrator starts advance revision tracking
-- cover any non-session metadata returned with the same response so the callback stays aligned with
-  the rest of the snapshot adoption flow
-
-## Duplicated `CONTROL_SURFACE_TAB_KINDS` constant across App.tsx and workspace.ts
-
-**Severity:** Medium - maintenance risk; adding a new control-surface kind requires updating both
-locations, and a missed update causes forward-sync and reverse-sync to disagree.
-
-`CONTROL_SURFACE_TAB_KINDS` in `App.tsx` and `CONTROL_SURFACE_KINDS` in `workspace.ts` contain the
-same six tab kinds. The canonical definition of what constitutes a "control surface" should live in
-one place.
-
-**Current behavior:**
-- two identical `ReadonlySet<string>` constants exist in separate files
-- adding a new control-surface kind (e.g., an orchestrator canvas) requires updating both
-
-**Proposal:**
-- export `CONTROL_SURFACE_KINDS` from `workspace.ts` and import it in `App.tsx`
-- remove the local `CONTROL_SURFACE_TAB_KINDS` declaration
-
-## Forward/reverse pane sync can both fire for the same control-surface tab
-
-**Severity:** Medium - confusing double-set of `selectedProjectId` with potentially different values.
-
-When a control-surface tab (e.g., `gitStatus`) is selected, the forward-sync block in
-`handlePaneTabSelect` may call `setSelectedProjectId` via `resolveWorkspaceTabProjectId`, and then
-the reverse-sync block also fires (because the tab kind is in `CONTROL_SURFACE_TAB_KINDS`) and may
-call `setSelectedProjectId` again with a different project derived from the nearest session. React 18
-batching means only the last value wins, but the intent is unclear and the overlapping early-return
-paths are fragile.
-
-**Current behavior:**
-- both forward-sync and reverse-sync blocks can execute for the same tab selection
-- `selectedProjectId` may be set twice with different values in the same handler
-- the interaction between the two blocks is hard to reason about
-
-**Proposal:**
-- restructure into two mutually exclusive branches: if the selected tab is a control surface, run
-  only reverse-sync; otherwise, run only forward-sync
-- use a single discriminator at the top of the handler to clarify the control flow
-
-## Pane-local Files/Git control surfaces still use global root/workdir state
-
-**Severity:** Medium - a control-surface pane can look scoped to one session/project while opening
-or fetching another pane's filesystem or Git data.
-
-`renderWorkspaceControlSurface(...)` now derives `controlPanelLauncherOriginSessionId` and
-`controlPanelLauncherOriginProjectId` from the pane being rendered, which fixes the session/project
-metadata for pane-local launches. But the Files and Git sections still read
-`controlPanelFilesystemRoot` and `controlPanelGitWorkdir` from the shared top-level state seeded by
-the global selected project / active session.
-
-That means a pane-local Files or Git control surface can now combine one pane's origin
-session/project IDs with a different pane's root path or workdir. In multi-pane workspaces, the
-tab metadata says "open this near session A", but the actual path-scoped payload can still point at
-session B's project.
-
-**Current behavior:**
-- Files/Git launchers use pane-local `originSessionId` / `originProjectId`
-- the Files root path and Git workdir still come from shared global state
-- opening or rendering those sections can target the wrong project/workdir while appearing scoped to
-  the local pane
-
-**Proposal:**
-- derive Files/Git root state from the same pane-local session/project context used for the launcher
-  origin IDs
-- avoid mixing pane-local metadata with globally cached path state in `renderWorkspaceControlSurface`
-- add App-level regressions that cover left/right pane contexts for both Files and Git
-
-## Moving the shared canvas tab preserves stale origin session/project metadata
-
-**Severity:** Medium - the canvas can open in the right pane but still drive the wrong active
-session and project context afterward.
-
-`openCanvasInWorkspaceState(...)` now moves the singleton canvas tab into the nearest session pane
-when it is launched from a control surface. However, the move path reuses the existing tab object
-through `moveWorkspaceTabToPane(...)`, so the canvas keeps its old `originSessionId` and
-`originProjectId` even after it has been relocated for a different session.
-
-That stale metadata is not cosmetic. `syncPaneState(...)` derives the target pane's
-`activeSessionId` from the moved tab's origin session, and later project sync uses the same stale
-origin fields. The canvas can therefore land in the desired pane but immediately re-scope that pane
-back to the previous session/project.
-
-**Current behavior:**
-- opening Canvas from a control surface can move the existing canvas into the nearest session pane
-- the moved canvas keeps the previous pane's `originSessionId` / `originProjectId`
-- the target pane's `activeSessionId` and later project sync can still resolve to the old session
-
-**Proposal:**
-- when a contextual canvas open relocates an existing canvas, rewrite its origin session/project to
-  the new launch context
-- keep the shared-canvas singleton behavior, but do not preserve stale origin metadata across moves
-- add regression coverage for both pane placement and post-move active-session / project sync
-
-## Drag-over `text/plain` MIME fallback triggers false drop indicators
-
-**Severity:** Medium - visual confusion, no data corruption.
-
-The `handleTabRailDragOver` handler in `PaneTabs.tsx` and the pane body `onDragOver` handler in
-`App.tsx` fall back to checking `dataTransfer.types.includes("text/plain")` when the custom MIME
-type is absent. This means any drag that carries `text/plain` data (selected text, browser
-bookmarks, OS file drops) will show drop indicators on the tab rail and pane body. The actual
-drop is safe - `readWorkspaceTabDragData` validates - but the visual affordance is misleading.
-
-**Current behavior:**
-- dragging selected text over a tab rail or pane body shows a drop indicator
-- dropping non-tab content does nothing (correctly rejected by the drop handler)
-
-**Proposal:**
-- tighten the `hasTabDragType` guard to also check `launcherDraggedTabRef.current` is non-null
-  before accepting the `text/plain` fallback
-- consider setting a second custom MIME type (e.g. `application/x-termal-tab`) as a lightweight
-  flag that avoids the `text/plain` ambiguity
-
-## Workspace docs lag the server-backed layout implementation
-
-**Severity:** Note - documentation drift only, but it obscures the real API and persistence model.
-
-The new multi-browser workspace implementation is now in the codebase, but the docs are not fully
-aligned with what shipped. `docs/features/multi-browser-workspaces.md` still says Phase 1 only
-needs `GET /api/workspaces/{id}` and `PUT /api/workspaces/{id}`, while the implementation also
-adds `GET /api/workspaces` to drive the workspace switcher. `docs/architecture.md` still says the
-workspace layout is local-only and not persisted to the backend.
-
-**Current behavior:**
-- the feature brief understates the implemented workspace API surface
-- the architecture doc still describes workspace layout as browser-local state
-- readers cannot rely on the docs to understand the current server-backed workspace model
-
-**Proposal:**
-- update `docs/features/multi-browser-workspaces.md` to include the list route and switcher-driven
-  flow
-- update `docs/architecture.md` so the persistence section and API table reflect server-backed
-  workspace layouts
-
-## Switching workspaces in the current tab can drop the last debounced server save
-
-**Severity:** Medium - the latest layout can be persisted only to browser-local storage and never
-reach the server-backed workspace record.
-
-Workspace switching now persists layouts to the backend with a debounced `PUT /api/workspaces/{id}`
-write, but `navigateToWorkspace()` immediately calls `window.location.assign(...)` for same-tab
-navigation. The save effect cleanup clears any pending timeout on unmount, so a quick workspace
-switch can cancel the last pending backend write even though the layout already changed locally.
-
-That means the current browser can often recover from `localStorage`, but other browsers, fresh
-profiles, and any later server-driven bootstrap can still see a stale workspace layout because the
-authoritative backend copy never received the final update.
-
-**Current behavior:**
-- same-tab workspace navigation can happen before the debounced server save fires
-- unmount cleanup clears the pending persistence timer instead of flushing it
-- the latest layout may exist only in browser-local storage while the backend still serves an
-  older workspace snapshot
-
-**Proposal:**
-- flush pending workspace saves before same-tab navigation or persist them during `pagehide`
-- consider `navigator.sendBeacon` or an explicit synchronous handoff path for the final save
-- add a regression that changes a layout, switches workspaces immediately, and asserts the backend
-  still receives the last `PUT /api/workspaces/{id}`
-
-## Dropping a session on the tab rail ignores the hovered insertion index
-
-**Severity:** Low - tab re-targeting works, but the visual insertion affordance is inaccurate.
-
-`placeSessionDropInWorkspaceState()` accepts a `tabIndex`, and the tab rail computes hovered drop
-positions, but the `placement === "tabs"` path forwards session drops through
-`openSessionInWorkspaceState(...)`, which does not take the insertion index. As a result, the drop
-indicator can show a specific slot while the actual session placement falls back to the existing
-open/focus behavior.
-
-**Current behavior:**
-- dropping a session onto a highlighted tab position does not honor the computed insertion index
-- existing sessions are focused and new sessions are appended/opened using the default path
-- the UI can preview one tab position while committing another
-
-**Proposal:**
-- thread the `tabIndex` through the session-drop tab-placement path
-- route tab-rail session drops through the insertion-aware tab open helper instead of the generic
-  open/focus path
-
-## Reusing an existing Sessions tab still jumps to its old pane
-
-**Severity:** Low - the new contextual targeting only applies when creating a fresh Sessions tab.
-
-`openSessionListInWorkspaceState(...)` now chooses a better pane for a newly created `sessionList`
-tab, which fixes the first-open path from a control surface. But if a reusable Sessions tab already
-exists anywhere in the workspace, the helper still returns `activatePane(existing.paneId, ...)`
-immediately and ignores the new contextual target entirely.
-
-That leaves the behavior inconsistent with `openSourceInWorkspaceState(...)`,
-`openSessionInWorkspaceState(...)`, and the new canvas move path. The first click can open Sessions
-near the relevant session, while the second click jumps back to whichever pane happened to own the
-reusable tab before.
-
-**Current behavior:**
-- first-open `sessionList` placement uses the new contextual target logic
-- reopening Sessions only activates the existing reusable tab in its old pane
-- current regression coverage only exercises the fresh-tab path
-
-**Proposal:**
-- give reused `sessionList` tabs the same contextual move/activate behavior as source, session, and
-  canvas tabs
-- preserve the singleton Sessions tab model, but move it when the launch context changes panes
-- add workspace-level regression coverage for reopening an existing Sessions tab from a control
-  surface
-
-
-## Markdown localhost file-link normalization overmatches same-origin web URLs
-
-**Severity:** Low - legitimate app-origin web links with file-like paths can be rewritten as local
-source links.
-
-The new markdown helper normalizes any URL whose `origin` matches `window.location.origin` before
-checking whether the pathname "looks like" a file path. That is broad enough to catch ordinary
-same-origin documentation or asset URLs such as `/docs/architecture.md` or `/assets/logo.svg`,
-because they also end in dotted path segments.
-
-The localhost Windows-path case from the Questly/Supabase link is valid and should stay clickable,
-but same-origin web routes should not be reinterpreted as source-file links just because they have
-an extension.
-
-**Current behavior:**
-- same-origin HTTP URLs with file-like pathnames are treated as non-external by the markdown link
-  helper
-- raw same-origin URL text can be collapsed into a workspace-style file label even when the target
-  is ordinary web content
-- current tests cover localhost file URLs, but not same-origin docs/assets URLs that should remain
-  normal anchors
-
-**Proposal:**
-- restrict the normalization to loopback/file-shaped URLs instead of all same-origin file-like paths
-- require an explicit absolute filesystem path shape before converting an HTTP URL into a source
-  link target
-- add regression coverage for both localhost file URLs and ordinary same-origin web URLs
-
-## Orchestrator template `Run` button treats unknown project IDs as local
-
-**Severity:** Low - stale template project IDs can expose a runnable action that only fails after
-submission.
-
-`OrchestratorTemplatesPanel` derives `selectedProjectIsLocal` by calling
-`isLocalRemoteId(selectedProject?.remoteId)`. Because `isLocalRemoteId(undefined)` returns `true`,
-a template draft whose `projectId` is set but missing from the loaded project list is treated like
-a runnable local project. That can happen with persisted draft state or templates that still
-reference a deleted project.
-
-The backend still rejects the launch because `create_orchestrator_instance` requires the project ID
-to resolve to a real local project. The result is an enabled `Run` button that produces a backend
-error instead of being blocked in the UI.
-
-**Current behavior:**
-- a draft/template with an unknown `projectId` can enable `Run`
-- clicking `Run` sends `POST /api/orchestrators` and fails with an avoidable backend validation
-  error
-- current panel tests cover template CRUD/persistence/validation, but not stale-project `Run`
-  behavior
-
-**Proposal:**
-- only enable `Run` when `draft.projectId` resolves to a known `Project`
-- treat missing project metadata as non-runnable instead of implicitly local
-- add frontend tests for stale/unknown project IDs and `Run`-button error/disable states
-
-## Feature briefs
-- [Project-Scoped Remotes](./features/project-scoped-remotes.md)
-- [Session Model Switching](./features/model-switching.md)
-- [Slash Commands](./features/slash-commands.md)
-- [Gemini CLI Integration](./features/gemini-cli-integration.md)
-- [Diff Review Workflow](./features/diff-review-workflow.md)
-- [Territory Visualization](./features/territory-visualization.md)
-- [Agent Integration Comparison](./features/agent-integration-comparison.md)
-- [Multi-Browser Workspaces](./features/multi-browser-workspaces.md)
-
-# Backlog
-
-## Backend module sizes are growing
-
-**Severity:** Medium - maintainability concern, not a runtime bug.
-
-The backend was split from a single `src/main.rs` into focused modules (`api.rs`, `state.rs`,
-`runtime.rs`, `turns.rs`, `remote.rs`, `tests.rs`), but several of those modules are already
-large. `src/state.rs` and `src/turns.rs` each carry substantial logic that could benefit from
-further decomposition as features stabilize.
-
-## Session model controls still need polish
-
-**Severity:** Medium - detailed brief:
-- [Session Model Switching](./features/model-switching.md)
-
-Session-scoped model switching is implemented for Claude, Codex, Cursor, and
-Gemini. The remaining work is polish: richer capability metadata, stronger
-refresh recovery, and deeper end-to-end coverage.
-
-## Gemini ACP integration still needs hardening
-
-**Severity:** Medium - detailed brief:
-- [Gemini CLI Integration](./features/gemini-cli-integration.md)
-
-Gemini is implemented as a first-class ACP-backed agent now. The remaining work
-is hardening: clearer auth/setup recovery, broader ACP protocol coverage, and
-more end-to-end testing around model refresh and approval-mode changes.
-
-## No territory visualization
-
-**Severity:** High - detailed brief:
-- [Territory Visualization](./features/territory-visualization.md)
-
-- Add click-through navigation from territory entries to the originating conversation message
-- Add a persistent territory summary bar visible across all tabs
-- Optionally overlay territory indicators in the source view and diff preview tabs
+The `stop_session` dedicated-runtime kill-failure, the orchestrator-start `adoptSessions` vs
+`adoptState` gap, the duplicated `CONTROL_SURFACE_TAB_KINDS` constant, the control-surface
+forward/reverse pane sync double-fire, the pane-local Files/Git global root/workdir mismatch,
+the canvas stale origin metadata on move, the `text/plain` MIME drag false-drop affordances, the
+workspace docs lag, the debounced server save drop on navigation, the Sessions-tab reuse contextual
+targeting gap, the markdown same-origin overmatch, and the orchestrator `Run` button stale project
+handling are also fixed in the current tree. Failed dedicated-runtime kills now roll back session
+state and return an error instead of treating the stop as clean, orchestrator start now routes the
+returned `StateResponse` through `adoptState` to keep revision tracking in sync, `CONTROL_SURFACE_KINDS`
+is now exported from `workspace.ts` as the single canonical set, control-surface tab selection now
+runs before and exclusive of session-tab sync, Files/Git panels now derive their root/workdir from
+the same pane-local session/project context as their launchers, canvas and sessionList tabs now
+refresh their origin metadata when moved to a new pane context, `PaneTabs.tsx` now only accepts
+the explicit custom MIME type to guard the drop affordance, workspace saves are flushed with
+`keepalive` on `pagehide` and before navigation, the Sessions tab is now moved to the contextual
+pane on reuse, `isMarkdownLocalFileUrl` was narrowed to loopback-only and gated behind an
+explicit Windows-path shape guard, and the orchestrator `Run` button now blocks on missing or
+stale projects. Two TypeScript compile errors introduced in the same batch (spurious `keepalive`
+fields on API functions lacking an `options` parameter, and out-of-scope drag refs in
+`SessionPaneView`) were also caught and fixed.
+
+The `openOrchestratorListInWorkspaceState` stale origin-metadata gap on tab reuse, the `pagehide`
+stale-closure fragility, the Windows-only `looksLikeAbsoluteHttpMarkdownFilePath` regex, and the
+process-global kill-failure test hook are also fixed in the current tree. The orchestrator list
+tab now refreshes its `originSessionId`/`originProjectId` and moves to the contextual pane on reuse
+(matching the canvas and Sessions singleton patterns); the `pagehide` effect now calls
+`flushWorkspaceLayoutSaveRef.current` so the empty dep array is definitively safe regardless of
+helper internals; `looksLikeAbsoluteHttpMarkdownFilePath` now also matches Unix absolute paths via
+a top-level directory allowlist; and the kill-failure injection hook is now scoped to a specific
+`Arc<SharedChild>` by pointer rather than a global label string. `stop_session` now keeps the
+previous session status and preview visible while shutdown is pending, guarded by an internal
+`runtime_stop_in_progress` flag so intentional runtime exits are not misclassified as failures.
+Launcher and cross-window tab drags also share one guarded known-drag fallback across the pane
+body and tab rail, which restores reduced-MIME browser behavior without reintroducing arbitrary
+`text/plain` false positives. Stop-in-progress sessions now also suppress matching runtime
+failure, retry, error, exit, completion, and Codex thread-state callbacks until the stop
+finishes, and backend regressions cover the double-stop conflict, queued-prompt suppression,
+and the stop-time callback suppression contracts.
 
 ---
 
-# Implementation Tasks
+## Failed dedicated stop attempts can drop runtime callbacks during the suppression window
 
-Concrete work implied by the current TermAl parity gaps. Ordered by user impact and dependency.
+**Severity:** Medium - a dedicated session can stay visibly Active with stale preview/messages if the runtime emits terminal callbacks while a failed stop attempt is in flight.
 
-## P0
+`stop_session()` now sets `runtime_stop_in_progress` before calling `shutdown_removed_runtime(...)`, and the runtime callback handlers early-return while that flag is set. If a dedicated Claude/Codex/ACP stop attempt ultimately fails and returns an error, the flag is cleared and the runtime is left attached, but any `finish_turn_ok`, `mark_turn_error`, retry, exit, or thread-state callbacks that arrived during the failed shutdown window have already been discarded.
 
-- [ ] Add territory visualization:
-  track per-session file read/write activity in backend state, expose it through `/api/territory`,
-  render a project-tree view color-coded by agent with recency decay, heatmap mode, conflict
-  warnings, click-through to originating messages, and a persistent summary bar. This is the core
-  coordination surface that makes concurrent agent workflows safe and manageable.
+That means a rare dedicated stop failure can now hide real runtime state transitions. Inference from the code path: if the agent exits or completes naturally while the stop attempt is timing out, the user can be left with a session that still looks Active even though the terminal callback already came and was ignored.
 
-## P1
+**Current behavior:**
+- `stop_session()` sets `runtime_stop_in_progress` before attempting dedicated runtime shutdown
+- matching runtime callbacks are suppressed while that flag is true
+- if the dedicated stop returns an error, the runtime stays attached but suppressed callbacks are not replayed
 
-- [ ] Polish session model controls:
-  keep the current session-scoped model switching, but continue improving live
-  metadata, validation, recovery flows, and create/clone defaults so the model
-  UX feels intentional across Claude, Codex, Cursor, and Gemini.
-- [ ] Add drag-and-drop image attachments:
-  pasted image attachments are documented in the composer now, but drag-and-drop is still missing.
-- [ ] Debounce delta persistence:
-  stop writing the full state to disk on every streaming text chunk. Accumulate deltas in memory
-  and flush periodically (e.g. 500 ms) or on turn completion. Index messages by ID for O(1)
-  lookup. Cache `collect_agent_readiness` instead of re-scanning PATH on every snapshot. Move
-  disk I/O outside the mutex lock.
+**Proposal:**
+- preserve or replay terminal runtime callbacks when a dedicated stop attempt fails
+- or narrow suppression so failed-stop paths still honor completion/error/exit callbacks
+- add a regression that forces a dedicated stop failure while a matching runtime callback arrives during the shutdown window
+
+## Tab-rail session drops still ignore insertion index for already-open sessions
+
+**Severity:** Low - dragging an already-open session onto a tab rail still repositions it to the pane default instead of the hovered slot.
+
+`placeSessionDropInWorkspaceState()` now threads `tabIndex` through the new-session path, but the already-open-session path still delegates to `openSessionInWorkspaceState()`, which only moves or activates the existing tab and does not accept an insertion index. So the visible insertion affordance is now accurate for closed sessions, but not for reordering an already-open session into a specific rail slot.
+
+The current workspace test only covers the newly-opened session case, so this remaining path can regress quietly.
+
+**Current behavior:**
+- dropping a not-yet-open session on the tab rail uses the requested `tabIndex`
+- dropping an already-open session ignores the hovered `tabIndex`
+- the existing regression test covers only the not-yet-open session path
+
+**Proposal:**
+- thread an optional `tabIndex` through the existing-session move path in `openSessionInWorkspaceState()`
+- preserve the hovered insertion slot when moving an already-open session into the target pane
+- add a workspace regression for the already-open session reorder case
 
 ## P2
 
@@ -482,12 +168,12 @@ Concrete work implied by the current TermAl parity gaps. Ordered by user impact 
 - [ ] Add backend regression tests for divergent completed-text replacement in Codex streaming:
   cover both shared-Codex and REPL-Codex paths where the final authoritative text must replace,
   not append to, previously streamed content.
+- [ ] Add a dedicated stop-failure callback suppression regression:
+  force a dedicated runtime stop failure while a matching completion/error/exit callback arrives
+  during `runtime_stop_in_progress`, and assert the callback is not lost once the stop fails.
 - [ ] Add a `stop_session` test with a queued prompt pending when a shared Codex interrupt fails:
   verify that `dispatch_next_queued_turn` fires and the queued prompt is dispatched after the
   best-effort cleanup completes.
-- [ ] Add a `stop_session` regression for failed dedicated-runtime kills:
-  cover Claude/Codex/ACP kill failures where the child process is still alive and assert the
-  session is not treated as cleanly stopped or allowed to dispatch queued follow-up work.
 - [ ] Add frontend reconcile tests for new interactive message types:
   `userInputRequest`, `mcpElicitationRequest`, and `codexAppRequest` messages are handled by the
   reconciler but have no test coverage verifying that state changes (e.g. pending ? submitted)
@@ -501,16 +187,9 @@ Concrete work implied by the current TermAl parity gaps. Ordered by user impact 
 - [ ] Add PaneTabs test for git status fetch failure in context menu:
   the `statusError` / `statusMessage` state fields exist but the error rendering path when
   `fetchGitStatus` rejects is uncovered.
-- [ ] Add OrchestratorTemplatesPanel tests for update, delete, and run flows:
+- [ ] Add OrchestratorTemplatesPanel tests for update and delete flows:
   mocks for `updateOrchestratorTemplate` and `deleteOrchestratorTemplate` are set up but no test
-  exercises them. Also cover `createOrchestratorInstance`, `onStateUpdated`, and stale/unknown
-  project handling for the `Run` action.
-- [ ] Add an App-level orchestrator-start adoption regression:
-  verify that starting an orchestration adopts the full returned `StateResponse` revision and other
-  metadata instead of only replacing the session list.
-- [ ] Add MarkdownContent regression coverage for localhost file URLs vs. same-origin web links:
-  keep `http://127.0.0.1/.../C:/...#L15C1` links opening source files, but ensure ordinary
-  same-origin docs/assets URLs remain normal anchors.
+  exercises them. (Run, `onStateUpdated`, and stale-project handling are now covered.)
 - [ ] Add OrchestratorTemplateLibraryPanel tests for fetch error and event-driven re-fetch:
   the error branch (`getErrorMessage`) and the `ORCHESTRATOR_TEMPLATES_CHANGED_EVENT` re-load
   path have no test coverage.
@@ -528,9 +207,6 @@ Concrete work implied by the current TermAl parity gaps. Ordered by user impact 
 - [ ] Add orchestrator instances to `StateResponse` or a dedicated SSE delta:
   the frontend currently has no push notification for orchestrator state changes (transitions
   fired, instances completed). It must poll `GET /api/orchestrators`.
-- [ ] Add session/transition count limits to orchestrator template validation:
-  `normalize_orchestrator_template_draft` has no upper bounds on `sessions.len()` or
-  `transitions.len()`. Cap at ~50 sessions and ~200 transitions.
 - [ ] Add unit tests for `rescopeControlSurfacePane`:
   cover gitStatus (workdir update), filesystem (rootPath update), controlPanel-like (origin-only
   update), pane-not-found no-op, and no-active-tab no-op branches in `workspace.test.ts`.
@@ -550,9 +226,11 @@ Concrete work implied by the current TermAl parity gaps. Ordered by user impact 
 - [ ] Add a canvas-move regression for post-relocation session/project sync:
   when an existing shared canvas is moved into a new pane, assert its origin metadata and the
   target pane's `activeSessionId` are updated to the new launch context instead of the old one.
-- [ ] Add a Sessions-tab reuse regression for contextual pane targeting:
-  cover reopening an existing singleton `sessionList` tab from a control surface and verify it
-  moves to the contextual pane instead of always reactivating its previous location.
+- [ ] Add unit tests for canvas/sessionList origin-refresh on existing tab reuse:
+  `openCanvasInWorkspaceState` and `openSessionListInWorkspaceState` now update `originSessionId`/
+  `originProjectId` via `replaceWorkspaceTabInPane` when the existing tab's origin differs from the
+  new launch context. Add `workspace.test.ts` cases where the existing tab has a null origin and
+  assert the new origin values are written after re-open.
 - [ ] Add unit tests for `ensureWorkspaceViewId` and `createWorkspaceViewId`:
   `workspace-storage.ts` exports these functions for URL-param handling and workspace ID
   generation. A round-trip test in jsdom would guard against regressions in workspace ID
@@ -561,12 +239,20 @@ Concrete work implied by the current TermAl parity gaps. Ordered by user impact 
   `list_workspace_layouts_route_returns_saved_workspaces` checks presence but not the documented
   `updated_at` descending sort order. Assert index positions after inserting workspaces with
   distinct timestamps.
-- [ ] Add workspace-navigation regression coverage for debounced server layout saves:
-  change a workspace layout, switch to another workspace in the current tab before the debounce
-  timer fires, and assert the last layout still reaches `PUT /api/workspaces/{id}`.
-- [ ] Add a tab-rail session-drop insertion-order regression:
-  cover `placeSessionDropInWorkspaceState` / App-level tab drops so a session dropped at a
-  specific tab index is inserted at that position instead of always falling back to append/focus.
+- [ ] Add orchestratorList same-pane origin-refresh test:
+  `openOrchestratorListInWorkspaceState` now updates `originSessionId`/`originProjectId` on reuse,
+  but the existing workspace.test.ts only covers the cross-pane move path. Add a case where the
+  orchestratorList is already in the target pane and verify that the origin fields are updated
+  without a move occurring.
+- [ ] Remove duplicate `saveWorkspaceLayoutSpy.mockClear()` in the pagehide test:
+  `App.test.tsx` "flushes a pending workspace layout save with keepalive on pagehide" calls
+  `.mockClear()` twice in a row with no intervening action; remove the redundant second call.
+- [ ] Add tab-rail session-drop insertion-order regressions:
+  cover both the new-session path and the already-open-session move path with a non-zero
+  `tabIndex`, asserting the tab lands at the hovered rail position in both cases.
+- [ ] Add PaneTabs `dragLeave` cleanup regression for the known-drag path:
+  after a `dragOver` shows a drop indicator via `getKnownDraggedTab`, fire `dragLeave` and assert
+  the indicator is removed. Current tests only verify the indicator appears but not that it clears.
 - [ ] Extract shared drag-drop test setup helper:
   the two drag-drop tests in `App.test.tsx` duplicate ~60 lines of identical fetch-mock and
   setup boilerplate. Extract a shared `renderAppWithProjectAndSession()` helper.

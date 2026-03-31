@@ -405,6 +405,22 @@ fn test_sleep_child() -> Child {
     }
 }
 
+struct TestKillChildProcessFailureGuard;
+
+impl Drop for TestKillChildProcessFailureGuard {
+    fn drop(&mut self) {
+        set_test_kill_child_process_failure(None, None);
+    }
+}
+
+fn force_test_kill_child_process_failure(
+    process: &Arc<SharedChild>,
+    label: &str,
+) -> TestKillChildProcessFailureGuard {
+    set_test_kill_child_process_failure(Some(label), Some(process));
+    TestKillChildProcessFailureGuard
+}
+
 fn test_codex_runtime_handle(
     runtime_id: &str,
 ) -> (CodexRuntimeHandle, mpsc::Receiver<CodexRuntimeCommand>) {
@@ -8295,6 +8311,404 @@ fn stop_session_detaches_shared_codex_session_when_interrupt_fails() {
 }
 
 #[test]
+fn stop_session_returns_an_error_when_a_dedicated_runtime_refuses_to_stop() {
+    let state = test_app_state();
+    let session_id = test_session_id(&state, Agent::Claude);
+    let process = Arc::new(SharedChild::new(test_sleep_child()).unwrap());
+    let (input_tx, input_rx) = mpsc::channel();
+    let runtime = ClaudeRuntimeHandle {
+        runtime_id: "claude-stop-fail".to_owned(),
+        input_tx,
+        process: process.clone(),
+    };
+
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(&session_id)
+            .expect("Claude session should exist");
+        inner.sessions[index].runtime = SessionRuntime::Claude(runtime);
+        inner.sessions[index].session.status = SessionStatus::Active;
+        inner.sessions[index].queued_prompts.push_back(QueuedPromptRecord {
+            attachments: Vec::new(),
+            pending_prompt: PendingPrompt {
+                attachments: Vec::new(),
+                id: "queued-stop-follow-up".to_owned(),
+                timestamp: stamp_now(),
+                text: "queued prompt".to_owned(),
+                expanded_text: None,
+            },
+        });
+        sync_pending_prompts(&mut inner.sessions[index]);
+    }
+
+    let baseline_revision = state.snapshot().revision;
+    let mut state_events = state.subscribe_events();
+    let _failure_guard = force_test_kill_child_process_failure(&process, "Claude");
+    let error = match state.stop_session(&session_id) {
+        Ok(_) => panic!("failed dedicated runtime kills should not be treated as clean stops"),
+        Err(error) => error,
+    };
+    assert_eq!(error.status, StatusCode::INTERNAL_SERVER_ERROR);
+    assert!(error.message.contains("failed to stop session `"));
+    assert_eq!(state.snapshot().revision, baseline_revision);
+    assert!(matches!(
+        state_events.try_recv(),
+        Err(broadcast::error::TryRecvError::Empty)
+    ));
+
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    let record = inner
+        .sessions
+        .iter()
+        .find(|record| record.session.id == session_id)
+        .expect("Claude session should exist");
+    assert_eq!(record.session.status, SessionStatus::Active);
+    assert_eq!(record.session.preview, "Ready for a prompt.");
+    assert!(matches!(record.runtime, SessionRuntime::Claude(_)));
+    assert_eq!(record.queued_prompts.len(), 1);
+    assert_eq!(record.session.pending_prompts.len(), 1);
+    drop(inner);
+
+    assert!(input_rx.recv_timeout(Duration::from_millis(100)).is_err());
+
+    process.kill().unwrap();
+    process.wait().unwrap();
+    let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
+#[test]
+fn stop_session_keeps_the_previous_state_visible_until_shutdown_completes() {
+    let state = test_app_state();
+    let session_id = test_session_id(&state, Agent::Claude);
+    let process = Arc::new(SharedChild::new(test_sleep_child()).unwrap());
+    let (input_tx, input_rx) = mpsc::channel();
+    let runtime = ClaudeRuntimeHandle {
+        runtime_id: "claude-stop-concurrent-read".to_owned(),
+        input_tx,
+        process,
+    };
+
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(&session_id)
+            .expect("Claude session should exist");
+        inner.sessions[index].runtime = SessionRuntime::Claude(runtime);
+        inner.sessions[index].session.status = SessionStatus::Active;
+        inner.sessions[index].session.preview = "Streaming reply...".to_owned();
+    }
+
+    let stop_state = state.clone();
+    let stop_session_id = session_id.clone();
+    let stop_handle = std::thread::spawn(move || stop_state.stop_session(&stop_session_id));
+
+    let deadline = std::time::Instant::now() + Duration::from_secs(1);
+    loop {
+        {
+            let inner = state.inner.lock().expect("state mutex poisoned");
+            let record = inner
+                .sessions
+                .iter()
+                .find(|record| record.session.id == session_id)
+                .expect("Claude session should exist");
+            if record.runtime_stop_in_progress {
+                assert_eq!(record.session.status, SessionStatus::Active);
+                assert_eq!(record.session.preview, "Streaming reply...");
+                break;
+            }
+        }
+
+        if std::time::Instant::now() >= deadline {
+            panic!("stop_session did not enter the shutdown window in time");
+        }
+
+        std::thread::sleep(Duration::from_millis(5));
+    }
+
+    let snapshot = state.snapshot();
+    let session = snapshot
+        .sessions
+        .iter()
+        .find(|session| session.id == session_id)
+        .expect("session should still be visible while stopping");
+    assert_eq!(session.status, SessionStatus::Active);
+    assert_eq!(session.preview, "Streaming reply...");
+
+    let stopped_snapshot = stop_handle
+        .join()
+        .expect("stop_session thread should join cleanly")
+        .expect("stop_session should succeed");
+    let stopped_session = stopped_snapshot
+        .sessions
+        .iter()
+        .find(|session| session.id == session_id)
+        .expect("stopped session should remain present");
+    assert_eq!(stopped_session.status, SessionStatus::Idle);
+    assert_eq!(stopped_session.preview, "Turn stopped by user.");
+
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    let record = inner
+        .sessions
+        .iter()
+        .find(|record| record.session.id == session_id)
+        .expect("Claude session should exist");
+    assert!(!record.runtime_stop_in_progress);
+    assert!(matches!(record.runtime, SessionRuntime::None));
+    drop(inner);
+
+    assert!(input_rx.recv_timeout(Duration::from_millis(100)).is_err());
+
+    let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
+#[test]
+fn stop_session_returns_conflict_when_already_stopping() {
+    let state = test_app_state();
+    let session_id = test_session_id(&state, Agent::Claude);
+    let process = Arc::new(SharedChild::new(test_sleep_child()).unwrap());
+    let (input_tx, input_rx) = mpsc::channel();
+    let runtime = ClaudeRuntimeHandle {
+        runtime_id: "claude-stop-conflict".to_owned(),
+        input_tx,
+        process,
+    };
+
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(&session_id)
+            .expect("Claude session should exist");
+        inner.sessions[index].runtime = SessionRuntime::Claude(runtime);
+        inner.sessions[index].session.status = SessionStatus::Active;
+        inner.sessions[index].session.preview = "Streaming reply...".to_owned();
+    }
+
+    let stop_state = state.clone();
+    let stop_session_id = session_id.clone();
+    let stop_handle = std::thread::spawn(move || stop_state.stop_session(&stop_session_id));
+
+    let deadline = std::time::Instant::now() + Duration::from_secs(1);
+    loop {
+        let stop_in_progress = {
+            let inner = state.inner.lock().expect("state mutex poisoned");
+            inner
+                .sessions
+                .iter()
+                .find(|record| record.session.id == session_id)
+                .expect("Claude session should exist")
+                .runtime_stop_in_progress
+        };
+        if stop_in_progress {
+            break;
+        }
+        if std::time::Instant::now() >= deadline {
+            panic!("stop_session did not enter the shutdown window in time");
+        }
+
+        std::thread::sleep(Duration::from_millis(5));
+    }
+
+    let error = match state.stop_session(&session_id) {
+        Ok(_) => panic!("a second stop should conflict while shutdown is in flight"),
+        Err(error) => error,
+    };
+    assert_eq!(error.status, StatusCode::CONFLICT);
+    assert_eq!(error.message, "session is already stopping");
+
+    let stopped_snapshot = stop_handle
+        .join()
+        .expect("stop_session thread should join cleanly")
+        .expect("initial stop_session should succeed");
+    let stopped_session = stopped_snapshot
+        .sessions
+        .iter()
+        .find(|session| session.id == session_id)
+        .expect("stopped session should remain present");
+    assert_eq!(stopped_session.status, SessionStatus::Idle);
+    assert_eq!(stopped_session.preview, "Turn stopped by user.");
+
+    assert!(input_rx.recv_timeout(Duration::from_millis(100)).is_err());
+
+    let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
+#[test]
+fn runtime_turn_callbacks_are_suppressed_while_stop_is_in_progress() {
+    let state = test_app_state();
+    let session_id = test_session_id(&state, Agent::Claude);
+    let (runtime, input_rx) = test_claude_runtime_handle("claude-stop-callback-guard");
+    let runtime_token = RuntimeToken::Claude(runtime.runtime_id.clone());
+
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(&session_id)
+            .expect("Claude session should exist");
+        inner.sessions[index].runtime = SessionRuntime::Claude(runtime);
+        inner.sessions[index].session.status = SessionStatus::Active;
+        inner.sessions[index].session.preview = "Streaming reply...".to_owned();
+        inner.sessions[index].queued_prompts.push_back(QueuedPromptRecord {
+            attachments: Vec::new(),
+            pending_prompt: PendingPrompt {
+                attachments: Vec::new(),
+                id: "queued-stop-callback-guard".to_owned(),
+                timestamp: stamp_now(),
+                text: "queued prompt".to_owned(),
+                expanded_text: None,
+            },
+        });
+        sync_pending_prompts(&mut inner.sessions[index]);
+        inner.sessions[index].runtime_stop_in_progress = true;
+    }
+
+    let baseline_revision = state.snapshot().revision;
+    let mut state_events = state.subscribe_events();
+
+    state
+        .fail_turn_if_runtime_matches(&session_id, &runtime_token, "reader failure")
+        .expect("fail_turn_if_runtime_matches should succeed");
+    state
+        .note_turn_retry_if_runtime_matches(&session_id, &runtime_token, "Retrying Claude...")
+        .expect("note_turn_retry_if_runtime_matches should succeed");
+    state
+        .mark_turn_error_if_runtime_matches(&session_id, &runtime_token, "runtime error")
+        .expect("mark_turn_error_if_runtime_matches should succeed");
+    state
+        .finish_turn_ok_if_runtime_matches(&session_id, &runtime_token)
+        .expect("finish_turn_ok_if_runtime_matches should succeed");
+
+    assert_eq!(state.snapshot().revision, baseline_revision);
+    assert!(matches!(
+        state_events.try_recv(),
+        Err(broadcast::error::TryRecvError::Empty)
+    ));
+
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    let record = inner
+        .sessions
+        .iter()
+        .find(|record| record.session.id == session_id)
+        .expect("Claude session should exist");
+    assert_eq!(record.session.status, SessionStatus::Active);
+    assert_eq!(record.session.preview, "Streaming reply...");
+    assert!(record.session.messages.is_empty());
+    assert_eq!(record.queued_prompts.len(), 1);
+    assert_eq!(record.session.pending_prompts.len(), 1);
+    assert!(matches!(record.runtime, SessionRuntime::Claude(_)));
+    assert!(record.runtime_stop_in_progress);
+    drop(inner);
+
+    assert!(input_rx.recv_timeout(Duration::from_millis(100)).is_err());
+
+    let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
+#[test]
+fn codex_thread_state_updates_are_suppressed_while_stop_is_in_progress() {
+    let state = test_app_state();
+    let session_id = test_session_id(&state, Agent::Codex);
+    let (runtime, _input_rx) = test_codex_runtime_handle("codex-stop-thread-state-guard");
+    let runtime_token = RuntimeToken::Codex(runtime.runtime_id.clone());
+    state
+        .set_external_session_id(&session_id, "thread-stop-guard".to_owned())
+        .expect("Codex session should accept external thread ids");
+
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(&session_id)
+            .expect("Codex session should exist");
+        inner.sessions[index].runtime = SessionRuntime::Codex(runtime);
+        inner.sessions[index].session.status = SessionStatus::Active;
+        inner.sessions[index].session.preview = "Streaming reply...".to_owned();
+        inner.sessions[index].runtime_stop_in_progress = true;
+    }
+
+    let baseline_revision = state.snapshot().revision;
+    let mut state_events = state.subscribe_events();
+
+    state
+        .set_codex_thread_state_if_runtime_matches(
+            &session_id,
+            &runtime_token,
+            CodexThreadState::Archived,
+        )
+        .expect("set_codex_thread_state_if_runtime_matches should succeed");
+
+    assert_eq!(state.snapshot().revision, baseline_revision);
+    assert!(matches!(
+        state_events.try_recv(),
+        Err(broadcast::error::TryRecvError::Empty)
+    ));
+
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    let record = inner
+        .sessions
+        .iter()
+        .find(|record| record.session.id == session_id)
+        .expect("Codex session should exist");
+    assert_eq!(record.session.status, SessionStatus::Active);
+    assert_eq!(record.session.preview, "Streaming reply...");
+    assert_eq!(
+        record.session.codex_thread_state,
+        Some(CodexThreadState::Active)
+    );
+    assert!(matches!(record.runtime, SessionRuntime::Codex(_)));
+    assert!(record.runtime_stop_in_progress);
+    drop(inner);
+
+    let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
+#[test]
+fn runtime_exit_is_suppressed_while_stop_is_in_progress() {
+    let state = test_app_state();
+    let session_id = test_session_id(&state, Agent::Claude);
+    let (runtime, _input_rx) = test_claude_runtime_handle("claude-stop-exit-guard");
+    let runtime_token = RuntimeToken::Claude(runtime.runtime_id.clone());
+
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(&session_id)
+            .expect("Claude session should exist");
+        inner.sessions[index].runtime = SessionRuntime::Claude(runtime);
+        inner.sessions[index].session.status = SessionStatus::Active;
+        inner.sessions[index].session.preview = "Streaming reply...".to_owned();
+        inner.sessions[index].runtime_stop_in_progress = true;
+    }
+
+    let baseline_revision = state.snapshot().revision;
+    let mut state_events = state.subscribe_events();
+
+    state
+        .handle_runtime_exit_if_matches(&session_id, &runtime_token, Some("runtime exited"))
+        .expect("handle_runtime_exit_if_matches should succeed");
+
+    assert_eq!(state.snapshot().revision, baseline_revision);
+    assert!(matches!(
+        state_events.try_recv(),
+        Err(broadcast::error::TryRecvError::Empty)
+    ));
+
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    let record = inner
+        .sessions
+        .iter()
+        .find(|record| record.session.id == session_id)
+        .expect("Claude session should exist");
+    assert_eq!(record.session.status, SessionStatus::Active);
+    assert_eq!(record.session.preview, "Streaming reply...");
+    assert!(record.session.messages.is_empty());
+    assert!(matches!(record.runtime, SessionRuntime::Claude(_)));
+    assert!(record.runtime_stop_in_progress);
+    drop(inner);
+
+    let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
+#[test]
 fn syncs_cursor_model_options_from_acp_config() {
     let state = test_app_state();
 
@@ -12563,6 +12977,119 @@ fn orchestrator_templates_reject_cyclic_transitions() {
     assert!(error.message.contains("cycle"));
 }
 
+#[test]
+fn orchestrator_templates_reject_too_many_sessions() {
+    let state = test_app_state();
+    let mut draft = sample_orchestrator_template_draft();
+    draft.sessions = (0..51)
+        .map(|index| OrchestratorSessionTemplate {
+            id: format!("session-{index}"),
+            name: format!("Session {index}"),
+            agent: Agent::Claude,
+            model: None,
+            instructions: String::new(),
+            auto_approve: false,
+            position: OrchestratorNodePosition {
+                x: index as f64 * 40.0,
+                y: 0.0,
+            },
+        })
+        .collect();
+    draft.transitions.clear();
+
+    let error = state
+        .create_orchestrator_template(draft)
+        .expect_err("template creation should reject oversized session graphs");
+
+    assert_eq!(error.status, StatusCode::BAD_REQUEST);
+    assert_eq!(
+        error.message,
+        "orchestrator templates support at most 50 sessions"
+    );
+}
+
+#[test]
+fn orchestrator_templates_reject_too_many_transitions() {
+    let state = test_app_state();
+    let mut draft = sample_orchestrator_template_draft();
+    draft.sessions.truncate(2);
+    draft.transitions = (0..201)
+        .map(|index| OrchestratorTemplateTransition {
+            id: format!("transition-{index}"),
+            from_session_id: "planner".to_owned(),
+            to_session_id: "builder".to_owned(),
+            from_anchor: None,
+            to_anchor: None,
+            trigger: OrchestratorTransitionTrigger::OnCompletion,
+            result_mode: OrchestratorTransitionResultMode::LastResponse,
+            prompt_template: None,
+        })
+        .collect();
+
+    let error = state
+        .create_orchestrator_template(draft)
+        .expect_err("template creation should reject oversized transition graphs");
+
+    assert_eq!(error.status, StatusCode::BAD_REQUEST);
+    assert_eq!(
+        error.message,
+        "orchestrator templates support at most 200 transitions"
+    );
+}
+
+#[test]
+fn orchestrator_templates_accept_the_session_limit_boundary() {
+    let state = test_app_state();
+    let mut draft = sample_orchestrator_template_draft();
+    draft.sessions = (0..50)
+        .map(|index| OrchestratorSessionTemplate {
+            id: format!("session-{index}"),
+            name: format!("Session {index}"),
+            agent: Agent::Claude,
+            model: None,
+            instructions: String::new(),
+            auto_approve: false,
+            position: OrchestratorNodePosition {
+                x: index as f64 * 40.0,
+                y: 0.0,
+            },
+        })
+        .collect();
+    draft.transitions.clear();
+
+    let response = state
+        .create_orchestrator_template(draft)
+        .expect("template creation should accept 50 sessions");
+
+    assert_eq!(response.template.sessions.len(), 50);
+    assert!(response.template.transitions.is_empty());
+}
+
+#[test]
+fn orchestrator_templates_accept_the_transition_limit_boundary() {
+    let state = test_app_state();
+    let mut draft = sample_orchestrator_template_draft();
+    draft.sessions.truncate(2);
+    draft.transitions = (0..200)
+        .map(|index| OrchestratorTemplateTransition {
+            id: format!("transition-{index}"),
+            from_session_id: "planner".to_owned(),
+            to_session_id: "builder".to_owned(),
+            from_anchor: None,
+            to_anchor: None,
+            trigger: OrchestratorTransitionTrigger::OnCompletion,
+            result_mode: OrchestratorTransitionResultMode::LastResponse,
+            prompt_template: None,
+        })
+        .collect();
+
+    let response = state
+        .create_orchestrator_template(draft)
+        .expect("template creation should accept 200 transitions");
+
+    assert_eq!(response.template.sessions.len(), 2);
+    assert_eq!(response.template.transitions.len(), 200);
+}
 #[tokio::test]
 async fn list_orchestrator_instances_route_returns_runtime_instances() {
     let state = test_app_state();
@@ -14157,3 +14684,4 @@ fn killing_a_session_prunes_its_orchestrator_links() {
         })
     }));
 }
+

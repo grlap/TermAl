@@ -4,9 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   applyGitFileAction,
   commitGitChanges,
-  fetchGitDiff,
   fetchGitStatus,
-  type GitDiffResponse,
   type GitStatusFile,
   type GitStatusResponse,
 } from "../api";
@@ -18,14 +16,12 @@ vi.mock("../api", async () => {
     ...actual,
     applyGitFileAction: vi.fn(),
     commitGitChanges: vi.fn(),
-    fetchGitDiff: vi.fn(),
     fetchGitStatus: vi.fn(),
   };
 });
 
 const applyGitFileActionMock = vi.mocked(applyGitFileAction);
 const commitGitChangesMock = vi.mocked(commitGitChanges);
-const fetchGitDiffMock = vi.mocked(fetchGitDiff);
 const fetchGitStatusMock = vi.mocked(fetchGitStatus);
 const PROJECT_ID = "project-1";
 const SESSION_ID = "session-1";
@@ -42,7 +38,6 @@ describe("GitStatusPanel", () => {
     __resetGitStatusPanelCacheForTests();
     applyGitFileActionMock.mockReset();
     commitGitChangesMock.mockReset();
-    fetchGitDiffMock.mockReset();
     fetchGitStatusMock.mockReset();
   });
 
@@ -65,9 +60,8 @@ describe("GitStatusPanel", () => {
         },
       ]),
     );
-    fetchGitDiffMock.mockResolvedValue(makeDiffResponse());
-
-    const onOpenDiff = vi.fn();
+    const deferredOpen = createDeferred<void>();
+    const onOpenDiff = vi.fn(() => deferredOpen.promise);
 
     render(
       <GitStatusPanel
@@ -87,10 +81,11 @@ describe("GitStatusPanel", () => {
     expect(screen.getAllByText("ui").length).toBeGreaterThan(0);
     expect(screen.getByText("ControlPanelSurface.tsx")).toBeInTheDocument();
 
-    await clickAndSettle(screen.getByRole("button", { name: /^ControlPanelSurface\.tsx$/i }));
+    const fileButton = screen.getByRole("button", { name: /^ControlPanelSurface\.tsx$/i });
+    await clickAndSettle(fileButton);
 
-    await waitFor(() => {
-      expect(fetchGitDiffMock).toHaveBeenCalledWith({
+    expect(onOpenDiff).toHaveBeenCalledWith(
+      {
         originalPath: undefined,
         path: "ui/src/panels/ControlPanelSurface.tsx",
         projectId: null,
@@ -98,11 +93,14 @@ describe("GitStatusPanel", () => {
         sessionId: SESSION_ID,
         statusCode: "A",
         workdir: "/repo",
-      });
-    });
+      },
+      { sectionId: "staged" },
+    );
+    expect(fileButton).toBeDisabled();
 
+    deferredOpen.resolve();
     await waitFor(() => {
-      expect(onOpenDiff).toHaveBeenCalledWith(makeDiffResponse(), { sectionId: "staged" });
+      expect(fileButton).not.toBeDisabled();
     });
 
     await clickAndSettle(screen.getByRole("button", { name: /^Staged\b/i }));
@@ -119,9 +117,7 @@ describe("GitStatusPanel", () => {
         },
       ]),
     );
-    fetchGitDiffMock.mockResolvedValue(makeDiffResponse());
-
-    const onOpenDiff = vi.fn();
+    const onOpenDiff = vi.fn().mockResolvedValue(undefined);
 
     render(
       <GitStatusPanel
@@ -137,7 +133,18 @@ describe("GitStatusPanel", () => {
     await clickAndSettle(fileButton, { ctrlKey: true });
 
     await waitFor(() => {
-      expect(onOpenDiff).toHaveBeenCalledWith(makeDiffResponse(), { openInNewTab: true, sectionId: "staged" });
+      expect(onOpenDiff).toHaveBeenCalledWith(
+        {
+          originalPath: undefined,
+          path: "ui/src/ControlPanelSurface.tsx",
+          projectId: null,
+          sectionId: "staged",
+          sessionId: SESSION_ID,
+          statusCode: "M",
+          workdir: "/repo",
+        },
+        { openInNewTab: true, sectionId: "staged" },
+      );
     });
   });
 
@@ -441,14 +448,14 @@ describe("GitStatusPanel", () => {
         },
       ]),
     );
-    fetchGitDiffMock.mockResolvedValue(makeDiffResponse());
+    const onOpenDiff = vi.fn().mockResolvedValue(undefined);
 
     render(
       <GitStatusPanel
         sessionId={null}
         workdir="/repo"
         showPathControls={false}
-        onOpenDiff={() => {}}
+        onOpenDiff={onOpenDiff}
         onOpenWorkdir={() => {}}
       />,
     );
@@ -460,15 +467,18 @@ describe("GitStatusPanel", () => {
     await clickAndSettle(await screen.findByRole("button", { name: /^main\.rs$/i }));
 
     await waitFor(() => {
-      expect(fetchGitDiffMock).toHaveBeenCalledWith({
-        originalPath: undefined,
-        path: "src/main.rs",
-        projectId: null,
-        sectionId: "unstaged",
-        sessionId: null,
-        statusCode: "M",
-        workdir: "/repo",
-      });
+      expect(onOpenDiff).toHaveBeenCalledWith(
+        {
+          originalPath: undefined,
+          path: "src/main.rs",
+          projectId: null,
+          sectionId: "unstaged",
+          sessionId: null,
+          statusCode: "M",
+          workdir: "/repo",
+        },
+        { sectionId: "unstaged" },
+      );
     });
   });
 
@@ -879,17 +889,6 @@ describe("GitStatusPanel", () => {
     expect(await screen.findByRole("button", { name: /Stage ui/i })).toBeInTheDocument();
   });
 });
-
-function makeDiffResponse(): GitDiffResponse {
-  return {
-    changeType: "edit",
-    diff: ["@@ -1 +1 @@", "-old", "+new"].join("\n"),
-    diffId: "git:preview-1",
-    filePath: "/repo/ui/src/panels/ControlPanelSurface.tsx",
-    language: "typescript",
-    summary: "Staged changes in ui/src/panels/ControlPanelSurface.tsx",
-  };
-}
 
 function makeStatusResponse(
   files: GitStatusFile[],

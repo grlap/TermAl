@@ -103,6 +103,9 @@ export function isWorkspaceTab(value: unknown): value is WorkspaceTab {
         isOptionalNullableString(value.changeSetId) &&
         isString(value.diffMessageId) &&
         isNullableString(value.filePath) &&
+        isOptionalNullableString(value.gitDiffRequestKey) &&
+        (typeof value.isLoading === "undefined" || typeof value.isLoading === "boolean") &&
+        isOptionalNullableString(value.loadError) &&
         isOptionalNullableString(value.language) &&
         isNullableString(value.originSessionId) &&
         isOptionalNullableString(value.originProjectId) &&

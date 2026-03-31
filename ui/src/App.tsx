@@ -30,6 +30,7 @@ import {
   createSession,
   fetchAgentCommands,
   fetchFile,
+  fetchGitDiff,
   fetchGitStatus,
   fetchState,
   fetchWorkspaceLayout,
@@ -48,8 +49,8 @@ import {
   submitCodexAppRequest,
   submitMcpElicitation,
   submitUserInput,
+  type GitDiffRequestPayload,
   type GitDiffSection,
-  type GitDiffResponse,
   type StateResponse,
   type WorkspaceLayoutSummary,
   unarchiveCodexThread,
@@ -149,6 +150,7 @@ import type {
 import {
   activatePane,
   closeWorkspaceTab,
+  CONTROL_SURFACE_KINDS,
   createFilesystemTab,
   createGitStatusTab,
   createOrchestratorListTab,
@@ -182,6 +184,8 @@ import {
   setPaneSourcePath,
   setPaneViewMode,
   splitPane,
+  stripLoadingGitDiffPreviewTabsFromWorkspaceState,
+  updateGitDiffPreviewTabInWorkspaceState,
   updateSplitRatio,
   upsertCanvasSessionCard,
   type PaneViewMode,
@@ -284,6 +288,19 @@ type SessionErrorMap = Record<string, string | undefined>;
 type SessionNoticeMap = Record<string, string | undefined>;
 type BackendConnectionState = "connecting" | "connected" | "reconnecting" | "offline";
 type SessionAgentCommandMap = Record<string, AgentCommand[] | undefined>;
+type WorkspaceLayoutPersistencePayload = {
+  controlPanelSide: ControlPanelSide;
+  densityPercent: number;
+  editorFontSizePx: number;
+  fontSizePx: number;
+  styleId: StyleId;
+  themeId: ThemeId;
+  workspace: WorkspaceState;
+};
+type PendingWorkspaceLayoutSave = {
+  layout: WorkspaceLayoutPersistencePayload;
+  workspaceId: string;
+};
 type PreferencesTabId = "themes" | "appearance" | "remotes" | "orchestrators" | "codex-prompts" | "claude-approvals";
 type DraftImageAttachment = ImageAttachment & {
   base64Data: string;
@@ -417,11 +434,12 @@ const PREFERENCES_TABS: ReadonlyArray<{ id: PreferencesTabId; label: string }> =
   { id: "claude-approvals", label: "Claude defaults" },
 ];
 const ALL_PROJECTS_FILTER_ID = "__all__";
-const CONTROL_SURFACE_TAB_KINDS: ReadonlySet<string> = new Set([
-  "controlPanel", "sessionList", "projectList", "orchestratorList",
-  "gitStatus", "filesystem",
-]);
 const CREATE_SESSION_WORKSPACE_ID = "__workspace__";
+type StandaloneControlSurfaceViewState = {
+  projectId?: string;
+  sessionListFilter?: SessionListFilter;
+  sessionListSearchQuery?: string;
+};
 const SESSION_SCOPED_MODEL_AGENTS = new Set<AgentType>(["Claude", "Codex", "Cursor", "Gemini"]);
 
 function defaultNewSessionModel(agent: AgentType): string {
@@ -974,6 +992,50 @@ function resolveWorkspaceScopedSessionId(
   return sessions.find((session) => session.projectId === projectId)?.id ?? null;
 }
 
+function buildControlSurfaceSessionListState(
+  sessions: readonly Session[],
+  selectedProject: Project | null,
+  sessionListFilter: SessionListFilter,
+  sessionListSearchQuery: string,
+) {
+  const projectScopedSessions = selectedProject
+    ? sessions.filter((session) => session.projectId === selectedProject.id)
+    : sessions;
+  const mutableProjectScopedSessions = [...projectScopedSessions];
+  const sessionFilterCounts = countSessionsByFilter(mutableProjectScopedSessions);
+  const statusFilteredSessions = filterSessionsByListFilter(mutableProjectScopedSessions, sessionListFilter);
+  const trimmedSearchQuery = sessionListSearchQuery.trim();
+  const hasSessionListSearch = trimmedSearchQuery.length > 0;
+
+  if (!hasSessionListSearch) {
+    return {
+      projectScopedSessions,
+      sessionFilterCounts,
+      hasSessionListSearch,
+      sessionListSearchResults: new Map<string, SessionListSearchResult>(),
+      filteredSessions: statusFilteredSessions,
+    };
+  }
+
+  const sessionListSearchResults = new Map(
+    statusFilteredSessions.flatMap((session) => {
+      const result = buildSessionListSearchResultFromIndex(
+        buildSessionSearchIndex(session),
+        trimmedSearchQuery,
+      );
+      return result ? ([[session.id, result]] as const) : [];
+    }),
+  );
+
+  return {
+    projectScopedSessions,
+    sessionFilterCounts,
+    hasSessionListSearch,
+    sessionListSearchResults,
+    filteredSessions: statusFilteredSessions.filter((session) => sessionListSearchResults.has(session.id)),
+  };
+}
+
 function createInitialWorkspaceBootstrap(workspaceViewId: string) {
   const storedLayout = getStoredWorkspaceLayout(workspaceViewId);
   const controlPanelSide: ControlPanelSide = storedLayout?.controlPanelSide ?? "left";
@@ -1096,6 +1158,9 @@ export default function App() {
   const [controlPanelFilesystemRoot, setControlPanelFilesystemRoot] = useState<string | null>(null);
   const [controlPanelGitWorkdir, setControlPanelGitWorkdir] = useState<string | null>(null);
   const [controlPanelGitStatusCount, setControlPanelGitStatusCount] = useState(0);
+  const [standaloneControlSurfaceViewStateByTabId, setStandaloneControlSurfaceViewStateByTabId] = useState<
+    Record<string, StandaloneControlSurfaceViewState>
+  >({});
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [settingsTab, setSettingsTab] = useState<PreferencesTabId>("themes");
   const [pendingSessionRename, setPendingSessionRename] = useState<PendingSessionRename | null>(
@@ -1147,6 +1212,9 @@ export default function App() {
   const lastDerivedControlPanelFilesystemRootRef = useRef<string | null>(null);
   const lastDerivedControlPanelGitWorkdirRef = useRef<string | null>(null);
   const workspaceSwitcherRef = useRef<HTMLDivElement | null>(null);
+  const pendingWorkspaceLayoutSaveRef = useRef<PendingWorkspaceLayoutSave | null>(null);
+  const pendingWorkspaceLayoutSaveTimeoutRef = useRef<number | null>(null);
+  const flushWorkspaceLayoutSaveRef = useRef<(options?: { keepalive?: boolean }) => void>(() => {});
   const sessionsRef = useRef<Session[]>([]);
   const latestStateRevisionRef = useRef<number | null>(null);
   const forceAdoptNextStateEventRef = useRef(false);
@@ -1460,6 +1528,15 @@ export default function App() {
   const editorAppearance: MonacoAppearance = isHexColorDark(activeTheme.swatches[0]) ? "dark" : "light";
   const activeDraggedTab = draggedTab ?? launcherDraggedTab ?? externalDraggedTab;
 
+  function getKnownWorkspaceTabDrag() {
+    return (
+      draggedTabRef.current ??
+      draggedTab ??
+      launcherDraggedTabRef.current ??
+      launcherDraggedTab ??
+      externalDraggedTab
+    );
+  }
   function focusSessionListSearch(selectAll = false) {
     controlPanelSurfaceRef.current?.selectSection("sessions");
     window.requestAnimationFrame(() => {
@@ -1606,11 +1683,47 @@ export default function App() {
     }
   }
 
+  function clearPendingWorkspaceLayoutSaveTimeout() {
+    if (pendingWorkspaceLayoutSaveTimeoutRef.current === null || typeof window === "undefined") {
+      return;
+    }
+
+    window.clearTimeout(pendingWorkspaceLayoutSaveTimeoutRef.current);
+    pendingWorkspaceLayoutSaveTimeoutRef.current = null;
+  }
+
+  function persistPendingWorkspaceLayoutSave(
+    pendingSave: PendingWorkspaceLayoutSave,
+    options?: { keepalive?: boolean },
+  ) {
+    void saveWorkspaceLayout(
+      pendingSave.workspaceId,
+      pendingSave.layout,
+      options?.keepalive ? { keepalive: true } : undefined,
+    ).catch((error) => {
+      console.warn("workspace layout warning> failed to save server workspace layout:", error);
+    });
+  }
+
+  function flushPendingWorkspaceLayoutSave(options?: { keepalive?: boolean }) {
+    clearPendingWorkspaceLayoutSaveTimeout();
+    const pendingSave = pendingWorkspaceLayoutSaveRef.current;
+    if (!pendingSave) {
+      return;
+    }
+
+    pendingWorkspaceLayoutSaveRef.current = null;
+    persistPendingWorkspaceLayoutSave(pendingSave, options);
+  }
+
+  flushWorkspaceLayoutSaveRef.current = flushPendingWorkspaceLayoutSave;
+
   function navigateToWorkspace(nextWorkspaceViewId: string) {
     if (typeof window === "undefined") {
       return;
     }
 
+    flushPendingWorkspaceLayoutSave({ keepalive: true });
     const url = new URL(window.location.href);
     url.searchParams.set(WORKSPACE_VIEW_QUERY_PARAM, nextWorkspaceViewId);
     window.location.assign(url.toString());
@@ -1644,6 +1757,7 @@ export default function App() {
     }
 
     const nextWorkspaceViewId = createWorkspaceViewId();
+    flushPendingWorkspaceLayoutSave({ keepalive: true });
     const url = new URL(window.location.href);
     url.searchParams.set(WORKSPACE_VIEW_QUERY_PARAM, nextWorkspaceViewId);
     window.open(url.toString(), "_blank", "noopener");
@@ -2081,6 +2195,28 @@ export default function App() {
   }, [activeSession?.projectId, projects]);
 
   useEffect(() => {
+    const openStandaloneControlSurfaceTabIds = new Set(
+      workspace.panes.flatMap((pane) =>
+        pane.tabs
+          .filter((tab) => CONTROL_SURFACE_KINDS.has(tab.kind) && tab.kind !== "controlPanel")
+          .map((tab) => tab.id),
+      ),
+    );
+    setStandaloneControlSurfaceViewStateByTabId((current) => {
+      let changed = false;
+      const next: Record<string, StandaloneControlSurfaceViewState> = {};
+      for (const [tabId, state] of Object.entries(current)) {
+        if (openStandaloneControlSurfaceTabIds.has(tabId)) {
+          next[tabId] = state;
+        } else {
+          changed = true;
+        }
+      }
+      return changed ? next : current;
+    });
+  }, [workspace.panes]);
+
+  useEffect(() => {
     if (activeSession) {
       setNewSessionAgent(activeSession.agent);
     }
@@ -2180,27 +2316,47 @@ export default function App() {
       return;
     }
 
-    const layout = {
+    const persistedWorkspace = stripLoadingGitDiffPreviewTabsFromWorkspaceState(
+      applyControlPanelLayout(workspace, controlPanelSide),
+    );
+    const layout: WorkspaceLayoutPersistencePayload = {
       controlPanelSide,
       themeId,
       styleId,
       fontSizePx,
       editorFontSizePx,
       densityPercent,
-      workspace: applyControlPanelLayout(workspace, controlPanelSide),
+      workspace: persistedWorkspace,
     };
     persistWorkspaceLayout(workspaceViewId, layout);
+    pendingWorkspaceLayoutSaveRef.current = {
+      workspaceId: workspaceViewId,
+      layout,
+    };
 
+    clearPendingWorkspaceLayoutSaveTimeout();
     const persistTimeout = window.setTimeout(() => {
-      void saveWorkspaceLayout(workspaceViewId, layout).catch((error) => {
-        console.warn("workspace layout warning> failed to save server workspace layout:", error);
-      });
+      flushPendingWorkspaceLayoutSave();
     }, WORKSPACE_LAYOUT_PERSIST_DELAY_MS);
+    pendingWorkspaceLayoutSaveTimeoutRef.current = persistTimeout;
 
     return () => {
-      window.clearTimeout(persistTimeout);
+      if (pendingWorkspaceLayoutSaveTimeoutRef.current === persistTimeout) {
+        clearPendingWorkspaceLayoutSaveTimeout();
+      }
     };
   }, [controlPanelSide, densityPercent, editorFontSizePx, fontSizePx, isWorkspaceLayoutReady, styleId, themeId, workspace, workspaceViewId]);
+
+  useEffect(() => {
+    function handlePageHide() {
+      flushWorkspaceLayoutSaveRef.current({ keepalive: true });
+    }
+
+    window.addEventListener("pagehide", handlePageHide);
+    return () => {
+      window.removeEventListener("pagehide", handlePageHide);
+    };
+  }, []);
 
   useEffect(() => {
     if (!isWorkspaceSwitcherOpen) {
@@ -2681,13 +2837,23 @@ export default function App() {
     });
   }
 
-  function openCreateSessionDialog(preferredPaneId: string | null = null) {
-    const defaultProjectId =
+  function openCreateSessionDialog(
+    preferredPaneId: string | null = null,
+    defaultProjectSelectionId: string | null = null,
+  ) {
+    const normalizedDefaultProjectSelectionId = defaultProjectSelectionId?.trim() ?? "";
+    const fallbackProjectId =
       selectedProjectId !== ALL_PROJECTS_FILTER_ID && projectLookup.has(selectedProjectId)
         ? selectedProjectId
         : activeSession?.projectId && projectLookup.has(activeSession.projectId)
           ? activeSession.projectId
           : CREATE_SESSION_WORKSPACE_ID;
+    const defaultProjectId =
+      normalizedDefaultProjectSelectionId === ALL_PROJECTS_FILTER_ID
+        ? CREATE_SESSION_WORKSPACE_ID
+        : normalizedDefaultProjectSelectionId && projectLookup.has(normalizedDefaultProjectSelectionId)
+          ? normalizedDefaultProjectSelectionId
+          : fallbackProjectId;
 
     setCreateSessionPaneId(preferredPaneId ?? workspace.activePaneId);
     setCreateSessionProjectId(defaultProjectId);
@@ -3582,11 +3748,17 @@ export default function App() {
     }
   }
 
-  function handleSidebarSessionClick(sessionId: string, preferredPaneId: string | null = null) {
+  function handleSidebarSessionClick(
+    sessionId: string,
+    preferredPaneId: string | null = null,
+    syncControlPanelProject = true,
+  ) {
     const session = sessionLookup.get(sessionId);
     closePendingSessionRename();
     setKillRevealSessionId(null);
-    setSelectedProjectId(session?.projectId ?? ALL_PROJECTS_FILTER_ID);
+    if (syncControlPanelProject) {
+      setSelectedProjectId(session?.projectId ?? ALL_PROJECTS_FILTER_ID);
+    }
     requestScrollToBottom(sessionId);
     setWorkspace((current) =>
       applyControlPanelLayout(
@@ -3662,52 +3834,11 @@ export default function App() {
       requestScrollToBottom(tab.sessionId);
     }
 
-    // Sync the nearest control surface pane to the selected tab's project context.
-    // If the nearest is a standalone git/files tab, re-scope it directly.
-    // If the nearest is the docked control panel, update the global selectedProjectId.
-    const nearestControlSurface = findNearestControlSurfacePaneId(workspace, paneId);
-    if (nearestControlSurface) {
-      const session = tab?.kind === "session" ? sessionLookup.get(tab.sessionId) : null;
-      const nearestPane = paneLookup.get(nearestControlSurface);
-      const nearestActiveTab = nearestPane?.tabs.find((t) => t.id === nearestPane.activeTabId);
-      const nearestIsDockedControlPanel = nearestActiveTab?.kind === "controlPanel";
-
-      if (session) {
-        const projectId = session.projectId ?? null;
-        if (nearestIsDockedControlPanel) {
-          // Nearest is the docked control panel — update global project filter.
-          if (projectId && projectLookup.has(projectId)) {
-            setSelectedProjectId(projectId);
-          }
-        } else {
-          // Nearest is a standalone tab (git, files, etc.) — re-scope it to the session's workdir.
-          setWorkspace((current) =>
-            rescopeControlSurfacePane(
-              activatePane(current, paneId, tabId),
-              nearestControlSurface,
-              session.id,
-              projectId,
-              session.workdir ?? null,
-            ),
-          );
-          return;
-        }
-      } else {
-        // Non-session tab selected — sync project from the tab's origin.
-        const projectId = resolveWorkspaceTabProjectId(tab, sessionLookup);
-        if (projectId && projectLookup.has(projectId) && nearestIsDockedControlPanel) {
-          setSelectedProjectId(projectId);
-        }
-      }
-    }
-
-    // Reverse sync: when a control surface is selected, find the nearest session
-    // pane and re-scope this control surface to that session's project/workdir.
-    if (tab && CONTROL_SURFACE_TAB_KINDS.has(tab.kind)) {
+    if (tab?.kind === "controlPanel") {
       const nearestSessionPaneId = findNearestSessionPaneId(workspace, paneId);
       if (nearestSessionPaneId) {
         const nearestSessionPane = paneLookup.get(nearestSessionPaneId);
-        const nearestSessionTab = nearestSessionPane?.tabs.find((t) => t.id === nearestSessionPane.activeTabId);
+        const nearestSessionTab = nearestSessionPane?.tabs.find((candidate) => candidate.id === nearestSessionPane.activeTabId);
         if (nearestSessionTab?.kind === "session") {
           const nearestSession = sessionLookup.get(nearestSessionTab.sessionId);
           if (nearestSession) {
@@ -3715,19 +3846,35 @@ export default function App() {
             if (projectId && projectLookup.has(projectId)) {
               setSelectedProjectId(projectId);
             }
-            if (tab.kind === "gitStatus" || tab.kind === "filesystem") {
-              setWorkspace((current) =>
-                rescopeControlSurfacePane(
-                  activatePane(current, paneId, tabId),
-                  paneId,
-                  nearestSession.id,
-                  projectId,
-                  nearestSession.workdir ?? null,
-                ),
-              );
-              return;
-            }
           }
+        }
+      }
+
+      setWorkspace((current) => activatePane(current, paneId, tabId));
+      return;
+    }
+
+    if (tab && CONTROL_SURFACE_KINDS.has(tab.kind)) {
+      setWorkspace((current) => activatePane(current, paneId, tabId));
+      return;
+    }
+
+    const nearestControlSurface = findNearestControlSurfacePaneId(workspace, paneId);
+    if (nearestControlSurface) {
+      const session = tab?.kind === "session" ? sessionLookup.get(tab.sessionId) : null;
+      const nearestPane = paneLookup.get(nearestControlSurface);
+      const nearestActiveTab = nearestPane?.tabs.find((candidate) => candidate.id === nearestPane.activeTabId);
+      const nearestIsDockedControlPanel = nearestActiveTab?.kind === "controlPanel";
+
+      if (session) {
+        const projectId = session.projectId ?? null;
+        if (nearestIsDockedControlPanel && projectId && projectLookup.has(projectId)) {
+          setSelectedProjectId(projectId);
+        }
+      } else {
+        const projectId = resolveWorkspaceTabProjectId(tab, sessionLookup);
+        if (projectId && projectLookup.has(projectId) && nearestIsDockedControlPanel) {
+          setSelectedProjectId(projectId);
         }
       }
     }
@@ -4088,9 +4235,9 @@ export default function App() {
     );
   }
 
-  function handleOpenGitStatusDiffPreviewTab(
+  async function handleOpenGitStatusDiffPreviewTab(
     paneId: string,
-    diffPreview: GitDiffResponse,
+    request: GitDiffRequestPayload,
     originSessionId: string | null,
     originProjectId: string | null,
     options?: {
@@ -4098,33 +4245,79 @@ export default function App() {
       sectionId?: GitDiffSection;
     },
   ) {
-    setWorkspace((current) =>
-      applyControlPanelLayout(
-        openDiffPreviewInWorkspaceState(
-          current,
-          {
+    const requestKey = buildGitDiffPreviewRequestKey(paneId, request, Boolean(options?.openInNewTab));
+    const gitSectionId = options?.sectionId ?? request.sectionId;
+    const pendingTab = {
+      changeType: pendingGitDiffPreviewChangeType(request.statusCode),
+      changeSetId: null,
+      diff: "",
+      diffMessageId: requestKey,
+      filePath: request.path,
+      gitSectionId,
+      language: null,
+      originSessionId,
+      originProjectId,
+      summary: pendingGitDiffPreviewSummary(gitSectionId, request.path),
+      gitDiffRequestKey: requestKey,
+      isLoading: true,
+      loadError: null,
+    };
+
+    setWorkspace((current) => {
+      const opened = openDiffPreviewInWorkspaceState(
+        current,
+        pendingTab,
+        paneId,
+        options?.openInNewTab
+          ? {
+              openInNewTab: true,
+            }
+          : {
+              reuseActiveViewerTab: true,
+            },
+      );
+      return applyControlPanelLayout(
+        updateGitDiffPreviewTabInWorkspaceState(opened, requestKey, (tab) => ({
+          ...tab,
+          ...pendingTab,
+          id: tab.id,
+        })),
+      );
+    });
+
+    try {
+      const diffPreview = await fetchGitDiff(request);
+      setWorkspace((current) =>
+        applyControlPanelLayout(
+          updateGitDiffPreviewTabInWorkspaceState(current, requestKey, (tab) => ({
+            ...tab,
             changeType: diffPreview.changeType,
             changeSetId: diffPreview.changeSetId ?? null,
             diff: diffPreview.diff,
-            diffMessageId: diffPreview.diffId,
-            filePath: diffPreview.filePath ?? null,
-            gitSectionId: options?.sectionId ?? null,
+            filePath: diffPreview.filePath ?? tab.filePath,
+            gitSectionId,
             language: diffPreview.language ?? null,
-            originSessionId,
-            originProjectId,
             summary: diffPreview.summary,
-          },
-          paneId,
-          options?.openInNewTab
-            ? {
-                openInNewTab: true,
-              }
-            : {
-                reuseActiveViewerTab: true,
-              },
+            isLoading: false,
+            loadError: null,
+          })),
         ),
-      ),
-    );
+      );
+    } catch (error) {
+      const errorMessage = getErrorMessage(error);
+      setWorkspace((current) =>
+        applyControlPanelLayout(
+          updateGitDiffPreviewTabInWorkspaceState(current, requestKey, (tab) => ({
+            ...tab,
+            diff: "",
+            summary: `Failed to load ${gitSectionId} changes in ${request.path}`,
+            isLoading: false,
+            loadError: errorMessage,
+          })),
+        ),
+      );
+      throw error;
+    }
   }
 
   function handleOpenFilesystemTab(
@@ -4246,7 +4439,7 @@ export default function App() {
   }
 
   function handleOrchestratorStateUpdated(state: StateResponse) {
-    adoptSessions(state.sessions);
+    adoptState(state);
   }
 
   function handleOpenInstructionDebuggerTab(
@@ -4297,37 +4490,93 @@ export default function App() {
       nearestSessionTab?.kind === "session"
         ? (sessionLookup.get(nearestSessionTab.sessionId) ?? null)
         : null;
-    const controlSurfaceScopedProjectId =
-      selectedProject?.id ??
-      resolveWorkspaceTabProjectId(controlSurfaceActiveTab ?? undefined, sessionLookup) ??
-      null;
-    const controlSurfaceSessionCandidates = [
-      controlSurfaceOriginSession,
-      controlSurfacePaneSession,
-      nearestSession,
-      activeSession,
-    ].filter((session): session is Session => Boolean(session));
+    const isStandaloneControlSurface = fixedSection !== null;
+    const standaloneControlSurfaceTabId =
+      isStandaloneControlSurface && controlSurfaceActiveTab ? controlSurfaceActiveTab.id : null;
+    const standaloneControlSurfaceViewState = standaloneControlSurfaceTabId
+      ? (standaloneControlSurfaceViewStateByTabId[standaloneControlSurfaceTabId] ?? null)
+      : null;
+    const controlSurfaceTabProjectId = resolveWorkspaceTabProjectId(
+      controlSurfaceActiveTab ?? undefined,
+      sessionLookup,
+    );
+    const controlSurfaceSelectedProjectId =
+      isStandaloneControlSurface
+        ? standaloneControlSurfaceViewState?.projectId ??
+          (controlSurfaceTabProjectId && projectLookup.has(controlSurfaceTabProjectId)
+            ? controlSurfaceTabProjectId
+            : ALL_PROJECTS_FILTER_ID)
+        : selectedProjectId;
+    const controlSurfaceSelectedProject =
+      controlSurfaceSelectedProjectId === ALL_PROJECTS_FILTER_ID
+        ? null
+        : (projectLookup.get(controlSurfaceSelectedProjectId) ?? null);
+    const controlSurfaceSessionCandidates = (
+      isStandaloneControlSurface
+        ? [controlSurfaceOriginSession, controlSurfacePaneSession]
+        : [controlSurfaceOriginSession, controlSurfacePaneSession, nearestSession, activeSession]
+    ).filter((session): session is Session => Boolean(session));
     const controlSurfaceSession =
-      (controlSurfaceScopedProjectId
+      controlSurfaceSelectedProject
         ? (controlSurfaceSessionCandidates.find(
-            (session) => session.projectId === controlSurfaceScopedProjectId,
+            (session) => session.projectId === controlSurfaceSelectedProject.id,
           ) ??
-          sessions.find((session) => session.projectId === controlSurfaceScopedProjectId) ??
+          sessions.find((session) => session.projectId === controlSurfaceSelectedProject.id) ??
           null)
-        : (controlSurfaceSessionCandidates[0] ?? sessions[0] ?? null));
+        : (controlSurfaceSessionCandidates[0] ?? sessions[0] ?? null);
     const controlPanelLauncherOriginProjectId =
-      controlSurfaceScopedProjectId ?? controlSurfaceSession?.projectId ?? null;
+      controlSurfaceSelectedProject?.id ?? controlSurfaceSession?.projectId ?? controlSurfaceTabProjectId ?? null;
     const controlPanelLauncherOriginSessionId = controlSurfaceSession?.id ?? null;
+    const controlSurfaceWorkspaceRoot = resolveControlPanelWorkspaceRoot(
+      controlSurfaceSelectedProject,
+      controlSurfaceSession?.workdir ?? null,
+    );
+    const isStandaloneSessionList = fixedSection === "sessions" && standaloneControlSurfaceTabId !== null;
+    const standaloneSessionListState = isStandaloneSessionList
+      ? buildControlSurfaceSessionListState(
+          sessions,
+          controlSurfaceSelectedProject,
+          standaloneControlSurfaceViewState?.sessionListFilter ?? "all",
+          standaloneControlSurfaceViewState?.sessionListSearchQuery ?? "",
+        )
+      : null;
+    const controlSurfaceSessionListFilter = standaloneSessionListState
+      ? (standaloneControlSurfaceViewState?.sessionListFilter ?? "all")
+      : sessionListFilter;
+    const controlSurfaceSessionListSearchQuery = standaloneSessionListState
+      ? (standaloneControlSurfaceViewState?.sessionListSearchQuery ?? "")
+      : sessionListSearchQuery;
+    const controlSurfaceSessionFilterCounts = standaloneSessionListState
+      ? standaloneSessionListState.sessionFilterCounts
+      : sessionFilterCounts;
+    const controlSurfaceHasSessionListSearch = standaloneSessionListState
+      ? standaloneSessionListState.hasSessionListSearch
+      : hasSessionListSearch;
+    const controlSurfaceSessionListSearchResults = standaloneSessionListState
+      ? standaloneSessionListState.sessionListSearchResults
+      : sessionListSearchResults;
+    const controlSurfaceFilteredSessions = standaloneSessionListState
+      ? standaloneSessionListState.filteredSessions
+      : filteredSessions;
+    const controlSurfaceFilesystemRoot = controlSurfaceActiveTab?.kind === "filesystem"
+      ? controlSurfaceActiveTab.rootPath
+      : fixedSection === "files"
+        ? controlSurfaceWorkspaceRoot
+        : controlPanelFilesystemRoot;
+    const controlSurfaceGitWorkdir = controlSurfaceActiveTab?.kind === "gitStatus"
+      ? controlSurfaceActiveTab.workdir
+      : fixedSection === "git"
+        ? controlSurfaceWorkspaceRoot
+        : controlPanelGitWorkdir;
 
     function buildControlPanelLauncherTab(sectionId: ControlPanelSectionId) {
       return createControlPanelSectionLauncherTab(sectionId, {
-        filesystemRoot: controlPanelFilesystemRoot,
-        gitWorkdir: controlPanelGitWorkdir,
+        filesystemRoot: controlSurfaceFilesystemRoot,
+        gitWorkdir: controlSurfaceGitWorkdir,
         originProjectId: controlPanelLauncherOriginProjectId,
         originSessionId: controlPanelLauncherOriginSessionId,
       });
     }
-
     function handleControlPanelSectionTabDragStart(
       event: ReactDragEvent<HTMLButtonElement>,
       sectionId: ControlPanelSectionId,
@@ -4340,6 +4589,65 @@ export default function App() {
       handleControlPanelLauncherDragStart(event, paneId, sectionId, tab);
     }
 
+    function updateStandaloneControlSurfaceViewState(
+      updates: Partial<StandaloneControlSurfaceViewState>,
+    ) {
+      if (!standaloneControlSurfaceTabId) {
+        return;
+      }
+
+      setStandaloneControlSurfaceViewStateByTabId((current) => {
+        const previous = current[standaloneControlSurfaceTabId] ?? {};
+        const next = { ...previous, ...updates };
+        if (
+          previous.projectId === next.projectId &&
+          previous.sessionListFilter === next.sessionListFilter &&
+          previous.sessionListSearchQuery === next.sessionListSearchQuery
+        ) {
+          return current;
+        }
+
+        return {
+          ...current,
+          [standaloneControlSurfaceTabId]: next,
+        };
+      });
+    }
+
+    function handleControlSurfaceProjectScopeChange(nextProjectId: string) {
+      if (!isStandaloneControlSurface || !controlSurfaceActiveTab) {
+        setSelectedProjectId(nextProjectId);
+        return;
+      }
+
+      updateStandaloneControlSurfaceViewState({ projectId: nextProjectId });
+      const nextSelectedProject =
+        nextProjectId !== ALL_PROJECTS_FILTER_ID && projectLookup.has(nextProjectId)
+          ? (projectLookup.get(nextProjectId) ?? null)
+          : null;
+      const preferredStandaloneSession = controlSurfaceOriginSession ?? controlSurfacePaneSession ?? null;
+      const nextScopedSession =
+        nextSelectedProject
+          ? (preferredStandaloneSession?.projectId === nextSelectedProject.id
+              ? preferredStandaloneSession
+              : (sessions.find((session) => session.projectId === nextSelectedProject.id) ?? null))
+          : (preferredStandaloneSession ?? sessions[0] ?? null);
+      const nextWorkspaceRoot = resolveControlPanelWorkspaceRoot(
+        nextSelectedProject,
+        nextScopedSession?.workdir ?? null,
+      );
+
+      setWorkspace((current) =>
+        rescopeControlSurfacePane(
+          current,
+          paneId,
+          nextScopedSession?.id ?? null,
+          nextSelectedProject?.id ?? null,
+          nextWorkspaceRoot,
+        ),
+      );
+    }
+
     function renderControlPanelProjectScope() {
       return (
         <div className="control-panel-scope-control">
@@ -4349,9 +4657,9 @@ export default function App() {
           <ThemedCombobox
             id={controlPanelProjectFilterId}
             className="control-panel-scope-combobox"
-            value={selectedProjectId}
+            value={controlSurfaceSelectedProjectId}
             options={controlPanelProjectOptions}
-            onChange={setSelectedProjectId}
+            onChange={handleControlSurfaceProjectScopeChange}
             aria-label="Project"
           />
         </div>
@@ -4369,6 +4677,7 @@ export default function App() {
           className="control-panel-header-action control-panel-header-open-button"
           type="button"
           draggable={!disabled && tab !== null}
+          aria-label="Open tab"
           title={disabled ? "Open tab" : "Open tab or drag it into the workspace"}
           onClick={onClick}
           onDragStart={(event) => {
@@ -4435,11 +4744,11 @@ export default function App() {
                 () =>
                   handleOpenFilesystemTab(
                     paneId,
-                    controlPanelFilesystemRoot,
+                    controlSurfaceFilesystemRoot,
                     controlPanelLauncherOriginSessionId,
                     controlPanelLauncherOriginProjectId,
                   ),
-                !(controlPanelFilesystemRoot?.trim() ?? ""),
+                !(controlSurfaceFilesystemRoot?.trim() ?? ""),
                 buildControlPanelLauncherTab("files"),
               );
 
@@ -4453,11 +4762,11 @@ export default function App() {
                     () =>
                       handleOpenGitStatusTab(
                         paneId,
-                        controlPanelGitWorkdir,
+                        controlSurfaceGitWorkdir,
                         controlPanelLauncherOriginSessionId,
                         controlPanelLauncherOriginProjectId,
                       ),
-                    !(controlPanelGitWorkdir?.trim() ?? ""),
+                    !(controlSurfaceGitWorkdir?.trim() ?? ""),
                     buildControlPanelLauncherTab("git"),
                   )}
             </>
@@ -4569,7 +4878,9 @@ export default function App() {
               <button
                 className="control-panel-header-action control-panel-header-new-session-button"
                 type="button"
-                onClick={() => openCreateSessionDialog(paneId)}
+                onClick={() => openCreateSessionDialog(paneId, controlSurfaceSelectedProjectId)}
+                aria-label="New"
+                title="New session"
                 aria-haspopup="dialog"
                 aria-expanded={isCreateSessionOpen}
                 aria-controls="create-session-dialog"
@@ -4597,7 +4908,7 @@ export default function App() {
             <section className="control-panel-section-stack control-panel-section-files" aria-label="Files">
               {renderControlPanelProjectScope()}
               <FileSystemPanel
-                rootPath={controlPanelFilesystemRoot}
+                rootPath={controlSurfaceFilesystemRoot}
                 sessionId={controlPanelLauncherOriginSessionId}
                 projectId={controlPanelLauncherOriginProjectId}
                 showPathControls={false}
@@ -4610,7 +4921,7 @@ export default function App() {
                     options,
                   )
                 }
-                onOpenRootPath={(path) => setControlPanelFilesystemRoot(path.trim() || null)}
+                onOpenRootPath={(path) => { if (!fixedSection) { setControlPanelFilesystemRoot(path.trim() || null); } }}
               />
             </section>
           );
@@ -4644,7 +4955,7 @@ export default function App() {
               <GitStatusPanel
                 projectId={controlPanelLauncherOriginProjectId}
                 sessionId={controlPanelLauncherOriginSessionId}
-                workdir={controlPanelGitWorkdir}
+                workdir={controlSurfaceGitWorkdir}
                 showPathControls={false}
                 onStatusChange={(status) => setControlPanelGitStatusCount(status?.files.length ?? 0)}
                 onOpenDiff={(diff, options) =>
@@ -4656,7 +4967,7 @@ export default function App() {
                     options,
                   )
                 }
-                onOpenWorkdir={(path) => setControlPanelGitWorkdir(path.trim() || null)}
+                onOpenWorkdir={(path) => { if (!fixedSection) { setControlPanelGitWorkdir(path.trim() || null); } }}
               />
             </section>
           );
@@ -4671,9 +4982,9 @@ export default function App() {
                 </div>
                 <div className="project-list" role="list">
                   <button
-                    className={`project-row ${selectedProjectId === ALL_PROJECTS_FILTER_ID ? "selected" : ""}`}
+                    className={`project-row ${controlSurfaceSelectedProjectId === ALL_PROJECTS_FILTER_ID ? "selected" : ""}`}
                     type="button"
-                    onClick={() => setSelectedProjectId(ALL_PROJECTS_FILTER_ID)}
+                    onClick={() => handleControlSurfaceProjectScopeChange(ALL_PROJECTS_FILTER_ID)}
                   >
                     <span className="project-row-copy">
                       <strong>All projects</strong>
@@ -4682,14 +4993,14 @@ export default function App() {
                     <span className="project-row-count">{sessions.length}</span>
                   </button>
                   {projects.map((project) => {
-                    const isSelected = project.id === selectedProjectId;
+                    const isSelected = project.id === controlSurfaceSelectedProjectId;
 
                     return (
                       <button
                         key={project.id}
                         className={`project-row ${isSelected ? "selected" : ""}`}
                         type="button"
-                        onClick={() => setSelectedProjectId(project.id)}
+                        onClick={() => handleControlSurfaceProjectScopeChange(project.id)}
                       >
                         <span className="project-row-copy">
                           <strong>{project.name}</strong>
@@ -4712,44 +5023,56 @@ export default function App() {
                 <div className="session-list-tools">
                   {renderControlPanelProjectScope()}
                   <input
-                    ref={sessionListSearchInputRef}
+                    ref={fixedSection ? undefined : sessionListSearchInputRef}
                     className="themed-input session-list-search-input"
                     type="search"
-                    value={sessionListSearchQuery}
+                    value={controlSurfaceSessionListSearchQuery}
                     placeholder="Search sessions"
                     spellCheck={false}
                     aria-label="Search sessions"
                     title={`Search across visible sessions (${primaryModifierLabel()}+Shift+F)`}
-                    onChange={(event) => setSessionListSearchQuery(event.currentTarget.value)}
+                    onChange={(event) => {
+                      if (standaloneControlSurfaceTabId) {
+                        updateStandaloneControlSurfaceViewState({
+                          sessionListSearchQuery: event.currentTarget.value,
+                        });
+                      } else {
+                        setSessionListSearchQuery(event.currentTarget.value);
+                      }
+                    }}
                     onKeyDown={(event) => {
                       if (event.key === "Escape") {
                         event.preventDefault();
-                        if (sessionListSearchQuery) {
-                          setSessionListSearchQuery("");
+                        if (controlSurfaceSessionListSearchQuery) {
+                          if (standaloneControlSurfaceTabId) {
+                            updateStandaloneControlSurfaceViewState({ sessionListSearchQuery: "" });
+                          } else {
+                            setSessionListSearchQuery("");
+                          }
                         } else {
                           event.currentTarget.blur();
                         }
                       }
                     }}
                   />
-                  {hasSessionListSearch ? (
+                  {controlSurfaceHasSessionListSearch ? (
                     <div className="session-list-search-meta" aria-live="polite">
-                      {filteredSessions.length === 1
+                      {controlSurfaceFilteredSessions.length === 1
                         ? "1 matching session"
-                        : `${filteredSessions.length} matching sessions`}
+                        : `${controlSurfaceFilteredSessions.length} matching sessions`}
                     </div>
                   ) : null}
                 </div>
                 <div className="session-list">
-                  {filteredSessions.length > 0 ? (
-                    filteredSessions.map((session) => {
+                  {controlSurfaceFilteredSessions.length > 0 ? (
+                    controlSurfaceFilteredSessions.map((session) => {
                       const isActive = session.id === activeSession?.id;
                       const isOpen = openSessionIds.has(session.id);
                       const isKilling = Boolean(killingSessionIds[session.id]);
                       const isKillConfirmationOpen = pendingKillSessionId === session.id;
                       const isKillVisible =
                         isKilling || isKillConfirmationOpen || killRevealSessionId === session.id;
-                      const searchResult = sessionListSearchResults.get(session.id);
+                      const searchResult = controlSurfaceSessionListSearchResults.get(session.id);
 
                       return (
                         <div
@@ -4775,7 +5098,7 @@ export default function App() {
                             className={`session-row ${isActive ? "selected" : ""} ${isOpen ? "open" : ""}`}
                             type="button"
                             draggable
-                            onClick={() => handleSidebarSessionClick(session.id, paneId)}
+                            onClick={() => handleSidebarSessionClick(session.id, paneId, !fixedSection)}
                             title={`${session.agent} / ${session.workdir}`}
                             onDragStart={(event) => {
                               event.dataTransfer.effectAllowed = "copy";
@@ -4850,12 +5173,12 @@ export default function App() {
                     <div className="session-filter-empty">
                       {sessions.length === 0
                         ? "No sessions yet."
-                        : hasSessionListSearch
-                          ? selectedProject
-                            ? `No sessions match this search in ${selectedProject.name}.`
+                        : controlSurfaceHasSessionListSearch
+                          ? controlSurfaceSelectedProject
+                            ? `No sessions match this search in ${controlSurfaceSelectedProject.name}.`
                             : "No sessions match this search."
-                          : selectedProject
-                            ? `No ${sessionListFilter === "all" ? "" : `${sessionListFilter} `}sessions in ${selectedProject.name}.`
+                          : controlSurfaceSelectedProject
+                            ? `No ${controlSurfaceSessionListFilter === "all" ? "" : `${controlSurfaceSessionListFilter} `}sessions in ${controlSurfaceSelectedProject.name}.`
                             : "No sessions match this filter."}
                     </div>
                   )}
@@ -4866,36 +5189,60 @@ export default function App() {
                 <div className="session-control-label">Status</div>
                 <div className="sidebar-status-chips">
                   <button
-                    className={`chip sidebar-status-chip ${sessionListFilter === "all" ? "selected" : ""}`}
+                    className={`chip sidebar-status-chip ${controlSurfaceSessionListFilter === "all" ? "selected" : ""}`}
                     type="button"
-                    onClick={() => setSessionListFilter("all")}
-                    aria-pressed={sessionListFilter === "all"}
+                    onClick={() => {
+                      if (standaloneControlSurfaceTabId) {
+                        updateStandaloneControlSurfaceViewState({ sessionListFilter: "all" });
+                      } else {
+                        setSessionListFilter("all");
+                      }
+                    }}
+                    aria-pressed={controlSurfaceSessionListFilter === "all"}
                   >
-                    No filter ({sessionFilterCounts.all})
+                    No filter ({controlSurfaceSessionFilterCounts.all})
                   </button>
                   <button
-                    className={`chip sidebar-status-chip ${sessionListFilter === "working" ? "selected" : ""}`}
+                    className={`chip sidebar-status-chip ${controlSurfaceSessionListFilter === "working" ? "selected" : ""}`}
                     type="button"
-                    onClick={() => setSessionListFilter("working")}
-                    aria-pressed={sessionListFilter === "working"}
+                    onClick={() => {
+                      if (standaloneControlSurfaceTabId) {
+                        updateStandaloneControlSurfaceViewState({ sessionListFilter: "working" });
+                      } else {
+                        setSessionListFilter("working");
+                      }
+                    }}
+                    aria-pressed={controlSurfaceSessionListFilter === "working"}
                   >
-                    Working ({sessionFilterCounts.working})
+                    Working ({controlSurfaceSessionFilterCounts.working})
                   </button>
                   <button
-                    className={`chip sidebar-status-chip ${sessionListFilter === "asking" ? "selected" : ""}`}
+                    className={`chip sidebar-status-chip ${controlSurfaceSessionListFilter === "asking" ? "selected" : ""}`}
                     type="button"
-                    onClick={() => setSessionListFilter("asking")}
-                    aria-pressed={sessionListFilter === "asking"}
+                    onClick={() => {
+                      if (standaloneControlSurfaceTabId) {
+                        updateStandaloneControlSurfaceViewState({ sessionListFilter: "asking" });
+                      } else {
+                        setSessionListFilter("asking");
+                      }
+                    }}
+                    aria-pressed={controlSurfaceSessionListFilter === "asking"}
                   >
-                    Asking ({sessionFilterCounts.asking})
+                    Asking ({controlSurfaceSessionFilterCounts.asking})
                   </button>
                   <button
-                    className={`chip sidebar-status-chip ${sessionListFilter === "completed" ? "selected" : ""}`}
+                    className={`chip sidebar-status-chip ${controlSurfaceSessionListFilter === "completed" ? "selected" : ""}`}
                     type="button"
-                    onClick={() => setSessionListFilter("completed")}
-                    aria-pressed={sessionListFilter === "completed"}
+                    onClick={() => {
+                      if (standaloneControlSurfaceTabId) {
+                        updateStandaloneControlSurfaceViewState({ sessionListFilter: "completed" });
+                      } else {
+                        setSessionListFilter("completed");
+                      }
+                    }}
+                    aria-pressed={controlSurfaceSessionListFilter === "completed"}
                   >
-                    Completed ({sessionFilterCounts.completed})
+                    Completed ({controlSurfaceSessionFilterCounts.completed})
                   </button>
                 </div>
               </section>
@@ -5000,8 +5347,8 @@ export default function App() {
               pendingScrollToBottomRequest={pendingScrollToBottomRequest}
               windowId={windowId}
               draggedTab={activeDraggedTab}
-              editorAppearance={editorAppearance}
-              editorFontSizePx={editorFontSizePx}
+              getKnownDraggedTab={getKnownWorkspaceTabDrag}
+              editorAppearance={editorAppearance}              editorFontSizePx={editorFontSizePx}
               onActivatePane={handlePaneActivate}
               onSelectTab={handlePaneTabSelect}
               onCloseTab={handleCloseTab}
@@ -5696,7 +6043,7 @@ export default function App() {
                     }}
                   />
                 ) : settingsTab === "orchestrators" ? (
-                  <OrchestratorTemplatesPanel projects={projects} onStateUpdated={(state) => adoptSessions(state.sessions)} />
+                  <OrchestratorTemplatesPanel projects={projects} onStateUpdated={handleOrchestratorStateUpdated} />
                 ) : settingsTab === "codex-prompts" ? (
                   <CodexPromptPreferencesPanel
                     defaultApprovalPolicy={defaultCodexApprovalPolicy}
@@ -6990,6 +7337,7 @@ function WorkspaceNodeView({
   pendingScrollToBottomRequest,
   windowId,
   draggedTab,
+  getKnownDraggedTab,
   editorAppearance,
   editorFontSizePx,
   onActivatePane,
@@ -7072,6 +7420,7 @@ function WorkspaceNodeView({
   } | null;
   windowId: string;
   draggedTab: WorkspaceTabDrag | null;
+  getKnownDraggedTab: () => WorkspaceTabDrag | null;
   editorAppearance: MonacoAppearance;
   editorFontSizePx: number;
   onActivatePane: (paneId: string) => void;
@@ -7107,11 +7456,11 @@ function WorkspaceNodeView({
   ) => void;
   onOpenGitStatusDiffPreviewTab: (
     paneId: string,
-    diffPreview: GitDiffResponse,
+    request: GitDiffRequestPayload,
     originSessionId: string | null,
     originProjectId: string | null,
-    options?: { openInNewTab?: boolean },
-  ) => void;
+    options?: { openInNewTab?: boolean; sectionId?: GitDiffSection },
+  ) => Promise<void> | void;
   onOpenFilesystemTab: (
     paneId: string,
     rootPath: string | null,
@@ -7256,6 +7605,7 @@ function WorkspaceNodeView({
         pendingScrollToBottomRequest={pendingScrollToBottomRequest}
         windowId={windowId}
         draggedTab={draggedTab}
+        getKnownDraggedTab={getKnownDraggedTab}
         editorAppearance={editorAppearance}
         editorFontSizePx={editorFontSizePx}
         onActivatePane={onActivatePane}
@@ -7355,6 +7705,7 @@ function WorkspaceNodeView({
           pendingScrollToBottomRequest={pendingScrollToBottomRequest}
           windowId={windowId}
           draggedTab={draggedTab}
+          getKnownDraggedTab={getKnownDraggedTab}
           editorAppearance={editorAppearance}
           editorFontSizePx={editorFontSizePx}
           onActivatePane={onActivatePane}
@@ -7444,6 +7795,7 @@ function WorkspaceNodeView({
           pendingScrollToBottomRequest={pendingScrollToBottomRequest}
           windowId={windowId}
           draggedTab={draggedTab}
+          getKnownDraggedTab={getKnownDraggedTab}
           editorAppearance={editorAppearance}
           editorFontSizePx={editorFontSizePx}
           onActivatePane={onActivatePane}
@@ -7527,6 +7879,7 @@ function SessionPaneView({
   pendingScrollToBottomRequest,
   windowId,
   draggedTab,
+  getKnownDraggedTab,
   editorAppearance,
   editorFontSizePx,
   onActivatePane,
@@ -7608,6 +7961,7 @@ function SessionPaneView({
   } | null;
   windowId: string;
   draggedTab: WorkspaceTabDrag | null;
+  getKnownDraggedTab: () => WorkspaceTabDrag | null;
   editorAppearance: MonacoAppearance;
   editorFontSizePx: number;
   onActivatePane: (paneId: string) => void;
@@ -7638,11 +7992,11 @@ function SessionPaneView({
   ) => void;
   onOpenGitStatusDiffPreviewTab: (
     paneId: string,
-    diffPreview: GitDiffResponse,
+    request: GitDiffRequestPayload,
     originSessionId: string | null,
     originProjectId: string | null,
-    options?: { openInNewTab?: boolean },
-  ) => void;
+    options?: { openInNewTab?: boolean; sectionId?: GitDiffSection },
+  ) => Promise<void> | void;
   onOpenFilesystemTab: (
     paneId: string,
     rootPath: string | null,
@@ -8713,14 +9067,15 @@ function SessionPaneView({
           return;
         }
 
-        const currentDrag = draggedTab ?? readWorkspaceTabDragData(event.dataTransfer);
+        const knownWorkspaceTabDrag = pointerDraggedTab ?? getKnownDraggedTab();
+        const currentDrag = knownWorkspaceTabDrag ?? readWorkspaceTabDragData(event.dataTransfer);
         const hasSessionDragType = dataTransferHasSessionDragType(event.dataTransfer);
-        // During dragover, browsers restrict getData() so readWorkspaceTabDragData may
-        // return null.  Fall back to checking dataTransfer.types — some browsers omit
-        // custom MIME types, so also check for text/plain which we always set.
         const dragTypes = event.dataTransfer?.types;
-        const hasTabDragType = dragTypes?.includes(TAB_DRAG_MIME_TYPE) ||
-          dragTypes?.includes("text/plain");
+        const hasKnownWorkspaceTabDrag = Boolean(knownWorkspaceTabDrag);
+        const hasTabDragType = Boolean(
+          dragTypes?.includes(TAB_DRAG_MIME_TYPE) ||
+          (hasKnownWorkspaceTabDrag && dragTypes?.includes("text/plain")),
+        );
         if (!currentDrag && !hasTabDragType && !hasSessionDragType) {
           return;
         }
@@ -8752,7 +9107,8 @@ function SessionPaneView({
           return;
         }
 
-        const currentDrag = draggedTab ?? pointerDraggedTab ?? readWorkspaceTabDragData(event.dataTransfer);
+        const currentDrag =
+          pointerDraggedTab ?? getKnownDraggedTab() ?? readWorkspaceTabDragData(event.dataTransfer);
         if (!currentDrag && !dataTransferHasSessionDragType(event.dataTransfer)) {
           return;
         }
@@ -8818,6 +9174,7 @@ function SessionPaneView({
               remoteLookup={remoteLookup}
               sessionLookup={sessionLookup}
               draggedTab={draggedTab}
+              getKnownDraggedTab={getKnownDraggedTab}
               onSelectTab={onSelectTab}
               onCloseTab={onCloseTab}
               onTabDragStart={onTabDragStart}
@@ -9176,6 +9533,28 @@ function SessionPaneView({
             }
           />
         ) : activeDiffPreviewTab ? (
+          activeDiffPreviewTab.isLoading || activeDiffPreviewTab.loadError ? (
+            <div
+              className={`source-editor-loading diff-preview-loading-state${activeDiffPreviewTab.loadError ? " is-error" : ""}`}
+              role={activeDiffPreviewTab.isLoading ? "status" : "alert"}
+              aria-live={activeDiffPreviewTab.isLoading ? "polite" : undefined}
+            >
+              <div className="diff-preview-loading-copy">
+                {activeDiffPreviewTab.isLoading ? (
+                  <span className="activity-spinner diff-preview-loading-spinner" aria-hidden="true" />
+                ) : null}
+                <strong>{activeDiffPreviewTab.isLoading ? "Loading diff" : "Unable to load diff"}</strong>
+                {activeDiffPreviewTab.filePath ? (
+                  <span className="diff-preview-loading-path">
+                    {normalizeDisplayPath(activeDiffPreviewTab.filePath)}
+                  </span>
+                ) : null}
+                <span className="diff-preview-loading-detail">
+                  {activeDiffPreviewTab.loadError ?? "Fetching git diff from the repository..."}
+                </span>
+              </div>
+            </div>
+          ) : (
           <DiffPanel
             appearance={editorAppearance}
             changeType={activeDiffPreviewTab.changeType}
@@ -9212,7 +9591,7 @@ function SessionPaneView({
               handleSourceFileSave(path, content, activeDiffOriginSessionId, activeDiffOriginProjectId)
             }
             summary={activeDiffPreviewTab.summary}
-          />
+          />)
         ) : (
           <AgentSessionPanel
             paneId={pane.id}
@@ -12848,7 +13227,12 @@ function normalizeMarkdownLocalFileHref(href: string | undefined) {
     return trimmedHref;
   }
 
-  const normalizedPath = normalizeMarkdownFileLinkAbsolutePath(safeDecodeMarkdownHref(parsedHref.pathname));
+  const decodedPathname = safeDecodeMarkdownHref(parsedHref.pathname);
+  if (!looksLikeAbsoluteHttpMarkdownFilePath(decodedPathname)) {
+    return trimmedHref;
+  }
+
+  const normalizedPath = normalizeMarkdownFileLinkAbsolutePath(decodedPathname);
   if (!looksLikeAbsoluteMarkdownFilePath(normalizedPath, null)) {
     return trimmedHref;
   }
@@ -12857,15 +13241,12 @@ function normalizeMarkdownLocalFileHref(href: string | undefined) {
 }
 
 function isMarkdownLocalFileUrl(url: URL) {
-  if (!/^https?:$/i.test(url.protocol)) {
-    return false;
-  }
+  return /^https?:$/i.test(url.protocol) && isLoopbackMarkdownHostname(url.hostname);
+}
 
-  if (typeof window !== "undefined" && url.origin === window.location.origin) {
-    return true;
-  }
-
-  return isLoopbackMarkdownHostname(url.hostname);
+function looksLikeAbsoluteHttpMarkdownFilePath(pathname: string) {
+  return /^\/[A-Za-z]:[\\/]/.test(pathname) ||
+    /^\/(?:Users|home|root|tmp|var|private|opt|usr|etc|srv|mnt|Volumes)\//.test(pathname);
 }
 
 function isLoopbackMarkdownHostname(hostname: string) {
@@ -13166,6 +13547,31 @@ function mapCommandStatus(status: CommandMessage["status"]): Session["status"] {
     case "error":
       return "error";
   }
+}
+
+function buildGitDiffPreviewRequestKey(
+  paneId: string,
+  request: GitDiffRequestPayload,
+  openInNewTab: boolean,
+) {
+  const baseKey = [
+    "git-preview",
+    paneId,
+    request.workdir,
+    request.sectionId,
+    request.originalPath ?? "",
+    request.path,
+  ].join(":");
+  return openInNewTab ? `${baseKey}:${crypto.randomUUID()}` : baseKey;
+}
+
+function pendingGitDiffPreviewChangeType(statusCode: string | null | undefined): DiffMessage["changeType"] {
+  const normalizedStatusCode = statusCode?.trim().charAt(0) ?? "";
+  return normalizedStatusCode === "A" || normalizedStatusCode === "?" ? "create" : "edit";
+}
+
+function pendingGitDiffPreviewSummary(sectionId: GitDiffSection, path: string) {
+  return `Loading ${sectionId} changes in ${path}`;
 }
 
 function getErrorMessage(error: unknown) {
@@ -13769,3 +14175,5 @@ function dropLabelForPlacement(placement: TabDropPlacement) {
       return "Bottom";
   }
 }
+
+

@@ -1595,6 +1595,7 @@ fn upsert_remote_proxy_session_record(
         remote_session_id: Some(remote_session.id.clone()),
         runtime: SessionRuntime::None,
         runtime_reset_required: false,
+        runtime_stop_in_progress: false,
         hidden: false,
         session,
     };
