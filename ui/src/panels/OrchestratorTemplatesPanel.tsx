@@ -172,7 +172,7 @@ type PersistedOrchestratorSessionTemplate = Omit<
   OrchestratorSessionTemplate,
   "inputMode"
 > & {
-  inputMode?: OrchestratorSessionInputMode | null;
+  inputMode: OrchestratorSessionInputMode | null;
 };
 
 type PendingPanelPersistence = {
@@ -1968,7 +1968,6 @@ function templateToDraft(
     projectId: template.projectId ?? null,
     sessions: template.sessions.map((session) => ({
       ...session,
-      inputMode: normalizeSessionInputMode(session.inputMode),
       model: session.model ?? "",
       position: { ...session.position },
     })),
@@ -2094,6 +2093,13 @@ function readState(stateKey: string): PanelState | null {
       return null;
     }
 
+    if (
+      !draft.sessions.every(isPersistedSessionTemplate) ||
+      !draft.transitions.every(isTransitionTemplate)
+    ) {
+      return null;
+    }
+
     return finalizePanelState(
       {
         name: draft.name,
@@ -2102,20 +2108,16 @@ function readState(stateKey: string): PanelState | null {
           typeof draft.projectId === "string" && draft.projectId.trim()
             ? draft.projectId
             : null,
-        sessions: draft.sessions
-          .filter(isPersistedSessionTemplate)
-          .map((session) => ({
-            ...session,
-            inputMode: normalizeSessionInputMode(session.inputMode),
-            model: session.model ?? "",
-            position: { ...session.position },
-          })),
-        transitions: draft.transitions
-          .filter(isTransitionTemplate)
-          .map((transition) => ({
-            ...transition,
-            promptTemplate: transition.promptTemplate ?? "",
-          })),
+        sessions: draft.sessions.map((session) => ({
+          ...session,
+          inputMode: session.inputMode ?? "queue",
+          model: session.model ?? "",
+          position: { ...session.position },
+        })),
+        transitions: draft.transitions.map((transition) => ({
+          ...transition,
+          promptTemplate: transition.promptTemplate ?? "",
+        })),
       },
       typeof parsed.selectedTemplateId === "string"
         ? parsed.selectedTemplateId
@@ -2134,14 +2136,18 @@ function isPersistedSessionTemplate(
     return false;
   }
   const candidate = value as Partial<PersistedOrchestratorSessionTemplate>;
+  const hasInputMode = Object.prototype.hasOwnProperty.call(
+    candidate,
+    "inputMode",
+  );
   return (
     typeof candidate.id === "string" &&
     typeof candidate.name === "string" &&
     typeof candidate.agent === "string" &&
     typeof candidate.instructions === "string" &&
     typeof candidate.autoApprove === "boolean" &&
-    (candidate.inputMode === undefined ||
-      candidate.inputMode === null ||
+    hasInputMode &&
+    (candidate.inputMode === null ||
       candidate.inputMode === "queue" ||
       candidate.inputMode === "consolidate") &&
     !!candidate.position &&
@@ -2242,12 +2248,6 @@ function nextSequenceNumber(values: string[], prefix: string) {
     next += 1;
   }
   return next;
-}
-
-function normalizeSessionInputMode(
-  value: OrchestratorSessionInputMode | null | undefined,
-): OrchestratorSessionInputMode {
-  return value === "consolidate" ? "consolidate" : "queue";
 }
 
 function validateDraft(draft: OrchestratorTemplateDraft) {

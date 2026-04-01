@@ -150,7 +150,11 @@ longer reschedule already-delivered completion revisions. Reconnect fallback `/a
 now also force-adopt same-revision snapshots after backend restarts, queued work no longer
 auto-dispatches for sessions owned by stopped orchestrators, and `kill_session` now reruns
 orchestrator reconciliation so consolidate deadlocks are surfaced instead of leaving instances
-stuck `Running`.
+stuck `Running`. Reconnect fallback state refreshes also treat reconnect-path `/api/state`
+snapshots as authoritative when the backend restarts behind the last streamed delta, provided no
+newer SSE state arrived while the fetch was in flight. Legacy queued prompts without explicit
+provenance now deserialize as `Legacy` instead of `User`, and stopped orchestrators clear stale
+legacy/orchestrator-owned queued prompts while preserving explicit user work.
 
 ---
 
@@ -198,21 +202,9 @@ same file more often than they should.
       `userInputRequest`, `mcpElicitationRequest`, and `codexAppRequest` messages are handled by the
       reconciler but have no test coverage verifying that state changes (e.g. pending ? submitted)
       correctly produce new message references.
-- [ ] Add `SessionCanvasPanel.test.tsx` afterEach cleanup:
-      other test files (`PaneTabs.test.tsx`, `App.test.tsx`) explicitly call `cleanup()` in
-      `afterEach`; this file should match the project convention.
-- [ ] Add PaneTabs test for "Git Sync" context menu action:
-      only the "Git Push" path is exercised; add a test that clicks "Git Sync" and verifies
-      `syncGitChanges` is called with the expected workdir.
-- [ ] Add PaneTabs test for git status fetch failure in context menu:
-      the `statusError` / `statusMessage` state fields exist but the error rendering path when
-      `fetchGitStatus` rejects is uncovered.
 - [ ] Add test for deferred callbacks discarded on a successful stop:
       pre-stage a `DeferredStopCallback::TurnCompleted` entry, let `stop_session` succeed normally, and
       assert the session ends `Idle` (not `Error`) and `deferred_stop_callbacks` is empty.
-- [ ] Add same-pane tab reorder test in `workspace.test.ts`:
-      cover `placeSessionDropInWorkspaceState` when source and target pane are identical and a non-zero
-      `tabIndex` is provided, asserting the tab lands at the correct slot without duplication.
 - [ ] Fix multi-callback ordering oracle test to pre-populate a message:
       `failed_dedicated_stop_replays_multiple_deferred_callbacks_in_order` starts with zero messages;
       pre-populate an in-progress assistant message so `finish_turn_ok` produces a measurably different
@@ -227,12 +219,6 @@ same file more often than they should.
 - [ ] Add orchestrator instances to `StateResponse` or a dedicated SSE delta:
       the frontend currently has no push notification for orchestrator state changes (transitions
       fired, instances completed). It must poll `GET /api/orchestrators`.
-- [ ] Add unit tests for `rescopeControlSurfacePane`:
-      cover gitStatus (workdir update), filesystem (rootPath update), controlPanel-like (origin-only
-      update), pane-not-found no-op, and no-active-tab no-op branches in `workspace.test.ts`.
-- [ ] Add unit tests for `findNearestSessionPaneId`:
-      cover left-preference when sessions exist on both sides, right-only fallback, no session panes
-      returning null, and paneId not in workspace returning null.
 - [ ] Add `openDiffPreviewInWorkspaceState` test for control-surface anchor redirect:
       the existing test covers the docked controlPanel case; add a test where the preferred pane is a
       standalone gitStatus or filesystem pane and verify the diff opens adjacent to the session pane.
@@ -251,22 +237,6 @@ same file more often than they should.
       `originProjectId` via `replaceWorkspaceTabInPane` when the existing tab's origin differs from the
       new launch context. Add `workspace.test.ts` cases where the existing tab has a null origin and
       assert the new origin values are written after re-open.
-- [ ] Add unit tests for `ensureWorkspaceViewId` and `createWorkspaceViewId`:
-      `workspace-storage.ts` exports these functions for URL-param handling and workspace ID
-      generation. A round-trip test in jsdom would guard against regressions in workspace ID
-      normalization or URL-param handling.
-- [ ] Add sort-order assertion to `list_workspace_layouts` backend test:
-      `list_workspace_layouts_route_returns_saved_workspaces` checks presence but not the documented
-      `updated_at` descending sort order. Assert index positions after inserting workspaces with
-      distinct timestamps.
-- [ ] Add orchestratorList same-pane origin-refresh test:
-      `openOrchestratorListInWorkspaceState` now updates `originSessionId`/`originProjectId` on reuse,
-      but the existing workspace.test.ts only covers the cross-pane move path. Add a case where the
-      orchestratorList is already in the target pane and verify that the origin fields are updated
-      without a move occurring.
-- [ ] Add PaneTabs `dragLeave` cleanup regression for the known-drag path:
-      after a `dragOver` shows a drop indicator via `getKnownDraggedTab`, fire `dragLeave` and assert
-      the indicator is removed. Current tests only verify the indicator appears but not that it clears.
 - [ ] Extract shared drag-drop test setup helper:
       the two drag-drop tests in `App.test.tsx` duplicate ~60 lines of identical fetch-mock and
       setup boilerplate. Extract a shared `renderAppWithProjectAndSession()` helper.
@@ -279,9 +249,5 @@ same file more often than they should.
       `src/main.rs` was split into `api.rs`, `state.rs`, `runtime.rs`, `turns.rs`, `remote.rs`, and
       `tests.rs`. Some of these modules (especially `state.rs` and `turns.rs`) are already large and
       could benefit from further decomposition as features stabilize.
-- [ ] Add deadlock detection test with a 3-node asymmetric consolidate cycle:
-      `consolidate_input_mode_stops_instances_deadlocked_by_blocked_cycles` only tests a 2-node
-      symmetric cycle. Add a test with three consolidate nodes in a ring, and one where an external
-      (non-blocked) feeder prevents deadlock detection, to exercise the fixed-point pruning algorithm.
 
 ## Later

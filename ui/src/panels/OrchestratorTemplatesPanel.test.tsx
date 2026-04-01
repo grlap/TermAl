@@ -218,6 +218,55 @@ describe("OrchestratorTemplatesPanel", () => {
     expect(runButton).toBeEnabled();
   });
 
+  it("deletes the selected template and selects the next available template", async () => {
+    fetchTemplatesMock.mockResolvedValue({
+      templates: [
+        makeTemplate({
+          id: "template-delete",
+          name: "Delete Me",
+          sessions: [
+            makeSession({ id: "builder-delete", name: "Builder Delete" }),
+          ],
+        }),
+        makeTemplate({
+          id: "template-keep",
+          name: "Keep Me",
+          updatedAt: "2026-03-26 11:00:00",
+          sessions: [makeSession({ id: "builder-keep", name: "Builder Keep" })],
+        }),
+      ],
+    });
+    deleteTemplateMock.mockResolvedValue({
+      templates: [
+        makeTemplate({
+          id: "template-keep",
+          name: "Keep Me",
+          updatedAt: "2026-03-26 11:00:00",
+          sessions: [makeSession({ id: "builder-keep", name: "Builder Keep" })],
+        }),
+      ],
+    });
+
+    render(<OrchestratorTemplatesPanel initialTemplateId="template-delete" />);
+
+    expect(await screen.findByDisplayValue("Delete Me")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+
+    await waitFor(() => {
+      expect(deleteTemplateMock).toHaveBeenCalledWith("template-delete");
+    });
+    await waitFor(() => {
+      expect(screen.getByText("Template deleted.")).toBeInTheDocument();
+      expect(screen.getByLabelText("Template name")).toHaveValue("Keep Me");
+    });
+    expect(
+      screen.getByLabelText("Name", {
+        selector: "input#session-name-builder-keep",
+      }),
+    ).toHaveValue("Builder Keep");
+  });
+
   it("restores the selected project from persisted draft state", async () => {
     fetchTemplatesMock.mockResolvedValue({ templates: [] });
     window.localStorage.setItem(
@@ -320,7 +369,7 @@ describe("OrchestratorTemplatesPanel", () => {
     expect(refreshedRunButton).toBeEnabled();
   });
 
-  it("defaults restored legacy draft sessions without input mode to queue", async () => {
+  it("ignores restored drafts that use the removed legacy inputMode schema", async () => {
     fetchTemplatesMock.mockResolvedValue({ templates: [] });
     const legacySession = {
       ...makeSession({ id: "builder", name: "Builder" }),
@@ -345,12 +394,10 @@ describe("OrchestratorTemplatesPanel", () => {
       <OrchestratorTemplatesPanel persistenceKey="orchestrator-legacy-input-mode" />,
     );
 
-    expect(await screen.findByDisplayValue("Legacy Flow")).toBeInTheDocument();
-    expect(
-      screen.getByLabelText("Incoming transitions", {
-        selector: "select#session-input-mode-builder",
-      }),
-    ).toHaveValue("queue");
+    await waitFor(() => {
+      expect(screen.getByLabelText("Template name")).toHaveValue("");
+    });
+    expect(screen.queryByDisplayValue("Legacy Flow")).not.toBeInTheDocument();
   });
 
   it("reopens restored edits as a new draft when the selected template no longer exists", async () => {
@@ -377,7 +424,9 @@ describe("OrchestratorTemplatesPanel", () => {
     );
 
     expect(await screen.findByText("Live Flow")).toBeInTheDocument();
-    expect(screen.getByLabelText("Template name")).toHaveValue("Recovered Flow");
+    expect(screen.getByLabelText("Template name")).toHaveValue(
+      "Recovered Flow",
+    );
     expect(
       screen.getByRole("button", { name: "Create template" }),
     ).toBeEnabled();

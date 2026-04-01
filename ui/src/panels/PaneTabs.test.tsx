@@ -1,4 +1,11 @@
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -56,7 +63,10 @@ describe("PaneTabs", () => {
     copyTextToClipboardMock.mockReset();
 
     copyTextToClipboardMock.mockResolvedValue(undefined);
-    vi.stubGlobal("ResizeObserver", ResizeObserverMock as unknown as typeof ResizeObserver);
+    vi.stubGlobal(
+      "ResizeObserver",
+      ResizeObserverMock as unknown as typeof ResizeObserver,
+    );
   });
 
   afterEach(() => {
@@ -98,15 +108,23 @@ describe("PaneTabs", () => {
     });
 
     expect(onSelectTab).not.toHaveBeenCalled();
-    expect(await screen.findByRole("menu", { name: "File tab actions" })).toBeInTheDocument();
-    expect(screen.getByRole("menuitem", { name: "Copy Relative Path" })).toBeEnabled();
+    expect(
+      await screen.findByRole("menu", { name: "File tab actions" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("menuitem", { name: "Copy Relative Path" }),
+    ).toBeEnabled();
 
     await clickAndSettle(screen.getByRole("menuitem", { name: "Copy Path" }));
 
     await waitFor(() => {
-      expect(copyTextToClipboardMock).toHaveBeenCalledWith("C:/repo/src/main.rs");
+      expect(copyTextToClipboardMock).toHaveBeenCalledWith(
+        "C:/repo/src/main.rs",
+      );
     });
-    expect(screen.queryByRole("menu", { name: "File tab actions" })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("menu", { name: "File tab actions" }),
+    ).not.toBeInTheDocument();
   });
 
   it("opens a dedicated git tab context menu with repo actions", async () => {
@@ -151,12 +169,20 @@ describe("PaneTabs", () => {
     });
 
     expect(onSelectTab).not.toHaveBeenCalled();
-    expect(await screen.findByRole("menu", { name: "Git tab actions" })).toBeInTheDocument();
+    expect(
+      await screen.findByRole("menu", { name: "Git tab actions" }),
+    ).toBeInTheDocument();
     expect(await screen.findByText("Branch: main")).toBeInTheDocument();
-    expect(screen.getByText("Upstream: origin/main (ahead 2, behind 1)")).toBeInTheDocument();
+    expect(
+      screen.getByText("Upstream: origin/main (ahead 2, behind 1)"),
+    ).toBeInTheDocument();
     expect(screen.getByText("Status: 1 changed file")).toBeInTheDocument();
-    expect(screen.queryByRole("menuitem", { name: "Copy Path" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("menuitem", { name: "Copy Relative Path" })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("menuitem", { name: "Copy Path" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("menuitem", { name: "Copy Relative Path" }),
+    ).not.toBeInTheDocument();
     expect(screen.getByRole("menuitem", { name: "Git Sync" })).toBeEnabled();
     expect(screen.getByRole("menuitem", { name: "Git Push" })).toBeEnabled();
 
@@ -170,7 +196,94 @@ describe("PaneTabs", () => {
       });
     });
     expect(syncGitChangesMock).not.toHaveBeenCalled();
-    expect(await screen.findByText("Pushed current branch to origin/main.")).toBeInTheDocument();
+    expect(
+      await screen.findByText("Pushed current branch to origin/main."),
+    ).toBeInTheDocument();
+  });
+
+  it("runs Git Sync from the dedicated git tab context menu", async () => {
+    fetchGitStatusMock.mockResolvedValue(
+      makeGitStatus("C:/repo/packages/app", {
+        ahead: 0,
+        behind: 2,
+        files: [{ path: "src/main.ts", indexStatus: "M", worktreeStatus: "M" }],
+        isClean: false,
+      }),
+    );
+    syncGitChangesMock.mockResolvedValue({
+      status: makeGitStatus("C:/repo/packages/app"),
+      summary: "Synced current branch with origin/main.",
+    });
+
+    renderPaneTabs({
+      sessionLookup: new Map([
+        ["session-1", makeSession("session-1", "C:/repo")],
+      ]),
+      tabs: [
+        {
+          id: "tab-git",
+          kind: "gitStatus",
+          workdir: "C:/repo/packages/app",
+          originSessionId: "session-1",
+        },
+      ],
+    });
+
+    fireEvent.contextMenu(screen.getByRole("tab", { name: /Git: app/i }), {
+      clientX: 120,
+      clientY: 80,
+    });
+
+    expect(
+      await screen.findByRole("menu", { name: "Git tab actions" }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "Git Sync" })).toBeEnabled();
+
+    await clickAndSettle(screen.getByRole("menuitem", { name: "Git Sync" }));
+
+    await waitFor(() => {
+      expect(syncGitChangesMock).toHaveBeenCalledWith({
+        projectId: null,
+        sessionId: "session-1",
+        workdir: "C:/repo/packages/app",
+      });
+    });
+    expect(pushGitChangesMock).not.toHaveBeenCalled();
+    expect(
+      await screen.findByText("Synced current branch with origin/main."),
+    ).toBeInTheDocument();
+  });
+
+  it("shows git status fetch failures in the dedicated git tab context menu", async () => {
+    fetchGitStatusMock.mockRejectedValue(new Error("Git status unavailable."));
+
+    renderPaneTabs({
+      sessionLookup: new Map([
+        ["session-1", makeSession("session-1", "C:/repo")],
+      ]),
+      tabs: [
+        {
+          id: "tab-git",
+          kind: "gitStatus",
+          workdir: "C:/repo/packages/app",
+          originSessionId: "session-1",
+        },
+      ],
+    });
+
+    fireEvent.contextMenu(screen.getByRole("tab", { name: /Git: app/i }), {
+      clientX: 120,
+      clientY: 80,
+    });
+
+    expect(
+      await screen.findByRole("menu", { name: "Git tab actions" }),
+    ).toBeInTheDocument();
+    expect(
+      await screen.findByText("Git status unavailable."),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "Git Sync" })).toBeDisabled();
+    expect(screen.getByRole("menuitem", { name: "Git Push" })).toBeDisabled();
   });
 
   it("copies a workspace-relative path for project-backed file tabs", async () => {
@@ -198,8 +311,12 @@ describe("PaneTabs", () => {
       clientY: 80,
     });
 
-    expect(await screen.findByRole("menu", { name: "File tab actions" })).toBeInTheDocument();
-    await clickAndSettle(screen.getByRole("menuitem", { name: "Copy Relative Path" }));
+    expect(
+      await screen.findByRole("menu", { name: "File tab actions" }),
+    ).toBeInTheDocument();
+    await clickAndSettle(
+      screen.getByRole("menuitem", { name: "Copy Relative Path" }),
+    );
 
     await waitFor(() => {
       expect(copyTextToClipboardMock).toHaveBeenCalledWith("src/lib.rs");
@@ -229,7 +346,9 @@ describe("PaneTabs", () => {
       clientY: 80,
     });
 
-    expect(await screen.findByRole("menu", { name: "File tab actions" })).toBeInTheDocument();
+    expect(
+      await screen.findByRole("menu", { name: "File tab actions" }),
+    ).toBeInTheDocument();
     await clickAndSettle(screen.getByRole("menuitem", { name: "Close" }));
 
     expect(onCloseTab).toHaveBeenCalledWith("pane-1", "tab-source");
@@ -263,7 +382,9 @@ describe("PaneTabs", () => {
       140,
       expect.any(HTMLDivElement),
     );
-    expect(screen.queryByRole("menu", { name: "File tab actions" })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("menu", { name: "File tab actions" }),
+    ).not.toBeInTheDocument();
   });
 
   it("renders file-type icons for source and diff tabs", () => {
@@ -296,8 +417,12 @@ describe("PaneTabs", () => {
     const sourceTab = screen.getByRole("tab", { name: /main\.rs/i });
     const diffTab = screen.getByRole("tab", { name: /Diff: App\.tsx/i });
 
-    expect(sourceTab.querySelector('.pane-tab-file-icon[data-file-kind="rust"]')).not.toBeNull();
-    expect(diffTab.querySelector('.pane-tab-file-icon[data-file-kind="typescript"]')).not.toBeNull();
+    expect(
+      sourceTab.querySelector('.pane-tab-file-icon[data-file-kind="rust"]'),
+    ).not.toBeNull();
+    expect(
+      diffTab.querySelector('.pane-tab-file-icon[data-file-kind="typescript"]'),
+    ).not.toBeNull();
   });
 
   it("shows Codex global notices in the status tooltip", async () => {
@@ -314,7 +439,9 @@ describe("PaneTabs", () => {
           },
         ],
       },
-      sessionLookup: new Map([["session-1", makeSession("session-1", "C:/repo", "Codex Live")]]),
+      sessionLookup: new Map([
+        ["session-1", makeSession("session-1", "C:/repo", "Codex Live")],
+      ]),
       tabs: [
         {
           id: "tab-session",
@@ -329,7 +456,9 @@ describe("PaneTabs", () => {
     const tooltip = await screen.findByRole("tooltip");
     expect(tooltip).toHaveTextContent("Notices");
     expect(tooltip).toHaveTextContent("Config warning");
-    expect(tooltip).toHaveTextContent("Codex is using fallback sandbox defaults.");
+    expect(tooltip).toHaveTextContent(
+      "Codex is using fallback sandbox defaults.",
+    );
     expect(screen.getByTitle("1 Codex notice")).toBeInTheDocument();
   });
 
@@ -391,7 +520,9 @@ describe("PaneTabs", () => {
 
     renderPaneTabs({
       onTabDrop,
-      sessionLookup: new Map([["session-1", makeSession("session-1", "C:/repo", "Session One")]]),
+      sessionLookup: new Map([
+        ["session-1", makeSession("session-1", "C:/repo", "Session One")],
+      ]),
       tabs: [
         {
           id: "tab-session-1",
@@ -405,7 +536,9 @@ describe("PaneTabs", () => {
       dropEffect: "move",
       effectAllowed: "all",
       getData: (format: string) =>
-        format === SESSION_DRAG_MIME_TYPE ? JSON.stringify({ sessionId: "session-2" }) : "",
+        format === SESSION_DRAG_MIME_TYPE
+          ? JSON.stringify({ sessionId: "session-2" })
+          : "",
       setData: () => {},
       types: [SESSION_DRAG_MIME_TYPE],
     };
@@ -422,7 +555,9 @@ describe("PaneTabs", () => {
 
     renderPaneTabs({
       onTabDrop,
-      sessionLookup: new Map([["session-1", makeSession("session-1", "C:/repo", "Session One")]]),
+      sessionLookup: new Map([
+        ["session-1", makeSession("session-1", "C:/repo", "Session One")],
+      ]),
       tabs: [
         {
           id: "tab-session-1",
@@ -492,17 +627,83 @@ describe("PaneTabs", () => {
     const tablist = screen.getByRole("tablist", { name: "Tile tabs" });
     fireEvent.dragOver(tablist, { clientX: 180, dataTransfer });
 
-    expect(tablist.querySelector(".pane-tab-shell.drop-before, .pane-tab-shell.drop-after")).not.toBeNull();
+    expect(
+      tablist.querySelector(
+        ".pane-tab-shell.drop-before, .pane-tab-shell.drop-after",
+      ),
+    ).not.toBeNull();
 
     fireEvent.drop(tablist, { clientX: 180, dataTransfer });
 
-    expect(onTabDrop).toHaveBeenCalledWith("pane-1", "tabs", expect.any(Number), dataTransfer);
+    expect(onTabDrop).toHaveBeenCalledWith(
+      "pane-1",
+      "tabs",
+      expect.any(Number),
+      dataTransfer,
+    );
+  });
+
+  it("clears the known-drag drop indicator on dragLeave", () => {
+    const knownDraggedTab: WorkspaceTabDrag = {
+      dragId: "drag-1",
+      sourceWindowId: "window-2",
+      sourcePaneId: "pane-2",
+      tabId: "tab-session-2",
+      tab: {
+        id: "tab-session-2",
+        kind: "session",
+        sessionId: "session-2",
+      },
+    };
+
+    renderPaneTabs({
+      getKnownDraggedTab: () => knownDraggedTab,
+      sessionLookup: new Map([
+        ["session-1", makeSession("session-1", "C:/repo", "Session One")],
+        ["session-2", makeSession("session-2", "C:/repo", "Session Two")],
+      ]),
+      tabs: [
+        {
+          id: "tab-session-1",
+          kind: "session",
+          sessionId: "session-1",
+        },
+      ],
+    });
+
+    const dataTransfer = {
+      dropEffect: "move",
+      effectAllowed: "all",
+      getData: () => "",
+      setData: () => {},
+      types: ["text/plain"],
+    };
+
+    const tablist = screen.getByRole("tablist", { name: "Tile tabs" });
+    fireEvent.dragOver(tablist, { clientX: 180, dataTransfer });
+
+    expect(
+      tablist.querySelector(
+        ".pane-tab-shell.drop-before, .pane-tab-shell.drop-after",
+      ),
+    ).not.toBeNull();
+
+    fireEvent.dragLeave(tablist);
+
+    expect(
+      tablist.querySelector(
+        ".pane-tab-shell.drop-before, .pane-tab-shell.drop-after",
+      ),
+    ).toBeNull();
   });
 
   it("shows project and remote info in the status tooltip", async () => {
     renderPaneTabs({
       projectLookup: new Map([
-        ["project-1", makeProject("project-1", "/remote/repo", "Questica", "ssh-lab")],
+        [
+          "project-1",
+          makeProject("project-1", "/remote/repo", "Questica", "ssh-lab"),
+        ],
       ]),
       remoteLookup: new Map([
         [
@@ -744,7 +945,12 @@ function renderPaneTabs({
   );
 }
 
-function makeProject(id: string, rootPath: string, name = "Repo", remoteId?: string): Project {
+function makeProject(
+  id: string,
+  rootPath: string,
+  name = "Repo",
+  remoteId?: string,
+): Project {
   return {
     id,
     name,
@@ -772,7 +978,6 @@ function makeSession(
     ...overrides,
   };
 }
-
 
 function makeGitStatus(
   workdir: string,

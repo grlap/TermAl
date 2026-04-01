@@ -1,12 +1,17 @@
 ﻿import { fireEvent, render, waitFor } from "@testing-library/react";
 import { useState } from "react";
-import { describe, expect, it, vi } from "vitest";
+import { cleanup } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { Session } from "../types";
 import type { WorkspaceCanvasTab } from "../workspace";
 import { SessionCanvasPanel } from "./SessionCanvasPanel";
 
 describe("SessionCanvasPanel", () => {
+  afterEach(() => {
+    cleanup();
+  });
+
   it("zooms around the pointer when ctrl + wheel is used", async () => {
     const onSetZoomSpy = vi.fn();
     const { container } = render(
@@ -22,7 +27,9 @@ describe("SessionCanvasPanel", () => {
       />,
     );
 
-    const scrollContainer = container.querySelector(".message-stack") as HTMLDivElement;
+    const scrollContainer = container.querySelector(
+      ".message-stack",
+    ) as HTMLDivElement;
     let scrollLeft = 120;
     let scrollTop = 180;
     Object.defineProperty(scrollContainer, "scrollLeft", {
@@ -40,7 +47,9 @@ describe("SessionCanvasPanel", () => {
       },
     });
 
-    const frame = container.querySelector(".session-canvas-scale-frame") as HTMLDivElement;
+    const frame = container.querySelector(
+      ".session-canvas-scale-frame",
+    ) as HTMLDivElement;
     vi.spyOn(frame, "getBoundingClientRect").mockReturnValue({
       x: 100,
       y: 80,
@@ -86,7 +95,9 @@ describe("SessionCanvasPanel", () => {
       />,
     );
 
-    const scrollContainer = container.querySelector(".message-stack") as HTMLDivElement;
+    const scrollContainer = container.querySelector(
+      ".message-stack",
+    ) as HTMLDivElement;
     let scrollLeft = 120;
     let scrollTop = 180;
     Object.defineProperty(scrollContainer, "scrollLeft", {
@@ -104,7 +115,9 @@ describe("SessionCanvasPanel", () => {
       },
     });
 
-    const frame = container.querySelector(".session-canvas-scale-frame") as HTMLDivElement;
+    const frame = container.querySelector(
+      ".session-canvas-scale-frame",
+    ) as HTMLDivElement;
     let capturedPointerId: number | null = null;
     Object.defineProperty(frame, "setPointerCapture", {
       configurable: true,
@@ -173,7 +186,9 @@ describe("SessionCanvasPanel", () => {
       />,
     );
 
-    const frame = container.querySelector(".session-canvas-scale-frame") as HTMLDivElement;
+    const frame = container.querySelector(
+      ".session-canvas-scale-frame",
+    ) as HTMLDivElement;
     fireEvent.wheel(frame, {
       deltaY: -100,
       clientX: 340,

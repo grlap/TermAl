@@ -1,7 +1,14 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { fetchOrchestratorTemplates } from "../api";
+import { ORCHESTRATOR_TEMPLATES_CHANGED_EVENT } from "../orchestrator-templates-events";
 import type { OrchestratorTemplate } from "../types";
 import { OrchestratorTemplateLibraryPanel } from "./OrchestratorTemplateLibraryPanel";
 
@@ -54,15 +61,68 @@ describe("OrchestratorTemplateLibraryPanel", () => {
       "No orchestration templates yet. Start with a blank canvas and save your first flow.",
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "Create template canvas" }));
+    fireEvent.click(
+      screen.getByRole("button", { name: "Create template canvas" }),
+    );
 
     await waitFor(() => {
       expect(onNewCanvas).toHaveBeenCalledTimes(1);
     });
   });
+
+  it("shows a fetch error when loading templates fails", async () => {
+    fetchTemplatesMock.mockRejectedValue(
+      new Error("Could not load templates."),
+    );
+
+    render(
+      <OrchestratorTemplateLibraryPanel
+        onNewCanvas={() => {}}
+        onOpenCanvas={() => {}}
+      />,
+    );
+
+    expect(
+      await screen.findByText("Could not load templates."),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText("Loading orchestration templates..."),
+    ).not.toBeInTheDocument();
+  });
+
+  it("reloads templates when the library changed event fires", async () => {
+    fetchTemplatesMock
+      .mockResolvedValueOnce({
+        templates: [makeTemplate({ id: "template-1", name: "Original Flow" })],
+      })
+      .mockResolvedValueOnce({
+        templates: [makeTemplate({ id: "template-2", name: "Updated Flow" })],
+      });
+
+    render(
+      <OrchestratorTemplateLibraryPanel
+        onNewCanvas={() => {}}
+        onOpenCanvas={() => {}}
+      />,
+    );
+
+    expect(await screen.findByText("Original Flow")).toBeInTheDocument();
+
+    await act(async () => {
+      window.dispatchEvent(
+        new CustomEvent(ORCHESTRATOR_TEMPLATES_CHANGED_EVENT),
+      );
+    });
+
+    expect(await screen.findByText("Updated Flow")).toBeInTheDocument();
+    expect(fetchTemplatesMock).toHaveBeenCalledTimes(2);
+    expect(screen.queryByText("Original Flow")).not.toBeInTheDocument();
+  });
 });
 
-function makeTemplate(overrides: Partial<OrchestratorTemplate> = {}): OrchestratorTemplate {
+function makeTemplate(
+  overrides: Partial<OrchestratorTemplate> = {},
+): OrchestratorTemplate {
   return {
     id: "template-1",
     name: "Delivery Flow",

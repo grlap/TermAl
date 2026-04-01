@@ -7,6 +7,7 @@ import {
 } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import type { StateResponse } from "./api";
 import App from "./App";
 
 class EventSourceMock {
@@ -42,7 +43,7 @@ class EventSourceMock {
     this.onopen?.(new Event("open"));
   }
 
-  dispatchState(state: { revision: number; projects: []; sessions: [] }) {
+  dispatchState(state: StateResponse) {
     const event = new MessageEvent<string>("state", {
       data: JSON.stringify(state),
     });
@@ -452,7 +453,292 @@ describe("Backend connection state", () => {
       restoreGlobal("ResizeObserver", originalResizeObserver);
     }
   });
+
+  it("adopts a same-revision reconnect fallback snapshot after backend restart", async () => {
+    const originalFetch = globalThis.fetch;
+    const originalEventSource = globalThis.EventSource;
+    const originalResizeObserver = globalThis.ResizeObserver;
+    let fallbackState = makeBackendStateResponse({
+      revision: 1,
+      sessionName: "Recovered Session",
+      preview: "Recovered preview",
+    });
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const target = String(input);
+      if (target === "/api/state") {
+        return jsonResponse(fallbackState);
+      }
+      if (target.startsWith("/api/workspaces/")) {
+        return new Response("", {
+          status: 404,
+        });
+      }
+
+      throw new Error(`Unexpected fetch: ${target}`);
+    });
+
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal(
+      "EventSource",
+      EventSourceMock as unknown as typeof EventSource,
+    );
+    vi.stubGlobal(
+      "ResizeObserver",
+      ResizeObserverMock as unknown as typeof ResizeObserver,
+    );
+
+    try {
+      render(<App />);
+
+      const eventSource =
+        EventSourceMock.instances[EventSourceMock.instances.length - 1];
+      expect(eventSource).toBeDefined();
+
+      act(() => {
+        eventSource?.dispatchOpen();
+        eventSource?.dispatchState(
+          makeBackendStateResponse({
+            revision: 1,
+            sessionName: "Original Session",
+            preview: "Original preview",
+          }),
+        );
+      });
+      expect(await screen.findByText("Original Session")).toBeInTheDocument();
+      expect(screen.getByText("Original preview")).toBeInTheDocument();
+
+      vi.useFakeTimers();
+      act(() => {
+        eventSource?.dispatchError();
+      });
+      expect(screen.getByText("Reconnecting")).toBeInTheDocument();
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(400);
+      });
+
+      expect(
+        fetchMock.mock.calls.some(([url]) => String(url) === "/api/state"),
+      ).toBe(true);
+      expect(screen.getByText("Recovered Session")).toBeInTheDocument();
+      expect(screen.getByText("Recovered preview")).toBeInTheDocument();
+      expect(screen.queryByText("Original Session")).toBeNull();
+    } finally {
+      vi.useRealTimers();
+      restoreGlobal("fetch", originalFetch);
+      restoreGlobal("EventSource", originalEventSource);
+      restoreGlobal("ResizeObserver", originalResizeObserver);
+    }
+  });
+
+  it("adopts a lower-revision reconnect fallback snapshot after backend restart", async () => {
+    const originalFetch = globalThis.fetch;
+    const originalEventSource = globalThis.EventSource;
+    const originalResizeObserver = globalThis.ResizeObserver;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const target = String(input);
+      if (target === "/api/state") {
+        return jsonResponse(
+          makeBackendStateResponse({
+            revision: 3,
+            sessionName: "Recovered Session",
+            preview: "Recovered preview",
+          }),
+        );
+      }
+      if (target.startsWith("/api/workspaces/")) {
+        return new Response("", {
+          status: 404,
+        });
+      }
+
+      throw new Error(`Unexpected fetch: ${target}`);
+    });
+
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal(
+      "EventSource",
+      EventSourceMock as unknown as typeof EventSource,
+    );
+    vi.stubGlobal(
+      "ResizeObserver",
+      ResizeObserverMock as unknown as typeof ResizeObserver,
+    );
+
+    try {
+      render(<App />);
+
+      const eventSource =
+        EventSourceMock.instances[EventSourceMock.instances.length - 1];
+      expect(eventSource).toBeDefined();
+
+      act(() => {
+        eventSource?.dispatchOpen();
+        eventSource?.dispatchState(
+          makeBackendStateResponse({
+            revision: 5,
+            sessionName: "Original Session",
+            preview: "Original preview",
+          }),
+        );
+      });
+      expect(await screen.findByText("Original Session")).toBeInTheDocument();
+      expect(screen.getByText("Original preview")).toBeInTheDocument();
+
+      vi.useFakeTimers();
+      act(() => {
+        eventSource?.dispatchError();
+      });
+      expect(screen.getByText("Reconnecting")).toBeInTheDocument();
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(400);
+      });
+
+      expect(
+        fetchMock.mock.calls.some(([url]) => String(url) === "/api/state"),
+      ).toBe(true);
+      expect(screen.getByText("Recovered Session")).toBeInTheDocument();
+      expect(screen.getByText("Recovered preview")).toBeInTheDocument();
+      expect(screen.queryByText("Original Session")).toBeNull();
+    } finally {
+      vi.useRealTimers();
+      restoreGlobal("fetch", originalFetch);
+      restoreGlobal("EventSource", originalEventSource);
+      restoreGlobal("ResizeObserver", originalResizeObserver);
+    }
+  });
+
+  it("discards a lower-revision reconnect fallback fetch after a newer SSE state arrives", async () => {
+    const originalFetch = globalThis.fetch;
+    const originalEventSource = globalThis.EventSource;
+    const originalResizeObserver = globalThis.ResizeObserver;
+    let resolveStateFetch: ((response: Response) => void) | null = null;
+    const stateFetchPromise = new Promise<Response>((resolve) => {
+      resolveStateFetch = resolve;
+    });
+    const fetchMock = vi.fn((input: RequestInfo | URL) => {
+      const target = String(input);
+      if (target === "/api/state") {
+        return stateFetchPromise;
+      }
+      if (target.startsWith("/api/workspaces/")) {
+        return Promise.resolve(
+          new Response("", {
+            status: 404,
+          }),
+        );
+      }
+
+      return Promise.reject(new Error(`Unexpected fetch: ${target}`));
+    });
+
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal(
+      "EventSource",
+      EventSourceMock as unknown as typeof EventSource,
+    );
+    vi.stubGlobal(
+      "ResizeObserver",
+      ResizeObserverMock as unknown as typeof ResizeObserver,
+    );
+
+    try {
+      render(<App />);
+
+      const eventSource =
+        EventSourceMock.instances[EventSourceMock.instances.length - 1];
+      expect(eventSource).toBeDefined();
+
+      act(() => {
+        eventSource?.dispatchOpen();
+        eventSource?.dispatchState(
+          makeBackendStateResponse({
+            revision: 5,
+            sessionName: "Original Session",
+            preview: "Original preview",
+          }),
+        );
+      });
+      expect(await screen.findByText("Original Session")).toBeInTheDocument();
+
+      vi.useFakeTimers();
+      act(() => {
+        eventSource?.dispatchError();
+      });
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(400);
+      });
+      expect(resolveStateFetch).not.toBeNull();
+
+      act(() => {
+        eventSource?.dispatchOpen();
+        eventSource?.dispatchState(
+          makeBackendStateResponse({
+            revision: 6,
+            sessionName: "Newer Session",
+            preview: "Newer preview",
+          }),
+        );
+      });
+      expect(screen.getByText("Newer Session")).toBeInTheDocument();
+      expect(screen.getByText("Newer preview")).toBeInTheDocument();
+
+      await act(async () => {
+        resolveStateFetch?.(
+          jsonResponse(
+            makeBackendStateResponse({
+              revision: 3,
+              sessionName: "Recovered Session",
+              preview: "Recovered preview",
+            }),
+          ),
+        );
+        await Promise.resolve();
+      });
+
+      expect(screen.getByText("Newer Session")).toBeInTheDocument();
+      expect(screen.getByText("Newer preview")).toBeInTheDocument();
+      expect(screen.queryByText("Recovered Session")).toBeNull();
+    } finally {
+      vi.useRealTimers();
+      restoreGlobal("fetch", originalFetch);
+      restoreGlobal("EventSource", originalEventSource);
+      restoreGlobal("ResizeObserver", originalResizeObserver);
+    }
+  });
 });
+
+function makeBackendStateResponse({
+  revision,
+  sessionName,
+  preview,
+}: {
+  revision: number;
+  sessionName: string;
+  preview: string;
+}): StateResponse {
+  return {
+    revision,
+    projects: [],
+    sessions: [
+      {
+        id: "session-1",
+        name: sessionName,
+        emoji: "1f9ea",
+        agent: "Codex" as const,
+        workdir: "/repo",
+        projectId: null,
+        model: "gpt-5",
+        status: "idle" as const,
+        preview,
+        messages: [],
+        pendingPrompts: [],
+      },
+    ],
+  };
+}
 
 function restoreGlobal<Key extends "fetch" | "EventSource" | "ResizeObserver">(
   key: Key,

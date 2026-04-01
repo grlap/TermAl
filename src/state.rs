@@ -2830,7 +2830,7 @@ impl AppState {
         if self.remote_session_target(session_id)?.is_some() {
             return self.proxy_remote_kill_session(session_id);
         }
-        let (snapshot, runtime_to_kill, hidden_runtimes_to_kill) = {
+        let (runtime_to_kill, hidden_runtimes_to_kill) = {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
             let index = inner
                 .find_visible_session_index(session_id)
@@ -2893,7 +2893,7 @@ impl AppState {
             self.commit_locked(&mut inner).map_err(|err| {
                 ApiError::internal(format!("failed to persist session state: {err:#}"))
             })?;
-            (self.snapshot_from_inner(&inner), runtime, hidden_runtimes)
+            (runtime, hidden_runtimes)
         };
 
         if let Some(runtime) = runtime_to_kill {
@@ -2908,7 +2908,13 @@ impl AppState {
             }
         }
 
-        Ok(snapshot)
+        self.resume_pending_orchestrator_transitions()
+            .map_err(|err| {
+                ApiError::internal(format!(
+                    "failed to reconcile orchestrator transitions: {err:#}"
+                ))
+            })?;
+        Ok(self.snapshot())
     }
 
     fn cancel_queued_prompt(
@@ -5085,6 +5091,7 @@ impl PersistedState {
                 .collect(),
         };
         inner.ensure_projects_consistent();
+        inner.upgrade_legacy_queued_prompt_sources();
         inner.recover_interrupted_sessions();
         inner.normalize_orchestrator_instances();
         inner
@@ -5386,8 +5393,19 @@ fn record_has_archived_codex_thread(record: &SessionRecord) -> bool {
     record.session.codex_thread_state == Some(CodexThreadState::Archived)
 }
 
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+enum QueuedPromptSource {
+    #[default]
+    Legacy,
+    User,
+    Orchestrator,
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize)]
 struct QueuedPromptRecord {
+    #[serde(default)]
+    source: QueuedPromptSource,
     attachments: Vec<PromptImageAttachment>,
     pending_prompt: PendingPrompt,
 }
@@ -6091,11 +6109,53 @@ fn queue_prompt_on_record(
     pending_prompt: PendingPrompt,
     attachments: Vec<PromptImageAttachment>,
 ) {
+    queue_prompt_on_record_with_source(
+        record,
+        pending_prompt,
+        attachments,
+        QueuedPromptSource::User,
+    );
+}
+
+fn queue_orchestrator_prompt_on_record(
+    record: &mut SessionRecord,
+    pending_prompt: PendingPrompt,
+    attachments: Vec<PromptImageAttachment>,
+) {
+    queue_prompt_on_record_with_source(
+        record,
+        pending_prompt,
+        attachments,
+        QueuedPromptSource::Orchestrator,
+    );
+}
+
+fn queue_prompt_on_record_with_source(
+    record: &mut SessionRecord,
+    pending_prompt: PendingPrompt,
+    attachments: Vec<PromptImageAttachment>,
+    source: QueuedPromptSource,
+) {
     record.queued_prompts.push_back(QueuedPromptRecord {
+        source,
         attachments,
         pending_prompt,
     });
     sync_pending_prompts(record);
+}
+
+fn clear_queued_prompts_by_source(record: &mut SessionRecord, source: QueuedPromptSource) {
+    let original_len = record.queued_prompts.len();
+    record
+        .queued_prompts
+        .retain(|queued| queued.source != source);
+    if record.queued_prompts.len() != original_len {
+        sync_pending_prompts(record);
+    }
+}
+
+fn clear_stopped_orchestrator_queued_prompts(record: &mut SessionRecord) {
+    clear_queued_prompts_by_source(record, QueuedPromptSource::Orchestrator);
 }
 
 fn recover_interrupted_session_record(record: &mut SessionRecord) -> Option<String> {

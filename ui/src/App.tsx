@@ -1221,6 +1221,7 @@ export default function App() {
   const forceAdoptNextStateEventRef = useRef(false);
   const stateResyncInFlightRef = useRef(false);
   const stateResyncPendingRef = useRef(false);
+  const stateResyncAllowAuthoritativeRollbackRef = useRef(false);
   const paneShouldStickToBottomRef = useRef<Record<string, boolean | undefined>>({});
   const paneScrollPositionsRef = useRef<
     Record<string, Record<string, { top: number; shouldStick: boolean }>>
@@ -2050,16 +2051,19 @@ export default function App() {
           return;
         }
 
-        requestStateResync();
+        requestStateResync({ allowAuthoritativeRollback: true });
       }, RECONNECT_STATE_RESYNC_DELAY_MS);
     }
 
-    function requestStateResync() {
+    function requestStateResync(options?: { allowAuthoritativeRollback?: boolean }) {
       if (cancelled) {
         return;
       }
 
       clearReconnectStateResyncTimeout();
+      if (options?.allowAuthoritativeRollback) {
+        stateResyncAllowAuthoritativeRollbackRef.current = true;
+      }
       stateResyncPendingRef.current = true;
       if (stateResyncInFlightRef.current) {
         return;
@@ -2070,6 +2074,10 @@ export default function App() {
         try {
           while (!cancelled && stateResyncPendingRef.current) {
             stateResyncPendingRef.current = false;
+            const allowAuthoritativeRollback =
+              stateResyncAllowAuthoritativeRollbackRef.current;
+            stateResyncAllowAuthoritativeRollbackRef.current = false;
+            const requestedRevision = latestStateRevisionRef.current;
 
             try {
               const state = await fetchState();
@@ -2077,7 +2085,18 @@ export default function App() {
                 return;
               }
 
-              adoptState(state);
+              const shouldForceRollback =
+                allowAuthoritativeRollback &&
+                requestedRevision !== null &&
+                latestStateRevisionRef.current === requestedRevision &&
+                state.revision <= requestedRevision;
+
+              adoptState(state, {
+                // A reconnect fallback snapshot is authoritative if no newer SSE state landed
+                // while it was in flight, even when a crashed backend restarted below the last
+                // streamed client revision.
+                force: shouldForceRollback,
+              });
               setRequestError(null);
             } catch (error) {
               if (!cancelled) {
@@ -14207,5 +14226,3 @@ function dropLabelForPlacement(placement: TabDropPlacement) {
       return "Bottom";
   }
 }
-
-

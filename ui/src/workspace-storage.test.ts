@@ -2,6 +2,9 @@ import { beforeEach, describe, expect, it } from "vitest";
 
 import {
   LEGACY_WORKSPACE_LAYOUT_STORAGE_KEY,
+  WORKSPACE_VIEW_QUERY_PARAM,
+  createWorkspaceViewId,
+  ensureWorkspaceViewId,
   getStoredWorkspaceLayout,
   parseStoredWorkspaceLayout,
   persistWorkspaceLayout,
@@ -13,6 +16,42 @@ describe("workspace storage", () => {
 
   beforeEach(() => {
     window.localStorage.clear();
+    window.history.replaceState(null, "", "/");
+  });
+
+  it("createWorkspaceViewId returns unique workspace-prefixed ids", () => {
+    const first = createWorkspaceViewId();
+    const second = createWorkspaceViewId();
+
+    expect(first).toMatch(/^workspace-/);
+    expect(second).toMatch(/^workspace-/);
+    expect(first).not.toBe(second);
+  });
+
+  it("ensureWorkspaceViewId reuses the existing query parameter", () => {
+    window.history.replaceState(
+      null,
+      "",
+      `/?${WORKSPACE_VIEW_QUERY_PARAM}=workspace-existing`,
+    );
+
+    expect(ensureWorkspaceViewId()).toBe("workspace-existing");
+    expect(
+      new URL(window.location.href).searchParams.get(
+        WORKSPACE_VIEW_QUERY_PARAM,
+      ),
+    ).toBe("workspace-existing");
+  });
+
+  it("ensureWorkspaceViewId generates and persists a query parameter when absent", () => {
+    const workspaceViewId = ensureWorkspaceViewId();
+
+    expect(workspaceViewId).toMatch(/^workspace-/);
+    expect(
+      new URL(window.location.href).searchParams.get(
+        WORKSPACE_VIEW_QUERY_PARAM,
+      ),
+    ).toBe(workspaceViewId);
   });
 
   it("returns null when storage is empty or invalid", () => {
@@ -113,7 +152,9 @@ describe("workspace storage", () => {
     persistWorkspaceLayout(workspaceViewId, layout);
 
     expect(
-      window.localStorage.getItem(`${LEGACY_WORKSPACE_LAYOUT_STORAGE_KEY}:${workspaceViewId}`),
+      window.localStorage.getItem(
+        `${LEGACY_WORKSPACE_LAYOUT_STORAGE_KEY}:${workspaceViewId}`,
+      ),
     ).not.toBeNull();
     expect(getStoredWorkspaceLayout(workspaceViewId)).toEqual(layout);
   });

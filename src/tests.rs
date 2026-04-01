@@ -8334,6 +8334,7 @@ fn stop_session_returns_an_error_when_a_dedicated_runtime_refuses_to_stop() {
         inner.sessions[index]
             .queued_prompts
             .push_back(QueuedPromptRecord {
+                source: QueuedPromptSource::User,
                 attachments: Vec::new(),
                 pending_prompt: PendingPrompt {
                     attachments: Vec::new(),
@@ -8555,6 +8556,7 @@ fn runtime_turn_callbacks_are_suppressed_while_stop_is_in_progress() {
         inner.sessions[index]
             .queued_prompts
             .push_back(QueuedPromptRecord {
+                source: QueuedPromptSource::User,
                 attachments: Vec::new(),
                 pending_prompt: PendingPrompt {
                     attachments: Vec::new(),
@@ -13379,8 +13381,8 @@ fn orchestrator_template_crud_persists_in_the_separate_store() {
 }
 
 #[test]
-fn orchestrator_template_draft_deserialization_defaults_missing_input_mode_to_queue() {
-    let draft: OrchestratorTemplateDraft = serde_json::from_value(json!({
+fn orchestrator_template_draft_deserialization_requires_input_mode() {
+    let error = serde_json::from_value::<OrchestratorTemplateDraft>(json!({
         "name": "Legacy Flow",
         "description": "",
         "projectId": null,
@@ -13396,13 +13398,9 @@ fn orchestrator_template_draft_deserialization_defaults_missing_input_mode_to_qu
         ],
         "transitions": []
     }))
-    .expect("legacy drafts without inputMode should deserialize");
+    .expect_err("drafts without inputMode should be rejected");
 
-    assert_eq!(draft.sessions.len(), 1);
-    assert_eq!(
-        draft.sessions[0].input_mode,
-        OrchestratorSessionInputMode::Queue
-    );
+    assert!(error.to_string().contains("inputMode"));
 }
 
 #[test]
@@ -13417,6 +13415,75 @@ fn orchestrator_templates_reject_unknown_transition_nodes() {
 
     assert_eq!(error.status, StatusCode::BAD_REQUEST);
     assert!(error.message.contains("unknown target `missing-session`"));
+}
+
+#[test]
+fn orchestrator_templates_reject_duplicate_session_ids() {
+    let state = test_app_state();
+    let mut draft = sample_orchestrator_template_draft();
+    draft.sessions.push(OrchestratorSessionTemplate {
+        id: draft.sessions[0].id.clone(),
+        name: "Duplicate Planner".to_owned(),
+        agent: Agent::Claude,
+        model: None,
+        instructions: String::new(),
+        auto_approve: false,
+        input_mode: OrchestratorSessionInputMode::Queue,
+        position: OrchestratorNodePosition { x: 480.0, y: 180.0 },
+    });
+
+    let error = state
+        .create_orchestrator_template(draft)
+        .expect_err("template creation should reject duplicate session ids");
+
+    assert_eq!(error.status, StatusCode::BAD_REQUEST);
+    assert!(error.message.contains("duplicate session id `planner`"));
+}
+
+#[test]
+fn orchestrator_templates_reject_empty_session_lists() {
+    let state = test_app_state();
+    let mut draft = sample_orchestrator_template_draft();
+    draft.sessions.clear();
+    draft.transitions.clear();
+
+    let error = state
+        .create_orchestrator_template(draft)
+        .expect_err("template creation should reject empty session lists");
+
+    assert_eq!(error.status, StatusCode::BAD_REQUEST);
+    assert!(
+        error
+            .message
+            .contains("an orchestrator template needs at least one session")
+    );
+}
+
+#[test]
+fn orchestrator_templates_reject_duplicate_transition_ids() {
+    let state = test_app_state();
+    let mut draft = sample_orchestrator_template_draft();
+    draft.transitions.push(OrchestratorTemplateTransition {
+        id: draft.transitions[0].id.clone(),
+        from_session_id: "planner".to_owned(),
+        to_session_id: "builder".to_owned(),
+        from_anchor: None,
+        to_anchor: None,
+        trigger: OrchestratorTransitionTrigger::OnCompletion,
+        result_mode: OrchestratorTransitionResultMode::LastResponse,
+        prompt_template: Some("Duplicate transition".to_owned()),
+    });
+
+    let error = state
+        .create_orchestrator_template(draft)
+        .expect_err("template creation should reject duplicate transition ids");
+
+    assert_eq!(error.status, StatusCode::BAD_REQUEST);
+    assert!(
+        error
+            .message
+            .contains("duplicate transition id `planner-to-builder`")
+    );
 }
 
 #[test]
@@ -13845,6 +13912,19 @@ async fn list_workspace_layouts_route_returns_saved_workspaces() {
             },
         )
         .expect("second workspace should save");
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        inner
+            .workspace_layouts
+            .get_mut("monitor-a")
+            .expect("first workspace should exist")
+            .updated_at = "2026-03-26 10:00:00".to_owned();
+        inner
+            .workspace_layouts
+            .get_mut("monitor-b")
+            .expect("second workspace should exist")
+            .updated_at = "2026-03-26 10:05:00".to_owned();
+    }
     let app = app_router(state);
 
     let (status, response): (StatusCode, WorkspaceLayoutsResponse) = request_json(
@@ -13870,6 +13950,14 @@ async fn list_workspace_layouts_route_returns_saved_workspaces() {
             .workspaces
             .iter()
             .any(|workspace| workspace.id == "monitor-b")
+    );
+    assert_eq!(
+        response
+            .workspaces
+            .iter()
+            .map(|workspace| workspace.id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["monitor-b", "monitor-a"]
     );
 }
 
@@ -15249,6 +15337,440 @@ fn runtime_exit_rechecks_deadlocked_consolidate_cycles() {
 }
 
 #[test]
+fn runtime_exit_does_not_restart_queued_work_after_deadlocked_stop() {
+    let state = test_app_state();
+    let project_root = std::env::temp_dir().join(format!(
+        "termal-orchestrator-consolidation-runtime-exit-queued-{}",
+        Uuid::new_v4()
+    ));
+    fs::create_dir_all(&project_root).expect("runtime-exit queued project root should exist");
+    let project_id = create_test_project(&state, &project_root, "Runtime Exit Queued Project");
+    let mut draft = sample_deadlocked_consolidation_orchestrator_template_draft();
+    draft.sessions.push(OrchestratorSessionTemplate {
+        id: "worker".to_owned(),
+        name: "Worker".to_owned(),
+        agent: Agent::Codex,
+        model: Some("gpt-5".to_owned()),
+        instructions: "Handle queued follow-up work.".to_owned(),
+        auto_approve: true,
+        input_mode: OrchestratorSessionInputMode::Queue,
+        position: OrchestratorNodePosition { x: 420.0, y: 420.0 },
+    });
+    let template = state
+        .create_orchestrator_template(draft)
+        .expect("template should be created")
+        .template;
+    let orchestrator = state
+        .create_orchestrator_instance(CreateOrchestratorInstanceRequest {
+            template_id: template.id,
+            project_id: Some(project_id),
+        })
+        .expect("orchestrator instance should be created")
+        .orchestrator;
+
+    let consolidate_a_session_id = orchestrator
+        .session_instances
+        .iter()
+        .find(|instance| instance.template_session_id == "consolidate-a")
+        .expect("consolidate A session should be mapped")
+        .session_id
+        .clone();
+    let worker_session_id = orchestrator
+        .session_instances
+        .iter()
+        .find(|instance| instance.template_session_id == "worker")
+        .expect("worker session should be mapped")
+        .session_id
+        .clone();
+
+    let runtime_token = {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let consolidate_a_index = inner
+            .find_session_index(&consolidate_a_session_id)
+            .expect("consolidate A session should exist");
+        let worker_index = inner
+            .find_session_index(&worker_session_id)
+            .expect("worker session should exist");
+        let (runtime, _input_rx) =
+            test_codex_runtime_handle("orchestrator-consolidation-runtime-exit-queued-worker");
+        let runtime_token = RuntimeToken::Codex(runtime.runtime_id.clone());
+        inner.sessions[worker_index].runtime = SessionRuntime::Codex(runtime);
+        inner.sessions[worker_index].session.status = SessionStatus::Active;
+        let queued_prompt_id = inner.next_message_id();
+        queue_orchestrator_prompt_on_record(
+            &mut inner.sessions[worker_index],
+            PendingPrompt {
+                attachments: Vec::new(),
+                id: queued_prompt_id,
+                timestamp: stamp_now(),
+                text: "Queued worker follow-up".to_owned(),
+                expanded_text: None,
+            },
+            Vec::new(),
+        );
+
+        let message_id = inner.next_message_id();
+        push_message_on_record(
+            &mut inner.sessions[consolidate_a_index],
+            Message::Text {
+                attachments: Vec::new(),
+                id: message_id,
+                timestamp: stamp_now(),
+                author: Author::Assistant,
+                text: "A produced the initial consolidated branch.".to_owned(),
+                expanded_text: None,
+            },
+        );
+        inner.sessions[consolidate_a_index].session.status = SessionStatus::Idle;
+        let completion_revision = inner.revision + 1;
+        schedule_orchestrator_transitions_for_completed_session(
+            &mut inner,
+            &consolidate_a_session_id,
+            completion_revision,
+        );
+        state.commit_locked(&mut inner).unwrap();
+        runtime_token
+    };
+
+    state
+        .handle_runtime_exit_if_matches(
+            &worker_session_id,
+            &runtime_token,
+            Some("worker runtime crashed"),
+        )
+        .expect("runtime exit should be handled");
+
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    let orchestrator = &inner.orchestrator_instances[0];
+    assert_eq!(orchestrator.status, OrchestratorInstanceStatus::Stopped);
+    let worker = inner
+        .sessions
+        .iter()
+        .find(|record| record.session.id == worker_session_id)
+        .expect("worker session should exist");
+    assert_eq!(worker.session.status, SessionStatus::Error);
+    assert!(worker.session.pending_prompts.is_empty());
+    assert!(!worker.session.messages.iter().any(|message| matches!(
+        message,
+        Message::Text { text, .. } if text == "Queued worker follow-up"
+    )));
+}
+
+#[test]
+fn stopped_orchestrator_sessions_can_dispatch_user_queued_prompts_after_deadlock_stop() {
+    let state = test_app_state();
+    let project_root = std::env::temp_dir().join(format!(
+        "termal-orchestrator-consolidation-user-queue-recovery-{}",
+        Uuid::new_v4()
+    ));
+    fs::create_dir_all(&project_root).expect("user queue recovery project root should exist");
+    let project_id = create_test_project(&state, &project_root, "User Queue Recovery Project");
+    let mut draft = sample_deadlocked_consolidation_orchestrator_template_draft();
+    draft.sessions.push(OrchestratorSessionTemplate {
+        id: "external".to_owned(),
+        name: "External Reviewer".to_owned(),
+        agent: Agent::Claude,
+        model: Some("claude-sonnet-4-5".to_owned()),
+        instructions: "Supply an external predecessor.".to_owned(),
+        auto_approve: false,
+        input_mode: OrchestratorSessionInputMode::Queue,
+        position: OrchestratorNodePosition { x: 40.0, y: 180.0 },
+    });
+    draft.sessions.push(OrchestratorSessionTemplate {
+        id: "worker".to_owned(),
+        name: "Worker".to_owned(),
+        agent: Agent::Claude,
+        model: Some("claude-sonnet-4-5".to_owned()),
+        instructions: "Handle manual recovery work.".to_owned(),
+        auto_approve: false,
+        input_mode: OrchestratorSessionInputMode::Queue,
+        position: OrchestratorNodePosition { x: 420.0, y: 420.0 },
+    });
+    draft.transitions.push(OrchestratorTemplateTransition {
+        id: "external-to-a".to_owned(),
+        from_session_id: "external".to_owned(),
+        to_session_id: "consolidate-a".to_owned(),
+        from_anchor: Some("right".to_owned()),
+        to_anchor: Some("left".to_owned()),
+        trigger: OrchestratorTransitionTrigger::OnCompletion,
+        result_mode: OrchestratorTransitionResultMode::LastResponse,
+        prompt_template: Some("From external:\n{{result}}".to_owned()),
+    });
+    let template = state
+        .create_orchestrator_template(draft)
+        .expect("template should be created")
+        .template;
+    let orchestrator = state
+        .create_orchestrator_instance(CreateOrchestratorInstanceRequest {
+            template_id: template.id,
+            project_id: Some(project_id),
+        })
+        .expect("orchestrator instance should be created")
+        .orchestrator;
+
+    let consolidate_a_session_id = orchestrator
+        .session_instances
+        .iter()
+        .find(|instance| instance.template_session_id == "consolidate-a")
+        .expect("consolidate A session should be mapped")
+        .session_id
+        .clone();
+    let external_session_id = orchestrator
+        .session_instances
+        .iter()
+        .find(|instance| instance.template_session_id == "external")
+        .expect("external session should be mapped")
+        .session_id
+        .clone();
+    let worker_session_id = orchestrator
+        .session_instances
+        .iter()
+        .find(|instance| instance.template_session_id == "worker")
+        .expect("worker session should be mapped")
+        .session_id
+        .clone();
+
+    let child = test_exit_success_child();
+    let (input_tx, _input_rx) = mpsc::channel();
+    let runtime = ClaudeRuntimeHandle {
+        runtime_id: "orchestrator-user-queue-recovery".to_owned(),
+        input_tx,
+        process: Arc::new(SharedChild::new(child).unwrap()),
+    };
+
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let consolidate_a_index = inner
+            .find_session_index(&consolidate_a_session_id)
+            .expect("consolidate A session should exist");
+        let worker_index = inner
+            .find_session_index(&worker_session_id)
+            .expect("worker session should exist");
+        inner.sessions[worker_index].runtime = SessionRuntime::Claude(runtime);
+        inner.sessions[worker_index].session.status = SessionStatus::Error;
+        let queued_prompt_id = inner.next_message_id();
+        queue_prompt_on_record(
+            &mut inner.sessions[worker_index],
+            PendingPrompt {
+                attachments: Vec::new(),
+                id: queued_prompt_id,
+                timestamp: stamp_now(),
+                text: "first".to_owned(),
+                expanded_text: None,
+            },
+            Vec::new(),
+        );
+
+        let message_id = inner.next_message_id();
+        push_message_on_record(
+            &mut inner.sessions[consolidate_a_index],
+            Message::Text {
+                attachments: Vec::new(),
+                id: message_id,
+                timestamp: stamp_now(),
+                author: Author::Assistant,
+                text: "A produced the initial consolidated branch.".to_owned(),
+                expanded_text: None,
+            },
+        );
+        inner.sessions[consolidate_a_index].session.status = SessionStatus::Idle;
+        let completion_revision = inner.revision + 1;
+        schedule_orchestrator_transitions_for_completed_session(
+            &mut inner,
+            &consolidate_a_session_id,
+            completion_revision,
+        );
+        state.commit_locked(&mut inner).unwrap();
+    }
+
+    state
+        .kill_session(&external_session_id)
+        .expect("external session should be killed");
+
+    {
+        let inner = state.inner.lock().expect("state mutex poisoned");
+        let orchestrator = inner
+            .orchestrator_instances
+            .first()
+            .expect("orchestrator should be present");
+        let worker = inner
+            .sessions
+            .iter()
+            .find(|record| record.session.id == worker_session_id)
+            .expect("worker session should be present");
+        assert_eq!(orchestrator.status, OrchestratorInstanceStatus::Stopped);
+        assert_eq!(worker.session.pending_prompts.len(), 1);
+        assert_eq!(worker.session.pending_prompts[0].text, "first");
+    }
+
+    let result = state
+        .dispatch_turn(
+            &worker_session_id,
+            SendMessageRequest {
+                text: "second".to_owned(),
+                expanded_text: None,
+                attachments: Vec::new(),
+            },
+        )
+        .expect("manual recovery send should dispatch queued work");
+
+    match result {
+        DispatchTurnResult::Dispatched(TurnDispatch::PersistentClaude { command, .. }) => {
+            assert_eq!(command.text, "first");
+        }
+        DispatchTurnResult::Dispatched(_) => panic!("expected Claude dispatch"),
+        DispatchTurnResult::Queued => panic!("expected dispatched turn"),
+    }
+
+    let snapshot = state.snapshot();
+    let worker = snapshot
+        .sessions
+        .iter()
+        .find(|session| session.id == worker_session_id)
+        .expect("worker session should be present");
+    assert_eq!(worker.status, SessionStatus::Active);
+    assert_eq!(worker.pending_prompts.len(), 1);
+    assert_eq!(worker.pending_prompts[0].text, "second");
+    assert!(matches!(
+        worker.messages.last(),
+        Some(Message::Text { text, .. }) if text == "first"
+    ));
+}
+
+#[test]
+fn kill_session_rechecks_deadlocked_consolidate_cycles() {
+    let state = test_app_state();
+    let project_root = std::env::temp_dir().join(format!(
+        "termal-orchestrator-consolidation-kill-deadlock-{}",
+        Uuid::new_v4()
+    ));
+    fs::create_dir_all(&project_root).expect("kill deadlock project root should exist");
+    let project_id = create_test_project(&state, &project_root, "Kill Deadlock Project");
+    let mut draft = sample_deadlocked_consolidation_orchestrator_template_draft();
+    draft.sessions.push(OrchestratorSessionTemplate {
+        id: "external".to_owned(),
+        name: "External Reviewer".to_owned(),
+        agent: Agent::Claude,
+        model: Some("claude-sonnet-4-5".to_owned()),
+        instructions: "Supply an external predecessor.".to_owned(),
+        auto_approve: false,
+        input_mode: OrchestratorSessionInputMode::Queue,
+        position: OrchestratorNodePosition { x: 40.0, y: 180.0 },
+    });
+    draft.transitions.push(OrchestratorTemplateTransition {
+        id: "external-to-a".to_owned(),
+        from_session_id: "external".to_owned(),
+        to_session_id: "consolidate-a".to_owned(),
+        from_anchor: Some("right".to_owned()),
+        to_anchor: Some("left".to_owned()),
+        trigger: OrchestratorTransitionTrigger::OnCompletion,
+        result_mode: OrchestratorTransitionResultMode::LastResponse,
+        prompt_template: Some("From external:\n{{result}}".to_owned()),
+    });
+    let template = state
+        .create_orchestrator_template(draft)
+        .expect("template should be created")
+        .template;
+    let orchestrator = state
+        .create_orchestrator_instance(CreateOrchestratorInstanceRequest {
+            template_id: template.id,
+            project_id: Some(project_id),
+        })
+        .expect("orchestrator instance should be created")
+        .orchestrator;
+
+    let consolidate_a_session_id = orchestrator
+        .session_instances
+        .iter()
+        .find(|instance| instance.template_session_id == "consolidate-a")
+        .expect("consolidate A session should be mapped")
+        .session_id
+        .clone();
+    let consolidate_b_session_id = orchestrator
+        .session_instances
+        .iter()
+        .find(|instance| instance.template_session_id == "consolidate-b")
+        .expect("consolidate B session should be mapped")
+        .session_id
+        .clone();
+    let external_session_id = orchestrator
+        .session_instances
+        .iter()
+        .find(|instance| instance.template_session_id == "external")
+        .expect("external session should be mapped")
+        .session_id
+        .clone();
+
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let consolidate_a_index = inner
+            .find_session_index(&consolidate_a_session_id)
+            .expect("consolidate A session should exist");
+        let message_id = inner.next_message_id();
+        push_message_on_record(
+            &mut inner.sessions[consolidate_a_index],
+            Message::Text {
+                attachments: Vec::new(),
+                id: message_id,
+                timestamp: stamp_now(),
+                author: Author::Assistant,
+                text: "A produced the initial consolidated branch.".to_owned(),
+                expanded_text: None,
+            },
+        );
+        inner.sessions[consolidate_a_index].session.status = SessionStatus::Idle;
+        let completion_revision = inner.revision + 1;
+        schedule_orchestrator_transitions_for_completed_session(
+            &mut inner,
+            &consolidate_a_session_id,
+            completion_revision,
+        );
+        state.commit_locked(&mut inner).unwrap();
+    }
+
+    {
+        let inner = state.inner.lock().expect("state mutex poisoned");
+        assert_eq!(
+            inner.orchestrator_instances[0].status,
+            OrchestratorInstanceStatus::Running
+        );
+        assert_eq!(inner.orchestrator_instances[0].pending_transitions.len(), 2);
+    }
+
+    state
+        .kill_session(&external_session_id)
+        .expect("external session should be killed");
+
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    let orchestrator = &inner.orchestrator_instances[0];
+    assert_eq!(orchestrator.status, OrchestratorInstanceStatus::Stopped);
+    assert!(orchestrator.pending_transitions.is_empty());
+    let error_message = orchestrator
+        .error_message
+        .as_deref()
+        .expect("deadlocked instance should surface an error");
+    assert!(error_message.contains("Orchestrator deadlock"));
+    let consolidate_a = inner
+        .sessions
+        .iter()
+        .find(|record| record.session.id == consolidate_a_session_id)
+        .expect("consolidate A session should exist");
+    let consolidate_b = inner
+        .sessions
+        .iter()
+        .find(|record| record.session.id == consolidate_b_session_id)
+        .expect("consolidate B session should exist");
+    assert_eq!(consolidate_a.session.status, SessionStatus::Error);
+    assert_eq!(consolidate_b.session.status, SessionStatus::Error);
+    assert!(
+        orchestrator
+            .session_instances
+            .iter()
+            .all(|instance| instance.session_id != external_session_id)
+    );
+}
+
+#[test]
 fn persisted_pending_orchestrator_transitions_resume_once_after_reload() {
     let state = test_app_state();
     let project_root =
@@ -15472,7 +15994,7 @@ fn startup_recovery_dispatches_orphaned_orchestrator_queued_prompt() {
             &pending.rendered_prompt,
         );
         let queued_prompt_id = inner.next_message_id();
-        queue_prompt_on_record(
+        queue_orchestrator_prompt_on_record(
             &mut inner.sessions[builder_index],
             PendingPrompt {
                 attachments: Vec::new(),
@@ -15543,6 +16065,236 @@ fn startup_recovery_dispatches_orphaned_orchestrator_queued_prompt() {
             text,
             ..
         }) if text == &expected_prompt
+    ));
+}
+
+#[test]
+fn startup_recovery_clears_legacy_stopped_orchestrator_prompts_but_keeps_user_work() {
+    let state = test_app_state();
+    let project_root = std::env::temp_dir().join(format!(
+        "termal-orchestrator-startup-legacy-stopped-{}",
+        Uuid::new_v4()
+    ));
+    fs::create_dir_all(&project_root).expect("legacy stopped startup project root should exist");
+    let project_id = state
+        .create_project(CreateProjectRequest {
+            name: Some("Legacy Stopped Startup Project".to_owned()),
+            root_path: project_root.to_string_lossy().into_owned(),
+            remote_id: default_local_remote_id(),
+        })
+        .expect("project should be created")
+        .project_id;
+    let template = state
+        .create_orchestrator_template(sample_orchestrator_template_draft())
+        .expect("template should be created")
+        .template;
+    let orchestrator = state
+        .create_orchestrator_instance(CreateOrchestratorInstanceRequest {
+            template_id: template.id,
+            project_id: Some(project_id),
+        })
+        .expect("orchestrator instance should be created")
+        .orchestrator;
+
+    let builder_session_id = orchestrator
+        .session_instances
+        .iter()
+        .find(|instance| instance.template_session_id == "builder")
+        .expect("builder session should be mapped")
+        .session_id
+        .clone();
+    let planner_session_id = orchestrator
+        .session_instances
+        .iter()
+        .find(|instance| instance.template_session_id == "planner")
+        .expect("planner session should be mapped")
+        .session_id
+        .clone();
+
+    let stale_prompt = {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let builder_index = inner
+            .find_session_index(&builder_session_id)
+            .expect("builder session should exist");
+        let planner_index = inner
+            .find_session_index(&planner_session_id)
+            .expect("planner session should exist");
+        let user_prompt_id = inner.next_message_id();
+        queue_prompt_on_record(
+            &mut inner.sessions[builder_index],
+            PendingPrompt {
+                attachments: Vec::new(),
+                id: user_prompt_id,
+                timestamp: stamp_now(),
+                text: "Manual recovery follow-up".to_owned(),
+                expanded_text: None,
+            },
+            Vec::new(),
+        );
+        let planner_message_id = inner.next_message_id();
+        push_message_on_record(
+            &mut inner.sessions[planner_index],
+            Message::Text {
+                attachments: Vec::new(),
+                id: planner_message_id,
+                timestamp: stamp_now(),
+                author: Author::Assistant,
+                text: "Build the migration-safe orchestrator recovery fix.".to_owned(),
+                expanded_text: None,
+            },
+        );
+        inner.sessions[planner_index].session.status = SessionStatus::Idle;
+        let completion_revision = inner.revision + 1;
+        schedule_orchestrator_transitions_for_completed_session(
+            &mut inner,
+            &planner_session_id,
+            completion_revision,
+        );
+        let pending = inner.orchestrator_instances[0]
+            .pending_transitions
+            .first()
+            .cloned()
+            .expect("planner transition should be pending");
+        let destination_template = inner.orchestrator_instances[0]
+            .session_instances
+            .iter()
+            .find(|instance| instance.session_id == builder_session_id)
+            .and_then(|session_instance| {
+                inner.orchestrator_instances[0]
+                    .template_snapshot
+                    .sessions
+                    .iter()
+                    .find(|template_session| {
+                        template_session.id == session_instance.template_session_id
+                    })
+            })
+            .cloned()
+            .expect("builder template should exist");
+        let stale_prompt = build_orchestrator_destination_prompt(
+            &inner.sessions[builder_index],
+            &destination_template.instructions,
+            &pending.rendered_prompt,
+        );
+        let stale_prompt_id = inner.next_message_id();
+        queue_orchestrator_prompt_on_record(
+            &mut inner.sessions[builder_index],
+            PendingPrompt {
+                attachments: Vec::new(),
+                id: stale_prompt_id,
+                timestamp: stamp_now(),
+                text: stale_prompt.clone(),
+                expanded_text: None,
+            },
+            Vec::new(),
+        );
+        acknowledge_pending_orchestrator_transition(&mut inner, 0, &pending);
+        inner.orchestrator_instances[0].status = OrchestratorInstanceStatus::Stopped;
+        inner.orchestrator_instances[0].pending_transitions.clear();
+        state.commit_locked(&mut inner).unwrap();
+        stale_prompt
+    };
+
+    let mut encoded: Value = serde_json::from_slice(
+        &fs::read(state.persistence_path.as_path()).expect("persisted state should exist"),
+    )
+    .expect("persisted state should deserialize");
+    let sessions = encoded["sessions"]
+        .as_array_mut()
+        .expect("persisted sessions should be an array");
+    let builder_entry = sessions
+        .iter_mut()
+        .find(|entry| {
+            entry
+                .get("session")
+                .and_then(|session| session.get("id"))
+                .and_then(Value::as_str)
+                == Some(builder_session_id.as_str())
+        })
+        .expect("builder session should be persisted");
+    let queued_prompts = builder_entry["queuedPrompts"]
+        .as_array_mut()
+        .expect("persisted queued prompts should be an array");
+    for queued_prompt in queued_prompts.iter_mut() {
+        queued_prompt
+            .as_object_mut()
+            .expect("queued prompt should be an object")
+            .remove("source");
+    }
+    fs::write(
+        state.persistence_path.as_path(),
+        serde_json::to_vec_pretty(&encoded).expect("persisted state should reserialize"),
+    )
+    .expect("updated persisted state should be written");
+
+    let reloaded_inner = load_state(state.persistence_path.as_path())
+        .expect("persisted state should load")
+        .expect("persisted state should exist");
+    let (runtime, input_rx, _process) =
+        test_shared_codex_runtime("orchestrator-startup-legacy-stopped");
+    let resumed_state = AppState {
+        default_workdir: "/tmp".to_owned(),
+        persistence_path: state.persistence_path.clone(),
+        orchestrator_templates_path: state.orchestrator_templates_path.clone(),
+        orchestrator_templates_lock: state.orchestrator_templates_lock.clone(),
+        state_events: broadcast::channel(16).0,
+        delta_events: broadcast::channel(16).0,
+        shared_codex_runtime: Arc::new(Mutex::new(Some(runtime))),
+        remote_registry: test_remote_registry(),
+        inner: Arc::new(Mutex::new(reloaded_inner)),
+    };
+
+    {
+        let inner = resumed_state.inner.lock().expect("state mutex poisoned");
+        let builder = inner
+            .sessions
+            .iter()
+            .find(|record| record.session.id == builder_session_id)
+            .expect("builder session should exist");
+        assert_eq!(builder.session.status, SessionStatus::Idle);
+        assert_eq!(builder.queued_prompts.len(), 1);
+        assert_eq!(builder.queued_prompts[0].source, QueuedPromptSource::User);
+        assert_eq!(builder.session.pending_prompts.len(), 1);
+        assert_eq!(
+            builder.session.pending_prompts[0].text,
+            "Manual recovery follow-up"
+        );
+        assert_eq!(
+            inner.orchestrator_instances[0].status,
+            OrchestratorInstanceStatus::Stopped
+        );
+    }
+
+    resumed_state.dispatch_orphaned_queued_prompts();
+
+    match input_rx.recv_timeout(Duration::from_secs(1)) {
+        Ok(CodexRuntimeCommand::Prompt { command, .. }) => {
+            assert_eq!(command.prompt, "Manual recovery follow-up");
+        }
+        Ok(_) => panic!("expected queued prompt dispatch"),
+        Err(err) => panic!("expected queued prompt dispatch: {err}"),
+    }
+    assert!(input_rx.recv_timeout(Duration::from_millis(50)).is_err());
+
+    let inner = resumed_state.inner.lock().expect("state mutex poisoned");
+    let builder = inner
+        .sessions
+        .iter()
+        .find(|record| record.session.id == builder_session_id)
+        .expect("builder session should exist");
+    assert_eq!(builder.session.status, SessionStatus::Active);
+    assert!(builder.queued_prompts.is_empty());
+    assert!(builder.session.pending_prompts.is_empty());
+    assert!(!builder.session.messages.iter().any(|message| matches!(
+        message,
+        Message::Text { text, .. } if text == &stale_prompt
+    )));
+    assert!(matches!(
+        builder.session.messages.last(),
+        Some(Message::Text {
+            author: Author::You,
+            text,
+            ..
+        }) if text == "Manual recovery follow-up"
     ));
 }
 
