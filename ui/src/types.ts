@@ -147,8 +147,11 @@ export type OrchestratorSessionTemplate = {
   model?: string | null;
   instructions: string;
   autoApprove: boolean;
+  inputMode: OrchestratorSessionInputMode;
   position: OrchestratorNodePosition;
 };
+
+export type OrchestratorSessionInputMode = "queue" | "consolidate";
 
 export type OrchestratorTransitionTrigger = "onCompletion";
 export type OrchestratorTransitionResultMode =
@@ -212,6 +215,7 @@ export type OrchestratorInstance = {
   sessionInstances: OrchestratorSessionInstance[];
   pendingTransitions: PendingTransition[];
   createdAt: string;
+  errorMessage?: string | null;
   completedAt?: string | null;
 };
 

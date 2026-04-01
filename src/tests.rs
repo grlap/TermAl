@@ -221,6 +221,7 @@ fn test_app_state() -> AppState {
         orchestrator_templates_path: Arc::new(
             std::env::temp_dir().join(format!("termal-orchestrators-test-{}.json", Uuid::new_v4())),
         ),
+        orchestrator_templates_lock: Arc::new(Mutex::new(())),
         state_events: broadcast::channel(16).0,
         delta_events: broadcast::channel(16).0,
         shared_codex_runtime: Arc::new(Mutex::new(None)),
@@ -2823,6 +2824,7 @@ fn persists_app_settings_and_applies_them_to_new_sessions() {
         default_workdir: "/tmp".to_owned(),
         persistence_path: state.persistence_path.clone(),
         orchestrator_templates_path: state.orchestrator_templates_path.clone(),
+        orchestrator_templates_lock: state.orchestrator_templates_lock.clone(),
         state_events: broadcast::channel(16).0,
         delta_events: broadcast::channel(16).0,
         shared_codex_runtime: Arc::new(Mutex::new(None)),
@@ -8329,16 +8331,18 @@ fn stop_session_returns_an_error_when_a_dedicated_runtime_refuses_to_stop() {
             .expect("Claude session should exist");
         inner.sessions[index].runtime = SessionRuntime::Claude(runtime);
         inner.sessions[index].session.status = SessionStatus::Active;
-        inner.sessions[index].queued_prompts.push_back(QueuedPromptRecord {
-            attachments: Vec::new(),
-            pending_prompt: PendingPrompt {
+        inner.sessions[index]
+            .queued_prompts
+            .push_back(QueuedPromptRecord {
                 attachments: Vec::new(),
-                id: "queued-stop-follow-up".to_owned(),
-                timestamp: stamp_now(),
-                text: "queued prompt".to_owned(),
-                expanded_text: None,
-            },
-        });
+                pending_prompt: PendingPrompt {
+                    attachments: Vec::new(),
+                    id: "queued-stop-follow-up".to_owned(),
+                    timestamp: stamp_now(),
+                    text: "queued prompt".to_owned(),
+                    expanded_text: None,
+                },
+            });
         sync_pending_prompts(&mut inner.sessions[index]);
     }
 
@@ -8548,16 +8552,18 @@ fn runtime_turn_callbacks_are_suppressed_while_stop_is_in_progress() {
         inner.sessions[index].runtime = SessionRuntime::Claude(runtime);
         inner.sessions[index].session.status = SessionStatus::Active;
         inner.sessions[index].session.preview = "Streaming reply...".to_owned();
-        inner.sessions[index].queued_prompts.push_back(QueuedPromptRecord {
-            attachments: Vec::new(),
-            pending_prompt: PendingPrompt {
+        inner.sessions[index]
+            .queued_prompts
+            .push_back(QueuedPromptRecord {
                 attachments: Vec::new(),
-                id: "queued-stop-callback-guard".to_owned(),
-                timestamp: stamp_now(),
-                text: "queued prompt".to_owned(),
-                expanded_text: None,
-            },
-        });
+                pending_prompt: PendingPrompt {
+                    attachments: Vec::new(),
+                    id: "queued-stop-callback-guard".to_owned(),
+                    timestamp: stamp_now(),
+                    text: "queued prompt".to_owned(),
+                    expanded_text: None,
+                },
+            });
         sync_pending_prompts(&mut inner.sessions[index]);
         inner.sessions[index].runtime_stop_in_progress = true;
     }
@@ -8597,6 +8603,14 @@ fn runtime_turn_callbacks_are_suppressed_while_stop_is_in_progress() {
     assert_eq!(record.session.pending_prompts.len(), 1);
     assert!(matches!(record.runtime, SessionRuntime::Claude(_)));
     assert!(record.runtime_stop_in_progress);
+    assert_eq!(
+        record.deferred_stop_callbacks,
+        vec![
+            DeferredStopCallback::TurnFailed("reader failure".to_owned()),
+            DeferredStopCallback::TurnError("runtime error".to_owned()),
+            DeferredStopCallback::TurnCompleted,
+        ]
+    );
     drop(inner);
 
     assert!(input_rx.recv_timeout(Duration::from_millis(100)).is_err());
@@ -8703,8 +8717,328 @@ fn runtime_exit_is_suppressed_while_stop_is_in_progress() {
     assert!(record.session.messages.is_empty());
     assert!(matches!(record.runtime, SessionRuntime::Claude(_)));
     assert!(record.runtime_stop_in_progress);
+    assert_eq!(
+        record.deferred_stop_callbacks,
+        vec![DeferredStopCallback::RuntimeExited(Some(
+            "runtime exited".to_owned()
+        ))]
+    );
     drop(inner);
 
+    let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
+#[test]
+fn failed_dedicated_stop_replays_deferred_turn_completion() {
+    let state = test_app_state();
+    let session_id = test_session_id(&state, Agent::Claude);
+    let process = Arc::new(SharedChild::new(test_sleep_child()).unwrap());
+    let (input_tx, _input_rx) = mpsc::channel();
+    let runtime = ClaudeRuntimeHandle {
+        runtime_id: "claude-stop-replay".to_owned(),
+        input_tx,
+        process: process.clone(),
+    };
+
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(&session_id)
+            .expect("Claude session should exist");
+        inner.sessions[index].runtime = SessionRuntime::Claude(runtime);
+        inner.sessions[index].session.status = SessionStatus::Active;
+        inner.sessions[index].session.preview = "Streaming reply...".to_owned();
+    }
+
+    // Pre-stage a deferred completion callback. In production this would be stored by
+    // `finish_turn_ok_if_runtime_matches` arriving during the shutdown window; here we set it
+    // directly because the forced kill failure completes synchronously with no observable window.
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(&session_id)
+            .expect("Claude session should exist");
+        inner.sessions[index].deferred_stop_callbacks = vec![DeferredStopCallback::TurnCompleted];
+    }
+
+    let _failure_guard = force_test_kill_child_process_failure(&process, "Claude");
+    let error = match state.stop_session(&session_id) {
+        Ok(_) => panic!("failed dedicated runtime kills should not be treated as clean stops"),
+        Err(error) => error,
+    };
+    assert_eq!(error.status, StatusCode::INTERNAL_SERVER_ERROR);
+    assert!(error.message.contains("failed to stop session `"));
+
+    // The deferred callback should have been replayed: session should now be Idle with the
+    // runtime detached, just as if `finish_turn_ok_if_runtime_matches` had run normally.
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    let record = inner
+        .sessions
+        .iter()
+        .find(|record| record.session.id == session_id)
+        .expect("Claude session should exist");
+    assert_eq!(record.session.status, SessionStatus::Idle);
+    assert!(!record.runtime_stop_in_progress);
+    assert!(record.deferred_stop_callbacks.is_empty());
+    drop(inner);
+
+    process.kill().unwrap();
+    process.wait().unwrap();
+    let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
+#[test]
+fn failed_dedicated_stop_replays_deferred_runtime_exit() {
+    let state = test_app_state();
+    let session_id = test_session_id(&state, Agent::Claude);
+    let process = Arc::new(SharedChild::new(test_sleep_child()).unwrap());
+    let (input_tx, _input_rx) = mpsc::channel();
+    let runtime = ClaudeRuntimeHandle {
+        runtime_id: "claude-stop-exit-replay".to_owned(),
+        input_tx,
+        process: process.clone(),
+    };
+
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(&session_id)
+            .expect("Claude session should exist");
+        inner.sessions[index].runtime = SessionRuntime::Claude(runtime);
+        inner.sessions[index].session.status = SessionStatus::Active;
+        inner.sessions[index].session.preview = "Streaming reply...".to_owned();
+    }
+
+    // Pre-stage a deferred exit callback with an error message.
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(&session_id)
+            .expect("Claude session should exist");
+        inner.sessions[index].deferred_stop_callbacks = vec![DeferredStopCallback::RuntimeExited(
+            Some("process crashed".to_owned()),
+        )];
+    }
+
+    let _failure_guard = force_test_kill_child_process_failure(&process, "Claude");
+    let error = match state.stop_session(&session_id) {
+        Ok(_) => panic!("failed dedicated runtime kills should not be treated as clean stops"),
+        Err(error) => error,
+    };
+    assert_eq!(error.status, StatusCode::INTERNAL_SERVER_ERROR);
+
+    // The replayed exit callback should have transitioned the session to Error.
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    let record = inner
+        .sessions
+        .iter()
+        .find(|record| record.session.id == session_id)
+        .expect("Claude session should exist");
+    assert_eq!(record.session.status, SessionStatus::Error);
+    assert!(record.session.preview.contains("process crashed"));
+    assert!(!record.runtime_stop_in_progress);
+    assert!(record.deferred_stop_callbacks.is_empty());
+    assert!(matches!(record.runtime, SessionRuntime::None));
+    drop(inner);
+
+    process.kill().unwrap();
+    process.wait().unwrap();
+    let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
+#[test]
+fn failed_dedicated_stop_replays_multiple_deferred_callbacks_in_order() {
+    let expected_state = test_app_state();
+    let expected_session_id = test_session_id(&expected_state, Agent::Claude);
+    let expected_process = Arc::new(SharedChild::new(test_sleep_child()).unwrap());
+    let (expected_input_tx, _expected_input_rx) = mpsc::channel();
+    let expected_runtime = ClaudeRuntimeHandle {
+        runtime_id: "claude-stop-replay-order-expected".to_owned(),
+        input_tx: expected_input_tx,
+        process: expected_process.clone(),
+    };
+    let expected_token = RuntimeToken::Claude(expected_runtime.runtime_id.clone());
+
+    {
+        let mut inner = expected_state.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(&expected_session_id)
+            .expect("Claude session should exist");
+        inner.sessions[index].runtime = SessionRuntime::Claude(expected_runtime);
+        inner.sessions[index].session.status = SessionStatus::Active;
+        inner.sessions[index].session.preview = "Streaming reply...".to_owned();
+    }
+
+    expected_state
+        .finish_turn_ok_if_runtime_matches(&expected_session_id, &expected_token)
+        .expect("finish_turn_ok_if_runtime_matches should succeed");
+    expected_state
+        .handle_runtime_exit_if_matches(&expected_session_id, &expected_token, None)
+        .expect("handle_runtime_exit_if_matches should succeed");
+
+    let (expected_status, expected_preview, expected_message_count) = {
+        let inner = expected_state.inner.lock().expect("state mutex poisoned");
+        let record = inner
+            .sessions
+            .iter()
+            .find(|record| record.session.id == expected_session_id)
+            .expect("Claude session should exist");
+        (
+            record.session.status,
+            record.session.preview.clone(),
+            record.session.messages.len(),
+        )
+    };
+
+    expected_process.kill().unwrap();
+    expected_process.wait().unwrap();
+    let _ = fs::remove_file(expected_state.persistence_path.as_path());
+
+    let state = test_app_state();
+    let session_id = test_session_id(&state, Agent::Claude);
+    let process = Arc::new(SharedChild::new(test_sleep_child()).unwrap());
+    let (input_tx, _input_rx) = mpsc::channel();
+    let runtime = ClaudeRuntimeHandle {
+        runtime_id: "claude-stop-replay-order".to_owned(),
+        input_tx,
+        process: process.clone(),
+    };
+
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(&session_id)
+            .expect("Claude session should exist");
+        inner.sessions[index].runtime = SessionRuntime::Claude(runtime);
+        inner.sessions[index].session.status = SessionStatus::Active;
+        inner.sessions[index].session.preview = "Streaming reply...".to_owned();
+        inner.sessions[index].deferred_stop_callbacks = vec![
+            DeferredStopCallback::TurnCompleted,
+            DeferredStopCallback::RuntimeExited(None),
+        ];
+    }
+
+    let _failure_guard = force_test_kill_child_process_failure(&process, "Claude");
+    let error = match state.stop_session(&session_id) {
+        Ok(_) => panic!("failed dedicated runtime kills should not be treated as clean stops"),
+        Err(error) => error,
+    };
+    assert_eq!(error.status, StatusCode::INTERNAL_SERVER_ERROR);
+
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    let record = inner
+        .sessions
+        .iter()
+        .find(|record| record.session.id == session_id)
+        .expect("Claude session should exist");
+    assert_eq!(record.session.status, expected_status);
+    assert_eq!(record.session.preview, expected_preview);
+    assert_eq!(record.session.messages.len(), expected_message_count);
+    assert!(matches!(record.runtime, SessionRuntime::None));
+    assert!(!record.runtime_stop_in_progress);
+    assert!(record.deferred_stop_callbacks.is_empty());
+    drop(inner);
+
+    process.kill().unwrap();
+    process.wait().unwrap();
+    let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
+#[test]
+fn failed_dedicated_stop_replays_runtime_exit_last_even_when_it_arrives_first() {
+    let expected_state = test_app_state();
+    let expected_session_id = test_session_id(&expected_state, Agent::Claude);
+    let expected_process = Arc::new(SharedChild::new(test_sleep_child()).unwrap());
+    let (expected_input_tx, _expected_input_rx) = mpsc::channel();
+    let expected_runtime = ClaudeRuntimeHandle {
+        runtime_id: "claude-stop-replay-reversed-expected".to_owned(),
+        input_tx: expected_input_tx,
+        process: expected_process.clone(),
+    };
+    let expected_token = RuntimeToken::Claude(expected_runtime.runtime_id.clone());
+
+    {
+        let mut inner = expected_state.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(&expected_session_id)
+            .expect("Claude session should exist");
+        inner.sessions[index].runtime = SessionRuntime::Claude(expected_runtime);
+        inner.sessions[index].session.status = SessionStatus::Active;
+        inner.sessions[index].session.preview = "Streaming reply...".to_owned();
+    }
+
+    expected_state
+        .finish_turn_ok_if_runtime_matches(&expected_session_id, &expected_token)
+        .expect("finish_turn_ok_if_runtime_matches should succeed");
+    expected_state
+        .handle_runtime_exit_if_matches(&expected_session_id, &expected_token, None)
+        .expect("handle_runtime_exit_if_matches should succeed");
+
+    let (expected_status, expected_preview, expected_message_count) = {
+        let inner = expected_state.inner.lock().expect("state mutex poisoned");
+        let record = inner
+            .sessions
+            .iter()
+            .find(|record| record.session.id == expected_session_id)
+            .expect("Claude session should exist");
+        (
+            record.session.status,
+            record.session.preview.clone(),
+            record.session.messages.len(),
+        )
+    };
+
+    expected_process.kill().unwrap();
+    expected_process.wait().unwrap();
+    let _ = fs::remove_file(expected_state.persistence_path.as_path());
+
+    let state = test_app_state();
+    let session_id = test_session_id(&state, Agent::Claude);
+    let process = Arc::new(SharedChild::new(test_sleep_child()).unwrap());
+    let (input_tx, _input_rx) = mpsc::channel();
+    let runtime = ClaudeRuntimeHandle {
+        runtime_id: "claude-stop-replay-reversed".to_owned(),
+        input_tx,
+        process: process.clone(),
+    };
+
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(&session_id)
+            .expect("Claude session should exist");
+        inner.sessions[index].runtime = SessionRuntime::Claude(runtime);
+        inner.sessions[index].session.status = SessionStatus::Active;
+        inner.sessions[index].session.preview = "Streaming reply...".to_owned();
+        inner.sessions[index].deferred_stop_callbacks = vec![
+            DeferredStopCallback::RuntimeExited(None),
+            DeferredStopCallback::TurnCompleted,
+        ];
+    }
+
+    let _failure_guard = force_test_kill_child_process_failure(&process, "Claude");
+    let error = match state.stop_session(&session_id) {
+        Ok(_) => panic!("failed dedicated runtime kills should not be treated as clean stops"),
+        Err(error) => error,
+    };
+    assert_eq!(error.status, StatusCode::INTERNAL_SERVER_ERROR);
+
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    let record = inner
+        .sessions
+        .iter()
+        .find(|record| record.session.id == session_id)
+        .expect("Claude session should exist");
+    assert_eq!(record.session.status, expected_status);
+    assert_eq!(record.session.preview, expected_preview);
+    assert_eq!(record.session.messages.len(), expected_message_count);
+    assert!(matches!(record.runtime, SessionRuntime::None));
+    assert!(!record.runtime_stop_in_progress);
+    assert!(record.deferred_stop_callbacks.is_empty());
+    drop(inner);
+
+    process.kill().unwrap();
+    process.wait().unwrap();
     let _ = fs::remove_file(state.persistence_path.as_path());
 }
 
@@ -12047,7 +12381,10 @@ async fn codex_user_input_route_submits_answers_and_redacts_secret_values() {
         .find(|session| session.id == session_id)
         .expect("updated session should be present");
     assert_eq!(session.status, SessionStatus::Active);
-    assert_eq!(session.preview, "Input submitted. Codex is continuingâ€¦");
+    assert_eq!(
+        session.preview,
+        "Input submitted. Codex is continuing\u{2026}"
+    );
     assert!(matches!(
         session.messages.last(),
         Some(Message::UserInputRequest {
@@ -12183,7 +12520,7 @@ async fn codex_mcp_elicitation_route_submits_structured_content() {
     assert_eq!(session.status, SessionStatus::Active);
     assert_eq!(
         session.preview,
-        "MCP input submitted. Codex is continuingâ€¦"
+        "MCP input submitted. Codex is continuing\u{2026}"
     );
     assert!(matches!(
         session.messages.last(),
@@ -12377,7 +12714,7 @@ async fn codex_generic_app_request_route_submits_json_result() {
     assert_eq!(session.status, SessionStatus::Active);
     assert_eq!(
         session.preview,
-        "Codex response submitted. Codex is continuingâ€¦"
+        "Codex response submitted. Codex is continuing\u{2026}"
     );
     assert!(matches!(
         session.messages.last(),
@@ -12791,6 +13128,7 @@ fn sample_orchestrator_template_draft() -> OrchestratorTemplateDraft {
                 model: Some("claude-sonnet-4-5".to_owned()),
                 instructions: "Plan the work and decide the next action.".to_owned(),
                 auto_approve: false,
+                input_mode: OrchestratorSessionInputMode::Queue,
                 position: OrchestratorNodePosition { x: 620.0, y: 120.0 },
             },
             OrchestratorSessionTemplate {
@@ -12800,6 +13138,7 @@ fn sample_orchestrator_template_draft() -> OrchestratorTemplateDraft {
                 model: Some("gpt-5".to_owned()),
                 instructions: "Implement the requested changes.".to_owned(),
                 auto_approve: true,
+                input_mode: OrchestratorSessionInputMode::Queue,
                 position: OrchestratorNodePosition { x: 180.0, y: 420.0 },
             },
             OrchestratorSessionTemplate {
@@ -12809,6 +13148,7 @@ fn sample_orchestrator_template_draft() -> OrchestratorTemplateDraft {
                 model: Some("claude-sonnet-4-5".to_owned()),
                 instructions: "Review the produced changes and summarize issues.".to_owned(),
                 auto_approve: false,
+                input_mode: OrchestratorSessionInputMode::Queue,
                 position: OrchestratorNodePosition { x: 980.0, y: 420.0 },
             },
         ],
@@ -12832,6 +13172,140 @@ fn sample_orchestrator_template_draft() -> OrchestratorTemplateDraft {
                 trigger: OrchestratorTransitionTrigger::OnCompletion,
                 result_mode: OrchestratorTransitionResultMode::SummaryAndLastResponse,
                 prompt_template: Some("Review this implementation:\n\n{{result}}".to_owned()),
+            },
+        ],
+    }
+}
+
+fn sample_consolidation_orchestrator_template_draft() -> OrchestratorTemplateDraft {
+    OrchestratorTemplateDraft {
+        name: "Review Consolidation Flow".to_owned(),
+        description: "Fan out to reviewers and consolidate their outputs.".to_owned(),
+        project_id: None,
+        sessions: vec![
+            OrchestratorSessionTemplate {
+                id: "reviewer-claude".to_owned(),
+                name: "Reviewer Claude".to_owned(),
+                agent: Agent::Claude,
+                model: Some("claude-sonnet-4-5".to_owned()),
+                instructions: "/review-local".to_owned(),
+                auto_approve: false,
+                input_mode: OrchestratorSessionInputMode::Queue,
+                position: OrchestratorNodePosition { x: 180.0, y: 120.0 },
+            },
+            OrchestratorSessionTemplate {
+                id: "reviewer-codex".to_owned(),
+                name: "Reviewer Codex".to_owned(),
+                agent: Agent::Codex,
+                model: Some("gpt-5".to_owned()),
+                instructions: "/review-local".to_owned(),
+                auto_approve: true,
+                input_mode: OrchestratorSessionInputMode::Queue,
+                position: OrchestratorNodePosition { x: 620.0, y: 120.0 },
+            },
+            OrchestratorSessionTemplate {
+                id: "consolidate".to_owned(),
+                name: "Consolidate".to_owned(),
+                agent: Agent::Claude,
+                model: Some("claude-sonnet-4-5".to_owned()),
+                instructions: "Combine all reviewer findings into one answer.".to_owned(),
+                auto_approve: false,
+                input_mode: OrchestratorSessionInputMode::Consolidate,
+                position: OrchestratorNodePosition { x: 400.0, y: 420.0 },
+            },
+        ],
+        transitions: vec![
+            OrchestratorTemplateTransition {
+                id: "claude-to-consolidate".to_owned(),
+                from_session_id: "reviewer-claude".to_owned(),
+                to_session_id: "consolidate".to_owned(),
+                from_anchor: Some("bottom".to_owned()),
+                to_anchor: Some("top-left".to_owned()),
+                trigger: OrchestratorTransitionTrigger::OnCompletion,
+                result_mode: OrchestratorTransitionResultMode::LastResponse,
+                prompt_template: Some("Claude review:\n{{result}}".to_owned()),
+            },
+            OrchestratorTemplateTransition {
+                id: "codex-to-consolidate".to_owned(),
+                from_session_id: "reviewer-codex".to_owned(),
+                to_session_id: "consolidate".to_owned(),
+                from_anchor: Some("bottom".to_owned()),
+                to_anchor: Some("top-right".to_owned()),
+                trigger: OrchestratorTransitionTrigger::OnCompletion,
+                result_mode: OrchestratorTransitionResultMode::LastResponse,
+                prompt_template: Some("Codex review:\n{{result}}".to_owned()),
+            },
+        ],
+    }
+}
+
+fn sample_deadlocked_consolidation_orchestrator_template_draft() -> OrchestratorTemplateDraft {
+    OrchestratorTemplateDraft {
+        name: "Deadlocked Consolidation Flow".to_owned(),
+        description: "Create a consolidate-only cycle with no external escape.".to_owned(),
+        project_id: None,
+        sessions: vec![
+            OrchestratorSessionTemplate {
+                id: "consolidate-a".to_owned(),
+                name: "Consolidate A".to_owned(),
+                agent: Agent::Claude,
+                model: Some("claude-sonnet-4-5".to_owned()),
+                instructions: "Merge the first branch.".to_owned(),
+                auto_approve: false,
+                input_mode: OrchestratorSessionInputMode::Consolidate,
+                position: OrchestratorNodePosition { x: 220.0, y: 180.0 },
+            },
+            OrchestratorSessionTemplate {
+                id: "consolidate-b".to_owned(),
+                name: "Consolidate B".to_owned(),
+                agent: Agent::Codex,
+                model: Some("gpt-5".to_owned()),
+                instructions: "Merge the second branch.".to_owned(),
+                auto_approve: true,
+                input_mode: OrchestratorSessionInputMode::Consolidate,
+                position: OrchestratorNodePosition { x: 620.0, y: 180.0 },
+            },
+        ],
+        transitions: vec![
+            OrchestratorTemplateTransition {
+                id: "a-self".to_owned(),
+                from_session_id: "consolidate-a".to_owned(),
+                to_session_id: "consolidate-a".to_owned(),
+                from_anchor: Some("bottom".to_owned()),
+                to_anchor: Some("left".to_owned()),
+                trigger: OrchestratorTransitionTrigger::OnCompletion,
+                result_mode: OrchestratorTransitionResultMode::LastResponse,
+                prompt_template: Some("A self:\n{{result}}".to_owned()),
+            },
+            OrchestratorTemplateTransition {
+                id: "a-to-b".to_owned(),
+                from_session_id: "consolidate-a".to_owned(),
+                to_session_id: "consolidate-b".to_owned(),
+                from_anchor: Some("right".to_owned()),
+                to_anchor: Some("left".to_owned()),
+                trigger: OrchestratorTransitionTrigger::OnCompletion,
+                result_mode: OrchestratorTransitionResultMode::LastResponse,
+                prompt_template: Some("From A:\n{{result}}".to_owned()),
+            },
+            OrchestratorTemplateTransition {
+                id: "b-to-a".to_owned(),
+                from_session_id: "consolidate-b".to_owned(),
+                to_session_id: "consolidate-a".to_owned(),
+                from_anchor: Some("left".to_owned()),
+                to_anchor: Some("right".to_owned()),
+                trigger: OrchestratorTransitionTrigger::OnCompletion,
+                result_mode: OrchestratorTransitionResultMode::LastResponse,
+                prompt_template: Some("From B:\n{{result}}".to_owned()),
+            },
+            OrchestratorTemplateTransition {
+                id: "b-self".to_owned(),
+                from_session_id: "consolidate-b".to_owned(),
+                to_session_id: "consolidate-b".to_owned(),
+                from_anchor: Some("bottom".to_owned()),
+                to_anchor: Some("right".to_owned()),
+                trigger: OrchestratorTransitionTrigger::OnCompletion,
+                result_mode: OrchestratorTransitionResultMode::LastResponse,
+                prompt_template: Some("B self:\n{{result}}".to_owned()),
             },
         ],
     }
@@ -12905,6 +13379,33 @@ fn orchestrator_template_crud_persists_in_the_separate_store() {
 }
 
 #[test]
+fn orchestrator_template_draft_deserialization_defaults_missing_input_mode_to_queue() {
+    let draft: OrchestratorTemplateDraft = serde_json::from_value(json!({
+        "name": "Legacy Flow",
+        "description": "",
+        "projectId": null,
+        "sessions": [
+            {
+                "id": "builder",
+                "name": "Builder",
+                "agent": "Claude",
+                "instructions": "",
+                "autoApprove": false,
+                "position": { "x": 120.0, "y": 240.0 }
+            }
+        ],
+        "transitions": []
+    }))
+    .expect("legacy drafts without inputMode should deserialize");
+
+    assert_eq!(draft.sessions.len(), 1);
+    assert_eq!(
+        draft.sessions[0].input_mode,
+        OrchestratorSessionInputMode::Queue
+    );
+}
+
+#[test]
 fn orchestrator_templates_reject_unknown_transition_nodes() {
     let state = test_app_state();
     let mut draft = sample_orchestrator_template_draft();
@@ -12919,7 +13420,7 @@ fn orchestrator_templates_reject_unknown_transition_nodes() {
 }
 
 #[test]
-fn orchestrator_templates_reject_cyclic_transitions() {
+fn orchestrator_templates_accept_cyclic_transitions() {
     let state = test_app_state();
     let draft = OrchestratorTemplateDraft {
         name: "Cycle Test".to_owned(),
@@ -12933,6 +13434,7 @@ fn orchestrator_templates_reject_cyclic_transitions() {
                 model: None,
                 instructions: String::new(),
                 auto_approve: false,
+                input_mode: OrchestratorSessionInputMode::Queue,
                 position: OrchestratorNodePosition { x: 0.0, y: 0.0 },
             },
             OrchestratorSessionTemplate {
@@ -12942,6 +13444,7 @@ fn orchestrator_templates_reject_cyclic_transitions() {
                 model: None,
                 instructions: String::new(),
                 auto_approve: false,
+                input_mode: OrchestratorSessionInputMode::Queue,
                 position: OrchestratorNodePosition { x: 100.0, y: 0.0 },
             },
         ],
@@ -12969,12 +13472,51 @@ fn orchestrator_templates_reject_cyclic_transitions() {
         ],
     };
 
-    let error = state
+    let response = state
         .create_orchestrator_template(draft)
-        .expect_err("template creation should reject cyclic transitions");
+        .expect("template creation should allow cyclic transitions");
 
-    assert_eq!(error.status, StatusCode::BAD_REQUEST);
-    assert!(error.message.contains("cycle"));
+    assert_eq!(response.template.name, "Cycle Test");
+    assert_eq!(response.template.transitions.len(), 2);
+}
+
+#[test]
+fn orchestrator_templates_accept_self_loop_transitions() {
+    let state = test_app_state();
+    let draft = OrchestratorTemplateDraft {
+        name: "Self Loop Test".to_owned(),
+        description: String::new(),
+        project_id: None,
+        sessions: vec![OrchestratorSessionTemplate {
+            id: "loop".to_owned(),
+            name: "Loop Session".to_owned(),
+            agent: Agent::Claude,
+            model: None,
+            instructions: String::new(),
+            auto_approve: false,
+            input_mode: OrchestratorSessionInputMode::Queue,
+            position: OrchestratorNodePosition { x: 0.0, y: 0.0 },
+        }],
+        transitions: vec![OrchestratorTemplateTransition {
+            id: "loop-to-loop".to_owned(),
+            from_session_id: "loop".to_owned(),
+            to_session_id: "loop".to_owned(),
+            from_anchor: None,
+            to_anchor: None,
+            trigger: OrchestratorTransitionTrigger::OnCompletion,
+            result_mode: OrchestratorTransitionResultMode::LastResponse,
+            prompt_template: None,
+        }],
+    };
+
+    let response = state
+        .create_orchestrator_template(draft)
+        .expect("template creation should allow self-loop transitions");
+
+    assert_eq!(response.template.name, "Self Loop Test");
+    assert_eq!(response.template.transitions.len(), 1);
+    assert_eq!(response.template.transitions[0].from_session_id, "loop");
+    assert_eq!(response.template.transitions[0].to_session_id, "loop");
 }
 
 #[test]
@@ -12989,6 +13531,7 @@ fn orchestrator_templates_reject_too_many_sessions() {
             model: None,
             instructions: String::new(),
             auto_approve: false,
+            input_mode: OrchestratorSessionInputMode::Queue,
             position: OrchestratorNodePosition {
                 x: index as f64 * 40.0,
                 y: 0.0,
@@ -13049,6 +13592,7 @@ fn orchestrator_templates_accept_the_session_limit_boundary() {
             model: None,
             instructions: String::new(),
             auto_approve: false,
+            input_mode: OrchestratorSessionInputMode::Queue,
             position: OrchestratorNodePosition {
                 x: index as f64 * 40.0,
                 y: 0.0,
@@ -13580,6 +14124,1131 @@ fn completed_session_routes_transition_prompt_into_destination_queue() {
 }
 
 #[test]
+fn delivered_completion_revisions_are_not_rescheduled_once_acknowledged() {
+    let state = test_app_state();
+    let project_root = std::env::temp_dir().join(format!(
+        "termal-orchestrator-delivery-guard-{}",
+        Uuid::new_v4()
+    ));
+    fs::create_dir_all(&project_root).expect("delivery guard project root should exist");
+    let project_id = create_test_project(&state, &project_root, "Delivery Guard Project");
+    let template = state
+        .create_orchestrator_template(sample_orchestrator_template_draft())
+        .expect("template should be created")
+        .template;
+    let orchestrator = state
+        .create_orchestrator_instance(CreateOrchestratorInstanceRequest {
+            template_id: template.id,
+            project_id: Some(project_id),
+        })
+        .expect("orchestrator instance should be created")
+        .orchestrator;
+
+    let planner_session_id = orchestrator
+        .session_instances
+        .iter()
+        .find(|instance| instance.template_session_id == "planner")
+        .expect("planner session should be mapped")
+        .session_id
+        .clone();
+    let builder_session_id = orchestrator
+        .session_instances
+        .iter()
+        .find(|instance| instance.template_session_id == "builder")
+        .expect("builder session should be mapped")
+        .session_id
+        .clone();
+
+    let completion_revision = {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let planner_index = inner
+            .find_session_index(&planner_session_id)
+            .expect("planner session should exist");
+        let builder_index = inner
+            .find_session_index(&builder_session_id)
+            .expect("builder session should exist");
+
+        inner.sessions[builder_index].session.status = SessionStatus::Active;
+        let message_id = inner.next_message_id();
+        push_message_on_record(
+            &mut inner.sessions[planner_index],
+            Message::Text {
+                attachments: Vec::new(),
+                id: message_id,
+                timestamp: stamp_now(),
+                author: Author::Assistant,
+                text: "Implement the delivery guard.".to_owned(),
+                expanded_text: None,
+            },
+        );
+        inner.sessions[planner_index].session.status = SessionStatus::Idle;
+
+        let completion_revision = inner.revision + 1;
+        schedule_orchestrator_transitions_for_completed_session(
+            &mut inner,
+            &planner_session_id,
+            completion_revision,
+        );
+        state.commit_locked(&mut inner).unwrap();
+        completion_revision
+    };
+
+    state
+        .resume_pending_orchestrator_transitions()
+        .expect("initial completion should deliver once");
+
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        schedule_orchestrator_transitions_for_completed_session(
+            &mut inner,
+            &planner_session_id,
+            completion_revision,
+        );
+        schedule_orchestrator_transitions_for_completed_session(
+            &mut inner,
+            &planner_session_id,
+            completion_revision.saturating_sub(1),
+        );
+        state.commit_locked(&mut inner).unwrap();
+    }
+
+    state
+        .resume_pending_orchestrator_transitions()
+        .expect("stale completions should not be re-delivered");
+
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    let builder = inner
+        .sessions
+        .iter()
+        .find(|record| record.session.id == builder_session_id)
+        .expect("builder session should exist");
+    assert_eq!(builder.session.pending_prompts.len(), 1);
+    assert!(
+        inner.orchestrator_instances[0]
+            .pending_transitions
+            .is_empty()
+    );
+    let planner_instance = inner.orchestrator_instances[0]
+        .session_instances
+        .iter()
+        .find(|instance| instance.session_id == planner_session_id)
+        .expect("planner session instance should exist");
+    assert_eq!(
+        planner_instance.last_completion_revision,
+        Some(completion_revision)
+    );
+    assert_eq!(
+        planner_instance.last_delivered_completion_revision,
+        Some(completion_revision)
+    );
+}
+
+#[test]
+fn delivered_completion_revisions_still_schedule_newer_revisions() {
+    let state = test_app_state();
+    let project_root = std::env::temp_dir().join(format!(
+        "termal-orchestrator-delivery-guard-newer-{}",
+        Uuid::new_v4()
+    ));
+    fs::create_dir_all(&project_root).expect("delivery guard project root should exist");
+    let project_id = create_test_project(&state, &project_root, "Delivery Guard Project");
+    let template = state
+        .create_orchestrator_template(sample_orchestrator_template_draft())
+        .expect("template should be created")
+        .template;
+    let orchestrator = state
+        .create_orchestrator_instance(CreateOrchestratorInstanceRequest {
+            template_id: template.id,
+            project_id: Some(project_id),
+        })
+        .expect("orchestrator instance should be created")
+        .orchestrator;
+
+    let planner_session_id = orchestrator
+        .session_instances
+        .iter()
+        .find(|instance| instance.template_session_id == "planner")
+        .expect("planner session should be mapped")
+        .session_id
+        .clone();
+    let builder_session_id = orchestrator
+        .session_instances
+        .iter()
+        .find(|instance| instance.template_session_id == "builder")
+        .expect("builder session should be mapped")
+        .session_id
+        .clone();
+
+    let first_completion_revision = {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let planner_index = inner
+            .find_session_index(&planner_session_id)
+            .expect("planner session should exist");
+        let builder_index = inner
+            .find_session_index(&builder_session_id)
+            .expect("builder session should exist");
+
+        inner.sessions[builder_index].session.status = SessionStatus::Active;
+        let message_id = inner.next_message_id();
+        push_message_on_record(
+            &mut inner.sessions[planner_index],
+            Message::Text {
+                attachments: Vec::new(),
+                id: message_id,
+                timestamp: stamp_now(),
+                author: Author::Assistant,
+                text: "Implement the first handoff.".to_owned(),
+                expanded_text: None,
+            },
+        );
+        inner.sessions[planner_index].session.status = SessionStatus::Idle;
+
+        let completion_revision = inner.revision + 1;
+        schedule_orchestrator_transitions_for_completed_session(
+            &mut inner,
+            &planner_session_id,
+            completion_revision,
+        );
+        state.commit_locked(&mut inner).unwrap();
+        completion_revision
+    };
+
+    state
+        .resume_pending_orchestrator_transitions()
+        .expect("first completion should deliver");
+
+    let second_completion_revision = {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let planner_index = inner
+            .find_session_index(&planner_session_id)
+            .expect("planner session should exist");
+        let message_id = inner.next_message_id();
+        push_message_on_record(
+            &mut inner.sessions[planner_index],
+            Message::Text {
+                attachments: Vec::new(),
+                id: message_id,
+                timestamp: stamp_now(),
+                author: Author::Assistant,
+                text: "Implement the follow-up handoff.".to_owned(),
+                expanded_text: None,
+            },
+        );
+        inner.sessions[planner_index].session.status = SessionStatus::Idle;
+
+        let completion_revision = first_completion_revision + 1;
+        schedule_orchestrator_transitions_for_completed_session(
+            &mut inner,
+            &planner_session_id,
+            completion_revision,
+        );
+        state.commit_locked(&mut inner).unwrap();
+        completion_revision
+    };
+
+    state
+        .resume_pending_orchestrator_transitions()
+        .expect("newer completion should still deliver");
+
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    let builder = inner
+        .sessions
+        .iter()
+        .find(|record| record.session.id == builder_session_id)
+        .expect("builder session should exist");
+    assert_eq!(builder.session.pending_prompts.len(), 2);
+    assert!(
+        builder.session.pending_prompts[0]
+            .text
+            .contains("Implement the first handoff.")
+    );
+    assert!(
+        builder.session.pending_prompts[1]
+            .text
+            .contains("Implement the follow-up handoff.")
+    );
+    assert!(
+        inner.orchestrator_instances[0]
+            .pending_transitions
+            .is_empty()
+    );
+    let planner_instance = inner.orchestrator_instances[0]
+        .session_instances
+        .iter()
+        .find(|instance| instance.session_id == planner_session_id)
+        .expect("planner session instance should exist");
+    assert_eq!(
+        planner_instance.last_completion_revision,
+        Some(second_completion_revision)
+    );
+    assert_eq!(
+        planner_instance.last_delivered_completion_revision,
+        Some(second_completion_revision)
+    );
+}
+
+#[test]
+fn consolidate_input_mode_waits_for_all_predecessors_and_combines_prompts() {
+    let state = test_app_state();
+    let project_root = std::env::temp_dir().join(format!(
+        "termal-orchestrator-consolidation-{}",
+        Uuid::new_v4()
+    ));
+    fs::create_dir_all(&project_root).expect("consolidation project root should exist");
+    let project_id = state
+        .create_project(CreateProjectRequest {
+            name: Some("Consolidation Project".to_owned()),
+            root_path: project_root.to_string_lossy().into_owned(),
+            remote_id: default_local_remote_id(),
+        })
+        .expect("project should be created")
+        .project_id;
+    let template = state
+        .create_orchestrator_template(sample_consolidation_orchestrator_template_draft())
+        .expect("template should be created")
+        .template;
+    let orchestrator = state
+        .create_orchestrator_instance(CreateOrchestratorInstanceRequest {
+            template_id: template.id,
+            project_id: Some(project_id),
+        })
+        .expect("orchestrator instance should be created")
+        .orchestrator;
+
+    let reviewer_claude_session_id = orchestrator
+        .session_instances
+        .iter()
+        .find(|instance| instance.template_session_id == "reviewer-claude")
+        .expect("reviewer claude session should be mapped")
+        .session_id
+        .clone();
+    let reviewer_codex_session_id = orchestrator
+        .session_instances
+        .iter()
+        .find(|instance| instance.template_session_id == "reviewer-codex")
+        .expect("reviewer codex session should be mapped")
+        .session_id
+        .clone();
+    let consolidate_session_id = orchestrator
+        .session_instances
+        .iter()
+        .find(|instance| instance.template_session_id == "consolidate")
+        .expect("consolidate session should be mapped")
+        .session_id
+        .clone();
+
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let consolidate_index = inner
+            .find_session_index(&consolidate_session_id)
+            .expect("consolidate session should exist");
+        inner.sessions[consolidate_index].session.status = SessionStatus::Active;
+
+        let claude_index = inner
+            .find_session_index(&reviewer_claude_session_id)
+            .expect("reviewer claude session should exist");
+        let message_id = inner.next_message_id();
+        push_message_on_record(
+            &mut inner.sessions[claude_index],
+            Message::Text {
+                attachments: Vec::new(),
+                id: message_id,
+                timestamp: stamp_now(),
+                author: Author::Assistant,
+                text: "Claude found an edge-case bug.".to_owned(),
+                expanded_text: None,
+            },
+        );
+        inner.sessions[claude_index].session.status = SessionStatus::Idle;
+        let first_completion_revision = inner.revision + 1;
+        schedule_orchestrator_transitions_for_completed_session(
+            &mut inner,
+            &reviewer_claude_session_id,
+            first_completion_revision,
+        );
+        state.commit_locked(&mut inner).unwrap();
+    }
+
+    state
+        .resume_pending_orchestrator_transitions()
+        .expect("first predecessor should not dispatch consolidation yet");
+
+    {
+        let inner = state.inner.lock().expect("state mutex poisoned");
+        let consolidate = inner
+            .sessions
+            .iter()
+            .find(|record| record.session.id == consolidate_session_id)
+            .expect("consolidate session should exist");
+        assert_eq!(consolidate.session.pending_prompts.len(), 0);
+        assert_eq!(inner.orchestrator_instances[0].pending_transitions.len(), 1);
+    }
+
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let codex_index = inner
+            .find_session_index(&reviewer_codex_session_id)
+            .expect("reviewer codex session should exist");
+        let message_id = inner.next_message_id();
+        push_message_on_record(
+            &mut inner.sessions[codex_index],
+            Message::Text {
+                attachments: Vec::new(),
+                id: message_id,
+                timestamp: stamp_now(),
+                author: Author::Assistant,
+                text: "Codex found a missing regression test.".to_owned(),
+                expanded_text: None,
+            },
+        );
+        inner.sessions[codex_index].session.status = SessionStatus::Idle;
+        let second_completion_revision = inner.revision + 1;
+        schedule_orchestrator_transitions_for_completed_session(
+            &mut inner,
+            &reviewer_codex_session_id,
+            second_completion_revision,
+        );
+        state.commit_locked(&mut inner).unwrap();
+    }
+
+    state
+        .resume_pending_orchestrator_transitions()
+        .expect("all predecessors should dispatch one consolidated prompt");
+
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    let consolidate = inner
+        .sessions
+        .iter()
+        .find(|record| record.session.id == consolidate_session_id)
+        .expect("consolidate session should exist");
+    assert_eq!(consolidate.session.pending_prompts.len(), 1);
+    let prompt = &consolidate.session.pending_prompts[0].text;
+    assert!(prompt.contains("Session instructions:"));
+    assert!(prompt.contains("Combine all reviewer findings into one answer."));
+    assert!(prompt.contains("Consolidated predecessor inputs:"));
+    assert!(prompt.contains("From Reviewer Claude (claude-to-consolidate)"));
+    assert!(prompt.contains("Claude review:"));
+    assert!(prompt.contains("Claude found an edge-case bug."));
+    assert!(prompt.contains("From Reviewer Codex (codex-to-consolidate)"));
+    assert!(prompt.contains("Codex review:"));
+    assert!(prompt.contains("Codex found a missing regression test."));
+    assert!(
+        inner.orchestrator_instances[0]
+            .pending_transitions
+            .is_empty()
+    );
+}
+
+#[test]
+fn consolidate_input_mode_prefers_the_latest_pending_completion_per_predecessor() {
+    let state = test_app_state();
+    let project_root = std::env::temp_dir().join(format!(
+        "termal-orchestrator-consolidation-latest-{}",
+        Uuid::new_v4()
+    ));
+    fs::create_dir_all(&project_root).expect("consolidation project root should exist");
+    let project_id = state
+        .create_project(CreateProjectRequest {
+            name: Some("Consolidation Project".to_owned()),
+            root_path: project_root.to_string_lossy().into_owned(),
+            remote_id: default_local_remote_id(),
+        })
+        .expect("project should be created")
+        .project_id;
+    let template = state
+        .create_orchestrator_template(sample_consolidation_orchestrator_template_draft())
+        .expect("template should be created")
+        .template;
+    let orchestrator = state
+        .create_orchestrator_instance(CreateOrchestratorInstanceRequest {
+            template_id: template.id,
+            project_id: Some(project_id),
+        })
+        .expect("orchestrator instance should be created")
+        .orchestrator;
+
+    let reviewer_claude_session_id = orchestrator
+        .session_instances
+        .iter()
+        .find(|instance| instance.template_session_id == "reviewer-claude")
+        .expect("reviewer claude session should be mapped")
+        .session_id
+        .clone();
+    let reviewer_codex_session_id = orchestrator
+        .session_instances
+        .iter()
+        .find(|instance| instance.template_session_id == "reviewer-codex")
+        .expect("reviewer codex session should be mapped")
+        .session_id
+        .clone();
+    let consolidate_session_id = orchestrator
+        .session_instances
+        .iter()
+        .find(|instance| instance.template_session_id == "consolidate")
+        .expect("consolidate session should be mapped")
+        .session_id
+        .clone();
+
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let consolidate_index = inner
+            .find_session_index(&consolidate_session_id)
+            .expect("consolidate session should exist");
+        inner.sessions[consolidate_index].session.status = SessionStatus::Active;
+    }
+
+    let original_claude_completion_revision = {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let claude_index = inner
+            .find_session_index(&reviewer_claude_session_id)
+            .expect("reviewer claude session should exist");
+        let message_id = inner.next_message_id();
+        push_message_on_record(
+            &mut inner.sessions[claude_index],
+            Message::Text {
+                attachments: Vec::new(),
+                id: message_id,
+                timestamp: stamp_now(),
+                author: Author::Assistant,
+                text: "Claude found the original issue.".to_owned(),
+                expanded_text: None,
+            },
+        );
+        inner.sessions[claude_index].session.status = SessionStatus::Idle;
+        let completion_revision = inner.revision + 1;
+        schedule_orchestrator_transitions_for_completed_session(
+            &mut inner,
+            &reviewer_claude_session_id,
+            completion_revision,
+        );
+        state.commit_locked(&mut inner).unwrap();
+        completion_revision
+    };
+
+    state
+        .resume_pending_orchestrator_transitions()
+        .expect("single predecessor should not dispatch consolidation yet");
+
+    {
+        let inner = state.inner.lock().expect("state mutex poisoned");
+        assert_eq!(inner.orchestrator_instances[0].pending_transitions.len(), 1);
+    }
+
+    let latest_claude_completion_revision = {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let claude_index = inner
+            .find_session_index(&reviewer_claude_session_id)
+            .expect("reviewer claude session should exist");
+        let message_id = inner.next_message_id();
+        push_message_on_record(
+            &mut inner.sessions[claude_index],
+            Message::Text {
+                attachments: Vec::new(),
+                id: message_id,
+                timestamp: stamp_now(),
+                author: Author::Assistant,
+                text: "Claude found the corrected issue.".to_owned(),
+                expanded_text: None,
+            },
+        );
+        inner.sessions[claude_index].session.status = SessionStatus::Idle;
+        let completion_revision = inner.revision + 1;
+        schedule_orchestrator_transitions_for_completed_session(
+            &mut inner,
+            &reviewer_claude_session_id,
+            completion_revision,
+        );
+        state.commit_locked(&mut inner).unwrap();
+        completion_revision
+    };
+
+    state
+        .resume_pending_orchestrator_transitions()
+        .expect("duplicate predecessor completions should stay pending until all inputs arrive");
+
+    {
+        let inner = state.inner.lock().expect("state mutex poisoned");
+        assert_eq!(inner.orchestrator_instances[0].pending_transitions.len(), 2);
+    }
+
+    let codex_completion_revision = {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let codex_index = inner
+            .find_session_index(&reviewer_codex_session_id)
+            .expect("reviewer codex session should exist");
+        let message_id = inner.next_message_id();
+        push_message_on_record(
+            &mut inner.sessions[codex_index],
+            Message::Text {
+                attachments: Vec::new(),
+                id: message_id,
+                timestamp: stamp_now(),
+                author: Author::Assistant,
+                text: "Codex found the regression gap.".to_owned(),
+                expanded_text: None,
+            },
+        );
+        inner.sessions[codex_index].session.status = SessionStatus::Idle;
+        let completion_revision = inner.revision + 1;
+        schedule_orchestrator_transitions_for_completed_session(
+            &mut inner,
+            &reviewer_codex_session_id,
+            completion_revision,
+        );
+        state.commit_locked(&mut inner).unwrap();
+        completion_revision
+    };
+
+    {
+        let inner = state.inner.lock().expect("state mutex poisoned");
+        let consolidated = collect_consolidated_pending_transitions(
+            &inner.orchestrator_instances[0],
+            &consolidate_session_id,
+        )
+        .expect("all predecessor pendings should now be consolidatable");
+        assert_eq!(consolidated.prompt_pendings.len(), 2);
+        assert_eq!(
+            consolidated
+                .prompt_pendings
+                .iter()
+                .filter(|pending| pending.source_session_id == reviewer_claude_session_id)
+                .count(),
+            1
+        );
+        assert!(consolidated.prompt_pendings.iter().any(|pending| {
+            pending.source_session_id == reviewer_claude_session_id
+                && pending.completion_revision == latest_claude_completion_revision
+        }));
+        assert!(consolidated.prompt_pendings.iter().any(|pending| {
+            pending.source_session_id == reviewer_codex_session_id
+                && pending.completion_revision == codex_completion_revision
+        }));
+        assert_eq!(consolidated.acknowledged_pendings.len(), 3);
+        assert!(consolidated.acknowledged_pendings.iter().any(|pending| {
+            pending.source_session_id == reviewer_claude_session_id
+                && pending.completion_revision == original_claude_completion_revision
+        }));
+        assert!(consolidated.acknowledged_pendings.iter().any(|pending| {
+            pending.source_session_id == reviewer_claude_session_id
+                && pending.completion_revision == latest_claude_completion_revision
+        }));
+        assert!(consolidated.acknowledged_pendings.iter().any(|pending| {
+            pending.source_session_id == reviewer_codex_session_id
+                && pending.completion_revision == codex_completion_revision
+        }));
+    }
+
+    state
+        .resume_pending_orchestrator_transitions()
+        .expect("latest predecessor results should dispatch one consolidated prompt");
+
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    let consolidate = inner
+        .sessions
+        .iter()
+        .find(|record| record.session.id == consolidate_session_id)
+        .expect("consolidate session should exist");
+    assert_eq!(consolidate.session.pending_prompts.len(), 1);
+    let prompt = &consolidate.session.pending_prompts[0].text;
+    assert!(prompt.contains("Claude found the corrected issue."));
+    assert!(!prompt.contains("Claude found the original issue."));
+    assert!(prompt.contains("Codex found the regression gap."));
+    let claude_instance = inner.orchestrator_instances[0]
+        .session_instances
+        .iter()
+        .find(|instance| instance.session_id == reviewer_claude_session_id)
+        .expect("reviewer claude session instance should exist");
+    assert_eq!(
+        claude_instance.last_delivered_completion_revision,
+        Some(latest_claude_completion_revision)
+    );
+    let codex_instance = inner.orchestrator_instances[0]
+        .session_instances
+        .iter()
+        .find(|instance| instance.session_id == reviewer_codex_session_id)
+        .expect("reviewer codex session instance should exist");
+    assert_eq!(
+        codex_instance.last_delivered_completion_revision,
+        Some(codex_completion_revision)
+    );
+    assert!(
+        inner.orchestrator_instances[0]
+            .pending_transitions
+            .is_empty()
+    );
+}
+
+#[test]
+fn consolidate_input_mode_ignores_pruned_runtime_predecessors() {
+    let state = test_app_state();
+    let project_root = std::env::temp_dir().join(format!(
+        "termal-orchestrator-consolidation-pruned-{}",
+        Uuid::new_v4()
+    ));
+    fs::create_dir_all(&project_root).expect("consolidation project root should exist");
+    let project_id = create_test_project(&state, &project_root, "Consolidation Project");
+    let template = state
+        .create_orchestrator_template(sample_consolidation_orchestrator_template_draft())
+        .expect("template should be created")
+        .template;
+    let orchestrator = state
+        .create_orchestrator_instance(CreateOrchestratorInstanceRequest {
+            template_id: template.id,
+            project_id: Some(project_id),
+        })
+        .expect("orchestrator instance should be created")
+        .orchestrator;
+
+    let reviewer_claude_session_id = orchestrator
+        .session_instances
+        .iter()
+        .find(|instance| instance.template_session_id == "reviewer-claude")
+        .expect("reviewer claude session should be mapped")
+        .session_id
+        .clone();
+    let reviewer_codex_session_id = orchestrator
+        .session_instances
+        .iter()
+        .find(|instance| instance.template_session_id == "reviewer-codex")
+        .expect("reviewer codex session should be mapped")
+        .session_id
+        .clone();
+    let consolidate_session_id = orchestrator
+        .session_instances
+        .iter()
+        .find(|instance| instance.template_session_id == "consolidate")
+        .expect("consolidate session should be mapped")
+        .session_id
+        .clone();
+
+    let claude_completion_revision = {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let consolidate_index = inner
+            .find_session_index(&consolidate_session_id)
+            .expect("consolidate session should exist");
+        inner.sessions[consolidate_index].session.status = SessionStatus::Active;
+
+        let claude_index = inner
+            .find_session_index(&reviewer_claude_session_id)
+            .expect("reviewer claude session should exist");
+        let message_id = inner.next_message_id();
+        push_message_on_record(
+            &mut inner.sessions[claude_index],
+            Message::Text {
+                attachments: Vec::new(),
+                id: message_id,
+                timestamp: stamp_now(),
+                author: Author::Assistant,
+                text: "Claude found the surviving issue.".to_owned(),
+                expanded_text: None,
+            },
+        );
+        inner.sessions[claude_index].session.status = SessionStatus::Idle;
+        let completion_revision = inner.revision + 1;
+        schedule_orchestrator_transitions_for_completed_session(
+            &mut inner,
+            &reviewer_claude_session_id,
+            completion_revision,
+        );
+        state.commit_locked(&mut inner).unwrap();
+        completion_revision
+    };
+
+    state
+        .kill_session(&reviewer_codex_session_id)
+        .expect("reviewer codex session should be killed");
+
+    state
+        .resume_pending_orchestrator_transitions()
+        .expect("remaining live predecessor should still deliver consolidation");
+
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    let consolidate = inner
+        .sessions
+        .iter()
+        .find(|record| record.session.id == consolidate_session_id)
+        .expect("consolidate session should exist");
+    assert_eq!(consolidate.session.pending_prompts.len(), 1);
+    let prompt = &consolidate.session.pending_prompts[0].text;
+    assert!(prompt.contains("Claude found the surviving issue."));
+    assert!(prompt.contains("From Reviewer Claude (claude-to-consolidate)"));
+    assert!(!prompt.contains("From Reviewer Codex (codex-to-consolidate)"));
+    assert!(
+        inner.orchestrator_instances[0]
+            .pending_transitions
+            .is_empty()
+    );
+    assert!(
+        inner.orchestrator_instances[0]
+            .session_instances
+            .iter()
+            .all(|instance| instance.session_id != reviewer_codex_session_id)
+    );
+    let claude_instance = inner.orchestrator_instances[0]
+        .session_instances
+        .iter()
+        .find(|instance| instance.session_id == reviewer_claude_session_id)
+        .expect("reviewer claude session instance should exist");
+    assert_eq!(
+        claude_instance.last_delivered_completion_revision,
+        Some(claude_completion_revision)
+    );
+}
+
+#[test]
+fn consolidate_input_mode_stops_instances_deadlocked_by_blocked_cycles() {
+    let state = test_app_state();
+    let project_root = std::env::temp_dir().join(format!(
+        "termal-orchestrator-consolidation-deadlock-{}",
+        Uuid::new_v4()
+    ));
+    fs::create_dir_all(&project_root).expect("deadlock project root should exist");
+    let project_id = create_test_project(&state, &project_root, "Deadlock Project");
+    let template = state
+        .create_orchestrator_template(sample_deadlocked_consolidation_orchestrator_template_draft())
+        .expect("template should be created")
+        .template;
+    let orchestrator = state
+        .create_orchestrator_instance(CreateOrchestratorInstanceRequest {
+            template_id: template.id,
+            project_id: Some(project_id),
+        })
+        .expect("orchestrator instance should be created")
+        .orchestrator;
+
+    let consolidate_a_session_id = orchestrator
+        .session_instances
+        .iter()
+        .find(|instance| instance.template_session_id == "consolidate-a")
+        .expect("consolidate A session should be mapped")
+        .session_id
+        .clone();
+    let consolidate_b_session_id = orchestrator
+        .session_instances
+        .iter()
+        .find(|instance| instance.template_session_id == "consolidate-b")
+        .expect("consolidate B session should be mapped")
+        .session_id
+        .clone();
+
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let consolidate_a_index = inner
+            .find_session_index(&consolidate_a_session_id)
+            .expect("consolidate A session should exist");
+        let message_id = inner.next_message_id();
+        push_message_on_record(
+            &mut inner.sessions[consolidate_a_index],
+            Message::Text {
+                attachments: Vec::new(),
+                id: message_id,
+                timestamp: stamp_now(),
+                author: Author::Assistant,
+                text: "A produced the initial consolidated branch.".to_owned(),
+                expanded_text: None,
+            },
+        );
+        inner.sessions[consolidate_a_index].session.status = SessionStatus::Idle;
+        let completion_revision = inner.revision + 1;
+        schedule_orchestrator_transitions_for_completed_session(
+            &mut inner,
+            &consolidate_a_session_id,
+            completion_revision,
+        );
+        state.commit_locked(&mut inner).unwrap();
+    }
+
+    state
+        .resume_pending_orchestrator_transitions()
+        .expect("deadlocked consolidate cycles should stop instead of wedging");
+
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    let orchestrator = &inner.orchestrator_instances[0];
+    assert_eq!(orchestrator.status, OrchestratorInstanceStatus::Stopped);
+    assert!(orchestrator.completed_at.is_some());
+    assert!(orchestrator.pending_transitions.is_empty());
+    let error_message = orchestrator
+        .error_message
+        .as_deref()
+        .expect("deadlocked instance should surface an error");
+    assert!(error_message.contains("Orchestrator deadlock"));
+    assert!(error_message.contains("Consolidate A"));
+    assert!(error_message.contains("Consolidate B"));
+
+    let consolidate_a = inner
+        .sessions
+        .iter()
+        .find(|record| record.session.id == consolidate_a_session_id)
+        .expect("consolidate A session should exist");
+    let consolidate_b = inner
+        .sessions
+        .iter()
+        .find(|record| record.session.id == consolidate_b_session_id)
+        .expect("consolidate B session should exist");
+    assert_eq!(consolidate_a.session.status, SessionStatus::Error);
+    assert_eq!(consolidate_b.session.status, SessionStatus::Error);
+    assert!(
+        consolidate_a
+            .session
+            .preview
+            .contains("Orchestrator deadlock")
+    );
+    assert!(
+        consolidate_b
+            .session
+            .preview
+            .contains("Orchestrator deadlock")
+    );
+}
+
+#[test]
+fn cancel_queued_prompt_rechecks_deadlocked_consolidate_cycles() {
+    let state = test_app_state();
+    let project_root = std::env::temp_dir().join(format!(
+        "termal-orchestrator-consolidation-cancel-deadlock-{}",
+        Uuid::new_v4()
+    ));
+    fs::create_dir_all(&project_root).expect("cancel deadlock project root should exist");
+    let project_id = create_test_project(&state, &project_root, "Cancel Deadlock Project");
+    let template = state
+        .create_orchestrator_template(sample_deadlocked_consolidation_orchestrator_template_draft())
+        .expect("template should be created")
+        .template;
+    let orchestrator = state
+        .create_orchestrator_instance(CreateOrchestratorInstanceRequest {
+            template_id: template.id,
+            project_id: Some(project_id),
+        })
+        .expect("orchestrator instance should be created")
+        .orchestrator;
+
+    let consolidate_a_session_id = orchestrator
+        .session_instances
+        .iter()
+        .find(|instance| instance.template_session_id == "consolidate-a")
+        .expect("consolidate A session should be mapped")
+        .session_id
+        .clone();
+    let consolidate_b_session_id = orchestrator
+        .session_instances
+        .iter()
+        .find(|instance| instance.template_session_id == "consolidate-b")
+        .expect("consolidate B session should be mapped")
+        .session_id
+        .clone();
+
+    let queued_prompt_id = {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let consolidate_a_index = inner
+            .find_session_index(&consolidate_a_session_id)
+            .expect("consolidate A session should exist");
+        let consolidate_b_index = inner
+            .find_session_index(&consolidate_b_session_id)
+            .expect("consolidate B session should exist");
+
+        let queued_prompt_id = inner.next_message_id();
+        queue_prompt_on_record(
+            &mut inner.sessions[consolidate_b_index],
+            PendingPrompt {
+                attachments: Vec::new(),
+                id: queued_prompt_id.clone(),
+                timestamp: stamp_now(),
+                text: "Existing queued prompt".to_owned(),
+                expanded_text: None,
+            },
+            Vec::new(),
+        );
+
+        let message_id = inner.next_message_id();
+        push_message_on_record(
+            &mut inner.sessions[consolidate_a_index],
+            Message::Text {
+                attachments: Vec::new(),
+                id: message_id,
+                timestamp: stamp_now(),
+                author: Author::Assistant,
+                text: "A produced the initial consolidated branch.".to_owned(),
+                expanded_text: None,
+            },
+        );
+        inner.sessions[consolidate_a_index].session.status = SessionStatus::Idle;
+        let completion_revision = inner.revision + 1;
+        schedule_orchestrator_transitions_for_completed_session(
+            &mut inner,
+            &consolidate_a_session_id,
+            completion_revision,
+        );
+        state.commit_locked(&mut inner).unwrap();
+        queued_prompt_id
+    };
+
+    state
+        .resume_pending_orchestrator_transitions()
+        .expect("queued prompts should keep the cycle from looking deadlocked yet");
+
+    {
+        let inner = state.inner.lock().expect("state mutex poisoned");
+        assert_eq!(
+            inner.orchestrator_instances[0].status,
+            OrchestratorInstanceStatus::Running
+        );
+        let consolidate_b = inner
+            .sessions
+            .iter()
+            .find(|record| record.session.id == consolidate_b_session_id)
+            .expect("consolidate B session should exist");
+        assert_eq!(consolidate_b.session.pending_prompts.len(), 1);
+    }
+
+    state
+        .cancel_queued_prompt(&consolidate_b_session_id, &queued_prompt_id)
+        .expect("canceling the queued prompt should succeed");
+
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    let orchestrator = &inner.orchestrator_instances[0];
+    assert_eq!(orchestrator.status, OrchestratorInstanceStatus::Stopped);
+    assert!(orchestrator.pending_transitions.is_empty());
+    let error_message = orchestrator
+        .error_message
+        .as_deref()
+        .expect("deadlocked instance should surface an error");
+    assert!(error_message.contains("Orchestrator deadlock"));
+    let consolidate_a = inner
+        .sessions
+        .iter()
+        .find(|record| record.session.id == consolidate_a_session_id)
+        .expect("consolidate A session should exist");
+    let consolidate_b = inner
+        .sessions
+        .iter()
+        .find(|record| record.session.id == consolidate_b_session_id)
+        .expect("consolidate B session should exist");
+    assert_eq!(consolidate_a.session.status, SessionStatus::Error);
+    assert_eq!(consolidate_b.session.status, SessionStatus::Error);
+}
+
+#[test]
+fn runtime_exit_rechecks_deadlocked_consolidate_cycles() {
+    let state = test_app_state();
+    let project_root = std::env::temp_dir().join(format!(
+        "termal-orchestrator-consolidation-runtime-exit-deadlock-{}",
+        Uuid::new_v4()
+    ));
+    fs::create_dir_all(&project_root).expect("runtime-exit deadlock project root should exist");
+    let project_id = create_test_project(&state, &project_root, "Runtime Exit Deadlock Project");
+    let template = state
+        .create_orchestrator_template(sample_deadlocked_consolidation_orchestrator_template_draft())
+        .expect("template should be created")
+        .template;
+    let orchestrator = state
+        .create_orchestrator_instance(CreateOrchestratorInstanceRequest {
+            template_id: template.id,
+            project_id: Some(project_id),
+        })
+        .expect("orchestrator instance should be created")
+        .orchestrator;
+
+    let consolidate_a_session_id = orchestrator
+        .session_instances
+        .iter()
+        .find(|instance| instance.template_session_id == "consolidate-a")
+        .expect("consolidate A session should be mapped")
+        .session_id
+        .clone();
+    let consolidate_b_session_id = orchestrator
+        .session_instances
+        .iter()
+        .find(|instance| instance.template_session_id == "consolidate-b")
+        .expect("consolidate B session should be mapped")
+        .session_id
+        .clone();
+
+    let runtime_token = {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let consolidate_a_index = inner
+            .find_session_index(&consolidate_a_session_id)
+            .expect("consolidate A session should exist");
+        let consolidate_b_index = inner
+            .find_session_index(&consolidate_b_session_id)
+            .expect("consolidate B session should exist");
+        let (runtime, _input_rx) =
+            test_codex_runtime_handle("orchestrator-consolidation-runtime-exit-deadlock");
+        let runtime_token = RuntimeToken::Codex(runtime.runtime_id.clone());
+        inner.sessions[consolidate_b_index].runtime = SessionRuntime::Codex(runtime);
+        inner.sessions[consolidate_b_index].session.status = SessionStatus::Active;
+
+        let message_id = inner.next_message_id();
+        push_message_on_record(
+            &mut inner.sessions[consolidate_a_index],
+            Message::Text {
+                attachments: Vec::new(),
+                id: message_id,
+                timestamp: stamp_now(),
+                author: Author::Assistant,
+                text: "A produced the initial consolidated branch.".to_owned(),
+                expanded_text: None,
+            },
+        );
+        inner.sessions[consolidate_a_index].session.status = SessionStatus::Idle;
+        let completion_revision = inner.revision + 1;
+        schedule_orchestrator_transitions_for_completed_session(
+            &mut inner,
+            &consolidate_a_session_id,
+            completion_revision,
+        );
+        state.commit_locked(&mut inner).unwrap();
+        runtime_token
+    };
+
+    state
+        .resume_pending_orchestrator_transitions()
+        .expect("an active consolidate session should defer deadlock detection");
+
+    {
+        let inner = state.inner.lock().expect("state mutex poisoned");
+        assert_eq!(
+            inner.orchestrator_instances[0].status,
+            OrchestratorInstanceStatus::Running
+        );
+        assert_eq!(inner.orchestrator_instances[0].pending_transitions.len(), 2);
+    }
+
+    state
+        .handle_runtime_exit_if_matches(
+            &consolidate_b_session_id,
+            &runtime_token,
+            Some("Consolidate B runtime crashed"),
+        )
+        .expect("runtime exit should be handled");
+
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    let orchestrator = &inner.orchestrator_instances[0];
+    assert_eq!(orchestrator.status, OrchestratorInstanceStatus::Stopped);
+    assert!(orchestrator.pending_transitions.is_empty());
+    let error_message = orchestrator
+        .error_message
+        .as_deref()
+        .expect("deadlocked instance should surface an error");
+    assert!(error_message.contains("Orchestrator deadlock"));
+    let consolidate_b = inner
+        .sessions
+        .iter()
+        .find(|record| record.session.id == consolidate_b_session_id)
+        .expect("consolidate B session should exist");
+    assert!(
+        consolidate_b
+            .session
+            .messages
+            .iter()
+            .any(|message| matches!(
+                message,
+                Message::Text { text, .. } if text == "Turn failed: Consolidate B runtime crashed"
+            ))
+    );
+    assert_eq!(consolidate_b.session.status, SessionStatus::Error);
+}
+
+#[test]
 fn persisted_pending_orchestrator_transitions_resume_once_after_reload() {
     let state = test_app_state();
     let project_root =
@@ -13670,6 +15339,7 @@ fn persisted_pending_orchestrator_transitions_resume_once_after_reload() {
         default_workdir: "/tmp".to_owned(),
         persistence_path: state.persistence_path.clone(),
         orchestrator_templates_path: state.orchestrator_templates_path.clone(),
+        orchestrator_templates_lock: state.orchestrator_templates_lock.clone(),
         state_events: broadcast::channel(16).0,
         delta_events: broadcast::channel(16).0,
         shared_codex_runtime: Arc::new(Mutex::new(None)),
@@ -13826,6 +15496,7 @@ fn startup_recovery_dispatches_orphaned_orchestrator_queued_prompt() {
         default_workdir: "/tmp".to_owned(),
         persistence_path: state.persistence_path.clone(),
         orchestrator_templates_path: state.orchestrator_templates_path.clone(),
+        orchestrator_templates_lock: state.orchestrator_templates_lock.clone(),
         state_events: broadcast::channel(16).0,
         delta_events: broadcast::channel(16).0,
         shared_codex_runtime: Arc::new(Mutex::new(Some(runtime))),
@@ -14684,4 +16355,3 @@ fn killing_a_session_prunes_its_orchestrator_links() {
         })
     }));
 }
-

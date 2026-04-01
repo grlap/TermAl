@@ -1,5 +1,5 @@
-use reqwest::blocking::{Client as BlockingHttpClient, Response as BlockingHttpResponse};
 use reqwest::Method;
+use reqwest::blocking::{Client as BlockingHttpClient, Response as BlockingHttpResponse};
 use serde::de::DeserializeOwned;
 use std::io::Read as _;
 use std::thread;
@@ -68,7 +68,10 @@ impl RemoteRegistry {
             .iter()
             .map(|remote| (remote.id.clone(), remote.clone()))
             .collect::<HashMap<_, _>>();
-        let mut connections = self.connections.lock().expect("remote registry mutex poisoned");
+        let mut connections = self
+            .connections
+            .lock()
+            .expect("remote registry mutex poisoned");
         let existing_ids = connections.keys().cloned().collect::<Vec<_>>();
         for remote_id in existing_ids {
             let Some(connection) = connections.get(&remote_id).cloned() else {
@@ -84,7 +87,10 @@ impl RemoteRegistry {
     }
 
     fn connection(&self, remote: &RemoteConfig) -> Arc<RemoteConnection> {
-        let mut connections = self.connections.lock().expect("remote registry mutex poisoned");
+        let mut connections = self
+            .connections
+            .lock()
+            .expect("remote registry mutex poisoned");
         let connection = connections
             .entry(remote.id.clone())
             .or_insert_with(|| Arc::new(RemoteConnection::new(remote.clone())))
@@ -255,8 +261,10 @@ impl RemoteConnection {
                             "remote SSH connection failed for `{}`. managed start failed: {}. tunnel-only fallback failed: {}",
                             remote.name, managed_error, tunnel_error
                         );
-                        Err(ApiError::bad_gateway(remote_connection_issue_message(&remote.name)))
-                    },
+                        Err(ApiError::bad_gateway(remote_connection_issue_message(
+                            &remote.name,
+                        )))
+                    }
                 }
             }
         }
@@ -276,7 +284,10 @@ impl RemoteConnection {
             .stdout(Stdio::null())
             .stderr(Stdio::piped());
         let child = command.spawn().map_err(|err| {
-            eprintln!("failed to start SSH connection for remote `{}`: {err}", remote.name);
+            eprintln!(
+                "failed to start SSH connection for remote `{}`: {err}",
+                remote.name
+            );
             ApiError::bad_gateway(local_ssh_start_issue_message(&remote.name))
         })?;
         Ok(RemoteProcessHandle { child, mode })
@@ -395,7 +406,8 @@ impl AppState {
         };
 
         for remote in remotes {
-            self.remote_registry.start_event_bridge(self.clone(), &remote);
+            self.remote_registry
+                .start_event_bridge(self.clone(), &remote);
         }
     }
 
@@ -559,12 +571,12 @@ impl AppState {
                 .iter()
                 .position(|candidate| candidate.id == project.id)
                 .ok_or_else(|| ApiError::not_found("project not found"))?;
-            if inner.projects[index].remote_project_id.as_deref() != Some(remote_project_id.as_str()) {
+            if inner.projects[index].remote_project_id.as_deref()
+                != Some(remote_project_id.as_str())
+            {
                 inner.projects[index].remote_project_id = Some(remote_project_id.clone());
                 self.commit_locked(&mut inner).map_err(|err| {
-                    ApiError::internal(format!(
-                        "failed to persist remote project binding: {err:#}"
-                    ))
+                    ApiError::internal(format!("failed to persist remote project binding: {err:#}"))
                 })?;
             }
         }
@@ -620,7 +632,9 @@ impl AppState {
             .position(|candidate| candidate.id == project.id)
             .ok_or_else(|| ApiError::not_found("project not found"))?;
         let mut changed = inner.projects.len() != existing_len;
-        if inner.projects[index].remote_project_id.as_deref() != Some(remote_response.project_id.as_str()) {
+        if inner.projects[index].remote_project_id.as_deref()
+            != Some(remote_response.project_id.as_str())
+        {
             inner.projects[index].remote_project_id = Some(remote_response.project_id.clone());
             changed = true;
         }
@@ -662,14 +676,17 @@ impl AppState {
                 "geminiApprovalMode": request.gemini_approval_mode,
             })),
         )?;
-        self.remote_registry.start_event_bridge(self.clone(), &binding.remote);
+        self.remote_registry
+            .start_event_bridge(self.clone(), &binding.remote);
         let remote_session = remote_response
             .state
             .sessions
             .iter()
             .find(|session| session.id == remote_response.session_id)
             .cloned()
-            .ok_or_else(|| ApiError::bad_gateway("remote session was not returned by remote state"))?;
+            .ok_or_else(|| {
+                ApiError::bad_gateway("remote session was not returned by remote state")
+            })?;
         let local_session_id = {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
             let local_session_id = upsert_remote_proxy_session_record(
@@ -1134,8 +1151,9 @@ impl AppState {
             &remote_state,
             Some(&target.remote_session_id),
         );
-        self.commit_locked(&mut inner)
-            .map_err(|err| ApiError::internal(format!("failed to persist remote state: {err:#}")))?;
+        self.commit_locked(&mut inner).map_err(|err| {
+            ApiError::internal(format!("failed to persist remote state: {err:#}"))
+        })?;
         Ok(())
     }
 
@@ -1146,8 +1164,9 @@ impl AppState {
     ) -> Result<(), ApiError> {
         let mut inner = self.inner.lock().expect("state mutex poisoned");
         sync_remote_state_inner(&mut inner, remote_id, &remote_state, None);
-        self.commit_locked(&mut inner)
-            .map_err(|err| ApiError::internal(format!("failed to persist remote state: {err:#}")))?;
+        self.commit_locked(&mut inner).map_err(|err| {
+            ApiError::internal(format!("failed to persist remote state: {err:#}"))
+        })?;
         Ok(())
     }
 
@@ -1204,9 +1223,8 @@ impl AppState {
                         .find_remote_session_index(remote_id, &session_id)
                         .ok_or_else(|| anyhow!("remote session `{session_id}` not found"))?;
                     let record = &mut inner.sessions[index];
-                    let message_index = message_index_on_record(record, &message_id).ok_or_else(|| {
-                        anyhow!("remote message `{message_id}` not found")
-                    })?;
+                    let message_index = message_index_on_record(record, &message_id)
+                        .ok_or_else(|| anyhow!("remote message `{message_id}` not found"))?;
                     let Some(message) = record.session.messages.get_mut(message_index) else {
                         return Err(anyhow!(
                             "remote message index `{message_index}` is out of bounds"
@@ -1249,16 +1267,17 @@ impl AppState {
                         .find_remote_session_index(remote_id, &session_id)
                         .ok_or_else(|| anyhow!("remote session `{session_id}` not found"))?;
                     let record = &mut inner.sessions[index];
-                    let message_index = message_index_on_record(record, &message_id).ok_or_else(|| {
-                        anyhow!("remote message `{message_id}` not found")
-                    })?;
+                    let message_index = message_index_on_record(record, &message_id)
+                        .ok_or_else(|| anyhow!("remote message `{message_id}` not found"))?;
                     let Some(message) = record.session.messages.get_mut(message_index) else {
                         return Err(anyhow!(
                             "remote message index `{message_index}` is out of bounds"
                         ));
                     };
                     match message {
-                        Message::Text { text: current_text, .. } => {
+                        Message::Text {
+                            text: current_text, ..
+                        } => {
                             current_text.clear();
                             current_text.push_str(&text);
                         }
@@ -1559,7 +1578,11 @@ fn upsert_remote_proxy_session_record(
     local_project_id: Option<String>,
 ) -> String {
     if let Some(index) = inner.find_remote_session_index(remote_id, &remote_session.id) {
-        apply_remote_session_to_record(&mut inner.sessions[index], local_project_id, remote_session);
+        apply_remote_session_to_record(
+            &mut inner.sessions[index],
+            local_project_id,
+            remote_session,
+        );
         return inner.sessions[index].session.id.clone();
     }
 
@@ -1596,6 +1619,7 @@ fn upsert_remote_proxy_session_record(
         runtime: SessionRuntime::None,
         runtime_reset_required: false,
         runtime_stop_in_progress: false,
+        deferred_stop_callbacks: Vec::new(),
         hidden: false,
         session,
     };
@@ -1624,7 +1648,8 @@ fn process_remote_event_stream(
     let mut data_lines = Vec::new();
     let reader = BufReader::new(response);
     for line in reader.lines() {
-        let line = line.with_context(|| format!("failed to read SSE line for remote `{remote_id}`"))?;
+        let line =
+            line.with_context(|| format!("failed to read SSE line for remote `{remote_id}`"))?;
         if line.is_empty() {
             dispatch_remote_event(state, remote_id, &event_name, &data_lines)?;
             event_name.clear();
@@ -1676,13 +1701,7 @@ fn dispatch_remote_event(
                     .map_err(|err| anyhow!(err.message))?;
                 let full_state: StateResponse = state
                     .remote_registry
-                    .request_json(
-                        &remote,
-                        Method::GET,
-                        "/api/state",
-                        &[],
-                        None,
-                    )
+                    .request_json(&remote, Method::GET, "/api/state", &[], None)
                     .map_err(|err| anyhow!(err.message))?;
                 state
                     .apply_remote_state_snapshot(remote_id, full_state)
@@ -1774,10 +1793,7 @@ fn remote_ssh_command_args(
         "-o".to_owned(),
         "ServerAliveCountMax=3".to_owned(),
         "-p".to_owned(),
-        remote
-            .port
-            .unwrap_or(DEFAULT_SSH_REMOTE_PORT)
-            .to_string(),
+        remote.port.unwrap_or(DEFAULT_SSH_REMOTE_PORT).to_string(),
         "-L".to_owned(),
         format!("{forwarded_port}:127.0.0.1:{REMOTE_SERVER_PORT}"),
     ];
@@ -1866,9 +1882,9 @@ fn validate_remote_ssh_host_value(host: &str, remote_name: &str) -> Result<(), A
 
 fn validate_remote_ssh_user_value(user: &str, remote_name: &str) -> Result<(), ApiError> {
     if user.contains('@')
-        || !user
-            .bytes()
-            .all(|byte| matches!(byte, b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'.' | b'-' | b'_'))
+        || !user.bytes().all(
+            |byte| matches!(byte, b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'.' | b'-' | b'_'),
+        )
     {
         return Err(ApiError::bad_request(format!(
             "remote `{remote_name}` has an invalid SSH user",
@@ -1941,8 +1957,8 @@ fn remote_healthcheck(client: &BlockingHttpClient, base_url: &str) -> Result<()>
         .timeout(REMOTE_HEALTH_TIMEOUT)
         .send()
         .with_context(|| format!("failed to contact {base_url}/api/health"))?;
-    let payload: HealthResponse = decode_remote_json(response)
-        .map_err(|err| anyhow!(err.message))?;
+    let payload: HealthResponse =
+        decode_remote_json(response).map_err(|err| anyhow!(err.message))?;
     if payload.ok {
         Ok(())
     } else {
@@ -1966,9 +1982,8 @@ fn decode_remote_json<T: DeserializeOwned>(response: BlockingHttpResponse) -> Re
         };
         return Err(ApiError::from_status(status, message));
     }
-    serde_json::from_str(&raw).map_err(|err| {
-        ApiError::bad_gateway(format!("failed to decode remote response: {err}"))
-    })
+    serde_json::from_str(&raw)
+        .map_err(|err| ApiError::bad_gateway(format!("failed to decode remote response: {err}")))
 }
 
 fn encode_uri_component(value: &str) -> String {

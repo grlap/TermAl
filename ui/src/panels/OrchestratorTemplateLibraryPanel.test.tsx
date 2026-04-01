@@ -77,6 +77,7 @@ function makeTemplate(overrides: Partial<OrchestratorTemplate> = {}): Orchestrat
         model: null,
         instructions: "Implement the change.",
         autoApprove: true,
+        inputMode: "queue",
         position: { x: 220, y: 420 },
       },
     ],

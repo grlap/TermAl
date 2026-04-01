@@ -211,8 +211,6 @@ import {
   dataTransferHasSessionDragType,
   readSessionDragData,
 } from "./session-drag";
-
-const TAB_DRAG_STALE_TIMEOUT_MS = 15000;
 import {
   DENSITY_STEP_PERCENT,
   DEFAULT_DENSITY_PERCENT,
@@ -263,6 +261,9 @@ import {
   type WorkspaceTabDrag,
   type WorkspaceTabDragChannelMessage,
 } from "./tab-drag";
+
+const TAB_DRAG_STALE_TIMEOUT_MS = 15000;
+const RECONNECT_STATE_RESYNC_DELAY_MS = 400;
 
 type SessionFlagMap = Record<string, true | undefined>;
 const WORKSPACE_LAYOUT_PERSIST_DELAY_MS = 150;
@@ -2029,13 +2030,36 @@ export default function App() {
 
   useEffect(() => {
     let cancelled = false;
+    let reconnectStateResyncTimeoutId: ReturnType<typeof window.setTimeout> | null = null;
     const eventSource = new EventSource("/api/events");
+
+    function clearReconnectStateResyncTimeout() {
+      if (reconnectStateResyncTimeoutId === null) {
+        return;
+      }
+
+      window.clearTimeout(reconnectStateResyncTimeoutId);
+      reconnectStateResyncTimeoutId = null;
+    }
+
+    function scheduleReconnectStateResync() {
+      clearReconnectStateResyncTimeout();
+      reconnectStateResyncTimeoutId = window.setTimeout(() => {
+        reconnectStateResyncTimeoutId = null;
+        if (cancelled || !readNavigatorOnline() || latestStateRevisionRef.current === null) {
+          return;
+        }
+
+        requestStateResync();
+      }, RECONNECT_STATE_RESYNC_DELAY_MS);
+    }
 
     function requestStateResync() {
       if (cancelled) {
         return;
       }
 
+      clearReconnectStateResyncTimeout();
       stateResyncPendingRef.current = true;
       if (stateResyncInFlightRef.current) {
         return;
@@ -2077,6 +2101,7 @@ export default function App() {
         return;
       }
 
+      clearReconnectStateResyncTimeout();
       try {
         const state = JSON.parse(event.data) as StateResponse;
         const force = forceAdoptNextStateEventRef.current;
@@ -2099,6 +2124,7 @@ export default function App() {
         return;
       }
 
+      clearReconnectStateResyncTimeout();
       try {
         const delta = JSON.parse(event.data) as DeltaEvent;
         const revisionAction = decideDeltaRevisionAction(
@@ -2134,6 +2160,7 @@ export default function App() {
     eventSource.addEventListener("state", handleStateEvent as EventListener);
     eventSource.addEventListener("delta", handleDeltaEvent as EventListener);
     eventSource.onopen = () => {
+      clearReconnectStateResyncTimeout();
       if (!cancelled) {
         if (latestStateRevisionRef.current !== null) {
           // A restarted backend can reconnect with the same persisted revision but a
@@ -2150,23 +2177,28 @@ export default function App() {
       }
 
       const isOnline = readNavigatorOnline();
+      const hasHydratedState = latestStateRevisionRef.current !== null;
       setBackendConnectionState(
-        isOnline
-          ? latestStateRevisionRef.current === null
-            ? "connecting"
-            : "reconnecting"
-          : "offline",
+        isOnline ? (hasHydratedState ? "reconnecting" : "connecting") : "offline",
       );
-      if (isOnline && latestStateRevisionRef.current === null) {
-        // The SSE endpoint emits a full state snapshot on connect, so once the client has an
-        // established revision it is cheaper to wait for the reconnect snapshot than to
-        // immediately force a duplicate /api/state fetch.
-        requestStateResync();
+      if (!isOnline) {
+        clearReconnectStateResyncTimeout();
+        return;
       }
+
+      if (!hasHydratedState) {
+        requestStateResync();
+        return;
+      }
+
+      // Prefer the SSE reconnect snapshot when it arrives quickly, but fall back to /api/state
+      // so completed assistant replies do not stay hidden until another user action forces a refresh.
+      scheduleReconnectStateResync();
     };
 
     return () => {
       cancelled = true;
+      clearReconnectStateResyncTimeout();
       eventSource.removeEventListener("state", handleStateEvent as EventListener);
       eventSource.removeEventListener("delta", handleDeltaEvent as EventListener);
       eventSource.close();
@@ -13734,7 +13766,7 @@ function describeBackendConnectionState(state: BackendConnectionState) {
       };
     case "reconnecting":
       return {
-        detail: "Waiting for the backend connection to recover.",
+        detail: "Live updates are disconnected. Trying to reconnect.",
         icon: "spinner" as const,
         label: "Reconnecting",
         tone: "active" as const,

@@ -609,6 +609,7 @@ export function openSessionInWorkspaceState(
   workspace: WorkspaceState,
   sessionId: string,
   preferredPaneId: string | null,
+  tabIndex?: number,
 ): WorkspaceState {
   const { targetPaneId, splitAnchorPaneId } = resolveSessionOpenTargetPaneId(
     workspace,
@@ -616,9 +617,9 @@ export function openSessionInWorkspaceState(
   );
   const existing = findSessionTab(workspace, sessionId);
   if (existing) {
-    if (targetPaneId && existing.paneId !== targetPaneId) {
+    if (targetPaneId && (existing.paneId !== targetPaneId || tabIndex !== undefined)) {
       return activatePane(
-        moveWorkspaceTabToPane(workspace, existing.paneId, existing.tab.id, targetPaneId),
+        moveWorkspaceTabToPane(workspace, existing.paneId, existing.tab.id, targetPaneId, tabIndex),
         targetPaneId,
         existing.tab.id,
       );
@@ -641,6 +642,7 @@ export function openSessionInWorkspaceState(
     workspace,
     createSessionTab(sessionId),
     targetPaneId ?? preferredPaneId,
+    tabIndex,
   );
 }
 
@@ -652,8 +654,13 @@ export function placeSessionDropInWorkspaceState(
   tabIndex?: number,
 ): WorkspaceState {
   if (placement === "tabs") {
-    if (findWorkspacePaneIdForSession(workspace, sessionId)) {
-      return openSessionInWorkspaceState(workspace, sessionId, targetPaneId);
+    const existing = findSessionTab(workspace, sessionId);
+    if (existing) {
+      return activatePane(
+        moveWorkspaceTabToPane(workspace, existing.paneId, existing.tab.id, targetPaneId, tabIndex),
+        targetPaneId,
+        existing.tab.id,
+      );
     }
 
     return openTabInWorkspaceState(
@@ -1654,11 +1661,8 @@ function moveWorkspaceTabToPane(
   sourcePaneId: string,
   tabId: string,
   targetPaneId: string,
+  tabIndex?: number,
 ) {
-  if (sourcePaneId === targetPaneId) {
-    return activatePane(workspace, sourcePaneId, tabId);
-  }
-
   const sourcePane = workspace.panes.find((pane) => pane.id === sourcePaneId);
   const targetPane = workspace.panes.find((pane) => pane.id === targetPaneId);
   const tab = sourcePane?.tabs.find((candidate) => candidate.id === tabId);
@@ -1666,12 +1670,23 @@ function moveWorkspaceTabToPane(
     return workspace;
   }
 
+  if (sourcePaneId === targetPaneId) {
+    if (tabIndex === undefined) {
+      return activatePane(workspace, sourcePaneId, tabId);
+    }
+
+    const sourceTabIndex = sourcePane.tabs.findIndex((candidate) => candidate.id === tabId);
+    const adjustedTabIndex =
+      sourceTabIndex >= 0 && tabIndex > sourceTabIndex ? tabIndex - 1 : tabIndex;
+    return addWorkspaceTabToPane(workspace, sourcePaneId, tab, adjustedTabIndex);
+  }
+
   const withoutSource = closeWorkspaceTab(workspace, sourcePaneId, tabId);
   if (!withoutSource.panes.some((pane) => pane.id === targetPaneId)) {
     return workspace;
   }
 
-  return addWorkspaceTabToPane(withoutSource, targetPaneId, tab);
+  return addWorkspaceTabToPane(withoutSource, targetPaneId, tab, tabIndex);
 }
 
 export function updateGitDiffPreviewTabInWorkspaceState(
@@ -1843,7 +1858,7 @@ function openContextualTabInWorkspaceState<T extends WorkspaceTab>(
     return openTabInAdjacentPane(workspace, preferredPaneId!, tab, "row", false);
   }
 
-  // Too many panes to split — try to find an adjacent content pane to reuse
+  // Too many panes to split - try to find an adjacent content pane to reuse
   // rather than replacing the current pane's content (e.g., don't replace git status with a source tab).
   if (preferredPaneId) {
     const siblingPaneId = findSiblingContentPaneId(workspace, preferredPaneId);
@@ -2785,7 +2800,7 @@ function findContextualTargetPaneId(
     if (preferredPane && paneContainsControlPanel(preferredPane)) {
       const nonControlPanelPaneId = findNonControlPanelPaneId(workspace, preferredPane.id);
       if (nonControlPanelPaneId && shouldOpenTabInAdjacentPane(workspace, nonControlPanelPaneId, tabKind)) {
-        // Room to split — return null so the caller splits off the content pane.
+        // Room to split - return null so the caller splits off the content pane.
         // The caller will use the content pane (not the control panel) as the split anchor.
         return null;
       }

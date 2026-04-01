@@ -842,6 +842,63 @@ describe("workspace helpers", () => {
     expect(next.activePaneId).toBe(paneB.id);
   });
 
+  it("placeSessionDropInWorkspaceState inserts a newly opened session at the requested tab index", () => {
+    const paneA = makePane("pane-a", [makeSessionTab("tab-a", "session-a")]);
+    const paneB = makePane("pane-b", [
+      makeSessionTab("tab-b", "session-b"),
+      makeSessionTab("tab-c", "session-c"),
+    ]);
+
+    const next = placeSessionDropInWorkspaceState(
+      makeSplitWorkspace(paneA, paneB, paneB.id),
+      "session-new",
+      paneB.id,
+      "tabs",
+      1,
+    );
+
+    expect(next.panes.find((pane) => pane.id === paneB.id)?.tabs).toEqual([
+      makeSessionTab("tab-b", "session-b"),
+      {
+        id: expect.any(String),
+        kind: "session",
+        sessionId: "session-new",
+      },
+      makeSessionTab("tab-c", "session-c"),
+    ]);
+    expect(next.panes.find((pane) => pane.id === paneB.id)?.activeSessionId).toBe("session-new");
+  });
+
+  it("placeSessionDropInWorkspaceState moves an already open session to the requested tab index", () => {
+    const paneA = makePane("pane-a", [makeSessionTab("tab-a", "session-a")]);
+    const paneB = makePane("pane-b", [
+      makeSessionTab("tab-b", "session-b"),
+      makeSessionTab("tab-c", "session-c"),
+    ]);
+
+    const next = placeSessionDropInWorkspaceState(
+      makeSplitWorkspace(paneA, paneB, paneA.id),
+      "session-a",
+      paneB.id,
+      "tabs",
+      1,
+    );
+
+    expect(next.panes.find((pane) => pane.id === paneB.id)?.tabs).toEqual([
+      makeSessionTab("tab-b", "session-b"),
+      {
+        id: "tab-a",
+        kind: "session",
+        sessionId: "session-a",
+      },
+      makeSessionTab("tab-c", "session-c"),
+    ]);
+    expect(
+      next.panes.flatMap((pane) => pane.tabs).filter((tab) => tab.kind === "session" && tab.sessionId === "session-a"),
+    ).toHaveLength(1);
+    expect(next.panes.find((pane) => pane.id === paneB.id)?.activeSessionId).toBe("session-a");
+  });
+
   it("placeSessionDropInWorkspaceState creates an adjacent pane for a side drop", () => {
     const paneA = makePane("pane-a", [makeSessionTab("tab-a", "session-a")]);
     const paneB = makePane("pane-b", [makeSessionListTab("tab-sessions", null)]);

@@ -1,4 +1,5 @@
 import {
+  startTransition,
   useEffect,
   useLayoutEffect,
   useMemo,
@@ -22,6 +23,7 @@ import { dispatchOrchestratorTemplatesChangedEvent } from "../orchestrator-templ
 import type {
   AgentType,
   OrchestratorNodePosition,
+  OrchestratorSessionInputMode,
   OrchestratorSessionTemplate,
   OrchestratorTemplate,
   OrchestratorTemplateDraft,
@@ -44,6 +46,9 @@ const PAN_CONTEXT_MENU_SUPPRESS_THRESHOLD_PX = 4;
 const STATE_KEY_PREFIX = "termal-orchestrator-panel-state:";
 const MAX_ORCHESTRATOR_TEMPLATE_SESSIONS = 50;
 const MAX_ORCHESTRATOR_TEMPLATE_TRANSITIONS = 200;
+const SELF_LOOP_CONTROL_DISTANCE = 120;
+const SELF_LOOP_CONTROL_SPREAD = 56;
+const TRANSITION_NOTE_OFFSET = 18;
 
 function getOrchestratorTemplateSessionLimitError() {
   return `Orchestrator templates support at most ${MAX_ORCHESTRATOR_TEMPLATE_SESSIONS} sessions.`;
@@ -82,6 +87,13 @@ const AGENT_OPTIONS: ReadonlyArray<{ label: string; value: AgentType }> = [
   { label: "Codex", value: "Codex" },
   { label: "Cursor", value: "Cursor" },
   { label: "Gemini", value: "Gemini" },
+];
+const INPUT_MODE_OPTIONS: ReadonlyArray<{
+  label: string;
+  value: OrchestratorSessionInputMode;
+}> = [
+  { label: "Queue", value: "queue" },
+  { label: "Consolidate", value: "consolidate" },
 ];
 const RESULT_MODE_OPTIONS: ReadonlyArray<{
   label: string;
@@ -152,6 +164,22 @@ type PanelState = {
   selectedTemplateId: string | null;
 };
 
+type InitialPanelState = PanelState & {
+  savedDraft: OrchestratorTemplateDraft;
+};
+
+type PersistedOrchestratorSessionTemplate = Omit<
+  OrchestratorSessionTemplate,
+  "inputMode"
+> & {
+  inputMode?: OrchestratorSessionInputMode | null;
+};
+
+type PendingPanelPersistence = {
+  stateKey: string;
+  serialized: string;
+};
+
 export function OrchestratorTemplatesPanel({
   initialTemplateId = null,
   persistenceKey = null,
@@ -170,6 +198,8 @@ export function OrchestratorTemplatesPanel({
     null,
   );
   const [draft, setDraft] = useState<OrchestratorTemplateDraft>(emptyDraft);
+  const [savedDraft, setSavedDraft] =
+    useState<OrchestratorTemplateDraft>(emptyDraft);
   const [selectedNodeId, setSelectedNodeId_raw] = useState<string | null>(null);
   const [selectedTransitionId, setSelectedTransitionId_raw] = useState<
     string | null
@@ -198,6 +228,10 @@ export function OrchestratorTemplatesPanel({
   const zoomAnchorRef = useRef<ZoomAnchor | null>(null);
   const scaleFrameRef = useRef<HTMLDivElement | null>(null);
   const surfaceRef = useRef<HTMLDivElement | null>(null);
+  const pendingStatePersistenceRef = useRef<PendingPanelPersistence | null>(
+    null,
+  );
+  const flushPersistedPanelStateRef = useRef<() => void>(() => {});
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
@@ -211,11 +245,6 @@ export function OrchestratorTemplatesPanel({
     [],
   );
 
-  const selectedTemplate = useMemo(
-    () =>
-      templates.find((template) => template.id === selectedTemplateId) ?? null,
-    [selectedTemplateId, templates],
-  );
   const renderedSessions = useMemo(
     () =>
       draft.sessions.map((session) => {
@@ -251,11 +280,21 @@ export function OrchestratorTemplatesPanel({
   const stateKey = persistenceKey?.trim()
     ? `${STATE_KEY_PREFIX}${persistenceKey.trim()}`
     : null;
+  flushPersistedPanelStateRef.current = () => {
+    const pending = pendingStatePersistenceRef.current;
+    if (!pending) {
+      return;
+    }
+    window.localStorage.setItem(pending.stateKey, pending.serialized);
+    pendingStatePersistenceRef.current = null;
+  };
   const validationError = validateDraft(draft);
-  const referenceDraft = selectedTemplate
-    ? templateToDraft(selectedTemplate)
-    : emptyDraft();
-  const isDirty = JSON.stringify(draft) !== JSON.stringify(referenceDraft);
+  const draftSignature = useMemo(() => JSON.stringify(draft), [draft]);
+  const referenceDraftSignature = useMemo(
+    () => JSON.stringify(savedDraft),
+    [savedDraft],
+  );
+  const isDirty = draftSignature !== referenceDraftSignature;
   const isCanvasMode = startMode !== "browse";
   const [isRunning, setIsRunning] = useState(false);
   const hasReachedSessionLimit =
@@ -293,6 +332,7 @@ export function OrchestratorTemplatesPanel({
           startMode,
         );
         setDraft(initial.draft);
+        setSavedDraft(initial.savedDraft);
         setSelectedNodeId(initial.selectedNodeId);
         setSelectedTemplateId(initial.selectedTemplateId);
       } catch (error) {
@@ -313,17 +353,36 @@ export function OrchestratorTemplatesPanel({
 
   useEffect(() => {
     if (!stateKey || isLoading) {
+      pendingStatePersistenceRef.current = null;
       return;
     }
-    window.localStorage.setItem(
-      stateKey,
-      JSON.stringify({
-        draft,
-        selectedNodeId,
-        selectedTemplateId,
-      } satisfies PanelState),
-    );
+    const serialized = JSON.stringify({
+      draft,
+      selectedNodeId,
+      selectedTemplateId,
+    } satisfies PanelState);
+    pendingStatePersistenceRef.current = { stateKey, serialized };
+    const timeoutId = window.setTimeout(() => {
+      flushPersistedPanelStateRef.current();
+    }, 150);
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
   }, [draft, isLoading, selectedNodeId, selectedTemplateId, stateKey]);
+
+  useEffect(() => {
+    function handlePageHide() {
+      flushPersistedPanelStateRef.current();
+    }
+
+    window.addEventListener("pagehide", handlePageHide);
+    window.addEventListener("beforeunload", handlePageHide);
+    return () => {
+      flushPersistedPanelStateRef.current();
+      window.removeEventListener("pagehide", handlePageHide);
+      window.removeEventListener("beforeunload", handlePageHide);
+    };
+  }, []);
 
   useEffect(() => {
     const frame = scaleFrameRef.current;
@@ -407,22 +466,32 @@ export function OrchestratorTemplatesPanel({
           draft,
         );
         if (!isMountedRef.current) return;
-        setTemplates((current) =>
-          current.map((template) =>
-            template.id === response.template.id ? response.template : template,
-          ),
-        );
-        setDraft(templateToDraft(response.template));
+        const canonicalDraft = templateToDraft(response.template);
+        setDraft(canonicalDraft);
+        setSavedDraft(canonicalDraft);
         setSelectedNodeId(response.template.sessions[0]?.id ?? null);
         setStatusMessage("Template saved.");
+        startTransition(() => {
+          setTemplates((current) =>
+            current.map((template) =>
+              template.id === response.template.id
+                ? response.template
+                : template,
+            ),
+          );
+        });
       } else {
         const response = await createOrchestratorTemplate(draft);
         if (!isMountedRef.current) return;
-        setTemplates((current) => [response.template, ...current]);
+        const canonicalDraft = templateToDraft(response.template);
         setSelectedTemplateId(response.template.id);
-        setDraft(templateToDraft(response.template));
+        setDraft(canonicalDraft);
+        setSavedDraft(canonicalDraft);
         setSelectedNodeId(response.template.sessions[0]?.id ?? null);
         setStatusMessage("Template created.");
+        startTransition(() => {
+          setTemplates((current) => [response.template, ...current]);
+        });
       }
       dispatchOrchestratorTemplatesChangedEvent();
     } catch (error) {
@@ -446,12 +515,16 @@ export function OrchestratorTemplatesPanel({
       setTemplates(response.templates);
       const nextTemplate = response.templates[0] ?? null;
       if (nextTemplate) {
+        const nextDraft = templateToDraft(nextTemplate);
         setSelectedTemplateId(nextTemplate.id);
-        setDraft(templateToDraft(nextTemplate));
+        setDraft(nextDraft);
+        setSavedDraft(nextDraft);
         setSelectedNodeId(nextTemplate.sessions[0]?.id ?? null);
       } else {
+        const nextDraft = emptyDraft();
         setSelectedTemplateId(null);
-        setDraft(emptyDraft());
+        setDraft(nextDraft);
+        setSavedDraft(nextDraft);
         setSelectedNodeId(null);
       }
       setStatusMessage("Template deleted.");
@@ -762,34 +835,14 @@ export function OrchestratorTemplatesPanel({
 
       const reconnect = connectionDrag.reconnect;
 
-      // For reconnect: exclude both the moving session AND the fixed session (no self-loops).
-      const excludeIds = new Set([connectionDrag.fromSessionId]);
-      if (reconnect) {
-        excludeIds.add(reconnect.fixedSessionId);
-      }
-
       const targetSession = renderedSessions.find(
         (session) =>
-          !excludeIds.has(session.id) &&
           canvasX >= session.position.x &&
           canvasX <= session.position.x + CARD_WIDTH &&
           canvasY >= session.position.y &&
           canvasY <= session.position.y + CARD_HEIGHT,
       );
-
-      // Also allow dropping back on the same card to just reposition the anchor.
-      const sameCardDrop = !targetSession
-        ? renderedSessions.find(
-            (session) =>
-              session.id === connectionDrag.fromSessionId &&
-              canvasX >= session.position.x &&
-              canvasX <= session.position.x + CARD_WIDTH &&
-              canvasY >= session.position.y &&
-              canvasY <= session.position.y + CARD_HEIGHT,
-          )
-        : null;
-
-      const dropSession = targetSession ?? (reconnect ? sameCardDrop : null);
+      const dropSession = targetSession;
 
       if (reconnect && dropSession) {
         const dropAnchor = nearestAnchorSide(dropSession, canvasX, canvasY);
@@ -951,8 +1004,10 @@ export function OrchestratorTemplatesPanel({
                 className="ghost-button"
                 type="button"
                 onClick={() => {
+                  const nextDraft = emptyDraft();
                   setSelectedTemplateId(null);
-                  setDraft(emptyDraft());
+                  setDraft(nextDraft);
+                  setSavedDraft(nextDraft);
                   setSelectedNodeId(null);
                   setStatusMessage(null);
                   setErrorMessage(null);
@@ -976,8 +1031,10 @@ export function OrchestratorTemplatesPanel({
                     className={`orchestrator-template-list-item${template.id === selectedTemplateId ? " selected" : ""}`}
                     type="button"
                     onClick={() => {
+                      const nextDraft = templateToDraft(template);
                       setSelectedTemplateId(template.id);
-                      setDraft(templateToDraft(template));
+                      setDraft(nextDraft);
+                      setSavedDraft(nextDraft);
                       setSelectedNodeId(template.sessions[0]?.id ?? null);
                       setStatusMessage(null);
                       setErrorMessage(null);
@@ -1011,8 +1068,8 @@ export function OrchestratorTemplatesPanel({
                   className="ghost-button"
                   type="button"
                   onClick={() => {
-                    setDraft(referenceDraft);
-                    setSelectedNodeId(referenceDraft.sessions[0]?.id ?? null);
+                    setDraft(savedDraft);
+                    setSelectedNodeId(savedDraft.sessions[0]?.id ?? null);
                     setStatusMessage(null);
                     setErrorMessage(null);
                   }}
@@ -1480,6 +1537,14 @@ export function OrchestratorTemplatesPanel({
                               {session.instructions.trim() ||
                                 "No instructions yet."}
                             </p>
+                            <div className="orchestrator-board-card-meta-block">
+                              <span>Incoming</span>
+                              <strong>
+                                {session.inputMode === "consolidate"
+                                  ? "Consolidate"
+                                  : "Queue"}
+                              </strong>
+                            </div>
                           </div>
                           {!isDragging
                             ? ANCHOR_SIDES.map((side) => (
@@ -1646,6 +1711,33 @@ export function OrchestratorTemplatesPanel({
                             <span>Auto-approve this session's tool calls</span>
                           </label>
                         </div>
+                        <div className="session-control-group orchestrator-form-full-width">
+                          <label
+                            className="session-control-label"
+                            htmlFor={`session-input-mode-${session.id}`}
+                          >
+                            Incoming transitions
+                          </label>
+                          <select
+                            id={`session-input-mode-${session.id}`}
+                            className="themed-input orchestrator-select"
+                            value={session.inputMode}
+                            onChange={(event) =>
+                              setSessionField(
+                                session.id,
+                                "inputMode",
+                                event.target
+                                  .value as OrchestratorSessionInputMode,
+                              )
+                            }
+                          >
+                            {INPUT_MODE_OPTIONS.map((option) => (
+                              <option key={option.value} value={option.value}>
+                                {option.label}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
                         <div className="session-control-group orchestrator-form-textarea-group">
                           <label
                             className="session-control-label"
@@ -1698,27 +1790,6 @@ export function OrchestratorTemplatesPanel({
                         </button>
                       </div>
                       <div className="orchestrator-form-grid">
-                        <div className="session-control-group">
-                          <label
-                            className="session-control-label"
-                            htmlFor={`transition-id-${transition.id}`}
-                          >
-                            Transition id
-                          </label>
-                          <input
-                            id={`transition-id-${transition.id}`}
-                            className="themed-input"
-                            type="text"
-                            value={transition.id}
-                            onChange={(event) =>
-                              setTransitionField(
-                                transition.id,
-                                "id",
-                                event.target.value,
-                              )
-                            }
-                          />
-                        </div>
                         <div className="session-control-group">
                           <label
                             className="session-control-label"
@@ -1897,6 +1968,7 @@ function templateToDraft(
     projectId: template.projectId ?? null,
     sessions: template.sessions.map((session) => ({
       ...session,
+      inputMode: normalizeSessionInputMode(session.inputMode),
       model: session.model ?? "",
       position: { ...session.position },
     })),
@@ -1912,22 +1984,38 @@ function resolveInitialState(
   initialTemplateId: string | null,
   restored: PanelState | null,
   startMode: "browse" | "edit" | "new",
-): PanelState {
+): InitialPanelState {
   if (restored) {
-    const selectedTemplateId =
-      restored.selectedTemplateId &&
-      templates.some((template) => template.id === restored.selectedTemplateId)
+    const restoredTemplateId =
+      typeof restored.selectedTemplateId === "string"
         ? restored.selectedTemplateId
         : null;
-    return finalizePanelState(
+    const selectedTemplateId =
+      restoredTemplateId &&
+      templates.some((template) => template.id === restoredTemplateId)
+        ? restoredTemplateId
+        : null;
+    if (restoredTemplateId && !selectedTemplateId) {
+      const savedDraft = emptyDraft();
+      return {
+        ...finalizePanelState(restored.draft, null, restored.selectedNodeId),
+        savedDraft,
+      };
+    }
+    const panelState = finalizePanelState(
       restored.draft,
       selectedTemplateId,
       restored.selectedNodeId,
     );
+    return {
+      ...panelState,
+      savedDraft: savedDraftForTemplateId(templates, selectedTemplateId),
+    };
   }
 
   if (startMode === "new") {
-    return finalizePanelState(emptyDraft(), null, null);
+    const draft = emptyDraft();
+    return { ...finalizePanelState(draft, null, null), savedDraft: draft };
   }
 
   const selectedTemplate =
@@ -1938,14 +2026,33 @@ function resolveInitialState(
     null;
 
   if (!selectedTemplate) {
-    return finalizePanelState(emptyDraft(), null, null);
+    const draft = emptyDraft();
+    return { ...finalizePanelState(draft, null, null), savedDraft: draft };
   }
 
-  return finalizePanelState(
-    templateToDraft(selectedTemplate),
-    selectedTemplate.id,
-    selectedTemplate.sessions[0]?.id ?? null,
+  const savedDraft = templateToDraft(selectedTemplate);
+  return {
+    ...finalizePanelState(
+      savedDraft,
+      selectedTemplate.id,
+      selectedTemplate.sessions[0]?.id ?? null,
+    ),
+    savedDraft,
+  };
+}
+
+function savedDraftForTemplateId(
+  templates: OrchestratorTemplate[],
+  selectedTemplateId: string | null,
+): OrchestratorTemplateDraft {
+  if (!selectedTemplateId) {
+    return emptyDraft();
+  }
+
+  const selectedTemplate = templates.find(
+    (template) => template.id === selectedTemplateId,
   );
+  return selectedTemplate ? templateToDraft(selectedTemplate) : emptyDraft();
 }
 
 function finalizePanelState(
@@ -1995,11 +2102,14 @@ function readState(stateKey: string): PanelState | null {
           typeof draft.projectId === "string" && draft.projectId.trim()
             ? draft.projectId
             : null,
-        sessions: draft.sessions.filter(isSessionTemplate).map((session) => ({
-          ...session,
-          model: session.model ?? "",
-          position: { ...session.position },
-        })),
+        sessions: draft.sessions
+          .filter(isPersistedSessionTemplate)
+          .map((session) => ({
+            ...session,
+            inputMode: normalizeSessionInputMode(session.inputMode),
+            model: session.model ?? "",
+            position: { ...session.position },
+          })),
         transitions: draft.transitions
           .filter(isTransitionTemplate)
           .map((transition) => ({
@@ -2017,19 +2127,23 @@ function readState(stateKey: string): PanelState | null {
   }
 }
 
-function isSessionTemplate(
+function isPersistedSessionTemplate(
   value: unknown,
-): value is OrchestratorSessionTemplate {
+): value is PersistedOrchestratorSessionTemplate {
   if (!value || typeof value !== "object") {
     return false;
   }
-  const candidate = value as Partial<OrchestratorSessionTemplate>;
+  const candidate = value as Partial<PersistedOrchestratorSessionTemplate>;
   return (
     typeof candidate.id === "string" &&
     typeof candidate.name === "string" &&
     typeof candidate.agent === "string" &&
     typeof candidate.instructions === "string" &&
     typeof candidate.autoApprove === "boolean" &&
+    (candidate.inputMode === undefined ||
+      candidate.inputMode === null ||
+      candidate.inputMode === "queue" ||
+      candidate.inputMode === "consolidate") &&
     !!candidate.position &&
     typeof candidate.position.x === "number" &&
     typeof candidate.position.y === "number"
@@ -2072,6 +2186,7 @@ function createSession(
     model: "",
     instructions: "",
     autoApprove: false,
+    inputMode: "queue",
     position: clampPosition(nextX, nextY),
   };
 }
@@ -2129,6 +2244,12 @@ function nextSequenceNumber(values: string[], prefix: string) {
   return next;
 }
 
+function normalizeSessionInputMode(
+  value: OrchestratorSessionInputMode | null | undefined,
+): OrchestratorSessionInputMode {
+  return value === "consolidate" ? "consolidate" : "queue";
+}
+
 function validateDraft(draft: OrchestratorTemplateDraft) {
   if (!draft.name.trim()) {
     return "Template name cannot be empty.";
@@ -2181,42 +2302,6 @@ function validateDraft(draft: OrchestratorTemplateDraft) {
     if (!sessionIds.has(transition.toSessionId)) {
       return `Transition \`${transition.id.trim()}\` references an unknown destination session.`;
     }
-    if (transition.fromSessionId === transition.toSessionId) {
-      return `Transition \`${transition.id.trim()}\` must connect two different sessions.`;
-    }
-  }
-
-  const adjacency = new Map<string, string[]>();
-  for (const transition of draft.transitions) {
-    const next = adjacency.get(transition.fromSessionId) ?? [];
-    next.push(transition.toSessionId);
-    adjacency.set(transition.fromSessionId, next);
-  }
-
-  const color = new Map<string, 0 | 1 | 2>();
-  for (const sessionId of sessionIds) {
-    color.set(sessionId, 0);
-  }
-
-  function hasCycle(sessionId: string): boolean {
-    color.set(sessionId, 1);
-    for (const neighbor of adjacency.get(sessionId) ?? []) {
-      const nextColor = color.get(neighbor) ?? 0;
-      if (nextColor === 1) {
-        return true;
-      }
-      if (nextColor === 0 && hasCycle(neighbor)) {
-        return true;
-      }
-    }
-    color.set(sessionId, 2);
-    return false;
-  }
-
-  for (const sessionId of sessionIds) {
-    if ((color.get(sessionId) ?? 0) === 0 && hasCycle(sessionId)) {
-      return "Transitions must form a directed acyclic graph.";
-    }
   }
 
   return null;
@@ -2244,6 +2329,10 @@ function buildTransitionGeometry(
   fromNode: OrchestratorSessionTemplate,
   toNode: OrchestratorSessionTemplate,
 ): TransitionGeometry {
+  if (fromNode.id === toNode.id) {
+    return buildSelfLoopTransitionGeometry(transition, fromNode);
+  }
+
   const toCenter = {
     x: toNode.position.x + CARD_WIDTH / 2,
     y: toNode.position.y + CARD_HEIGHT / 2,
@@ -2262,9 +2351,7 @@ function buildTransitionGeometry(
   const midpointY = (start.y + end.y) / 2;
   const dx = end.x - start.x;
   const dy = end.y - start.y;
-  const length = Math.hypot(dx, dy) || 1;
-  const noteX = midpointX - (dy / length) * 18;
-  const noteY = midpointY + (dx / length) * 18;
+  const note = perpendicularOffsetPoint(midpointX, midpointY, dx, dy);
 
   return {
     transition,
@@ -2275,9 +2362,185 @@ function buildTransitionGeometry(
     endY: end.y,
     midpointX,
     midpointY,
-    noteX,
-    noteY,
+    noteX: note.x,
+    noteY: note.y,
     title: `${transition.id}: ${fromNode.name || fromNode.id} -> ${toNode.name || toNode.id}`,
+  };
+}
+
+function buildSelfLoopTransitionGeometry(
+  transition: OrchestratorTemplateTransition,
+  session: OrchestratorSessionTemplate,
+): TransitionGeometry {
+  const fromSide = isValidAnchor(transition.fromAnchor)
+    ? transition.fromAnchor
+    : "right";
+  const rawToSide = isValidAnchor(transition.toAnchor)
+    ? transition.toAnchor
+    : "top";
+  const toSide =
+    rawToSide === fromSide && !isValidAnchor(transition.toAnchor)
+      ? defaultSelfLoopEndAnchor(fromSide)
+      : rawToSide;
+  const start = anchorPosition(session, fromSide);
+  const end = anchorPosition(session, toSide);
+
+  let control1: OrchestratorNodePosition;
+  let control2: OrchestratorNodePosition;
+  if (start.x === end.x && start.y === end.y) {
+    const normal = anchorNormal(fromSide);
+    const tangent = { x: -normal.y, y: normal.x };
+    control1 = {
+      x:
+        start.x +
+        normal.x * SELF_LOOP_CONTROL_DISTANCE +
+        tangent.x * SELF_LOOP_CONTROL_SPREAD,
+      y:
+        start.y +
+        normal.y * SELF_LOOP_CONTROL_DISTANCE +
+        tangent.y * SELF_LOOP_CONTROL_SPREAD,
+    };
+    control2 = {
+      x:
+        end.x +
+        normal.x * SELF_LOOP_CONTROL_DISTANCE -
+        tangent.x * SELF_LOOP_CONTROL_SPREAD,
+      y:
+        end.y +
+        normal.y * SELF_LOOP_CONTROL_DISTANCE -
+        tangent.y * SELF_LOOP_CONTROL_SPREAD,
+    };
+  } else {
+    const startNormal = anchorNormal(fromSide);
+    const endNormal = anchorNormal(toSide);
+    control1 = {
+      x: start.x + startNormal.x * SELF_LOOP_CONTROL_DISTANCE,
+      y: start.y + startNormal.y * SELF_LOOP_CONTROL_DISTANCE,
+    };
+    control2 = {
+      x: end.x + endNormal.x * SELF_LOOP_CONTROL_DISTANCE,
+      y: end.y + endNormal.y * SELF_LOOP_CONTROL_DISTANCE,
+    };
+  }
+
+  const midpoint = cubicBezierPoint(start, control1, control2, end, 0.5);
+  const tangent = cubicBezierDerivative(start, control1, control2, end, 0.5);
+  const note = perpendicularOffsetPoint(
+    midpoint.x,
+    midpoint.y,
+    tangent.x,
+    tangent.y,
+  );
+
+  return {
+    transition,
+    path: `M ${start.x} ${start.y} C ${control1.x} ${control1.y}, ${control2.x} ${control2.y}, ${end.x} ${end.y}`,
+    startX: start.x,
+    startY: start.y,
+    endX: end.x,
+    endY: end.y,
+    midpointX: midpoint.x,
+    midpointY: midpoint.y,
+    noteX: note.x,
+    noteY: note.y,
+    title: `${transition.id}: ${session.name || session.id} -> ${session.name || session.id}`,
+  };
+}
+
+function defaultSelfLoopEndAnchor(side: AnchorSide): AnchorSide {
+  switch (side) {
+    case "top":
+      return "right";
+    case "top-right":
+      return "right";
+    case "right":
+      return "top";
+    case "bottom-right":
+      return "right";
+    case "bottom":
+      return "right";
+    case "bottom-left":
+      return "bottom";
+    case "left":
+      return "top";
+    case "top-left":
+      return "top";
+  }
+}
+
+function anchorNormal(side: AnchorSide): OrchestratorNodePosition {
+  switch (side) {
+    case "top":
+      return { x: 0, y: -1 };
+    case "top-right":
+      return { x: Math.SQRT1_2, y: -Math.SQRT1_2 };
+    case "right":
+      return { x: 1, y: 0 };
+    case "bottom-right":
+      return { x: Math.SQRT1_2, y: Math.SQRT1_2 };
+    case "bottom":
+      return { x: 0, y: 1 };
+    case "bottom-left":
+      return { x: -Math.SQRT1_2, y: Math.SQRT1_2 };
+    case "left":
+      return { x: -1, y: 0 };
+    case "top-left":
+      return { x: -Math.SQRT1_2, y: -Math.SQRT1_2 };
+  }
+}
+
+function cubicBezierPoint(
+  start: OrchestratorNodePosition,
+  control1: OrchestratorNodePosition,
+  control2: OrchestratorNodePosition,
+  end: OrchestratorNodePosition,
+  t: number,
+): OrchestratorNodePosition {
+  const inverse = 1 - t;
+  return {
+    x:
+      inverse ** 3 * start.x +
+      3 * inverse ** 2 * t * control1.x +
+      3 * inverse * t ** 2 * control2.x +
+      t ** 3 * end.x,
+    y:
+      inverse ** 3 * start.y +
+      3 * inverse ** 2 * t * control1.y +
+      3 * inverse * t ** 2 * control2.y +
+      t ** 3 * end.y,
+  };
+}
+
+function cubicBezierDerivative(
+  start: OrchestratorNodePosition,
+  control1: OrchestratorNodePosition,
+  control2: OrchestratorNodePosition,
+  end: OrchestratorNodePosition,
+  t: number,
+): OrchestratorNodePosition {
+  const inverse = 1 - t;
+  return {
+    x:
+      3 * inverse ** 2 * (control1.x - start.x) +
+      6 * inverse * t * (control2.x - control1.x) +
+      3 * t ** 2 * (end.x - control2.x),
+    y:
+      3 * inverse ** 2 * (control1.y - start.y) +
+      6 * inverse * t * (control2.y - control1.y) +
+      3 * t ** 2 * (end.y - control2.y),
+  };
+}
+
+function perpendicularOffsetPoint(
+  x: number,
+  y: number,
+  dx: number,
+  dy: number,
+): OrchestratorNodePosition {
+  const length = Math.hypot(dx, dy) || 1;
+  return {
+    x: x - (dy / length) * TRANSITION_NOTE_OFFSET,
+    y: y + (dx / length) * TRANSITION_NOTE_OFFSET,
   };
 }
 

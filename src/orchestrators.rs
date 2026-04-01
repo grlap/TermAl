@@ -23,8 +23,8 @@ fn persist_orchestrator_template_store(
             .with_context(|| format!("failed to create `{}`", parent.display()))?;
     }
 
-    let encoded = serde_json::to_vec_pretty(store)
-        .context("failed to serialize orchestrator templates")?;
+    let encoded =
+        serde_json::to_vec_pretty(store).context("failed to serialize orchestrator templates")?;
     fs::write(path, encoded).with_context(|| format!("failed to write `{}`", path.display()))
 }
 
@@ -94,6 +94,14 @@ enum OrchestratorTransitionResultMode {
     SummaryAndLastResponse,
 }
 
+#[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+enum OrchestratorSessionInputMode {
+    #[default]
+    Queue,
+    Consolidate,
+}
+
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct OrchestratorNodePosition {
@@ -113,6 +121,8 @@ struct OrchestratorSessionTemplate {
     instructions: String,
     #[serde(default)]
     auto_approve: bool,
+    #[serde(default)]
+    input_mode: OrchestratorSessionInputMode,
     position: OrchestratorNodePosition,
 }
 
@@ -178,12 +188,13 @@ struct OrchestratorTemplateResponse {
 
 impl AppState {
     fn list_orchestrator_templates(&self) -> Result<OrchestratorTemplatesResponse, ApiError> {
-        let _guard = self.inner.lock().expect("state mutex poisoned");
+        let _guard = self
+            .orchestrator_templates_lock
+            .lock()
+            .expect("orchestrator templates mutex poisoned");
         let store = load_orchestrator_template_store(self.orchestrator_templates_path.as_path())
             .map_err(|err| {
-                ApiError::internal(format!(
-                    "failed to load orchestrator templates: {err:#}"
-                ))
+                ApiError::internal(format!("failed to load orchestrator templates: {err:#}"))
             })?;
         Ok(OrchestratorTemplatesResponse {
             templates: store.templates,
@@ -194,12 +205,13 @@ impl AppState {
         &self,
         template_id: &str,
     ) -> Result<OrchestratorTemplateResponse, ApiError> {
-        let _guard = self.inner.lock().expect("state mutex poisoned");
+        let _guard = self
+            .orchestrator_templates_lock
+            .lock()
+            .expect("orchestrator templates mutex poisoned");
         let store = load_orchestrator_template_store(self.orchestrator_templates_path.as_path())
             .map_err(|err| {
-                ApiError::internal(format!(
-                    "failed to load orchestrator templates: {err:#}"
-                ))
+                ApiError::internal(format!("failed to load orchestrator templates: {err:#}"))
             })?;
         let template = store
             .templates
@@ -214,13 +226,14 @@ impl AppState {
         request: OrchestratorTemplateDraft,
     ) -> Result<OrchestratorTemplateResponse, ApiError> {
         let normalized = normalize_orchestrator_template_draft(request)?;
-        let _guard = self.inner.lock().expect("state mutex poisoned");
-        let mut store = load_orchestrator_template_store(self.orchestrator_templates_path.as_path())
-            .map_err(|err| {
-                ApiError::internal(format!(
-                    "failed to load orchestrator templates: {err:#}"
-                ))
-            })?;
+        let _guard = self
+            .orchestrator_templates_lock
+            .lock()
+            .expect("orchestrator templates mutex poisoned");
+        let mut store =
+            load_orchestrator_template_store(self.orchestrator_templates_path.as_path()).map_err(
+                |err| ApiError::internal(format!("failed to load orchestrator templates: {err:#}")),
+            )?;
         let id = format!("orchestrator-template-{}", store.next_template_number);
         store.next_template_number = store.next_template_number.saturating_add(1).max(1);
         let now = stamp_orchestrator_template_now();
@@ -237,9 +250,7 @@ impl AppState {
         store.templates.push(template.clone());
         persist_orchestrator_template_store(self.orchestrator_templates_path.as_path(), &store)
             .map_err(|err| {
-                ApiError::internal(format!(
-                    "failed to persist orchestrator templates: {err:#}"
-                ))
+                ApiError::internal(format!("failed to persist orchestrator templates: {err:#}"))
             })?;
         Ok(OrchestratorTemplateResponse { template })
     }
@@ -250,13 +261,14 @@ impl AppState {
         request: OrchestratorTemplateDraft,
     ) -> Result<OrchestratorTemplateResponse, ApiError> {
         let normalized = normalize_orchestrator_template_draft(request)?;
-        let _guard = self.inner.lock().expect("state mutex poisoned");
-        let mut store = load_orchestrator_template_store(self.orchestrator_templates_path.as_path())
-            .map_err(|err| {
-                ApiError::internal(format!(
-                    "failed to load orchestrator templates: {err:#}"
-                ))
-            })?;
+        let _guard = self
+            .orchestrator_templates_lock
+            .lock()
+            .expect("orchestrator templates mutex poisoned");
+        let mut store =
+            load_orchestrator_template_store(self.orchestrator_templates_path.as_path()).map_err(
+                |err| ApiError::internal(format!("failed to load orchestrator templates: {err:#}")),
+            )?;
         let index = store
             .templates
             .iter()
@@ -276,9 +288,7 @@ impl AppState {
         store.templates[index] = template.clone();
         persist_orchestrator_template_store(self.orchestrator_templates_path.as_path(), &store)
             .map_err(|err| {
-                ApiError::internal(format!(
-                    "failed to persist orchestrator templates: {err:#}"
-                ))
+                ApiError::internal(format!("failed to persist orchestrator templates: {err:#}"))
             })?;
         Ok(OrchestratorTemplateResponse { template })
     }
@@ -287,13 +297,14 @@ impl AppState {
         &self,
         template_id: &str,
     ) -> Result<OrchestratorTemplatesResponse, ApiError> {
-        let _guard = self.inner.lock().expect("state mutex poisoned");
-        let mut store = load_orchestrator_template_store(self.orchestrator_templates_path.as_path())
-            .map_err(|err| {
-                ApiError::internal(format!(
-                    "failed to load orchestrator templates: {err:#}"
-                ))
-            })?;
+        let _guard = self
+            .orchestrator_templates_lock
+            .lock()
+            .expect("orchestrator templates mutex poisoned");
+        let mut store =
+            load_orchestrator_template_store(self.orchestrator_templates_path.as_path()).map_err(
+                |err| ApiError::internal(format!("failed to load orchestrator templates: {err:#}")),
+            )?;
         let index = store
             .templates
             .iter()
@@ -302,9 +313,7 @@ impl AppState {
         store.templates.remove(index);
         persist_orchestrator_template_store(self.orchestrator_templates_path.as_path(), &store)
             .map_err(|err| {
-                ApiError::internal(format!(
-                    "failed to persist orchestrator templates: {err:#}"
-                ))
+                ApiError::internal(format!("failed to persist orchestrator templates: {err:#}"))
             })?;
         Ok(OrchestratorTemplatesResponse {
             templates: store.templates,
@@ -340,7 +349,8 @@ async fn update_orchestrator_template(
     AxumPath(template_id): AxumPath<String>,
     Json(request): Json<OrchestratorTemplateDraft>,
 ) -> Result<Json<OrchestratorTemplateResponse>, ApiError> {
-    let response = run_blocking_api(move || state.update_orchestrator_template(&template_id, request)).await?;
+    let response =
+        run_blocking_api(move || state.update_orchestrator_template(&template_id, request)).await?;
     Ok(Json(response))
 }
 
@@ -348,7 +358,8 @@ async fn delete_orchestrator_template(
     State(state): State<AppState>,
     AxumPath(template_id): AxumPath<String>,
 ) -> Result<Json<OrchestratorTemplatesResponse>, ApiError> {
-    let response = run_blocking_api(move || state.delete_orchestrator_template(&template_id)).await?;
+    let response =
+        run_blocking_api(move || state.delete_orchestrator_template(&template_id)).await?;
     Ok(Json(response))
 }
 
@@ -417,62 +428,7 @@ fn normalize_orchestrator_template_draft(
                 normalized.id, normalized.to_session_id
             )));
         }
-        if normalized.from_session_id == normalized.to_session_id {
-            return Err(ApiError::bad_request(format!(
-                "transition `{}` cannot point to the same session on both ends",
-                normalized.id
-            )));
-        }
         transitions.push(normalized);
-    }
-
-    // Cycle detection: build adjacency list and run 3-color DFS.
-    {
-        let mut adj: std::collections::HashMap<&str, Vec<&str>> = std::collections::HashMap::new();
-        for t in &transitions {
-            adj.entry(t.from_session_id.as_str())
-                .or_default()
-                .push(t.to_session_id.as_str());
-        }
-
-        // 0 = white (unvisited), 1 = gray (in current path), 2 = black (finished)
-        let mut color: std::collections::HashMap<&str, u8> = std::collections::HashMap::new();
-        for id in &valid_node_ids {
-            color.insert(id.as_str(), 0);
-        }
-
-        fn dfs<'a>(
-            node: &'a str,
-            adj: &std::collections::HashMap<&str, Vec<&'a str>>,
-            color: &mut std::collections::HashMap<&'a str, u8>,
-        ) -> bool {
-            color.insert(node, 1);
-            if let Some(neighbors) = adj.get(node) {
-                for &next in neighbors {
-                    match color.get(next) {
-                        Some(1) => return true,
-                        Some(0) => {
-                            if dfs(next, adj, color) {
-                                return true;
-                            }
-                        }
-                        _ => {}
-                    }
-                }
-            }
-            color.insert(node, 2);
-            false
-        }
-
-        for id in &valid_node_ids {
-            if color.get(id.as_str()) == Some(&0) {
-                if dfs(id.as_str(), &adj, &mut color) {
-                    return Err(ApiError::bad_request(
-                        "Transition graph contains a cycle: transitions must form a directed acyclic graph (DAG).",
-                    ));
-                }
-            }
-        }
     }
 
     let project_id = draft
@@ -501,6 +457,7 @@ fn normalize_orchestrator_session_template(
         model: normalize_optional_orchestrator_text(template.model),
         instructions: template.instructions.trim().to_owned(),
         auto_approve: template.auto_approve,
+        input_mode: template.input_mode,
         position: normalize_orchestrator_position(template.position)?,
     })
 }
@@ -567,8 +524,10 @@ enum OrchestratorInstanceStatus {
 struct OrchestratorSessionInstance {
     template_session_id: String,
     session_id: String,
+    /// Highest completion revision observed for this runtime session.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     last_completion_revision: Option<u64>,
+    /// Highest completion revision whose transitions were fully acknowledged.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     last_delivered_completion_revision: Option<u64>,
 }
@@ -583,6 +542,34 @@ struct PendingTransition {
     completion_revision: u64,
     rendered_prompt: String,
     created_at: String,
+}
+
+#[derive(Clone, Debug)]
+struct ConsolidatedPendingTransitions {
+    prompt_pendings: Vec<PendingTransition>,
+    acknowledged_pendings: Vec<PendingTransition>,
+}
+
+#[derive(Clone, Debug)]
+struct ConsolidatedPendingInspection {
+    prompt_pendings: Vec<PendingTransition>,
+    acknowledged_pendings: Vec<PendingTransition>,
+    missing_source_session_ids: Vec<String>,
+}
+
+#[derive(Clone, Debug)]
+enum PendingTransitionAction {
+    Acknowledge {
+        instance_index: usize,
+        pendings: Vec<PendingTransition>,
+    },
+    Deliver {
+        destination_session_id: String,
+        destination_template: Option<OrchestratorSessionTemplate>,
+        instance_index: usize,
+        pendings: Vec<PendingTransition>,
+        rendered_prompt: String,
+    },
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
@@ -600,6 +587,8 @@ struct OrchestratorInstance {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pending_transitions: Vec<PendingTransition>,
     created_at: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    error_message: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     completed_at: Option<String>,
 }
@@ -691,8 +680,11 @@ impl AppState {
         let template_id =
             normalize_required_orchestrator_text(&request.template_id, "template id")?;
 
-        let mut inner = self.inner.lock().expect("state mutex poisoned");
         let template = {
+            let _guard = self
+                .orchestrator_templates_lock
+                .lock()
+                .expect("orchestrator templates mutex poisoned");
             let store =
                 load_orchestrator_template_store(self.orchestrator_templates_path.as_path())
                     .map_err(|err| {
@@ -706,6 +698,7 @@ impl AppState {
                 .find(|template| template.id == template_id)
                 .ok_or_else(|| ApiError::not_found("orchestrator template not found"))?
         };
+        let mut inner = self.inner.lock().expect("state mutex poisoned");
         let project_id = request
             .project_id
             .as_deref()
@@ -764,6 +757,7 @@ impl AppState {
             session_instances,
             pending_transitions: Vec::new(),
             created_at: stamp_orchestrator_template_now(),
+            error_message: None,
             completed_at: None,
         };
         inner.orchestrator_instances.push(orchestrator.clone());
@@ -783,115 +777,124 @@ impl AppState {
             }
         }
 
+        let mut inner = self.inner.lock().expect("state mutex poisoned");
+        if mark_deadlocked_orchestrator_instances(&mut inner) {
+            self.commit_locked(&mut inner)?;
+        }
+
         Ok(())
     }
 
-    fn accept_next_pending_orchestrator_transition(
-        &self,
-    ) -> Result<bool> {
+    fn accept_next_pending_orchestrator_transition(&self) -> Result<bool> {
         let dispatch_destination_session_id = {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
 
-            let Some((instance_index, pending)) = inner
-                .orchestrator_instances
-                .iter()
-                .enumerate()
-                .find_map(|(index, instance)| {
-                    (instance.status == OrchestratorInstanceStatus::Running)
-                        .then(|| instance.pending_transitions.first().cloned())
-                        .flatten()
-                        .map(|pending| (index, pending))
-                })
-            else {
+            let Some(action) = next_pending_transition_action(&inner) else {
                 return Ok(false);
             };
 
-            let destination_session_index =
-                inner.find_session_index(&pending.destination_session_id);
-            let destination_template = inner.orchestrator_instances[instance_index]
-                .session_instances
-                .iter()
-                .find(|session| session.session_id == pending.destination_session_id)
-                .and_then(|session_instance| {
-                    inner.orchestrator_instances[instance_index]
-                        .template_snapshot
-                        .sessions
-                        .iter()
-                        .find(|template_session| {
-                            template_session.id == session_instance.template_session_id
-                        })
-                        .cloned()
-                });
-
-            let Some(destination_session_index) = destination_session_index else {
-                acknowledge_pending_orchestrator_transition(
-                    &mut inner,
+            match action {
+                PendingTransitionAction::Acknowledge {
                     instance_index,
-                    &pending,
-                );
-                self.commit_locked(&mut inner)?;
-                return Ok(true);
-            };
-
-            let final_prompt = build_orchestrator_destination_prompt(
-                &inner.sessions[destination_session_index],
-                destination_template
-                    .as_ref()
-                    .map(|template| template.instructions.as_str())
-                    .unwrap_or(""),
-                &pending.rendered_prompt,
-            );
-
-            if final_prompt.trim().is_empty() {
-                acknowledge_pending_orchestrator_transition(
-                    &mut inner,
+                    pendings,
+                } => {
+                    for pending in &pendings {
+                        acknowledge_pending_orchestrator_transition(
+                            &mut inner,
+                            instance_index,
+                            pending,
+                        );
+                    }
+                    self.commit_locked(&mut inner)?;
+                    return Ok(true);
+                }
+                PendingTransitionAction::Deliver {
+                    destination_session_id,
+                    destination_template,
                     instance_index,
-                    &pending,
-                );
-                self.commit_locked(&mut inner)?;
-                return Ok(true);
+                    pendings,
+                    rendered_prompt,
+                } => {
+                    let Some(destination_session_index) =
+                        inner.find_session_index(&destination_session_id)
+                    else {
+                        for pending in &pendings {
+                            acknowledge_pending_orchestrator_transition(
+                                &mut inner,
+                                instance_index,
+                                pending,
+                            );
+                        }
+                        self.commit_locked(&mut inner)?;
+                        return Ok(true);
+                    };
+
+                    let final_prompt = build_orchestrator_destination_prompt(
+                        &inner.sessions[destination_session_index],
+                        destination_template
+                            .as_ref()
+                            .map(|template| template.instructions.as_str())
+                            .unwrap_or(""),
+                        &rendered_prompt,
+                    );
+
+                    if final_prompt.trim().is_empty() {
+                        for pending in &pendings {
+                            acknowledge_pending_orchestrator_transition(
+                                &mut inner,
+                                instance_index,
+                                pending,
+                            );
+                        }
+                        self.commit_locked(&mut inner)?;
+                        return Ok(true);
+                    }
+
+                    let should_dispatch_now = !matches!(
+                        inner.sessions[destination_session_index].session.status,
+                        SessionStatus::Active | SessionStatus::Approval
+                    ) && inner.sessions[destination_session_index]
+                        .queued_prompts
+                        .is_empty()
+                        && !record_has_archived_codex_thread(
+                            &inner.sessions[destination_session_index],
+                        );
+                    let message_id = inner.next_message_id();
+                    queue_prompt_on_record(
+                        &mut inner.sessions[destination_session_index],
+                        PendingPrompt {
+                            attachments: Vec::new(),
+                            id: message_id,
+                            timestamp: stamp_now(),
+                            text: final_prompt,
+                            expanded_text: None,
+                        },
+                        Vec::new(),
+                    );
+                    for pending in &pendings {
+                        acknowledge_pending_orchestrator_transition(
+                            &mut inner,
+                            instance_index,
+                            pending,
+                        );
+                    }
+                    self.commit_locked(&mut inner)?;
+
+                    should_dispatch_now.then(|| destination_session_id)
+                }
             }
-
-            let should_dispatch_now = !matches!(
-                inner.sessions[destination_session_index].session.status,
-                SessionStatus::Active | SessionStatus::Approval
-            ) && inner.sessions[destination_session_index].queued_prompts.is_empty()
-                && !record_has_archived_codex_thread(&inner.sessions[destination_session_index]);
-            let message_id = inner.next_message_id();
-            queue_prompt_on_record(
-                &mut inner.sessions[destination_session_index],
-                PendingPrompt {
-                    attachments: Vec::new(),
-                    id: message_id,
-                    timestamp: stamp_now(),
-                    text: final_prompt,
-                    expanded_text: None,
-                },
-                Vec::new(),
-            );
-            acknowledge_pending_orchestrator_transition(
-                &mut inner,
-                instance_index,
-                &pending,
-            );
-            self.commit_locked(&mut inner)?;
-
-            should_dispatch_now.then(|| pending.destination_session_id.clone())
         };
 
         if let Some(destination_session_id) = dispatch_destination_session_id {
             let dispatch = self
                 .dispatch_next_queued_turn(&destination_session_id)?
                 .ok_or_else(|| {
-                    anyhow!(
-                        "queued orchestrator transition prompt disappeared before dispatch"
-                    )
+                    anyhow!("queued orchestrator transition prompt disappeared before dispatch")
                 })?;
             if let Err(err) = deliver_turn_dispatch(self, dispatch) {
                 eprintln!(
                     "orchestrator transition warning> failed to dispatch queued prompt for session `{}`: {}",
-                    destination_session_id,
-                    err.message
+                    destination_session_id, err.message
                 );
             }
         }
@@ -911,8 +914,7 @@ async fn get_orchestrator_instance(
     State(state): State<AppState>,
     AxumPath(instance_id): AxumPath<String>,
 ) -> Result<Json<OrchestratorInstanceResponse>, ApiError> {
-    let response =
-        run_blocking_api(move || state.get_orchestrator_instance(&instance_id)).await?;
+    let response = run_blocking_api(move || state.get_orchestrator_instance(&instance_id)).await?;
     Ok(Json(response))
 }
 
@@ -1008,6 +1010,26 @@ fn orchestrator_template_session_for_runtime_session(
     })
 }
 
+fn orchestrator_template_session_for_instance_session(
+    instance: &OrchestratorInstance,
+    session_id: &str,
+) -> Option<OrchestratorSessionTemplate> {
+    instance
+        .session_instances
+        .iter()
+        .find(|session_instance| session_instance.session_id == session_id)
+        .and_then(|session_instance| {
+            instance
+                .template_snapshot
+                .sessions
+                .iter()
+                .find(|template_session| {
+                    template_session.id == session_instance.template_session_id
+                })
+                .cloned()
+        })
+}
+
 fn schedule_orchestrator_transitions_for_completed_session(
     inner: &mut StateInner,
     session_id: &str,
@@ -1034,11 +1056,23 @@ fn schedule_orchestrator_transitions_for_completed_session(
             continue;
         };
 
-        instance.session_instances[session_instance_index].last_completion_revision =
-            Some(completion_revision);
-        let template_session_id = instance.session_instances[session_instance_index]
-            .template_session_id
-            .clone();
+        let (template_session_id, last_delivered_completion_revision) = {
+            let session_instance = &mut instance.session_instances[session_instance_index];
+            session_instance.last_completion_revision = Some(
+                session_instance
+                    .last_completion_revision
+                    .unwrap_or(0)
+                    .max(completion_revision),
+            );
+            (
+                session_instance.template_session_id.clone(),
+                session_instance.last_delivered_completion_revision,
+            )
+        };
+        // Ignore stale/duplicate completions once every transition for that revision was delivered.
+        if completion_revision <= last_delivered_completion_revision.unwrap_or(0) {
+            continue;
+        }
         let source_template = instance
             .template_snapshot
             .sessions
@@ -1046,10 +1080,15 @@ fn schedule_orchestrator_transitions_for_completed_session(
             .find(|session| session.id == template_session_id)
             .cloned();
 
-        for transition in instance.template_snapshot.transitions.iter().filter(|transition| {
-            transition.trigger == OrchestratorTransitionTrigger::OnCompletion
-                && transition.from_session_id == template_session_id
-        }) {
+        for transition in instance
+            .template_snapshot
+            .transitions
+            .iter()
+            .filter(|transition| {
+                transition.trigger == OrchestratorTransitionTrigger::OnCompletion
+                    && transition.from_session_id == template_session_id
+            })
+        {
             if instance.pending_transitions.iter().any(|pending| {
                 pending.transition_id == transition.id
                     && pending.source_session_id == session_id
@@ -1114,6 +1153,163 @@ fn update_orchestrator_delivery_cursor(
     }
 }
 
+fn mark_deadlocked_orchestrator_instances(inner: &mut StateInner) -> bool {
+    let deadlocks = inner
+        .orchestrator_instances
+        .iter()
+        .enumerate()
+        .filter_map(|(instance_index, instance)| {
+            if instance.status != OrchestratorInstanceStatus::Running {
+                return None;
+            }
+
+            let deadlocked_session_ids = detect_deadlocked_consolidate_session_ids(inner, instance);
+            if deadlocked_session_ids.is_empty() {
+                return None;
+            }
+
+            Some((
+                instance_index,
+                deadlocked_session_ids.clone(),
+                format_deadlocked_orchestrator_message(inner, instance, &deadlocked_session_ids),
+            ))
+        })
+        .collect::<Vec<_>>();
+    if deadlocks.is_empty() {
+        return false;
+    }
+
+    for (instance_index, deadlocked_session_ids, error_message) in deadlocks {
+        {
+            let instance = &mut inner.orchestrator_instances[instance_index];
+            instance.status = OrchestratorInstanceStatus::Stopped;
+            instance.pending_transitions.clear();
+            instance.error_message = Some(error_message.clone());
+            instance.completed_at = Some(stamp_orchestrator_template_now());
+        }
+
+        for session_id in deadlocked_session_ids {
+            let Some(session_index) = inner.find_session_index(&session_id) else {
+                continue;
+            };
+            let session = &mut inner.sessions[session_index].session;
+            session.status = SessionStatus::Error;
+            session.preview = make_preview(&error_message);
+        }
+    }
+
+    true
+}
+
+fn detect_deadlocked_consolidate_session_ids(
+    inner: &StateInner,
+    instance: &OrchestratorInstance,
+) -> Vec<String> {
+    let mut blocked_destinations = instance
+        .pending_transitions
+        .iter()
+        .map(|pending| pending.destination_session_id.clone())
+        .collect::<HashSet<_>>()
+        .into_iter()
+        .filter_map(|destination_session_id| {
+            let destination_template = orchestrator_template_session_for_instance_session(
+                instance,
+                &destination_session_id,
+            )?;
+            if destination_template.input_mode != OrchestratorSessionInputMode::Consolidate {
+                return None;
+            }
+
+            let destination_session_index = inner.find_session_index(&destination_session_id)?;
+            let destination_record = &inner.sessions[destination_session_index];
+            if matches!(
+                destination_record.session.status,
+                SessionStatus::Active | SessionStatus::Approval
+            ) || !destination_record.queued_prompts.is_empty()
+            {
+                return None;
+            }
+
+            let inspection =
+                inspect_consolidated_pending_transitions(instance, &destination_session_id)?;
+            if inspection.missing_source_session_ids.is_empty() {
+                return None;
+            }
+
+            Some((
+                destination_session_id,
+                inspection
+                    .missing_source_session_ids
+                    .into_iter()
+                    .collect::<HashSet<_>>(),
+            ))
+        })
+        .collect::<HashMap<_, _>>();
+    if blocked_destinations.is_empty() {
+        return Vec::new();
+    }
+
+    // Repeatedly prune any blocked destination that still depends on a source
+    // outside the blocked set. The sessions that remain are waiting only on
+    // each other, so they cannot make progress without an external completion.
+    loop {
+        let removable = blocked_destinations
+            .iter()
+            .filter(|(_, missing_source_session_ids)| {
+                missing_source_session_ids
+                    .iter()
+                    .any(|session_id| !blocked_destinations.contains_key(session_id))
+            })
+            .map(|(destination_session_id, _)| destination_session_id.clone())
+            .collect::<Vec<_>>();
+        if removable.is_empty() {
+            break;
+        }
+        for destination_session_id in removable {
+            blocked_destinations.remove(&destination_session_id);
+        }
+    }
+
+    let mut deadlocked_session_ids = blocked_destinations.into_keys().collect::<Vec<_>>();
+    deadlocked_session_ids.sort();
+    deadlocked_session_ids
+}
+
+fn format_deadlocked_orchestrator_message(
+    inner: &StateInner,
+    instance: &OrchestratorInstance,
+    deadlocked_session_ids: &[String],
+) -> String {
+    let mut deadlocked_session_names = deadlocked_session_ids
+        .iter()
+        .map(|session_id| {
+            inner
+                .find_session_index(session_id)
+                .and_then(|index| inner.sessions.get(index))
+                .map(|record| record.session.name.trim().to_owned())
+                .filter(|name| !name.is_empty())
+                .or_else(|| {
+                    orchestrator_template_session_for_instance_session(instance, session_id)
+                        .map(|session| session.name)
+                })
+                .unwrap_or_else(|| session_id.clone())
+        })
+        .collect::<Vec<_>>();
+    deadlocked_session_names.sort();
+
+    if deadlocked_session_names.len() == 1 {
+        format!(
+            "Orchestrator deadlock: consolidate session {} is waiting only on blocked consolidate inputs.",
+            deadlocked_session_names[0]
+        )
+    } else {
+        format!(
+            "Orchestrator deadlock: consolidate sessions {} are waiting only on blocked consolidate inputs.",
+            deadlocked_session_names.join(", ")
+        )
+    }
+}
+
 fn build_transition_result_text(
     record: &SessionRecord,
     mode: OrchestratorTransitionResultMode,
@@ -1131,9 +1327,192 @@ fn build_transition_result_text(
         OrchestratorTransitionResultMode::SummaryAndLastResponse => {
             let summary = latest_transition_message_summary(current_turn_messages)
                 .unwrap_or_else(|| record.session.preview.trim().to_owned());
-            let last_response = latest_transition_message_text(current_turn_messages).unwrap_or_default();
+            let last_response =
+                latest_transition_message_text(current_turn_messages).unwrap_or_default();
             combine_transition_summary_and_result(&summary, &last_response)
         }
+    }
+}
+
+fn next_pending_transition_action(inner: &StateInner) -> Option<PendingTransitionAction> {
+    for (instance_index, instance) in inner.orchestrator_instances.iter().enumerate() {
+        if instance.status != OrchestratorInstanceStatus::Running {
+            continue;
+        }
+
+        for pending in &instance.pending_transitions {
+            let destination_template = orchestrator_template_session_for_instance_session(
+                instance,
+                &pending.destination_session_id,
+            );
+            if inner
+                .find_session_index(&pending.destination_session_id)
+                .is_none()
+            {
+                return Some(PendingTransitionAction::Acknowledge {
+                    instance_index,
+                    pendings: vec![pending.clone()],
+                });
+            }
+
+            let input_mode = destination_template
+                .as_ref()
+                .map(|template| template.input_mode)
+                .unwrap_or_default();
+            if input_mode == OrchestratorSessionInputMode::Queue {
+                return Some(PendingTransitionAction::Deliver {
+                    destination_session_id: pending.destination_session_id.clone(),
+                    destination_template,
+                    instance_index,
+                    pendings: vec![pending.clone()],
+                    rendered_prompt: pending.rendered_prompt.clone(),
+                });
+            }
+
+            let Some(ConsolidatedPendingTransitions {
+                prompt_pendings,
+                acknowledged_pendings,
+            }) =
+                collect_consolidated_pending_transitions(instance, &pending.destination_session_id)
+            else {
+                continue;
+            };
+            if acknowledged_pendings.is_empty() {
+                continue;
+            }
+            return Some(PendingTransitionAction::Deliver {
+                destination_session_id: pending.destination_session_id.clone(),
+                destination_template,
+                instance_index,
+                pendings: acknowledged_pendings,
+                rendered_prompt: build_consolidated_transition_prompt(instance, &prompt_pendings),
+            });
+        }
+    }
+
+    None
+}
+
+fn collect_consolidated_pending_transitions(
+    instance: &OrchestratorInstance,
+    destination_session_id: &str,
+) -> Option<ConsolidatedPendingTransitions> {
+    let ConsolidatedPendingInspection {
+        prompt_pendings,
+        acknowledged_pendings,
+        missing_source_session_ids,
+    } = inspect_consolidated_pending_transitions(instance, destination_session_id)?;
+    if !missing_source_session_ids.is_empty() {
+        return None;
+    }
+
+    Some(ConsolidatedPendingTransitions {
+        prompt_pendings,
+        acknowledged_pendings,
+    })
+}
+
+fn inspect_consolidated_pending_transitions(
+    instance: &OrchestratorInstance,
+    destination_session_id: &str,
+) -> Option<ConsolidatedPendingInspection> {
+    let destination_template =
+        orchestrator_template_session_for_instance_session(instance, destination_session_id)?;
+    let live_session_ids_by_template = instance
+        .session_instances
+        .iter()
+        .map(|session| {
+            (
+                session.template_session_id.as_str(),
+                session.session_id.as_str(),
+            )
+        })
+        .collect::<HashMap<_, _>>();
+    let required_transitions = instance
+        .template_snapshot
+        .transitions
+        .iter()
+        .filter(|transition| {
+            transition.trigger == OrchestratorTransitionTrigger::OnCompletion
+                && transition.to_session_id == destination_template.id
+                && live_session_ids_by_template.contains_key(transition.from_session_id.as_str())
+        })
+        .collect::<Vec<_>>();
+    if required_transitions.is_empty() {
+        return None;
+    }
+
+    let mut prompt_pendings = Vec::with_capacity(required_transitions.len());
+    let mut acknowledged_pendings = Vec::new();
+    let mut missing_source_session_ids = Vec::new();
+    for transition in required_transitions {
+        let Some(source_session_id) =
+            live_session_ids_by_template.get(transition.from_session_id.as_str())
+        else {
+            continue;
+        };
+        let transition_pendings = instance
+            .pending_transitions
+            .iter()
+            .filter(|pending| {
+                pending.destination_session_id == destination_session_id
+                    && pending.transition_id == transition.id
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+        if transition_pendings.is_empty() {
+            missing_source_session_ids.push((*source_session_id).to_owned());
+            continue;
+        }
+
+        let latest_pending = transition_pendings
+            .iter()
+            .max_by_key(|pending| pending.completion_revision)
+            .cloned()
+            .expect("non-empty transition pendings should have a latest revision");
+        prompt_pendings.push(latest_pending);
+        acknowledged_pendings.extend(transition_pendings);
+    }
+
+    Some(ConsolidatedPendingInspection {
+        prompt_pendings,
+        acknowledged_pendings,
+        missing_source_session_ids,
+    })
+}
+
+fn build_consolidated_transition_prompt(
+    instance: &OrchestratorInstance,
+    pendings: &[PendingTransition],
+) -> String {
+    let sections = pendings
+        .iter()
+        .filter_map(|pending| {
+            let rendered_prompt = pending.rendered_prompt.trim();
+            if rendered_prompt.is_empty() {
+                return None;
+            }
+
+            let source_name = orchestrator_template_session_for_instance_session(
+                instance,
+                &pending.source_session_id,
+            )
+            .map(|session| session.name)
+            .unwrap_or_else(|| pending.source_session_id.clone());
+            Some(format!(
+                "From {} ({})\n{}",
+                source_name, pending.transition_id, rendered_prompt
+            ))
+        })
+        .collect::<Vec<_>>();
+
+    match sections.as_slice() {
+        [] => String::new(),
+        [section] => section.clone(),
+        _ => format!(
+            "Consolidated predecessor inputs:\n\n{}",
+            sections.join("\n\n---\n\n")
+        ),
     }
 }
 
@@ -1192,7 +1571,8 @@ fn transition_message_summary(message: &Message) -> Option<String> {
         | Message::McpElicitationRequest { .. }
         | Message::CodexAppRequest { .. }
         | Message::Text {
-            author: Author::You, ..
+            author: Author::You,
+            ..
         } => None,
     }
 }
@@ -1208,28 +1588,24 @@ fn transition_message_text(message: &Message) -> Option<String> {
             text,
             expanded_text,
             ..
+        } => Some(expanded_text.as_deref().unwrap_or(text).trim().to_owned()),
+        Message::Markdown {
+            title, markdown, ..
         } => Some(
-            expanded_text
-                .as_deref()
-                .unwrap_or(text)
+            format!("{}\n\n{}", title.trim(), markdown.trim())
                 .trim()
                 .to_owned(),
         ),
-        Message::Markdown { title, markdown, .. } => Some(format!(
-            "{}\n\n{}",
-            title.trim(),
-            markdown.trim()
-        ).trim().to_owned()),
-        Message::Diff { summary, diff, .. } => Some(format!(
-            "{}\n\n{}",
-            summary.trim(),
-            diff.trim()
-        ).trim().to_owned()),
-        Message::SubagentResult { title, summary, .. } => Some(format!(
-            "{}\n\n{}",
-            title.trim(),
-            summary.trim()
-        ).trim().to_owned()),
+        Message::Diff { summary, diff, .. } => Some(
+            format!("{}\n\n{}", summary.trim(), diff.trim())
+                .trim()
+                .to_owned(),
+        ),
+        Message::SubagentResult { title, summary, .. } => Some(
+            format!("{}\n\n{}", title.trim(), summary.trim())
+                .trim()
+                .to_owned(),
+        ),
         Message::ParallelAgents { agents, .. } => Some(parallel_agents_preview_text(agents)),
         Message::Thinking { title, lines, .. } => {
             let mut parts = vec![title.trim().to_owned()];
@@ -1264,7 +1640,8 @@ fn transition_message_text(message: &Message) -> Option<String> {
         | Message::McpElicitationRequest { .. }
         | Message::CodexAppRequest { .. }
         | Message::Text {
-            author: Author::You, ..
+            author: Author::You,
+            ..
         } => None,
     }
 }
@@ -1275,7 +1652,10 @@ fn render_transition_prompt(
     source_session: &Session,
     result: &str,
 ) -> String {
-    let template = transition.prompt_template.as_deref().unwrap_or("{{result}}");
+    let template = transition
+        .prompt_template
+        .as_deref()
+        .unwrap_or("{{result}}");
     let rendered = template
         .replace("{{result}}", result)
         .replace(

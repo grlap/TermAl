@@ -3,6 +3,9 @@ struct AppState {
     default_workdir: String,
     persistence_path: Arc<PathBuf>,
     orchestrator_templates_path: Arc<PathBuf>,
+    /// Must not be held at the same time as `self.inner`; template file I/O happens
+    /// outside the main state mutex so we never invert lock ordering.
+    orchestrator_templates_lock: Arc<Mutex<()>>,
     state_events: broadcast::Sender<String>,
     delta_events: broadcast::Sender<String>,
     shared_codex_runtime: Arc<Mutex<Option<SharedCodexRuntime>>>,
@@ -48,6 +51,7 @@ impl AppState {
             default_workdir,
             persistence_path: Arc::new(persistence_path),
             orchestrator_templates_path: Arc::new(orchestrator_templates_path),
+            orchestrator_templates_lock: Arc::new(Mutex::new(())),
             state_events: broadcast::channel(128).0,
             delta_events: broadcast::channel(256).0,
             shared_codex_runtime: Arc::new(Mutex::new(None)),
@@ -143,11 +147,10 @@ impl AppState {
             density_percent: request.density_percent,
             workspace: request.workspace,
         };
-        inner
-            .workspace_layouts
-            .insert(workspace_id, layout.clone());
-        self.persist_internal_locked(&inner)
-            .map_err(|err| ApiError::internal(format!("failed to persist workspace layout: {err:#}")))?;
+        inner.workspace_layouts.insert(workspace_id, layout.clone());
+        self.persist_internal_locked(&inner).map_err(|err| {
+            ApiError::internal(format!("failed to persist workspace layout: {err:#}"))
+        })?;
         Ok(WorkspaceLayoutResponse { layout })
     }
 
@@ -849,7 +852,8 @@ impl AppState {
             return;
         };
         let record = &mut inner.sessions[index];
-        if record.session.agent != Agent::Claude || !matches!(record.runtime, SessionRuntime::None) {
+        if record.session.agent != Agent::Claude || !matches!(record.runtime, SessionRuntime::None)
+        {
             let _ = handle.kill();
             return;
         }
@@ -1826,7 +1830,10 @@ impl AppState {
         }
     }
 
-    fn fork_codex_thread(&self, session_id: &str) -> std::result::Result<CreateSessionResponse, ApiError> {
+    fn fork_codex_thread(
+        &self,
+        session_id: &str,
+    ) -> std::result::Result<CreateSessionResponse, ApiError> {
         if self.remote_session_target(session_id)?.is_some() {
             return self.proxy_remote_fork_codex_thread(session_id);
         }
@@ -1934,14 +1941,19 @@ impl AppState {
         })
     }
 
-    fn archive_codex_thread(&self, session_id: &str) -> std::result::Result<StateResponse, ApiError> {
+    fn archive_codex_thread(
+        &self,
+        session_id: &str,
+    ) -> std::result::Result<StateResponse, ApiError> {
         if self.remote_session_target(session_id)?.is_some() {
             return self.proxy_remote_archive_codex_thread(session_id);
         }
 
         let context = self.resolve_codex_thread_action_context(session_id)?;
         if context.thread_state == Some(CodexThreadState::Archived) {
-            return Err(ApiError::conflict("the current Codex thread is already archived"));
+            return Err(ApiError::conflict(
+                "the current Codex thread is already archived",
+            ));
         }
         self.perform_codex_json_rpc_request(
             "thread/archive",
@@ -1967,7 +1979,9 @@ impl AppState {
             ),
         );
         self.commit_locked(&mut inner).map_err(|err| {
-            ApiError::internal(format!("failed to persist archived Codex thread note: {err:#}"))
+            ApiError::internal(format!(
+                "failed to persist archived Codex thread note: {err:#}"
+            ))
         })?;
         Ok(self.snapshot_from_inner(&inner))
     }
@@ -1982,7 +1996,9 @@ impl AppState {
 
         let context = self.resolve_codex_thread_action_context(session_id)?;
         if context.thread_state != Some(CodexThreadState::Archived) {
-            return Err(ApiError::conflict("the current Codex thread is not archived"));
+            return Err(ApiError::conflict(
+                "the current Codex thread is not archived",
+            ));
         }
         self.perform_codex_json_rpc_request(
             "thread/unarchive",
@@ -2015,7 +2031,10 @@ impl AppState {
         Ok(self.snapshot_from_inner(&inner))
     }
 
-    fn compact_codex_thread(&self, session_id: &str) -> std::result::Result<StateResponse, ApiError> {
+    fn compact_codex_thread(
+        &self,
+        session_id: &str,
+    ) -> std::result::Result<StateResponse, ApiError> {
         if self.remote_session_target(session_id)?.is_some() {
             return self.proxy_remote_compact_codex_thread(session_id);
         }
@@ -2044,9 +2063,7 @@ impl AppState {
             ),
         );
         self.commit_locked(&mut inner).map_err(|err| {
-            ApiError::internal(format!(
-                "failed to persist Codex compaction note: {err:#}"
-            ))
+            ApiError::internal(format!("failed to persist Codex compaction note: {err:#}"))
         })?;
         Ok(self.snapshot_from_inner(&inner))
     }
@@ -2371,6 +2388,7 @@ impl AppState {
         record.runtime = SessionRuntime::None;
         record.runtime_reset_required = false;
         record.runtime_stop_in_progress = false;
+        record.deferred_stop_callbacks.clear();
         record.active_turn_start_message_count = None;
         clear_all_pending_requests(record);
         self.commit_locked(&mut inner)?;
@@ -2395,6 +2413,9 @@ impl AppState {
                 return Ok(());
             }
             if record.runtime_stop_in_progress {
+                record
+                    .deferred_stop_callbacks
+                    .push(DeferredStopCallback::TurnFailed(cleaned.to_owned()));
                 return Ok(());
             }
 
@@ -2418,11 +2439,14 @@ impl AppState {
         };
 
         if should_dispatch_next {
+            self.resume_pending_orchestrator_transitions()?;
             if let Some(dispatch) = self.dispatch_next_queued_turn(session_id)? {
                 deliver_turn_dispatch(self, dispatch).map_err(|err| {
                     anyhow!("failed to deliver queued turn dispatch: {}", err.message)
                 })?;
             }
+        } else {
+            self.resume_pending_orchestrator_transitions()?;
         }
 
         Ok(())
@@ -2502,6 +2526,9 @@ impl AppState {
                 return Ok(());
             }
             if record.runtime_stop_in_progress {
+                record
+                    .deferred_stop_callbacks
+                    .push(DeferredStopCallback::TurnError(cleaned.to_owned()));
                 return Ok(());
             }
 
@@ -2516,11 +2543,14 @@ impl AppState {
         };
 
         if should_dispatch_next {
+            self.resume_pending_orchestrator_transitions()?;
             if let Some(dispatch) = self.dispatch_next_queued_turn(session_id)? {
                 deliver_turn_dispatch(self, dispatch).map_err(|err| {
                     anyhow!("failed to deliver queued turn dispatch: {}", err.message)
                 })?;
             }
+        } else {
+            self.resume_pending_orchestrator_transitions()?;
         }
 
         Ok(())
@@ -2541,6 +2571,9 @@ impl AppState {
                 return Ok(());
             }
             if record.runtime_stop_in_progress {
+                record
+                    .deferred_stop_callbacks
+                    .push(DeferredStopCallback::TurnCompleted);
                 return Ok(());
             }
 
@@ -2590,6 +2623,9 @@ impl AppState {
                 return Ok(());
             }
             if inner.sessions[index].runtime_stop_in_progress {
+                inner.sessions[index].deferred_stop_callbacks.push(
+                    DeferredStopCallback::RuntimeExited(error_message.map(str::to_owned)),
+                );
                 return Ok(());
             }
             let was_busy = matches!(
@@ -2621,6 +2657,7 @@ impl AppState {
                 record.runtime = SessionRuntime::None;
                 record.runtime_reset_required = false;
                 record.runtime_stop_in_progress = false;
+                record.deferred_stop_callbacks.clear();
                 cancel_pending_interaction_messages(&mut record.session.messages);
                 clear_all_pending_requests(record);
 
@@ -2646,11 +2683,14 @@ impl AppState {
         };
 
         if should_dispatch_next {
+            self.resume_pending_orchestrator_transitions()?;
             if let Some(dispatch) = self.dispatch_next_queued_turn(session_id)? {
                 deliver_turn_dispatch(self, dispatch).map_err(|err| {
                     anyhow!("failed to deliver queued turn dispatch: {}", err.message)
                 })?;
             }
+        } else {
+            self.resume_pending_orchestrator_transitions()?;
         }
 
         Ok(())
@@ -2853,15 +2893,12 @@ impl AppState {
             self.commit_locked(&mut inner).map_err(|err| {
                 ApiError::internal(format!("failed to persist session state: {err:#}"))
             })?;
-            (
-                self.snapshot_from_inner(&inner),
-                runtime,
-                hidden_runtimes,
-            )
+            (self.snapshot_from_inner(&inner), runtime, hidden_runtimes)
         };
 
         if let Some(runtime) = runtime_to_kill {
-            if let Err(err) = shutdown_removed_runtime(runtime, &format!("session `{session_id}`")) {
+            if let Err(err) = shutdown_removed_runtime(runtime, &format!("session `{session_id}`"))
+            {
                 eprintln!("session cleanup warning> {err:#}");
             }
         }
@@ -2899,7 +2936,14 @@ impl AppState {
         self.commit_locked(&mut inner).map_err(|err| {
             ApiError::internal(format!("failed to persist session state: {err:#}"))
         })?;
-        Ok(self.snapshot_from_inner(&inner))
+        drop(inner);
+        self.resume_pending_orchestrator_transitions()
+            .map_err(|err| {
+                ApiError::internal(format!(
+                    "failed to reconcile orchestrator transitions: {err:#}"
+                ))
+            })?;
+        Ok(self.snapshot())
     }
 
     fn stop_session(&self, session_id: &str) -> std::result::Result<StateResponse, ApiError> {
@@ -2936,24 +2980,63 @@ impl AppState {
 
             // Preserve the public session status until the stop succeeds so borrowed state reads
             // never observe a contradictory transient Idle snapshot while shutdown is still pending.
+            // `deferred_stop_callbacks` is guaranteed to be empty here because the guard above
+            // already returned if `runtime_stop_in_progress` was true (and callbacks can only
+            // defer when that flag is set).
             record.runtime_stop_in_progress = true;
 
             (runtime, stop_failure_is_best_effort)
         };
 
-        if let Err(err) = shutdown_removed_runtime(runtime_to_stop, &format!("session `{session_id}`"))
+        if let Err(err) =
+            shutdown_removed_runtime(runtime_to_stop, &format!("session `{session_id}`"))
         {
             if stop_failure_is_best_effort {
                 eprintln!(
                     "session cleanup warning> failed to stop session `{session_id}` cleanly: {err:#}"
                 );
             } else {
-                let mut inner = self.inner.lock().expect("state mutex poisoned");
-                let index = inner
-                    .find_visible_session_index(session_id)
-                    .ok_or_else(|| ApiError::not_found("session not found"))?;
-                let record = &mut inner.sessions[index];
-                record.runtime_stop_in_progress = false;
+                let (mut deferred_callbacks, token) = {
+                    let mut inner = self.inner.lock().expect("state mutex poisoned");
+                    let index = inner
+                        .find_visible_session_index(session_id)
+                        .ok_or_else(|| ApiError::not_found("session not found"))?;
+                    let record = &mut inner.sessions[index];
+                    record.runtime_stop_in_progress = false;
+                    let deferred_callbacks = std::mem::take(&mut record.deferred_stop_callbacks);
+                    let token = record.runtime.runtime_token();
+                    (deferred_callbacks, token)
+                };
+
+                // Replay any terminal callbacks that arrived during the failed shutdown window.
+                // The flag is now cleared so the callback methods will proceed normally.
+                if let Some(token) = token {
+                    deferred_callbacks.sort_by_key(|deferred| {
+                        matches!(deferred, DeferredStopCallback::RuntimeExited(_))
+                    });
+                    for deferred in deferred_callbacks {
+                        let replay_result = match deferred {
+                            DeferredStopCallback::TurnFailed(msg) => {
+                                self.fail_turn_if_runtime_matches(session_id, &token, &msg)
+                            }
+                            DeferredStopCallback::TurnError(msg) => {
+                                self.mark_turn_error_if_runtime_matches(session_id, &token, &msg)
+                            }
+                            DeferredStopCallback::TurnCompleted => {
+                                self.finish_turn_ok_if_runtime_matches(session_id, &token)
+                            }
+                            DeferredStopCallback::RuntimeExited(msg) => self
+                                .handle_runtime_exit_if_matches(session_id, &token, msg.as_deref()),
+                        };
+                        if let Err(replay_err) = replay_result {
+                            eprintln!(
+                                "session cleanup warning> failed to replay deferred stop callback \
+                                 for session `{session_id}`: {replay_err:#}"
+                            );
+                        }
+                    }
+                }
+
                 return Err(ApiError::internal(format!(
                     "failed to stop session `{session_id}` cleanly: {err:#}"
                 )));
@@ -2970,6 +3053,7 @@ impl AppState {
                 record.runtime = SessionRuntime::None;
                 record.runtime_reset_required = false;
                 record.runtime_stop_in_progress = false;
+                record.deferred_stop_callbacks.clear();
                 cancel_pending_interaction_messages(&mut record.session.messages);
                 clear_all_pending_requests(record);
                 record.session.status = SessionStatus::Idle;
@@ -3071,11 +3155,12 @@ impl AppState {
                 .ok_or_else(|| anyhow!("session `{session_id}` not found"))?;
             let (message_index, preview, status) = {
                 let record = &mut inner.sessions[index];
-                let anchor_index = message_index_on_record(record, anchor_message_id).ok_or_else(|| {
-                    anyhow!(
-                        "session `{session_id}` anchor message `{anchor_message_id}` not found"
-                    )
-                })?;
+                let anchor_index =
+                    message_index_on_record(record, anchor_message_id).ok_or_else(|| {
+                        anyhow!(
+                            "session `{session_id}` anchor message `{anchor_message_id}` not found"
+                        )
+                    })?;
                 // This insertion path is currently reserved for subagent-result messages that do
                 // not contribute preview/status text. Keep the existing session preview/status in
                 // the emitted delta unless a future caller explicitly broadens that contract.
@@ -3765,10 +3850,7 @@ impl AppState {
     ) -> std::result::Result<StateResponse, ApiError> {
         if self.remote_session_target(session_id)?.is_some() {
             return self.proxy_remote_submit_codex_mcp_elicitation(
-                session_id,
-                message_id,
-                action,
-                content,
+                session_id, message_id, action, content,
             );
         }
 
@@ -4097,11 +4179,7 @@ fn discover_codex_home_candidates(
     let mut seen = HashSet::new();
 
     for scope in ["shared-app-server"] {
-        push_codex_home_candidate(
-            &mut homes,
-            &mut seen,
-            termal_codex_root.join(scope),
-        );
+        push_codex_home_candidate(&mut homes, &mut seen, termal_codex_root.join(scope));
     }
 
     let mut extra_termal_homes = fs::read_dir(termal_codex_root)
@@ -4123,18 +4201,10 @@ fn discover_codex_home_candidates(
         push_codex_home_candidate(&mut homes, &mut seen, home);
     }
 
-    push_codex_home_candidate(
-        &mut homes,
-        &mut seen,
-        termal_codex_root.to_path_buf(),
-    );
+    push_codex_home_candidate(&mut homes, &mut seen, termal_codex_root.to_path_buf());
 
     if let Some(source_codex_home) = source_codex_home {
-        push_codex_home_candidate(
-            &mut homes,
-            &mut seen,
-            source_codex_home.to_path_buf(),
-        );
+        push_codex_home_candidate(&mut homes, &mut seen, source_codex_home.to_path_buf());
     }
 
     homes
@@ -4146,11 +4216,7 @@ fn codex_home_scope_is_importable(path: &FsPath) -> bool {
         .map_or(true, |scope| scope != "repl")
 }
 
-fn push_codex_home_candidate(
-    homes: &mut Vec<PathBuf>,
-    seen: &mut HashSet<PathBuf>,
-    home: PathBuf,
-) {
+fn push_codex_home_candidate(homes: &mut Vec<PathBuf>, seen: &mut HashSet<PathBuf>, home: PathBuf) {
     let key = normalize_codex_discovery_path(&home);
     if seen.insert(key) {
         homes.push(home);
@@ -4333,10 +4399,7 @@ fn codex_discovery_scope_query_patterns(scope: &str) -> Vec<(String, String)> {
 
     for candidate in candidates {
         if seen.insert(candidate.clone()) {
-            patterns.push((
-                candidate.clone(),
-                codex_discovery_like_pattern(&candidate),
-            ));
+            patterns.push((candidate.clone(), codex_discovery_like_pattern(&candidate)));
         }
     }
 
@@ -4633,6 +4696,7 @@ impl StateInner {
             runtime: SessionRuntime::None,
             runtime_reset_required: false,
             runtime_stop_in_progress: false,
+            deferred_stop_callbacks: Vec::new(),
             hidden: false,
             session: Session {
                 id: format!("session-{number}"),
@@ -4987,9 +5051,7 @@ impl PersistedState {
             next_session_number: inner.next_session_number,
             next_message_number: inner.next_message_number,
             projects: inner.projects.clone(),
-            ignored_discovered_codex_thread_ids: inner
-                .ignored_discovered_codex_thread_ids
-                .clone(),
+            ignored_discovered_codex_thread_ids: inner.ignored_discovered_codex_thread_ids.clone(),
             orchestrator_instances: inner.orchestrator_instances.clone(),
             workspace_layouts: inner.workspace_layouts.clone(),
             sessions: inner
@@ -5143,6 +5205,7 @@ impl PersistedSessionRecord {
             runtime: SessionRuntime::None,
             runtime_reset_required: false,
             runtime_stop_in_progress: false,
+            deferred_stop_callbacks: Vec::new(),
             hidden: false,
             session,
         };
@@ -5176,6 +5239,11 @@ struct SessionRecord {
     runtime: SessionRuntime,
     runtime_reset_required: bool,
     runtime_stop_in_progress: bool,
+    /// Terminal callbacks deferred while `runtime_stop_in_progress` was true. Replayed in arrival
+    /// order on dedicated stop failure so the session doesn't get stuck in a stale Active state or
+    /// reconstruct the wrong terminal sequence when completion/error and runtime-exit both land
+    /// during the shutdown window.
+    deferred_stop_callbacks: Vec<DeferredStopCallback>,
     hidden: bool,
     session: Session,
 }
@@ -5200,6 +5268,7 @@ fn reset_hidden_claude_spare_record(record: &mut SessionRecord) {
     record.message_positions.clear();
     record.runtime_reset_required = false;
     record.runtime_stop_in_progress = false;
+    record.deferred_stop_callbacks.clear();
     record.active_turn_start_message_count = None;
 }
 
@@ -5257,7 +5326,13 @@ fn dedupe_agent_commands(commands: Vec<AgentCommand>) -> Vec<AgentCommand> {
 
 fn claude_spare_profile(
     record: &SessionRecord,
-) -> (String, Option<String>, String, ClaudeApprovalMode, ClaudeEffortLevel) {
+) -> (
+    String,
+    Option<String>,
+    String,
+    ClaudeApprovalMode,
+    ClaudeEffortLevel,
+) {
     (
         record.session.workdir.clone(),
         record.session.project_id.clone(),
@@ -5502,10 +5577,7 @@ fn approval_preview_text(agent_name: &str, decision: ApprovalDecision) -> String
     }
 }
 
-fn user_input_request_preview_text(
-    agent_name: &str,
-    state: InteractionRequestState,
-) -> String {
+fn user_input_request_preview_text(agent_name: &str, state: InteractionRequestState) -> String {
     match state {
         InteractionRequestState::Pending => "Input requested.".to_owned(),
         InteractionRequestState::Submitted => {
@@ -5527,17 +5599,19 @@ fn mcp_elicitation_request_preview_text(
 ) -> String {
     match state {
         InteractionRequestState::Pending => "MCP input requested.".to_owned(),
-        InteractionRequestState::Submitted => match action.unwrap_or(McpElicitationAction::Accept) {
-            McpElicitationAction::Accept => {
-                format!("MCP input submitted. {agent_name} is continuing\u{2026}")
+        InteractionRequestState::Submitted => {
+            match action.unwrap_or(McpElicitationAction::Accept) {
+                McpElicitationAction::Accept => {
+                    format!("MCP input submitted. {agent_name} is continuing\u{2026}")
+                }
+                McpElicitationAction::Decline => {
+                    format!("MCP request declined. {agent_name} is continuing\u{2026}")
+                }
+                McpElicitationAction::Cancel => {
+                    format!("MCP request canceled. {agent_name} is continuing\u{2026}")
+                }
             }
-            McpElicitationAction::Decline => {
-                format!("MCP request declined. {agent_name} is continuing\u{2026}")
-            }
-            McpElicitationAction::Cancel => {
-                format!("MCP request canceled. {agent_name} is continuing\u{2026}")
-            }
-        },
+        }
         InteractionRequestState::Interrupted => {
             "MCP input request expired after TermAl restarted.".to_owned()
         }
@@ -5722,9 +5796,9 @@ fn validate_codex_mcp_elicitation_form_content(
         .and_then(Value::as_array)
         .cloned()
         .unwrap_or_default();
-    let object = content.as_object().ok_or_else(|| {
-        ApiError::bad_request("MCP elicitation content must be a JSON object")
-    })?;
+    let object = content
+        .as_object()
+        .ok_or_else(|| ApiError::bad_request("MCP elicitation content must be a JSON object"))?;
 
     for key in object.keys() {
         if !properties.contains_key(key) {
@@ -5744,9 +5818,7 @@ fn validate_codex_mcp_elicitation_form_content(
     let mut normalized = serde_json::Map::new();
     for (key, value) in object {
         let schema = properties.get(key).ok_or_else(|| {
-            ApiError::bad_request(format!(
-                "field `{key}` is not part of this MCP elicitation",
-            ))
+            ApiError::bad_request(format!("field `{key}` is not part of this MCP elicitation",))
         })?;
         normalized.insert(
             key.clone(),
@@ -5795,7 +5867,11 @@ fn validate_codex_mcp_elicitation_number_value(
     require_integer: bool,
 ) -> std::result::Result<Value, ApiError> {
     let Some(number) = value.as_f64() else {
-        let expected = if require_integer { "an integer" } else { "a number" };
+        let expected = if require_integer {
+            "an integer"
+        } else {
+            "a number"
+        };
         return Err(ApiError::bad_request(format!(
             "field `{field_name}` must be {expected}",
         )));
@@ -5913,9 +5989,9 @@ fn validate_codex_mcp_elicitation_array_value(
     schema: &Value,
     value: &Value,
 ) -> std::result::Result<Value, ApiError> {
-    let values = value.as_array().ok_or_else(|| {
-        ApiError::bad_request(format!("field `{field_name}` must be a list"))
-    })?;
+    let values = value
+        .as_array()
+        .ok_or_else(|| ApiError::bad_request(format!("field `{field_name}` must be a list")))?;
 
     if let Some(min_items) = schema.get("minItems").and_then(Value::as_u64) {
         if values.len() < min_items as usize {
@@ -6575,9 +6651,7 @@ fn codex_sandbox_mode_from_json_value(value: &Value) -> Option<CodexSandboxMode>
 }
 
 fn default_forked_codex_session_name(current_name: &str, thread_name: Option<&str>) -> String {
-    let trimmed_thread_name = thread_name
-        .map(str::trim)
-        .filter(|value| !value.is_empty());
+    let trimmed_thread_name = thread_name.map(str::trim).filter(|value| !value.is_empty());
     let trimmed_current_name = current_name.trim();
     let base = trimmed_thread_name.unwrap_or(trimmed_current_name);
     format!("{base} Fork")
@@ -6601,7 +6675,10 @@ fn resolve_forked_codex_workdir(
         None => return Ok(requested_workdir.to_owned()),
     };
     let project_root = resolve_project_root_path_by_id(state, project_id)?;
-    if path_contains(project_root.to_string_lossy().as_ref(), FsPath::new(requested_workdir)) {
+    if path_contains(
+        project_root.to_string_lossy().as_ref(),
+        FsPath::new(requested_workdir),
+    ) {
         Ok(requested_workdir.to_owned())
     } else {
         Ok(fallback_workdir.to_owned())
@@ -6814,9 +6891,7 @@ fn shutdown_removed_runtime(runtime: KillableRuntime, context: &str) -> Result<(
         KillableRuntime::Codex(handle) => {
             if let Some(shared_session) = &handle.shared_session {
                 match shared_session.interrupt_and_detach() {
-                    Ok(()) => {
-                        Ok(())
-                    }
+                    Ok(()) => Ok(()),
                     Err(interrupt_err) => {
                         if shared_child_has_exited(&handle.process, "shared Codex runtime")? {
                             Err(anyhow!(
@@ -6838,10 +6913,27 @@ fn shutdown_removed_runtime(runtime: KillableRuntime, context: &str) -> Result<(
         KillableRuntime::Claude(handle) => handle
             .kill()
             .with_context(|| format!("failed to kill Claude runtime for {context}")),
-        KillableRuntime::Acp(handle) => handle
-            .kill()
-            .with_context(|| format!("failed to kill {} runtime for {context}", handle.agent.label())),
+        KillableRuntime::Acp(handle) => handle.kill().with_context(|| {
+            format!(
+                "failed to kill {} runtime for {context}",
+                handle.agent.label()
+            )
+        }),
     }
+}
+
+/// Terminal runtime callback deferred because `runtime_stop_in_progress` was true.
+/// Replayed when a dedicated stop attempt fails, discarded when it succeeds.
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum DeferredStopCallback {
+    /// `fail_turn_if_runtime_matches` was called.
+    TurnFailed(String),
+    /// `mark_turn_error_if_runtime_matches` was called.
+    TurnError(String),
+    /// `finish_turn_ok_if_runtime_matches` was called.
+    TurnCompleted,
+    /// `handle_runtime_exit_if_matches` was called.
+    RuntimeExited(Option<String>),
 }
 
 #[derive(Clone)]
@@ -6852,6 +6944,15 @@ enum RuntimeToken {
 }
 
 impl SessionRuntime {
+    fn runtime_token(&self) -> Option<RuntimeToken> {
+        match self {
+            Self::Claude(handle) => Some(RuntimeToken::Claude(handle.runtime_id.clone())),
+            Self::Codex(handle) => Some(RuntimeToken::Codex(handle.runtime_id.clone())),
+            Self::Acp(handle) => Some(RuntimeToken::Acp(handle.runtime_id.clone())),
+            Self::None => None,
+        }
+    }
+
     fn matches_runtime_token(&self, token: &RuntimeToken) -> bool {
         match (self, token) {
             (Self::Claude(handle), RuntimeToken::Claude(runtime_id)) => {
@@ -6885,14 +6986,13 @@ fn forced_kill_child_process_failure() -> &'static Mutex<Option<ForcedKillChildP
 fn set_test_kill_child_process_failure(label: Option<&str>, process: Option<&Arc<SharedChild>>) {
     *forced_kill_child_process_failure()
         .lock()
-        .expect("forced kill-child-process failure mutex poisoned") =
-        match (label, process) {
-            (Some(label), Some(process)) => Some(ForcedKillChildProcessFailure {
-                label: label.to_owned(),
-                process_ptr: Arc::as_ptr(process) as usize,
-            }),
-            _ => None,
-        };
+        .expect("forced kill-child-process failure mutex poisoned") = match (label, process) {
+        (Some(label), Some(process)) => Some(ForcedKillChildProcessFailure {
+            label: label.to_owned(),
+            process_ptr: Arc::as_ptr(process) as usize,
+        }),
+        _ => None,
+    };
 }
 
 fn kill_child_process(process: &Arc<SharedChild>, label: &str) -> Result<()> {
@@ -6911,25 +7011,15 @@ fn kill_child_process(process: &Arc<SharedChild>, label: &str) -> Result<()> {
         }
     }
 
-    if wait_for_shared_child_exit_timeout(
-        process,
-        Duration::from_millis(50),
-        label,
-    )?
-    .is_some()
-    {
+    if wait_for_shared_child_exit_timeout(process, Duration::from_millis(50), label)?.is_some() {
         return Ok(());
     }
 
     match process.kill() {
         Ok(()) => Ok(()),
         Err(err) => {
-            if wait_for_shared_child_exit_timeout(
-                process,
-                Duration::from_millis(50),
-                label,
-            )?
-            .is_some()
+            if wait_for_shared_child_exit_timeout(process, Duration::from_millis(50), label)?
+                .is_some()
             {
                 Ok(())
             } else {
@@ -6975,4 +7065,3 @@ fn wait_for_shared_child_exit_timeout(
         )),
     }
 }
-

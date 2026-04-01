@@ -1,4 +1,10 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -102,12 +108,114 @@ describe("OrchestratorTemplatesPanel", () => {
             expect.objectContaining({
               id: "session-1",
               name: "Session 1",
+              inputMode: "queue",
             }),
           ],
         }),
       );
     });
     expect(screen.getByText("Template created.")).toBeInTheDocument();
+  });
+
+  it("saves a session input mode override on the template draft", async () => {
+    fetchTemplatesMock.mockResolvedValue({ templates: [] });
+    createTemplateMock.mockResolvedValue({
+      template: makeTemplate({
+        id: "orchestrator-template-2",
+        name: "Consolidation Flow",
+        sessions: [
+          makeSession({
+            id: "session-1",
+            name: "Session 1",
+            inputMode: "consolidate",
+          }),
+        ],
+      }),
+    });
+
+    render(<OrchestratorTemplatesPanel />);
+
+    await screen.findByText(
+      "No orchestration templates yet. Start a new one and save it here.",
+    );
+
+    fireEvent.change(screen.getByLabelText("Template name"), {
+      target: { value: "Consolidation Flow" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Add session" }));
+    fireEvent.change(screen.getByLabelText("Incoming transitions"), {
+      target: { value: "consolidate" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Create template" }));
+
+    await waitFor(() => {
+      expect(createTemplateMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          name: "Consolidation Flow",
+          sessions: [
+            expect.objectContaining({
+              id: "session-1",
+              inputMode: "consolidate",
+            }),
+          ],
+        }),
+      );
+    });
+  });
+
+  it("clears dirty state after saving an existing template", async () => {
+    fetchTemplatesMock.mockResolvedValue({
+      templates: [
+        makeTemplate({
+          id: "template-existing",
+          name: "Codium",
+          description: "Code factory",
+          projectId: "project-a",
+          sessions: [makeSession({ id: "session-1", name: "Entry" })],
+        }),
+      ],
+    });
+    updateTemplateMock.mockResolvedValue({
+      template: makeTemplate({
+        id: "template-existing",
+        name: "Codium",
+        description: "Code factory updated",
+        projectId: "project-a",
+        sessions: [makeSession({ id: "session-1", name: "Entry" })],
+      }),
+    });
+
+    render(<OrchestratorTemplatesPanel projects={[makeProject()]} />);
+
+    await screen.findByDisplayValue("Codium");
+
+    fireEvent.change(screen.getByLabelText("Description"), {
+      target: { value: "Code factory updated" },
+    });
+
+    const saveButton = screen.getByRole("button", { name: "Save template" });
+    expect(saveButton).toBeEnabled();
+
+    fireEvent.click(saveButton);
+
+    await waitFor(() => {
+      expect(updateTemplateMock).toHaveBeenCalledWith(
+        "template-existing",
+        expect.objectContaining({
+          description: "Code factory updated",
+        }),
+      );
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText("Template saved.")).toBeInTheDocument();
+      expect(
+        screen.getByRole("button", { name: "Save template" }),
+      ).toBeDisabled();
+    });
+
+    const runButton = screen.getAllByRole("button", { name: /run/i })[0];
+    expect(runButton).toBeEnabled();
   });
 
   it("restores the selected project from persisted draft state", async () => {
@@ -140,7 +248,278 @@ describe("OrchestratorTemplatesPanel", () => {
     expect(screen.getByLabelText("Project")).toHaveValue("project-a");
   });
 
-  it("shows a validation error for cyclic transition drafts", async () => {
+  it("keeps restored template edits dirty against the saved template after reload", async () => {
+    fetchTemplatesMock.mockResolvedValue({
+      templates: [
+        makeTemplate({
+          id: "template-recovered",
+          name: "Saved Flow",
+          projectId: "project-a",
+          sessions: [makeSession({ id: "builder", name: "Builder" })],
+        }),
+      ],
+    });
+    window.localStorage.setItem(
+      "termal-orchestrator-panel-state:orchestrator-dirty-template",
+      JSON.stringify({
+        draft: {
+          name: "Recovered Flow",
+          description: "Recovered local edits",
+          projectId: "project-a",
+          sessions: [makeSession({ id: "builder", name: "Builder" })],
+          transitions: [],
+        },
+        selectedNodeId: "builder",
+        selectedTemplateId: "template-recovered",
+      }),
+    );
+
+    render(
+      <OrchestratorTemplatesPanel
+        persistenceKey="orchestrator-dirty-template"
+        projects={[makeProject()]}
+      />,
+    );
+
+    expect(
+      await screen.findByDisplayValue("Recovered Flow"),
+    ).toBeInTheDocument();
+
+    const saveButton = screen.getByRole("button", { name: "Save template" });
+    expect(saveButton).toBeEnabled();
+
+    const runButton = screen
+      .getAllByRole("button", { name: /run/i })
+      .find((candidate) =>
+        /Save changes before running/.test(
+          candidate.getAttribute("title") ?? "",
+        ),
+      );
+    if (!runButton) {
+      throw new Error("Run button not found");
+    }
+    expect(runButton).toBeDisabled();
+    expect(runButton).toHaveAttribute("title", "Save changes before running");
+
+    fireEvent.click(screen.getByRole("button", { name: "Reset draft" }));
+
+    await waitFor(() => {
+      expect(screen.getByLabelText("Template name")).toHaveValue("Saved Flow");
+    });
+    expect(
+      screen.getByRole("button", { name: "Save template" }),
+    ).toBeDisabled();
+    const refreshedRunButton = screen
+      .getAllByRole("button", { name: /run/i })
+      .find((candidate) =>
+        /Run on /.test(candidate.getAttribute("title") ?? ""),
+      );
+    if (!refreshedRunButton) {
+      throw new Error("Run button not found after reset");
+    }
+    expect(refreshedRunButton).toBeEnabled();
+  });
+
+  it("defaults restored legacy draft sessions without input mode to queue", async () => {
+    fetchTemplatesMock.mockResolvedValue({ templates: [] });
+    const legacySession = {
+      ...makeSession({ id: "builder", name: "Builder" }),
+    } as Record<string, unknown>;
+    delete legacySession.inputMode;
+    window.localStorage.setItem(
+      "termal-orchestrator-panel-state:orchestrator-legacy-input-mode",
+      JSON.stringify({
+        draft: {
+          name: "Legacy Flow",
+          description: "",
+          projectId: null,
+          sessions: [legacySession],
+          transitions: [],
+        },
+        selectedNodeId: "builder",
+        selectedTemplateId: null,
+      }),
+    );
+
+    render(
+      <OrchestratorTemplatesPanel persistenceKey="orchestrator-legacy-input-mode" />,
+    );
+
+    expect(await screen.findByDisplayValue("Legacy Flow")).toBeInTheDocument();
+    expect(
+      screen.getByLabelText("Incoming transitions", {
+        selector: "select#session-input-mode-builder",
+      }),
+    ).toHaveValue("queue");
+  });
+
+  it("reopens restored edits as a new draft when the selected template no longer exists", async () => {
+    fetchTemplatesMock.mockResolvedValue({
+      templates: [makeTemplate({ id: "template-live", name: "Live Flow" })],
+    });
+    window.localStorage.setItem(
+      "termal-orchestrator-panel-state:orchestrator-missing-template",
+      JSON.stringify({
+        draft: {
+          name: "Recovered Flow",
+          description: "Recovered local edits",
+          projectId: null,
+          sessions: [makeSession({ id: "builder", name: "Builder" })],
+          transitions: [],
+        },
+        selectedNodeId: "builder",
+        selectedTemplateId: "template-missing",
+      }),
+    );
+
+    render(
+      <OrchestratorTemplatesPanel persistenceKey="orchestrator-missing-template" />,
+    );
+
+    expect(await screen.findByText("Live Flow")).toBeInTheDocument();
+    expect(screen.getByLabelText("Template name")).toHaveValue("Recovered Flow");
+    expect(
+      screen.getByRole("button", { name: "Create template" }),
+    ).toBeEnabled();
+  });
+
+  it("defaults restored legacy draft sessions with null input mode to queue", async () => {
+    fetchTemplatesMock.mockResolvedValue({ templates: [] });
+    window.localStorage.setItem(
+      "termal-orchestrator-panel-state:orchestrator-null-input-mode",
+      JSON.stringify({
+        draft: {
+          name: "Legacy Flow",
+          description: "",
+          projectId: null,
+          sessions: [
+            {
+              ...makeSession({ id: "builder", name: "Builder" }),
+              inputMode: null,
+            },
+          ],
+          transitions: [],
+        },
+        selectedNodeId: "builder",
+        selectedTemplateId: null,
+      }),
+    );
+
+    render(
+      <OrchestratorTemplatesPanel persistenceKey="orchestrator-null-input-mode" />,
+    );
+
+    expect(await screen.findByDisplayValue("Legacy Flow")).toBeInTheDocument();
+    expect(
+      screen.getByLabelText("Incoming transitions", {
+        selector: "select#session-input-mode-builder",
+      }),
+    ).toHaveValue("queue");
+  });
+
+  it("keeps an identical restored draft clean against the server snapshot", async () => {
+    fetchTemplatesMock.mockResolvedValue({
+      templates: [
+        makeTemplate({
+          id: "template-clean",
+          name: "Saved Flow",
+          projectId: "project-a",
+          sessions: [makeSession({ id: "builder", name: "Builder" })],
+        }),
+      ],
+    });
+    window.localStorage.setItem(
+      "termal-orchestrator-panel-state:orchestrator-clean-template",
+      JSON.stringify({
+        draft: {
+          name: "Saved Flow",
+          description: "",
+          projectId: "project-a",
+          sessions: [makeSession({ id: "builder", name: "Builder" })],
+          transitions: [],
+        },
+        selectedNodeId: "builder",
+        selectedTemplateId: "template-clean",
+      }),
+    );
+
+    render(
+      <OrchestratorTemplatesPanel
+        persistenceKey="orchestrator-clean-template"
+        projects={[makeProject()]}
+      />,
+    );
+
+    expect(await screen.findByDisplayValue("Saved Flow")).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Save template" }),
+    ).toBeDisabled();
+    const runButton = screen
+      .getAllByRole("button", { name: /run/i })
+      .find((candidate) =>
+        /Run on Project A/.test(candidate.getAttribute("title") ?? ""),
+      );
+    if (!runButton) {
+      throw new Error("Run button not found");
+    }
+    expect(runButton).toBeEnabled();
+  });
+
+  it("flushes pending draft persistence on pagehide before the debounce fires", async () => {
+    fetchTemplatesMock.mockResolvedValue({ templates: [] });
+    render(
+      <OrchestratorTemplatesPanel persistenceKey="orchestrator-pagehide" />,
+    );
+
+    expect(
+      await screen.findByText(
+        "No orchestration templates yet. Start a new one and save it here.",
+      ),
+    ).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText("Template name"), {
+      target: { value: "Unsaved Flow" },
+    });
+
+    const stateKey = "termal-orchestrator-panel-state:orchestrator-pagehide";
+    expect(window.localStorage.getItem(stateKey)).toBeNull();
+
+    act(() => {
+      window.dispatchEvent(new Event("pagehide"));
+    });
+
+    expect(window.localStorage.getItem(stateKey)).toContain(
+      '"name":"Unsaved Flow"',
+    );
+  });
+
+  it("flushes pending draft persistence when the panel unmounts before the debounce fires", async () => {
+    fetchTemplatesMock.mockResolvedValue({ templates: [] });
+    const { unmount } = render(
+      <OrchestratorTemplatesPanel persistenceKey="orchestrator-unmount" />,
+    );
+
+    expect(
+      await screen.findByText(
+        "No orchestration templates yet. Start a new one and save it here.",
+      ),
+    ).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText("Template name"), {
+      target: { value: "Unsaved Flow" },
+    });
+
+    const stateKey = "termal-orchestrator-panel-state:orchestrator-unmount";
+    expect(window.localStorage.getItem(stateKey)).toBeNull();
+
+    unmount();
+
+    expect(window.localStorage.getItem(stateKey)).toContain(
+      '"name":"Unsaved Flow"',
+    );
+  });
+
+  it("allows cyclic transition drafts", async () => {
     fetchTemplatesMock.mockResolvedValue({ templates: [] });
     window.localStorage.setItem(
       "termal-orchestrator-panel-state:orchestrator-cycle",
@@ -175,11 +554,60 @@ describe("OrchestratorTemplatesPanel", () => {
 
     expect(await screen.findByDisplayValue("Cycle Flow")).toBeInTheDocument();
     expect(
-      screen.getByText("Transitions must form a directed acyclic graph."),
+      screen.getByRole("button", { name: "Create template" }),
+    ).toBeEnabled();
+    expect(
+      screen.queryByText(/cannot create cycles?/i),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByText(/two different sessions/i),
+    ).not.toBeInTheDocument();
+  });
+
+  it("allows self-loop transition drafts", async () => {
+    fetchTemplatesMock.mockResolvedValue({ templates: [] });
+    window.localStorage.setItem(
+      "termal-orchestrator-panel-state:orchestrator-self-loop",
+      JSON.stringify({
+        draft: {
+          name: "Self Loop Flow",
+          description: "",
+          projectId: null,
+          sessions: [makeSession({ id: "loop", name: "Loop Session" })],
+          transitions: [
+            makeTransition({
+              id: "loop-to-loop",
+              fromSessionId: "loop",
+              toSessionId: "loop",
+            }),
+          ],
+        },
+        selectedNodeId: "loop",
+        selectedTemplateId: null,
+      }),
+    );
+
+    const { container } = render(
+      <OrchestratorTemplatesPanel persistenceKey="orchestrator-self-loop" />,
+    );
+
+    expect(
+      await screen.findByDisplayValue("Self Loop Flow"),
     ).toBeInTheDocument();
     expect(
       screen.getByRole("button", { name: "Create template" }),
     ).toBeEnabled();
+    expect(
+      screen.queryByText(/cannot create cycles?/i),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByText(/two different sessions/i),
+    ).not.toBeInTheDocument();
+    const edgePath = container.querySelector(
+      "svg.orchestrator-board-edges path.orchestrator-board-edge",
+    );
+    expect(edgePath).not.toBeNull();
+    expect(edgePath?.getAttribute("d")).toContain(" C ");
   });
 
   it("shows a validation error when a draft exceeds the session limit", async () => {
@@ -506,6 +934,50 @@ describe("OrchestratorTemplatesPanel", () => {
       await screen.findByTitle("transition-1: Dev -> Reviewer"),
     ).toBeInTheDocument();
   });
+
+  it("shows the transition title without rendering an editable transition id field", async () => {
+    fetchTemplatesMock.mockResolvedValue({
+      templates: [
+        makeTemplate({
+          id: "template-transition",
+          name: "Flow With Transition",
+          sessions: [
+            makeSession({
+              id: "dev",
+              name: "Dev",
+              position: { x: 140, y: 160 },
+            }),
+            makeSession({
+              id: "reviewer",
+              name: "Reviewer",
+              position: { x: 760, y: 420 },
+            }),
+          ],
+          transitions: [
+            makeTransition({
+              id: "transition-1",
+              fromSessionId: "dev",
+              toSessionId: "reviewer",
+            }),
+          ],
+        }),
+      ],
+    });
+
+    render(
+      <OrchestratorTemplatesPanel
+        initialTemplateId="template-transition"
+        startMode="edit"
+      />,
+    );
+
+    fireEvent.click(await screen.findByTitle("transition-1: Dev -> Reviewer"));
+
+    expect(
+      screen.getByRole("heading", { level: 3, name: "transition-1" }),
+    ).toBeInTheDocument();
+    expect(screen.queryByLabelText("Transition id")).not.toBeInTheDocument();
+  });
 });
 
 function makeTemplate(
@@ -533,6 +1005,7 @@ function makeSession(
     model: null,
     instructions: "Implement the change.",
     autoApprove: true,
+    inputMode: "queue",
     position: { x: 180, y: 420 },
     ...overrides,
   };

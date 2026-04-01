@@ -63,13 +63,11 @@ The frontend workspace-layout `controlPanelSide` typing note is also fixed in th
 workspace layout API types now narrow `controlPanelSide` to `"left" | "right"` in `ui/src/api.ts`,
 matching the backend enum contract.
 
-The `ApprovalDecision::Pending` panic, the cyclic transition graph resource exhaustion, the
-unbounded orchestrator template graph size, and the frontend/client-side template size drift are
-also fixed in the current tree. `Pending` is now rejected by the early guard alongside
-`Interrupted` and `Canceled`, template validation runs a DFS-based cycle detection that rejects
-non-DAG transition graphs while also capping templates at 50 sessions and 200 transitions, and
-`OrchestratorTemplatesPanel` now mirrors those limits locally while disabling the "Add session"
-affordance at the cap.
+The `ApprovalDecision::Pending` panic, the unbounded orchestrator template graph size, and the
+frontend/client-side template size drift are also fixed in the current tree. `Pending` is now
+rejected by the early guard alongside `Interrupted` and `Canceled`, template validation caps
+templates at 50 sessions and 200 transitions, and `OrchestratorTemplatesPanel` now mirrors those
+limits locally while disabling the "Add session" affordance at the cap.
 
 The orchestrator handoff restart recovery gap is also fixed in the current tree. On startup,
 `dispatch_orphaned_queued_prompts` scans for idle sessions with queued prompts and no active
@@ -118,150 +116,172 @@ body and tab rail, which restores reduced-MIME browser behavior without reintrod
 `text/plain` false positives. Stop-in-progress sessions now also suppress matching runtime
 failure, retry, error, exit, completion, and Codex thread-state callbacks until the stop
 finishes, and backend regressions cover the double-stop conflict, queued-prompt suppression,
-and the stop-time callback suppression contracts.
+and the stop-time callback suppression contracts. Terminal runtime callbacks (`fail_turn`,
+`mark_turn_error`, `finish_turn_ok`, `handle_runtime_exit`) that arrive during a dedicated
+stop window are now deferred in ordered `deferred_stop_callbacks` queues and replayed in arrival
+order when the stop fails, so a session can no longer get stuck in a stale Active state or
+reconstruct the wrong completion-then-exit sequence after a failed kill attempt. Tab-rail
+session drops now also preserve the hovered insertion index for already-open sessions, and
+workspace regressions cover both the newly opened and already-open move paths.
+
+The `RuntimeExited`-before-other-callbacks deferred replay ordering bug and the stale `runButton`
+DOM reference concern are also fixed in the current tree. The failed-stop replay loop now sorts
+`RuntimeExited` callbacks last via `sort_by_key` before replaying, so `TurnCompleted` and other
+terminal callbacks always process before the runtime is cleared. The regression test
+`failed_dedicated_stop_replays_runtime_exit_last_even_when_it_arrives_first` covers the reversed
+arrival order `[RuntimeExited(None), TurnCompleted]` and asserts the session ends `Idle`. The
+"keeps restored template edits dirty" test already re-queries the run button after the Reset
+click via a separate `refreshedRunButton` reference, so the pre-reset reference is only used for
+pre-reset assertions and does not produce a stale-DOM false positive.
+
+The SSE reconnect-timer race, consolidate-delivery empty/pruned-predecessor edge cases,
+consolidate-only deadlock handling, restored-draft initialization gaps, self-loop transition
+rendering collapse, panel draft-persistence debounce loss, and the write-only
+`last_delivered_completion_revision` note are also fixed in the current tree. SSE `onopen` now
+clears the fallback reconnect state-resync timer immediately, consolidate delivery skips
+zero-predecessor templates and runtime-pruned predecessors instead of constructing empty
+deliveries, deadlocked consolidate-only cycles now fail closed with an orchestrator `error_message`
+instead of staying `Running`, legacy templates and saved drafts missing `inputMode` now default to
+`queue` on both backend deserialization and frontend restore without weakening the main TypeScript
+template type, stale restored drafts pointing at deleted templates are dropped back to an empty
+clean state, self-loop transitions render as cubic SVG paths, `OrchestratorTemplatesPanel` flushes
+pending localStorage writes on `pagehide`, `beforeunload`, and unmount, and completed sessions no
+longer reschedule already-delivered completion revisions. Reconnect fallback `/api/state` refreshes
+now also force-adopt same-revision snapshots after backend restarts, queued work no longer
+auto-dispatches for sessions owned by stopped orchestrators, and `kill_session` now reruns
+orchestrator reconciliation so consolidate deadlocks are surfaced instead of leaving instances
+stuck `Running`.
 
 ---
 
-## Failed dedicated stop attempts can drop runtime callbacks during the suppression window
+## `ui/src/App.tsx` is large enough to trigger Babel deoptimization warnings
 
-**Severity:** Medium - a dedicated session can stay visibly Active with stale preview/messages if the runtime emits terminal callbacks while a failed stop attempt is in flight.
+**Severity:** Note - the main frontend entry file is now large enough to create tooling friction even though the app still runs correctly.
 
-`stop_session()` now sets `runtime_stop_in_progress` before calling `shutdown_removed_runtime(...)`, and the runtime callback handlers early-return while that flag is set. If a dedicated Claude/Codex/ACP stop attempt ultimately fails and returns an error, the flag is cleared and the runtime is left attached, but any `finish_turn_ok`, `mark_turn_error`, retry, exit, or thread-state callbacks that arrived during the failed shutdown window have already been discarded.
+Running the frontend now emits Babel's "code generator has deoptimised the styling" warning for
+`ui/src/App.tsx` because the file exceeds the generator's 500 KB pretty-print threshold. This is not
+an immediate runtime bug, but it is a concrete signal that build output, source-map ergonomics, and
+routine maintenance are all getting worse as more UI behavior accumulates in one file.
 
-That means a rare dedicated stop failure can now hide real runtime state transitions. Inference from the code path: if the agent exits or completes naturally while the stop attempt is timing out, the user can be left with a session that still looks Active even though the terminal callback already came and was ignored.
-
-**Current behavior:**
-- `stop_session()` sets `runtime_stop_in_progress` before attempting dedicated runtime shutdown
-- matching runtime callbacks are suppressed while that flag is true
-- if the dedicated stop returns an error, the runtime stays attached but suppressed callbacks are not replayed
-
-**Proposal:**
-- preserve or replay terminal runtime callbacks when a dedicated stop attempt fails
-- or narrow suppression so failed-stop paths still honor completion/error/exit callbacks
-- add a regression that forces a dedicated stop failure while a matching runtime callback arrives during the shutdown window
-
-## Tab-rail session drops still ignore insertion index for already-open sessions
-
-**Severity:** Low - dragging an already-open session onto a tab rail still repositions it to the pane default instead of the hovered slot.
-
-`placeSessionDropInWorkspaceState()` now threads `tabIndex` through the new-session path, but the already-open-session path still delegates to `openSessionInWorkspaceState()`, which only moves or activates the existing tab and does not accept an insertion index. So the visible insertion affordance is now accurate for closed sessions, but not for reordering an already-open session into a specific rail slot.
-
-The current workspace test only covers the newly-opened session case, so this remaining path can regress quietly.
+The underlying problem is structural rather than cosmetic: workspace layout logic, pane routing,
+control-surface state, session rendering, and modal/settings behavior all continue to land in the
+same top-level module. That raises the cost of review and makes unrelated UI changes collide in the
+same file more often than they should.
 
 **Current behavior:**
-- dropping a not-yet-open session on the tab rail uses the requested `tabIndex`
-- dropping an already-open session ignores the hovered `tabIndex`
-- the existing regression test covers only the not-yet-open session path
+
+- `ui/src/App.tsx` is large enough to trigger Babel's deoptimization warning during frontend builds
+- multiple distinct UI responsibilities still live in one monolithic module
+- routine frontend changes frequently require editing or reviewing the same oversized file
 
 **Proposal:**
-- thread an optional `tabIndex` through the existing-session move path in `openSessionInWorkspaceState()`
-- preserve the hovered insertion slot when moving an already-open session into the target pane
-- add a workspace regression for the already-open session reorder case
+
+- split `ui/src/App.tsx` into smaller modules by responsibility instead of continuing to grow the main file
+- extract self-contained workspace/controller hooks and pane-rendering sections first, where the existing seams already exist
+- keep `App.tsx` as the composition/root wiring layer instead of the implementation home for every control flow
 
 ## P2
 
 - [ ] Expand HTTP route tests for the axum API:
-  Codex thread actions (archive, unarchive, fork, rollback) and interactive request submissions
-  (user input, MCP elicitation, generic app requests) now have HTTP route tests via
-  `tower::ServiceExt`. Still missing: session creation, message send, settings updates, Claude
-  approvals, and SSE state events.
+      Codex thread actions (archive, unarchive, fork, rollback) and interactive request submissions
+      (user input, MCP elicitation, generic app requests) now have HTTP route tests via
+      `tower::ServiceExt`. Still missing: session creation, message send, settings updates, Claude
+      approvals, and SSE state events.
 - [ ] Add backend regression tests for divergent completed-text replacement in Codex streaming:
-  cover both shared-Codex and REPL-Codex paths where the final authoritative text must replace,
-  not append to, previously streamed content.
-- [ ] Add a dedicated stop-failure callback suppression regression:
-  force a dedicated runtime stop failure while a matching completion/error/exit callback arrives
-  during `runtime_stop_in_progress`, and assert the callback is not lost once the stop fails.
+      cover both shared-Codex and REPL-Codex paths where the final authoritative text must replace,
+      not append to, previously streamed content.
 - [ ] Add a `stop_session` test with a queued prompt pending when a shared Codex interrupt fails:
-  verify that `dispatch_next_queued_turn` fires and the queued prompt is dispatched after the
-  best-effort cleanup completes.
+      verify that `dispatch_next_queued_turn` fires and the queued prompt is dispatched after the
+      best-effort cleanup completes.
+
 - [ ] Add frontend reconcile tests for new interactive message types:
-  `userInputRequest`, `mcpElicitationRequest`, and `codexAppRequest` messages are handled by the
-  reconciler but have no test coverage verifying that state changes (e.g. pending ? submitted)
-  correctly produce new message references.
+      `userInputRequest`, `mcpElicitationRequest`, and `codexAppRequest` messages are handled by the
+      reconciler but have no test coverage verifying that state changes (e.g. pending ? submitted)
+      correctly produce new message references.
 - [ ] Add `SessionCanvasPanel.test.tsx` afterEach cleanup:
-  other test files (`PaneTabs.test.tsx`, `App.test.tsx`) explicitly call `cleanup()` in
-  `afterEach`; this file should match the project convention.
+      other test files (`PaneTabs.test.tsx`, `App.test.tsx`) explicitly call `cleanup()` in
+      `afterEach`; this file should match the project convention.
 - [ ] Add PaneTabs test for "Git Sync" context menu action:
-  only the "Git Push" path is exercised; add a test that clicks "Git Sync" and verifies
-  `syncGitChanges` is called with the expected workdir.
+      only the "Git Push" path is exercised; add a test that clicks "Git Sync" and verifies
+      `syncGitChanges` is called with the expected workdir.
 - [ ] Add PaneTabs test for git status fetch failure in context menu:
-  the `statusError` / `statusMessage` state fields exist but the error rendering path when
-  `fetchGitStatus` rejects is uncovered.
-- [ ] Add OrchestratorTemplatesPanel tests for update and delete flows:
-  mocks for `updateOrchestratorTemplate` and `deleteOrchestratorTemplate` are set up but no test
-  exercises them. (Run, `onStateUpdated`, and stale-project handling are now covered.)
-- [ ] Add OrchestratorTemplateLibraryPanel tests for fetch error and event-driven re-fetch:
-  the error branch (`getErrorMessage`) and the `ORCHESTRATOR_TEMPLATES_CHANGED_EVENT` re-load
-  path have no test coverage.
-- [ ] Add backend orchestrator validation tests for self-loop, duplicate ID, and empty-sessions:
-  `normalize_orchestrator_template_draft` rejects self-referencing transitions, duplicate
-  session/transition IDs, and drafts with zero sessions. Unknown-target and cyclic-transition
-  coverage now exists; keep filling in the remaining validation cases.
+      the `statusError` / `statusMessage` state fields exist but the error rendering path when
+      `fetchGitStatus` rejects is uncovered.
+- [ ] Add test for deferred callbacks discarded on a successful stop:
+      pre-stage a `DeferredStopCallback::TurnCompleted` entry, let `stop_session` succeed normally, and
+      assert the session ends `Idle` (not `Error`) and `deferred_stop_callbacks` is empty.
+- [ ] Add same-pane tab reorder test in `workspace.test.ts`:
+      cover `placeSessionDropInWorkspaceState` when source and target pane are identical and a non-zero
+      `tabIndex` is provided, asserting the tab lands at the correct slot without duplication.
+- [ ] Fix multi-callback ordering oracle test to pre-populate a message:
+      `failed_dedicated_stop_replays_multiple_deferred_callbacks_in_order` starts with zero messages;
+      pre-populate an in-progress assistant message so `finish_turn_ok` produces a measurably different
+      `messages.len()` from `RuntimeExited` alone, making the oracle comparison unambiguous.
 - [ ] Add backend tests for template-level orchestrator project fallback:
-  current `create_orchestrator_instance` coverage still passes `projectId` explicitly in the
-  request. Add state/route tests where the template supplies `projectId` and the request omits it.
+      current `create_orchestrator_instance` coverage still passes `projectId` explicitly in the
+      request. Add state/route tests where the template supplies `projectId` and the request omits it.
 - [ ] Add orchestrator lifecycle endpoints (stop, pause, resume):
-  `OrchestratorInstanceStatus` defines `Running`, `Paused`, and `Stopped` but no API endpoint
-  transitions between them. Users cannot stop a running orchestration except by killing
-  individual sessions.
+      `OrchestratorInstanceStatus` defines `Running`, `Paused`, and `Stopped` but no API endpoint
+      transitions between them. Users cannot stop a running orchestration except by killing
+      individual sessions.
 - [ ] Add orchestrator instances to `StateResponse` or a dedicated SSE delta:
-  the frontend currently has no push notification for orchestrator state changes (transitions
-  fired, instances completed). It must poll `GET /api/orchestrators`.
+      the frontend currently has no push notification for orchestrator state changes (transitions
+      fired, instances completed). It must poll `GET /api/orchestrators`.
 - [ ] Add unit tests for `rescopeControlSurfacePane`:
-  cover gitStatus (workdir update), filesystem (rootPath update), controlPanel-like (origin-only
-  update), pane-not-found no-op, and no-active-tab no-op branches in `workspace.test.ts`.
+      cover gitStatus (workdir update), filesystem (rootPath update), controlPanel-like (origin-only
+      update), pane-not-found no-op, and no-active-tab no-op branches in `workspace.test.ts`.
 - [ ] Add unit tests for `findNearestSessionPaneId`:
-  cover left-preference when sessions exist on both sides, right-only fallback, no session panes
-  returning null, and paneId not in workspace returning null.
+      cover left-preference when sessions exist on both sides, right-only fallback, no session panes
+      returning null, and paneId not in workspace returning null.
 - [ ] Add `openDiffPreviewInWorkspaceState` test for control-surface anchor redirect:
-  the existing test covers the docked controlPanel case; add a test where the preferred pane is a
-  standalone gitStatus or filesystem pane and verify the diff opens adjacent to the session pane.
+      the existing test covers the docked controlPanel case; add a test where the preferred pane is a
+      standalone gitStatus or filesystem pane and verify the diff opens adjacent to the session pane.
 - [ ] Add App-level regression coverage for control-surface tab selection sync:
-  render a docked control panel plus standalone git/files panes with neighboring sessions, then
-  verify selecting the control surface adopts the nearest session context instead of leaving stale
-  origin-based project state behind.
+      render a docked control panel plus standalone git/files panes with neighboring sessions, then
+      verify selecting the control surface adopts the nearest session context instead of leaving stale
+      origin-based project state behind.
 - [ ] Add App-level control-surface launch regressions for pane-local Files/Git roots:
-  render split panes with different session contexts, then verify Files/Git launchers and panels
-  use a root/workdir that matches the same pane-local session/project metadata they emit.
+      render split panes with different session contexts, then verify Files/Git launchers and panels
+      use a root/workdir that matches the same pane-local session/project metadata they emit.
 - [ ] Add a canvas-move regression for post-relocation session/project sync:
-  when an existing shared canvas is moved into a new pane, assert its origin metadata and the
-  target pane's `activeSessionId` are updated to the new launch context instead of the old one.
+      when an existing shared canvas is moved into a new pane, assert its origin metadata and the
+      target pane's `activeSessionId` are updated to the new launch context instead of the old one.
 - [ ] Add unit tests for canvas/sessionList origin-refresh on existing tab reuse:
-  `openCanvasInWorkspaceState` and `openSessionListInWorkspaceState` now update `originSessionId`/
-  `originProjectId` via `replaceWorkspaceTabInPane` when the existing tab's origin differs from the
-  new launch context. Add `workspace.test.ts` cases where the existing tab has a null origin and
-  assert the new origin values are written after re-open.
+      `openCanvasInWorkspaceState` and `openSessionListInWorkspaceState` now update `originSessionId`/
+      `originProjectId` via `replaceWorkspaceTabInPane` when the existing tab's origin differs from the
+      new launch context. Add `workspace.test.ts` cases where the existing tab has a null origin and
+      assert the new origin values are written after re-open.
 - [ ] Add unit tests for `ensureWorkspaceViewId` and `createWorkspaceViewId`:
-  `workspace-storage.ts` exports these functions for URL-param handling and workspace ID
-  generation. A round-trip test in jsdom would guard against regressions in workspace ID
-  normalization or URL-param handling.
+      `workspace-storage.ts` exports these functions for URL-param handling and workspace ID
+      generation. A round-trip test in jsdom would guard against regressions in workspace ID
+      normalization or URL-param handling.
 - [ ] Add sort-order assertion to `list_workspace_layouts` backend test:
-  `list_workspace_layouts_route_returns_saved_workspaces` checks presence but not the documented
-  `updated_at` descending sort order. Assert index positions after inserting workspaces with
-  distinct timestamps.
+      `list_workspace_layouts_route_returns_saved_workspaces` checks presence but not the documented
+      `updated_at` descending sort order. Assert index positions after inserting workspaces with
+      distinct timestamps.
 - [ ] Add orchestratorList same-pane origin-refresh test:
-  `openOrchestratorListInWorkspaceState` now updates `originSessionId`/`originProjectId` on reuse,
-  but the existing workspace.test.ts only covers the cross-pane move path. Add a case where the
-  orchestratorList is already in the target pane and verify that the origin fields are updated
-  without a move occurring.
-- [ ] Remove duplicate `saveWorkspaceLayoutSpy.mockClear()` in the pagehide test:
-  `App.test.tsx` "flushes a pending workspace layout save with keepalive on pagehide" calls
-  `.mockClear()` twice in a row with no intervening action; remove the redundant second call.
-- [ ] Add tab-rail session-drop insertion-order regressions:
-  cover both the new-session path and the already-open-session move path with a non-zero
-  `tabIndex`, asserting the tab lands at the hovered rail position in both cases.
+      `openOrchestratorListInWorkspaceState` now updates `originSessionId`/`originProjectId` on reuse,
+      but the existing workspace.test.ts only covers the cross-pane move path. Add a case where the
+      orchestratorList is already in the target pane and verify that the origin fields are updated
+      without a move occurring.
 - [ ] Add PaneTabs `dragLeave` cleanup regression for the known-drag path:
-  after a `dragOver` shows a drop indicator via `getKnownDraggedTab`, fire `dragLeave` and assert
-  the indicator is removed. Current tests only verify the indicator appears but not that it clears.
+      after a `dragOver` shows a drop indicator via `getKnownDraggedTab`, fire `dragLeave` and assert
+      the indicator is removed. Current tests only verify the indicator appears but not that it clears.
 - [ ] Extract shared drag-drop test setup helper:
-  the two drag-drop tests in `App.test.tsx` duplicate ~60 lines of identical fetch-mock and
-  setup boilerplate. Extract a shared `renderAppWithProjectAndSession()` helper.
+      the two drag-drop tests in `App.test.tsx` duplicate ~60 lines of identical fetch-mock and
+      setup boilerplate. Extract a shared `renderAppWithProjectAndSession()` helper.
 - [ ] Add unit tests for orchestrator geometry functions:
-  `anchorPosition`, `nearestAnchorSide`, `nearestAnchorPosition`, `buildTransitionGeometry`,
-  and `isValidAnchor` are pure deterministic functions with no DOM dependencies.
+      `anchorPosition`, `nearestAnchorSide`, `nearestAnchorPosition`, `buildTransitionGeometry`,
+      `buildSelfLoopTransitionGeometry`, `anchorNormal`, `cubicBezierPoint`, `cubicBezierDerivative`,
+      `perpendicularOffsetPoint`, and `isValidAnchor` are pure deterministic functions with no DOM
+      dependencies.
 - [ ] Continue splitting backend modules as they grow:
-  `src/main.rs` was split into `api.rs`, `state.rs`, `runtime.rs`, `turns.rs`, `remote.rs`, and
-  `tests.rs`. Some of these modules (especially `state.rs` and `turns.rs`) are already large and
-  could benefit from further decomposition as features stabilize.
+      `src/main.rs` was split into `api.rs`, `state.rs`, `runtime.rs`, `turns.rs`, `remote.rs`, and
+      `tests.rs`. Some of these modules (especially `state.rs` and `turns.rs`) are already large and
+      could benefit from further decomposition as features stabilize.
+- [ ] Add deadlock detection test with a 3-node asymmetric consolidate cycle:
+      `consolidate_input_mode_stops_instances_deadlocked_by_blocked_cycles` only tests a 2-node
+      symmetric cycle. Add a test with three consolidate nodes in a ring, and one where an external
+      (non-blocked) feeder prevents deadlock detection, to exercise the fixed-point pruning algorithm.
 
 ## Later

@@ -1,4 +1,12 @@
-import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import * as api from "./api";
@@ -22,19 +30,27 @@ class EventSourceMock {
 
   onopen: ((event: Event) => void) | null = null;
 
-  private listeners = new Map<string, Set<(event: MessageEvent<string>) => void>>();
+  private listeners = new Map<
+    string,
+    Set<(event: MessageEvent<string>) => void>
+  >();
 
   constructor(_url?: string) {
     EventSourceMock.instances.push(this);
   }
 
   addEventListener(type: string, listener: EventListenerOrEventListenerObject) {
-    const listeners = this.listeners.get(type) ?? new Set<(event: MessageEvent<string>) => void>();
+    const listeners =
+      this.listeners.get(type) ??
+      new Set<(event: MessageEvent<string>) => void>();
     listeners.add(normalizeMessageEventListener(listener));
     this.listeners.set(type, listeners);
   }
 
-  removeEventListener(type: string, listener: EventListenerOrEventListenerObject) {
+  removeEventListener(
+    type: string,
+    listener: EventListenerOrEventListenerObject,
+  ) {
     this.listeners.get(type)?.delete(normalizeMessageEventListener(listener));
   }
 
@@ -119,7 +135,9 @@ function createActWrappedAnimationFrameMocks() {
     requestAnimationFrameMock,
   };
 }
-function normalizeMessageEventListener(listener: EventListenerOrEventListenerObject) {
+function normalizeMessageEventListener(
+  listener: EventListenerOrEventListenerObject,
+) {
   if (typeof listener === "function") {
     return listener as (event: MessageEvent<string>) => void;
   }
@@ -210,13 +228,18 @@ async function submitButtonAndSettle(target: HTMLElement) {
 // flows. Keep any suppression local to the specific tests that exercise them.
 async function withSuppressedActWarnings<T>(run: () => Promise<T>) {
   const originalConsoleError = console.error;
-  const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation((message?: unknown, ...args: unknown[]) => {
-    if (typeof message === "string" && message.includes("not wrapped in act")) {
-      return;
-    }
+  const consoleErrorSpy = vi
+    .spyOn(console, "error")
+    .mockImplementation((message?: unknown, ...args: unknown[]) => {
+      if (
+        typeof message === "string" &&
+        message.includes("not wrapped in act")
+      ) {
+        return;
+      }
 
-    originalConsoleError.call(console, message, ...args);
-  });
+      originalConsoleError.call(console, message, ...args);
+    });
 
   try {
     return await run();
@@ -248,7 +271,9 @@ async function selectComboboxOption(name: string, optionName: string | RegExp) {
         candidate.textContent?.trim() ??
         "";
 
-      return typeof optionName === "string" ? label === optionName : optionName.test(label);
+      return typeof optionName === "string"
+        ? label === optionName
+        : optionName.test(label);
     });
 
   if (!option) {
@@ -274,7 +299,9 @@ function createDragDataTransfer() {
   };
 }
 
-function createReducedMimeDragDataTransfer(dataTransfer: ReturnType<typeof createDragDataTransfer>) {
+function createReducedMimeDragDataTransfer(
+  dataTransfer: ReturnType<typeof createDragDataTransfer>,
+) {
   return {
     dropEffect: dataTransfer.dropEffect,
     effectAllowed: dataTransfer.effectAllowed,
@@ -324,7 +351,9 @@ describe("MarkdownContent", () => {
       "| `skip_list.rs` | Fixed |",
     ].join("\n");
 
-    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    const consoleError = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => {});
 
     try {
       const { container } = render(<MarkdownContent markdown={markdown} />);
@@ -369,7 +398,11 @@ describe("MarkdownContent", () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole("link", { name: "route_post_processing_service.dart:469" }));
+    fireEvent.click(
+      screen.getByRole("link", {
+        name: "route_post_processing_service.dart:469",
+      }),
+    );
 
     expect(onOpenSourceLink).toHaveBeenCalledWith({
       path: "C:/github/Personal/fit_friends/lib/services/route_post_processing_service.dart",
@@ -389,7 +422,11 @@ describe("MarkdownContent", () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole("link", { name: "route_post_processing_service.dart:469" }));
+    fireEvent.click(
+      screen.getByRole("link", {
+        name: "route_post_processing_service.dart:469",
+      }),
+    );
 
     expect(onOpenSourceLink).toHaveBeenCalledWith({
       path: "/home/grzeg/projects/fit_friends/lib/services/route_post_processing_service.dart",
@@ -409,7 +446,9 @@ describe("MarkdownContent", () => {
       />,
     );
 
-    const link = screen.getByRole("link", { name: "20260322000004_child_provisioning_rpcs.sql" });
+    const link = screen.getByRole("link", {
+      name: "20260322000004_child_provisioning_rpcs.sql",
+    });
     expect(link).not.toHaveAttribute("target");
 
     fireEvent.click(link);
@@ -550,7 +589,6 @@ describe("MarkdownContent", () => {
       openInNewTab: false,
     });
   });
-
 });
 
 describe("App", () => {
@@ -563,11 +601,16 @@ describe("App", () => {
       createActWrappedAnimationFrameMocks();
     vi.stubGlobal("requestAnimationFrame", requestAnimationFrameMock);
     vi.stubGlobal("cancelAnimationFrame", cancelAnimationFrameMock);
-    HTMLElement.prototype.scrollTo = vi.fn() as unknown as typeof HTMLElement.prototype.scrollTo;
+    HTMLElement.prototype.scrollTo =
+      vi.fn() as unknown as typeof HTMLElement.prototype.scrollTo;
     EventSourceMock.instances = [];
     vi.spyOn(api, "fetchWorkspaceLayout").mockResolvedValue(null);
-    vi.spyOn(api, "fetchWorkspaceLayouts").mockResolvedValue({ workspaces: [] });
-    vi.spyOn(api, "saveWorkspaceLayout").mockResolvedValue(makeWorkspaceLayoutResponse());
+    vi.spyOn(api, "fetchWorkspaceLayouts").mockResolvedValue({
+      workspaces: [],
+    });
+    vi.spyOn(api, "saveWorkspaceLayout").mockResolvedValue(
+      makeWorkspaceLayoutResponse(),
+    );
   });
 
   afterEach(async () => {
@@ -628,7 +671,8 @@ describe("App", () => {
   });
 
   it("scrolls an off-screen combobox selection into view when the menu opens", async () => {
-    const originalGetBoundingClientRect = HTMLElement.prototype.getBoundingClientRect;
+    const originalGetBoundingClientRect =
+      HTMLElement.prototype.getBoundingClientRect;
     HTMLElement.prototype.getBoundingClientRect = function () {
       if (this.classList.contains("combo-menu")) {
         return {
@@ -686,7 +730,8 @@ describe("App", () => {
         expect(listbox.scrollTop).toBe(150);
       });
     } finally {
-      HTMLElement.prototype.getBoundingClientRect = originalGetBoundingClientRect;
+      HTMLElement.prototype.getBoundingClientRect =
+        originalGetBoundingClientRect;
     }
   });
 
@@ -725,7 +770,9 @@ describe("App", () => {
     expect(resolveControlPanelWorkspaceRoot(null, null)).toBeNull();
     expect(resolveControlPanelWorkspaceRoot(null, "")).toBeNull();
     expect(resolveControlPanelWorkspaceRoot(null, "   ")).toBeNull();
-    expect(resolveControlPanelWorkspaceRoot(null, "  /workspace/current  ")).toBe("/workspace/current");
+    expect(
+      resolveControlPanelWorkspaceRoot(null, "  /workspace/current  "),
+    ).toBe("/workspace/current");
     expect(
       resolveControlPanelWorkspaceRoot(
         {
@@ -796,8 +843,14 @@ describe("App", () => {
     });
 
     vi.stubGlobal("fetch", fetchMock);
-    vi.stubGlobal("EventSource", EventSourceMock as unknown as typeof EventSource);
-    vi.stubGlobal("ResizeObserver", ResizeObserverMock as unknown as typeof ResizeObserver);
+    vi.stubGlobal(
+      "EventSource",
+      EventSourceMock as unknown as typeof EventSource,
+    );
+    vi.stubGlobal(
+      "ResizeObserver",
+      ResizeObserverMock as unknown as typeof ResizeObserver,
+    );
     const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
     HTMLElement.prototype.scrollIntoView = vi.fn();
 
@@ -844,7 +897,9 @@ describe("App", () => {
       });
 
       await waitFor(() => {
-        expect(fetchMock.mock.calls.some(([url]) => String(url) === "/api/state")).toBe(true);
+        expect(
+          fetchMock.mock.calls.some(([url]) => String(url) === "/api/state"),
+        ).toBe(true);
       });
 
       await act(async () => {
@@ -885,8 +940,14 @@ describe("App", () => {
       throw new Error(`Unexpected fetch: ${String(input)}`);
     });
     vi.stubGlobal("fetch", fetchMock);
-    vi.stubGlobal("EventSource", EventSourceMock as unknown as typeof EventSource);
-    vi.stubGlobal("ResizeObserver", ResizeObserverMock as unknown as typeof ResizeObserver);
+    vi.stubGlobal(
+      "EventSource",
+      EventSourceMock as unknown as typeof EventSource,
+    );
+    vi.stubGlobal(
+      "ResizeObserver",
+      ResizeObserverMock as unknown as typeof ResizeObserver,
+    );
     const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
     HTMLElement.prototype.scrollIntoView = vi.fn();
     try {
@@ -917,13 +978,16 @@ describe("App", () => {
         });
       });
 
-      await clickAndSettle(await screen.findByRole("button", { name: "Sessions" }));
+      await clickAndSettle(
+        await screen.findByRole("button", { name: "Sessions" }),
+      );
       const sessionList = document.querySelector(".session-list");
       if (!(sessionList instanceof HTMLDivElement)) {
         throw new Error("Session list not found");
       }
 
-      const sessionRowLabel = await within(sessionList).findByText("Codex Session");
+      const sessionRowLabel =
+        await within(sessionList).findByText("Codex Session");
       const sessionRowButton = sessionRowLabel.closest("button");
       if (!sessionRowButton) {
         throw new Error("Session row button not found");
@@ -967,8 +1031,132 @@ describe("App", () => {
       await waitFor(() => {
         expect(screen.getAllByText("Here.").length).toBeGreaterThan(0);
       });
-      expect(screen.queryByText("Waiting for the next chunk of output...")).not.toBeInTheDocument();
-      expect(fetchMock.mock.calls.some(([url]) => String(url) === "/api/state")).toBe(false);
+      expect(
+        screen.queryByText("Waiting for the next chunk of output..."),
+      ).not.toBeInTheDocument();
+      expect(
+        fetchMock.mock.calls.some(([url]) => String(url) === "/api/state"),
+      ).toBe(false);
+    } finally {
+      HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
+      restoreGlobal("fetch", originalFetch);
+      restoreGlobal("EventSource", originalEventSource);
+      restoreGlobal("ResizeObserver", originalResizeObserver);
+    }
+  });
+
+  it("falls back to /api/state after a post-hydration stream error when reconnect data does not arrive", async () => {
+    const originalFetch = globalThis.fetch;
+    const originalEventSource = globalThis.EventSource;
+    const originalResizeObserver = globalThis.ResizeObserver;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/api/state") {
+        return jsonResponse({
+          revision: 2,
+          projects: [],
+          sessions: [
+            makeSession("session-1", {
+              name: "Codex Session",
+              status: "idle",
+              preview: "Here.",
+              messages: [
+                {
+                  id: "message-user-1",
+                  type: "text",
+                  timestamp: "10:00",
+                  author: "you",
+                  text: "test",
+                },
+                {
+                  id: "message-assistant-1",
+                  type: "text",
+                  timestamp: "10:01",
+                  author: "assistant",
+                  text: "Here.",
+                },
+              ],
+            }),
+          ],
+        });
+      }
+
+      throw new Error(`Unexpected fetch: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal(
+      "EventSource",
+      EventSourceMock as unknown as typeof EventSource,
+    );
+    vi.stubGlobal(
+      "ResizeObserver",
+      ResizeObserverMock as unknown as typeof ResizeObserver,
+    );
+    const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
+    HTMLElement.prototype.scrollIntoView = vi.fn();
+    try {
+      await renderApp();
+      const eventSource = EventSourceMock.instances[0];
+      expect(eventSource).toBeTruthy();
+      act(() => {
+        eventSource.dispatchOpen();
+        eventSource.dispatchNamedEvent("state", {
+          revision: 1,
+          projects: [],
+          sessions: [
+            makeSession("session-1", {
+              name: "Codex Session",
+              status: "active",
+              preview: "test",
+              messages: [
+                {
+                  id: "message-user-1",
+                  type: "text",
+                  timestamp: "10:00",
+                  author: "you",
+                  text: "test",
+                },
+              ],
+            }),
+          ],
+        });
+      });
+
+      await clickAndSettle(
+        await screen.findByRole("button", { name: "Sessions" }),
+      );
+      const sessionList = document.querySelector(".session-list");
+      if (!(sessionList instanceof HTMLDivElement)) {
+        throw new Error("Session list not found");
+      }
+
+      const sessionRowLabel =
+        await within(sessionList).findByText("Codex Session");
+      const sessionRowButton = sessionRowLabel.closest("button");
+      if (!sessionRowButton) {
+        throw new Error("Session row button not found");
+      }
+
+      await clickAndSettle(sessionRowButton);
+      await screen.findByText("Waiting for the next chunk of output...");
+      act(() => {
+        eventSource.dispatchError();
+      });
+
+      await waitFor(
+        () => {
+          expect(
+            fetchMock.mock.calls.some(([url]) => String(url) === "/api/state"),
+          ).toBe(true);
+        },
+        { timeout: 2000 },
+      );
+      await waitFor(() => {
+        expect(screen.getAllByText("Here.").length).toBeGreaterThan(0);
+      });
+      expect(
+        screen.queryByText("Waiting for the next chunk of output..."),
+      ).not.toBeInTheDocument();
     } finally {
       HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
       restoreGlobal("fetch", originalFetch);
@@ -991,8 +1179,14 @@ describe("App", () => {
     });
 
     vi.stubGlobal("fetch", fetchMock);
-    vi.stubGlobal("EventSource", EventSourceMock as unknown as typeof EventSource);
-    vi.stubGlobal("ResizeObserver", ResizeObserverMock as unknown as typeof ResizeObserver);
+    vi.stubGlobal(
+      "EventSource",
+      EventSourceMock as unknown as typeof EventSource,
+    );
+    vi.stubGlobal(
+      "ResizeObserver",
+      ResizeObserverMock as unknown as typeof ResizeObserver,
+    );
     const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
     HTMLElement.prototype.scrollIntoView = vi.fn();
 
@@ -1026,13 +1220,16 @@ describe("App", () => {
         });
       });
 
-      await clickAndSettle(await screen.findByRole("button", { name: "Sessions" }));
+      await clickAndSettle(
+        await screen.findByRole("button", { name: "Sessions" }),
+      );
       const sessionList = document.querySelector(".session-list");
       if (!(sessionList instanceof HTMLDivElement)) {
         throw new Error("Session list not found");
       }
 
-      const sessionRowLabel = await within(sessionList).findByText("Codex Session");
+      const sessionRowLabel =
+        await within(sessionList).findByText("Codex Session");
       const sessionRowButton = sessionRowLabel.closest("button");
       if (!sessionRowButton) {
         throw new Error("Session row button not found");
@@ -1047,7 +1244,9 @@ describe("App", () => {
       act(() => {
         eventSource.dispatchError();
       });
-      expect(fetchMock.mock.calls.some(([url]) => String(url) === "/api/state")).toBe(false);
+      expect(
+        fetchMock.mock.calls.some(([url]) => String(url) === "/api/state"),
+      ).toBe(false);
 
       act(() => {
         eventSource.dispatchOpen();
@@ -1097,57 +1296,85 @@ describe("App", () => {
       const originalEventSource = globalThis.EventSource;
       const originalResizeObserver = globalThis.ResizeObserver;
       const openSpy = vi.spyOn(window, "open").mockImplementation(() => null);
-      const fetchWorkspaceLayoutsSpy = vi.mocked(api.fetchWorkspaceLayouts).mockResolvedValue({
-        workspaces: [
-          {
-            id: "monitor-left",
-            revision: 4,
-            updatedAt: "2026-03-28 18:00:00",
-            controlPanelSide: "left",
-          },
-          {
-            id: "monitor-right",
-            revision: 1,
-            updatedAt: "2026-03-28 17:30:00",
-            controlPanelSide: "right",
-          },
-        ],
-      });
-      const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-        const requestUrl = new URL(String(input), "http://localhost");
-        if (requestUrl.pathname === "/api/state") {
-          return jsonResponse({
-            revision: 1,
-            projects: [],
-            sessions: [],
-          });
-        }
+      const fetchWorkspaceLayoutsSpy = vi
+        .mocked(api.fetchWorkspaceLayouts)
+        .mockResolvedValue({
+          workspaces: [
+            {
+              id: "monitor-left",
+              revision: 4,
+              updatedAt: "2026-03-28 18:00:00",
+              controlPanelSide: "left",
+            },
+            {
+              id: "monitor-right",
+              revision: 1,
+              updatedAt: "2026-03-28 17:30:00",
+              controlPanelSide: "right",
+            },
+          ],
+        });
+      const fetchMock = vi.fn(
+        async (input: RequestInfo | URL, init?: RequestInit) => {
+          const requestUrl = new URL(String(input), "http://localhost");
+          if (requestUrl.pathname === "/api/state") {
+            return jsonResponse({
+              revision: 1,
+              projects: [],
+              sessions: [],
+            });
+          }
 
-        throw new Error(`Unexpected fetch: ${requestUrl.pathname}${requestUrl.search}`);
-      });
+          throw new Error(
+            `Unexpected fetch: ${requestUrl.pathname}${requestUrl.search}`,
+          );
+        },
+      );
 
       window.localStorage.clear();
       vi.stubGlobal("fetch", fetchMock);
-      vi.stubGlobal("EventSource", EventSourceMock as unknown as typeof EventSource);
-      vi.stubGlobal("ResizeObserver", ResizeObserverMock as unknown as typeof ResizeObserver);
+      vi.stubGlobal(
+        "EventSource",
+        EventSourceMock as unknown as typeof EventSource,
+      );
+      vi.stubGlobal(
+        "ResizeObserver",
+        ResizeObserverMock as unknown as typeof ResizeObserver,
+      );
 
       try {
         await renderApp();
 
-        await clickAndSettle(await screen.findByRole("button", { name: "Sessions" }));
-        await clickAndSettle(await screen.findByRole("button", { name: "Open tab" }));
+        await clickAndSettle(
+          await screen.findByRole("button", { name: "Sessions" }),
+        );
+        await clickAndSettle(
+          await screen.findByRole("button", { name: "Open tab" }),
+        );
 
-        const switcherTrigger = await screen.findByRole("button", { name: /workspace /i });
+        const switcherTrigger = await screen.findByRole("button", {
+          name: /workspace /i,
+        });
         await clickAndSettle(switcherTrigger);
 
-        const switcherDialog = await screen.findByRole("dialog", { name: "Workspace switcher" });
-        expect(within(switcherDialog).getAllByText("monitor-left").length).toBeGreaterThan(0);
-        expect(within(switcherDialog).getAllByText("monitor-right").length).toBeGreaterThan(0);
+        const switcherDialog = await screen.findByRole("dialog", {
+          name: "Workspace switcher",
+        });
+        expect(
+          within(switcherDialog).getAllByText("monitor-left").length,
+        ).toBeGreaterThan(0);
+        expect(
+          within(switcherDialog).getAllByText("monitor-right").length,
+        ).toBeGreaterThan(0);
 
-        await clickAndSettle(await screen.findByRole("button", { name: "New window" }));
+        await clickAndSettle(
+          await screen.findByRole("button", { name: "New window" }),
+        );
 
         expect(openSpy).toHaveBeenCalledTimes(1);
-        expect(String(openSpy.mock.calls[0]?.[0] ?? "")).toContain("workspace=");
+        expect(String(openSpy.mock.calls[0]?.[0] ?? "")).toContain(
+          "workspace=",
+        );
       } finally {
         fetchWorkspaceLayoutsSpy.mockRestore();
         openSpy.mockRestore();
@@ -1168,31 +1395,41 @@ describe("App", () => {
         projects: [],
         sessions: [],
       });
-      const fetchWorkspaceLayoutSpy = vi.mocked(api.fetchWorkspaceLayout).mockResolvedValue(null);
-      const fetchWorkspaceLayoutsSpy = vi.mocked(api.fetchWorkspaceLayouts).mockResolvedValue({
-        workspaces: [
-          {
-            id: "workspace-next",
-            revision: 2,
-            updatedAt: "2026-03-30 09:30:00",
-            controlPanelSide: "right",
-          },
-        ],
-      });
-      const saveWorkspaceLayoutSpy = vi.mocked(api.saveWorkspaceLayout).mockResolvedValue(
-        makeWorkspaceLayoutResponse({
-          id: "workspace-current",
-          updatedAt: "2026-03-30 09:31:00",
-        }),
-      );
+      const fetchWorkspaceLayoutSpy = vi
+        .mocked(api.fetchWorkspaceLayout)
+        .mockResolvedValue(null);
+      const fetchWorkspaceLayoutsSpy = vi
+        .mocked(api.fetchWorkspaceLayouts)
+        .mockResolvedValue({
+          workspaces: [
+            {
+              id: "workspace-next",
+              revision: 2,
+              updatedAt: "2026-03-30 09:30:00",
+              controlPanelSide: "right",
+            },
+          ],
+        });
+      const saveWorkspaceLayoutSpy = vi
+        .mocked(api.saveWorkspaceLayout)
+        .mockResolvedValue(
+          makeWorkspaceLayoutResponse({
+            id: "workspace-current",
+            updatedAt: "2026-03-30 09:31:00",
+          }),
+        );
       window.localStorage.clear();
-      vi.stubGlobal("EventSource", EventSourceMock as unknown as typeof EventSource);
-      vi.stubGlobal("ResizeObserver", ResizeObserverMock as unknown as typeof ResizeObserver);
+      vi.stubGlobal(
+        "EventSource",
+        EventSourceMock as unknown as typeof EventSource,
+      );
+      vi.stubGlobal(
+        "ResizeObserver",
+        ResizeObserverMock as unknown as typeof ResizeObserver,
+      );
 
       try {
         await renderApp();
-        saveWorkspaceLayoutSpy.mockClear();
-
         saveWorkspaceLayoutSpy.mockClear();
         act(() => {
           window.dispatchEvent(new Event("pagehide"));
@@ -1221,42 +1458,84 @@ describe("App", () => {
 
   it("refreshes model options after creating a new Codex session", async () => {
     await withSuppressedActWarnings(async () => {
-    const originalEventSource = globalThis.EventSource;
-    const originalResizeObserver = globalThis.ResizeObserver;
-    const fetchStateDeferred = createDeferred<Awaited<ReturnType<typeof api.fetchState>>>();
-    const createSessionDeferred = createDeferred<{
-      sessionId: string;
-      state: Awaited<ReturnType<typeof api.fetchState>>;
-    }>();
-    const refreshSessionModelOptionsDeferred = createDeferred<Awaited<ReturnType<typeof api.fetchState>>>();
-    const fetchStateSpy = vi.spyOn(api, "fetchState").mockImplementation(() => fetchStateDeferred.promise);
-    const createSessionSpy = vi.spyOn(api, "createSession").mockImplementation(
-      () => createSessionDeferred.promise,
-    );
-    const refreshSessionModelOptionsSpy = vi
-      .spyOn(api, "refreshSessionModelOptions")
-      .mockImplementation(() => refreshSessionModelOptionsDeferred.promise);
+      const originalEventSource = globalThis.EventSource;
+      const originalResizeObserver = globalThis.ResizeObserver;
+      const fetchStateDeferred =
+        createDeferred<Awaited<ReturnType<typeof api.fetchState>>>();
+      const createSessionDeferred = createDeferred<{
+        sessionId: string;
+        state: Awaited<ReturnType<typeof api.fetchState>>;
+      }>();
+      const refreshSessionModelOptionsDeferred =
+        createDeferred<Awaited<ReturnType<typeof api.fetchState>>>();
+      const fetchStateSpy = vi
+        .spyOn(api, "fetchState")
+        .mockImplementation(() => fetchStateDeferred.promise);
+      const createSessionSpy = vi
+        .spyOn(api, "createSession")
+        .mockImplementation(() => createSessionDeferred.promise);
+      const refreshSessionModelOptionsSpy = vi
+        .spyOn(api, "refreshSessionModelOptions")
+        .mockImplementation(() => refreshSessionModelOptionsDeferred.promise);
 
-    vi.stubGlobal("EventSource", EventSourceMock as unknown as typeof EventSource);
-    vi.stubGlobal("ResizeObserver", ResizeObserverMock as unknown as typeof ResizeObserver);
-    const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
-    HTMLElement.prototype.scrollIntoView = vi.fn();
+      vi.stubGlobal(
+        "EventSource",
+        EventSourceMock as unknown as typeof EventSource,
+      );
+      vi.stubGlobal(
+        "ResizeObserver",
+        ResizeObserverMock as unknown as typeof ResizeObserver,
+      );
+      const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
+      HTMLElement.prototype.scrollIntoView = vi.fn();
 
-    try {
-      await renderApp();
+      try {
+        await renderApp();
 
-      await openCreateSessionDialog();
-      await settleAsyncUi();
-      await submitButtonAndSettle(screen.getByRole("button", { name: "Create session" }));
+        await openCreateSessionDialog();
+        await settleAsyncUi();
+        await submitButtonAndSettle(
+          screen.getByRole("button", { name: "Create session" }),
+        );
 
-      await waitFor(() => {
-        expect(createSessionSpy).toHaveBeenCalled();
-      });
-      await act(async () => {
-        createSessionDeferred.resolve({
-          sessionId: "session-1",
-          state: {
-            revision: 2,
+        await waitFor(() => {
+          expect(createSessionSpy).toHaveBeenCalled();
+        });
+        await act(async () => {
+          createSessionDeferred.resolve({
+            sessionId: "session-1",
+            state: {
+              revision: 2,
+              projects: [],
+              sessions: [
+                {
+                  id: "session-1",
+                  name: "Codex 1",
+                  emoji: "O",
+                  agent: "Codex",
+                  workdir: "/tmp",
+                  model: "gpt-5.4",
+                  approvalPolicy: "never",
+                  reasoningEffort: "medium",
+                  sandboxMode: "workspace-write",
+                  status: "idle",
+                  preview: "Ready for a prompt.",
+                  messages: [],
+                },
+              ],
+            },
+          });
+          await flushUiWork();
+        });
+
+        await waitFor(() => {
+          expect(refreshSessionModelOptionsSpy).toHaveBeenCalledWith(
+            "session-1",
+          );
+        });
+        await act(async () => {
+          refreshSessionModelOptionsDeferred.resolve({
+            revision: 3,
             projects: [],
             sessions: [
               {
@@ -1266,6 +1545,20 @@ describe("App", () => {
                 agent: "Codex",
                 workdir: "/tmp",
                 model: "gpt-5.4",
+                modelOptions: [
+                  {
+                    label: "gpt-5.4",
+                    value: "gpt-5.4",
+                    description: "Latest frontier agentic coding model.",
+                    defaultReasoningEffort: "medium",
+                    supportedReasoningEfforts: [
+                      "low",
+                      "medium",
+                      "high",
+                      "xhigh",
+                    ],
+                  },
+                ],
                 approvalPolicy: "never",
                 reasoningEffort: "medium",
                 sandboxMode: "workspace-write",
@@ -1274,56 +1567,19 @@ describe("App", () => {
                 messages: [],
               },
             ],
-          },
+          });
+          await flushUiWork();
         });
-        await flushUiWork();
-      });
-
-      await waitFor(() => {
-        expect(refreshSessionModelOptionsSpy).toHaveBeenCalledWith("session-1");
-      });
-      await act(async () => {
-        refreshSessionModelOptionsDeferred.resolve({
-          revision: 3,
-          projects: [],
-          sessions: [
-            {
-              id: "session-1",
-              name: "Codex 1",
-              emoji: "O",
-              agent: "Codex",
-              workdir: "/tmp",
-              model: "gpt-5.4",
-              modelOptions: [
-                {
-                  label: "gpt-5.4",
-                  value: "gpt-5.4",
-                  description: "Latest frontier agentic coding model.",
-                  defaultReasoningEffort: "medium",
-                  supportedReasoningEfforts: ["low", "medium", "high", "xhigh"],
-                },
-              ],
-              approvalPolicy: "never",
-              reasoningEffort: "medium",
-              sandboxMode: "workspace-write",
-              status: "idle",
-              preview: "Ready for a prompt.",
-              messages: [],
-            },
-          ],
-        });
-        await flushUiWork();
-      });
-      await screen.findAllByText("Codex 1");
-      await settleAsyncUi();
-    } finally {
-      HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
-      fetchStateSpy.mockRestore();
-      createSessionSpy.mockRestore();
-      refreshSessionModelOptionsSpy.mockRestore();
-      restoreGlobal("EventSource", originalEventSource);
-      restoreGlobal("ResizeObserver", originalResizeObserver);
-    }
+        await screen.findAllByText("Codex 1");
+        await settleAsyncUi();
+      } finally {
+        HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
+        fetchStateSpy.mockRestore();
+        createSessionSpy.mockRestore();
+        refreshSessionModelOptionsSpy.mockRestore();
+        restoreGlobal("EventSource", originalEventSource);
+        restoreGlobal("ResizeObserver", originalResizeObserver);
+      }
     });
   });
 
@@ -1336,95 +1592,111 @@ describe("App", () => {
         projects: [],
         sessions: [],
       });
-      const fetchWorkspaceLayoutSpy = vi.mocked(api.fetchWorkspaceLayout).mockResolvedValue(null);
-      const saveWorkspaceLayoutSpy = vi.mocked(api.saveWorkspaceLayout).mockResolvedValue(
-        makeWorkspaceLayoutResponse({
-          updatedAt: "2026-03-30 09:01:00",
-        }),
-      );
-      const fetchTemplatesSpy = vi.spyOn(api, "fetchOrchestratorTemplates").mockResolvedValue({
-        templates: [
-          {
-            id: "delivery-flow",
-            name: "Delivery Flow",
-            description: "Implement and review a change.",
-            createdAt: "2026-03-30 09:00:00",
-            updatedAt: "2026-03-30 09:05:00",
-            projectId: "project-local",
-            sessions: [
-              {
-                id: "builder",
-                name: "Builder",
-                agent: "Codex",
-                model: null,
-                instructions: "Implement the change.",
-                autoApprove: true,
-                position: { x: 220, y: 420 },
-              },
-            ],
-            transitions: [],
-          },
-        ],
-      });
-      const createOrchestratorInstanceSpy = vi.spyOn(api, "createOrchestratorInstance").mockResolvedValue({
-        orchestrator: {
-          id: "orchestrator-1",
-          templateId: "delivery-flow",
-          projectId: "project-local",
-          templateSnapshot: {
-            id: "delivery-flow",
-            name: "Delivery Flow",
-            description: "Implement and review a change.",
-            createdAt: "2026-03-30 09:00:00",
-            updatedAt: "2026-03-30 09:05:00",
-            projectId: "project-local",
-            sessions: [
-              {
-                id: "builder",
-                name: "Builder",
-                agent: "Codex",
-                model: null,
-                instructions: "Implement the change.",
-                autoApprove: true,
-                position: { x: 220, y: 420 },
-              },
-            ],
-            transitions: [],
-          },
-          status: "running",
-          sessionInstances: [],
-          pendingTransitions: [],
-          createdAt: "2026-03-30 09:06:00",
-          completedAt: null,
-        },
-        state: {
-          revision: 3,
-          projects: [
+      const fetchWorkspaceLayoutSpy = vi
+        .mocked(api.fetchWorkspaceLayout)
+        .mockResolvedValue(null);
+      const saveWorkspaceLayoutSpy = vi
+        .mocked(api.saveWorkspaceLayout)
+        .mockResolvedValue(
+          makeWorkspaceLayoutResponse({
+            updatedAt: "2026-03-30 09:01:00",
+          }),
+        );
+      const fetchTemplatesSpy = vi
+        .spyOn(api, "fetchOrchestratorTemplates")
+        .mockResolvedValue({
+          templates: [
             {
-              id: "project-local",
-              name: "Local Project",
-              rootPath: "/repo",
-              remoteId: "local",
-            },
-            {
-              id: "project-added",
-              name: "Added By Start",
-              rootPath: "/repo-added",
-            },
-          ],
-          sessions: [
-            makeSession("session-orchestrated", {
-              name: "Orchestrated Builder",
+              id: "delivery-flow",
+              name: "Delivery Flow",
+              description: "Implement and review a change.",
+              createdAt: "2026-03-30 09:00:00",
+              updatedAt: "2026-03-30 09:05:00",
               projectId: "project-local",
-              preview: "Waiting for work",
-              status: "active",
-              workdir: "/repo",
-            }),
+              sessions: [
+                {
+                  id: "builder",
+                  name: "Builder",
+                  agent: "Codex",
+                  model: null,
+                  instructions: "Implement the change.",
+                  autoApprove: true,
+                  inputMode: "queue",
+                  position: { x: 220, y: 420 },
+                },
+              ],
+              transitions: [],
+            },
           ],
-        },
-      });
-      vi.stubGlobal("EventSource", EventSourceMock as unknown as typeof EventSource);
-      vi.stubGlobal("ResizeObserver", ResizeObserverMock as unknown as typeof ResizeObserver);
+        });
+      const createOrchestratorInstanceSpy = vi
+        .spyOn(api, "createOrchestratorInstance")
+        .mockResolvedValue({
+          orchestrator: {
+            id: "orchestrator-1",
+            templateId: "delivery-flow",
+            projectId: "project-local",
+            templateSnapshot: {
+              id: "delivery-flow",
+              name: "Delivery Flow",
+              description: "Implement and review a change.",
+              createdAt: "2026-03-30 09:00:00",
+              updatedAt: "2026-03-30 09:05:00",
+              projectId: "project-local",
+              sessions: [
+                {
+                  id: "builder",
+                  name: "Builder",
+                  agent: "Codex",
+                  model: null,
+                  instructions: "Implement the change.",
+                  autoApprove: true,
+                  inputMode: "queue",
+                  position: { x: 220, y: 420 },
+                },
+              ],
+              transitions: [],
+            },
+            status: "running",
+            sessionInstances: [],
+            pendingTransitions: [],
+            createdAt: "2026-03-30 09:06:00",
+            completedAt: null,
+          },
+          state: {
+            revision: 3,
+            projects: [
+              {
+                id: "project-local",
+                name: "Local Project",
+                rootPath: "/repo",
+                remoteId: "local",
+              },
+              {
+                id: "project-added",
+                name: "Added By Start",
+                rootPath: "/repo-added",
+              },
+            ],
+            sessions: [
+              makeSession("session-orchestrated", {
+                name: "Orchestrated Builder",
+                projectId: "project-local",
+                preview: "Waiting for work",
+                status: "active",
+                workdir: "/repo",
+              }),
+            ],
+          },
+        });
+      vi.stubGlobal(
+        "EventSource",
+        EventSourceMock as unknown as typeof EventSource,
+      );
+      vi.stubGlobal(
+        "ResizeObserver",
+        ResizeObserverMock as unknown as typeof ResizeObserver,
+      );
       const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
       HTMLElement.prototype.scrollIntoView = vi.fn();
 
@@ -1452,16 +1724,26 @@ describe("App", () => {
         });
         await settleAsyncUi();
 
-        await clickAndSettle(await screen.findByRole("button", { name: "Open preferences" }));
-        await clickAndSettle(screen.getByRole("tab", { name: "Orchestrators" }));
-        expect(await screen.findByDisplayValue("Delivery Flow")).toBeInTheDocument();
+        await clickAndSettle(
+          await screen.findByRole("button", { name: "Open preferences" }),
+        );
+        await clickAndSettle(
+          screen.getByRole("tab", { name: "Orchestrators" }),
+        );
+        expect(
+          await screen.findByDisplayValue("Delivery Flow"),
+        ).toBeInTheDocument();
 
         const templateProjectSelect = screen.getByLabelText("Project", {
           selector: "select#orchestrator-template-project",
         });
-        fireEvent.change(templateProjectSelect, { target: { value: "project-local" } });
+        fireEvent.change(templateProjectSelect, {
+          target: { value: "project-local" },
+        });
         expect(templateProjectSelect).toHaveValue("project-local");
-        const runButton = document.querySelector<HTMLButtonElement>(".orchestrator-run-button");
+        const runButton = document.querySelector<HTMLButtonElement>(
+          ".orchestrator-run-button",
+        );
         if (!runButton) {
           throw new Error("Run button not found");
         }
@@ -1469,9 +1751,14 @@ describe("App", () => {
         await clickAndSettle(runButton);
 
         await waitFor(() => {
-          expect(createOrchestratorInstanceSpy).toHaveBeenCalledWith("delivery-flow", "project-local");
+          expect(createOrchestratorInstanceSpy).toHaveBeenCalledWith(
+            "delivery-flow",
+            "project-local",
+          );
         });
-        expect(await screen.findByText("Orchestrated Builder")).toBeInTheDocument();
+        expect(
+          await screen.findByText("Orchestrated Builder"),
+        ).toBeInTheDocument();
 
         act(() => {
           eventSource.dispatchNamedEvent("delta", {
@@ -1509,74 +1796,90 @@ describe("App", () => {
 
   it("filters sessions from the control panel project selector", async () => {
     await withSuppressedActWarnings(async () => {
-    const originalFetch = globalThis.fetch;
-    const originalEventSource = globalThis.EventSource;
-    const originalResizeObserver = globalThis.ResizeObserver;
-    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
-      const url = String(input);
-      if (url === "/api/state") {
-        return jsonResponse({
-          revision: 1,
-          projects: [
-            {
-              id: "project-api",
-              name: "API",
-              rootPath: "/projects/api",
-            },
-            {
-              id: "project-web",
-              name: "Web",
-              rootPath: "/projects/web",
-            },
-          ],
-          sessions: [
-            makeSession("session-web", {
-              name: "Web Session",
-              projectId: "project-web",
-              workdir: "/projects/web",
-            }),
-          ],
+      const originalFetch = globalThis.fetch;
+      const originalEventSource = globalThis.EventSource;
+      const originalResizeObserver = globalThis.ResizeObserver;
+      const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url === "/api/state") {
+          return jsonResponse({
+            revision: 1,
+            projects: [
+              {
+                id: "project-api",
+                name: "API",
+                rootPath: "/projects/api",
+              },
+              {
+                id: "project-web",
+                name: "Web",
+                rootPath: "/projects/web",
+              },
+            ],
+            sessions: [
+              makeSession("session-web", {
+                name: "Web Session",
+                projectId: "project-web",
+                workdir: "/projects/web",
+              }),
+            ],
+          });
+        }
+
+        throw new Error(`Unexpected fetch: ${url}`);
+      });
+
+      vi.stubGlobal("fetch", fetchMock);
+      vi.stubGlobal(
+        "EventSource",
+        EventSourceMock as unknown as typeof EventSource,
+      );
+      vi.stubGlobal(
+        "ResizeObserver",
+        ResizeObserverMock as unknown as typeof ResizeObserver,
+      );
+      const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
+      HTMLElement.prototype.scrollIntoView = vi.fn();
+
+      try {
+        await renderApp();
+        const eventSource = EventSourceMock.instances[0];
+        expect(eventSource).toBeTruthy();
+        act(() => {
+          eventSource.dispatchError();
         });
+        await settleAsyncUi();
+        await clickAndSettle(
+          await screen.findByRole("button", { name: "Projects" }),
+        );
+        await screen.findByText("API");
+        await clickAndSettle(
+          await screen.findByRole("button", { name: "Sessions" }),
+        );
+
+        expect(
+          screen.getByRole("combobox", { name: "Project" }),
+        ).toHaveTextContent("All projects");
+
+        await selectComboboxOption("Project", /^API$/i);
+
+        await waitFor(() => {
+          expect(screen.getByText("No sessions in API.")).toBeInTheDocument();
+        });
+
+        await clickAndSettle(
+          await screen.findByRole("button", { name: "Files" }),
+        );
+        expect(
+          screen.getByRole("combobox", { name: "Project" }),
+        ).toHaveTextContent("API");
+        await settleAsyncUi();
+      } finally {
+        HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
+        restoreGlobal("fetch", originalFetch);
+        restoreGlobal("EventSource", originalEventSource);
+        restoreGlobal("ResizeObserver", originalResizeObserver);
       }
-
-      throw new Error(`Unexpected fetch: ${url}`);
-    });
-
-    vi.stubGlobal("fetch", fetchMock);
-    vi.stubGlobal("EventSource", EventSourceMock as unknown as typeof EventSource);
-    vi.stubGlobal("ResizeObserver", ResizeObserverMock as unknown as typeof ResizeObserver);
-    const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
-    HTMLElement.prototype.scrollIntoView = vi.fn();
-
-    try {
-      await renderApp();
-      const eventSource = EventSourceMock.instances[0];
-      expect(eventSource).toBeTruthy();
-      act(() => {
-        eventSource.dispatchError();
-      });
-      await settleAsyncUi();
-      await clickAndSettle(await screen.findByRole("button", { name: "Projects" }));
-      await screen.findByText("API");
-      await clickAndSettle(await screen.findByRole("button", { name: "Sessions" }));
-
-      expect(screen.getByRole("combobox", { name: "Project" })).toHaveTextContent("All projects");
-
-      await selectComboboxOption("Project", /^API$/i);
-
-      await waitFor(() => {
-        expect(screen.getByText("No sessions in API.")).toBeInTheDocument();
-      });
-
-      await clickAndSettle(await screen.findByRole("button", { name: "Files" }));
-      expect(screen.getByRole("combobox", { name: "Project" })).toHaveTextContent("API");
-      await settleAsyncUi();
-    } finally {
-      HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
-      restoreGlobal("fetch", originalFetch);
-      restoreGlobal("EventSource", originalEventSource);
-      restoreGlobal("ResizeObserver", originalResizeObserver);
-    }
     });
   });
 
@@ -1621,8 +1924,14 @@ describe("App", () => {
       });
 
       vi.stubGlobal("fetch", fetchMock);
-      vi.stubGlobal("EventSource", EventSourceMock as unknown as typeof EventSource);
-      vi.stubGlobal("ResizeObserver", ResizeObserverMock as unknown as typeof ResizeObserver);
+      vi.stubGlobal(
+        "EventSource",
+        EventSourceMock as unknown as typeof EventSource,
+      );
+      vi.stubGlobal(
+        "ResizeObserver",
+        ResizeObserverMock as unknown as typeof ResizeObserver,
+      );
       const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
       HTMLElement.prototype.scrollIntoView = vi.fn();
 
@@ -1635,11 +1944,18 @@ describe("App", () => {
         });
         await settleAsyncUi();
 
-        await clickAndSettle(await screen.findByRole("button", { name: "Projects" }));
-        await clickAndSettle(await screen.findByRole("button", { name: "Open tab" }));
+        await clickAndSettle(
+          await screen.findByRole("button", { name: "Projects" }),
+        );
+        await clickAndSettle(
+          await screen.findByRole("button", { name: "Open tab" }),
+        );
 
-        const projectSurfaces = Array.from(document.querySelectorAll(".project-controls"));
-        const standaloneProjectsSurface = projectSurfaces[projectSurfaces.length - 1] ?? null;
+        const projectSurfaces = Array.from(
+          document.querySelectorAll(".project-controls"),
+        );
+        const standaloneProjectsSurface =
+          projectSurfaces[projectSurfaces.length - 1] ?? null;
         if (!(standaloneProjectsSurface instanceof HTMLElement)) {
           throw new Error("Standalone projects surface not found");
         }
@@ -1653,8 +1969,12 @@ describe("App", () => {
         await clickAndSettle(apiRowButton);
         expect(apiRowButton).toHaveClass("selected");
 
-        await clickAndSettle(await screen.findByRole("button", { name: "Sessions" }));
-        expect(screen.getByRole("combobox", { name: "Project" })).toHaveTextContent("All projects");
+        await clickAndSettle(
+          await screen.findByRole("button", { name: "Sessions" }),
+        );
+        expect(
+          screen.getByRole("combobox", { name: "Project" }),
+        ).toHaveTextContent("All projects");
         expect(screen.getByText("Web Session")).toBeInTheDocument();
         expect(screen.getByText("API Session")).toBeInTheDocument();
       } finally {
@@ -1730,12 +2050,20 @@ describe("App", () => {
         });
       }
 
-      throw new Error(`Unexpected fetch: ${requestUrl.pathname}${requestUrl.search}`);
+      throw new Error(
+        `Unexpected fetch: ${requestUrl.pathname}${requestUrl.search}`,
+      );
     });
 
     vi.stubGlobal("fetch", fetchMock);
-    vi.stubGlobal("EventSource", EventSourceMock as unknown as typeof EventSource);
-    vi.stubGlobal("ResizeObserver", ResizeObserverMock as unknown as typeof ResizeObserver);
+    vi.stubGlobal(
+      "EventSource",
+      EventSourceMock as unknown as typeof EventSource,
+    );
+    vi.stubGlobal(
+      "ResizeObserver",
+      ResizeObserverMock as unknown as typeof ResizeObserver,
+    );
     const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
     HTMLElement.prototype.scrollIntoView = vi.fn();
 
@@ -1749,11 +2077,17 @@ describe("App", () => {
       await settleAsyncUi();
 
       await selectComboboxOption("Project", /^API$/i);
-      await clickAndSettle(await screen.findByRole("button", { name: "Files" }));
+      await clickAndSettle(
+        await screen.findByRole("button", { name: "Files" }),
+      );
 
-      expect(await screen.findByRole("button", { name: /^README\.md/i })).toBeInTheDocument();
       expect(
-        screen.queryByText("This file browser is no longer associated with a live session or project."),
+        await screen.findByRole("button", { name: /^README\.md/i }),
+      ).toBeInTheDocument();
+      expect(
+        screen.queryByText(
+          "This file browser is no longer associated with a live session or project.",
+        ),
       ).not.toBeInTheDocument();
     } finally {
       HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
@@ -1768,69 +2102,74 @@ describe("App", () => {
       const originalFetch = globalThis.fetch;
       const originalEventSource = globalThis.EventSource;
       const originalResizeObserver = globalThis.ResizeObserver;
-      const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-        const requestUrl = new URL(String(input), "http://localhost");
-        if (requestUrl.pathname === "/api/state") {
-          return jsonResponse({
-            revision: 1,
-            projects: [
-              {
-                id: "project-termal",
-                name: "TermAl",
-                rootPath: "/projects/termal",
-              },
-            ],
-            sessions: [
-              makeSession("session-1", {
-                name: "Session 1",
-                projectId: "project-termal",
-                workdir: "/projects/termal",
-              }),
-            ],
-          });
-        }
+      const fetchMock = vi.fn(
+        async (input: RequestInfo | URL, init?: RequestInit) => {
+          const requestUrl = new URL(String(input), "http://localhost");
+          if (requestUrl.pathname === "/api/state") {
+            return jsonResponse({
+              revision: 1,
+              projects: [
+                {
+                  id: "project-termal",
+                  name: "TermAl",
+                  rootPath: "/projects/termal",
+                },
+              ],
+              sessions: [
+                makeSession("session-1", {
+                  name: "Session 1",
+                  projectId: "project-termal",
+                  workdir: "/projects/termal",
+                }),
+              ],
+            });
+          }
 
-        if (requestUrl.pathname === "/api/git/status") {
-          return jsonResponse({
-            ahead: 0,
-            behind: 0,
-            branch: "main",
-            files: [],
-            isClean: true,
-            repoRoot: "/projects/termal",
-            upstream: "origin/main",
-            workdir: "/projects/termal",
-          });
-        }
+          if (requestUrl.pathname === "/api/git/status") {
+            return jsonResponse({
+              ahead: 0,
+              behind: 0,
+              branch: "main",
+              files: [],
+              isClean: true,
+              repoRoot: "/projects/termal",
+              upstream: "origin/main",
+              workdir: "/projects/termal",
+            });
+          }
 
-        if (requestUrl.pathname === "/api/orchestrators/templates") {
-          return jsonResponse({
-            templates: [
-              {
-                id: "delivery-flow",
-                name: "Delivery Flow",
-                description: "Implement and review a change.",
-                createdAt: "2026-03-26 10:00:00",
-                updatedAt: "2026-03-26 10:15:00",
-                sessions: [
-                  {
-                    id: "builder",
-                    name: "Builder",
-                    agent: "Codex",
-                    model: null,
-                    instructions: "Implement the change.",
-                    autoApprove: true,
-                    position: { x: 220, y: 420 },
-                  },
-                ],
-                transitions: [],
-              },
-            ],
-          });
-        }
+          if (requestUrl.pathname === "/api/orchestrators/templates") {
+            return jsonResponse({
+              templates: [
+                {
+                  id: "delivery-flow",
+                  name: "Delivery Flow",
+                  description: "Implement and review a change.",
+                  createdAt: "2026-03-26 10:00:00",
+                  updatedAt: "2026-03-26 10:15:00",
+                  sessions: [
+                    {
+                      id: "builder",
+                      name: "Builder",
+                      agent: "Codex",
+                      model: null,
+                      instructions: "Implement the change.",
+                      autoApprove: true,
+                      inputMode: "queue",
+                      position: { x: 220, y: 420 },
+                    },
+                  ],
+                  transitions: [],
+                },
+              ],
+            });
+          }
 
-        throw new Error(`Unexpected fetch: ${requestUrl.pathname}${requestUrl.search}`);
-      });
+          throw new Error(
+            `Unexpected fetch: ${requestUrl.pathname}${requestUrl.search}`,
+          );
+        },
+      );
 
       function getSessionTablist() {
         const sessionTablist = screen
@@ -1846,8 +2185,14 @@ describe("App", () => {
 
       window.localStorage.clear();
       vi.stubGlobal("fetch", fetchMock);
-      vi.stubGlobal("EventSource", EventSourceMock as unknown as typeof EventSource);
-      vi.stubGlobal("ResizeObserver", ResizeObserverMock as unknown as typeof ResizeObserver);
+      vi.stubGlobal(
+        "EventSource",
+        EventSourceMock as unknown as typeof EventSource,
+      );
+      vi.stubGlobal(
+        "ResizeObserver",
+        ResizeObserverMock as unknown as typeof ResizeObserver,
+      );
       const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
       HTMLElement.prototype.scrollIntoView = vi.fn();
 
@@ -1865,7 +2210,8 @@ describe("App", () => {
           throw new Error("Session list not found");
         }
 
-        const sessionRowLabel = await within(sessionList).findByText("Session 1");
+        const sessionRowLabel =
+          await within(sessionList).findByText("Session 1");
         const sessionRowButton = sessionRowLabel.closest("button");
         if (!sessionRowButton) {
           throw new Error("Session row button not found");
@@ -1873,25 +2219,58 @@ describe("App", () => {
 
         await clickAndSettle(sessionRowButton);
 
-        await clickAndSettle(await screen.findByRole("button", { name: "Open tab" }));
-        expect(within(getSessionTablist()).getByText("Sessions")).toBeInTheDocument();
+        await clickAndSettle(
+          await screen.findByRole("button", { name: "Open tab" }),
+        );
+        expect(
+          within(getSessionTablist()).getByText("Sessions"),
+        ).toBeInTheDocument();
 
-        await clickAndSettle(await screen.findByRole("button", { name: "Projects" }));
-        await clickAndSettle(await screen.findByRole("button", { name: "Open tab" }));
-        expect(within(getSessionTablist()).getByText("Projects")).toBeInTheDocument();
+        await clickAndSettle(
+          await screen.findByRole("button", { name: "Projects" }),
+        );
+        await clickAndSettle(
+          await screen.findByRole("button", { name: "Open tab" }),
+        );
+        expect(
+          within(getSessionTablist()).getByText("Projects"),
+        ).toBeInTheDocument();
 
-        await clickAndSettle(await screen.findByRole("button", { name: "Git status" }));
-        await clickAndSettle(await screen.findByRole("button", { name: "Open tab" }));
-        expect(within(getSessionTablist()).getByText(/^Git:/)).toBeInTheDocument();
+        await clickAndSettle(
+          await screen.findByRole("button", { name: "Git status" }),
+        );
+        await clickAndSettle(
+          await screen.findByRole("button", { name: "Open tab" }),
+        );
+        expect(
+          within(getSessionTablist()).getByText(/^Git:/),
+        ).toBeInTheDocument();
 
-        await clickAndSettle(await screen.findByRole("button", { name: "Projects" }));
-        expect(screen.getByRole("combobox", { name: "Project" })).toHaveTextContent("TermAl");
-        expect(screen.queryByRole("button", { name: /Load repo/i })).not.toBeInTheDocument();
+        await clickAndSettle(
+          await screen.findByRole("button", { name: "Projects" }),
+        );
+        expect(
+          screen.getByRole("combobox", { name: "Project" }),
+        ).toHaveTextContent("TermAl");
+        expect(
+          screen.queryByRole("button", { name: /Load repo/i }),
+        ).not.toBeInTheDocument();
 
-        await clickAndSettle(await screen.findByRole("button", { name: "Orchestrators" }));
-        await clickAndSettle(await screen.findByRole("button", { name: "Edit canvas" }));
-        expect(within(getSessionTablist()).getByText("Orchestration: delivery-flow")).toBeInTheDocument();
-        expect(await screen.findByRole("heading", { level: 3, name: "Edit template" })).toBeInTheDocument();
+        await clickAndSettle(
+          await screen.findByRole("button", { name: "Orchestrators" }),
+        );
+        await clickAndSettle(
+          await screen.findByRole("button", { name: "Edit canvas" }),
+        );
+        expect(
+          within(getSessionTablist()).getByText("Orchestration: delivery-flow"),
+        ).toBeInTheDocument();
+        expect(
+          await screen.findByRole("heading", {
+            level: 3,
+            name: "Edit template",
+          }),
+        ).toBeInTheDocument();
       } finally {
         window.localStorage.clear();
         HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
@@ -1906,56 +2285,66 @@ describe("App", () => {
       const originalFetch = globalThis.fetch;
       const originalEventSource = globalThis.EventSource;
       const originalResizeObserver = globalThis.ResizeObserver;
-      const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-        const requestUrl = new URL(String(input), "http://localhost");
-        if (requestUrl.pathname === "/api/state") {
-          return jsonResponse({
-            revision: 1,
-            projects: [
-              {
-                id: "project-termal",
-                name: "TermAl",
-                rootPath: "/projects/termal",
-              },
-            ],
-            sessions: [
-              makeSession("session-1", {
-                name: "Session 1",
-                projectId: "project-termal",
-                workdir: "/projects/termal",
-              }),
-            ],
-          });
-        }
-
-        if (requestUrl.pathname === "/api/git/status") {
-          return jsonResponse({
-            ahead: 0,
-            behind: 0,
-            branch: "main",
-            files: [],
-            isClean: true,
-            repoRoot: "/projects/termal",
-            upstream: "origin/main",
-            workdir: "/projects/termal",
-          });
-        }
-
-        if (requestUrl.pathname.startsWith("/api/workspaces/")) {
-          if ((init?.method ?? "GET").toUpperCase() === "PUT") {
-            return jsonResponse({ ok: true });
+      const fetchMock = vi.fn(
+        async (input: RequestInfo | URL, init?: RequestInit) => {
+          const requestUrl = new URL(String(input), "http://localhost");
+          if (requestUrl.pathname === "/api/state") {
+            return jsonResponse({
+              revision: 1,
+              projects: [
+                {
+                  id: "project-termal",
+                  name: "TermAl",
+                  rootPath: "/projects/termal",
+                },
+              ],
+              sessions: [
+                makeSession("session-1", {
+                  name: "Session 1",
+                  projectId: "project-termal",
+                  workdir: "/projects/termal",
+                }),
+              ],
+            });
           }
 
-          return new Response("", { status: 404 });
-        }
+          if (requestUrl.pathname === "/api/git/status") {
+            return jsonResponse({
+              ahead: 0,
+              behind: 0,
+              branch: "main",
+              files: [],
+              isClean: true,
+              repoRoot: "/projects/termal",
+              upstream: "origin/main",
+              workdir: "/projects/termal",
+            });
+          }
 
-        throw new Error(`Unexpected fetch: ${requestUrl.pathname}${requestUrl.search}`);
-      });
+          if (requestUrl.pathname.startsWith("/api/workspaces/")) {
+            if ((init?.method ?? "GET").toUpperCase() === "PUT") {
+              return jsonResponse({ ok: true });
+            }
+
+            return new Response("", { status: 404 });
+          }
+
+          throw new Error(
+            `Unexpected fetch: ${requestUrl.pathname}${requestUrl.search}`,
+          );
+        },
+      );
 
       window.localStorage.clear();
       vi.stubGlobal("fetch", fetchMock);
-      vi.stubGlobal("EventSource", EventSourceMock as unknown as typeof EventSource);
-      vi.stubGlobal("ResizeObserver", ResizeObserverMock as unknown as typeof ResizeObserver);
+      vi.stubGlobal(
+        "EventSource",
+        EventSourceMock as unknown as typeof EventSource,
+      );
+      vi.stubGlobal(
+        "ResizeObserver",
+        ResizeObserverMock as unknown as typeof ResizeObserver,
+      );
       const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
       HTMLElement.prototype.scrollIntoView = vi.fn();
 
@@ -1973,7 +2362,8 @@ describe("App", () => {
           throw new Error("Session list not found");
         }
 
-        const sessionRowLabel = await within(sessionList).findByText("Session 1");
+        const sessionRowLabel =
+          await within(sessionList).findByText("Session 1");
         const sessionRowButton = sessionRowLabel.closest("button");
         if (!sessionRowButton) {
           throw new Error("Session row button not found");
@@ -1981,9 +2371,16 @@ describe("App", () => {
 
         await clickAndSettle(sessionRowButton);
 
-        async function dragDockSectionToWorkspace(buttonName: string, expectedTabName: RegExp) {
-          const dock = await screen.findByRole("navigation", { name: "Control panel dock" });
-          const sectionButton = await within(dock).findByRole("button", { name: buttonName });
+        async function dragDockSectionToWorkspace(
+          buttonName: string,
+          expectedTabName: RegExp,
+        ) {
+          const dock = await screen.findByRole("navigation", {
+            name: "Control panel dock",
+          });
+          const sectionButton = await within(dock).findByRole("button", {
+            name: buttonName,
+          });
           expect(sectionButton).toHaveAttribute("draggable", "true");
 
           const dataTransfer = createDragDataTransfer();
@@ -2010,7 +2407,9 @@ describe("App", () => {
               screen
                 .getAllByRole("tab")
                 .some((tab) =>
-                  expectedTabName.test((tab.textContent ?? "").replace(/×/g, "").trim()),
+                  expectedTabName.test(
+                    (tab.textContent ?? "").replace(/×/g, "").trim(),
+                  ),
                 ),
             ).toBe(true);
           });
@@ -2034,43 +2433,53 @@ describe("App", () => {
       const originalFetch = globalThis.fetch;
       const originalEventSource = globalThis.EventSource;
       const originalResizeObserver = globalThis.ResizeObserver;
-      const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-        const requestUrl = new URL(String(input), "http://localhost");
-        if (requestUrl.pathname === "/api/state") {
-          return jsonResponse({
-            revision: 1,
-            projects: [
-              {
-                id: "project-termal",
-                name: "TermAl",
-                rootPath: "/projects/termal",
-              },
-            ],
-            sessions: [
-              makeSession("session-1", {
-                name: "Session 1",
-                projectId: "project-termal",
-                workdir: "/projects/termal",
-              }),
-            ],
-          });
-        }
-
-        if (requestUrl.pathname.startsWith("/api/workspaces/")) {
-          if ((init?.method ?? "GET").toUpperCase() === "PUT") {
-            return jsonResponse({ ok: true });
+      const fetchMock = vi.fn(
+        async (input: RequestInfo | URL, init?: RequestInit) => {
+          const requestUrl = new URL(String(input), "http://localhost");
+          if (requestUrl.pathname === "/api/state") {
+            return jsonResponse({
+              revision: 1,
+              projects: [
+                {
+                  id: "project-termal",
+                  name: "TermAl",
+                  rootPath: "/projects/termal",
+                },
+              ],
+              sessions: [
+                makeSession("session-1", {
+                  name: "Session 1",
+                  projectId: "project-termal",
+                  workdir: "/projects/termal",
+                }),
+              ],
+            });
           }
 
-          return new Response("", { status: 404 });
-        }
+          if (requestUrl.pathname.startsWith("/api/workspaces/")) {
+            if ((init?.method ?? "GET").toUpperCase() === "PUT") {
+              return jsonResponse({ ok: true });
+            }
 
-        throw new Error(`Unexpected fetch: ${requestUrl.pathname}${requestUrl.search}`);
-      });
+            return new Response("", { status: 404 });
+          }
+
+          throw new Error(
+            `Unexpected fetch: ${requestUrl.pathname}${requestUrl.search}`,
+          );
+        },
+      );
 
       window.localStorage.clear();
       vi.stubGlobal("fetch", fetchMock);
-      vi.stubGlobal("EventSource", EventSourceMock as unknown as typeof EventSource);
-      vi.stubGlobal("ResizeObserver", ResizeObserverMock as unknown as typeof ResizeObserver);
+      vi.stubGlobal(
+        "EventSource",
+        EventSourceMock as unknown as typeof EventSource,
+      );
+      vi.stubGlobal(
+        "ResizeObserver",
+        ResizeObserverMock as unknown as typeof ResizeObserver,
+      );
       const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
       HTMLElement.prototype.scrollIntoView = vi.fn();
 
@@ -2088,7 +2497,8 @@ describe("App", () => {
           throw new Error("Session list not found");
         }
 
-        const sessionRowLabel = await within(sessionList).findByText("Session 1");
+        const sessionRowLabel =
+          await within(sessionList).findByText("Session 1");
         const sessionRowButton = sessionRowLabel.closest("button");
         if (!sessionRowButton) {
           throw new Error("Session row button not found");
@@ -2096,18 +2506,25 @@ describe("App", () => {
 
         await clickAndSettle(sessionRowButton);
 
-        const dock = await screen.findByRole("navigation", { name: "Control panel dock" });
-        const sectionButton = await within(dock).findByRole("button", { name: "Sessions" });
+        const dock = await screen.findByRole("navigation", {
+          name: "Control panel dock",
+        });
+        const sectionButton = await within(dock).findByRole("button", {
+          name: "Sessions",
+        });
         const dataTransfer = createDragDataTransfer();
 
         await act(async () => {
           fireEvent.dragStart(sectionButton, { dataTransfer });
         });
 
-        const reducedMimeDataTransfer = createReducedMimeDragDataTransfer(dataTransfer);
-        const workspaceTabList = screen.getAllByRole("tablist", { name: "Tile tabs" }).find((tabList) =>
-          within(tabList).queryByRole("tab", { name: /Session 1/i }),
-        );
+        const reducedMimeDataTransfer =
+          createReducedMimeDragDataTransfer(dataTransfer);
+        const workspaceTabList = screen
+          .getAllByRole("tablist", { name: "Tile tabs" })
+          .find((tabList) =>
+            within(tabList).queryByRole("tab", { name: /Session 1/i }),
+          );
         if (!(workspaceTabList instanceof HTMLDivElement)) {
           throw new Error("Workspace tab list not found");
         }
@@ -2117,15 +2534,31 @@ describe("App", () => {
         }
 
         await act(async () => {
-          fireEvent.dragEnter(workspacePane, { clientX: 240, clientY: 220, dataTransfer: reducedMimeDataTransfer });
-          fireEvent.dragOver(workspacePane, { clientX: 240, clientY: 220, dataTransfer: reducedMimeDataTransfer });
-          fireEvent.drop(workspacePane, { clientX: 240, clientY: 220, dataTransfer: reducedMimeDataTransfer });
+          fireEvent.dragEnter(workspacePane, {
+            clientX: 240,
+            clientY: 220,
+            dataTransfer: reducedMimeDataTransfer,
+          });
+          fireEvent.dragOver(workspacePane, {
+            clientX: 240,
+            clientY: 220,
+            dataTransfer: reducedMimeDataTransfer,
+          });
+          fireEvent.drop(workspacePane, {
+            clientX: 240,
+            clientY: 220,
+            dataTransfer: reducedMimeDataTransfer,
+          });
           fireEvent.dragEnd(sectionButton, { dataTransfer });
         });
         await settleAsyncUi();
 
         await waitFor(() => {
-          expect(screen.getAllByRole("tab").some((tab) => /Sessions/i.test(tab.textContent ?? ""))).toBe(true);
+          expect(
+            screen
+              .getAllByRole("tab")
+              .some((tab) => /Sessions/i.test(tab.textContent ?? "")),
+          ).toBe(true);
         });
       } finally {
         window.localStorage.clear();
@@ -2141,56 +2574,66 @@ describe("App", () => {
       const originalFetch = globalThis.fetch;
       const originalEventSource = globalThis.EventSource;
       const originalResizeObserver = globalThis.ResizeObserver;
-      const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-        const requestUrl = new URL(String(input), "http://localhost");
-        if (requestUrl.pathname === "/api/state") {
-          return jsonResponse({
-            revision: 1,
-            projects: [
-              {
-                id: "project-termal",
-                name: "TermAl",
-                rootPath: "/projects/termal",
-              },
-            ],
-            sessions: [
-              makeSession("session-1", {
-                name: "Session 1",
-                projectId: "project-termal",
-                workdir: "/projects/termal",
-              }),
-            ],
-          });
-        }
-
-        if (requestUrl.pathname === "/api/git/status") {
-          return jsonResponse({
-            ahead: 0,
-            behind: 0,
-            branch: "main",
-            files: [],
-            isClean: true,
-            repoRoot: "/projects/termal",
-            upstream: "origin/main",
-            workdir: "/projects/termal",
-          });
-        }
-
-        if (requestUrl.pathname.startsWith("/api/workspaces/")) {
-          if ((init?.method ?? "GET").toUpperCase() === "PUT") {
-            return jsonResponse({ ok: true });
+      const fetchMock = vi.fn(
+        async (input: RequestInfo | URL, init?: RequestInit) => {
+          const requestUrl = new URL(String(input), "http://localhost");
+          if (requestUrl.pathname === "/api/state") {
+            return jsonResponse({
+              revision: 1,
+              projects: [
+                {
+                  id: "project-termal",
+                  name: "TermAl",
+                  rootPath: "/projects/termal",
+                },
+              ],
+              sessions: [
+                makeSession("session-1", {
+                  name: "Session 1",
+                  projectId: "project-termal",
+                  workdir: "/projects/termal",
+                }),
+              ],
+            });
           }
 
-          return new Response("", { status: 404 });
-        }
+          if (requestUrl.pathname === "/api/git/status") {
+            return jsonResponse({
+              ahead: 0,
+              behind: 0,
+              branch: "main",
+              files: [],
+              isClean: true,
+              repoRoot: "/projects/termal",
+              upstream: "origin/main",
+              workdir: "/projects/termal",
+            });
+          }
 
-        throw new Error(`Unexpected fetch: ${requestUrl.pathname}${requestUrl.search}`);
-      });
+          if (requestUrl.pathname.startsWith("/api/workspaces/")) {
+            if ((init?.method ?? "GET").toUpperCase() === "PUT") {
+              return jsonResponse({ ok: true });
+            }
+
+            return new Response("", { status: 404 });
+          }
+
+          throw new Error(
+            `Unexpected fetch: ${requestUrl.pathname}${requestUrl.search}`,
+          );
+        },
+      );
 
       window.localStorage.clear();
       vi.stubGlobal("fetch", fetchMock);
-      vi.stubGlobal("EventSource", EventSourceMock as unknown as typeof EventSource);
-      vi.stubGlobal("ResizeObserver", ResizeObserverMock as unknown as typeof ResizeObserver);
+      vi.stubGlobal(
+        "EventSource",
+        EventSourceMock as unknown as typeof EventSource,
+      );
+      vi.stubGlobal(
+        "ResizeObserver",
+        ResizeObserverMock as unknown as typeof ResizeObserver,
+      );
       const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
       HTMLElement.prototype.scrollIntoView = vi.fn();
 
@@ -2208,7 +2651,8 @@ describe("App", () => {
           throw new Error("Session list not found");
         }
 
-        const sessionRowLabel = await within(sessionList).findByText("Session 1");
+        const sessionRowLabel =
+          await within(sessionList).findByText("Session 1");
         const sessionRowButton = sessionRowLabel.closest("button");
         if (!sessionRowButton) {
           throw new Error("Session row button not found");
@@ -2216,7 +2660,9 @@ describe("App", () => {
 
         await clickAndSettle(sessionRowButton);
 
-        const initialTabLists = screen.getAllByRole("tablist", { name: "Tile tabs" });
+        const initialTabLists = screen.getAllByRole("tablist", {
+          name: "Tile tabs",
+        });
         expect(initialTabLists).toHaveLength(2);
 
         const workspaceTabList = initialTabLists.find((tabList) =>
@@ -2227,9 +2673,16 @@ describe("App", () => {
         }
         const workspaceTabRail = workspaceTabList;
 
-        async function dragDockSectionToTabRail(buttonName: string, expectedTabLabel: RegExp) {
-          const dock = await screen.findByRole("navigation", { name: "Control panel dock" });
-          const sectionButton = await within(dock).findByRole("button", { name: buttonName });
+        async function dragDockSectionToTabRail(
+          buttonName: string,
+          expectedTabLabel: RegExp,
+        ) {
+          const dock = await screen.findByRole("navigation", {
+            name: "Control panel dock",
+          });
+          const sectionButton = await within(dock).findByRole("button", {
+            name: buttonName,
+          });
           const dataTransfer = createDragDataTransfer();
 
           await act(async () => {
@@ -2238,21 +2691,31 @@ describe("App", () => {
           await settleAsyncUi();
 
           await act(async () => {
-            fireEvent.dragEnter(workspaceTabRail, { clientX: 200, dataTransfer });
-            fireEvent.dragOver(workspaceTabRail, { clientX: 200, dataTransfer });
+            fireEvent.dragEnter(workspaceTabRail, {
+              clientX: 200,
+              dataTransfer,
+            });
+            fireEvent.dragOver(workspaceTabRail, {
+              clientX: 200,
+              dataTransfer,
+            });
             fireEvent.drop(workspaceTabRail, { clientX: 200, dataTransfer });
             fireEvent.dragEnd(sectionButton, { dataTransfer });
           });
           await settleAsyncUi();
 
           await waitFor(() => {
-            const tabLists = screen.getAllByRole("tablist", { name: "Tile tabs" });
+            const tabLists = screen.getAllByRole("tablist", {
+              name: "Tile tabs",
+            });
             expect(tabLists).toHaveLength(2);
             const updatedWorkspaceTabList = tabLists.find((tabList) =>
               /Session 1/i.test(tabList.textContent ?? ""),
             );
             expect(updatedWorkspaceTabList).toBeTruthy();
-            expect(updatedWorkspaceTabList?.textContent ?? "").toMatch(expectedTabLabel);
+            expect(updatedWorkspaceTabList?.textContent ?? "").toMatch(
+              expectedTabLabel,
+            );
           });
         }
 
@@ -2274,60 +2737,65 @@ describe("App", () => {
       const originalFetch = globalThis.fetch;
       const originalEventSource = globalThis.EventSource;
       const originalResizeObserver = globalThis.ResizeObserver;
-      const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-        const requestUrl = new URL(String(input), "http://localhost");
-        if (requestUrl.pathname === "/api/state") {
-          return jsonResponse({
-            revision: 1,
-            projects: [
-              {
-                id: "project-termal",
-                name: "TermAl",
-                rootPath: "/projects/termal",
-              },
-              {
-                id: "project-api",
-                name: "API",
-                rootPath: "/projects/api",
-              },
-            ],
-            sessions: [
-              makeSession("session-1", {
-                name: "Session 1",
-                projectId: "project-termal",
-                workdir: "/projects/termal",
-              }),
-            ],
-          });
-        }
-
-        if (requestUrl.pathname === "/api/git/status") {
-          const repoPath = requestUrl.searchParams.get("path") ?? "";
-          const repoSegments = repoPath.split("/").filter(Boolean);
-          const repoName = repoSegments[repoSegments.length - 1] ?? "workspace";
-          return jsonResponse({
-            ahead: 0,
-            behind: 0,
-            branch: "main",
-            files: [],
-            isClean: true,
-            repoRoot: repoPath,
-            upstream: "origin/main",
-            workdir: repoPath,
-            statusMessage: `${repoName} ready`,
-          });
-        }
-
-        if (requestUrl.pathname.startsWith("/api/workspaces/")) {
-          if ((init?.method ?? "GET").toUpperCase() === "PUT") {
-            return jsonResponse({ ok: true });
+      const fetchMock = vi.fn(
+        async (input: RequestInfo | URL, init?: RequestInit) => {
+          const requestUrl = new URL(String(input), "http://localhost");
+          if (requestUrl.pathname === "/api/state") {
+            return jsonResponse({
+              revision: 1,
+              projects: [
+                {
+                  id: "project-termal",
+                  name: "TermAl",
+                  rootPath: "/projects/termal",
+                },
+                {
+                  id: "project-api",
+                  name: "API",
+                  rootPath: "/projects/api",
+                },
+              ],
+              sessions: [
+                makeSession("session-1", {
+                  name: "Session 1",
+                  projectId: "project-termal",
+                  workdir: "/projects/termal",
+                }),
+              ],
+            });
           }
 
-          return new Response("", { status: 404 });
-        }
+          if (requestUrl.pathname === "/api/git/status") {
+            const repoPath = requestUrl.searchParams.get("path") ?? "";
+            const repoSegments = repoPath.split("/").filter(Boolean);
+            const repoName =
+              repoSegments[repoSegments.length - 1] ?? "workspace";
+            return jsonResponse({
+              ahead: 0,
+              behind: 0,
+              branch: "main",
+              files: [],
+              isClean: true,
+              repoRoot: repoPath,
+              upstream: "origin/main",
+              workdir: repoPath,
+              statusMessage: `${repoName} ready`,
+            });
+          }
 
-        throw new Error(`Unexpected fetch: ${requestUrl.pathname}${requestUrl.search}`);
-      });
+          if (requestUrl.pathname.startsWith("/api/workspaces/")) {
+            if ((init?.method ?? "GET").toUpperCase() === "PUT") {
+              return jsonResponse({ ok: true });
+            }
+
+            return new Response("", { status: 404 });
+          }
+
+          throw new Error(
+            `Unexpected fetch: ${requestUrl.pathname}${requestUrl.search}`,
+          );
+        },
+      );
 
       function getSessionTablist() {
         const sessionTablist = screen
@@ -2342,7 +2810,9 @@ describe("App", () => {
       }
 
       function getControlPanelShell() {
-        const controlPanelShell = document.querySelector(".control-panel-shell");
+        const controlPanelShell = document.querySelector(
+          ".control-panel-shell",
+        );
         if (!(controlPanelShell instanceof HTMLDivElement)) {
           throw new Error("Control panel shell not found");
         }
@@ -2351,7 +2821,9 @@ describe("App", () => {
       }
 
       async function selectControlPanelProject(optionName: string | RegExp) {
-        const combobox = within(getControlPanelShell()).getByRole("combobox", { name: "Project" });
+        const combobox = within(getControlPanelShell()).getByRole("combobox", {
+          name: "Project",
+        });
         await clickAndSettle(combobox);
 
         const listbox = await screen.findByRole("listbox");
@@ -2359,15 +2831,21 @@ describe("App", () => {
           .getAllByRole("option")
           .find((candidate) => {
             const label =
-              candidate.querySelector(".combo-option-label")?.textContent?.trim() ??
+              candidate
+                .querySelector(".combo-option-label")
+                ?.textContent?.trim() ??
               candidate.textContent?.trim() ??
               "";
 
-            return typeof optionName === "string" ? label === optionName : optionName.test(label);
+            return typeof optionName === "string"
+              ? label === optionName
+              : optionName.test(label);
           });
 
         if (!option) {
-          throw new Error(`Control panel project option not found for ${String(optionName)}`);
+          throw new Error(
+            `Control panel project option not found for ${String(optionName)}`,
+          );
         }
 
         await clickAndSettle(option);
@@ -2375,8 +2853,14 @@ describe("App", () => {
 
       window.localStorage.clear();
       vi.stubGlobal("fetch", fetchMock);
-      vi.stubGlobal("EventSource", EventSourceMock as unknown as typeof EventSource);
-      vi.stubGlobal("ResizeObserver", ResizeObserverMock as unknown as typeof ResizeObserver);
+      vi.stubGlobal(
+        "EventSource",
+        EventSourceMock as unknown as typeof EventSource,
+      );
+      vi.stubGlobal(
+        "ResizeObserver",
+        ResizeObserverMock as unknown as typeof ResizeObserver,
+      );
       const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
       HTMLElement.prototype.scrollIntoView = vi.fn();
 
@@ -2388,41 +2872,68 @@ describe("App", () => {
           eventSource.dispatchError();
         });
         await settleAsyncUi();
-        await clickAndSettle(await screen.findByRole("button", { name: "Sessions" }));
+        await clickAndSettle(
+          await screen.findByRole("button", { name: "Sessions" }),
+        );
 
         const sessionList = document.querySelector(".session-list");
         if (!(sessionList instanceof HTMLDivElement)) {
           throw new Error("Session list not found");
         }
 
-        const sessionRowLabel = await within(sessionList).findByText("Session 1");
+        const sessionRowLabel =
+          await within(sessionList).findByText("Session 1");
         const sessionRowButton = sessionRowLabel.closest("button");
         if (!sessionRowButton) {
           throw new Error("Session row button not found");
         }
 
         await clickAndSettle(sessionRowButton);
-        await clickAndSettle(await screen.findByRole("button", { name: "Git status" }));
+        await clickAndSettle(
+          await screen.findByRole("button", { name: "Git status" }),
+        );
 
-        expect(within(getControlPanelShell()).getByRole("combobox", { name: "Project" })).toHaveTextContent("TermAl");
+        expect(
+          within(getControlPanelShell()).getByRole("combobox", {
+            name: "Project",
+          }),
+        ).toHaveTextContent("TermAl");
 
         await selectControlPanelProject(/^API$/i);
         await clickAndSettle(
-          within(getControlPanelShell()).getByTitle("Open tab or drag it into the workspace"),
+          within(getControlPanelShell()).getByTitle(
+            "Open tab or drag it into the workspace",
+          ),
         );
 
         const sessionTablist = getSessionTablist();
-        expect(within(sessionTablist).getByText("Git: api")).toBeInTheDocument();
+        expect(
+          within(sessionTablist).getByText("Git: api"),
+        ).toBeInTheDocument();
 
         await selectControlPanelProject(/^TermAl$/i);
         await clickAndSettle(
-          within(getControlPanelShell()).getByTitle("Open tab or drag it into the workspace"),
+          within(getControlPanelShell()).getByTitle(
+            "Open tab or drag it into the workspace",
+          ),
         );
-        expect(within(sessionTablist).getByText("Git: termal")).toBeInTheDocument();
-        expect(within(getControlPanelShell()).getByRole("combobox", { name: "Project" })).toHaveTextContent("TermAl");
+        expect(
+          within(sessionTablist).getByText("Git: termal"),
+        ).toBeInTheDocument();
+        expect(
+          within(getControlPanelShell()).getByRole("combobox", {
+            name: "Project",
+          }),
+        ).toHaveTextContent("TermAl");
 
-        await clickAndSettle(within(sessionTablist).getByRole("tab", { name: /Git: api/i }));
-        expect(within(getControlPanelShell()).getByRole("combobox", { name: "Project" })).toHaveTextContent("TermAl");
+        await clickAndSettle(
+          within(sessionTablist).getByRole("tab", { name: /Git: api/i }),
+        );
+        expect(
+          within(getControlPanelShell()).getByRole("combobox", {
+            name: "Project",
+          }),
+        ).toHaveTextContent("TermAl");
       } finally {
         window.localStorage.clear();
         HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
@@ -2438,56 +2949,60 @@ describe("App", () => {
       const originalEventSource = globalThis.EventSource;
       const originalResizeObserver = globalThis.ResizeObserver;
       const originalUrl = `${window.location.pathname}${window.location.search}${window.location.hash}`;
-      const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-        const requestUrl = new URL(String(input), "http://localhost");
-        if (requestUrl.pathname === "/api/state") {
-          return jsonResponse({
-            revision: 1,
-            projects: [
-              {
-                id: "project-termal",
-                name: "TermAl",
-                rootPath: "/projects/termal",
-              },
-            ],
-            sessions: [
-              makeSession("session-1", {
-                name: "Main",
-                projectId: "project-termal",
-                workdir: "/projects/termal",
-              }),
-              makeSession("session-2", {
-                name: "Review",
-                projectId: "project-termal",
-                workdir: "/projects/termal",
-              }),
-            ],
-          });
-        }
-
-        if (requestUrl.pathname === "/api/git/status") {
-          return jsonResponse({
-            ahead: 0,
-            behind: 0,
-            branch: "main",
-            files: [],
-            isClean: true,
-            repoRoot: "/projects/termal",
-            upstream: "origin/main",
-            workdir: "/projects/termal",
-          });
-        }
-
-        if (requestUrl.pathname.startsWith("/api/workspaces/")) {
-          if ((init?.method ?? "GET").toUpperCase() === "PUT") {
-            return jsonResponse({ ok: true });
+      const fetchMock = vi.fn(
+        async (input: RequestInfo | URL, init?: RequestInit) => {
+          const requestUrl = new URL(String(input), "http://localhost");
+          if (requestUrl.pathname === "/api/state") {
+            return jsonResponse({
+              revision: 1,
+              projects: [
+                {
+                  id: "project-termal",
+                  name: "TermAl",
+                  rootPath: "/projects/termal",
+                },
+              ],
+              sessions: [
+                makeSession("session-1", {
+                  name: "Main",
+                  projectId: "project-termal",
+                  workdir: "/projects/termal",
+                }),
+                makeSession("session-2", {
+                  name: "Review",
+                  projectId: "project-termal",
+                  workdir: "/projects/termal",
+                }),
+              ],
+            });
           }
 
-          return new Response("", { status: 404 });
-        }
+          if (requestUrl.pathname === "/api/git/status") {
+            return jsonResponse({
+              ahead: 0,
+              behind: 0,
+              branch: "main",
+              files: [],
+              isClean: true,
+              repoRoot: "/projects/termal",
+              upstream: "origin/main",
+              workdir: "/projects/termal",
+            });
+          }
 
-        throw new Error(`Unexpected fetch: ${requestUrl.pathname}${requestUrl.search}`);
-      });
+          if (requestUrl.pathname.startsWith("/api/workspaces/")) {
+            if ((init?.method ?? "GET").toUpperCase() === "PUT") {
+              return jsonResponse({ ok: true });
+            }
+
+            return new Response("", { status: 404 });
+          }
+
+          throw new Error(
+            `Unexpected fetch: ${requestUrl.pathname}${requestUrl.search}`,
+          );
+        },
+      );
 
       function getTablistForSession(name: string) {
         const tablist = screen
@@ -2501,7 +3016,11 @@ describe("App", () => {
         return tablist;
       }
 
-      window.history.replaceState(window.history.state, "", "/?workspace=test-pane-local-control-panel");
+      window.history.replaceState(
+        window.history.state,
+        "",
+        "/?workspace=test-pane-local-control-panel",
+      );
       window.localStorage.clear();
       window.localStorage.setItem(
         "termal-workspace-layout:test-pane-local-control-panel",
@@ -2592,8 +3111,14 @@ describe("App", () => {
       );
 
       vi.stubGlobal("fetch", fetchMock);
-      vi.stubGlobal("EventSource", EventSourceMock as unknown as typeof EventSource);
-      vi.stubGlobal("ResizeObserver", ResizeObserverMock as unknown as typeof ResizeObserver);
+      vi.stubGlobal(
+        "EventSource",
+        EventSourceMock as unknown as typeof EventSource,
+      );
+      vi.stubGlobal(
+        "ResizeObserver",
+        ResizeObserverMock as unknown as typeof ResizeObserver,
+      );
       const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
       HTMLElement.prototype.scrollIntoView = vi.fn();
 
@@ -2606,18 +3131,38 @@ describe("App", () => {
         });
         await settleAsyncUi();
 
-        const controlPanelShell = document.querySelector(".control-panel-shell");
+        const controlPanelShell = document.querySelector(
+          ".control-panel-shell",
+        );
         if (!(controlPanelShell instanceof HTMLDivElement)) {
           throw new Error("Control panel shell not found");
         }
 
-        expect(within(getTablistForSession("Main")).getByRole("tab", { name: /Canvas/i })).toBeInTheDocument();
-        expect(within(getTablistForSession("Review")).queryByRole("tab", { name: /Canvas/i })).toBeNull();
+        expect(
+          within(getTablistForSession("Main")).getByRole("tab", {
+            name: /Canvas/i,
+          }),
+        ).toBeInTheDocument();
+        expect(
+          within(getTablistForSession("Review")).queryByRole("tab", {
+            name: /Canvas/i,
+          }),
+        ).toBeNull();
 
-        await clickAndSettle(within(controlPanelShell).getByRole("button", { name: "Canvas" }));
+        await clickAndSettle(
+          within(controlPanelShell).getByRole("button", { name: "Canvas" }),
+        );
 
-        expect(within(getTablistForSession("Main")).getByRole("tab", { name: /Canvas/i })).toBeInTheDocument();
-        expect(within(getTablistForSession("Review")).queryByRole("tab", { name: /Canvas/i })).toBeNull();
+        expect(
+          within(getTablistForSession("Main")).getByRole("tab", {
+            name: /Canvas/i,
+          }),
+        ).toBeInTheDocument();
+        expect(
+          within(getTablistForSession("Review")).queryByRole("tab", {
+            name: /Canvas/i,
+          }),
+        ).toBeNull();
       } finally {
         window.history.replaceState(window.history.state, "", originalUrl);
         window.localStorage.clear();
@@ -2651,8 +3196,14 @@ describe("App", () => {
     });
 
     vi.stubGlobal("fetch", fetchMock);
-    vi.stubGlobal("EventSource", EventSourceMock as unknown as typeof EventSource);
-    vi.stubGlobal("ResizeObserver", ResizeObserverMock as unknown as typeof ResizeObserver);
+    vi.stubGlobal(
+      "EventSource",
+      EventSourceMock as unknown as typeof EventSource,
+    );
+    vi.stubGlobal(
+      "ResizeObserver",
+      ResizeObserverMock as unknown as typeof ResizeObserver,
+    );
     const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
     HTMLElement.prototype.scrollIntoView = vi.fn();
 
@@ -2664,7 +3215,9 @@ describe("App", () => {
         eventSource.dispatchError();
       });
       await settleAsyncUi();
-      await clickAndSettle(await screen.findByRole("button", { name: "Sessions" }));
+      await clickAndSettle(
+        await screen.findByRole("button", { name: "Sessions" }),
+      );
 
       const sessionList = document.querySelector(".session-list");
       if (!(sessionList instanceof HTMLDivElement)) {
@@ -2690,7 +3243,10 @@ describe("App", () => {
   });
 
   it("uses the control panel pixel minimum instead of the generic row split clamp", () => {
-    document.documentElement.style.setProperty("--control-panel-pane-min-width", "14rem");
+    document.documentElement.style.setProperty(
+      "--control-panel-pane-min-width",
+      "14rem",
+    );
 
     const bounds = getWorkspaceSplitResizeBounds(
       {
@@ -2755,11 +3311,17 @@ describe("App", () => {
   });
 
   it("matches the standalone control panel width when resolving the initial dock ratio", () => {
-    const previousPaneWidth = document.documentElement.style.getPropertyValue("--control-panel-pane-width");
-    document.documentElement.style.setProperty("--control-panel-pane-width", "23rem");
+    const previousPaneWidth = document.documentElement.style.getPropertyValue(
+      "--control-panel-pane-width",
+    );
+    document.documentElement.style.setProperty(
+      "--control-panel-pane-width",
+      "23rem",
+    );
 
     const workspaceStage = document.createElement("div");
-    workspaceStage.className = "workspace-stage workspace-stage-control-panel-only";
+    workspaceStage.className =
+      "workspace-stage workspace-stage-control-panel-only";
     Object.defineProperty(workspaceStage, "clientWidth", {
       configurable: true,
       value: 1200,
@@ -2767,25 +3329,45 @@ describe("App", () => {
     document.body.appendChild(workspaceStage);
 
     try {
-      expect(resolveStandaloneControlPanelDockWidthRatio(0.24)).toBeCloseTo((23 * 16) / 1200, 5);
+      expect(resolveStandaloneControlPanelDockWidthRatio(0.24)).toBeCloseTo(
+        (23 * 16) / 1200,
+        5,
+      );
     } finally {
       workspaceStage.remove();
       if (previousPaneWidth) {
-        document.documentElement.style.setProperty("--control-panel-pane-width", previousPaneWidth);
+        document.documentElement.style.setProperty(
+          "--control-panel-pane-width",
+          previousPaneWidth,
+        );
       } else {
-        document.documentElement.style.removeProperty("--control-panel-pane-width");
+        document.documentElement.style.removeProperty(
+          "--control-panel-pane-width",
+        );
       }
     }
   });
 
   it("clamps the initial dock ratio when the standalone width would crowd out the session pane", () => {
-    const previousPaneWidth = document.documentElement.style.getPropertyValue("--control-panel-pane-width");
-    const previousPaneMinWidth = document.documentElement.style.getPropertyValue("--control-panel-pane-min-width");
-    document.documentElement.style.setProperty("--control-panel-pane-width", "23rem");
-    document.documentElement.style.setProperty("--control-panel-pane-min-width", "20rem");
+    const previousPaneWidth = document.documentElement.style.getPropertyValue(
+      "--control-panel-pane-width",
+    );
+    const previousPaneMinWidth =
+      document.documentElement.style.getPropertyValue(
+        "--control-panel-pane-min-width",
+      );
+    document.documentElement.style.setProperty(
+      "--control-panel-pane-width",
+      "23rem",
+    );
+    document.documentElement.style.setProperty(
+      "--control-panel-pane-min-width",
+      "20rem",
+    );
 
     const workspaceStage = document.createElement("div");
-    workspaceStage.className = "workspace-stage workspace-stage-control-panel-only";
+    workspaceStage.className =
+      "workspace-stage workspace-stage-control-panel-only";
     Object.defineProperty(workspaceStage, "clientWidth", {
       configurable: true,
       value: 400,
@@ -2793,65 +3375,119 @@ describe("App", () => {
     document.body.appendChild(workspaceStage);
 
     try {
-      expect(resolveStandaloneControlPanelDockWidthRatio(0.24)).toBeCloseTo((20 * 16) / ((20 * 16) + 400 * 0.22), 5);
+      expect(resolveStandaloneControlPanelDockWidthRatio(0.24)).toBeCloseTo(
+        (20 * 16) / (20 * 16 + 400 * 0.22),
+        5,
+      );
     } finally {
       workspaceStage.remove();
       if (previousPaneWidth) {
-        document.documentElement.style.setProperty("--control-panel-pane-width", previousPaneWidth);
+        document.documentElement.style.setProperty(
+          "--control-panel-pane-width",
+          previousPaneWidth,
+        );
       } else {
-        document.documentElement.style.removeProperty("--control-panel-pane-width");
+        document.documentElement.style.removeProperty(
+          "--control-panel-pane-width",
+        );
       }
       if (previousPaneMinWidth) {
-        document.documentElement.style.setProperty("--control-panel-pane-min-width", previousPaneMinWidth);
+        document.documentElement.style.setProperty(
+          "--control-panel-pane-min-width",
+          previousPaneMinWidth,
+        );
       } else {
-        document.documentElement.style.removeProperty("--control-panel-pane-min-width");
+        document.documentElement.style.removeProperty(
+          "--control-panel-pane-min-width",
+        );
       }
     }
   });
   it("shows a Codex notice when live model refresh resets reasoning effort after session creation", async () => {
     await withSuppressedActWarnings(async () => {
-    const originalEventSource = globalThis.EventSource;
-    const originalResizeObserver = globalThis.ResizeObserver;
-    const fetchStateDeferred = createDeferred<Awaited<ReturnType<typeof api.fetchState>>>();
-    const createSessionDeferred = createDeferred<{
-      sessionId: string;
-      state: Awaited<ReturnType<typeof api.fetchState>>;
-    }>();
-    const refreshSessionModelOptionsDeferred = createDeferred<Awaited<ReturnType<typeof api.fetchState>>>();
-    const fetchStateSpy = vi.spyOn(api, "fetchState").mockImplementation(() => fetchStateDeferred.promise);
-    const createSessionSpy = vi.spyOn(api, "createSession").mockImplementation(
-      () => createSessionDeferred.promise,
-    );
-    const refreshSessionModelOptionsSpy = vi
-      .spyOn(api, "refreshSessionModelOptions")
-      .mockImplementation(() => refreshSessionModelOptionsDeferred.promise);
-    vi.stubGlobal("EventSource", EventSourceMock as unknown as typeof EventSource);
-    vi.stubGlobal("ResizeObserver", ResizeObserverMock as unknown as typeof ResizeObserver);
-    const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
-    HTMLElement.prototype.scrollIntoView = vi.fn();
+      const originalEventSource = globalThis.EventSource;
+      const originalResizeObserver = globalThis.ResizeObserver;
+      const fetchStateDeferred =
+        createDeferred<Awaited<ReturnType<typeof api.fetchState>>>();
+      const createSessionDeferred = createDeferred<{
+        sessionId: string;
+        state: Awaited<ReturnType<typeof api.fetchState>>;
+      }>();
+      const refreshSessionModelOptionsDeferred =
+        createDeferred<Awaited<ReturnType<typeof api.fetchState>>>();
+      const fetchStateSpy = vi
+        .spyOn(api, "fetchState")
+        .mockImplementation(() => fetchStateDeferred.promise);
+      const createSessionSpy = vi
+        .spyOn(api, "createSession")
+        .mockImplementation(() => createSessionDeferred.promise);
+      const refreshSessionModelOptionsSpy = vi
+        .spyOn(api, "refreshSessionModelOptions")
+        .mockImplementation(() => refreshSessionModelOptionsDeferred.promise);
+      vi.stubGlobal(
+        "EventSource",
+        EventSourceMock as unknown as typeof EventSource,
+      );
+      vi.stubGlobal(
+        "ResizeObserver",
+        ResizeObserverMock as unknown as typeof ResizeObserver,
+      );
+      const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
+      HTMLElement.prototype.scrollIntoView = vi.fn();
 
-    try {
-      await renderApp();
-      await act(async () => {
-        fetchStateDeferred.resolve({
-          revision: 1,
-          projects: [],
-          sessions: [],
+      try {
+        await renderApp();
+        await act(async () => {
+          fetchStateDeferred.resolve({
+            revision: 1,
+            projects: [],
+            sessions: [],
+          });
+          await flushUiWork();
         });
-        await flushUiWork();
-      });
 
-      await openCreateSessionDialog();
-      await settleAsyncUi();
-      await submitButtonAndSettle(screen.getByRole("button", { name: "Create session" }));
-      await waitFor(() => {
-        expect(createSessionSpy).toHaveBeenCalled();
-      });
-      await act(async () => {
-        createSessionDeferred.resolve({
-          sessionId: "session-1",
-          state: {
-            revision: 2,
+        await openCreateSessionDialog();
+        await settleAsyncUi();
+        await submitButtonAndSettle(
+          screen.getByRole("button", { name: "Create session" }),
+        );
+        await waitFor(() => {
+          expect(createSessionSpy).toHaveBeenCalled();
+        });
+        await act(async () => {
+          createSessionDeferred.resolve({
+            sessionId: "session-1",
+            state: {
+              revision: 2,
+              projects: [],
+              sessions: [
+                {
+                  id: "session-1",
+                  name: "Codex 1",
+                  emoji: "O",
+                  agent: "Codex",
+                  workdir: "/tmp",
+                  model: "gpt-5-codex-mini",
+                  approvalPolicy: "never",
+                  reasoningEffort: "minimal",
+                  sandboxMode: "workspace-write",
+                  status: "idle",
+                  preview: "Ready for a prompt.",
+                  messages: [],
+                },
+              ],
+            },
+          });
+          await flushUiWork();
+        });
+        await waitFor(() => {
+          expect(refreshSessionModelOptionsSpy).toHaveBeenCalledWith(
+            "session-1",
+          );
+        });
+        await act(async () => {
+          refreshSessionModelOptionsDeferred.resolve({
+            revision: 3,
             projects: [],
             sessions: [
               {
@@ -2861,154 +3497,184 @@ describe("App", () => {
                 agent: "Codex",
                 workdir: "/tmp",
                 model: "gpt-5-codex-mini",
+                modelOptions: [
+                  {
+                    label: "GPT-5 Codex Mini",
+                    value: "gpt-5-codex-mini",
+                    description:
+                      "Optimized for codex. Cheaper, faster, but less capable.",
+                    defaultReasoningEffort: "medium",
+                    supportedReasoningEfforts: ["medium", "high"],
+                  },
+                ],
                 approvalPolicy: "never",
-                reasoningEffort: "minimal",
+                reasoningEffort: "medium",
                 sandboxMode: "workspace-write",
                 status: "idle",
                 preview: "Ready for a prompt.",
                 messages: [],
               },
             ],
-          },
+          });
+          await flushUiWork();
         });
-        await flushUiWork();
-      });
-      await waitFor(() => {
-        expect(refreshSessionModelOptionsSpy).toHaveBeenCalledWith("session-1");
-      });
-      await act(async () => {
-        refreshSessionModelOptionsDeferred.resolve({
-          revision: 3,
-          projects: [],
-          sessions: [
-            {
-              id: "session-1",
-              name: "Codex 1",
-              emoji: "O",
-              agent: "Codex",
-              workdir: "/tmp",
-              model: "gpt-5-codex-mini",
-              modelOptions: [
-                {
-                  label: "GPT-5 Codex Mini",
-                  value: "gpt-5-codex-mini",
-                  description: "Optimized for codex. Cheaper, faster, but less capable.",
-                  defaultReasoningEffort: "medium",
-                  supportedReasoningEfforts: ["medium", "high"],
-                },
-              ],
-              approvalPolicy: "never",
-              reasoningEffort: "medium",
-              sandboxMode: "workspace-write",
-              status: "idle",
-              preview: "Ready for a prompt.",
-              messages: [],
-            },
-          ],
-        });
-        await flushUiWork();
-      });
-      await clickAndSettle(await screen.findByRole("button", { name: "Prompt" }));
+        await clickAndSettle(
+          await screen.findByRole("button", { name: "Prompt" }),
+        );
 
-      await waitFor(() => {
-        expect(
-          screen.getByText(
-            "GPT-5 Codex Mini only supports medium and high reasoning, so TermAl reset effort from minimal to medium.",
-          ),
-        ).toBeInTheDocument();
-      });
-      await settleAsyncUi();
-    } finally {
-      HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
-      fetchStateSpy.mockRestore();
-      createSessionSpy.mockRestore();
-      refreshSessionModelOptionsSpy.mockRestore();
-      restoreGlobal("EventSource", originalEventSource);
-      restoreGlobal("ResizeObserver", originalResizeObserver);
-    }
+        await waitFor(() => {
+          expect(
+            screen.getByText(
+              "GPT-5 Codex Mini only supports medium and high reasoning, so TermAl reset effort from minimal to medium.",
+            ),
+          ).toBeInTheDocument();
+        });
+        await settleAsyncUi();
+      } finally {
+        HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
+        fetchStateSpy.mockRestore();
+        createSessionSpy.mockRestore();
+        refreshSessionModelOptionsSpy.mockRestore();
+        restoreGlobal("EventSource", originalEventSource);
+        restoreGlobal("ResizeObserver", originalResizeObserver);
+      }
     });
   });
   it("applies the configured Codex reasoning effort to new Codex sessions", async () => {
     await withSuppressedActWarnings(async () => {
-    const originalEventSource = globalThis.EventSource;
-    const originalResizeObserver = globalThis.ResizeObserver;
-    const fetchStateDeferred = createDeferred<Awaited<ReturnType<typeof api.fetchState>>>();
-    const updateSettingsDeferred = createDeferred<Awaited<ReturnType<typeof api.fetchState>>>();
-    const createSessionDeferred = createDeferred<{
-      sessionId: string;
-      state: Awaited<ReturnType<typeof api.fetchState>>;
-    }>();
-    const refreshSessionModelOptionsDeferred = createDeferred<Awaited<ReturnType<typeof api.fetchState>>>();
-    const fetchStateSpy = vi.spyOn(api, "fetchState").mockImplementation(() => fetchStateDeferred.promise);
-    const updateAppSettingsSpy = vi
-      .spyOn(api, "updateAppSettings")
-      .mockImplementation(() => updateSettingsDeferred.promise);
-    const createSessionSpy = vi.spyOn(api, "createSession").mockImplementation(
-      () => createSessionDeferred.promise,
-    );
-    const refreshSessionModelOptionsSpy = vi
-      .spyOn(api, "refreshSessionModelOptions")
-      .mockImplementation(() => refreshSessionModelOptionsDeferred.promise);
-    vi.stubGlobal("EventSource", EventSourceMock as unknown as typeof EventSource);
-    vi.stubGlobal("ResizeObserver", ResizeObserverMock as unknown as typeof ResizeObserver);
-    const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
-    HTMLElement.prototype.scrollIntoView = vi.fn();
+      const originalEventSource = globalThis.EventSource;
+      const originalResizeObserver = globalThis.ResizeObserver;
+      const fetchStateDeferred =
+        createDeferred<Awaited<ReturnType<typeof api.fetchState>>>();
+      const updateSettingsDeferred =
+        createDeferred<Awaited<ReturnType<typeof api.fetchState>>>();
+      const createSessionDeferred = createDeferred<{
+        sessionId: string;
+        state: Awaited<ReturnType<typeof api.fetchState>>;
+      }>();
+      const refreshSessionModelOptionsDeferred =
+        createDeferred<Awaited<ReturnType<typeof api.fetchState>>>();
+      const fetchStateSpy = vi
+        .spyOn(api, "fetchState")
+        .mockImplementation(() => fetchStateDeferred.promise);
+      const updateAppSettingsSpy = vi
+        .spyOn(api, "updateAppSettings")
+        .mockImplementation(() => updateSettingsDeferred.promise);
+      const createSessionSpy = vi
+        .spyOn(api, "createSession")
+        .mockImplementation(() => createSessionDeferred.promise);
+      const refreshSessionModelOptionsSpy = vi
+        .spyOn(api, "refreshSessionModelOptions")
+        .mockImplementation(() => refreshSessionModelOptionsDeferred.promise);
+      vi.stubGlobal(
+        "EventSource",
+        EventSourceMock as unknown as typeof EventSource,
+      );
+      vi.stubGlobal(
+        "ResizeObserver",
+        ResizeObserverMock as unknown as typeof ResizeObserver,
+      );
+      const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
+      HTMLElement.prototype.scrollIntoView = vi.fn();
 
-    try {
-      await renderApp();
-      await act(async () => {
-        fetchStateDeferred.resolve({
-          revision: 1,
-          preferences: {
-            defaultCodexReasoningEffort: "medium",
-            defaultClaudeEffort: "default",
-          },
-          projects: [],
-          sessions: [],
+      try {
+        await renderApp();
+        await act(async () => {
+          fetchStateDeferred.resolve({
+            revision: 1,
+            preferences: {
+              defaultCodexReasoningEffort: "medium",
+              defaultClaudeEffort: "default",
+            },
+            projects: [],
+            sessions: [],
+          });
+          await flushUiWork();
         });
-        await flushUiWork();
-      });
 
-      await clickAndSettle(await screen.findByRole("button", { name: "Open preferences" }));
-      await clickAndSettle(screen.getByRole("tab", { name: "Codex defaults" }));
-      await selectComboboxOption("Default reasoning effort", /high/i);
-      await waitFor(() => {
-        expect(updateAppSettingsSpy).toHaveBeenCalledWith({
-          defaultCodexReasoningEffort: "high",
-        });
-      });
-      await act(async () => {
-        updateSettingsDeferred.resolve({
-          revision: 2,
-          preferences: {
-            defaultCodexReasoningEffort: "high",
-            defaultClaudeEffort: "default",
-          },
-          projects: [],
-          sessions: [],
-        });
-        await flushUiWork();
-      });
-      await clickAndSettle(screen.getByRole("button", { name: "Close dialog" }));
-
-      await openCreateSessionDialog();
-      await settleAsyncUi();
-      expect(screen.getByRole("combobox", { name: "Codex reasoning effort" })).toHaveTextContent("high");
-      await submitButtonAndSettle(screen.getByRole("button", { name: "Create session" }));
-
-      await waitFor(() => {
-        expect(createSessionSpy).toHaveBeenCalledWith(
-          expect.objectContaining({
-            agent: "Codex",
-            reasoningEffort: "high",
-          }),
+        await clickAndSettle(
+          await screen.findByRole("button", { name: "Open preferences" }),
         );
-      });
-      await act(async () => {
-        createSessionDeferred.resolve({
-          sessionId: "session-1",
-          state: {
-            revision: 3,
+        await clickAndSettle(
+          screen.getByRole("tab", { name: "Codex defaults" }),
+        );
+        await selectComboboxOption("Default reasoning effort", /high/i);
+        await waitFor(() => {
+          expect(updateAppSettingsSpy).toHaveBeenCalledWith({
+            defaultCodexReasoningEffort: "high",
+          });
+        });
+        await act(async () => {
+          updateSettingsDeferred.resolve({
+            revision: 2,
+            preferences: {
+              defaultCodexReasoningEffort: "high",
+              defaultClaudeEffort: "default",
+            },
+            projects: [],
+            sessions: [],
+          });
+          await flushUiWork();
+        });
+        await clickAndSettle(
+          screen.getByRole("button", { name: "Close dialog" }),
+        );
+
+        await openCreateSessionDialog();
+        await settleAsyncUi();
+        expect(
+          screen.getByRole("combobox", { name: "Codex reasoning effort" }),
+        ).toHaveTextContent("high");
+        await submitButtonAndSettle(
+          screen.getByRole("button", { name: "Create session" }),
+        );
+
+        await waitFor(() => {
+          expect(createSessionSpy).toHaveBeenCalledWith(
+            expect.objectContaining({
+              agent: "Codex",
+              reasoningEffort: "high",
+            }),
+          );
+        });
+        await act(async () => {
+          createSessionDeferred.resolve({
+            sessionId: "session-1",
+            state: {
+              revision: 3,
+              preferences: {
+                defaultCodexReasoningEffort: "high",
+                defaultClaudeEffort: "default",
+              },
+              projects: [],
+              sessions: [
+                {
+                  id: "session-1",
+                  name: "Codex 1",
+                  emoji: "O",
+                  agent: "Codex",
+                  workdir: "/tmp",
+                  model: "gpt-5.4",
+                  approvalPolicy: "never",
+                  reasoningEffort: "high",
+                  sandboxMode: "workspace-write",
+                  status: "idle",
+                  preview: "Ready for a prompt.",
+                  messages: [],
+                },
+              ],
+            },
+          });
+          await flushUiWork();
+        });
+        await waitFor(() => {
+          expect(refreshSessionModelOptionsSpy).toHaveBeenCalledWith(
+            "session-1",
+          );
+        });
+        await act(async () => {
+          refreshSessionModelOptionsDeferred.resolve({
+            revision: 4,
             preferences: {
               defaultCodexReasoningEffort: "high",
               defaultClaudeEffort: "default",
@@ -3030,135 +3696,157 @@ describe("App", () => {
                 messages: [],
               },
             ],
-          },
+          });
+          await flushUiWork();
         });
-        await flushUiWork();
-      });
-      await waitFor(() => {
-        expect(refreshSessionModelOptionsSpy).toHaveBeenCalledWith("session-1");
-      });
-      await act(async () => {
-        refreshSessionModelOptionsDeferred.resolve({
-          revision: 4,
-          preferences: {
-            defaultCodexReasoningEffort: "high",
-            defaultClaudeEffort: "default",
-          },
-          projects: [],
-          sessions: [
-            {
-              id: "session-1",
-              name: "Codex 1",
-              emoji: "O",
-              agent: "Codex",
-              workdir: "/tmp",
-              model: "gpt-5.4",
-              approvalPolicy: "never",
-              reasoningEffort: "high",
-              sandboxMode: "workspace-write",
-              status: "idle",
-              preview: "Ready for a prompt.",
-              messages: [],
-            },
-          ],
-        });
-        await flushUiWork();
-      });
-      await settleAsyncUi();
-    } finally {
-      HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
-      fetchStateSpy.mockRestore();
-      updateAppSettingsSpy.mockRestore();
-      createSessionSpy.mockRestore();
-      refreshSessionModelOptionsSpy.mockRestore();
-      restoreGlobal("EventSource", originalEventSource);
-      restoreGlobal("ResizeObserver", originalResizeObserver);
-    }
+        await settleAsyncUi();
+      } finally {
+        HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
+        fetchStateSpy.mockRestore();
+        updateAppSettingsSpy.mockRestore();
+        createSessionSpy.mockRestore();
+        refreshSessionModelOptionsSpy.mockRestore();
+        restoreGlobal("EventSource", originalEventSource);
+        restoreGlobal("ResizeObserver", originalResizeObserver);
+      }
     });
   });
 
   it("applies the configured Claude effort to new Claude sessions", async () => {
     await withSuppressedActWarnings(async () => {
-    const originalEventSource = globalThis.EventSource;
-    const originalResizeObserver = globalThis.ResizeObserver;
-    const fetchStateDeferred = createDeferred<Awaited<ReturnType<typeof api.fetchState>>>();
-    const updateSettingsDeferred = createDeferred<Awaited<ReturnType<typeof api.fetchState>>>();
-    const createSessionDeferred = createDeferred<{
-      sessionId: string;
-      state: Awaited<ReturnType<typeof api.fetchState>>;
-    }>();
-    const refreshSessionModelOptionsDeferred = createDeferred<Awaited<ReturnType<typeof api.fetchState>>>();
-    const fetchStateSpy = vi.spyOn(api, "fetchState").mockImplementation(() => fetchStateDeferred.promise);
-    const updateAppSettingsSpy = vi
-      .spyOn(api, "updateAppSettings")
-      .mockImplementation(() => updateSettingsDeferred.promise);
-    const createSessionSpy = vi.spyOn(api, "createSession").mockImplementation(
-      () => createSessionDeferred.promise,
-    );
-    const refreshSessionModelOptionsSpy = vi
-      .spyOn(api, "refreshSessionModelOptions")
-      .mockImplementation(() => refreshSessionModelOptionsDeferred.promise);
-    vi.stubGlobal("EventSource", EventSourceMock as unknown as typeof EventSource);
-    vi.stubGlobal("ResizeObserver", ResizeObserverMock as unknown as typeof ResizeObserver);
-    const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
-    HTMLElement.prototype.scrollIntoView = vi.fn();
+      const originalEventSource = globalThis.EventSource;
+      const originalResizeObserver = globalThis.ResizeObserver;
+      const fetchStateDeferred =
+        createDeferred<Awaited<ReturnType<typeof api.fetchState>>>();
+      const updateSettingsDeferred =
+        createDeferred<Awaited<ReturnType<typeof api.fetchState>>>();
+      const createSessionDeferred = createDeferred<{
+        sessionId: string;
+        state: Awaited<ReturnType<typeof api.fetchState>>;
+      }>();
+      const refreshSessionModelOptionsDeferred =
+        createDeferred<Awaited<ReturnType<typeof api.fetchState>>>();
+      const fetchStateSpy = vi
+        .spyOn(api, "fetchState")
+        .mockImplementation(() => fetchStateDeferred.promise);
+      const updateAppSettingsSpy = vi
+        .spyOn(api, "updateAppSettings")
+        .mockImplementation(() => updateSettingsDeferred.promise);
+      const createSessionSpy = vi
+        .spyOn(api, "createSession")
+        .mockImplementation(() => createSessionDeferred.promise);
+      const refreshSessionModelOptionsSpy = vi
+        .spyOn(api, "refreshSessionModelOptions")
+        .mockImplementation(() => refreshSessionModelOptionsDeferred.promise);
+      vi.stubGlobal(
+        "EventSource",
+        EventSourceMock as unknown as typeof EventSource,
+      );
+      vi.stubGlobal(
+        "ResizeObserver",
+        ResizeObserverMock as unknown as typeof ResizeObserver,
+      );
+      const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
+      HTMLElement.prototype.scrollIntoView = vi.fn();
 
-    try {
-      await renderApp();
-      await act(async () => {
-        fetchStateDeferred.resolve({
-          revision: 1,
-          preferences: {
-            defaultCodexReasoningEffort: "medium",
-            defaultClaudeEffort: "default",
-          },
-          projects: [],
-          sessions: [],
+      try {
+        await renderApp();
+        await act(async () => {
+          fetchStateDeferred.resolve({
+            revision: 1,
+            preferences: {
+              defaultCodexReasoningEffort: "medium",
+              defaultClaudeEffort: "default",
+            },
+            projects: [],
+            sessions: [],
+          });
+          await flushUiWork();
         });
-        await flushUiWork();
-      });
 
-      await clickAndSettle(await screen.findByRole("button", { name: "Open preferences" }));
-      await clickAndSettle(screen.getByRole("tab", { name: "Claude defaults" }));
-      await selectComboboxOption("Default Claude effort", /max/i);
-      await waitFor(() => {
-        expect(updateAppSettingsSpy).toHaveBeenCalledWith({
-          defaultClaudeEffort: "max",
-        });
-      });
-      await act(async () => {
-        updateSettingsDeferred.resolve({
-          revision: 2,
-          preferences: {
-            defaultCodexReasoningEffort: "medium",
-            defaultClaudeEffort: "max",
-          },
-          projects: [],
-          sessions: [],
-        });
-        await flushUiWork();
-      });
-      await clickAndSettle(screen.getByRole("button", { name: "Close dialog" }));
-
-      await openCreateSessionDialog();
-      await settleAsyncUi();
-      await selectComboboxOption("Assistant", /^Claude$/i);
-      expect(screen.getByRole("combobox", { name: "Claude effort" })).toHaveTextContent("max");
-      await submitButtonAndSettle(screen.getByRole("button", { name: "Create session" }));
-
-      await waitFor(() => {
-        expect(createSessionSpy).toHaveBeenCalledWith(
-          expect.objectContaining({
-            agent: "Claude",
-            claudeEffort: "max",
-          }),
+        await clickAndSettle(
+          await screen.findByRole("button", { name: "Open preferences" }),
         );
-      });
-      await act(async () => {
-        createSessionDeferred.resolve({
-          sessionId: "session-1",
-          state: {
-            revision: 3,
+        await clickAndSettle(
+          screen.getByRole("tab", { name: "Claude defaults" }),
+        );
+        await selectComboboxOption("Default Claude effort", /max/i);
+        await waitFor(() => {
+          expect(updateAppSettingsSpy).toHaveBeenCalledWith({
+            defaultClaudeEffort: "max",
+          });
+        });
+        await act(async () => {
+          updateSettingsDeferred.resolve({
+            revision: 2,
+            preferences: {
+              defaultCodexReasoningEffort: "medium",
+              defaultClaudeEffort: "max",
+            },
+            projects: [],
+            sessions: [],
+          });
+          await flushUiWork();
+        });
+        await clickAndSettle(
+          screen.getByRole("button", { name: "Close dialog" }),
+        );
+
+        await openCreateSessionDialog();
+        await settleAsyncUi();
+        await selectComboboxOption("Assistant", /^Claude$/i);
+        expect(
+          screen.getByRole("combobox", { name: "Claude effort" }),
+        ).toHaveTextContent("max");
+        await submitButtonAndSettle(
+          screen.getByRole("button", { name: "Create session" }),
+        );
+
+        await waitFor(() => {
+          expect(createSessionSpy).toHaveBeenCalledWith(
+            expect.objectContaining({
+              agent: "Claude",
+              claudeEffort: "max",
+            }),
+          );
+        });
+        await act(async () => {
+          createSessionDeferred.resolve({
+            sessionId: "session-1",
+            state: {
+              revision: 3,
+              preferences: {
+                defaultCodexReasoningEffort: "medium",
+                defaultClaudeEffort: "max",
+              },
+              projects: [],
+              sessions: [
+                {
+                  id: "session-1",
+                  name: "Claude 1",
+                  emoji: "C",
+                  agent: "Claude",
+                  workdir: "/tmp",
+                  model: "claude-sonnet-4-20250514",
+                  claudeApprovalMode: "ask",
+                  claudeEffort: "max",
+                  status: "idle",
+                  preview: "Ready for a prompt.",
+                  messages: [],
+                },
+              ],
+            },
+          });
+          await flushUiWork();
+        });
+        await waitFor(() => {
+          expect(refreshSessionModelOptionsSpy).toHaveBeenCalledWith(
+            "session-1",
+          );
+        });
+        await act(async () => {
+          refreshSessionModelOptionsDeferred.resolve({
+            revision: 4,
             preferences: {
               defaultCodexReasoningEffort: "medium",
               defaultClaudeEffort: "max",
@@ -3179,270 +3867,318 @@ describe("App", () => {
                 messages: [],
               },
             ],
-          },
+          });
+          await flushUiWork();
         });
-        await flushUiWork();
-      });
-      await waitFor(() => {
-        expect(refreshSessionModelOptionsSpy).toHaveBeenCalledWith("session-1");
-      });
-      await act(async () => {
-        refreshSessionModelOptionsDeferred.resolve({
-          revision: 4,
-          preferences: {
-            defaultCodexReasoningEffort: "medium",
-            defaultClaudeEffort: "max",
-          },
-          projects: [],
-          sessions: [
-            {
-              id: "session-1",
-              name: "Claude 1",
-              emoji: "C",
-              agent: "Claude",
-              workdir: "/tmp",
-              model: "claude-sonnet-4-20250514",
-              claudeApprovalMode: "ask",
-              claudeEffort: "max",
-              status: "idle",
-              preview: "Ready for a prompt.",
-              messages: [],
-            },
-          ],
-        });
-        await flushUiWork();
-      });
-      await settleAsyncUi();
-    } finally {
-      HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
-      fetchStateSpy.mockRestore();
-      updateAppSettingsSpy.mockRestore();
-      createSessionSpy.mockRestore();
-      refreshSessionModelOptionsSpy.mockRestore();
-      restoreGlobal("EventSource", originalEventSource);
-      restoreGlobal("ResizeObserver", originalResizeObserver);
-    }
+        await settleAsyncUi();
+      } finally {
+        HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
+        fetchStateSpy.mockRestore();
+        updateAppSettingsSpy.mockRestore();
+        createSessionSpy.mockRestore();
+        refreshSessionModelOptionsSpy.mockRestore();
+        restoreGlobal("EventSource", originalEventSource);
+        restoreGlobal("ResizeObserver", originalResizeObserver);
+      }
     });
   });
 
   it("keeps unsaved remote draft edits across unrelated state refreshes", async () => {
     await withSuppressedActWarnings(async () => {
-    const originalEventSource = globalThis.EventSource;
-    const originalResizeObserver = globalThis.ResizeObserver;
-    vi.stubGlobal("EventSource", EventSourceMock as unknown as typeof EventSource);
-    vi.stubGlobal("ResizeObserver", ResizeObserverMock as unknown as typeof ResizeObserver);
-    const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
-    HTMLElement.prototype.scrollIntoView = vi.fn();
+      const originalEventSource = globalThis.EventSource;
+      const originalResizeObserver = globalThis.ResizeObserver;
+      vi.stubGlobal(
+        "EventSource",
+        EventSourceMock as unknown as typeof EventSource,
+      );
+      vi.stubGlobal(
+        "ResizeObserver",
+        ResizeObserverMock as unknown as typeof ResizeObserver,
+      );
+      const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
+      HTMLElement.prototype.scrollIntoView = vi.fn();
 
-    const remotes = [
-      {
-        id: "local",
-        name: "Local",
-        transport: "local" as const,
-        enabled: true,
-        host: null,
-        port: null,
-        user: null,
-      },
-      {
-        id: "ssh-lab",
-        name: "SSH Lab",
-        transport: "ssh" as const,
-        enabled: true,
-        host: "example.com",
-        port: 22,
-        user: "alice",
-      },
-    ];
+      const remotes = [
+        {
+          id: "local",
+          name: "Local",
+          transport: "local" as const,
+          enabled: true,
+          host: null,
+          port: null,
+          user: null,
+        },
+        {
+          id: "ssh-lab",
+          name: "SSH Lab",
+          transport: "ssh" as const,
+          enabled: true,
+          host: "example.com",
+          port: 22,
+          user: "alice",
+        },
+      ];
 
-    try {
-      await renderApp();
-      const eventSource = EventSourceMock.instances[0];
-      expect(eventSource).toBeTruthy();
+      try {
+        await renderApp();
+        const eventSource = EventSourceMock.instances[0];
+        expect(eventSource).toBeTruthy();
 
-      await act(async () => {
-        eventSource.dispatchOpen();
-        eventSource.dispatchNamedEvent("state", {
-          revision: 1,
-          preferences: {
-            defaultCodexReasoningEffort: "medium",
-            defaultClaudeEffort: "default",
-            remotes,
-          },
-          projects: [],
-          sessions: [makeSession("session-1", { name: "Codex Session", preview: "Initial preview" })],
+        await act(async () => {
+          eventSource.dispatchOpen();
+          eventSource.dispatchNamedEvent("state", {
+            revision: 1,
+            preferences: {
+              defaultCodexReasoningEffort: "medium",
+              defaultClaudeEffort: "default",
+              remotes,
+            },
+            projects: [],
+            sessions: [
+              makeSession("session-1", {
+                name: "Codex Session",
+                preview: "Initial preview",
+              }),
+            ],
+          });
+          await flushUiWork();
         });
-        await flushUiWork();
-      });
-      await screen.findAllByText("Codex Session");
+        await screen.findAllByText("Codex Session");
 
-      await clickAndSettle(await screen.findByRole("button", { name: "Open preferences" }));
-      await clickAndSettle(screen.getByRole("tab", { name: "Remotes" }));
-      await screen.findByRole("heading", { level: 3, name: "Remote definitions" });
-      const remoteName = await screen.findByText("SSH Lab");
-      const remoteRow = remoteName.closest(".remote-settings-row");
-      if (!(remoteRow instanceof HTMLElement)) {
-        throw new Error("SSH remote row not found");
+        await clickAndSettle(
+          await screen.findByRole("button", { name: "Open preferences" }),
+        );
+        await clickAndSettle(screen.getByRole("tab", { name: "Remotes" }));
+        await screen.findByRole("heading", {
+          level: 3,
+          name: "Remote definitions",
+        });
+        const remoteName = await screen.findByText("SSH Lab");
+        const remoteRow = remoteName.closest(".remote-settings-row");
+        if (!(remoteRow instanceof HTMLElement)) {
+          throw new Error("SSH remote row not found");
+        }
+        expect(
+          within(remoteRow).getByText("Enabled for projects and sessions"),
+        ).toBeInTheDocument();
+
+        const hostInput = within(remoteRow).getByDisplayValue("example.com");
+        expect(hostInput).toHaveValue("example.com");
+
+        await act(async () => {
+          fireEvent.change(hostInput, {
+            target: { value: "draft.example.com" },
+          });
+          await flushUiWork();
+        });
+
+        expect(within(remoteRow).getByDisplayValue("draft.example.com")).toBe(
+          hostInput,
+        );
+
+        await act(async () => {
+          eventSource.dispatchOpen();
+          eventSource.dispatchNamedEvent("state", {
+            revision: 2,
+            preferences: {
+              defaultCodexReasoningEffort: "medium",
+              defaultClaudeEffort: "default",
+              remotes,
+            },
+            projects: [],
+            sessions: [
+              makeSession("session-1", {
+                name: "Codex Session",
+                preview: "Updated preview",
+              }),
+            ],
+          });
+          await flushUiWork();
+        });
+
+        expect(within(remoteRow).getByDisplayValue("draft.example.com")).toBe(
+          hostInput,
+        );
+      } finally {
+        HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
+        restoreGlobal("EventSource", originalEventSource);
+        restoreGlobal("ResizeObserver", originalResizeObserver);
       }
-      expect(within(remoteRow).getByText("Enabled for projects and sessions")).toBeInTheDocument();
-
-      const hostInput = within(remoteRow).getByDisplayValue("example.com");
-      expect(hostInput).toHaveValue("example.com");
-
-      await act(async () => {
-        fireEvent.change(hostInput, { target: { value: "draft.example.com" } });
-        await flushUiWork();
-      });
-
-      expect(within(remoteRow).getByDisplayValue("draft.example.com")).toBe(hostInput);
-
-      await act(async () => {
-        eventSource.dispatchOpen();
-        eventSource.dispatchNamedEvent("state", {
-          revision: 2,
-          preferences: {
-            defaultCodexReasoningEffort: "medium",
-            defaultClaudeEffort: "default",
-            remotes,
-          },
-          projects: [],
-          sessions: [makeSession("session-1", { name: "Codex Session", preview: "Updated preview" })],
-        });
-        await flushUiWork();
-      });
-
-      expect(within(remoteRow).getByDisplayValue("draft.example.com")).toBe(hostInput);
-    } finally {
-      HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
-      restoreGlobal("EventSource", originalEventSource);
-      restoreGlobal("ResizeObserver", originalResizeObserver);
-    }
     });
   });
 
   it("routes current-workspace session creation through the active remote project", async () => {
     await withSuppressedActWarnings(async () => {
-    const originalEventSource = globalThis.EventSource;
-    const originalResizeObserver = globalThis.ResizeObserver;
-    const createSessionDeferred = createDeferred<{
-      sessionId: string;
-      state: Awaited<ReturnType<typeof api.fetchState>>;
-    }>();
-    const refreshSessionModelOptionsDeferred = createDeferred<Awaited<ReturnType<typeof api.fetchState>>>();
-    const createSessionSpy = vi.spyOn(api, "createSession").mockImplementation(
-      () => createSessionDeferred.promise,
-    );
-    const refreshSessionModelOptionsSpy = vi
-      .spyOn(api, "refreshSessionModelOptions")
-      .mockImplementation(() => refreshSessionModelOptionsDeferred.promise);
-    vi.stubGlobal("EventSource", EventSourceMock as unknown as typeof EventSource);
-    vi.stubGlobal("ResizeObserver", ResizeObserverMock as unknown as typeof ResizeObserver);
-    const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
-    HTMLElement.prototype.scrollIntoView = vi.fn();
+      const originalEventSource = globalThis.EventSource;
+      const originalResizeObserver = globalThis.ResizeObserver;
+      const createSessionDeferred = createDeferred<{
+        sessionId: string;
+        state: Awaited<ReturnType<typeof api.fetchState>>;
+      }>();
+      const refreshSessionModelOptionsDeferred =
+        createDeferred<Awaited<ReturnType<typeof api.fetchState>>>();
+      const createSessionSpy = vi
+        .spyOn(api, "createSession")
+        .mockImplementation(() => createSessionDeferred.promise);
+      const refreshSessionModelOptionsSpy = vi
+        .spyOn(api, "refreshSessionModelOptions")
+        .mockImplementation(() => refreshSessionModelOptionsDeferred.promise);
+      vi.stubGlobal(
+        "EventSource",
+        EventSourceMock as unknown as typeof EventSource,
+      );
+      vi.stubGlobal(
+        "ResizeObserver",
+        ResizeObserverMock as unknown as typeof ResizeObserver,
+      );
+      const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
+      HTMLElement.prototype.scrollIntoView = vi.fn();
 
-    const remotes = [
-      {
-        id: "local",
-        name: "Local",
-        transport: "local" as const,
-        enabled: true,
-        host: null,
-        port: null,
-        user: null,
-      },
-      {
-        id: "ssh-lab",
-        name: "SSH Lab",
-        transport: "ssh" as const,
-        enabled: true,
-        host: "example.com",
-        port: 22,
-        user: "alice",
-      },
-    ];
-    const projects = [
-      {
-        id: "project-remote",
-        name: "Remote Project",
-        rootPath: "/remote/repo",
-        remoteId: "ssh-lab",
-      },
-    ];
+      const remotes = [
+        {
+          id: "local",
+          name: "Local",
+          transport: "local" as const,
+          enabled: true,
+          host: null,
+          port: null,
+          user: null,
+        },
+        {
+          id: "ssh-lab",
+          name: "SSH Lab",
+          transport: "ssh" as const,
+          enabled: true,
+          host: "example.com",
+          port: 22,
+          user: "alice",
+        },
+      ];
+      const projects = [
+        {
+          id: "project-remote",
+          name: "Remote Project",
+          rootPath: "/remote/repo",
+          remoteId: "ssh-lab",
+        },
+      ];
 
-    try {
-      await renderApp();
-      const eventSource = EventSourceMock.instances[0];
-      expect(eventSource).toBeTruthy();
+      try {
+        await renderApp();
+        const eventSource = EventSourceMock.instances[0];
+        expect(eventSource).toBeTruthy();
 
-      await act(async () => {
-        eventSource.dispatchOpen();
-        eventSource.dispatchNamedEvent("state", {
-          revision: 1,
-          preferences: {
-            defaultCodexReasoningEffort: "medium",
-            defaultClaudeEffort: "default",
-            remotes,
-          },
-          projects,
-          sessions: [
-            makeSession("session-1", {
-              name: "Remote Session",
-              workdir: "/remote/repo/subdir",
-              projectId: "project-remote",
-            }),
-          ],
+        await act(async () => {
+          eventSource.dispatchOpen();
+          eventSource.dispatchNamedEvent("state", {
+            revision: 1,
+            preferences: {
+              defaultCodexReasoningEffort: "medium",
+              defaultClaudeEffort: "default",
+              remotes,
+            },
+            projects,
+            sessions: [
+              makeSession("session-1", {
+                name: "Remote Session",
+                workdir: "/remote/repo/subdir",
+                projectId: "project-remote",
+              }),
+            ],
+          });
+          await flushUiWork();
         });
-        await flushUiWork();
-      });
-      await screen.findAllByText("Remote Session");
+        await screen.findAllByText("Remote Session");
 
-      const sessionList = document.querySelector(".session-list");
-      if (!(sessionList instanceof HTMLDivElement)) {
-        throw new Error("Session list not found");
-      }
-      const sessionRowLabel = await within(sessionList).findByText("Remote Session");
-      const sessionRowButton = sessionRowLabel.closest("button");
-      if (!sessionRowButton) {
-        throw new Error("Remote session row button not found");
-      }
-      await clickAndSettle(sessionRowButton);
+        const sessionList = document.querySelector(".session-list");
+        if (!(sessionList instanceof HTMLDivElement)) {
+          throw new Error("Session list not found");
+        }
+        const sessionRowLabel =
+          await within(sessionList).findByText("Remote Session");
+        const sessionRowButton = sessionRowLabel.closest("button");
+        if (!sessionRowButton) {
+          throw new Error("Remote session row button not found");
+        }
+        await clickAndSettle(sessionRowButton);
 
-      await openCreateSessionDialog();
-      const createSessionDialog = screen.getByRole("dialog", { name: "New session" });
-      const projectCombobox = within(createSessionDialog).getByRole("combobox", {
-        name: "Project",
-      });
-      await clickAndSettle(projectCombobox);
-      const projectListbox = await screen.findByRole("listbox");
-      const currentWorkspaceOption = within(projectListbox)
-        .getAllByRole("option")
-        .find((candidate) =>
-          /^Current workspace$/i.test(
-            candidate.querySelector(".combo-option-label")?.textContent?.trim() ??
-              candidate.textContent?.trim() ??
-              "",
-          ),
+        await openCreateSessionDialog();
+        const createSessionDialog = screen.getByRole("dialog", {
+          name: "New session",
+        });
+        const projectCombobox = within(createSessionDialog).getByRole(
+          "combobox",
+          {
+            name: "Project",
+          },
         );
-      if (!currentWorkspaceOption) {
-        throw new Error("Current workspace option not found");
-      }
-      await clickAndSettle(currentWorkspaceOption);
-      await submitButtonAndSettle(screen.getByRole("button", { name: "Create session" }));
-
-      await waitFor(() => {
-        expect(createSessionSpy).toHaveBeenCalledWith(
-          expect.objectContaining({
-            projectId: "project-remote",
-            workdir: undefined,
-          }),
+        await clickAndSettle(projectCombobox);
+        const projectListbox = await screen.findByRole("listbox");
+        const currentWorkspaceOption = within(projectListbox)
+          .getAllByRole("option")
+          .find((candidate) =>
+            /^Current workspace$/i.test(
+              candidate
+                .querySelector(".combo-option-label")
+                ?.textContent?.trim() ??
+                candidate.textContent?.trim() ??
+                "",
+            ),
+          );
+        if (!currentWorkspaceOption) {
+          throw new Error("Current workspace option not found");
+        }
+        await clickAndSettle(currentWorkspaceOption);
+        await submitButtonAndSettle(
+          screen.getByRole("button", { name: "Create session" }),
         );
-      });
 
-      await act(async () => {
-        createSessionDeferred.resolve({
-          sessionId: "session-2",
-          state: {
-            revision: 2,
+        await waitFor(() => {
+          expect(createSessionSpy).toHaveBeenCalledWith(
+            expect.objectContaining({
+              projectId: "project-remote",
+              workdir: undefined,
+            }),
+          );
+        });
+
+        await act(async () => {
+          createSessionDeferred.resolve({
+            sessionId: "session-2",
+            state: {
+              revision: 2,
+              preferences: {
+                defaultCodexReasoningEffort: "medium",
+                defaultClaudeEffort: "default",
+                remotes,
+              },
+              projects,
+              sessions: [
+                makeSession("session-1", {
+                  name: "Remote Session",
+                  workdir: "/remote/repo/subdir",
+                  projectId: "project-remote",
+                }),
+                makeSession("session-2", {
+                  name: "Codex 2",
+                  workdir: "/remote/repo",
+                  projectId: "project-remote",
+                }),
+              ],
+            },
+          });
+          await flushUiWork();
+        });
+
+        await waitFor(() => {
+          expect(refreshSessionModelOptionsSpy).toHaveBeenCalledWith(
+            "session-2",
+          );
+        });
+
+        await act(async () => {
+          refreshSessionModelOptionsDeferred.resolve({
+            revision: 3,
             preferences: {
               defaultCodexReasoningEffort: "medium",
               defaultClaudeEffort: "default",
@@ -3461,58 +4197,37 @@ describe("App", () => {
                 projectId: "project-remote",
               }),
             ],
-          },
+          });
+          await flushUiWork();
         });
-        await flushUiWork();
-      });
 
-      await waitFor(() => {
-        expect(refreshSessionModelOptionsSpy).toHaveBeenCalledWith("session-2");
-      });
-
-      await act(async () => {
-        refreshSessionModelOptionsDeferred.resolve({
-          revision: 3,
-          preferences: {
-            defaultCodexReasoningEffort: "medium",
-            defaultClaudeEffort: "default",
-            remotes,
-          },
-          projects,
-          sessions: [
-            makeSession("session-1", {
-              name: "Remote Session",
-              workdir: "/remote/repo/subdir",
-              projectId: "project-remote",
-            }),
-            makeSession("session-2", {
-              name: "Codex 2",
-              workdir: "/remote/repo",
-              projectId: "project-remote",
-            }),
-          ],
-        });
-        await flushUiWork();
-      });
-
-      await settleAsyncUi();
-    } finally {
-      HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
-      createSessionSpy.mockRestore();
-      refreshSessionModelOptionsSpy.mockRestore();
-      restoreGlobal("EventSource", originalEventSource);
-      restoreGlobal("ResizeObserver", originalResizeObserver);
-    }
+        await settleAsyncUi();
+      } finally {
+        HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
+        createSessionSpy.mockRestore();
+        refreshSessionModelOptionsSpy.mockRestore();
+        restoreGlobal("EventSource", originalEventSource);
+        restoreGlobal("ResizeObserver", originalResizeObserver);
+      }
     });
   });
 
   it("separates theme selection from editor and UI appearance controls in preferences", async () => {
     const originalEventSource = globalThis.EventSource;
     const originalResizeObserver = globalThis.ResizeObserver;
-    const fetchStateDeferred = createDeferred<Awaited<ReturnType<typeof api.fetchState>>>();
-    const fetchStateSpy = vi.spyOn(api, "fetchState").mockImplementation(() => fetchStateDeferred.promise);
-    vi.stubGlobal("EventSource", EventSourceMock as unknown as typeof EventSource);
-    vi.stubGlobal("ResizeObserver", ResizeObserverMock as unknown as typeof ResizeObserver);
+    const fetchStateDeferred =
+      createDeferred<Awaited<ReturnType<typeof api.fetchState>>>();
+    const fetchStateSpy = vi
+      .spyOn(api, "fetchState")
+      .mockImplementation(() => fetchStateDeferred.promise);
+    vi.stubGlobal(
+      "EventSource",
+      EventSourceMock as unknown as typeof EventSource,
+    );
+    vi.stubGlobal(
+      "ResizeObserver",
+      ResizeObserverMock as unknown as typeof ResizeObserver,
+    );
     const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
     HTMLElement.prototype.scrollIntoView = vi.fn();
 
@@ -3531,17 +4246,33 @@ describe("App", () => {
         await flushUiWork();
       });
 
-      await clickAndSettle(await screen.findByRole("button", { name: "Open preferences" }));
+      await clickAndSettle(
+        await screen.findByRole("button", { name: "Open preferences" }),
+      );
 
-      expect(screen.getByRole("radiogroup", { name: "UI theme" })).toBeInTheDocument();
-      expect(screen.getByRole("radiogroup", { name: "UI style" })).toBeInTheDocument();
-      expect(screen.queryByRole("heading", { level: 3, name: "Font sizes" })).not.toBeInTheDocument();
+      expect(
+        screen.getByRole("radiogroup", { name: "UI theme" }),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByRole("radiogroup", { name: "UI style" }),
+      ).toBeInTheDocument();
+      expect(
+        screen.queryByRole("heading", { level: 3, name: "Font sizes" }),
+      ).not.toBeInTheDocument();
 
-      await clickAndSettle(screen.getByRole("tab", { name: "Editor & UI appearance" }));
+      await clickAndSettle(
+        screen.getByRole("tab", { name: "Editor & UI appearance" }),
+      );
 
-      expect(screen.getByRole("heading", { level: 3, name: "Font sizes" })).toBeInTheDocument();
-      expect(screen.queryByRole("radiogroup", { name: "UI theme" })).not.toBeInTheDocument();
-      expect(screen.queryByRole("radiogroup", { name: "UI style" })).not.toBeInTheDocument();
+      expect(
+        screen.getByRole("heading", { level: 3, name: "Font sizes" }),
+      ).toBeInTheDocument();
+      expect(
+        screen.queryByRole("radiogroup", { name: "UI theme" }),
+      ).not.toBeInTheDocument();
+      expect(
+        screen.queryByRole("radiogroup", { name: "UI style" }),
+      ).not.toBeInTheDocument();
     } finally {
       HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
       fetchStateSpy.mockRestore();
@@ -3553,10 +4284,19 @@ describe("App", () => {
   it("persists UI density changes from the appearance preferences", async () => {
     const originalEventSource = globalThis.EventSource;
     const originalResizeObserver = globalThis.ResizeObserver;
-    const fetchStateDeferred = createDeferred<Awaited<ReturnType<typeof api.fetchState>>>();
-    const fetchStateSpy = vi.spyOn(api, "fetchState").mockImplementation(() => fetchStateDeferred.promise);
-    vi.stubGlobal("EventSource", EventSourceMock as unknown as typeof EventSource);
-    vi.stubGlobal("ResizeObserver", ResizeObserverMock as unknown as typeof ResizeObserver);
+    const fetchStateDeferred =
+      createDeferred<Awaited<ReturnType<typeof api.fetchState>>>();
+    const fetchStateSpy = vi
+      .spyOn(api, "fetchState")
+      .mockImplementation(() => fetchStateDeferred.promise);
+    vi.stubGlobal(
+      "EventSource",
+      EventSourceMock as unknown as typeof EventSource,
+    );
+    vi.stubGlobal(
+      "ResizeObserver",
+      ResizeObserverMock as unknown as typeof ResizeObserver,
+    );
     const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
     HTMLElement.prototype.scrollIntoView = vi.fn();
     window.localStorage.clear();
@@ -3577,8 +4317,12 @@ describe("App", () => {
         await flushUiWork();
       });
 
-      await clickAndSettle(await screen.findByRole("button", { name: "Open preferences" }));
-      await clickAndSettle(screen.getByRole("tab", { name: "Editor & UI appearance" }));
+      await clickAndSettle(
+        await screen.findByRole("button", { name: "Open preferences" }),
+      );
+      await clickAndSettle(
+        screen.getByRole("tab", { name: "Editor & UI appearance" }),
+      );
 
       const densitySlider = screen.getByRole("slider", { name: "UI density" });
       expect((densitySlider as HTMLInputElement).value).toBe("100");
@@ -3588,7 +4332,9 @@ describe("App", () => {
       });
       await settleAsyncUi();
 
-      expect(document.documentElement.style.getPropertyValue("--density-scale")).toBe("0.85");
+      expect(
+        document.documentElement.style.getPropertyValue("--density-scale"),
+      ).toBe("0.85");
       expect(window.localStorage.getItem("termal-ui-density")).toBe("85");
     } finally {
       HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
@@ -3601,10 +4347,19 @@ describe("App", () => {
   it("persists UI style changes from the themes preferences", async () => {
     const originalEventSource = globalThis.EventSource;
     const originalResizeObserver = globalThis.ResizeObserver;
-    const fetchStateDeferred = createDeferred<Awaited<ReturnType<typeof api.fetchState>>>();
-    const fetchStateSpy = vi.spyOn(api, "fetchState").mockImplementation(() => fetchStateDeferred.promise);
-    vi.stubGlobal("EventSource", EventSourceMock as unknown as typeof EventSource);
-    vi.stubGlobal("ResizeObserver", ResizeObserverMock as unknown as typeof ResizeObserver);
+    const fetchStateDeferred =
+      createDeferred<Awaited<ReturnType<typeof api.fetchState>>>();
+    const fetchStateSpy = vi
+      .spyOn(api, "fetchState")
+      .mockImplementation(() => fetchStateDeferred.promise);
+    vi.stubGlobal(
+      "EventSource",
+      EventSourceMock as unknown as typeof EventSource,
+    );
+    vi.stubGlobal(
+      "ResizeObserver",
+      ResizeObserverMock as unknown as typeof ResizeObserver,
+    );
     const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
     HTMLElement.prototype.scrollIntoView = vi.fn();
     window.localStorage.clear();
@@ -3625,12 +4380,18 @@ describe("App", () => {
         await flushUiWork();
       });
 
-      await clickAndSettle(await screen.findByRole("button", { name: "Open preferences" }));
+      await clickAndSettle(
+        await screen.findByRole("button", { name: "Open preferences" }),
+      );
       const styleGroup = screen.getByRole("radiogroup", { name: "UI style" });
-      await clickAndSettle(within(styleGroup).getByRole("radio", { name: /Blueprint/i }));
+      await clickAndSettle(
+        within(styleGroup).getByRole("radio", { name: /Blueprint/i }),
+      );
 
       expect(document.documentElement.dataset.uiStyle).toBe("blueprint-style");
-      expect(window.localStorage.getItem("termal-ui-style")).toBe("blueprint-style");
+      expect(window.localStorage.getItem("termal-ui-style")).toBe(
+        "blueprint-style",
+      );
     } finally {
       HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
       fetchStateSpy.mockRestore();
@@ -3646,7 +4407,10 @@ describe("App", () => {
       modelOptions: [{ label: "GPT-5.4", value: "gpt-5.4" }],
     });
 
-    const firstAttempt = resolveUnknownSessionModelSendAttempt(new Set(), session);
+    const firstAttempt = resolveUnknownSessionModelSendAttempt(
+      new Set(),
+      session,
+    );
     expect(firstAttempt.allowSend).toBe(false);
     expect(firstAttempt.warning).toBe(
       "Codex is set to gpt-5.5-preview, but that model is not in the current live list. Refresh models to verify it, or send the prompt again to continue anyway.",
@@ -3660,4 +4424,3 @@ describe("App", () => {
     expect(secondAttempt.warning).toBeNull();
   });
 });
-
