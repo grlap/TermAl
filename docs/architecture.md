@@ -124,6 +124,14 @@ All routes are under `/api`. The backend serves JSON; the frontend proxies throu
 | POST | `/api/git/commit` | Create a git commit from the staged changes |
 | POST | `/api/projects` | Create project → `CreateProjectResponse` |
 | POST | `/api/projects/pick` | Pick a local project root |
+| GET | `/api/orchestrators/templates` | List orchestrator templates → `OrchestratorTemplatesResponse` |
+| POST | `/api/orchestrators/templates` | Create orchestrator template → `OrchestratorTemplateResponse` (201) |
+| GET | `/api/orchestrators/templates/{id}` | Read orchestrator template → `OrchestratorTemplateResponse` |
+| PUT | `/api/orchestrators/templates/{id}` | Update orchestrator template → `OrchestratorTemplateResponse` |
+| DELETE | `/api/orchestrators/templates/{id}` | Delete orchestrator template → `OrchestratorTemplatesResponse` |
+| GET | `/api/orchestrators` | List orchestrator instances → `OrchestratorInstancesResponse` |
+| POST | `/api/orchestrators` | Create orchestrator instance → `CreateOrchestratorInstanceResponse` (201) |
+| GET | `/api/orchestrators/{id}` | Read orchestrator instance → `OrchestratorInstanceResponse` |
 | POST | `/api/sessions` | Create session → `CreateSessionResponse` |
 | POST | `/api/sessions/{id}/settings` | Update session config → `StateResponse` |
 | POST | `/api/sessions/{id}/model-options/refresh` | Refresh live model list/options |

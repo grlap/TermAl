@@ -12,9 +12,22 @@ fn load_orchestrator_template_store(path: &FsPath) -> Result<OrchestratorTemplat
         .with_context(|| format!("failed to parse `{}`", path.display()))?;
     normalize_persisted_orchestrator_template_store_input_modes(&mut encoded);
     let mut store: OrchestratorTemplateStore = serde_json::from_value(encoded)
-        .with_context(|| format!("failed to parse `{}`", path.display()))?;
+        .with_context(|| format!("failed to deserialize orchestrator templates from `{}`", path.display()))?;
     store.normalize();
     Ok(store)
+}
+
+fn default_missing_persisted_orchestrator_session_input_mode(session: &mut Value) {
+    let Some(session_object) = session.as_object_mut() else {
+        return;
+    };
+    let should_default = !session_object.contains_key("inputMode")
+        || session_object
+            .get("inputMode")
+            .is_some_and(Value::is_null);
+    if should_default {
+        session_object.insert("inputMode".to_owned(), Value::String("queue".to_owned()));
+    }
 }
 
 fn normalize_persisted_orchestrator_template_store_input_modes(encoded: &mut Value) {
@@ -30,16 +43,29 @@ fn normalize_persisted_orchestrator_template_store_input_modes(encoded: &mut Val
             continue;
         };
         for session in sessions {
-            let Some(session_object) = session.as_object_mut() else {
-                continue;
-            };
-            let should_default = !session_object.contains_key("inputMode")
-                || session_object
-                    .get("inputMode")
-                    .is_some_and(Value::is_null);
-            if should_default {
-                session_object.insert("inputMode".to_owned(), Value::String("queue".to_owned()));
-            }
+            default_missing_persisted_orchestrator_session_input_mode(session);
+        }
+    }
+}
+
+fn normalize_persisted_state_orchestrator_instance_input_modes(encoded: &mut Value) {
+    let Some(instances) = encoded
+        .get_mut("orchestratorInstances")
+        .and_then(Value::as_array_mut)
+    else {
+        return;
+    };
+
+    for instance in instances {
+        let Some(sessions) = instance
+            .get_mut("templateSnapshot")
+            .and_then(|snapshot| snapshot.get_mut("sessions"))
+            .and_then(Value::as_array_mut)
+        else {
+            continue;
+        };
+        for session in sessions {
+            default_missing_persisted_orchestrator_session_input_mode(session);
         }
     }
 }
@@ -650,37 +676,6 @@ struct CreateOrchestratorInstanceResponse {
 }
 
 impl StateInner {
-    fn upgrade_legacy_queued_prompt_sources(&mut self) {
-        let session_ids = self
-            .sessions
-            .iter()
-            .filter(|record| {
-                record
-                    .queued_prompts
-                    .iter()
-                    .any(|queued| queued.source == QueuedPromptSource::Legacy)
-            })
-            .map(|record| record.session.id.clone())
-            .collect::<Vec<_>>();
-
-        for session_id in session_ids {
-            let Some(resolved_sources) = resolve_legacy_queued_prompt_sources(self, &session_id)
-            else {
-                continue;
-            };
-            let Some(session_index) = self.find_session_index(&session_id) else {
-                continue;
-            };
-            for (queued, source) in self.sessions[session_index]
-                .queued_prompts
-                .iter_mut()
-                .zip(resolved_sources)
-            {
-                queued.source = source;
-            }
-        }
-    }
-
     fn normalize_orchestrator_instances(&mut self) {
         let available_session_ids = self
             .sessions
@@ -725,197 +720,6 @@ impl StateInner {
                 continue;
             };
             clear_stopped_orchestrator_queued_prompts(&mut self.sessions[session_index]);
-        }
-    }
-}
-
-fn resolve_legacy_queued_prompt_sources(
-    inner: &StateInner,
-    destination_session_id: &str,
-) -> Option<Vec<QueuedPromptSource>> {
-    let destination_session_index = inner.find_session_index(destination_session_id)?;
-    let destination_record = inner.sessions.get(destination_session_index)?.clone();
-    if !destination_record
-        .queued_prompts
-        .iter()
-        .any(|queued| queued.source == QueuedPromptSource::Legacy)
-    {
-        return None;
-    }
-
-    let instance = inner.orchestrator_instances.iter().find(|candidate| {
-        candidate
-            .session_instances
-            .iter()
-            .any(|session| session.session_id == destination_session_id)
-    });
-    let mut simulated_destination = destination_record.clone();
-    simulated_destination.queued_prompts.clear();
-    simulated_destination.session.pending_prompts.clear();
-
-    let mut resolved_sources = Vec::with_capacity(destination_record.queued_prompts.len());
-    for queued in &destination_record.queued_prompts {
-        let source = match queued.source.clone() {
-            QueuedPromptSource::Legacy => {
-                if instance.is_some_and(|instance| {
-                    legacy_prompt_matches_orchestrator_delivery(
-                        inner,
-                        instance,
-                        &simulated_destination,
-                        destination_session_id,
-                        queued.pending_prompt.text.as_str(),
-                    )
-                }) {
-                    QueuedPromptSource::Orchestrator
-                } else {
-                    QueuedPromptSource::User
-                }
-            }
-            other => other,
-        };
-        let mut simulated_queued = queued.clone();
-        simulated_queued.source = source.clone();
-        simulated_destination
-            .queued_prompts
-            .push_back(simulated_queued);
-        sync_pending_prompts(&mut simulated_destination);
-        resolved_sources.push(source);
-    }
-
-    Some(resolved_sources)
-}
-
-fn legacy_prompt_matches_orchestrator_delivery(
-    inner: &StateInner,
-    instance: &OrchestratorInstance,
-    destination_record: &SessionRecord,
-    destination_session_id: &str,
-    prompt_text: &str,
-) -> bool {
-    let Some(destination_template) =
-        orchestrator_template_session_for_instance_session(instance, destination_session_id)
-    else {
-        return false;
-    };
-    let prompt_text = prompt_text.trim();
-    if prompt_text.is_empty() {
-        return false;
-    }
-
-    match destination_template.input_mode {
-        OrchestratorSessionInputMode::Queue => instance
-            .template_snapshot
-            .transitions
-            .iter()
-            .filter(|transition| {
-                transition.trigger == OrchestratorTransitionTrigger::OnCompletion
-                    && transition.to_session_id == destination_template.id
-            })
-            .filter_map(|transition| {
-                let source_session_instance =
-                    instance.session_instances.iter().find(|session| {
-                        session.template_session_id == transition.from_session_id
-                            && session.last_completion_revision.is_some()
-                    })?;
-                let source_session_index =
-                    inner.find_session_index(&source_session_instance.session_id)?;
-                let source_record = inner.sessions.get(source_session_index)?;
-                let source_template = instance
-                    .template_snapshot
-                    .sessions
-                    .iter()
-                    .find(|session| session.id == transition.from_session_id);
-                let rendered_prompt = render_transition_prompt(
-                    transition,
-                    source_template,
-                    &source_record.session,
-                    &build_transition_result_text(source_record, transition.result_mode),
-                );
-                let final_prompt = build_orchestrator_destination_prompt(
-                    destination_record,
-                    &destination_template.instructions,
-                    &rendered_prompt,
-                );
-                (!final_prompt.is_empty()).then_some(final_prompt)
-            })
-            .any(|candidate| candidate == prompt_text),
-        OrchestratorSessionInputMode::Consolidate => {
-            let live_session_ids_by_template = instance
-                .session_instances
-                .iter()
-                .map(|session| {
-                    (
-                        session.template_session_id.as_str(),
-                        session.session_id.as_str(),
-                    )
-                })
-                .collect::<HashMap<_, _>>();
-            let required_transitions = instance
-                .template_snapshot
-                .transitions
-                .iter()
-                .filter(|transition| {
-                    transition.trigger == OrchestratorTransitionTrigger::OnCompletion
-                        && transition.to_session_id == destination_template.id
-                        && live_session_ids_by_template
-                            .contains_key(transition.from_session_id.as_str())
-                })
-                .collect::<Vec<_>>();
-            if required_transitions.is_empty() {
-                return false;
-            }
-
-            let mut pendings = Vec::with_capacity(required_transitions.len());
-            for transition in required_transitions {
-                let Some(source_session_instance) =
-                    instance.session_instances.iter().find(|session| {
-                        session.template_session_id == transition.from_session_id
-                            && session.last_completion_revision.is_some()
-                    })
-                else {
-                    return false;
-                };
-                let Some(source_session_index) =
-                    inner.find_session_index(&source_session_instance.session_id)
-                else {
-                    return false;
-                };
-                let Some(source_record) = inner.sessions.get(source_session_index) else {
-                    return false;
-                };
-                let source_template = instance
-                    .template_snapshot
-                    .sessions
-                    .iter()
-                    .find(|session| session.id == transition.from_session_id);
-                let rendered_prompt = render_transition_prompt(
-                    transition,
-                    source_template,
-                    &source_record.session,
-                    &build_transition_result_text(source_record, transition.result_mode),
-                );
-                pendings.push(PendingTransition {
-                    id: String::new(),
-                    transition_id: transition.id.clone(),
-                    source_session_id: source_session_instance.session_id.clone(),
-                    destination_session_id: destination_session_id.to_owned(),
-                    completion_revision: source_session_instance
-                        .last_completion_revision
-                        .unwrap_or(0),
-                    rendered_prompt,
-                    created_at: String::new(),
-                });
-            }
-
-            let consolidated_prompt = build_consolidated_transition_prompt(instance, &pendings);
-            if consolidated_prompt.is_empty() {
-                return false;
-            }
-            build_orchestrator_destination_prompt(
-                destination_record,
-                &destination_template.instructions,
-                &consolidated_prompt,
-            ) == prompt_text
         }
     }
 }
@@ -1613,84 +1417,6 @@ fn build_transition_result_text(
             combine_transition_summary_and_result(&summary, &last_response)
         }
     }
-}
-
-fn build_transition_result_text_candidates(
-    record: &SessionRecord,
-    mode: OrchestratorTransitionResultMode,
-) -> Vec<String> {
-    let mut candidates = Vec::new();
-    let mut seen = HashSet::new();
-
-    let current = build_transition_result_text(record, mode);
-    if seen.insert(current.clone()) {
-        candidates.push(current);
-    }
-
-    for turn_messages in historical_turn_transition_messages(record) {
-        let candidate = build_transition_result_text_for_messages(turn_messages, mode);
-        if seen.insert(candidate.clone()) {
-            candidates.push(candidate);
-        }
-    }
-
-    candidates
-}
-
-fn historical_turn_transition_messages(record: &SessionRecord) -> Vec<&[Message]> {
-    let messages = record.session.messages.as_slice();
-    if messages.is_empty() {
-        return Vec::new();
-    }
-
-    let turn_starts = messages
-        .iter()
-        .enumerate()
-        .filter_map(|(index, message)| match message {
-            Message::Text {
-                author: Author::You,
-                ..
-            } => Some(index),
-            _ => None,
-        })
-        .collect::<Vec<_>>();
-    if turn_starts.is_empty() {
-        return vec![messages];
-    }
-
-    let mut turns = Vec::with_capacity(turn_starts.len());
-    for (index, turn_start) in turn_starts.iter().enumerate() {
-        let turn_end = turn_starts.get(index + 1).copied().unwrap_or(messages.len());
-        if let Some(turn_messages) = messages.get(*turn_start..turn_end) {
-            turns.push(turn_messages);
-        }
-    }
-    turns
-}
-
-fn build_transition_result_text_for_messages(
-    messages: &[Message],
-    mode: OrchestratorTransitionResultMode,
-) -> String {
-    match mode {
-        OrchestratorTransitionResultMode::None => String::new(),
-        OrchestratorTransitionResultMode::LastResponse => {
-            latest_transition_message_text(messages).unwrap_or_default()
-        }
-        OrchestratorTransitionResultMode::Summary => {
-            transition_summary_candidate(messages).unwrap_or_default()
-        }
-        OrchestratorTransitionResultMode::SummaryAndLastResponse => {
-            let summary = transition_summary_candidate(messages).unwrap_or_default();
-            let last_response = latest_transition_message_text(messages).unwrap_or_default();
-            combine_transition_summary_and_result(&summary, &last_response)
-        }
-    }
-}
-
-fn transition_summary_candidate(messages: &[Message]) -> Option<String> {
-    latest_transition_message_summary(messages)
-        .or_else(|| latest_transition_message_text(messages).map(|text| make_preview(&text)))
 }
 
 fn next_pending_transition_action(inner: &StateInner) -> Option<PendingTransitionAction> {

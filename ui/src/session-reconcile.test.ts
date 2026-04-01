@@ -16,6 +16,86 @@ function makeSession(id: string, overrides?: Partial<Session>): Session {
   };
 }
 
+function expectChangedMessageReference(
+  previousMessage: Session["messages"][number],
+  nextMessage: Session["messages"][number],
+) {
+  const previous = [
+    makeSession("session-a", {
+      messages: [
+        {
+          id: "message-stable",
+          type: "text",
+          timestamp: "10:00",
+          author: "assistant",
+          text: "Stable",
+        },
+        previousMessage,
+      ],
+    }),
+  ];
+
+  const next = [
+    makeSession("session-a", {
+      messages: [
+        {
+          id: "message-stable",
+          type: "text",
+          timestamp: "10:00",
+          author: "assistant",
+          text: "Stable",
+        },
+        nextMessage,
+      ],
+    }),
+  ];
+
+  const merged = reconcileSessions(previous, next);
+
+  expect(merged).not.toBe(previous);
+  expect(merged[0]).not.toBe(previous[0]);
+  expect(merged[0].messages).not.toBe(previous[0].messages);
+  expect(merged[0].messages[0]).toBe(previous[0].messages[0]);
+  expect(merged[0].messages[1]).not.toBe(previous[0].messages[1]);
+  expect(merged[0].messages[1]).toBe(next[0].messages[1]);
+  expect(merged[0].messages[1]).toEqual(nextMessage);
+}
+
+function expectStableMessageReference(message: Session["messages"][number]) {
+  const previous = [
+    makeSession("session-a", {
+      messages: [
+        {
+          id: "message-stable",
+          type: "text",
+          timestamp: "10:00",
+          author: "assistant",
+          text: "Stable",
+        },
+        message,
+      ],
+    }),
+  ];
+
+  const next = [
+    makeSession("session-a", {
+      messages: [
+        structuredClone(previous[0].messages[0]),
+        structuredClone(message),
+      ],
+    }),
+  ];
+
+  const merged = reconcileSessions(previous, next);
+
+  expect(merged).toBe(previous);
+  expect(merged[0]).toBe(previous[0]);
+  expect(merged[0].messages).toBe(previous[0].messages);
+  expect(merged[0].messages[0]).toBe(previous[0].messages[0]);
+  expect(merged[0].messages[1]).toBe(previous[0].messages[1]);
+  expect(merged[0].messages[1]).toEqual(message);
+}
+
 describe("reconcileSessions", () => {
   it("reuses the existing session object when nothing changed", () => {
     const previous = [
@@ -114,6 +194,7 @@ describe("reconcileSessions", () => {
     expect(merged[0].messages).not.toBe(previous[0].messages);
     expect(merged[0].messages[0]).toBe(previous[0].messages[0]);
     expect(merged[0].messages[1]).not.toBe(previous[0].messages[1]);
+    expect(merged[0].messages[1]).toBe(next[0].messages[1]);
   });
 
   it("reuses unaffected sessions while replacing the changed one", () => {
@@ -222,6 +303,223 @@ describe("reconcileSessions", () => {
     expect(merged[0].messages[0]).not.toBe(previous[0].messages[0]);
   });
 
+  it("replaces user input request messages when their state changes", () => {
+    expectChangedMessageReference(
+      {
+        id: "message-1",
+        type: "userInputRequest",
+        timestamp: "10:01",
+        author: "assistant",
+        title: "Need input",
+        detail: "Choose one option",
+        state: "pending",
+        questions: [
+          {
+            header: "Mode",
+            id: "mode",
+            question: "Choose a mode",
+            options: [
+              {
+                label: "Fast",
+                description: "Uses the fast mode",
+              },
+            ],
+          },
+        ],
+      },
+      {
+        id: "message-1",
+        type: "userInputRequest",
+        timestamp: "10:01",
+        author: "assistant",
+        title: "Need input",
+        detail: "Choose one option",
+        state: "submitted",
+        questions: [
+          {
+            header: "Mode",
+            id: "mode",
+            question: "Choose a mode",
+            options: [
+              {
+                label: "Fast",
+                description: "Uses the fast mode",
+              },
+            ],
+          },
+        ],
+        submittedAnswers: {
+          mode: ["Fast"],
+        },
+      },
+    );
+  });
+
+  it("reuses user input request messages when nothing changed", () => {
+    expectStableMessageReference({
+      id: "message-1",
+      type: "userInputRequest",
+      timestamp: "10:01",
+      author: "assistant",
+      title: "Need input",
+      detail: "Choose one option",
+      state: "pending",
+      questions: [
+        {
+          header: "Mode",
+          id: "mode",
+          question: "Choose a mode",
+          options: [
+            {
+              label: "Fast",
+              description: "Uses the fast mode",
+            },
+          ],
+        },
+      ],
+    });
+  });
+
+  it("replaces MCP elicitation request messages when their state changes", () => {
+    expectChangedMessageReference(
+      {
+        id: "message-1",
+        type: "mcpElicitationRequest",
+        timestamp: "10:01",
+        author: "assistant",
+        title: "Need MCP input",
+        detail: "Confirm the action",
+        state: "pending",
+        request: {
+          threadId: "thread-1",
+          serverName: "deployment-helper",
+          mode: "form",
+          message: "Choose an option",
+          requestedSchema: {
+            type: "object",
+            properties: {
+              choice: {
+                type: "string",
+                title: "Choice",
+                enum: ["accept", "decline"],
+              },
+            },
+            required: ["choice"],
+          },
+        },
+      },
+      {
+        id: "message-1",
+        type: "mcpElicitationRequest",
+        timestamp: "10:01",
+        author: "assistant",
+        title: "Need MCP input",
+        detail: "Confirm the action",
+        state: "submitted",
+        request: {
+          threadId: "thread-1",
+          serverName: "deployment-helper",
+          mode: "form",
+          message: "Choose an option",
+          requestedSchema: {
+            type: "object",
+            properties: {
+              choice: {
+                type: "string",
+                title: "Choice",
+                enum: ["accept", "decline"],
+              },
+            },
+            required: ["choice"],
+          },
+        },
+        submittedAction: "accept",
+        submittedContent: {
+          choice: "accept",
+        },
+      },
+    );
+  });
+
+  it("reuses MCP elicitation request messages when nothing changed", () => {
+    expectStableMessageReference({
+      id: "message-1",
+      type: "mcpElicitationRequest",
+      timestamp: "10:01",
+      author: "assistant",
+      title: "Need MCP input",
+      detail: "Confirm the action",
+      state: "pending",
+      request: {
+        threadId: "thread-1",
+        serverName: "deployment-helper",
+        mode: "form",
+        message: "Choose an option",
+        requestedSchema: {
+          type: "object",
+          properties: {
+            choice: {
+              type: "string",
+              title: "Choice",
+              enum: ["accept", "decline"],
+            },
+          },
+          required: ["choice"],
+        },
+      },
+    });
+  });
+
+  it("replaces Codex app request messages when their state changes", () => {
+    expectChangedMessageReference(
+      {
+        id: "message-1",
+        type: "codexAppRequest",
+        timestamp: "10:01",
+        author: "assistant",
+        title: "App request",
+        detail: "Return some JSON",
+        method: "workspace.pick_file",
+        params: {
+          allowMultiple: false,
+        },
+        state: "pending",
+      },
+      {
+        id: "message-1",
+        type: "codexAppRequest",
+        timestamp: "10:01",
+        author: "assistant",
+        title: "App request",
+        detail: "Return some JSON",
+        method: "workspace.pick_file",
+        params: {
+          allowMultiple: false,
+        },
+        state: "submitted",
+        submittedResult: {
+          path: "/repo/src/main.ts",
+        },
+      },
+    );
+  });
+
+  it("reuses Codex app request messages when nothing changed", () => {
+    expectStableMessageReference({
+      id: "message-1",
+      type: "codexAppRequest",
+      timestamp: "10:01",
+      author: "assistant",
+      title: "App request",
+      detail: "Return some JSON",
+      method: "workspace.pick_file",
+      params: {
+        allowMultiple: false,
+      },
+      state: "pending",
+    });
+  });
+
   it("replaces a session when the external session id changes", () => {
     const previous = [makeSession("session-a", { externalSessionId: null, preview: "ready" })];
 
@@ -280,3 +578,4 @@ describe("reconcileSessions", () => {
   });
 
 });
+

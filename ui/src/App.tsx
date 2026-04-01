@@ -359,7 +359,7 @@ const NEW_SESSION_AGENT_OPTIONS = [
   { label: "Codex", value: "Codex" },
   { label: "Cursor", value: "Cursor" },
   { label: "Gemini", value: "Gemini" },
-] as const;
+] as const satisfies ReadonlyArray<{ label: string; value: AgentType }>;
 const NEW_SESSION_MODEL_OPTIONS: Readonly<Record<AgentType, readonly ComboboxOption[]>> = {
   Claude: [
     { label: "Sonnet", value: "sonnet" },

@@ -213,7 +213,7 @@ export type OrchestratorInstance = {
   templateSnapshot: OrchestratorTemplate;
   status: OrchestratorInstanceStatus;
   sessionInstances: OrchestratorSessionInstance[];
-  pendingTransitions: PendingTransition[];
+  pendingTransitions?: PendingTransition[];
   createdAt: string;
   errorMessage?: string | null;
   completedAt?: string | null;

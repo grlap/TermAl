@@ -8313,6 +8313,165 @@ fn stop_session_detaches_shared_codex_session_when_interrupt_fails() {
 }
 
 #[test]
+fn stop_session_dispatches_queued_prompt_after_shared_codex_interrupt_failure() {
+    let state = test_app_state();
+    let session_id = test_session_id(&state, Agent::Codex);
+    let process = Arc::new(SharedChild::new(test_sleep_child()).unwrap());
+    let (input_tx, input_rx) = mpsc::channel();
+    let runtime = SharedCodexRuntime {
+        runtime_id: "shared-codex-stop-fail-queued".to_owned(),
+        input_tx,
+        process: process.clone(),
+        sessions: Arc::new(Mutex::new(HashMap::new())),
+        thread_sessions: Arc::new(Mutex::new(HashMap::new())),
+    };
+
+    {
+        let mut shared_runtime = state
+            .shared_codex_runtime
+            .lock()
+            .expect("shared Codex runtime mutex poisoned");
+        *shared_runtime = Some(runtime.clone());
+    }
+
+    runtime
+        .sessions
+        .lock()
+        .expect("shared Codex session mutex poisoned")
+        .insert(
+            session_id.clone(),
+            SharedCodexSessionState {
+                thread_id: Some("thread-stop-fail-queued".to_owned()),
+                turn_id: Some("turn-stop-fail-queued".to_owned()),
+                ..SharedCodexSessionState::default()
+            },
+        );
+    runtime
+        .thread_sessions
+        .lock()
+        .expect("shared Codex thread mutex poisoned")
+        .insert("thread-stop-fail-queued".to_owned(), session_id.clone());
+
+    let handle = CodexRuntimeHandle {
+        runtime_id: runtime.runtime_id.clone(),
+        input_tx: runtime.input_tx.clone(),
+        process: process.clone(),
+        shared_session: Some(SharedCodexSessionHandle {
+            runtime: runtime.clone(),
+            session_id: session_id.clone(),
+        }),
+    };
+
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(&session_id)
+            .expect("Codex session should exist");
+        inner.sessions[index].runtime = SessionRuntime::Codex(handle);
+        inner.sessions[index].session.status = SessionStatus::Active;
+        inner.sessions[index].session.preview = "Streaming reply...".to_owned();
+        inner.sessions[index].external_session_id = Some("thread-stop-fail-queued".to_owned());
+        inner.sessions[index]
+            .queued_prompts
+            .push_back(QueuedPromptRecord {
+                source: QueuedPromptSource::User,
+                attachments: Vec::new(),
+                pending_prompt: PendingPrompt {
+                    attachments: Vec::new(),
+                    id: "queued-shared-stop-fail".to_owned(),
+                    timestamp: stamp_now(),
+                    text: "queued prompt after failed interrupt".to_owned(),
+                    expanded_text: None,
+                },
+            });
+        sync_pending_prompts(&mut inner.sessions[index]);
+    }
+
+    let queued_session_id = session_id.clone();
+    let command_thread = std::thread::spawn(move || {
+        let interrupt = input_rx
+            .recv_timeout(Duration::from_secs(1))
+            .expect("Codex interrupt command should arrive");
+        match interrupt {
+            CodexRuntimeCommand::InterruptTurn {
+                thread_id,
+                turn_id,
+                response_tx,
+            } => {
+                assert_eq!(thread_id, "thread-stop-fail-queued");
+                assert_eq!(turn_id, "turn-stop-fail-queued");
+                let _ = response_tx.send(Err("interrupt failed".to_owned()));
+            }
+            _ => panic!("expected Codex turn interrupt command"),
+        }
+
+        let prompt = input_rx
+            .recv_timeout(Duration::from_secs(1))
+            .expect("queued Codex prompt should be dispatched");
+        match prompt {
+            CodexRuntimeCommand::Prompt { session_id, command } => {
+                assert_eq!(session_id, queued_session_id);
+                assert_eq!(command.prompt, "queued prompt after failed interrupt");
+                assert_eq!(
+                    command.resume_thread_id.as_deref(),
+                    Some("thread-stop-fail-queued")
+                );
+            }
+            _ => panic!("expected queued Codex prompt dispatch"),
+        }
+    });
+
+    let snapshot = state.stop_session(&session_id).unwrap();
+    command_thread
+        .join()
+        .expect("shared Codex command thread should join cleanly");
+
+    let session = snapshot
+        .sessions
+        .iter()
+        .find(|session| session.id == session_id)
+        .expect("session should remain present");
+    assert_eq!(session.status, SessionStatus::Active);
+    assert_eq!(session.preview, "queued prompt after failed interrupt");
+    assert!(session.pending_prompts.is_empty());
+    assert!(session.messages.iter().any(|message| matches!(
+        message,
+        Message::Text { text, .. } if text == "Turn stopped by user."
+    )));
+    assert!(session.messages.iter().any(|message| matches!(
+        message,
+        Message::Text {
+            author: Author::You,
+            text,
+            ..
+        } if text == "queued prompt after failed interrupt"
+    )));
+
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    let record = inner
+        .sessions
+        .iter()
+        .find(|record| record.session.id == session_id)
+        .expect("Codex session should exist");
+    assert_eq!(record.session.status, SessionStatus::Active);
+    assert!(matches!(record.runtime, SessionRuntime::Codex(_)));
+    assert!(!record.runtime_stop_in_progress);
+    assert!(record.queued_prompts.is_empty());
+    assert!(
+        !runtime
+            .thread_sessions
+            .lock()
+            .expect("shared Codex thread mutex poisoned")
+            .contains_key("thread-stop-fail-queued")
+    );
+    drop(inner);
+
+    process.kill().unwrap();
+    process.wait().unwrap();
+    let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
+#[test]
 fn stop_session_returns_an_error_when_a_dedicated_runtime_refuses_to_stop() {
     let state = test_app_state();
     let session_id = test_session_id(&state, Agent::Claude);
@@ -8391,7 +8550,7 @@ fn stop_session_keeps_the_previous_state_visible_until_shutdown_completes() {
     let runtime = ClaudeRuntimeHandle {
         runtime_id: "claude-stop-concurrent-read".to_owned(),
         input_tx,
-        process,
+        process: process.clone(),
     };
 
     {
@@ -8464,6 +8623,7 @@ fn stop_session_keeps_the_previous_state_visible_until_shutdown_completes() {
 
     assert!(input_rx.recv_timeout(Duration::from_millis(100)).is_err());
 
+    process.wait().unwrap();
     let _ = fs::remove_file(state.persistence_path.as_path());
 }
 
@@ -8731,6 +8891,57 @@ fn runtime_exit_is_suppressed_while_stop_is_in_progress() {
 }
 
 #[test]
+fn successful_stop_discards_deferred_callbacks() {
+    let state = test_app_state();
+    let session_id = test_session_id(&state, Agent::Claude);
+    let process = Arc::new(SharedChild::new(test_sleep_child()).unwrap());
+    let (input_tx, input_rx) = mpsc::channel();
+    let runtime = ClaudeRuntimeHandle {
+        runtime_id: "claude-stop-discard-deferred".to_owned(),
+        input_tx,
+        process: process.clone(),
+    };
+
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(&session_id)
+            .expect("Claude session should exist");
+        inner.sessions[index].runtime = SessionRuntime::Claude(runtime);
+        inner.sessions[index].session.status = SessionStatus::Active;
+        inner.sessions[index].session.preview = "Streaming reply...".to_owned();
+        inner.sessions[index].deferred_stop_callbacks = vec![DeferredStopCallback::TurnCompleted];
+    }
+
+    let snapshot = state.stop_session(&session_id).unwrap();
+    let session = snapshot
+        .sessions
+        .iter()
+        .find(|session| session.id == session_id)
+        .expect("stopped session should remain present");
+    assert_eq!(session.status, SessionStatus::Idle);
+    assert_eq!(session.preview, "Turn stopped by user.");
+
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    let record = inner
+        .sessions
+        .iter()
+        .find(|record| record.session.id == session_id)
+        .expect("Claude session should exist");
+    assert_eq!(record.session.status, SessionStatus::Idle);
+    assert_eq!(record.session.preview, "Turn stopped by user.");
+    assert!(matches!(record.runtime, SessionRuntime::None));
+    assert!(!record.runtime_stop_in_progress);
+    assert!(record.deferred_stop_callbacks.is_empty());
+    drop(inner);
+
+    assert!(input_rx.recv_timeout(Duration::from_millis(100)).is_err());
+    process.wait().unwrap();
+
+    let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
+#[test]
 fn failed_dedicated_stop_replays_deferred_turn_completion() {
     let state = test_app_state();
     let session_id = test_session_id(&state, Agent::Claude);
@@ -8861,15 +9072,25 @@ fn failed_dedicated_stop_replays_multiple_deferred_callbacks_in_order() {
     };
     let expected_token = RuntimeToken::Claude(expected_runtime.runtime_id.clone());
 
-    {
+    let initial_message_count = {
         let mut inner = expected_state.inner.lock().expect("state mutex poisoned");
         let index = inner
             .find_session_index(&expected_session_id)
             .expect("Claude session should exist");
+        let message_id = inner.next_message_id();
         inner.sessions[index].runtime = SessionRuntime::Claude(expected_runtime);
         inner.sessions[index].session.status = SessionStatus::Active;
-        inner.sessions[index].session.preview = "Streaming reply...".to_owned();
-    }
+        inner.sessions[index].session.preview = "Partial reply".to_owned();
+        inner.sessions[index].session.messages.push(Message::Text {
+            attachments: Vec::new(),
+            id: message_id,
+            timestamp: stamp_now(),
+            author: Author::Assistant,
+            text: "Partial reply".to_owned(),
+            expanded_text: None,
+        });
+        inner.sessions[index].session.messages.len()
+    };
 
     expected_state
         .finish_turn_ok_if_runtime_matches(&expected_session_id, &expected_token)
@@ -8878,19 +9099,28 @@ fn failed_dedicated_stop_replays_multiple_deferred_callbacks_in_order() {
         .handle_runtime_exit_if_matches(&expected_session_id, &expected_token, None)
         .expect("handle_runtime_exit_if_matches should succeed");
 
-    let (expected_status, expected_preview, expected_message_count) = {
+    let (expected_status, expected_preview, expected_message_count, expected_message_text) = {
         let inner = expected_state.inner.lock().expect("state mutex poisoned");
         let record = inner
             .sessions
             .iter()
             .find(|record| record.session.id == expected_session_id)
             .expect("Claude session should exist");
+        let expected_message_text = match record.session.messages.last() {
+            Some(Message::Text { text, .. }) => text.clone(),
+            _ => panic!("Claude session should end with a text message"),
+        };
         (
             record.session.status,
             record.session.preview.clone(),
             record.session.messages.len(),
+            expected_message_text,
         )
     };
+    assert_eq!(expected_status, SessionStatus::Idle);
+    assert_eq!(expected_preview, "Partial reply");
+    assert_eq!(expected_message_count, initial_message_count);
+    assert_eq!(expected_message_text, "Partial reply");
 
     expected_process.kill().unwrap();
     expected_process.wait().unwrap();
@@ -8911,9 +9141,18 @@ fn failed_dedicated_stop_replays_multiple_deferred_callbacks_in_order() {
         let index = inner
             .find_session_index(&session_id)
             .expect("Claude session should exist");
+        let message_id = inner.next_message_id();
         inner.sessions[index].runtime = SessionRuntime::Claude(runtime);
         inner.sessions[index].session.status = SessionStatus::Active;
-        inner.sessions[index].session.preview = "Streaming reply...".to_owned();
+        inner.sessions[index].session.preview = "Partial reply".to_owned();
+        inner.sessions[index].session.messages.push(Message::Text {
+            attachments: Vec::new(),
+            id: message_id,
+            timestamp: stamp_now(),
+            author: Author::Assistant,
+            text: "Partial reply".to_owned(),
+            expanded_text: None,
+        });
         inner.sessions[index].deferred_stop_callbacks = vec![
             DeferredStopCallback::TurnCompleted,
             DeferredStopCallback::RuntimeExited(None),
@@ -8936,6 +9175,10 @@ fn failed_dedicated_stop_replays_multiple_deferred_callbacks_in_order() {
     assert_eq!(record.session.status, expected_status);
     assert_eq!(record.session.preview, expected_preview);
     assert_eq!(record.session.messages.len(), expected_message_count);
+    assert!(matches!(
+        record.session.messages.last(),
+        Some(Message::Text { text, .. }) if text == &expected_message_text
+    ));
     assert!(matches!(record.runtime, SessionRuntime::None));
     assert!(!record.runtime_stop_in_progress);
     assert!(record.deferred_stop_callbacks.is_empty());
@@ -8959,15 +9202,25 @@ fn failed_dedicated_stop_replays_runtime_exit_last_even_when_it_arrives_first() 
     };
     let expected_token = RuntimeToken::Claude(expected_runtime.runtime_id.clone());
 
-    {
+    let initial_message_count = {
         let mut inner = expected_state.inner.lock().expect("state mutex poisoned");
         let index = inner
             .find_session_index(&expected_session_id)
             .expect("Claude session should exist");
+        let message_id = inner.next_message_id();
         inner.sessions[index].runtime = SessionRuntime::Claude(expected_runtime);
         inner.sessions[index].session.status = SessionStatus::Active;
-        inner.sessions[index].session.preview = "Streaming reply...".to_owned();
-    }
+        inner.sessions[index].session.preview = "Partial reply".to_owned();
+        inner.sessions[index].session.messages.push(Message::Text {
+            attachments: Vec::new(),
+            id: message_id,
+            timestamp: stamp_now(),
+            author: Author::Assistant,
+            text: "Partial reply".to_owned(),
+            expanded_text: None,
+        });
+        inner.sessions[index].session.messages.len()
+    };
 
     expected_state
         .finish_turn_ok_if_runtime_matches(&expected_session_id, &expected_token)
@@ -8976,19 +9229,28 @@ fn failed_dedicated_stop_replays_runtime_exit_last_even_when_it_arrives_first() 
         .handle_runtime_exit_if_matches(&expected_session_id, &expected_token, None)
         .expect("handle_runtime_exit_if_matches should succeed");
 
-    let (expected_status, expected_preview, expected_message_count) = {
+    let (expected_status, expected_preview, expected_message_count, expected_message_text) = {
         let inner = expected_state.inner.lock().expect("state mutex poisoned");
         let record = inner
             .sessions
             .iter()
             .find(|record| record.session.id == expected_session_id)
             .expect("Claude session should exist");
+        let expected_message_text = match record.session.messages.last() {
+            Some(Message::Text { text, .. }) => text.clone(),
+            _ => panic!("Claude session should end with a text message"),
+        };
         (
             record.session.status,
             record.session.preview.clone(),
             record.session.messages.len(),
+            expected_message_text,
         )
     };
+    assert_eq!(expected_status, SessionStatus::Idle);
+    assert_eq!(expected_preview, "Partial reply");
+    assert_eq!(expected_message_count, initial_message_count);
+    assert_eq!(expected_message_text, "Partial reply");
 
     expected_process.kill().unwrap();
     expected_process.wait().unwrap();
@@ -9009,9 +9271,18 @@ fn failed_dedicated_stop_replays_runtime_exit_last_even_when_it_arrives_first() 
         let index = inner
             .find_session_index(&session_id)
             .expect("Claude session should exist");
+        let message_id = inner.next_message_id();
         inner.sessions[index].runtime = SessionRuntime::Claude(runtime);
         inner.sessions[index].session.status = SessionStatus::Active;
-        inner.sessions[index].session.preview = "Streaming reply...".to_owned();
+        inner.sessions[index].session.preview = "Partial reply".to_owned();
+        inner.sessions[index].session.messages.push(Message::Text {
+            attachments: Vec::new(),
+            id: message_id,
+            timestamp: stamp_now(),
+            author: Author::Assistant,
+            text: "Partial reply".to_owned(),
+            expanded_text: None,
+        });
         inner.sessions[index].deferred_stop_callbacks = vec![
             DeferredStopCallback::RuntimeExited(None),
             DeferredStopCallback::TurnCompleted,
@@ -9034,6 +9305,10 @@ fn failed_dedicated_stop_replays_runtime_exit_last_even_when_it_arrives_first() 
     assert_eq!(record.session.status, expected_status);
     assert_eq!(record.session.preview, expected_preview);
     assert_eq!(record.session.messages.len(), expected_message_count);
+    assert!(matches!(
+        record.session.messages.last(),
+        Some(Message::Text { text, .. }) if text == &expected_message_text
+    ));
     assert!(matches!(record.runtime, SessionRuntime::None));
     assert!(!record.runtime_stop_in_progress);
     assert!(record.deferred_stop_callbacks.is_empty());
@@ -11351,6 +11626,63 @@ fn persisted_state_without_projects_migrates_cleanly() {
 }
 
 #[test]
+fn persisted_state_requires_queued_prompt_source() {
+    let path = std::env::temp_dir().join(format!(
+        "termal-queued-prompt-source-required-{}",
+        Uuid::new_v4()
+    ));
+    let mut inner = StateInner::new();
+    let record = inner.create_session(
+        Agent::Codex,
+        Some("Queued".to_owned()),
+        "/tmp".to_owned(),
+        None,
+        None,
+    );
+    let session_id = record.session.id.clone();
+    let index = inner
+        .find_session_index(&session_id)
+        .expect("session should exist");
+    queue_prompt_on_record(
+        &mut inner.sessions[index],
+        PendingPrompt {
+            attachments: Vec::new(),
+            id: "queued-prompt-1".to_owned(),
+            timestamp: stamp_now(),
+            text: "queued prompt".to_owned(),
+            expanded_text: None,
+        },
+        Vec::new(),
+    );
+    persist_state(&path, &inner).unwrap();
+
+    let mut encoded: Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+    let sessions = encoded["sessions"]
+        .as_array_mut()
+        .expect("persisted sessions should be an array");
+    let queued_prompts = sessions[0]["queuedPrompts"]
+        .as_array_mut()
+        .expect("persisted queued prompts should be an array");
+    queued_prompts[0]
+        .as_object_mut()
+        .expect("queued prompt should be an object")
+        .remove("source");
+    fs::write(&path, serde_json::to_vec(&encoded).unwrap()).unwrap();
+
+    let err = match load_state(&path) {
+        Ok(_) => panic!("persisted state without queued prompt source should fail"),
+        Err(err) => err,
+    };
+    let err_text = format!("{err:#}");
+    assert!(
+        err_text.contains("missing field `source`"),
+        "unexpected load_state error: {err_text}"
+    );
+
+    let _ = fs::remove_file(path);
+}
+
+#[test]
 fn delta_events_include_monotonic_revisions() {
     let state = test_app_state();
     let session_id = test_session_id(&state, Agent::Codex);
@@ -13383,7 +13715,7 @@ fn orchestrator_template_crud_persists_in_the_separate_store() {
 #[test]
 fn orchestrator_template_draft_deserialization_requires_input_mode() {
     let error = serde_json::from_value::<OrchestratorTemplateDraft>(json!({
-        "name": "Legacy Flow",
+        "name": "Missing InputMode Flow",
         "description": "",
         "projectId": null,
         "sessions": [
@@ -13401,6 +13733,157 @@ fn orchestrator_template_draft_deserialization_requires_input_mode() {
     .expect_err("drafts without inputMode should be rejected");
 
     assert!(error.to_string().contains("inputMode"));
+}
+
+#[test]
+fn load_orchestrator_template_store_defaults_missing_input_mode_to_queue() {
+    let templates_path = std::env::temp_dir().join(format!(
+        "termal-orchestrator-store-input-mode-{}.json",
+        Uuid::new_v4()
+    ));
+    fs::write(
+        &templates_path,
+        serde_json::to_vec_pretty(&json!({
+            "nextTemplateNumber": 2,
+            "templates": [
+                {
+                    "id": "orchestrator-template-1",
+                    "name": "Missing InputMode Flow",
+                    "description": "",
+                    "projectId": null,
+                    "sessions": [
+                        {
+                            "id": "builder",
+                            "name": "Builder",
+                            "agent": "Claude",
+                            "model": "claude-sonnet-4-5",
+                            "instructions": "",
+                            "autoApprove": false,
+                            "position": { "x": 120.0, "y": 240.0 }
+                        }
+                    ],
+                    "transitions": [],
+                    "createdAt": "2026-03-31 10:00:00",
+                    "updatedAt": "2026-03-31 10:00:00"
+                }
+            ]
+        }))
+        .expect("legacy template store should serialize"),
+    )
+    .expect("legacy template store should be written");
+
+    let loaded = load_orchestrator_template_store(&templates_path)
+        .expect("legacy template store should load");
+    assert_eq!(loaded.templates.len(), 1);
+    assert_eq!(loaded.templates[0].sessions.len(), 1);
+    assert_eq!(
+        loaded.templates[0].sessions[0].input_mode,
+        OrchestratorSessionInputMode::Queue
+    );
+
+    let _ = fs::remove_file(templates_path);
+}
+
+#[test]
+fn load_orchestrator_template_store_reports_deserialization_errors_after_migration() {
+    let templates_path = std::env::temp_dir().join(format!(
+        "termal-orchestrator-store-invalid-after-migration-{}.json",
+        Uuid::new_v4()
+    ));
+    fs::write(
+        &templates_path,
+        serde_json::to_vec_pretty(&json!({
+            "nextTemplateNumber": 2,
+            "templates": [
+                {
+                    "id": 42,
+                    "name": "Invalid Template",
+                    "description": "",
+                    "projectId": null,
+                    "sessions": [],
+                    "transitions": [],
+                    "createdAt": "2026-03-31 10:00:00",
+                    "updatedAt": "2026-03-31 10:00:00"
+                }
+            ]
+        }))
+        .expect("invalid template store should serialize"),
+    )
+    .expect("invalid template store should be written");
+
+    let error = load_orchestrator_template_store(&templates_path)
+        .expect_err("invalid template store should fail to deserialize");
+    assert!(
+        error
+            .to_string()
+            .contains("failed to deserialize orchestrator templates from"),
+        "unexpected error: {error:#}"
+    );
+
+    let _ = fs::remove_file(templates_path);
+}
+
+#[test]
+fn load_state_defaults_missing_orchestrator_snapshot_input_mode_to_queue() {
+    let state = test_app_state();
+    let project_root = std::env::temp_dir().join(format!(
+        "termal-orchestrator-snapshot-input-mode-{}",
+        Uuid::new_v4()
+    ));
+    fs::create_dir_all(&project_root).expect("snapshot project root should exist");
+    let project_id = create_test_project(&state, &project_root, "Snapshot InputMode Project");
+    let template = state
+        .create_orchestrator_template(sample_orchestrator_template_draft())
+        .expect("template should be created")
+        .template;
+    let orchestrator = state
+        .create_orchestrator_instance(CreateOrchestratorInstanceRequest {
+            template_id: template.id,
+            project_id: Some(project_id),
+        })
+        .expect("orchestrator instance should be created")
+        .orchestrator;
+    assert!(!orchestrator.template_snapshot.sessions.is_empty());
+
+    let mut encoded: Value = serde_json::from_slice(
+        &fs::read(state.persistence_path.as_path()).expect("persisted state should exist"),
+    )
+    .expect("persisted state should deserialize");
+    let persisted_sessions = encoded["orchestratorInstances"][0]["templateSnapshot"]["sessions"]
+        .as_array_mut()
+        .expect("persisted snapshot sessions should be an array");
+    for session in persisted_sessions {
+        session
+            .as_object_mut()
+            .expect("persisted snapshot session should be an object")
+            .remove("inputMode");
+    }
+    fs::write(
+        state.persistence_path.as_path(),
+        serde_json::to_vec_pretty(&encoded).expect("normalized state should serialize"),
+    )
+    .expect("legacy persisted state should be rewritten");
+
+    let loaded = load_state(state.persistence_path.as_path())
+        .expect("persisted state should load")
+        .expect("persisted state should exist");
+    let loaded_instance = loaded
+        .orchestrator_instances
+        .iter()
+        .find(|instance| instance.id == orchestrator.id)
+        .expect("orchestrator instance should still exist after reload");
+    assert_eq!(
+        loaded_instance.template_snapshot.sessions.len(),
+        orchestrator.template_snapshot.sessions.len()
+    );
+    assert!(loaded_instance
+        .template_snapshot
+        .sessions
+        .iter()
+        .all(|session| session.input_mode == OrchestratorSessionInputMode::Queue));
+
+    let _ = fs::remove_file(state.persistence_path.as_path());
+    let _ = fs::remove_dir_all(project_root);
 }
 
 #[test]
@@ -13813,6 +14296,51 @@ async fn get_orchestrator_instance_route_returns_the_requested_instance() {
 }
 
 #[tokio::test]
+async fn create_orchestrator_instance_route_uses_template_project_id_when_request_omits_it() {
+    let state = test_app_state();
+    let project_root = std::env::temp_dir().join(format!(
+        "termal-orchestrator-route-template-project-{}",
+        Uuid::new_v4()
+    ));
+    fs::create_dir_all(&project_root).expect("route-template project root should exist");
+    let project_id = create_test_project(&state, &project_root, "Route Template Project");
+    let mut draft = sample_orchestrator_template_draft();
+    draft.project_id = Some(project_id.clone());
+    let template = state
+        .create_orchestrator_template(draft)
+        .expect("template should be created")
+        .template;
+    assert!(!template.sessions.is_empty());
+
+    let app = app_router(state);
+    let request_body = serde_json::to_vec(&json!({
+        "templateId": template.id,
+    }))
+    .unwrap();
+    let (status, response): (StatusCode, CreateOrchestratorInstanceResponse) = request_json(
+        &app,
+        Request::builder()
+            .method("POST")
+            .uri("/api/orchestrators")
+            .header("content-type", "application/json")
+            .body(Body::from(request_body))
+            .unwrap(),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::CREATED);
+    assert_eq!(response.orchestrator.project_id, project_id);
+    assert_eq!(response.state.sessions.len(), template.sessions.len());
+    assert!(
+        response
+            .state
+            .sessions
+            .iter()
+            .all(|session| session.project_id.as_deref() == Some(project_id.as_str()))
+    );
+}
+
+#[tokio::test]
 async fn workspace_layout_routes_round_trip_without_bumping_state_revision() {
     let state = test_app_state();
     let app = app_router(state.clone());
@@ -14006,6 +14534,60 @@ fn orchestrator_instance_creation_creates_runtime_sessions() {
         .expect("orchestrator instance should be created");
 
     assert_eq!(response.orchestrator.template_id, template.id);
+    assert_eq!(
+        response.orchestrator.session_instances.len(),
+        template.sessions.len()
+    );
+
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    assert_eq!(inner.orchestrator_instances.len(), 1);
+    for session_instance in &response.orchestrator.session_instances {
+        let record = inner
+            .sessions
+            .iter()
+            .find(|record| record.session.id == session_instance.session_id)
+            .expect("runtime session should exist");
+        assert_eq!(
+            record.session.project_id.as_deref(),
+            Some(project_id.as_str())
+        );
+        assert_eq!(record.session.workdir, project_root.to_string_lossy());
+    }
+}
+
+#[test]
+fn orchestrator_instance_creation_uses_template_project_id_when_request_omits_it() {
+    let state = test_app_state();
+    let project_root = std::env::temp_dir().join(format!(
+        "termal-orchestrator-runtime-template-project-{}",
+        Uuid::new_v4()
+    ));
+    fs::create_dir_all(&project_root).expect("runtime template project root should exist");
+    let project_id = state
+        .create_project(CreateProjectRequest {
+            name: Some("Runtime Template Project".to_owned()),
+            root_path: project_root.to_string_lossy().into_owned(),
+            remote_id: default_local_remote_id(),
+        })
+        .expect("project should be created")
+        .project_id;
+    let mut draft = sample_orchestrator_template_draft();
+    draft.project_id = Some(project_id.clone());
+    let template = state
+        .create_orchestrator_template(draft)
+        .expect("template should be created")
+        .template;
+    assert!(!template.sessions.is_empty());
+
+    let response = state
+        .create_orchestrator_instance(CreateOrchestratorInstanceRequest {
+            template_id: template.id.clone(),
+            project_id: None,
+        })
+        .expect("orchestrator instance should be created");
+
+    assert_eq!(response.orchestrator.template_id, template.id);
+    assert_eq!(response.orchestrator.project_id, project_id);
     assert_eq!(
         response.orchestrator.session_instances.len(),
         template.sessions.len()

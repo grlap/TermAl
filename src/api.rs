@@ -8,8 +8,11 @@ fn load_state(path: &FsPath) -> Result<Option<StateInner>> {
     }
 
     let raw = fs::read(path).with_context(|| format!("failed to read `{}`", path.display()))?;
-    let persisted: PersistedState = serde_json::from_slice(&raw)
+    let mut encoded: Value = serde_json::from_slice(&raw)
         .with_context(|| format!("failed to parse `{}`", path.display()))?;
+    normalize_persisted_state_orchestrator_instance_input_modes(&mut encoded);
+    let persisted: PersistedState = serde_json::from_value(encoded)
+        .with_context(|| format!("failed to deserialize state from `{}`", path.display()))?;
     Ok(Some(persisted.into_inner()))
 }
 

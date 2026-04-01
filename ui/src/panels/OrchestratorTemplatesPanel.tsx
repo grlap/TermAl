@@ -82,12 +82,13 @@ type PanDragState = {
   startClientX: number;
   startClientY: number;
 };
-const AGENT_OPTIONS: ReadonlyArray<{ label: string; value: AgentType }> = [
+const AGENT_OPTIONS = [
   { label: "Claude", value: "Claude" },
   { label: "Codex", value: "Codex" },
   { label: "Cursor", value: "Cursor" },
   { label: "Gemini", value: "Gemini" },
-];
+] as const satisfies ReadonlyArray<{ label: string; value: AgentType }>;
+
 const INPUT_MODE_OPTIONS: ReadonlyArray<{
   label: string;
   value: OrchestratorSessionInputMode;
@@ -168,11 +169,13 @@ type InitialPanelState = PanelState & {
   savedDraft: OrchestratorTemplateDraft;
 };
 
+// Keep isPersistedSessionTemplate in sync with every validated
+// OrchestratorSessionTemplate field restored from localStorage.
 type PersistedOrchestratorSessionTemplate = Omit<
   OrchestratorSessionTemplate,
   "inputMode"
 > & {
-  inputMode: OrchestratorSessionInputMode | null;
+  inputMode?: OrchestratorSessionInputMode | null;
 };
 
 type PendingPanelPersistence = {
@@ -238,12 +241,12 @@ export function OrchestratorTemplatesPanel({
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const isMountedRef = useRef(true);
-  useEffect(
-    () => () => {
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
       isMountedRef.current = false;
-    },
-    [],
-  );
+    };
+  }, []);
 
   const renderedSessions = useMemo(
     () =>
@@ -288,6 +291,28 @@ export function OrchestratorTemplatesPanel({
     window.localStorage.setItem(pending.stateKey, pending.serialized);
     pendingStatePersistenceRef.current = null;
   };
+
+  function persistPanelStateImmediately(
+    nextDraft: OrchestratorTemplateDraft,
+    nextSelectedTemplateId: string | null,
+    nextSelectedNodeId: string | null,
+  ) {
+    if (!stateKey) {
+      return;
+    }
+    pendingStatePersistenceRef.current = {
+      stateKey,
+      serialized: JSON.stringify(
+        finalizePanelState(
+          nextDraft,
+          nextSelectedTemplateId,
+          nextSelectedNodeId,
+        ),
+      ),
+    };
+    flushPersistedPanelStateRef.current();
+  }
+
   const validationError = validateDraft(draft);
   const draftSignature = useMemo(() => JSON.stringify(draft), [draft]);
   const referenceDraftSignature = useMemo(
@@ -467,9 +492,15 @@ export function OrchestratorTemplatesPanel({
         );
         if (!isMountedRef.current) return;
         const canonicalDraft = templateToDraft(response.template);
+        const nextSelectedNodeId = response.template.sessions[0]?.id ?? null;
         setDraft(canonicalDraft);
         setSavedDraft(canonicalDraft);
-        setSelectedNodeId(response.template.sessions[0]?.id ?? null);
+        setSelectedNodeId(nextSelectedNodeId);
+        persistPanelStateImmediately(
+          canonicalDraft,
+          response.template.id,
+          nextSelectedNodeId,
+        );
         setStatusMessage("Template saved.");
         startTransition(() => {
           setTemplates((current) =>
@@ -484,10 +515,16 @@ export function OrchestratorTemplatesPanel({
         const response = await createOrchestratorTemplate(draft);
         if (!isMountedRef.current) return;
         const canonicalDraft = templateToDraft(response.template);
+        const nextSelectedNodeId = response.template.sessions[0]?.id ?? null;
         setSelectedTemplateId(response.template.id);
         setDraft(canonicalDraft);
         setSavedDraft(canonicalDraft);
-        setSelectedNodeId(response.template.sessions[0]?.id ?? null);
+        setSelectedNodeId(nextSelectedNodeId);
+        persistPanelStateImmediately(
+          canonicalDraft,
+          response.template.id,
+          nextSelectedNodeId,
+        );
         setStatusMessage("Template created.");
         startTransition(() => {
           setTemplates((current) => [response.template, ...current]);
@@ -2109,14 +2146,28 @@ function readState(stateKey: string): PanelState | null {
             ? draft.projectId
             : null,
         sessions: draft.sessions.map((session) => ({
-          ...session,
-          inputMode: session.inputMode ?? "queue",
+          id: session.id,
+          name: session.name,
+          agent: session.agent,
           model: session.model ?? "",
-          position: { ...session.position },
+          instructions: session.instructions,
+          autoApprove: session.autoApprove,
+          inputMode: session.inputMode ?? "queue",
+          position: clampPosition(session.position.x, session.position.y),
         })),
         transitions: draft.transitions.map((transition) => ({
-          ...transition,
+          id: transition.id,
+          fromSessionId: transition.fromSessionId,
+          toSessionId: transition.toSessionId,
+          trigger: transition.trigger,
+          resultMode: transition.resultMode,
           promptTemplate: transition.promptTemplate ?? "",
+          ...(transition.fromAnchor !== undefined
+            ? { fromAnchor: transition.fromAnchor }
+            : {}),
+          ...(transition.toAnchor !== undefined
+            ? { toAnchor: transition.toAnchor }
+            : {}),
         })),
       },
       typeof parsed.selectedTemplateId === "string"
@@ -2129,6 +2180,30 @@ function readState(stateKey: string): PanelState | null {
   }
 }
 
+const SUPPORTED_PERSISTED_TEMPLATE_AGENTS = {
+  Claude: true,
+  Codex: true,
+  Cursor: true,
+  Gemini: true,
+} satisfies Record<AgentType, true>;
+
+export function objectHasOwnWithFallback(target: object, key: PropertyKey) {
+  const objectWithHasOwn = Object as ObjectConstructor & {
+    hasOwn?: (target: object, key: PropertyKey) => boolean;
+  };
+  return (
+    objectWithHasOwn.hasOwn?.(target, key) ??
+    Object.prototype.hasOwnProperty.call(target, key)
+  );
+}
+
+function isSupportedPersistedTemplateAgent(value: unknown): value is AgentType {
+  return (
+    typeof value === "string" &&
+    objectHasOwnWithFallback(SUPPORTED_PERSISTED_TEMPLATE_AGENTS, value)
+  );
+}
+
 function isPersistedSessionTemplate(
   value: unknown,
 ): value is PersistedOrchestratorSessionTemplate {
@@ -2136,23 +2211,25 @@ function isPersistedSessionTemplate(
     return false;
   }
   const candidate = value as Partial<PersistedOrchestratorSessionTemplate>;
-  const hasInputMode = Object.prototype.hasOwnProperty.call(
-    candidate,
-    "inputMode",
-  );
   return (
     typeof candidate.id === "string" &&
     typeof candidate.name === "string" &&
-    typeof candidate.agent === "string" &&
+    isSupportedPersistedTemplateAgent(candidate.agent) &&
+    (candidate.model === undefined ||
+      candidate.model === null ||
+      typeof candidate.model === "string") &&
     typeof candidate.instructions === "string" &&
     typeof candidate.autoApprove === "boolean" &&
-    hasInputMode &&
-    (candidate.inputMode === null ||
+    (candidate.inputMode === undefined ||
+      candidate.inputMode === null ||
       candidate.inputMode === "queue" ||
       candidate.inputMode === "consolidate") &&
-    !!candidate.position &&
-    typeof candidate.position.x === "number" &&
-    typeof candidate.position.y === "number"
+    candidate.position !== null &&
+    candidate.position !== undefined &&
+    typeof candidate.position === "object" &&
+    !Array.isArray(candidate.position) &&
+    Number.isFinite(candidate.position.x) &&
+    Number.isFinite(candidate.position.y)
   );
 }
 
@@ -2167,6 +2244,15 @@ function isTransitionTemplate(
     typeof candidate.id === "string" &&
     typeof candidate.fromSessionId === "string" &&
     typeof candidate.toSessionId === "string" &&
+    (candidate.promptTemplate === undefined ||
+      candidate.promptTemplate === null ||
+      typeof candidate.promptTemplate === "string") &&
+    (candidate.fromAnchor === undefined ||
+      candidate.fromAnchor === null ||
+      isValidAnchor(candidate.fromAnchor)) &&
+    (candidate.toAnchor === undefined ||
+      candidate.toAnchor === null ||
+      isValidAnchor(candidate.toAnchor)) &&
     candidate.trigger === "onCompletion" &&
     (candidate.resultMode === "none" ||
       candidate.resultMode === "lastResponse" ||
@@ -2320,7 +2406,9 @@ function clampPosition(x: number, y: number): OrchestratorNodePosition {
   };
 }
 
-function isValidAnchor(value: string | null | undefined): value is AnchorSide {
+function isValidAnchor(
+  value: OrchestratorTransitionAnchor | null | undefined,
+): value is AnchorSide {
   return ANCHOR_SIDES.includes(value as AnchorSide);
 }
 

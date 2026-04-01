@@ -3,160 +3,65 @@
 Updated against the current checked-in code in `src/main.rs`, `ui/src/App.tsx`,
 `ui/package.json`, and `ui/vite.config.ts`.
 
-The older entries for "No image paste support", the image-attachment UX mismatch, Claude `control_request` fallthrough, "No SSE/WebSocket for real-time updates", "Codex receive has no streaming", "No queueing system for prompts", the stale `/api/state`-after-SSE bootstrap race, the false-positive delta SSE reconciliation drift when a message already existed locally, shared Codex turn-scoped subagent ordering, shared Codex `item_completed` multipart truncation, stale shared-Codex agent-event turn filtering, the shared Codex buffered-result flush edge, multiple simultaneous approvals, Windows `HOME`-only path resolution, process-exit polling, unhandled Codex rate-limit notifications, the stale "Backend persists full state on every streaming text delta" entry, the old unscoped `/api/file` read bug, the legacy Codex REPL `exec --json` path, the old per-session / partial Codex app-server notes, the old Codex session-discovery note, the startup Codex home-discovery mismatch, the REPL Codex import leak, the discovery truncation bug, the startup discovery settings-clobber bug, the shared Codex lock-order deadlock, the Codex DB fallback-scan abort, the unbounded generic Codex app-request payload path, the MCP elicitation schema-enforcement gap, the uncapped Codex discovery query, the old interaction-request state name, the stale command-delta timestamp note, agent replies in diff review comments, the spec-drift note for `docs/claude-pair-spec.md`, the Claude hidden-session pool note, the old agent-native slash-command note, the stale runtime `try_wait()` polling note, the stale recorder-duplication note, the SSH remote-host injection bug, the remote review scope-routing bug, the remote bridge lifecycle bug, the remote ghost-session snapshot bug, the Remotes draft-reset bug, the workspace-first remote create-session bug, the remote-toggle copy mismatch, the stale Claude approval-cancel item, the `..` git pathspec validation gap, the failed Claude Task detail-loss bug, the stale `insert_message_before` contract note, the stale Claude parallel-agent type-duplication note, the streaming-refresh UI performance entry (render callback stabilization, mountedSessions referential stability, box-shadow transition scoping, MeasuredMessageCard memoization, sameJsonValue rewrite), and the stale architecture-doc API table note were stale. Those are implemented in the current tree.
+Completed items are removed from this file once fixed. The sections below track
+active bugs and follow-up tasks only.
 
-The newer shared Codex regressions where stale `task_complete` summaries could bleed into the next
-answer or a pre-answer summary insert could overwrite the final-answer preview are also fixed in
-the current tree. Parallel-agent progress updates now also use the targeted delta SSE path instead
-of forcing full-state snapshots.
+The `objectHasOwnWithFallback` test was promoted to a top-level
+`describe("objectHasOwnWithFallback")` block in `OrchestratorTemplatesPanel.test.tsx`, decoupling
+it from the component suite's `beforeEach`/`afterEach` hooks it never needed.
 
-The earlier command-card UX issue where `OUT` could render as an empty dark block was also fixed.
-Command messages now use a compact `IN` / `OUT` layout with copy controls, a collapsible output
-view for longer results, and a plain placeholder when there is no command output.
+## `null` transition anchors survive the `readState` restore boundary as `null` instead of absent
 
-The stale `reconcileSession` `projectId` note, the `clear_runtime()` revision note, the file
-read/write size-limit note, the missing CORS note, the remote-delta diagnostic note, the duplicate
-project-text normalizer note, the `should_dispatch_next` consistency note, the Codex completed-text
-reconciliation note, and the `TextReplace` architecture-doc note are also fixed in the current tree.
+**Severity:** Low - a subtle type-contract mismatch between the localStorage deserialization guard and the TypeScript type for `OrchestratorTemplateTransition`.
 
-The shared Codex kill-isolation note, the committed-kill response-contract note, and the stale
-killed-thread ignore-list growth note are also fixed in the current tree. Shared-session kill
-failures now detach locally instead of tearing down the shared Codex runtime, kill now returns the
-committed authoritative state while post-removal cleanup warnings are logged server-side, and
-discovery import prunes ignored Codex thread IDs that no longer exist.
+`isTransitionTemplate` correctly allows `null` for `fromAnchor`/`toAnchor` (meaning "compute nearest anchor at render time"), and the restore spread preserves that `null` verbatim: `...(transition.fromAnchor !== undefined ? { fromAnchor: transition.fromAnchor } : {})`. If `OrchestratorTemplateTransition.fromAnchor` is typed as `AnchorSide | undefined` — not `| null` — a `null` anchor from localStorage survives the validation boundary as `null` rather than being normalized to absent (`undefined`). Call sites that check `=== undefined` to detect "no anchor" will see a `null` and behave incorrectly.
 
-The non-Codex external-session tombstone leak, the shared-Codex `stop_session` detach gap, the
-shared-Codex post-interrupt cleanup gap, and the tooltip vs. session-panel model-option trim
-divergence are also fixed in the current tree. Codex tombstone clearing is now scoped to Codex
-sessions only, `stop_session` now always detaches shared Codex session bookkeeping after an
-interrupt attempt and continues through runtime cleanup/stop-message recording even if that
-interrupt fails, and tooltip/panel model-option matching now uses one shared lookup utility.
+**Current behavior:**
+- `isTransitionTemplate` passes `null` anchors through the guard
+- the restore spread copies `null` into draft state unchanged
+- downstream code that branches on `anchor === undefined` vs. a real `AnchorSide` sees `null` and may take an unexpected path
 
-The CORS `allow_methods` missing DELETE and the orchestrator card grab handle missing keyboard
-support are also fixed in the current tree. DELETE is now included in the CORS method list, and
-the card grab handle responds to Enter and Space key presses.
+**Proposal:**
+- change the spread condition from `!== undefined` to `!= null` so both `null` and `undefined` anchors are normalized to absent: `...(transition.fromAnchor != null ? { fromAnchor: transition.fromAnchor } : {})`
 
-The newer orchestration runtime issues around entry-session instruction injection, transition
-handoff durability, per-turn result extraction, template-read serialization during instance
-creation, kill cleanup, and agent readiness validation are also fixed in the current tree.
-Runtime orchestration sessions now inject template instructions on their first prompt whether it
-comes from a user kickoff or a transition, transition handoff now goes through a persist-first
-queued prompt before any runtime send, transition result extraction is scoped to the current
-turn, template loading is serialized under the state mutex during instance creation, kill cleanup
-immediately normalizes owning orchestrator instances, and orchestrator-spawned sessions now
-validate local agent readiness before they are created.
+## `AGENT_OPTIONS` arrays are entry-validated but not exhaustive against the `AgentType` union
 
-The follow-up orchestration regressions around duplicate replay after dispatch, silent stalled
-pending transitions, and resume-loop starvation are also fixed in the current tree. Failed
-transition dispatch now becomes a visible destination-session error instead of leaving hidden
-pending work behind, runtime completion handlers log orchestration-finalization failures, and one
-instance's failed dispatch no longer prevents other orchestrators from draining their own pending
-work.
+**Severity:** Low - `as const satisfies ReadonlyArray<{ label: string; value: AgentType }>` validates that each existing entry's `value` is a known `AgentType`, but it does not enforce that every `AgentType` has an entry. A new agent added to the union will not appear in either the new-session dropdown (`NEW_SESSION_AGENT_OPTIONS` in `App.tsx`) or the orchestrator template agent picker (`AGENT_OPTIONS` in `OrchestratorTemplatesPanel.tsx`) without a compile-time error.
 
-The missing axum coverage for orchestrator instance routes is also fixed in the current tree.
-`GET /api/orchestrators`, `POST /api/orchestrators`, and `GET /api/orchestrators/{id}` now have
-route-level tests in addition to the direct state-level orchestration tests.
+By contrast, `SUPPORTED_PERSISTED_TEMPLATE_AGENTS satisfies Record<AgentType, true>` is exhaustive and will catch a new variant immediately.
 
-The settings-tab selection-frame padding issue is also fixed in the current tree.
+**Current behavior:**
+- `AGENT_OPTIONS` and `NEW_SESSION_AGENT_OPTIONS` use `satisfies ReadonlyArray<...>` which validates existing entries only
+- adding a new `AgentType` variant produces no TypeScript error on either dropdown array
+- `SUPPORTED_PERSISTED_TEMPLATE_AGENTS` is exhaustive but is only used for the restore guard, not the UI dropdowns
 
-The frontend workspace-layout `controlPanelSide` typing note is also fixed in the current tree. The
-workspace layout API types now narrow `controlPanelSide` to `"left" | "right"` in `ui/src/api.ts`,
-matching the backend enum contract.
+**Proposal:**
+- derive a companion `satisfies Record<AgentType, boolean>` map from each options array (or add a static assertion that the union of `value` fields covers all `AgentType` members), so TypeScript errors when a new agent is added to the union but not to the dropdown
 
-The `ApprovalDecision::Pending` panic, the unbounded orchestrator template graph size, and the
-frontend/client-side template size drift are also fixed in the current tree. `Pending` is now
-rejected by the early guard alongside `Interrupted` and `Canceled`, template validation caps
-templates at 50 sessions and 200 transitions, and `OrchestratorTemplatesPanel` now mirrors those
-limits locally while disabling the "Add session" affordance at the cap.
+## `pendingTransitions: []` in test fixtures exercises a path absent from real SSE payloads
 
-The orchestrator handoff restart recovery gap is also fixed in the current tree. On startup,
-`dispatch_orphaned_queued_prompts` scans for idle sessions with queued prompts and no active
-runtime, and auto-dispatches them. This covers the window where a transition was committed
-(queued prompt persisted, pending transition removed) but the process crashed before
-`dispatch_next_queued_turn` ran. A backend regression now covers that exact restart window.
+**Severity:** Low - test mock objects that construct `OrchestratorInstance` still pass `pendingTransitions: []` (the old required-field form). The Rust backend uses `#[serde(skip_serializing_if = "Vec::is_empty")]`, so the field is absent from any SSE payload or API response when the list is empty. Fixtures with `pendingTransitions: []` exercise the `length === 0` path rather than the `=== undefined` path, meaning any frontend code that branches on `pendingTransitions !== undefined` behaves differently against real data vs. test fixtures.
 
-The orchestration stop/error fan-out bug, the shared workspace-tab validator drift, the
-file-not-found 400/404 mismatch, and the `stop_session` cleanup-contract asymmetry are also
-fixed in the current tree.
+**Current behavior:**
+- `OrchestratorInstance` mock objects in `App.test.tsx` and `OrchestratorTemplatesPanel.test.tsx` include `pendingTransitions: []`
+- real backend payloads with an empty list omit the field entirely
+- frontend code that guards `instance.pendingTransitions !== undefined` before iterating will see different behavior in tests vs. production
 
-The `stop_session` dedicated-runtime kill-failure, the orchestrator-start `adoptSessions` vs
-`adoptState` gap, the duplicated `CONTROL_SURFACE_TAB_KINDS` constant, the control-surface
-forward/reverse pane sync double-fire, the pane-local Files/Git global root/workdir mismatch,
-the canvas stale origin metadata on move, the `text/plain` MIME drag false-drop affordances, the
-workspace docs lag, the debounced server save drop on navigation, the Sessions-tab reuse contextual
-targeting gap, the markdown same-origin overmatch, and the orchestrator `Run` button stale project
-handling are also fixed in the current tree. Failed dedicated-runtime kills now roll back session
-state and return an error instead of treating the stop as clean, orchestrator start now routes the
-returned `StateResponse` through `adoptState` to keep revision tracking in sync, `CONTROL_SURFACE_KINDS`
-is now exported from `workspace.ts` as the single canonical set, control-surface tab selection now
-runs before and exclusive of session-tab sync, Files/Git panels now derive their root/workdir from
-the same pane-local session/project context as their launchers, canvas and sessionList tabs now
-refresh their origin metadata when moved to a new pane context, `PaneTabs.tsx` now only accepts
-the explicit custom MIME type to guard the drop affordance, workspace saves are flushed with
-`keepalive` on `pagehide` and before navigation, the Sessions tab is now moved to the contextual
-pane on reuse, `isMarkdownLocalFileUrl` was narrowed to loopback-only and gated behind an
-explicit Windows-path shape guard, and the orchestrator `Run` button now blocks on missing or
-stale projects. Two TypeScript compile errors introduced in the same batch (spurious `keepalive`
-fields on API functions lacking an `options` parameter, and out-of-scope drag refs in
-`SessionPaneView`) were also caught and fixed.
+**Proposal:**
+- remove `pendingTransitions: []` from all mock objects that construct `OrchestratorInstance`; use `instance.pendingTransitions ?? []` at call sites that need to iterate the value
 
-The `openOrchestratorListInWorkspaceState` stale origin-metadata gap on tab reuse, the `pagehide`
-stale-closure fragility, the Windows-only `looksLikeAbsoluteHttpMarkdownFilePath` regex, and the
-process-global kill-failure test hook are also fixed in the current tree. The orchestrator list
-tab now refreshes its `originSessionId`/`originProjectId` and moves to the contextual pane on reuse
-(matching the canvas and Sessions singleton patterns); the `pagehide` effect now calls
-`flushWorkspaceLayoutSaveRef.current` so the empty dep array is definitively safe regardless of
-helper internals; `looksLikeAbsoluteHttpMarkdownFilePath` now also matches Unix absolute paths via
-a top-level directory allowlist; and the kill-failure injection hook is now scoped to a specific
-`Arc<SharedChild>` by pointer rather than a global label string. `stop_session` now keeps the
-previous session status and preview visible while shutdown is pending, guarded by an internal
-`runtime_stop_in_progress` flag so intentional runtime exits are not misclassified as failures.
-Launcher and cross-window tab drags also share one guarded known-drag fallback across the pane
-body and tab rail, which restores reduced-MIME browser behavior without reintroducing arbitrary
-`text/plain` false positives. Stop-in-progress sessions now also suppress matching runtime
-failure, retry, error, exit, completion, and Codex thread-state callbacks until the stop
-finishes, and backend regressions cover the double-stop conflict, queued-prompt suppression,
-and the stop-time callback suppression contracts. Terminal runtime callbacks (`fail_turn`,
-`mark_turn_error`, `finish_turn_ok`, `handle_runtime_exit`) that arrive during a dedicated
-stop window are now deferred in ordered `deferred_stop_callbacks` queues and replayed in arrival
-order when the stop fails, so a session can no longer get stuck in a stale Active state or
-reconstruct the wrong completion-then-exit sequence after a failed kill attempt. Tab-rail
-session drops now also preserve the hovered insertion index for already-open sessions, and
-workspace regressions cover both the newly opened and already-open move paths.
+## Inline streaming-tail reconcile test missing `toEqual` value-equality assertion
 
-The `RuntimeExited`-before-other-callbacks deferred replay ordering bug and the stale `runButton`
-DOM reference concern are also fixed in the current tree. The failed-stop replay loop now sorts
-`RuntimeExited` callbacks last via `sort_by_key` before replaying, so `TurnCompleted` and other
-terminal callbacks always process before the runtime is cleared. The regression test
-`failed_dedicated_stop_replays_runtime_exit_last_even_when_it_arrives_first` covers the reversed
-arrival order `[RuntimeExited(None), TurnCompleted]` and asserts the session ends `Idle`. The
-"keeps restored template edits dirty" test already re-queries the run button after the Reset
-click via a separate `refreshedRunButton` reference, so the pre-reset reference is only used for
-pre-reset assertions and does not produce a stale-DOM false positive.
+**Severity:** Low - the pre-existing "reuses unchanged messages when only the streaming tail message changed" test in `session-reconcile.test.ts` received `expect(merged[0].messages[1]).toBe(next[0].messages[1])` (reference identity) but has no `toEqual` assertion confirming the content of the changed message. A reconciler that returns the correct reference but with wrong content would still pass.
 
-The SSE reconnect-timer race, consolidate-delivery empty/pruned-predecessor edge cases,
-consolidate-only deadlock handling, restored-draft initialization gaps, self-loop transition
-rendering collapse, panel draft-persistence debounce loss, and the write-only
-`last_delivered_completion_revision` note are also fixed in the current tree. SSE `onopen` now
-clears the fallback reconnect state-resync timer immediately, consolidate delivery skips
-zero-predecessor templates and runtime-pruned predecessors instead of constructing empty
-deliveries, deadlocked consolidate-only cycles now fail closed with an orchestrator `error_message`
-instead of staying `Running`, legacy templates and saved drafts missing `inputMode` now default to
-`queue` on both backend deserialization and frontend restore without weakening the main TypeScript
-template type, stale restored drafts pointing at deleted templates are dropped back to an empty
-clean state, self-loop transitions render as cubic SVG paths, `OrchestratorTemplatesPanel` flushes
-pending localStorage writes on `pagehide`, `beforeunload`, and unmount, and completed sessions no
-longer reschedule already-delivered completion revisions. Reconnect fallback `/api/state` refreshes
-now also force-adopt same-revision snapshots after backend restarts, queued work no longer
-auto-dispatches for sessions owned by stopped orchestrators, and `kill_session` now reruns
-orchestrator reconciliation so consolidate deadlocks are surfaced instead of leaving instances
-stuck `Running`. Reconnect fallback state refreshes also treat reconnect-path `/api/state`
-snapshots as authoritative when the backend restarts behind the last streamed delta, provided no
-newer SSE state arrived while the fetch was in flight. Legacy queued prompts without explicit
-provenance now deserialize as `Legacy` instead of `User`, and stopped orchestrators clear stale
-legacy/orchestrator-owned queued prompts while preserving explicit user work.
+The new `expectChangedMessageReference` helper includes `expect(merged[0].messages[1]).toEqual(nextMessage)` as a sixth assertion; the inline test should match that stricter pattern.
 
----
+**Current behavior:**
+- the inline test asserts the changed message is `!== previous` and `=== next` but not that it `equals` the expected content
+- a content-corrupting reconciler regression would produce a false pass on this test
+
+**Proposal:**
+- add `expect(merged[0].messages[1]).toEqual(next[0].messages[1])` after the `toBe` assertion, consistent with `expectChangedMessageReference`
 
 ## `ui/src/App.tsx` is large enough to trigger Babel deoptimization warnings
 
@@ -194,24 +99,6 @@ same file more often than they should.
 - [ ] Add backend regression tests for divergent completed-text replacement in Codex streaming:
       cover both shared-Codex and REPL-Codex paths where the final authoritative text must replace,
       not append to, previously streamed content.
-- [ ] Add a `stop_session` test with a queued prompt pending when a shared Codex interrupt fails:
-      verify that `dispatch_next_queued_turn` fires and the queued prompt is dispatched after the
-      best-effort cleanup completes.
-
-- [ ] Add frontend reconcile tests for new interactive message types:
-      `userInputRequest`, `mcpElicitationRequest`, and `codexAppRequest` messages are handled by the
-      reconciler but have no test coverage verifying that state changes (e.g. pending ? submitted)
-      correctly produce new message references.
-- [ ] Add test for deferred callbacks discarded on a successful stop:
-      pre-stage a `DeferredStopCallback::TurnCompleted` entry, let `stop_session` succeed normally, and
-      assert the session ends `Idle` (not `Error`) and `deferred_stop_callbacks` is empty.
-- [ ] Fix multi-callback ordering oracle test to pre-populate a message:
-      `failed_dedicated_stop_replays_multiple_deferred_callbacks_in_order` starts with zero messages;
-      pre-populate an in-progress assistant message so `finish_turn_ok` produces a measurably different
-      `messages.len()` from `RuntimeExited` alone, making the oracle comparison unambiguous.
-- [ ] Add backend tests for template-level orchestrator project fallback:
-      current `create_orchestrator_instance` coverage still passes `projectId` explicitly in the
-      request. Add state/route tests where the template supplies `projectId` and the request omits it.
 - [ ] Add orchestrator lifecycle endpoints (stop, pause, resume):
       `OrchestratorInstanceStatus` defines `Running`, `Paused`, and `Stopped` but no API endpoint
       transitions between them. Users cannot stop a running orchestration except by killing
@@ -219,9 +106,6 @@ same file more often than they should.
 - [ ] Add orchestrator instances to `StateResponse` or a dedicated SSE delta:
       the frontend currently has no push notification for orchestrator state changes (transitions
       fired, instances completed). It must poll `GET /api/orchestrators`.
-- [ ] Add `openDiffPreviewInWorkspaceState` test for control-surface anchor redirect:
-      the existing test covers the docked controlPanel case; add a test where the preferred pane is a
-      standalone gitStatus or filesystem pane and verify the diff opens adjacent to the session pane.
 - [ ] Add App-level regression coverage for control-surface tab selection sync:
       render a docked control panel plus standalone git/files panes with neighboring sessions, then
       verify selecting the control surface adopts the nearest session context instead of leaving stale
@@ -232,14 +116,13 @@ same file more often than they should.
 - [ ] Add a canvas-move regression for post-relocation session/project sync:
       when an existing shared canvas is moved into a new pane, assert its origin metadata and the
       target pane's `activeSessionId` are updated to the new launch context instead of the old one.
-- [ ] Add unit tests for canvas/sessionList origin-refresh on existing tab reuse:
-      `openCanvasInWorkspaceState` and `openSessionListInWorkspaceState` now update `originSessionId`/
-      `originProjectId` via `replaceWorkspaceTabInPane` when the existing tab's origin differs from the
-      new launch context. Add `workspace.test.ts` cases where the existing tab has a null origin and
-      assert the new origin values are written after re-open.
-- [ ] Extract shared drag-drop test setup helper:
-      the two drag-drop tests in `App.test.tsx` duplicate ~60 lines of identical fetch-mock and
-      setup boilerplate. Extract a shared `renderAppWithProjectAndSession()` helper.
+- [ ] Verify/fix Codex `thread/resume` safety after failed `turn/interrupt`:
+      `stop_session_dispatches_queued_prompt_after_shared_codex_interrupt_failure` dispatches the
+      queued prompt with `resume_thread_id` pointing to a thread whose `turn/interrupt` returned
+      an error. If the prior turn is still running in Codex, `thread/resume` + `turn/start` may
+      produce interleaved turns; the resumed completion arrives on the shared reader with no session
+      mapped (detached), so it is silently dropped. Verify against the Codex JSON-RPC spec and, if
+      unsafe, fall back to `thread/start` (new thread) when the interrupt fails.
 - [ ] Add unit tests for orchestrator geometry functions:
       `anchorPosition`, `nearestAnchorSide`, `nearestAnchorPosition`, `buildTransitionGeometry`,
       `buildSelfLoopTransitionGeometry`, `anchorNormal`, `cubicBezierPoint`, `cubicBezierDerivative`,
@@ -249,5 +132,42 @@ same file more often than they should.
       `src/main.rs` was split into `api.rs`, `state.rs`, `runtime.rs`, `turns.rs`, `remote.rs`, and
       `tests.rs`. Some of these modules (especially `state.rs` and `turns.rs`) are already large and
       could benefit from further decomposition as features stabilize.
+- [ ] Add frontend test for `createOrchestratorInstance` with omitted `projectId`:
+      the backend has two new tests (route-level and state-level) verifying the template-project
+      fallback when `projectId` is absent; no frontend test verifies that the
+      `...(projectId ? { projectId } : {})` conditional spread in `api.ts` actually fires
+      when the panel has no project selected. Add a test where `OrchestratorTemplatesPanel` runs
+      a template with `projectId: null` and asserts `createOrchestratorInstanceMock` was called with
+      only `templateId` (no second argument or `projectId: undefined`).
+- [ ] Add HTTP-boundary test for `POST /api/orchestrators` with explicit `"projectId": ""`:
+      the route test omits `projectId` entirely from the JSON body; a client sending
+      `{ "templateId": "...", "projectId": "" }` takes a different serde path
+      (`Some("")` → trim → filter → template fallback) that is correct but untested. Add a
+      `request_json` test posting the explicit empty-string body and asserting the template fallback fires.
+- [ ] Migrate remaining `EventSourceMock.instances[0]` uses to stale-safe pattern:
+      integration tests outside the two refactored drag-drop tests still access
+      `EventSourceMock.instances[0]` (hardcoded index). If any earlier test leaves stale instances in
+      the array, those tests operate on the wrong `EventSource`. Capture `priorEventSourceCount`
+      before calling `renderApp()` and use `EventSourceMock.instances[priorEventSourceCount]`,
+      or migrate to `renderAppWithProjectAndSession`.
+- [ ] Fix `null` anchor passthrough in `readState` transition restore:
+      change `!== undefined` to `!= null` in the `fromAnchor`/`toAnchor` conditional spreads
+      so `null` anchors are normalized to absent rather than propagated into draft state as `null`,
+      matching `OrchestratorTemplateTransition`'s TypeScript type (`AnchorSide | undefined`).
+- [ ] Add `AgentType` exhaustiveness check to `AGENT_OPTIONS` arrays:
+      derive a companion `satisfies Record<AgentType, boolean>` map from `AGENT_OPTIONS` and
+      `NEW_SESSION_AGENT_OPTIONS` so TypeScript errors when a new agent is added to the union but
+      not to either dropdown, matching the exhaustiveness already enforced by
+      `SUPPORTED_PERSISTED_TEMPLATE_AGENTS satisfies Record<AgentType, true>`.
+- [ ] Add `toEqual` assertion to inline streaming-tail reconcile test:
+      "reuses unchanged messages when only the streaming tail message changed" asserts
+      `merged[0].messages[1]` is `=== next[0].messages[1]` but not that the content is correct;
+      add `expect(merged[0].messages[1]).toEqual(next[0].messages[1])` to match the
+      stricter pattern enforced by `expectChangedMessageReference`.
+- [ ] Fix `pendingTransitions: []` in `OrchestratorInstance` test fixtures:
+      mock objects that include `pendingTransitions: []` exercise a path the backend never
+      produces (the field is omitted when empty via `skip_serializing_if`). Remove the field
+      from mock construction; add `?? []` at the few call sites that need to iterate it so
+      tests accurately reflect the real SSE wire format.
 
 ## Later

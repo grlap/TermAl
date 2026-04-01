@@ -26,6 +26,8 @@ import type { AgentReadiness, Session } from "./types";
 class EventSourceMock {
   static instances: EventSourceMock[] = [];
 
+  readonly url: string | undefined;
+
   onerror: ((event: Event) => void) | null = null;
 
   onopen: ((event: Event) => void) | null = null;
@@ -35,7 +37,8 @@ class EventSourceMock {
     Set<(event: MessageEvent<string>) => void>
   >();
 
-  constructor(_url?: string) {
+  constructor(url?: string) {
+    this.url = url;
     EventSourceMock.instances.push(this);
   }
 
@@ -314,6 +317,125 @@ function createReducedMimeDragDataTransfer(
   };
 }
 
+
+type RenderAppWithProjectAndSessionOptions = {
+  includeGitStatus?: boolean;
+  includeWorkspacePersistence?: boolean;
+};
+
+async function renderAppWithProjectAndSession(
+  options: RenderAppWithProjectAndSessionOptions = {},
+) {
+  const {
+    includeGitStatus = false,
+    includeWorkspacePersistence = false,
+  } = options;
+  const originalFetch = globalThis.fetch;
+  const originalEventSource = globalThis.EventSource;
+  const originalResizeObserver = globalThis.ResizeObserver;
+  const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
+  const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const requestUrl = new URL(String(input), "http://localhost");
+    if (requestUrl.pathname === "/api/state") {
+      return jsonResponse({
+        revision: 1,
+        projects: [
+          {
+            id: "project-termal",
+            name: "TermAl",
+            rootPath: "/projects/termal",
+          },
+        ],
+        sessions: [
+          makeSession("session-1", {
+            name: "Session 1",
+            projectId: "project-termal",
+            workdir: "/projects/termal",
+          }),
+        ],
+      });
+    }
+
+    if (includeGitStatus && requestUrl.pathname === "/api/git/status") {
+      return jsonResponse({
+        ahead: 0,
+        behind: 0,
+        branch: "main",
+        files: [],
+        isClean: true,
+        repoRoot: "/projects/termal",
+        upstream: "origin/main",
+        workdir: "/projects/termal",
+      });
+    }
+
+    if (includeWorkspacePersistence && requestUrl.pathname.startsWith("/api/workspaces/")) {
+      if ((init?.method ?? "GET").toUpperCase() === "PUT") {
+        return jsonResponse({ ok: true });
+      }
+
+      return new Response("", { status: 404 });
+    }
+
+    throw new Error(`Unexpected fetch: ${requestUrl.pathname}${requestUrl.search}`);
+  });
+
+  const priorEventSourceCount = EventSourceMock.instances.length;
+
+  function restoreSetup() {
+    window.localStorage.clear();
+    EventSourceMock.instances.splice(priorEventSourceCount);
+    HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
+    restoreGlobal("fetch", originalFetch);
+    restoreGlobal("EventSource", originalEventSource);
+    restoreGlobal("ResizeObserver", originalResizeObserver);
+  }
+
+  window.localStorage.clear();
+  vi.stubGlobal("fetch", fetchMock);
+  vi.stubGlobal(
+    "EventSource",
+    EventSourceMock as unknown as typeof EventSource,
+  );
+  vi.stubGlobal(
+    "ResizeObserver",
+    ResizeObserverMock as unknown as typeof ResizeObserver,
+  );
+  HTMLElement.prototype.scrollIntoView = vi.fn();
+
+  try {
+    await renderApp();
+    const eventSource = EventSourceMock.instances[priorEventSourceCount];
+    if (!eventSource) {
+      throw new Error("Event source not created");
+    }
+    await act(async () => {
+      eventSource.dispatchError();
+    });
+    await settleAsyncUi();
+
+    const sessionList = document.querySelector(".session-list");
+    if (!(sessionList instanceof HTMLDivElement)) {
+      throw new Error("Session list not found");
+    }
+
+    const sessionRowLabel = await within(sessionList).findByText("Session 1");
+    const sessionRowButton = sessionRowLabel.closest("button");
+    if (!sessionRowButton) {
+      throw new Error("Session row button not found");
+    }
+
+    await clickAndSettle(sessionRowButton);
+
+    return {
+      fetchMock,
+      cleanup: restoreSetup,
+    };
+  } catch (error) {
+    restoreSetup();
+    throw error;
+  }
+}
 function makeSession(id: string, overrides?: Partial<Session>): Session {
   return {
     id,
@@ -634,10 +756,82 @@ describe("App", () => {
     vi.unstubAllGlobals();
   });
 
+  it("restores helper setup globals when renderAppWithProjectAndSession fails", async () => {
+    await withSuppressedActWarnings(async () => {
+      const originalFetch = globalThis.fetch;
+      const originalEventSource = globalThis.EventSource;
+      const originalResizeObserver = globalThis.ResizeObserver;
+      const originalQuerySelector = Document.prototype.querySelector;
+      const querySelectorSpy = vi
+        .spyOn(Document.prototype, "querySelector")
+        .mockImplementation(function (this: Document, selectors: string) {
+          if (selectors === ".session-list") {
+            return null;
+          }
+
+          return originalQuerySelector.call(this, selectors);
+        });
+
+      const originalScrollIntoViewBeforeFailure =
+        HTMLElement.prototype.scrollIntoView;
+
+      try {
+        await expect(renderAppWithProjectAndSession()).rejects.toThrow(
+          "Session list not found",
+        );
+        expect(globalThis.fetch).toBe(originalFetch);
+        expect(globalThis.EventSource).toBe(originalEventSource);
+        expect(globalThis.ResizeObserver).toBe(originalResizeObserver);
+        expect(HTMLElement.prototype.scrollIntoView).toBe(
+          originalScrollIntoViewBeforeFailure,
+        );
+      } finally {
+        querySelectorSpy.mockRestore();
+      }
+    });
+  });
+
+  it("uses the freshly rendered EventSource when prior mock instances exist", async () => {
+    await withSuppressedActWarnings(async () => {
+      const staleDispatchError = vi.fn(() => {
+        throw new Error("stale EventSource should not be reused");
+      });
+      const priorEventSourceCount = EventSourceMock.instances.length;
+      const seededEventSourceCount = (
+        EventSourceMock.instances = [
+          ...EventSourceMock.instances,
+          {
+            dispatchError: staleDispatchError,
+          } as unknown as EventSourceMock,
+        ]
+      ).length;
+
+      const context = await renderAppWithProjectAndSession();
+      try {
+        const freshEventSources = EventSourceMock.instances.slice(
+          seededEventSourceCount,
+        );
+        expect(EventSourceMock.instances.length).toBeGreaterThan(
+          seededEventSourceCount,
+        );
+        expect(
+          freshEventSources.some((eventSource) =>
+            eventSource.url?.includes("/api/events") ?? false,
+          ),
+        ).toBe(true);
+        expect(staleDispatchError).not.toHaveBeenCalled();
+      } finally {
+        context.cleanup();
+        EventSourceMock.instances.splice(priorEventSourceCount);
+      }
+    });
+  });
+
   it("applies the active combobox option on space without closing the menu", () => {
     const onChange = vi.fn();
-    const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
-    HTMLElement.prototype.scrollIntoView = vi.fn();
+    const scrollIntoViewSpy = vi
+      .spyOn(HTMLElement.prototype, "scrollIntoView")
+      .mockImplementation(() => {});
 
     try {
       render(
@@ -666,7 +860,7 @@ describe("App", () => {
       expect(onChange).toHaveBeenLastCalledWith("gpt-5-mini");
       expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
     } finally {
-      HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
+      scrollIntoViewSpy.mockRestore();
     }
   });
 
@@ -2282,95 +2476,12 @@ describe("App", () => {
   });
   it("drags control panel dock sections into the workspace", async () => {
     await withSuppressedActWarnings(async () => {
-      const originalFetch = globalThis.fetch;
-      const originalEventSource = globalThis.EventSource;
-      const originalResizeObserver = globalThis.ResizeObserver;
-      const fetchMock = vi.fn(
-        async (input: RequestInfo | URL, init?: RequestInit) => {
-          const requestUrl = new URL(String(input), "http://localhost");
-          if (requestUrl.pathname === "/api/state") {
-            return jsonResponse({
-              revision: 1,
-              projects: [
-                {
-                  id: "project-termal",
-                  name: "TermAl",
-                  rootPath: "/projects/termal",
-                },
-              ],
-              sessions: [
-                makeSession("session-1", {
-                  name: "Session 1",
-                  projectId: "project-termal",
-                  workdir: "/projects/termal",
-                }),
-              ],
-            });
-          }
-
-          if (requestUrl.pathname === "/api/git/status") {
-            return jsonResponse({
-              ahead: 0,
-              behind: 0,
-              branch: "main",
-              files: [],
-              isClean: true,
-              repoRoot: "/projects/termal",
-              upstream: "origin/main",
-              workdir: "/projects/termal",
-            });
-          }
-
-          if (requestUrl.pathname.startsWith("/api/workspaces/")) {
-            if ((init?.method ?? "GET").toUpperCase() === "PUT") {
-              return jsonResponse({ ok: true });
-            }
-
-            return new Response("", { status: 404 });
-          }
-
-          throw new Error(
-            `Unexpected fetch: ${requestUrl.pathname}${requestUrl.search}`,
-          );
-        },
-      );
-
-      window.localStorage.clear();
-      vi.stubGlobal("fetch", fetchMock);
-      vi.stubGlobal(
-        "EventSource",
-        EventSourceMock as unknown as typeof EventSource,
-      );
-      vi.stubGlobal(
-        "ResizeObserver",
-        ResizeObserverMock as unknown as typeof ResizeObserver,
-      );
-      const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
-      HTMLElement.prototype.scrollIntoView = vi.fn();
+      const context = await renderAppWithProjectAndSession({
+        includeGitStatus: true,
+        includeWorkspacePersistence: true,
+      });
 
       try {
-        await renderApp();
-        const eventSource = EventSourceMock.instances[0];
-        expect(eventSource).toBeTruthy();
-        act(() => {
-          eventSource.dispatchError();
-        });
-        await settleAsyncUi();
-
-        const sessionList = document.querySelector(".session-list");
-        if (!(sessionList instanceof HTMLDivElement)) {
-          throw new Error("Session list not found");
-        }
-
-        const sessionRowLabel =
-          await within(sessionList).findByText("Session 1");
-        const sessionRowButton = sessionRowLabel.closest("button");
-        if (!sessionRowButton) {
-          throw new Error("Session row button not found");
-        }
-
-        await clickAndSettle(sessionRowButton);
-
         async function dragDockSectionToWorkspace(
           buttonName: string,
           expectedTabName: RegExp,
@@ -2420,92 +2531,17 @@ describe("App", () => {
         await dragDockSectionToWorkspace("Files", /Files: termal/i);
         await dragDockSectionToWorkspace("Git status", /Git: termal/i);
       } finally {
-        window.localStorage.clear();
-        HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
-        restoreGlobal("fetch", originalFetch);
-        restoreGlobal("EventSource", originalEventSource);
-        restoreGlobal("ResizeObserver", originalResizeObserver);
+        context.cleanup();
       }
     });
   });
   it("accepts control panel launcher drags in the pane body when dragover only exposes text/plain", async () => {
     await withSuppressedActWarnings(async () => {
-      const originalFetch = globalThis.fetch;
-      const originalEventSource = globalThis.EventSource;
-      const originalResizeObserver = globalThis.ResizeObserver;
-      const fetchMock = vi.fn(
-        async (input: RequestInfo | URL, init?: RequestInit) => {
-          const requestUrl = new URL(String(input), "http://localhost");
-          if (requestUrl.pathname === "/api/state") {
-            return jsonResponse({
-              revision: 1,
-              projects: [
-                {
-                  id: "project-termal",
-                  name: "TermAl",
-                  rootPath: "/projects/termal",
-                },
-              ],
-              sessions: [
-                makeSession("session-1", {
-                  name: "Session 1",
-                  projectId: "project-termal",
-                  workdir: "/projects/termal",
-                }),
-              ],
-            });
-          }
-
-          if (requestUrl.pathname.startsWith("/api/workspaces/")) {
-            if ((init?.method ?? "GET").toUpperCase() === "PUT") {
-              return jsonResponse({ ok: true });
-            }
-
-            return new Response("", { status: 404 });
-          }
-
-          throw new Error(
-            `Unexpected fetch: ${requestUrl.pathname}${requestUrl.search}`,
-          );
-        },
-      );
-
-      window.localStorage.clear();
-      vi.stubGlobal("fetch", fetchMock);
-      vi.stubGlobal(
-        "EventSource",
-        EventSourceMock as unknown as typeof EventSource,
-      );
-      vi.stubGlobal(
-        "ResizeObserver",
-        ResizeObserverMock as unknown as typeof ResizeObserver,
-      );
-      const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
-      HTMLElement.prototype.scrollIntoView = vi.fn();
+      const context = await renderAppWithProjectAndSession({
+        includeWorkspacePersistence: true,
+      });
 
       try {
-        await renderApp();
-        const eventSource = EventSourceMock.instances[0];
-        expect(eventSource).toBeTruthy();
-        act(() => {
-          eventSource.dispatchError();
-        });
-        await settleAsyncUi();
-
-        const sessionList = document.querySelector(".session-list");
-        if (!(sessionList instanceof HTMLDivElement)) {
-          throw new Error("Session list not found");
-        }
-
-        const sessionRowLabel =
-          await within(sessionList).findByText("Session 1");
-        const sessionRowButton = sessionRowLabel.closest("button");
-        if (!sessionRowButton) {
-          throw new Error("Session row button not found");
-        }
-
-        await clickAndSettle(sessionRowButton);
-
         const dock = await screen.findByRole("navigation", {
           name: "Control panel dock",
         });
@@ -2561,11 +2597,7 @@ describe("App", () => {
           ).toBe(true);
         });
       } finally {
-        window.localStorage.clear();
-        HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
-        restoreGlobal("fetch", originalFetch);
-        restoreGlobal("EventSource", originalEventSource);
-        restoreGlobal("ResizeObserver", originalResizeObserver);
+        context.cleanup();
       }
     });
   });
@@ -4424,3 +4456,4 @@ describe("App", () => {
     expect(secondAttempt.warning).toBeNull();
   });
 });
+

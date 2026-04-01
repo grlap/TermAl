@@ -192,6 +192,10 @@ function reconcileTextMessage(previous: TextMessage, next: TextMessage): TextMes
     return previous;
   }
 
+  if (attachments === next.attachments) {
+    return next;
+  }
+
   if (attachments) {
     return {
       ...next,

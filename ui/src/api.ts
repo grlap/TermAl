@@ -404,6 +404,9 @@ export function fetchOrchestratorInstance(instanceId: string) {
   );
 }
 
+/**
+ * Omits empty-string project ids so the backend can fall back to the template project.
+ */
 export function createOrchestratorInstance(templateId: string, projectId?: string | null) {
   return request<CreateOrchestratorInstanceResponse>("/api/orchestrators", {
     method: "POST",
@@ -662,7 +665,12 @@ export function saveFile(path: string, content: string, scope?: RequestScope) {
 
   return request<FileResponse>("/api/file", {
     method: "PUT",
-    body: JSON.stringify({ path, content, sessionId, projectId }),
+    body: JSON.stringify({
+      path,
+      content,
+      ...(sessionId ? { sessionId } : {}),
+      ...(projectId ? { projectId } : {}),
+    }),
   });
 }
 

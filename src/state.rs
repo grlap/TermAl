@@ -5091,7 +5091,6 @@ impl PersistedState {
                 .collect(),
         };
         inner.ensure_projects_consistent();
-        inner.upgrade_legacy_queued_prompt_sources();
         inner.recover_interrupted_sessions();
         inner.normalize_orchestrator_instances();
         inner
@@ -5393,18 +5392,16 @@ fn record_has_archived_codex_thread(record: &SessionRecord) -> bool {
     record.session.codex_thread_state == Some(CodexThreadState::Archived)
 }
 
-#[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq, Serialize)]
+#[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 enum QueuedPromptSource {
     #[default]
-    Legacy,
     User,
     Orchestrator,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 struct QueuedPromptRecord {
-    #[serde(default)]
     source: QueuedPromptSource,
     attachments: Vec<PromptImageAttachment>,
     pending_prompt: PendingPrompt,
