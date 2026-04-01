@@ -7014,6 +7014,130 @@ fn shared_codex_agent_message_final_event_appends_missing_suffix_after_streamed_
 }
 
 #[test]
+fn shared_codex_agent_message_final_event_replaces_divergent_streamed_text() {
+    let state = test_app_state();
+    let session_id = test_session_id(&state, Agent::Codex);
+    let (runtime, _input_rx, process) =
+        test_shared_codex_runtime("shared-codex-agent-final-replace");
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(&session_id)
+            .expect("Codex session should exist");
+        inner.sessions[index].runtime = SessionRuntime::Codex(CodexRuntimeHandle {
+            runtime_id: runtime.runtime_id.clone(),
+            input_tx: runtime.input_tx.clone(),
+            process,
+            shared_session: Some(SharedCodexSessionHandle {
+                runtime: runtime.clone(),
+                session_id: session_id.clone(),
+            }),
+        });
+        inner.sessions[index].session.status = SessionStatus::Active;
+    }
+    runtime
+        .sessions
+        .lock()
+        .expect("shared Codex session mutex poisoned")
+        .insert(
+            session_id.clone(),
+            SharedCodexSessionState {
+                thread_id: Some("conversation-123".to_owned()),
+                ..SharedCodexSessionState::default()
+            },
+        );
+    runtime
+        .thread_sessions
+        .lock()
+        .expect("shared Codex thread mutex poisoned")
+        .insert("conversation-123".to_owned(), session_id.clone());
+    let pending_requests = Arc::new(Mutex::new(HashMap::new()));
+    let turn_started = json!({
+        "method": "turn/started",
+        "params": {
+            "threadId": "conversation-123",
+            "turn": {
+                "id": "turn-123"
+            }
+        }
+    });
+    let delta_message = json!({
+        "method": "codex/event/agent_message_content_delta",
+        "params": {
+            "conversationId": "conversation-123",
+            "id": "turn-123",
+            "msg": {
+                "delta": "Hello from stream",
+                "item_id": "msg-123",
+                "thread_id": "conversation-123",
+                "turn_id": "turn-123",
+                "type": "agent_message_content_delta"
+            }
+        }
+    });
+    let final_message = json!({
+        "method": "codex/event/agent_message",
+        "params": {
+            "conversationId": "conversation-123",
+            "id": "turn-123",
+            "msg": {
+                "message": "Different final answer.",
+                "phase": "final_answer",
+                "type": "agent_message"
+            }
+        }
+    });
+    handle_shared_codex_app_server_message(
+        &turn_started,
+        &state,
+        &runtime.runtime_id,
+        &pending_requests,
+        &runtime.sessions,
+        &runtime.thread_sessions,
+    )
+    .unwrap();
+    handle_shared_codex_app_server_message(
+        &delta_message,
+        &state,
+        &runtime.runtime_id,
+        &pending_requests,
+        &runtime.sessions,
+        &runtime.thread_sessions,
+    )
+    .unwrap();
+    let snapshot = state.snapshot();
+    let session = snapshot
+        .sessions
+        .iter()
+        .find(|session| session.id == session_id)
+        .expect("updated session should be present");
+    assert!(matches!(
+        session.messages.last(),
+        Some(Message::Text { text, .. }) if text == "Hello from stream"
+    ));
+    handle_shared_codex_app_server_message(
+        &final_message,
+        &state,
+        &runtime.runtime_id,
+        &pending_requests,
+        &runtime.sessions,
+        &runtime.thread_sessions,
+    )
+    .unwrap();
+    let snapshot = state.snapshot();
+    let session = snapshot
+        .sessions
+        .iter()
+        .find(|session| session.id == session_id)
+        .expect("updated session should be present");
+    assert_eq!(session.preview, "Different final answer.");
+    assert_eq!(session.messages.len(), 1);
+    assert!(matches!(
+        session.messages.last(),
+        Some(Message::Text { text, .. }) if text == "Different final answer."
+    ));
+}
+#[test]
 fn shared_codex_agent_message_content_delta_streams_without_duplicate_final_message() {
     let state = test_app_state();
     let session_id = test_session_id(&state, Agent::Codex);
@@ -7687,6 +7811,81 @@ fn repl_codex_streamed_agent_message_appends_missing_completed_suffix() {
     assert!(repl_state.current_turn_id.is_none());
 }
 
+#[test]
+fn repl_codex_streamed_agent_message_replaces_divergent_completed_text() {
+    let mut recorder = TestRecorder::default();
+    let mut repl_state = ReplCodexSessionState::default();
+    let turn_started = json!({
+        "method": "turn/started",
+        "params": {
+            "threadId": "conversation-123",
+            "turn": {
+                "id": "turn-stream-1"
+            }
+        }
+    });
+    let delta = json!({
+        "method": "item/agentMessage/delta",
+        "params": {
+            "threadId": "conversation-123",
+            "itemId": "item-1",
+            "delta": "Hello from stream"
+        }
+    });
+    let completed = json!({
+        "method": "item/completed",
+        "params": {
+            "threadId": "conversation-123",
+            "item": {
+                "id": "item-1",
+                "type": "agentMessage",
+                "text": "Different final answer."
+            }
+        }
+    });
+    let turn_completed = json!({
+        "method": "turn/completed",
+        "params": {
+            "threadId": "conversation-123",
+            "turn": {
+                "id": "turn-stream-1",
+                "error": null
+            }
+        }
+    });
+    handle_repl_codex_app_server_notification(
+        "turn/started",
+        &turn_started,
+        &mut repl_state,
+        &mut recorder,
+    )
+    .unwrap();
+    handle_repl_codex_app_server_notification(
+        "item/agentMessage/delta",
+        &delta,
+        &mut repl_state,
+        &mut recorder,
+    )
+    .unwrap();
+    handle_repl_codex_app_server_notification(
+        "item/completed",
+        &completed,
+        &mut repl_state,
+        &mut recorder,
+    )
+    .unwrap();
+    handle_repl_codex_app_server_notification(
+        "turn/completed",
+        &turn_completed,
+        &mut repl_state,
+        &mut recorder,
+    )
+    .unwrap();
+    assert_eq!(recorder.text_deltas, vec!["Different final answer.".to_owned()]);
+    assert!(recorder.texts.is_empty());
+    assert!(repl_state.turn_completed);
+    assert!(repl_state.current_turn_id.is_none());
+}
 #[test]
 fn repl_codex_streamed_agent_message_skips_duplicate_completed_text() {
     let mut recorder = TestRecorder::default();
@@ -8400,7 +8599,10 @@ fn stop_session_dispatches_queued_prompt_after_shared_codex_interrupt_failure() 
             .recv_timeout(Duration::from_secs(1))
             .expect("queued Codex prompt should be dispatched");
         match prompt {
-            CodexRuntimeCommand::Prompt { session_id, command } => {
+            CodexRuntimeCommand::Prompt {
+                session_id,
+                command,
+            } => {
                 assert_eq!(session_id, queued_session_id);
                 assert_eq!(command.prompt, "queued prompt after failed interrupt");
                 assert_eq!(
@@ -11586,10 +11788,8 @@ fn persisted_state_load_error_after_mutation<F>(inner: StateInner, mutate: F) ->
 where
     F: FnOnce(&mut Value),
 {
-    let path = std::env::temp_dir().join(format!(
-        "termal-state-load-error-{}.json",
-        Uuid::new_v4()
-    ));
+    let path =
+        std::env::temp_dir().join(format!("termal-state-load-error-{}.json", Uuid::new_v4()));
     persist_state(&path, &inner).expect("persisted state should be written");
 
     let mut encoded: Value = serde_json::from_slice(&fs::read(&path).unwrap())
@@ -11603,6 +11803,135 @@ where
     };
     let _ = fs::remove_file(path);
     format!("{err:#}")
+}
+
+#[cfg(windows)]
+#[test]
+fn persisted_state_normalizes_legacy_local_verbatim_paths() {
+    let project_root =
+        std::env::temp_dir().join(format!("termal-legacy-verbatim-path-{}", Uuid::new_v4()));
+    fs::create_dir_all(&project_root).expect("project root should exist");
+    let normalized_root = normalize_user_facing_path(&fs::canonicalize(&project_root).unwrap())
+        .to_string_lossy()
+        .into_owned();
+    let legacy_root = format!(r"\\?\{normalized_root}");
+    let path = std::env::temp_dir().join(format!(
+        "termal-legacy-verbatim-state-{}.json",
+        Uuid::new_v4()
+    ));
+
+    let mut inner = StateInner::new();
+    let project = inner.create_project(None, normalized_root.clone(), default_local_remote_id());
+    inner.create_session(
+        Agent::Claude,
+        Some("Claude".to_owned()),
+        normalized_root.clone(),
+        Some(project.id),
+        None,
+    );
+    persist_state(&path, &inner).expect("persisted state should be written");
+
+    let mut encoded: Value =
+        serde_json::from_slice(&fs::read(&path).unwrap()).expect("state should deserialize");
+    encoded["projects"][0]["rootPath"] = Value::String(legacy_root.clone());
+    encoded["sessions"][0]["session"]["workdir"] = Value::String(legacy_root);
+    fs::write(&path, serde_json::to_vec(&encoded).unwrap()).expect("persisted state should update");
+
+    let loaded = load_state(&path)
+        .expect("persisted state should load")
+        .expect("persisted state should exist");
+    assert_eq!(loaded.projects[0].root_path, normalized_root);
+    assert_eq!(loaded.sessions[0].session.workdir, normalized_root);
+
+    let _ = fs::remove_file(path);
+    let _ = fs::remove_dir_all(project_root);
+}
+
+#[cfg(windows)]
+#[test]
+fn app_state_bootstrap_normalizes_legacy_local_verbatim_workdir() {
+    let project_root =
+        std::env::temp_dir().join(format!("termal-bootstrap-verbatim-path-{}", Uuid::new_v4()));
+    let state_root =
+        std::env::temp_dir().join(format!("termal-bootstrap-state-root-{}", Uuid::new_v4()));
+    fs::create_dir_all(&project_root).expect("project root should exist");
+    fs::create_dir_all(&state_root).expect("state root should exist");
+    let normalized_root = normalize_user_facing_path(&fs::canonicalize(&project_root).unwrap())
+        .to_string_lossy()
+        .into_owned();
+    let legacy_root = format!(r"\\?\{normalized_root}");
+    let persistence_path = state_root.join("sessions.json");
+    let orchestrator_templates_path = state_root.join("orchestrators.json");
+
+    let state = AppState::new_with_paths(
+        legacy_root,
+        persistence_path.clone(),
+        orchestrator_templates_path.clone(),
+    )
+    .expect("state should initialize");
+
+    assert_eq!(state.default_workdir, normalized_root);
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    assert_eq!(inner.projects.len(), 1);
+    assert_eq!(inner.projects[0].root_path, normalized_root);
+    let bootstrapped_sessions = inner
+        .sessions
+        .iter()
+        .filter(|record| {
+            matches!(
+                record.session.name.as_str(),
+                "Codex Live" | "Claude Live"
+            )
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(bootstrapped_sessions.len(), 2);
+    assert!(
+        bootstrapped_sessions
+            .iter()
+            .all(|record| record.session.workdir == normalized_root)
+    );
+    drop(inner);
+    drop(state);
+
+    let _ = fs::remove_dir_all(state_root);
+    let _ = fs::remove_dir_all(project_root);
+}
+
+#[cfg(not(windows))]
+#[test]
+fn persisted_state_preserves_significant_local_path_spaces() {
+    let project_root =
+        std::env::temp_dir().join(format!("termal-significant-path-space-{} ", Uuid::new_v4()));
+    fs::create_dir_all(&project_root).expect("project root should exist");
+    let normalized_root = normalize_user_facing_path(&fs::canonicalize(&project_root).unwrap())
+        .to_string_lossy()
+        .into_owned();
+    let path = std::env::temp_dir().join(format!(
+        "termal-significant-path-space-state-{}.json",
+        Uuid::new_v4()
+    ));
+
+    assert!(normalized_root.ends_with(' '));
+
+    let mut inner = StateInner::new();
+    let project = inner.create_project(None, normalized_root.clone(), default_local_remote_id());
+    inner.create_session(
+        Agent::Claude,
+        Some("Claude".to_owned()),
+        normalized_root.clone(),
+        Some(project.id),
+        None,
+    );
+    persist_state(&path, &inner).expect("persisted state should be written");
+
+    let loaded = load_state(&path)
+        .expect("persisted state should load")
+        .expect("persisted state should exist");
+    assert_eq!(loaded.projects[0].root_path, normalized_root);
+    assert_eq!(loaded.sessions[0].session.workdir, normalized_root);
+
+    let _ = fs::remove_file(path);
+    let _ = fs::remove_dir_all(project_root);
 }
 
 #[test]
@@ -11912,6 +12241,62 @@ fn persisted_state_requires_queued_prompt_source() {
     let _ = fs::remove_file(path);
 }
 
+#[tokio::test]
+async fn create_orchestrator_instance_route_uses_template_project_when_request_project_id_is_empty()
+{
+    let state = test_app_state();
+    let project_root = std::env::temp_dir().join(format!(
+        "termal-orchestrator-route-empty-project-id-{}",
+        Uuid::new_v4()
+    ));
+    fs::create_dir_all(&project_root).expect("route fallback project root should exist");
+    let project_id = create_test_project(&state, &project_root, "Route Fallback Project");
+    let template = state
+        .create_orchestrator_template(OrchestratorTemplateDraft {
+            project_id: Some(project_id.clone()),
+            ..sample_orchestrator_template_draft()
+        })
+        .expect("template should be created")
+        .template;
+    let template_id = template.id.clone();
+    let template_session_count = template.sessions.len();
+
+    let app = app_router(state);
+    let (status, response): (StatusCode, CreateOrchestratorInstanceResponse) = request_json(
+        &app,
+        Request::builder()
+            .method("POST")
+            .uri("/api/orchestrators")
+            .header("content-type", "application/json")
+            .body(Body::from(
+                serde_json::to_vec(&json!({
+                    "templateId": template_id,
+                    "projectId": "",
+                }))
+                .expect("request body should serialize"),
+            ))
+            .unwrap(),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::CREATED);
+    assert_eq!(response.orchestrator.template_id, template.id);
+    assert_eq!(response.orchestrator.project_id, project_id);
+    assert_eq!(
+        response
+            .orchestrator
+            .template_snapshot
+            .project_id
+            .as_deref(),
+        Some(response.orchestrator.project_id.as_str())
+    );
+    assert_eq!(
+        response.orchestrator.session_instances.len(),
+        template_session_count
+    );
+    let _ = fs::remove_dir_all(project_root);
+}
+
 fn sample_orchestrator_template_draft() -> OrchestratorTemplateDraft {
     OrchestratorTemplateDraft {
         name: "Feature Delivery Flow".to_owned(),
@@ -11973,8 +12358,6 @@ fn sample_orchestrator_template_draft() -> OrchestratorTemplateDraft {
         ],
     }
 }
-
-
 
 #[test]
 fn failed_orchestrator_transition_dispatch_becomes_a_visible_destination_error() {

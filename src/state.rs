@@ -13,30 +13,47 @@ struct AppState {
     inner: Arc<Mutex<StateInner>>,
 }
 
+fn bootstrap_default_local_state(default_workdir: &str) -> StateInner {
+    let mut inner = StateInner::new();
+    let default_project =
+        inner.create_project(None, default_workdir.to_owned(), default_local_remote_id());
+    inner.create_session(
+        Agent::Codex,
+        Some("Codex Live".to_owned()),
+        default_workdir.to_owned(),
+        Some(default_project.id.clone()),
+        None,
+    );
+    inner.create_session(
+        Agent::Claude,
+        Some("Claude Live".to_owned()),
+        default_workdir.to_owned(),
+        Some(default_project.id.clone()),
+        None,
+    );
+    inner
+}
+
 impl AppState {
     fn new(default_workdir: String) -> Result<Self> {
+        let default_workdir = normalize_local_user_facing_path(&default_workdir);
         let persistence_path = resolve_persistence_path(&default_workdir);
         let orchestrator_templates_path = resolve_orchestrator_templates_path(&default_workdir);
-        let mut inner = load_state(&persistence_path)?.unwrap_or_else(|| {
-            let mut inner = StateInner::new();
-            let default_project =
-                inner.create_project(None, default_workdir.clone(), default_local_remote_id());
-            inner.create_session(
-                Agent::Codex,
-                Some("Codex Live".to_owned()),
-                default_workdir.clone(),
-                Some(default_project.id.clone()),
-                None,
-            );
-            inner.create_session(
-                Agent::Claude,
-                Some("Claude Live".to_owned()),
-                default_workdir.clone(),
-                Some(default_project.id.clone()),
-                None,
-            );
-            inner
-        });
+        Self::new_with_paths(
+            default_workdir,
+            persistence_path,
+            orchestrator_templates_path,
+        )
+    }
+
+    fn new_with_paths(
+        default_workdir: String,
+        persistence_path: PathBuf,
+        orchestrator_templates_path: PathBuf,
+    ) -> Result<Self> {
+        let default_workdir = normalize_local_user_facing_path(&default_workdir);
+        let mut inner = load_state(&persistence_path)?
+            .unwrap_or_else(|| bootstrap_default_local_state(&default_workdir));
         let discovery_scopes = collect_codex_discovery_scopes(&default_workdir, &inner.projects);
         match discover_codex_threads(&default_workdir, &discovery_scopes) {
             Ok(discovered_threads) => {
@@ -4580,6 +4597,12 @@ fn validate_persisted_remote_configs(remotes: Vec<RemoteConfig>) -> Result<Vec<R
     normalize_remote_configs(remotes).map_err(|err| anyhow!(err.message))
 }
 
+fn normalize_local_user_facing_path(path: &str) -> String {
+    normalize_user_facing_path(FsPath::new(path))
+        .to_string_lossy()
+        .into_owned()
+}
+
 struct StateInner {
     codex: CodexState,
     preferences: AppPreferences,
@@ -4967,6 +4990,34 @@ impl StateInner {
         Ok(())
     }
 
+    fn normalize_local_paths(&mut self) {
+        let local_project_ids = self
+            .projects
+            .iter_mut()
+            .filter_map(|project| {
+                if project.remote_id == LOCAL_REMOTE_ID {
+                    project.root_path = normalize_local_user_facing_path(&project.root_path);
+                    Some(project.id.clone())
+                } else {
+                    None
+                }
+            })
+            .collect::<HashSet<_>>();
+
+        for record in &mut self.sessions {
+            let should_normalize = record.remote_id.is_none()
+                && record
+                    .session
+                    .project_id
+                    .as_deref()
+                    .map(|project_id| local_project_ids.contains(project_id))
+                    .unwrap_or(true);
+            if should_normalize {
+                record.session.workdir = normalize_local_user_facing_path(&record.session.workdir);
+            }
+        }
+    }
+
     fn recover_interrupted_sessions(&mut self) {
         for index in 0..self.sessions.len() {
             if self.sessions[index].is_remote_proxy() {
@@ -5069,6 +5120,7 @@ impl PersistedState {
                 .map(PersistedSessionRecord::into_record)
                 .collect::<Result<Vec<_>>>()?,
         };
+        inner.normalize_local_paths();
         inner.validate_projects_consistent()?;
         inner.recover_interrupted_sessions();
         inner.normalize_orchestrator_instances();

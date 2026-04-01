@@ -195,6 +195,7 @@ describe("reconcileSessions", () => {
     expect(merged[0].messages[0]).toBe(previous[0].messages[0]);
     expect(merged[0].messages[1]).not.toBe(previous[0].messages[1]);
     expect(merged[0].messages[1]).toBe(next[0].messages[1]);
+    expect(merged[0].messages[1]).toEqual(next[0].messages[1]);
   });
 
   it("reuses unaffected sessions while replacing the changed one", () => {

@@ -22,6 +22,7 @@ import { isLocalRemoteId } from "../remotes";
 import { dispatchOrchestratorTemplatesChangedEvent } from "../orchestrator-templates-events";
 import type {
   AgentType,
+  ExhaustiveValueCoverage,
   OrchestratorNodePosition,
   OrchestratorSessionInputMode,
   OrchestratorSessionTemplate,
@@ -88,6 +89,10 @@ const AGENT_OPTIONS = [
   { label: "Cursor", value: "Cursor" },
   { label: "Gemini", value: "Gemini" },
 ] as const satisfies ReadonlyArray<{ label: string; value: AgentType }>;
+const AGENT_OPTIONS_EXHAUSTIVE: ExhaustiveValueCoverage<
+  AgentType,
+  typeof AGENT_OPTIONS
+> = true;
 
 const INPUT_MODE_OPTIONS: ReadonlyArray<{
   label: string;
@@ -172,6 +177,13 @@ type InitialPanelState = PanelState & {
 // Keep isPersistedSessionTemplate in sync with every validated
 // OrchestratorSessionTemplate field restored from localStorage.
 type PersistedOrchestratorSessionTemplate = OrchestratorSessionTemplate;
+type PersistedOrchestratorTemplateTransition = Omit<
+  OrchestratorTemplateTransition,
+  "fromAnchor" | "toAnchor"
+> & {
+  fromAnchor?: OrchestratorTransitionAnchor | null;
+  toAnchor?: OrchestratorTransitionAnchor | null;
+};
 
 type PendingPanelPersistence = {
   stateKey: string;
@@ -2157,10 +2169,10 @@ function readState(stateKey: string): PanelState | null {
           trigger: transition.trigger,
           resultMode: transition.resultMode,
           promptTemplate: transition.promptTemplate ?? "",
-          ...(transition.fromAnchor !== undefined
+          ...(transition.fromAnchor != null
             ? { fromAnchor: transition.fromAnchor }
             : {}),
-          ...(transition.toAnchor !== undefined
+          ...(transition.toAnchor != null
             ? { toAnchor: transition.toAnchor }
             : {}),
         })),
@@ -2228,11 +2240,11 @@ function isPersistedSessionTemplate(
 
 function isTransitionTemplate(
   value: unknown,
-): value is OrchestratorTemplateTransition {
+): value is PersistedOrchestratorTemplateTransition {
   if (!value || typeof value !== "object") {
     return false;
   }
-  const candidate = value as Partial<OrchestratorTemplateTransition>;
+  const candidate = value as Partial<PersistedOrchestratorTemplateTransition>;
   return (
     typeof candidate.id === "string" &&
     typeof candidate.fromSessionId === "string" &&
@@ -2399,13 +2411,13 @@ function clampPosition(x: number, y: number): OrchestratorNodePosition {
   };
 }
 
-function isValidAnchor(
+export function isValidAnchor(
   value: OrchestratorTransitionAnchor | null | undefined,
 ): value is AnchorSide {
   return ANCHOR_SIDES.includes(value as AnchorSide);
 }
 
-function buildTransitionGeometry(
+export function buildTransitionGeometry(
   transition: OrchestratorTemplateTransition,
   fromNode: OrchestratorSessionTemplate,
   toNode: OrchestratorSessionTemplate,
@@ -2449,7 +2461,7 @@ function buildTransitionGeometry(
   };
 }
 
-function buildSelfLoopTransitionGeometry(
+export function buildSelfLoopTransitionGeometry(
   transition: OrchestratorTemplateTransition,
   session: OrchestratorSessionTemplate,
 ): TransitionGeometry {
@@ -2549,7 +2561,7 @@ function defaultSelfLoopEndAnchor(side: AnchorSide): AnchorSide {
   }
 }
 
-function anchorNormal(side: AnchorSide): OrchestratorNodePosition {
+export function anchorNormal(side: AnchorSide): OrchestratorNodePosition {
   switch (side) {
     case "top":
       return { x: 0, y: -1 };
@@ -2570,7 +2582,7 @@ function anchorNormal(side: AnchorSide): OrchestratorNodePosition {
   }
 }
 
-function cubicBezierPoint(
+export function cubicBezierPoint(
   start: OrchestratorNodePosition,
   control1: OrchestratorNodePosition,
   control2: OrchestratorNodePosition,
@@ -2592,7 +2604,7 @@ function cubicBezierPoint(
   };
 }
 
-function cubicBezierDerivative(
+export function cubicBezierDerivative(
   start: OrchestratorNodePosition,
   control1: OrchestratorNodePosition,
   control2: OrchestratorNodePosition,
@@ -2612,7 +2624,7 @@ function cubicBezierDerivative(
   };
 }
 
-function perpendicularOffsetPoint(
+export function perpendicularOffsetPoint(
   x: number,
   y: number,
   dx: number,
@@ -2625,7 +2637,7 @@ function perpendicularOffsetPoint(
   };
 }
 
-function anchorPosition(
+export function anchorPosition(
   session: OrchestratorSessionTemplate,
   side: AnchorSide,
 ): OrchestratorNodePosition {
@@ -2653,7 +2665,7 @@ function anchorPosition(
   }
 }
 
-function nearestAnchorSide(
+export function nearestAnchorSide(
   session: OrchestratorSessionTemplate,
   cursorX: number,
   cursorY: number,
@@ -2671,7 +2683,7 @@ function nearestAnchorSide(
   return bestSide;
 }
 
-function nearestAnchorPosition(
+export function nearestAnchorPosition(
   session: OrchestratorSessionTemplate,
   cursorX: number,
   cursorY: number,

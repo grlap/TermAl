@@ -1,4 +1,8 @@
 export type AgentType = "Claude" | "Codex" | "Cursor" | "Gemini";
+export type ExhaustiveValueCoverage<
+  Union extends string,
+  Options extends ReadonlyArray<{ value: Union }>,
+> = Exclude<Union, Options[number]["value"]> extends never ? true : never;
 export type SessionStatus = "active" | "idle" | "approval" | "error";
 export type SandboxMode = "read-only" | "workspace-write" | "danger-full-access";
 export type ApprovalPolicy = "untrusted" | "on-failure" | "on-request" | "never";
@@ -166,8 +170,8 @@ export type OrchestratorTemplateTransition = {
   id: string;
   fromSessionId: string;
   toSessionId: string;
-  fromAnchor?: OrchestratorTransitionAnchor | null;
-  toAnchor?: OrchestratorTransitionAnchor | null;
+  fromAnchor?: OrchestratorTransitionAnchor;
+  toAnchor?: OrchestratorTransitionAnchor;
   trigger: OrchestratorTransitionTrigger;
   resultMode: OrchestratorTransitionResultMode;
   promptTemplate?: string | null;

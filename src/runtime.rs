@@ -405,6 +405,7 @@ fn spawn_acp_runtime(
     gemini_approval_mode: Option<GeminiApprovalMode>,
 ) -> Result<AcpRuntimeHandle> {
     let runtime_id = Uuid::new_v4().to_string();
+    let cwd = normalize_local_user_facing_path(&cwd);
     let mut command = agent.command(AcpLaunchOptions {
         gemini_approval_mode,
     })?;
@@ -4527,6 +4528,7 @@ fn spawn_claude_runtime(
     model_options_tx: Option<Sender<std::result::Result<Vec<SessionModelOption>, String>>>,
 ) -> Result<ClaudeRuntimeHandle> {
     let runtime_id = Uuid::new_v4().to_string();
+    let cwd = normalize_local_user_facing_path(&cwd);
     let mut command = Command::new("claude");
     command.current_dir(&cwd).args([
         "--model",

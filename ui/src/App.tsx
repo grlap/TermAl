@@ -126,6 +126,7 @@ import type {
   CursorMode,
   DeltaEvent,
   DiffMessage,
+  ExhaustiveValueCoverage,
   GeminiApprovalMode,
   ImageAttachment,
   JsonValue,
@@ -360,6 +361,10 @@ const NEW_SESSION_AGENT_OPTIONS = [
   { label: "Cursor", value: "Cursor" },
   { label: "Gemini", value: "Gemini" },
 ] as const satisfies ReadonlyArray<{ label: string; value: AgentType }>;
+const NEW_SESSION_AGENT_OPTIONS_EXHAUSTIVE: ExhaustiveValueCoverage<
+  AgentType,
+  typeof NEW_SESSION_AGENT_OPTIONS
+> = true;
 const NEW_SESSION_MODEL_OPTIONS: Readonly<Record<AgentType, readonly ComboboxOption[]>> = {
   Claude: [
     { label: "Sonnet", value: "sonnet" },

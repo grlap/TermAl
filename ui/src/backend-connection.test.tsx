@@ -70,6 +70,14 @@ function jsonResponse(body: unknown) {
   });
 }
 
+function latestEventSource(): EventSourceMock {
+  const eventSource = EventSourceMock.instances[EventSourceMock.instances.length - 1];
+  if (!eventSource) {
+    throw new Error("Event source not created");
+  }
+  return eventSource;
+}
+
 describe("Backend connection state", () => {
   const originalScrollTo = HTMLElement.prototype.scrollTo;
 
@@ -141,19 +149,18 @@ describe("Backend connection state", () => {
         ),
       ).toBeNull();
 
-      const eventSource =
-        EventSourceMock.instances[EventSourceMock.instances.length - 1];
+      const eventSource = latestEventSource();
       expect(eventSource).toBeDefined();
 
       act(() => {
-        eventSource?.dispatchOpen();
+        eventSource.dispatchOpen();
       });
       await waitFor(() => {
         expect(screen.getByText("Connected")).toBeInTheDocument();
       });
 
       act(() => {
-        eventSource?.dispatchState({
+        eventSource.dispatchState({
           revision: 1,
           projects: [],
           sessions: [],
@@ -161,7 +168,7 @@ describe("Backend connection state", () => {
       });
 
       act(() => {
-        eventSource?.dispatchError();
+        eventSource.dispatchError();
       });
       await waitFor(() => {
         expect(screen.getByText("Reconnecting")).toBeInTheDocument();
@@ -189,7 +196,7 @@ describe("Backend connection state", () => {
       expect(fetchMock).toHaveBeenCalledTimes(reconnectFetchCount);
 
       act(() => {
-        eventSource?.dispatchOpen();
+        eventSource.dispatchOpen();
       });
       await waitFor(() => {
         expect(screen.getByText("Connected")).toBeInTheDocument();
@@ -248,13 +255,12 @@ describe("Backend connection state", () => {
     try {
       render(<App />);
 
-      const eventSource =
-        EventSourceMock.instances[EventSourceMock.instances.length - 1];
+      const eventSource = latestEventSource();
       expect(eventSource).toBeDefined();
 
       act(() => {
-        eventSource?.dispatchOpen();
-        eventSource?.dispatchState({
+        eventSource.dispatchOpen();
+        eventSource.dispatchState({
           revision: 1,
           projects: [],
           sessions: [],
@@ -268,12 +274,12 @@ describe("Backend connection state", () => {
       vi.useFakeTimers();
 
       act(() => {
-        eventSource?.dispatchError();
+        eventSource.dispatchError();
       });
       expect(screen.getByText("Reconnecting")).toBeInTheDocument();
 
       act(() => {
-        eventSource?.dispatchOpen();
+        eventSource.dispatchOpen();
       });
       expect(screen.getByText("Connected")).toBeInTheDocument();
 
@@ -327,13 +333,12 @@ describe("Backend connection state", () => {
     try {
       render(<App />);
 
-      const eventSource =
-        EventSourceMock.instances[EventSourceMock.instances.length - 1];
+      const eventSource = latestEventSource();
       expect(eventSource).toBeDefined();
 
       act(() => {
-        eventSource?.dispatchOpen();
-        eventSource?.dispatchState({
+        eventSource.dispatchOpen();
+        eventSource.dispatchState({
           revision: 1,
           projects: [],
           sessions: [],
@@ -347,7 +352,7 @@ describe("Backend connection state", () => {
       vi.useFakeTimers();
 
       act(() => {
-        eventSource?.dispatchError();
+        eventSource.dispatchError();
       });
       expect(screen.getByText("Reconnecting")).toBeInTheDocument();
 
@@ -406,13 +411,12 @@ describe("Backend connection state", () => {
     try {
       render(<App />);
 
-      const eventSource =
-        EventSourceMock.instances[EventSourceMock.instances.length - 1];
+      const eventSource = latestEventSource();
       expect(eventSource).toBeDefined();
 
       act(() => {
-        eventSource?.dispatchOpen();
-        eventSource?.dispatchState({
+        eventSource.dispatchOpen();
+        eventSource.dispatchState({
           revision: 1,
           projects: [],
           sessions: [],
@@ -426,7 +430,7 @@ describe("Backend connection state", () => {
       vi.useFakeTimers();
 
       act(() => {
-        eventSource?.dispatchError();
+        eventSource.dispatchError();
       });
       expect(screen.getByText("Reconnecting")).toBeInTheDocument();
 
@@ -434,7 +438,7 @@ describe("Backend connection state", () => {
         await vi.advanceTimersByTimeAsync(100);
       });
       act(() => {
-        eventSource?.dispatchState({
+        eventSource.dispatchState({
           revision: 1,
           projects: [],
           sessions: [],
@@ -490,13 +494,12 @@ describe("Backend connection state", () => {
     try {
       render(<App />);
 
-      const eventSource =
-        EventSourceMock.instances[EventSourceMock.instances.length - 1];
+      const eventSource = latestEventSource();
       expect(eventSource).toBeDefined();
 
       act(() => {
-        eventSource?.dispatchOpen();
-        eventSource?.dispatchState(
+        eventSource.dispatchOpen();
+        eventSource.dispatchState(
           makeBackendStateResponse({
             revision: 1,
             sessionName: "Original Session",
@@ -509,7 +512,7 @@ describe("Backend connection state", () => {
 
       vi.useFakeTimers();
       act(() => {
-        eventSource?.dispatchError();
+        eventSource.dispatchError();
       });
       expect(screen.getByText("Reconnecting")).toBeInTheDocument();
 
@@ -568,13 +571,12 @@ describe("Backend connection state", () => {
     try {
       render(<App />);
 
-      const eventSource =
-        EventSourceMock.instances[EventSourceMock.instances.length - 1];
+      const eventSource = latestEventSource();
       expect(eventSource).toBeDefined();
 
       act(() => {
-        eventSource?.dispatchOpen();
-        eventSource?.dispatchState(
+        eventSource.dispatchOpen();
+        eventSource.dispatchState(
           makeBackendStateResponse({
             revision: 5,
             sessionName: "Original Session",
@@ -587,7 +589,7 @@ describe("Backend connection state", () => {
 
       vi.useFakeTimers();
       act(() => {
-        eventSource?.dispatchError();
+        eventSource.dispatchError();
       });
       expect(screen.getByText("Reconnecting")).toBeInTheDocument();
 
@@ -646,13 +648,12 @@ describe("Backend connection state", () => {
     try {
       render(<App />);
 
-      const eventSource =
-        EventSourceMock.instances[EventSourceMock.instances.length - 1];
+      const eventSource = latestEventSource();
       expect(eventSource).toBeDefined();
 
       act(() => {
-        eventSource?.dispatchOpen();
-        eventSource?.dispatchState(
+        eventSource.dispatchOpen();
+        eventSource.dispatchState(
           makeBackendStateResponse({
             revision: 5,
             sessionName: "Original Session",
@@ -664,7 +665,7 @@ describe("Backend connection state", () => {
 
       vi.useFakeTimers();
       act(() => {
-        eventSource?.dispatchError();
+        eventSource.dispatchError();
       });
 
       await act(async () => {
@@ -673,8 +674,8 @@ describe("Backend connection state", () => {
       expect(resolveStateFetch).not.toBeNull();
 
       act(() => {
-        eventSource?.dispatchOpen();
-        eventSource?.dispatchState(
+        eventSource.dispatchOpen();
+        eventSource.dispatchState(
           makeBackendStateResponse({
             revision: 6,
             sessionName: "Newer Session",

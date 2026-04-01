@@ -208,6 +208,14 @@ async function renderApp() {
   await settleAsyncUi();
 }
 
+function latestEventSource(): EventSourceMock {
+  const eventSource = EventSourceMock.instances[EventSourceMock.instances.length - 1];
+  if (!eventSource) {
+    throw new Error("Event source not created");
+  }
+  return eventSource;
+}
+
 async function clickAndSettle(target: HTMLElement) {
   await act(async () => {
     fireEvent.click(target);
@@ -1051,7 +1059,7 @@ describe("App", () => {
     try {
       await renderApp();
 
-      const eventSource = EventSourceMock.instances[0];
+      const eventSource = latestEventSource();
       expect(eventSource).toBeTruthy();
 
       act(() => {
@@ -1146,7 +1154,7 @@ describe("App", () => {
     HTMLElement.prototype.scrollIntoView = vi.fn();
     try {
       await renderApp();
-      const eventSource = EventSourceMock.instances[0];
+      const eventSource = latestEventSource();
       expect(eventSource).toBeTruthy();
       act(() => {
         eventSource.dispatchOpen();
@@ -1290,7 +1298,7 @@ describe("App", () => {
     HTMLElement.prototype.scrollIntoView = vi.fn();
     try {
       await renderApp();
-      const eventSource = EventSourceMock.instances[0];
+      const eventSource = latestEventSource();
       expect(eventSource).toBeTruthy();
       act(() => {
         eventSource.dispatchOpen();
@@ -1387,7 +1395,7 @@ describe("App", () => {
     try {
       await renderApp();
 
-      const eventSource = EventSourceMock.instances[0];
+      const eventSource = latestEventSource();
       expect(eventSource).toBeTruthy();
 
       act(() => {
@@ -1853,7 +1861,6 @@ describe("App", () => {
             },
             status: "running",
             sessionInstances: [],
-            pendingTransitions: [],
             createdAt: "2026-03-30 09:06:00",
             completedAt: null,
           },
@@ -1897,10 +1904,7 @@ describe("App", () => {
       try {
         await renderApp();
 
-        const eventSource = EventSourceMock.instances[0];
-        if (!eventSource) {
-          throw new Error("Event source not created");
-        }
+        const eventSource = latestEventSource();
         act(() => {
           eventSource.dispatchOpen();
           eventSource.dispatchNamedEvent("state", {
@@ -2037,7 +2041,7 @@ describe("App", () => {
 
       try {
         await renderApp();
-        const eventSource = EventSourceMock.instances[0];
+        const eventSource = latestEventSource();
         expect(eventSource).toBeTruthy();
         act(() => {
           eventSource.dispatchError();
@@ -2131,7 +2135,7 @@ describe("App", () => {
 
       try {
         await renderApp();
-        const eventSource = EventSourceMock.instances[0];
+        const eventSource = latestEventSource();
         expect(eventSource).toBeTruthy();
         act(() => {
           eventSource.dispatchError();
@@ -2263,7 +2267,7 @@ describe("App", () => {
 
     try {
       await renderApp();
-      const eventSource = EventSourceMock.instances[0];
+      const eventSource = latestEventSource();
       expect(eventSource).toBeTruthy();
       act(() => {
         eventSource.dispatchError();
@@ -2392,7 +2396,7 @@ describe("App", () => {
 
       try {
         await renderApp();
-        const eventSource = EventSourceMock.instances[0];
+        const eventSource = latestEventSource();
         expect(eventSource).toBeTruthy();
         act(() => {
           eventSource.dispatchError();
@@ -2519,7 +2523,7 @@ describe("App", () => {
                 .getAllByRole("tab")
                 .some((tab) =>
                   expectedTabName.test(
-                    (tab.textContent ?? "").replace(/×/g, "").trim(),
+                    (tab.textContent ?? "").replace(/\u00d7/g, "").trim(),
                   ),
                 ),
             ).toBe(true);
@@ -2671,7 +2675,7 @@ describe("App", () => {
 
       try {
         await renderApp();
-        const eventSource = EventSourceMock.instances[0];
+        const eventSource = latestEventSource();
         expect(eventSource).toBeTruthy();
         act(() => {
           eventSource.dispatchError();
@@ -2898,7 +2902,7 @@ describe("App", () => {
 
       try {
         await renderApp();
-        const eventSource = EventSourceMock.instances[0];
+        const eventSource = latestEventSource();
         expect(eventSource).toBeTruthy();
         act(() => {
           eventSource.dispatchError();
@@ -3156,7 +3160,7 @@ describe("App", () => {
 
       try {
         await renderApp();
-        const eventSource = EventSourceMock.instances[0];
+        const eventSource = latestEventSource();
         expect(eventSource).toBeTruthy();
         act(() => {
           eventSource.dispatchError();
@@ -3241,7 +3245,7 @@ describe("App", () => {
 
     try {
       await renderApp();
-      const eventSource = EventSourceMock.instances[0];
+      const eventSource = latestEventSource();
       expect(eventSource).toBeTruthy();
       act(() => {
         eventSource.dispatchError();
@@ -3953,7 +3957,7 @@ describe("App", () => {
 
       try {
         await renderApp();
-        const eventSource = EventSourceMock.instances[0];
+        const eventSource = latestEventSource();
         expect(eventSource).toBeTruthy();
 
         await act(async () => {
@@ -4097,7 +4101,7 @@ describe("App", () => {
 
       try {
         await renderApp();
-        const eventSource = EventSourceMock.instances[0];
+        const eventSource = latestEventSource();
         expect(eventSource).toBeTruthy();
 
         await act(async () => {

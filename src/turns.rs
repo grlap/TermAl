@@ -76,11 +76,8 @@ trait TurnRecorder {
         output: &str,
         status: CommandStatus,
     ) -> Result<()>;
-    fn upsert_parallel_agents(
-        &mut self,
-        key: &str,
-        agents: &[ParallelAgentProgress],
-    ) -> Result<()>;
+    fn upsert_parallel_agents(&mut self, key: &str, agents: &[ParallelAgentProgress])
+    -> Result<()>;
     fn error(&mut self, detail: &str) -> Result<()>;
 }
 
@@ -141,9 +138,16 @@ impl SessionRecorder {
         detail: &str,
         approval: ClaudePendingApproval,
     ) -> Result<()> {
-        recorder_push_pending_approval(self, title, command, detail, approval, |state, session_id, message_id, approval| {
-            state.register_claude_pending_approval(session_id, message_id, approval)
-        })
+        recorder_push_pending_approval(
+            self,
+            title,
+            command,
+            detail,
+            approval,
+            |state, session_id, message_id, approval| {
+                state.register_claude_pending_approval(session_id, message_id, approval)
+            },
+        )
     }
 
     fn push_acp_approval(
@@ -153,9 +157,16 @@ impl SessionRecorder {
         detail: &str,
         approval: AcpPendingApproval,
     ) -> Result<()> {
-        recorder_push_pending_approval(self, title, command, detail, approval, |state, session_id, message_id, approval| {
-            state.register_acp_pending_approval(session_id, message_id, approval)
-        })
+        recorder_push_pending_approval(
+            self,
+            title,
+            command,
+            detail,
+            approval,
+            |state, session_id, message_id, approval| {
+                state.register_acp_pending_approval(session_id, message_id, approval)
+            },
+        )
     }
 }
 
@@ -386,7 +397,11 @@ fn recorder_text_delta<R: SessionRecorderAccess>(recorder: &mut R, delta: &str) 
 
     let state = recorder.state().clone();
     let session_id = recorder.session_id().to_owned();
-    let message_id = match recorder.recorder_state_mut().streaming_text_message_id.clone() {
+    let message_id = match recorder
+        .recorder_state_mut()
+        .streaming_text_message_id
+        .clone()
+    {
         Some(message_id) => message_id,
         None => {
             let message_id = state.allocate_message_id();
@@ -420,7 +435,11 @@ fn recorder_replace_streaming_text<R: SessionRecorderAccess>(
 
     let state = recorder.state().clone();
     let session_id = recorder.session_id().to_owned();
-    let message_id = match recorder.recorder_state_mut().streaming_text_message_id.clone() {
+    let message_id = match recorder
+        .recorder_state_mut()
+        .streaming_text_message_id
+        .clone()
+    {
         Some(message_id) => message_id,
         None => {
             return state.push_message(
@@ -515,7 +534,13 @@ fn recorder_command_started<R: SessionRecorderAccess>(
         .or_insert_with(|| state_for_entry.allocate_message_id())
         .clone();
 
-    state.upsert_command_message(&session_id, &message_id, command, "", CommandStatus::Running)
+    state.upsert_command_message(
+        &session_id,
+        &message_id,
+        command,
+        "",
+        CommandStatus::Running,
+    )
 }
 
 fn recorder_command_completed<R: SessionRecorderAccess>(
@@ -586,9 +611,16 @@ impl CodexTurnRecorder for SessionRecorder {
         detail: &str,
         approval: CodexPendingApproval,
     ) -> Result<()> {
-        recorder_push_pending_approval(self, title, command, detail, approval, |state, session_id, message_id, approval| {
-            state.register_codex_pending_approval(session_id, message_id, approval)
-        })
+        recorder_push_pending_approval(
+            self,
+            title,
+            command,
+            detail,
+            approval,
+            |state, session_id, message_id, approval| {
+                state.register_codex_pending_approval(session_id, message_id, approval)
+            },
+        )
     }
 
     fn push_codex_user_input_request(
@@ -641,7 +673,6 @@ impl<'a> BorrowedSessionRecorder<'a> {
             state,
         }
     }
-
 }
 
 impl SessionRecorderAccess for BorrowedSessionRecorder<'_> {
@@ -666,9 +697,16 @@ impl CodexTurnRecorder for BorrowedSessionRecorder<'_> {
         detail: &str,
         approval: CodexPendingApproval,
     ) -> Result<()> {
-        recorder_push_pending_approval(self, title, command, detail, approval, |state, session_id, message_id, approval| {
-            state.register_codex_pending_approval(session_id, message_id, approval)
-        })
+        recorder_push_pending_approval(
+            self,
+            title,
+            command,
+            detail,
+            approval,
+            |state, session_id, message_id, approval| {
+                state.register_codex_pending_approval(session_id, message_id, approval)
+            },
+        )
     }
 
     fn push_codex_user_input_request(
@@ -1022,7 +1060,10 @@ impl CodexTurnRecorder for ReplPrinter {
     ) -> Result<()> {
         println!("mcp> {title}");
         println!("mcp> {detail}");
-        println!("{}", serde_json::to_string_pretty(&request).unwrap_or_else(|_| request.thread_id));
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&request).unwrap_or_else(|_| request.thread_id)
+        );
         Ok(())
     }
 
@@ -1066,11 +1107,10 @@ fn run_codex_turn(
     prompt: &str,
     recorder: &mut dyn TurnRecorder,
 ) -> Result<String> {
-    let codex_home = prepare_termal_codex_home(cwd, "repl")?;
+    let cwd = normalize_local_user_facing_path(cwd);
+    let codex_home = prepare_termal_codex_home(&cwd, "repl")?;
     let mut command = codex_command()?;
-    command
-        .arg("app-server")
-        .env("CODEX_HOME", &codex_home);
+    command.arg("app-server").env("CODEX_HOME", &codex_home);
 
     let mut child = command
         .stdin(Stdio::piped())
@@ -1129,7 +1169,7 @@ fn run_codex_turn(
                 "thread/resume",
                 json!({
                     "threadId": thread_id,
-                    "cwd": cwd,
+                    "cwd": cwd.as_str(),
                     "model": model,
                     "sandbox": sandbox_mode.as_cli_value(),
                     "approvalPolicy": approval_policy.as_cli_value(),
@@ -1143,7 +1183,7 @@ fn run_codex_turn(
                 recorder,
                 "thread/start",
                 json!({
-                    "cwd": cwd,
+                    "cwd": cwd.as_str(),
                     "model": model,
                     "sandbox": sandbox_mode.as_cli_value(),
                     "approvalPolicy": approval_policy.as_cli_value(),
@@ -1171,7 +1211,7 @@ fn run_codex_turn(
             "turn/start",
             json!({
                 "threadId": resolved_thread_id,
-                "cwd": cwd,
+                "cwd": cwd.as_str(),
                 "approvalPolicy": approval_policy.as_cli_value(),
                 "effort": reasoning_effort.as_api_value(),
                 "model": model,
@@ -1186,12 +1226,7 @@ fn run_codex_turn(
             .map(str::to_owned)
             .or(repl_state.current_turn_id.clone());
 
-        pump_repl_codex_turn(
-            &stdout_rx,
-            &mut child_stdin,
-            &mut repl_state,
-            recorder,
-        )?;
+        pump_repl_codex_turn(&stdout_rx, &mut child_stdin, &mut repl_state, recorder)?;
         recorder.finish_streaming_text()?;
         if let Some(detail) = repl_state.turn_failed.as_deref() {
             bail!(detail.to_owned());
@@ -1550,7 +1585,9 @@ fn handle_repl_codex_app_server_request(
             );
             let detail = match (
                 reason.trim().is_empty(),
-                permissions_summary.as_deref().filter(|value| !value.is_empty()),
+                permissions_summary
+                    .as_deref()
+                    .filter(|value| !value.is_empty()),
             ) {
                 (true, Some(summary)) => {
                     format!("Codex requested approval to grant additional permissions: {summary}.")
@@ -1582,14 +1619,20 @@ fn handle_repl_codex_app_server_request(
         }
         "item/tool/requestUserInput" => {
             let questions: Vec<UserInputQuestion> = serde_json::from_value(
-                params.get("questions").cloned().unwrap_or_else(|| json!([])),
+                params
+                    .get("questions")
+                    .cloned()
+                    .unwrap_or_else(|| json!([])),
             )
             .context("failed to parse Codex request_user_input questions")?;
             let detail = describe_codex_user_input_request(&questions);
             recorder.push_text(&format!("input> Codex needs input\ninput> {detail}"))?;
             for question in &questions {
                 println!("input> {}: {}", question.header, question.question);
-                if let Some(options) = question.options.as_ref().filter(|options| !options.is_empty())
+                if let Some(options) = question
+                    .options
+                    .as_ref()
+                    .filter(|options| !options.is_empty())
                 {
                     let labels = options
                         .iter()
@@ -1659,10 +1702,7 @@ fn prompt_repl_codex_user_input_answers(
 ) -> Result<BTreeMap<String, Vec<String>>> {
     let mut answers = BTreeMap::new();
     for question in questions {
-        let answer = prompt_repl_line(
-            &format!("input> {}: ", question.header.trim()),
-            false,
-        )?;
+        let answer = prompt_repl_line(&format!("input> {}: ", question.header.trim()), false)?;
         answers.insert(question.id.clone(), vec![answer]);
     }
     Ok(answers)
@@ -1852,7 +1892,8 @@ fn handle_repl_codex_app_server_notification(
         "error" => {
             repl_state.current_turn_id = None;
             clear_codex_turn_state(&mut repl_state.turn_state);
-            repl_state.turn_failed = Some(summarize_error(message.get("params").unwrap_or(message)));
+            repl_state.turn_failed =
+                Some(summarize_error(message.get("params").unwrap_or(message)));
         }
         "codex/event/item_completed" => {
             handle_repl_codex_event_item_completed(
@@ -1929,7 +1970,12 @@ fn handle_repl_codex_task_complete(
         return Ok(());
     };
     let trimmed = summary.trim();
-    if trimmed.is_empty() || !shared_codex_event_matches_active_turn(current_turn_id, shared_codex_event_turn_id(message)) {
+    if trimmed.is_empty()
+        || !shared_codex_event_matches_active_turn(
+            current_turn_id,
+            shared_codex_event_turn_id(message),
+        )
+    {
         return Ok(());
     }
 
@@ -1937,7 +1983,9 @@ fn handle_repl_codex_task_complete(
         turn_state,
         "Subagent completed",
         trimmed,
-        message.pointer("/params/conversationId").and_then(Value::as_str),
+        message
+            .pointer("/params/conversationId")
+            .and_then(Value::as_str),
         shared_codex_event_turn_id(message),
     );
     Ok(())
@@ -1948,7 +1996,8 @@ fn handle_repl_codex_model_rerouted(
     current_turn_id: Option<&str>,
     recorder: &mut dyn TurnRecorder,
 ) -> Result<()> {
-    if !shared_codex_event_matches_active_turn(current_turn_id, shared_codex_event_turn_id(message)) {
+    if !shared_codex_event_matches_active_turn(current_turn_id, shared_codex_event_turn_id(message))
+    {
         return Ok(());
     }
 
@@ -1977,7 +2026,8 @@ fn handle_repl_codex_thread_compacted(
     current_turn_id: Option<&str>,
     recorder: &mut dyn TurnRecorder,
 ) -> Result<()> {
-    if !shared_codex_event_matches_active_turn(current_turn_id, shared_codex_event_turn_id(message)) {
+    if !shared_codex_event_matches_active_turn(current_turn_id, shared_codex_event_turn_id(message))
+    {
         return Ok(());
     }
 
@@ -2033,7 +2083,8 @@ fn handle_repl_codex_event_item_completed(
     turn_state: &mut CodexTurnState,
     recorder: &mut dyn TurnRecorder,
 ) -> Result<()> {
-    if !shared_codex_event_matches_active_turn(current_turn_id, shared_codex_event_turn_id(message)) {
+    if !shared_codex_event_matches_active_turn(current_turn_id, shared_codex_event_turn_id(message))
+    {
         return Ok(());
     }
 
@@ -2059,7 +2110,9 @@ fn handle_repl_codex_event_item_completed(
                     .and_then(Value::as_str)
                     .unwrap_or("");
                 let status = match item.get("status").and_then(Value::as_str) {
-                    Some("completed") if item.get("exitCode").and_then(Value::as_i64) == Some(0) => {
+                    Some("completed")
+                        if item.get("exitCode").and_then(Value::as_i64) == Some(0) =>
+                    {
                         CommandStatus::Success
                     }
                     Some("completed") => CommandStatus::Error,
@@ -2081,7 +2134,8 @@ fn handle_repl_codex_event_agent_message_content_delta(
     turn_state: &mut CodexTurnState,
     recorder: &mut dyn TurnRecorder,
 ) -> Result<()> {
-    if !shared_codex_event_matches_active_turn(current_turn_id, shared_codex_event_turn_id(message)) {
+    if !shared_codex_event_matches_active_turn(current_turn_id, shared_codex_event_turn_id(message))
+    {
         return Ok(());
     }
 
@@ -2104,7 +2158,8 @@ fn handle_repl_codex_event_agent_message(
     turn_state: &mut CodexTurnState,
     recorder: &mut dyn TurnRecorder,
 ) -> Result<()> {
-    if !shared_codex_event_matches_active_turn(current_turn_id, shared_codex_event_turn_id(message)) {
+    if !shared_codex_event_matches_active_turn(current_turn_id, shared_codex_event_turn_id(message))
+    {
         return Ok(());
     }
 
@@ -2148,7 +2203,9 @@ fn handle_repl_codex_app_server_item_completed(
                     .and_then(Value::as_str)
                     .unwrap_or("");
                 let status = match item.get("status").and_then(Value::as_str) {
-                    Some("completed") if item.get("exitCode").and_then(Value::as_i64) == Some(0) => {
+                    Some("completed")
+                        if item.get("exitCode").and_then(Value::as_i64) == Some(0) =>
+                    {
                         CommandStatus::Success
                     }
                     Some("completed") => CommandStatus::Error,
@@ -2227,12 +2284,12 @@ fn record_repl_codex_agent_message_delta(
     recorder.text_delta(&unseen_suffix)
 }
 
-fn shutdown_repl_codex_process(process: &Arc<SharedChild>) -> Result<(std::process::ExitStatus, bool)> {
-    if let Some(status) = wait_for_shared_child_exit_timeout(
-        process,
-        Duration::from_secs(1),
-        "Codex app-server",
-    )? {
+fn shutdown_repl_codex_process(
+    process: &Arc<SharedChild>,
+) -> Result<(std::process::ExitStatus, bool)> {
+    if let Some(status) =
+        wait_for_shared_child_exit_timeout(process, Duration::from_secs(1), "Codex app-server")?
+    {
         return Ok((status, false));
     }
 
@@ -2377,8 +2434,9 @@ fn run_claude_turn(
     prompt: &str,
     recorder: &mut dyn TurnRecorder,
 ) -> Result<String> {
+    let cwd = normalize_local_user_facing_path(cwd);
     let mut command = Command::new("claude");
-    command.current_dir(cwd).args([
+    command.current_dir(&cwd).args([
         "--model",
         model,
         "-p",
@@ -2774,7 +2832,11 @@ fn register_claude_tool_use(
         .and_then(Value::as_str)
         .map(str::to_owned);
     let subagent_type = input
-        .and_then(|value| value.get("subagent_type").or_else(|| value.get("subagentType")))
+        .and_then(|value| {
+            value
+                .get("subagent_type")
+                .or_else(|| value.get("subagentType"))
+        })
         .and_then(Value::as_str)
         .map(str::to_owned);
 
@@ -2791,7 +2853,10 @@ fn register_claude_tool_use(
 
     match name {
         "Bash" => {
-            let command_label = command.as_deref().or(description.as_deref()).unwrap_or("Bash");
+            let command_label = command
+                .as_deref()
+                .or(description.as_deref())
+                .unwrap_or("Bash");
             recorder.command_started(tool_id, command_label)?;
         }
         "Task" => {

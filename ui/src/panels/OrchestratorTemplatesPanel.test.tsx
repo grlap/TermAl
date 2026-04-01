@@ -718,6 +718,68 @@ describe("OrchestratorTemplatesPanel", () => {
     ).not.toBeInTheDocument();
   });
 
+  it("normalizes restored null transition anchors before persisting the draft", async () => {
+    fetchTemplatesMock.mockResolvedValue({ templates: [] });
+    const stateKey =
+      "termal-orchestrator-panel-state:orchestrator-null-transition-anchor";
+    const restoredTransition = {
+      ...makeTransition(),
+      fromAnchor: null,
+      toAnchor: null,
+    } as Record<string, unknown>;
+    window.localStorage.setItem(
+      stateKey,
+      JSON.stringify({
+        draft: {
+          name: "Null Transition Anchor Flow",
+          description: "",
+          projectId: null,
+          sessions: [
+            makeSession({ id: "builder", name: "Builder" }),
+            makeSession({
+              id: "reviewer",
+              name: "Reviewer",
+              position: { x: 520, y: 420 },
+            }),
+          ],
+          transitions: [restoredTransition],
+        },
+        selectedNodeId: null,
+        selectedTemplateId: null,
+      }),
+    );
+
+    render(
+      <OrchestratorTemplatesPanel
+        persistenceKey="orchestrator-null-transition-anchor"
+      />,
+    );
+
+    expect(
+      await screen.findByDisplayValue("Null Transition Anchor Flow"),
+    ).toBeInTheDocument();
+
+    act(() => {
+      window.dispatchEvent(new Event("pagehide"));
+    });
+
+    const persistedState = window.localStorage.getItem(stateKey);
+    expect(persistedState).not.toBeNull();
+    const parsedState = JSON.parse(persistedState as string) as {
+      draft: {
+        transitions: Record<string, unknown>[];
+      };
+    };
+    expect(parsedState.draft.transitions).toHaveLength(1);
+    expect(parsedState.draft.transitions[0]).toMatchObject({
+      id: "transition-1",
+      fromSessionId: "builder",
+      toSessionId: "reviewer",
+    });
+    expect(parsedState.draft.transitions[0]).not.toHaveProperty("fromAnchor");
+    expect(parsedState.draft.transitions[0]).not.toHaveProperty("toAnchor");
+  });
+
   it("keeps an identical restored draft clean against the server snapshot", async () => {
     fetchTemplatesMock.mockResolvedValue({
       templates: [
@@ -1209,7 +1271,6 @@ describe("OrchestratorTemplatesPanel", () => {
         }),
         status: "running",
         sessionInstances: [],
-        pendingTransitions: [],
         createdAt: "2026-03-30 09:00:00",
         completedAt: null,
       },
