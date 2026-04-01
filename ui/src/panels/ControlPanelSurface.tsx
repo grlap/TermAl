@@ -26,13 +26,6 @@ const DEFAULT_CONTROL_PANEL_SECTION_ORDER: readonly ControlPanelSectionId[] = [
   "git",
 ];
 const CONTROL_PANEL_SECTION_ORDER_STORAGE_KEY = "termal-control-panel-section-order-v2";
-const LEGACY_CONTROL_PANEL_SECTION_ORDER_STORAGE_KEY = "termal-control-panel-section-order";
-const LEGACY_FILES_FIRST_CONTROL_PANEL_SECTION_ORDER: readonly ControlPanelSectionId[] = [
-  "files",
-  "projects",
-  "sessions",
-  "git",
-];
 
 type ControlPanelSurfaceProps = {
   fixedSection?: ControlPanelSectionId | null;
@@ -466,13 +459,6 @@ function getStoredControlPanelSectionOrder(): ControlPanelSectionId[] {
     return normalizeControlPanelSectionOrder(stored);
   }
 
-  const legacyStored = parseStoredControlPanelSectionOrder(
-    window.localStorage.getItem(LEGACY_CONTROL_PANEL_SECTION_ORDER_STORAGE_KEY),
-  );
-  if (legacyStored) {
-    return migrateLegacyControlPanelSectionOrder(legacyStored);
-  }
-
   return [...DEFAULT_CONTROL_PANEL_SECTION_ORDER];
 }
 
@@ -493,50 +479,6 @@ function parseStoredControlPanelSectionOrder(
   } catch {
     return null;
   }
-}
-
-function migrateLegacyControlPanelSectionOrder(
-  order: readonly ControlPanelSectionId[],
-): ControlPanelSectionId[] {
-  const normalized = normalizeControlPanelSectionOrder(order);
-
-  if (matchesControlPanelSectionOrder(normalized, LEGACY_FILES_FIRST_CONTROL_PANEL_SECTION_ORDER)) {
-    return [...DEFAULT_CONTROL_PANEL_SECTION_ORDER];
-  }
-
-  if (!normalized.includes("git")) {
-    return normalized;
-  }
-
-  if (!normalized.includes("files")) {
-    const gitIndex = normalized.indexOf("git");
-    return [
-      ...normalized.slice(0, gitIndex),
-      "files",
-      ...normalized.slice(gitIndex),
-    ];
-  }
-
-  const filesIndex = normalized.indexOf("files");
-  const gitIndex = normalized.indexOf("git");
-  if (filesIndex > gitIndex) {
-    const withoutFiles = normalized.filter((sectionId) => sectionId !== "files");
-    const nextGitIndex = withoutFiles.indexOf("git");
-    return [
-      ...withoutFiles.slice(0, nextGitIndex),
-      "files",
-      ...withoutFiles.slice(nextGitIndex),
-    ];
-  }
-
-  return normalized;
-}
-
-function matchesControlPanelSectionOrder(
-  left: readonly ControlPanelSectionId[],
-  right: readonly ControlPanelSectionId[],
-) {
-  return left.length === right.length && left.every((sectionId, index) => sectionId === right[index]);
 }
 
 function persistControlPanelSectionOrder(order: readonly ControlPanelSectionId[]) {

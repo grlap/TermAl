@@ -12,7 +12,11 @@ fn load_state(path: &FsPath) -> Result<Option<StateInner>> {
         .with_context(|| format!("failed to parse `{}`", path.display()))?;
     let persisted: PersistedState = serde_json::from_value(encoded)
         .with_context(|| format!("failed to deserialize state from `{}`", path.display()))?;
-    Ok(Some(persisted.into_inner()))
+    Ok(Some(
+        persisted
+            .into_inner()
+            .with_context(|| format!("failed to validate state from `{}`", path.display()))?,
+    ))
 }
 
 fn persist_state(path: &FsPath, inner: &StateInner) -> Result<()> {
@@ -2969,7 +2973,6 @@ struct Project {
     id: String,
     name: String,
     root_path: String,
-    #[serde(default = "default_local_remote_id")]
     remote_id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     remote_project_id: Option<String>,

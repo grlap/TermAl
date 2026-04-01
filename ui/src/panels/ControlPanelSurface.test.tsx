@@ -110,7 +110,7 @@ describe("ControlPanelSurface", () => {
     ]);
   });
 
-  it("migrates the legacy dock order so Files lands directly above Git status", () => {
+  it("ignores the old dock-order key", () => {
     window.localStorage.setItem(
       "termal-control-panel-section-order",
       JSON.stringify(["projects", "sessions", "git", "files"]),
@@ -121,9 +121,9 @@ describe("ControlPanelSurface", () => {
     expect(getDockSectionLabels()).toEqual([
       "Projects",
       "Sessions",
+      "Orchestrators",
       "Files",
       "Git status",
-      "Orchestrators",
     ]);
   });
 

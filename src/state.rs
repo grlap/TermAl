@@ -4272,7 +4272,6 @@ fn discover_codex_threads_from_home(
         rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
     )
     .with_context(|| format!("failed to open `{}`", database_path.display()))?;
-    let thread_columns = codex_threads_table_columns(&connection)?;
     let query_scopes = collect_codex_discovery_query_scope_strings(discovery_scopes);
     let query_scope_patterns = query_scopes
         .iter()
@@ -4288,16 +4287,11 @@ fn discover_codex_threads_from_home(
         .collect::<Vec<_>>()
         .join(" OR ");
     let query = format!(
-        "select id, cwd, title, {}, {}, {}, {}, {}
+        "select id, cwd, title, sandbox_policy, approval_mode, archived, model, reasoning_effort
          from threads
          where {scope_sql}
          order by updated_at desc
-         limit ?",
-        codex_threads_select_column(&thread_columns, "sandbox_policy", "NULL"),
-        codex_threads_select_column(&thread_columns, "approval_mode", "NULL"),
-        codex_threads_select_column(&thread_columns, "archived", "0"),
-        codex_threads_select_column(&thread_columns, "model", "NULL"),
-        codex_threads_select_column(&thread_columns, "reasoning_effort", "NULL"),
+         limit ?"
     );
     let mut statement = connection.prepare(&query)?;
     let mut params = Vec::with_capacity((query_scope_patterns.len() * 2) + 1);
@@ -4350,28 +4344,6 @@ fn discover_codex_threads_from_home(
         threads.push(thread);
     }
     Ok(threads)
-}
-
-fn codex_threads_table_columns(connection: &rusqlite::Connection) -> Result<HashSet<String>> {
-    let mut statement = connection.prepare("pragma table_info(threads)")?;
-    let rows = statement.query_map([], |row| row.get::<_, String>(1))?;
-    let mut columns = HashSet::new();
-    for row in rows {
-        columns.insert(row?);
-    }
-    Ok(columns)
-}
-
-fn codex_threads_select_column(
-    columns: &HashSet<String>,
-    column_name: &str,
-    default_sql: &str,
-) -> String {
-    if columns.contains(column_name) {
-        column_name.to_owned()
-    } else {
-        format!("{default_sql} as {column_name}")
-    }
 }
 
 fn collect_codex_discovery_query_scope_strings(discovery_scopes: &[PathBuf]) -> Vec<String> {
@@ -4604,8 +4576,8 @@ fn normalize_remote_configs(remotes: Vec<RemoteConfig>) -> Result<Vec<RemoteConf
     Ok(normalized)
 }
 
-fn normalize_persisted_remote_configs(remotes: Vec<RemoteConfig>) -> Vec<RemoteConfig> {
-    normalize_remote_configs(remotes).unwrap_or_else(|_| default_remote_configs())
+fn validate_persisted_remote_configs(remotes: Vec<RemoteConfig>) -> Result<Vec<RemoteConfig>> {
+    normalize_remote_configs(remotes).map_err(|err| anyhow!(err.message))
 }
 
 struct StateInner {
@@ -4941,11 +4913,25 @@ impl StateInner {
         }
     }
 
-    fn ensure_projects_consistent(&mut self) {
-        for project in &mut self.projects {
-            if project.remote_id.trim().is_empty() {
-                project.remote_id = default_local_remote_id();
+    fn validate_projects_consistent(&self) -> Result<()> {
+        for project in &self.projects {
+            let remote_id = project.remote_id.trim();
+            if remote_id.is_empty() {
+                return Err(anyhow!(
+                    "persisted project `{}` is missing remoteId",
+                    project.id
+                ));
             }
+            if self.find_remote(remote_id).is_none() {
+                return Err(anyhow!(
+                    "persisted project `{}` references unknown remote `{remote_id}`",
+                    project.id
+                ));
+            }
+        }
+
+        if self.next_project_number < 1 {
+            return Err(anyhow!("persisted nextProjectNumber must be at least 1"));
         }
 
         let highest_project_number = self
@@ -4959,31 +4945,26 @@ impl StateInner {
             })
             .max()
             .unwrap_or(0);
-        self.next_project_number = self
-            .next_project_number
-            .max(highest_project_number.saturating_add(1))
-            .max(1);
-
-        for index in 0..self.sessions.len() {
-            let existing_project_id = self.sessions[index].session.project_id.clone();
-            if existing_project_id
-                .as_deref()
-                .and_then(|project_id| self.find_project(project_id))
-                .is_some()
-            {
-                continue;
-            }
-
-            let workdir = self.sessions[index].session.workdir.clone();
-            let project_id = self
-                .find_project_for_workdir(&workdir)
-                .map(|project| project.id.clone())
-                .unwrap_or_else(|| {
-                    self.create_project(None, workdir, default_local_remote_id())
-                        .id
-                });
-            self.sessions[index].session.project_id = Some(project_id);
+        if self.next_project_number <= highest_project_number {
+            return Err(anyhow!(
+                "persisted nextProjectNumber `{}` must be greater than existing project ids",
+                self.next_project_number
+            ));
         }
+
+        for record in &self.sessions {
+            let Some(project_id) = record.session.project_id.as_deref() else {
+                continue;
+            };
+            if self.find_project(project_id).is_none() {
+                return Err(anyhow!(
+                    "persisted session `{}` references unknown project `{project_id}`",
+                    record.session.id
+                ));
+            }
+        }
+
+        Ok(())
     }
 
     fn recover_interrupted_sessions(&mut self) {
@@ -5032,11 +5013,9 @@ struct PersistedState {
     preferences: AppPreferences,
     #[serde(default)]
     revision: u64,
-    #[serde(default)]
     next_project_number: usize,
     next_session_number: usize,
     next_message_number: u64,
-    #[serde(default)]
     projects: Vec<Project>,
     #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
     ignored_discovered_codex_thread_ids: BTreeSet<String>,
@@ -5069,15 +5048,15 @@ impl PersistedState {
         }
     }
 
-    fn into_inner(self) -> StateInner {
+    fn into_inner(self) -> Result<StateInner> {
         let mut inner = StateInner {
             codex: self.codex,
             preferences: AppPreferences {
-                remotes: normalize_persisted_remote_configs(self.preferences.remotes),
+                remotes: validate_persisted_remote_configs(self.preferences.remotes)?,
                 ..self.preferences
             },
             revision: self.revision,
-            next_project_number: self.next_project_number.max(1),
+            next_project_number: self.next_project_number,
             next_session_number: self.next_session_number,
             next_message_number: self.next_message_number,
             projects: self.projects,
@@ -5088,12 +5067,12 @@ impl PersistedState {
                 .sessions
                 .into_iter()
                 .map(PersistedSessionRecord::into_record)
-                .collect(),
+                .collect::<Result<Vec<_>>>()?,
         };
-        inner.ensure_projects_consistent();
+        inner.validate_projects_consistent()?;
         inner.recover_interrupted_sessions();
         inner.normalize_orchestrator_instances();
-        inner
+        Ok(inner)
     }
 }
 
@@ -5113,7 +5092,6 @@ struct PersistedSessionRecord {
     active_codex_reasoning_effort: Option<CodexReasoningEffort>,
     active_codex_sandbox_mode: Option<CodexSandboxMode>,
     codex_approval_policy: CodexApprovalPolicy,
-    #[serde(default = "default_codex_reasoning_effort")]
     codex_reasoning_effort: CodexReasoningEffort,
     codex_sandbox_mode: CodexSandboxMode,
     external_session_id: Option<String>,
@@ -5148,41 +5126,12 @@ impl PersistedSessionRecord {
         }
     }
 
-    fn into_record(self) -> SessionRecord {
+    fn into_record(self) -> Result<SessionRecord> {
         let mut session = self.session;
+        validate_persisted_session_fields(&session, self.external_session_id.as_deref())?;
         session.external_session_id = self.external_session_id.clone();
         if session.agent.acp_runtime().is_none() {
             session.model_options.clear();
-        }
-        if session.agent.supports_cursor_mode() {
-            session.cursor_mode.get_or_insert_with(default_cursor_mode);
-        } else {
-            session.cursor_mode = None;
-        }
-        if session.agent.supports_claude_approval_mode() {
-            session
-                .claude_approval_mode
-                .get_or_insert_with(default_claude_approval_mode);
-            session
-                .claude_effort
-                .get_or_insert_with(default_claude_effort);
-        } else {
-            session.claude_approval_mode = None;
-            session.claude_effort = None;
-        }
-        if session.agent.supports_gemini_approval_mode() {
-            session
-                .gemini_approval_mode
-                .get_or_insert_with(default_gemini_approval_mode);
-        } else {
-            session.gemini_approval_mode = None;
-        }
-        if session.agent.supports_codex_prompt_settings() {
-            session
-                .reasoning_effort
-                .get_or_insert_with(default_codex_reasoning_effort);
-        } else {
-            session.reasoning_effort = None;
         }
         if self.remote_id.is_none() {
             session.pending_prompts.clear();
@@ -5217,8 +5166,116 @@ impl PersistedSessionRecord {
         };
         sync_codex_thread_state(&mut record);
         sync_pending_prompts(&mut record);
-        record
+        Ok(record)
     }
+}
+
+fn validate_persisted_session_fields(
+    session: &Session,
+    external_session_id: Option<&str>,
+) -> Result<()> {
+    if session.external_session_id.as_deref() != external_session_id {
+        return Err(anyhow!(
+            "persisted session `{}` has mismatched externalSessionId",
+            session.id
+        ));
+    }
+
+    if session.agent.supports_cursor_mode() {
+        if session.cursor_mode.is_none() {
+            return Err(anyhow!("persisted session `{}` is missing cursorMode", session.id));
+        }
+    } else if session.cursor_mode.is_some() {
+        return Err(anyhow!(
+            "persisted session `{}` should not define cursorMode for {} sessions",
+            session.id,
+            session.agent.name()
+        ));
+    }
+
+    if session.agent.supports_claude_approval_mode() {
+        if session.claude_approval_mode.is_none() {
+            return Err(anyhow!(
+                "persisted session `{}` is missing claudeApprovalMode",
+                session.id
+            ));
+        }
+        if session.claude_effort.is_none() {
+            return Err(anyhow!(
+                "persisted session `{}` is missing claudeEffort",
+                session.id
+            ));
+        }
+    } else if session.claude_approval_mode.is_some() || session.claude_effort.is_some() {
+        return Err(anyhow!(
+            "persisted session `{}` should not define Claude settings for {} sessions",
+            session.id,
+            session.agent.name()
+        ));
+    }
+
+    if session.agent.supports_gemini_approval_mode() {
+        if session.gemini_approval_mode.is_none() {
+            return Err(anyhow!(
+                "persisted session `{}` is missing geminiApprovalMode",
+                session.id
+            ));
+        }
+    } else if session.gemini_approval_mode.is_some() {
+        return Err(anyhow!(
+            "persisted session `{}` should not define geminiApprovalMode for {} sessions",
+            session.id,
+            session.agent.name()
+        ));
+    }
+
+    if session.agent.supports_codex_prompt_settings() {
+        if session.approval_policy.is_none() {
+            return Err(anyhow!(
+                "persisted session `{}` is missing approvalPolicy",
+                session.id
+            ));
+        }
+        if session.reasoning_effort.is_none() {
+            return Err(anyhow!(
+                "persisted session `{}` is missing reasoningEffort",
+                session.id
+            ));
+        }
+        if session.sandbox_mode.is_none() {
+            return Err(anyhow!(
+                "persisted session `{}` is missing sandboxMode",
+                session.id
+            ));
+        }
+    } else if session.approval_policy.is_some()
+        || session.reasoning_effort.is_some()
+        || session.sandbox_mode.is_some()
+    {
+        return Err(anyhow!(
+            "persisted session `{}` should not define Codex prompt settings for {} sessions",
+            session.id,
+            session.agent.name()
+        ));
+    }
+
+    let expects_codex_thread_state =
+        session.agent.supports_codex_prompt_settings() && external_session_id.is_some();
+    if expects_codex_thread_state {
+        if session.codex_thread_state.is_none() {
+            return Err(anyhow!(
+                "persisted session `{}` is missing codexThreadState",
+                session.id
+            ));
+        }
+    } else if session.codex_thread_state.is_some() {
+        return Err(anyhow!(
+            "persisted session `{}` should not define codexThreadState without an active Codex thread",
+            session.id
+        ));
+    }
+
+    Ok(())
 }
 
 #[derive(Clone)]

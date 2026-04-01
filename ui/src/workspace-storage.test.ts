@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 
 import {
-  LEGACY_WORKSPACE_LAYOUT_STORAGE_KEY,
+  WORKSPACE_LAYOUT_STORAGE_KEY,
   WORKSPACE_VIEW_QUERY_PARAM,
   createWorkspaceViewId,
   ensureWorkspaceViewId,
@@ -58,13 +58,13 @@ describe("workspace storage", () => {
     expect(getStoredWorkspaceLayout(workspaceViewId)).toBeNull();
 
     window.localStorage.setItem(
-      `${LEGACY_WORKSPACE_LAYOUT_STORAGE_KEY}:${workspaceViewId}`,
+      `${WORKSPACE_LAYOUT_STORAGE_KEY}:${workspaceViewId}`,
       "not-json",
     );
     expect(getStoredWorkspaceLayout(workspaceViewId)).toBeNull();
 
     window.localStorage.setItem(
-      `${LEGACY_WORKSPACE_LAYOUT_STORAGE_KEY}:${workspaceViewId}`,
+      `${WORKSPACE_LAYOUT_STORAGE_KEY}:${workspaceViewId}`,
       JSON.stringify({ controlPanelSide: "up" }),
     );
     expect(getStoredWorkspaceLayout(workspaceViewId)).toBeNull();
@@ -153,13 +153,13 @@ describe("workspace storage", () => {
 
     expect(
       window.localStorage.getItem(
-        `${LEGACY_WORKSPACE_LAYOUT_STORAGE_KEY}:${workspaceViewId}`,
+        `${WORKSPACE_LAYOUT_STORAGE_KEY}:${workspaceViewId}`,
       ),
     ).not.toBeNull();
     expect(getStoredWorkspaceLayout(workspaceViewId)).toEqual(layout);
   });
 
-  it("falls back to the legacy global key", () => {
+  it("ignores the old global key", () => {
     const layout: StoredWorkspaceLayout = {
       controlPanelSide: "left",
       workspace: {
@@ -170,11 +170,11 @@ describe("workspace storage", () => {
     };
 
     window.localStorage.setItem(
-      LEGACY_WORKSPACE_LAYOUT_STORAGE_KEY,
+      WORKSPACE_LAYOUT_STORAGE_KEY,
       JSON.stringify(layout),
     );
 
-    expect(getStoredWorkspaceLayout(workspaceViewId)).toEqual(layout);
+    expect(getStoredWorkspaceLayout(workspaceViewId)).toBeNull();
   });
 
   it("parses a valid raw layout payload", () => {
@@ -228,7 +228,7 @@ describe("workspace storage", () => {
     };
 
     window.localStorage.setItem(
-      `${LEGACY_WORKSPACE_LAYOUT_STORAGE_KEY}:${workspaceViewId}`,
+      `${WORKSPACE_LAYOUT_STORAGE_KEY}:${workspaceViewId}`,
       JSON.stringify(malformed),
     );
 
@@ -267,7 +267,7 @@ describe("workspace storage", () => {
     };
 
     window.localStorage.setItem(
-      `${LEGACY_WORKSPACE_LAYOUT_STORAGE_KEY}:${workspaceViewId}`,
+      `${WORKSPACE_LAYOUT_STORAGE_KEY}:${workspaceViewId}`,
       JSON.stringify(malformed),
     );
 
@@ -305,7 +305,7 @@ describe("workspace storage", () => {
     };
 
     window.localStorage.setItem(
-      `${LEGACY_WORKSPACE_LAYOUT_STORAGE_KEY}:${workspaceViewId}`,
+      `${WORKSPACE_LAYOUT_STORAGE_KEY}:${workspaceViewId}`,
       JSON.stringify(malformed),
     );
 
@@ -342,7 +342,7 @@ describe("workspace storage", () => {
     };
 
     window.localStorage.setItem(
-      `${LEGACY_WORKSPACE_LAYOUT_STORAGE_KEY}:${workspaceViewId}`,
+      `${WORKSPACE_LAYOUT_STORAGE_KEY}:${workspaceViewId}`,
       JSON.stringify(malformed),
     );
 

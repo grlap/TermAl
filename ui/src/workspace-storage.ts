@@ -11,7 +11,7 @@ import {
   isWorkspaceTab,
 } from "./workspace-tab-validation";
 
-export const LEGACY_WORKSPACE_LAYOUT_STORAGE_KEY = "termal-workspace-layout";
+export const WORKSPACE_LAYOUT_STORAGE_KEY = "termal-workspace-layout";
 export const WORKSPACE_VIEW_QUERY_PARAM = "workspace";
 
 export type ControlPanelSide = "left" | "right";
@@ -53,12 +53,7 @@ export function getStoredWorkspaceLayout(workspaceViewId: string): StoredWorkspa
   }
 
   const storageKey = getWorkspaceLayoutStorageKey(workspaceViewId);
-  const namespaced = parseStoredWorkspaceLayout(window.localStorage.getItem(storageKey));
-  if (namespaced) {
-    return namespaced;
-  }
-
-  return parseStoredWorkspaceLayout(window.localStorage.getItem(LEGACY_WORKSPACE_LAYOUT_STORAGE_KEY));
+  return parseStoredWorkspaceLayout(window.localStorage.getItem(storageKey));
 }
 
 export function persistWorkspaceLayout(workspaceViewId: string, layout: StoredWorkspaceLayout) {
@@ -123,7 +118,7 @@ function isControlPanelSide(value: unknown): value is ControlPanelSide {
 function getWorkspaceLayoutStorageKey(workspaceViewId: string) {
   const normalizedWorkspaceViewId =
     normalizeWorkspaceViewId(workspaceViewId) ?? "workspace-server";
-  return `${LEGACY_WORKSPACE_LAYOUT_STORAGE_KEY}:${normalizedWorkspaceViewId}`;
+  return `${WORKSPACE_LAYOUT_STORAGE_KEY}:${normalizedWorkspaceViewId}`;
 }
 
 function normalizeWorkspaceViewId(value: string | null | undefined) {
