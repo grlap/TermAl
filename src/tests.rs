@@ -13736,9 +13736,9 @@ fn orchestrator_template_draft_deserialization_requires_input_mode() {
 }
 
 #[test]
-fn load_orchestrator_template_store_defaults_missing_input_mode_to_queue() {
+fn load_orchestrator_template_store_rejects_missing_input_mode() {
     let templates_path = std::env::temp_dir().join(format!(
-        "termal-orchestrator-store-input-mode-{}.json",
+        "termal-orchestrator-store-input-mode-{}",
         Uuid::new_v4()
     ));
     fs::write(
@@ -13768,17 +13768,19 @@ fn load_orchestrator_template_store_defaults_missing_input_mode_to_queue() {
                 }
             ]
         }))
-        .expect("legacy template store should serialize"),
+        .expect("template store should serialize"),
     )
-    .expect("legacy template store should be written");
+    .expect("template store should be written");
 
-    let loaded = load_orchestrator_template_store(&templates_path)
-        .expect("legacy template store should load");
-    assert_eq!(loaded.templates.len(), 1);
-    assert_eq!(loaded.templates[0].sessions.len(), 1);
-    assert_eq!(
-        loaded.templates[0].sessions[0].input_mode,
-        OrchestratorSessionInputMode::Queue
+    let err = match load_orchestrator_template_store(&templates_path) {
+        Ok(_) => panic!("template store without inputMode should fail to load"),
+        Err(err) => err,
+    };
+    let err_text = format!("{err:#}");
+    assert!(
+        err_text.contains("failed to deserialize orchestrator templates from")
+            && err_text.contains("inputMode"),
+        "unexpected error: {err_text}"
     );
 
     let _ = fs::remove_file(templates_path);
@@ -13824,7 +13826,7 @@ fn load_orchestrator_template_store_reports_deserialization_errors_after_migrati
 }
 
 #[test]
-fn load_state_defaults_missing_orchestrator_snapshot_input_mode_to_queue() {
+fn load_state_rejects_orchestrator_snapshot_without_input_mode() {
     let state = test_app_state();
     let project_root = std::env::temp_dir().join(format!(
         "termal-orchestrator-snapshot-input-mode-{}",
@@ -13860,27 +13862,19 @@ fn load_state_defaults_missing_orchestrator_snapshot_input_mode_to_queue() {
     }
     fs::write(
         state.persistence_path.as_path(),
-        serde_json::to_vec_pretty(&encoded).expect("normalized state should serialize"),
+        serde_json::to_vec_pretty(&encoded).expect("persisted state should serialize"),
     )
-    .expect("legacy persisted state should be rewritten");
+    .expect("persisted state should be rewritten");
 
-    let loaded = load_state(state.persistence_path.as_path())
-        .expect("persisted state should load")
-        .expect("persisted state should exist");
-    let loaded_instance = loaded
-        .orchestrator_instances
-        .iter()
-        .find(|instance| instance.id == orchestrator.id)
-        .expect("orchestrator instance should still exist after reload");
-    assert_eq!(
-        loaded_instance.template_snapshot.sessions.len(),
-        orchestrator.template_snapshot.sessions.len()
+    let err = match load_state(state.persistence_path.as_path()) {
+        Ok(_) => panic!("persisted state without inputMode should fail to load"),
+        Err(err) => err,
+    };
+    let err_text = format!("{err:#}");
+    assert!(
+        err_text.contains("failed to deserialize state from") && err_text.contains("inputMode"),
+        "unexpected error: {err_text}"
     );
-    assert!(loaded_instance
-        .template_snapshot
-        .sessions
-        .iter()
-        .all(|session| session.input_mode == OrchestratorSessionInputMode::Queue));
 
     let _ = fs::remove_file(state.persistence_path.as_path());
     let _ = fs::remove_dir_all(project_root);

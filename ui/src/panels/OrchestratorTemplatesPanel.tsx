@@ -171,12 +171,7 @@ type InitialPanelState = PanelState & {
 
 // Keep isPersistedSessionTemplate in sync with every validated
 // OrchestratorSessionTemplate field restored from localStorage.
-type PersistedOrchestratorSessionTemplate = Omit<
-  OrchestratorSessionTemplate,
-  "inputMode"
-> & {
-  inputMode?: OrchestratorSessionInputMode | null;
-};
+type PersistedOrchestratorSessionTemplate = OrchestratorSessionTemplate;
 
 type PendingPanelPersistence = {
   stateKey: string;
@@ -2152,7 +2147,7 @@ function readState(stateKey: string): PanelState | null {
           model: session.model ?? "",
           instructions: session.instructions,
           autoApprove: session.autoApprove,
-          inputMode: session.inputMode ?? "queue",
+          inputMode: session.inputMode,
           position: clampPosition(session.position.x, session.position.y),
         })),
         transitions: draft.transitions.map((transition) => ({
@@ -2220,9 +2215,7 @@ function isPersistedSessionTemplate(
       typeof candidate.model === "string") &&
     typeof candidate.instructions === "string" &&
     typeof candidate.autoApprove === "boolean" &&
-    (candidate.inputMode === undefined ||
-      candidate.inputMode === null ||
-      candidate.inputMode === "queue" ||
+    (candidate.inputMode === "queue" ||
       candidate.inputMode === "consolidate") &&
     candidate.position !== null &&
     candidate.position !== undefined &&

@@ -406,20 +406,20 @@ describe("OrchestratorTemplatesPanel", () => {
     expect(refreshedRunButton).toBeEnabled();
   });
 
-  it("defaults restored draft sessions with missing input mode to queue", async () => {
+  it("ignores restored drafts with a missing input mode", async () => {
     fetchTemplatesMock.mockResolvedValue({ templates: [] });
-    const legacySession = {
+    const invalidSession = {
       ...makeSession({ id: "builder", name: "Builder" }),
     } as Record<string, unknown>;
-    delete legacySession.inputMode;
+    delete invalidSession.inputMode;
     window.localStorage.setItem(
-      "termal-orchestrator-panel-state:orchestrator-legacy-input-mode",
+      "termal-orchestrator-panel-state:orchestrator-missing-input-mode",
       JSON.stringify({
         draft: {
-          name: "Legacy Flow",
+          name: "Invalid InputMode Flow",
           description: "",
           projectId: null,
-          sessions: [legacySession],
+          sessions: [invalidSession],
           transitions: [],
         },
         selectedNodeId: "builder",
@@ -428,15 +428,13 @@ describe("OrchestratorTemplatesPanel", () => {
     );
 
     render(
-      <OrchestratorTemplatesPanel persistenceKey="orchestrator-legacy-input-mode" />,
+      <OrchestratorTemplatesPanel persistenceKey="orchestrator-missing-input-mode" />,
     );
 
-    expect(await screen.findByDisplayValue("Legacy Flow")).toBeInTheDocument();
-    expect(
-      screen.getByLabelText("Incoming transitions", {
-        selector: "select#session-input-mode-builder",
-      }),
-    ).toHaveValue("queue");
+    await waitFor(() => {
+      expect(screen.getByLabelText("Template name")).toHaveValue("");
+    });
+    expect(screen.queryByDisplayValue("Invalid InputMode Flow")).not.toBeInTheDocument();
   });
 
   it("reopens restored edits as a new draft when the selected template no longer exists", async () => {
@@ -471,13 +469,13 @@ describe("OrchestratorTemplatesPanel", () => {
     ).toBeEnabled();
   });
 
-  it("defaults restored draft sessions with null input mode to queue", async () => {
+  it("ignores restored drafts with a null input mode", async () => {
     fetchTemplatesMock.mockResolvedValue({ templates: [] });
     window.localStorage.setItem(
       "termal-orchestrator-panel-state:orchestrator-null-input-mode",
       JSON.stringify({
         draft: {
-          name: "Legacy Flow",
+          name: "Invalid InputMode Flow",
           description: "",
           projectId: null,
           sessions: [
@@ -497,12 +495,10 @@ describe("OrchestratorTemplatesPanel", () => {
       <OrchestratorTemplatesPanel persistenceKey="orchestrator-null-input-mode" />,
     );
 
-    expect(await screen.findByDisplayValue("Legacy Flow")).toBeInTheDocument();
-    expect(
-      screen.getByLabelText("Incoming transitions", {
-        selector: "select#session-input-mode-builder",
-      }),
-    ).toHaveValue("queue");
+    await waitFor(() => {
+      expect(screen.getByLabelText("Template name")).toHaveValue("");
+    });
+    expect(screen.queryByDisplayValue("Invalid InputMode Flow")).not.toBeInTheDocument();
   });
 
   it("ignores restored drafts with an invalid model type", async () => {

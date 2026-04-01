@@ -8,66 +8,12 @@ fn load_orchestrator_template_store(path: &FsPath) -> Result<OrchestratorTemplat
     }
 
     let raw = fs::read(path).with_context(|| format!("failed to read `{}`", path.display()))?;
-    let mut encoded: Value = serde_json::from_slice(&raw)
+    let encoded: Value = serde_json::from_slice(&raw)
         .with_context(|| format!("failed to parse `{}`", path.display()))?;
-    normalize_persisted_orchestrator_template_store_input_modes(&mut encoded);
     let mut store: OrchestratorTemplateStore = serde_json::from_value(encoded)
         .with_context(|| format!("failed to deserialize orchestrator templates from `{}`", path.display()))?;
     store.normalize();
     Ok(store)
-}
-
-fn default_missing_persisted_orchestrator_session_input_mode(session: &mut Value) {
-    let Some(session_object) = session.as_object_mut() else {
-        return;
-    };
-    let should_default = !session_object.contains_key("inputMode")
-        || session_object
-            .get("inputMode")
-            .is_some_and(Value::is_null);
-    if should_default {
-        session_object.insert("inputMode".to_owned(), Value::String("queue".to_owned()));
-    }
-}
-
-fn normalize_persisted_orchestrator_template_store_input_modes(encoded: &mut Value) {
-    let Some(templates) = encoded
-        .get_mut("templates")
-        .and_then(Value::as_array_mut)
-    else {
-        return;
-    };
-
-    for template in templates {
-        let Some(sessions) = template.get_mut("sessions").and_then(Value::as_array_mut) else {
-            continue;
-        };
-        for session in sessions {
-            default_missing_persisted_orchestrator_session_input_mode(session);
-        }
-    }
-}
-
-fn normalize_persisted_state_orchestrator_instance_input_modes(encoded: &mut Value) {
-    let Some(instances) = encoded
-        .get_mut("orchestratorInstances")
-        .and_then(Value::as_array_mut)
-    else {
-        return;
-    };
-
-    for instance in instances {
-        let Some(sessions) = instance
-            .get_mut("templateSnapshot")
-            .and_then(|snapshot| snapshot.get_mut("sessions"))
-            .and_then(Value::as_array_mut)
-        else {
-            continue;
-        };
-        for session in sessions {
-            default_missing_persisted_orchestrator_session_input_mode(session);
-        }
-    }
 }
 
 fn persist_orchestrator_template_store(
