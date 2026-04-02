@@ -4138,6 +4138,8 @@ struct StateResponse {
     preferences: AppPreferences,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     projects: Vec<Project>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    orchestrators: Vec<OrchestratorInstance>,
     sessions: Vec<Session>,
 }
 
@@ -4729,6 +4731,10 @@ enum DeltaEvent {
         message_index: usize,
         agents: Vec<ParallelAgentProgress>,
         preview: String,
+    },
+    OrchestratorsUpdated {
+        revision: u64,
+        orchestrators: Vec<OrchestratorInstance>,
     },
 }
 

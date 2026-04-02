@@ -145,6 +145,18 @@ fn app_router(state: AppState) -> Router {
             get(list_orchestrator_instances).post(create_orchestrator_instance),
         )
         .route("/api/orchestrators/{id}", get(get_orchestrator_instance))
+        .route(
+            "/api/orchestrators/{id}/pause",
+            post(pause_orchestrator_instance),
+        )
+        .route(
+            "/api/orchestrators/{id}/resume",
+            post(resume_orchestrator_instance),
+        )
+        .route(
+            "/api/orchestrators/{id}/stop",
+            post(stop_orchestrator_instance),
+        )
         .route("/api/instructions/search", get(search_instructions))
         .route("/api/events", get(state_events))
         .route(

@@ -1477,6 +1477,7 @@ impl AppState {
                     });
                 }
             }
+            DeltaEvent::OrchestratorsUpdated { .. } => {}
         }
         Ok(())
     }

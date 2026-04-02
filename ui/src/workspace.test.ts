@@ -492,6 +492,9 @@ describe("workspace helpers", () => {
       next.panes.find((pane) => pane.id === targetSessionPane.id)?.activeTabId,
     ).toBe("canvas-a");
     expect(
+      next.panes.find((pane) => pane.id === targetSessionPane.id)?.activeSessionId,
+    ).toBe("session-target");
+    expect(
       next.panes.find((pane) => pane.id === targetSessionPane.id)?.viewMode,
     ).toBe("canvas");
     expect(

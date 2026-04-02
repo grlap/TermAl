@@ -21,7 +21,7 @@ import App, {
   describeUnknownSessionModelWarning,
   resolveUnknownSessionModelSendAttempt,
 } from "./App";
-import type { AgentReadiness, Session } from "./types";
+import type { AgentReadiness, OrchestratorInstance, Session } from "./types";
 
 class EventSourceMock {
   static instances: EventSourceMock[] = [];
@@ -462,6 +462,51 @@ function makeSession(id: string, overrides?: Partial<Session>): Session {
   };
 }
 
+function makeOrchestrator(
+  overrides: Partial<OrchestratorInstance> = {},
+): OrchestratorInstance {
+  return {
+    id: "orchestrator-1",
+    templateId: "template-1",
+    projectId: "project-local",
+    templateSnapshot: {
+      id: "template-1",
+      name: "Runtime Flow",
+      description: "Handle orchestration work.",
+      createdAt: "2026-03-30 09:00:00",
+      updatedAt: "2026-03-30 09:05:00",
+      projectId: "project-local",
+      sessions: [
+        {
+          id: "builder",
+          name: "Builder",
+          agent: "Codex",
+          model: null,
+          instructions: "Implement the queued work.",
+          autoApprove: true,
+          inputMode: "queue",
+          position: { x: 220, y: 420 },
+        },
+      ],
+      transitions: [],
+    },
+    status: "running",
+    sessionInstances: [
+      {
+        templateSessionId: "builder",
+        sessionId: "session-1",
+        lastCompletionRevision: null,
+        lastDeliveredCompletionRevision: null,
+      },
+    ],
+    pendingTransitions: [],
+    createdAt: "2026-03-30 09:06:00",
+    completedAt: null,
+    errorMessage: null,
+    ...overrides,
+  };
+}
+
 function makeReadiness(overrides?: Partial<AgentReadiness>): AgentReadiness {
   return {
     agent: "Gemini",
@@ -769,7 +814,7 @@ describe("App", () => {
       const originalFetch = globalThis.fetch;
       const originalEventSource = globalThis.EventSource;
       const originalResizeObserver = globalThis.ResizeObserver;
-      const originalQuerySelector = Document.prototype.querySelector;
+      const originalUrl = `${window.location.pathname}${window.location.search}${window.location.hash}`;      const originalQuerySelector = Document.prototype.querySelector;
       const querySelectorSpy = vi
         .spyOn(Document.prototype, "querySelector")
         .mockImplementation(function (this: Document, selectors: string) {
@@ -1497,7 +1542,7 @@ describe("App", () => {
       const originalFetch = globalThis.fetch;
       const originalEventSource = globalThis.EventSource;
       const originalResizeObserver = globalThis.ResizeObserver;
-      const openSpy = vi.spyOn(window, "open").mockImplementation(() => null);
+      const originalUrl = `${window.location.pathname}${window.location.search}${window.location.hash}`;      const openSpy = vi.spyOn(window, "open").mockImplementation(() => null);
       const fetchWorkspaceLayoutsSpy = vi
         .mocked(api.fetchWorkspaceLayouts)
         .mockResolvedValue({
@@ -1592,6 +1637,7 @@ describe("App", () => {
     await withSuppressedActWarnings(async () => {
       const originalEventSource = globalThis.EventSource;
       const originalResizeObserver = globalThis.ResizeObserver;
+      const originalUrl = `${window.location.pathname}${window.location.search}${window.location.hash}`;
       const fetchStateSpy = vi.spyOn(api, "fetchState").mockResolvedValue({
         revision: 1,
         projects: [],
@@ -1662,7 +1708,7 @@ describe("App", () => {
     await withSuppressedActWarnings(async () => {
       const originalEventSource = globalThis.EventSource;
       const originalResizeObserver = globalThis.ResizeObserver;
-      const fetchStateDeferred =
+      const originalUrl = `${window.location.pathname}${window.location.search}${window.location.hash}`;      const fetchStateDeferred =
         createDeferred<Awaited<ReturnType<typeof api.fetchState>>>();
       const createSessionDeferred = createDeferred<{
         sessionId: string;
@@ -1775,8 +1821,9 @@ describe("App", () => {
         await screen.findAllByText("Codex 1");
         await settleAsyncUi();
       } finally {
-        HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
-        fetchStateSpy.mockRestore();
+        window.history.replaceState(window.history.state, "", originalUrl);
+        window.localStorage.clear();
+        HTMLElement.prototype.scrollIntoView = originalScrollIntoView;        fetchStateSpy.mockRestore();
         createSessionSpy.mockRestore();
         refreshSessionModelOptionsSpy.mockRestore();
         restoreGlobal("EventSource", originalEventSource);
@@ -1789,6 +1836,7 @@ describe("App", () => {
     await withSuppressedActWarnings(async () => {
       const originalEventSource = globalThis.EventSource;
       const originalResizeObserver = globalThis.ResizeObserver;
+      const originalUrl = `${window.location.pathname}${window.location.search}${window.location.hash}`;
       const fetchStateSpy = vi.spyOn(api, "fetchState").mockResolvedValue({
         revision: 1,
         projects: [],
@@ -1980,12 +2028,86 @@ describe("App", () => {
         await screen.findByText("Orchestration delta applied.");
         expect(fetchStateSpy).not.toHaveBeenCalled();
       } finally {
-        HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
-        fetchStateSpy.mockRestore();
+        window.history.replaceState(window.history.state, "", originalUrl);
+        window.localStorage.clear();
+        HTMLElement.prototype.scrollIntoView = originalScrollIntoView;        fetchStateSpy.mockRestore();
         fetchWorkspaceLayoutSpy.mockRestore();
         saveWorkspaceLayoutSpy.mockRestore();
         fetchTemplatesSpy.mockRestore();
         createOrchestratorInstanceSpy.mockRestore();
+        restoreGlobal("EventSource", originalEventSource);
+        restoreGlobal("ResizeObserver", originalResizeObserver);
+      }
+    });
+  });
+
+  it("updates the orchestrator library from live orchestrator deltas without forcing a resync", async () => {
+    await withSuppressedActWarnings(async () => {
+      const originalEventSource = globalThis.EventSource;
+      const originalResizeObserver = globalThis.ResizeObserver;
+      const fetchStateSpy = vi.spyOn(api, "fetchState").mockResolvedValue({
+        revision: 1,
+        projects: [
+          {
+            id: "project-local",
+            name: "Local Project",
+            rootPath: "/repo",
+            remoteId: "local",
+          },
+        ],
+        orchestrators: [makeOrchestrator()],
+        sessions: [
+          makeSession("session-1", {
+            name: "Builder",
+            projectId: "project-local",
+            workdir: "/repo",
+          }),
+        ],
+      });
+      const fetchWorkspaceLayoutSpy = vi
+        .mocked(api.fetchWorkspaceLayout)
+        .mockResolvedValue(null);
+      const saveWorkspaceLayoutSpy = vi
+        .mocked(api.saveWorkspaceLayout)
+        .mockResolvedValue(
+          makeWorkspaceLayoutResponse({
+            updatedAt: "2026-03-30 09:07:00",
+          }),
+        );
+      vi.stubGlobal(
+        "EventSource",
+        EventSourceMock as unknown as typeof EventSource,
+      );
+      vi.stubGlobal(
+        "ResizeObserver",
+        ResizeObserverMock as unknown as typeof ResizeObserver,
+      );
+      const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
+      HTMLElement.prototype.scrollIntoView = vi.fn();
+
+      try {
+        await renderApp();
+
+        const eventSource = latestEventSource();
+        act(() => {
+          eventSource.dispatchNamedEvent("delta", {
+            type: "orchestratorsUpdated",
+            revision: 2,
+            orchestrators: [
+              makeOrchestrator({
+                status: "paused",
+              }),
+            ],
+          });
+        });
+        await settleAsyncUi();
+
+        expect(fetchStateSpy).toHaveBeenCalledTimes(1);
+      } finally {
+        HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
+        fetchStateSpy.mockRestore();
+        fetchWorkspaceLayoutSpy.mockRestore();
+        saveWorkspaceLayoutSpy.mockRestore();
         restoreGlobal("EventSource", originalEventSource);
         restoreGlobal("ResizeObserver", originalResizeObserver);
       }
@@ -1997,6 +2119,7 @@ describe("App", () => {
       const originalFetch = globalThis.fetch;
       const originalEventSource = globalThis.EventSource;
       const originalResizeObserver = globalThis.ResizeObserver;
+      const originalUrl = `${window.location.pathname}${window.location.search}${window.location.hash}`;
       const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
         const url = String(input);
         if (url === "/api/state") {
@@ -2073,8 +2196,9 @@ describe("App", () => {
         ).toHaveTextContent("API");
         await settleAsyncUi();
       } finally {
-        HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
-        restoreGlobal("fetch", originalFetch);
+        window.history.replaceState(window.history.state, "", originalUrl);
+        window.localStorage.clear();
+        HTMLElement.prototype.scrollIntoView = originalScrollIntoView;        restoreGlobal("fetch", originalFetch);
         restoreGlobal("EventSource", originalEventSource);
         restoreGlobal("ResizeObserver", originalResizeObserver);
       }
@@ -2086,6 +2210,7 @@ describe("App", () => {
       const originalFetch = globalThis.fetch;
       const originalEventSource = globalThis.EventSource;
       const originalResizeObserver = globalThis.ResizeObserver;
+      const originalUrl = `${window.location.pathname}${window.location.search}${window.location.hash}`;
       const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
         const url = String(input);
         if (url === "/api/state") {
@@ -2176,8 +2301,9 @@ describe("App", () => {
         expect(screen.getByText("Web Session")).toBeInTheDocument();
         expect(screen.getByText("API Session")).toBeInTheDocument();
       } finally {
-        HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
-        restoreGlobal("fetch", originalFetch);
+        window.history.replaceState(window.history.state, "", originalUrl);
+        window.localStorage.clear();
+        HTMLElement.prototype.scrollIntoView = originalScrollIntoView;        restoreGlobal("fetch", originalFetch);
         restoreGlobal("EventSource", originalEventSource);
         restoreGlobal("ResizeObserver", originalResizeObserver);
       }
@@ -2300,7 +2426,7 @@ describe("App", () => {
       const originalFetch = globalThis.fetch;
       const originalEventSource = globalThis.EventSource;
       const originalResizeObserver = globalThis.ResizeObserver;
-      const fetchMock = vi.fn(
+      const originalUrl = `${window.location.pathname}${window.location.search}${window.location.hash}`;      const fetchMock = vi.fn(
         async (input: RequestInfo | URL, init?: RequestInit) => {
           const requestUrl = new URL(String(input), "http://localhost");
           if (requestUrl.pathname === "/api/state") {
@@ -2610,7 +2736,7 @@ describe("App", () => {
       const originalFetch = globalThis.fetch;
       const originalEventSource = globalThis.EventSource;
       const originalResizeObserver = globalThis.ResizeObserver;
-      const fetchMock = vi.fn(
+      const originalUrl = `${window.location.pathname}${window.location.search}${window.location.hash}`;      const fetchMock = vi.fn(
         async (input: RequestInfo | URL, init?: RequestInit) => {
           const requestUrl = new URL(String(input), "http://localhost");
           if (requestUrl.pathname === "/api/state") {
@@ -2773,7 +2899,7 @@ describe("App", () => {
       const originalFetch = globalThis.fetch;
       const originalEventSource = globalThis.EventSource;
       const originalResizeObserver = globalThis.ResizeObserver;
-      const fetchMock = vi.fn(
+      const originalUrl = `${window.location.pathname}${window.location.search}${window.location.hash}`;      const fetchMock = vi.fn(
         async (input: RequestInfo | URL, init?: RequestInit) => {
           const requestUrl = new URL(String(input), "http://localhost");
           if (requestUrl.pathname === "/api/state") {
@@ -2979,6 +3105,182 @@ describe("App", () => {
       }
     });
   });
+  it("persists the nearest session context when selecting the control panel tab", async () => {
+    await withSuppressedActWarnings(async () => {
+      const originalFetch = globalThis.fetch;
+      const originalEventSource = globalThis.EventSource;
+      const originalResizeObserver = globalThis.ResizeObserver;
+      const originalUrl = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+      const fetchMock = vi.fn(
+        async (input: RequestInfo | URL, init?: RequestInit) => {
+          const requestUrl = new URL(String(input), "http://localhost");
+          if (requestUrl.pathname === "/api/state") {
+            return jsonResponse({
+              revision: 1,
+              projects: [
+                {
+                  id: "project-termal",
+                  name: "TermAl",
+                  rootPath: "/projects/termal",
+                },
+                {
+                  id: "project-api",
+                  name: "API",
+                  rootPath: "/projects/api",
+                },
+              ],
+              sessions: [
+                makeSession("session-1", {
+                  name: "Main",
+                  projectId: "project-termal",
+                  workdir: "/projects/termal",
+                }),
+                makeSession("session-2", {
+                  name: "Review",
+                  projectId: "project-api",
+                  workdir: "/projects/api",
+                }),
+              ],
+            });
+          }
+
+          if (requestUrl.pathname.startsWith("/api/workspaces/")) {
+            if ((init?.method ?? "GET").toUpperCase() === "PUT") {
+              return jsonResponse({ ok: true });
+            }
+
+            return new Response("", { status: 404 });
+          }
+
+          throw new Error(
+            `Unexpected fetch: ${requestUrl.pathname}${requestUrl.search}`,
+          );
+        },
+      );
+
+      window.history.replaceState(
+        window.history.state,
+        "",
+        "/?workspace=test-control-panel-tab-context-sync",
+      );
+      window.localStorage.clear();
+      window.localStorage.setItem(
+        "termal-workspace-layout:test-control-panel-tab-context-sync",
+        JSON.stringify({
+          controlPanelSide: "left",
+          workspace: {
+            root: {
+              id: "split-root",
+              type: "split",
+              direction: "row",
+              ratio: 0.22,
+              first: {
+                type: "pane",
+                paneId: "pane-control",
+              },
+              second: {
+                type: "pane",
+                paneId: "pane-review",
+              },
+            },
+            panes: [
+              {
+                id: "pane-control",
+                tabs: [
+                  {
+                    id: "tab-control",
+                    kind: "controlPanel",
+                    originSessionId: "session-1",
+                    originProjectId: "project-termal",
+                  },
+                ],
+                activeTabId: "tab-control",
+                activeSessionId: null,
+                viewMode: "controlPanel",
+                lastSessionViewMode: "session",
+                sourcePath: null,
+              },
+              {
+                id: "pane-review",
+                tabs: [
+                  {
+                    id: "tab-review",
+                    kind: "session",
+                    sessionId: "session-2",
+                  },
+                ],
+                activeTabId: "tab-review",
+                activeSessionId: "session-2",
+                viewMode: "session",
+                lastSessionViewMode: "session",
+                sourcePath: null,
+              },
+            ],
+            activePaneId: "pane-review",
+          },
+        }),
+      );
+
+      vi.stubGlobal("fetch", fetchMock);
+      vi.stubGlobal(
+        "EventSource",
+        EventSourceMock as unknown as typeof EventSource,
+      );
+      vi.stubGlobal(
+        "ResizeObserver",
+        ResizeObserverMock as unknown as typeof ResizeObserver,
+      );
+      const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
+      HTMLElement.prototype.scrollIntoView = vi.fn();
+
+      try {
+        await renderApp();
+        const eventSource = latestEventSource();
+        expect(eventSource).toBeTruthy();
+        act(() => {
+          eventSource.dispatchError();
+        });
+        await settleAsyncUi();
+
+        await clickAndSettle(
+          screen.getByRole("tab", { name: /Control panel/i }),
+        );
+
+        await waitFor(() => {
+          const persistedLayoutRaw = window.localStorage.getItem(
+            "termal-workspace-layout:test-control-panel-tab-context-sync",
+          );
+          expect(persistedLayoutRaw).not.toBeNull();
+          const persistedLayout = JSON.parse(persistedLayoutRaw ?? "null") as {
+            workspace: {
+              activePaneId: string | null;
+              panes: Array<{
+                id: string;
+                tabs: Array<Record<string, unknown>>;
+              }>;
+            };
+          };
+          const persistedControlPane = persistedLayout.workspace.panes.find(
+            (pane) => pane.id === "pane-control",
+          );
+
+          expect(persistedLayout.workspace.activePaneId).toBe("pane-control");
+          expect(persistedControlPane?.tabs).toContainEqual({
+            id: "tab-control",
+            kind: "controlPanel",
+            originSessionId: "session-2",
+            originProjectId: "project-api",
+          });
+        });
+      } finally {
+        window.history.replaceState(window.history.state, "", originalUrl);
+        window.localStorage.clear();
+        HTMLElement.prototype.scrollIntoView = originalScrollIntoView;        restoreGlobal("fetch", originalFetch);
+        restoreGlobal("EventSource", originalEventSource);
+        restoreGlobal("ResizeObserver", originalResizeObserver);
+      }
+    });
+  });
   it("opens canvas from the control panel using the pane-local session context", async () => {
     await withSuppressedActWarnings(async () => {
       const originalFetch = globalThis.fetch;
@@ -3039,7 +3341,6 @@ describe("App", () => {
           );
         },
       );
-
       function getTablistForSession(name: string) {
         const tablist = screen
           .getAllByRole("tablist", { name: "Tile tabs" })
@@ -3202,8 +3503,1130 @@ describe("App", () => {
       } finally {
         window.history.replaceState(window.history.state, "", originalUrl);
         window.localStorage.clear();
-        HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
-        restoreGlobal("fetch", originalFetch);
+        HTMLElement.prototype.scrollIntoView = originalScrollIntoView;        restoreGlobal("fetch", originalFetch);
+        restoreGlobal("EventSource", originalEventSource);
+        restoreGlobal("ResizeObserver", originalResizeObserver);
+      }
+    });
+  });
+  it("moves an existing shared canvas into the new launch context and syncs its pane state", async () => {
+    await withSuppressedActWarnings(async () => {
+      const originalFetch = globalThis.fetch;
+      const originalEventSource = globalThis.EventSource;
+      const originalResizeObserver = globalThis.ResizeObserver;
+      const originalUrl = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+      const fetchMock = vi.fn(
+        async (input: RequestInfo | URL, init?: RequestInit) => {
+          const requestUrl = new URL(String(input), "http://localhost");
+          if (requestUrl.pathname === "/api/state") {
+            return jsonResponse({
+              revision: 1,
+              projects: [
+                {
+                  id: "project-termal",
+                  name: "TermAl",
+                  rootPath: "/projects/termal",
+                },
+                {
+                  id: "project-api",
+                  name: "API",
+                  rootPath: "/projects/api",
+                },
+              ],
+              sessions: [
+                makeSession("session-1", {
+                  name: "Main",
+                  projectId: "project-termal",
+                  workdir: "/projects/termal",
+                }),
+                makeSession("session-2", {
+                  name: "Review",
+                  projectId: "project-api",
+                  workdir: "/projects/api",
+                }),
+              ],
+            });
+          }
+
+          if (requestUrl.pathname === "/api/fs") {
+            const path = requestUrl.searchParams.get("path") ?? "";
+            const segments = path.split("/").filter(Boolean);
+            const name = segments[segments.length - 1] ?? "workspace";
+            return jsonResponse({
+              entries: [],
+              name,
+              path,
+            });
+          }
+
+          if (requestUrl.pathname === "/api/git/status") {
+            const path = requestUrl.searchParams.get("path") ?? "/projects/api";
+            return jsonResponse({
+              ahead: 0,
+              behind: 0,
+              branch: "main",
+              files: [],
+              isClean: true,
+              repoRoot: path,
+              upstream: "origin/main",
+              workdir: path,
+            });
+          }
+
+          if (requestUrl.pathname.startsWith("/api/workspaces/")) {
+            if ((init?.method ?? "GET").toUpperCase() === "PUT") {
+              return jsonResponse({ ok: true });
+            }
+
+            return new Response("", { status: 404 });
+          }
+
+          throw new Error(
+            `Unexpected fetch: ${requestUrl.pathname}${requestUrl.search}`,
+          );
+        },
+      );
+      function getTablistForSession(name: string) {
+        const tablist = screen
+          .getAllByRole("tablist", { name: "Tile tabs" })
+          .find((candidate) => within(candidate).queryByText(name));
+
+        if (!tablist) {
+          throw new Error(`Tablist not found for session ${name}`);
+        }
+
+        return tablist;
+      }
+
+      window.history.replaceState(
+        window.history.state,
+        "",
+        "/?workspace=test-canvas-relocation-sync",
+      );
+      window.localStorage.clear();
+      window.localStorage.setItem(
+        "termal-workspace-layout:test-canvas-relocation-sync",
+        JSON.stringify({
+          controlPanelSide: "left",
+          workspace: {
+            root: {
+              id: "split-root",
+              type: "split",
+              direction: "row",
+              ratio: 0.22,
+              first: {
+                type: "pane",
+                paneId: "pane-control",
+              },
+              second: {
+                id: "split-content",
+                type: "split",
+                direction: "row",
+                ratio: 0.45,
+                first: {
+                  type: "pane",
+                  paneId: "pane-review",
+                },
+                second: {
+                  type: "pane",
+                  paneId: "pane-main",
+                },
+              },
+            },
+            panes: [
+              {
+                id: "pane-control",
+                tabs: [
+                  {
+                    id: "tab-control",
+                    kind: "controlPanel",
+                    originSessionId: null,
+                  },
+                ],
+                activeTabId: "tab-control",
+                activeSessionId: null,
+                viewMode: "controlPanel",
+                lastSessionViewMode: "session",
+                sourcePath: null,
+              },
+              {
+                id: "pane-review",
+                tabs: [
+                  {
+                    id: "tab-review",
+                    kind: "session",
+                    sessionId: "session-2",
+                  },
+                ],
+                activeTabId: "tab-review",
+                activeSessionId: "session-2",
+                viewMode: "session",
+                lastSessionViewMode: "session",
+                sourcePath: null,
+              },
+              {
+                id: "pane-main",
+                tabs: [
+                  {
+                    id: "tab-main",
+                    kind: "session",
+                    sessionId: "session-1",
+                  },
+                  {
+                    id: "tab-canvas",
+                    kind: "canvas",
+                    cards: [],
+                    originSessionId: "session-1",
+                    originProjectId: "project-termal",
+                  },
+                ],
+                activeTabId: "tab-main",
+                activeSessionId: "session-1",
+                viewMode: "session",
+                lastSessionViewMode: "session",
+                sourcePath: null,
+              },
+            ],
+            activePaneId: "pane-review",
+          },
+        }),
+      );
+
+      vi.stubGlobal("fetch", fetchMock);
+      vi.stubGlobal(
+        "EventSource",
+        EventSourceMock as unknown as typeof EventSource,
+      );
+      vi.stubGlobal(
+        "ResizeObserver",
+        ResizeObserverMock as unknown as typeof ResizeObserver,
+      );
+      const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
+      HTMLElement.prototype.scrollIntoView = vi.fn();
+
+      try {
+        await renderApp();
+        const eventSource = latestEventSource();
+        expect(eventSource).toBeTruthy();
+        act(() => {
+          eventSource.dispatchError();
+        });
+        await settleAsyncUi();
+
+        const controlPanelShell = document.querySelector(
+          ".control-panel-shell",
+        );
+        if (!(controlPanelShell instanceof HTMLDivElement)) {
+          throw new Error("Control panel shell not found");
+        }
+
+        expect(
+          within(getTablistForSession("Main")).getByRole("tab", {
+            name: /Canvas/i,
+          }),
+        ).toBeInTheDocument();
+        expect(
+          within(getTablistForSession("Review")).queryByRole("tab", {
+            name: /Canvas/i,
+          }),
+        ).toBeNull();
+
+        await clickAndSettle(
+          within(controlPanelShell).getByRole("button", { name: "Canvas" }),
+        );
+
+        expect(
+          within(getTablistForSession("Review")).getByRole("tab", {
+            name: /Canvas/i,
+          }),
+        ).toBeInTheDocument();
+        expect(
+          within(getTablistForSession("Main")).queryByRole("tab", {
+            name: /Canvas/i,
+          }),
+        ).toBeNull();
+
+        const persistedLayoutRaw = window.localStorage.getItem(
+          "termal-workspace-layout:test-canvas-relocation-sync",
+        );
+        expect(persistedLayoutRaw).not.toBeNull();
+        const persistedLayout = JSON.parse(persistedLayoutRaw ?? "null") as {
+          workspace: {
+            panes: Array<{
+              id: string;
+              activeTabId: string | null;
+              activeSessionId: string | null;
+              tabs: Array<Record<string, unknown>>;
+            }>;
+          };
+        };
+        const persistedReviewPane = persistedLayout.workspace.panes.find(
+          (pane) => pane.id === "pane-review",
+        );
+        const persistedMainPane = persistedLayout.workspace.panes.find(
+          (pane) => pane.id === "pane-main",
+        );
+
+        expect(persistedReviewPane?.activeTabId).toBe("tab-canvas");
+        expect(persistedReviewPane?.activeSessionId).toBe("session-2");
+        expect(persistedReviewPane?.tabs).toContainEqual({
+          id: "tab-canvas",
+          kind: "canvas",
+          cards: [],
+          originSessionId: "session-2",
+          originProjectId: "project-api",
+        });
+        expect(persistedMainPane?.tabs).toEqual([
+          {
+            id: "tab-main",
+            kind: "session",
+            sessionId: "session-1",
+          },
+        ]);
+      } finally {
+        window.history.replaceState(window.history.state, "", originalUrl);
+        window.localStorage.clear();
+        HTMLElement.prototype.scrollIntoView = originalScrollIntoView;        restoreGlobal("fetch", originalFetch);
+        restoreGlobal("EventSource", originalEventSource);
+        restoreGlobal("ResizeObserver", originalResizeObserver);
+      }
+    });
+  });
+  it("re-scopes standalone Files and Git panes to the nearest session when selected", async () => {
+    await withSuppressedActWarnings(async () => {
+      const originalFetch = globalThis.fetch;
+      const originalEventSource = globalThis.EventSource;
+      const originalResizeObserver = globalThis.ResizeObserver;
+      const originalUrl = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+      const fetchMock = vi.fn(
+        async (input: RequestInfo | URL, init?: RequestInit) => {
+          const requestUrl = new URL(String(input), "http://localhost");
+          if (requestUrl.pathname === "/api/state") {
+            return jsonResponse({
+              revision: 1,
+              projects: [
+                {
+                  id: "project-termal",
+                  name: "TermAl",
+                  rootPath: "/projects/termal",
+                },
+                {
+                  id: "project-api",
+                  name: "API",
+                  rootPath: "/projects/api",
+                },
+              ],
+              sessions: [
+                makeSession("session-1", {
+                  name: "Main",
+                  projectId: "project-termal",
+                  workdir: "/projects/termal",
+                }),
+                makeSession("session-2", {
+                  name: "Review",
+                  projectId: "project-api",
+                  workdir: "/projects/api",
+                }),
+              ],
+            });
+          }
+
+          if (requestUrl.pathname === "/api/fs") {
+            const path = requestUrl.searchParams.get("path") ?? "";
+            const segments = path.split("/").filter(Boolean);
+            const name = segments[segments.length - 1] ?? "workspace";
+            return jsonResponse({
+              entries: [],
+              name,
+              path,
+            });
+          }
+
+          if (requestUrl.pathname === "/api/git/status") {
+            const path = requestUrl.searchParams.get("path") ?? "";
+            return jsonResponse({
+              ahead: 0,
+              behind: 0,
+              branch: "main",
+              files: [],
+              isClean: true,
+              repoRoot: path,
+              upstream: "origin/main",
+              workdir: path,
+            });
+          }
+
+          if (requestUrl.pathname.startsWith("/api/workspaces/")) {
+            if ((init?.method ?? "GET").toUpperCase() === "PUT") {
+              return jsonResponse({ ok: true });
+            }
+
+            return new Response("", { status: 404 });
+          }
+
+          throw new Error(
+            `Unexpected fetch: ${requestUrl.pathname}${requestUrl.search}`,
+          );
+        },
+      );
+
+      function getControlPanelShell() {
+        const controlPanelShell = document.querySelector(
+          ".control-panel-shell",
+        );
+        if (!(controlPanelShell instanceof HTMLDivElement)) {
+          throw new Error("Control panel shell not found");
+        }
+
+        return controlPanelShell;
+      }
+
+      function getPaneByTabName(name: string | RegExp) {
+        const tab = screen.getByRole("tab", { name });
+        const pane = tab.closest(".workspace-pane");
+        if (!(pane instanceof HTMLElement)) {
+          throw new Error(`Workspace pane not found for ${String(name)}`);
+        }
+
+        return pane;
+      }
+
+      function latestRequestTo(pathname: string) {
+        const requests = fetchMock.mock.calls
+          .map(([input]) => new URL(String(input), "http://localhost"))
+          .filter((requestUrl) => requestUrl.pathname === pathname);
+        const request = requests[requests.length - 1];
+        if (!request) {
+          throw new Error(`No request captured for ${pathname}`);
+        }
+
+        return request;
+      }
+
+      window.history.replaceState(
+        window.history.state,
+        "",
+        "/?workspace=test-standalone-control-surface-sync",
+      );
+      window.localStorage.clear();
+      window.localStorage.setItem(
+        "termal-workspace-layout:test-standalone-control-surface-sync",
+        JSON.stringify({
+          controlPanelSide: "left",
+          workspace: {
+            root: {
+              id: "split-root",
+              type: "split",
+              direction: "row",
+              ratio: 0.18,
+              first: {
+                type: "pane",
+                paneId: "pane-control",
+              },
+              second: {
+                id: "split-right-1",
+                type: "split",
+                direction: "row",
+                ratio: 0.33,
+                first: {
+                  type: "pane",
+                  paneId: "pane-files",
+                },
+                second: {
+                  id: "split-right-2",
+                  type: "split",
+                  direction: "row",
+                  ratio: 0.5,
+                  first: {
+                    type: "pane",
+                    paneId: "pane-git",
+                  },
+                  second: {
+                    type: "pane",
+                    paneId: "pane-review",
+                  },
+                },
+              },
+            },
+            panes: [
+              {
+                id: "pane-control",
+                tabs: [
+                  {
+                    id: "tab-control",
+                    kind: "controlPanel",
+                    originSessionId: null,
+                  },
+                ],
+                activeTabId: "tab-control",
+                activeSessionId: null,
+                viewMode: "controlPanel",
+                lastSessionViewMode: "session",
+                sourcePath: null,
+              },
+              {
+                id: "pane-files",
+                tabs: [
+                  {
+                    id: "tab-files",
+                    kind: "filesystem",
+                    rootPath: "/projects/termal",
+                    originSessionId: "session-1",
+                    originProjectId: "project-termal",
+                  },
+                ],
+                activeTabId: "tab-files",
+                activeSessionId: "session-1",
+                viewMode: "filesystem",
+                lastSessionViewMode: "session",
+                sourcePath: null,
+              },
+              {
+                id: "pane-git",
+                tabs: [
+                  {
+                    id: "tab-git",
+                    kind: "gitStatus",
+                    workdir: "/projects/termal",
+                    originSessionId: "session-1",
+                    originProjectId: "project-termal",
+                  },
+                ],
+                activeTabId: "tab-git",
+                activeSessionId: "session-1",
+                viewMode: "gitStatus",
+                lastSessionViewMode: "session",
+                sourcePath: null,
+              },
+              {
+                id: "pane-review",
+                tabs: [
+                  {
+                    id: "tab-review",
+                    kind: "session",
+                    sessionId: "session-2",
+                  },
+                ],
+                activeTabId: "tab-review",
+                activeSessionId: "session-2",
+                viewMode: "session",
+                lastSessionViewMode: "session",
+                sourcePath: null,
+              },
+            ],
+            activePaneId: "pane-review",
+          },
+        }),
+      );
+
+      vi.stubGlobal("fetch", fetchMock);
+      vi.stubGlobal(
+        "EventSource",
+        EventSourceMock as unknown as typeof EventSource,
+      );
+      vi.stubGlobal(
+        "ResizeObserver",
+        ResizeObserverMock as unknown as typeof ResizeObserver,
+      );
+      const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
+      HTMLElement.prototype.scrollIntoView = vi.fn();
+
+      try {
+        await renderApp();
+        const eventSource = latestEventSource();
+        expect(eventSource).toBeTruthy();
+        act(() => {
+          eventSource.dispatchError();
+        });
+        await settleAsyncUi();
+
+        await clickAndSettle(
+          screen.getByRole("tab", { name: /Files: termal/i }),
+        );
+
+        await waitFor(() => {
+          expect(
+            screen.getByRole("tab", { name: /Files: api/i }),
+          ).toBeInTheDocument();
+        });
+        expect(
+          within(getControlPanelShell()).getByRole("combobox", {
+            name: "Project",
+          }),
+        ).toHaveTextContent("API");
+        expect(
+          within(getPaneByTabName(/Files: api/i)).getByRole("combobox", {
+            name: "Project",
+          }),
+        ).toHaveTextContent("API");
+        await waitFor(() => {
+          const request = latestRequestTo("/api/fs");
+          expect(request.searchParams.get("path")).toBe("/projects/api");
+          expect(request.searchParams.get("sessionId")).toBe("session-2");
+          expect(request.searchParams.get("projectId")).toBe("project-api");
+        });
+
+        await clickAndSettle(
+          screen.getByRole("tab", { name: /Git: termal/i }),
+        );
+
+        await waitFor(() => {
+          expect(
+            screen.getByRole("tab", { name: /Git: api/i }),
+          ).toBeInTheDocument();
+        });
+        expect(
+          within(getControlPanelShell()).getByRole("combobox", {
+            name: "Project",
+          }),
+        ).toHaveTextContent("API");
+        expect(
+          within(getPaneByTabName(/Git: api/i)).getByRole("combobox", {
+            name: "Project",
+          }),
+        ).toHaveTextContent("API");
+        await waitFor(() => {
+          const request = latestRequestTo("/api/git/status");
+          expect(request.searchParams.get("path")).toBe("/projects/api");
+          expect(request.searchParams.get("sessionId")).toBe("session-2");
+          expect(request.searchParams.get("projectId")).toBe("project-api");
+        });
+      } finally {
+        window.history.replaceState(window.history.state, "", originalUrl);
+        window.localStorage.clear();
+        HTMLElement.prototype.scrollIntoView = originalScrollIntoView;        restoreGlobal("fetch", originalFetch);
+        restoreGlobal("EventSource", originalEventSource);
+        restoreGlobal("ResizeObserver", originalResizeObserver);
+      }
+    });
+  });
+  it("re-scopes a standalone Files pane to a projectless nearest session and resets the control panel filter", async () => {
+    await withSuppressedActWarnings(async () => {
+      const originalFetch = globalThis.fetch;
+      const originalEventSource = globalThis.EventSource;
+      const originalResizeObserver = globalThis.ResizeObserver;
+      const originalUrl = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+      const fetchMock = vi.fn(
+        async (input: RequestInfo | URL, init?: RequestInit) => {
+          const requestUrl = new URL(String(input), "http://localhost");
+          if (requestUrl.pathname === "/api/state") {
+            return jsonResponse({
+              revision: 1,
+              projects: [
+                {
+                  id: "project-termal",
+                  name: "TermAl",
+                  rootPath: "/projects/termal",
+                },
+                {
+                  id: "project-api",
+                  name: "API",
+                  rootPath: "/projects/api",
+                },
+              ],
+              sessions: [
+                makeSession("session-1", {
+                  name: "Main",
+                  projectId: "project-api",
+                  workdir: "/projects/api",
+                }),
+                makeSession("session-2", {
+                  name: "Workspace Only",
+                  projectId: null,
+                  workdir: "/workspace/review-only",
+                }),
+              ],
+            });
+          }
+
+          if (requestUrl.pathname === "/api/fs") {
+            const path = requestUrl.searchParams.get("path") ?? "";
+            const segments = path.split("/").filter(Boolean);
+            const name = segments[segments.length - 1] ?? "workspace";
+            return jsonResponse({
+              entries: [],
+              name,
+              path,
+            });
+          }
+
+          if (requestUrl.pathname.startsWith("/api/workspaces/")) {
+            if ((init?.method ?? "GET").toUpperCase() === "PUT") {
+              return jsonResponse({ ok: true });
+            }
+
+            return new Response("", { status: 404 });
+          }
+
+          throw new Error(
+            `Unexpected fetch: ${requestUrl.pathname}${requestUrl.search}`,
+          );
+        },
+      );
+
+      function getControlPanelShell() {
+        const controlPanelShell = document.querySelector(
+          ".control-panel-shell",
+        );
+        if (!(controlPanelShell instanceof HTMLDivElement)) {
+          throw new Error("Control panel shell not found");
+        }
+
+        return controlPanelShell;
+      }
+
+      function getPaneByTabName(name: string | RegExp) {
+        const tab = screen.getByRole("tab", { name });
+        const pane = tab.closest(".workspace-pane");
+        if (!(pane instanceof HTMLElement)) {
+          throw new Error(`Workspace pane not found for ${String(name)}`);
+        }
+
+        return pane;
+      }
+
+      function latestRequestTo(pathname: string) {
+        const requests = fetchMock.mock.calls
+          .map(([input]) => new URL(String(input), "http://localhost"))
+          .filter((requestUrl) => requestUrl.pathname === pathname);
+        const request = requests[requests.length - 1];
+        if (!request) {
+          throw new Error(`No request captured for ${pathname}`);
+        }
+
+        return request;
+      }
+
+      window.history.replaceState(
+        window.history.state,
+        "",
+        "/?workspace=test-projectless-standalone-control-surface-sync",
+      );
+      window.localStorage.clear();
+      window.localStorage.setItem(
+        "termal-workspace-layout:test-projectless-standalone-control-surface-sync",
+        JSON.stringify({
+          controlPanelSide: "left",
+          workspace: {
+            root: {
+              id: "split-root",
+              type: "split",
+              direction: "row",
+              ratio: 0.18,
+              first: {
+                type: "pane",
+                paneId: "pane-control",
+              },
+              second: {
+                id: "split-right",
+                type: "split",
+                direction: "row",
+                ratio: 0.45,
+                first: {
+                  type: "pane",
+                  paneId: "pane-files",
+                },
+                second: {
+                  type: "pane",
+                  paneId: "pane-workspace",
+                },
+              },
+            },
+            panes: [
+              {
+                id: "pane-control",
+                tabs: [
+                  {
+                    id: "tab-control",
+                    kind: "controlPanel",
+                    originSessionId: null,
+                  },
+                ],
+                activeTabId: "tab-control",
+                activeSessionId: null,
+                viewMode: "controlPanel",
+                lastSessionViewMode: "session",
+                sourcePath: null,
+              },
+              {
+                id: "pane-files",
+                tabs: [
+                  {
+                    id: "tab-files",
+                    kind: "filesystem",
+                    rootPath: "/projects/api",
+                    originSessionId: "session-1",
+                    originProjectId: "project-api",
+                  },
+                ],
+                activeTabId: "tab-files",
+                activeSessionId: "session-1",
+                viewMode: "filesystem",
+                lastSessionViewMode: "session",
+                sourcePath: null,
+              },
+              {
+                id: "pane-workspace",
+                tabs: [
+                  {
+                    id: "tab-workspace",
+                    kind: "session",
+                    sessionId: "session-2",
+                  },
+                ],
+                activeTabId: "tab-workspace",
+                activeSessionId: "session-2",
+                viewMode: "session",
+                lastSessionViewMode: "session",
+                sourcePath: null,
+              },
+            ],
+            activePaneId: "pane-workspace",
+          },
+        }),
+      );
+
+      vi.stubGlobal("fetch", fetchMock);
+      vi.stubGlobal(
+        "EventSource",
+        EventSourceMock as unknown as typeof EventSource,
+      );
+      vi.stubGlobal(
+        "ResizeObserver",
+        ResizeObserverMock as unknown as typeof ResizeObserver,
+      );
+      const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
+      HTMLElement.prototype.scrollIntoView = vi.fn();
+
+      try {
+        await renderApp();
+        const eventSource = latestEventSource();
+        expect(eventSource).toBeTruthy();
+        act(() => {
+          eventSource.dispatchError();
+        });
+        await settleAsyncUi();
+
+        await clickAndSettle(
+          within(getControlPanelShell()).getByRole("combobox", {
+            name: "Project",
+          }),
+        );
+        const projectListbox = await screen.findByRole("listbox");
+        const apiOption = within(projectListbox)
+          .getAllByRole("option")
+          .find((candidate) => {
+            const label =
+              candidate.querySelector(".combo-option-label")?.textContent?.trim() ??
+              candidate.textContent?.trim() ??
+              "";
+            return /^API$/i.test(label);
+          });
+        if (!apiOption) {
+          throw new Error("Project option not found for API");
+        }
+        await clickAndSettle(apiOption);
+        expect(
+          within(getControlPanelShell()).getByRole("combobox", {
+            name: "Project",
+          }),
+        ).toHaveTextContent("API");
+
+        await clickAndSettle(
+          screen.getByRole("tab", { name: /Files: api/i }),
+        );
+
+        await waitFor(() => {
+          expect(
+            screen.getByRole("tab", { name: /Files: review-only/i }),
+          ).toBeInTheDocument();
+        });
+        expect(
+          within(getControlPanelShell()).getByRole("combobox", {
+            name: "Project",
+          }),
+        ).toHaveTextContent("All projects");
+        expect(
+          within(getPaneByTabName(/Files: review-only/i)).getByDisplayValue(
+            "/workspace/review-only",
+          ),
+        ).toBeInTheDocument();
+        await waitFor(() => {
+          const request = latestRequestTo("/api/fs");
+          expect(request.searchParams.get("path")).toBe("/workspace/review-only");
+          expect(request.searchParams.get("sessionId")).toBe("session-2");
+          expect(request.searchParams.has("projectId")).toBe(false);
+        });
+      } finally {
+        window.history.replaceState(window.history.state, "", originalUrl);
+        window.localStorage.clear();
+        HTMLElement.prototype.scrollIntoView = originalScrollIntoView;        restoreGlobal("fetch", originalFetch);
+        restoreGlobal("EventSource", originalEventSource);
+        restoreGlobal("ResizeObserver", originalResizeObserver);
+      }
+    });
+  });
+  it("opens Files and Git status from the control panel using the pane-local session context", async () => {
+    await withSuppressedActWarnings(async () => {
+      const originalFetch = globalThis.fetch;
+      const originalEventSource = globalThis.EventSource;
+      const originalResizeObserver = globalThis.ResizeObserver;
+      const originalUrl = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+      const fetchMock = vi.fn(
+        async (input: RequestInfo | URL, init?: RequestInit) => {
+          const requestUrl = new URL(String(input), "http://localhost");
+          if (requestUrl.pathname === "/api/state") {
+            return jsonResponse({
+              revision: 1,
+              projects: [
+                {
+                  id: "project-termal",
+                  name: "TermAl",
+                  rootPath: "/projects/termal",
+                },
+                {
+                  id: "project-api",
+                  name: "API",
+                  rootPath: "/projects/api",
+                },
+              ],
+              sessions: [
+                makeSession("session-1", {
+                  name: "Main",
+                  projectId: "project-termal",
+                  workdir: "/projects/termal",
+                }),
+                makeSession("session-2", {
+                  name: "Review",
+                  projectId: "project-api",
+                  workdir: "/projects/api",
+                }),
+              ],
+            });
+          }
+
+          if (requestUrl.pathname === "/api/fs") {
+            const path = requestUrl.searchParams.get("path") ?? "";
+            const segments = path.split("/").filter(Boolean);
+            const name = segments[segments.length - 1] ?? "workspace";
+            return jsonResponse({
+              entries: [],
+              name,
+              path,
+            });
+          }
+
+          if (requestUrl.pathname === "/api/git/status") {
+            const path = requestUrl.searchParams.get("path") ?? "";
+            return jsonResponse({
+              ahead: 0,
+              behind: 0,
+              branch: "main",
+              files: [],
+              isClean: true,
+              repoRoot: path,
+              upstream: "origin/main",
+              workdir: path,
+            });
+          }
+
+          if (requestUrl.pathname.startsWith("/api/workspaces/")) {
+            if ((init?.method ?? "GET").toUpperCase() === "PUT") {
+              return jsonResponse({ ok: true });
+            }
+
+            return new Response("", { status: 404 });
+          }
+
+          throw new Error(
+            `Unexpected fetch: ${requestUrl.pathname}${requestUrl.search}`,
+          );
+        },
+      );
+
+      function getControlPanelShell() {
+        const controlPanelShell = document.querySelector(
+          ".control-panel-shell",
+        );
+        if (!(controlPanelShell instanceof HTMLDivElement)) {
+          throw new Error("Control panel shell not found");
+        }
+
+        return controlPanelShell;
+      }
+
+      function latestRequestTo(pathname: string) {
+        const requests = fetchMock.mock.calls
+          .map(([input]) => new URL(String(input), "http://localhost"))
+          .filter((requestUrl) => requestUrl.pathname === pathname);
+        const request = requests[requests.length - 1];
+        if (!request) {
+          throw new Error(`No request captured for ${pathname}`);
+        }
+
+        return request;
+      }
+
+      window.history.replaceState(
+        window.history.state,
+        "",
+        "/?workspace=test-pane-local-control-panel-files-git",
+      );
+      window.localStorage.clear();
+      window.localStorage.setItem(
+        "termal-workspace-layout:test-pane-local-control-panel-files-git",
+        JSON.stringify({
+          controlPanelSide: "left",
+          workspace: {
+            root: {
+              id: "split-root",
+              type: "split",
+              direction: "row",
+              ratio: 0.22,
+              first: {
+                type: "pane",
+                paneId: "pane-control",
+              },
+              second: {
+                id: "split-content",
+                type: "split",
+                direction: "row",
+                ratio: 0.5,
+                first: {
+                  type: "pane",
+                  paneId: "pane-main",
+                },
+                second: {
+                  type: "pane",
+                  paneId: "pane-review",
+                },
+              },
+            },
+            panes: [
+              {
+                id: "pane-control",
+                tabs: [
+                  {
+                    id: "tab-control",
+                    kind: "controlPanel",
+                    originSessionId: null,
+                  },
+                ],
+                activeTabId: "tab-control",
+                activeSessionId: null,
+                viewMode: "controlPanel",
+                lastSessionViewMode: "session",
+                sourcePath: null,
+              },
+              {
+                id: "pane-main",
+                tabs: [
+                  {
+                    id: "tab-main",
+                    kind: "session",
+                    sessionId: "session-1",
+                  },
+                ],
+                activeTabId: "tab-main",
+                activeSessionId: "session-1",
+                viewMode: "session",
+                lastSessionViewMode: "session",
+                sourcePath: null,
+              },
+              {
+                id: "pane-review",
+                tabs: [
+                  {
+                    id: "tab-review",
+                    kind: "session",
+                    sessionId: "session-2",
+                  },
+                ],
+                activeTabId: "tab-review",
+                activeSessionId: "session-2",
+                viewMode: "session",
+                lastSessionViewMode: "session",
+                sourcePath: null,
+              },
+            ],
+            activePaneId: "pane-review",
+          },
+        }),
+      );
+
+      vi.stubGlobal("fetch", fetchMock);
+      vi.stubGlobal(
+        "EventSource",
+        EventSourceMock as unknown as typeof EventSource,
+      );
+      vi.stubGlobal(
+        "ResizeObserver",
+        ResizeObserverMock as unknown as typeof ResizeObserver,
+      );
+      const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
+      HTMLElement.prototype.scrollIntoView = vi.fn();
+
+      try {
+        await renderApp();
+        const eventSource = latestEventSource();
+        expect(eventSource).toBeTruthy();
+        act(() => {
+          eventSource.dispatchError();
+        });
+        await settleAsyncUi();
+
+        const controlPanelShell = getControlPanelShell();
+
+        expect(screen.queryByRole("tab", { name: /Files: termal/i })).toBeNull();
+        expect(screen.queryByRole("tab", { name: /Files: api/i })).toBeNull();
+
+        await clickAndSettle(
+          within(controlPanelShell).getByRole("button", { name: "Files" }),
+        );
+        await clickAndSettle(
+          within(controlPanelShell).getByTitle(
+            "Open tab or drag it into the workspace",
+          ),
+        );
+
+        await waitFor(() => {
+          expect(
+            screen.getByRole("tab", { name: /Files: termal/i }),
+          ).toBeInTheDocument();
+        });
+        expect(screen.queryByRole("tab", { name: /Files: api/i })).toBeNull();
+        await waitFor(() => {
+          const request = latestRequestTo("/api/fs");
+          expect(request.searchParams.get("path")).toBe("/projects/termal");
+          expect(request.searchParams.get("sessionId")).toBe("session-1");
+          expect(request.searchParams.get("projectId")).toBe("project-termal");
+        });
+
+        await clickAndSettle(
+          within(controlPanelShell).getByRole("button", { name: "Git status" }),
+        );
+        await clickAndSettle(
+          within(controlPanelShell).getByTitle(
+            "Open tab or drag it into the workspace",
+          ),
+        );
+
+        await waitFor(() => {
+          expect(
+            screen.getByRole("tab", { name: /Git: termal/i }),
+          ).toBeInTheDocument();
+        });
+        expect(screen.queryByRole("tab", { name: /Git: api/i })).toBeNull();
+        await waitFor(() => {
+          const request = latestRequestTo("/api/git/status");
+          expect(request.searchParams.get("path")).toBe("/projects/termal");
+          expect(request.searchParams.get("sessionId")).toBe("session-1");
+          expect(request.searchParams.get("projectId")).toBe("project-termal");
+        });
+      } finally {
+        window.history.replaceState(window.history.state, "", originalUrl);
+        window.localStorage.clear();
+        HTMLElement.prototype.scrollIntoView = originalScrollIntoView;        restoreGlobal("fetch", originalFetch);
         restoreGlobal("EventSource", originalEventSource);
         restoreGlobal("ResizeObserver", originalResizeObserver);
       }
@@ -3443,7 +4866,7 @@ describe("App", () => {
     await withSuppressedActWarnings(async () => {
       const originalEventSource = globalThis.EventSource;
       const originalResizeObserver = globalThis.ResizeObserver;
-      const fetchStateDeferred =
+      const originalUrl = `${window.location.pathname}${window.location.search}${window.location.hash}`;      const fetchStateDeferred =
         createDeferred<Awaited<ReturnType<typeof api.fetchState>>>();
       const createSessionDeferred = createDeferred<{
         sessionId: string;
@@ -3567,8 +4990,9 @@ describe("App", () => {
         });
         await settleAsyncUi();
       } finally {
-        HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
-        fetchStateSpy.mockRestore();
+        window.history.replaceState(window.history.state, "", originalUrl);
+        window.localStorage.clear();
+        HTMLElement.prototype.scrollIntoView = originalScrollIntoView;        fetchStateSpy.mockRestore();
         createSessionSpy.mockRestore();
         refreshSessionModelOptionsSpy.mockRestore();
         restoreGlobal("EventSource", originalEventSource);
@@ -3580,7 +5004,7 @@ describe("App", () => {
     await withSuppressedActWarnings(async () => {
       const originalEventSource = globalThis.EventSource;
       const originalResizeObserver = globalThis.ResizeObserver;
-      const fetchStateDeferred =
+      const originalUrl = `${window.location.pathname}${window.location.search}${window.location.hash}`;      const fetchStateDeferred =
         createDeferred<Awaited<ReturnType<typeof api.fetchState>>>();
       const updateSettingsDeferred =
         createDeferred<Awaited<ReturnType<typeof api.fetchState>>>();
@@ -3737,8 +5161,9 @@ describe("App", () => {
         });
         await settleAsyncUi();
       } finally {
-        HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
-        fetchStateSpy.mockRestore();
+        window.history.replaceState(window.history.state, "", originalUrl);
+        window.localStorage.clear();
+        HTMLElement.prototype.scrollIntoView = originalScrollIntoView;        fetchStateSpy.mockRestore();
         updateAppSettingsSpy.mockRestore();
         createSessionSpy.mockRestore();
         refreshSessionModelOptionsSpy.mockRestore();
@@ -3752,7 +5177,7 @@ describe("App", () => {
     await withSuppressedActWarnings(async () => {
       const originalEventSource = globalThis.EventSource;
       const originalResizeObserver = globalThis.ResizeObserver;
-      const fetchStateDeferred =
+      const originalUrl = `${window.location.pathname}${window.location.search}${window.location.hash}`;      const fetchStateDeferred =
         createDeferred<Awaited<ReturnType<typeof api.fetchState>>>();
       const updateSettingsDeferred =
         createDeferred<Awaited<ReturnType<typeof api.fetchState>>>();
@@ -3908,8 +5333,9 @@ describe("App", () => {
         });
         await settleAsyncUi();
       } finally {
-        HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
-        fetchStateSpy.mockRestore();
+        window.history.replaceState(window.history.state, "", originalUrl);
+        window.localStorage.clear();
+        HTMLElement.prototype.scrollIntoView = originalScrollIntoView;        fetchStateSpy.mockRestore();
         updateAppSettingsSpy.mockRestore();
         createSessionSpy.mockRestore();
         refreshSessionModelOptionsSpy.mockRestore();
@@ -3923,7 +5349,7 @@ describe("App", () => {
     await withSuppressedActWarnings(async () => {
       const originalEventSource = globalThis.EventSource;
       const originalResizeObserver = globalThis.ResizeObserver;
-      vi.stubGlobal(
+      const originalUrl = `${window.location.pathname}${window.location.search}${window.location.hash}`;      vi.stubGlobal(
         "EventSource",
         EventSourceMock as unknown as typeof EventSource,
       );
@@ -4036,8 +5462,9 @@ describe("App", () => {
           hostInput,
         );
       } finally {
-        HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
-        restoreGlobal("EventSource", originalEventSource);
+        window.history.replaceState(window.history.state, "", originalUrl);
+        window.localStorage.clear();
+        HTMLElement.prototype.scrollIntoView = originalScrollIntoView;        restoreGlobal("EventSource", originalEventSource);
         restoreGlobal("ResizeObserver", originalResizeObserver);
       }
     });
@@ -4047,7 +5474,7 @@ describe("App", () => {
     await withSuppressedActWarnings(async () => {
       const originalEventSource = globalThis.EventSource;
       const originalResizeObserver = globalThis.ResizeObserver;
-      const createSessionDeferred = createDeferred<{
+      const originalUrl = `${window.location.pathname}${window.location.search}${window.location.hash}`;      const createSessionDeferred = createDeferred<{
         sessionId: string;
         state: Awaited<ReturnType<typeof api.fetchState>>;
       }>();
@@ -4239,8 +5666,9 @@ describe("App", () => {
 
         await settleAsyncUi();
       } finally {
-        HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
-        createSessionSpy.mockRestore();
+        window.history.replaceState(window.history.state, "", originalUrl);
+        window.localStorage.clear();
+        HTMLElement.prototype.scrollIntoView = originalScrollIntoView;        createSessionSpy.mockRestore();
         refreshSessionModelOptionsSpy.mockRestore();
         restoreGlobal("EventSource", originalEventSource);
         restoreGlobal("ResizeObserver", originalResizeObserver);

@@ -5,6 +5,9 @@ export type DeltaApplyResult =
   | { kind: "needsResync" };
 
 export function applyDeltaToSessions(sessions: Session[], delta: DeltaEvent): DeltaApplyResult {
+  if (delta.type === "orchestratorsUpdated") {
+    return { kind: "needsResync" };
+  }
   const sessionIndex = sessions.findIndex((session) => session.id === delta.sessionId);
   if (sessionIndex === -1) {
     return { kind: "needsResync" };

@@ -31,6 +31,7 @@ export type StateResponse = {
   agentReadiness?: AgentReadiness[];
   preferences?: AppPreferences;
   projects: Project[];
+  orchestrators?: OrchestratorInstance[];
   sessions: Session[];
 };
 
@@ -414,6 +415,23 @@ export function createOrchestratorInstance(templateId: string, projectId?: strin
   });
 }
 
+export function pauseOrchestratorInstance(instanceId: string) {
+  return request<StateResponse>(`/api/orchestrators/${encodeURIComponent(instanceId)}/pause`, {
+    method: "POST",
+  });
+}
+
+export function resumeOrchestratorInstance(instanceId: string) {
+  return request<StateResponse>(`/api/orchestrators/${encodeURIComponent(instanceId)}/resume`, {
+    method: "POST",
+  });
+}
+
+export function stopOrchestratorInstance(instanceId: string) {
+  return request<StateResponse>(`/api/orchestrators/${encodeURIComponent(instanceId)}/stop`, {
+    method: "POST",
+  });
+}
 export function pickProjectRoot() {
   return request<PickProjectRootResponse>("/api/projects/pick", {
     method: "POST",

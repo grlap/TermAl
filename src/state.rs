@@ -10,7 +10,22 @@ struct AppState {
     delta_events: broadcast::Sender<String>,
     shared_codex_runtime: Arc<Mutex<Option<SharedCodexRuntime>>>,
     remote_registry: Arc<RemoteRegistry>,
+    stopping_orchestrator_ids: Arc<Mutex<HashSet<String>>>,
     inner: Arc<Mutex<StateInner>>,
+}
+
+const SESSION_NOT_RUNNING_CONFLICT_MESSAGE: &str = "session is not currently running";
+
+#[derive(Clone, Copy)]
+struct StopSessionOptions {
+    dispatch_queued_prompts_on_success: bool,
+}
+impl Default for StopSessionOptions {
+    fn default() -> Self {
+        Self {
+            dispatch_queued_prompts_on_success: true,
+        }
+    }
 }
 
 fn bootstrap_default_local_state(default_workdir: &str) -> StateInner {
@@ -78,6 +93,7 @@ impl AppState {
                     .join()
                     .expect("remote registry init thread panicked")?,
             ),
+            stopping_orchestrator_ids: Arc::new(Mutex::new(HashSet::new())),
             inner: Arc::new(Mutex::new(inner)),
         };
         state.seed_hidden_claude_spares();
@@ -753,6 +769,7 @@ impl AppState {
             agent_readiness: collect_agent_readiness(&self.default_workdir),
             preferences: inner.preferences.clone(),
             projects: inner.projects.clone(),
+            orchestrators: inner.orchestrator_instances.clone(),
             sessions: inner
                 .sessions
                 .iter()
@@ -2469,7 +2486,6 @@ impl AppState {
 
         Ok(())
     }
-
     fn note_turn_retry_if_runtime_matches(
         &self,
         session_id: &str,
@@ -2559,7 +2575,6 @@ impl AppState {
             self.commit_locked(&mut inner)?;
             has_queued_prompts
         };
-
         if should_dispatch_next {
             self.resume_pending_orchestrator_transitions()?;
             if let Some(dispatch) = self.dispatch_next_queued_turn(session_id)? {
@@ -2573,13 +2588,13 @@ impl AppState {
 
         Ok(())
     }
-
     fn finish_turn_ok_if_runtime_matches(
         &self,
         session_id: &str,
         token: &RuntimeToken,
     ) -> Result<()> {
-        let should_dispatch_next = {
+        let stopping_orchestrator_ids = self.stopping_orchestrator_ids_snapshot();
+        let (should_dispatch_next, orchestrator_delta) = {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
             let index = inner
                 .find_session_index(session_id)
@@ -2602,15 +2617,29 @@ impl AppState {
                 record.session.preview = "Turn completed.".to_owned();
             }
             let completion_revision = inner.revision.saturating_add(1);
-            schedule_orchestrator_transitions_for_completed_session(
+            let orchestrator_changed = schedule_orchestrator_transitions_for_completed_session(
                 &mut inner,
+                &stopping_orchestrator_ids,
                 session_id,
                 completion_revision,
             );
             inner.sessions[index].active_turn_start_message_count = None;
             self.commit_locked(&mut inner)?;
-            true
+            let orchestrator_delta = orchestrator_changed.then(|| {
+                (
+                    inner.revision,
+                    inner.orchestrator_instances.clone(),
+                )
+            });
+            (true, orchestrator_delta)
         };
+
+        if let Some((revision, orchestrators)) = orchestrator_delta {
+            self.publish_delta(&DeltaEvent::OrchestratorsUpdated {
+                revision,
+                orchestrators,
+            });
+        }
 
         if should_dispatch_next {
             self.resume_pending_orchestrator_transitions()?;
@@ -2623,7 +2652,6 @@ impl AppState {
 
         Ok(())
     }
-
     fn handle_runtime_exit_if_matches(
         &self,
         session_id: &str,
@@ -2970,6 +2998,14 @@ impl AppState {
     }
 
     fn stop_session(&self, session_id: &str) -> std::result::Result<StateResponse, ApiError> {
+        self.stop_session_with_options(session_id, StopSessionOptions::default())
+    }
+
+    fn stop_session_with_options(
+        &self,
+        session_id: &str,
+        options: StopSessionOptions,
+    ) -> std::result::Result<StateResponse, ApiError> {
         if self.remote_session_target(session_id)?.is_some() {
             return self.proxy_remote_stop_session(session_id);
         }
@@ -2988,7 +3024,7 @@ impl AppState {
                 record.session.status,
                 SessionStatus::Active | SessionStatus::Approval
             ) {
-                return Err(ApiError::conflict("session is not currently running"));
+                return Err(ApiError::conflict(SESSION_NOT_RUNNING_CONFLICT_MESSAGE));
             }
 
             let runtime = match &record.runtime {
@@ -2996,7 +3032,7 @@ impl AppState {
                 SessionRuntime::Codex(handle) => KillableRuntime::Codex(handle.clone()),
                 SessionRuntime::Acp(handle) => KillableRuntime::Acp(handle.clone()),
                 SessionRuntime::None => {
-                    return Err(ApiError::conflict("session is not currently running"));
+                    return Err(ApiError::conflict(SESSION_NOT_RUNNING_CONFLICT_MESSAGE));
                 }
             };
             let stop_failure_is_best_effort = runtime.stop_failure_is_best_effort();
@@ -3099,7 +3135,8 @@ impl AppState {
             }
 
             inner.sessions[index].active_turn_start_message_count = None;
-            let has_queued_prompts = !inner.sessions[index].queued_prompts.is_empty();
+            let has_queued_prompts = options.dispatch_queued_prompts_on_success
+                && !inner.sessions[index].queued_prompts.is_empty();
             self.commit_locked(&mut inner).map_err(|err| {
                 ApiError::internal(format!("failed to persist session state: {err:#}"))
             })?;

@@ -552,9 +552,15 @@ export type ParallelAgentsUpdateEvent = {
   preview: string;
 };
 
+export type OrchestratorsUpdatedEvent = {
+  type: "orchestratorsUpdated";
+  revision: number;
+  orchestrators: OrchestratorInstance[];
+};
 export type DeltaEvent =
   | MessageCreatedEvent
   | TextDeltaEvent
   | TextReplaceEvent
   | CommandUpdateEvent
-  | ParallelAgentsUpdateEvent;
+  | ParallelAgentsUpdateEvent
+  | OrchestratorsUpdatedEvent;

@@ -80,6 +80,7 @@ import {
   resolveProjectRemoteId,
 } from "./remotes";
 import { resolvePaneScrollCommand } from "./pane-keyboard";
+import { BackendConnectionStatus, WorkspaceSwitcher } from "./workspace-shell-controls";
 import { AgentSessionPanel, AgentSessionPanelFooter } from "./panels/AgentSessionPanel";
 import {
   ControlPanelSectionIcon,
@@ -138,6 +139,7 @@ import type {
   ParallelAgentsMessage,
   SubagentResultMessage,
   PendingPrompt,
+  OrchestratorInstance,
   Project,
   RemoteConfig,
   SandboxMode,
@@ -760,7 +762,7 @@ function sessionModelOptionDescription(option: SessionModelOption | null) {
     parts.push(capabilitySummary);
   }
 
-  return parts.join(" ");
+  return parts.join(" \u00b7 ");
 }
 
 function manualSessionModelPlaceholder(agent: AgentType): string {
@@ -1076,6 +1078,7 @@ export default function App() {
   const [workspaceViewId] = useState(() => ensureWorkspaceViewId());
   const [projects, setProjects] = useState<Project[]>([]);
   const [sessions, setSessions] = useState<Session[]>([]);
+  const [orchestrators, setOrchestrators] = useState<OrchestratorInstance[]>([]);
   const [codexState, setCodexState] = useState<CodexState>({});
   const [agentReadiness, setAgentReadiness] = useState<AgentReadiness[]>([]);
   const initialWorkspaceBootstrapRef = useRef<ReturnType<typeof createInitialWorkspaceBootstrap> | null>(
@@ -1371,12 +1374,6 @@ export default function App() {
     ? null
     : agentReadinessByAgent.get(newSessionAgent) ?? null;
   const createSessionBlocked = createSessionAgentReadiness?.blocking ?? false;
-  const derivedControlPanelWorkspaceRoot = resolveControlPanelWorkspaceRoot(
-    selectedProject,
-    activeSession?.workdir ?? null,
-  );
-  const derivedControlPanelFilesystemRoot = derivedControlPanelWorkspaceRoot;
-  const derivedControlPanelGitWorkdir = derivedControlPanelWorkspaceRoot;
   const projectScopedSessions = useMemo(() => {
     if (!selectedProject) {
       return sessions;
@@ -1384,17 +1381,56 @@ export default function App() {
 
     return sessions.filter((session) => session.projectId === selectedProject.id);
   }, [selectedProject, sessions]);
-  const controlPanelSessionId = useMemo(() => {
-    if (!selectedProject) {
-      return activeSession?.id ?? sessions[0]?.id ?? null;
-    }
-
-    if (activeSession?.projectId === selectedProject.id) {
-      return activeSession.id;
-    }
-
-    return projectScopedSessions[0]?.id ?? null;
-  }, [activeSession?.id, activeSession?.projectId, projectScopedSessions, selectedProject, sessions]);
+  const dockedControlPanelPane =
+    workspace.panes.find((pane) => pane.tabs.some((tab) => tab.kind === "controlPanel")) ?? null;
+  const dockedControlPanelActiveTab = dockedControlPanelPane
+    ? (dockedControlPanelPane.tabs.find((tab) => tab.id === dockedControlPanelPane.activeTabId) ??
+      dockedControlPanelPane.tabs[0] ??
+      null)
+    : null;
+  const dockedControlPanelOriginSession =
+    dockedControlPanelActiveTab &&
+    "originSessionId" in dockedControlPanelActiveTab &&
+    dockedControlPanelActiveTab.originSessionId
+      ? (sessionLookup.get(dockedControlPanelActiveTab.originSessionId) ?? null)
+      : null;
+  const dockedControlPanelPaneSession = dockedControlPanelPane?.activeSessionId
+    ? (sessionLookup.get(dockedControlPanelPane.activeSessionId) ?? null)
+    : null;
+  const dockedControlPanelNearestSessionPaneId = dockedControlPanelPane
+    ? findNearestSessionPaneId(workspace, dockedControlPanelPane.id)
+    : null;
+  const dockedControlPanelNearestSessionPane = dockedControlPanelNearestSessionPaneId
+    ? (paneLookup.get(dockedControlPanelNearestSessionPaneId) ?? null)
+    : null;
+  const dockedControlPanelNearestSessionTab = dockedControlPanelNearestSessionPane
+    ? (dockedControlPanelNearestSessionPane.tabs.find((tab) => tab.id === dockedControlPanelNearestSessionPane.activeTabId) ??
+      dockedControlPanelNearestSessionPane.tabs[0] ??
+      null)
+    : null;
+  const dockedControlPanelNearestSession =
+    dockedControlPanelNearestSessionTab?.kind === "session"
+      ? (sessionLookup.get(dockedControlPanelNearestSessionTab.sessionId) ?? null)
+      : null;
+  const dockedControlPanelSessionCandidates = [
+    dockedControlPanelOriginSession,
+    dockedControlPanelPaneSession,
+    dockedControlPanelNearestSession,
+    activeSession,
+  ].filter((session): session is Session => Boolean(session));
+  const controlPanelContextSession =
+    selectedProject
+      ? (dockedControlPanelSessionCandidates.find((session) => session.projectId === selectedProject.id) ??
+        projectScopedSessions[0] ??
+        null)
+      : (dockedControlPanelSessionCandidates[0] ?? sessions[0] ?? null);
+  const derivedControlPanelWorkspaceRoot = resolveControlPanelWorkspaceRoot(
+    selectedProject,
+    controlPanelContextSession?.workdir ?? null,
+  );
+  const derivedControlPanelFilesystemRoot = derivedControlPanelWorkspaceRoot;
+  const derivedControlPanelGitWorkdir = derivedControlPanelWorkspaceRoot;
+  const controlPanelSessionId = controlPanelContextSession?.id ?? null;
   const sessionFilterCounts = useMemo(
     () => countSessionsByFilter(projectScopedSessions),
     [projectScopedSessions],
@@ -1955,6 +1991,7 @@ export default function App() {
     setAgentReadiness(nextState.agentReadiness ?? []);
     syncPreferencesFromState(nextState);
     setProjects(nextState.projects ?? []);
+    setOrchestrators(nextState.orchestrators ?? []);
     adoptSessions(nextState.sessions, options);
     if (options?.openSessionId) {
       const openedSession = nextState.sessions.find((session) => session.id === options.openSessionId);
@@ -2161,6 +2198,15 @@ export default function App() {
         }
         if (revisionAction === "resync") {
           requestStateResync();
+          return;
+        }
+
+        if (delta.type === "orchestratorsUpdated") {
+          latestStateRevisionRef.current = delta.revision;
+          startTransition(() => {
+            setOrchestrators(delta.orchestrators);
+          });
+          setRequestError(null);
           return;
         }
 
@@ -3892,26 +3938,78 @@ export default function App() {
 
     if (tab?.kind === "controlPanel") {
       const nearestSessionPaneId = findNearestSessionPaneId(workspace, paneId);
-      if (nearestSessionPaneId) {
-        const nearestSessionPane = paneLookup.get(nearestSessionPaneId);
-        const nearestSessionTab = nearestSessionPane?.tabs.find((candidate) => candidate.id === nearestSessionPane.activeTabId);
-        if (nearestSessionTab?.kind === "session") {
-          const nearestSession = sessionLookup.get(nearestSessionTab.sessionId);
-          if (nearestSession) {
-            const projectId = nearestSession.projectId ?? null;
-            if (projectId && projectLookup.has(projectId)) {
-              setSelectedProjectId(projectId);
-            }
-          }
-        }
+      const nearestSessionPane = nearestSessionPaneId
+        ? (paneLookup.get(nearestSessionPaneId) ?? null)
+        : null;
+      const nearestSessionTab = nearestSessionPane
+        ? (nearestSessionPane.tabs.find((candidate) => candidate.id === nearestSessionPane.activeTabId) ??
+          nearestSessionPane.tabs[0] ??
+          null)
+        : null;
+      const nearestSession =
+        nearestSessionTab?.kind === "session"
+          ? (sessionLookup.get(nearestSessionTab.sessionId) ?? null)
+          : null;
+      if (nearestSession) {
+        const projectId = nearestSession.projectId ?? null;
+        setSelectedProjectId(
+          projectId && projectLookup.has(projectId)
+            ? projectId
+            : ALL_PROJECTS_FILTER_ID,
+        );
       }
 
-      setWorkspace((current) => activatePane(current, paneId, tabId));
+      setWorkspace((current) => {
+        const next = activatePane(current, paneId, tabId);
+        if (!nearestSession) {
+          return next;
+        }
+
+        return rescopeControlSurfacePane(
+          next,
+          paneId,
+          nearestSession.id,
+          nearestSession.projectId ?? null,
+          nearestSession.workdir ?? null,
+        );
+      });
       return;
     }
 
     if (tab && CONTROL_SURFACE_KINDS.has(tab.kind)) {
-      setWorkspace((current) => activatePane(current, paneId, tabId));
+      const nearestSessionPaneId = findNearestSessionPaneId(workspace, paneId);
+      const nearestSessionPane = nearestSessionPaneId ? (paneLookup.get(nearestSessionPaneId) ?? null) : null;
+      const nearestSessionTab = nearestSessionPane
+        ? (nearestSessionPane.tabs.find((candidate) => candidate.id === nearestSessionPane.activeTabId) ??
+          nearestSessionPane.tabs[0] ??
+          null)
+        : null;
+      const nearestSession =
+        nearestSessionTab?.kind === "session"
+          ? (sessionLookup.get(nearestSessionTab.sessionId) ?? null)
+          : null;
+      if (nearestSession) {
+        setSelectedProjectId(
+          nearestSession.projectId && projectLookup.has(nearestSession.projectId)
+            ? nearestSession.projectId
+            : ALL_PROJECTS_FILTER_ID,
+        );
+      }
+
+      setWorkspace((current) => {
+        const next = activatePane(current, paneId, tabId);
+        if (!nearestSession) {
+          return next;
+        }
+
+        return rescopeControlSurfacePane(
+          next,
+          paneId,
+          nearestSession.id,
+          nearestSession.projectId ?? null,
+          nearestSession.workdir ?? null,
+        );
+      });
       return;
     }
 
@@ -4027,7 +4125,7 @@ export default function App() {
     event.dataTransfer.effectAllowed = "copyMove";
     attachWorkspaceTabDragData(event.dataTransfer, drag);
     launcherDraggedTabRef.current = drag;
-    // Defer the React state update — Chrome cancels in-progress drags when DOM
+    // Defer the React state update - Chrome cancels in-progress drags when DOM
     // mutations happen during or immediately after dragstart.  setTimeout pushes
     // the re-render to the next task, after Chrome has committed the drag.
     setTimeout(() => setLauncherDraggedTab(drag), 0);
@@ -4985,6 +5083,8 @@ export default function App() {
         case "orchestrators":
           return (
             <OrchestratorTemplateLibraryPanel
+              orchestrators={orchestrators}
+              onStateUpdated={handleOrchestratorStateUpdated}
               onNewCanvas={() =>
                 handleOpenOrchestratorCanvasTab(
                   paneId,
@@ -11909,11 +12009,11 @@ function parallelAgentsSummary(message: ParallelAgentsMessage) {
       parts.push(`${errorCount} failed`);
     }
     parts.push(`${activeCount} active`);
-    return parts.join(" · ");
+    return parts.join(" \u00b7 ");
   }
 
   if (errorCount > 0 && completedCount > 0) {
-    return `${completedCount} completed · ${errorCount} failed`;
+    return `${completedCount} completed \u00b7 ${errorCount} failed`;
   }
   if (errorCount > 0) {
     return `${errorCount} failed`;
@@ -12013,7 +12113,7 @@ function ParallelAgentsCard({
               >
                 <div className="parallel-agent-line">
                   <span className="parallel-agent-branch" aria-hidden="true">
-                    {isLast ? "└" : "├"}
+                    {isLast ? "\u2514" : "\u251c"}
                   </span>
                   <div className="parallel-agent-copy">
                     <div className="parallel-agent-title-row">
@@ -12028,7 +12128,7 @@ function ParallelAgentsCard({
                     </div>
                     <div className="parallel-agent-detail-row">
                       <span className="parallel-agent-branch-child" aria-hidden="true">
-                        {isLast ? " " : "│"}
+                        {isLast ? " " : "\u2502"}
                       </span>
                       <span className="parallel-agent-detail">
                         {renderHighlightedText(
@@ -13640,226 +13740,6 @@ function readNavigatorOnline() {
   }
 
   return navigator.onLine !== false;
-}
-
-function WorkspaceSwitcher({
-  currentWorkspaceId,
-  error,
-  isLoading,
-  isOpen,
-  summaries,
-  switcherRef,
-  onOpenNewWorkspaceHere,
-  onOpenNewWorkspaceWindow,
-  onOpenWorkspace,
-  onToggle,
-}: {
-  currentWorkspaceId: string;
-  error: string | null;
-  isLoading: boolean;
-  isOpen: boolean;
-  summaries: readonly WorkspaceLayoutSummary[];
-  switcherRef: RefObject<HTMLDivElement>;
-  onOpenNewWorkspaceHere: () => void;
-  onOpenNewWorkspaceWindow: () => void;
-  onOpenWorkspace: (workspaceId: string) => void;
-  onToggle: () => void;
-}) {
-  const visibleSummaries = useMemo(() => {
-    const byId = new Map(summaries.map((summary) => [summary.id, summary]));
-    if (!byId.has(currentWorkspaceId)) {
-      byId.set(currentWorkspaceId, {
-        id: currentWorkspaceId,
-        revision: 0,
-        updatedAt: "Current browser view",
-        controlPanelSide: "left",
-      });
-    }
-
-    return [...byId.values()];
-  }, [currentWorkspaceId, summaries]);
-
-  return (
-    <div ref={switcherRef} className="workspace-switcher">
-      <button
-        className={`ghost-button workspace-switcher-trigger ${isOpen ? "open" : ""}`}
-        type="button"
-        aria-expanded={isOpen}
-        aria-haspopup="dialog"
-        aria-label={`Workspace ${currentWorkspaceId}`}
-        onClick={onToggle}
-      >
-        <span className="workspace-switcher-trigger-copy">
-          <span className="workspace-switcher-trigger-label">Workspace</span>
-          <span className="workspace-switcher-trigger-value">
-            {formatWorkspaceSwitcherLabel(currentWorkspaceId)}
-          </span>
-        </span>
-        <span className={`combo-trigger-caret ${isOpen ? "open" : ""}`} aria-hidden="true">
-          v
-        </span>
-      </button>
-
-      {isOpen ? (
-        <div className="workspace-switcher-menu panel" role="dialog" aria-label="Workspace switcher">
-          <div className="workspace-switcher-menu-header">
-            <div>
-              <div className="card-label">Workspace</div>
-              <h3>Switch browser layout</h3>
-            </div>
-            <span className="workspace-switcher-current-id" title={currentWorkspaceId}>
-              {currentWorkspaceId}
-            </span>
-          </div>
-
-          <div className="workspace-switcher-actions">
-            <button className="ghost-button" type="button" onClick={onOpenNewWorkspaceHere}>
-              New here
-            </button>
-            <button className="ghost-button" type="button" onClick={onOpenNewWorkspaceWindow}>
-              New window
-            </button>
-          </div>
-
-          <div className="workspace-switcher-list" role="list">
-            {visibleSummaries.map((summary) => {
-              const isCurrent = summary.id === currentWorkspaceId;
-              return (
-                <button
-                  key={summary.id}
-                  className={`workspace-switcher-item ${isCurrent ? "selected" : ""}`}
-                  type="button"
-                  role="listitem"
-                  onClick={() => onOpenWorkspace(summary.id)}
-                >
-                  <span className="workspace-switcher-item-copy">
-                    <span className="workspace-switcher-item-title-row">
-                      <span className="workspace-switcher-item-title">
-                        {formatWorkspaceSwitcherLabel(summary.id)}
-                      </span>
-                      {isCurrent ? (
-                        <span className="workspace-switcher-item-status">Current</span>
-                      ) : null}
-                    </span>
-                    <span className="workspace-switcher-item-meta" title={summary.id}>
-                      {summary.id}
-                    </span>
-                    <span className="workspace-switcher-item-meta">
-                      {summary.updatedAt}
-                    </span>
-                  </span>
-                </button>
-              );
-            })}
-          </div>
-
-          {isLoading ? (
-            <p className="workspace-switcher-status">Loading saved workspaces…</p>
-          ) : null}
-          {error ? <p className="workspace-switcher-error">{error}</p> : null}
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
-function formatWorkspaceSwitcherLabel(workspaceId: string) {
-  const normalized = workspaceId.trim();
-  if (normalized.startsWith("workspace-") && normalized.length > "workspace-".length + 8) {
-    return normalized.slice("workspace-".length, "workspace-".length + 8);
-  }
-
-  return normalized;
-}
-
-function describeBackendConnectionState(state: BackendConnectionState) {
-  switch (state) {
-    case "connecting":
-      return {
-        detail: "Connecting to the TermAl backend.",
-        icon: "spinner" as const,
-        label: "Connecting",
-        tone: "active" as const,
-      };
-    case "connected":
-      return {
-        detail: "Live updates are connected.",
-        icon: "connected" as const,
-        label: "Connected",
-        tone: "idle" as const,
-      };
-    case "reconnecting":
-      return {
-        detail: "Live updates are disconnected. Trying to reconnect.",
-        icon: "spinner" as const,
-        label: "Reconnecting",
-        tone: "active" as const,
-      };
-    case "offline":
-      return {
-        detail: "The browser is offline or cannot reach the backend.",
-        icon: "offline" as const,
-        label: "Offline",
-        tone: "error" as const,
-      };
-  }
-}
-
-function BackendConnectionStatus({ state }: { state: BackendConnectionState }) {
-  const descriptor = describeBackendConnectionState(state);
-
-  return (
-    <div className="workspace-connection-status" role="status" aria-live="polite" title={descriptor.detail}>
-      <span className={`chip chip-status chip-status-${descriptor.tone} workspace-connection-chip`}>
-        {descriptor.icon === "spinner" ? (
-          <span className="activity-spinner workspace-connection-spinner" aria-hidden="true" />
-        ) : (
-          <BackendConnectionIcon state={descriptor.icon} />
-        )}
-        <span className="visually-hidden">{descriptor.label}</span>
-      </span>
-    </div>
-  );
-}
-
-function BackendConnectionIcon({ state }: { state: "connected" | "offline" }) {
-  if (state === "connected") {
-    return (
-      <span className="workspace-connection-icon" aria-hidden="true">
-        <svg viewBox="0 0 16 16" focusable="false" aria-hidden="true">
-          <path
-            d="m4 8.2 2.2 2.2L12 4.6"
-            fill="none"
-            stroke="currentColor"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            strokeWidth="1.8"
-          />
-        </svg>
-      </span>
-    );
-  }
-
-  return (
-    <span className="workspace-connection-icon" aria-hidden="true">
-      <svg viewBox="0 0 16 16" focusable="false" aria-hidden="true">
-        <path
-          d="M4.5 4.5 11.5 11.5"
-          fill="none"
-          stroke="currentColor"
-          strokeLinecap="round"
-          strokeWidth="1.8"
-        />
-        <path
-          d="M11.5 4.5 4.5 11.5"
-          fill="none"
-          stroke="currentColor"
-          strokeLinecap="round"
-          strokeWidth="1.8"
-        />
-      </svg>
-    </span>
-  );
 }
 
 function primaryModifierLabel() {
