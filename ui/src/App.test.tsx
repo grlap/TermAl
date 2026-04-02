@@ -216,6 +216,13 @@ function latestEventSource(): EventSourceMock {
   return eventSource;
 }
 
+function setDocumentVisibilityState(value: DocumentVisibilityState) {
+  Object.defineProperty(document, "visibilityState", {
+    configurable: true,
+    value,
+  });
+}
+
 async function clickAndSettle(target: HTMLElement) {
   await act(async () => {
     fireEvent.click(target);
@@ -1405,6 +1412,135 @@ describe("App", () => {
         screen.queryByText("Waiting for the next chunk of output..."),
       ).not.toBeInTheDocument();
     } finally {
+      HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
+      restoreGlobal("fetch", originalFetch);
+      restoreGlobal("EventSource", originalEventSource);
+      restoreGlobal("ResizeObserver", originalResizeObserver);
+    }
+  });
+  it("resyncs when the page becomes visible again after a live reply finishes while hidden", async () => {
+    const originalFetch = globalThis.fetch;
+    const originalEventSource = globalThis.EventSource;
+    const originalResizeObserver = globalThis.ResizeObserver;
+    const originalVisibilityState = document.visibilityState;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/api/state") {
+        return jsonResponse({
+          revision: 2,
+          projects: [],
+          sessions: [
+            makeSession("session-1", {
+              name: "Codex Session",
+              status: "idle",
+              preview: "Here while hidden.",
+              messages: [
+                {
+                  id: "message-user-1",
+                  type: "text",
+                  timestamp: "10:00",
+                  author: "you",
+                  text: "test",
+                },
+                {
+                  id: "message-assistant-1",
+                  type: "text",
+                  timestamp: "10:01",
+                  author: "assistant",
+                  text: "Here while hidden.",
+                },
+              ],
+            }),
+          ],
+        });
+      }
+
+      throw new Error(`Unexpected fetch: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal(
+      "EventSource",
+      EventSourceMock as unknown as typeof EventSource,
+    );
+    vi.stubGlobal(
+      "ResizeObserver",
+      ResizeObserverMock as unknown as typeof ResizeObserver,
+    );
+    const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
+    HTMLElement.prototype.scrollIntoView = vi.fn();
+    setDocumentVisibilityState("visible");
+    try {
+      await renderApp();
+      const eventSource = latestEventSource();
+      act(() => {
+        eventSource.dispatchOpen();
+        eventSource.dispatchNamedEvent("state", {
+          revision: 1,
+          projects: [],
+          sessions: [
+            makeSession("session-1", {
+              name: "Codex Session",
+              status: "active",
+              preview: "test",
+              messages: [
+                {
+                  id: "message-user-1",
+                  type: "text",
+                  timestamp: "10:00",
+                  author: "you",
+                  text: "test",
+                },
+              ],
+            }),
+          ],
+        });
+      });
+
+      await clickAndSettle(
+        await screen.findByRole("button", { name: "Sessions" }),
+      );
+      const sessionList = document.querySelector(".session-list");
+      if (!(sessionList instanceof HTMLDivElement)) {
+        throw new Error("Session list not found");
+      }
+
+      const sessionRowLabel = await within(sessionList).findByText("Codex Session");
+      const sessionRowButton = sessionRowLabel.closest("button");
+      if (!sessionRowButton) {
+        throw new Error("Session row button not found");
+      }
+
+      await clickAndSettle(sessionRowButton);
+      await screen.findByText("Waiting for the next chunk of output...");
+      fetchMock.mockClear();
+
+      act(() => {
+        setDocumentVisibilityState("hidden");
+        document.dispatchEvent(new Event("visibilitychange"));
+      });
+
+      expect(
+        fetchMock.mock.calls.some(([url]) => String(url) === "/api/state"),
+      ).toBe(false);
+
+      act(() => {
+        setDocumentVisibilityState("visible");
+        document.dispatchEvent(new Event("visibilitychange"));
+      });
+
+      await waitFor(() => {
+        expect(
+          fetchMock.mock.calls.some(([url]) => String(url) === "/api/state"),
+        ).toBe(true);
+      });
+      await waitFor(() => {
+        expect(screen.getAllByText("Here while hidden.").length).toBeGreaterThan(0);
+      });
+      expect(
+        screen.queryByText("Waiting for the next chunk of output..."),
+      ).not.toBeInTheDocument();
+    } finally {
+      setDocumentVisibilityState(originalVisibilityState);
       HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
       restoreGlobal("fetch", originalFetch);
       restoreGlobal("EventSource", originalEventSource);
@@ -5888,4 +6024,7 @@ describe("App", () => {
     expect(secondAttempt.warning).toBeNull();
   });
 });
+
+
+
 

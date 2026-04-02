@@ -2074,6 +2074,7 @@ export default function App() {
   useEffect(() => {
     let cancelled = false;
     let reconnectStateResyncTimeoutId: ReturnType<typeof window.setTimeout> | null = null;
+    let shouldResyncOnResume = false;
     const eventSource = new EventSource("/api/events");
 
     function clearReconnectStateResyncTimeout() {
@@ -2155,6 +2156,32 @@ export default function App() {
           stateResyncInFlightRef.current = false;
         }
       })();
+    }
+
+    function hasPotentiallyStaleLiveSession() {
+      return sessionsRef.current.some((session) => session.status !== "idle");
+    }
+
+    function markResumeResyncIfNeeded() {
+      if (latestStateRevisionRef.current === null) {
+        return;
+      }
+
+      shouldResyncOnResume = hasPotentiallyStaleLiveSession();
+    }
+
+    function resumeStateIfNeeded() {
+      if (
+        cancelled ||
+        !shouldResyncOnResume ||
+        !readNavigatorOnline() ||
+        latestStateRevisionRef.current === null
+      ) {
+        return;
+      }
+
+      shouldResyncOnResume = false;
+      requestStateResync({ allowAuthoritativeRollback: true });
     }
 
     function handleStateEvent(event: MessageEvent<string>) {
@@ -2266,9 +2293,49 @@ export default function App() {
       scheduleReconnectStateResync();
     };
 
+    function handleWindowBlur() {
+      markResumeResyncIfNeeded();
+    }
+
+    function handlePageHide() {
+      markResumeResyncIfNeeded();
+    }
+
+    function handlePageShow() {
+      resumeStateIfNeeded();
+    }
+
+    function handleWindowFocus() {
+      if (typeof document !== "undefined" && document.visibilityState === "hidden") {
+        return;
+      }
+
+      resumeStateIfNeeded();
+    }
+
+    function handleVisibilityChange() {
+      if (document.visibilityState === "hidden") {
+        markResumeResyncIfNeeded();
+        return;
+      }
+
+      resumeStateIfNeeded();
+    }
+
+    window.addEventListener("blur", handleWindowBlur);
+    window.addEventListener("focus", handleWindowFocus);
+    window.addEventListener("pagehide", handlePageHide);
+    window.addEventListener("pageshow", handlePageShow);
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+
     return () => {
       cancelled = true;
       clearReconnectStateResyncTimeout();
+      window.removeEventListener("blur", handleWindowBlur);
+      window.removeEventListener("focus", handleWindowFocus);
+      window.removeEventListener("pagehide", handlePageHide);
+      window.removeEventListener("pageshow", handlePageShow);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
       eventSource.removeEventListener("state", handleStateEvent as EventListener);
       eventSource.removeEventListener("delta", handleDeltaEvent as EventListener);
       eventSource.close();
@@ -14111,3 +14178,6 @@ function dropLabelForPlacement(placement: TabDropPlacement) {
       return "Bottom";
   }
 }
+
+
+
