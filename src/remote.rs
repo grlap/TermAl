@@ -1619,6 +1619,7 @@ fn upsert_remote_proxy_session_record(
         remote_session_id: Some(remote_session.id.clone()),
         runtime: SessionRuntime::None,
         runtime_reset_required: false,
+        orchestrator_auto_dispatch_blocked: false,
         runtime_stop_in_progress: false,
         deferred_stop_callbacks: Vec::new(),
         hidden: false,

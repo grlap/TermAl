@@ -10,8 +10,13 @@ fn load_orchestrator_template_store(path: &FsPath) -> Result<OrchestratorTemplat
     let raw = fs::read(path).with_context(|| format!("failed to read `{}`", path.display()))?;
     let encoded: Value = serde_json::from_slice(&raw)
         .with_context(|| format!("failed to parse `{}`", path.display()))?;
-    let mut store: OrchestratorTemplateStore = serde_json::from_value(encoded)
-        .with_context(|| format!("failed to deserialize orchestrator templates from `{}`", path.display()))?;
+    let mut store: OrchestratorTemplateStore =
+        serde_json::from_value(encoded).with_context(|| {
+            format!(
+                "failed to deserialize orchestrator templates from `{}`",
+                path.display()
+            )
+        })?;
     store.normalize();
     Ok(store)
 }
@@ -36,6 +41,10 @@ fn stamp_orchestrator_template_now() -> String {
 
 fn default_next_orchestrator_template_number() -> usize {
     1
+}
+
+fn is_false(value: &bool) -> bool {
+    !*value
 }
 
 const MAX_ORCHESTRATOR_TEMPLATE_SESSIONS: usize = 50;
@@ -592,6 +601,12 @@ struct OrchestratorInstance {
     error_message: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     completed_at: Option<String>,
+    #[serde(default, skip_serializing_if = "is_false")]
+    stop_in_progress: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    active_session_ids_during_stop: Option<Vec<String>>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    stopped_session_ids_during_stop: Vec<String>,
 }
 
 #[derive(Deserialize)]
@@ -623,6 +638,16 @@ struct CreateOrchestratorInstanceResponse {
 
 impl StateInner {
     fn normalize_orchestrator_instances(&mut self) {
+        let persisted_non_running_session_ids = HashSet::new();
+        self.normalize_orchestrator_instances_with_persisted_non_running(
+            &persisted_non_running_session_ids,
+        );
+    }
+
+    fn normalize_orchestrator_instances_with_persisted_non_running(
+        &mut self,
+        persisted_non_running_session_ids: &HashSet<String>,
+    ) {
         let available_session_ids = self
             .sessions
             .iter()
@@ -632,6 +657,7 @@ impl StateInner {
         self.orchestrator_instances
             .retain(|instance| !instance.id.trim().is_empty());
 
+        let mut recovered_stop_in_progress_session_ids = HashSet::new();
         for instance in &mut self.orchestrator_instances {
             instance.template_id = instance.template_id.trim().to_owned();
             instance.project_id = instance.project_id.trim().to_owned();
@@ -642,8 +668,69 @@ impl StateInner {
                 available_session_ids.contains(&transition.source_session_id)
                     && available_session_ids.contains(&transition.destination_session_id)
             });
+            if let Some(active_session_ids_during_stop) =
+                instance.active_session_ids_during_stop.as_mut()
+            {
+                active_session_ids_during_stop
+                    .retain(|session_id| available_session_ids.contains(session_id));
+                active_session_ids_during_stop.sort();
+                active_session_ids_during_stop.dedup();
+            }
+            instance
+                .stopped_session_ids_during_stop
+                .retain(|session_id| available_session_ids.contains(session_id));
+            if instance.stop_in_progress {
+                let recovered_stopped_session_ids = instance
+                    .stopped_session_ids_during_stop
+                    .iter()
+                    .cloned()
+                    .collect::<HashSet<_>>();
+                let stop_reached_all_active_children = instance
+                    .active_session_ids_during_stop
+                    .as_ref()
+                    .is_some_and(|active_session_ids| {
+                        active_session_ids.iter().all(|session_id| {
+                            recovered_stopped_session_ids.contains(session_id)
+                                || persisted_non_running_session_ids.contains(session_id)
+                        })
+                    });
+                if stop_reached_all_active_children {
+                    instance.status = OrchestratorInstanceStatus::Stopped;
+                    instance.pending_transitions.clear();
+                    instance.error_message = None;
+                    if instance.completed_at.is_none() {
+                        instance.completed_at = Some(stamp_orchestrator_template_now());
+                    }
+                } else if !recovered_stopped_session_ids.is_empty() {
+                    recovered_stop_in_progress_session_ids
+                        .extend(recovered_stopped_session_ids.iter().cloned());
+                    let dropped_pendings = instance
+                        .pending_transitions
+                        .iter()
+                        .filter(|pending| {
+                            recovered_stopped_session_ids.contains(&pending.destination_session_id)
+                        })
+                        .cloned()
+                        .collect::<Vec<_>>();
+                    for pending in &dropped_pendings {
+                        instance
+                            .pending_transitions
+                            .retain(|candidate| candidate.id != pending.id);
+                        update_orchestrator_delivery_cursor(
+                            instance,
+                            &pending.source_session_id,
+                            pending.completion_revision,
+                        );
+                    }
+                }
+                instance.stop_in_progress = false;
+                instance.active_session_ids_during_stop = None;
+                instance.stopped_session_ids_during_stop.clear();
+            }
             if instance.status == OrchestratorInstanceStatus::Stopped {
                 instance.pending_transitions.clear();
+                instance.active_session_ids_during_stop = None;
+                instance.stopped_session_ids_during_stop.clear();
             }
         }
 
@@ -660,6 +747,7 @@ impl StateInner {
                     .iter()
                     .map(|session| session.session_id.clone())
             })
+            .chain(recovered_stop_in_progress_session_ids)
             .collect::<HashSet<_>>();
         for session_id in stopped_session_ids {
             let Some(session_index) = self.find_session_index(&session_id) else {
@@ -790,6 +878,9 @@ impl AppState {
                 created_at: stamp_orchestrator_template_now(),
                 error_message: None,
                 completed_at: None,
+                stop_in_progress: false,
+                active_session_ids_during_stop: None,
+                stopped_session_ids_during_stop: Vec::new(),
             };
             inner.orchestrator_instances.push(orchestrator.clone());
             self.commit_locked(&mut inner).map_err(|err| {
@@ -797,7 +888,10 @@ impl AppState {
             })?;
             (self.snapshot_from_inner(&inner), orchestrator)
         };
-        Ok(CreateOrchestratorInstanceResponse { orchestrator, state })
+        Ok(CreateOrchestratorInstanceResponse {
+            orchestrator,
+            state,
+        })
     }
 
     fn pause_orchestrator_instance(&self, instance_id: &str) -> Result<StateResponse, ApiError> {
@@ -819,10 +913,14 @@ impl AppState {
                     return Err(ApiError::conflict("stopped orchestrators cannot be paused"));
                 }
             }
-            self.commit_persisted_delta_locked(&mut inner).map_err(|err| {
-                ApiError::internal(format!("failed to persist orchestrator state: {err:#}"))
-            })?;
-            (self.snapshot_from_inner(&inner), inner.orchestrator_instances.clone())
+            self.commit_persisted_delta_locked(&mut inner)
+                .map_err(|err| {
+                    ApiError::internal(format!("failed to persist orchestrator state: {err:#}"))
+                })?;
+            (
+                self.snapshot_from_inner(&inner),
+                inner.orchestrator_instances.clone(),
+            )
         };
         self.publish_orchestrators_updated(state.revision, orchestrators);
         Ok(state)
@@ -844,17 +942,27 @@ impl AppState {
                     return Err(ApiError::conflict("orchestrator is already running"));
                 }
                 OrchestratorInstanceStatus::Stopped => {
-                    return Err(ApiError::conflict("stopped orchestrators cannot be resumed"));
+                    return Err(ApiError::conflict(
+                        "stopped orchestrators cannot be resumed",
+                    ));
                 }
             }
-            self.commit_persisted_delta_locked(&mut inner).map_err(|err| {
-                ApiError::internal(format!("failed to persist orchestrator state: {err:#}"))
-            })?;
-            (self.snapshot_from_inner(&inner), inner.orchestrator_instances.clone())
+            self.commit_persisted_delta_locked(&mut inner)
+                .map_err(|err| {
+                    ApiError::internal(format!("failed to persist orchestrator state: {err:#}"))
+                })?;
+            (
+                self.snapshot_from_inner(&inner),
+                inner.orchestrator_instances.clone(),
+            )
         };
         self.publish_orchestrators_updated(state.revision, orchestrators);
         self.resume_pending_orchestrator_transitions()
-            .map_err(|err| ApiError::internal(format!("failed to resume orchestrator transitions: {err:#}")))?;
+            .map_err(|err| {
+                ApiError::internal(format!(
+                    "failed to resume orchestrator transitions: {err:#}"
+                ))
+            })?;
         let inner = self.inner.lock().expect("state mutex poisoned");
         Ok(self.snapshot_from_inner(&inner))
     }
@@ -865,8 +973,70 @@ impl AppState {
             .lock()
             .expect("orchestrator stop mutex poisoned");
         if !stopping.insert(instance_id.to_owned()) {
-            return Err(ApiError::conflict("orchestrator stop is already in progress"));
+            return Err(ApiError::conflict(
+                "orchestrator stop is already in progress",
+            ));
         }
+        drop(stopping);
+        self.stopping_orchestrator_session_ids
+            .lock()
+            .expect("orchestrator stop session mutex poisoned")
+            .insert(instance_id.to_owned(), HashSet::new());
+
+        let result = (|| {
+            let mut inner = self.inner.lock().expect("state mutex poisoned");
+            let instance_index = inner
+                .orchestrator_instances
+                .iter()
+                .position(|instance| instance.id == instance_id)
+                .ok_or_else(|| ApiError::not_found("orchestrator instance not found"))?;
+            if inner.orchestrator_instances[instance_index].status
+                == OrchestratorInstanceStatus::Stopped
+            {
+                return Err(ApiError::conflict("orchestrator is already stopped"));
+            }
+            let mut active_session_ids = inner.orchestrator_instances[instance_index]
+                .session_instances
+                .iter()
+                .filter_map(|session_instance| {
+                    inner
+                        .find_session_index(&session_instance.session_id)
+                        .and_then(|session_index| {
+                            let record = &inner.sessions[session_index];
+                            if matches!(
+                                record.session.status,
+                                SessionStatus::Active | SessionStatus::Approval
+                            ) && !matches!(record.runtime, SessionRuntime::None)
+                            {
+                                Some(session_instance.session_id.clone())
+                            } else {
+                                None
+                            }
+                        })
+                })
+                .collect::<Vec<_>>();
+            active_session_ids.sort();
+            active_session_ids.dedup();
+            inner.orchestrator_instances[instance_index].stop_in_progress = true;
+            inner.orchestrator_instances[instance_index].active_session_ids_during_stop =
+                Some(active_session_ids);
+            inner.orchestrator_instances[instance_index]
+                .stopped_session_ids_during_stop
+                .clear();
+            if let Err(err) = self.persist_internal_locked(&inner) {
+                inner.orchestrator_instances[instance_index].stop_in_progress = false;
+                inner.orchestrator_instances[instance_index].active_session_ids_during_stop = None;
+                return Err(ApiError::internal(format!(
+                    "failed to persist orchestrator stop state: {err:#}"
+                )));
+            }
+            Ok(())
+        })();
+        if let Err(err) = result {
+            self.finish_orchestrator_stop(instance_id);
+            return Err(err);
+        }
+
         Ok(())
     }
 
@@ -875,6 +1045,19 @@ impl AppState {
             .lock()
             .expect("orchestrator stop mutex poisoned")
             .remove(instance_id);
+        self.stopping_orchestrator_session_ids
+            .lock()
+            .expect("orchestrator stop session mutex poisoned")
+            .remove(instance_id);
+    }
+
+    fn note_stopped_orchestrator_session(&self, instance_id: &str, session_id: &str) {
+        self.stopping_orchestrator_session_ids
+            .lock()
+            .expect("orchestrator stop session mutex poisoned")
+            .entry(instance_id.to_owned())
+            .or_default()
+            .insert(session_id.to_owned());
     }
 
     fn stopping_orchestrator_ids_snapshot(&self) -> HashSet<String> {
@@ -882,6 +1065,103 @@ impl AppState {
             .lock()
             .expect("orchestrator stop mutex poisoned")
             .clone()
+    }
+
+    fn stopping_orchestrator_session_ids_snapshot(&self) -> HashMap<String, HashSet<String>> {
+        self.stopping_orchestrator_session_ids
+            .lock()
+            .expect("orchestrator stop session mutex poisoned")
+            .clone()
+    }
+
+    fn prune_pending_transitions_for_stopped_orchestrator_sessions(
+        &self,
+        instance_id: &str,
+    ) -> Result<(), ApiError> {
+        let mut stopping_sessions = self.stopping_orchestrator_session_ids_snapshot();
+        let mut stopped_session_ids = stopping_sessions.remove(instance_id).unwrap_or_default();
+
+        {
+            let mut inner = self.inner.lock().expect("state mutex poisoned");
+            let mut changed = false;
+            if let Some(instance_index) = inner
+                .orchestrator_instances
+                .iter()
+                .position(|instance| instance.id == instance_id)
+            {
+                let effective_stopped_session_ids = stopped_session_ids
+                    .iter()
+                    .cloned()
+                    .chain(
+                        inner.orchestrator_instances[instance_index]
+                            .stopped_session_ids_during_stop
+                            .iter()
+                            .cloned(),
+                    )
+                    .collect::<HashSet<_>>();
+                if inner.orchestrator_instances[instance_index].stop_in_progress {
+                    inner.orchestrator_instances[instance_index].stop_in_progress = false;
+                    changed = true;
+                }
+                if inner.orchestrator_instances[instance_index]
+                    .active_session_ids_during_stop
+                    .is_some()
+                {
+                    inner.orchestrator_instances[instance_index].active_session_ids_during_stop =
+                        None;
+                    changed = true;
+                }
+                if !inner.orchestrator_instances[instance_index]
+                    .stopped_session_ids_during_stop
+                    .is_empty()
+                {
+                    inner.orchestrator_instances[instance_index]
+                        .stopped_session_ids_during_stop
+                        .clear();
+                    changed = true;
+                }
+                let dropped_pendings = inner.orchestrator_instances[instance_index]
+                    .pending_transitions
+                    .iter()
+                    .filter(|pending| {
+                        effective_stopped_session_ids.contains(&pending.destination_session_id)
+                    })
+                    .cloned()
+                    .collect::<Vec<_>>();
+                if !dropped_pendings.is_empty() {
+                    for pending in &dropped_pendings {
+                        acknowledge_pending_orchestrator_transition(
+                            &mut inner,
+                            instance_index,
+                            pending,
+                        );
+                    }
+                    changed = true;
+                }
+                stopped_session_ids = effective_stopped_session_ids;
+            }
+
+            for session_id in &stopped_session_ids {
+                let Some(session_index) = inner.find_session_index(session_id) else {
+                    continue;
+                };
+                let queued_prompt_count = inner.sessions[session_index].queued_prompts.len();
+                clear_stopped_orchestrator_queued_prompts(&mut inner.sessions[session_index]);
+                if inner.sessions[session_index].queued_prompts.len() != queued_prompt_count {
+                    changed = true;
+                }
+            }
+
+            if changed {
+                self.commit_locked(&mut inner).map_err(|err| {
+                    ApiError::internal(format!(
+                        "failed to persist orchestrator stop cleanup: {err:#}"
+                    ))
+                })?;
+            }
+        }
+
+        Ok(())
     }
 
     fn is_session_not_running_conflict(error: &ApiError) -> bool {
@@ -914,13 +1194,15 @@ impl AppState {
                 let active_session_ids = session_ids
                     .iter()
                     .filter(|session_id| {
-                        inner.find_session_index(session_id).is_some_and(|session_index| {
-                            let record = &inner.sessions[session_index];
-                            matches!(
-                                record.session.status,
-                                SessionStatus::Active | SessionStatus::Approval
-                            ) && !matches!(record.runtime, SessionRuntime::None)
-                        })
+                        inner
+                            .find_session_index(session_id)
+                            .is_some_and(|session_index| {
+                                let record = &inner.sessions[session_index];
+                                matches!(
+                                    record.session.status,
+                                    SessionStatus::Active | SessionStatus::Approval
+                                ) && !matches!(record.runtime, SessionRuntime::None)
+                            })
                     })
                     .cloned()
                     .collect::<Vec<_>>();
@@ -930,17 +1212,21 @@ impl AppState {
 
             let mut stop_error = None;
             for session_id in active_session_ids {
-                if let Err(err) = self.stop_session_with_options(
+                match self.stop_session_with_options(
                     &session_id,
                     StopSessionOptions {
                         dispatch_queued_prompts_on_success: false,
+                        orchestrator_stop_instance_id: Some(instance_id.to_owned()),
                     },
                 ) {
-                    if Self::is_session_not_running_conflict(&err) {
-                        continue;
-                    }
-                    if stop_error.is_none() {
-                        stop_error = Some(err);
+                    Ok(_) => {}
+                    Err(err) => {
+                        if Self::is_session_not_running_conflict(&err) {
+                            continue;
+                        }
+                        if stop_error.is_none() {
+                            stop_error = Some(err);
+                        }
                     }
                 }
             }
@@ -967,6 +1253,9 @@ impl AppState {
                     instance.pending_transitions.clear();
                     instance.error_message = None;
                     instance.completed_at = Some(stamp_orchestrator_template_now());
+                    instance.stop_in_progress = false;
+                    instance.active_session_ids_during_stop = None;
+                    instance.stopped_session_ids_during_stop.clear();
                 }
                 for session_id in &session_ids {
                     let Some(session_index) = inner.find_session_index(session_id) else {
@@ -974,14 +1263,28 @@ impl AppState {
                     };
                     clear_stopped_orchestrator_queued_prompts(&mut inner.sessions[session_index]);
                 }
-                self.commit_persisted_delta_locked(&mut inner).map_err(|err| {
-                    ApiError::internal(format!("failed to persist orchestrator state: {err:#}"))
-                })?;
-                (self.snapshot_from_inner(&inner), inner.orchestrator_instances.clone())
+                self.commit_persisted_delta_locked(&mut inner)
+                    .map_err(|err| {
+                        ApiError::internal(format!("failed to persist orchestrator state: {err:#}"))
+                    })?;
+                (
+                    self.snapshot_from_inner(&inner),
+                    inner.orchestrator_instances.clone(),
+                )
             };
             self.publish_orchestrators_updated(state.revision, orchestrators);
             Ok(state)
         })();
+        if stop_result.is_err() && resume_after_abort {
+            if let Err(err) =
+                self.prune_pending_transitions_for_stopped_orchestrator_sessions(instance_id)
+            {
+                eprintln!(
+                    "orchestrator stop warning> failed pruning pending transitions after aborted stop `{}`: {err:#?}",
+                    instance_id
+                );
+            }
+        }
         self.finish_orchestrator_stop(instance_id);
         if stop_result.is_err() && resume_after_abort {
             if let Err(err) = self.resume_pending_orchestrator_transitions() {
@@ -1029,7 +1332,8 @@ impl AppState {
         let dispatch_destination_session_id = {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
 
-            let Some(action) = next_pending_transition_action(&inner, &stopping_orchestrator_ids) else {
+            let Some(action) = next_pending_transition_action(&inner, &stopping_orchestrator_ids)
+            else {
                 return Ok(false);
             };
 
@@ -1127,7 +1431,7 @@ impl AppState {
 
         if let Some(destination_session_id) = dispatch_destination_session_id {
             let dispatch = self
-                .dispatch_next_queued_turn(&destination_session_id)?
+                .dispatch_next_queued_turn(&destination_session_id, false)?
                 .ok_or_else(|| {
                     anyhow!("queued orchestrator transition prompt disappeared before dispatch")
                 })?;
@@ -1170,7 +1474,8 @@ async fn pause_orchestrator_instance(
     State(state): State<AppState>,
     AxumPath(instance_id): AxumPath<String>,
 ) -> Result<Json<StateResponse>, ApiError> {
-    let response = run_blocking_api(move || state.pause_orchestrator_instance(&instance_id)).await?;
+    let response =
+        run_blocking_api(move || state.pause_orchestrator_instance(&instance_id)).await?;
     Ok(Json(response))
 }
 
@@ -1178,7 +1483,8 @@ async fn resume_orchestrator_instance(
     State(state): State<AppState>,
     AxumPath(instance_id): AxumPath<String>,
 ) -> Result<Json<StateResponse>, ApiError> {
-    let response = run_blocking_api(move || state.resume_orchestrator_instance(&instance_id)).await?;
+    let response =
+        run_blocking_api(move || state.resume_orchestrator_instance(&instance_id)).await?;
     Ok(Json(response))
 }
 
@@ -1295,7 +1601,7 @@ fn orchestrator_template_session_for_instance_session(
 
 fn schedule_orchestrator_transitions_for_completed_session(
     inner: &mut StateInner,
-    stopping_orchestrator_ids: &HashSet<String>,
+    stopping_orchestrator_session_ids: &HashMap<String, HashSet<String>>,
     session_id: &str,
     completion_revision: u64,
 ) -> bool {
@@ -1321,13 +1627,7 @@ fn schedule_orchestrator_transitions_for_completed_session(
             continue;
         };
 
-        let ignore_completion_while_stopping = stopping_orchestrator_ids.contains(&instance.id);
-        let (
-            template_session_id,
-            last_delivered_completion_revision,
-            prior_completion_revision,
-            prior_delivered_completion_revision,
-        ) = {
+        let (template_session_id, last_delivered_completion_revision, prior_completion_revision) = {
             let session_instance = &mut instance.session_instances[session_instance_index];
             let prior_completion_revision = session_instance.last_completion_revision;
             let prior_delivered_completion_revision =
@@ -1339,36 +1639,15 @@ fn schedule_orchestrator_transitions_for_completed_session(
                     .max(completion_revision),
             );
             session_instance.last_completion_revision = next_completion_revision;
-            if ignore_completion_while_stopping {
-                session_instance.last_delivered_completion_revision = Some(
-                    session_instance
-                        .last_delivered_completion_revision
-                        .unwrap_or(0)
-                        .max(completion_revision),
-                );
-            }
             (
                 session_instance.template_session_id.clone(),
                 prior_delivered_completion_revision,
                 prior_completion_revision,
-                prior_delivered_completion_revision,
             )
         };
         if prior_completion_revision != Some(completion_revision) {
             changed = true;
         }
-        if ignore_completion_while_stopping {
-            let next_delivered_completion_revision = Some(
-                prior_delivered_completion_revision
-                    .unwrap_or(0)
-                    .max(completion_revision),
-            );
-            if prior_delivered_completion_revision != next_delivered_completion_revision {
-                changed = true;
-            }
-            continue;
-        }
-        // Ignore stale/duplicate completions once every transition for that revision was delivered.
         if completion_revision <= last_delivered_completion_revision.unwrap_or(0) {
             continue;
         }
@@ -1378,6 +1657,8 @@ fn schedule_orchestrator_transitions_for_completed_session(
             .iter()
             .find(|session| session.id == template_session_id)
             .cloned();
+        let stopped_destination_session_ids = stopping_orchestrator_session_ids.get(&instance.id);
+        let mut suppressed_stopped_destinations = false;
 
         for transition in instance
             .template_snapshot
@@ -1404,6 +1685,12 @@ fn schedule_orchestrator_transitions_for_completed_session(
             else {
                 continue;
             };
+            if stopped_destination_session_ids.is_some_and(|stopped_session_ids| {
+                stopped_session_ids.contains(&destination_session_id)
+            }) {
+                suppressed_stopped_destinations = true;
+                continue;
+            }
 
             let result = build_transition_result_text(&source_record, transition.result_mode);
             let rendered_prompt = render_transition_prompt(
@@ -1423,10 +1710,23 @@ fn schedule_orchestrator_transitions_for_completed_session(
             });
             changed = true;
         }
+
+        if suppressed_stopped_destinations {
+            update_orchestrator_delivery_cursor(instance, session_id, completion_revision);
+            let next_delivered_completion_revision = instance
+                .session_instances
+                .iter()
+                .find(|candidate| candidate.session_id == session_id)
+                .and_then(|candidate| candidate.last_delivered_completion_revision);
+            if last_delivered_completion_revision != next_delivered_completion_revision {
+                changed = true;
+            }
+        }
     }
 
     changed
 }
+
 fn update_orchestrator_delivery_cursor(
     instance: &mut OrchestratorInstance,
     source_session_id: &str,
@@ -1464,6 +1764,7 @@ fn mark_deadlocked_orchestrator_instances(
         .enumerate()
         .filter_map(|(instance_index, instance)| {
             if instance.status != OrchestratorInstanceStatus::Running
+                || instance.stop_in_progress
                 || stopping_orchestrator_ids.contains(&instance.id)
             {
                 return None;
@@ -1658,6 +1959,7 @@ fn next_pending_transition_action(
 ) -> Option<PendingTransitionAction> {
     for (instance_index, instance) in inner.orchestrator_instances.iter().enumerate() {
         if instance.status != OrchestratorInstanceStatus::Running
+            || instance.stop_in_progress
             || stopping_orchestrator_ids.contains(&instance.id)
         {
             continue;
@@ -1668,14 +1970,16 @@ fn next_pending_transition_action(
                 instance,
                 &pending.destination_session_id,
             );
-            if inner
-                .find_session_index(&pending.destination_session_id)
-                .is_none()
-            {
+            let Some(destination_session_index) =
+                inner.find_session_index(&pending.destination_session_id)
+            else {
                 return Some(PendingTransitionAction::Acknowledge {
                     instance_index,
                     pendings: vec![pending.clone()],
                 });
+            };
+            if inner.sessions[destination_session_index].orchestrator_auto_dispatch_blocked {
+                continue;
             }
 
             let input_mode = destination_template
