@@ -1209,6 +1209,34 @@ describe("workspace helpers", () => {
     ]);
   });
 
+  it("openInstructionDebuggerInWorkspaceState focuses a restored debugger tab with a legacy Windows verbatim workdir", () => {
+    const legacyWorkdir = String.raw`\\?\C:\repo`;
+    const normalizedWorkdir = String.raw`C:\repo`;
+    const paneA = makePane("pane-a", [
+      makeSessionTab("tab-session", "session-a"),
+      makeInstructionDebuggerTab(
+        "tab-instructions",
+        legacyWorkdir,
+        "session-a",
+      ),
+    ]);
+    const paneB = makePane("pane-b", [makeSessionTab("tab-b", "session-b")]);
+
+    const next = openInstructionDebuggerInWorkspaceState(
+      makeSplitWorkspace(paneA, paneB, paneB.id),
+      normalizedWorkdir,
+      paneB.id,
+      "session-a",
+    );
+
+    expect(next.activePaneId).toBe("pane-a");
+    expect(next.panes.find((pane) => pane.id === "pane-a")?.activeTabId).toBe(
+      "tab-instructions",
+    );
+    expect(next.panes.find((pane) => pane.id === "pane-b")?.tabs).toEqual([
+      makeSessionTab("tab-b", "session-b"),
+    ]);
+  });
   it("dockControlPanelAtWorkspaceEdge preserves the resized control panel width", () => {
     const workspace = {
       root: {
@@ -1878,6 +1906,39 @@ describe("workspace helpers", () => {
     });
   });
 
+  it("openSourceInWorkspaceState reuses a restored source tab with a legacy Windows UNC verbatim path", () => {
+    const legacyPath = String.raw`\\?\UNC\server\share\src\app.ts`;
+    const normalizedPath = String.raw`\\server\share\src\app.ts`;
+    const paneA = makePane(
+      "pane-a",
+      [makeSourceTab("source-a", legacyPath, "session-a")],
+      {
+        activeTabId: "source-a",
+        activeSessionId: "session-a",
+        viewMode: "source",
+        sourcePath: legacyPath,
+      },
+    );
+    const paneB = makePane("pane-b", [makeSessionTab("tab-b", "session-b")]);
+
+    const next = openSourceInWorkspaceState(
+      makeSplitWorkspace(paneA, paneB, paneB.id),
+      normalizedPath,
+      paneA.id,
+      "session-a",
+    );
+
+    expect(next.activePaneId).toBe("pane-a");
+    expect(next.panes.find((pane) => pane.id === "pane-a")?.activeTabId).toBe(
+      "source-a",
+    );
+    expect(next.panes.find((pane) => pane.id === "pane-a")?.tabs).toEqual([
+      makeSourceTab("source-a", legacyPath, "session-a"),
+    ]);
+    expect(next.panes.find((pane) => pane.id === "pane-b")?.tabs).toEqual([
+      makeSessionTab("tab-b", "session-b"),
+    ]);
+  });
   it("openSourceInWorkspaceState retargets an existing source tab to the requested line", () => {
     const next = openSourceInWorkspaceState(
       makeSinglePaneWorkspace(
@@ -2010,6 +2071,63 @@ describe("workspace helpers", () => {
     );
   });
 
+  it("openFilesystemInWorkspaceState reuses a restored filesystem tab with a legacy Windows verbatim root", () => {
+    const legacyRoot = String.raw`\\?\C:\repo`;
+    const normalizedRoot = String.raw`C:\repo`;
+    const paneA = makePane(
+      "pane-a",
+      [makeFilesystemTab("fs-a", legacyRoot, "session-a")],
+      {
+        activeTabId: "fs-a",
+        activeSessionId: "session-a",
+        viewMode: "filesystem",
+      },
+    );
+    const paneB = makePane("pane-b", [makeSessionTab("tab-b", "session-b")]);
+
+    const next = openFilesystemInWorkspaceState(
+      makeSplitWorkspace(paneA, paneB, paneB.id),
+      normalizedRoot,
+      paneB.id,
+      "session-b",
+    );
+
+    const filesystemPane = next.panes.find((pane) => pane.id === "pane-a");
+    expect(next.activePaneId).toBe("pane-a");
+    expect(filesystemPane?.activeTabId).toBe("fs-a");
+    expect(filesystemPane?.tabs).toEqual([
+      makeFilesystemTab("fs-a", legacyRoot, "session-a"),
+    ]);
+  });
+
+  it("openGitStatusInWorkspaceState reuses a restored git status tab with a legacy Windows verbatim workdir", () => {
+    const legacyWorkdir = String.raw`\\?\C:\repo`;
+    const normalizedWorkdir = String.raw`C:\repo`;
+    const paneA = makePane(
+      "pane-a",
+      [makeGitStatusTab("git-a", legacyWorkdir, "session-a")],
+      {
+        activeTabId: "git-a",
+        activeSessionId: "session-a",
+        viewMode: "gitStatus",
+      },
+    );
+    const paneB = makePane("pane-b", [makeSessionTab("tab-b", "session-b")]);
+
+    const next = openGitStatusInWorkspaceState(
+      makeSplitWorkspace(paneA, paneB, paneB.id),
+      normalizedWorkdir,
+      paneB.id,
+      "session-b",
+    );
+
+    const gitPane = next.panes.find((pane) => pane.id === "pane-a");
+    expect(next.activePaneId).toBe("pane-a");
+    expect(gitPane?.activeTabId).toBe("git-a");
+    expect(gitPane?.tabs).toEqual([
+      makeGitStatusTab("git-a", legacyWorkdir, "session-a"),
+    ]);
+  });
   it("openSessionListInWorkspaceState creates a sessions tab and switches the pane mode", () => {
     const next = openSessionListInWorkspaceState(
       makeSinglePaneWorkspace(

@@ -417,6 +417,45 @@ export function createDiffPreviewTab({
   };
 }
 
+export function normalizeWorkspaceStatePaths(workspace: WorkspaceState): WorkspaceState {
+  return {
+    ...workspace,
+    panes: workspace.panes.map((pane) =>
+      syncPaneState({
+        ...pane,
+        sourcePath: normalizeWorkspacePath(pane.sourcePath),
+        tabs: pane.tabs.map((tab) => {
+          if (tab.kind === "source") {
+            return {
+              ...tab,
+              path: normalizeWorkspacePath(tab.path),
+            };
+          }
+          if (tab.kind === "filesystem") {
+            return {
+              ...tab,
+              rootPath: normalizeWorkspacePath(tab.rootPath),
+            };
+          }
+          if (tab.kind === "gitStatus" || tab.kind === "instructionDebugger") {
+            return {
+              ...tab,
+              workdir: normalizeWorkspacePath(tab.workdir),
+            };
+          }
+          if (tab.kind === "diffPreview") {
+            return {
+              ...tab,
+              filePath: normalizeWorkspacePath(tab.filePath),
+            };
+          }
+          return tab;
+        }),
+      }),
+    ),
+  };
+}
+
 export function reconcileWorkspaceState(current: WorkspaceState, sessions: Session[]): WorkspaceState {
   const availableSessionIds = new Set(sessions.map((session) => session.id));
   let panes = current.panes.map((pane) => {
@@ -1993,10 +2032,12 @@ function findSessionTab(workspace: WorkspaceState, sessionId: string) {
 }
 
 function findSourceTab(workspace: WorkspaceState, path: string) {
+  const normalizedPath = normalizeWorkspacePath(path);
   for (const pane of workspace.panes) {
     const tab = pane.tabs.find(
       (candidate): candidate is WorkspaceSourceTab =>
-        candidate.kind === "source" && candidate.path === path,
+        candidate.kind === "source" &&
+        normalizeWorkspacePath(candidate.path) === normalizedPath,
     );
     if (tab) {
       return { paneId: pane.id, tab };
@@ -2007,10 +2048,12 @@ function findSourceTab(workspace: WorkspaceState, path: string) {
 }
 
 function findFilesystemTab(workspace: WorkspaceState, rootPath: string) {
+  const normalizedRootPath = normalizeWorkspacePath(rootPath);
   for (const pane of workspace.panes) {
     const tab = pane.tabs.find(
       (candidate): candidate is WorkspaceFilesystemTab =>
-        candidate.kind === "filesystem" && candidate.rootPath === rootPath,
+        candidate.kind === "filesystem" &&
+        normalizeWorkspacePath(candidate.rootPath) === normalizedRootPath,
     );
     if (tab) {
       return { paneId: pane.id, tab };
@@ -2021,10 +2064,12 @@ function findFilesystemTab(workspace: WorkspaceState, rootPath: string) {
 }
 
 function findGitStatusTab(workspace: WorkspaceState, workdir: string) {
+  const normalizedWorkdir = normalizeWorkspacePath(workdir);
   for (const pane of workspace.panes) {
     const tab = pane.tabs.find(
       (candidate): candidate is WorkspaceGitStatusTab =>
-        candidate.kind === "gitStatus" && candidate.workdir === workdir,
+        candidate.kind === "gitStatus" &&
+        normalizeWorkspacePath(candidate.workdir) === normalizedWorkdir,
     );
     if (tab) {
       return { paneId: pane.id, tab };
@@ -2131,12 +2176,13 @@ function findInstructionDebuggerTab(
   workdir: string | null,
   originSessionId: string | null,
 ) {
+  const normalizedWorkdir = normalizeWorkspacePath(workdir);
   for (const pane of workspace.panes) {
     const tab = pane.tabs.find(
       (candidate): candidate is WorkspaceInstructionDebuggerTab =>
         candidate.kind === "instructionDebugger" &&
         candidate.originSessionId === originSessionId &&
-        candidate.workdir === workdir,
+        normalizeWorkspacePath(candidate.workdir) === normalizedWorkdir,
     );
     if (tab) {
       return { paneId: pane.id, tab };
@@ -2966,9 +3012,21 @@ function normalizeWorkspaceLineNumber(value: number | null | undefined) {
   return normalized >= 1 ? normalized : null;
 }
 
+const WINDOWS_UNC_VERBATIM_PREFIX = "\\\\?\\UNC\\";
+const WINDOWS_VERBATIM_PREFIX = "\\\\?\\";
+
 function normalizeWorkspacePath(path: string | null | undefined) {
   const trimmed = path?.trim();
-  return trimmed ? trimmed : null;
+  if (!trimmed) {
+    return null;
+  }
+  if (trimmed.startsWith(WINDOWS_UNC_VERBATIM_PREFIX)) {
+    return `\\\\${trimmed.slice(WINDOWS_UNC_VERBATIM_PREFIX.length)}`;
+  }
+  if (trimmed.startsWith(WINDOWS_VERBATIM_PREFIX)) {
+    return trimmed.slice(WINDOWS_VERBATIM_PREFIX.length);
+  }
+  return trimmed;
 }
 
 function normalizeWorkspaceIdentifier(value: string | null | undefined) {

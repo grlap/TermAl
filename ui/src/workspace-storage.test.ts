@@ -197,6 +197,244 @@ describe("workspace storage", () => {
     });
   });
 
+  it("parses and normalizes legacy Windows workspace paths", () => {
+    const legacyRoot = String.raw`\\?\C:\repo`;
+    const legacyFile = String.raw`\\?\C:\repo\src\main.ts`;
+    const normalizedRoot = String.raw`C:\repo`;
+    const normalizedFile = String.raw`C:\repo\src\main.ts`;
+    const raw = JSON.stringify({
+      controlPanelSide: "left",
+      workspace: {
+        root: {
+          type: "pane",
+          paneId: "pane-a",
+        },
+        panes: [
+          {
+            id: "pane-a",
+            tabs: [
+              {
+                id: "tab-source",
+                kind: "source",
+                path: legacyFile,
+                originSessionId: "session-1",
+              },
+              {
+                id: "tab-files",
+                kind: "filesystem",
+                rootPath: legacyRoot,
+                originSessionId: "session-1",
+              },
+              {
+                id: "tab-git",
+                kind: "gitStatus",
+                workdir: legacyRoot,
+                originSessionId: "session-1",
+              },
+              {
+                id: "tab-debug",
+                kind: "instructionDebugger",
+                workdir: legacyRoot,
+                originSessionId: "session-1",
+              },
+              {
+                id: "tab-diff",
+                kind: "diffPreview",
+                changeType: "edit",
+                diff: "-before\n+after",
+                diffMessageId: "message-1",
+                filePath: legacyFile,
+                originSessionId: "session-1",
+                summary: "Updated file",
+              },
+            ],
+            activeTabId: "tab-source",
+            activeSessionId: "session-1",
+            viewMode: "source",
+            lastSessionViewMode: "session",
+            sourcePath: legacyFile,
+          },
+        ],
+        activePaneId: "pane-a",
+      },
+    });
+
+    expect(parseStoredWorkspaceLayout(raw)).toEqual({
+      controlPanelSide: "left",
+      workspace: {
+        root: {
+          type: "pane",
+          paneId: "pane-a",
+        },
+        panes: [
+          {
+            id: "pane-a",
+            tabs: [
+              {
+                id: "tab-source",
+                kind: "source",
+                path: normalizedFile,
+                originSessionId: "session-1",
+              },
+              {
+                id: "tab-files",
+                kind: "filesystem",
+                rootPath: normalizedRoot,
+                originSessionId: "session-1",
+              },
+              {
+                id: "tab-git",
+                kind: "gitStatus",
+                workdir: normalizedRoot,
+                originSessionId: "session-1",
+              },
+              {
+                id: "tab-debug",
+                kind: "instructionDebugger",
+                workdir: normalizedRoot,
+                originSessionId: "session-1",
+              },
+              {
+                id: "tab-diff",
+                kind: "diffPreview",
+                changeType: "edit",
+                diff: "-before\n+after",
+                diffMessageId: "message-1",
+                filePath: normalizedFile,
+                originSessionId: "session-1",
+                summary: "Updated file",
+              },
+            ],
+            activeTabId: "tab-source",
+            activeSessionId: "session-1",
+            viewMode: "source",
+            lastSessionViewMode: "session",
+            sourcePath: normalizedFile,
+          },
+        ],
+        activePaneId: "pane-a",
+      },
+    });
+  });
+  it("parses and normalizes legacy Windows UNC workspace paths", () => {
+    const legacyRoot = String.raw`\\?\UNC\server\share`;
+    const legacyFile = String.raw`\\?\UNC\server\share\src\main.ts`;
+    const normalizedRoot = String.raw`\\server\share`;
+    const normalizedFile = String.raw`\\server\share\src\main.ts`;
+    const raw = JSON.stringify({
+      controlPanelSide: "left",
+      workspace: {
+        root: {
+          type: "pane",
+          paneId: "pane-a",
+        },
+        panes: [
+          {
+            id: "pane-a",
+            tabs: [
+              {
+                id: "tab-source",
+                kind: "source",
+                path: legacyFile,
+                originSessionId: "session-1",
+              },
+              {
+                id: "tab-files",
+                kind: "filesystem",
+                rootPath: legacyRoot,
+                originSessionId: "session-1",
+              },
+              {
+                id: "tab-git",
+                kind: "gitStatus",
+                workdir: legacyRoot,
+                originSessionId: "session-1",
+              },
+              {
+                id: "tab-debug",
+                kind: "instructionDebugger",
+                workdir: legacyRoot,
+                originSessionId: "session-1",
+              },
+              {
+                id: "tab-diff",
+                kind: "diffPreview",
+                changeType: "edit",
+                diff: "-before\n+after",
+                diffMessageId: "message-1",
+                filePath: legacyFile,
+                originSessionId: "session-1",
+                summary: "Updated file",
+              },
+            ],
+            activeTabId: "tab-source",
+            activeSessionId: "session-1",
+            viewMode: "source",
+            lastSessionViewMode: "session",
+            sourcePath: legacyFile,
+          },
+        ],
+        activePaneId: "pane-a",
+      },
+    });
+
+    expect(parseStoredWorkspaceLayout(raw)).toEqual({
+      controlPanelSide: "left",
+      workspace: {
+        root: {
+          type: "pane",
+          paneId: "pane-a",
+        },
+        panes: [
+          {
+            id: "pane-a",
+            tabs: [
+              {
+                id: "tab-source",
+                kind: "source",
+                path: normalizedFile,
+                originSessionId: "session-1",
+              },
+              {
+                id: "tab-files",
+                kind: "filesystem",
+                rootPath: normalizedRoot,
+                originSessionId: "session-1",
+              },
+              {
+                id: "tab-git",
+                kind: "gitStatus",
+                workdir: normalizedRoot,
+                originSessionId: "session-1",
+              },
+              {
+                id: "tab-debug",
+                kind: "instructionDebugger",
+                workdir: normalizedRoot,
+                originSessionId: "session-1",
+              },
+              {
+                id: "tab-diff",
+                kind: "diffPreview",
+                changeType: "edit",
+                diff: "-before\n+after",
+                diffMessageId: "message-1",
+                filePath: normalizedFile,
+                originSessionId: "session-1",
+                summary: "Updated file",
+              },
+            ],
+            activeTabId: "tab-source",
+            activeSessionId: "session-1",
+            viewMode: "source",
+            lastSessionViewMode: "session",
+            sourcePath: normalizedFile,
+          },
+        ],
+        activePaneId: "pane-a",
+      },
+    });
+  });
   it("rejects malformed canvas tabs", () => {
     const malformed = {
       controlPanelSide: "left",

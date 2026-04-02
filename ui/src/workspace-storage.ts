@@ -1,9 +1,10 @@
 import type { StyleId, ThemeId } from "./themes";
 import { isStyleId, isThemeId } from "./themes";
-import type {
-  WorkspaceNode,
-  WorkspacePane,
-  WorkspaceState,
+import {
+  normalizeWorkspaceStatePaths,
+  type WorkspaceNode,
+  type WorkspacePane,
+  type WorkspaceState,
 } from "./workspace";
 import {
   isPaneViewMode,
@@ -74,7 +75,14 @@ export function parseStoredWorkspaceLayout(raw: string | null | undefined): Stor
 
   try {
     const parsed = JSON.parse(raw);
-    return isStoredWorkspaceLayout(parsed) ? parsed : null;
+    if (!isStoredWorkspaceLayout(parsed)) {
+      return null;
+    }
+
+    return {
+      ...parsed,
+      workspace: normalizeWorkspaceStatePaths(parsed.workspace),
+    };
   } catch {
     return null;
   }
@@ -89,7 +97,7 @@ function isStoredWorkspaceLayout(value: unknown): value is StoredWorkspaceLayout
     return false;
   }
 
-  // themeId and styleId are optional — accept absent, reject invalid
+  // themeId and styleId are optional - accept absent, reject invalid
   if (value.themeId !== undefined && !isThemeId(value.themeId as string)) {
     return false;
   }
@@ -97,7 +105,7 @@ function isStoredWorkspaceLayout(value: unknown): value is StoredWorkspaceLayout
     return false;
   }
 
-  // Numeric UI settings are optional — accept absent, reject non-finite
+  // Numeric UI settings are optional - accept absent, reject non-finite
   if (value.fontSizePx !== undefined && !isOptionalFiniteNumber(value.fontSizePx)) {
     return false;
   }

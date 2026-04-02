@@ -51,6 +51,7 @@ impl AppState {
         persistence_path: PathBuf,
         orchestrator_templates_path: PathBuf,
     ) -> Result<Self> {
+        // Defensive: tests and other direct callers may pass an un-normalized workdir.
         let default_workdir = normalize_local_user_facing_path(&default_workdir);
         let mut inner = load_state(&persistence_path)?
             .unwrap_or_else(|| bootstrap_default_local_state(&default_workdir));
@@ -2677,7 +2678,6 @@ impl AppState {
                 record.deferred_stop_callbacks.clear();
                 cancel_pending_interaction_messages(&mut record.session.messages);
                 clear_all_pending_requests(record);
-
                 if let Some(detail) = detail.as_ref() {
                     if let Some(message_id) = message_id {
                         record.session.messages.push(Message::Text {
@@ -3011,6 +3011,7 @@ impl AppState {
             (runtime, stop_failure_is_best_effort)
         };
 
+        let mut clear_external_session_id = false;
         if let Err(err) =
             shutdown_removed_runtime(runtime_to_stop, &format!("session `{session_id}`"))
         {
@@ -3018,6 +3019,7 @@ impl AppState {
                 eprintln!(
                     "session cleanup warning> failed to stop session `{session_id}` cleanly: {err:#}"
                 );
+                clear_external_session_id = true;
             } else {
                 let (mut deferred_callbacks, token) = {
                     let mut inner = self.inner.lock().expect("state mutex poisoned");
@@ -3079,6 +3081,11 @@ impl AppState {
                 record.deferred_stop_callbacks.clear();
                 cancel_pending_interaction_messages(&mut record.session.messages);
                 clear_all_pending_requests(record);
+                if clear_external_session_id {
+                    // Interrupt failures can leave the detached Codex thread running, so any
+                    // queued or future prompt must start a fresh thread instead of resuming it.
+                    set_record_external_session_id(record, None);
+                }
                 record.session.status = SessionStatus::Idle;
                 record.session.preview = "Turn stopped by user.".to_owned();
                 record.session.messages.push(Message::Text {
@@ -4603,6 +4610,46 @@ fn normalize_local_user_facing_path(path: &str) -> String {
         .into_owned()
 }
 
+fn normalize_workspace_layout_paths(layout: &mut WorkspaceLayoutDocument) {
+    let Some(panes) = layout
+        .workspace
+        .get_mut("panes")
+        .and_then(Value::as_array_mut)
+    else {
+        return;
+    };
+
+    for pane in panes {
+        normalize_workspace_layout_path_field(pane, "sourcePath");
+
+        let Some(tabs) = pane.get_mut("tabs").and_then(Value::as_array_mut) else {
+            continue;
+        };
+
+        for tab in tabs {
+            match tab.get("kind").and_then(Value::as_str) {
+                Some("source") => normalize_workspace_layout_path_field(tab, "path"),
+                Some("filesystem") => normalize_workspace_layout_path_field(tab, "rootPath"),
+                Some("gitStatus") | Some("instructionDebugger") => {
+                    normalize_workspace_layout_path_field(tab, "workdir")
+                }
+                Some("diffPreview") => normalize_workspace_layout_path_field(tab, "filePath"),
+                _ => {}
+            }
+        }
+    }
+}
+
+fn normalize_workspace_layout_path_field(object: &mut Value, key: &str) {
+    let Some(field) = object.get_mut(key) else {
+        return;
+    };
+    let Some(path) = field.as_str() else {
+        return;
+    };
+    *field = Value::String(normalize_local_user_facing_path(path));
+}
+
 struct StateInner {
     codex: CodexState,
     preferences: AppPreferences,
@@ -4875,6 +4922,10 @@ impl StateInner {
             .retain(|thread_id| discovered_thread_ids.contains(thread_id));
 
         for thread in threads {
+            let thread = DiscoveredCodexThread {
+                cwd: normalize_local_user_facing_path(&thread.cwd),
+                ..thread
+            };
             let target_path = FsPath::new(&thread.cwd);
             let within_scope = codex_discovery_scope_contains(default_workdir, target_path)
                 || self.projects.iter().any(|project| {
@@ -5016,6 +5067,10 @@ impl StateInner {
                 record.session.workdir = normalize_local_user_facing_path(&record.session.workdir);
             }
         }
+        for layout in self.workspace_layouts.values_mut() {
+            normalize_workspace_layout_paths(layout);
+        }
+
     }
 
     fn recover_interrupted_sessions(&mut self) {

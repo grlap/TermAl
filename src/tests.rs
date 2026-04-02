@@ -1349,6 +1349,50 @@ async fn request_json<T: for<'de> Deserialize<'de>>(
     (status, parsed)
 }
 
+async fn request_response(app: &Router, request: Request<Body>) -> axum::response::Response {
+    app.clone()
+        .oneshot(request)
+        .await
+        .expect("request should complete")
+}
+async fn next_sse_event<S>(stream: &mut std::pin::Pin<Box<S>>) -> String
+where
+    S: futures_core::Stream<Item = Result<axum::body::Bytes, axum::Error>>,
+{
+    tokio::time::timeout(Duration::from_secs(5), async {
+        let mut event = String::new();
+        loop {
+            let chunk = std::future::poll_fn(|cx| stream.as_mut().poll_next(cx))
+                .await
+                .expect("SSE chunk should arrive")
+                .expect("SSE chunk should stream cleanly");
+            event.push_str(
+                std::str::from_utf8(chunk.as_ref()).expect("SSE chunk should be valid UTF-8"),
+            );
+            if event.contains("\n\n") || event.contains("\r\n\r\n") {
+                return event;
+            }
+        }
+    })
+    .await
+    .expect("SSE event should arrive before timeout")
+}
+fn parse_sse_event(raw: &str) -> (String, String) {
+    let mut event_name = None;
+    let mut data_lines = Vec::new();
+    for line in raw.lines() {
+        let line = line.trim_end_matches('\r');
+        if let Some(value) = line.strip_prefix("event: ") {
+            event_name = Some(value.to_owned());
+        } else if let Some(value) = line.strip_prefix("data: ") {
+            data_lines.push(value.to_owned());
+        }
+    }
+    (
+        event_name.expect("SSE event should include a name"),
+        data_lines.join("\n"),
+    )
+}
 #[test]
 fn wait_for_shared_child_exit_timeout_returns_status_for_completed_process() {
     let child = test_exit_success_child();
@@ -4796,6 +4840,50 @@ fn import_discovered_codex_threads_adds_project_scoped_sessions_without_duplicat
     );
 }
 
+#[cfg(windows)]
+#[test]
+fn import_discovered_codex_threads_normalizes_legacy_local_verbatim_paths() {
+    let project_root =
+        std::env::temp_dir().join(format!("termal-discovered-verbatim-path-{}", Uuid::new_v4()));
+    fs::create_dir_all(&project_root).expect("project root should exist");
+    let normalized_root = normalize_user_facing_path(&fs::canonicalize(&project_root).unwrap())
+        .to_string_lossy()
+        .into_owned();
+    let legacy_root = format!(r"\\?\{normalized_root}");
+
+    let mut inner = StateInner::new();
+    let project = inner.create_project(
+        Some("TermAl".to_owned()),
+        normalized_root.clone(),
+        default_local_remote_id(),
+    );
+    inner.import_discovered_codex_threads(
+        &normalized_root,
+        vec![DiscoveredCodexThread {
+            approval_policy: Some(CodexApprovalPolicy::Never),
+            archived: false,
+            cwd: legacy_root,
+            id: "thread-legacy".to_owned(),
+            model: Some("gpt-5-codex".to_owned()),
+            reasoning_effort: None,
+            sandbox_mode: Some(CodexSandboxMode::WorkspaceWrite),
+            title: "Legacy thread".to_owned(),
+        }],
+    );
+
+    assert_eq!(inner.projects.len(), 1);
+    assert_eq!(inner.projects[0].root_path, normalized_root);
+    let record = inner
+        .sessions
+        .iter()
+        .find(|entry| entry.external_session_id.as_deref() == Some("thread-legacy"))
+        .expect("legacy discovered thread should be imported");
+    assert_eq!(record.session.workdir, normalized_root);
+    assert_eq!(record.session.project_id.as_deref(), Some(project.id.as_str()));
+
+    let _ = fs::remove_dir_all(project_root);
+}
+
 #[test]
 fn import_discovered_codex_threads_preserves_existing_prompt_settings() {
     let mut inner = StateInner::new();
@@ -4863,6 +4951,270 @@ fn import_discovered_codex_threads_preserves_existing_prompt_settings() {
     );
 }
 
+#[tokio::test]
+async fn create_session_route_returns_created_response() {
+    let state = test_app_state();
+    let initial_session_count = state.snapshot().sessions.len();
+    let app = app_router(state.clone());
+    let body = serde_json::to_vec(&json!({
+        "name": "Route Created Session",
+        "workdir": "/tmp"
+    }))
+    .expect("create session route body should serialize");
+    let (status, response): (StatusCode, CreateSessionResponse) = request_json(
+        &app,
+        Request::builder()
+            .method("POST")
+            .uri("/api/sessions")
+            .header("content-type", "application/json")
+            .body(Body::from(body))
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+    assert_eq!(response.state.sessions.len(), initial_session_count + 1);
+    let created_session = response
+        .state
+        .sessions
+        .iter()
+        .find(|session| session.id == response.session_id)
+        .expect("created session should be present");
+    assert_eq!(created_session.name, "Route Created Session");
+    let expected_workdir = resolve_session_workdir("/tmp")
+        .expect("route workdir should normalize");
+    assert_eq!(created_session.workdir, expected_workdir);
+    assert_eq!(created_session.agent, Agent::Codex);
+    let _ = fs::remove_file(state.persistence_path.as_path());
+}
+#[tokio::test]
+async fn update_session_settings_route_updates_session_name() {
+    let state = test_app_state();
+    let session_id = test_session_id(&state, Agent::Codex);
+    let app = app_router(state.clone());
+    let body = serde_json::to_vec(&json!({
+        "name": "Route Updated Session"
+    }))
+    .expect("settings route body should serialize");
+    let (status, response): (StatusCode, StateResponse) = request_json(
+        &app,
+        Request::builder()
+            .method("POST")
+            .uri(format!("/api/sessions/{session_id}/settings"))
+            .header("content-type", "application/json")
+            .body(Body::from(body))
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let session = response
+        .sessions
+        .iter()
+        .find(|session| session.id == session_id)
+        .expect("updated session should be present");
+    assert_eq!(session.name, "Route Updated Session");
+    let _ = fs::remove_file(state.persistence_path.as_path());
+}
+#[tokio::test]
+async fn send_message_route_accepts_and_queues_prompt_for_busy_session() {
+    let state = test_app_state();
+    let session_id = test_session_id(&state, Agent::Codex);
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(&session_id)
+            .expect("Codex session should exist");
+        inner.sessions[index].session.status = SessionStatus::Active;
+        inner.sessions[index].session.preview = "Streaming reply...".to_owned();
+    }
+    let app = app_router(state.clone());
+    let body = serde_json::to_vec(&json!({
+        "text": "Queued route prompt",
+        "expandedText": "Expanded queued route prompt"
+    }))
+    .expect("message route body should serialize");
+    let (status, response): (StatusCode, StateResponse) = request_json(
+        &app,
+        Request::builder()
+            .method("POST")
+            .uri(format!("/api/sessions/{session_id}/messages"))
+            .header("content-type", "application/json")
+            .body(Body::from(body))
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(status, StatusCode::ACCEPTED);
+    let session = response
+        .sessions
+        .iter()
+        .find(|session| session.id == session_id)
+        .expect("queued session should be present");
+    assert_eq!(session.status, SessionStatus::Active);
+    assert_eq!(session.pending_prompts.len(), 1);
+    assert_eq!(session.pending_prompts[0].text, "Queued route prompt");
+    assert_eq!(
+        session.pending_prompts[0].expanded_text.as_deref(),
+        Some("Expanded queued route prompt")
+    );
+    let _ = fs::remove_file(state.persistence_path.as_path());
+}
+#[tokio::test]
+async fn submit_approval_route_updates_claude_session_and_delivers_runtime_response() {
+    let state = test_app_state();
+    let session_id = test_session_id(&state, Agent::Claude);
+    let (runtime, input_rx) = test_claude_runtime_handle("claude-approval-route");
+    let message_id = "approval-route-1".to_owned();
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(&session_id)
+            .expect("Claude session should exist");
+        inner.sessions[index].runtime = SessionRuntime::Claude(runtime);
+    }
+    state
+        .push_message(
+            &session_id,
+            Message::Approval {
+                id: message_id.clone(),
+                timestamp: stamp_now(),
+                author: Author::Assistant,
+                title: "Claude needs approval".to_owned(),
+                command: "Edit src/main.rs".to_owned(),
+                command_language: None,
+                detail: "Need to update the route tests.".to_owned(),
+                decision: ApprovalDecision::Pending,
+            },
+        )
+        .expect("approval message should be recorded");
+    state
+        .register_claude_pending_approval(
+            &session_id,
+            message_id.clone(),
+            ClaudePendingApproval {
+                permission_mode_for_session: Some("acceptEdits".to_owned()),
+                request_id: "claude-route-request".to_owned(),
+                tool_input: json!({
+                    "path": "src/main.rs"
+                }),
+            },
+        )
+        .expect("pending Claude approval should be registered");
+    let app = app_router(state.clone());
+    let body = serde_json::to_vec(&json!({
+        "decision": "acceptedForSession"
+    }))
+    .expect("approval route body should serialize");
+    let (status, response): (StatusCode, StateResponse) = request_json(
+        &app,
+        Request::builder()
+            .method("POST")
+            .uri(format!("/api/sessions/{session_id}/approvals/{message_id}"))
+            .header("content-type", "application/json")
+            .body(Body::from(body))
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let session = response
+        .sessions
+        .iter()
+        .find(|session| session.id == session_id)
+        .expect("updated Claude session should be present");
+    assert_eq!(session.status, SessionStatus::Active);
+    assert_eq!(
+        session.preview,
+        approval_preview_text("Claude", ApprovalDecision::AcceptedForSession)
+    );
+    assert!(session.messages.iter().any(|message| matches!(
+        message,
+        Message::Approval { id, decision, .. }
+            if id == &message_id && *decision == ApprovalDecision::AcceptedForSession
+    )));
+    match input_rx.recv_timeout(Duration::from_millis(50)) {
+        Ok(ClaudeRuntimeCommand::SetPermissionMode(mode)) => {
+            assert_eq!(mode, "acceptEdits");
+        }
+        Ok(_) => panic!("expected Claude permission-mode update"),
+        Err(err) => panic!("Claude permission-mode update should arrive: {err}"),
+    }
+    match input_rx.recv_timeout(Duration::from_millis(50)) {
+        Ok(ClaudeRuntimeCommand::PermissionResponse(ClaudePermissionDecision::Allow {
+            request_id,
+            updated_input,
+        })) => {
+            assert_eq!(request_id, "claude-route-request");
+            assert_eq!(updated_input, json!({ "path": "src/main.rs" }));
+        }
+        Ok(_) => panic!("expected Claude permission response"),
+        Err(err) => panic!("Claude permission response should arrive: {err}"),
+    }
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    let record = inner
+        .sessions
+        .iter()
+        .find(|record| record.session.id == session_id)
+        .expect("Claude session should exist");
+    assert!(record.pending_claude_approvals.is_empty());
+    drop(inner);
+    let _ = fs::remove_file(state.persistence_path.as_path());
+}
+#[tokio::test]
+async fn state_events_route_streams_initial_state_and_live_deltas() {
+    let state = test_app_state();
+    let session_id = test_session_id(&state, Agent::Codex);
+    let app = app_router(state.clone());
+    let response = request_response(
+        &app,
+        Request::builder()
+            .method("GET")
+            .uri("/api/events")
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let content_type = response
+        .headers()
+        .get("content-type")
+        .and_then(|value| value.to_str().ok())
+        .expect("SSE route should set a content type");
+    assert!(content_type.starts_with("text/event-stream"));
+    let mut body = Box::pin(response.into_body().into_data_stream());
+    let initial_event = next_sse_event(&mut body).await;
+    let (initial_name, initial_data) = parse_sse_event(&initial_event);
+    assert_eq!(initial_name, "state");
+    let initial_state: StateResponse =
+        serde_json::from_str(&initial_data).expect("initial SSE payload should parse");
+    assert!(
+        initial_state
+            .sessions
+            .iter()
+            .any(|session| session.id == session_id)
+    );
+    let message_id = state.allocate_message_id();
+    state
+        .push_message(
+            &session_id,
+            Message::Text {
+                attachments: Vec::new(),
+                id: message_id.clone(),
+                timestamp: stamp_now(),
+                author: Author::Assistant,
+                text: "Live delta".to_owned(),
+                expanded_text: None,
+            },
+        )
+        .expect("delta message should be recorded");
+    let delta_event = next_sse_event(&mut body).await;
+    let (delta_name, delta_data) = parse_sse_event(&delta_event);
+    assert_eq!(delta_name, "delta");
+    let delta: Value = serde_json::from_str(&delta_data).expect("delta SSE payload should parse");
+    assert_eq!(delta["type"], "messageCreated");
+    assert_eq!(delta["sessionId"], session_id);
+    assert_eq!(delta["messageId"], message_id);
+    assert_eq!(delta["message"]["type"], "text");
+    assert_eq!(delta["message"]["text"], "Live delta");
+    let _ = fs::remove_file(state.persistence_path.as_path());
+}
 #[tokio::test]
 async fn codex_thread_action_routes_update_session_state() {
     let state = test_app_state();
@@ -8380,6 +8732,8 @@ fn stops_shared_codex_sessions_via_turn_interrupt() {
         .find(|session| session.id == session_id)
         .expect("stopped session should remain present");
     assert_eq!(session.status, SessionStatus::Idle);
+    assert!(session.external_session_id.is_none());
+    assert!(session.codex_thread_state.is_none());
     assert!(session.messages.iter().any(|message| matches!(
         message,
         Message::Text { text, .. } if text == "Turn stopped by user."
@@ -8459,6 +8813,10 @@ fn stop_session_detaches_shared_codex_session_when_interrupt_fails() {
             .expect("Codex session should exist");
         inner.sessions[index].runtime = SessionRuntime::Codex(handle);
         inner.sessions[index].session.status = SessionStatus::Active;
+        set_record_external_session_id(
+            &mut inner.sessions[index],
+            Some("thread-stop-fail".to_owned()),
+        );
     }
 
     let snapshot = state.stop_session(&session_id).unwrap();
@@ -8468,6 +8826,8 @@ fn stop_session_detaches_shared_codex_session_when_interrupt_fails() {
         .find(|session| session.id == session_id)
         .expect("stopped session should remain present");
     assert_eq!(session.status, SessionStatus::Idle);
+    assert!(session.external_session_id.is_none());
+    assert!(session.codex_thread_state.is_none());
     assert!(session.messages.iter().any(|message| matches!(
         message,
         Message::Text { text, .. } if text == "Turn stopped by user."
@@ -8480,7 +8840,22 @@ fn stop_session_detaches_shared_codex_session_when_interrupt_fails() {
         .find(|record| record.session.id == session_id)
         .expect("Codex session should exist");
     assert!(matches!(record.runtime, SessionRuntime::None));
+    assert!(record.external_session_id.is_none());
+    assert!(record.session.external_session_id.is_none());
+    assert!(record.session.codex_thread_state.is_none());
     drop(inner);
+
+    let reloaded_inner = load_state(state.persistence_path.as_path())
+        .unwrap()
+        .expect("persisted state should exist");
+    let reloaded = reloaded_inner
+        .sessions
+        .iter()
+        .find(|record| record.session.id == session_id)
+        .expect("Codex session should persist");
+    assert!(reloaded.external_session_id.is_none());
+    assert!(reloaded.session.external_session_id.is_none());
+    assert!(reloaded.session.codex_thread_state.is_none());
 
     assert!(
         !runtime
@@ -8560,7 +8935,10 @@ fn stop_session_dispatches_queued_prompt_after_shared_codex_interrupt_failure() 
         inner.sessions[index].runtime = SessionRuntime::Codex(handle);
         inner.sessions[index].session.status = SessionStatus::Active;
         inner.sessions[index].session.preview = "Streaming reply...".to_owned();
-        inner.sessions[index].external_session_id = Some("thread-stop-fail-queued".to_owned());
+        set_record_external_session_id(
+            &mut inner.sessions[index],
+            Some("thread-stop-fail-queued".to_owned()),
+        );
         inner.sessions[index]
             .queued_prompts
             .push_back(QueuedPromptRecord {
@@ -8605,10 +8983,7 @@ fn stop_session_dispatches_queued_prompt_after_shared_codex_interrupt_failure() 
             } => {
                 assert_eq!(session_id, queued_session_id);
                 assert_eq!(command.prompt, "queued prompt after failed interrupt");
-                assert_eq!(
-                    command.resume_thread_id.as_deref(),
-                    Some("thread-stop-fail-queued")
-                );
+                assert!(command.resume_thread_id.is_none());
             }
             _ => panic!("expected queued Codex prompt dispatch"),
         }
@@ -8626,6 +9001,8 @@ fn stop_session_dispatches_queued_prompt_after_shared_codex_interrupt_failure() 
         .expect("session should remain present");
     assert_eq!(session.status, SessionStatus::Active);
     assert_eq!(session.preview, "queued prompt after failed interrupt");
+    assert!(session.external_session_id.is_none());
+    assert!(session.codex_thread_state.is_none());
     assert!(session.pending_prompts.is_empty());
     assert!(session.messages.iter().any(|message| matches!(
         message,
@@ -8650,6 +9027,23 @@ fn stop_session_dispatches_queued_prompt_after_shared_codex_interrupt_failure() 
     assert!(matches!(record.runtime, SessionRuntime::Codex(_)));
     assert!(!record.runtime_stop_in_progress);
     assert!(record.queued_prompts.is_empty());
+    assert!(record.external_session_id.is_none());
+    assert!(record.session.external_session_id.is_none());
+    assert!(record.session.codex_thread_state.is_none());
+    drop(inner);
+
+    let reloaded_inner = load_state(state.persistence_path.as_path())
+        .unwrap()
+        .expect("persisted state should exist");
+    let reloaded = reloaded_inner
+        .sessions
+        .iter()
+        .find(|record| record.session.id == session_id)
+        .expect("Codex session should persist");
+    assert_eq!(reloaded.session.status, SessionStatus::Active);
+    assert!(reloaded.external_session_id.is_none());
+    assert!(reloaded.session.external_session_id.is_none());
+    assert!(reloaded.session.codex_thread_state.is_none());
     assert!(
         !runtime
             .thread_sessions
@@ -8657,7 +9051,6 @@ fn stop_session_dispatches_queued_prompt_after_shared_codex_interrupt_failure() 
             .expect("shared Codex thread mutex poisoned")
             .contains_key("thread-stop-fail-queued")
     );
-    drop(inner);
 
     process.kill().unwrap();
     process.wait().unwrap();
@@ -11848,6 +12241,141 @@ fn persisted_state_normalizes_legacy_local_verbatim_paths() {
 }
 
 #[cfg(windows)]
+#[test]
+fn persisted_state_normalizes_legacy_workspace_layout_paths() {
+    let project_root =
+        std::env::temp_dir().join(format!("termal-layout-verbatim-path-{}", Uuid::new_v4()));
+    fs::create_dir_all(&project_root).expect("project root should exist");
+    let normalized_root = normalize_user_facing_path(&fs::canonicalize(&project_root).unwrap())
+        .to_string_lossy()
+        .into_owned();
+    let legacy_root = format!(r"\\?\{normalized_root}");
+    let normalized_file = format!(r"{normalized_root}\src\main.rs");
+    let legacy_file = format!(r"\\?\{normalized_file}");
+    let path = std::env::temp_dir().join(format!(
+        "termal-layout-verbatim-state-{}.json",
+        Uuid::new_v4()
+    ));
+
+    let mut inner = StateInner::new();
+    inner.workspace_layouts.insert(
+        "workspace-1".to_owned(),
+        WorkspaceLayoutDocument {
+            id: "workspace-1".to_owned(),
+            revision: 1,
+            updated_at: "2026-04-01 12:00:00".to_owned(),
+            control_panel_side: WorkspaceControlPanelSide::Left,
+            theme_id: None,
+            style_id: None,
+            font_size_px: None,
+            editor_font_size_px: None,
+            density_percent: None,
+            workspace: json!({
+                "root": {
+                    "type": "pane",
+                    "paneId": "pane-a"
+                },
+                "panes": [{
+                    "id": "pane-a",
+                    "tabs": [
+                        {
+                            "id": "tab-files",
+                            "kind": "filesystem",
+                            "rootPath": legacy_root,
+                            "originSessionId": serde_json::Value::Null
+                        },
+                        {
+                            "id": "tab-git",
+                            "kind": "gitStatus",
+                            "workdir": format!(r"\\?\{normalized_root}"),
+                            "originSessionId": serde_json::Value::Null
+                        },
+                        {
+                            "id": "tab-debug",
+                            "kind": "instructionDebugger",
+                            "workdir": format!(r"\\?\{normalized_root}"),
+                            "originSessionId": serde_json::Value::Null
+                        },
+                        {
+                            "id": "tab-source",
+                            "kind": "source",
+                            "path": legacy_file,
+                            "originSessionId": serde_json::Value::Null
+                        },
+                        {
+                            "id": "tab-diff",
+                            "kind": "diffPreview",
+                            "changeType": "edit",
+                            "diff": "-before\n+after",
+                            "diffMessageId": "message-1",
+                            "filePath": format!(r"\\?\{normalized_file}"),
+                            "originSessionId": serde_json::Value::Null,
+                            "summary": "Updated file"
+                        }
+                    ],
+                    "activeTabId": "tab-files",
+                    "activeSessionId": serde_json::Value::Null,
+                    "viewMode": "filesystem",
+                    "lastSessionViewMode": "session",
+                    "sourcePath": format!(r"\\?\{normalized_file}")
+                }],
+                "activePaneId": "pane-a"
+            }),
+        },
+    );
+    persist_state(&path, &inner).expect("persisted state should be written");
+
+    let loaded = load_state(&path)
+        .expect("persisted state should load")
+        .expect("persisted state should exist");
+    let layout = loaded
+        .workspace_layouts
+        .get("workspace-1")
+        .expect("workspace layout should load");
+    assert_eq!(
+        layout.workspace.pointer("/panes/0/sourcePath").and_then(Value::as_str),
+        Some(normalized_file.as_str())
+    );
+    assert_eq!(
+        layout
+            .workspace
+            .pointer("/panes/0/tabs/0/rootPath")
+            .and_then(Value::as_str),
+        Some(normalized_root.as_str())
+    );
+    assert_eq!(
+        layout
+            .workspace
+            .pointer("/panes/0/tabs/1/workdir")
+            .and_then(Value::as_str),
+        Some(normalized_root.as_str())
+    );
+    assert_eq!(
+        layout
+            .workspace
+            .pointer("/panes/0/tabs/2/workdir")
+            .and_then(Value::as_str),
+        Some(normalized_root.as_str())
+    );
+    assert_eq!(
+        layout
+            .workspace
+            .pointer("/panes/0/tabs/3/path")
+            .and_then(Value::as_str),
+        Some(normalized_file.as_str())
+    );
+    assert_eq!(
+        layout
+            .workspace
+            .pointer("/panes/0/tabs/4/filePath")
+            .and_then(Value::as_str),
+        Some(normalized_file.as_str())
+    );
+
+    let _ = fs::remove_file(path);
+    let _ = fs::remove_dir_all(project_root);
+}
+
 #[test]
 fn app_state_bootstrap_normalizes_legacy_local_verbatim_workdir() {
     let project_root =

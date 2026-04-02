@@ -34,11 +34,6 @@ same file more often than they should.
 
 ## P2
 
-- [ ] Expand HTTP route tests for the axum API:
-      Codex thread actions (archive, unarchive, fork, rollback) and interactive request submissions
-      (user input, MCP elicitation, generic app requests) now have HTTP route tests via
-      `tower::ServiceExt`. Still missing: session creation, message send, settings updates, Claude
-      approvals, and SSE state events.
 - [ ] Add orchestrator lifecycle endpoints (stop, pause, resume):
       `OrchestratorInstanceStatus` defines `Running`, `Paused`, and `Stopped` but no API endpoint
       transitions between them. Users cannot stop a running orchestration except by killing
@@ -56,10 +51,4 @@ same file more often than they should.
 - [ ] Add a canvas-move regression for post-relocation session/project sync:
       when an existing shared canvas is moved into a new pane, assert its origin metadata and the
       target pane's `activeSessionId` are updated to the new launch context instead of the old one.
-- [ ] Verify/fix Codex `thread/resume` safety after failed `turn/interrupt`:
-      `stop_session_dispatches_queued_prompt_after_shared_codex_interrupt_failure` dispatches the
-      queued prompt with `resume_thread_id` pointing to a thread whose `turn/interrupt` returned
-      an error. If the prior turn is still running in Codex, `thread/resume` + `turn/start` may
-      produce interleaved turns; the resumed completion arrives on the shared reader with no session
-      mapped (detached), so it is silently dropped. Verify against the Codex JSON-RPC spec and, if
-      unsafe, fall back to `thread/start` (new thread) when the interrupt fails.
+
