@@ -1,5 +1,16 @@
-import { applyDeltaToSessions } from "./live-updates";
-import type { DeltaEvent, Session } from "./types";
+import {
+  LIVE_SESSION_TRANSPORT_STALE_RESYNC_DELAY_MS,
+  applyDeltaToSessions,
+  pruneLiveTransportActivitySessions,
+  sessionHasPotentiallyStaleTransport,
+} from "./live-updates";
+import type {
+  CodexAppRequestMessage,
+  DeltaEvent,
+  McpElicitationRequestMessage,
+  Session,
+  UserInputRequestMessage,
+} from "./types";
 
 function makeSession(id: string, overrides?: Partial<Session>): Session {
   return {
@@ -15,6 +26,394 @@ function makeSession(id: string, overrides?: Partial<Session>): Session {
     ...overrides,
   };
 }
+
+const resolvedInteractionBoundaryCases: {
+  label: string;
+  pending: UserInputRequestMessage | McpElicitationRequestMessage | CodexAppRequestMessage;
+  resolved: UserInputRequestMessage | McpElicitationRequestMessage | CodexAppRequestMessage;
+}[] = [
+  {
+    label: "user input request",
+    pending: {
+      id: "message-user-input-pending",
+      type: "userInputRequest",
+      author: "assistant",
+      timestamp: "10:02",
+      title: "Need details",
+      detail: "Please choose one option.",
+      questions: [],
+      state: "pending",
+    },
+    resolved: {
+      id: "message-user-input-submitted",
+      type: "userInputRequest",
+      author: "assistant",
+      timestamp: "10:02",
+      title: "Need details",
+      detail: "Please choose one option.",
+      questions: [],
+      state: "submitted",
+      submittedAnswers: { answer: ["yes"] },
+    },
+  },
+  {
+    label: "MCP elicitation request",
+    pending: {
+      id: "message-mcp-pending",
+      type: "mcpElicitationRequest",
+      author: "assistant",
+      timestamp: "10:02",
+      title: "Need MCP input",
+      detail: "Choose an option.",
+      state: "pending",
+      request: {
+        threadId: "thread-1",
+        serverName: "deployment-helper",
+        mode: "form",
+        message: "Choose an option",
+        requestedSchema: {
+          type: "object",
+          properties: {
+            choice: {
+              type: "string",
+              title: "Choice",
+              enum: ["accept", "decline"],
+            },
+          },
+          required: ["choice"],
+        },
+      },
+    },
+    resolved: {
+      id: "message-mcp-submitted",
+      type: "mcpElicitationRequest",
+      author: "assistant",
+      timestamp: "10:02",
+      title: "Need MCP input",
+      detail: "Choose an option.",
+      state: "submitted",
+      request: {
+        threadId: "thread-1",
+        serverName: "deployment-helper",
+        mode: "form",
+        message: "Choose an option",
+        requestedSchema: {
+          type: "object",
+          properties: {
+            choice: {
+              type: "string",
+              title: "Choice",
+              enum: ["accept", "decline"],
+            },
+          },
+          required: ["choice"],
+        },
+      },
+      submittedAction: "accept",
+      submittedContent: {
+        choice: "accept",
+      },
+    },
+  },
+  {
+    label: "Codex app request",
+    pending: {
+      id: "message-codex-app-pending",
+      type: "codexAppRequest",
+      author: "assistant",
+      timestamp: "10:02",
+      title: "App request",
+      detail: "Return some JSON.",
+      method: "workspace.pick_file",
+      params: {
+        allowMultiple: false,
+      },
+      state: "pending",
+    },
+    resolved: {
+      id: "message-codex-app-submitted",
+      type: "codexAppRequest",
+      author: "assistant",
+      timestamp: "10:02",
+      title: "App request",
+      detail: "Return some JSON.",
+      method: "workspace.pick_file",
+      params: {
+        allowMultiple: false,
+      },
+      state: "submitted",
+      submittedResult: {
+        path: "/repo/src/main.ts",
+      },
+    },
+  },
+];
+
+describe("session transport helpers", () => {
+  it("does not treat active sessions without tracked transport activity as stale", () => {
+    const session = makeSession("session-1", {
+      status: "active",
+      messages: [
+        {
+          id: "message-user-1",
+          type: "text",
+          timestamp: "10:00",
+          author: "you",
+          text: "test",
+        },
+        {
+          id: "message-assistant-1",
+          type: "text",
+          timestamp: "10:01",
+          author: "assistant",
+          text: "Partial output.",
+        },
+      ],
+    });
+
+    expect(
+      sessionHasPotentiallyStaleTransport(
+        session,
+        undefined,
+        LIVE_SESSION_TRANSPORT_STALE_RESYNC_DELAY_MS + 1000,
+      ),
+    ).toBe(false);
+  });
+
+  it("does not treat a newer user-authored turn as having current-turn assistant activity", () => {
+    const session = makeSession("session-1", {
+      status: "active",
+      messages: [
+        {
+          id: "message-user-1",
+          type: "text",
+          timestamp: "10:00",
+          author: "you",
+          text: "First prompt",
+        },
+        {
+          id: "message-assistant-1",
+          type: "text",
+          timestamp: "10:01",
+          author: "assistant",
+          text: "Earlier reply.",
+        },
+        {
+          id: "message-user-2",
+          type: "text",
+          timestamp: "10:02",
+          author: "you",
+          text: "Latest prompt",
+        },
+      ],
+    });
+
+    expect(
+      sessionHasPotentiallyStaleTransport(
+        session,
+        0,
+        LIVE_SESSION_TRANSPORT_STALE_RESYNC_DELAY_MS,
+      ),
+    ).toBe(false);
+  });
+
+  it("treats assistant output after the latest user turn as current-turn activity", () => {
+    const session = makeSession("session-1", {
+      status: "active",
+      messages: [
+        {
+          id: "message-user-1",
+          type: "text",
+          timestamp: "10:00",
+          author: "you",
+          text: "Prompt",
+        },
+        {
+          id: "message-assistant-1",
+          type: "text",
+          timestamp: "10:01",
+          author: "assistant",
+          text: "Partial output.",
+        },
+      ],
+    });
+
+    expect(
+      sessionHasPotentiallyStaleTransport(
+        session,
+        0,
+        LIVE_SESSION_TRANSPORT_STALE_RESYNC_DELAY_MS,
+      ),
+    ).toBe(true);
+  });
+
+  it("does not treat active sessions just below the stale threshold as stale", () => {
+    const session = makeSession("session-1", {
+      status: "active",
+      messages: [
+        {
+          id: "message-user-1",
+          type: "text",
+          timestamp: "10:00",
+          author: "you",
+          text: "test",
+        },
+        {
+          id: "message-assistant-1",
+          type: "text",
+          timestamp: "10:01",
+          author: "assistant",
+          text: "Partial output.",
+        },
+      ],
+    });
+
+    expect(
+      sessionHasPotentiallyStaleTransport(
+        session,
+        0,
+        LIVE_SESSION_TRANSPORT_STALE_RESYNC_DELAY_MS - 1,
+      ),
+    ).toBe(false);
+  });
+
+  it("treats active sessions at the stale threshold as stale", () => {
+    const session = makeSession("session-1", {
+      status: "active",
+      messages: [
+        {
+          id: "message-user-1",
+          type: "text",
+          timestamp: "10:00",
+          author: "you",
+          text: "test",
+        },
+        {
+          id: "message-assistant-1",
+          type: "text",
+          timestamp: "10:01",
+          author: "assistant",
+          text: "Partial output.",
+        },
+      ],
+    });
+
+    expect(
+      sessionHasPotentiallyStaleTransport(
+        session,
+        0,
+        LIVE_SESSION_TRANSPORT_STALE_RESYNC_DELAY_MS,
+      ),
+    ).toBe(true);
+  });
+
+  it.each(resolvedInteractionBoundaryCases)(
+    "treats assistant activity before a pending $label as current-turn activity",
+    ({ pending }) => {
+      const session = makeSession("session-1", {
+        status: "active",
+        messages: [
+          {
+            id: "message-user-1",
+            type: "text",
+            timestamp: "10:00",
+            author: "you",
+            text: "Prompt",
+          },
+          {
+            id: "message-assistant-1",
+            type: "text",
+            timestamp: "10:01",
+            author: "assistant",
+            text: "Earlier reply.",
+          },
+          pending,
+        ],
+      });
+
+      expect(
+        sessionHasPotentiallyStaleTransport(
+          session,
+          0,
+          LIVE_SESSION_TRANSPORT_STALE_RESYNC_DELAY_MS,
+        ),
+      ).toBe(true);
+    },
+  );
+
+  it.each(resolvedInteractionBoundaryCases)(
+    "treats a resolved $label as a current-turn boundary",
+    ({ resolved }) => {
+      const session = makeSession("session-1", {
+        status: "active",
+        messages: [
+          {
+            id: "message-user-1",
+            type: "text",
+            timestamp: "10:00",
+            author: "you",
+            text: "Prompt",
+          },
+          {
+            id: "message-assistant-1",
+            type: "text",
+            timestamp: "10:01",
+            author: "assistant",
+            text: "Earlier reply.",
+          },
+          resolved,
+        ],
+      });
+
+      expect(
+        sessionHasPotentiallyStaleTransport(
+          session,
+          0,
+          LIVE_SESSION_TRANSPORT_STALE_RESYNC_DELAY_MS,
+        ),
+      ).toBe(false);
+    },
+  );
+
+  it("prunes tracked transport activity for sessions missing from the latest snapshot", () => {
+    const liveTransportActivityAtBySessionId = new Map<string, number>([
+      ["session-1", 1000],
+      ["session-2", 2000],
+      ["session-3", 3000],
+    ]);
+
+    pruneLiveTransportActivitySessions(liveTransportActivityAtBySessionId, [
+      makeSession("session-2"),
+      makeSession("session-4"),
+    ]);
+
+    expect(Array.from(liveTransportActivityAtBySessionId.entries())).toEqual([
+      ["session-2", 2000],
+    ]);
+  });
+
+  it("prunes all tracked transport activity when the latest snapshot has no sessions", () => {
+    const liveTransportActivityAtBySessionId = new Map<string, number>([
+      ["session-1", 1000],
+      ["session-2", 2000],
+    ]);
+
+    pruneLiveTransportActivitySessions(liveTransportActivityAtBySessionId, []);
+
+    expect(Array.from(liveTransportActivityAtBySessionId.entries())).toEqual([]);
+  });
+
+  it("does nothing when transport activity is already empty", () => {
+    const liveTransportActivityAtBySessionId = new Map<string, number>();
+
+    pruneLiveTransportActivitySessions(liveTransportActivityAtBySessionId, [
+      makeSession("session-1"),
+    ]);
+
+    expect(Array.from(liveTransportActivityAtBySessionId.entries())).toEqual([]);
+  });
+
+});
 
 describe("applyDeltaToSessions", () => {
   it("appends a created message without needing a resync", () => {
@@ -490,5 +889,15 @@ describe("applyDeltaToSessions", () => {
     }
 
     expect(result.sessions[0].messages.map((message) => message.id)).toEqual(["message-1", "message-2"]);
+  });
+  it("returns needsResync for an unsupported session delta payload", () => {
+    const sessions = [makeSession("session-a")];
+    const delta = {
+      type: "unknownFutureDelta",
+      revision: 7,
+      sessionId: "session-a",
+    } as unknown as Parameters<typeof applyDeltaToSessions>[1];
+
+    expect(applyDeltaToSessions(sessions, delta)).toEqual({ kind: "needsResync" });
   });
 });

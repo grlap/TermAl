@@ -63,7 +63,13 @@ import { copyTextToClipboard } from "./clipboard";
 import { buildDiffPreviewModel } from "./diff-preview";
 import { formatUserFacingError } from "./error-messages";
 import { highlightCode } from "./highlight";
-import { applyDeltaToSessions } from "./live-updates";
+import {
+  LIVE_SESSION_RESUME_WATCHDOG_DRIFT_MS,
+  LIVE_SESSION_WATCHDOG_RESYNC_RETRY_COOLDOWN_MS,
+  applyDeltaToSessions,
+  pruneLiveTransportActivitySessions,
+  sessionHasPotentiallyStaleTransport,
+} from "./live-updates";
 import { matchingSessionModelOption } from "./session-model-options";
 import {
   looksLikeWindowsPath,
@@ -267,6 +273,7 @@ import {
 
 const TAB_DRAG_STALE_TIMEOUT_MS = 15000;
 const RECONNECT_STATE_RESYNC_DELAY_MS = 400;
+const LIVE_SESSION_RESUME_WATCHDOG_INTERVAL_MS = 1000;
 
 type SessionFlagMap = Record<string, true | undefined>;
 const WORKSPACE_LAYOUT_PERSIST_DELAY_MS = 150;
@@ -1230,6 +1237,7 @@ export default function App() {
   const stateResyncInFlightRef = useRef(false);
   const stateResyncPendingRef = useRef(false);
   const stateResyncAllowAuthoritativeRollbackRef = useRef(false);
+  const stateResyncPreserveWatchdogCooldownRef = useRef(false);
   const paneShouldStickToBottomRef = useRef<Record<string, boolean | undefined>>({});
   const paneScrollPositionsRef = useRef<
     Record<string, Record<string, { top: number; shouldStick: boolean }>>
@@ -2074,7 +2082,22 @@ export default function App() {
   useEffect(() => {
     let cancelled = false;
     let reconnectStateResyncTimeoutId: ReturnType<typeof window.setTimeout> | null = null;
+    let sawReconnectOpenSinceLastError = false;
+    let liveSessionResumeWatchdogIntervalId: ReturnType<typeof window.setInterval> | null = null;
     let shouldResyncOnResume = false;
+    // These refs are component-scoped, so Strict Mode effect remounts must reset
+    // any stale in-flight resync bookkeeping from the previous mount.
+    stateResyncInFlightRef.current = false;
+    stateResyncPendingRef.current = false;
+    stateResyncAllowAuthoritativeRollbackRef.current = false;
+    stateResyncPreserveWatchdogCooldownRef.current = false;
+    // Track transport activity per session so one noisy active session cannot
+    // mask another stalled one.
+    let lastLiveTransportActivityAtBySessionId = new Map<string, number>();
+    // Drift-gap detection uses the effect-mount clock baseline; any test that
+    // calls vi.setSystemTime() for this path must do so before renderApp().
+    let lastLiveSessionResumeWatchdogTickAt = Date.now();
+    let lastWatchdogResyncAttemptAt: number | null = null;
     const eventSource = new EventSource("/api/events");
 
     function clearReconnectStateResyncTimeout() {
@@ -2086,7 +2109,16 @@ export default function App() {
       reconnectStateResyncTimeoutId = null;
     }
 
+    function clearReconnectStateResyncTimeoutAfterConfirmedReopen() {
+      if (!sawReconnectOpenSinceLastError) {
+        return;
+      }
+
+      clearReconnectStateResyncTimeout();
+    }
+
     function scheduleReconnectStateResync() {
+      sawReconnectOpenSinceLastError = false;
       clearReconnectStateResyncTimeout();
       reconnectStateResyncTimeoutId = window.setTimeout(() => {
         reconnectStateResyncTimeoutId = null;
@@ -2098,14 +2130,51 @@ export default function App() {
       }, RECONNECT_STATE_RESYNC_DELAY_MS);
     }
 
-    function requestStateResync(options?: { allowAuthoritativeRollback?: boolean }) {
+    function markLiveTransportActivity(
+      sessionIds: Iterable<string>,
+      now = Date.now(),
+      { clearWatchdogCooldown = true }: { clearWatchdogCooldown?: boolean } = {},
+    ) {
+      for (const sessionId of sessionIds) {
+        lastLiveTransportActivityAtBySessionId.set(sessionId, now);
+      }
+      if (clearWatchdogCooldown) {
+        lastWatchdogResyncAttemptAt = null;
+      }
+    }
+
+    function syncLiveTransportActivityFromState(
+      sessions: Session[],
+      now = Date.now(),
+      { clearWatchdogCooldown = true }: { clearWatchdogCooldown?: boolean } = {},
+    ) {
+      markLiveTransportActivity(
+        sessions.map((session) => session.id),
+        now,
+        { clearWatchdogCooldown },
+      );
+    }
+
+    function requestStateResync(options?: {
+      allowAuthoritativeRollback?: boolean;
+      preserveWatchdogCooldown?: boolean;
+    }) {
       if (cancelled) {
         return;
       }
 
-      clearReconnectStateResyncTimeout();
+      const shouldPreserveReconnectFallbackUntilSuccess =
+        reconnectStateResyncTimeoutId !== null && !sawReconnectOpenSinceLastError;
+      if (!shouldPreserveReconnectFallbackUntilSuccess) {
+        clearReconnectStateResyncTimeout();
+      }
+      // Coalesced resync requests retain the strongest semantics until the next
+      // loop iteration consumes them.
       if (options?.allowAuthoritativeRollback) {
         stateResyncAllowAuthoritativeRollbackRef.current = true;
+      }
+      if (options?.preserveWatchdogCooldown) {
+        stateResyncPreserveWatchdogCooldownRef.current = true;
       }
       stateResyncPendingRef.current = true;
       if (stateResyncInFlightRef.current) {
@@ -2120,12 +2189,15 @@ export default function App() {
             const allowAuthoritativeRollback =
               stateResyncAllowAuthoritativeRollbackRef.current;
             stateResyncAllowAuthoritativeRollbackRef.current = false;
+            const preserveWatchdogCooldown =
+              stateResyncPreserveWatchdogCooldownRef.current;
+            stateResyncPreserveWatchdogCooldownRef.current = false;
             const requestedRevision = latestStateRevisionRef.current;
 
             try {
               const state = await fetchState();
               if (cancelled) {
-                return;
+                break;
               }
 
               const shouldForceRollback =
@@ -2134,12 +2206,26 @@ export default function App() {
                 latestStateRevisionRef.current === requestedRevision &&
                 state.revision <= requestedRevision;
 
-              adoptState(state, {
+              const adopted = adoptState(state, {
                 // A reconnect fallback snapshot is authoritative if no newer SSE state landed
                 // while it was in flight, even when a crashed backend restarted below the last
                 // streamed client revision.
                 force: shouldForceRollback,
               });
+              if (adopted) {
+                if (shouldPreserveReconnectFallbackUntilSuccess) {
+                  // Pre-reopen delta-triggered resyncs should only disarm the fast reconnect
+                  // fallback once a /api/state snapshot has actually been adopted.
+                  clearReconnectStateResyncTimeout();
+                }
+                syncLiveTransportActivityFromState(state.sessions, Date.now(), {
+                  clearWatchdogCooldown: !preserveWatchdogCooldown,
+                });
+                pruneLiveTransportActivitySessions(
+                  lastLiveTransportActivityAtBySessionId,
+                  state.sessions,
+                );
+              }
               setRequestError(null);
             } catch (error) {
               if (!cancelled) {
@@ -2160,6 +2246,20 @@ export default function App() {
 
     function hasPotentiallyStaleLiveSession() {
       return sessionsRef.current.some((session) => session.status !== "idle");
+    }
+
+    function hasActivelyStreamingSession() {
+      return sessionsRef.current.some((session) => session.status === "active");
+    }
+
+    function hasPotentiallyStaleTransportSession(now: number) {
+      return sessionsRef.current.some((session) =>
+        sessionHasPotentiallyStaleTransport(
+          session,
+          lastLiveTransportActivityAtBySessionId.get(session.id),
+          now,
+        ),
+      );
     }
 
     function markResumeResyncIfNeeded() {
@@ -2184,17 +2284,83 @@ export default function App() {
       requestStateResync({ allowAuthoritativeRollback: true });
     }
 
+    function handleLiveSessionResumeWatchdogTick() {
+      const now = Date.now();
+      if (cancelled) {
+        return;
+      }
+
+      if (document.visibilityState === "hidden") {
+        return;
+      }
+
+      const elapsedSinceLastWatchdogTick = now - lastLiveSessionResumeWatchdogTickAt;
+      if (
+        !readNavigatorOnline() ||
+        stateResyncInFlightRef.current ||
+        stateResyncPendingRef.current
+      ) {
+        return;
+      }
+
+      // Only advance the baseline when this tick is actually evaluating drift.
+      // Pausing during in-flight/pending resyncs avoids consuming a real wake gap.
+      // Advance it even with no active session so an idle-to-active transition does
+      // not inherit a false wake gap from time spent without live streaming.
+      lastLiveSessionResumeWatchdogTickAt = now;
+      if (
+        latestStateRevisionRef.current === null ||
+        !hasActivelyStreamingSession()
+      ) {
+        return;
+      }
+
+      // Wake-gap recovery stays broader than the stale-transport path so a first
+      // assistant reply that finished while the machine was asleep can still recover,
+      // even when queued follow-ups exist behind the active turn.
+      const detectedResumeGap =
+        elapsedSinceLastWatchdogTick >= LIVE_SESSION_RESUME_WATCHDOG_DRIFT_MS;
+      const transportLooksStale = hasPotentiallyStaleTransportSession(now);
+      if (!detectedResumeGap && !transportLooksStale) {
+        return;
+      }
+
+      const watchdogRetryCooldownElapsed =
+        lastWatchdogResyncAttemptAt === null ||
+        now - lastWatchdogResyncAttemptAt >=
+          LIVE_SESSION_WATCHDOG_RESYNC_RETRY_COOLDOWN_MS;
+      if (!watchdogRetryCooldownElapsed) {
+        return;
+      }
+
+      // A focused window can wake without blur/focus or visibility transitions.
+      lastWatchdogResyncAttemptAt = now;
+      requestStateResync({
+        allowAuthoritativeRollback: true,
+        preserveWatchdogCooldown: true,
+      });
+    }
+
     function handleStateEvent(event: MessageEvent<string>) {
       if (cancelled) {
         return;
       }
 
-      clearReconnectStateResyncTimeout();
       try {
         const state = JSON.parse(event.data) as StateResponse;
         const force = forceAdoptNextStateEventRef.current;
+        const adopted = adoptState(state, { force });
         forceAdoptNextStateEventRef.current = false;
-        adoptState(state, { force });
+        if (adopted) {
+          clearReconnectStateResyncTimeoutAfterConfirmedReopen();
+          // A live SSE state payload proves the stream is healthy again, so it also
+          // clears any residual watchdog retry cooldown from an earlier fallback probe.
+          syncLiveTransportActivityFromState(state.sessions);
+          pruneLiveTransportActivitySessions(
+            lastLiveTransportActivityAtBySessionId,
+            state.sessions,
+          );
+        }
         setRequestError(null);
       } catch (error) {
         if (!cancelled) {
@@ -2212,7 +2378,6 @@ export default function App() {
         return;
       }
 
-      clearReconnectStateResyncTimeout();
       try {
         const delta = JSON.parse(event.data) as DeltaEvent;
         const revisionAction = decideDeltaRevisionAction(
@@ -2220,6 +2385,7 @@ export default function App() {
           delta.revision,
         );
         if (revisionAction === "ignore") {
+          clearReconnectStateResyncTimeoutAfterConfirmedReopen();
           setRequestError(null);
           return;
         }
@@ -2229,6 +2395,7 @@ export default function App() {
         }
 
         if (delta.type === "orchestratorsUpdated") {
+          clearReconnectStateResyncTimeoutAfterConfirmedReopen();
           latestStateRevisionRef.current = delta.revision;
           startTransition(() => {
             setOrchestrators(delta.orchestrators);
@@ -2237,8 +2404,12 @@ export default function App() {
           return;
         }
 
+        // Non-session deltas such as orchestratorsUpdated are handled above; the
+        // session reducer only accepts deltas that carry a concrete sessionId.
         const result = applyDeltaToSessions(sessionsRef.current, delta);
         if (result.kind === "applied") {
+          clearReconnectStateResyncTimeoutAfterConfirmedReopen();
+          markLiveTransportActivity([delta.sessionId]);
           latestStateRevisionRef.current = delta.revision;
           sessionsRef.current = result.sessions;
           startTransition(() => {
@@ -2257,8 +2428,8 @@ export default function App() {
     eventSource.addEventListener("state", handleStateEvent as EventListener);
     eventSource.addEventListener("delta", handleDeltaEvent as EventListener);
     eventSource.onopen = () => {
-      clearReconnectStateResyncTimeout();
       if (!cancelled) {
+        sawReconnectOpenSinceLastError = true;
         if (latestStateRevisionRef.current !== null) {
           // A restarted backend can reconnect with the same persisted revision but a
           // more complete authoritative snapshot than the client currently has.
@@ -2273,6 +2444,7 @@ export default function App() {
         return;
       }
 
+      sawReconnectOpenSinceLastError = false;
       const isOnline = readNavigatorOnline();
       const hasHydratedState = latestStateRevisionRef.current !== null;
       setBackendConnectionState(
@@ -2292,6 +2464,10 @@ export default function App() {
       // so completed assistant replies do not stay hidden until another user action forces a refresh.
       scheduleReconnectStateResync();
     };
+    liveSessionResumeWatchdogIntervalId = window.setInterval(
+      handleLiveSessionResumeWatchdogTick,
+      LIVE_SESSION_RESUME_WATCHDOG_INTERVAL_MS,
+    );
 
     function handleWindowBlur() {
       markResumeResyncIfNeeded();
@@ -2331,6 +2507,9 @@ export default function App() {
     return () => {
       cancelled = true;
       clearReconnectStateResyncTimeout();
+      if (liveSessionResumeWatchdogIntervalId !== null) {
+        window.clearInterval(liveSessionResumeWatchdogIntervalId);
+      }
       window.removeEventListener("blur", handleWindowBlur);
       window.removeEventListener("focus", handleWindowFocus);
       window.removeEventListener("pagehide", handlePageHide);
@@ -14178,6 +14357,7 @@ function dropLabelForPlacement(placement: TabDropPlacement) {
       return "Bottom";
   }
 }
+
 
 
 

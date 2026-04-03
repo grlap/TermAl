@@ -1,13 +1,78 @@
-import type { CommandMessage, DeltaEvent, ParallelAgentsMessage, Session, TextMessage } from "./types";
+import type { CommandMessage, DeltaEvent, Message, ParallelAgentsMessage, Session, TextMessage } from "./types";
+
+export const LIVE_SESSION_TRANSPORT_STALE_RESYNC_DELAY_MS = 15000;
+export const LIVE_SESSION_RESUME_WATCHDOG_DRIFT_MS = 5000;
+// Keep watchdog retries aligned with one full stale-transport window for now.
+export const LIVE_SESSION_WATCHDOG_RESYNC_RETRY_COOLDOWN_MS =
+  LIVE_SESSION_TRANSPORT_STALE_RESYNC_DELAY_MS;
+
+function isResolvedInteractionTurnBoundary(message: Message) {
+  switch (message.type) {
+    case "approval":
+      return message.decision !== "pending";
+    case "userInputRequest":
+    case "mcpElicitationRequest":
+    case "codexAppRequest":
+      return message.state !== "pending";
+    default:
+      return false;
+  }
+}
+
+function hasAssistantActivitySinceCurrentTurnBoundary(session: Session) {
+  // Resolved interaction cards are assistant-authored, but they hand control back
+  // to the user until newer assistant output arrives.
+  for (let index = session.messages.length - 1; index >= 0; index -= 1) {
+    const message = session.messages[index];
+    if (isResolvedInteractionTurnBoundary(message)) {
+      return false;
+    }
+    if (message.author === "assistant") {
+      return true;
+    }
+    if (message.author === "you") {
+      return false;
+    }
+  }
+
+  return false;
+}
+
+export function sessionHasPotentiallyStaleTransport(
+  session: Session,
+  lastLiveTransportActivityAt: number | undefined,
+  now: number,
+) {
+  return (
+    session.status === "active" &&
+    hasAssistantActivitySinceCurrentTurnBoundary(session) &&
+    lastLiveTransportActivityAt !== undefined &&
+    now - lastLiveTransportActivityAt >= LIVE_SESSION_TRANSPORT_STALE_RESYNC_DELAY_MS
+  );
+}
+
+export function pruneLiveTransportActivitySessions(
+  liveTransportActivityAtBySessionId: Map<string, number>,
+  sessions: Session[],
+) {
+  const activeSessionIds = new Set(sessions.map((session) => session.id));
+  for (const sessionId of liveTransportActivityAtBySessionId.keys()) {
+    if (!activeSessionIds.has(sessionId)) {
+      liveTransportActivityAtBySessionId.delete(sessionId);
+    }
+  }
+}
+
+type SessionDeltaEvent = Exclude<DeltaEvent, { type: "orchestratorsUpdated" }>;
 
 export type DeltaApplyResult =
   | { kind: "applied"; sessions: Session[] }
   | { kind: "needsResync" };
 
-export function applyDeltaToSessions(sessions: Session[], delta: DeltaEvent): DeltaApplyResult {
-  if (delta.type === "orchestratorsUpdated") {
-    return { kind: "needsResync" };
-  }
+export function applyDeltaToSessions(
+  sessions: Session[],
+  delta: SessionDeltaEvent,
+): DeltaApplyResult {
   const sessionIndex = sessions.findIndex((session) => session.id === delta.sessionId);
   if (sessionIndex === -1) {
     return { kind: "needsResync" };
@@ -175,6 +240,11 @@ export function applyDeltaToSessions(sessions: Session[], delta: DeltaEvent): De
           preview: delta.preview,
         }),
       };
+    }
+    default: {
+      const _exhaustive: never = delta;
+      void _exhaustive;
+      return { kind: "needsResync" };
     }
   }
 }

@@ -7,15 +7,19 @@ TermAl gives you one place to run, supervise, review, and steer long-running sof
 ## Features
 
 - **Multi-session workspace** — run multiple agent sessions in parallel across a split-pane layout
+- **Orchestrator** — visual graph editor for designing multi-agent workflows; chain sessions with transitions that fire automatically on completion and route results between agents
+- **Control panel** — dockable sidebar with icon-only section tabs for Projects, Sessions, Orchestrators, Files, and Git — with project-aware context syncing
+- **Multi-browser workspaces** — server-backed layout persistence lets you run independent workspace views across multiple monitors (e.g. `?workspace=planner` on one screen, `?workspace=review` on another)
 - **Structured message cards** — text, commands, diffs, thinking blocks, markdown, and approval requests rendered as typed cards, not raw text
 - **Streaming responses** — token-by-token output with delta events for low-latency display
 - **Diff review** — unified diff cards with Monaco diff preview, click-to-open in a side pane
+- **Smart pane placement** — source and diff tabs opened from the control panel land in the nearest available pane
 - **Explicit approvals** — agents request permission for risky actions; you approve, reject, or set a session-wide policy
 - **Prompt queueing** — send follow-up prompts while an agent is working; they run automatically in order
 - **SSH remotes** — connect to remote machines over SSH tunnels; run agents on a build server while supervising from your laptop
 - **Session persistence** — sessions and message history survive restart (`~/.termal/sessions.json`)
 - **Filesystem and git panels** — browse files, view git status, and open source or diff views directly from the workspace
-- **17 themes + style presets** - hand-crafted palettes, independent chrome styles, and a density control switchable at runtime
+- **16 themes + 4 chrome styles** — hand-crafted color palettes, independent chrome styles (Terminal, Editorial, Studio, Blueprint), and a density control switchable at runtime
 
 ## Agent support
 
@@ -36,6 +40,8 @@ Browser (React + TypeScript)        Rust Backend (axum + tokio)
 │  ├── Session chat    │  REST      │  ├── Agent child processes       │
 │  ├── Diff viewer     │───────────>│  ├── Approval queues             │
 │  ├── Source editor   │            │  ├── Remote registry             │
+│  ├── Control panel   │            │  ├── Orchestrator templates      │
+│  ├── Orchestrator    │            │  ├── Workspace layouts           │
 │  ├── Filesystem      │            │  └── Persistence (~/.termal/)    │
 │  └── Git status      │            │                                  │
 └──────────────────────┘            │  Agent Runtimes                  │
@@ -49,7 +55,7 @@ Browser (React + TypeScript)        Rust Backend (axum + tokio)
 - **Backend:** Rust + axum + tokio on `:8787`. Spawns agents as child processes, communicates via stdin/stdout.
 - **Frontend:** React 18 + TypeScript + Vite on `:4173` (dev). No external state library — state lives in `App.tsx`.
 - **Real-time:** Server-Sent Events with a monotonic revision counter. Delta events for streaming; full snapshots for sync.
-- **Persistence:** Single JSON file at `~/.termal/sessions.json`.
+- **Persistence:** Sessions in `~/.termal/sessions.json`, orchestrator templates in `~/.termal/orchestrators.json`, workspace layouts in backend state.
 
 ## SSH remotes
 
@@ -264,27 +270,71 @@ termal/
 │   ├── state.rs             # AppState, sessions, persistence
 │   ├── runtime.rs           # Agent runtimes (Claude, Codex, Gemini, Cursor)
 │   ├── remote.rs            # SSH tunnels, remote registry, SSE bridge
+│   ├── orchestrators.rs     # Orchestrator templates, instances, and transitions
 │   ├── telegram.rs          # Telegram polling relay for project digests and actions
 │   ├── turns.rs             # Turn lifecycle, types, shared structures
 │   └── tests.rs             # Rust unit tests
 ├── ui/
 │   ├── src/
-│   │   ├── App.tsx          # Main React component (~4500 lines)
-│   │   ├── api.ts           # API client
-│   │   ├── types.ts         # Shared TypeScript types
-│   │   ├── workspace.ts     # Pane/tab/split state
-│   │   ├── live-updates.ts  # Delta event application
-│   │   ├── themes/          # 17 CSS theme files
-│   │   └── panels/          # AgentSession, Source, Diff, Filesystem, Git panels
-│   └── vite.config.ts       # Dev proxy: /api → :8787
+│   │   ├── App.tsx              # Main React component
+│   │   ├── api.ts               # API client
+│   │   ├── types.ts             # Shared TypeScript types
+│   │   ├── workspace.ts         # Pane/tab/split state
+│   │   ├── workspace-storage.ts # Multi-browser workspace view ID and layout persistence
+│   │   ├── live-updates.ts      # Delta event application
+│   │   ├── themes/              # 16 color themes + 4 chrome style presets
+│   │   └── panels/
+│   │       ├── AgentSessionPanel.tsx                # Chat session view
+│   │       ├── ControlPanelSurface.tsx              # Dockable sidebar with section tabs
+│   │       ├── OrchestratorTemplatesPanel.tsx        # Visual canvas editor for workflows
+│   │       ├── OrchestratorTemplateLibraryPanel.tsx  # Template library and instance management
+│   │       ├── SessionCanvasPanel.tsx               # Session graph overview
+│   │       ├── SourcePanel.tsx                      # Source file viewer
+│   │       ├── DiffPanel.tsx                        # Diff viewer
+│   │       ├── FileSystemPanel.tsx                  # Filesystem browser
+│   │       ├── GitStatusPanel.tsx                   # Git status and diff tree
+│   │       └── InstructionDebuggerPanel.tsx         # Agent instruction tracing
+│   └── vite.config.ts          # Dev proxy: /api → :8787
 ├── docs/
 │   ├── architecture.md      # Full architecture reference
 │   ├── vision.md            # Product vision
 │   ├── roadmap.md           # Phased roadmap
-│   └── bugs.md              # Bug tracker and implementation backlog
+│   ├── bugs.md              # Bug tracker and implementation backlog
+│   └── features/            # Feature briefs (orchestration, workspaces, agent integrations, etc.)
 ├── Cargo.toml
 └── Cargo.lock
 ```
+
+## Orchestrator
+
+The orchestrator lets you design reusable multi-agent workflows as directed graphs. Each node is an agent session; each edge is a transition that fires when a session completes.
+
+### Template design
+
+Open the orchestrator canvas to build a workflow visually:
+
+- **Add session cards** — each card defines an agent, model, and instruction prompt
+- **Draw transitions** — drag between anchor points on cards to create edges; set a trigger (`OnCompletion`), result mode, and optional prompt template
+- **Save as a template** — templates are persisted to `~/.termal/orchestrators.json` and reusable across projects
+
+### Runtime
+
+Launch an orchestrator instance from a template. TermAl creates the sessions, starts the first one, and then:
+
+1. When a session reaches `prompt_ready`, the orchestrator evaluates outgoing transitions.
+2. The transition assembles a follow-up prompt (optionally including the source session's last response or a summary).
+3. The follow-up prompt is delivered to the target session, which starts automatically.
+
+Instances can be **paused**, **resumed**, or **stopped** from the control panel or via REST API.
+
+### Transition settings
+
+| Setting | Options | Description |
+|---------|---------|-------------|
+| Trigger | `OnCompletion` | Fires when the source session finishes its turn |
+| Result mode | `None`, `LastResponse`, `Summary`, `SummaryAndLastResponse` | What context to include in the delivered prompt |
+| Input mode | `Queue`, `Consolidate` | How multiple inbound transitions are handled |
+| Prompt template | Free text with `{{result}}` placeholder | Custom prompt wrapping the result |
 
 ## Roadmap
 
@@ -305,3 +355,9 @@ See [`docs/roadmap.md`](docs/roadmap.md) for the full breakdown.
 - [`docs/vision.md`](docs/vision.md) — product framing and guiding principles
 - [`docs/roadmap.md`](docs/roadmap.md) — phased roadmap
 - [`docs/bugs.md`](docs/bugs.md) — implementation backlog
+- [`docs/features/`](docs/features/) — feature briefs including:
+  - [Orchestration](docs/features/orchestration.md) — multi-agent workflow design
+  - [Multi-browser workspaces](docs/features/multi-browser-workspaces.md) — server-backed layout persistence
+  - [Diff review workflow](docs/features/diff-review-workflow.md) — structured diff review
+  - [Agent integrations](docs/features/agent-integration-comparison.md) — Claude, Codex, Gemini, Cursor comparison
+  - [Project-scoped remotes](docs/features/project-scoped-remotes.md) — remote binding at project level

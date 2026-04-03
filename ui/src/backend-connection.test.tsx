@@ -51,6 +51,16 @@ class EventSourceMock {
       listener(event);
     }
   }
+
+  dispatchDelta(delta: unknown) {
+    const event = new MessageEvent<string>("delta", {
+      data: JSON.stringify(delta),
+    });
+    for (const listener of this.listeners.delta ?? []) {
+      listener(event);
+    }
+  }
+
 }
 
 class ResizeObserverMock {
@@ -88,6 +98,9 @@ describe("Backend connection state", () => {
   });
 
   afterEach(() => {
+    if (vi.isFakeTimers()) {
+      vi.useRealTimers();
+    }
     HTMLElement.prototype.scrollTo = originalScrollTo;
   });
 
@@ -217,7 +230,7 @@ describe("Backend connection state", () => {
     }
   });
 
-  it("cancels the reconnect fallback fetch as soon as the stream reopens", async () => {
+  it("keeps the reconnect fallback fetch armed when the stream reopens without usable data", async () => {
     const originalFetch = globalThis.fetch;
     const originalEventSource = globalThis.EventSource;
     const originalResizeObserver = globalThis.ResizeObserver;
@@ -284,9 +297,108 @@ describe("Backend connection state", () => {
       expect(screen.getByText("Connected")).toBeInTheDocument();
 
       await act(async () => {
-        await vi.advanceTimersByTimeAsync(500);
+        await vi.advanceTimersByTimeAsync(399);
       });
       expect(countStateFetches()).toBe(hydratedStateFetchCount);
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1);
+      });
+      expect(countStateFetches()).toBe(hydratedStateFetchCount + 1);
+    } finally {
+      vi.useRealTimers();
+      restoreGlobal("fetch", originalFetch);
+      restoreGlobal("EventSource", originalEventSource);
+      restoreGlobal("ResizeObserver", originalResizeObserver);
+    }
+  });
+
+  it("runs the reconnect fallback fetch after a second stream error when the reopened stream still delivers no data", async () => {
+    const originalFetch = globalThis.fetch;
+    const originalEventSource = globalThis.EventSource;
+    const originalResizeObserver = globalThis.ResizeObserver;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const target = String(input);
+      if (target === "/api/state") {
+        return jsonResponse({
+          revision: 1,
+          projects: [],
+          sessions: [],
+        });
+      }
+      if (target.startsWith("/api/workspaces/")) {
+        return new Response("", {
+          status: 404,
+        });
+      }
+
+      throw new Error(`Unexpected fetch: ${target}`);
+    });
+    const countStateFetches = () =>
+      fetchMock.mock.calls.filter(([url]) => String(url) === "/api/state")
+        .length;
+
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal(
+      "EventSource",
+      EventSourceMock as unknown as typeof EventSource,
+    );
+    vi.stubGlobal(
+      "ResizeObserver",
+      ResizeObserverMock as unknown as typeof ResizeObserver,
+    );
+
+    try {
+      render(<App />);
+
+      const eventSource = latestEventSource();
+      expect(eventSource).toBeDefined();
+
+      act(() => {
+        eventSource.dispatchOpen();
+        eventSource.dispatchState({
+          revision: 1,
+          projects: [],
+          sessions: [],
+        });
+      });
+      await waitFor(() => {
+        expect(screen.getByText("Connected")).toBeInTheDocument();
+      });
+
+      const hydratedStateFetchCount = countStateFetches();
+      vi.useFakeTimers();
+
+      act(() => {
+        eventSource.dispatchError();
+      });
+      expect(screen.getByText("Reconnecting")).toBeInTheDocument();
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(100);
+      });
+      act(() => {
+        eventSource.dispatchOpen();
+      });
+      expect(screen.getByText("Connected")).toBeInTheDocument();
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(100);
+      });
+      act(() => {
+        eventSource.dispatchError();
+      });
+      expect(screen.getByText("Reconnecting")).toBeInTheDocument();
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(399);
+      });
+      expect(countStateFetches()).toBe(hydratedStateFetchCount);
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1);
+      });
+      expect(countStateFetches()).toBe(hydratedStateFetchCount + 1);
     } finally {
       vi.useRealTimers();
       restoreGlobal("fetch", originalFetch);
@@ -373,7 +485,7 @@ describe("Backend connection state", () => {
     }
   });
 
-  it("cancels the reconnect fallback fetch when a reconnect state event arrives first", async () => {
+  it("cancels the reconnect fallback fetch when an adopted reconnect state event arrives first", async () => {
     const originalFetch = globalThis.fetch;
     const originalEventSource = globalThis.EventSource;
     const originalResizeObserver = globalThis.ResizeObserver;
@@ -438,18 +550,743 @@ describe("Backend connection state", () => {
         await vi.advanceTimersByTimeAsync(100);
       });
       act(() => {
+        eventSource.dispatchOpen();
         eventSource.dispatchState({
           revision: 1,
           projects: [],
           sessions: [],
         });
       });
-      expect(screen.getByText("Reconnecting")).toBeInTheDocument();
+      expect(screen.getByText("Connected")).toBeInTheDocument();
 
       await act(async () => {
         await vi.advanceTimersByTimeAsync(400);
       });
       expect(countStateFetches()).toBe(hydratedStateFetchCount);
+    } finally {
+      vi.useRealTimers();
+      restoreGlobal("fetch", originalFetch);
+      restoreGlobal("EventSource", originalEventSource);
+      restoreGlobal("ResizeObserver", originalResizeObserver);
+    }
+  });
+
+  it("cancels the reconnect fallback fetch when an orchestrator delta proves the stream recovered", async () => {
+    const originalFetch = globalThis.fetch;
+    const originalEventSource = globalThis.EventSource;
+    const originalResizeObserver = globalThis.ResizeObserver;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const target = String(input);
+      if (target === "/api/state") {
+        return jsonResponse({
+          revision: 1,
+          projects: [],
+          sessions: [],
+        });
+      }
+      if (target.startsWith("/api/workspaces/")) {
+        return new Response("", {
+          status: 404,
+        });
+      }
+
+      throw new Error(`Unexpected fetch: ${target}`);
+    });
+    const countStateFetches = () =>
+      fetchMock.mock.calls.filter(([url]) => String(url) === "/api/state")
+        .length;
+
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal(
+      "EventSource",
+      EventSourceMock as unknown as typeof EventSource,
+    );
+    vi.stubGlobal(
+      "ResizeObserver",
+      ResizeObserverMock as unknown as typeof ResizeObserver,
+    );
+
+    try {
+      render(<App />);
+
+      const eventSource = latestEventSource();
+      expect(eventSource).toBeDefined();
+
+      act(() => {
+        eventSource.dispatchOpen();
+        eventSource.dispatchState({
+          revision: 1,
+          projects: [],
+          sessions: [],
+        });
+      });
+      await waitFor(() => {
+        expect(screen.getByText("Connected")).toBeInTheDocument();
+      });
+
+      const hydratedStateFetchCount = countStateFetches();
+      vi.useFakeTimers();
+
+      act(() => {
+        eventSource.dispatchError();
+      });
+      expect(screen.getByText("Reconnecting")).toBeInTheDocument();
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(100);
+      });
+      act(() => {
+        eventSource.dispatchOpen();
+        eventSource.dispatchDelta({
+          type: "orchestratorsUpdated",
+          revision: 2,
+          orchestrators: [],
+        });
+      });
+      expect(screen.getByText("Connected")).toBeInTheDocument();
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(400);
+      });
+      expect(countStateFetches()).toBe(hydratedStateFetchCount);
+    } finally {
+      vi.useRealTimers();
+      restoreGlobal("fetch", originalFetch);
+      restoreGlobal("EventSource", originalEventSource);
+      restoreGlobal("ResizeObserver", originalResizeObserver);
+    }
+  });
+
+  it("keeps the reconnect fallback fetch armed when an orchestrator delta arrives before a confirmed reopen", async () => {
+    const originalFetch = globalThis.fetch;
+    const originalEventSource = globalThis.EventSource;
+    const originalResizeObserver = globalThis.ResizeObserver;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const target = String(input);
+      if (target === "/api/state") {
+        return jsonResponse({
+          revision: 1,
+          projects: [],
+          sessions: [],
+        });
+      }
+      if (target.startsWith("/api/workspaces/")) {
+        return new Response("", {
+          status: 404,
+        });
+      }
+
+      throw new Error(`Unexpected fetch: ${target}`);
+    });
+    const countStateFetches = () =>
+      fetchMock.mock.calls.filter(([url]) => String(url) === "/api/state")
+        .length;
+
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal(
+      "EventSource",
+      EventSourceMock as unknown as typeof EventSource,
+    );
+    vi.stubGlobal(
+      "ResizeObserver",
+      ResizeObserverMock as unknown as typeof ResizeObserver,
+    );
+
+    try {
+      render(<App />);
+
+      const eventSource = latestEventSource();
+      expect(eventSource).toBeDefined();
+
+      act(() => {
+        eventSource.dispatchOpen();
+        eventSource.dispatchState({
+          revision: 1,
+          projects: [],
+          sessions: [],
+        });
+      });
+      await waitFor(() => {
+        expect(screen.getByText("Connected")).toBeInTheDocument();
+      });
+
+      const hydratedStateFetchCount = countStateFetches();
+      vi.useFakeTimers();
+
+      act(() => {
+        eventSource.dispatchError();
+      });
+      expect(screen.getByText("Reconnecting")).toBeInTheDocument();
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(100);
+      });
+      act(() => {
+        // Intentionally omit dispatchOpen(): a buffered pre-error delta must not
+        // suppress the reconnect fallback until the stream proves it reopened.
+        eventSource.dispatchDelta({
+          type: "orchestratorsUpdated",
+          revision: 2,
+          orchestrators: [],
+        });
+      });
+      expect(screen.getByText("Reconnecting")).toBeInTheDocument();
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(299);
+      });
+      expect(countStateFetches()).toBe(hydratedStateFetchCount);
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1);
+      });
+      expect(countStateFetches()).toBe(hydratedStateFetchCount + 1);
+    } finally {
+      vi.useRealTimers();
+      restoreGlobal("fetch", originalFetch);
+      restoreGlobal("EventSource", originalEventSource);
+      restoreGlobal("ResizeObserver", originalResizeObserver);
+    }
+  });
+
+  it("keeps the reconnect fallback fetch armed when an applied session delta arrives before a confirmed reopen", async () => {
+    const originalFetch = globalThis.fetch;
+    const originalEventSource = globalThis.EventSource;
+    const originalResizeObserver = globalThis.ResizeObserver;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const target = String(input);
+      if (target === "/api/state") {
+        return jsonResponse(
+          makeBackendStateResponse({
+            revision: 2,
+            sessionName: "Recovered Session",
+            preview: "Recovered preview",
+          }),
+        );
+      }
+      if (target.startsWith("/api/workspaces/")) {
+        return new Response("", {
+          status: 404,
+        });
+      }
+
+      throw new Error(`Unexpected fetch: ${target}`);
+    });
+    const countStateFetches = () =>
+      fetchMock.mock.calls.filter(([url]) => String(url) === "/api/state")
+        .length;
+
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal(
+      "EventSource",
+      EventSourceMock as unknown as typeof EventSource,
+    );
+    vi.stubGlobal(
+      "ResizeObserver",
+      ResizeObserverMock as unknown as typeof ResizeObserver,
+    );
+
+    try {
+      render(<App />);
+
+      const eventSource = latestEventSource();
+      expect(eventSource).toBeDefined();
+
+      act(() => {
+        eventSource.dispatchOpen();
+        eventSource.dispatchState(
+          makeBackendStateResponse({
+            revision: 1,
+            sessionName: "Original Session",
+            preview: "Original preview",
+          }),
+        );
+      });
+      await screen.findByText("Original preview");
+
+      const hydratedStateFetchCount = countStateFetches();
+      vi.useFakeTimers();
+
+      act(() => {
+        eventSource.dispatchError();
+      });
+      expect(screen.getByText("Reconnecting")).toBeInTheDocument();
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(100);
+      });
+      act(() => {
+        // Intentionally omit dispatchOpen(): even an applied session delta may be
+        // buffered from the pre-error stream and must not cancel the fallback yet.
+        eventSource.dispatchDelta({
+          type: "messageCreated",
+          revision: 2,
+          sessionId: "session-1",
+          messageId: "message-1",
+          messageIndex: 0,
+          message: {
+            id: "message-1",
+            type: "text",
+            timestamp: "10:00",
+            author: "assistant",
+            text: "",
+          },
+          preview: "Streaming preview",
+          status: "active",
+        });
+      });
+      expect(screen.getByText("Streaming preview")).toBeInTheDocument();
+      expect(screen.getByText("Reconnecting")).toBeInTheDocument();
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(299);
+      });
+      expect(countStateFetches()).toBe(hydratedStateFetchCount);
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1);
+      });
+      expect(countStateFetches()).toBe(hydratedStateFetchCount + 1);
+      await act(async () => {
+        await Promise.resolve();
+      });
+      expect(screen.getByText("Recovered preview")).toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+      restoreGlobal("fetch", originalFetch);
+      restoreGlobal("EventSource", originalEventSource);
+      restoreGlobal("ResizeObserver", originalResizeObserver);
+    }
+  });
+
+  it("cancels the reconnect fallback fetch when an ignored delta arrives after a confirmed reopen", async () => {
+    const originalFetch = globalThis.fetch;
+    const originalEventSource = globalThis.EventSource;
+    const originalResizeObserver = globalThis.ResizeObserver;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const target = String(input);
+      if (target === "/api/state") {
+        return jsonResponse({
+          revision: 1,
+          projects: [],
+          sessions: [],
+        });
+      }
+      if (target.startsWith("/api/workspaces/")) {
+        return new Response("", {
+          status: 404,
+        });
+      }
+
+      throw new Error(`Unexpected fetch: ${target}`);
+    });
+    const countStateFetches = () =>
+      fetchMock.mock.calls.filter(([url]) => String(url) === "/api/state")
+        .length;
+
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal(
+      "EventSource",
+      EventSourceMock as unknown as typeof EventSource,
+    );
+    vi.stubGlobal(
+      "ResizeObserver",
+      ResizeObserverMock as unknown as typeof ResizeObserver,
+    );
+
+    try {
+      render(<App />);
+
+      const eventSource = latestEventSource();
+      expect(eventSource).toBeDefined();
+
+      act(() => {
+        eventSource.dispatchOpen();
+        eventSource.dispatchState({
+          revision: 1,
+          projects: [],
+          sessions: [],
+        });
+      });
+      await waitFor(() => {
+        expect(screen.getByText("Connected")).toBeInTheDocument();
+      });
+
+      const hydratedStateFetchCount = countStateFetches();
+      vi.useFakeTimers();
+
+      act(() => {
+        eventSource.dispatchError();
+      });
+      expect(screen.getByText("Reconnecting")).toBeInTheDocument();
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(100);
+      });
+      act(() => {
+        eventSource.dispatchOpen();
+        eventSource.dispatchDelta({
+          type: "messageCreated",
+          revision: 1,
+          sessionId: "missing-session",
+          messageId: "message-1",
+          messageIndex: 0,
+          message: {
+            id: "message-1",
+            type: "text",
+            timestamp: "10:00",
+            author: "assistant",
+            text: "",
+          },
+          preview: "Ignored preview",
+          status: "active",
+        });
+      });
+      expect(screen.getByText("Connected")).toBeInTheDocument();
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(400);
+      });
+      expect(countStateFetches()).toBe(hydratedStateFetchCount);
+    } finally {
+      vi.useRealTimers();
+      restoreGlobal("fetch", originalFetch);
+      restoreGlobal("EventSource", originalEventSource);
+      restoreGlobal("ResizeObserver", originalResizeObserver);
+    }
+  });
+
+  it("keeps the reconnect fallback fetch armed when a pre-reopen gap resync only gets a stale state snapshot", async () => {
+    const originalFetch = globalThis.fetch;
+    const originalEventSource = globalThis.EventSource;
+    const originalResizeObserver = globalThis.ResizeObserver;
+    let stateRequestCount = 0;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const target = String(input);
+      if (target === "/api/state") {
+        stateRequestCount += 1;
+        if (stateRequestCount === 1) {
+          return jsonResponse({
+            revision: 1,
+            projects: [],
+            sessions: [],
+          });
+        }
+        return jsonResponse({
+          revision: 2,
+          projects: [],
+          sessions: [],
+        });
+      }
+      if (target.startsWith("/api/workspaces/")) {
+        return new Response("", {
+          status: 404,
+        });
+      }
+
+      throw new Error(`Unexpected fetch: ${target}`);
+    });
+    const countStateFetches = () =>
+      fetchMock.mock.calls.filter(([url]) => String(url) === "/api/state")
+        .length;
+
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal(
+      "EventSource",
+      EventSourceMock as unknown as typeof EventSource,
+    );
+    vi.stubGlobal(
+      "ResizeObserver",
+      ResizeObserverMock as unknown as typeof ResizeObserver,
+    );
+
+    try {
+      render(<App />);
+
+      const eventSource = latestEventSource();
+      expect(eventSource).toBeDefined();
+
+      act(() => {
+        eventSource.dispatchOpen();
+        eventSource.dispatchState({
+          revision: 1,
+          projects: [],
+          sessions: [],
+        });
+      });
+      await waitFor(() => {
+        expect(screen.getByText("Connected")).toBeInTheDocument();
+      });
+
+      const hydratedStateFetchCount = countStateFetches();
+      vi.useFakeTimers();
+
+      act(() => {
+        eventSource.dispatchError();
+      });
+      expect(screen.getByText("Reconnecting")).toBeInTheDocument();
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(100);
+      });
+      act(() => {
+        // Intentionally omit dispatchOpen(): the immediate resync gets a stale snapshot,
+        // so the fast reconnect fallback must stay armed until a usable state arrives.
+        eventSource.dispatchDelta({
+          type: "messageCreated",
+          revision: 3,
+          sessionId: "session-1",
+          messageId: "message-1",
+          messageIndex: 0,
+          message: {
+            id: "message-1",
+            type: "text",
+            timestamp: "10:00",
+            author: "assistant",
+            text: "",
+          },
+          preview: "Buffered preview",
+          status: "active",
+        });
+      });
+      await act(async () => {
+        await Promise.resolve();
+      });
+      expect(countStateFetches()).toBe(hydratedStateFetchCount + 1);
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(299);
+      });
+      expect(countStateFetches()).toBe(hydratedStateFetchCount + 1);
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1);
+      });
+      expect(countStateFetches()).toBe(hydratedStateFetchCount + 2);
+    } finally {
+      vi.useRealTimers();
+      restoreGlobal("fetch", originalFetch);
+      restoreGlobal("EventSource", originalEventSource);
+      restoreGlobal("ResizeObserver", originalResizeObserver);
+    }
+  });
+
+  it("keeps the reconnect fallback fetch armed when a gapped session delta arrives before a confirmed reopen", async () => {
+    const originalFetch = globalThis.fetch;
+    const originalEventSource = globalThis.EventSource;
+    const originalResizeObserver = globalThis.ResizeObserver;
+    let stateRequestCount = 0;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const target = String(input);
+      if (target === "/api/state") {
+        stateRequestCount += 1;
+        if (stateRequestCount === 1) {
+          throw new Error("temporary outage");
+        }
+        return jsonResponse({
+          revision: 1,
+          projects: [],
+          sessions: [],
+        });
+      }
+      if (target.startsWith("/api/workspaces/")) {
+        return new Response("", {
+          status: 404,
+        });
+      }
+
+      throw new Error(`Unexpected fetch: ${target}`);
+    });
+    const countStateFetches = () =>
+      fetchMock.mock.calls.filter(([url]) => String(url) === "/api/state")
+        .length;
+
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal(
+      "EventSource",
+      EventSourceMock as unknown as typeof EventSource,
+    );
+    vi.stubGlobal(
+      "ResizeObserver",
+      ResizeObserverMock as unknown as typeof ResizeObserver,
+    );
+
+    try {
+      render(<App />);
+
+      const eventSource = latestEventSource();
+      expect(eventSource).toBeDefined();
+
+      act(() => {
+        eventSource.dispatchOpen();
+        eventSource.dispatchState({
+          revision: 1,
+          projects: [],
+          sessions: [],
+        });
+      });
+      await waitFor(() => {
+        expect(screen.getByText("Connected")).toBeInTheDocument();
+      });
+
+      const hydratedStateFetchCount = countStateFetches();
+      vi.useFakeTimers();
+
+      act(() => {
+        eventSource.dispatchError();
+      });
+      expect(screen.getByText("Reconnecting")).toBeInTheDocument();
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(100);
+      });
+      act(() => {
+        // Intentionally omit dispatchOpen(): a buffered gap delta must not cancel
+        // the reconnect fallback before the stream proves it reopened.
+        eventSource.dispatchDelta({
+          type: "messageCreated",
+          revision: 3,
+          sessionId: "session-1",
+          messageId: "message-1",
+          messageIndex: 0,
+          message: {
+            id: "message-1",
+            type: "text",
+            timestamp: "10:00",
+            author: "assistant",
+            text: "",
+          },
+          preview: "Buffered preview",
+          status: "active",
+        });
+      });
+      await act(async () => {
+        await Promise.resolve();
+      });
+      expect(countStateFetches()).toBe(hydratedStateFetchCount + 1);
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(299);
+      });
+      expect(countStateFetches()).toBe(hydratedStateFetchCount + 1);
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1);
+      });
+      expect(countStateFetches()).toBe(hydratedStateFetchCount + 2);
+    } finally {
+      vi.useRealTimers();
+      restoreGlobal("fetch", originalFetch);
+      restoreGlobal("EventSource", originalEventSource);
+      restoreGlobal("ResizeObserver", originalResizeObserver);
+    }
+  });
+
+  it("keeps the reconnect fallback fetch armed when a reducer-rejected session delta arrives before a confirmed reopen", async () => {
+    const originalFetch = globalThis.fetch;
+    const originalEventSource = globalThis.EventSource;
+    const originalResizeObserver = globalThis.ResizeObserver;
+    let stateRequestCount = 0;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const target = String(input);
+      if (target === "/api/state") {
+        stateRequestCount += 1;
+        if (stateRequestCount === 1) {
+          throw new Error("temporary outage");
+        }
+        return jsonResponse(
+          makeBackendStateResponse({
+            revision: 2,
+            sessionName: "Recovered Session",
+            preview: "Recovered preview",
+          }),
+        );
+      }
+      if (target.startsWith("/api/workspaces/")) {
+        return new Response("", {
+          status: 404,
+        });
+      }
+
+      throw new Error(`Unexpected fetch: ${target}`);
+    });
+    const countStateFetches = () =>
+      fetchMock.mock.calls.filter(([url]) => String(url) === "/api/state")
+        .length;
+
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal(
+      "EventSource",
+      EventSourceMock as unknown as typeof EventSource,
+    );
+    vi.stubGlobal(
+      "ResizeObserver",
+      ResizeObserverMock as unknown as typeof ResizeObserver,
+    );
+
+    try {
+      render(<App />);
+
+      const eventSource = latestEventSource();
+      expect(eventSource).toBeDefined();
+
+      act(() => {
+        eventSource.dispatchOpen();
+        eventSource.dispatchState(
+          makeBackendStateResponse({
+            revision: 1,
+            sessionName: "Original Session",
+            preview: "Original preview",
+          }),
+        );
+      });
+      await screen.findByText("Original preview");
+
+      const hydratedStateFetchCount = countStateFetches();
+      vi.useFakeTimers();
+
+      act(() => {
+        eventSource.dispatchError();
+      });
+      expect(screen.getByText("Reconnecting")).toBeInTheDocument();
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(100);
+      });
+      act(() => {
+        // Intentionally omit dispatchOpen(): a reducer-rejected buffered delta must
+        // not disarm the reconnect fallback until recovery is confirmed.
+        eventSource.dispatchDelta({
+          type: "messageCreated",
+          revision: 2,
+          sessionId: "missing-session",
+          messageId: "message-1",
+          messageIndex: 0,
+          message: {
+            id: "message-1",
+            type: "text",
+            timestamp: "10:00",
+            author: "assistant",
+            text: "",
+          },
+          preview: "Buffered preview",
+          status: "active",
+        });
+      });
+      await act(async () => {
+        await Promise.resolve();
+      });
+      expect(countStateFetches()).toBe(hydratedStateFetchCount + 1);
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(299);
+      });
+      expect(countStateFetches()).toBe(hydratedStateFetchCount + 1);
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1);
+      });
+      expect(countStateFetches()).toBe(hydratedStateFetchCount + 2);
     } finally {
       vi.useRealTimers();
       restoreGlobal("fetch", originalFetch);
