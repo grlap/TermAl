@@ -1,3 +1,21 @@
+/*
+Backend composition guide
+main.rs owns three top-level concerns:
+  1. selecting the process mode
+  2. assembling the HTTP router
+  3. stitching the backend together through include! fragments
+High-level flow:
+CLI args
+  -> run()
+     -> server    -> run_server() -> app_router() -> AppState + HTTP/SSE handlers
+     -> repl      -> run_turn_blocking() -> recorder callbacks -> stdout
+     -> telegram  -> run_telegram_bot() -> project digest/action bridge
+The crate still compiles as one module so shared backend types stay crate-visible
+without a dense web of pub mod exports, but the behavior is split across
+src/api.rs, src/state.rs, src/runtime.rs, src/turns.rs, src/remote.rs,
+src/orchestrators.rs, and src/telegram.rs.
+*/
+
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
 use std::convert::Infallible;
 use std::fs;
@@ -32,6 +50,7 @@ use uuid::Uuid;
 const MAX_IMAGE_ATTACHMENT_BYTES: usize = 5 * 1024 * 1024;
 const MAX_FILE_CONTENT_BYTES: usize = 10 * 1024 * 1024;
 
+/// Starts the backend entrypoint.
 #[tokio::main]
 async fn main() {
     if let Err(err) = run().await {
@@ -40,6 +59,7 @@ async fn main() {
     }
 }
 
+/// Runs the selected CLI mode.
 async fn run() -> Result<()> {
     let args: Vec<String> = std::env::args().skip(1).collect();
     match Mode::parse(args)? {
@@ -51,6 +71,7 @@ async fn run() -> Result<()> {
     }
 }
 
+/// Runs the backend server.
 async fn run_server() -> Result<()> {
     let cwd_path = std::env::current_dir().context("failed to resolve current directory")?;
     let ui_dist_dir = cwd_path.join("ui").join("dist");
@@ -99,6 +120,7 @@ async fn run_server() -> Result<()> {
     result
 }
 
+/// Builds the application router.
 fn app_router(state: AppState) -> Router {
     let cors = CorsLayer::new()
         .allow_origin([
@@ -232,10 +254,12 @@ fn app_router(state: AppState) -> Router {
         .layer(cors)
 }
 
+/// Builds the persisted change-set ID for a diff message.
 fn diff_change_set_id(message_id: &str) -> String {
     format!("change-{message_id}")
 }
 
+/// Runs the REPL loop for the selected agent.
 fn run_repl(agent: Agent) -> Result<()> {
     let cwd = std::env::current_dir().context("failed to resolve current directory")?;
     let cwd = cwd
@@ -305,6 +329,7 @@ fn run_repl(agent: Agent) -> Result<()> {
     Ok(())
 }
 
+/// Enumerates value modes.
 enum Mode {
     Server,
     Repl { agent: Agent },
@@ -312,6 +337,7 @@ enum Mode {
 }
 
 impl Mode {
+    /// Handles parse.
     fn parse(args: Vec<String>) -> Result<Self> {
         match args.first().map(String::as_str) {
             None | Some("server") => Ok(Self::Server),

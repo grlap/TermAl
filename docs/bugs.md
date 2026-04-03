@@ -101,6 +101,43 @@ interval instead of fake timers, and checks both the watchdog fetch plus the
 disappearance of the streaming placeholder after resync; and (2) the adjacent
 orchestrator-start regression was restored after an intermediate edit dropped it.
 
+## State mutex held during review file I/O
+
+**Severity:** Medium — may block all state operations under concurrent load.
+
+`put_review` in `src/api.rs` acquires the main `state.inner.lock()` guard while
+`prepare_review_document_for_write` reads the review file from disk and
+`persist_review_document` writes it back. This holds the global state mutex for
+the duration of disk I/O, blocking session updates, message delivery, and SSE
+snapshots.
+
+**Current behavior:**
+- The `_state_guard` is taken to serialize concurrent review writes, but the
+  same mutex also serializes all other state operations.
+
+**Proposal:**
+- Use a dedicated `Mutex<()>` (similar to `orchestrator_templates_lock`) to
+  serialize review-file writes without holding the main state mutex.
+
+## Sync mutex lock in async SSE lag-recovery paths
+
+**Severity:** Medium — can block a tokio worker thread if the state mutex is contended.
+
+The SSE event stream in `src/api.rs` calls `state.snapshot()` (which acquires
+`std::sync::Mutex::lock()`) directly from an async context within the tokio
+select loop at the lag-recovery branches (lines ~2453 and ~2465). Under
+contention this blocks the worker thread rather than yielding.
+
+**Current behavior:**
+- The lock is typically uncontended and resolves in microseconds, but lag-recovery
+  paths run after contention was already observed.
+
+**Proposal:**
+- Wrap the lag-recovery `state.snapshot()` calls in `tokio::task::spawn_blocking`,
+  consistent with the pattern used for other handlers.
+
 ## Implementation Tasks
 
-- None currently tracked from the latest review round.
+- [ ] Add HTTP-level route tests for workspace layout CRUD:
+  a round-trip `PUT /api/workspaces/{id}` + `GET /api/workspaces/{id}` test,
+  plus edge cases for missing IDs and malformed payloads.

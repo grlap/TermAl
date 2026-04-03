@@ -6,30 +6,24 @@
 
 ## System Overview
 
-```
-Browser (React)                      Rust Backend (axum)
-┌──────────────────────┐             ┌──────────────────────────────────┐
-│  App.tsx             │  SSE /api   │  AppState                        │
-│  ├── Sidebar         │◄════════════╡  ├── StateInner (Mutex)          │
-│  ├── Workspace       │  events +   │  │   ├── sessions: Vec<Record>   │
-│  │   ├── Pane[]      │  deltas     │  │   ├── revision: u64           │
-│  │   └── Tabs[]      │             │  │   └── codex: CodexState       │
-│  └── Composer        │             │  ├── state_events (broadcast)    │
-│                      │  REST /api  │  ├── delta_events (broadcast)    │
-│  api.ts              │────────────>│  └── persistence_path            │
-└──────────────────────┘             │                                  │
-                                     │  Agent Runtimes                  │
-                                     │  ├── Claude (child process)      │
-                                     │  │   NDJSON over stdin/stdout    │
-                                     │  └── Codex (child process)       │
-                                     │      JSON-RPC over stdin/stdout  │
-                                     └──────────────────────────────────┘
+```text
+Browser UI
+  -> /api + /api/events
+  -> local TermAl server
+       -> AppState / StateInner / persistence
+       -> shared Codex app-server
+       -> per-session Claude runtime
+       -> per-session ACP runtimes (Cursor / Gemini)
+       -> RemoteRegistry (SSH tunnels + remote event bridges)
+
+Optional sidecar:
+  telegram mode -> project digest/actions -> same local TermAl server
 ```
 
-**Frontend:** React 18 + TypeScript, served on `:4173` (dev) with Vite proxy to backend.
-**Backend:** Rust + axum + tokio, runs on `:8787`. Spawns AI agents as child processes.
-**Persistence:** Single JSON file at `~/.termal/sessions.json`.
-**Real-time:** Server-Sent Events with monotonic revision counter for ordering.
+**Frontend:** React 18 + TypeScript, served on `:4173` in dev with a Vite proxy to the backend.
+**Backend:** Rust + axum + tokio, bound to `127.0.0.1:8787` by default, overridable with `TERMAL_PORT`.
+**Persistence:** `~/.termal/sessions.json` stores sessions, projects, preferences, remote config, workspace layouts, and orchestrator instances. `~/.termal/orchestrators.json` stores orchestrator templates.
+**Real-time:** Server-Sent Events with a monotonic revision counter for ordering.
 
 **Current status:** The current implementation uses server-backed workspace layouts with per-workspace local cache warm starts.
 
@@ -44,45 +38,61 @@ SSH-managed tunnels.
 
 ### Entry Points
 
-The binary has two modes:
+The binary has three modes:
 
-1. **Server mode** (default) — starts an axum HTTP server on `0.0.0.0:8787`, serves the API, manages long-lived agent processes.
-2. **REPL mode** (`--repl`) — interactive terminal loop. Reads prompts from stdin, runs one turn at a time via `run_turn_blocking()`. Mostly used for testing.
+1. **Server mode** (default) - starts an axum HTTP server on `127.0.0.1:8787` by default, serves the API, and manages long-lived agent processes. `TERMAL_PORT` can override the port.
+2. **REPL mode** (`repl`, `cli`, or an agent shortcut such as `codex` / `claude`) - interactive terminal loop. Reads prompts from stdin and runs one turn at a time via `run_turn_blocking()`.
+3. **Telegram mode** (`telegram` or `telegram-bot`) - long-polling relay that turns project digests and project actions into a Telegram bot workflow.
 
 ### Core State
 
 ```rust
 AppState {
-    inner: Arc<Mutex<StateInner>>,      // all mutable state
-    state_events: broadcast::Sender,     // full-state SSE channel (cap 128)
-    delta_events: broadcast::Sender,     // incremental SSE channel (cap 256)
-    persistence_path: Arc<PathBuf>,      // ~/.termal/sessions.json
     default_workdir: String,
+    persistence_path: Arc<PathBuf>,            // ~/.termal/sessions.json
+    orchestrator_templates_path: Arc<PathBuf>, // ~/.termal/orchestrators.json
+    state_events: broadcast::Sender<String>,
+    delta_events: broadcast::Sender<String>,
+    shared_codex_runtime: Arc<Mutex<Option<SharedCodexRuntime>>>,
+    remote_registry: Arc<RemoteRegistry>,
+    inner: Arc<Mutex<StateInner>>,
 }
 
 StateInner {
-    revision: u64,                       // monotonic, bumped on visible changes
-    sessions: Vec<SessionRecord>,        // all sessions with runtime handles
-    codex: CodexState,                   // shared Codex rate-limit info
+    codex: CodexState,
+    preferences: AppPreferences,
+    revision: u64,
+    next_project_number: usize,
     next_session_number: usize,
     next_message_number: u64,
+    projects: Vec<Project>,
+    ignored_discovered_codex_thread_ids: BTreeSet<String>,
+    sessions: Vec<SessionRecord>,
+    orchestrator_instances: Vec<OrchestratorInstance>,
+    workspace_layouts: BTreeMap<String, WorkspaceLayoutDocument>,
 }
 ```
+
+`AppState` is the live coordination shell: SSE broadcasters, the shared Codex app-server handle, and the SSH remote registry all live there. `StateInner` is the mutex-protected durable model that gets serialized to disk.
 
 **SessionRecord** wraps the serializable `Session` with runtime-only fields:
 
 ```rust
 SessionRecord {
-    session: Session,                          // id, name, agent, status, messages, etc.
-    runtime: SessionRuntime,                   // None | Claude(handle) | Codex(handle)
-    pending_claude_approvals: HashMap,         // request_id → ClaudePendingApproval
-    pending_codex_approvals: HashMap,          // message_id → CodexPendingApproval
+    session: Session,                          // id, agent, model, messages, preview, status
+    runtime: SessionRuntime,                   // None | Claude | Codex | Acp
+    pending_claude_approvals: HashMap,
+    pending_codex_approvals: HashMap,
+    pending_codex_user_inputs: HashMap,
+    pending_codex_mcp_elicitations: HashMap,
+    pending_codex_app_requests: HashMap,
+    pending_acp_approvals: HashMap,
     queued_prompts: VecDeque<QueuedPromptRecord>,
-    external_session_id: Option<String>,       // Codex thread ID or Claude session ID
-    codex_approval_policy: CodexApprovalPolicy,
-    codex_sandbox_mode: CodexSandboxMode,
-    active_codex_approval_policy: Option<...>, // what the running process actually uses
-    active_codex_sandbox_mode: Option<...>,
+    remote_id: Option<String>,                 // remote owning the proxy session
+    remote_session_id: Option<String>,         // remote session id when proxied
+    external_session_id: Option<String>,       // Claude/Codex/ACP resume identifier
+    runtime_reset_required: bool,
+    hidden: bool,
 }
 ```
 
@@ -104,36 +114,47 @@ Internal bookkeeping that the frontend doesn't need (e.g. recording Codex sandbo
 
 ### HTTP API
 
-All routes are under `/api`. The backend serves JSON; the frontend proxies through Vite in dev.
+All routes are under `/api`. The backend serves JSON, and the frontend proxies requests through Vite in development.
 
 | Method | Path | Purpose |
 |--------|------|---------|
 | GET | `/api/health` | Health check |
+| GET | `/api/file?path=...` | Read file content |
+| PUT | `/api/file` | Write file content |
+| GET | `/api/fs?path=...` | List directory entries |
+| GET | `/api/git/status?path=...` | Git status and branch info |
+| POST | `/api/git/diff` | Build a structured git diff preview |
+| POST | `/api/git/file` | Apply a file-level git action |
+| POST | `/api/git/commit` | Create a git commit from staged changes |
+| POST | `/api/git/push` | Push the current repo |
+| POST | `/api/git/sync` | Pull, rebase, or otherwise sync the current repo |
 | GET | `/api/state` | Full state snapshot |
-| GET | `/api/events` | SSE stream (state + delta events) |
 | GET | `/api/workspaces` | List saved workspace layout summaries |
 | GET | `/api/workspaces/{id}` | Read a persisted workspace layout |
 | PUT | `/api/workspaces/{id}` | Save a persisted workspace layout |
-| POST | `/api/settings` | Update app-wide preferences/settings |
+| POST | `/api/settings` | Update app-wide preferences and remote config |
+| GET | `/api/orchestrators/templates` | List orchestrator templates |
+| POST | `/api/orchestrators/templates` | Create orchestrator template |
+| GET | `/api/orchestrators/templates/{id}` | Read orchestrator template |
+| PUT | `/api/orchestrators/templates/{id}` | Update orchestrator template |
+| DELETE | `/api/orchestrators/templates/{id}` | Delete orchestrator template |
+| GET | `/api/orchestrators` | List orchestrator instances |
+| POST | `/api/orchestrators` | Create orchestrator instance |
+| GET | `/api/orchestrators/{id}` | Read orchestrator instance |
+| POST | `/api/orchestrators/{id}/pause` | Pause an orchestrator instance |
+| POST | `/api/orchestrators/{id}/resume` | Resume an orchestrator instance |
+| POST | `/api/orchestrators/{id}/stop` | Stop an orchestrator instance |
 | GET | `/api/instructions/search` | Search instruction files for a session/workdir |
-| GET | `/api/reviews/{changeSetId}` | Read a persisted diff review document |
-| PUT | `/api/reviews/{changeSetId}` | Save a persisted diff review document |
-| GET | `/api/reviews/{changeSetId}/summary` | Read review thread summary counts |
-| POST | `/api/git/diff` | Build a structured git diff preview |
-| POST | `/api/git/file` | Apply a file-level git action from the status view |
-| POST | `/api/git/commit` | Create a git commit from the staged changes |
-| POST | `/api/projects` | Create project → `CreateProjectResponse` |
+| GET | `/api/events` | SSE stream (state + delta events) |
+| GET | `/api/reviews/{change_set_id}` | Read a persisted diff review document |
+| PUT | `/api/reviews/{change_set_id}` | Save a persisted diff review document |
+| GET | `/api/reviews/{change_set_id}/summary` | Read review-thread summary counts |
+| POST | `/api/projects` | Create project |
+| GET | `/api/projects/{id}/digest` | Read the project digest used by Telegram/mobile workflows |
+| POST | `/api/projects/{id}/actions/{action_id}` | Dispatch a digest action such as approve, continue, or stop |
 | POST | `/api/projects/pick` | Pick a local project root |
-| GET | `/api/orchestrators/templates` | List orchestrator templates → `OrchestratorTemplatesResponse` |
-| POST | `/api/orchestrators/templates` | Create orchestrator template → `OrchestratorTemplateResponse` (201) |
-| GET | `/api/orchestrators/templates/{id}` | Read orchestrator template → `OrchestratorTemplateResponse` |
-| PUT | `/api/orchestrators/templates/{id}` | Update orchestrator template → `OrchestratorTemplateResponse` |
-| DELETE | `/api/orchestrators/templates/{id}` | Delete orchestrator template → `OrchestratorTemplatesResponse` |
-| GET | `/api/orchestrators` | List orchestrator instances → `OrchestratorInstancesResponse` |
-| POST | `/api/orchestrators` | Create orchestrator instance → `CreateOrchestratorInstanceResponse` (201) |
-| GET | `/api/orchestrators/{id}` | Read orchestrator instance → `OrchestratorInstanceResponse` |
-| POST | `/api/sessions` | Create session → `CreateSessionResponse` |
-| POST | `/api/sessions/{id}/settings` | Update session config → `StateResponse` |
+| POST | `/api/sessions` | Create session |
+| POST | `/api/sessions/{id}/settings` | Update session config |
 | POST | `/api/sessions/{id}/model-options/refresh` | Refresh live model list/options |
 | POST | `/api/sessions/{id}/codex/thread/fork` | Fork the live Codex thread into a new session |
 | POST | `/api/sessions/{id}/codex/thread/archive` | Archive the live Codex thread |
@@ -141,18 +162,14 @@ All routes are under `/api`. The backend serves JSON; the frontend proxies throu
 | POST | `/api/sessions/{id}/codex/thread/compact` | Request Codex thread compaction |
 | POST | `/api/sessions/{id}/codex/thread/rollback` | Roll back the live Codex thread |
 | GET | `/api/sessions/{id}/agent-commands` | Read local agent-command shortcuts |
-| POST | `/api/sessions/{id}/messages` | Send message → `StateResponse` (202) |
-| POST | `/api/sessions/{id}/queued-prompts/{pid}/cancel` | Cancel queued prompt |
+| POST | `/api/sessions/{id}/messages` | Send message |
+| POST | `/api/sessions/{id}/queued-prompts/{prompt_id}/cancel` | Cancel queued prompt |
 | POST | `/api/sessions/{id}/stop` | Stop active turn |
 | POST | `/api/sessions/{id}/kill` | Kill and remove session |
-| POST | `/api/sessions/{id}/approvals/{mid}` | Submit approval decision |
-| POST | `/api/sessions/{id}/user-input/{mid}` | Submit structured Codex user-input answers |
-| POST | `/api/sessions/{id}/mcp-elicitation/{mid}` | Submit an MCP elicitation response |
-| POST | `/api/sessions/{id}/codex/requests/{mid}` | Reply to a generic Codex app-server request |
-| GET | `/api/file?path=...` | Read file content |
-| PUT | `/api/file` | Write file content |
-| GET | `/api/fs?path=...` | List directory entries |
-| GET | `/api/git/status?path=...` | Git status + branch info |
+| POST | `/api/sessions/{id}/approvals/{message_id}` | Submit approval decision |
+| POST | `/api/sessions/{id}/user-input/{message_id}` | Submit structured Codex user-input answers |
+| POST | `/api/sessions/{id}/mcp-elicitation/{message_id}` | Submit an MCP elicitation response |
+| POST | `/api/sessions/{id}/codex/requests/{message_id}` | Reply to a generic Codex app-server request |
 
 ### SSE Event Stream
 
@@ -462,31 +479,62 @@ claude -p --output-format stream-json --input-format stream-json \
 codex app-server   # JSON-RPC over stdin/stdout
 ```
 
-**Protocol:** JSON-RPC 2.0 over stdio. One app-server process per session (currently; planned: one shared process for all Codex sessions).
+**Protocol:** JSON-RPC 2.0 over stdio. One shared app-server process is reused across all live Codex sessions, and each session is mapped onto its own Codex thread inside that process.
 
-**Thread architecture:** Same 4-thread pattern as Claude (writer, reader, stderr, waiter).
+**Thread architecture:** The shared process still uses the same four helper threads as the other runtimes:
+1. **Writer** - serializes queued commands and JSON-RPC responses to stdin
+2. **Reader** - parses stdout JSON lines and routes events to the correct session recorder
+3. **Stderr** - logs diagnostic output
+4. **Waiter** - watches for child-process exit and tears down any attached sessions
 
 **Lifecycle:**
-1. Spawn process → send `initialize` RPC → receive capabilities
-2. Send `thread/start` (new) or `thread/resume` (existing) → receive thread ID
-3. On user message → send `turn/start` RPC with input items (text + optional image attachments)
-4. Receive notifications: `item/agentMessage/delta` (streaming text), `item/started`/`item/completed` (tool results), `turn/completed`
-5. On approval needed → Codex sends `item/commandExecution/requestApproval` or `item/fileChange/requestApproval` → TermAl shows approval card → responds with accept/decline/acceptForSession
+1. Spawn shared process -> send `initialize` RPC -> receive capabilities
+2. For each session, send `thread/start` (new) or `thread/resume` (existing) -> receive thread ID
+3. On user message, send `turn/start` with input items (text + optional image attachments)
+4. Receive notifications such as `item/agentMessage/delta`, `item/completed`, and `turn/completed`
+5. On approval or structured interaction, surface a TermAl message card and answer via JSON-RPC once the user responds
 
-**Session resume:** Store the Codex thread ID as `external_session_id`. On next spawn, send `thread/resume` instead of `thread/start`.
+**Session resume:** The persisted `external_session_id` holds the Codex thread ID. Session-scoped actions such as fork, archive, compact, and rollback are issued through the shared app-server.
+
+### Cursor
+
+**Invocation:**
+```bash
+cursor-agent acp
+```
+
+**Protocol:** ACP over stdio. One process per session.
+
+**Behavior:** Cursor emits ACP session updates for thinking, assistant text, tool calls, and config updates. TermAl maps Cursor's permission options onto the session `cursor_mode` (`agent`, `plan`, or `ask`) before deciding whether to auto-answer or show an approval card.
+
+### Gemini
+
+**Invocation:**
+```bash
+gemini --acp [--approval-mode <mode>]
+```
+
+**Protocol:** ACP over stdio. One process per session.
+
+**Behavior:** Gemini uses the same ACP normalization layer as Cursor, but its launch command can include the configured Gemini approval mode. TermAl also performs local readiness checks so missing CLI auth or missing `gemini` installation is surfaced before a session starts.
 
 ### Message Types
 
-Both agents produce the same set of TermAl message types:
+All agent integrations normalize into the same TermAl message model. Some variants are common across all agents, while others are only emitted by specific backends such as Codex or ACP.
 
-| Type | Fields | Source |
-|------|--------|--------|
+| Type | Fields | Typical source |
+|------|--------|----------------|
 | `Text` | text, attachments, author | User input or agent response |
-| `Thinking` | title, lines | Claude extended thinking blocks |
-| `Command` | command, output, status (running/success/error), languages | Bash/shell tool calls |
-| `Diff` | file_path, summary, diff (unified patch), change_type (edit/create) | File edit/create tool calls |
+| `Thinking` | title, lines | Claude or ACP thought streaming |
+| `Command` | command, output, status, languages | Tool calls and shell execution |
+| `Diff` | file_path, summary, diff, change_type | File edit/create tools |
 | `Markdown` | title, markdown | Structured markdown output |
+| `SubagentResult` | title, summary, conversation_id, turn_id | Codex subagent/task results |
+| `ParallelAgents` | agents[] | Codex parallel-agent progress |
 | `Approval` | title, command, detail, decision | Permission requests |
+| `UserInputRequest` | title, detail, questions, state | Codex `request_user_input` |
+| `McpElicitationRequest` | title, detail, request, state | Codex MCP elicitation |
+| `CodexAppRequest` | title, detail, method, params, state | Generic Codex app-server requests |
 
 ---
 
@@ -657,65 +705,52 @@ When a session is busy (Active or Approval), new messages are queued in a `VecDe
 
 ## Project Structure
 
-```
+```text
 termal/
-├── src/
-│   └── main.rs                    # Entire backend (~7600 lines)
-├── ui/
-│   ├── src/
-│   │   ├── App.tsx                # Main component (~4500 lines)
-│   │   ├── api.ts                 # API client
-│   │   ├── types.ts               # Shared TypeScript types
-│   │   ├── workspace.ts           # Pane/tab/split state management
-│   │   ├── live-updates.ts        # Delta event application
-│   │   ├── state-revision.ts      # Revision ordering logic
-│   │   ├── session-reconcile.ts   # State reconciliation
-│   │   ├── session-list-filter.ts # Sidebar filtering
-│   │   ├── highlight.ts           # Syntax highlighting
-│   │   ├── diff-preview.ts        # Unified diff parsing
-│   │   ├── monaco.ts              # Monaco editor setup
-│   │   ├── pane-keyboard.ts       # Keyboard navigation
-│   │   ├── themes.ts              # Theme management
-│   │   ├── styles.css             # Global styles + CSS variables
-│   │   ├── MonacoCodeEditor.tsx   # Source editor component
-│   │   ├── MonacoDiffEditor.tsx   # Diff viewer component
-│   │   ├── panels/
-│   │   │   ├── AgentSessionPanel.tsx       # Chat message thread
-│   │   │   ├── AgentSessionPanelFooter.tsx # Composer + controls  (in App.tsx)
-│   │   │   ├── PaneTabs.tsx               # Tab bar with drag-drop
-│   │   │   ├── SourcePanel.tsx            # File editor panel
-│   │   │   ├── DiffPanel.tsx              # Diff preview panel
-│   │   │   ├── FileSystemPanel.tsx        # Directory browser
-│   │   │   └── GitStatusPanel.tsx         # Git status panel
-│   │   ├── themes/                # 16 CSS theme files
-│   │   └── *.test.ts              # Tests
-│   ├── package.json
-│   ├── vite.config.ts             # Dev proxy: /api → :8787
-│   └── tsconfig.json
-├── docs/
-│   ├── architecture.md            # This file
-│   ├── bugs.md                    # Bug tracker + implementation tasks
-│   ├── claude-pair-spec.md        # Historical product spec from the pre-web rewrite
-│   └── features/                  # Feature briefs
-├── Cargo.toml
-└── Cargo.lock
+|-- src/
+|   |-- main.rs              # process mode selection + router assembly
+|   |-- api.rs               # axum handlers and transport glue
+|   |-- state.rs             # AppState, sessions, persistence, shared state
+|   |-- runtime.rs           # Claude/Codex/ACP process management
+|   |-- turns.rs             # recorder pipeline and blocking REPL turns
+|   |-- remote.rs            # SSH tunnels, remote proxying, SSE bridge
+|   |-- orchestrators.rs     # template CRUD and runtime instance engine
+|   |-- telegram.rs          # Telegram digest/action relay mode
+|   `-- tests.rs             # backend regression tests
+|-- ui/
+|   |-- src/
+|   |   |-- App.tsx
+|   |   |-- api.ts
+|   |   |-- workspace.ts
+|   |   |-- live-updates.ts
+|   |   `-- panels/
+|   `-- vite.config.ts
+|-- docs/
+|   |-- architecture.md
+|   |-- vision.md
+|   |-- roadmap.md
+|   |-- bugs.md
+|   `-- features/
+|-- Cargo.toml
+`-- README.md
 ```
+
+The backend is still compiled as one crate-level module through `include!`, but the implementation is now split by concern instead of living entirely inside `main.rs`.
 
 ---
 
 ## Key Design Decisions
 
-**Single-process backend.** All sessions share one Rust process. Agent runtimes are child processes managed via stdin/stdout. No microservices, no message broker. Simple to deploy, simple to debug.
+**Single-process control plane.** All local state, HTTP handlers, SSE broadcasting, and remote supervision live inside one Rust server. Agent runtimes remain child processes managed over stdin/stdout, and remote machines are bridged back into that same control plane.
 
-**SSE over WebSocket.** Server-Sent Events are simpler than WebSocket for a unidirectional update stream. The client only sends data via REST calls. SSE handles reconnection automatically.
+**SSE over WebSocket.** Server-Sent Events are enough for TermAl's unidirectional update stream. The client sends commands through REST, while SSE handles low-latency streaming updates and reconnection.
 
-**Revision counter over timestamps.** A monotonic `u64` is cheaper to compare than timestamps and immune to clock skew. The frontend rejects any state with `revision <= current` and requests a resync if a delta's revision is non-contiguous.
+**Revision counter over timestamps.** A monotonic `u64` makes ordering cheap and deterministic. The frontend rejects stale snapshots and forces a resync when delta revisions skip.
 
-**Delta events for streaming.** During active generation, text arrives token-by-token. Publishing a full state snapshot (all sessions, all messages) per token is expensive. Delta events carry only the changed field, and the frontend patches it into the local state.
+**Shared Codex app-server.** Codex threads already carry their own cwd and thread identity, so one shared app-server process can service many Codex sessions. That reduces process churn while keeping session state logically separate.
 
-**One file per layer.** `main.rs` is the entire backend; `App.tsx` is the main frontend component. This is a known tech-debt tradeoff — iteration speed over modularity while the architecture is still changing. The module boundaries are clear and documented in bugs.md for when the split happens.
+**Include-split backend.** The backend still shares one crate namespace, but responsibility is separated into `api.rs`, `state.rs`, `runtime.rs`, `turns.rs`, `remote.rs`, `orchestrators.rs`, and `telegram.rs`. That keeps cross-cutting types easy to share without claiming the backend is still one giant `main.rs`.
 
-**Agent-agnostic message model.** Both Claude and Codex produce the same `Message` variants (Text, Command, Diff, Approval, etc.). The frontend doesn't know which agent produced a message — it just renders the type. This makes adding new agents (Gemini CLI is next) a backend-only change for basic support.
+**Agent-agnostic UI message model.** Claude, Codex, Cursor, and Gemini are normalized into the same `Message` enum. Adding a new agent is mostly a runtime and normalization task rather than a frontend rewrite.
 
-**Custom CSS over Tailwind.** The app uses CSS custom properties for theming with 16 hand-crafted themes. Each theme is a standalone `.css` file that sets color variables. No build-time CSS processing needed.
-
+**Custom CSS over Tailwind.** The frontend uses CSS custom properties and standalone theme files for theming, keeping runtime theme switching simple and avoiding build-time CSS machinery.

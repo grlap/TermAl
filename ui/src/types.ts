@@ -564,3 +564,22 @@ export type DeltaEvent =
   | CommandUpdateEvent
   | ParallelAgentsUpdateEvent
   | OrchestratorsUpdatedEvent;
+
+export type SessionSettingsField =
+  | "model"
+  | "sandboxMode"
+  | "approvalPolicy"
+  | "reasoningEffort"
+  | "claudeApprovalMode"
+  | "claudeEffort"
+  | "cursorMode"
+  | "geminiApprovalMode";
+export type SessionSettingsValue =
+  | string
+  | SandboxMode
+  | ApprovalPolicy
+  | ClaudeEffortLevel
+  | CodexReasoningEffort
+  | ClaudeApprovalMode
+  | CursorMode
+  | GeminiApprovalMode;

@@ -1,7 +1,20 @@
+/*
+Telegram relay
+Telegram Bot API <-> telegram.rs <-> local TermAl project digest/actions
+Poll updates
+  -> link chat / parse command / forward free text
+  -> GET project digest or POST project action
+  -> render digest + inline keyboard
+  -> persist chat binding and digest cursor
+This adapter runs as a separate CLI mode. It reuses the same backend project
+action contract instead of exposing a second transport-specific control path.
+*/
+
 const TELEGRAM_API_BASE_URL: &str = "https://api.telegram.org";
 const TELEGRAM_DEFAULT_POLL_TIMEOUT_SECS: u64 = 5;
 const TELEGRAM_ERROR_RETRY_DELAY: Duration = Duration::from_secs(2);
 
+/// Runs Telegram bot.
 fn run_telegram_bot() -> Result<()> {
     let cwd_path = std::env::current_dir().context("failed to resolve current directory")?;
     let cwd = cwd_path
@@ -68,6 +81,7 @@ fn run_telegram_bot() -> Result<()> {
     }
 }
 
+/// Holds Telegram bot configuration.
 #[derive(Clone)]
 struct TelegramBotConfig {
     api_base_url: String,
@@ -80,6 +94,7 @@ struct TelegramBotConfig {
 }
 
 impl TelegramBotConfig {
+    /// Builds the value from environment.
     fn from_env(default_workdir: &str) -> Result<Self> {
         let bot_token = required_env_var("TERMAL_TELEGRAM_BOT_TOKEN")?;
         let project_id = required_env_var("TERMAL_TELEGRAM_PROJECT_ID")?;
@@ -117,6 +132,7 @@ impl TelegramBotConfig {
     }
 }
 
+/// Tracks Telegram bot state.
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct TelegramBotState {
@@ -130,6 +146,7 @@ struct TelegramBotState {
     next_update_id: Option<i64>,
 }
 
+/// Loads Telegram bot state.
 fn load_telegram_bot_state(path: &FsPath) -> Result<TelegramBotState> {
     if !path.exists() {
         return Ok(TelegramBotState::default());
@@ -140,6 +157,7 @@ fn load_telegram_bot_state(path: &FsPath) -> Result<TelegramBotState> {
         .with_context(|| format!("failed to parse `{}`", path.display()))
 }
 
+/// Persists Telegram bot state.
 fn persist_telegram_bot_state(path: &FsPath, state: &TelegramBotState) -> Result<()> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)
@@ -151,16 +169,19 @@ fn persist_telegram_bot_state(path: &FsPath, state: &TelegramBotState) -> Result
     fs::write(path, encoded).with_context(|| format!("failed to write `{}`", path.display()))
 }
 
+/// Computes the effective Telegram chat ID.
 fn effective_telegram_chat_id(config: &TelegramBotConfig, state: &TelegramBotState) -> Option<i64> {
     config.chat_id.or(state.chat_id)
 }
 
+/// Represents Telegram API client.
 struct TelegramApiClient {
     api_base_url: String,
     client: BlockingHttpClient,
 }
 
 impl TelegramApiClient {
+    /// Creates a new instance.
     fn new(bot_token: &str, poll_timeout_secs: u64) -> Result<Self> {
         let client = BlockingHttpClient::builder()
             .connect_timeout(Duration::from_secs(5))
@@ -173,6 +194,7 @@ impl TelegramApiClient {
         })
     }
 
+    /// Gets updates.
     fn get_updates(
         &self,
         offset: Option<i64>,
@@ -191,6 +213,7 @@ impl TelegramApiClient {
         self.request_json("getUpdates", Some(Value::Object(body)))
     }
 
+    /// Handles send message.
     fn send_message(
         &self,
         chat_id: i64,
@@ -208,6 +231,7 @@ impl TelegramApiClient {
         )
     }
 
+    /// Handles edit message.
     fn edit_message(
         &self,
         chat_id: i64,
@@ -232,6 +256,7 @@ impl TelegramApiClient {
             .unwrap_or(message_id))
     }
 
+    /// Handles answer callback query.
     fn answer_callback_query(&self, callback_query_id: &str, text: &str) -> Result<()> {
         let _: bool = self.request_json(
             "answerCallbackQuery",
@@ -244,6 +269,7 @@ impl TelegramApiClient {
         Ok(())
     }
 
+    /// Handles request JSON.
     fn request_json<T: DeserializeOwned>(&self, method: &str, body: Option<Value>) -> Result<T> {
         let url = format!("{}/{}", self.api_base_url, method);
         let request = match body {
@@ -277,12 +303,14 @@ impl TelegramApiClient {
     }
 }
 
+/// Represents TermAl API client.
 struct TermalApiClient {
     api_base_url: String,
     client: BlockingHttpClient,
 }
 
 impl TermalApiClient {
+    /// Creates a new instance.
     fn new(api_base_url: &str) -> Result<Self> {
         let client = BlockingHttpClient::builder()
             .connect_timeout(Duration::from_secs(5))
@@ -295,6 +323,7 @@ impl TermalApiClient {
         })
     }
 
+    /// Gets project digest.
     fn get_project_digest(&self, project_id: &str) -> Result<ProjectDigestResponse> {
         self.request_json(
             Method::GET,
@@ -303,6 +332,7 @@ impl TermalApiClient {
         )
     }
 
+    /// Dispatches project action.
     fn dispatch_project_action(
         &self,
         project_id: &str,
@@ -319,6 +349,7 @@ impl TermalApiClient {
         )
     }
 
+    /// Handles send session message.
     fn send_session_message(&self, session_id: &str, text: &str) -> Result<StateResponse> {
         self.request_json(
             Method::POST,
@@ -330,6 +361,7 @@ impl TermalApiClient {
         )
     }
 
+    /// Handles request JSON.
     fn request_json<T: DeserializeOwned>(
         &self,
         method: Method,
@@ -364,6 +396,7 @@ impl TermalApiClient {
     }
 }
 
+/// Represents Telegram API envelope.
 #[derive(Deserialize)]
 struct TelegramApiEnvelope<T> {
     ok: bool,
@@ -371,6 +404,7 @@ struct TelegramApiEnvelope<T> {
     description: Option<String>,
 }
 
+/// Represents Telegram update.
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct TelegramUpdate {
@@ -381,6 +415,7 @@ struct TelegramUpdate {
     message: Option<TelegramChatMessage>,
 }
 
+/// Represents Telegram callback query.
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct TelegramCallbackQuery {
@@ -391,6 +426,7 @@ struct TelegramCallbackQuery {
     message: Option<TelegramChatMessage>,
 }
 
+/// Represents Telegram chat message.
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct TelegramChatMessage {
@@ -400,6 +436,7 @@ struct TelegramChatMessage {
     text: Option<String>,
 }
 
+/// Represents Telegram chat.
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct TelegramChat {
@@ -408,17 +445,20 @@ struct TelegramChat {
     _kind: String,
 }
 
+/// Represents Telegram inline keyboard markup.
 #[derive(Clone, Debug, Serialize)]
 struct TelegramInlineKeyboardMarkup {
     inline_keyboard: Vec<Vec<TelegramInlineKeyboardButton>>,
 }
 
+/// Represents Telegram inline keyboard button.
 #[derive(Clone, Debug, Serialize)]
 struct TelegramInlineKeyboardButton {
     text: String,
     callback_data: String,
 }
 
+/// Handles Telegram update.
 fn handle_telegram_update(
     telegram: &TelegramApiClient,
     termal: &TermalApiClient,
@@ -435,6 +475,7 @@ fn handle_telegram_update(
     Ok(false)
 }
 
+/// Handles Telegram message.
 fn handle_telegram_message(
     telegram: &TelegramApiClient,
     termal: &TermalApiClient,
@@ -487,6 +528,7 @@ fn handle_telegram_message(
     forward_telegram_text_to_project(telegram, termal, config, state, chat_id, text)
 }
 
+/// Handles Telegram callback query.
 fn handle_telegram_callback_query(
     telegram: &TelegramApiClient,
     termal: &TermalApiClient,
@@ -531,6 +573,7 @@ fn handle_telegram_callback_query(
     )
 }
 
+/// Handles forward Telegram text to project.
 fn forward_telegram_text_to_project(
     telegram: &TelegramApiClient,
     termal: &TermalApiClient,
@@ -554,6 +597,7 @@ fn forward_telegram_text_to_project(
     send_fresh_telegram_digest_from_response(telegram, config, state, chat_id, &next_digest)
 }
 
+/// Syncs Telegram digest.
 fn sync_telegram_digest(
     telegram: &TelegramApiClient,
     termal: &TermalApiClient,
@@ -582,6 +626,7 @@ fn sync_telegram_digest(
     )?)
 }
 
+/// Handles send fresh Telegram digest.
 fn send_fresh_telegram_digest(
     telegram: &TelegramApiClient,
     termal: &TermalApiClient,
@@ -593,6 +638,7 @@ fn send_fresh_telegram_digest(
     send_fresh_telegram_digest_from_response(telegram, config, state, chat_id, &digest)
 }
 
+/// Handles send fresh Telegram digest from response.
 fn send_fresh_telegram_digest_from_response(
     telegram: &TelegramApiClient,
     config: &TelegramBotConfig,
@@ -611,6 +657,7 @@ fn send_fresh_telegram_digest_from_response(
     )
 }
 
+/// Handles send or edit Telegram digest from response.
 fn send_or_edit_telegram_digest_from_response(
     telegram: &TelegramApiClient,
     config: &TelegramBotConfig,
@@ -629,6 +676,7 @@ fn send_or_edit_telegram_digest_from_response(
     )
 }
 
+/// Handles edit or send Telegram digest.
 fn edit_or_send_telegram_digest(
     telegram: &TelegramApiClient,
     config: &TelegramBotConfig,
@@ -651,6 +699,7 @@ fn edit_or_send_telegram_digest(
     Ok(sent.message_id)
 }
 
+/// Remembers Telegram digest.
 fn remember_telegram_digest(
     state: &mut TelegramBotState,
     digest: &ProjectDigestResponse,
@@ -665,6 +714,7 @@ fn remember_telegram_digest(
     Ok(changed)
 }
 
+/// Handles Telegram digest hash.
 fn telegram_digest_hash(
     digest: &ProjectDigestResponse,
     public_base_url: Option<&str>,
@@ -682,6 +732,7 @@ fn telegram_digest_hash(
     ))
 }
 
+/// Builds Telegram digest keyboard.
 fn build_telegram_digest_keyboard(
     digest: &ProjectDigestResponse,
 ) -> Option<TelegramInlineKeyboardMarkup> {
@@ -708,6 +759,7 @@ fn build_telegram_digest_keyboard(
     Some(TelegramInlineKeyboardMarkup { inline_keyboard: rows })
 }
 
+/// Renders Telegram digest.
 fn render_telegram_digest(
     digest: &ProjectDigestResponse,
     public_base_url: Option<&str>,
@@ -737,6 +789,7 @@ fn render_telegram_digest(
     lines.join("\n")
 }
 
+/// Handles Telegram deep link URL.
 fn telegram_deep_link_url(
     digest: &ProjectDigestResponse,
     public_base_url: Option<&str>,
@@ -755,6 +808,7 @@ fn telegram_deep_link_url(
     Some(format!("{base}{deep_link}"))
 }
 
+/// Handles Telegram help text.
 fn telegram_help_text(config: &TelegramBotConfig) -> String {
     [
         format!("TermAl Telegram relay for project `{}`.", config.project_id),
@@ -766,12 +820,14 @@ fn telegram_help_text(config: &TelegramBotConfig) -> String {
     .join("\n")
 }
 
+/// Represents a Telegram parsed command.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct TelegramParsedCommand<'a> {
     args: &'a str,
     command: TelegramIncomingCommand,
 }
 
+/// Represents a Telegram incoming command.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum TelegramIncomingCommand {
     Start,
@@ -780,6 +836,7 @@ enum TelegramIncomingCommand {
     Action(ProjectActionId),
 }
 
+/// Parses Telegram command.
 fn parse_telegram_command(text: &str) -> Option<TelegramParsedCommand<'_>> {
     let trimmed = text.trim();
     let command_text = trimmed.strip_prefix('/')?;
@@ -808,6 +865,7 @@ fn parse_telegram_command(text: &str) -> Option<TelegramParsedCommand<'_>> {
     Some(TelegramParsedCommand { args, command })
 }
 
+/// Handles required environment var.
 fn required_env_var(key: &str) -> Result<String> {
     std::env::var(key)
         .ok()
@@ -816,6 +874,7 @@ fn required_env_var(key: &str) -> Result<String> {
         .ok_or_else(|| anyhow!("{key} is required"))
 }
 
+/// Parses optional i64 environment.
 fn parse_optional_i64_env(key: &str) -> Result<Option<i64>> {
     std::env::var(key)
         .ok()
@@ -826,6 +885,7 @@ fn parse_optional_i64_env(key: &str) -> Result<Option<i64>> {
         .transpose()
 }
 
+/// Returns the default TermAl API base URL.
 fn default_termal_api_base_url() -> String {
     let port = std::env::var("TERMAL_PORT")
         .ok()

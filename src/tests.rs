@@ -1,3 +1,14 @@
+/*
+Backend regression tests
+Coverage is organized around production seams rather than tiny private helpers:
+  - HTTP router behavior
+  - state mutation and persistence
+  - runtime protocol normalization
+  - remote/orchestrator integration helpers
+The local fixtures below keep tests close to real wiring so include!-based
+refactors still exercise the same cross-file behavior the app depends on.
+*/
+
 use super::*;
 use axum::body::{Body, to_bytes};
 use axum::http::Request;
@@ -523,6 +534,7 @@ fn cursor_permission_request(request_id: &str) -> Value {
     })
 }
 
+// Tests that Claude task tool use updates parallel agent progress.
 #[test]
 fn claude_task_tool_use_updates_parallel_agent_progress() {
     let mut turn_state = ClaudeTurnState::default();
@@ -573,6 +585,7 @@ fn claude_task_tool_use_updates_parallel_agent_progress() {
     assert_eq!(latest[1].status, ParallelAgentStatus::Initializing);
 }
 
+// Tests that Claude task tool result updates parallel agents and records subagent result.
 #[test]
 fn claude_task_tool_result_updates_parallel_agents_and_records_subagent_result() {
     let mut turn_state = ClaudeTurnState::default();
@@ -639,6 +652,7 @@ fn claude_task_tool_result_updates_parallel_agents_and_records_subagent_result()
     );
 }
 
+// Tests that Claude task tool error records full failure detail.
 #[test]
 fn claude_task_tool_error_records_full_failure_detail() {
     let mut turn_state = ClaudeTurnState::default();
@@ -706,6 +720,7 @@ fn claude_task_tool_error_records_full_failure_detail() {
     );
 }
 
+// Tests that Claude task tool error without detail records fallback failure message.
 #[test]
 fn claude_task_tool_error_without_detail_records_fallback_failure_message() {
     let mut turn_state = ClaudeTurnState::default();
@@ -768,6 +783,7 @@ fn claude_task_tool_error_without_detail_records_fallback_failure_message() {
     );
 }
 
+// Tests that Claude streamed text appends missing final suffix after message stop.
 #[test]
 fn claude_streamed_text_appends_missing_final_suffix_after_message_stop() {
     let state = test_app_state();
@@ -845,6 +861,7 @@ fn claude_streamed_text_appends_missing_final_suffix_after_message_stop() {
     ));
 }
 
+// Tests that Claude streamed text skips duplicate final text after message stop.
 #[test]
 fn claude_streamed_text_skips_duplicate_final_text_after_message_stop() {
     let state = test_app_state();
@@ -922,6 +939,7 @@ fn claude_streamed_text_skips_duplicate_final_text_after_message_stop() {
     ));
 }
 
+// Tests that Claude streamed text replaces divergent final text.
 #[test]
 fn claude_streamed_text_replaces_divergent_final_text() {
     let state = test_app_state();
@@ -989,6 +1007,7 @@ fn claude_streamed_text_replaces_divergent_final_text() {
     ));
 }
 
+// Tests that Claude tool use after streamed text starts followup in new message.
 #[test]
 fn claude_tool_use_after_streamed_text_starts_followup_in_new_message() {
     let state = test_app_state();
@@ -1098,6 +1117,7 @@ fn claude_tool_use_after_streamed_text_starts_followup_in_new_message() {
     ));
 }
 
+// Tests that ACP JSON RPC request without timeout waits for late response.
 #[test]
 fn acp_json_rpc_request_without_timeout_waits_for_late_response() {
     let pending_requests = Arc::new(Mutex::new(HashMap::new()));
@@ -1159,6 +1179,7 @@ fn acp_json_rpc_request_without_timeout_waits_for_late_response() {
     );
 }
 
+// Tests that ACP prompt command keeps writer loop responsive while waiting for response.
 #[test]
 fn acp_prompt_command_keeps_writer_loop_responsive_while_waiting_for_response() {
     let state = test_app_state();
@@ -1290,6 +1311,7 @@ fn acp_prompt_command_keeps_writer_loop_responsive_while_waiting_for_response() 
     writer_thread.join().unwrap();
 }
 
+// Tests that fail pending ACP requests releases waiters.
 #[test]
 fn fail_pending_acp_requests_releases_waiters() {
     let pending_requests = Arc::new(Mutex::new(HashMap::new()));
@@ -1395,6 +1417,7 @@ fn parse_sse_event(raw: &str) -> (String, String) {
         data_lines.join("\n"),
     )
 }
+// Tests that wait for shared child exit timeout returns status for completed process.
 #[test]
 fn wait_for_shared_child_exit_timeout_returns_status_for_completed_process() {
     let child = test_exit_success_child();
@@ -1407,6 +1430,7 @@ fn wait_for_shared_child_exit_timeout_returns_status_for_completed_process() {
     assert!(status.success());
 }
 
+// Tests that wait for shared child exit timeout returns none for running process.
 #[test]
 fn wait_for_shared_child_exit_timeout_returns_none_for_running_process() {
     let child = test_sleep_child();
@@ -1421,6 +1445,7 @@ fn wait_for_shared_child_exit_timeout_returns_none_for_running_process() {
     process.wait().unwrap();
 }
 
+// Tests that shutdown REPL Codex process forces running process after timeout.
 #[test]
 fn shutdown_repl_codex_process_forces_running_process_after_timeout() {
     let child = test_sleep_child();
@@ -1432,6 +1457,7 @@ fn shutdown_repl_codex_process_forces_running_process_after_timeout() {
     assert!(!status.success());
 }
 
+// Tests that reads Claude agent commands from markdown files.
 #[test]
 fn reads_claude_agent_commands_from_markdown_files() {
     let root = std::env::temp_dir().join(format!("termal-agent-commands-{}", Uuid::new_v4()));
@@ -1496,6 +1522,7 @@ Inspect diffs.
     fs::remove_dir_all(root).unwrap();
 }
 
+// Tests that returns empty agent commands when commands directory is missing.
 #[test]
 fn returns_empty_agent_commands_when_commands_directory_is_missing() {
     let root =
@@ -1508,6 +1535,7 @@ fn returns_empty_agent_commands_when_commands_directory_is_missing() {
     fs::remove_dir_all(root).unwrap();
 }
 
+// Tests that returns agent commands for non Claude sessions.
 #[test]
 fn returns_agent_commands_for_non_claude_sessions() {
     let root = std::env::temp_dir().join(format!("termal-agent-commands-codex-{}", Uuid::new_v4()));
@@ -1549,6 +1577,7 @@ Use the active agent's tools.
     fs::remove_dir_all(root).unwrap();
 }
 
+// Tests that extracts Claude native agent commands from initialize response.
 #[test]
 fn extracts_claude_native_agent_commands_from_initialize_response() {
     let message = json!({
@@ -1595,6 +1624,7 @@ fn extracts_claude_native_agent_commands_from_initialize_response() {
     );
 }
 
+// Tests that extracts Claude native agent commands filters empty names and normalizes user suffix.
 #[test]
 fn extracts_claude_native_agent_commands_filters_empty_names_and_normalizes_user_suffix() {
     let message = json!({
@@ -1629,6 +1659,7 @@ fn extracts_claude_native_agent_commands_filters_empty_names_and_normalizes_user
     );
 }
 
+// Tests that extracts Claude native agent commands returns none for empty command list.
 #[test]
 fn extracts_claude_native_agent_commands_returns_none_for_empty_command_list() {
     let message = json!({
@@ -1644,6 +1675,7 @@ fn extracts_claude_native_agent_commands_returns_none_for_empty_command_list() {
     assert_eq!(claude_agent_commands(&message), None);
 }
 
+// Tests that returns cached Claude native commands alongside template fallbacks.
 #[test]
 fn returns_cached_claude_native_commands_alongside_template_fallbacks() {
     let root = std::env::temp_dir().join(format!(
@@ -1730,6 +1762,7 @@ fn returns_cached_claude_native_commands_alongside_template_fallbacks() {
     let _ = fs::remove_dir_all(&root);
 }
 
+// Tests that sync session agent commands bumps visible session command revision.
 #[test]
 fn sync_session_agent_commands_bumps_visible_session_command_revision() {
     let state = test_app_state();
@@ -1785,6 +1818,7 @@ fn sync_session_agent_commands_bumps_visible_session_command_revision() {
     );
 }
 
+// Tests that returns not found for missing agent command session.
 #[test]
 fn returns_not_found_for_missing_agent_command_session() {
     let state = test_app_state();
@@ -1794,6 +1828,7 @@ fn returns_not_found_for_missing_agent_command_session() {
     assert_eq!(error.message, "session not found");
 }
 
+// Tests that instruction search returns all roots for a phrase.
 #[test]
 fn instruction_search_returns_all_roots_for_a_phrase() {
     let root = std::env::temp_dir().join(format!("termal-instruction-search-{}", Uuid::new_v4()));
@@ -1853,6 +1888,7 @@ fn instruction_search_returns_all_roots_for_a_phrase() {
     fs::remove_dir_all(root).unwrap();
 }
 
+// Tests that instruction search expands directory discovery edges.
 #[test]
 fn instruction_search_expands_directory_discovery_edges() {
     let root = std::env::temp_dir().join(format!(
@@ -1905,6 +1941,7 @@ fn instruction_search_expands_directory_discovery_edges() {
     fs::remove_dir_all(root).unwrap();
 }
 
+// Tests that instruction search stops at generic referenced docs.
 #[test]
 fn instruction_search_stops_at_generic_referenced_docs() {
     let root = std::env::temp_dir().join(format!(
@@ -1942,6 +1979,7 @@ fn instruction_search_stops_at_generic_referenced_docs() {
     fs::remove_dir_all(root).unwrap();
 }
 
+// Tests that instruction search walks instructionish docs transitively.
 #[test]
 fn instruction_search_walks_instructionish_docs_transitively() {
     let root =
@@ -1997,6 +2035,7 @@ fn instruction_search_walks_instructionish_docs_transitively() {
     fs::remove_dir_all(root).unwrap();
 }
 
+// Tests that instruction search ignores internal TermAl roots for Claude reviewers.
 #[test]
 fn instruction_search_ignores_internal_termal_roots_for_claude_reviewers() {
     let root = std::env::temp_dir().join(format!(
@@ -2085,6 +2124,7 @@ fn instruction_search_ignores_internal_termal_roots_for_claude_reviewers() {
     fs::remove_dir_all(root).unwrap();
 }
 
+// Tests that instruction search returns not found for missing session.
 #[test]
 fn instruction_search_returns_not_found_for_missing_session() {
     let state = test_app_state();
@@ -2096,6 +2136,7 @@ fn instruction_search_returns_not_found_for_missing_session() {
     assert_eq!(error.message, "session not found");
 }
 
+// Tests that creates Claude sessions with default ask mode.
 #[test]
 fn creates_claude_sessions_with_default_ask_mode() {
     let mut inner = StateInner::new();
@@ -2114,6 +2155,7 @@ fn creates_claude_sessions_with_default_ask_mode() {
     assert_eq!(record.session.sandbox_mode, None);
 }
 
+// Tests that creates Claude sessions with requested plan mode.
 #[test]
 fn creates_claude_sessions_with_requested_plan_mode() {
     let state = test_app_state();
@@ -2145,6 +2187,7 @@ fn creates_claude_sessions_with_requested_plan_mode() {
     assert_eq!(session.claude_effort, Some(ClaudeEffortLevel::High));
 }
 
+// Tests that hidden Claude spares are filtered from snapshots and persistence.
 #[test]
 fn hidden_claude_spares_are_filtered_from_snapshots_and_persistence() {
     let state = test_app_state();
@@ -2186,6 +2229,7 @@ fn hidden_claude_spares_are_filtered_from_snapshots_and_persistence() {
     );
 }
 
+// Tests that create session promotes matching hidden Claude spare and replenishes pool.
 #[test]
 fn create_session_promotes_matching_hidden_claude_spare_and_replenishes_pool() {
     let state = test_app_state();
@@ -2251,6 +2295,7 @@ fn create_session_promotes_matching_hidden_claude_spare_and_replenishes_pool() {
     assert_ne!(hidden_spares[0].session.id, hidden_session_id);
 }
 
+// Tests that create session promotes matching non default hidden Claude spare.
 #[test]
 fn create_session_promotes_matching_non_default_hidden_claude_spare() {
     let state = test_app_state();
@@ -2303,6 +2348,7 @@ fn create_session_promotes_matching_non_default_hidden_claude_spare() {
     assert_ne!(hidden_spares[0].session.id, hidden_session_id);
 }
 
+// Tests that killing last visible Claude session reaps hidden spare for context.
 #[test]
 fn killing_last_visible_claude_session_reaps_hidden_spare_for_context() {
     let state = test_app_state();
@@ -2347,6 +2393,7 @@ fn killing_last_visible_claude_session_reaps_hidden_spare_for_context() {
     }));
 }
 
+// Tests that killing one visible Claude session keeps hidden spares when another visible session remains.
 #[test]
 fn killing_one_visible_claude_session_keeps_hidden_spares_when_another_visible_session_remains() {
     let state = test_app_state();
@@ -2401,6 +2448,7 @@ fn killing_one_visible_claude_session_keeps_hidden_spares_when_another_visible_s
     }));
 }
 
+// Tests that killing session persists removal even when shared Codex interrupt fails.
 #[test]
 fn killing_session_persists_removal_even_when_shared_codex_interrupt_fails() {
     let state = test_app_state();
@@ -2497,6 +2545,7 @@ fn killing_session_persists_removal_even_when_shared_codex_interrupt_fails() {
     let _ = fs::remove_file(state.persistence_path.as_path());
 }
 
+// Tests that kill session route returns ok when shared Codex interrupt fails.
 #[tokio::test]
 async fn kill_session_route_returns_ok_when_shared_codex_interrupt_fails() {
     let state = test_app_state();
@@ -2580,6 +2629,7 @@ async fn kill_session_route_returns_ok_when_shared_codex_interrupt_fails() {
     let _ = fs::remove_file(state.persistence_path.as_path());
 }
 
+// Tests that killing shared Codex session does not reset other shared sessions when interrupt fails.
 #[test]
 fn killing_shared_codex_session_does_not_reset_other_shared_sessions_when_interrupt_fails() {
     let state = test_app_state();
@@ -2718,6 +2768,7 @@ fn killing_shared_codex_session_does_not_reset_other_shared_sessions_when_interr
     let _ = fs::remove_file(state.persistence_path.as_path());
 }
 
+// Tests that killing local Codex session prevents rediscovery after restart.
 #[test]
 fn killing_local_codex_session_prevents_rediscovery_after_restart() {
     let state = test_app_state();
@@ -2767,6 +2818,7 @@ fn killing_local_codex_session_prevents_rediscovery_after_restart() {
     let _ = fs::remove_file(state.persistence_path.as_path());
 }
 
+// Tests that setting non Codex external session ID does not clear ignored Codex thread.
 #[test]
 fn setting_non_codex_external_session_id_does_not_clear_ignored_codex_thread() {
     let state = test_app_state();
@@ -2792,6 +2844,7 @@ fn setting_non_codex_external_session_id_does_not_clear_ignored_codex_thread() {
     let _ = fs::remove_file(state.persistence_path.as_path());
 }
 
+// Tests that import discovered Codex threads prunes stale ignored thread IDs.
 #[test]
 fn import_discovered_codex_threads_prunes_stale_ignored_thread_ids() {
     let mut inner = StateInner::new();
@@ -2831,6 +2884,7 @@ fn import_discovered_codex_threads_prunes_stale_ignored_thread_ids() {
     );
 }
 
+// Tests that persists app settings and applies them to new sessions.
 #[test]
 fn persists_app_settings_and_applies_them_to_new_sessions() {
     let state = test_app_state();
@@ -2934,6 +2988,7 @@ fn persists_app_settings_and_applies_them_to_new_sessions() {
     let _ = fs::remove_file(state.persistence_path.as_path());
 }
 
+// Tests that creates Codex sessions with requested prompt defaults.
 #[test]
 fn creates_codex_sessions_with_requested_prompt_defaults() {
     let state = test_app_state();
@@ -2980,6 +3035,7 @@ fn creates_codex_sessions_with_requested_prompt_defaults() {
     assert_eq!(record.codex_sandbox_mode, CodexSandboxMode::ReadOnly);
 }
 
+// Tests that updates cursor session model settings.
 #[test]
 fn updates_cursor_session_model_settings() {
     let state = test_app_state();
@@ -3026,6 +3082,7 @@ fn updates_cursor_session_model_settings() {
     assert_eq!(session.model, "gpt-5.3-codex");
 }
 
+// Tests that updates Codex session model settings without restarting runtime.
 #[test]
 fn updates_codex_session_model_settings_without_restarting_runtime() {
     let state = test_app_state();
@@ -3080,6 +3137,7 @@ fn updates_codex_session_model_settings_without_restarting_runtime() {
     assert!(!record.runtime_reset_required);
 }
 
+// Tests that updates Codex reasoning effort without restarting runtime.
 #[test]
 fn updates_codex_reasoning_effort_without_restarting_runtime() {
     let state = test_app_state();
@@ -3135,6 +3193,7 @@ fn updates_codex_reasoning_effort_without_restarting_runtime() {
     assert!(!record.runtime_reset_required);
 }
 
+// Tests that normalizes Codex reasoning effort when switching models.
 #[test]
 fn normalizes_codex_reasoning_effort_when_switching_models() {
     let state = test_app_state();
@@ -3227,6 +3286,7 @@ fn normalizes_codex_reasoning_effort_when_switching_models() {
     assert_eq!(record.codex_reasoning_effort, CodexReasoningEffort::Medium);
 }
 
+// Tests that rejects unsupported Codex reasoning effort for selected model.
 #[test]
 fn rejects_unsupported_codex_reasoning_effort_for_selected_model() {
     let state = test_app_state();
@@ -3294,6 +3354,7 @@ fn rejects_unsupported_codex_reasoning_effort_for_selected_model() {
     );
 }
 
+// Tests that updates Claude session model settings without restarting runtime.
 #[test]
 fn updates_claude_session_model_settings_without_restarting_runtime() {
     let state = test_app_state();
@@ -3372,6 +3433,7 @@ fn updates_claude_session_model_settings_without_restarting_runtime() {
     }
 }
 
+// Tests that updates Claude effort and marks runtime for restart.
 #[test]
 fn updates_claude_effort_and_marks_runtime_for_restart() {
     let state = test_app_state();
@@ -3448,6 +3510,7 @@ fn updates_claude_effort_and_marks_runtime_for_restart() {
     }
 }
 
+// Tests that syncs Claude model options into session state.
 #[test]
 fn syncs_claude_model_options_into_session_state() {
     let state = test_app_state();
@@ -3488,6 +3551,7 @@ fn syncs_claude_model_options_into_session_state() {
     assert_eq!(session.model_options, model_options);
 }
 
+// Tests that refreshes Codex model options from runtime.
 #[test]
 fn refreshes_codex_model_options_from_runtime() {
     let state = test_app_state();
@@ -3559,6 +3623,7 @@ fn refreshes_codex_model_options_from_runtime() {
     );
 }
 
+// Tests that fork Codex thread creates a new local session.
 #[test]
 fn fork_codex_thread_creates_a_new_local_session() {
     let state = test_app_state();
@@ -3770,6 +3835,7 @@ fn fork_codex_thread_creates_a_new_local_session() {
     ));
 }
 
+// Tests that fork Codex thread falls back to note when history is unavailable.
 #[test]
 fn fork_codex_thread_falls_back_to_note_when_history_is_unavailable() {
     let state = test_app_state();
@@ -3846,6 +3912,7 @@ fn fork_codex_thread_falls_back_to_note_when_history_is_unavailable() {
     ));
 }
 
+// Tests that Codex thread actions require a live idle thread.
 #[test]
 fn codex_thread_actions_require_a_live_idle_thread() {
     let state = test_app_state();
@@ -3913,6 +3980,7 @@ fn codex_thread_actions_require_a_live_idle_thread() {
     );
 }
 
+// Tests that Codex archive and unarchive actions update thread state and block dispatch.
 #[test]
 fn codex_archive_and_unarchive_actions_update_thread_state_and_block_dispatch() {
     let state = test_app_state();
@@ -4008,6 +4076,7 @@ fn codex_archive_and_unarchive_actions_update_thread_state_and_block_dispatch() 
     ));
 }
 
+// Tests that shared Codex archive notifications update thread state.
 #[test]
 fn shared_codex_archive_notifications_update_thread_state() {
     let state = test_app_state();
@@ -4107,6 +4176,7 @@ fn shared_codex_archive_notifications_update_thread_state() {
     );
 }
 
+// Tests that shared Codex model rerouted notification records notice.
 #[test]
 fn shared_codex_model_rerouted_notification_records_notice() {
     let state = test_app_state();
@@ -4185,6 +4255,7 @@ fn shared_codex_model_rerouted_notification_records_notice() {
     ));
 }
 
+// Tests that shared Codex compaction notice inserts before visible assistant output.
 #[test]
 fn shared_codex_compaction_notice_inserts_before_visible_assistant_output() {
     let state = test_app_state();
@@ -4298,6 +4369,7 @@ fn shared_codex_compaction_notice_inserts_before_visible_assistant_output() {
     assert!(compact_notice_index < assistant_index);
 }
 
+// Tests that shared Codex global notices update Codex state.
 #[test]
 fn shared_codex_global_notices_update_codex_state() {
     let state = test_app_state();
@@ -4378,6 +4450,7 @@ fn shared_codex_global_notices_update_codex_state() {
     ));
 }
 
+// Tests that shared Codex threadless runtime notice is recorded.
 #[test]
 fn shared_codex_threadless_runtime_notice_is_recorded() {
     let state = test_app_state();
@@ -4418,6 +4491,7 @@ fn shared_codex_threadless_runtime_notice_is_recorded() {
     ));
 }
 
+// Tests that discover Codex threads from home reads latest database.
 #[test]
 fn discover_codex_threads_from_home_reads_latest_database() {
     let codex_home = std::env::temp_dir().join(format!("termal-codex-home-{}", Uuid::new_v4()));
@@ -4457,6 +4531,7 @@ fn discover_codex_threads_from_home_reads_latest_database() {
     let _ = fs::remove_dir_all(&codex_home);
 }
 
+// Tests that discover Codex threads from home requires optional columns.
 #[test]
 fn discover_codex_threads_from_home_requires_optional_columns() {
     let codex_home =
@@ -4505,6 +4580,7 @@ fn discover_codex_threads_from_home_requires_optional_columns() {
     let _ = fs::remove_dir_all(&codex_home);
 }
 
+// Tests that resolve Codex threads database path skips unrelated entries.
 #[test]
 fn resolve_codex_threads_database_path_skips_unrelated_entries() {
     let codex_home =
@@ -4525,6 +4601,7 @@ fn resolve_codex_threads_database_path_skips_unrelated_entries() {
     let _ = fs::remove_dir_all(&codex_home);
 }
 
+// Tests that discover Codex threads from sources skips REPL home and uses shared runtime home.
 #[test]
 fn discover_codex_threads_from_sources_skips_repl_home_and_uses_shared_runtime_home() {
     let root = std::env::temp_dir().join(format!("termal-codex-discovery-{}", Uuid::new_v4()));
@@ -4619,6 +4696,7 @@ fn discover_codex_threads_from_sources_skips_repl_home_and_uses_shared_runtime_h
     let _ = fs::remove_dir_all(&root);
 }
 
+// Tests that discover Codex threads from home filters scopes before limiting results.
 #[test]
 fn discover_codex_threads_from_home_filters_scopes_before_limiting_results() {
     let codex_home =
@@ -4690,6 +4768,7 @@ fn discover_codex_threads_from_home_filters_scopes_before_limiting_results() {
     let _ = fs::remove_dir_all(&codex_home);
 }
 
+// Tests that discover Codex threads from home limits in scope results per home.
 #[test]
 fn discover_codex_threads_from_home_limits_in_scope_results_per_home() {
     let codex_home =
@@ -4754,6 +4833,7 @@ fn discover_codex_threads_from_home_limits_in_scope_results_per_home() {
     let _ = fs::remove_dir_all(&codex_home);
 }
 
+// Tests that import discovered Codex threads adds project scoped sessions without duplicates.
 #[test]
 fn import_discovered_codex_threads_adds_project_scoped_sessions_without_duplicates() {
     let mut inner = StateInner::new();
@@ -4844,6 +4924,7 @@ fn import_discovered_codex_threads_adds_project_scoped_sessions_without_duplicat
     );
 }
 
+// Tests that import discovered Codex threads normalizes legacy local verbatim paths.
 #[cfg(windows)]
 #[test]
 fn import_discovered_codex_threads_normalizes_legacy_local_verbatim_paths() {
@@ -4893,6 +4974,7 @@ fn import_discovered_codex_threads_normalizes_legacy_local_verbatim_paths() {
     let _ = fs::remove_dir_all(project_root);
 }
 
+// Tests that import discovered Codex threads preserves existing prompt settings.
 #[test]
 fn import_discovered_codex_threads_preserves_existing_prompt_settings() {
     let mut inner = StateInner::new();
@@ -4960,6 +5042,7 @@ fn import_discovered_codex_threads_preserves_existing_prompt_settings() {
     );
 }
 
+// Tests that create session route returns created response.
 #[tokio::test]
 async fn create_session_route_returns_created_response() {
     let state = test_app_state();
@@ -4994,6 +5077,7 @@ async fn create_session_route_returns_created_response() {
     assert_eq!(created_session.agent, Agent::Codex);
     let _ = fs::remove_file(state.persistence_path.as_path());
 }
+// Tests that update session settings route updates session name.
 #[tokio::test]
 async fn update_session_settings_route_updates_session_name() {
     let state = test_app_state();
@@ -5022,6 +5106,7 @@ async fn update_session_settings_route_updates_session_name() {
     assert_eq!(session.name, "Route Updated Session");
     let _ = fs::remove_file(state.persistence_path.as_path());
 }
+// Tests that send message route accepts and queues prompt for busy session.
 #[tokio::test]
 async fn send_message_route_accepts_and_queues_prompt_for_busy_session() {
     let state = test_app_state();
@@ -5065,6 +5150,7 @@ async fn send_message_route_accepts_and_queues_prompt_for_busy_session() {
     );
     let _ = fs::remove_file(state.persistence_path.as_path());
 }
+// Tests that submit approval route updates Claude session and delivers runtime response.
 #[tokio::test]
 async fn submit_approval_route_updates_claude_session_and_delivers_runtime_response() {
     let state = test_app_state();
@@ -5165,6 +5251,7 @@ async fn submit_approval_route_updates_claude_session_and_delivers_runtime_respo
     drop(inner);
     let _ = fs::remove_file(state.persistence_path.as_path());
 }
+// Tests that state events route streams initial state and live deltas.
 #[tokio::test]
 async fn state_events_route_streams_initial_state_and_live_deltas() {
     let state = test_app_state();
@@ -5223,6 +5310,7 @@ async fn state_events_route_streams_initial_state_and_live_deltas() {
     assert_eq!(delta["message"]["text"], "Live delta");
     let _ = fs::remove_file(state.persistence_path.as_path());
 }
+// Tests that state events route streams orchestrator creation state and live orchestrator deltas.
 #[tokio::test]
 async fn state_events_route_streams_orchestrator_creation_state_and_live_orchestrator_deltas() {
     let state = test_app_state();
@@ -5316,6 +5404,7 @@ async fn state_events_route_streams_orchestrator_creation_state_and_live_orchest
     let _ = fs::remove_file(state.persistence_path.as_path());
 }
 
+// Tests that Codex thread action routes update session state.
 #[tokio::test]
 async fn codex_thread_action_routes_update_session_state() {
     let state = test_app_state();
@@ -5471,6 +5560,7 @@ async fn codex_thread_action_routes_update_session_state() {
     ));
 }
 
+// Tests that Codex thread rollback route falls back when history is unavailable.
 #[tokio::test]
 async fn codex_thread_rollback_route_falls_back_when_history_is_unavailable() {
     let state = test_app_state();
@@ -5552,6 +5642,7 @@ async fn codex_thread_rollback_route_falls_back_when_history_is_unavailable() {
     ));
 }
 
+// Tests that Codex thread fork route returns created response.
 #[tokio::test]
 async fn codex_thread_fork_route_returns_created_response() {
     let state = test_app_state();
@@ -5683,6 +5774,7 @@ async fn codex_thread_fork_route_returns_created_response() {
     ));
 }
 
+// Tests that shared Codex task complete event buffers subagent result until final agent message.
 #[test]
 fn shared_codex_task_complete_event_buffers_subagent_result_until_final_agent_message() {
     let state = test_app_state();
@@ -5822,6 +5914,7 @@ fn shared_codex_task_complete_event_buffers_subagent_result_until_final_agent_me
     ));
 }
 
+// Tests that shared Codex agent message event without turn ID uses active turn.
 #[test]
 fn shared_codex_agent_message_event_without_turn_id_uses_active_turn() {
     let state = test_app_state();
@@ -5919,6 +6012,7 @@ fn shared_codex_agent_message_event_without_turn_id_uses_active_turn() {
     ));
 }
 
+// Tests that shared Codex agent message event ignores stale turn ID from params ID.
 #[test]
 fn shared_codex_agent_message_event_ignores_stale_turn_id_from_params_id() {
     let state = test_app_state();
@@ -6065,6 +6159,7 @@ fn shared_codex_agent_message_event_ignores_stale_turn_id_from_params_id() {
     ));
 }
 
+// Tests that shared Codex task complete event stays in current turn after prior assistant message.
 #[test]
 fn shared_codex_task_complete_event_stays_in_current_turn_after_prior_assistant_message() {
     let state = test_app_state();
@@ -6224,6 +6319,7 @@ fn shared_codex_task_complete_event_stays_in_current_turn_after_prior_assistant_
     ));
 }
 
+// Tests that shared Codex task complete event without active turn is ignored.
 #[test]
 fn shared_codex_task_complete_event_without_active_turn_is_ignored() {
     let state = test_app_state();
@@ -6297,6 +6393,7 @@ fn shared_codex_task_complete_event_without_active_turn_is_ignored() {
     assert!(session.messages.is_empty());
 }
 
+// Tests that shared Codex task complete event after streaming output inserts before answer.
 #[test]
 fn shared_codex_task_complete_event_after_streaming_output_inserts_before_answer() {
     let state = test_app_state();
@@ -6449,6 +6546,7 @@ fn shared_codex_task_complete_event_after_streaming_output_inserts_before_answer
     ));
 }
 
+// Tests that shared Codex task complete event ignores stale summary from previous turn.
 #[test]
 fn shared_codex_task_complete_event_ignores_stale_summary_from_previous_turn() {
     let state = test_app_state();
@@ -6594,6 +6692,7 @@ fn shared_codex_task_complete_event_ignores_stale_summary_from_previous_turn() {
     ));
 }
 
+// Tests that shared Codex task complete event drops buffered summary on failed turn.
 #[test]
 fn shared_codex_task_complete_event_drops_buffered_summary_on_failed_turn() {
     let state = test_app_state();
@@ -6712,6 +6811,7 @@ fn shared_codex_task_complete_event_drops_buffered_summary_on_failed_turn() {
     ));
 }
 
+// Tests that shared Codex turn completed flushes buffered subagent results after output started.
 #[test]
 fn shared_codex_turn_completed_flushes_buffered_subagent_results_after_output_started() {
     let state = test_app_state();
@@ -6809,6 +6909,7 @@ fn shared_codex_turn_completed_flushes_buffered_subagent_results_after_output_st
     ));
 }
 
+// Tests that shared Codex item completed event records agent message.
 #[test]
 fn shared_codex_item_completed_event_records_agent_message() {
     let state = test_app_state();
@@ -6915,6 +7016,7 @@ fn shared_codex_item_completed_event_records_agent_message() {
     ));
 }
 
+// Tests that shared Codex item completed event ignores stale turn ID from params ID.
 #[test]
 fn shared_codex_item_completed_event_ignores_stale_turn_id_from_params_id() {
     let state = test_app_state();
@@ -7081,6 +7183,7 @@ fn shared_codex_item_completed_event_ignores_stale_turn_id_from_params_id() {
     ));
 }
 
+// Tests that shared Codex item completed event concatenates multipart agent message.
 #[test]
 fn shared_codex_item_completed_event_concatenates_multipart_agent_message() {
     let state = test_app_state();
@@ -7198,6 +7301,7 @@ fn shared_codex_item_completed_event_concatenates_multipart_agent_message() {
     ));
 }
 
+// Tests that shared Codex agent message content delta event ignores stale turn ID from params ID.
 #[test]
 fn shared_codex_agent_message_content_delta_event_ignores_stale_turn_id_from_params_id() {
     let state = test_app_state();
@@ -7346,6 +7450,7 @@ fn shared_codex_agent_message_content_delta_event_ignores_stale_turn_id_from_par
     ));
 }
 
+// Tests that shared Codex agent message final event appends missing suffix after streamed delta.
 #[test]
 fn shared_codex_agent_message_final_event_appends_missing_suffix_after_streamed_delta() {
     let state = test_app_state();
@@ -7466,6 +7571,7 @@ fn shared_codex_agent_message_final_event_appends_missing_suffix_after_streamed_
     ));
 }
 
+// Tests that shared Codex agent message final event replaces divergent streamed text.
 #[test]
 fn shared_codex_agent_message_final_event_replaces_divergent_streamed_text() {
     let state = test_app_state();
@@ -7590,6 +7696,7 @@ fn shared_codex_agent_message_final_event_replaces_divergent_streamed_text() {
         Some(Message::Text { text, .. }) if text == "Different final answer."
     ));
 }
+// Tests that shared Codex agent message content delta streams without duplicate final message.
 #[test]
 fn shared_codex_agent_message_content_delta_streams_without_duplicate_final_message() {
     let state = test_app_state();
@@ -7725,6 +7832,7 @@ fn shared_codex_agent_message_content_delta_streams_without_duplicate_final_mess
     ));
 }
 
+// Tests that shared Codex agent message event after turn completed is ignored.
 #[test]
 fn shared_codex_agent_message_event_after_turn_completed_is_ignored() {
     let state = test_app_state();
@@ -7837,6 +7945,7 @@ fn shared_codex_agent_message_event_after_turn_completed_is_ignored() {
     assert!(session.messages.is_empty());
 }
 
+// Tests that Codex app server command approval request records pending approval.
 #[test]
 fn codex_app_server_command_approval_request_records_pending_approval() {
     let mut recorder = TestRecorder::default();
@@ -7868,6 +7977,7 @@ fn codex_app_server_command_approval_request_records_pending_approval() {
     ));
 }
 
+// Tests that Codex app server file change approval request records pending approval.
 #[test]
 fn codex_app_server_file_change_approval_request_records_pending_approval() {
     let mut recorder = TestRecorder::default();
@@ -7893,6 +8003,7 @@ fn codex_app_server_file_change_approval_request_records_pending_approval() {
     ));
 }
 
+// Tests that Codex app server permissions approval request records pending approval.
 #[test]
 fn codex_app_server_permissions_approval_request_records_pending_approval() {
     let mut recorder = TestRecorder::default();
@@ -7961,6 +8072,7 @@ fn codex_app_server_permissions_approval_request_records_pending_approval() {
     assert_eq!(approval.request_id, json!("req-3"));
 }
 
+// Tests that Codex app server user input request records pending request.
 #[test]
 fn codex_app_server_user_input_request_records_pending_request() {
     let mut recorder = TestRecorder::default();
@@ -8010,6 +8122,7 @@ fn codex_app_server_user_input_request_records_pending_request() {
     assert_eq!(request.questions, questions.clone());
 }
 
+// Tests that Codex app server MCP elicitation request records pending request.
 #[test]
 fn codex_app_server_mcp_elicitation_request_records_pending_request() {
     let mut recorder = TestRecorder::default();
@@ -8066,6 +8179,7 @@ fn codex_app_server_mcp_elicitation_request_records_pending_request() {
     assert_eq!(pending.request, *request);
 }
 
+// Tests that Codex app server generic request records pending request.
 #[test]
 fn codex_app_server_generic_request_records_pending_request() {
     let mut recorder = TestRecorder::default();
@@ -8104,6 +8218,7 @@ fn codex_app_server_generic_request_records_pending_request() {
     assert_eq!(pending.request_id, json!("req-tool-1"));
 }
 
+// Tests that REPL Codex task complete event buffers subagent result until final message.
 #[test]
 fn repl_codex_task_complete_event_buffers_subagent_result_until_final_message() {
     let mut recorder = TestRecorder::default();
@@ -8183,6 +8298,7 @@ fn repl_codex_task_complete_event_buffers_subagent_result_until_final_message() 
     );
 }
 
+// Tests that REPL Codex streamed agent message appends missing completed suffix.
 #[test]
 fn repl_codex_streamed_agent_message_appends_missing_completed_suffix() {
     let mut recorder = TestRecorder::default();
@@ -8264,6 +8380,7 @@ fn repl_codex_streamed_agent_message_appends_missing_completed_suffix() {
     assert!(repl_state.current_turn_id.is_none());
 }
 
+// Tests that REPL Codex streamed agent message replaces divergent completed text.
 #[test]
 fn repl_codex_streamed_agent_message_replaces_divergent_completed_text() {
     let mut recorder = TestRecorder::default();
@@ -8342,6 +8459,7 @@ fn repl_codex_streamed_agent_message_replaces_divergent_completed_text() {
     assert!(repl_state.turn_completed);
     assert!(repl_state.current_turn_id.is_none());
 }
+// Tests that REPL Codex streamed agent message skips duplicate completed text.
 #[test]
 fn repl_codex_streamed_agent_message_skips_duplicate_completed_text() {
     let mut recorder = TestRecorder::default();
@@ -8420,6 +8538,7 @@ fn repl_codex_streamed_agent_message_skips_duplicate_completed_text() {
     assert!(repl_state.current_turn_id.is_none());
 }
 
+// Tests that Codex app server web search item records command lifecycle.
 #[test]
 fn codex_app_server_web_search_item_records_command_lifecycle() {
     let state = test_app_state();
@@ -8463,6 +8582,7 @@ fn codex_app_server_web_search_item_records_command_lifecycle() {
     );
 }
 
+// Tests that Codex app server file change item records create and edit diffs.
 #[test]
 fn codex_app_server_file_change_item_records_create_and_edit_diffs() {
     let state = test_app_state();
@@ -8518,6 +8638,7 @@ fn codex_app_server_file_change_item_records_create_and_edit_diffs() {
     );
 }
 
+// Tests that Codex delta suffix deduplicates cumulative and overlapping chunks.
 #[test]
 fn codex_delta_suffix_deduplicates_cumulative_and_overlapping_chunks() {
     let mut text = String::new();
@@ -8547,6 +8668,7 @@ fn codex_delta_suffix_deduplicates_cumulative_and_overlapping_chunks() {
     assert_eq!(text, "Try these plain");
 }
 
+// Tests that Codex delta suffix handles multibyte UTF-8 characters.
 #[test]
 fn codex_delta_suffix_handles_multibyte_utf8_characters() {
     let mut text = String::new();
@@ -8566,6 +8688,7 @@ fn codex_delta_suffix_handles_multibyte_utf8_characters() {
     assert_eq!(text, "I\u{2018}m here");
 }
 
+// Tests that shared Codex agent message event uses conversation ID for session routing.
 #[test]
 fn shared_codex_agent_message_event_uses_conversation_id_for_session_routing() {
     let state = test_app_state();
@@ -8661,6 +8784,7 @@ fn shared_codex_agent_message_event_uses_conversation_id_for_session_routing() {
     ));
 }
 
+// Tests that subagent results append after existing assistant text.
 #[test]
 fn subagent_results_append_after_existing_assistant_text() {
     let state = test_app_state();
@@ -8711,6 +8835,7 @@ fn subagent_results_append_after_existing_assistant_text() {
     ));
 }
 
+// Tests that clear runtime commits revision when it resets state.
 #[test]
 fn clear_runtime_commits_revision_when_it_resets_state() {
     let state = test_app_state();
@@ -8742,6 +8867,7 @@ fn clear_runtime_commits_revision_when_it_resets_state() {
     assert_eq!(state.snapshot().revision, stable_revision);
 }
 
+// Tests that reuses shared Codex runtime across sessions.
 #[test]
 fn reuses_shared_codex_runtime_across_sessions() {
     let state = test_app_state();
@@ -8769,6 +8895,7 @@ fn reuses_shared_codex_runtime_across_sessions() {
     assert!(shared_sessions.is_empty());
 }
 
+// Tests that stops shared Codex sessions via turn interrupt.
 #[test]
 fn stops_shared_codex_sessions_via_turn_interrupt() {
     let state = test_app_state();
@@ -8867,6 +8994,7 @@ fn stops_shared_codex_sessions_via_turn_interrupt() {
     );
 }
 
+// Tests that stop session detaches shared Codex session when interrupt fails.
 #[test]
 fn stop_session_detaches_shared_codex_session_when_interrupt_fails() {
     let state = test_app_state();
@@ -8981,6 +9109,7 @@ fn stop_session_detaches_shared_codex_session_when_interrupt_fails() {
     let _ = fs::remove_file(state.persistence_path.as_path());
 }
 
+// Tests that stop session dispatches queued prompt after shared Codex interrupt failure.
 #[test]
 fn stop_session_dispatches_queued_prompt_after_shared_codex_interrupt_failure() {
     let state = test_app_state();
@@ -9160,6 +9289,7 @@ fn stop_session_dispatches_queued_prompt_after_shared_codex_interrupt_failure() 
     let _ = fs::remove_file(state.persistence_path.as_path());
 }
 
+// Tests that stop session returns an error when a dedicated runtime refuses to stop.
 #[test]
 fn stop_session_returns_an_error_when_a_dedicated_runtime_refuses_to_stop() {
     let state = test_app_state();
@@ -9230,6 +9360,7 @@ fn stop_session_returns_an_error_when_a_dedicated_runtime_refuses_to_stop() {
     let _ = fs::remove_file(state.persistence_path.as_path());
 }
 
+// Tests that stop session keeps the previous state visible until shutdown completes.
 #[test]
 fn stop_session_keeps_the_previous_state_visible_until_shutdown_completes() {
     let state = test_app_state();
@@ -9316,6 +9447,7 @@ fn stop_session_keeps_the_previous_state_visible_until_shutdown_completes() {
     let _ = fs::remove_file(state.persistence_path.as_path());
 }
 
+// Tests that stop session returns conflict when already stopping.
 #[test]
 fn stop_session_returns_conflict_when_already_stopping() {
     let state = test_app_state();
@@ -9387,6 +9519,7 @@ fn stop_session_returns_conflict_when_already_stopping() {
     let _ = fs::remove_file(state.persistence_path.as_path());
 }
 
+// Tests that runtime turn callbacks are suppressed while stop is in progress.
 #[test]
 fn runtime_turn_callbacks_are_suppressed_while_stop_is_in_progress() {
     let state = test_app_state();
@@ -9469,6 +9602,7 @@ fn runtime_turn_callbacks_are_suppressed_while_stop_is_in_progress() {
     let _ = fs::remove_file(state.persistence_path.as_path());
 }
 
+// Tests that Codex thread state updates are suppressed while stop is in progress.
 #[test]
 fn codex_thread_state_updates_are_suppressed_while_stop_is_in_progress() {
     let state = test_app_state();
@@ -9526,6 +9660,7 @@ fn codex_thread_state_updates_are_suppressed_while_stop_is_in_progress() {
     let _ = fs::remove_file(state.persistence_path.as_path());
 }
 
+// Tests that runtime exit is suppressed while stop is in progress.
 #[test]
 fn runtime_exit_is_suppressed_while_stop_is_in_progress() {
     let state = test_app_state();
@@ -9579,6 +9714,7 @@ fn runtime_exit_is_suppressed_while_stop_is_in_progress() {
     let _ = fs::remove_file(state.persistence_path.as_path());
 }
 
+// Tests that successful stop discards deferred callbacks.
 #[test]
 fn successful_stop_discards_deferred_callbacks() {
     let state = test_app_state();
@@ -9630,6 +9766,7 @@ fn successful_stop_discards_deferred_callbacks() {
     let _ = fs::remove_file(state.persistence_path.as_path());
 }
 
+// Tests that failed dedicated stop replays deferred turn completion.
 #[test]
 fn failed_dedicated_stop_replays_deferred_turn_completion() {
     let state = test_app_state();
@@ -9689,6 +9826,7 @@ fn failed_dedicated_stop_replays_deferred_turn_completion() {
     let _ = fs::remove_file(state.persistence_path.as_path());
 }
 
+// Tests that failed dedicated stop replays deferred runtime exit.
 #[test]
 fn failed_dedicated_stop_replays_deferred_runtime_exit() {
     let state = test_app_state();
@@ -9748,6 +9886,7 @@ fn failed_dedicated_stop_replays_deferred_runtime_exit() {
     let _ = fs::remove_file(state.persistence_path.as_path());
 }
 
+// Tests that failed dedicated stop replays multiple deferred callbacks in order.
 #[test]
 fn failed_dedicated_stop_replays_multiple_deferred_callbacks_in_order() {
     let expected_state = test_app_state();
@@ -9878,6 +10017,7 @@ fn failed_dedicated_stop_replays_multiple_deferred_callbacks_in_order() {
     let _ = fs::remove_file(state.persistence_path.as_path());
 }
 
+// Tests that failed dedicated stop replays runtime exit last even when it arrives first.
 #[test]
 fn failed_dedicated_stop_replays_runtime_exit_last_even_when_it_arrives_first() {
     let expected_state = test_app_state();
@@ -10008,6 +10148,7 @@ fn failed_dedicated_stop_replays_runtime_exit_last_even_when_it_arrives_first() 
     let _ = fs::remove_file(state.persistence_path.as_path());
 }
 
+// Tests that syncs cursor model options from ACP config.
 #[test]
 fn syncs_cursor_model_options_from_acp_config() {
     let state = test_app_state();
@@ -10052,6 +10193,7 @@ fn syncs_cursor_model_options_from_acp_config() {
     assert_eq!(session.model_options, model_options);
 }
 
+// Tests that cursor agent mode auto approves ACP permission requests.
 #[test]
 fn cursor_agent_mode_auto_approves_acp_permission_requests() {
     let state = test_app_state();
@@ -10109,6 +10251,7 @@ fn cursor_agent_mode_auto_approves_acp_permission_requests() {
     assert_eq!(record.session.status, SessionStatus::Idle);
 }
 
+// Tests that cursor ask mode queues ACP permission requests.
 #[test]
 fn cursor_ask_mode_queues_acp_permission_requests() {
     let state = test_app_state();
@@ -10167,6 +10310,7 @@ fn cursor_ask_mode_queues_acp_permission_requests() {
     assert_eq!(record.session.status, SessionStatus::Approval);
 }
 
+// Tests that cursor plan mode rejects ACP permission requests.
 #[test]
 fn cursor_plan_mode_rejects_acp_permission_requests() {
     let state = test_app_state();
@@ -10224,6 +10368,7 @@ fn cursor_plan_mode_rejects_acp_permission_requests() {
     assert_eq!(record.session.status, SessionStatus::Idle);
 }
 
+// Tests that syncs cursor mode from ACP config updates.
 #[test]
 fn syncs_cursor_mode_from_acp_config_updates() {
     let state = test_app_state();
@@ -10283,6 +10428,7 @@ fn syncs_cursor_mode_from_acp_config_updates() {
     assert_eq!(record.session.cursor_mode, Some(CursorMode::Ask));
 }
 
+// Tests that syncs cursor mode from mode updates.
 #[test]
 fn syncs_cursor_mode_from_mode_updates() {
     let state = test_app_state();
@@ -10327,6 +10473,7 @@ fn syncs_cursor_mode_from_mode_updates() {
     assert_eq!(record.session.cursor_mode, Some(CursorMode::Plan));
 }
 
+// Tests that borrowed session recorder uses shared message and request logic.
 #[test]
 fn borrowed_session_recorder_uses_shared_message_and_request_logic() {
     let state = test_app_state();
@@ -10403,6 +10550,7 @@ fn borrowed_session_recorder_uses_shared_message_and_request_logic() {
     assert_eq!(record.pending_codex_user_inputs.len(), 1);
 }
 
+// Tests that updates live cursor mode on active ACP sessions.
 #[test]
 fn updates_live_cursor_mode_on_active_acp_sessions() {
     let state = test_app_state();
@@ -10477,6 +10625,7 @@ fn updates_live_cursor_mode_on_active_acp_sessions() {
     }
 }
 
+// Tests that matches ACP model options by name or label.
 #[test]
 fn matches_acp_model_options_by_name_or_label() {
     let config = json!({
@@ -10507,6 +10656,7 @@ fn matches_acp_model_options_by_name_or_label() {
     );
 }
 
+// Tests that canonicalizes session model updates from live model labels.
 #[test]
 fn canonicalizes_session_model_updates_from_live_model_labels() {
     let state = test_app_state();
@@ -10561,6 +10711,7 @@ fn canonicalizes_session_model_updates_from_live_model_labels() {
     assert_eq!(session.model, "gpt-5.4");
 }
 
+// Tests that revisions increase for visible state changes.
 #[test]
 fn revisions_increase_for_visible_state_changes() {
     let state = test_app_state();
@@ -10602,6 +10753,7 @@ fn revisions_increase_for_visible_state_changes() {
     assert_eq!(updated.revision, 2);
 }
 
+// Tests that renames sessions via settings updates.
 #[test]
 fn renames_sessions_via_settings_updates() {
     let state = test_app_state();
@@ -10648,6 +10800,7 @@ fn renames_sessions_via_settings_updates() {
     assert_eq!(renamed.name, "New Name");
 }
 
+// Tests that persists remote settings.
 #[test]
 fn persists_remote_settings() {
     let state = test_app_state();
@@ -10687,6 +10840,7 @@ fn persists_remote_settings() {
     );
 }
 
+// Tests that rejects remote settings with unsafe remote ID.
 #[test]
 fn rejects_remote_settings_with_unsafe_remote_id() {
     let state = test_app_state();
@@ -10718,6 +10872,7 @@ fn rejects_remote_settings_with_unsafe_remote_id() {
     );
 }
 
+// Tests that rejects remote settings with invalid SSH host.
 #[test]
 fn rejects_remote_settings_with_invalid_ssh_host() {
     let state = test_app_state();
@@ -10746,6 +10901,7 @@ fn rejects_remote_settings_with_invalid_ssh_host() {
     assert_eq!(error.message, "remote `SSH Lab` has an invalid SSH host");
 }
 
+// Tests that rejects remote settings with invalid SSH user.
 #[test]
 fn rejects_remote_settings_with_invalid_ssh_user() {
     let state = test_app_state();
@@ -10774,6 +10930,7 @@ fn rejects_remote_settings_with_invalid_ssh_user() {
     assert_eq!(error.message, "remote `SSH Lab` has an invalid SSH user");
 }
 
+// Tests that remote connection issue message hides transport details.
 #[test]
 fn remote_connection_issue_message_hides_transport_details() {
     assert_eq!(
@@ -10782,6 +10939,7 @@ fn remote_connection_issue_message_hides_transport_details() {
     );
 }
 
+// Tests that local SSH start issue message hides transport details.
 #[test]
 fn local_ssh_start_issue_message_hides_transport_details() {
     assert_eq!(
@@ -10790,6 +10948,7 @@ fn local_ssh_start_issue_message_hides_transport_details() {
     );
 }
 
+// Tests that remote SSH command args insert double dash before target.
 #[test]
 fn remote_ssh_command_args_insert_double_dash_before_target() {
     let remote = RemoteConfig {
@@ -10813,6 +10972,7 @@ fn remote_ssh_command_args_insert_double_dash_before_target() {
     assert_eq!(&args[separator_index + 2..], ["termal", "server"]);
 }
 
+// Tests that removing remote stops event bridge worker and resets started guard.
 #[test]
 fn removing_remote_stops_event_bridge_worker_and_resets_started_guard() {
     let state = test_app_state();
@@ -10883,6 +11043,7 @@ fn removing_remote_stops_event_bridge_worker_and_resets_started_guard() {
     }
 }
 
+// Tests that remote snapshot sync removes missing proxy sessions.
 #[test]
 fn remote_snapshot_sync_removes_missing_proxy_sessions() {
     let state = test_app_state();
@@ -10952,6 +11113,7 @@ fn remote_snapshot_sync_removes_missing_proxy_sessions() {
     );
 }
 
+// Tests that remote review put sends scope via query params.
 #[test]
 fn remote_review_put_sends_scope_via_query_params() {
     let captured = Arc::new(Mutex::new(None::<(String, String)>));
@@ -11104,6 +11266,7 @@ fn remote_review_put_sends_scope_via_query_params() {
     server.join().expect("test server should finish");
 }
 
+// Tests that normalize Git repo relative path rejects parent traversal components.
 #[test]
 fn normalize_git_repo_relative_path_rejects_parent_traversal_components() {
     let error = normalize_git_repo_relative_path("../../etc/passwd")
@@ -11116,6 +11279,7 @@ fn normalize_git_repo_relative_path_rejects_parent_traversal_components() {
     );
 }
 
+// Tests that rejects projects with unknown remote.
 #[test]
 fn rejects_projects_with_unknown_remote() {
     let state = test_app_state();
@@ -11133,6 +11297,7 @@ fn rejects_projects_with_unknown_remote() {
     assert!(error.message.contains("unknown remote"));
 }
 
+// Tests that creates sessions for remote projects over SSH.
 #[test]
 #[ignore = "requires a reachable SSH remote"]
 fn creates_sessions_for_remote_projects_over_ssh() {
@@ -11202,6 +11367,7 @@ fn creates_sessions_for_remote_projects_over_ssh() {
     assert!(!error.message.trim().is_empty());
 }
 
+// Tests that creates projects and assigns sessions to them.
 #[test]
 fn creates_projects_and_assigns_sessions_to_them() {
     let state = test_app_state();
@@ -11246,6 +11412,7 @@ fn creates_projects_and_assigns_sessions_to_them() {
     assert_eq!(session.workdir, expected_root);
 }
 
+// Tests that rejects session workdirs outside the selected project.
 #[test]
 fn rejects_session_workdirs_outside_the_selected_project() {
     let state = test_app_state();
@@ -11280,6 +11447,7 @@ fn rejects_session_workdirs_outside_the_selected_project() {
     assert!(error.message.contains("must stay inside project"));
 }
 
+// Tests that rejects empty project roots.
 #[test]
 fn rejects_empty_project_roots() {
     let state = test_app_state();
@@ -11298,6 +11466,7 @@ fn rejects_empty_project_roots() {
     assert_eq!(error.message, "project root path cannot be empty");
 }
 
+// Tests that resolves requested paths inside the session project root.
 #[test]
 fn resolves_requested_paths_inside_the_session_project_root() {
     let state = test_app_state();
@@ -11363,6 +11532,7 @@ fn resolves_requested_paths_inside_the_session_project_root() {
     fs::remove_dir_all(outside_root).unwrap();
 }
 
+// Tests that allows new file paths inside the session project root.
 #[test]
 fn allows_new_file_paths_inside_the_session_project_root() {
     let state = test_app_state();
@@ -11423,6 +11593,7 @@ fn allows_new_file_paths_inside_the_session_project_root() {
     fs::remove_dir_all(outside_root).unwrap();
 }
 
+// Tests that resolves project scoped paths without a session.
 #[test]
 fn resolves_project_scoped_paths_without_a_session() {
     let state = test_app_state();
@@ -11476,6 +11647,7 @@ fn resolves_project_scoped_paths_without_a_session() {
     fs::remove_dir_all(outside_root).unwrap();
 }
 
+// Tests that parses quoted Git status paths.
 #[test]
 fn parses_quoted_git_status_paths() {
     assert_eq!(
@@ -11492,6 +11664,7 @@ fn parses_quoted_git_status_paths() {
     );
 }
 
+// Tests that Git status file actions support paths with spaces.
 #[test]
 fn git_status_file_actions_support_paths_with_spaces() {
     let repo_root = std::env::temp_dir().join(format!("termal-git-status-{}", Uuid::new_v4()));
@@ -11560,6 +11733,7 @@ fn git_status_file_actions_support_paths_with_spaces() {
     fs::remove_dir_all(repo_root).unwrap();
 }
 
+// Tests that push Git repo updates tracking branch.
 #[test]
 fn push_git_repo_updates_tracking_branch() {
     let root = std::env::temp_dir().join(format!("termal-git-push-{}", Uuid::new_v4()));
@@ -11603,6 +11777,7 @@ fn push_git_repo_updates_tracking_branch() {
     fs::remove_dir_all(root).unwrap();
 }
 
+// Tests that sync Git repo pulls remote changes.
 #[test]
 fn sync_git_repo_pulls_remote_changes() {
     let root = std::env::temp_dir().join(format!("termal-git-sync-{}", Uuid::new_v4()));
@@ -11665,6 +11840,7 @@ fn sync_git_repo_pulls_remote_changes() {
     fs::remove_dir_all(root).unwrap();
 }
 
+// Tests that project scoped paths require a session or project identifier.
 #[test]
 fn project_scoped_paths_require_a_session_or_project_identifier() {
     let state = test_app_state();
@@ -11681,6 +11857,7 @@ fn project_scoped_paths_require_a_session_or_project_identifier() {
     assert_eq!(error.message, "sessionId or projectId is required");
 }
 
+// Tests that read directory accepts project ID without session.
 #[tokio::test]
 async fn read_directory_accepts_project_id_without_session() {
     let state = test_app_state();
@@ -11725,6 +11902,7 @@ async fn read_directory_accepts_project_id_without_session() {
     fs::remove_dir_all(root).unwrap();
 }
 
+// Tests that API router sets local CORS headers.
 #[tokio::test]
 async fn api_router_sets_local_cors_headers() {
     let response = app_router(test_app_state())
@@ -11747,6 +11925,7 @@ async fn api_router_sets_local_cors_headers() {
     );
 }
 
+// Tests that read and write file accept project ID without session.
 #[tokio::test]
 async fn read_and_write_file_accept_project_id_without_session() {
     let state = test_app_state();
@@ -11810,6 +11989,7 @@ async fn read_and_write_file_accept_project_id_without_session() {
     fs::remove_dir_all(root).unwrap();
 }
 
+// Tests that read file returns not found for missing project file.
 #[tokio::test]
 async fn read_file_returns_not_found_for_missing_project_file() {
     let state = test_app_state();
@@ -11846,6 +12026,7 @@ async fn read_file_returns_not_found_for_missing_project_file() {
     fs::remove_dir_all(root).unwrap();
 }
 
+// Tests that read directory returns not found for missing project path.
 #[tokio::test]
 async fn read_directory_returns_not_found_for_missing_project_path() {
     let state = test_app_state();
@@ -11885,6 +12066,7 @@ async fn read_directory_returns_not_found_for_missing_project_path() {
     fs::remove_dir_all(root).unwrap();
 }
 
+// Tests that read instruction document returns not found for missing file.
 #[test]
 fn read_instruction_document_returns_not_found_for_missing_file() {
     let workdir =
@@ -11902,6 +12084,7 @@ fn read_instruction_document_returns_not_found_for_missing_file() {
     fs::remove_dir_all(workdir).unwrap();
 }
 
+// Tests that read file rejects content over size limit.
 #[tokio::test]
 async fn read_file_rejects_content_over_size_limit() {
     let state = test_app_state();
@@ -11940,6 +12123,7 @@ async fn read_file_rejects_content_over_size_limit() {
     fs::remove_dir_all(root).unwrap();
 }
 
+// Tests that write file rejects content over size limit.
 #[tokio::test]
 async fn write_file_rejects_content_over_size_limit() {
     let state = test_app_state();
@@ -11982,6 +12166,7 @@ async fn write_file_rejects_content_over_size_limit() {
     fs::remove_dir_all(root).unwrap();
 }
 
+// Tests that project digest surfaces pending approval actions.
 #[test]
 fn project_digest_surfaces_pending_approval_actions() {
     let state = test_app_state();
@@ -12051,6 +12236,7 @@ fn project_digest_surfaces_pending_approval_actions() {
     fs::remove_dir_all(root).unwrap();
 }
 
+// Tests that project digest prefers review actions for dirty idle project.
 #[test]
 fn project_digest_prefers_review_actions_for_dirty_idle_project() {
     let state = test_app_state();
@@ -12098,6 +12284,7 @@ fn project_digest_prefers_review_actions_for_dirty_idle_project() {
     fs::remove_dir_all(repo_root).unwrap();
 }
 
+// Tests that project action approve routes to the live project approval.
 #[test]
 fn project_action_approve_routes_to_the_live_project_approval() {
     let state = test_app_state();
@@ -12163,6 +12350,7 @@ fn project_action_approve_routes_to_the_live_project_approval() {
     fs::remove_dir_all(root).unwrap();
 }
 
+// Tests that project action keep iterating dispatches a follow up prompt.
 #[test]
 fn project_action_keep_iterating_dispatches_a_follow_up_prompt() {
     let state = test_app_state();
@@ -12226,6 +12414,7 @@ fn project_action_keep_iterating_dispatches_a_follow_up_prompt() {
     fs::remove_dir_all(repo_root).unwrap();
 }
 
+// Tests that Telegram command parser supports suffixes and aliases.
 #[test]
 fn telegram_command_parser_supports_suffixes_and_aliases() {
     let parsed =
@@ -12240,11 +12429,13 @@ fn telegram_command_parser_supports_suffixes_and_aliases() {
     assert_eq!(parsed.command, TelegramIncomingCommand::Status);
 }
 
+// Tests that Telegram command parser rejects unknown slash commands.
 #[test]
 fn telegram_command_parser_rejects_unknown_slash_commands() {
     assert!(parse_telegram_command("/unknown").is_none());
 }
 
+// Tests that Telegram digest renderer includes actions and public link.
 #[test]
 fn telegram_digest_renderer_includes_actions_and_public_link() {
     let digest = ProjectDigestResponse {
@@ -12301,6 +12492,7 @@ where
     format!("{err:#}")
 }
 
+// Tests that persisted state normalizes legacy local verbatim paths.
 #[cfg(windows)]
 #[test]
 fn persisted_state_normalizes_legacy_local_verbatim_paths() {
@@ -12343,6 +12535,7 @@ fn persisted_state_normalizes_legacy_local_verbatim_paths() {
     let _ = fs::remove_dir_all(project_root);
 }
 
+// Tests that persisted state normalizes legacy workspace layout paths.
 #[cfg(windows)]
 #[test]
 fn persisted_state_normalizes_legacy_workspace_layout_paths() {
@@ -12482,6 +12675,7 @@ fn persisted_state_normalizes_legacy_workspace_layout_paths() {
     let _ = fs::remove_dir_all(project_root);
 }
 
+// Tests that app state bootstrap normalizes legacy local verbatim working directory.
 #[test]
 fn app_state_bootstrap_normalizes_legacy_local_verbatim_workdir() {
     let project_root =
@@ -12526,6 +12720,7 @@ fn app_state_bootstrap_normalizes_legacy_local_verbatim_workdir() {
     let _ = fs::remove_dir_all(project_root);
 }
 
+// Tests that persisted state preserves significant local path spaces.
 #[cfg(not(windows))]
 #[test]
 fn persisted_state_preserves_significant_local_path_spaces() {
@@ -12563,6 +12758,7 @@ fn persisted_state_preserves_significant_local_path_spaces() {
     let _ = fs::remove_dir_all(project_root);
 }
 
+// Tests that persisted state requires projects.
 #[test]
 fn persisted_state_requires_projects() {
     let mut inner = StateInner::new();
@@ -12587,6 +12783,7 @@ fn persisted_state_requires_projects() {
     );
 }
 
+// Tests that persisted state requires next project number.
 #[test]
 fn persisted_state_requires_next_project_number() {
     let inner = StateInner::new();
@@ -12604,6 +12801,7 @@ fn persisted_state_requires_next_project_number() {
     );
 }
 
+// Tests that persisted state requires project remote ID.
 #[test]
 fn persisted_state_requires_project_remote_id() {
     let mut inner = StateInner::new();
@@ -12624,6 +12822,7 @@ fn persisted_state_requires_project_remote_id() {
     );
 }
 
+// Tests that persisted state requires valid remotes.
 #[test]
 fn persisted_state_requires_valid_remotes() {
     let inner = StateInner::new();
@@ -12664,6 +12863,7 @@ fn persisted_state_requires_valid_remotes() {
     );
 }
 
+// Tests that persisted state requires cursor mode.
 #[test]
 fn persisted_state_requires_cursor_mode() {
     let mut inner = StateInner::new();
@@ -12691,6 +12891,7 @@ fn persisted_state_requires_cursor_mode() {
     );
 }
 
+// Tests that persisted state requires Claude settings.
 #[test]
 fn persisted_state_requires_claude_settings() {
     let mut inner = StateInner::new();
@@ -12719,6 +12920,7 @@ fn persisted_state_requires_claude_settings() {
     );
 }
 
+// Tests that persisted state requires Gemini approval mode.
 #[test]
 fn persisted_state_requires_gemini_approval_mode() {
     let mut inner = StateInner::new();
@@ -12746,6 +12948,7 @@ fn persisted_state_requires_gemini_approval_mode() {
     );
 }
 
+// Tests that persisted state requires Codex prompt fields.
 #[test]
 fn persisted_state_requires_codex_prompt_fields() {
     let mut inner = StateInner::new();
@@ -12775,6 +12978,7 @@ fn persisted_state_requires_codex_prompt_fields() {
     );
 }
 
+// Tests that persisted state requires Codex thread state for live threads.
 #[test]
 fn persisted_state_requires_codex_thread_state_for_live_threads() {
     let mut inner = StateInner::new();
@@ -12813,6 +13017,7 @@ fn persisted_state_requires_codex_thread_state_for_live_threads() {
     );
 }
 
+// Tests that persisted state requires queued prompt source.
 #[test]
 fn persisted_state_requires_queued_prompt_source() {
     let path = std::env::temp_dir().join(format!(
@@ -12870,6 +13075,7 @@ fn persisted_state_requires_queued_prompt_source() {
     let _ = fs::remove_file(path);
 }
 
+// Tests that create orchestrator instance route uses template project when request project ID is empty.
 #[tokio::test]
 async fn create_orchestrator_instance_route_uses_template_project_when_request_project_id_is_empty()
 {
@@ -12926,6 +13132,7 @@ async fn create_orchestrator_instance_route_uses_template_project_when_request_p
     let _ = fs::remove_dir_all(project_root);
 }
 
+// Tests that orchestrator lifecycle routes update state and stop active sessions.
 #[tokio::test]
 async fn orchestrator_lifecycle_routes_update_state_and_stop_active_sessions() {
     let state = test_app_state();
@@ -13062,6 +13269,7 @@ async fn orchestrator_lifecycle_routes_update_state_and_stop_active_sessions() {
     let _ = fs::remove_dir_all(project_root);
     let _ = fs::remove_file(state.persistence_path.as_path());
 }
+// Tests that orchestrator stop route preserves running state when a child stop fails.
 #[tokio::test]
 async fn orchestrator_stop_route_preserves_running_state_when_a_child_stop_fails() {
     let state = test_app_state();
@@ -13205,6 +13413,7 @@ async fn orchestrator_stop_route_preserves_running_state_when_a_child_stop_fails
     let _ = fs::remove_file(state.persistence_path.as_path());
 }
 
+// Tests that aborted stop cleanup preserves child work when child stop persist fails.
 #[test]
 fn aborted_stop_cleanup_preserves_child_work_when_child_stop_persist_fails() {
     let mut state = test_app_state();
@@ -13392,6 +13601,7 @@ fn aborted_stop_cleanup_preserves_child_work_when_child_stop_persist_fails() {
     let _ = fs::remove_dir_all(failing_persistence_path);
 }
 
+// Tests that aborted stop resume does not redispatch child after child stop persist fails.
 #[test]
 fn aborted_stop_resume_does_not_redispatch_child_after_child_stop_persist_fails() {
     let mut state = test_app_state();
@@ -13548,6 +13758,7 @@ fn aborted_stop_resume_does_not_redispatch_child_after_child_stop_persist_fails(
     let _ = fs::remove_dir_all(failing_persistence_path);
 }
 
+// Tests that aborted stop restart does not redispatch child after child stop persist fails.
 #[test]
 fn aborted_stop_restart_does_not_redispatch_child_after_child_stop_persist_fails() {
     let project_root = std::env::temp_dir().join(format!(
@@ -13698,6 +13909,7 @@ fn aborted_stop_restart_does_not_redispatch_child_after_child_stop_persist_fails
     let _ = fs::remove_dir_all(state_root);
 }
 
+// Tests that aborted stop restart does not dispatch orphaned child queue after child stop persist fails.
 #[test]
 fn aborted_stop_restart_does_not_dispatch_orphaned_child_queue_after_child_stop_persist_fails() {
     let project_root = std::env::temp_dir().join(format!(
@@ -13837,6 +14049,7 @@ fn aborted_stop_restart_does_not_dispatch_orphaned_child_queue_after_child_stop_
     let _ = fs::remove_dir_all(project_root);
 }
 
+// Tests that blocked session manual recovery dispatch prioritizes user prompt after restart.
 #[test]
 fn blocked_session_manual_recovery_dispatch_prioritizes_user_prompt_after_restart() {
     let project_root = std::env::temp_dir().join(format!(
@@ -14057,6 +14270,7 @@ fn blocked_session_manual_recovery_dispatch_prioritizes_user_prompt_after_restar
     let _ = fs::remove_dir_all(project_root);
 }
 
+// Tests that blocked session manual recovery preserves user prompt fifo after plain stop persist failure.
 #[test]
 fn blocked_session_manual_recovery_preserves_user_prompt_fifo_after_plain_stop_persist_failure() {
     let mut state = test_app_state();
@@ -14188,6 +14402,7 @@ fn blocked_session_manual_recovery_preserves_user_prompt_fifo_after_plain_stop_p
     let _ = fs::remove_dir_all(failing_persistence_path);
 }
 
+// Tests that blocked session manual recovery prioritizes existing user queue ahead of stale orchestrator work.
 #[test]
 fn blocked_session_manual_recovery_prioritizes_existing_user_queue_ahead_of_stale_orchestrator_work()
  {
@@ -14348,6 +14563,7 @@ fn blocked_session_manual_recovery_prioritizes_existing_user_queue_ahead_of_stal
     let _ = fs::remove_dir_all(failing_persistence_path);
 }
 
+// Tests that aborted stop does not relaunch child work completed during stop.
 #[test]
 fn aborted_stop_does_not_relaunch_child_work_completed_during_stop() {
     let state = test_app_state();
@@ -14596,6 +14812,7 @@ fn aborted_stop_does_not_relaunch_child_work_completed_during_stop() {
     let _ = fs::remove_file(state.persistence_path.as_path());
 }
 
+// Tests that begin orchestrator stop cleans up guards on missing and stopped errors.
 #[test]
 fn begin_orchestrator_stop_cleans_up_guards_on_missing_and_stopped_errors() {
     let state = test_app_state();
@@ -14684,6 +14901,7 @@ fn begin_orchestrator_stop_cleans_up_guards_on_missing_and_stopped_errors() {
     let _ = fs::remove_file(state.persistence_path.as_path());
 }
 
+// Tests that begin orchestrator stop rolls back stop in progress after persist failure.
 #[test]
 fn begin_orchestrator_stop_rolls_back_stop_in_progress_after_persist_failure() {
     let mut state = test_app_state();
@@ -14753,6 +14971,7 @@ fn begin_orchestrator_stop_rolls_back_stop_in_progress_after_persist_failure() {
     let _ = fs::remove_dir_all(failing_persistence_path);
 }
 
+// Tests that load state preserves pending transitions when stop in progress has no stopped children.
 #[test]
 fn load_state_preserves_pending_transitions_when_stop_in_progress_has_no_stopped_children() {
     let project_root = std::env::temp_dir().join(format!(
@@ -14881,6 +15100,7 @@ fn load_state_preserves_pending_transitions_when_stop_in_progress_has_no_stopped
     let _ = fs::remove_dir_all(project_root);
 }
 
+// Tests that load state recovers completed stop when active children finished during stop.
 #[test]
 fn load_state_recovers_completed_stop_when_active_children_finished_during_stop() {
     let project_root = std::env::temp_dir().join(format!(
@@ -15043,6 +15263,7 @@ fn load_state_recovers_completed_stop_when_active_children_finished_during_stop(
     let _ = fs::remove_dir_all(project_root);
 }
 
+// Tests that load state prunes only stopped child work when recovering stop in progress.
 #[test]
 fn load_state_prunes_only_stopped_child_work_when_recovering_stop_in_progress() {
     let project_root = std::env::temp_dir().join(format!(
@@ -15205,6 +15426,7 @@ fn load_state_prunes_only_stopped_child_work_when_recovering_stop_in_progress() 
     let _ = fs::remove_dir_all(project_root);
 }
 
+// Tests that load state recovers completed stop when all active children were stopped.
 #[test]
 fn load_state_recovers_completed_stop_when_all_active_children_were_stopped() {
     let project_root = std::env::temp_dir().join(format!(
@@ -15402,6 +15624,7 @@ fn sample_orchestrator_template_draft() -> OrchestratorTemplateDraft {
     }
 }
 
+// Tests that failed orchestrator transition dispatch becomes a visible destination error.
 #[test]
 fn failed_orchestrator_transition_dispatch_becomes_a_visible_destination_error() {
     let state = test_app_state();
@@ -15527,6 +15750,7 @@ fn failed_orchestrator_transition_dispatch_becomes_a_visible_destination_error()
     );
 }
 
+// Tests that failed orchestrator transition dispatch does not block other instances.
 #[test]
 fn failed_orchestrator_transition_dispatch_does_not_block_other_instances() {
     let state = test_app_state();
@@ -15685,6 +15909,7 @@ fn failed_orchestrator_transition_dispatch_does_not_block_other_instances() {
     );
 }
 
+// Tests that stop session does not schedule orchestrator transitions.
 #[test]
 fn stop_session_does_not_schedule_orchestrator_transitions() {
     let state = test_app_state();
@@ -15770,6 +15995,7 @@ fn stop_session_does_not_schedule_orchestrator_transitions() {
     );
 }
 
+// Tests that fail turn does not schedule orchestrator transitions.
 #[test]
 fn fail_turn_does_not_schedule_orchestrator_transitions() {
     let state = test_app_state();
@@ -15849,6 +16075,7 @@ fn fail_turn_does_not_schedule_orchestrator_transitions() {
     );
 }
 
+// Tests that mark turn error does not schedule orchestrator transitions.
 #[test]
 fn mark_turn_error_does_not_schedule_orchestrator_transitions() {
     let state = test_app_state();
@@ -15929,6 +16156,7 @@ fn mark_turn_error_does_not_schedule_orchestrator_transitions() {
     );
 }
 
+// Tests that orchestrator transition uses only messages from the current turn.
 #[test]
 fn orchestrator_transition_uses_only_messages_from_the_current_turn() {
     let state = test_app_state();
@@ -16044,6 +16272,7 @@ fn orchestrator_transition_uses_only_messages_from_the_current_turn() {
     );
 }
 
+// Tests that runtime exit does not schedule orchestrator transitions.
 #[test]
 fn runtime_exit_does_not_schedule_orchestrator_transitions() {
     let state = test_app_state();
@@ -16134,6 +16363,7 @@ fn runtime_exit_does_not_schedule_orchestrator_transitions() {
     );
 }
 
+// Tests that killing a session prunes its orchestrator links.
 #[test]
 fn killing_a_session_prunes_its_orchestrator_links() {
     let state = test_app_state();

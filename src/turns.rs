@@ -1,3 +1,16 @@
+/*
+Turn execution and event recording
+agent stdout/stdin
+  -> runtime-specific parser
+  -> TurnRecorder callbacks
+  -> SessionRecorder
+  -> AppState mutations
+  -> persistence + SSE deltas
+The REPL path and the server path share the same recorder vocabulary so each
+agent integration only needs one normalization layer.
+*/
+
+/// Runs a blocking turn for the selected agent.
 fn run_turn_blocking(config: TurnConfig, recorder: &mut dyn TurnRecorder) -> Result<String> {
     match config.agent {
         Agent::Codex => run_codex_turn(
@@ -46,10 +59,15 @@ fn run_turn_blocking(config: TurnConfig, recorder: &mut dyn TurnRecorder) -> Res
     }
 }
 
+/// Defines behavior for turn recorder.
 trait TurnRecorder {
+    /// Records external session.
     fn note_external_session(&mut self, session_id: &str) -> Result<()>;
+    /// Pushes approval.
     fn push_approval(&mut self, title: &str, command: &str, detail: &str) -> Result<()>;
+    /// Pushes text.
     fn push_text(&mut self, text: &str) -> Result<()>;
+    /// Pushes subagent result.
     fn push_subagent_result(
         &mut self,
         title: &str,
@@ -57,7 +75,9 @@ trait TurnRecorder {
         conversation_id: Option<&str>,
         turn_id: Option<&str>,
     ) -> Result<()>;
+    /// Pushes thinking.
     fn push_thinking(&mut self, title: &str, lines: Vec<String>) -> Result<()>;
+    /// Pushes diff.
     fn push_diff(
         &mut self,
         file_path: &str,
@@ -65,10 +85,15 @@ trait TurnRecorder {
         diff: &str,
         change_type: ChangeType,
     ) -> Result<()>;
+    /// Handles text delta.
     fn text_delta(&mut self, delta: &str) -> Result<()>;
+    /// Replaces streaming text.
     fn replace_streaming_text(&mut self, text: &str) -> Result<()>;
+    /// Finishes streaming text.
     fn finish_streaming_text(&mut self) -> Result<()>;
+    /// Handles command started.
     fn command_started(&mut self, key: &str, command: &str) -> Result<()>;
+    /// Handles command completed.
     fn command_completed(
         &mut self,
         key: &str,
@@ -76,12 +101,16 @@ trait TurnRecorder {
         output: &str,
         status: CommandStatus,
     ) -> Result<()>;
+    /// Upserts parallel agents.
     fn upsert_parallel_agents(&mut self, key: &str, agents: &[ParallelAgentProgress])
     -> Result<()>;
+    /// Handles error.
     fn error(&mut self, detail: &str) -> Result<()>;
 }
 
+/// Defines behavior for Codex turn recorder.
 trait CodexTurnRecorder: TurnRecorder {
+    /// Pushes Codex approval.
     fn push_codex_approval(
         &mut self,
         title: &str,
@@ -90,6 +119,7 @@ trait CodexTurnRecorder: TurnRecorder {
         approval: CodexPendingApproval,
     ) -> Result<()>;
 
+    /// Pushes Codex user input request.
     fn push_codex_user_input_request(
         &mut self,
         title: &str,
@@ -98,6 +128,7 @@ trait CodexTurnRecorder: TurnRecorder {
         request: CodexPendingUserInput,
     ) -> Result<()>;
 
+    /// Pushes Codex MCP elicitation request.
     fn push_codex_mcp_elicitation_request(
         &mut self,
         title: &str,
@@ -106,6 +137,7 @@ trait CodexTurnRecorder: TurnRecorder {
         pending: CodexPendingMcpElicitation,
     ) -> Result<()>;
 
+    /// Pushes Codex app request.
     fn push_codex_app_request(
         &mut self,
         title: &str,
@@ -116,6 +148,7 @@ trait CodexTurnRecorder: TurnRecorder {
     ) -> Result<()>;
 }
 
+/// Represents session recorder.
 struct SessionRecorder {
     recorder_state: SessionRecorderState,
     session_id: String,
@@ -123,6 +156,7 @@ struct SessionRecorder {
 }
 
 impl SessionRecorder {
+    /// Creates a new instance.
     fn new(state: AppState, session_id: String) -> Self {
         Self {
             recorder_state: SessionRecorderState::default(),
@@ -131,6 +165,7 @@ impl SessionRecorder {
         }
     }
 
+    /// Pushes Claude approval.
     fn push_claude_approval(
         &mut self,
         title: &str,
@@ -150,6 +185,7 @@ impl SessionRecorder {
         )
     }
 
+    /// Pushes ACP approval.
     fn push_acp_approval(
         &mut self,
         title: &str,
@@ -170,26 +206,34 @@ impl SessionRecorder {
     }
 }
 
+/// Defines behavior for session recorder access.
 trait SessionRecorderAccess {
+    /// Handles state.
     fn state(&self) -> &AppState;
+    /// Handles session ID.
     fn session_id(&self) -> &str;
+    /// Handles recorder state mut.
     fn recorder_state_mut(&mut self) -> &mut SessionRecorderState;
 }
 
 impl SessionRecorderAccess for SessionRecorder {
+    /// Handles state.
     fn state(&self) -> &AppState {
         &self.state
     }
 
+    /// Handles session ID.
     fn session_id(&self) -> &str {
         &self.session_id
     }
 
+    /// Handles recorder state mut.
     fn recorder_state_mut(&mut self) -> &mut SessionRecorderState {
         &mut self.recorder_state
     }
 }
 
+/// Handles recorder push pending approval.
 fn recorder_push_pending_approval<R, T, F>(
     recorder: &mut R,
     title: &str,
@@ -222,6 +266,7 @@ where
     register(&state, &session_id, message_id, pending)
 }
 
+/// Handles recorder push Codex user input request.
 fn recorder_push_codex_user_input_request<R: SessionRecorderAccess>(
     recorder: &mut R,
     title: &str,
@@ -249,6 +294,7 @@ fn recorder_push_codex_user_input_request<R: SessionRecorderAccess>(
     state.register_codex_pending_user_input(&session_id, message_id, request)
 }
 
+/// Handles recorder push Codex MCP elicitation request.
 fn recorder_push_codex_mcp_elicitation_request<R: SessionRecorderAccess>(
     recorder: &mut R,
     title: &str,
@@ -277,6 +323,7 @@ fn recorder_push_codex_mcp_elicitation_request<R: SessionRecorderAccess>(
     state.register_codex_pending_mcp_elicitation(&session_id, message_id, pending)
 }
 
+/// Handles recorder push Codex app request.
 fn recorder_push_codex_app_request<R: SessionRecorderAccess>(
     recorder: &mut R,
     title: &str,
@@ -306,6 +353,7 @@ fn recorder_push_codex_app_request<R: SessionRecorderAccess>(
     state.register_codex_pending_app_request(&session_id, message_id, pending)
 }
 
+/// Handles recorder note external session.
 fn recorder_note_external_session<R: SessionRecorderAccess>(
     recorder: &mut R,
     session_id: &str,
@@ -315,6 +363,7 @@ fn recorder_note_external_session<R: SessionRecorderAccess>(
     state.set_external_session_id(&current_session_id, session_id.to_owned())
 }
 
+/// Handles recorder push approval.
 fn recorder_push_approval<R: SessionRecorderAccess>(
     recorder: &mut R,
     title: &str,
@@ -339,6 +388,7 @@ fn recorder_push_approval<R: SessionRecorderAccess>(
     )
 }
 
+/// Handles recorder push text.
 fn recorder_push_text<R: SessionRecorderAccess>(recorder: &mut R, text: &str) -> Result<()> {
     let trimmed = text.trim();
     if trimmed.is_empty() {
@@ -361,6 +411,7 @@ fn recorder_push_text<R: SessionRecorderAccess>(recorder: &mut R, text: &str) ->
     )
 }
 
+/// Handles recorder push subagent result.
 fn recorder_push_subagent_result<R: SessionRecorderAccess>(
     recorder: &mut R,
     title: &str,
@@ -390,6 +441,7 @@ fn recorder_push_subagent_result<R: SessionRecorderAccess>(
     )
 }
 
+/// Handles recorder text delta.
 fn recorder_text_delta<R: SessionRecorderAccess>(recorder: &mut R, delta: &str) -> Result<()> {
     if delta.is_empty() {
         return Ok(());
@@ -424,6 +476,7 @@ fn recorder_text_delta<R: SessionRecorderAccess>(recorder: &mut R, delta: &str) 
     state.append_text_delta(&session_id, &message_id, delta)
 }
 
+/// Handles recorder replace streaming text.
 fn recorder_replace_streaming_text<R: SessionRecorderAccess>(
     recorder: &mut R,
     text: &str,
@@ -459,6 +512,7 @@ fn recorder_replace_streaming_text<R: SessionRecorderAccess>(
     state.replace_text_message(&session_id, &message_id, trimmed)
 }
 
+/// Handles recorder push thinking.
 fn recorder_push_thinking<R: SessionRecorderAccess>(
     recorder: &mut R,
     title: &str,
@@ -483,6 +537,7 @@ fn recorder_push_thinking<R: SessionRecorderAccess>(
     )
 }
 
+/// Handles recorder push diff.
 fn recorder_push_diff<R: SessionRecorderAccess>(
     recorder: &mut R,
     file_path: &str,
@@ -514,11 +569,13 @@ fn recorder_push_diff<R: SessionRecorderAccess>(
     )
 }
 
+/// Handles recorder finish streaming text.
 fn recorder_finish_streaming_text<R: SessionRecorderAccess>(recorder: &mut R) -> Result<()> {
     recorder.recorder_state_mut().streaming_text_message_id = None;
     Ok(())
 }
 
+/// Handles recorder command started.
 fn recorder_command_started<R: SessionRecorderAccess>(
     recorder: &mut R,
     key: &str,
@@ -543,6 +600,7 @@ fn recorder_command_started<R: SessionRecorderAccess>(
     )
 }
 
+/// Handles recorder command completed.
 fn recorder_command_completed<R: SessionRecorderAccess>(
     recorder: &mut R,
     key: &str,
@@ -563,6 +621,7 @@ fn recorder_command_completed<R: SessionRecorderAccess>(
     state.upsert_command_message(&session_id, &message_id, command, output, status)
 }
 
+/// Handles recorder upsert parallel agents.
 fn recorder_upsert_parallel_agents<R: SessionRecorderAccess>(
     recorder: &mut R,
     key: &str,
@@ -581,6 +640,7 @@ fn recorder_upsert_parallel_agents<R: SessionRecorderAccess>(
     state.upsert_parallel_agents_message(&session_id, &message_id, agents.to_vec())
 }
 
+/// Handles recorder error.
 fn recorder_error<R: SessionRecorderAccess>(recorder: &mut R, detail: &str) -> Result<()> {
     let cleaned = detail.trim();
     if cleaned.is_empty() {
@@ -604,6 +664,7 @@ fn recorder_error<R: SessionRecorderAccess>(recorder: &mut R, detail: &str) -> R
 }
 
 impl CodexTurnRecorder for SessionRecorder {
+    /// Pushes Codex approval.
     fn push_codex_approval(
         &mut self,
         title: &str,
@@ -623,6 +684,7 @@ impl CodexTurnRecorder for SessionRecorder {
         )
     }
 
+    /// Pushes Codex user input request.
     fn push_codex_user_input_request(
         &mut self,
         title: &str,
@@ -633,6 +695,7 @@ impl CodexTurnRecorder for SessionRecorder {
         recorder_push_codex_user_input_request(self, title, detail, questions, request)
     }
 
+    /// Pushes Codex MCP elicitation request.
     fn push_codex_mcp_elicitation_request(
         &mut self,
         title: &str,
@@ -643,6 +706,7 @@ impl CodexTurnRecorder for SessionRecorder {
         recorder_push_codex_mcp_elicitation_request(self, title, detail, request, pending)
     }
 
+    /// Pushes Codex app request.
     fn push_codex_app_request(
         &mut self,
         title: &str,
@@ -655,6 +719,7 @@ impl CodexTurnRecorder for SessionRecorder {
     }
 }
 
+/// Represents borrowed session recorder.
 struct BorrowedSessionRecorder<'a> {
     recorder_state: &'a mut SessionRecorderState,
     session_id: &'a str,
@@ -662,6 +727,7 @@ struct BorrowedSessionRecorder<'a> {
 }
 
 impl<'a> BorrowedSessionRecorder<'a> {
+    /// Creates a new instance.
     fn new(
         state: &'a AppState,
         session_id: &'a str,
@@ -676,20 +742,24 @@ impl<'a> BorrowedSessionRecorder<'a> {
 }
 
 impl SessionRecorderAccess for BorrowedSessionRecorder<'_> {
+    /// Handles state.
     fn state(&self) -> &AppState {
         self.state
     }
 
+    /// Handles session ID.
     fn session_id(&self) -> &str {
         self.session_id
     }
 
+    /// Handles recorder state mut.
     fn recorder_state_mut(&mut self) -> &mut SessionRecorderState {
         self.recorder_state
     }
 }
 
 impl CodexTurnRecorder for BorrowedSessionRecorder<'_> {
+    /// Pushes Codex approval.
     fn push_codex_approval(
         &mut self,
         title: &str,
@@ -709,6 +779,7 @@ impl CodexTurnRecorder for BorrowedSessionRecorder<'_> {
         )
     }
 
+    /// Pushes Codex user input request.
     fn push_codex_user_input_request(
         &mut self,
         title: &str,
@@ -719,6 +790,7 @@ impl CodexTurnRecorder for BorrowedSessionRecorder<'_> {
         recorder_push_codex_user_input_request(self, title, detail, questions, request)
     }
 
+    /// Pushes Codex MCP elicitation request.
     fn push_codex_mcp_elicitation_request(
         &mut self,
         title: &str,
@@ -729,6 +801,7 @@ impl CodexTurnRecorder for BorrowedSessionRecorder<'_> {
         recorder_push_codex_mcp_elicitation_request(self, title, detail, request, pending)
     }
 
+    /// Pushes Codex app request.
     fn push_codex_app_request(
         &mut self,
         title: &str,
@@ -742,18 +815,22 @@ impl CodexTurnRecorder for BorrowedSessionRecorder<'_> {
 }
 
 impl TurnRecorder for SessionRecorder {
+    /// Records external session.
     fn note_external_session(&mut self, session_id: &str) -> Result<()> {
         recorder_note_external_session(self, session_id)
     }
 
+    /// Pushes approval.
     fn push_approval(&mut self, title: &str, command: &str, detail: &str) -> Result<()> {
         recorder_push_approval(self, title, command, detail)
     }
 
+    /// Pushes text.
     fn push_text(&mut self, text: &str) -> Result<()> {
         recorder_push_text(self, text)
     }
 
+    /// Pushes subagent result.
     fn push_subagent_result(
         &mut self,
         title: &str,
@@ -764,18 +841,22 @@ impl TurnRecorder for SessionRecorder {
         recorder_push_subagent_result(self, title, summary, conversation_id, turn_id)
     }
 
+    /// Handles text delta.
     fn text_delta(&mut self, delta: &str) -> Result<()> {
         recorder_text_delta(self, delta)
     }
 
+    /// Replaces streaming text.
     fn replace_streaming_text(&mut self, text: &str) -> Result<()> {
         recorder_replace_streaming_text(self, text)
     }
 
+    /// Pushes thinking.
     fn push_thinking(&mut self, title: &str, lines: Vec<String>) -> Result<()> {
         recorder_push_thinking(self, title, lines)
     }
 
+    /// Pushes diff.
     fn push_diff(
         &mut self,
         file_path: &str,
@@ -786,14 +867,17 @@ impl TurnRecorder for SessionRecorder {
         recorder_push_diff(self, file_path, summary, diff, change_type)
     }
 
+    /// Finishes streaming text.
     fn finish_streaming_text(&mut self) -> Result<()> {
         recorder_finish_streaming_text(self)
     }
 
+    /// Handles command started.
     fn command_started(&mut self, key: &str, command: &str) -> Result<()> {
         recorder_command_started(self, key, command)
     }
 
+    /// Handles command completed.
     fn command_completed(
         &mut self,
         key: &str,
@@ -804,6 +888,7 @@ impl TurnRecorder for SessionRecorder {
         recorder_command_completed(self, key, command, output, status)
     }
 
+    /// Upserts parallel agents.
     fn upsert_parallel_agents(
         &mut self,
         key: &str,
@@ -812,24 +897,29 @@ impl TurnRecorder for SessionRecorder {
         recorder_upsert_parallel_agents(self, key, agents)
     }
 
+    /// Handles error.
     fn error(&mut self, detail: &str) -> Result<()> {
         recorder_error(self, detail)
     }
 }
 
 impl TurnRecorder for BorrowedSessionRecorder<'_> {
+    /// Records external session.
     fn note_external_session(&mut self, session_id: &str) -> Result<()> {
         recorder_note_external_session(self, session_id)
     }
 
+    /// Pushes approval.
     fn push_approval(&mut self, title: &str, command: &str, detail: &str) -> Result<()> {
         recorder_push_approval(self, title, command, detail)
     }
 
+    /// Pushes text.
     fn push_text(&mut self, text: &str) -> Result<()> {
         recorder_push_text(self, text)
     }
 
+    /// Pushes subagent result.
     fn push_subagent_result(
         &mut self,
         title: &str,
@@ -840,18 +930,22 @@ impl TurnRecorder for BorrowedSessionRecorder<'_> {
         recorder_push_subagent_result(self, title, summary, conversation_id, turn_id)
     }
 
+    /// Handles text delta.
     fn text_delta(&mut self, delta: &str) -> Result<()> {
         recorder_text_delta(self, delta)
     }
 
+    /// Replaces streaming text.
     fn replace_streaming_text(&mut self, text: &str) -> Result<()> {
         recorder_replace_streaming_text(self, text)
     }
 
+    /// Pushes thinking.
     fn push_thinking(&mut self, title: &str, lines: Vec<String>) -> Result<()> {
         recorder_push_thinking(self, title, lines)
     }
 
+    /// Pushes diff.
     fn push_diff(
         &mut self,
         file_path: &str,
@@ -862,14 +956,17 @@ impl TurnRecorder for BorrowedSessionRecorder<'_> {
         recorder_push_diff(self, file_path, summary, diff, change_type)
     }
 
+    /// Finishes streaming text.
     fn finish_streaming_text(&mut self) -> Result<()> {
         recorder_finish_streaming_text(self)
     }
 
+    /// Handles command started.
     fn command_started(&mut self, key: &str, command: &str) -> Result<()> {
         recorder_command_started(self, key, command)
     }
 
+    /// Handles command completed.
     fn command_completed(
         &mut self,
         key: &str,
@@ -880,6 +977,7 @@ impl TurnRecorder for BorrowedSessionRecorder<'_> {
         recorder_command_completed(self, key, command, output, status)
     }
 
+    /// Upserts parallel agents.
     fn upsert_parallel_agents(
         &mut self,
         key: &str,
@@ -888,22 +986,26 @@ impl TurnRecorder for BorrowedSessionRecorder<'_> {
         recorder_upsert_parallel_agents(self, key, agents)
     }
 
+    /// Handles error.
     fn error(&mut self, detail: &str) -> Result<()> {
         recorder_error(self, detail)
     }
 }
 
+/// Represents REPL printer.
 #[derive(Default)]
 struct ReplPrinter {
     assistant_stream_open: bool,
 }
 
 impl TurnRecorder for ReplPrinter {
+    /// Records external session.
     fn note_external_session(&mut self, session_id: &str) -> Result<()> {
         println!("session> {session_id}");
         Ok(())
     }
 
+    /// Pushes approval.
     fn push_approval(&mut self, title: &str, command: &str, detail: &str) -> Result<()> {
         println!("approval> {title}");
         println!("approval> {command}");
@@ -911,6 +1013,7 @@ impl TurnRecorder for ReplPrinter {
         Ok(())
     }
 
+    /// Pushes text.
     fn push_text(&mut self, text: &str) -> Result<()> {
         let trimmed = text.trim();
         if !trimmed.is_empty() {
@@ -919,6 +1022,7 @@ impl TurnRecorder for ReplPrinter {
         Ok(())
     }
 
+    /// Pushes subagent result.
     fn push_subagent_result(
         &mut self,
         title: &str,
@@ -931,6 +1035,7 @@ impl TurnRecorder for ReplPrinter {
         Ok(())
     }
 
+    /// Upserts parallel agents.
     fn upsert_parallel_agents(
         &mut self,
         _key: &str,
@@ -948,6 +1053,7 @@ impl TurnRecorder for ReplPrinter {
         Ok(())
     }
 
+    /// Handles text delta.
     fn text_delta(&mut self, delta: &str) -> Result<()> {
         if delta.is_empty() {
             return Ok(());
@@ -962,11 +1068,13 @@ impl TurnRecorder for ReplPrinter {
         Ok(())
     }
 
+    /// Replaces streaming text.
     fn replace_streaming_text(&mut self, text: &str) -> Result<()> {
         self.finish_streaming_text()?;
         self.push_text(text)
     }
 
+    /// Pushes thinking.
     fn push_thinking(&mut self, title: &str, lines: Vec<String>) -> Result<()> {
         println!("thinking> {title}");
         for line in lines {
@@ -975,6 +1083,7 @@ impl TurnRecorder for ReplPrinter {
         Ok(())
     }
 
+    /// Pushes diff.
     fn push_diff(
         &mut self,
         file_path: &str,
@@ -992,6 +1101,7 @@ impl TurnRecorder for ReplPrinter {
         Ok(())
     }
 
+    /// Finishes streaming text.
     fn finish_streaming_text(&mut self) -> Result<()> {
         if self.assistant_stream_open {
             println!();
@@ -1000,11 +1110,13 @@ impl TurnRecorder for ReplPrinter {
         Ok(())
     }
 
+    /// Handles command started.
     fn command_started(&mut self, _key: &str, command: &str) -> Result<()> {
         println!("cmd> {command}");
         Ok(())
     }
 
+    /// Handles command completed.
     fn command_completed(
         &mut self,
         _key: &str,
@@ -1019,6 +1131,7 @@ impl TurnRecorder for ReplPrinter {
         Ok(())
     }
 
+    /// Handles error.
     fn error(&mut self, detail: &str) -> Result<()> {
         println!("error> {detail}");
         Ok(())
@@ -1026,6 +1139,7 @@ impl TurnRecorder for ReplPrinter {
 }
 
 impl CodexTurnRecorder for ReplPrinter {
+    /// Pushes Codex approval.
     fn push_codex_approval(
         &mut self,
         title: &str,
@@ -1036,6 +1150,7 @@ impl CodexTurnRecorder for ReplPrinter {
         self.push_approval(title, command, detail)
     }
 
+    /// Pushes Codex user input request.
     fn push_codex_user_input_request(
         &mut self,
         title: &str,
@@ -1051,6 +1166,7 @@ impl CodexTurnRecorder for ReplPrinter {
         Ok(())
     }
 
+    /// Pushes Codex MCP elicitation request.
     fn push_codex_mcp_elicitation_request(
         &mut self,
         title: &str,
@@ -1067,6 +1183,7 @@ impl CodexTurnRecorder for ReplPrinter {
         Ok(())
     }
 
+    /// Pushes Codex app request.
     fn push_codex_app_request(
         &mut self,
         title: &str,
@@ -1086,6 +1203,7 @@ impl CodexTurnRecorder for ReplPrinter {
     }
 }
 
+/// Runs ACP turn.
 fn run_acp_turn(
     agent: AcpAgent,
     _cwd: &str,
@@ -1097,6 +1215,7 @@ fn run_acp_turn(
     bail!("{} REPL mode is not supported yet", agent.label())
 }
 
+/// Runs Codex turn.
 fn run_codex_turn(
     cwd: &str,
     external_session_id: Option<&str>,
@@ -1264,6 +1383,7 @@ fn run_codex_turn(
     }
 }
 
+/// Tracks REPL Codex session state.
 #[derive(Default)]
 struct ReplCodexSessionState {
     resolved_session_id: Option<String>,
@@ -1273,29 +1393,35 @@ struct ReplCodexSessionState {
     turn_failed: Option<String>,
 }
 
+/// Represents dyn turn recorder ref.
 struct DynTurnRecorderRef<'a> {
     inner: &'a mut dyn TurnRecorder,
 }
 
 impl<'a> DynTurnRecorderRef<'a> {
+    /// Creates a new instance.
     fn new(inner: &'a mut dyn TurnRecorder) -> Self {
         Self { inner }
     }
 }
 
 impl TurnRecorder for DynTurnRecorderRef<'_> {
+    /// Records external session.
     fn note_external_session(&mut self, session_id: &str) -> Result<()> {
         self.inner.note_external_session(session_id)
     }
 
+    /// Pushes approval.
     fn push_approval(&mut self, title: &str, command: &str, detail: &str) -> Result<()> {
         self.inner.push_approval(title, command, detail)
     }
 
+    /// Pushes text.
     fn push_text(&mut self, text: &str) -> Result<()> {
         self.inner.push_text(text)
     }
 
+    /// Pushes subagent result.
     fn push_subagent_result(
         &mut self,
         title: &str,
@@ -1307,10 +1433,12 @@ impl TurnRecorder for DynTurnRecorderRef<'_> {
             .push_subagent_result(title, summary, conversation_id, turn_id)
     }
 
+    /// Pushes thinking.
     fn push_thinking(&mut self, title: &str, lines: Vec<String>) -> Result<()> {
         self.inner.push_thinking(title, lines)
     }
 
+    /// Pushes diff.
     fn push_diff(
         &mut self,
         file_path: &str,
@@ -1321,22 +1449,27 @@ impl TurnRecorder for DynTurnRecorderRef<'_> {
         self.inner.push_diff(file_path, summary, diff, change_type)
     }
 
+    /// Handles text delta.
     fn text_delta(&mut self, delta: &str) -> Result<()> {
         self.inner.text_delta(delta)
     }
 
+    /// Replaces streaming text.
     fn replace_streaming_text(&mut self, text: &str) -> Result<()> {
         self.inner.replace_streaming_text(text)
     }
 
+    /// Finishes streaming text.
     fn finish_streaming_text(&mut self) -> Result<()> {
         self.inner.finish_streaming_text()
     }
 
+    /// Handles command started.
     fn command_started(&mut self, key: &str, command: &str) -> Result<()> {
         self.inner.command_started(key, command)
     }
 
+    /// Handles command completed.
     fn command_completed(
         &mut self,
         key: &str,
@@ -1347,6 +1480,7 @@ impl TurnRecorder for DynTurnRecorderRef<'_> {
         self.inner.command_completed(key, command, output, status)
     }
 
+    /// Upserts parallel agents.
     fn upsert_parallel_agents(
         &mut self,
         key: &str,
@@ -1355,11 +1489,13 @@ impl TurnRecorder for DynTurnRecorderRef<'_> {
         self.inner.upsert_parallel_agents(key, agents)
     }
 
+    /// Handles error.
     fn error(&mut self, detail: &str) -> Result<()> {
         self.inner.error(detail)
     }
 }
 
+/// Spawns REPL Codex stdout reader.
 fn spawn_repl_codex_stdout_reader(
     stdout: impl io::Read + Send + 'static,
 ) -> mpsc::Receiver<std::result::Result<Value, String>> {
@@ -1402,6 +1538,7 @@ fn spawn_repl_codex_stdout_reader(
     rx
 }
 
+/// Handles send REPL Codex JSON RPC request.
 fn send_repl_codex_json_rpc_request(
     writer: &mut impl Write,
     stdout_rx: &mpsc::Receiver<std::result::Result<Value, String>>,
@@ -1441,6 +1578,7 @@ fn send_repl_codex_json_rpc_request(
     }
 }
 
+/// Handles recv REPL Codex stdout.
 fn recv_repl_codex_stdout(
     stdout_rx: &mpsc::Receiver<std::result::Result<Value, String>>,
     timeout: Option<Duration>,
@@ -1456,6 +1594,7 @@ fn recv_repl_codex_stdout(
     message.map_err(anyhow::Error::msg)
 }
 
+/// Handles pump REPL Codex turn.
 fn pump_repl_codex_turn(
     stdout_rx: &mpsc::Receiver<std::result::Result<Value, String>>,
     writer: &mut impl Write,
@@ -1469,6 +1608,7 @@ fn pump_repl_codex_turn(
     Ok(())
 }
 
+/// Handles REPL Codex app server message.
 fn handle_repl_codex_app_server_message(
     message: &Value,
     writer: &mut impl Write,
@@ -1490,6 +1630,7 @@ fn handle_repl_codex_app_server_message(
     handle_repl_codex_app_server_notification(method, message, repl_state, recorder)
 }
 
+/// Handles REPL Codex global notice.
 fn handle_repl_codex_global_notice(
     method: &str,
     message: &Value,
@@ -1525,6 +1666,7 @@ fn handle_repl_codex_global_notice(
     Ok(true)
 }
 
+/// Handles REPL Codex app server request.
 fn handle_repl_codex_app_server_request(
     method: &str,
     message: &Value,
@@ -1685,6 +1827,7 @@ fn handle_repl_codex_app_server_request(
     )
 }
 
+/// Handles prompt REPL Codex approval decision.
 fn prompt_repl_codex_approval_decision() -> Result<ApprovalDecision> {
     loop {
         let choice = prompt_repl_line("approval> [a]ccept, [s]ession, [r]eject: ", false)?;
@@ -1697,6 +1840,7 @@ fn prompt_repl_codex_approval_decision() -> Result<ApprovalDecision> {
     }
 }
 
+/// Handles prompt REPL Codex user input answers.
 fn prompt_repl_codex_user_input_answers(
     questions: &[UserInputQuestion],
 ) -> Result<BTreeMap<String, Vec<String>>> {
@@ -1708,6 +1852,7 @@ fn prompt_repl_codex_user_input_answers(
     Ok(answers)
 }
 
+/// Handles prompt REPL Codex MCP submission.
 fn prompt_repl_codex_mcp_submission(
     request: &McpElicitationRequestPayload,
 ) -> Result<(McpElicitationAction, Option<Value>)> {
@@ -1730,6 +1875,7 @@ fn prompt_repl_codex_mcp_submission(
     Ok((action, content))
 }
 
+/// Handles prompt REPL Codex app request result.
 fn prompt_repl_codex_app_request_result() -> Result<Value> {
     prompt_repl_json_block(
         "codex-request> enter JSON result, then an empty line (blank for {}):",
@@ -1737,6 +1883,7 @@ fn prompt_repl_codex_app_request_result() -> Result<Value> {
     )
 }
 
+/// Handles prompt REPL line.
 fn prompt_repl_line(prompt: &str, allow_empty: bool) -> Result<String> {
     loop {
         print!("{prompt}");
@@ -1757,6 +1904,7 @@ fn prompt_repl_line(prompt: &str, allow_empty: bool) -> Result<String> {
     }
 }
 
+/// Handles prompt REPL JSON block.
 fn prompt_repl_json_block(prompt: &str, empty_default: Option<Value>) -> Result<Value> {
     println!("{prompt}");
     let mut lines = Vec::new();
@@ -1790,6 +1938,7 @@ fn prompt_repl_json_block(prompt: &str, empty_default: Option<Value>) -> Result<
     serde_json::from_str(&lines.join("\n")).context("failed to parse JSON input")
 }
 
+/// Remembers REPL Codex thread ID.
 fn remember_repl_codex_thread_id(
     repl_state: &mut ReplCodexSessionState,
     recorder: &mut dyn TurnRecorder,
@@ -1802,6 +1951,7 @@ fn remember_repl_codex_thread_id(
     Ok(())
 }
 
+/// Handles REPL Codex app server notification.
 fn handle_repl_codex_app_server_notification(
     method: &str,
     message: &Value,
@@ -1958,6 +2108,7 @@ fn handle_repl_codex_app_server_notification(
     Ok(())
 }
 
+/// Handles REPL Codex task complete.
 fn handle_repl_codex_task_complete(
     message: &Value,
     current_turn_id: Option<&str>,
@@ -1991,6 +2142,7 @@ fn handle_repl_codex_task_complete(
     Ok(())
 }
 
+/// Handles REPL Codex model rerouted.
 fn handle_repl_codex_model_rerouted(
     message: &Value,
     current_turn_id: Option<&str>,
@@ -2021,6 +2173,7 @@ fn handle_repl_codex_model_rerouted(
     ))
 }
 
+/// Handles REPL Codex thread compacted.
 fn handle_repl_codex_thread_compacted(
     message: &Value,
     current_turn_id: Option<&str>,
@@ -2035,6 +2188,7 @@ fn handle_repl_codex_thread_compacted(
     recorder.push_text("Codex compacted the thread context for this turn.")
 }
 
+/// Records REPL Codex completed agent message.
 fn record_repl_codex_completed_agent_message(
     turn_state: &mut CodexTurnState,
     recorder: &mut dyn TurnRecorder,
@@ -2077,6 +2231,7 @@ fn record_repl_codex_completed_agent_message(
     }
 }
 
+/// Handles REPL Codex event item completed.
 fn handle_repl_codex_event_item_completed(
     message: &Value,
     current_turn_id: Option<&str>,
@@ -2128,6 +2283,7 @@ fn handle_repl_codex_event_item_completed(
     Ok(())
 }
 
+/// Handles REPL Codex event agent message content delta.
 fn handle_repl_codex_event_agent_message_content_delta(
     message: &Value,
     current_turn_id: Option<&str>,
@@ -2152,6 +2308,7 @@ fn handle_repl_codex_event_agent_message_content_delta(
     record_repl_codex_agent_message_delta(turn_state, recorder, item_id, delta)
 }
 
+/// Handles REPL Codex event agent message.
 fn handle_repl_codex_event_agent_message(
     message: &Value,
     current_turn_id: Option<&str>,
@@ -2183,6 +2340,7 @@ fn handle_repl_codex_event_agent_message(
     recorder.push_text(trimmed)
 }
 
+/// Handles REPL Codex app server item completed.
 fn handle_repl_codex_app_server_item_completed(
     item: &Value,
     turn_state: &mut CodexTurnState,
@@ -2256,6 +2414,7 @@ fn handle_repl_codex_app_server_item_completed(
     Ok(())
 }
 
+/// Records REPL Codex agent message delta.
 fn record_repl_codex_agent_message_delta(
     turn_state: &mut CodexTurnState,
     recorder: &mut dyn TurnRecorder,
@@ -2284,6 +2443,7 @@ fn record_repl_codex_agent_message_delta(
     recorder.text_delta(&unseen_suffix)
 }
 
+/// Shuts down REPL Codex process.
 fn shutdown_repl_codex_process(
     process: &Arc<SharedChild>,
 ) -> Result<(std::process::ExitStatus, bool)> {
@@ -2300,6 +2460,7 @@ fn shutdown_repl_codex_process(
     Ok((status, true))
 }
 
+/// Returns the default Codex sandbox mode.
 fn default_codex_sandbox_mode() -> CodexSandboxMode {
     match std::env::var("TERMAL_CODEX_SANDBOX").ok().as_deref() {
         Some("read-only") => CodexSandboxMode::ReadOnly,
@@ -2308,6 +2469,7 @@ fn default_codex_sandbox_mode() -> CodexSandboxMode {
     }
 }
 
+/// Returns the default Codex approval policy.
 fn default_codex_approval_policy() -> CodexApprovalPolicy {
     match std::env::var("TERMAL_CODEX_APPROVAL").ok().as_deref() {
         Some("untrusted") => CodexApprovalPolicy::Untrusted,
@@ -2317,6 +2479,7 @@ fn default_codex_approval_policy() -> CodexApprovalPolicy {
     }
 }
 
+/// Returns the default Codex reasoning effort.
 fn default_codex_reasoning_effort() -> CodexReasoningEffort {
     match std::env::var("TERMAL_CODEX_REASONING_EFFORT")
         .ok()
@@ -2331,10 +2494,12 @@ fn default_codex_reasoning_effort() -> CodexReasoningEffort {
     }
 }
 
+/// Returns the default Claude approval mode.
 fn default_claude_approval_mode() -> ClaudeApprovalMode {
     ClaudeApprovalMode::Ask
 }
 
+/// Returns the default Claude effort.
 fn default_claude_effort() -> ClaudeEffortLevel {
     ClaudeEffortLevel::Default
 }
@@ -2343,18 +2508,22 @@ const LOCAL_REMOTE_ID: &str = "local";
 const LOCAL_REMOTE_NAME: &str = "Local";
 const DEFAULT_SSH_REMOTE_PORT: u16 = 22;
 
+/// Returns the default local remote ID.
 fn default_local_remote_id() -> String {
     LOCAL_REMOTE_ID.to_owned()
 }
 
+/// Returns the default remote enabled.
 fn default_remote_enabled() -> bool {
     true
 }
 
+/// Returns the default remote configs.
 fn default_remote_configs() -> Vec<RemoteConfig> {
     vec![RemoteConfig::local()]
 }
 
+/// Defines the remote transport variants.
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 enum RemoteTransport {
@@ -2362,6 +2531,7 @@ enum RemoteTransport {
     Ssh,
 }
 
+/// Holds remote configuration.
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct RemoteConfig {
@@ -2379,6 +2549,7 @@ struct RemoteConfig {
 }
 
 impl RemoteConfig {
+    /// Builds the local default value.
     fn local() -> Self {
         Self {
             id: default_local_remote_id(),
@@ -2392,6 +2563,7 @@ impl RemoteConfig {
     }
 }
 
+/// Represents app preferences.
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct AppPreferences {
@@ -2404,6 +2576,7 @@ struct AppPreferences {
 }
 
 impl Default for AppPreferences {
+    /// Builds the default value.
     fn default() -> Self {
         Self {
             default_codex_reasoning_effort: default_codex_reasoning_effort(),
@@ -2413,18 +2586,22 @@ impl Default for AppPreferences {
     }
 }
 
+/// Returns the default cursor mode.
 fn default_cursor_mode() -> CursorMode {
     CursorMode::Agent
 }
 
+/// Returns the default Gemini approval mode.
 fn default_gemini_approval_mode() -> GeminiApprovalMode {
     GeminiApprovalMode::Default
 }
 
+/// Handles log unhandled Codex event.
 fn log_unhandled_codex_event(context: &str, message: &Value) {
     eprintln!("codex diagnostic> {context}: {message}");
 }
 
+/// Runs Claude turn.
 fn run_claude_turn(
     cwd: &str,
     session_id: Option<&str>,
@@ -2531,6 +2708,7 @@ fn run_claude_turn(
     resolved_session_id.ok_or_else(|| anyhow!("Claude completed without emitting a session id"))
 }
 
+/// Tracks Claude turn state.
 #[derive(Default)]
 struct ClaudeTurnState {
     approval_keys_this_turn: HashSet<String>,
@@ -2543,6 +2721,7 @@ struct ClaudeTurnState {
     saw_text_delta: bool,
 }
 
+/// Represents Claude tool use.
 struct ClaudeToolUse {
     command: Option<String>,
     description: Option<String>,
@@ -2551,6 +2730,7 @@ struct ClaudeToolUse {
     subagent_type: Option<String>,
 }
 
+/// Represents the Claude tool permission request payload.
 struct ClaudeToolPermissionRequest {
     detail: String,
     permission_mode_for_session: Option<String>,
@@ -2560,6 +2740,7 @@ struct ClaudeToolPermissionRequest {
     tool_input: Value,
 }
 
+/// Classifies Claude control request.
 fn classify_claude_control_request(
     message: &Value,
     state: &mut ClaudeTurnState,
@@ -2602,6 +2783,7 @@ fn classify_claude_control_request(
     }))
 }
 
+/// Parses Claude tool permission request.
 fn parse_claude_tool_permission_request(message: &Value) -> Option<ClaudeToolPermissionRequest> {
     if message.get("type").and_then(Value::as_str) != Some("control_request") {
         return None;
@@ -2647,6 +2829,7 @@ fn parse_claude_tool_permission_request(message: &Value) -> Option<ClaudeToolPer
     })
 }
 
+/// Records Claude assistant text delta.
 fn record_claude_assistant_text_delta(
     state: &mut ClaudeTurnState,
     recorder: &mut dyn TurnRecorder,
@@ -2667,6 +2850,7 @@ fn record_claude_assistant_text_delta(
     Ok(())
 }
 
+/// Records Claude completed assistant text.
 fn record_claude_completed_assistant_text(
     state: &mut ClaudeTurnState,
     recorder: &mut dyn TurnRecorder,
@@ -2692,6 +2876,7 @@ fn record_claude_completed_assistant_text(
     }
 }
 
+/// Finishes Claude assistant text stream.
 fn finish_claude_assistant_text_stream<R: TurnRecorder + ?Sized>(
     state: &mut ClaudeTurnState,
     recorder: &mut R,
@@ -2702,6 +2887,7 @@ fn finish_claude_assistant_text_stream<R: TurnRecorder + ?Sized>(
     Ok(())
 }
 
+/// Handles Claude event.
 fn handle_claude_event(
     message: &Value,
     session_id: &mut Option<String>,
@@ -2806,6 +2992,7 @@ fn handle_claude_event(
     Ok(())
 }
 
+/// Registers Claude tool use.
 fn register_claude_tool_use(
     content: &Value,
     state: &mut ClaudeTurnState,
@@ -2885,6 +3072,7 @@ fn register_claude_tool_use(
 
     Ok(())
 }
+/// Handles Claude tool result.
 fn handle_claude_tool_result(
     message: &Value,
     state: &mut ClaudeTurnState,
@@ -2951,6 +3139,7 @@ fn handle_claude_tool_result(
 
     Ok(())
 }
+/// Handles Claude task result.
 fn handle_claude_task_result(
     tool_use_id: &str,
     tool_use: &ClaudeToolUse,
@@ -3008,6 +3197,7 @@ fn handle_claude_task_result(
     Ok(())
 }
 
+/// Syncs Claude parallel agents.
 fn sync_claude_parallel_agents(
     state: &ClaudeTurnState,
     recorder: &mut dyn TurnRecorder,
@@ -3028,6 +3218,7 @@ fn sync_claude_parallel_agents(
     recorder.upsert_parallel_agents(key, &agents)
 }
 
+/// Describes Claude task tool.
 fn describe_claude_task_tool(description: Option<&str>, subagent_type: Option<&str>) -> String {
     let trimmed_description = description.unwrap_or("").trim();
     if !trimmed_description.is_empty() {
@@ -3042,6 +3233,7 @@ fn describe_claude_task_tool(description: Option<&str>, subagent_type: Option<&s
     "Task agent".to_owned()
 }
 
+/// Summarizes Claude task detail.
 fn summarize_claude_task_detail(detail: &str, is_error: bool) -> String {
     let trimmed = detail.trim();
     if trimmed.is_empty() {
@@ -3054,6 +3246,7 @@ fn summarize_claude_task_detail(detail: &str, is_error: bool) -> String {
 
     make_preview(trimmed)
 }
+/// Handles Claude bash result.
 fn handle_claude_bash_result(
     tool_use_id: &str,
     tool_use: &ClaudeToolUse,
@@ -3111,6 +3304,7 @@ fn handle_claude_bash_result(
     recorder.command_completed(tool_use_id, command, output.trim_end(), status)
 }
 
+/// Handles Claude file result.
 fn handle_claude_file_result(
     tool_use: &ClaudeToolUse,
     tool_use_result: Option<&Value>,
@@ -3200,6 +3394,7 @@ fn handle_claude_file_result(
     Ok(())
 }
 
+/// Extracts Claude tool result text.
 fn extract_claude_tool_result_text(message: &Value, content: &Value) -> String {
     if let Some(text) = content.get("content").and_then(Value::as_str) {
         return text.to_owned();
@@ -3231,10 +3426,12 @@ fn extract_claude_tool_result_text(message: &Value, content: &Value) -> String {
 
     "Claude tool call failed.".to_owned()
 }
+/// Returns whether permission denial.
 fn is_permission_denial(detail: &str) -> bool {
     detail.contains("requested permissions")
 }
 
+/// Records Claude approval.
 fn record_claude_approval(
     state: &mut ClaudeTurnState,
     recorder: &mut dyn TurnRecorder,
@@ -3250,10 +3447,12 @@ fn record_claude_approval(
     Ok(())
 }
 
+/// Describes Claude tool request.
 fn describe_claude_tool_request(request: &ClaudeToolPermissionRequest) -> String {
     describe_claude_tool_action_from_parts(&request.tool_name, &request.tool_input)
 }
 
+/// Describes Claude tool action.
 fn describe_claude_tool_action(tool_use: &ClaudeToolUse) -> String {
     match (
         tool_use.name.as_str(),
@@ -3266,6 +3465,7 @@ fn describe_claude_tool_action(tool_use: &ClaudeToolUse) -> String {
     }
 }
 
+/// Describes Claude tool action from parts.
 fn describe_claude_tool_action_from_parts(tool_name: &str, tool_input: &Value) -> String {
     match tool_name {
         "Write" | "Edit" => tool_input
@@ -3283,6 +3483,7 @@ fn describe_claude_tool_action_from_parts(tool_name: &str, tool_input: &Value) -
     }
 }
 
+/// Describes Claude permission detail.
 fn describe_claude_permission_detail(
     tool_name: &str,
     tool_input: &Value,
@@ -3319,6 +3520,7 @@ fn describe_claude_permission_detail(
     }
 }
 
+/// Handles split thinking lines.
 fn split_thinking_lines(thinking: &str) -> Vec<String> {
     let lines = thinking
         .lines()
@@ -3334,6 +3536,7 @@ fn split_thinking_lines(thinking: &str) -> Vec<String> {
     }
 }
 
+/// Handles flatten structured patch.
 fn flatten_structured_patch(patches: &[Value]) -> String {
     patches
         .iter()
@@ -3345,6 +3548,7 @@ fn flatten_structured_patch(patches: &[Value]) -> String {
         .join("\n")
 }
 
+/// Handles fallback file diff.
 fn fallback_file_diff(original: &str, updated: &str) -> String {
     let mut lines = Vec::new();
     for line in original.lines() {
@@ -3356,6 +3560,7 @@ fn fallback_file_diff(original: &str, updated: &str) -> String {
     lines.join("\n")
 }
 
+/// Handles short file name.
 fn short_file_name(file_path: &str) -> &str {
     file_path
         .rsplit('/')
@@ -3364,12 +3569,14 @@ fn short_file_name(file_path: &str) -> &str {
         .unwrap_or(file_path)
 }
 
+/// Summarizes error.
 fn summarize_error(value: &Value) -> String {
     summarize_structured_error(value).unwrap_or_else(|| {
         serde_json::to_string_pretty(value).unwrap_or_else(|_| value.to_string())
     })
 }
 
+/// Summarizes structured error.
 fn summarize_structured_error(value: &Value) -> Option<String> {
     summarize_retryable_connectivity_error(value)
         .or_else(|| summarize_error_fields(value))
@@ -3384,6 +3591,7 @@ fn summarize_structured_error(value: &Value) -> Option<String> {
         })
 }
 
+/// Summarizes error fields.
 fn summarize_error_fields(value: &Value) -> Option<String> {
     let message = trimmed_string_field(value, "message");
     let detail = trimmed_string_field(value, "additionalDetails")
@@ -3404,6 +3612,7 @@ fn summarize_error_fields(value: &Value) -> Option<String> {
     }
 }
 
+/// Summarizes retryable connectivity error.
 fn summarize_retryable_connectivity_error(value: &Value) -> Option<String> {
     if !is_retryable_connectivity_error(value) {
         return None;
@@ -3420,10 +3629,12 @@ fn summarize_retryable_connectivity_error(value: &Value) -> Option<String> {
     Some(summary)
 }
 
+/// Returns whether retryable connectivity error.
 fn is_retryable_connectivity_error(value: &Value) -> bool {
     codex_error_will_retry(value) && has_connectivity_marker(value)
 }
 
+/// Handles Codex error will retry.
 fn codex_error_will_retry(value: &Value) -> bool {
     value
         .get("willRetry")
@@ -3436,6 +3647,7 @@ fn codex_error_will_retry(value: &Value) -> bool {
             .unwrap_or(false)
 }
 
+/// Returns whether connectivity marker.
 fn has_connectivity_marker(value: &Value) -> bool {
     value
         .pointer("/error/codexErrorInfo/responseStreamDisconnected")
@@ -3455,6 +3667,7 @@ fn has_connectivity_marker(value: &Value) -> bool {
         .any(is_connectivity_text)
 }
 
+/// Summarizes retry status.
 fn summarize_retry_status(value: &Value) -> Option<String> {
     let message = trimmed_string_field(value, "message").or_else(|| {
         value
@@ -3482,6 +3695,7 @@ fn summarize_retry_status(value: &Value) -> Option<String> {
     ))
 }
 
+/// Handles trimmed string field.
 fn trimmed_string_field<'a>(value: &'a Value, key: &str) -> Option<&'a str> {
     value
         .get(key)
@@ -3490,12 +3704,14 @@ fn trimmed_string_field<'a>(value: &'a Value, key: &str) -> Option<&'a str> {
         .filter(|field| !field.is_empty())
 }
 
+/// Returns whether ignore ascii case.
 fn contains_ignore_ascii_case(haystack: &str, needle: &str) -> bool {
     haystack
         .to_ascii_lowercase()
         .contains(&needle.to_ascii_lowercase())
 }
 
+/// Returns whether connectivity text.
 fn is_connectivity_text(text: &str) -> bool {
     let normalized = text.to_ascii_lowercase();
     normalized.contains("stream disconnected before completion")
@@ -3505,6 +3721,7 @@ fn is_connectivity_text(text: &str) -> bool {
         || normalized.contains("reconnecting")
 }
 
+/// Builds preview.
 fn make_preview(text: &str) -> String {
     let first_line = text.lines().next().unwrap_or("").trim();
     let compact = first_line.replace('\t', " ");
@@ -3521,6 +3738,7 @@ fn make_preview(text: &str) -> String {
     preview
 }
 
+/// Handles image attachment summary.
 fn image_attachment_summary(count: usize) -> String {
     match count {
         0 => "Waiting for activity.".to_owned(),
@@ -3529,6 +3747,7 @@ fn image_attachment_summary(count: usize) -> String {
     }
 }
 
+/// Handles prompt preview text.
 fn prompt_preview_text(text: &str, attachments: &[MessageImageAttachment]) -> String {
     let trimmed = text.trim();
     if !trimmed.is_empty() {
@@ -3538,10 +3757,12 @@ fn prompt_preview_text(text: &str, attachments: &[MessageImageAttachment]) -> St
     make_preview(&image_attachment_summary(attachments.len()))
 }
 
+/// Handles shell language.
 fn shell_language() -> &'static str {
     "bash"
 }
 
+/// Infers language from path.
 fn infer_language_from_path(path: &FsPath) -> Option<&'static str> {
     let file_name = path.file_name()?.to_str()?.to_ascii_lowercase();
     match file_name.as_str() {
@@ -3570,6 +3791,7 @@ fn infer_language_from_path(path: &FsPath) -> Option<&'static str> {
     }
 }
 
+/// Infers command output language.
 fn infer_command_output_language(command: &str) -> Option<&'static str> {
     let normalized = command.to_ascii_lowercase();
     if normalized.contains("git diff")
@@ -3594,10 +3816,12 @@ fn infer_command_output_language(command: &str) -> Option<&'static str> {
         .find_map(|candidate| infer_language_from_path(FsPath::new(candidate)))
 }
 
+/// Handles command token separator.
 fn command_token_separator(character: char) -> bool {
     character.is_whitespace() || matches!(character, '"' | '\'' | '`' | '|' | '&' | ';')
 }
 
+/// Returns whether file viewer command.
 fn is_file_viewer_command(token: &str) -> bool {
     matches!(
         token,
@@ -3605,6 +3829,7 @@ fn is_file_viewer_command(token: &str) -> bool {
     )
 }
 
+/// Cleans command path hint.
 fn clean_command_path_hint(token: &str) -> &str {
     let trimmed = token.trim_matches(|character: char| {
         matches!(
@@ -3625,6 +3850,7 @@ fn clean_command_path_hint(token: &str) -> &str {
         })
 }
 
+/// Handles Codex user input items.
 fn codex_user_input_items(prompt: &str, attachments: &[PromptImageAttachment]) -> Vec<Value> {
     let mut input = Vec::with_capacity(attachments.len() + usize::from(!prompt.is_empty()));
 
@@ -3645,6 +3871,7 @@ fn codex_user_input_items(prompt: &str, attachments: &[PromptImageAttachment]) -
     input
 }
 
+/// Handles Codex image data URL.
 fn codex_image_data_url(attachment: &PromptImageAttachment) -> String {
     format!(
         "data:{};base64,{}",
@@ -3652,6 +3879,7 @@ fn codex_image_data_url(attachment: &PromptImageAttachment) -> String {
     )
 }
 
+/// Parses prompt image attachments.
 fn parse_prompt_image_attachments(
     requests: &[SendMessageAttachmentRequest],
 ) -> std::result::Result<Vec<PromptImageAttachment>, ApiError> {
@@ -3662,6 +3890,7 @@ fn parse_prompt_image_attachments(
         .collect()
 }
 
+/// Parses prompt image attachment.
 fn parse_prompt_image_attachment(
     index: usize,
     request: &SendMessageAttachmentRequest,
@@ -3711,6 +3940,7 @@ fn parse_prompt_image_attachment(
     })
 }
 
+/// Returns the default attachment file name.
 fn default_attachment_file_name(index: usize, media_type: &str) -> String {
     let extension = match media_type {
         "image/png" => "png",
@@ -3723,6 +3953,7 @@ fn default_attachment_file_name(index: usize, media_type: &str) -> String {
     format!("pasted-image-{}.{}", index + 1, extension)
 }
 
+/// Sanitizes attachment file name.
 fn sanitize_attachment_file_name(value: &str) -> String {
     let cleaned = value
         .chars()
@@ -3739,6 +3970,7 @@ fn sanitize_attachment_file_name(value: &str) -> String {
     }
 }
 
+/// Stamps now.
 fn stamp_now() -> String {
     Local::now().format("%H:%M").to_string()
 }

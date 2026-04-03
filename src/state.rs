@@ -1,3 +1,29 @@
+/*
+State and persistence core
+                 +------------------------+
+REST / runtimes ->| AppState              |-> state_events
+remote bridge  -> | - coordination shell  |-> delta_events
+                  | - remote registry      |
+                  | - shared Codex runtime |
+                  +-----------+------------+
+                              |
+                              v
+                       +------+------+
+                       | StateInner  |
+                       | projects    |
+                       | sessions    |
+                       | orchestrators
+                       | workspaces  |
+                       +------+------+
+                              |
+                              v
+                    ~/.termal/sessions.json
+AppState owns live coordination primitives that should not be serialized.
+StateInner is the durable model plus counters and indexes protected by one
+mutex.
+*/
+
+/// Tracks app state.
 #[derive(Clone)]
 struct AppState {
     default_workdir: String,
@@ -8,7 +34,9 @@ struct AppState {
     orchestrator_templates_lock: Arc<Mutex<()>>,
     state_events: broadcast::Sender<String>,
     delta_events: broadcast::Sender<String>,
+    /// Lazily created shared Codex app-server reused across Codex sessions.
     shared_codex_runtime: Arc<Mutex<Option<SharedCodexRuntime>>>,
+    /// Owns SSH-backed remote connections and their event bridges.
     remote_registry: Arc<RemoteRegistry>,
     stopping_orchestrator_ids: Arc<Mutex<HashSet<String>>>,
     stopping_orchestrator_session_ids: Arc<Mutex<HashMap<String, HashSet<String>>>>,
@@ -17,12 +45,14 @@ struct AppState {
 
 const SESSION_NOT_RUNNING_CONFLICT_MESSAGE: &str = "session is not currently running";
 
+/// Holds stop session options.
 #[derive(Clone)]
 struct StopSessionOptions {
     dispatch_queued_prompts_on_success: bool,
     orchestrator_stop_instance_id: Option<String>,
 }
 impl Default for StopSessionOptions {
+    /// Builds the default value.
     fn default() -> Self {
         Self {
             dispatch_queued_prompts_on_success: true,
@@ -31,6 +61,7 @@ impl Default for StopSessionOptions {
     }
 }
 
+/// Handles bootstrap default local state.
 fn bootstrap_default_local_state(default_workdir: &str) -> StateInner {
     let mut inner = StateInner::new();
     let default_project =
@@ -53,6 +84,7 @@ fn bootstrap_default_local_state(default_workdir: &str) -> StateInner {
 }
 
 impl AppState {
+    /// Creates a new instance.
     fn new(default_workdir: String) -> Result<Self> {
         let default_workdir = normalize_local_user_facing_path(&default_workdir);
         let persistence_path = resolve_persistence_path(&default_workdir);
@@ -64,6 +96,7 @@ impl AppState {
         )
     }
 
+    /// Handles new with paths.
     fn new_with_paths(
         default_workdir: String,
         persistence_path: PathBuf,
@@ -113,11 +146,13 @@ impl AppState {
         Ok(state)
     }
 
+    /// Handles snapshot.
     fn snapshot(&self) -> StateResponse {
         let inner = self.inner.lock().expect("state mutex poisoned");
         self.snapshot_from_inner(&inner)
     }
 
+    /// Lists workspace layouts.
     fn list_workspace_layouts(&self) -> Result<WorkspaceLayoutsResponse, ApiError> {
         let inner = self.inner.lock().expect("state mutex poisoned");
         let mut workspaces: Vec<_> = inner
@@ -144,6 +179,7 @@ impl AppState {
         Ok(WorkspaceLayoutsResponse { workspaces })
     }
 
+    /// Gets workspace layout.
     fn get_workspace_layout(
         &self,
         workspace_id: &str,
@@ -159,6 +195,7 @@ impl AppState {
         Ok(WorkspaceLayoutResponse { layout })
     }
 
+    /// Stores workspace layout.
     fn put_workspace_layout(
         &self,
         workspace_id: &str,
@@ -192,6 +229,7 @@ impl AppState {
         Ok(WorkspaceLayoutResponse { layout })
     }
 
+    /// Lists agent commands.
     fn list_agent_commands(
         &self,
         session_id: &str,
@@ -221,6 +259,7 @@ impl AppState {
         Ok(AgentCommandsResponse { commands })
     }
 
+    /// Searches instructions.
     fn search_instructions(
         &self,
         session_id: &str,
@@ -241,6 +280,7 @@ impl AppState {
         search_instruction_phrase(FsPath::new(&session.workdir), query)
     }
 
+    /// Creates session.
     fn create_session(
         &self,
         request: CreateSessionRequest,
@@ -457,6 +497,7 @@ impl AppState {
         })
     }
 
+    /// Updates app settings.
     fn update_app_settings(
         &self,
         request: UpdateAppSettingsRequest,
@@ -516,6 +557,7 @@ impl AppState {
         Ok(snapshot)
     }
 
+    /// Creates project.
     fn create_project(
         &self,
         request: CreateProjectRequest,
@@ -561,6 +603,7 @@ impl AppState {
         })
     }
 
+    /// Handles commit locked.
     fn commit_locked(&self, inner: &mut StateInner) -> Result<u64> {
         let revision = self.bump_revision_and_persist_locked(inner)?;
         self.publish_state_locked(inner)?;
@@ -568,6 +611,7 @@ impl AppState {
     }
 
     // Internal bookkeeping changes should be persisted without advancing the client-visible revision.
+    /// Persists internal locked.
     fn persist_internal_locked(&self, inner: &StateInner) -> Result<()> {
         persist_state(self.persistence_path.as_path(), inner)
     }
@@ -576,6 +620,7 @@ impl AppState {
     // carries the new revision instead. Persisting the full state on every streamed chunk makes
     // long responses increasingly slow, so durable persistence is deferred until the next
     // non-delta commit.
+    /// Handles commit delta locked.
     fn commit_delta_locked(&self, inner: &mut StateInner) -> Result<u64> {
         inner.revision += 1;
         Ok(inner.revision)
@@ -583,30 +628,36 @@ impl AppState {
 
     // Some live-update paths still need durable persistence, but should not force a full-state
     // SSE snapshot when a small targeted delta is enough for the UI.
+    /// Handles commit persisted delta locked.
     fn commit_persisted_delta_locked(&self, inner: &mut StateInner) -> Result<u64> {
         self.bump_revision_and_persist_locked(inner)
     }
 
+    /// Handles bump revision and persist locked.
     fn bump_revision_and_persist_locked(&self, inner: &mut StateInner) -> Result<u64> {
         inner.revision += 1;
         self.persist_internal_locked(inner)?;
         Ok(inner.revision)
     }
 
+    /// Handles subscribe events.
     fn subscribe_events(&self) -> broadcast::Receiver<String> {
         self.state_events.subscribe()
     }
 
+    /// Handles subscribe delta events.
     fn subscribe_delta_events(&self) -> broadcast::Receiver<String> {
         self.delta_events.subscribe()
     }
 
+    /// Publishes delta.
     fn publish_delta(&self, event: &DeltaEvent) {
         if let Ok(payload) = serde_json::to_string(event) {
             let _ = self.delta_events.send(payload);
         }
     }
 
+    /// Publishes state locked.
     fn publish_state_locked(&self, inner: &StateInner) -> Result<()> {
         let payload = serde_json::to_string(&self.snapshot_from_inner(inner))
             .context("failed to serialize session snapshot")?;
@@ -614,6 +665,7 @@ impl AppState {
         Ok(())
     }
 
+    /// Handles shared Codex runtime.
     fn shared_codex_runtime(&self) -> Result<SharedCodexRuntime> {
         let mut shared_runtime = self
             .shared_codex_runtime
@@ -628,6 +680,7 @@ impl AppState {
         Ok(runtime)
     }
 
+    /// Handles perform Codex JSON RPC request.
     fn perform_codex_json_rpc_request(
         &self,
         method: &str,
@@ -664,6 +717,7 @@ impl AppState {
         }
     }
 
+    /// Resolves Codex thread action context.
     fn resolve_codex_thread_action_context(
         &self,
         session_id: &str,
@@ -726,6 +780,7 @@ impl AppState {
         })
     }
 
+    /// Clears shared Codex runtime if matches.
     fn clear_shared_codex_runtime_if_matches(&self, runtime_id: &str) {
         let mut shared_runtime = self
             .shared_codex_runtime
@@ -739,6 +794,7 @@ impl AppState {
         }
     }
 
+    /// Handles shared Codex runtime exit.
     fn handle_shared_codex_runtime_exit(
         &self,
         runtime_id: &str,
@@ -766,6 +822,7 @@ impl AppState {
         Ok(())
     }
 
+    /// Handles snapshot from inner.
     fn snapshot_from_inner(&self, inner: &StateInner) -> StateResponse {
         StateResponse {
             revision: inner.revision,
@@ -783,6 +840,7 @@ impl AppState {
         }
     }
 
+    /// Seeds hidden Claude spares.
     fn seed_hidden_claude_spares(&self) {
         let spare_ids = {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
@@ -830,6 +888,7 @@ impl AppState {
         }
     }
 
+    /// Handles try start hidden Claude spare.
     fn try_start_hidden_claude_spare(&self, session_id: &str) {
         let spawn_request = {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
@@ -899,6 +958,7 @@ impl AppState {
         record.runtime = SessionRuntime::Claude(handle);
     }
 
+    /// Starts turn on record.
     fn start_turn_on_record(
         &self,
         record: &mut SessionRecord,
@@ -1141,9 +1201,7 @@ impl AppState {
         Ok(dispatch)
     }
 
-    /// On startup, find idle sessions that have orphaned queued prompts (e.g. from an
-    /// orchestrator transition that was committed but not dispatched before a crash) and
-    /// auto-dispatch them.
+    /// Dispatches orphaned queued prompts.
     fn dispatch_orphaned_queued_prompts(&self) {
         let session_ids: Vec<String> = {
             let inner = self.inner.lock().expect("state mutex poisoned");
@@ -1181,6 +1239,7 @@ impl AppState {
         }
     }
 
+    /// Dispatches next queued turn.
     fn dispatch_next_queued_turn(
         &self,
         session_id: &str,
@@ -1216,6 +1275,7 @@ impl AppState {
         Ok(Some(dispatch))
     }
 
+    /// Dispatches turn.
     fn dispatch_turn(
         &self,
         session_id: &str,
@@ -1376,6 +1436,7 @@ impl AppState {
         Ok(DispatchTurnResult::Dispatched(dispatch))
     }
 
+    /// Updates session settings.
     fn update_session_settings(
         &self,
         session_id: &str,
@@ -1654,6 +1715,7 @@ impl AppState {
         Ok(snapshot)
     }
 
+    /// Refreshes session model options.
     fn refresh_session_model_options(
         &self,
         session_id: &str,
@@ -1938,6 +2000,7 @@ impl AppState {
         }
     }
 
+    /// Forks Codex thread.
     fn fork_codex_thread(
         &self,
         session_id: &str,
@@ -2049,6 +2112,7 @@ impl AppState {
         })
     }
 
+    /// Archives Codex thread.
     fn archive_codex_thread(
         &self,
         session_id: &str,
@@ -2094,6 +2158,7 @@ impl AppState {
         Ok(self.snapshot_from_inner(&inner))
     }
 
+    /// Unarchives Codex thread.
     fn unarchive_codex_thread(
         &self,
         session_id: &str,
@@ -2139,6 +2204,7 @@ impl AppState {
         Ok(self.snapshot_from_inner(&inner))
     }
 
+    /// Compacts Codex thread.
     fn compact_codex_thread(
         &self,
         session_id: &str,
@@ -2176,6 +2242,7 @@ impl AppState {
         Ok(self.snapshot_from_inner(&inner))
     }
 
+    /// Rolls back Codex thread.
     fn rollback_codex_thread(
         &self,
         session_id: &str,
@@ -2238,11 +2305,13 @@ impl AppState {
         Ok(self.snapshot_from_inner(&inner))
     }
 
+    /// Allocates message ID.
     fn allocate_message_id(&self) -> String {
         let mut inner = self.inner.lock().expect("state mutex poisoned");
         inner.next_message_id()
     }
 
+    /// Sets external session ID.
     fn set_external_session_id(&self, session_id: &str, external_session_id: String) -> Result<()> {
         let mut inner = self.inner.lock().expect("state mutex poisoned");
         let index = inner
@@ -2261,6 +2330,7 @@ impl AppState {
         Ok(())
     }
 
+    /// Sets Codex thread state if runtime matches.
     fn set_codex_thread_state_if_runtime_matches(
         &self,
         session_id: &str,
@@ -2293,6 +2363,7 @@ impl AppState {
         Ok(())
     }
 
+    /// Syncs session model options.
     fn sync_session_model_options(
         &self,
         session_id: &str,
@@ -2339,6 +2410,7 @@ impl AppState {
         Ok(())
     }
 
+    /// Syncs session agent commands.
     fn sync_session_agent_commands(
         &self,
         session_id: &str,
@@ -2369,6 +2441,7 @@ impl AppState {
         Ok(())
     }
 
+    /// Syncs session cursor mode.
     fn sync_session_cursor_mode(
         &self,
         session_id: &str,
@@ -2394,6 +2467,7 @@ impl AppState {
         Ok(())
     }
 
+    /// Records Codex rate limits.
     fn note_codex_rate_limits(&self, rate_limits: CodexRateLimits) -> Result<()> {
         let mut inner = self.inner.lock().expect("state mutex poisoned");
         if inner.codex.rate_limits.as_ref() == Some(&rate_limits) {
@@ -2405,6 +2479,7 @@ impl AppState {
         Ok(())
     }
 
+    /// Records Codex notice.
     fn note_codex_notice(&self, notice: CodexNotice) -> Result<()> {
         let mut inner = self.inner.lock().expect("state mutex poisoned");
         if inner
@@ -2431,6 +2506,7 @@ impl AppState {
         Ok(())
     }
 
+    /// Records Codex runtime config.
     fn record_codex_runtime_config(
         &self,
         session_id: &str,
@@ -2449,6 +2525,7 @@ impl AppState {
         Ok(())
     }
 
+    /// Handles Claude approval mode.
     fn claude_approval_mode(&self, session_id: &str) -> Result<ClaudeApprovalMode> {
         let inner = self.inner.lock().expect("state mutex poisoned");
         let index = inner
@@ -2460,6 +2537,7 @@ impl AppState {
             .unwrap_or_else(default_claude_approval_mode))
     }
 
+    /// Handles cursor mode.
     fn cursor_mode(&self, session_id: &str) -> Result<CursorMode> {
         let inner = self.inner.lock().expect("state mutex poisoned");
         let index = inner
@@ -2471,6 +2549,7 @@ impl AppState {
             .unwrap_or_else(default_cursor_mode))
     }
 
+    /// Handles session matches runtime token.
     fn session_matches_runtime_token(&self, session_id: &str, token: &RuntimeToken) -> bool {
         let inner = self.inner.lock().expect("state mutex poisoned");
         inner
@@ -2479,6 +2558,7 @@ impl AppState {
             .is_some_and(|record| record.runtime.matches_runtime_token(token))
     }
 
+    /// Clears runtime.
     fn clear_runtime(&self, session_id: &str) -> Result<()> {
         let mut inner = self.inner.lock().expect("state mutex poisoned");
         let index = inner
@@ -2504,6 +2584,7 @@ impl AppState {
         Ok(())
     }
 
+    /// Marks turn if runtime matches as failed.
     fn fail_turn_if_runtime_matches(
         &self,
         session_id: &str,
@@ -2560,6 +2641,7 @@ impl AppState {
 
         Ok(())
     }
+    /// Records turn retry if runtime matches.
     fn note_turn_retry_if_runtime_matches(
         &self,
         session_id: &str,
@@ -2617,6 +2699,7 @@ impl AppState {
         Ok(())
     }
 
+    /// Marks turn error if runtime matches.
     fn mark_turn_error_if_runtime_matches(
         &self,
         session_id: &str,
@@ -2662,6 +2745,7 @@ impl AppState {
 
         Ok(())
     }
+    /// Finishes turn ok if runtime matches.
     fn finish_turn_ok_if_runtime_matches(
         &self,
         session_id: &str,
@@ -2722,6 +2806,7 @@ impl AppState {
 
         Ok(())
     }
+    /// Handles runtime exit if matches.
     fn handle_runtime_exit_if_matches(
         &self,
         session_id: &str,
@@ -2812,6 +2897,7 @@ impl AppState {
         Ok(())
     }
 
+    /// Registers Claude pending approval.
     fn register_claude_pending_approval(
         &self,
         session_id: &str,
@@ -2828,6 +2914,7 @@ impl AppState {
         Ok(())
     }
 
+    /// Registers Codex pending approval.
     fn register_codex_pending_approval(
         &self,
         session_id: &str,
@@ -2844,6 +2931,7 @@ impl AppState {
         Ok(())
     }
 
+    /// Registers Codex pending user input.
     fn register_codex_pending_user_input(
         &self,
         session_id: &str,
@@ -2860,6 +2948,7 @@ impl AppState {
         Ok(())
     }
 
+    /// Registers Codex pending MCP elicitation.
     fn register_codex_pending_mcp_elicitation(
         &self,
         session_id: &str,
@@ -2876,6 +2965,7 @@ impl AppState {
         Ok(())
     }
 
+    /// Registers Codex pending app request.
     fn register_codex_pending_app_request(
         &self,
         session_id: &str,
@@ -2892,6 +2982,7 @@ impl AppState {
         Ok(())
     }
 
+    /// Registers ACP pending approval.
     fn register_acp_pending_approval(
         &self,
         session_id: &str,
@@ -2908,6 +2999,7 @@ impl AppState {
         Ok(())
     }
 
+    /// Clears Claude pending approval by request.
     fn clear_claude_pending_approval_by_request(
         &self,
         session_id: &str,
@@ -2942,6 +3034,7 @@ impl AppState {
         Ok(())
     }
 
+    /// Kills session.
     fn kill_session(&self, session_id: &str) -> std::result::Result<StateResponse, ApiError> {
         if self.remote_session_target(session_id)?.is_some() {
             return self.proxy_remote_kill_session(session_id);
@@ -3033,6 +3126,7 @@ impl AppState {
         Ok(self.snapshot())
     }
 
+    /// Cancels queued prompt.
     fn cancel_queued_prompt(
         &self,
         session_id: &str,
@@ -3068,10 +3162,12 @@ impl AppState {
         Ok(self.snapshot())
     }
 
+    /// Stops session.
     fn stop_session(&self, session_id: &str) -> std::result::Result<StateResponse, ApiError> {
         self.stop_session_with_options(session_id, StopSessionOptions::default())
     }
 
+    /// Stops session with options.
     fn stop_session_with_options(
         &self,
         session_id: &str,
@@ -3264,6 +3360,7 @@ impl AppState {
         Ok(self.snapshot())
     }
 
+    /// Pushes message.
     fn push_message(&self, session_id: &str, message: Message) -> Result<()> {
         let (revision, message, message_index, preview, status) = {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
@@ -3307,6 +3404,7 @@ impl AppState {
         Ok(())
     }
 
+    /// Returns the last message ID.
     pub(crate) fn last_message_id(&self, session_id: &str) -> Result<Option<String>> {
         let inner = self.inner.lock().expect("state mutex poisoned");
         let index = inner
@@ -3319,6 +3417,7 @@ impl AppState {
             .map(|message| message.id().to_owned()))
     }
 
+    /// Handles insert message before.
     pub(crate) fn insert_message_before(
         &self,
         session_id: &str,
@@ -3364,6 +3463,7 @@ impl AppState {
         Ok(())
     }
 
+    /// Appends text delta.
     fn append_text_delta(&self, session_id: &str, message_id: &str, delta: &str) -> Result<()> {
         let (preview, revision, message_index) = {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
@@ -3416,6 +3516,7 @@ impl AppState {
         Ok(())
     }
 
+    /// Replaces text message.
     fn replace_text_message(&self, session_id: &str, message_id: &str, text: &str) -> Result<()> {
         let (preview, revision, message_index, replacement_text) = {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
@@ -3473,6 +3574,7 @@ impl AppState {
         Ok(())
     }
 
+    /// Upserts command message.
     fn upsert_command_message(
         &self,
         session_id: &str,
@@ -3604,6 +3706,7 @@ impl AppState {
         Ok(())
     }
 
+    /// Upserts parallel agents message.
     fn upsert_parallel_agents_message(
         &self,
         session_id: &str,
@@ -3699,6 +3802,7 @@ impl AppState {
         Ok(())
     }
 
+    /// Updates approval.
     fn update_approval(
         &self,
         session_id: &str,
@@ -3935,6 +4039,7 @@ impl AppState {
         Ok(self.snapshot_from_inner(&inner))
     }
 
+    /// Submits Codex user input.
     fn submit_codex_user_input(
         &self,
         session_id: &str,
@@ -4018,6 +4123,7 @@ impl AppState {
         Ok(self.snapshot_from_inner(&inner))
     }
 
+    /// Submits Codex MCP elicitation.
     fn submit_codex_mcp_elicitation(
         &self,
         session_id: &str,
@@ -4109,6 +4215,7 @@ impl AppState {
         Ok(self.snapshot_from_inner(&inner))
     }
 
+    /// Submits Codex app request.
     fn submit_codex_app_request(
         &self,
         session_id: &str,
@@ -4191,9 +4298,7 @@ impl AppState {
         Ok(self.snapshot_from_inner(&inner))
     }
 
-    /// Mark a turn as failed with an error message. Note: callers (e.g. `deliver_turn_dispatch`)
-    /// are responsible for scheduling orchestrator transitions after calling this if the failed
-    /// turn belongs to an orchestrated session.
+    /// Marks turn as failed.
     fn fail_turn(&self, session_id: &str, error_message: &str) -> Result<()> {
         let cleaned = error_message.trim();
         if !cleaned.is_empty() {
@@ -4231,6 +4336,7 @@ impl AppState {
     }
 }
 
+/// Handles Codex approval result.
 fn codex_approval_result(kind: &CodexApprovalKind, decision: ApprovalDecision) -> Value {
     match kind {
         CodexApprovalKind::CommandExecution => match decision {
@@ -4284,6 +4390,7 @@ fn codex_approval_result(kind: &CodexApprovalKind, decision: ApprovalDecision) -
     }
 }
 
+/// Represents discovered Codex thread.
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct DiscoveredCodexThread {
     approval_policy: Option<CodexApprovalPolicy>,
@@ -4298,6 +4405,7 @@ struct DiscoveredCodexThread {
 
 const MAX_DISCOVERED_CODEX_THREADS_PER_HOME: usize = 500;
 
+/// Collects Codex discovery scopes.
 fn collect_codex_discovery_scopes(default_workdir: &str, projects: &[Project]) -> Vec<PathBuf> {
     let mut scopes = Vec::new();
     let mut seen = HashSet::new();
@@ -4318,6 +4426,7 @@ fn collect_codex_discovery_scopes(default_workdir: &str, projects: &[Project]) -
     scopes
 }
 
+/// Handles discover Codex threads.
 fn discover_codex_threads(
     default_workdir: &str,
     discovery_scopes: &[PathBuf],
@@ -4339,6 +4448,7 @@ fn discover_codex_threads(
     )
 }
 
+/// Handles discover Codex threads from sources.
 fn discover_codex_threads_from_sources(
     source_codex_home: Option<&FsPath>,
     termal_codex_root: &FsPath,
@@ -4348,6 +4458,7 @@ fn discover_codex_threads_from_sources(
     discover_codex_threads_from_homes(&codex_homes, discovery_scopes)
 }
 
+/// Handles discover Codex home candidates.
 fn discover_codex_home_candidates(
     source_codex_home: Option<&FsPath>,
     termal_codex_root: &FsPath,
@@ -4387,12 +4498,14 @@ fn discover_codex_home_candidates(
     homes
 }
 
+/// Handles Codex home scope is importable.
 fn codex_home_scope_is_importable(path: &FsPath) -> bool {
     path.file_name()
         .and_then(|value| value.to_str())
         .map_or(true, |scope| scope != "repl")
 }
 
+/// Pushes Codex home candidate.
 fn push_codex_home_candidate(homes: &mut Vec<PathBuf>, seen: &mut HashSet<PathBuf>, home: PathBuf) {
     let key = normalize_codex_discovery_path(&home);
     if seen.insert(key) {
@@ -4400,6 +4513,7 @@ fn push_codex_home_candidate(homes: &mut Vec<PathBuf>, seen: &mut HashSet<PathBu
     }
 }
 
+/// Resolves TermAl Codex discovery root.
 fn resolve_termal_codex_discovery_root(default_workdir: &str) -> PathBuf {
     std::env::var_os("HOME")
         .or_else(|| std::env::var_os("USERPROFILE"))
@@ -4409,6 +4523,7 @@ fn resolve_termal_codex_discovery_root(default_workdir: &str) -> PathBuf {
         .join("codex-home")
 }
 
+/// Handles discover Codex threads from homes.
 fn discover_codex_threads_from_homes(
     codex_homes: &[PathBuf],
     discovery_scopes: &[PathBuf],
@@ -4427,6 +4542,7 @@ fn discover_codex_threads_from_homes(
     Ok(threads)
 }
 
+/// Handles discover Codex threads from home.
 fn discover_codex_threads_from_home(
     codex_home: &FsPath,
     discovery_scopes: &[PathBuf],
@@ -4517,6 +4633,7 @@ fn discover_codex_threads_from_home(
     Ok(threads)
 }
 
+/// Collects Codex discovery query scope strings.
 fn collect_codex_discovery_query_scope_strings(discovery_scopes: &[PathBuf]) -> Vec<String> {
     let mut scopes = Vec::new();
     let mut seen = HashSet::new();
@@ -4535,6 +4652,7 @@ fn collect_codex_discovery_query_scope_strings(discovery_scopes: &[PathBuf]) -> 
     scopes
 }
 
+/// Handles Codex discovery scope query patterns.
 fn codex_discovery_scope_query_patterns(scope: &str) -> Vec<(String, String)> {
     let mut patterns = Vec::new();
     let mut seen = HashSet::new();
@@ -4555,6 +4673,7 @@ fn codex_discovery_scope_query_patterns(scope: &str) -> Vec<(String, String)> {
     patterns
 }
 
+/// Handles Codex discovery like pattern.
 fn codex_discovery_like_pattern(scope: &str) -> String {
     let escaped_scope = scope
         .replace('\\', "\\\\")
@@ -4568,6 +4687,7 @@ fn codex_discovery_like_pattern(scope: &str) -> String {
     }
 }
 
+/// Resolves Codex threads database path.
 fn resolve_codex_threads_database_path(codex_home: &FsPath) -> Option<PathBuf> {
     let primary = codex_home.join("state.db");
     if primary
@@ -4611,6 +4731,7 @@ fn resolve_codex_threads_database_path(codex_home: &FsPath) -> Option<PathBuf> {
     best_candidate.map(|(_, path)| path)
 }
 
+/// Parses discovered Codex sandbox mode.
 fn parse_discovered_codex_sandbox_mode(value: &str) -> Option<CodexSandboxMode> {
     let payload: Value = serde_json::from_str(value).ok()?;
     match payload.get("type").and_then(Value::as_str) {
@@ -4621,6 +4742,7 @@ fn parse_discovered_codex_sandbox_mode(value: &str) -> Option<CodexSandboxMode> 
     }
 }
 
+/// Parses discovered Codex approval policy.
 fn parse_discovered_codex_approval_policy(value: &str) -> Option<CodexApprovalPolicy> {
     match value.trim().to_ascii_lowercase().as_str() {
         "untrusted" => Some(CodexApprovalPolicy::Untrusted),
@@ -4631,6 +4753,7 @@ fn parse_discovered_codex_approval_policy(value: &str) -> Option<CodexApprovalPo
     }
 }
 
+/// Parses discovered Codex reasoning effort.
 fn parse_discovered_codex_reasoning_effort(value: &str) -> Option<CodexReasoningEffort> {
     match value.trim().to_ascii_lowercase().as_str() {
         "none" => Some(CodexReasoningEffort::None),
@@ -4643,12 +4766,14 @@ fn parse_discovered_codex_reasoning_effort(value: &str) -> Option<CodexReasoning
     }
 }
 
+/// Handles Codex discovery scope contains.
 fn codex_discovery_scope_contains(root_path: &str, candidate_path: &FsPath) -> bool {
     let root = normalize_codex_discovery_path(FsPath::new(root_path));
     let candidate = normalize_codex_discovery_path(candidate_path);
     candidate == root || candidate.starts_with(root)
 }
 
+/// Normalizes Codex discovery path.
 fn normalize_codex_discovery_path(path: &FsPath) -> PathBuf {
     let resolved = if path.is_absolute() {
         path.to_path_buf()
@@ -4660,6 +4785,7 @@ fn normalize_codex_discovery_path(path: &FsPath) -> PathBuf {
     fs::canonicalize(&resolved).unwrap_or(resolved)
 }
 
+/// Applies discovered Codex thread.
 fn apply_discovered_codex_thread(
     record: &mut SessionRecord,
     thread: &DiscoveredCodexThread,
@@ -4702,6 +4828,7 @@ fn apply_discovered_codex_thread(
     }
 }
 
+/// Normalizes remote configs.
 fn normalize_remote_configs(remotes: Vec<RemoteConfig>) -> Result<Vec<RemoteConfig>, ApiError> {
     let mut normalized = vec![RemoteConfig::local()];
     let mut seen_ids = HashSet::from([default_local_remote_id()]);
@@ -4747,16 +4874,19 @@ fn normalize_remote_configs(remotes: Vec<RemoteConfig>) -> Result<Vec<RemoteConf
     Ok(normalized)
 }
 
+/// Validates persisted remote configs.
 fn validate_persisted_remote_configs(remotes: Vec<RemoteConfig>) -> Result<Vec<RemoteConfig>> {
     normalize_remote_configs(remotes).map_err(|err| anyhow!(err.message))
 }
 
+/// Normalizes local user facing path.
 fn normalize_local_user_facing_path(path: &str) -> String {
     normalize_user_facing_path(FsPath::new(path))
         .to_string_lossy()
         .into_owned()
 }
 
+/// Normalizes workspace layout paths.
 fn normalize_workspace_layout_paths(layout: &mut WorkspaceLayoutDocument) {
     let Some(panes) = layout
         .workspace
@@ -4787,6 +4917,7 @@ fn normalize_workspace_layout_paths(layout: &mut WorkspaceLayoutDocument) {
     }
 }
 
+/// Normalizes workspace layout path field.
 fn normalize_workspace_layout_path_field(object: &mut Value, key: &str) {
     let Some(field) = object.get_mut(key) else {
         return;
@@ -4797,6 +4928,7 @@ fn normalize_workspace_layout_path_field(object: &mut Value, key: &str) {
     *field = Value::String(normalize_local_user_facing_path(path));
 }
 
+/// Represents state inner.
 struct StateInner {
     codex: CodexState,
     preferences: AppPreferences,
@@ -4804,14 +4936,19 @@ struct StateInner {
     next_project_number: usize,
     next_session_number: usize,
     next_message_number: u64,
+    /// Stable project records used by local and remote session routing.
     projects: Vec<Project>,
     ignored_discovered_codex_thread_ids: BTreeSet<String>,
+    /// Session records carry the serializable session plus runtime-only state.
     sessions: Vec<SessionRecord>,
+    /// Runtime instances for orchestrator templates live beside ordinary sessions.
     orchestrator_instances: Vec<OrchestratorInstance>,
+    /// Server-backed workspace documents keyed by workspace id.
     workspace_layouts: BTreeMap<String, WorkspaceLayoutDocument>,
 }
 
 impl StateInner {
+    /// Creates a new instance.
     fn new() -> Self {
         Self {
             codex: CodexState::default(),
@@ -4828,6 +4965,7 @@ impl StateInner {
         }
     }
 
+    /// Creates project.
     fn create_project(
         &mut self,
         name: Option<String>,
@@ -4857,6 +4995,7 @@ impl StateInner {
         project
     }
 
+    /// Creates session.
     fn create_session(
         &mut self,
         agent: Agent,
@@ -4941,6 +5080,7 @@ impl StateInner {
         record
     }
 
+    /// Ignores discovered Codex thread.
     fn ignore_discovered_codex_thread(&mut self, thread_id: Option<&str>) {
         if let Some(thread_id) = normalize_optional_identifier(thread_id) {
             self.ignored_discovered_codex_thread_ids
@@ -4948,12 +5088,14 @@ impl StateInner {
         }
     }
 
+    /// Allows discovered Codex thread.
     fn allow_discovered_codex_thread(&mut self, thread_id: Option<&str>) {
         if let Some(thread_id) = normalize_optional_identifier(thread_id) {
             self.ignored_discovered_codex_thread_ids.remove(thread_id);
         }
     }
 
+    /// Finds matching hidden Claude spare.
     fn find_matching_hidden_claude_spare(
         &self,
         workdir: &str,
@@ -4974,6 +5116,7 @@ impl StateInner {
         })
     }
 
+    /// Ensures hidden Claude spare.
     fn ensure_hidden_claude_spare(
         &mut self,
         workdir: String,
@@ -5007,24 +5150,28 @@ impl StateInner {
         Some(record.session.id.clone())
     }
 
+    /// Returns the next message ID.
     fn next_message_id(&mut self) -> String {
         let id = format!("message-{}", self.next_message_number);
         self.next_message_number += 1;
         id
     }
 
+    /// Finds session index.
     fn find_session_index(&self, session_id: &str) -> Option<usize> {
         self.sessions
             .iter()
             .position(|record| record.session.id == session_id)
     }
 
+    /// Finds visible session index.
     fn find_visible_session_index(&self, session_id: &str) -> Option<usize> {
         self.sessions
             .iter()
             .position(|record| !record.hidden && record.session.id == session_id)
     }
 
+    /// Finds remote session index.
     fn find_remote_session_index(&self, remote_id: &str, remote_session_id: &str) -> Option<usize> {
         self.sessions.iter().position(|record| {
             record.remote_id.as_deref() == Some(remote_id)
@@ -5032,12 +5179,14 @@ impl StateInner {
         })
     }
 
+    /// Finds project.
     fn find_project(&self, project_id: &str) -> Option<&Project> {
         self.projects
             .iter()
             .find(|project| project.id == project_id)
     }
 
+    /// Finds remote.
     fn find_remote(&self, remote_id: &str) -> Option<&RemoteConfig> {
         self.preferences
             .remotes
@@ -5045,6 +5194,7 @@ impl StateInner {
             .find(|remote| remote.id == remote_id)
     }
 
+    /// Finds project for working directory.
     fn find_project_for_workdir(&self, workdir: &str) -> Option<&Project> {
         let target = FsPath::new(workdir);
         self.projects
@@ -5056,6 +5206,7 @@ impl StateInner {
             .max_by_key(|project| project.root_path.len())
     }
 
+    /// Imports discovered Codex threads.
     fn import_discovered_codex_threads(
         &mut self,
         default_workdir: &str,
@@ -5135,6 +5286,7 @@ impl StateInner {
         }
     }
 
+    /// Validates projects consistent.
     fn validate_projects_consistent(&self) -> Result<()> {
         for project in &self.projects {
             let remote_id = project.remote_id.trim();
@@ -5189,6 +5341,7 @@ impl StateInner {
         Ok(())
     }
 
+    /// Normalizes local paths.
     fn normalize_local_paths(&mut self) {
         let local_project_ids = self
             .projects
@@ -5220,6 +5373,7 @@ impl StateInner {
         }
     }
 
+    /// Recovers interrupted sessions.
     fn recover_interrupted_sessions(&mut self) {
         for index in 0..self.sessions.len() {
             if self.sessions[index].is_remote_proxy() {
@@ -5257,6 +5411,7 @@ impl StateInner {
     }
 }
 
+/// Tracks persisted state.
 #[derive(Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct PersistedState {
@@ -5280,6 +5435,7 @@ struct PersistedState {
 }
 
 impl PersistedState {
+    /// Builds the value from inner.
     fn from_inner(inner: &StateInner) -> Self {
         Self {
             codex: inner.codex.clone(),
@@ -5301,6 +5457,7 @@ impl PersistedState {
         }
     }
 
+    /// Converts the value into inner.
     fn into_inner(self) -> Result<StateInner> {
         let mut inner = StateInner {
             codex: self.codex,
@@ -5343,10 +5500,12 @@ impl PersistedState {
     }
 }
 
+/// Handles session flag is false.
 fn session_flag_is_false(value: &bool) -> bool {
     !*value
 }
 
+/// Returns whether the same Codex notice identity applies.
 fn same_codex_notice_identity(left: &CodexNotice, right: &CodexNotice) -> bool {
     left.kind == right.kind
         && left.level == right.level
@@ -5355,6 +5514,7 @@ fn same_codex_notice_identity(left: &CodexNotice, right: &CodexNotice) -> bool {
         && left.code == right.code
 }
 
+/// Represents a persisted session record.
 #[derive(Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct PersistedSessionRecord {
@@ -5378,6 +5538,7 @@ struct PersistedSessionRecord {
 }
 
 impl PersistedSessionRecord {
+    /// Builds the value from record.
     fn from_record(record: &SessionRecord) -> Self {
         let mut session = record.session.clone();
         if !record.is_remote_proxy() {
@@ -5400,6 +5561,7 @@ impl PersistedSessionRecord {
         }
     }
 
+    /// Converts the value into record.
     fn into_record(self) -> Result<SessionRecord> {
         let mut session = self.session;
         validate_persisted_session_fields(&session, self.external_session_id.as_deref())?;
@@ -5445,6 +5607,7 @@ impl PersistedSessionRecord {
     }
 }
 
+/// Validates persisted session fields.
 fn validate_persisted_session_fields(
     session: &Session,
     external_session_id: Option<&str>,
@@ -5556,6 +5719,7 @@ fn validate_persisted_session_fields(
     Ok(())
 }
 
+/// Represents a session record.
 #[derive(Clone)]
 struct SessionRecord {
     active_codex_approval_policy: Option<CodexApprovalPolicy>,
@@ -5573,8 +5737,10 @@ struct SessionRecord {
     pending_codex_mcp_elicitations: HashMap<String, CodexPendingMcpElicitation>,
     pending_codex_app_requests: HashMap<String, CodexPendingAppRequest>,
     pending_acp_approvals: HashMap<String, AcpPendingApproval>,
+    /// FIFO follow-up prompts collected while the runtime is busy.
     queued_prompts: VecDeque<QueuedPromptRecord>,
     message_positions: HashMap<String, usize>,
+    /// Present only for proxy sessions mirrored from a remote TermAl backend.
     remote_id: Option<String>,
     remote_session_id: Option<String>,
     runtime: SessionRuntime,
@@ -5593,11 +5759,13 @@ struct SessionRecord {
 }
 
 impl SessionRecord {
+    /// Returns whether remote proxy.
     fn is_remote_proxy(&self) -> bool {
         self.remote_id.is_some() && self.remote_session_id.is_some()
     }
 }
 
+/// Handles reset hidden Claude spare record.
 fn reset_hidden_claude_spare_record(record: &mut SessionRecord) {
     if record.session.agent != Agent::Claude {
         return;
@@ -5617,6 +5785,7 @@ fn reset_hidden_claude_spare_record(record: &mut SessionRecord) {
     record.active_turn_start_message_count = None;
 }
 
+/// Returns whether pending requests.
 fn has_pending_requests(record: &SessionRecord) -> bool {
     !record.pending_claude_approvals.is_empty()
         || !record.pending_codex_approvals.is_empty()
@@ -5626,6 +5795,7 @@ fn has_pending_requests(record: &SessionRecord) -> bool {
         || !record.pending_acp_approvals.is_empty()
 }
 
+/// Clears all pending requests.
 fn clear_all_pending_requests(record: &mut SessionRecord) {
     record.pending_claude_approvals.clear();
     record.pending_codex_approvals.clear();
@@ -5635,6 +5805,7 @@ fn clear_all_pending_requests(record: &mut SessionRecord) {
     record.pending_acp_approvals.clear();
 }
 
+/// Merges agent commands.
 fn merge_agent_commands(
     preferred: &[AgentCommand],
     fallback: &[AgentCommand],
@@ -5651,6 +5822,7 @@ fn merge_agent_commands(
     dedupe_agent_commands(commands)
 }
 
+/// Deduplicates agent commands.
 fn dedupe_agent_commands(commands: Vec<AgentCommand>) -> Vec<AgentCommand> {
     let mut seen = HashSet::new();
     let mut deduped = Vec::new();
@@ -5669,6 +5841,7 @@ fn dedupe_agent_commands(commands: Vec<AgentCommand>) -> Vec<AgentCommand> {
     deduped
 }
 
+/// Handles Claude spare profile.
 fn claude_spare_profile(
     record: &SessionRecord,
 ) -> (
@@ -5693,6 +5866,7 @@ fn claude_spare_profile(
     )
 }
 
+/// Returns the normalized Codex thread state.
 fn normalized_codex_thread_state(
     agent: Agent,
     external_session_id: Option<&str>,
@@ -5705,6 +5879,7 @@ fn normalized_codex_thread_state(
     Some(current_state.unwrap_or(CodexThreadState::Active))
 }
 
+/// Syncs Codex thread state.
 fn sync_codex_thread_state(record: &mut SessionRecord) {
     record.session.codex_thread_state = normalized_codex_thread_state(
         record.session.agent,
@@ -5713,12 +5888,14 @@ fn sync_codex_thread_state(record: &mut SessionRecord) {
     );
 }
 
+/// Sets record external session ID.
 fn set_record_external_session_id(record: &mut SessionRecord, external_session_id: Option<String>) {
     record.external_session_id = external_session_id.clone();
     record.session.external_session_id = external_session_id;
     sync_codex_thread_state(record);
 }
 
+/// Sets record Codex thread state.
 fn set_record_codex_thread_state(record: &mut SessionRecord, thread_state: CodexThreadState) {
     record.session.codex_thread_state = normalized_codex_thread_state(
         record.session.agent,
@@ -5727,10 +5904,12 @@ fn set_record_codex_thread_state(record: &mut SessionRecord, thread_state: Codex
     );
 }
 
+/// Records has archived Codex thread.
 fn record_has_archived_codex_thread(record: &SessionRecord) -> bool {
     record.session.codex_thread_state == Some(CodexThreadState::Archived)
 }
 
+/// Defines the queued prompt source variants.
 #[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 enum QueuedPromptSource {
@@ -5739,6 +5918,7 @@ enum QueuedPromptSource {
     Orchestrator,
 }
 
+/// Represents a queued prompt record.
 #[derive(Clone, Debug, Deserialize, Serialize)]
 struct QueuedPromptRecord {
     source: QueuedPromptSource,
@@ -5746,6 +5926,7 @@ struct QueuedPromptRecord {
     pending_prompt: PendingPrompt,
 }
 
+/// Syncs pending prompts.
 fn sync_pending_prompts(record: &mut SessionRecord) {
     if record.is_remote_proxy() {
         return;
@@ -5757,6 +5938,7 @@ fn sync_pending_prompts(record: &mut SessionRecord) {
         .collect();
 }
 
+/// Sets approval decision on record.
 fn set_approval_decision_on_record(
     record: &mut SessionRecord,
     message_id: &str,
@@ -5781,6 +5963,7 @@ fn set_approval_decision_on_record(
     }
 }
 
+/// Sets user input request state on record.
 fn set_user_input_request_state_on_record(
     record: &mut SessionRecord,
     message_id: &str,
@@ -5808,6 +5991,7 @@ fn set_user_input_request_state_on_record(
     }
 }
 
+/// Sets MCP elicitation request state on record.
 fn set_mcp_elicitation_request_state_on_record(
     record: &mut SessionRecord,
     message_id: &str,
@@ -5838,6 +6022,7 @@ fn set_mcp_elicitation_request_state_on_record(
     }
 }
 
+/// Sets Codex app request state on record.
 fn set_codex_app_request_state_on_record(
     record: &mut SessionRecord,
     message_id: &str,
@@ -5865,6 +6050,7 @@ fn set_codex_app_request_state_on_record(
     }
 }
 
+/// Returns the latest pending interaction preview.
 fn latest_pending_interaction_preview(record: &SessionRecord) -> Option<String> {
     for message in record.session.messages.iter().rev() {
         match message {
@@ -5912,6 +6098,7 @@ fn latest_pending_interaction_preview(record: &SessionRecord) -> Option<String> 
     None
 }
 
+/// Handles approval preview text.
 fn approval_preview_text(agent_name: &str, decision: ApprovalDecision) -> String {
     match decision {
         ApprovalDecision::Pending => "Approval pending.".to_owned(),
@@ -5931,6 +6118,7 @@ fn approval_preview_text(agent_name: &str, decision: ApprovalDecision) -> String
     }
 }
 
+/// Handles user input request preview text.
 fn user_input_request_preview_text(agent_name: &str, state: InteractionRequestState) -> String {
     match state {
         InteractionRequestState::Pending => "Input requested.".to_owned(),
@@ -5946,6 +6134,7 @@ fn user_input_request_preview_text(agent_name: &str, state: InteractionRequestSt
     }
 }
 
+/// Handles MCP elicitation request preview text.
 fn mcp_elicitation_request_preview_text(
     agent_name: &str,
     state: InteractionRequestState,
@@ -5975,6 +6164,7 @@ fn mcp_elicitation_request_preview_text(
     }
 }
 
+/// Handles Codex app request preview text.
 fn codex_app_request_preview_text(agent_name: &str, state: InteractionRequestState) -> String {
     match state {
         InteractionRequestState::Pending => "Codex response requested.".to_owned(),
@@ -5990,6 +6180,7 @@ fn codex_app_request_preview_text(agent_name: &str, state: InteractionRequestSta
     }
 }
 
+/// Syncs session interaction state.
 fn sync_session_interaction_state(record: &mut SessionRecord, resolved_preview: String) {
     if let Some(preview) = latest_pending_interaction_preview(record) {
         record.session.status = SessionStatus::Approval;
@@ -6006,6 +6197,7 @@ fn sync_session_interaction_state(record: &mut SessionRecord, resolved_preview: 
     }
 }
 
+/// Validates Codex user input answers.
 fn validate_codex_user_input_answers(
     questions: &[UserInputQuestion],
     answers: BTreeMap<String, Vec<String>>,
@@ -6085,6 +6277,7 @@ fn validate_codex_user_input_answers(
     Ok((response_answers, display_answers))
 }
 
+/// Validates Codex MCP elicitation submission.
 fn validate_codex_mcp_elicitation_submission(
     request: &McpElicitationRequestPayload,
     action: McpElicitationAction,
@@ -6121,6 +6314,7 @@ fn validate_codex_mcp_elicitation_submission(
     }
 }
 
+/// Validates Codex MCP elicitation form content.
 fn validate_codex_mcp_elicitation_form_content(
     request: &McpElicitationRequestPayload,
     content: Value,
@@ -6183,6 +6377,7 @@ fn validate_codex_mcp_elicitation_form_content(
     Ok(Value::Object(normalized))
 }
 
+/// Validates Codex MCP elicitation field value.
 fn validate_codex_mcp_elicitation_field_value(
     field_name: &str,
     schema: &Value,
@@ -6214,6 +6409,7 @@ fn validate_codex_mcp_elicitation_field_value(
     }
 }
 
+/// Validates Codex MCP elicitation number value.
 fn validate_codex_mcp_elicitation_number_value(
     field_name: &str,
     schema: &Value,
@@ -6258,6 +6454,7 @@ fn validate_codex_mcp_elicitation_number_value(
 const CODEX_APP_REQUEST_RESULT_MAX_BYTES: usize = 64 * 1024;
 const CODEX_APP_REQUEST_RESULT_MAX_DEPTH: usize = 32;
 
+/// Validates Codex app request result.
 fn validate_codex_app_request_result(result: Value) -> std::result::Result<Value, ApiError> {
     validate_codex_app_request_result_depth(&result, 0)?;
     let encoded = serde_json::to_vec(&result).map_err(|err| {
@@ -6274,6 +6471,7 @@ fn validate_codex_app_request_result(result: Value) -> std::result::Result<Value
     Ok(result)
 }
 
+/// Validates Codex app request result depth.
 fn validate_codex_app_request_result_depth(
     value: &Value,
     depth: usize,
@@ -6301,6 +6499,7 @@ fn validate_codex_app_request_result_depth(
     Ok(())
 }
 
+/// Validates Codex MCP elicitation string value.
 fn validate_codex_mcp_elicitation_string_value(
     field_name: &str,
     schema: &Value,
@@ -6338,6 +6537,7 @@ fn validate_codex_mcp_elicitation_string_value(
     Ok(Value::String(text.to_owned()))
 }
 
+/// Validates Codex MCP elicitation array value.
 fn validate_codex_mcp_elicitation_array_value(
     field_name: &str,
     schema: &Value,
@@ -6388,6 +6588,7 @@ fn validate_codex_mcp_elicitation_array_value(
     Ok(Value::Array(normalized))
 }
 
+/// Handles Codex MCP elicitation string options.
 fn codex_mcp_elicitation_string_options(schema: &Value) -> Option<Vec<String>> {
     if let Some(options) = schema.get("oneOf").and_then(Value::as_array) {
         let collected = options
@@ -6414,6 +6615,7 @@ fn codex_mcp_elicitation_string_options(schema: &Value) -> Option<Vec<String>> {
     (!collected.is_empty()).then_some(collected)
 }
 
+/// Handles Codex MCP elicitation array options.
 fn codex_mcp_elicitation_array_options(schema: &Value) -> Option<Vec<String>> {
     if let Some(options) = schema.get("anyOf").and_then(Value::as_array) {
         let collected = options
@@ -6440,6 +6642,7 @@ fn codex_mcp_elicitation_array_options(schema: &Value) -> Option<Vec<String>> {
     (!collected.is_empty()).then_some(collected)
 }
 
+/// Queues prompt on record.
 fn queue_prompt_on_record(
     record: &mut SessionRecord,
     pending_prompt: PendingPrompt,
@@ -6453,6 +6656,7 @@ fn queue_prompt_on_record(
     );
 }
 
+/// Queues orchestrator prompt on record.
 fn queue_orchestrator_prompt_on_record(
     record: &mut SessionRecord,
     pending_prompt: PendingPrompt,
@@ -6466,6 +6670,7 @@ fn queue_orchestrator_prompt_on_record(
     );
 }
 
+/// Queues prompt on record with source.
 fn queue_prompt_on_record_with_source(
     record: &mut SessionRecord,
     pending_prompt: PendingPrompt,
@@ -6480,6 +6685,7 @@ fn queue_prompt_on_record_with_source(
     sync_pending_prompts(record);
 }
 
+/// Handles prioritize user queued prompts.
 fn prioritize_user_queued_prompts(record: &mut SessionRecord) {
     let mut user_prompts = VecDeque::new();
     let mut deferred_orchestrator_prompts = VecDeque::new();
@@ -6497,6 +6703,7 @@ fn prioritize_user_queued_prompts(record: &mut SessionRecord) {
     sync_pending_prompts(record);
 }
 
+/// Clears queued prompts by source.
 fn clear_queued_prompts_by_source(record: &mut SessionRecord, source: QueuedPromptSource) {
     let original_len = record.queued_prompts.len();
     record
@@ -6507,10 +6714,12 @@ fn clear_queued_prompts_by_source(record: &mut SessionRecord, source: QueuedProm
     }
 }
 
+/// Clears stopped orchestrator queued prompts.
 fn clear_stopped_orchestrator_queued_prompts(record: &mut SessionRecord) {
     clear_queued_prompts_by_source(record, QueuedPromptSource::Orchestrator);
 }
 
+/// Recovers interrupted session record.
 fn recover_interrupted_session_record(record: &mut SessionRecord) -> Option<String> {
     if !matches!(
         record.session.status,
@@ -6544,6 +6753,7 @@ fn recover_interrupted_session_record(record: &mut SessionRecord) -> Option<Stri
     Some(notice)
 }
 
+/// Expires pending interaction messages.
 fn expire_pending_interaction_messages(messages: &mut [Message]) -> usize {
     let mut count = 0;
     for message in messages {
@@ -6578,6 +6788,7 @@ fn expire_pending_interaction_messages(messages: &mut [Message]) -> usize {
     count
 }
 
+/// Cancels pending interaction messages.
 fn cancel_pending_interaction_messages(messages: &mut [Message]) {
     for message in messages {
         match message {
@@ -6606,6 +6817,7 @@ fn cancel_pending_interaction_messages(messages: &mut [Message]) {
     }
 }
 
+/// Marks running command messages as failed.
 fn fail_running_command_messages(messages: &mut [Message]) {
     for message in messages {
         if let Message::Command { status, .. } = message {
@@ -6616,6 +6828,7 @@ fn fail_running_command_messages(messages: &mut [Message]) {
     }
 }
 
+/// Builds message positions.
 fn build_message_positions(messages: &[Message]) -> HashMap<String, usize> {
     messages
         .iter()
@@ -6624,6 +6837,7 @@ fn build_message_positions(messages: &[Message]) -> HashMap<String, usize> {
         .collect()
 }
 
+/// Handles message index on record.
 fn message_index_on_record(record: &mut SessionRecord, message_id: &str) -> Option<usize> {
     if let Some(index) = record.message_positions.get(message_id).copied() {
         if record
@@ -6640,6 +6854,7 @@ fn message_index_on_record(record: &mut SessionRecord, message_id: &str) -> Opti
     record.message_positions.get(message_id).copied()
 }
 
+/// Handles insert message on record.
 fn insert_message_on_record(record: &mut SessionRecord, index: usize, message: Message) -> usize {
     let index = index.min(record.session.messages.len());
     record.session.messages.insert(index, message);
@@ -6647,10 +6862,12 @@ fn insert_message_on_record(record: &mut SessionRecord, index: usize, message: M
     index
 }
 
+/// Pushes message on record.
 fn push_message_on_record(record: &mut SessionRecord, message: Message) -> usize {
     insert_message_on_record(record, record.session.messages.len(), message)
 }
 
+/// Pushes session markdown note on record.
 fn push_session_markdown_note_on_record(
     record: &mut SessionRecord,
     message_id: String,
@@ -6670,6 +6887,7 @@ fn push_session_markdown_note_on_record(
     push_message_on_record(record, message);
 }
 
+/// Replaces session messages on record.
 fn replace_session_messages_on_record(
     record: &mut SessionRecord,
     messages: Vec<Message>,
@@ -6687,6 +6905,7 @@ fn replace_session_messages_on_record(
         .unwrap_or_else(|| "Ready for a prompt.".to_owned());
 }
 
+/// Handles Codex thread messages from JSON.
 fn codex_thread_messages_from_json(inner: &mut StateInner, thread: &Value) -> Option<Vec<Message>> {
     let turns = thread.get("turns").and_then(Value::as_array)?;
     let mut messages = Vec::new();
@@ -6696,6 +6915,7 @@ fn codex_thread_messages_from_json(inner: &mut StateInner, thread: &Value) -> Op
     (!messages.is_empty()).then_some(messages)
 }
 
+/// Appends Codex thread turn messages.
 fn append_codex_thread_turn_messages(
     inner: &mut StateInner,
     turn: &Value,
@@ -6718,6 +6938,7 @@ fn append_codex_thread_turn_messages(
     Some(())
 }
 
+/// Appends Codex thread item messages.
 fn append_codex_thread_item_messages(
     inner: &mut StateInner,
     item: &Value,
@@ -6866,6 +7087,7 @@ fn append_codex_thread_item_messages(
     }
 }
 
+/// Handles Codex thread user message text.
 fn codex_thread_user_message_text(item: &Value) -> Option<String> {
     let content = item.get("content").and_then(Value::as_array)?;
     let parts: Vec<String> = content
@@ -6877,6 +7099,7 @@ fn codex_thread_user_message_text(item: &Value) -> Option<String> {
     (!trimmed.is_empty()).then(|| trimmed.to_owned())
 }
 
+/// Handles Codex thread user input text.
 fn codex_thread_user_input_text(input: &Value) -> Option<String> {
     match input.get("type").and_then(Value::as_str) {
         Some("text") => input
@@ -6903,6 +7126,7 @@ fn codex_thread_user_input_text(input: &Value) -> Option<String> {
     }
 }
 
+/// Handles Codex thread named path text.
 fn codex_thread_named_path_text(input: &Value, label: &str) -> Option<String> {
     let name = input
         .get("name")
@@ -6922,6 +7146,7 @@ fn codex_thread_named_path_text(input: &Value, label: &str) -> Option<String> {
     }
 }
 
+/// Handles Codex thread reasoning lines.
 fn codex_thread_reasoning_lines(item: &Value) -> Vec<String> {
     let mut lines = Vec::new();
     for key in ["summary", "content"] {
@@ -6943,6 +7168,7 @@ fn codex_thread_reasoning_lines(item: &Value) -> Vec<String> {
     lines
 }
 
+/// Handles Codex thread command status.
 fn codex_thread_command_status(item: &Value) -> CommandStatus {
     match item.get("status").and_then(Value::as_str) {
         Some("completed") => match item.get("exitCode").and_then(Value::as_i64) {
@@ -6954,6 +7180,7 @@ fn codex_thread_command_status(item: &Value) -> CommandStatus {
     }
 }
 
+/// Handles Codex thread turn status text.
 fn codex_thread_turn_status_text(turn: &Value) -> Option<String> {
     match turn.get("status").and_then(Value::as_str) {
         Some("failed") => {
@@ -6969,6 +7196,7 @@ fn codex_thread_turn_status_text(turn: &Value) -> Option<String> {
     }
 }
 
+/// Handles Codex thread fallback title.
 fn codex_thread_fallback_title(item_type: &str) -> String {
     match item_type {
         "mcpToolCall" => "Codex MCP tool call".to_owned(),
@@ -6977,6 +7205,7 @@ fn codex_thread_fallback_title(item_type: &str) -> String {
     }
 }
 
+/// Handles Codex thread fallback markdown.
 fn codex_thread_fallback_markdown(item: &Value, item_type: &str) -> Option<String> {
     let mut sections = vec![format!("Codex returned a `{item_type}` thread item.")];
     if let Some(tool) = item
@@ -7017,6 +7246,7 @@ fn codex_thread_fallback_markdown(item: &Value, item_type: &str) -> Option<Strin
     Some(sections.join("\n\n"))
 }
 
+/// Handles Codex approval policy from JSON value.
 fn codex_approval_policy_from_json_value(value: &Value) -> Option<CodexApprovalPolicy> {
     match value {
         Value::String(raw) => match raw.as_str() {
@@ -7030,6 +7260,7 @@ fn codex_approval_policy_from_json_value(value: &Value) -> Option<CodexApprovalP
     }
 }
 
+/// Handles Codex reasoning effort from JSON value.
 fn codex_reasoning_effort_from_json_value(value: &Value) -> Option<CodexReasoningEffort> {
     match value {
         Value::String(raw) => match raw.as_str() {
@@ -7045,6 +7276,7 @@ fn codex_reasoning_effort_from_json_value(value: &Value) -> Option<CodexReasonin
     }
 }
 
+/// Handles Codex sandbox mode from JSON value.
 fn codex_sandbox_mode_from_json_value(value: &Value) -> Option<CodexSandboxMode> {
     match value {
         Value::String(raw) => match raw.as_str() {
@@ -7063,6 +7295,7 @@ fn codex_sandbox_mode_from_json_value(value: &Value) -> Option<CodexSandboxMode>
     }
 }
 
+/// Returns the default forked Codex session name.
 fn default_forked_codex_session_name(current_name: &str, thread_name: Option<&str>) -> String {
     let trimmed_thread_name = thread_name.map(str::trim).filter(|value| !value.is_empty());
     let trimmed_current_name = current_name.trim();
@@ -7070,6 +7303,7 @@ fn default_forked_codex_session_name(current_name: &str, thread_name: Option<&st
     format!("{base} Fork")
 }
 
+/// Resolves forked Codex working directory.
 fn resolve_forked_codex_workdir(
     requested_workdir: Option<&str>,
     fallback_workdir: &str,
@@ -7098,6 +7332,7 @@ fn resolve_forked_codex_workdir(
     }
 }
 
+/// Represents Codex thread action context.
 struct CodexThreadActionContext {
     approval_policy: CodexApprovalPolicy,
     model: String,
@@ -7111,6 +7346,7 @@ struct CodexThreadActionContext {
     workdir: String,
 }
 
+/// Defines the session runtime variants.
 #[derive(Clone)]
 enum SessionRuntime {
     None,
@@ -7119,6 +7355,7 @@ enum SessionRuntime {
     Acp(AcpRuntimeHandle),
 }
 
+/// Represents the Claude runtime handle.
 #[derive(Clone)]
 struct ClaudeRuntimeHandle {
     runtime_id: String,
@@ -7127,11 +7364,13 @@ struct ClaudeRuntimeHandle {
 }
 
 impl ClaudeRuntimeHandle {
+    /// Handles kill.
     fn kill(&self) -> Result<()> {
         kill_child_process(&self.process, "Claude")
     }
 }
 
+/// Represents the Codex runtime handle.
 #[derive(Clone)]
 struct CodexRuntimeHandle {
     runtime_id: String,
@@ -7141,11 +7380,13 @@ struct CodexRuntimeHandle {
 }
 
 impl CodexRuntimeHandle {
+    /// Handles kill.
     fn kill(&self) -> Result<()> {
         kill_child_process(&self.process, "Codex")
     }
 }
 
+/// Represents shared Codex runtime.
 #[derive(Clone)]
 struct SharedCodexRuntime {
     runtime_id: String,
@@ -7155,6 +7396,7 @@ struct SharedCodexRuntime {
     thread_sessions: SharedCodexThreadMap,
 }
 
+/// Represents the shared Codex session handle.
 #[derive(Clone)]
 struct SharedCodexSessionHandle {
     runtime: SharedCodexRuntime,
@@ -7162,6 +7404,7 @@ struct SharedCodexSessionHandle {
 }
 
 impl SharedCodexSessionHandle {
+    /// Handles detach.
     fn detach(&self) {
         let removed_thread_id = {
             let mut sessions = self
@@ -7183,6 +7426,7 @@ impl SharedCodexSessionHandle {
         }
     }
 
+    /// Handles interrupt turn.
     fn interrupt_turn(&self) -> Result<()> {
         let (thread_id, turn_id) = {
             let sessions = self
@@ -7224,6 +7468,7 @@ impl SharedCodexSessionHandle {
         }
     }
 
+    /// Handles interrupt and detach.
     fn interrupt_and_detach(&self) -> Result<()> {
         let result = self.interrupt_turn();
         self.detach();
@@ -7231,6 +7476,7 @@ impl SharedCodexSessionHandle {
     }
 }
 
+/// Defines the ACP agent variants.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum AcpAgent {
     Cursor,
@@ -7238,6 +7484,7 @@ enum AcpAgent {
 }
 
 impl AcpAgent {
+    /// Handles agent.
     fn agent(self) -> Agent {
         match self {
             Self::Cursor => Agent::Cursor,
@@ -7245,6 +7492,7 @@ impl AcpAgent {
         }
     }
 
+    /// Handles command.
     fn command(self, launch_options: AcpLaunchOptions) -> Result<Command> {
         match self {
             Self::Cursor => {
@@ -7267,11 +7515,13 @@ impl AcpAgent {
         }
     }
 
+    /// Handles label.
     fn label(self) -> &'static str {
         self.agent().name()
     }
 }
 
+/// Represents the ACP runtime handle.
 #[derive(Clone)]
 struct AcpRuntimeHandle {
     agent: AcpAgent,
@@ -7281,11 +7531,13 @@ struct AcpRuntimeHandle {
 }
 
 impl AcpRuntimeHandle {
+    /// Handles kill.
     fn kill(&self) -> Result<()> {
         kill_child_process(&self.process, self.agent.label())
     }
 }
 
+/// Defines the killable runtime variants.
 #[derive(Clone)]
 enum KillableRuntime {
     Claude(ClaudeRuntimeHandle),
@@ -7294,11 +7546,13 @@ enum KillableRuntime {
 }
 
 impl KillableRuntime {
+    /// Stops failure is best effort.
     fn stop_failure_is_best_effort(&self) -> bool {
         matches!(self, Self::Codex(handle) if handle.shared_session.is_some())
     }
 }
 
+/// Shuts down removed runtime.
 fn shutdown_removed_runtime(runtime: KillableRuntime, context: &str) -> Result<()> {
     match runtime {
         KillableRuntime::Codex(handle) => {
@@ -7335,8 +7589,7 @@ fn shutdown_removed_runtime(runtime: KillableRuntime, context: &str) -> Result<(
     }
 }
 
-/// Terminal runtime callback deferred because `runtime_stop_in_progress` was true.
-/// Replayed when a dedicated stop attempt fails, discarded when it succeeds.
+/// Defines the deferred stop callback variants.
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum DeferredStopCallback {
     /// `fail_turn_if_runtime_matches` was called.
@@ -7349,6 +7602,7 @@ enum DeferredStopCallback {
     RuntimeExited(Option<String>),
 }
 
+/// Defines the runtime token variants.
 #[derive(Clone)]
 enum RuntimeToken {
     Claude(String),
@@ -7357,6 +7611,7 @@ enum RuntimeToken {
 }
 
 impl SessionRuntime {
+    /// Handles runtime token.
     fn runtime_token(&self) -> Option<RuntimeToken> {
         match self {
             Self::Claude(handle) => Some(RuntimeToken::Claude(handle.runtime_id.clone())),
@@ -7366,6 +7621,7 @@ impl SessionRuntime {
         }
     }
 
+    /// Returns whether runtime token.
     fn matches_runtime_token(&self, token: &RuntimeToken) -> bool {
         match (self, token) {
             (Self::Claude(handle), RuntimeToken::Claude(runtime_id)) => {
@@ -7380,6 +7636,7 @@ impl SessionRuntime {
     }
 }
 
+/// Represents forced kill child process failure.
 #[cfg(test)]
 #[derive(Clone)]
 struct ForcedKillChildProcessFailure {
@@ -7387,6 +7644,7 @@ struct ForcedKillChildProcessFailure {
     process_ptr: usize,
 }
 
+/// Returns the forced kill child process failure.
 #[cfg(test)]
 fn forced_kill_child_process_failure() -> &'static Mutex<Option<ForcedKillChildProcessFailure>> {
     static FORCED_KILL_CHILD_PROCESS_FAILURE: std::sync::OnceLock<
@@ -7395,6 +7653,7 @@ fn forced_kill_child_process_failure() -> &'static Mutex<Option<ForcedKillChildP
     FORCED_KILL_CHILD_PROCESS_FAILURE.get_or_init(|| Mutex::new(None))
 }
 
+/// Sets test kill child process failure.
 #[cfg(test)]
 fn set_test_kill_child_process_failure(label: Option<&str>, process: Option<&Arc<SharedChild>>) {
     *forced_kill_child_process_failure()
@@ -7408,6 +7667,7 @@ fn set_test_kill_child_process_failure(label: Option<&str>, process: Option<&Arc
     };
 }
 
+/// Kills child process.
 fn kill_child_process(process: &Arc<SharedChild>, label: &str) -> Result<()> {
     #[cfg(test)]
     {
@@ -7442,6 +7702,7 @@ fn kill_child_process(process: &Arc<SharedChild>, label: &str) -> Result<()> {
     }
 }
 
+/// Handles shared child has exited.
 fn shared_child_has_exited(process: &Arc<SharedChild>, label: &str) -> Result<bool> {
     match process.try_wait() {
         Ok(Some(_)) => Ok(true),
@@ -7450,6 +7711,7 @@ fn shared_child_has_exited(process: &Arc<SharedChild>, label: &str) -> Result<bo
     }
 }
 
+/// Handles wait for shared child exit timeout.
 fn wait_for_shared_child_exit_timeout(
     process: &Arc<SharedChild>,
     timeout: Duration,

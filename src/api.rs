@@ -1,7 +1,23 @@
+/*
+HTTP handler layer
+Request flow:
+axum route
+  -> parse path/query/json
+  -> run_blocking_api(...)
+  -> AppState method
+  -> optional runtime or remote dispatch
+  -> JSON response or SSE payload
+This file stays intentionally thin. Transport details live here, durable state
+changes live in state.rs, runtime process logic lives in runtime.rs, and the
+turn normalization layer lives in turns.rs.
+*/
+
+/// Resolves persistence path.
 fn resolve_persistence_path(default_workdir: &str) -> PathBuf {
     resolve_termal_data_dir(default_workdir).join("sessions.json")
 }
 
+/// Loads state.
 fn load_state(path: &FsPath) -> Result<Option<StateInner>> {
     if !path.exists() {
         return Ok(None);
@@ -19,6 +35,7 @@ fn load_state(path: &FsPath) -> Result<Option<StateInner>> {
     ))
 }
 
+/// Persists state.
 fn persist_state(path: &FsPath, inner: &StateInner) -> Result<()> {
     let persisted = PersistedState::from_inner(inner);
     if let Some(parent) = path.parent() {
@@ -31,6 +48,7 @@ fn persist_state(path: &FsPath, inner: &StateInner) -> Result<()> {
     fs::write(path, encoded).with_context(|| format!("failed to write `{}`", path.display()))
 }
 
+/// Delivers turn dispatch.
 fn deliver_turn_dispatch(state: &AppState, dispatch: TurnDispatch) -> Result<(), ApiError> {
     match dispatch {
         TurnDispatch::PersistentClaude {
@@ -89,14 +107,17 @@ fn deliver_turn_dispatch(state: &AppState, dispatch: TurnDispatch) -> Result<(),
     Ok(())
 }
 
+/// Returns the backend health response.
 async fn health() -> Json<HealthResponse> {
     Json(HealthResponse { ok: true })
 }
 
+/// Gets state.
 async fn get_state(State(state): State<AppState>) -> Json<StateResponse> {
     Json(state.snapshot())
 }
 
+/// Lists workspace layouts.
 async fn list_workspace_layouts(
     State(state): State<AppState>,
 ) -> Result<Json<WorkspaceLayoutsResponse>, ApiError> {
@@ -104,6 +125,7 @@ async fn list_workspace_layouts(
     Ok(Json(response))
 }
 
+/// Gets workspace layout.
 async fn get_workspace_layout(
     State(state): State<AppState>,
     AxumPath(workspace_id): AxumPath<String>,
@@ -113,6 +135,7 @@ async fn get_workspace_layout(
     Ok(Json(response))
 }
 
+/// Stores workspace layout.
 async fn put_workspace_layout(
     State(state): State<AppState>,
     AxumPath(workspace_id): AxumPath<String>,
@@ -123,12 +146,14 @@ async fn put_workspace_layout(
 }
 
 impl AppState {
+    /// Handles project digest.
     fn project_digest(&self, project_id: &str) -> Result<ProjectDigestResponse, ApiError> {
         Ok(self
             .build_project_digest_summary(project_id)?
             .into_response())
     }
 
+    /// Handles execute project action.
     fn execute_project_action(
         &self,
         project_id: &str,
@@ -201,6 +226,7 @@ impl AppState {
         self.project_digest(project_id)
     }
 
+    /// Builds project digest summary.
     fn build_project_digest_summary(
         &self,
         project_id: &str,
@@ -402,6 +428,7 @@ impl AppState {
         })
     }
 
+    /// Handles project digest inputs.
     fn project_digest_inputs(&self, project_id: &str) -> Result<ProjectDigestInputs, ApiError> {
         let inner = self.inner.lock().expect("state mutex poisoned");
         let project = inner
@@ -417,6 +444,7 @@ impl AppState {
         Ok(ProjectDigestInputs { project, sessions })
     }
 
+    /// Loads project Git status best effort.
     fn load_project_git_status_best_effort(&self, project: &Project) -> Option<GitStatusResponse> {
         if project.remote_id == LOCAL_REMOTE_ID {
             return load_git_status_for_path(FsPath::new(&project.root_path)).ok();
@@ -434,6 +462,7 @@ impl AppState {
     }
 }
 
+/// Runs blocking API.
 async fn run_blocking_api<T, F>(operation: F) -> Result<T, ApiError>
 where
     T: Send + 'static,
@@ -444,6 +473,7 @@ where
         .map_err(|err| ApiError::internal(format!("blocking task failed: {err}")))?
 }
 
+/// Gets review.
 async fn get_review(
     AxumPath(change_set_id): AxumPath<String>,
     Query(query): Query<ReviewQuery>,
@@ -477,6 +507,7 @@ async fn get_review(
     Ok(Json(response))
 }
 
+/// Stores review.
 async fn put_review(
     AxumPath(change_set_id): AxumPath<String>,
     Query(query): Query<ReviewQuery>,
@@ -519,6 +550,7 @@ async fn put_review(
     Ok(Json(response))
 }
 
+/// Gets review summary.
 async fn get_review_summary(
     AxumPath(change_set_id): AxumPath<String>,
     Query(query): Query<ReviewQuery>,
@@ -562,6 +594,7 @@ async fn get_review_summary(
     Ok(Json(response))
 }
 
+/// Reads file.
 async fn read_file(
     State(state): State<AppState>,
     Query(query): Query<FileQuery>,
@@ -637,6 +670,7 @@ async fn read_file(
     Ok(Json(response))
 }
 
+/// Writes file.
 async fn write_file(
     State(state): State<AppState>,
     Json(request): Json<WriteFileRequest>,
@@ -696,6 +730,7 @@ async fn write_file(
     Ok(Json(response))
 }
 
+/// Reads directory.
 async fn read_directory(
     State(state): State<AppState>,
     Query(query): Query<FileQuery>,
@@ -803,6 +838,7 @@ async fn read_directory(
     Ok(Json(response))
 }
 
+/// Lists agent commands.
 async fn list_agent_commands(
     AxumPath(session_id): AxumPath<String>,
     State(state): State<AppState>,
@@ -811,6 +847,7 @@ async fn list_agent_commands(
     Ok(Json(response))
 }
 
+/// Searches instructions.
 async fn search_instructions(
     Query(query): Query<InstructionSearchQuery>,
     State(state): State<AppState>,
@@ -819,6 +856,7 @@ async fn search_instructions(
     Ok(Json(response))
 }
 
+/// Reads Claude agent commands.
 fn read_claude_agent_commands(workdir: &FsPath) -> Result<Vec<AgentCommand>, ApiError> {
     let commands_dir = workdir.join(".claude").join("commands");
     let entries = match fs::read_dir(&commands_dir) {
@@ -888,6 +926,7 @@ fn read_claude_agent_commands(workdir: &FsPath) -> Result<Vec<AgentCommand>, Api
     Ok(commands)
 }
 
+/// Searches instruction phrase.
 fn search_instruction_phrase(
     workdir: &FsPath,
     query: &str,
@@ -938,6 +977,7 @@ fn search_instruction_phrase(
     })
 }
 
+/// Builds instruction search graph.
 fn build_instruction_search_graph(
     workdir: &FsPath,
 ) -> Result<InstructionSearchGraph, ApiError> {
@@ -1011,6 +1051,7 @@ fn build_instruction_search_graph(
     })
 }
 
+/// Handles discover instruction seed paths.
 fn discover_instruction_seed_paths(workdir: &FsPath) -> Result<Vec<PathBuf>, ApiError> {
     let mut pending_directories = vec![workdir.to_path_buf()];
     let mut paths = Vec::new();
@@ -1065,6 +1106,7 @@ fn discover_instruction_seed_paths(workdir: &FsPath) -> Result<Vec<PathBuf>, Api
     Ok(paths)
 }
 
+/// Returns whether skip instruction directory.
 fn should_skip_instruction_directory(path: &FsPath) -> bool {
     let Some(name) = path.file_name().and_then(|value| value.to_str()) else {
         return false;
@@ -1072,6 +1114,7 @@ fn should_skip_instruction_directory(path: &FsPath) -> bool {
     should_skip_instruction_directory_name(name)
 }
 
+/// Returns whether skip instruction directory name.
 fn should_skip_instruction_directory_name(name: &str) -> bool {
     matches!(
         name,
@@ -1079,6 +1122,7 @@ fn should_skip_instruction_directory_name(name: &str) -> bool {
     )
 }
 
+/// Returns whether instruction seed path.
 fn is_instruction_seed_path(path: &FsPath, workdir: &FsPath) -> bool {
     if !path.is_file() {
         return false;
@@ -1142,6 +1186,7 @@ fn is_instruction_seed_path(path: &FsPath, workdir: &FsPath) -> bool {
         && lower_relative.ends_with(".md")
 }
 
+/// Reads instruction document.
 fn read_instruction_document(
     path: &FsPath,
     workdir: &FsPath,
@@ -1167,6 +1212,7 @@ fn read_instruction_document(
     })
 }
 
+/// Classifies instruction document kind.
 fn classify_instruction_document_kind(path: &FsPath, workdir: &FsPath) -> InstructionDocumentKind {
     let lower_file_name = path
         .file_name()
@@ -1229,6 +1275,7 @@ fn classify_instruction_document_kind(path: &FsPath, workdir: &FsPath) -> Instru
     InstructionDocumentKind::ReferencedInstruction
 }
 
+/// Extracts instruction edges.
 fn extract_instruction_edges(
     document: &InstructionDocumentInternal,
     workdir: &FsPath,
@@ -1296,6 +1343,7 @@ fn extract_instruction_edges(
     Ok(edges)
 }
 
+/// Handles maybe push instruction file edge.
 fn maybe_push_instruction_file_edge(
     edges: &mut Vec<InstructionPathStep>,
     seen: &mut HashSet<(String, usize, InstructionRelation)>,
@@ -1323,6 +1371,7 @@ fn maybe_push_instruction_file_edge(
     );
 }
 
+/// Handles maybe push instruction edge.
 fn maybe_push_instruction_edge(
     edges: &mut Vec<InstructionPathStep>,
     seen: &mut HashSet<(String, usize, InstructionRelation)>,
@@ -1352,6 +1401,7 @@ fn maybe_push_instruction_edge(
     });
 }
 
+/// Resolves instruction reference file.
 fn resolve_instruction_reference_file(
     source_path: &FsPath,
     workdir: &FsPath,
@@ -1394,6 +1444,7 @@ fn resolve_instruction_reference_file(
     None
 }
 
+/// Resolves instruction reference directory.
 fn resolve_instruction_reference_directory(
     source_path: &FsPath,
     workdir: &FsPath,
@@ -1409,6 +1460,7 @@ fn resolve_instruction_reference_directory(
         .find(|candidate| candidate.is_dir())
 }
 
+/// Handles instruction reference candidates.
 fn instruction_reference_candidates(
     source_path: &FsPath,
     workdir: &FsPath,
@@ -1447,6 +1499,7 @@ fn instruction_reference_candidates(
     candidates
 }
 
+/// Extracts markdown link targets.
 fn extract_markdown_link_targets(line: &str) -> Vec<String> {
     let mut targets = Vec::new();
     let mut start = 0usize;
@@ -1464,6 +1517,7 @@ fn extract_markdown_link_targets(line: &str) -> Vec<String> {
     targets
 }
 
+/// Extracts instruction path tokens.
 fn extract_instruction_path_tokens(line: &str) -> Vec<String> {
     line.split_whitespace()
         .map(sanitize_instruction_reference)
@@ -1491,6 +1545,7 @@ fn extract_instruction_path_tokens(line: &str) -> Vec<String> {
         .collect()
 }
 
+/// Sanitizes instruction reference.
 fn sanitize_instruction_reference(raw: &str) -> String {
     raw.trim()
         .trim_matches(|character: char| {
@@ -1517,6 +1572,7 @@ fn sanitize_instruction_reference(raw: &str) -> String {
         .to_owned()
 }
 
+/// Collects markdown files in directory.
 fn collect_markdown_files_in_directory(directory: &FsPath) -> Result<Vec<PathBuf>, ApiError> {
     let mut pending_directories = vec![directory.to_path_buf()];
     let mut paths = Vec::new();
@@ -1571,10 +1627,12 @@ fn collect_markdown_files_in_directory(directory: &FsPath) -> Result<Vec<PathBuf
     Ok(paths)
 }
 
+/// Returns whether transitive instruction edges.
 fn supports_transitive_instruction_edges(kind: InstructionDocumentKind) -> bool {
     !matches!(kind, InstructionDocumentKind::ReferencedInstruction)
 }
 
+/// Handles path is in skipped instruction directory.
 fn path_is_in_skipped_instruction_directory(path: &FsPath, workdir: &FsPath) -> bool {
     let normalized = normalize_path_best_effort(path);
     let Ok(relative) = normalized.strip_prefix(workdir) else {
@@ -1590,6 +1648,7 @@ fn path_is_in_skipped_instruction_directory(path: &FsPath, workdir: &FsPath) -> 
     })
 }
 
+/// Traces instruction roots.
 fn trace_instruction_roots(
     graph: &InstructionSearchGraph,
     target_path: &FsPath,
@@ -1622,6 +1681,7 @@ fn trace_instruction_roots(
     results
 }
 
+/// Traces instruction roots recursive.
 fn trace_instruction_roots_recursive(
     graph: &InstructionSearchGraph,
     current_path: &str,
@@ -1657,6 +1717,7 @@ fn trace_instruction_roots_recursive(
     visited.remove(current_path);
 }
 
+/// Reads Git status.
 async fn read_git_status(
     State(state): State<AppState>,
     Query(query): Query<FileQuery>,
@@ -1688,6 +1749,7 @@ async fn read_git_status(
     Ok(Json(response))
 }
 
+/// Reads Git diff.
 async fn read_git_diff(
     State(state): State<AppState>,
     Json(request): Json<GitDiffRequest>,
@@ -1722,6 +1784,7 @@ async fn read_git_diff(
     Ok(Json(response))
 }
 
+/// Applies Git file action.
 async fn apply_git_file_action(
     State(state): State<AppState>,
     Json(request): Json<GitFileActionRequest>,
@@ -1792,6 +1855,7 @@ async fn apply_git_file_action(
     Ok(Json(response))
 }
 
+/// Handles commit Git changes.
 async fn commit_git_changes(
     State(state): State<AppState>,
     Json(request): Json<GitCommitRequest>,
@@ -1855,6 +1919,7 @@ async fn commit_git_changes(
     Ok(Json(response))
 }
 
+/// Pushes Git changes.
 async fn push_git_changes(
     State(state): State<AppState>,
     Json(request): Json<GitRepoActionRequest>,
@@ -1880,6 +1945,7 @@ async fn push_git_changes(
     Ok(Json(response))
 }
 
+/// Syncs Git changes.
 async fn sync_git_changes(
     State(state): State<AppState>,
     Json(request): Json<GitRepoActionRequest>,
@@ -1904,6 +1970,7 @@ async fn sync_git_changes(
     .await?;
     Ok(Json(response))
 }
+/// Loads Git diff for request.
 fn load_git_diff_for_request(
     workdir: &FsPath,
     request: &GitDiffRequest,
@@ -1970,6 +2037,7 @@ fn load_git_diff_for_request(
     })
 }
 
+/// Loads Git status for path.
 fn load_git_status_for_path(path: &FsPath) -> Result<GitStatusResponse, ApiError> {
     let workdir = normalize_git_workdir_path(path)?;
     let Some(repo_root) = resolve_git_repo_root(&workdir)? else {
@@ -2048,6 +2116,7 @@ fn load_git_status_for_path(path: &FsPath) -> Result<GitStatusResponse, ApiError
     })
 }
 
+/// Normalizes Git working directory path.
 fn normalize_git_workdir_path(path: &FsPath) -> Result<PathBuf, ApiError> {
     if path.is_dir() {
         return Ok(path.to_path_buf());
@@ -2058,6 +2127,7 @@ fn normalize_git_workdir_path(path: &FsPath) -> Result<PathBuf, ApiError> {
         .ok_or_else(|| ApiError::bad_request("cannot inspect git status for a root file path"))
 }
 
+/// Normalizes Git repo relative path.
 fn normalize_git_repo_relative_path(path: &str) -> Result<String, ApiError> {
     let trimmed = path.trim();
     if trimmed.is_empty() {
@@ -2085,6 +2155,7 @@ fn normalize_git_repo_relative_path(path: &str) -> Result<String, ApiError> {
     Ok(trimmed.to_owned())
 }
 
+/// Collects Git pathspecs.
 fn collect_git_pathspecs(current_path: &str, original_path: Option<&str>) -> Vec<String> {
     let mut pathspecs = Vec::new();
     if let Some(original_path) = original_path.filter(|original| *original != current_path) {
@@ -2094,6 +2165,7 @@ fn collect_git_pathspecs(current_path: &str, original_path: Option<&str>) -> Vec
     pathspecs
 }
 
+/// Loads Git file diff text.
 fn load_git_file_diff_text(
     repo_root: &FsPath,
     current_path: &str,
@@ -2133,6 +2205,7 @@ fn load_git_file_diff_text(
     }
 }
 
+/// Builds untracked Git diff.
 fn build_untracked_git_diff(repo_root: &FsPath, current_path: &str) -> Result<String, ApiError> {
     let file_path = repo_root.join(current_path);
     let content = fs::read(&file_path).map_err(|err| {
@@ -2162,6 +2235,7 @@ fn build_untracked_git_diff(repo_root: &FsPath, current_path: &str) -> Result<St
     Ok(diff_lines.join("\n"))
 }
 
+/// Reverts Git file action.
 fn revert_git_file_action(
     repo_root: &FsPath,
     current_path: &str,
@@ -2196,6 +2270,7 @@ fn revert_git_file_action(
     Ok(())
 }
 
+/// Runs Git pathspec command.
 fn run_git_pathspec_command(
     repo_root: &FsPath,
     args: &[&str],
@@ -2224,10 +2299,12 @@ fn run_git_pathspec_command(
     }
 }
 
+/// Returns whether staged Git changes.
 fn has_staged_git_changes(status: &GitStatusResponse) -> bool {
     status.files.iter().any(|file| file.index_status.is_some())
 }
 
+/// Extracts Git command error.
 fn extract_git_command_error(output: &std::process::Output) -> String {
     let stderr = String::from_utf8_lossy(&output.stderr).trim().to_owned();
     if !stderr.is_empty() {
@@ -2237,6 +2314,7 @@ fn extract_git_command_error(output: &std::process::Output) -> String {
     String::from_utf8_lossy(&output.stdout).trim().to_owned()
 }
 
+/// Builds Git commit summary.
 fn build_git_commit_summary(message: &str) -> String {
     let headline = message.lines().next().unwrap_or("").trim();
     if headline.is_empty() {
@@ -2246,6 +2324,7 @@ fn build_git_commit_summary(message: &str) -> String {
     }
 }
 
+/// Pushes Git repo.
 fn push_git_repo(workdir: &FsPath) -> Result<GitRepoActionResponse, ApiError> {
     let workdir = normalize_git_workdir_path(workdir)?;
     let Some(repo_root) = resolve_git_repo_root(&workdir)? else {
@@ -2261,6 +2340,7 @@ fn push_git_repo(workdir: &FsPath) -> Result<GitRepoActionResponse, ApiError> {
     })
 }
 
+/// Syncs Git repo.
 fn sync_git_repo(workdir: &FsPath) -> Result<GitRepoActionResponse, ApiError> {
     let workdir = normalize_git_workdir_path(workdir)?;
     let Some(repo_root) = resolve_git_repo_root(&workdir)? else {
@@ -2283,6 +2363,7 @@ fn sync_git_repo(workdir: &FsPath) -> Result<GitRepoActionResponse, ApiError> {
     })
 }
 
+/// Runs Git repo command.
 fn run_git_repo_command(
     repo_root: &FsPath,
     args: &[&str],
@@ -2307,6 +2388,7 @@ fn run_git_repo_command(
     }
 }
 
+/// Builds Git push summary.
 fn build_git_push_summary(
     status_before: &GitStatusResponse,
     status_after: &GitStatusResponse,
@@ -2316,6 +2398,7 @@ fn build_git_push_summary(
     build_git_repo_action_summary("Pushed", branch, upstream)
 }
 
+/// Builds Git sync summary.
 fn build_git_sync_summary(
     status_before: &GitStatusResponse,
     status_after: &GitStatusResponse,
@@ -2325,6 +2408,7 @@ fn build_git_sync_summary(
     build_git_repo_action_summary("Synced", branch, upstream)
 }
 
+/// Builds Git repo action summary.
 fn build_git_repo_action_summary(
     verb: &str,
     branch: Option<&str>,
@@ -2336,6 +2420,7 @@ fn build_git_repo_action_summary(
         _ => format!("{verb} git repository."),
     }
 }
+/// Handles stable text hash.
 fn stable_text_hash(value: &str) -> String {
     let mut hash = 0xcbf29ce484222325_u64;
     for byte in value.as_bytes() {
@@ -2345,6 +2430,7 @@ fn stable_text_hash(value: &str) -> String {
     format!("{hash:016x}")
 }
 
+/// Streams state and delta events over SSE.
 async fn state_events(
     State(state): State<AppState>,
 ) -> Sse<impl futures_core::Stream<Item = std::result::Result<Event, Infallible>>> {
@@ -2390,6 +2476,7 @@ async fn state_events(
     Sse::new(stream).keep_alive(KeepAlive::default())
 }
 
+/// Creates session.
 async fn create_session(
     State(state): State<AppState>,
     Json(request): Json<CreateSessionRequest>,
@@ -2398,6 +2485,7 @@ async fn create_session(
     Ok((StatusCode::CREATED, Json(response)))
 }
 
+/// Creates project.
 async fn create_project(
     State(state): State<AppState>,
     Json(request): Json<CreateProjectRequest>,
@@ -2406,6 +2494,7 @@ async fn create_project(
     Ok((StatusCode::CREATED, Json(response)))
 }
 
+/// Gets project digest.
 async fn get_project_digest(
     AxumPath(project_id): AxumPath<String>,
     State(state): State<AppState>,
@@ -2414,6 +2503,7 @@ async fn get_project_digest(
     Ok(Json(response))
 }
 
+/// Dispatches project action.
 async fn dispatch_project_action(
     AxumPath((project_id, action_id)): AxumPath<(String, String)>,
     State(state): State<AppState>,
@@ -2423,6 +2513,7 @@ async fn dispatch_project_action(
     Ok(Json(response))
 }
 
+/// Updates app settings.
 async fn update_app_settings(
     State(state): State<AppState>,
     Json(request): Json<UpdateAppSettingsRequest>,
@@ -2431,6 +2522,7 @@ async fn update_app_settings(
     Ok(Json(response))
 }
 
+/// Picks project root.
 async fn pick_project_root(
     State(state): State<AppState>,
 ) -> Result<Json<PickProjectRootResponse>, ApiError> {
@@ -2441,6 +2533,7 @@ async fn pick_project_root(
     Ok(Json(PickProjectRootResponse { path }))
 }
 
+/// Updates session settings.
 async fn update_session_settings(
     AxumPath(session_id): AxumPath<String>,
     State(state): State<AppState>,
@@ -2450,6 +2543,7 @@ async fn update_session_settings(
     Ok(Json(response))
 }
 
+/// Refreshes session model options.
 async fn refresh_session_model_options(
     AxumPath(session_id): AxumPath<String>,
     State(state): State<AppState>,
@@ -2458,6 +2552,7 @@ async fn refresh_session_model_options(
     Ok(Json(response))
 }
 
+/// Forks Codex thread.
 async fn fork_codex_thread(
     AxumPath(session_id): AxumPath<String>,
     State(state): State<AppState>,
@@ -2466,6 +2561,7 @@ async fn fork_codex_thread(
     Ok((StatusCode::CREATED, Json(response)))
 }
 
+/// Archives Codex thread.
 async fn archive_codex_thread(
     AxumPath(session_id): AxumPath<String>,
     State(state): State<AppState>,
@@ -2474,6 +2570,7 @@ async fn archive_codex_thread(
     Ok(Json(response))
 }
 
+/// Unarchives Codex thread.
 async fn unarchive_codex_thread(
     AxumPath(session_id): AxumPath<String>,
     State(state): State<AppState>,
@@ -2482,6 +2579,7 @@ async fn unarchive_codex_thread(
     Ok(Json(response))
 }
 
+/// Compacts Codex thread.
 async fn compact_codex_thread(
     AxumPath(session_id): AxumPath<String>,
     State(state): State<AppState>,
@@ -2490,6 +2588,7 @@ async fn compact_codex_thread(
     Ok(Json(response))
 }
 
+/// Rolls back Codex thread.
 async fn rollback_codex_thread(
     AxumPath(session_id): AxumPath<String>,
     State(state): State<AppState>,
@@ -2501,6 +2600,7 @@ async fn rollback_codex_thread(
     Ok(Json(response))
 }
 
+/// Handles send message.
 async fn send_message(
     AxumPath(session_id): AxumPath<String>,
     State(state): State<AppState>,
@@ -2522,6 +2622,7 @@ async fn send_message(
     Ok((StatusCode::ACCEPTED, Json(snapshot)))
 }
 
+/// Cancels queued prompt.
 async fn cancel_queued_prompt(
     AxumPath((session_id, prompt_id)): AxumPath<(String, String)>,
     State(state): State<AppState>,
@@ -2530,6 +2631,7 @@ async fn cancel_queued_prompt(
     Ok(Json(response))
 }
 
+/// Stops session.
 async fn stop_session(
     AxumPath(session_id): AxumPath<String>,
     State(state): State<AppState>,
@@ -2538,6 +2640,7 @@ async fn stop_session(
     Ok(Json(response))
 }
 
+/// Kills session.
 async fn kill_session(
     AxumPath(session_id): AxumPath<String>,
     State(state): State<AppState>,
@@ -2546,6 +2649,7 @@ async fn kill_session(
     Ok(Json(response))
 }
 
+/// Submits approval.
 async fn submit_approval(
     AxumPath((session_id, message_id)): AxumPath<(String, String)>,
     State(state): State<AppState>,
@@ -2555,6 +2659,7 @@ async fn submit_approval(
     Ok(Json(response))
 }
 
+/// Submits user input.
 async fn submit_user_input(
     AxumPath((session_id, message_id)): AxumPath<(String, String)>,
     State(state): State<AppState>,
@@ -2566,6 +2671,7 @@ async fn submit_user_input(
     Ok(Json(response))
 }
 
+/// Submits MCP elicitation.
 async fn submit_mcp_elicitation(
     AxumPath((session_id, message_id)): AxumPath<(String, String)>,
     State(state): State<AppState>,
@@ -2583,6 +2689,7 @@ async fn submit_mcp_elicitation(
     Ok(Json(response))
 }
 
+/// Submits Codex app request.
 async fn submit_codex_app_request(
     AxumPath((session_id, message_id)): AxumPath<(String, String)>,
     State(state): State<AppState>,
@@ -2595,6 +2702,7 @@ async fn submit_codex_app_request(
     Ok(Json(response))
 }
 
+/// Represents the API error.
 #[derive(Debug)]
 struct ApiError {
     message: String,
@@ -2602,6 +2710,7 @@ struct ApiError {
 }
 
 impl ApiError {
+    /// Handles bad request.
     fn bad_request(message: impl Into<String>) -> Self {
         Self {
             message: message.into(),
@@ -2609,6 +2718,7 @@ impl ApiError {
         }
     }
 
+    /// Handles conflict.
     fn conflict(message: impl Into<String>) -> Self {
         Self {
             message: message.into(),
@@ -2616,6 +2726,7 @@ impl ApiError {
         }
     }
 
+    /// Handles not found.
     fn not_found(message: impl Into<String>) -> Self {
         Self {
             message: message.into(),
@@ -2623,6 +2734,7 @@ impl ApiError {
         }
     }
 
+    /// Handles internal.
     fn internal(message: impl Into<String>) -> Self {
         Self {
             message: message.into(),
@@ -2630,6 +2742,7 @@ impl ApiError {
         }
     }
 
+    /// Handles bad gateway.
     fn bad_gateway(message: impl Into<String>) -> Self {
         Self {
             message: message.into(),
@@ -2637,6 +2750,7 @@ impl ApiError {
         }
     }
 
+    /// Builds the value from status.
     fn from_status(status: StatusCode, message: impl Into<String>) -> Self {
         Self {
             message: message.into(),
@@ -2646,6 +2760,7 @@ impl ApiError {
 }
 
 impl IntoResponse for ApiError {
+    /// Converts the value into response.
     fn into_response(self) -> Response {
         let body = Json(ErrorResponse {
             error: self.message,
@@ -2654,6 +2769,7 @@ impl IntoResponse for ApiError {
     }
 }
 
+/// Resolves review storage root.
 fn resolve_review_storage_root(
     state: &AppState,
     session_id: Option<&str>,
@@ -2662,6 +2778,7 @@ fn resolve_review_storage_root(
     resolve_request_project_root_path(state, session_id, project_id)
 }
 
+/// Resolves review document path.
 fn resolve_review_document_path(
     review_root: &FsPath,
     change_set_id: &str,
@@ -2673,6 +2790,7 @@ fn resolve_review_document_path(
         .join(format!("{change_set_id}.json")))
 }
 
+/// Loads review document.
 fn load_review_document(
     path: &FsPath,
     change_set_id: &str,
@@ -2694,6 +2812,7 @@ fn load_review_document(
     Ok(review)
 }
 
+/// Persists review document.
 fn persist_review_document(path: &FsPath, review: &ReviewDocument) -> Result<(), ApiError> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).map_err(|err| {
@@ -2711,6 +2830,7 @@ fn persist_review_document(path: &FsPath, review: &ReviewDocument) -> Result<(),
     })
 }
 
+/// Prepares review document for write.
 fn prepare_review_document_for_write(
     path: &FsPath,
     change_set_id: &str,
@@ -2734,6 +2854,7 @@ fn prepare_review_document_for_write(
     Ok(next)
 }
 
+/// Returns the default review document.
 fn default_review_document(change_set_id: &str) -> ReviewDocument {
     ReviewDocument {
         version: REVIEW_DOCUMENT_VERSION,
@@ -2745,6 +2866,7 @@ fn default_review_document(change_set_id: &str) -> ReviewDocument {
     }
 }
 
+/// Summarizes review document.
 fn summarize_review_document(review: &ReviewDocument) -> ReviewDocumentSummary {
     let mut summary = ReviewDocumentSummary::default();
     summary.thread_count = review.threads.len();
@@ -2761,6 +2883,7 @@ fn summarize_review_document(review: &ReviewDocument) -> ReviewDocumentSummary {
     summary
 }
 
+/// Validates review change set ID.
 fn validate_review_change_set_id(change_set_id: &str) -> Result<(), ApiError> {
     let trimmed = change_set_id.trim();
     if trimmed.is_empty() {
@@ -2779,6 +2902,7 @@ fn validate_review_change_set_id(change_set_id: &str) -> Result<(), ApiError> {
     ))
 }
 
+/// Validates review document.
 fn validate_review_document(
     change_set_id: &str,
     review: &ReviewDocument,
@@ -2816,6 +2940,7 @@ fn validate_review_document(
     Ok(())
 }
 
+/// Validates review thread.
 fn validate_review_thread(thread: &ReviewThread) -> Result<(), ApiError> {
     validate_non_empty_review_field("threads[].id", &thread.id)?;
     validate_review_anchor(&thread.anchor)?;
@@ -2836,6 +2961,7 @@ fn validate_review_thread(thread: &ReviewThread) -> Result<(), ApiError> {
     Ok(())
 }
 
+/// Validates review anchor.
 fn validate_review_anchor(anchor: &ReviewAnchor) -> Result<(), ApiError> {
     match anchor {
         ReviewAnchor::ChangeSet => Ok(()),
@@ -2867,6 +2993,7 @@ fn validate_review_anchor(anchor: &ReviewAnchor) -> Result<(), ApiError> {
     }
 }
 
+/// Validates non empty review field.
 fn validate_non_empty_review_field(label: &str, value: &str) -> Result<(), ApiError> {
     if value.trim().is_empty() {
         return Err(ApiError::bad_request(format!("{label} cannot be empty")));
@@ -2875,6 +3002,7 @@ fn validate_non_empty_review_field(label: &str, value: &str) -> Result<(), ApiEr
     Ok(())
 }
 
+/// Defines the agent variants.
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
 enum Agent {
     Codex,
@@ -2884,6 +3012,7 @@ enum Agent {
 }
 
 impl Agent {
+    /// Handles parse.
     fn parse(args: impl Iterator<Item = String>) -> Result<Self> {
         let mut args = args;
         while let Some(arg) = args.next() {
@@ -2903,6 +3032,7 @@ impl Agent {
         Ok(Self::Codex)
     }
 
+    /// Builds the value from str.
     fn from_str(value: &str) -> Result<Self> {
         match value {
             "codex" => Ok(Self::Codex),
@@ -2915,6 +3045,7 @@ impl Agent {
         }
     }
 
+    /// Handles name.
     fn name(self) -> &'static str {
         match self {
             Self::Codex => "Codex",
@@ -2924,6 +3055,7 @@ impl Agent {
         }
     }
 
+    /// Handles avatar.
     fn avatar(self) -> &'static str {
         match self {
             Self::Codex => "CX",
@@ -2933,6 +3065,7 @@ impl Agent {
         }
     }
 
+    /// Returns the default model.
     fn default_model(self) -> &'static str {
         match self {
             Self::Codex => "gpt-5.4",
@@ -2942,22 +3075,27 @@ impl Agent {
         }
     }
 
+    /// Returns whether Codex prompt settings.
     fn supports_codex_prompt_settings(self) -> bool {
         matches!(self, Self::Codex)
     }
 
+    /// Returns whether Claude approval mode.
     fn supports_claude_approval_mode(self) -> bool {
         matches!(self, Self::Claude)
     }
 
+    /// Returns whether cursor mode.
     fn supports_cursor_mode(self) -> bool {
         matches!(self, Self::Cursor)
     }
 
+    /// Returns whether Gemini approval mode.
     fn supports_gemini_approval_mode(self) -> bool {
         matches!(self, Self::Gemini)
     }
 
+    /// Handles ACP runtime.
     fn acp_runtime(self) -> Option<AcpAgent> {
         match self {
             Self::Cursor => Some(AcpAgent::Cursor),
@@ -2967,6 +3105,7 @@ impl Agent {
     }
 }
 
+/// Represents project.
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct Project {
@@ -2978,6 +3117,7 @@ struct Project {
     remote_project_id: Option<String>,
 }
 
+/// Represents session.
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct Session {
@@ -3015,6 +3155,7 @@ struct Session {
     pending_prompts: Vec<PendingPrompt>,
 }
 
+/// Tracks Codex thread state.
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
 enum CodexThreadState {
@@ -3022,6 +3163,7 @@ enum CodexThreadState {
     Archived,
 }
 
+/// Defines the Codex approval policy variants.
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "kebab-case")]
 enum CodexApprovalPolicy {
@@ -3032,6 +3174,7 @@ enum CodexApprovalPolicy {
 }
 
 impl CodexApprovalPolicy {
+    /// Returns the cli value representation.
     fn as_cli_value(self) -> &'static str {
         match self {
             Self::Untrusted => "untrusted",
@@ -3042,6 +3185,7 @@ impl CodexApprovalPolicy {
     }
 }
 
+/// Enumerates Codex sandbox modes.
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "kebab-case")]
 enum CodexSandboxMode {
@@ -3051,6 +3195,7 @@ enum CodexSandboxMode {
 }
 
 impl CodexSandboxMode {
+    /// Returns the cli value representation.
     fn as_cli_value(self) -> &'static str {
         match self {
             Self::ReadOnly => "read-only",
@@ -3060,6 +3205,7 @@ impl CodexSandboxMode {
     }
 }
 
+/// Defines the Codex reasoning effort variants.
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "kebab-case")]
 enum CodexReasoningEffort {
@@ -3073,6 +3219,7 @@ enum CodexReasoningEffort {
 }
 
 impl CodexReasoningEffort {
+    /// Returns the API value representation.
     fn as_api_value(self) -> &'static str {
         match self {
             Self::None => "none",
@@ -3085,6 +3232,7 @@ impl CodexReasoningEffort {
     }
 }
 
+/// Enumerates Claude approval modes.
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "kebab-case")]
 enum ClaudeApprovalMode {
@@ -3093,6 +3241,7 @@ enum ClaudeApprovalMode {
     Plan,
 }
 
+/// Defines the Claude effort level variants.
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "kebab-case")]
 enum ClaudeEffortLevel {
@@ -3104,6 +3253,7 @@ enum ClaudeEffortLevel {
 }
 
 impl ClaudeEffortLevel {
+    /// Returns the cli value representation.
     fn as_cli_value(self) -> Option<&'static str> {
         match self {
             Self::Default => None,
@@ -3116,6 +3266,7 @@ impl ClaudeEffortLevel {
 }
 
 impl ClaudeApprovalMode {
+    /// Handles initial cli permission mode.
     fn initial_cli_permission_mode(self) -> Option<&'static str> {
         match self {
             Self::Plan => Some("plan"),
@@ -3123,6 +3274,7 @@ impl ClaudeApprovalMode {
         }
     }
 
+    /// Handles session cli permission mode.
     fn session_cli_permission_mode(self) -> &'static str {
         match self {
             Self::Plan => "plan",
@@ -3131,6 +3283,7 @@ impl ClaudeApprovalMode {
     }
 }
 
+/// Enumerates cursor modes.
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
 enum CursorMode {
@@ -3140,6 +3293,7 @@ enum CursorMode {
 }
 
 impl CursorMode {
+    /// Returns the ACP value representation.
     fn as_acp_value(self) -> &'static str {
         match self {
             Self::Agent => "agent",
@@ -3149,6 +3303,7 @@ impl CursorMode {
     }
 }
 
+/// Enumerates Gemini approval modes.
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 enum GeminiApprovalMode {
@@ -3159,6 +3314,7 @@ enum GeminiApprovalMode {
 }
 
 impl GeminiApprovalMode {
+    /// Returns the cli value representation.
     fn as_cli_value(self) -> &'static str {
         match self {
             Self::Default => "default",
@@ -3169,6 +3325,7 @@ impl GeminiApprovalMode {
     }
 }
 
+/// Enumerates session states.
 #[allow(dead_code)]
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -3179,6 +3336,7 @@ enum SessionStatus {
     Error,
 }
 
+/// Defines the author variants.
 #[derive(Clone, Copy, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "lowercase")]
 enum Author {
@@ -3186,6 +3344,7 @@ enum Author {
     Assistant,
 }
 
+/// Enumerates command states.
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
 enum CommandStatus {
@@ -3195,6 +3354,7 @@ enum CommandStatus {
 }
 
 impl CommandStatus {
+    /// Handles label.
     fn label(self) -> &'static str {
         match self {
             Self::Running => "running",
@@ -3204,6 +3364,7 @@ impl CommandStatus {
     }
 }
 
+/// Defines the change type variants.
 #[allow(dead_code)]
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -3212,6 +3373,7 @@ enum ChangeType {
     Create,
 }
 
+/// Enumerates approval decisions.
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 enum ApprovalDecision {
@@ -3223,6 +3385,7 @@ enum ApprovalDecision {
     Rejected,
 }
 
+/// Enumerates parallel agent states.
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 enum ParallelAgentStatus {
@@ -3232,6 +3395,7 @@ enum ParallelAgentStatus {
     Error,
 }
 
+/// Represents user input question option.
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct UserInputQuestionOption {
@@ -3239,6 +3403,7 @@ struct UserInputQuestionOption {
     label: String,
 }
 
+/// Represents user input question.
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct UserInputQuestion {
@@ -3253,6 +3418,7 @@ struct UserInputQuestion {
     question: String,
 }
 
+/// Enumerates MCP elicitation actions.
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 enum McpElicitationAction {
@@ -3261,6 +3427,7 @@ enum McpElicitationAction {
     Cancel,
 }
 
+/// Enumerates MCP elicitation request modes.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase", tag = "mode")]
 enum McpElicitationRequestMode {
@@ -3281,6 +3448,7 @@ enum McpElicitationRequestMode {
     },
 }
 
+/// Represents the MCP elicitation request payload.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct McpElicitationRequestPayload {
@@ -3293,6 +3461,7 @@ struct McpElicitationRequestPayload {
     mode: McpElicitationRequestMode,
 }
 
+/// Tracks interaction request state.
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 enum InteractionRequestState {
@@ -3302,6 +3471,7 @@ enum InteractionRequestState {
     Canceled,
 }
 
+/// Represents parallel agent progress.
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct ParallelAgentProgress {
@@ -3312,6 +3482,7 @@ struct ParallelAgentProgress {
     title: String,
 }
 
+/// Represents message image attachment.
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct MessageImageAttachment {
@@ -3320,6 +3491,7 @@ struct MessageImageAttachment {
     media_type: String,
 }
 
+/// Represents pending prompt.
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct PendingPrompt {
@@ -3336,6 +3508,7 @@ struct PendingPrompt {
     expanded_text: Option<String>,
 }
 
+/// Defines the message variants.
 #[allow(dead_code)]
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(tag = "type", rename_all = "lowercase")]
@@ -3503,6 +3676,7 @@ enum Message {
 }
 
 impl Message {
+    /// Handles ID.
     fn id(&self) -> &str {
         match self {
             Self::Text { id, .. }
@@ -3519,6 +3693,7 @@ impl Message {
         }
     }
 
+    /// Handles preview text.
     fn preview_text(&self) -> Option<String> {
         match self {
             Self::Text {
@@ -3538,6 +3713,7 @@ impl Message {
     }
 }
 
+/// Handles parallel agents preview text.
 fn parallel_agents_preview_text(agents: &[ParallelAgentProgress]) -> String {
     let count = agents.len();
     let label = if count == 1 { "agent" } else { "agents" };
@@ -3569,18 +3745,21 @@ fn parallel_agents_preview_text(agents: &[ParallelAgentProgress]) -> String {
     make_preview(&format!("Completed {count} {label}"))
 }
 
+/// Represents the approval request payload.
 #[derive(Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct ApprovalRequest {
     decision: ApprovalDecision,
 }
 
+/// Represents the user input submission request payload.
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct UserInputSubmissionRequest {
     answers: BTreeMap<String, Vec<String>>,
 }
 
+/// Represents the MCP elicitation submission request payload.
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct McpElicitationSubmissionRequest {
@@ -3589,12 +3768,14 @@ struct McpElicitationSubmissionRequest {
     content: Option<Value>,
 }
 
+/// Represents the Codex app request submission request payload.
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct CodexAppRequestSubmissionRequest {
     result: Value,
 }
 
+/// Represents the create session request payload.
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct CreateSessionRequest {
@@ -3612,6 +3793,7 @@ struct CreateSessionRequest {
     gemini_approval_mode: Option<GeminiApprovalMode>,
 }
 
+/// Represents the create project request payload.
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct CreateProjectRequest {
@@ -3621,6 +3803,7 @@ struct CreateProjectRequest {
     remote_id: String,
 }
 
+/// Represents the update app settings request payload.
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct UpdateAppSettingsRequest {
@@ -3629,6 +3812,7 @@ struct UpdateAppSettingsRequest {
     remotes: Option<Vec<RemoteConfig>>,
 }
 
+/// Represents file query.
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct FileQuery {
@@ -3637,6 +3821,7 @@ struct FileQuery {
     session_id: Option<String>,
 }
 
+/// Represents instruction search query.
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct InstructionSearchQuery {
@@ -3644,6 +3829,7 @@ struct InstructionSearchQuery {
     session_id: String,
 }
 
+/// Represents review query.
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct ReviewQuery {
@@ -3651,6 +3837,7 @@ struct ReviewQuery {
     session_id: Option<String>,
 }
 
+/// Represents the Codex thread rollback request payload.
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct CodexThreadRollbackRequest {
@@ -3658,10 +3845,12 @@ struct CodexThreadRollbackRequest {
     num_turns: usize,
 }
 
+/// Returns the default Codex thread rollback turns.
 fn default_codex_thread_rollback_turns() -> usize {
     1
 }
 
+/// Represents the write file request payload.
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct WriteFileRequest {
@@ -3671,6 +3860,7 @@ struct WriteFileRequest {
     session_id: Option<String>,
 }
 
+/// Represents the file response payload.
 #[derive(Deserialize, Serialize)]
 struct FileResponse {
     path: String,
@@ -3679,6 +3869,7 @@ struct FileResponse {
     language: Option<String>,
 }
 
+/// Enumerates file system entry kinds.
 #[derive(Clone, Copy, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 enum FileSystemEntryKind {
@@ -3686,6 +3877,7 @@ enum FileSystemEntryKind {
     File,
 }
 
+/// Represents directory entry.
 #[derive(Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct DirectoryEntry {
@@ -3694,6 +3886,7 @@ struct DirectoryEntry {
     path: String,
 }
 
+/// Represents the directory response payload.
 #[derive(Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct DirectoryResponse {
@@ -3702,6 +3895,7 @@ struct DirectoryResponse {
     path: String,
 }
 
+/// Represents Git status file.
 #[derive(Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct GitStatusFile {
@@ -3714,6 +3908,7 @@ struct GitStatusFile {
     worktree_status: Option<String>,
 }
 
+/// Represents the Git status response payload.
 #[derive(Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct GitStatusResponse {
@@ -3730,6 +3925,7 @@ struct GitStatusResponse {
     workdir: String,
 }
 
+/// Defines the Git diff section variants.
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 enum GitDiffSection {
@@ -3738,6 +3934,7 @@ enum GitDiffSection {
 }
 
 impl GitDiffSection {
+    /// Returns the key representation.
     fn as_key(self) -> &'static str {
         match self {
             Self::Staged => "staged",
@@ -3745,6 +3942,7 @@ impl GitDiffSection {
         }
     }
 
+    /// Handles summary label.
     fn summary_label(self) -> &'static str {
         match self {
             Self::Staged => "Staged",
@@ -3753,6 +3951,7 @@ impl GitDiffSection {
     }
 }
 
+/// Enumerates Git file actions.
 #[derive(Clone, Copy, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 enum GitFileAction {
@@ -3761,6 +3960,7 @@ enum GitFileAction {
     Revert,
 }
 
+/// Represents the Git diff request payload.
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct GitDiffRequest {
@@ -3776,6 +3976,7 @@ struct GitDiffRequest {
     session_id: Option<String>,
 }
 
+/// Defines the Git diff change type variants.
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 enum GitDiffChangeType {
@@ -3783,6 +3984,7 @@ enum GitDiffChangeType {
     Create,
 }
 
+/// Represents the Git diff response payload.
 #[derive(Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct GitDiffResponse {
@@ -3797,6 +3999,7 @@ struct GitDiffResponse {
     summary: String,
 }
 
+/// Represents the Git commit response payload.
 #[derive(Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct GitCommitResponse {
@@ -3804,6 +4007,7 @@ struct GitCommitResponse {
     summary: String,
 }
 
+/// Represents the Git repo action response payload.
 #[derive(Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct GitRepoActionResponse {
@@ -3813,6 +4017,7 @@ struct GitRepoActionResponse {
 
 const REVIEW_DOCUMENT_VERSION: u32 = 1;
 
+/// Represents the review document.
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct ReviewDocument {
@@ -3828,6 +4033,7 @@ struct ReviewDocument {
     threads: Vec<ReviewThread>,
 }
 
+/// Represents review origin.
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct ReviewOrigin {
@@ -3838,6 +4044,7 @@ struct ReviewOrigin {
     created_at: String,
 }
 
+/// Represents review file entry.
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct ReviewFileEntry {
@@ -3845,6 +4052,7 @@ struct ReviewFileEntry {
     change_type: ChangeType,
 }
 
+/// Represents review thread.
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct ReviewThread {
@@ -3855,6 +4063,7 @@ struct ReviewThread {
     comments: Vec<ReviewThreadComment>,
 }
 
+/// Represents review thread comment.
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct ReviewThreadComment {
@@ -3865,6 +4074,7 @@ struct ReviewThreadComment {
     updated_at: String,
 }
 
+/// Defines the review anchor variants.
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 enum ReviewAnchor {
@@ -3884,6 +4094,7 @@ enum ReviewAnchor {
     },
 }
 
+/// Defines the review comment author variants.
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
 enum ReviewCommentAuthor {
@@ -3891,6 +4102,7 @@ enum ReviewCommentAuthor {
     Agent,
 }
 
+/// Enumerates review thread states.
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
 enum ReviewThreadStatus {
@@ -3900,6 +4112,7 @@ enum ReviewThreadStatus {
     Dismissed,
 }
 
+/// Represents the review document response payload.
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct ReviewDocumentResponse {
@@ -3907,6 +4120,7 @@ struct ReviewDocumentResponse {
     review: ReviewDocument,
 }
 
+/// Represents the review summary response payload.
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct ReviewSummaryResponse {
@@ -3919,6 +4133,7 @@ struct ReviewSummaryResponse {
     has_threads: bool,
 }
 
+/// Summarizes review document.
 #[derive(Default)]
 struct ReviewDocumentSummary {
     thread_count: usize,
@@ -3927,6 +4142,7 @@ struct ReviewDocumentSummary {
     comment_count: usize,
 }
 
+/// Represents the Git file action request payload.
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct GitFileActionRequest {
@@ -3943,6 +4159,7 @@ struct GitFileActionRequest {
     session_id: Option<String>,
 }
 
+/// Represents the Git commit request payload.
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct GitCommitRequest {
@@ -3954,6 +4171,7 @@ struct GitCommitRequest {
     session_id: Option<String>,
 }
 
+/// Represents the Git repo action request payload.
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct GitRepoActionRequest {
@@ -3964,17 +4182,20 @@ struct GitRepoActionRequest {
     session_id: Option<String>,
 }
 
+/// Represents the error response payload.
 #[derive(Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct ErrorResponse {
     error: String,
 }
 
+/// Represents the health response payload.
 #[derive(Deserialize, Serialize)]
 struct HealthResponse {
     ok: bool,
 }
 
+/// Represents the send message request payload.
 #[derive(Deserialize, Serialize)]
 struct SendMessageRequest {
     text: String,
@@ -3984,6 +4205,7 @@ struct SendMessageRequest {
     attachments: Vec<SendMessageAttachmentRequest>,
 }
 
+/// Represents the send message attachment request payload.
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct SendMessageAttachmentRequest {
@@ -3992,6 +4214,7 @@ struct SendMessageAttachmentRequest {
     media_type: String,
 }
 
+/// Represents the update session settings request payload.
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct UpdateSessionSettingsRequest {
@@ -4006,6 +4229,7 @@ struct UpdateSessionSettingsRequest {
     gemini_approval_mode: Option<GeminiApprovalMode>,
 }
 
+/// Represents session model option.
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct SessionModelOption {
@@ -4024,6 +4248,7 @@ struct SessionModelOption {
 }
 
 impl SessionModelOption {
+    /// Builds the plain response value.
     #[cfg(test)]
     fn plain(label: impl Into<String>, value: impl Into<String>) -> Self {
         Self {
@@ -4038,6 +4263,7 @@ impl SessionModelOption {
     }
 }
 
+/// Tracks Codex state.
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct CodexState {
@@ -4048,11 +4274,13 @@ struct CodexState {
 }
 
 impl CodexState {
+    /// Returns whether empty.
     fn is_empty(&self) -> bool {
         self.rate_limits.is_none() && self.notices.is_empty()
     }
 }
 
+/// Enumerates Codex notice kinds.
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 enum CodexNoticeKind {
@@ -4061,6 +4289,7 @@ enum CodexNoticeKind {
     RuntimeNotice,
 }
 
+/// Defines the Codex notice level variants.
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 enum CodexNoticeLevel {
@@ -4068,6 +4297,7 @@ enum CodexNoticeLevel {
     Warning,
 }
 
+/// Represents Codex notice.
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct CodexNotice {
@@ -4080,6 +4310,7 @@ struct CodexNotice {
     code: Option<String>,
 }
 
+/// Represents Codex rate limits.
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct CodexRateLimits {
@@ -4097,6 +4328,7 @@ struct CodexRateLimits {
     secondary: Option<CodexRateLimitWindow>,
 }
 
+/// Represents Codex rate limit window.
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct CodexRateLimitWindow {
@@ -4108,6 +4340,7 @@ struct CodexRateLimitWindow {
     window_duration_mins: Option<u64>,
 }
 
+/// Enumerates agent readiness states.
 #[derive(Clone, Copy, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 enum AgentReadinessStatus {
@@ -4116,6 +4349,7 @@ enum AgentReadinessStatus {
     NeedsSetup,
 }
 
+/// Represents agent readiness.
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct AgentReadiness {
@@ -4127,6 +4361,7 @@ struct AgentReadiness {
     command_path: Option<String>,
 }
 
+/// Represents the state response payload.
 #[derive(Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct StateResponse {
@@ -4143,6 +4378,7 @@ struct StateResponse {
     sessions: Vec<Session>,
 }
 
+/// Defines the workspace control panel side variants.
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 enum WorkspaceControlPanelSide {
@@ -4150,6 +4386,7 @@ enum WorkspaceControlPanelSide {
     Right,
 }
 
+/// Represents the workspace layout document.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct WorkspaceLayoutDocument {
@@ -4170,12 +4407,14 @@ struct WorkspaceLayoutDocument {
     workspace: Value,
 }
 
+/// Represents the workspace layout response payload.
 #[derive(Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct WorkspaceLayoutResponse {
     layout: WorkspaceLayoutDocument,
 }
 
+/// Summarizes workspace layout.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct WorkspaceLayoutSummary {
@@ -4195,12 +4434,14 @@ struct WorkspaceLayoutSummary {
     density_percent: Option<u32>,
 }
 
+/// Represents the workspace layouts response payload.
 #[derive(Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct WorkspaceLayoutsResponse {
     workspaces: Vec<WorkspaceLayoutSummary>,
 }
 
+/// Represents the put workspace layout request payload.
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct PutWorkspaceLayoutRequest {
@@ -4218,6 +4459,7 @@ struct PutWorkspaceLayoutRequest {
     workspace: Value,
 }
 
+/// Represents the create session response payload.
 #[derive(Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct CreateSessionResponse {
@@ -4225,6 +4467,7 @@ struct CreateSessionResponse {
     state: StateResponse,
 }
 
+/// Represents the create project response payload.
 #[derive(Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct CreateProjectResponse {
@@ -4232,6 +4475,7 @@ struct CreateProjectResponse {
     state: StateResponse,
 }
 
+/// Enumerates project digest actions.
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct ProjectDigestAction {
@@ -4242,6 +4486,7 @@ struct ProjectDigestAction {
     requires_confirmation: bool,
 }
 
+/// Represents the project digest response payload.
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct ProjectDigestResponse {
@@ -4259,18 +4504,21 @@ struct ProjectDigestResponse {
     source_message_ids: Vec<String>,
 }
 
+/// Represents project digest inputs.
 #[derive(Clone)]
 struct ProjectDigestInputs {
     project: Project,
     sessions: Vec<SessionRecord>,
 }
 
+/// Represents the project approval target.
 #[derive(Clone)]
 struct ProjectApprovalTarget {
     session_id: String,
     message_id: String,
 }
 
+/// Summarizes project digest.
 struct ProjectDigestSummary {
     project_id: String,
     headline: String,
@@ -4284,6 +4532,7 @@ struct ProjectDigestSummary {
 }
 
 impl ProjectDigestSummary {
+    /// Converts the value into response.
     fn into_response(self) -> ProjectDigestResponse {
         ProjectDigestResponse {
             project_id: self.project_id,
@@ -4302,6 +4551,7 @@ impl ProjectDigestSummary {
     }
 }
 
+/// Defines the project action ID variants.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum ProjectActionId {
     Approve,
@@ -4315,6 +4565,7 @@ enum ProjectActionId {
 }
 
 impl ProjectActionId {
+    /// Handles parse.
     fn parse(value: &str) -> Result<Self, ApiError> {
         match value.trim() {
             "approve" => Ok(Self::Approve),
@@ -4331,6 +4582,7 @@ impl ProjectActionId {
         }
     }
 
+    /// Returns the str representation.
     fn as_str(self) -> &'static str {
         match self {
             Self::Approve => "approve",
@@ -4344,6 +4596,7 @@ impl ProjectActionId {
         }
     }
 
+    /// Handles label.
     fn label(self) -> &'static str {
         match self {
             Self::Approve => "Approve",
@@ -4357,6 +4610,7 @@ impl ProjectActionId {
         }
     }
 
+    /// Handles prompt.
     fn prompt(self) -> Option<&'static str> {
         match self {
             Self::FixIt => Some(
@@ -4375,10 +4629,12 @@ impl ProjectActionId {
         }
     }
 
+    /// Handles requires confirmation.
     fn requires_confirmation(self) -> bool {
         matches!(self, Self::Stop)
     }
 
+    /// Converts the value into digest action.
     fn into_digest_action(self) -> ProjectDigestAction {
         ProjectDigestAction {
             id: self.as_str().to_owned(),
@@ -4389,6 +4645,7 @@ impl ProjectActionId {
     }
 }
 
+/// Represents a agent command.
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct AgentCommand {
@@ -4402,12 +4659,14 @@ struct AgentCommand {
     argument_hint: Option<String>,
 }
 
+/// Represents the agent commands response payload.
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct AgentCommandsResponse {
     commands: Vec<AgentCommand>,
 }
 
+/// Enumerates agent command kinds.
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 enum AgentCommandKind {
@@ -4416,11 +4675,13 @@ enum AgentCommandKind {
 }
 
 impl Default for AgentCommandKind {
+    /// Builds the default value.
     fn default() -> Self {
         Self::PromptTemplate
     }
 }
 
+/// Enumerates instruction document kinds.
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 enum InstructionDocumentKind {
@@ -4432,6 +4693,7 @@ enum InstructionDocumentKind {
     ReferencedInstruction,
 }
 
+/// Defines the instruction relation variants.
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Hash, Serialize)]
 #[serde(rename_all = "camelCase")]
 enum InstructionRelation {
@@ -4440,6 +4702,7 @@ enum InstructionRelation {
     DirectoryDiscovery,
 }
 
+/// Represents the instruction search response payload.
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct InstructionSearchResponse {
@@ -4448,6 +4711,7 @@ struct InstructionSearchResponse {
     workdir: String,
 }
 
+/// Represents instruction search match.
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct InstructionSearchMatch {
@@ -4457,6 +4721,7 @@ struct InstructionSearchMatch {
     text: String,
 }
 
+/// Represents instruction root path.
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct InstructionRootPath {
@@ -4465,6 +4730,7 @@ struct InstructionRootPath {
     steps: Vec<InstructionPathStep>,
 }
 
+/// Represents instruction path step.
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct InstructionPathStep {
@@ -4475,6 +4741,7 @@ struct InstructionPathStep {
     to_path: String,
 }
 
+/// Represents instruction document internal.
 #[derive(Clone, Debug)]
 struct InstructionDocumentInternal {
     kind: InstructionDocumentKind,
@@ -4482,18 +4749,21 @@ struct InstructionDocumentInternal {
     path: PathBuf,
 }
 
+/// Represents instruction search graph.
 #[derive(Clone, Debug, Default)]
 struct InstructionSearchGraph {
     documents: HashMap<String, InstructionDocumentInternal>,
     incoming: HashMap<String, Vec<InstructionPathStep>>,
 }
 
+/// Represents the pick project root response payload.
 #[derive(Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct PickProjectRootResponse {
     path: Option<String>,
 }
 
+/// Builds project deep link.
 fn build_project_deep_link(project_id: &str, session_id: Option<&str>) -> String {
     let mut query = format!("/?projectId={}", encode_uri_component(project_id));
     if let Some(session_id) = session_id {
@@ -4503,6 +4773,7 @@ fn build_project_deep_link(project_id: &str, session_id: Option<&str>) -> String
     query
 }
 
+/// Normalizes project text.
 fn normalize_project_text(value: &str, fallback: &str) -> String {
     let trimmed = value.trim();
     if trimmed.is_empty() {
@@ -4512,6 +4783,7 @@ fn normalize_project_text(value: &str, fallback: &str) -> String {
     }
 }
 
+/// Returns the active project status text.
 fn active_project_status_text(record: &SessionRecord) -> String {
     let queued_count = record.session.pending_prompts.len();
     match queued_count {
@@ -4521,6 +4793,7 @@ fn active_project_status_text(record: &SessionRecord) -> String {
     }
 }
 
+/// Handles select project done summary.
 fn select_project_done_summary(
     primary_session: Option<&SessionRecord>,
     git_status: Option<&GitStatusResponse>,
@@ -4547,6 +4820,7 @@ fn select_project_done_summary(
     )
 }
 
+/// Returns the default project done summary.
 fn default_project_done_summary(record: &SessionRecord) -> String {
     if record.session.messages.is_empty() {
         return "Ready for the next prompt.".to_owned();
@@ -4559,6 +4833,7 @@ fn default_project_done_summary(record: &SessionRecord) -> String {
     }
 }
 
+/// Handles project Git done summary.
 fn project_git_done_summary(status: &GitStatusResponse) -> Option<String> {
     let changed_files = status.files.len();
     if changed_files == 0 {
@@ -4570,6 +4845,7 @@ fn project_git_done_summary(status: &GitStatusResponse) -> Option<String> {
     })
 }
 
+/// Returns the latest project progress summary.
 fn latest_project_progress_summary(record: &SessionRecord) -> Option<(String, String)> {
     record
         .session
@@ -4582,6 +4858,7 @@ fn latest_project_progress_summary(record: &SessionRecord) -> Option<(String, St
         })
 }
 
+/// Handles project progress summary for message.
 fn project_progress_summary_for_message(message: &Message) -> Option<String> {
     match message {
         Message::Text {
@@ -4619,6 +4896,7 @@ fn project_progress_summary_for_message(message: &Message) -> Option<String> {
     }
 }
 
+/// Finds latest project pending approval.
 fn find_latest_project_pending_approval<'a>(
     sessions: &'a [SessionRecord],
 ) -> Option<(&'a SessionRecord, String)> {
@@ -4634,12 +4912,14 @@ fn find_latest_project_pending_approval<'a>(
     })
 }
 
+/// Returns whether live pending approval.
 fn has_live_pending_approval(record: &SessionRecord, message_id: &str) -> bool {
     record.pending_claude_approvals.contains_key(message_id)
         || record.pending_codex_approvals.contains_key(message_id)
         || record.pending_acp_approvals.contains_key(message_id)
 }
 
+/// Finds latest project pending nonapproval interaction.
 fn find_latest_project_pending_nonapproval_interaction<'a>(
     sessions: &'a [SessionRecord],
 ) -> Option<(&'a SessionRecord, String)> {
@@ -4665,6 +4945,7 @@ fn find_latest_project_pending_nonapproval_interaction<'a>(
     })
 }
 
+/// Defines the delta event variants.
 #[derive(Deserialize, Serialize)]
 #[serde(tag = "type", rename_all = "camelCase")]
 enum DeltaEvent {
@@ -4738,6 +5019,7 @@ enum DeltaEvent {
     },
 }
 
+/// Resolves requested path.
 fn resolve_requested_path(path: &str) -> Result<PathBuf, ApiError> {
     let raw_path = FsPath::new(path);
     let resolved = if raw_path.is_absolute() {
@@ -4751,6 +5033,7 @@ fn resolve_requested_path(path: &str) -> Result<PathBuf, ApiError> {
     Ok(resolved)
 }
 
+/// Resolves existing requested path.
 fn resolve_existing_requested_path(path: &str, label: &str) -> Result<PathBuf, ApiError> {
     let trimmed = path.trim();
     if trimmed.is_empty() {
@@ -4762,6 +5045,7 @@ fn resolve_existing_requested_path(path: &str, label: &str) -> Result<PathBuf, A
     Ok(normalize_user_facing_path(&resolved_path))
 }
 
+/// Enumerates scoped path modes.
 #[derive(Clone, Copy)]
 enum ScopedPathMode {
     ExistingFile,
@@ -4769,10 +5053,12 @@ enum ScopedPathMode {
     AllowMissingLeaf,
 }
 
+/// Normalizes optional identifier.
 fn normalize_optional_identifier(value: Option<&str>) -> Option<&str> {
     value.map(str::trim).filter(|candidate| !candidate.is_empty())
 }
 
+/// Resolves session project root path.
 fn resolve_session_project_root_path(
     state: &AppState,
     session_id: &str,
@@ -4820,6 +5106,7 @@ fn resolve_session_project_root_path(
         })
 }
 
+/// Resolves project root path by ID.
 fn resolve_project_root_path_by_id(
     state: &AppState,
     project_id: &str,
@@ -4851,6 +5138,7 @@ fn resolve_project_root_path_by_id(
         })
 }
 
+/// Resolves request project root path.
 fn resolve_request_project_root_path(
     state: &AppState,
     session_id: Option<&str>,
@@ -4867,6 +5155,7 @@ fn resolve_request_project_root_path(
     Err(ApiError::bad_request("sessionId or projectId is required"))
 }
 
+/// Resolves project scoped requested path.
 fn resolve_project_scoped_requested_path(
     state: &AppState,
     session_id: Option<&str>,
@@ -4893,6 +5182,7 @@ fn resolve_project_scoped_requested_path(
     Ok(normalize_user_facing_path(&resolved_path))
 }
 
+/// Resolves session scoped requested path.
 #[cfg(test)]
 fn resolve_session_scoped_requested_path(
     state: &AppState,
@@ -4903,6 +5193,7 @@ fn resolve_session_scoped_requested_path(
     resolve_project_scoped_requested_path(state, Some(session_id), None, path, mode)
 }
 
+/// Canonicalizes existing path.
 fn canonicalize_existing_path(path: &FsPath, label: &str) -> Result<PathBuf, ApiError> {
     fs::canonicalize(path)
         .map(|path| normalize_user_facing_path(&path))
@@ -4917,6 +5208,7 @@ fn canonicalize_existing_path(path: &FsPath, label: &str) -> Result<PathBuf, Api
         })
 }
 
+/// Canonicalizes path with existing ancestor.
 fn canonicalize_path_with_existing_ancestor(path: &FsPath) -> Result<PathBuf, ApiError> {
     let absolute = if path.is_absolute() {
         path.to_path_buf()
@@ -4969,6 +5261,7 @@ fn canonicalize_path_with_existing_ancestor(path: &FsPath) -> Result<PathBuf, Ap
     }
 }
 
+/// Normalizes user facing path.
 fn normalize_user_facing_path(path: &FsPath) -> PathBuf {
     #[cfg(windows)]
     {
@@ -4984,6 +5277,7 @@ fn normalize_user_facing_path(path: &FsPath) -> PathBuf {
     path.to_path_buf()
 }
 
+/// Resolves directory path.
 fn resolve_directory_path(path: &str, label: &str) -> Result<String, ApiError> {
     let trimmed = path.trim();
     if trimmed.is_empty() {
@@ -5005,14 +5299,17 @@ fn resolve_directory_path(path: &str, label: &str) -> Result<String, ApiError> {
         .into_owned())
 }
 
+/// Resolves project root path.
 fn resolve_project_root_path(path: &str) -> Result<String, ApiError> {
     resolve_directory_path(path, "project root path")
 }
 
+/// Resolves session working directory.
 fn resolve_session_workdir(path: &str) -> Result<String, ApiError> {
     resolve_directory_path(path, "session workdir")
 }
 
+/// Picks project root path.
 fn pick_project_root_path(default_workdir: &str) -> Result<Option<String>, ApiError> {
     #[cfg(target_os = "macos")]
     {
@@ -5068,6 +5365,7 @@ fn pick_project_root_path(default_workdir: &str) -> Result<Option<String>, ApiEr
     }
 }
 
+/// Returns the default project name.
 fn default_project_name(root_path: &str) -> String {
     let path = FsPath::new(root_path);
     path.file_name()
@@ -5077,6 +5375,7 @@ fn default_project_name(root_path: &str) -> String {
         .unwrap_or_else(|| root_path.to_owned())
 }
 
+/// Deduplicates project name.
 fn dedupe_project_name(existing: &[Project], base_name: &str) -> String {
     let existing_names = existing
         .iter()
@@ -5096,12 +5395,14 @@ fn dedupe_project_name(existing: &[Project], base_name: &str) -> String {
     }
 }
 
+/// Handles path contains.
 fn path_contains(root_path: &str, candidate_path: &FsPath) -> bool {
     let root = normalize_path_best_effort(FsPath::new(root_path));
     let candidate = normalize_path_best_effort(candidate_path);
     candidate == root || candidate.starts_with(root)
 }
 
+/// Normalizes path best effort.
 fn normalize_path_best_effort(path: &FsPath) -> PathBuf {
     let resolved = if path.is_absolute() {
         path.to_path_buf()
@@ -5114,6 +5415,7 @@ fn normalize_path_best_effort(path: &FsPath) -> PathBuf {
     normalize_user_facing_path(&canonical)
 }
 
+/// Enumerates parsed Git branch states.
 struct ParsedGitBranchStatus {
     ahead: usize,
     behind: usize,
@@ -5121,6 +5423,7 @@ struct ParsedGitBranchStatus {
     upstream: Option<String>,
 }
 
+/// Resolves Git repo root.
 fn resolve_git_repo_root(workdir: &FsPath) -> Result<Option<PathBuf>, ApiError> {
     let output = Command::new("git")
         .arg("-C")
@@ -5145,6 +5448,7 @@ fn resolve_git_repo_root(workdir: &FsPath) -> Result<Option<PathBuf>, ApiError> 
     )))
 }
 
+/// Parses Git branch status.
 fn parse_git_branch_status(line: &str) -> ParsedGitBranchStatus {
     let mut branch = None;
     let mut upstream = None;
@@ -5188,6 +5492,7 @@ fn parse_git_branch_status(line: &str) -> ParsedGitBranchStatus {
     }
 }
 
+/// Parses Git status paths.
 fn parse_git_status_paths(path_payload: &str) -> (Option<String>, String) {
     if let Some(separator_index) = find_git_status_rename_separator(path_payload) {
         let original_path = decode_git_status_path(&path_payload[..separator_index]);
@@ -5198,6 +5503,7 @@ fn parse_git_status_paths(path_payload: &str) -> (Option<String>, String) {
     (None, decode_git_status_path(path_payload))
 }
 
+/// Finds Git status rename separator.
 fn find_git_status_rename_separator(path_payload: &str) -> Option<usize> {
     let bytes = path_payload.as_bytes();
     let mut index = 0;
@@ -5224,11 +5530,13 @@ fn find_git_status_rename_separator(path_payload: &str) -> Option<usize> {
     None
 }
 
+/// Decodes Git status path.
 fn decode_git_status_path(path: &str) -> String {
     let trimmed = path.trim();
     decode_git_status_quoted_path(trimmed).unwrap_or_else(|| trimmed.to_owned())
 }
 
+/// Decodes Git status quoted path.
 fn decode_git_status_quoted_path(path: &str) -> Option<String> {
     if !path.starts_with('"') || !path.ends_with('"') || path.len() < 2 {
         return None;
@@ -5312,6 +5620,7 @@ fn decode_git_status_quoted_path(path: &str) -> Option<String> {
     Some(String::from_utf8_lossy(&decoded).into_owned())
 }
 
+/// Normalizes Git status code.
 fn normalize_git_status_code(code: char) -> Option<String> {
     match code {
         ' ' => None,

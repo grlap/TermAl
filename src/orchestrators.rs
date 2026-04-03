@@ -1,7 +1,23 @@
+/*
+Orchestrator templates and runtime instances
+orchestrators.json
+  -> template CRUD
+  -> normalized graph draft
+  -> launch instance
+       -> create backing sessions
+       -> watch completion signals
+       -> evaluate transitions
+       -> dispatch downstream prompts
+Template definitions are file-backed. Live instances are stored in StateInner so
+they advance together with ordinary session lifecycle updates.
+*/
+
+/// Resolves orchestrator templates path.
 fn resolve_orchestrator_templates_path(default_workdir: &str) -> PathBuf {
     resolve_termal_data_dir(default_workdir).join("orchestrators.json")
 }
 
+/// Loads orchestrator template store.
 fn load_orchestrator_template_store(path: &FsPath) -> Result<OrchestratorTemplateStore> {
     if !path.exists() {
         return Ok(OrchestratorTemplateStore::default());
@@ -21,6 +37,7 @@ fn load_orchestrator_template_store(path: &FsPath) -> Result<OrchestratorTemplat
     Ok(store)
 }
 
+/// Persists orchestrator template store.
 fn persist_orchestrator_template_store(
     path: &FsPath,
     store: &OrchestratorTemplateStore,
@@ -35,14 +52,17 @@ fn persist_orchestrator_template_store(
     fs::write(path, encoded).with_context(|| format!("failed to write `{}`", path.display()))
 }
 
+/// Stamps orchestrator template now.
 fn stamp_orchestrator_template_now() -> String {
     Local::now().format("%Y-%m-%d %H:%M:%S").to_string()
 }
 
+/// Returns the default next orchestrator template number.
 fn default_next_orchestrator_template_number() -> usize {
     1
 }
 
+/// Returns whether false.
 fn is_false(value: &bool) -> bool {
     !*value
 }
@@ -50,6 +70,7 @@ fn is_false(value: &bool) -> bool {
 const MAX_ORCHESTRATOR_TEMPLATE_SESSIONS: usize = 50;
 const MAX_ORCHESTRATOR_TEMPLATE_TRANSITIONS: usize = 200;
 
+/// Stores orchestrator template.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct OrchestratorTemplateStore {
@@ -60,6 +81,7 @@ struct OrchestratorTemplateStore {
 }
 
 impl Default for OrchestratorTemplateStore {
+    /// Builds the default value.
     fn default() -> Self {
         Self {
             next_template_number: default_next_orchestrator_template_number(),
@@ -69,6 +91,7 @@ impl Default for OrchestratorTemplateStore {
 }
 
 impl OrchestratorTemplateStore {
+    /// Handles normalize.
     fn normalize(&mut self) {
         let max_number = self
             .templates
@@ -89,6 +112,7 @@ impl OrchestratorTemplateStore {
     }
 }
 
+/// Defines the orchestrator transition trigger variants.
 #[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 enum OrchestratorTransitionTrigger {
@@ -96,6 +120,7 @@ enum OrchestratorTransitionTrigger {
     OnCompletion,
 }
 
+/// Enumerates orchestrator transition result modes.
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 enum OrchestratorTransitionResultMode {
@@ -105,6 +130,7 @@ enum OrchestratorTransitionResultMode {
     SummaryAndLastResponse,
 }
 
+/// Enumerates orchestrator session input modes.
 #[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 enum OrchestratorSessionInputMode {
@@ -113,6 +139,7 @@ enum OrchestratorSessionInputMode {
     Consolidate,
 }
 
+/// Represents orchestrator node position.
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct OrchestratorNodePosition {
@@ -120,6 +147,7 @@ struct OrchestratorNodePosition {
     y: f64,
 }
 
+/// Represents the orchestrator session template.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct OrchestratorSessionTemplate {
@@ -136,6 +164,7 @@ struct OrchestratorSessionTemplate {
     position: OrchestratorNodePosition,
 }
 
+/// Represents orchestrator template transition.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct OrchestratorTemplateTransition {
@@ -153,6 +182,7 @@ struct OrchestratorTemplateTransition {
     prompt_template: Option<String>,
 }
 
+/// Represents orchestrator template draft.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct OrchestratorTemplateDraft {
@@ -167,6 +197,7 @@ struct OrchestratorTemplateDraft {
     transitions: Vec<OrchestratorTemplateTransition>,
 }
 
+/// Represents the orchestrator template.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct OrchestratorTemplate {
@@ -184,12 +215,14 @@ struct OrchestratorTemplate {
     updated_at: String,
 }
 
+/// Represents the orchestrator templates response payload.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct OrchestratorTemplatesResponse {
     templates: Vec<OrchestratorTemplate>,
 }
 
+/// Represents the orchestrator template response payload.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct OrchestratorTemplateResponse {
@@ -197,6 +230,7 @@ struct OrchestratorTemplateResponse {
 }
 
 impl AppState {
+    /// Lists orchestrator templates.
     fn list_orchestrator_templates(&self) -> Result<OrchestratorTemplatesResponse, ApiError> {
         let _guard = self
             .orchestrator_templates_lock
@@ -211,6 +245,7 @@ impl AppState {
         })
     }
 
+    /// Gets orchestrator template.
     fn get_orchestrator_template(
         &self,
         template_id: &str,
@@ -231,6 +266,7 @@ impl AppState {
         Ok(OrchestratorTemplateResponse { template })
     }
 
+    /// Creates orchestrator template.
     fn create_orchestrator_template(
         &self,
         request: OrchestratorTemplateDraft,
@@ -265,6 +301,7 @@ impl AppState {
         Ok(OrchestratorTemplateResponse { template })
     }
 
+    /// Updates orchestrator template.
     fn update_orchestrator_template(
         &self,
         template_id: &str,
@@ -303,6 +340,7 @@ impl AppState {
         Ok(OrchestratorTemplateResponse { template })
     }
 
+    /// Deletes orchestrator template.
     fn delete_orchestrator_template(
         &self,
         template_id: &str,
@@ -331,6 +369,7 @@ impl AppState {
     }
 }
 
+/// Lists orchestrator templates.
 async fn list_orchestrator_templates(
     State(state): State<AppState>,
 ) -> Result<Json<OrchestratorTemplatesResponse>, ApiError> {
@@ -338,6 +377,7 @@ async fn list_orchestrator_templates(
     Ok(Json(response))
 }
 
+/// Gets orchestrator template.
 async fn get_orchestrator_template(
     State(state): State<AppState>,
     AxumPath(template_id): AxumPath<String>,
@@ -346,6 +386,7 @@ async fn get_orchestrator_template(
     Ok(Json(response))
 }
 
+/// Creates orchestrator template.
 async fn create_orchestrator_template(
     State(state): State<AppState>,
     Json(request): Json<OrchestratorTemplateDraft>,
@@ -354,6 +395,7 @@ async fn create_orchestrator_template(
     Ok((StatusCode::CREATED, Json(response)))
 }
 
+/// Updates orchestrator template.
 async fn update_orchestrator_template(
     State(state): State<AppState>,
     AxumPath(template_id): AxumPath<String>,
@@ -364,6 +406,7 @@ async fn update_orchestrator_template(
     Ok(Json(response))
 }
 
+/// Deletes orchestrator template.
 async fn delete_orchestrator_template(
     State(state): State<AppState>,
     AxumPath(template_id): AxumPath<String>,
@@ -373,6 +416,7 @@ async fn delete_orchestrator_template(
     Ok(Json(response))
 }
 
+/// Normalizes orchestrator template draft.
 fn normalize_orchestrator_template_draft(
     draft: OrchestratorTemplateDraft,
 ) -> Result<OrchestratorTemplateDraft, ApiError> {
@@ -457,6 +501,7 @@ fn normalize_orchestrator_template_draft(
     })
 }
 
+/// Normalizes orchestrator session template.
 fn normalize_orchestrator_session_template(
     template: OrchestratorSessionTemplate,
 ) -> Result<OrchestratorSessionTemplate, ApiError> {
@@ -472,6 +517,7 @@ fn normalize_orchestrator_session_template(
     })
 }
 
+/// Normalizes orchestrator transition.
 fn normalize_orchestrator_transition(
     transition: OrchestratorTemplateTransition,
 ) -> Result<OrchestratorTemplateTransition, ApiError> {
@@ -493,6 +539,7 @@ fn normalize_orchestrator_transition(
     })
 }
 
+/// Normalizes required orchestrator text.
 fn normalize_required_orchestrator_text(value: &str, label: &str) -> Result<String, ApiError> {
     let trimmed = value.trim();
     if trimmed.is_empty() {
@@ -501,6 +548,7 @@ fn normalize_required_orchestrator_text(value: &str, label: &str) -> Result<Stri
     Ok(trimmed.to_owned())
 }
 
+/// Normalizes optional orchestrator text.
 fn normalize_optional_orchestrator_text(value: Option<String>) -> Option<String> {
     value.and_then(|entry| {
         let trimmed = entry.trim();
@@ -508,6 +556,7 @@ fn normalize_optional_orchestrator_text(value: Option<String>) -> Option<String>
     })
 }
 
+/// Normalizes orchestrator position.
 fn normalize_orchestrator_position(
     position: OrchestratorNodePosition,
 ) -> Result<OrchestratorNodePosition, ApiError> {
@@ -520,6 +569,7 @@ fn normalize_orchestrator_position(
     Ok(position)
 }
 
+/// Enumerates orchestrator instance states.
 #[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 enum OrchestratorInstanceStatus {
@@ -529,6 +579,7 @@ enum OrchestratorInstanceStatus {
     Stopped,
 }
 
+/// Represents a orchestrator session instance.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct OrchestratorSessionInstance {
@@ -542,6 +593,7 @@ struct OrchestratorSessionInstance {
     last_delivered_completion_revision: Option<u64>,
 }
 
+/// Represents pending transition.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct PendingTransition {
@@ -554,12 +606,14 @@ struct PendingTransition {
     created_at: String,
 }
 
+/// Represents consolidated pending transitions.
 #[derive(Clone, Debug)]
 struct ConsolidatedPendingTransitions {
     prompt_pendings: Vec<PendingTransition>,
     acknowledged_pendings: Vec<PendingTransition>,
 }
 
+/// Represents consolidated pending inspection.
 #[derive(Clone, Debug)]
 struct ConsolidatedPendingInspection {
     prompt_pendings: Vec<PendingTransition>,
@@ -567,6 +621,7 @@ struct ConsolidatedPendingInspection {
     missing_source_session_ids: Vec<String>,
 }
 
+/// Enumerates pending transition actions.
 #[derive(Clone, Debug)]
 enum PendingTransitionAction {
     Acknowledge {
@@ -582,6 +637,7 @@ enum PendingTransitionAction {
     },
 }
 
+/// Represents a orchestrator instance.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct OrchestratorInstance {
@@ -609,6 +665,7 @@ struct OrchestratorInstance {
     stopped_session_ids_during_stop: Vec<String>,
 }
 
+/// Represents the create orchestrator instance request payload.
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct CreateOrchestratorInstanceRequest {
@@ -617,18 +674,21 @@ struct CreateOrchestratorInstanceRequest {
     project_id: Option<String>,
 }
 
+/// Represents the orchestrator instances response payload.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct OrchestratorInstancesResponse {
     orchestrators: Vec<OrchestratorInstance>,
 }
 
+/// Represents the orchestrator instance response payload.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct OrchestratorInstanceResponse {
     orchestrator: OrchestratorInstance,
 }
 
+/// Represents the create orchestrator instance response payload.
 #[derive(Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct CreateOrchestratorInstanceResponse {
@@ -637,6 +697,7 @@ struct CreateOrchestratorInstanceResponse {
 }
 
 impl StateInner {
+    /// Normalizes orchestrator instances.
     fn normalize_orchestrator_instances(&mut self) {
         let persisted_non_running_session_ids = HashSet::new();
         self.normalize_orchestrator_instances_with_persisted_non_running(
@@ -644,6 +705,7 @@ impl StateInner {
         );
     }
 
+    /// Normalizes orchestrator instances with persisted non running.
     fn normalize_orchestrator_instances_with_persisted_non_running(
         &mut self,
         persisted_non_running_session_ids: &HashSet<String>,
@@ -759,6 +821,7 @@ impl StateInner {
 }
 
 impl AppState {
+    /// Lists orchestrator instances.
     fn list_orchestrator_instances(&self) -> Result<OrchestratorInstancesResponse, ApiError> {
         let inner = self.inner.lock().expect("state mutex poisoned");
         Ok(OrchestratorInstancesResponse {
@@ -766,6 +829,7 @@ impl AppState {
         })
     }
 
+    /// Gets orchestrator instance.
     fn get_orchestrator_instance(
         &self,
         instance_id: &str,
@@ -780,6 +844,7 @@ impl AppState {
         Ok(OrchestratorInstanceResponse { orchestrator })
     }
 
+    /// Publishes orchestrators updated.
     fn publish_orchestrators_updated(
         &self,
         revision: u64,
@@ -791,6 +856,7 @@ impl AppState {
         });
     }
 
+    /// Creates orchestrator instance.
     fn create_orchestrator_instance(
         &self,
         request: CreateOrchestratorInstanceRequest,
@@ -894,6 +960,7 @@ impl AppState {
         })
     }
 
+    /// Pauses orchestrator instance.
     fn pause_orchestrator_instance(&self, instance_id: &str) -> Result<StateResponse, ApiError> {
         let (state, orchestrators) = {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
@@ -926,6 +993,7 @@ impl AppState {
         Ok(state)
     }
 
+    /// Resumes orchestrator instance.
     fn resume_orchestrator_instance(&self, instance_id: &str) -> Result<StateResponse, ApiError> {
         let (state, orchestrators) = {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
@@ -967,6 +1035,7 @@ impl AppState {
         Ok(self.snapshot_from_inner(&inner))
     }
 
+    /// Begins orchestrator stop.
     fn begin_orchestrator_stop(&self, instance_id: &str) -> Result<(), ApiError> {
         let mut stopping = self
             .stopping_orchestrator_ids
@@ -1040,6 +1109,7 @@ impl AppState {
         Ok(())
     }
 
+    /// Finishes orchestrator stop.
     fn finish_orchestrator_stop(&self, instance_id: &str) {
         self.stopping_orchestrator_ids
             .lock()
@@ -1051,6 +1121,7 @@ impl AppState {
             .remove(instance_id);
     }
 
+    /// Records stopped orchestrator session.
     fn note_stopped_orchestrator_session(&self, instance_id: &str, session_id: &str) {
         self.stopping_orchestrator_session_ids
             .lock()
@@ -1060,6 +1131,7 @@ impl AppState {
             .insert(session_id.to_owned());
     }
 
+    /// Returns the stopping orchestrator IDs snapshot.
     fn stopping_orchestrator_ids_snapshot(&self) -> HashSet<String> {
         self.stopping_orchestrator_ids
             .lock()
@@ -1067,6 +1139,7 @@ impl AppState {
             .clone()
     }
 
+    /// Returns the stopping orchestrator session IDs snapshot.
     fn stopping_orchestrator_session_ids_snapshot(&self) -> HashMap<String, HashSet<String>> {
         self.stopping_orchestrator_session_ids
             .lock()
@@ -1074,6 +1147,7 @@ impl AppState {
             .clone()
     }
 
+    /// Prunes pending transitions for stopped orchestrator sessions.
     fn prune_pending_transitions_for_stopped_orchestrator_sessions(
         &self,
         instance_id: &str,
@@ -1164,11 +1238,13 @@ impl AppState {
         Ok(())
     }
 
+    /// Returns whether session not running conflict.
     fn is_session_not_running_conflict(error: &ApiError) -> bool {
         error.status == StatusCode::CONFLICT
             && error.message == SESSION_NOT_RUNNING_CONFLICT_MESSAGE
     }
 
+    /// Stops orchestrator instance.
     fn stop_orchestrator_instance(&self, instance_id: &str) -> Result<StateResponse, ApiError> {
         self.begin_orchestrator_stop(instance_id)?;
         let mut resume_after_abort = false;
@@ -1297,6 +1373,7 @@ impl AppState {
         stop_result
     }
 
+    /// Resumes pending orchestrator transitions.
     fn resume_pending_orchestrator_transitions(&self) -> Result<()> {
         let mut changed = false;
         loop {
@@ -1327,6 +1404,7 @@ impl AppState {
         Ok(())
     }
 
+    /// Accepts next pending orchestrator transition.
     fn accept_next_pending_orchestrator_transition(&self) -> Result<bool> {
         let stopping_orchestrator_ids = self.stopping_orchestrator_ids_snapshot();
         let dispatch_destination_session_id = {
@@ -1447,6 +1525,7 @@ impl AppState {
     }
 }
 
+/// Lists orchestrator instances.
 async fn list_orchestrator_instances(
     State(state): State<AppState>,
 ) -> Result<Json<OrchestratorInstancesResponse>, ApiError> {
@@ -1454,6 +1533,7 @@ async fn list_orchestrator_instances(
     Ok(Json(response))
 }
 
+/// Gets orchestrator instance.
 async fn get_orchestrator_instance(
     State(state): State<AppState>,
     AxumPath(instance_id): AxumPath<String>,
@@ -1462,6 +1542,7 @@ async fn get_orchestrator_instance(
     Ok(Json(response))
 }
 
+/// Creates orchestrator instance.
 async fn create_orchestrator_instance(
     State(state): State<AppState>,
     Json(request): Json<CreateOrchestratorInstanceRequest>,
@@ -1470,6 +1551,7 @@ async fn create_orchestrator_instance(
     Ok((StatusCode::CREATED, Json(response)))
 }
 
+/// Pauses orchestrator instance.
 async fn pause_orchestrator_instance(
     State(state): State<AppState>,
     AxumPath(instance_id): AxumPath<String>,
@@ -1479,6 +1561,7 @@ async fn pause_orchestrator_instance(
     Ok(Json(response))
 }
 
+/// Resumes orchestrator instance.
 async fn resume_orchestrator_instance(
     State(state): State<AppState>,
     AxumPath(instance_id): AxumPath<String>,
@@ -1488,6 +1571,7 @@ async fn resume_orchestrator_instance(
     Ok(Json(response))
 }
 
+/// Stops orchestrator instance.
 async fn stop_orchestrator_instance(
     State(state): State<AppState>,
     AxumPath(instance_id): AxumPath<String>,
@@ -1495,6 +1579,7 @@ async fn stop_orchestrator_instance(
     let response = run_blocking_api(move || state.stop_orchestrator_instance(&instance_id)).await?;
     Ok(Json(response))
 }
+/// Applies orchestrator template session settings.
 fn apply_orchestrator_template_session_settings(
     record: &mut SessionRecord,
     template_session: &OrchestratorSessionTemplate,
@@ -1541,6 +1626,7 @@ fn apply_orchestrator_template_session_settings(
     }
 }
 
+/// Acknowledges pending orchestrator transition.
 fn acknowledge_pending_orchestrator_transition(
     inner: &mut StateInner,
     instance_index: usize,
@@ -1557,6 +1643,7 @@ fn acknowledge_pending_orchestrator_transition(
     );
 }
 
+/// Handles orchestrator template session for runtime session.
 fn orchestrator_template_session_for_runtime_session(
     inner: &StateInner,
     session_id: &str,
@@ -1579,6 +1666,7 @@ fn orchestrator_template_session_for_runtime_session(
     })
 }
 
+/// Handles orchestrator template session for instance session.
 fn orchestrator_template_session_for_instance_session(
     instance: &OrchestratorInstance,
     session_id: &str,
@@ -1599,6 +1687,7 @@ fn orchestrator_template_session_for_instance_session(
         })
 }
 
+/// Handles schedule orchestrator transitions for completed session.
 fn schedule_orchestrator_transitions_for_completed_session(
     inner: &mut StateInner,
     stopping_orchestrator_session_ids: &HashMap<String, HashSet<String>>,
@@ -1727,6 +1816,7 @@ fn schedule_orchestrator_transitions_for_completed_session(
     changed
 }
 
+/// Updates orchestrator delivery cursor.
 fn update_orchestrator_delivery_cursor(
     instance: &mut OrchestratorInstance,
     source_session_id: &str,
@@ -1754,6 +1844,7 @@ fn update_orchestrator_delivery_cursor(
     }
 }
 
+/// Marks deadlocked orchestrator instances.
 fn mark_deadlocked_orchestrator_instances(
     inner: &mut StateInner,
     stopping_orchestrator_ids: &HashSet<String>,
@@ -1820,6 +1911,7 @@ fn mark_deadlocked_orchestrator_instances(
     true
 }
 
+/// Detects deadlocked consolidate session IDs.
 fn detect_deadlocked_consolidate_session_ids(
     inner: &StateInner,
     instance: &OrchestratorInstance,
@@ -1894,6 +1986,7 @@ fn detect_deadlocked_consolidate_session_ids(
     deadlocked_session_ids
 }
 
+/// Formats deadlocked orchestrator message.
 fn format_deadlocked_orchestrator_message(
     inner: &StateInner,
     instance: &OrchestratorInstance,
@@ -1929,6 +2022,7 @@ fn format_deadlocked_orchestrator_message(
     }
 }
 
+/// Builds transition result text.
 fn build_transition_result_text(
     record: &SessionRecord,
     mode: OrchestratorTransitionResultMode,
@@ -1953,6 +2047,7 @@ fn build_transition_result_text(
     }
 }
 
+/// Returns the next pending transition action.
 fn next_pending_transition_action(
     inner: &StateInner,
     stopping_orchestrator_ids: &HashSet<String>,
@@ -2020,6 +2115,7 @@ fn next_pending_transition_action(
     None
 }
 
+/// Collects consolidated pending transitions.
 fn collect_consolidated_pending_transitions(
     instance: &OrchestratorInstance,
     destination_session_id: &str,
@@ -2039,6 +2135,7 @@ fn collect_consolidated_pending_transitions(
     })
 }
 
+/// Inspects consolidated pending transitions.
 fn inspect_consolidated_pending_transitions(
     instance: &OrchestratorInstance,
     destination_session_id: &str,
@@ -2108,6 +2205,7 @@ fn inspect_consolidated_pending_transitions(
     })
 }
 
+/// Builds consolidated transition prompt.
 fn build_consolidated_transition_prompt(
     instance: &OrchestratorInstance,
     pendings: &[PendingTransition],
@@ -2143,6 +2241,7 @@ fn build_consolidated_transition_prompt(
     }
 }
 
+/// Combines transition summary and result.
 fn combine_transition_summary_and_result(summary: &str, last_response: &str) -> String {
     let summary = summary.trim();
     let last_response = last_response.trim();
@@ -2155,6 +2254,7 @@ fn combine_transition_summary_and_result(summary: &str, last_response: &str) -> 
     }
 }
 
+/// Returns the current turn transition messages.
 fn current_turn_transition_messages(record: &SessionRecord) -> &[Message] {
     record
         .active_turn_start_message_count
@@ -2162,10 +2262,12 @@ fn current_turn_transition_messages(record: &SessionRecord) -> &[Message] {
         .unwrap_or(record.session.messages.as_slice())
 }
 
+/// Returns the latest transition message summary.
 fn latest_transition_message_summary(messages: &[Message]) -> Option<String> {
     messages.iter().rev().find_map(transition_message_summary)
 }
 
+/// Handles transition message summary.
 fn transition_message_summary(message: &Message) -> Option<String> {
     match message {
         Message::Text {
@@ -2204,10 +2306,12 @@ fn transition_message_summary(message: &Message) -> Option<String> {
     }
 }
 
+/// Returns the latest transition message text.
 fn latest_transition_message_text(messages: &[Message]) -> Option<String> {
     messages.iter().rev().find_map(transition_message_text)
 }
 
+/// Handles transition message text.
 fn transition_message_text(message: &Message) -> Option<String> {
     match message {
         Message::Text {
@@ -2273,6 +2377,7 @@ fn transition_message_text(message: &Message) -> Option<String> {
     }
 }
 
+/// Renders transition prompt.
 fn render_transition_prompt(
     transition: &OrchestratorTemplateTransition,
     source_template: Option<&OrchestratorSessionTemplate>,
@@ -2306,6 +2411,7 @@ fn render_transition_prompt(
     }
 }
 
+/// Builds orchestrator destination prompt.
 fn build_orchestrator_destination_prompt(
     destination_record: &SessionRecord,
     instructions: &str,

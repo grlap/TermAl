@@ -1,3 +1,21 @@
+/*
+Agent runtime adapters
+                    +----------------------+
+session dispatch -->| runtime spawn/attach |
+                    +----------+-----------+
+                               |
+          +--------------------+--------------------+
+          |                    |                    |
+          v                    v                    v
+   Claude stdio         shared Codex         ACP stdio
+   per session          app-server           per session
+                        shared by all        Cursor / Gemini
+                        Codex sessions
+Each adapter translates agent-native protocol events into recorder callbacks so
+the rest of the backend can work with one message model.
+*/
+
+/// Resolves source Codex home dir.
 fn resolve_source_codex_home_dir() -> Result<PathBuf> {
     if let Some(path) = std::env::var_os("CODEX_HOME") {
         return Ok(PathBuf::from(path));
@@ -7,23 +25,27 @@ fn resolve_source_codex_home_dir() -> Result<PathBuf> {
     Ok(home.join(".codex"))
 }
 
+/// Resolves TermAl data dir.
 fn resolve_termal_data_dir(default_workdir: &str) -> PathBuf {
     let base = resolve_home_dir().unwrap_or_else(|| PathBuf::from(default_workdir));
     base.join(".termal")
 }
 
+/// Resolves home dir.
 fn resolve_home_dir() -> Option<PathBuf> {
     std::env::var_os("HOME")
         .or_else(|| std::env::var_os("USERPROFILE"))
         .map(PathBuf::from)
 }
 
+/// Resolves TermAl Codex home.
 fn resolve_termal_codex_home(default_workdir: &str, scope: &str) -> PathBuf {
     resolve_termal_data_dir(default_workdir)
         .join("codex-home")
         .join(scope)
 }
 
+/// Prepares TermAl Codex home.
 fn prepare_termal_codex_home(default_workdir: &str, scope: &str) -> Result<PathBuf> {
     let target_home = resolve_termal_codex_home(default_workdir, scope);
     fs::create_dir_all(&target_home)
@@ -34,6 +56,7 @@ fn prepare_termal_codex_home(default_workdir: &str, scope: &str) -> Result<PathB
     Ok(target_home)
 }
 
+/// Seeds TermAl Codex home from.
 fn seed_termal_codex_home_from(source_home: &FsPath, target_home: &FsPath) -> Result<()> {
     if !source_home.exists() {
         return Ok(());
@@ -62,6 +85,7 @@ fn seed_termal_codex_home_from(source_home: &FsPath, target_home: &FsPath) -> Re
     Ok(())
 }
 
+/// Syncs Codex home entry.
 fn sync_codex_home_entry(source: &FsPath, target: &FsPath) -> Result<()> {
     if !source.exists() {
         return Ok(());
@@ -79,6 +103,7 @@ fn sync_codex_home_entry(source: &FsPath, target: &FsPath) -> Result<()> {
     }
 }
 
+/// Syncs Codex home directory.
 fn sync_codex_home_directory(source: &FsPath, target: &FsPath) -> Result<()> {
     if target.is_file() {
         fs::remove_file(target)
@@ -98,6 +123,7 @@ fn sync_codex_home_directory(source: &FsPath, target: &FsPath) -> Result<()> {
     Ok(())
 }
 
+/// Syncs Codex home file.
 fn sync_codex_home_file(
     source: &FsPath,
     target: &FsPath,
@@ -150,6 +176,7 @@ fn sync_codex_home_file(
     Ok(())
 }
 
+/// Represents a Codex runtime command.
 #[derive(Clone)]
 enum CodexRuntimeCommand {
     Prompt {
@@ -175,6 +202,7 @@ enum CodexRuntimeCommand {
     },
 }
 
+/// Represents a Codex prompt command.
 #[derive(Clone)]
 struct CodexPromptCommand {
     approval_policy: CodexApprovalPolicy,
@@ -187,12 +215,14 @@ struct CodexPromptCommand {
     sandbox_mode: CodexSandboxMode,
 }
 
+/// Represents a Codex JSON RPC response command.
 #[derive(Clone)]
 struct CodexJsonRpcResponseCommand {
     request_id: Value,
     result: Value,
 }
 
+/// Enumerates Codex approval kinds.
 #[derive(Clone)]
 enum CodexApprovalKind {
     CommandExecution,
@@ -200,35 +230,41 @@ enum CodexApprovalKind {
     Permissions { requested_permissions: Value },
 }
 
+/// Represents Codex pending approval.
 #[derive(Clone)]
 struct CodexPendingApproval {
     kind: CodexApprovalKind,
     request_id: Value,
 }
 
+/// Represents Codex pending user input.
 #[derive(Clone)]
 struct CodexPendingUserInput {
     questions: Vec<UserInputQuestion>,
     request_id: Value,
 }
 
+/// Represents Codex pending MCP elicitation.
 #[derive(Clone)]
 struct CodexPendingMcpElicitation {
     request: McpElicitationRequestPayload,
     request_id: Value,
 }
 
+/// Represents the Codex pending app request payload.
 #[derive(Clone)]
 struct CodexPendingAppRequest {
     request_id: Value,
 }
 
+/// Represents a Claude prompt command.
 #[derive(Clone)]
 struct ClaudePromptCommand {
     attachments: Vec<PromptImageAttachment>,
     text: String,
 }
 
+/// Represents a Claude runtime command.
 #[derive(Clone)]
 enum ClaudeRuntimeCommand {
     Prompt(ClaudePromptCommand),
@@ -237,12 +273,14 @@ enum ClaudeRuntimeCommand {
     SetPermissionMode(String),
 }
 
+/// Represents prompt image attachment.
 #[derive(Clone, Debug, Deserialize, Serialize)]
 struct PromptImageAttachment {
     data: String,
     metadata: MessageImageAttachment,
 }
 
+/// Represents Claude pending approval.
 #[derive(Clone)]
 struct ClaudePendingApproval {
     permission_mode_for_session: Option<String>,
@@ -250,6 +288,7 @@ struct ClaudePendingApproval {
     tool_input: Value,
 }
 
+/// Enumerates Claude permission decisions.
 #[derive(Clone)]
 enum ClaudePermissionDecision {
     Allow {
@@ -262,6 +301,7 @@ enum ClaudePermissionDecision {
     },
 }
 
+/// Enumerates Claude control request actions.
 enum ClaudeControlRequestAction {
     QueueApproval {
         title: String,
@@ -272,6 +312,7 @@ enum ClaudeControlRequestAction {
     Respond(ClaudePermissionDecision),
 }
 
+/// Represents a ACP runtime command.
 #[derive(Clone)]
 enum AcpRuntimeCommand {
     Prompt(AcpPromptCommand),
@@ -282,11 +323,13 @@ enum AcpRuntimeCommand {
     },
 }
 
+/// Holds ACP launch options.
 #[derive(Clone, Copy, Default)]
 struct AcpLaunchOptions {
     gemini_approval_mode: Option<GeminiApprovalMode>,
 }
 
+/// Represents a ACP prompt command.
 #[derive(Clone)]
 struct AcpPromptCommand {
     cwd: String,
@@ -296,6 +339,7 @@ struct AcpPromptCommand {
     resume_session_id: Option<String>,
 }
 
+/// Represents ACP pending approval.
 #[derive(Clone)]
 struct AcpPendingApproval {
     allow_once_option_id: Option<String>,
@@ -304,18 +348,21 @@ struct AcpPendingApproval {
     request_id: Value,
 }
 
+/// Tracks ACP runtime state.
 #[derive(Default)]
 struct AcpRuntimeState {
     current_session_id: Option<String>,
     is_loading_history: bool,
 }
 
+/// Tracks ACP turn state.
 #[derive(Default)]
 struct AcpTurnState {
     current_agent_message_id: Option<String>,
     thinking_buffer: String,
 }
 
+/// Holds turn configuration.
 #[derive(Clone)]
 struct TurnConfig {
     codex_approval_policy: Option<CodexApprovalPolicy>,
@@ -330,6 +377,7 @@ struct TurnConfig {
     external_session_id: Option<String>,
 }
 
+/// Defines the turn dispatch variants.
 enum TurnDispatch {
     PersistentClaude {
         command: ClaudePromptCommand,
@@ -348,6 +396,7 @@ enum TurnDispatch {
     },
 }
 
+/// Defines the dispatch turn result variants.
 enum DispatchTurnResult {
     Dispatched(TurnDispatch),
     Queued,
@@ -357,11 +406,13 @@ type CodexPendingRequestMap =
     Arc<Mutex<HashMap<String, Sender<std::result::Result<Value, String>>>>>;
 type AcpPendingRequestMap = Arc<Mutex<HashMap<String, Sender<std::result::Result<Value, String>>>>>;
 
+/// Represents the pending ACP JSON RPC request payload.
 struct PendingAcpJsonRpcRequest {
     request_id: String,
     response_rx: mpsc::Receiver<std::result::Result<Value, String>>,
 }
 
+/// Represents pending subagent result.
 struct PendingSubagentResult {
     title: String,
     summary: String,
@@ -369,6 +420,7 @@ struct PendingSubagentResult {
     turn_id: Option<String>,
 }
 
+/// Tracks Codex turn state.
 #[derive(Default)]
 struct CodexTurnState {
     current_agent_message_id: Option<String>,
@@ -379,6 +431,7 @@ struct CodexTurnState {
     first_visible_assistant_message_id: Option<String>,
 }
 
+/// Tracks session recorder state.
 #[derive(Default)]
 struct SessionRecorderState {
     command_messages: HashMap<String, String>,
@@ -386,6 +439,7 @@ struct SessionRecorderState {
     streaming_text_message_id: Option<String>,
 }
 
+/// Tracks shared Codex session state.
 #[derive(Default)]
 struct SharedCodexSessionState {
     recorder: SessionRecorderState,
@@ -397,6 +451,7 @@ struct SharedCodexSessionState {
 type SharedCodexSessionMap = Arc<Mutex<HashMap<String, SharedCodexSessionState>>>;
 type SharedCodexThreadMap = Arc<Mutex<HashMap<String, String>>>;
 
+/// Spawns ACP runtime.
 fn spawn_acp_runtime(
     state: AppState,
     session_id: String,
@@ -675,6 +730,7 @@ fn spawn_acp_runtime(
     })
 }
 
+/// Handles maybe authenticate ACP runtime.
 fn maybe_authenticate_acp_runtime(
     writer: &mut impl Write,
     pending_requests: &AcpPendingRequestMap,
@@ -696,6 +752,7 @@ fn maybe_authenticate_acp_runtime(
     Ok(())
 }
 
+/// Handles select ACP auth method.
 fn select_acp_auth_method(initialize_result: &Value, agent: AcpAgent) -> Option<String> {
     let methods = initialize_result
         .get("authMethods")
@@ -728,6 +785,7 @@ fn select_acp_auth_method(initialize_result: &Value, agent: AcpAgent) -> Option<
     }
 }
 
+/// Handles ACP prompt command.
 fn handle_acp_prompt_command(
     writer: &mut impl Write,
     pending_requests: &AcpPendingRequestMap,
@@ -804,6 +862,7 @@ fn handle_acp_prompt_command(
     Ok(())
 }
 
+/// Handles ACP session config refresh.
 fn handle_acp_session_config_refresh(
     writer: &mut impl Write,
     pending_requests: &AcpPendingRequestMap,
@@ -825,6 +884,7 @@ fn handle_acp_session_config_refresh(
     Ok(())
 }
 
+/// Ensures ACP session ready.
 fn ensure_acp_session_ready(
     writer: &mut impl Write,
     pending_requests: &AcpPendingRequestMap,
@@ -920,6 +980,7 @@ fn ensure_acp_session_ready(
     Ok(external_session_id)
 }
 
+/// Handles configure ACP session.
 fn configure_acp_session(
     writer: &mut impl Write,
     pending_requests: &AcpPendingRequestMap,
@@ -974,6 +1035,7 @@ fn configure_acp_session(
     Ok(())
 }
 
+/// Returns the current ACP config option value.
 fn current_acp_config_option_value(config_result: &Value, option_id: &str) -> Option<String> {
     acp_config_options(config_result)?
         .iter()
@@ -982,6 +1044,7 @@ fn current_acp_config_option_value(config_result: &Value, option_id: &str) -> Op
         .map(str::to_owned)
 }
 
+/// Returns the matching ACP config option value.
 fn matching_acp_config_option_value(
     config_result: &Value,
     option_id: &str,
@@ -1013,6 +1076,7 @@ fn matching_acp_config_option_value(
     })
 }
 
+/// Handles ACP model options.
 fn acp_model_options(config_result: &Value) -> Vec<SessionModelOption> {
     let Some(option) = acp_config_options(config_result).and_then(|entries| {
         entries
@@ -1061,6 +1125,7 @@ fn acp_model_options(config_result: &Value) -> Vec<SessionModelOption> {
         .unwrap_or_default()
 }
 
+/// Handles ACP config options.
 fn acp_config_options(config_result: &Value) -> Option<&Vec<Value>> {
     config_result
         .get("configOptions")
@@ -1068,6 +1133,7 @@ fn acp_config_options(config_result: &Value) -> Option<&Vec<Value>> {
         .and_then(Value::as_array)
 }
 
+/// Handles ACP message.
 fn handle_acp_message(
     message: &Value,
     state: &AppState,
@@ -1123,6 +1189,7 @@ fn handle_acp_message(
     )
 }
 
+/// Handles ACP request.
 fn handle_acp_request(
     message: &Value,
     state: &AppState,
@@ -1216,6 +1283,7 @@ fn handle_acp_request(
     Ok(())
 }
 
+/// Handles ACP permission response option ID.
 fn acp_permission_response_option_id(
     agent: AcpAgent,
     state: &AppState,
@@ -1238,6 +1306,7 @@ fn acp_permission_response_option_id(
     }
 }
 
+/// Handles ACP notification.
 fn handle_acp_notification(
     method: &str,
     message: &Value,
@@ -1282,6 +1351,7 @@ fn handle_acp_notification(
     Ok(())
 }
 
+/// Handles ACP session update.
 fn handle_acp_session_update(
     update: &Value,
     state: &AppState,
@@ -1368,6 +1438,7 @@ fn handle_acp_session_update(
     Ok(())
 }
 
+/// Finishes ACP turn state.
 fn finish_acp_turn_state(
     recorder: &mut SessionRecorder,
     turn_state: &mut AcpTurnState,
@@ -1377,6 +1448,7 @@ fn finish_acp_turn_state(
     recorder.finish_streaming_text()
 }
 
+/// Finishes ACP thinking.
 fn finish_acp_thinking(
     recorder: &mut SessionRecorder,
     turn_state: &mut AcpTurnState,
@@ -1401,6 +1473,7 @@ fn finish_acp_thinking(
     recorder.push_thinking(&format!("{} is thinking", agent.label()), lines)
 }
 
+/// Handles ACP tool identity.
 fn acp_tool_identity(update: &Value) -> Option<(String, String)> {
     let key = update.get("toolCallId").and_then(Value::as_str)?.to_owned();
     let command = update
@@ -1419,6 +1492,7 @@ fn acp_tool_identity(update: &Value) -> Option<(String, String)> {
     Some((key, command))
 }
 
+/// Summarizes ACP tool output.
 fn summarize_acp_tool_output(update: &Value) -> String {
     let Some(raw_output) = update.get("rawOutput") else {
         return String::new();
@@ -1445,6 +1519,7 @@ fn summarize_acp_tool_output(update: &Value) -> String {
     serde_json::to_string_pretty(raw_output).unwrap_or_else(|_| raw_output.to_string())
 }
 
+/// Handles ACP tool status.
 fn acp_tool_status(update: &Value) -> CommandStatus {
     match update.get("status").and_then(Value::as_str) {
         Some("completed") => {
@@ -1463,6 +1538,7 @@ fn acp_tool_status(update: &Value) -> CommandStatus {
     }
 }
 
+/// Parses cursor mode ACP value.
 fn parse_cursor_mode_acp_value(value: &str) -> Option<CursorMode> {
     match value.trim().to_ascii_lowercase().as_str() {
         "agent" => Some(CursorMode::Agent),
@@ -1472,6 +1548,7 @@ fn parse_cursor_mode_acp_value(value: &str) -> Option<CursorMode> {
     }
 }
 
+/// Handles ACP cursor mode.
 fn acp_cursor_mode(update: &Value) -> Option<CursorMode> {
     current_acp_config_option_value(update, "mode")
         .or_else(|| {
@@ -1489,6 +1566,7 @@ fn acp_cursor_mode(update: &Value) -> Option<CursorMode> {
         .and_then(|value| parse_cursor_mode_acp_value(&value))
 }
 
+/// Finds ACP permission option.
 fn find_acp_permission_option(options: &[Value], hints: &[&str]) -> Option<String> {
     options.iter().find_map(|option| {
         let option_id = option
@@ -1503,6 +1581,7 @@ fn find_acp_permission_option(options: &[Value], hints: &[&str]) -> Option<Strin
     })
 }
 
+/// Handles send ACP JSON RPC request.
 fn send_acp_json_rpc_request(
     writer: &mut impl Write,
     pending_requests: &AcpPendingRequestMap,
@@ -1521,6 +1600,7 @@ fn send_acp_json_rpc_request(
     )
 }
 
+/// Handles send ACP JSON RPC request without timeout.
 #[cfg(test)]
 fn send_acp_json_rpc_request_without_timeout(
     writer: &mut impl Write,
@@ -1532,6 +1612,7 @@ fn send_acp_json_rpc_request_without_timeout(
     send_acp_json_rpc_request_inner(writer, pending_requests, method, params, None, agent)
 }
 
+/// Starts ACP JSON RPC request.
 fn start_acp_json_rpc_request(
     writer: &mut impl Write,
     pending_requests: &AcpPendingRequestMap,
@@ -1569,6 +1650,7 @@ fn start_acp_json_rpc_request(
     })
 }
 
+/// Handles send ACP JSON RPC request inner.
 fn send_acp_json_rpc_request_inner(
     writer: &mut impl Write,
     pending_requests: &AcpPendingRequestMap,
@@ -1582,6 +1664,7 @@ fn send_acp_json_rpc_request_inner(
     wait_for_acp_json_rpc_response(pending_requests, pending_request, method, timeout, agent)
 }
 
+/// Handles wait for ACP JSON RPC response.
 fn wait_for_acp_json_rpc_response(
     pending_requests: &AcpPendingRequestMap,
     pending_request: PendingAcpJsonRpcRequest,
@@ -1626,6 +1709,7 @@ fn wait_for_acp_json_rpc_response(
     response.map_err(|err| anyhow!(err))
 }
 
+/// Marks pending ACP requests as failed.
 fn fail_pending_acp_requests(pending_requests: &AcpPendingRequestMap, detail: &str) {
     let senders = pending_requests
         .lock()
@@ -1639,6 +1723,7 @@ fn fail_pending_acp_requests(pending_requests: &AcpPendingRequestMap, detail: &s
     }
 }
 
+/// Writes ACP JSON RPC message.
 fn write_acp_json_rpc_message(
     writer: &mut impl Write,
     message: &Value,
@@ -1654,12 +1739,14 @@ fn write_acp_json_rpc_message(
         .with_context(|| format!("failed to flush {} ACP stdin", agent.label()))
 }
 
+/// Handles ACP request ID key.
 fn acp_request_id_key(id: &Value) -> String {
     id.as_str()
         .map(str::to_owned)
         .unwrap_or_else(|| id.to_string())
 }
 
+/// Summarizes ACP JSON RPC error.
 fn summarize_acp_json_rpc_error(error: &Value) -> String {
     if let Some(message) = error.get("message").and_then(Value::as_str) {
         return message.to_owned();
@@ -1668,6 +1755,7 @@ fn summarize_acp_json_rpc_error(error: &Value) -> String {
     summarize_error(error)
 }
 
+/// Handles log unhandled ACP event.
 fn log_unhandled_acp_event(agent: AcpAgent, context: &str, message: &Value) {
     eprintln!(
         "{} acp diagnostic> {context}: {message}",
@@ -1675,6 +1763,7 @@ fn log_unhandled_acp_event(agent: AcpAgent, context: &str, message: &Value) {
     );
 }
 
+/// Spawns Codex runtime.
 fn spawn_codex_runtime(
     state: AppState,
     session_id: String,
@@ -1697,6 +1786,7 @@ fn spawn_codex_runtime(
     })
 }
 
+/// Spawns shared Codex runtime.
 fn spawn_shared_codex_runtime(state: AppState) -> Result<SharedCodexRuntime> {
     // Codex threads carry their own cwd, so one shared app-server can serve all sessions.
     let codex_home = prepare_termal_codex_home(&state.default_workdir, "shared-app-server")?;
@@ -1969,6 +2059,7 @@ fn spawn_shared_codex_runtime(state: AppState) -> Result<SharedCodexRuntime> {
     })
 }
 
+/// Remembers shared Codex thread.
 fn remember_shared_codex_thread(
     sessions: &SharedCodexSessionMap,
     thread_sessions: &SharedCodexThreadMap,
@@ -1995,6 +2086,7 @@ fn remember_shared_codex_thread(
     thread_sessions.insert(thread_id, session_id.to_owned());
 }
 
+/// Finds shared Codex session ID.
 fn find_shared_codex_session_id(
     state: &AppState,
     thread_sessions: &SharedCodexThreadMap,
@@ -2024,6 +2116,7 @@ fn find_shared_codex_session_id(
     Some(session_id)
 }
 
+/// Handles Codex message thread ID.
 fn codex_message_thread_id<'a>(message: &'a Value) -> Option<&'a str> {
     message
         .pointer("/params/threadId")
@@ -2031,6 +2124,7 @@ fn codex_message_thread_id<'a>(message: &'a Value) -> Option<&'a str> {
         .or_else(|| message.pointer("/params/thread/id").and_then(Value::as_str))
 }
 
+/// Handles shared Codex session thread ID.
 fn shared_codex_session_thread_id<'a>(method: &str, message: &'a Value) -> Option<&'a str> {
     codex_message_thread_id(message).or_else(|| match method {
         _ if method.starts_with("codex/event/") => message
@@ -2045,6 +2139,7 @@ fn shared_codex_session_thread_id<'a>(method: &str, message: &'a Value) -> Optio
     })
 }
 
+/// Handles shared Codex prompt command.
 fn handle_shared_codex_prompt_command(
     writer: &mut impl Write,
     pending_requests: &CodexPendingRequestMap,
@@ -2140,6 +2235,7 @@ fn handle_shared_codex_prompt_command(
     Ok(())
 }
 
+/// Handles shared Codex app server message.
 fn handle_shared_codex_app_server_message(
     message: &Value,
     state: &AppState,
@@ -2266,6 +2362,7 @@ fn handle_shared_codex_app_server_message(
     )
 }
 
+/// Handles shared Codex global notice.
 fn handle_shared_codex_global_notice(
     method: &str,
     message: &Value,
@@ -2299,6 +2396,7 @@ fn handle_shared_codex_global_notice(
     Ok(true)
 }
 
+/// Builds shared Codex runtime notice.
 fn build_shared_codex_runtime_notice(method: &str, message: &Value) -> Option<CodexNotice> {
     build_shared_codex_global_notice(
         CodexNoticeKind::RuntimeNotice,
@@ -2308,6 +2406,7 @@ fn build_shared_codex_runtime_notice(method: &str, message: &Value) -> Option<Co
     )
 }
 
+/// Infers shared Codex notice level.
 fn infer_shared_codex_notice_level(method: &str, message: &Value) -> CodexNoticeLevel {
     let payload = message.get("params").unwrap_or(message);
     let severity = payload
@@ -2334,6 +2433,7 @@ fn infer_shared_codex_notice_level(method: &str, message: &Value) -> CodexNotice
     }
 }
 
+/// Builds shared Codex global notice.
 fn build_shared_codex_global_notice(
     kind: CodexNoticeKind,
     level: CodexNoticeLevel,
@@ -2393,6 +2493,7 @@ fn build_shared_codex_global_notice(
     })
 }
 
+/// Extracts shared Codex notice text.
 fn extract_shared_codex_notice_text(payload: &Value, pointers: &[&str]) -> Option<String> {
     pointers.iter().find_map(|pointer| {
         payload
@@ -2404,6 +2505,7 @@ fn extract_shared_codex_notice_text(payload: &Value, pointers: &[&str]) -> Optio
     })
 }
 
+/// Handles shared Codex app server notification.
 fn handle_shared_codex_app_server_notification(
     method: &str,
     message: &Value,
@@ -2590,6 +2692,7 @@ fn handle_shared_codex_app_server_notification(
     Ok(())
 }
 
+/// Handles shared Codex task complete.
 fn handle_shared_codex_task_complete(
     message: &Value,
     state: &AppState,
@@ -2646,6 +2749,7 @@ fn handle_shared_codex_task_complete(
     Ok(())
 }
 
+/// Handles shared Codex event turn ID.
 fn shared_codex_event_turn_id<'a>(message: &'a Value) -> Option<&'a str> {
     message
         .pointer("/params/msg/turn_id")
@@ -2656,6 +2760,7 @@ fn shared_codex_event_turn_id<'a>(message: &'a Value) -> Option<&'a str> {
         .or_else(|| message.pointer("/params/turn/id").and_then(Value::as_str))
 }
 
+/// Handles shared Codex event matches active turn.
 fn shared_codex_event_matches_active_turn(
     current_turn_id: Option<&str>,
     event_turn_id: Option<&str>,
@@ -2668,6 +2773,7 @@ fn shared_codex_event_matches_active_turn(
     }
 }
 
+/// Pushes shared Codex turn notice.
 fn push_shared_codex_turn_notice(
     state: &AppState,
     session_id: &str,
@@ -2696,6 +2802,7 @@ fn push_shared_codex_turn_notice(
     state.push_message(session_id, message)
 }
 
+/// Handles shared Codex model rerouted.
 fn handle_shared_codex_model_rerouted(
     message: &Value,
     state: &AppState,
@@ -2729,6 +2836,7 @@ fn handle_shared_codex_model_rerouted(
     push_shared_codex_turn_notice(state, session_id, turn_state, &notice)
 }
 
+/// Handles shared Codex thread compacted.
 fn handle_shared_codex_thread_compacted(
     message: &Value,
     state: &AppState,
@@ -2745,6 +2853,7 @@ fn handle_shared_codex_thread_compacted(
     push_shared_codex_turn_notice(state, session_id, turn_state, "Codex compacted the thread context for this turn.")
 }
 
+/// Records completed Codex agent message.
 fn record_completed_codex_agent_message(
     turn_state: &mut CodexTurnState,
     recorder: &mut impl TurnRecorder,
@@ -2789,6 +2898,7 @@ fn record_completed_codex_agent_message(
     remember_codex_first_assistant_message_id(state, session_id, turn_state)
 }
 
+/// Handles shared Codex event item completed.
 fn handle_shared_codex_event_item_completed(
     message: &Value,
     state: &AppState,
@@ -2851,6 +2961,7 @@ fn handle_shared_codex_event_item_completed(
     Ok(())
 }
 
+/// Concatenates Codex text parts.
 fn concatenate_codex_text_parts(content: &[Value]) -> Option<String> {
     let mut combined = String::new();
 
@@ -2871,6 +2982,7 @@ fn concatenate_codex_text_parts(content: &[Value]) -> Option<String> {
     }
 }
 
+/// Clears Codex turn state.
 fn clear_codex_turn_state(turn_state: &mut CodexTurnState) {
     turn_state.current_agent_message_id = None;
     turn_state.streamed_agent_message_text_by_item_id.clear();
@@ -2880,6 +2992,7 @@ fn clear_codex_turn_state(turn_state: &mut CodexTurnState) {
     turn_state.first_visible_assistant_message_id = None;
 }
 
+/// Buffers Codex subagent result.
 fn buffer_codex_subagent_result(
     turn_state: &mut CodexTurnState,
     title: &str,
@@ -2902,6 +3015,7 @@ fn buffer_codex_subagent_result(
         });
 }
 
+/// Flushes pending Codex subagent results.
 fn flush_pending_codex_subagent_results(
     turn_state: &mut CodexTurnState,
     recorder: &mut impl TurnRecorder,
@@ -2918,6 +3032,7 @@ fn flush_pending_codex_subagent_results(
     Ok(())
 }
 
+/// Begins Codex assistant output.
 fn begin_codex_assistant_output(
     turn_state: &mut CodexTurnState,
     recorder: &mut impl TurnRecorder,
@@ -2930,6 +3045,7 @@ fn begin_codex_assistant_output(
     Ok(())
 }
 
+/// Remembers Codex first assistant message ID.
 fn remember_codex_first_assistant_message_id(
     state: &AppState,
     session_id: &str,
@@ -2941,6 +3057,7 @@ fn remember_codex_first_assistant_message_id(
     Ok(())
 }
 
+/// Handles shared Codex event agent message content delta.
 fn handle_shared_codex_event_agent_message_content_delta(
     message: &Value,
     current_turn_id: Option<&str>,
@@ -2967,6 +3084,7 @@ fn handle_shared_codex_event_agent_message_content_delta(
     record_codex_agent_message_delta(turn_state, recorder, state, session_id, item_id, delta)
 }
 
+/// Handles shared Codex event agent message.
 fn handle_shared_codex_event_agent_message(
     message: &Value,
     state: &AppState,
@@ -3007,6 +3125,7 @@ fn handle_shared_codex_event_agent_message(
     remember_codex_first_assistant_message_id(state, session_id, turn_state)
 }
 
+/// Records Codex agent message delta.
 fn record_codex_agent_message_delta(
     turn_state: &mut CodexTurnState,
     recorder: &mut impl TurnRecorder,
@@ -3035,12 +3154,14 @@ fn record_codex_agent_message_delta(
     remember_codex_first_assistant_message_id(state, session_id, turn_state)
 }
 
+/// Defines the completed text update variants.
 enum CompletedTextUpdate {
     NoChange,
     Append(String),
     Replace(String),
 }
 
+/// Returns the next completed Codex text update.
 fn next_completed_codex_text_update(existing: &mut String, incoming: &str) -> CompletedTextUpdate {
     if incoming.is_empty() {
         return CompletedTextUpdate::NoChange;
@@ -3077,6 +3198,7 @@ fn next_completed_codex_text_update(existing: &mut String, incoming: &str) -> Co
     CompletedTextUpdate::Replace(incoming.to_owned())
 }
 
+/// Returns the next Codex delta suffix.
 fn next_codex_delta_suffix(existing: &mut String, incoming: &str) -> Option<String> {
     if incoming.is_empty() {
         return None;
@@ -3118,6 +3240,7 @@ fn next_codex_delta_suffix(existing: &mut String, incoming: &str) -> Option<Stri
     }
 }
 
+/// Handles longest Codex delta overlap.
 fn longest_codex_delta_overlap(existing: &str, incoming: &str) -> usize {
     let max_overlap = existing.len().min(incoming.len());
     for overlap in (1..=max_overlap).rev() {
@@ -3129,6 +3252,7 @@ fn longest_codex_delta_overlap(existing: &str, incoming: &str) -> usize {
     0
 }
 
+/// Handles Codex app server request.
 fn handle_codex_app_server_request(
     method: &str,
     message: &Value,
@@ -3277,6 +3401,7 @@ fn handle_codex_app_server_request(
     Ok(())
 }
 
+/// Describes Codex app server request.
 fn describe_codex_app_server_request(method: &str, params: &Value) -> (String, String) {
     if method == "item/tool/call" {
         let tool = params
@@ -3311,6 +3436,7 @@ fn describe_codex_app_server_request(method: &str, params: &Value) -> (String, S
     )
 }
 
+/// Handles Codex app server item started.
 fn handle_codex_app_server_item_started(
     item: &Value,
     recorder: &mut impl TurnRecorder,
@@ -3339,6 +3465,7 @@ fn handle_codex_app_server_item_started(
     Ok(())
 }
 
+/// Describes Codex permission request.
 fn describe_codex_permission_request(permissions: &Value) -> Option<String> {
     let mut parts = Vec::new();
 
@@ -3412,6 +3539,7 @@ fn describe_codex_permission_request(permissions: &Value) -> Option<String> {
     (!parts.is_empty()).then(|| parts.join(", "))
 }
 
+/// Describes Codex user input request.
 fn describe_codex_user_input_request(questions: &[UserInputQuestion]) -> String {
     match questions.len() {
         0 => "Codex requested additional input.".to_owned(),
@@ -3426,6 +3554,7 @@ fn describe_codex_user_input_request(questions: &[UserInputQuestion]) -> String 
     }
 }
 
+/// Describes Codex MCP elicitation request.
 fn describe_codex_mcp_elicitation_request(request: &McpElicitationRequestPayload) -> String {
     match &request.mode {
         McpElicitationRequestMode::Form { message, .. } => {
@@ -3459,6 +3588,7 @@ fn describe_codex_mcp_elicitation_request(request: &McpElicitationRequestPayload
     }
 }
 
+/// Handles Codex app server item completed.
 fn handle_codex_app_server_item_completed(
     item: &Value,
     state: &AppState,
@@ -3541,6 +3671,7 @@ fn handle_codex_app_server_item_completed(
     Ok(())
 }
 
+/// Handles send Codex JSON RPC request.
 fn send_codex_json_rpc_request(
     writer: &mut impl Write,
     pending_requests: &CodexPendingRequestMap,
@@ -3585,6 +3716,7 @@ fn send_codex_json_rpc_request(
     }
 }
 
+/// Handles Codex model list refresh.
 fn handle_codex_model_list_refresh(
     writer: &mut impl Write,
     pending_requests: &CodexPendingRequestMap,
@@ -3617,6 +3749,7 @@ fn handle_codex_model_list_refresh(
     Ok(model_options)
 }
 
+/// Handles Claude model options.
 fn claude_model_options(message: &Value) -> Option<Vec<SessionModelOption>> {
     let models = message.pointer("/response/response/models")?.as_array()?;
     Some(
@@ -3668,6 +3801,7 @@ fn claude_model_options(message: &Value) -> Option<Vec<SessionModelOption>> {
     )
 }
 
+/// Handles Claude agent commands.
 fn claude_agent_commands(message: &Value) -> Option<Vec<AgentCommand>> {
     let commands = message.pointer("/response/response/commands")?.as_array()?;
     let parsed = commands
@@ -3708,6 +3842,7 @@ fn claude_agent_commands(message: &Value) -> Option<Vec<AgentCommand>> {
     Some(dedupe_agent_commands(parsed))
 }
 
+/// Normalizes Claude agent command description.
 fn normalize_claude_agent_command_description(raw: &str) -> (String, String) {
     let trimmed = raw.trim();
     for (suffix, source) in [
@@ -3722,6 +3857,7 @@ fn normalize_claude_agent_command_description(raw: &str) -> (String, String) {
     (trimmed.to_owned(), "Claude native command".to_owned())
 }
 
+/// Handles Claude model badges.
 fn claude_model_badges(entry: &Value) -> Vec<String> {
     let mut badges = Vec::new();
     let display_name = entry
@@ -3762,6 +3898,7 @@ fn claude_model_badges(entry: &Value) -> Vec<String> {
     badges
 }
 
+/// Parses Claude effort level.
 fn parse_claude_effort_level(value: &str) -> Option<ClaudeEffortLevel> {
     match value.trim() {
         "default" => Some(ClaudeEffortLevel::Default),
@@ -3773,6 +3910,7 @@ fn parse_claude_effort_level(value: &str) -> Option<ClaudeEffortLevel> {
     }
 }
 
+/// Parses Codex reasoning effort.
 fn parse_codex_reasoning_effort(value: &str) -> Option<CodexReasoningEffort> {
     match value.trim() {
         "none" => Some(CodexReasoningEffort::None),
@@ -3785,6 +3923,7 @@ fn parse_codex_reasoning_effort(value: &str) -> Option<CodexReasoningEffort> {
     }
 }
 
+/// Handles Codex reasoning effort rank.
 fn codex_reasoning_effort_rank(effort: CodexReasoningEffort) -> usize {
     match effort {
         CodexReasoningEffort::None => 0,
@@ -3796,6 +3935,7 @@ fn codex_reasoning_effort_rank(effort: CodexReasoningEffort) -> usize {
     }
 }
 
+/// Handles Codex model option.
 fn codex_model_option<'a>(
     model: &str,
     model_options: &'a [SessionModelOption],
@@ -3803,6 +3943,7 @@ fn codex_model_option<'a>(
     model_options.iter().find(|option| option.value == model)
 }
 
+/// Returns the matching session model option value.
 fn matching_session_model_option_value(
     requested_model: &str,
     model_options: &[SessionModelOption],
@@ -3821,6 +3962,7 @@ fn matching_session_model_option_value(
         .map(|option| option.value.clone())
 }
 
+/// Returns the normalized Codex reasoning effort.
 fn normalized_codex_reasoning_effort(
     model: &str,
     current_effort: CodexReasoningEffort,
@@ -3840,6 +3982,7 @@ fn normalized_codex_reasoning_effort(
         .or_else(|| option.supported_reasoning_efforts.first().copied())
 }
 
+/// Formats Codex reasoning efforts.
 fn format_codex_reasoning_efforts(efforts: &[CodexReasoningEffort]) -> String {
     let efforts = efforts
         .iter()
@@ -3856,6 +3999,7 @@ fn format_codex_reasoning_efforts(efforts: &[CodexReasoningEffort]) -> String {
     }
 }
 
+/// Handles Codex model options.
 fn codex_model_options(model_list_result: &Value) -> Vec<SessionModelOption> {
     model_list_result
         .get("data")
@@ -3918,6 +4062,7 @@ fn codex_model_options(model_list_result: &Value) -> Vec<SessionModelOption> {
         .collect()
 }
 
+/// Writes Codex JSON RPC message.
 fn write_codex_json_rpc_message(writer: &mut impl Write, message: &Value) -> Result<()> {
     serde_json::to_writer(&mut *writer, message)
         .context("failed to encode Codex app-server message")?;
@@ -3929,12 +4074,14 @@ fn write_codex_json_rpc_message(writer: &mut impl Write, message: &Value) -> Res
         .context("failed to flush Codex app-server stdin")
 }
 
+/// Handles Codex request ID key.
 fn codex_request_id_key(id: &Value) -> String {
     id.as_str()
         .map(str::to_owned)
         .unwrap_or_else(|| id.to_string())
 }
 
+/// Summarizes Codex JSON RPC error.
 fn summarize_codex_json_rpc_error(error: &Value) -> String {
     if let Some(message) = error.get("message").and_then(Value::as_str) {
         return message.to_owned();
@@ -3943,6 +4090,7 @@ fn summarize_codex_json_rpc_error(error: &Value) -> String {
     summarize_error(error)
 }
 
+/// Handles Codex sandbox policy value.
 fn codex_sandbox_policy_value(mode: CodexSandboxMode) -> Value {
     match mode {
         CodexSandboxMode::ReadOnly => json!({
@@ -3957,6 +4105,7 @@ fn codex_sandbox_policy_value(mode: CodexSandboxMode) -> Value {
     }
 }
 
+/// Handles Codex command.
 fn codex_command() -> Result<Command> {
     let exe = resolve_codex_executable()?;
 
@@ -3975,12 +4124,14 @@ fn codex_command() -> Result<Command> {
     Ok(Command::new(exe))
 }
 
+/// Resolves Codex executable.
 fn resolve_codex_executable() -> Result<PathBuf> {
     let launcher =
         find_command_on_path("codex").ok_or_else(|| anyhow!("`codex` was not found on PATH"))?;
     Ok(resolve_codex_native_binary(&launcher).unwrap_or(launcher))
 }
 
+/// Finds command on path.
 fn find_command_on_path(command: &str) -> Option<PathBuf> {
     let path = std::env::var_os("PATH")?;
 
@@ -4001,6 +4152,7 @@ fn find_command_on_path(command: &str) -> Option<PathBuf> {
     None
 }
 
+/// Collects agent readiness.
 fn collect_agent_readiness(default_workdir: &str) -> Vec<AgentReadiness> {
     vec![
         agent_readiness_for(Agent::Cursor, default_workdir),
@@ -4008,6 +4160,7 @@ fn collect_agent_readiness(default_workdir: &str) -> Vec<AgentReadiness> {
     ]
 }
 
+/// Validates agent session setup.
 fn validate_agent_session_setup(agent: Agent, workdir: &str) -> std::result::Result<(), String> {
     let readiness = agent_readiness_for(agent, workdir);
     if readiness.blocking {
@@ -4016,6 +4169,7 @@ fn validate_agent_session_setup(agent: Agent, workdir: &str) -> std::result::Res
     Ok(())
 }
 
+/// Handles agent readiness for.
 fn agent_readiness_for(agent: Agent, workdir: &str) -> AgentReadiness {
     match agent {
         Agent::Cursor => cursor_agent_readiness(),
@@ -4030,6 +4184,7 @@ fn agent_readiness_for(agent: Agent, workdir: &str) -> AgentReadiness {
     }
 }
 
+/// Handles cursor agent readiness.
 fn cursor_agent_readiness() -> AgentReadiness {
     let command_path = find_command_on_path("cursor-agent").map(|path| path.display().to_string());
     match command_path {
@@ -4051,6 +4206,7 @@ fn cursor_agent_readiness() -> AgentReadiness {
     }
 }
 
+/// Handles Gemini agent readiness.
 fn gemini_agent_readiness(workdir: &str) -> AgentReadiness {
     let command_path = match find_command_on_path("gemini") {
         Some(path) => path,
@@ -4178,6 +4334,7 @@ fn gemini_agent_readiness(workdir: &str) -> AgentReadiness {
     }
 }
 
+/// Handles Gemini API key missing detail.
 fn gemini_api_key_missing_detail(workdir: &str) -> String {
     let env_file = find_gemini_env_file(workdir)
         .map(|path| display_path_for_user(&path))
@@ -4187,10 +4344,12 @@ fn gemini_api_key_missing_detail(workdir: &str) -> String {
     )
 }
 
+/// Handles Gemini API key source.
 fn gemini_api_key_source(workdir: &str) -> Option<String> {
     env_var_source("GEMINI_API_KEY").or_else(|| dotenv_var_source(workdir, "GEMINI_API_KEY"))
 }
 
+/// Handles Gemini vertex auth source.
 fn gemini_vertex_auth_source(workdir: &str) -> Option<String> {
     let vertex_enabled = env_var_present("GOOGLE_GENAI_USE_VERTEXAI")
         || env_var_present("GOOGLE_GENAI_USE_GCA")
@@ -4221,6 +4380,7 @@ fn gemini_vertex_auth_source(workdir: &str) -> Option<String> {
     None
 }
 
+/// Handles Gemini ADC source.
 fn gemini_adc_source() -> Option<String> {
     if let Some(path) = std::env::var_os("GOOGLE_APPLICATION_CREDENTIALS")
         .map(PathBuf::from)
@@ -4247,6 +4407,7 @@ fn gemini_adc_source() -> Option<String> {
         .then(|| display_path_for_user(&default_path))
 }
 
+/// Handles Gemini selected auth type.
 fn gemini_selected_auth_type(workdir: &str) -> Option<String> {
     let workspace_settings = PathBuf::from(workdir).join(".gemini").join("settings.json");
     for path in [
@@ -4264,6 +4425,7 @@ fn gemini_selected_auth_type(workdir: &str) -> Option<String> {
     None
 }
 
+/// Handles Gemini selected auth type from settings file.
 fn gemini_selected_auth_type_from_settings_file(path: &FsPath) -> Option<String> {
     let raw = fs::read_to_string(path).ok()?;
     if raw.trim().is_empty() {
@@ -4285,6 +4447,7 @@ fn gemini_selected_auth_type_from_settings_file(path: &FsPath) -> Option<String>
     .find_map(|candidate| raw.contains(candidate).then_some((*candidate).to_owned()))
 }
 
+/// Finds Gemini environment file.
 fn find_gemini_env_file(workdir: &str) -> Option<PathBuf> {
     let mut current = PathBuf::from(workdir);
     loop {
@@ -4315,11 +4478,13 @@ fn find_gemini_env_file(workdir: &str) -> Option<PathBuf> {
     home_env.is_file().then_some(home_env)
 }
 
+/// Handles dotenv var source.
 fn dotenv_var_source(workdir: &str, key: &str) -> Option<String> {
     let path = find_gemini_env_file(workdir)?;
     dotenv_file_var_present(&path, key).then(|| display_path_for_user(&path))
 }
 
+/// Handles dotenv var present.
 fn dotenv_var_present(workdir: &str, key: &str) -> bool {
     find_gemini_env_file(workdir)
         .as_deref()
@@ -4327,6 +4492,7 @@ fn dotenv_var_present(workdir: &str, key: &str) -> bool {
         .unwrap_or(false)
 }
 
+/// Handles dotenv file var present.
 fn dotenv_file_var_present(path: &FsPath, key: &str) -> bool {
     let Ok(raw) = fs::read_to_string(path) else {
         return false;
@@ -4350,24 +4516,29 @@ fn dotenv_file_var_present(path: &FsPath, key: &str) -> bool {
     })
 }
 
+/// Handles environment var source.
 fn env_var_source(key: &str) -> Option<String> {
     env_var_present(key).then(|| format!("the `{key}` environment variable"))
 }
 
+/// Handles environment var present.
 fn env_var_present(key: &str) -> bool {
     std::env::var(key)
         .map(|value| !value.trim().is_empty())
         .unwrap_or(false)
 }
 
+/// Handles Gemini OAuth credentials path.
 fn gemini_oauth_credentials_path() -> Option<PathBuf> {
     home_dir().map(|home| home.join(".gemini").join("oauth_creds.json"))
 }
 
+/// Handles Gemini user settings path.
 fn gemini_user_settings_path() -> Option<PathBuf> {
     home_dir().map(|home| home.join(".gemini").join("settings.json"))
 }
 
+/// Handles Gemini system settings path.
 fn gemini_system_settings_path() -> Option<PathBuf> {
     if let Some(path) = std::env::var_os("GEMINI_CLI_SYSTEM_SETTINGS_PATH") {
         return Some(PathBuf::from(path));
@@ -4381,6 +4552,7 @@ fn gemini_system_settings_path() -> Option<PathBuf> {
     })
 }
 
+/// Handles home dir.
 fn home_dir() -> Option<PathBuf> {
     #[cfg(windows)]
     {
@@ -4392,6 +4564,7 @@ fn home_dir() -> Option<PathBuf> {
     }
 }
 
+/// Handles display path for user.
 fn display_path_for_user(path: &FsPath) -> String {
     if let Some(home) = home_dir() {
         if let Ok(relative) = path.strip_prefix(&home) {
@@ -4405,6 +4578,7 @@ fn display_path_for_user(path: &FsPath) -> String {
     path.display().to_string()
 }
 
+/// Resolves Codex native binary.
 fn resolve_codex_native_binary(launcher: &PathBuf) -> Option<PathBuf> {
     let launcher = fs::canonicalize(launcher)
         .ok()
@@ -4436,6 +4610,7 @@ fn resolve_codex_native_binary(launcher: &PathBuf) -> Option<PathBuf> {
     None
 }
 
+/// Handles Codex target triple.
 fn codex_target_triple() -> Option<&'static str> {
     match (std::env::consts::OS, std::env::consts::ARCH) {
         ("macos", "aarch64") => Some("aarch64-apple-darwin"),
@@ -4448,6 +4623,7 @@ fn codex_target_triple() -> Option<&'static str> {
     }
 }
 
+/// Describes Codex app server web search command.
 fn describe_codex_app_server_web_search_command(item: &Value) -> String {
     let query = item
         .get("query")
@@ -4472,6 +4648,7 @@ fn describe_codex_app_server_web_search_command(item: &Value) -> String {
     }
 }
 
+/// Summarizes Codex app server web search output.
 fn summarize_codex_app_server_web_search_output(item: &Value) -> String {
     match item.pointer("/action/type").and_then(Value::as_str) {
         Some("search") => {
@@ -4517,6 +4694,7 @@ fn summarize_codex_app_server_web_search_output(item: &Value) -> String {
         .to_owned()
 }
 
+/// Spawns Claude runtime.
 fn spawn_claude_runtime(
     state: AppState,
     session_id: String,
@@ -4881,6 +5059,7 @@ fn spawn_claude_runtime(
     })
 }
 
+/// Writes Claude initialize.
 fn write_claude_initialize(writer: &mut impl Write) -> Result<()> {
     write_claude_message(
         writer,
@@ -4897,6 +5076,7 @@ fn write_claude_initialize(writer: &mut impl Write) -> Result<()> {
     )
 }
 
+/// Writes Claude prompt message.
 fn write_claude_prompt_message(
     writer: &mut impl Write,
     prompt: &ClaudePromptCommand,
@@ -4931,6 +5111,7 @@ fn write_claude_prompt_message(
     )
 }
 
+/// Writes Claude permission response.
 fn write_claude_permission_response(
     writer: &mut impl Write,
     decision: &ClaudePermissionDecision,
@@ -4969,6 +5150,7 @@ fn write_claude_permission_response(
     write_claude_message(writer, &message)
 }
 
+/// Writes Claude set permission mode.
 fn write_claude_set_permission_mode(writer: &mut impl Write, mode: &str) -> Result<()> {
     write_claude_message(
         writer,
@@ -4983,6 +5165,7 @@ fn write_claude_set_permission_mode(writer: &mut impl Write, mode: &str) -> Resu
     )
 }
 
+/// Writes Claude set model.
 fn write_claude_set_model(writer: &mut impl Write, model: &str) -> Result<()> {
     write_claude_message(
         writer,
@@ -4997,6 +5180,7 @@ fn write_claude_set_model(writer: &mut impl Write, model: &str) -> Result<()> {
     )
 }
 
+/// Writes Claude message.
 fn write_claude_message(writer: &mut impl Write, message: &Value) -> Result<()> {
     serde_json::to_writer(&mut *writer, message).context("failed to encode Claude message")?;
     writer

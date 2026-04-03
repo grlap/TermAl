@@ -1,3 +1,15 @@
+/*
+Remote execution bridge
+Browser
+  -> local TermAl
+     -> RemoteRegistry
+        -> RemoteConnection
+           -> ssh tunnel or managed remote server
+              -> remote TermAl /api + /api/events
+This layer keeps the browser on one local origin while proxying REST calls,
+bridging SSE streams, and rewriting local/remote identifiers.
+*/
+
 use reqwest::Method;
 use reqwest::blocking::{Client as BlockingHttpClient, Response as BlockingHttpResponse};
 use serde::de::DeserializeOwned;
@@ -17,22 +29,26 @@ const REMOTE_EVENT_SHUTDOWN_POLL_INTERVAL: Duration = Duration::from_millis(50);
 
 static NEXT_REMOTE_FORWARD_PORT: AtomicU16 = AtomicU16::new(REMOTE_FORWARD_PORT_START);
 
+/// Represents remote registry.
 struct RemoteRegistry {
     client: BlockingHttpClientHandle,
     connections: Arc<Mutex<HashMap<String, Arc<RemoteConnection>>>>,
 }
 
+/// Represents the blocking HTTP client handle.
 struct BlockingHttpClientHandle {
     client: Option<BlockingHttpClient>,
 }
 
 impl BlockingHttpClientHandle {
+    /// Creates a new instance.
     fn new(client: BlockingHttpClient) -> Self {
         Self {
             client: Some(client),
         }
     }
 
+    /// Handles client.
     fn client(&self) -> &BlockingHttpClient {
         self.client
             .as_ref()
@@ -41,6 +57,7 @@ impl BlockingHttpClientHandle {
 }
 
 impl Drop for BlockingHttpClientHandle {
+    /// Releases resources when the value is dropped.
     fn drop(&mut self) {
         if let Some(client) = self.client.take() {
             // reqwest::blocking tears down an internal Tokio runtime on drop.
@@ -52,6 +69,7 @@ impl Drop for BlockingHttpClientHandle {
 }
 
 impl RemoteRegistry {
+    /// Creates a new instance.
     fn new() -> Result<Self> {
         let client = BlockingHttpClient::builder()
             .connect_timeout(REMOTE_HEALTH_TIMEOUT)
@@ -63,6 +81,7 @@ impl RemoteRegistry {
         })
     }
 
+    /// Handles reconcile.
     fn reconcile(&self, remotes: &[RemoteConfig]) {
         let next_by_id = remotes
             .iter()
@@ -86,6 +105,7 @@ impl RemoteRegistry {
         }
     }
 
+    /// Handles connection.
     fn connection(&self, remote: &RemoteConfig) -> Arc<RemoteConnection> {
         let mut connections = self
             .connections
@@ -99,6 +119,7 @@ impl RemoteRegistry {
         connection
     }
 
+    /// Handles request JSON.
     fn request_json<T: DeserializeOwned>(
         &self,
         remote: &RemoteConfig,
@@ -132,12 +153,14 @@ impl RemoteRegistry {
         decode_remote_json(response)
     }
 
+    /// Starts event bridge.
     fn start_event_bridge(&self, state: AppState, remote: &RemoteConfig) {
         let connection = self.connection(remote);
         connection.start_event_bridge(self.client.client().clone(), state);
     }
 }
 
+/// Represents remote connection.
 struct RemoteConnection {
     config: Mutex<RemoteConfig>,
     forwarded_port: u16,
@@ -147,6 +170,7 @@ struct RemoteConnection {
 }
 
 impl RemoteConnection {
+    /// Creates a new instance.
     fn new(remote: RemoteConfig) -> Self {
         Self {
             config: Mutex::new(remote),
@@ -157,6 +181,7 @@ impl RemoteConnection {
         }
     }
 
+    /// Handles config.
     fn config(&self) -> RemoteConfig {
         self.config
             .lock()
@@ -164,6 +189,7 @@ impl RemoteConnection {
             .clone()
     }
 
+    /// Updates config.
     fn update_config(&self, remote: RemoteConfig) {
         let mut config = self.config.lock().expect("remote config mutex poisoned");
         if *config != remote {
@@ -173,6 +199,7 @@ impl RemoteConnection {
         }
     }
 
+    /// Handles disconnect.
     fn disconnect(&self) {
         let mut process = self.process.lock().expect("remote process mutex poisoned");
         if let Some(mut handle) = process.take() {
@@ -181,11 +208,13 @@ impl RemoteConnection {
         }
     }
 
+    /// Stops event bridge.
     fn stop_event_bridge(&self) {
         self.event_bridge_shutdown.store(true, Ordering::SeqCst);
         self.disconnect();
     }
 
+    /// Handles wait for bridge retry or shutdown.
     fn wait_for_bridge_retry_or_shutdown(&self, duration: Duration) -> bool {
         let deadline = Instant::now() + duration;
         loop {
@@ -203,10 +232,12 @@ impl RemoteConnection {
         }
     }
 
+    /// Handles base URL.
     fn base_url(&self) -> String {
         format!("http://127.0.0.1:{}", self.forwarded_port)
     }
 
+    /// Ensures available.
     fn ensure_available(&self, client: &BlockingHttpClient) -> Result<String, ApiError> {
         let remote = self.config();
         validate_remote_connection_config(&remote)?;
@@ -270,6 +301,7 @@ impl RemoteConnection {
         }
     }
 
+    /// Starts process.
     fn start_process(
         &self,
         remote: &RemoteConfig,
@@ -293,6 +325,7 @@ impl RemoteConnection {
         Ok(RemoteProcessHandle { child, mode })
     }
 
+    /// Starts event bridge.
     fn start_event_bridge(self: &Arc<Self>, client: BlockingHttpClient, state: AppState) {
         self.event_bridge_shutdown.store(false, Ordering::SeqCst);
         if self.event_bridge_started.swap(true, Ordering::SeqCst) {
@@ -301,11 +334,13 @@ impl RemoteConnection {
 
         let connection = Arc::clone(self);
         thread::spawn(move || {
+            /// Represents event bridge reset.
             struct EventBridgeReset {
                 connection: Arc<RemoteConnection>,
             }
 
             impl Drop for EventBridgeReset {
+                /// Releases resources when the value is dropped.
                 fn drop(&mut self) {
                     self.connection
                         .event_bridge_started
@@ -361,16 +396,19 @@ impl RemoteConnection {
     }
 }
 
+/// Represents the remote process handle.
 struct RemoteProcessHandle {
     child: Child,
     mode: RemoteProcessMode,
 }
 
+/// Enumerates remote process modes.
 #[derive(Clone, Copy)]
 enum RemoteProcessMode {
     ManagedServer,
     TunnelOnly,
 }
+/// Represents remote scope.
 #[derive(Clone)]
 struct RemoteScope {
     remote: RemoteConfig,
@@ -378,6 +416,7 @@ struct RemoteScope {
     remote_session_id: Option<String>,
 }
 
+/// Represents the remote session target.
 #[derive(Clone)]
 struct RemoteSessionTarget {
     local_session_id: String,
@@ -385,6 +424,7 @@ struct RemoteSessionTarget {
     remote_session_id: String,
 }
 
+/// Represents remote project binding.
 #[derive(Clone)]
 struct RemoteProjectBinding {
     local_project_id: String,
@@ -393,6 +433,7 @@ struct RemoteProjectBinding {
 }
 
 impl AppState {
+    /// Handles restore remote event bridges.
     fn restore_remote_event_bridges(&self) {
         let remotes = {
             let inner = self.inner.lock().expect("state mutex poisoned");
@@ -411,6 +452,7 @@ impl AppState {
         }
     }
 
+    /// Handles remote session target.
     fn remote_session_target(
         &self,
         session_id: &str,
@@ -437,6 +479,7 @@ impl AppState {
         }))
     }
 
+    /// Handles remote scope for request.
     fn remote_scope_for_request(
         &self,
         session_id: Option<&str>,
@@ -465,6 +508,7 @@ impl AppState {
         Ok(None)
     }
 
+    /// Handles remote get JSON.
     fn remote_get_json<T: DeserializeOwned>(
         &self,
         scope: &RemoteScope,
@@ -476,6 +520,7 @@ impl AppState {
             .request_json(&scope.remote, Method::GET, path, &query, None)
     }
 
+    /// Handles remote post JSON.
     fn remote_post_json<T: DeserializeOwned>(
         &self,
         scope: &RemoteScope,
@@ -491,6 +536,7 @@ impl AppState {
         )
     }
 
+    /// Handles remote put JSON.
     fn remote_put_json<T: DeserializeOwned>(
         &self,
         scope: &RemoteScope,
@@ -506,6 +552,7 @@ impl AppState {
         )
     }
 
+    /// Handles remote put JSON with query scope.
     fn remote_put_json_with_query_scope<T: DeserializeOwned>(
         &self,
         scope: &RemoteScope,
@@ -518,6 +565,7 @@ impl AppState {
             .request_json(&scope.remote, Method::PUT, path, &query, Some(body))
     }
 
+    /// Handles lookup remote config.
     fn lookup_remote_config(&self, remote_id: &str) -> Result<RemoteConfig, ApiError> {
         let inner = self.inner.lock().expect("state mutex poisoned");
         inner
@@ -526,6 +574,7 @@ impl AppState {
             .ok_or_else(|| ApiError::bad_request(format!("unknown remote `{remote_id}`")))
     }
 
+    /// Ensures remote project binding.
     fn ensure_remote_project_binding(
         &self,
         project_id: &str,
@@ -587,6 +636,7 @@ impl AppState {
             remote_project_id,
         }))
     }
+    /// Creates remote project proxy.
     fn create_remote_project_proxy(
         &self,
         request: CreateProjectRequest,
@@ -648,6 +698,7 @@ impl AppState {
         })
     }
 
+    /// Creates remote session proxy.
     fn create_remote_session_proxy(
         &self,
         request: CreateSessionRequest,
@@ -707,6 +758,7 @@ impl AppState {
         })
     }
 
+    /// Proxies remote fork Codex thread.
     fn proxy_remote_fork_codex_thread(
         &self,
         session_id: &str,
@@ -766,6 +818,7 @@ impl AppState {
         })
     }
 
+    /// Proxies remote archive Codex thread.
     fn proxy_remote_archive_codex_thread(
         &self,
         session_id: &str,
@@ -787,6 +840,7 @@ impl AppState {
         Ok(self.snapshot())
     }
 
+    /// Proxies remote unarchive Codex thread.
     fn proxy_remote_unarchive_codex_thread(
         &self,
         session_id: &str,
@@ -808,6 +862,7 @@ impl AppState {
         Ok(self.snapshot())
     }
 
+    /// Proxies remote compact Codex thread.
     fn proxy_remote_compact_codex_thread(
         &self,
         session_id: &str,
@@ -829,6 +884,7 @@ impl AppState {
         Ok(self.snapshot())
     }
 
+    /// Proxies remote rollback Codex thread.
     fn proxy_remote_rollback_codex_thread(
         &self,
         session_id: &str,
@@ -851,6 +907,7 @@ impl AppState {
         Ok(self.snapshot())
     }
 
+    /// Proxies remote session settings.
     fn proxy_remote_session_settings(
         &self,
         session_id: &str,
@@ -883,6 +940,7 @@ impl AppState {
         Ok(self.snapshot())
     }
 
+    /// Proxies remote refresh session model options.
     fn proxy_remote_refresh_session_model_options(
         &self,
         session_id: &str,
@@ -904,6 +962,7 @@ impl AppState {
         Ok(self.snapshot())
     }
 
+    /// Proxies remote turn dispatch.
     fn proxy_remote_turn_dispatch(
         &self,
         session_id: &str,
@@ -930,6 +989,7 @@ impl AppState {
         Ok(())
     }
 
+    /// Proxies remote cancel queued prompt.
     fn proxy_remote_cancel_queued_prompt(
         &self,
         session_id: &str,
@@ -953,6 +1013,7 @@ impl AppState {
         Ok(self.snapshot())
     }
 
+    /// Proxies remote stop session.
     fn proxy_remote_stop_session(&self, session_id: &str) -> Result<StateResponse, ApiError> {
         let Some(target) = self.remote_session_target(session_id)? else {
             return Err(ApiError::bad_request("session is not assigned to a remote"));
@@ -971,6 +1032,7 @@ impl AppState {
         Ok(self.snapshot())
     }
 
+    /// Proxies remote kill session.
     fn proxy_remote_kill_session(&self, session_id: &str) -> Result<StateResponse, ApiError> {
         let Some(target) = self.remote_session_target(session_id)? else {
             return Err(ApiError::bad_request("session is not assigned to a remote"));
@@ -1001,6 +1063,7 @@ impl AppState {
         Ok(self.snapshot_from_inner(&inner))
     }
 
+    /// Proxies remote update approval.
     fn proxy_remote_update_approval(
         &self,
         session_id: &str,
@@ -1025,6 +1088,7 @@ impl AppState {
         Ok(self.snapshot())
     }
 
+    /// Proxies remote submit Codex user input.
     fn proxy_remote_submit_codex_user_input(
         &self,
         session_id: &str,
@@ -1049,6 +1113,7 @@ impl AppState {
         Ok(self.snapshot())
     }
 
+    /// Proxies remote submit Codex MCP elicitation.
     fn proxy_remote_submit_codex_mcp_elicitation(
         &self,
         session_id: &str,
@@ -1077,6 +1142,7 @@ impl AppState {
         Ok(self.snapshot())
     }
 
+    /// Proxies remote submit Codex app request.
     fn proxy_remote_submit_codex_app_request(
         &self,
         session_id: &str,
@@ -1101,6 +1167,7 @@ impl AppState {
         Ok(self.snapshot())
     }
 
+    /// Proxies remote list agent commands.
     fn proxy_remote_list_agent_commands(
         &self,
         session_id: &str,
@@ -1120,6 +1187,7 @@ impl AppState {
         )
     }
 
+    /// Proxies remote search instructions.
     fn proxy_remote_search_instructions(
         &self,
         session_id: &str,
@@ -1139,6 +1207,7 @@ impl AppState {
             None,
         )
     }
+    /// Syncs remote state for target.
     fn sync_remote_state_for_target(
         &self,
         target: &RemoteSessionTarget,
@@ -1157,6 +1226,7 @@ impl AppState {
         Ok(())
     }
 
+    /// Applies remote state snapshot.
     fn apply_remote_state_snapshot(
         &self,
         remote_id: &str,
@@ -1170,6 +1240,7 @@ impl AppState {
         Ok(())
     }
 
+    /// Applies remote delta event.
     fn apply_remote_delta_event(
         &self,
         remote_id: &str,
@@ -1490,6 +1561,7 @@ impl AppState {
         Ok(())
     }
 }
+/// Syncs remote state inner.
 fn sync_remote_state_inner(
     inner: &mut StateInner,
     remote_id: &str,
@@ -1553,6 +1625,7 @@ fn sync_remote_state_inner(
     }
 }
 
+/// Applies remote session to record.
 fn apply_remote_session_to_record(
     record: &mut SessionRecord,
     local_project_id: Option<String>,
@@ -1580,6 +1653,7 @@ fn apply_remote_session_to_record(
     record.message_positions = build_message_positions(&record.session.messages);
 }
 
+/// Upserts remote proxy session record.
 fn upsert_remote_proxy_session_record(
     inner: &mut StateInner,
     remote_id: &str,
@@ -1638,6 +1712,7 @@ fn upsert_remote_proxy_session_record(
     local_session_id
 }
 
+/// Handles localize remote session.
 fn localize_remote_session(
     local_session_id: &str,
     local_project_id: Option<String>,
@@ -1649,6 +1724,7 @@ fn localize_remote_session(
     session
 }
 
+/// Processes remote event stream.
 fn process_remote_event_stream(
     state: &AppState,
     remote_id: &str,
@@ -1683,6 +1759,7 @@ fn process_remote_event_stream(
     Ok(())
 }
 
+/// Dispatches remote event.
 fn dispatch_remote_event(
     state: &AppState,
     remote_id: &str,
@@ -1722,6 +1799,7 @@ fn dispatch_remote_event(
     }
     Ok(())
 }
+/// Applies remote scope to query.
 fn apply_remote_scope_to_query(scope: &RemoteScope, query: &mut Vec<(String, String)>) {
     if let Some(remote_session_id) = scope.remote_session_id.as_deref() {
         query.push(("sessionId".to_owned(), remote_session_id.to_owned()));
@@ -1730,6 +1808,7 @@ fn apply_remote_scope_to_query(scope: &RemoteScope, query: &mut Vec<(String, Str
     }
 }
 
+/// Applies remote scope to body.
 fn apply_remote_scope_to_body(scope: &RemoteScope, body: Value) -> Value {
     let mut object = match body {
         Value::Object(map) => map,
@@ -1749,6 +1828,7 @@ fn apply_remote_scope_to_body(scope: &RemoteScope, body: Value) -> Value {
     Value::Object(object)
 }
 
+/// Allocates remote forward port.
 fn allocate_remote_forward_port() -> u16 {
     loop {
         let current = NEXT_REMOTE_FORWARD_PORT.fetch_add(1, Ordering::SeqCst);
@@ -1759,6 +1839,7 @@ fn allocate_remote_forward_port() -> u16 {
     }
 }
 
+/// Validates remote connection config.
 fn validate_remote_connection_config(remote: &RemoteConfig) -> Result<(), ApiError> {
     if !remote.enabled {
         return Err(ApiError::bad_request(format!(
@@ -1777,6 +1858,7 @@ fn validate_remote_connection_config(remote: &RemoteConfig) -> Result<(), ApiErr
     }
 }
 
+/// Handles remote SSH target.
 fn remote_ssh_target(remote: &RemoteConfig) -> Result<String, ApiError> {
     let host = normalized_remote_ssh_host(remote)?;
     let user = normalized_remote_ssh_user(remote)?;
@@ -1786,6 +1868,7 @@ fn remote_ssh_target(remote: &RemoteConfig) -> Result<String, ApiError> {
     })
 }
 
+/// Handles remote SSH command args.
 fn remote_ssh_command_args(
     remote: &RemoteConfig,
     forwarded_port: u16,
@@ -1819,6 +1902,7 @@ fn remote_ssh_command_args(
     Ok(args)
 }
 
+/// Returns the normalized remote SSH host.
 fn normalized_remote_ssh_host(remote: &RemoteConfig) -> Result<String, ApiError> {
     let host = remote
         .host
@@ -1832,6 +1916,7 @@ fn normalized_remote_ssh_host(remote: &RemoteConfig) -> Result<String, ApiError>
     Ok(host.to_owned())
 }
 
+/// Returns the normalized remote SSH user.
 fn normalized_remote_ssh_user(remote: &RemoteConfig) -> Result<Option<String>, ApiError> {
     let Some(user) = remote
         .user
@@ -1845,6 +1930,7 @@ fn normalized_remote_ssh_user(remote: &RemoteConfig) -> Result<Option<String>, A
     Ok(Some(user.to_owned()))
 }
 
+/// Validates remote ID value.
 fn validate_remote_id_value(id: &str) -> Result<(), ApiError> {
     if id.is_empty() {
         return Err(ApiError::bad_request("remote id cannot be empty"));
@@ -1860,6 +1946,7 @@ fn validate_remote_id_value(id: &str) -> Result<(), ApiError> {
     Ok(())
 }
 
+/// Validates remote SSH host value.
 fn validate_remote_ssh_host_value(host: &str, remote_name: &str) -> Result<(), ApiError> {
     if host.starts_with('-') {
         return Err(ApiError::bad_request(format!(
@@ -1890,6 +1977,7 @@ fn validate_remote_ssh_host_value(host: &str, remote_name: &str) -> Result<(), A
     Ok(())
 }
 
+/// Validates remote SSH user value.
 fn validate_remote_ssh_user_value(user: &str, remote_name: &str) -> Result<(), ApiError> {
     if user.contains('@')
         || !user.bytes().all(
@@ -1903,6 +1991,7 @@ fn validate_remote_ssh_user_value(user: &str, remote_name: &str) -> Result<(), A
     Ok(())
 }
 
+/// Handles wait for remote health.
 fn wait_for_remote_health(
     client: &BlockingHttpClient,
     base_url: &str,
@@ -1936,18 +2025,21 @@ fn wait_for_remote_health(
     }
 }
 
+/// Handles remote connection issue message.
 fn remote_connection_issue_message(remote_name: &str) -> String {
     format!(
         "Could not connect to remote \"{remote_name}\" over SSH. Check the host, network, and SSH settings, then try again."
     )
 }
 
+/// Handles local SSH start issue message.
 fn local_ssh_start_issue_message(remote_name: &str) -> String {
     format!(
         "Could not start the local SSH client for remote \"{remote_name}\". Verify OpenSSH is installed and available on PATH, then try again."
     )
 }
 
+/// Reads process stderr suffix.
 fn read_process_stderr_suffix(child: &mut Child) -> String {
     let mut detail = String::new();
     if let Some(mut stderr) = child.stderr.take() {
@@ -1961,6 +2053,7 @@ fn read_process_stderr_suffix(child: &mut Child) -> String {
     }
 }
 
+/// Handles remote health check.
 fn remote_healthcheck(client: &BlockingHttpClient, base_url: &str) -> Result<()> {
     let response = client
         .get(format!("{base_url}/api/health"))
@@ -1976,6 +2069,7 @@ fn remote_healthcheck(client: &BlockingHttpClient, base_url: &str) -> Result<()>
     }
 }
 
+/// Decodes remote JSON.
 fn decode_remote_json<T: DeserializeOwned>(response: BlockingHttpResponse) -> Result<T, ApiError> {
     let status = response.status();
     let raw = response.text().map_err(|err| {
@@ -1996,6 +2090,7 @@ fn decode_remote_json<T: DeserializeOwned>(response: BlockingHttpResponse) -> Re
         .map_err(|err| ApiError::bad_gateway(format!("failed to decode remote response: {err}")))
 }
 
+/// Encodes uri component.
 fn encode_uri_component(value: &str) -> String {
     use std::fmt::Write as _;
 
@@ -2011,6 +2106,7 @@ fn encode_uri_component(value: &str) -> String {
 }
 
 impl RemoteProcessMode {
+    /// Handles label.
     fn label(self) -> &'static str {
         match self {
             Self::ManagedServer => "managed SSH session",

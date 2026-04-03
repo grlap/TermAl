@@ -17,7 +17,10 @@ function monacoEsmCssStub() {
 }
 
 export default defineConfig({
-  plugins: [monacoEsmCssStub(), react()],
+  plugins: [
+    monacoEsmCssStub(),
+    react({ babel: { compact: false } }),
+  ],
   build: {
     // Monaco's language workers are intentionally lazy-loaded but still large enough
     // to overwhelm Vite's default warning threshold under the current toolchain.
