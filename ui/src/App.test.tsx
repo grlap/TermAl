@@ -1250,6 +1250,8 @@ describe("App", () => {
             }),
           );
         }
+        throw new Error(`Unexpected /api/state call #${stateRequestCount}`);
+
       }
 
       throw new Error(`Unexpected fetch: ${url}`);
@@ -1382,6 +1384,186 @@ describe("App", () => {
     }
   });
 
+  it("restarts the resync loop from finally when a reconnect fallback queues behind a failing pre-reopen resync", async () => {
+    const originalFetch = globalThis.fetch;
+    const originalEventSource = globalThis.EventSource;
+    const originalResizeObserver = globalThis.ResizeObserver;
+    let rejectFirstStateFetch!: (reason?: unknown) => void;
+    const firstStateFetch = new Promise<Response>((_resolve, reject) => {
+      rejectFirstStateFetch = reject;
+    });
+    vi.useFakeTimers();
+    let stateRequestCount = 0;
+    const fetchMock = vi.fn((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/api/state") {
+        stateRequestCount += 1;
+        if (stateRequestCount === 1) {
+          return firstStateFetch;
+        }
+        if (stateRequestCount === 2) {
+          return Promise.resolve(
+            jsonResponse({
+              // Intentionally below SSE revision 2: allowAuthoritativeRollback
+              // permits rollback when no newer SSE state arrived mid-fetch.
+              revision: 1,
+              projects: [],
+              sessions: [
+                makeSession("session-1", {
+                  name: "Recovered queued reconnect session",
+                  status: "idle",
+                  preview: "Recovered after queued reconnect fallback.",
+                  messages: [
+                    {
+                      id: "message-user-1",
+                      type: "text",
+                      timestamp: "10:00",
+                      author: "you",
+                      text: "test",
+                    },
+                    {
+                      id: "message-assistant-1",
+                      type: "text",
+                      timestamp: "10:01",
+                      author: "assistant",
+                      text: "Recovered after queued reconnect fallback.",
+                    },
+                  ],
+                }),
+              ],
+            }),
+          );
+        }
+
+        throw new Error(`Unexpected /api/state call #${stateRequestCount}`);
+      }
+
+      throw new Error(`Unexpected fetch: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal(
+      "EventSource",
+      EventSourceMock as unknown as typeof EventSource,
+    );
+    vi.stubGlobal(
+      "ResizeObserver",
+      ResizeObserverMock as unknown as typeof ResizeObserver,
+    );
+    const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
+    HTMLElement.prototype.scrollIntoView = vi.fn();
+
+    try {
+      await renderApp();
+
+      const eventSource = latestEventSource();
+      act(() => {
+        eventSource.dispatchOpen();
+        eventSource.dispatchNamedEvent("state", {
+          revision: 2,
+          projects: [],
+          sessions: [
+            makeSession("session-1", {
+              name: "Codex Session",
+              status: "active",
+              preview: "test",
+              messages: [
+                {
+                  id: "message-user-1",
+                  type: "text",
+                  timestamp: "10:00",
+                  author: "you",
+                  text: "test",
+                },
+              ],
+            }),
+          ],
+        });
+      });
+      await settleAsyncUi();
+
+      await clickAndSettle(screen.getByRole("button", { name: "Sessions" }));
+      const sessionList = document.querySelector(".session-list");
+      if (!(sessionList instanceof HTMLDivElement)) {
+        throw new Error("Session list not found");
+      }
+
+      const sessionRowLabel = within(sessionList).getByText("Codex Session");
+      const sessionRowButton = sessionRowLabel.closest("button");
+      if (!sessionRowButton) {
+        throw new Error("Session row button not found");
+      }
+
+      await clickAndSettle(sessionRowButton);
+      expect(
+        screen.getByText("Waiting for the next chunk of output..."),
+      ).toBeInTheDocument();
+      expect(stateRequestCount).toBe(0);
+
+      act(() => {
+        eventSource.dispatchError();
+      });
+      await advanceTimers(100);
+      await settleAsyncUi();
+
+      act(() => {
+        // Intentionally omit dispatchOpen(): the pre-reopen gap delta should trigger
+        // a resync while the 400 ms reconnect fallback remains armed behind it.
+        eventSource.dispatchNamedEvent("delta", {
+          type: "messageCreated",
+          revision: 4,
+          sessionId: "session-1",
+          messageId: "message-assistant-1",
+          messageIndex: 1,
+          message: {
+            id: "message-assistant-1",
+            type: "text",
+            timestamp: "10:01",
+            author: "assistant",
+            text: "",
+          },
+          preview: "Buffered preview",
+          status: "active",
+        });
+      });
+      await settleAsyncUi();
+
+      expect(stateRequestCount).toBe(1);
+
+      await advanceTimers(299);
+      await settleAsyncUi();
+      expect(stateRequestCount).toBe(1);
+
+      await advanceTimers(1);
+      await settleAsyncUi();
+      // The 400 ms timer fires here but defers because the first fetch is still
+      // in flight; the queued follow-up stays pending without starting fetch #2 yet.
+      expect(stateRequestCount).toBe(1);
+
+      await act(async () => {
+        rejectFirstStateFetch(new Error("temporary outage"));
+        await flushUiWork();
+      });
+
+      await settleAsyncUi();
+      expect(stateRequestCount).toBe(2);
+      expect(
+        screen.getAllByText("Recovered after queued reconnect fallback."),
+      ).toHaveLength(2);
+      expect(
+        screen.getAllByText("Recovered queued reconnect session"),
+      ).toHaveLength(2);
+      expect(
+        screen.queryByText("Waiting for the next chunk of output..."),
+      ).not.toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+      HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
+      restoreGlobal("fetch", originalFetch);
+      restoreGlobal("EventSource", originalEventSource);
+      restoreGlobal("ResizeObserver", originalResizeObserver);
+    }
+  });
+
   it("retains rollback permission when a plain resync queues after a stronger reconnect resync", async () => {
     const originalFetch = globalThis.fetch;
     const originalEventSource = globalThis.EventSource;
@@ -1427,6 +1609,8 @@ describe("App", () => {
             }),
           );
         }
+        throw new Error(`Unexpected /api/state call #${stateRequestCount}`);
+
       }
 
       throw new Error(`Unexpected fetch: ${url}`);
@@ -1661,7 +1845,7 @@ describe("App", () => {
         });
       });
       await waitFor(() => {
-        expect(screen.getAllByText("Here.").length).toBeGreaterThan(0);
+        expect(screen.getAllByText("Here.")).toHaveLength(2);
       });
       expect(
         screen.queryByText("Waiting for the next chunk of output..."),
@@ -1784,7 +1968,7 @@ describe("App", () => {
         { timeout: 2000 },
       );
       await waitFor(() => {
-        expect(screen.getAllByText("Here.").length).toBeGreaterThan(0);
+        expect(screen.getAllByText("Here.")).toHaveLength(2);
       });
       expect(
         screen.queryByText("Waiting for the next chunk of output..."),
@@ -2218,11 +2402,132 @@ describe("App", () => {
         ).toBe(true);
       });
       await waitFor(() => {
-        expect(screen.getAllByText("Here while hidden.").length).toBeGreaterThan(0);
+        expect(screen.getAllByText("Here while hidden.")).toHaveLength(2);
       });
       expect(
         screen.queryByText("Waiting for the next chunk of output..."),
       ).not.toBeInTheDocument();
+    } finally {
+      setDocumentVisibilityState(originalVisibilityState);
+      HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
+      restoreGlobal("fetch", originalFetch);
+      restoreGlobal("EventSource", originalEventSource);
+      restoreGlobal("ResizeObserver", originalResizeObserver);
+    }
+  });
+
+  it("ignores focus-triggered resync while the document remains hidden", async () => {
+    const originalFetch = globalThis.fetch;
+    const originalEventSource = globalThis.EventSource;
+    const originalResizeObserver = globalThis.ResizeObserver;
+    const originalVisibilityState = document.visibilityState;
+    let stateRequestCount = 0;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/api/state") {
+        stateRequestCount += 1;
+        if (stateRequestCount > 1) {
+          throw new Error(`Unexpected /api/state call #${stateRequestCount}`);
+        }
+
+        return jsonResponse({
+          revision: 2,
+          projects: [],
+          sessions: [
+            makeSession("session-1", {
+              name: "Codex Session",
+              status: "idle",
+              preview: "Here after hidden focus.",
+              messages: [
+                {
+                  id: "message-user-1",
+                  type: "text",
+                  timestamp: "10:00",
+                  author: "you",
+                  text: "test",
+                },
+                {
+                  id: "message-assistant-1",
+                  type: "text",
+                  timestamp: "10:01",
+                  author: "assistant",
+                  text: "Here after hidden focus.",
+                },
+              ],
+            }),
+          ],
+        });
+      }
+
+      throw new Error(`Unexpected fetch: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal(
+      "EventSource",
+      EventSourceMock as unknown as typeof EventSource,
+    );
+    vi.stubGlobal(
+      "ResizeObserver",
+      ResizeObserverMock as unknown as typeof ResizeObserver,
+    );
+    const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
+    HTMLElement.prototype.scrollIntoView = vi.fn();
+    setDocumentVisibilityState("visible");
+    try {
+      await renderApp();
+      const eventSource = latestEventSource();
+      act(() => {
+        eventSource.dispatchOpen();
+        eventSource.dispatchNamedEvent("state", {
+          revision: 1,
+          projects: [],
+          sessions: [
+            makeSession("session-1", {
+              name: "Codex Session",
+              status: "active",
+              preview: "test",
+              messages: [
+                {
+                  id: "message-user-1",
+                  type: "text",
+                  timestamp: "10:00",
+                  author: "you",
+                  text: "test",
+                },
+              ],
+            }),
+          ],
+        });
+      });
+      await settleAsyncUi();
+      fetchMock.mockClear();
+
+      act(() => {
+        window.dispatchEvent(new Event("blur"));
+      });
+      act(() => {
+        setDocumentVisibilityState("hidden");
+        window.dispatchEvent(new Event("focus"));
+      });
+
+      await settleAsyncUi();
+      expect(
+        fetchMock.mock.calls.some(([url]) => String(url) === "/api/state"),
+      ).toBe(false);
+
+      act(() => {
+        setDocumentVisibilityState("visible");
+        window.dispatchEvent(new Event("focus"));
+      });
+
+      await waitFor(() => {
+        expect(
+          fetchMock.mock.calls.filter(([url]) => String(url) === "/api/state"),
+        ).toHaveLength(1);
+      });
+      await waitFor(() => {
+        expect(screen.getByText("Here after hidden focus.")).toBeInTheDocument();
+      });
     } finally {
       setDocumentVisibilityState(originalVisibilityState);
       HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
@@ -3562,6 +3867,192 @@ describe("App", () => {
     }
   });
 
+  it("resyncs on the first wake-gap tick after a local state adoption resumes an active turn", async () => {
+    const originalFetch = globalThis.fetch;
+    const originalEventSource = globalThis.EventSource;
+    const originalResizeObserver = globalThis.ResizeObserver;
+    const originalVisibilityState = document.visibilityState;
+    const approvalEndpoint = "/api/sessions/session-1/approvals/message-approval-1";
+    const baseline = new Date("2026-04-02T09:00:00.000Z");
+    vi.useFakeTimers();
+    vi.setSystemTime(baseline);
+    let stateRequestCount = 0;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === approvalEndpoint) {
+        return jsonResponse({
+          revision: 2,
+          projects: [],
+          sessions: [
+            makeSession("session-1", {
+              name: "Codex Session",
+              status: "active",
+              preview: "Approval granted. Codex is continuing...",
+              messages: [
+                {
+                  id: "message-user-1",
+                  type: "text",
+                  timestamp: "10:00",
+                  author: "you",
+                  text: "run the command",
+                },
+                {
+                  id: "message-approval-1",
+                  type: "approval",
+                  timestamp: "10:01",
+                  author: "assistant",
+                  title: "Codex needs approval",
+                  command: "npm test",
+                  detail: "Need permission to run the test suite.",
+                  decision: "accepted",
+                },
+              ],
+            }),
+          ],
+        });
+      }
+      if (url === "/api/state") {
+        stateRequestCount += 1;
+        if (stateRequestCount > 1) {
+          throw new Error(`Unexpected /api/state call #${stateRequestCount}`);
+        }
+
+        return jsonResponse({
+          revision: 3,
+          projects: [],
+          sessions: [
+            makeSession("session-1", {
+              name: "Codex Session",
+              status: "idle",
+              preview: "Here after approval wake.",
+              messages: [
+                {
+                  id: "message-user-1",
+                  type: "text",
+                  timestamp: "10:00",
+                  author: "you",
+                  text: "run the command",
+                },
+                {
+                  id: "message-approval-1",
+                  type: "approval",
+                  timestamp: "10:01",
+                  author: "assistant",
+                  title: "Codex needs approval",
+                  command: "npm test",
+                  detail: "Need permission to run the test suite.",
+                  decision: "accepted",
+                },
+                {
+                  id: "message-assistant-1",
+                  type: "text",
+                  timestamp: "10:02",
+                  author: "assistant",
+                  text: "Here after approval wake.",
+                },
+              ],
+            }),
+          ],
+        });
+      }
+
+      throw new Error(`Unexpected fetch: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal(
+      "EventSource",
+      EventSourceMock as unknown as typeof EventSource,
+    );
+    vi.stubGlobal(
+      "ResizeObserver",
+      ResizeObserverMock as unknown as typeof ResizeObserver,
+    );
+    const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
+    HTMLElement.prototype.scrollIntoView = vi.fn();
+    const stateFetchCallCount = () => stateRequestCount;
+    setDocumentVisibilityState("visible");
+    try {
+      await renderApp();
+      const eventSource = latestEventSource();
+      act(() => {
+        eventSource.dispatchOpen();
+        eventSource.dispatchNamedEvent("state", {
+          revision: 1,
+          projects: [],
+          sessions: [
+            makeSession("session-1", {
+              name: "Codex Session",
+              status: "approval",
+              preview: "Approval pending.",
+              messages: [
+                {
+                  id: "message-user-1",
+                  type: "text",
+                  timestamp: "10:00",
+                  author: "you",
+                  text: "run the command",
+                },
+                {
+                  id: "message-approval-1",
+                  type: "approval",
+                  timestamp: "10:01",
+                  author: "assistant",
+                  title: "Codex needs approval",
+                  command: "npm test",
+                  detail: "Need permission to run the test suite.",
+                  decision: "pending",
+                },
+              ],
+            }),
+          ],
+        });
+      });
+      await settleAsyncUi();
+
+      await clickAndSettle(screen.getByRole("button", { name: "Sessions" }));
+      const sessionList = document.querySelector(".session-list");
+      if (!(sessionList instanceof HTMLDivElement)) {
+        throw new Error("Session list not found");
+      }
+
+      const sessionRowLabel = within(sessionList).getByText("Codex Session");
+      const sessionRowButton = sessionRowLabel.closest("button");
+      if (!sessionRowButton) {
+        throw new Error("Session row button not found");
+      }
+
+      await clickAndSettle(sessionRowButton);
+      expect(screen.getByRole("button", { name: "Approve" })).toBeInTheDocument();
+
+      await clickAndSettle(screen.getByRole("button", { name: "Approve" }));
+      expect(screen.getByText("Codex needs approval")).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Approve" })).toBeDisabled();
+      expect(
+        screen.getByText("Waiting for the next chunk of output..."),
+      ).toBeInTheDocument();
+      fetchMock.mockClear();
+      stateRequestCount = 0;
+
+      vi.setSystemTime(
+        new Date(baseline.getTime() + LIVE_SESSION_RESUME_WATCHDOG_DRIFT_MS + 2000),
+      );
+      await advanceTimers(1000);
+      await settleAsyncUi();
+
+      expect(stateFetchCallCount()).toBe(1);
+      expect(screen.getAllByText("Here after approval wake.")).toHaveLength(2);
+      expect(
+        screen.queryByText("Waiting for the next chunk of output..."),
+      ).not.toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+      setDocumentVisibilityState(originalVisibilityState);
+      HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
+      restoreGlobal("fetch", originalFetch);
+      restoreGlobal("EventSource", originalEventSource);
+      restoreGlobal("ResizeObserver", originalResizeObserver);
+    }
+  });
   it("does not watchdog-resync when queued follow-ups exist but the current turn has no assistant output yet", async () => {
     const originalFetch = globalThis.fetch;
     const originalEventSource = globalThis.EventSource;
@@ -4131,7 +4622,200 @@ describe("App", () => {
     }
   });
 
-  it("preserves the watchdog drift baseline while a reconnect resync is in flight", async () => {
+  it("keeps wake-gap recovery armed for a stalled session despite unrelated post-wake SSE traffic", async () => {
+    const originalFetch = globalThis.fetch;
+    const originalEventSource = globalThis.EventSource;
+    const originalResizeObserver = globalThis.ResizeObserver;
+    const originalVisibilityState = document.visibilityState;
+    const baseline = new Date("2026-04-02T09:00:00.000Z");
+    vi.useFakeTimers();
+    vi.setSystemTime(baseline);
+    let stateRequestCount = 0;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/api/state") {
+        stateRequestCount += 1;
+        if (stateRequestCount > 1) {
+          throw new Error(`Unexpected /api/state call #${stateRequestCount}`);
+        }
+
+        return jsonResponse({
+          revision: 4,
+          projects: [],
+          sessions: [
+            makeSession("session-1", {
+              name: "Quiet Session",
+              status: "idle",
+              preview: "Recovered quiet session after wake.",
+              messages: [
+                {
+                  id: "message-user-quiet-1",
+                  type: "text",
+                  timestamp: "10:00",
+                  author: "you",
+                  text: "quiet prompt",
+                },
+                {
+                  id: "message-assistant-quiet-1",
+                  type: "text",
+                  timestamp: "10:02",
+                  author: "assistant",
+                  text: "Recovered quiet session after wake.",
+                },
+              ],
+            }),
+            makeSession("session-2", {
+              name: "Noisy Session",
+              status: "active",
+              preview: "Still streaming from session 2.",
+              messages: [
+                {
+                  id: "message-user-noisy-1",
+                  type: "text",
+                  timestamp: "10:00",
+                  author: "you",
+                  text: "noisy prompt",
+                },
+                {
+                  id: "message-assistant-noisy-1",
+                  type: "text",
+                  timestamp: "10:01",
+                  author: "assistant",
+                  text: "Still streaming from session 2.",
+                },
+              ],
+            }),
+          ],
+        });
+      }
+
+      throw new Error(`Unexpected fetch: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal(
+      "EventSource",
+      EventSourceMock as unknown as typeof EventSource,
+    );
+    vi.stubGlobal(
+      "ResizeObserver",
+      ResizeObserverMock as unknown as typeof ResizeObserver,
+    );
+    const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
+    HTMLElement.prototype.scrollIntoView = vi.fn();
+    const stateFetchCallCount = () => stateRequestCount;
+    setDocumentVisibilityState("visible");
+    try {
+      await renderApp();
+      const eventSource = latestEventSource();
+      act(() => {
+        eventSource.dispatchOpen();
+        // Intentionally no assistant message for session-1: the wake-gap path must
+        // stay armed even if unrelated sessions keep producing live traffic first.
+        eventSource.dispatchNamedEvent("state", {
+          revision: 1,
+          projects: [],
+          sessions: [
+            makeSession("session-1", {
+              name: "Quiet Session",
+              status: "active",
+              preview: "quiet prompt",
+              messages: [
+                {
+                  id: "message-user-quiet-1",
+                  type: "text",
+                  timestamp: "10:00",
+                  author: "you",
+                  text: "quiet prompt",
+                },
+              ],
+            }),
+            makeSession("session-2", {
+              name: "Noisy Session",
+              status: "active",
+              preview: "Busy output 1",
+              messages: [
+                {
+                  id: "message-user-noisy-1",
+                  type: "text",
+                  timestamp: "10:00",
+                  author: "you",
+                  text: "noisy prompt",
+                },
+                {
+                  id: "message-assistant-noisy-1",
+                  type: "text",
+                  timestamp: "10:01",
+                  author: "assistant",
+                  text: "Busy output 1",
+                },
+              ],
+            }),
+          ],
+        });
+      });
+      await settleAsyncUi();
+
+      await clickAndSettle(screen.getByRole("button", { name: "Sessions" }));
+      const sessionList = document.querySelector(".session-list");
+      if (!(sessionList instanceof HTMLDivElement)) {
+        throw new Error("Session list not found");
+      }
+
+      const quietSessionRowLabel = within(sessionList).getByText("Quiet Session");
+      const quietSessionRowButton = quietSessionRowLabel.closest("button");
+      if (!quietSessionRowButton) {
+        throw new Error("Quiet session row button not found");
+      }
+
+      await clickAndSettle(quietSessionRowButton);
+      expect(
+        screen.getByText("Waiting for the next chunk of output..."),
+      ).toBeInTheDocument();
+      fetchMock.mockClear();
+      stateRequestCount = 0;
+
+      vi.setSystemTime(
+        new Date(baseline.getTime() + LIVE_SESSION_RESUME_WATCHDOG_DRIFT_MS + 2000),
+      );
+      act(() => {
+        eventSource.dispatchNamedEvent("delta", {
+          type: "textReplace",
+          revision: 2,
+          sessionId: "session-2",
+          messageId: "message-assistant-noisy-1",
+          messageIndex: 1,
+          text: "Still streaming from session 2.",
+          preview: "Still streaming from session 2.",
+        });
+        eventSource.dispatchNamedEvent("delta", {
+          type: "orchestratorsUpdated",
+          revision: 3,
+          orchestrators: [makeOrchestrator({ id: "orchestrator-1" })],
+        });
+      });
+      await settleAsyncUi();
+
+      expect(stateFetchCallCount()).toBe(0);
+
+      await advanceTimers(1000);
+      await settleAsyncUi();
+
+      expect(stateFetchCallCount()).toBe(1);
+      expect(screen.getAllByText("Recovered quiet session after wake.")).toHaveLength(2);
+      expect(
+        screen.queryByText("Waiting for the next chunk of output..."),
+      ).not.toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+      setDocumentVisibilityState(originalVisibilityState);
+      HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
+      restoreGlobal("fetch", originalFetch);
+      restoreGlobal("EventSource", originalEventSource);
+      restoreGlobal("ResizeObserver", originalResizeObserver);
+    }
+  });
+
+  it("resets the watchdog drift baseline after a long reconnect resync completes", async () => {
     const originalFetch = globalThis.fetch;
     const originalEventSource = globalThis.EventSource;
     const originalResizeObserver = globalThis.ResizeObserver;
@@ -4149,37 +4833,7 @@ describe("App", () => {
           return firstStateFetch.promise;
         }
 
-        if (stateRequestCount === 2) {
-          return Promise.resolve(
-            jsonResponse({
-              revision: 3,
-              projects: [],
-              sessions: [
-                makeSession("session-1", {
-                  name: "Codex Session",
-                  status: "idle",
-                  preview: "Recovered after wake.",
-                  messages: [
-                    {
-                      id: "message-user-1",
-                      type: "text",
-                      timestamp: "10:00",
-                      author: "you",
-                      text: "test",
-                    },
-                    {
-                      id: "message-assistant-final-1",
-                      type: "text",
-                      timestamp: "10:02",
-                      author: "assistant",
-                      text: "Recovered after wake.",
-                    },
-                  ],
-                }),
-              ],
-            }),
-          );
-        }
+        throw new Error(`Unexpected /api/state call #${stateRequestCount}`);
       }
 
       throw new Error(`Unexpected fetch: ${url}`);
@@ -4276,6 +4930,200 @@ describe("App", () => {
               makeSession("session-1", {
                 name: "Codex Session",
                 status: "active",
+                preview: "Recovered after wake.",
+                messages: [
+                  {
+                    id: "message-user-1",
+                    type: "text",
+                    timestamp: "10:00",
+                    author: "you",
+                    text: "test",
+                  },
+                  {
+                    id: "message-assistant-final-1",
+                    type: "text",
+                    timestamp: "10:02",
+                    author: "assistant",
+                    text: "Recovered after wake.",
+                  },
+                ],
+              }),
+            ],
+          }),
+        );
+        await flushUiWork();
+      });
+
+      await advanceTimers(LIVE_SESSION_RESUME_WATCHDOG_DRIFT_MS + 1000);
+      // 6000 ms < LIVE_SESSION_TRANSPORT_STALE_RESYNC_DELAY_MS (15000 ms), so
+      // the stale-transport path cannot independently trigger the resync here.
+      await settleAsyncUi();
+
+      expect(stateFetchCallCount()).toBe(1);
+      expect(screen.getAllByText("Recovered after wake.")).toHaveLength(2);
+      expect(
+        screen.getByText("Waiting for the next chunk of output..."),
+      ).toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+      setDocumentVisibilityState(originalVisibilityState);
+      HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
+      restoreGlobal("fetch", originalFetch);
+      restoreGlobal("EventSource", originalEventSource);
+      restoreGlobal("ResizeObserver", originalResizeObserver);
+    }
+  });
+
+  it("resets the watchdog drift baseline when live state recovers before a slow reconnect resync settles", async () => {
+    const originalFetch = globalThis.fetch;
+    const originalEventSource = globalThis.EventSource;
+    const originalResizeObserver = globalThis.ResizeObserver;
+    const originalVisibilityState = document.visibilityState;
+    const baseline = new Date("2026-04-02T09:00:00.000Z");
+    const firstStateFetch = createDeferred<Response>();
+    vi.useFakeTimers();
+    vi.setSystemTime(baseline);
+    let stateRequestCount = 0;
+    const fetchMock = vi.fn((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/api/state") {
+        stateRequestCount += 1;
+        if (stateRequestCount === 1) {
+          return firstStateFetch.promise;
+        }
+
+        throw new Error(`Unexpected /api/state call #${stateRequestCount}`);
+      }
+
+      throw new Error(`Unexpected fetch: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal(
+      "EventSource",
+      EventSourceMock as unknown as typeof EventSource,
+    );
+    vi.stubGlobal(
+      "ResizeObserver",
+      ResizeObserverMock as unknown as typeof ResizeObserver,
+    );
+    const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
+    HTMLElement.prototype.scrollIntoView = vi.fn();
+    const stateFetchCallCount = () =>
+      fetchMock.mock.calls.filter(([url]) => String(url) === "/api/state").length;
+    setDocumentVisibilityState("visible");
+    try {
+      await renderApp();
+      const eventSource = latestEventSource();
+      act(() => {
+        eventSource.dispatchOpen();
+        eventSource.dispatchNamedEvent("state", {
+          revision: 1,
+          projects: [],
+          sessions: [
+            makeSession("session-1", {
+              name: "Codex Session",
+              status: "active",
+              preview: "Partial output.",
+              messages: [
+                {
+                  id: "message-user-1",
+                  type: "text",
+                  timestamp: "10:00",
+                  author: "you",
+                  text: "test",
+                },
+                {
+                  id: "message-assistant-partial-1",
+                  type: "text",
+                  timestamp: "10:01",
+                  author: "assistant",
+                  text: "Partial output.",
+                },
+              ],
+            }),
+          ],
+        });
+      });
+      await settleAsyncUi();
+
+      await clickAndSettle(screen.getByRole("button", { name: "Sessions" }));
+      const sessionList = document.querySelector(".session-list");
+      if (!(sessionList instanceof HTMLDivElement)) {
+        throw new Error("Session list not found");
+      }
+
+      const sessionRowLabel = within(sessionList).getByText("Codex Session");
+      const sessionRowButton = sessionRowLabel.closest("button");
+      if (!sessionRowButton) {
+        throw new Error("Session row button not found");
+      }
+
+      await clickAndSettle(sessionRowButton);
+      expect(
+        screen.getByText("Waiting for the next chunk of output..."),
+      ).toBeInTheDocument();
+      fetchMock.mockClear();
+
+      act(() => {
+        eventSource.dispatchError();
+      });
+      await advanceTimers(400);
+      await settleAsyncUi();
+
+      expect(stateFetchCallCount()).toBe(1);
+
+      vi.setSystemTime(
+        new Date(baseline.getTime() + LIVE_SESSION_RESUME_WATCHDOG_DRIFT_MS + 3400),
+      );
+      await advanceTimers(1000);
+      await settleAsyncUi();
+
+      expect(stateFetchCallCount()).toBe(1);
+
+      act(() => {
+        eventSource.dispatchOpen();
+        eventSource.dispatchNamedEvent("state", {
+          revision: 2,
+          projects: [],
+          sessions: [
+            makeSession("session-1", {
+              name: "Codex Session",
+              status: "active",
+              preview: "Recovered from live state.",
+              messages: [
+                {
+                  id: "message-user-1",
+                  type: "text",
+                  timestamp: "10:00",
+                  author: "you",
+                  text: "test",
+                },
+                {
+                  id: "message-assistant-live-state-1",
+                  type: "text",
+                  timestamp: "10:02",
+                  author: "assistant",
+                  text: "Recovered from live state.",
+                },
+              ],
+            }),
+          ],
+        });
+      });
+      await settleAsyncUi();
+      expect(screen.getAllByText("Recovered from live state.")).toHaveLength(2);
+
+      await act(async () => {
+        firstStateFetch.resolve(
+          jsonResponse({
+            // Stale: intentionally below SSE revision 2 - rejected by adoptState,
+            // proving only the live SSE baseline reset matters.
+            revision: 1,
+            projects: [],
+            sessions: [
+              makeSession("session-1", {
+                name: "Codex Session",
+                status: "active",
                 preview: "Partial output.",
                 messages: [
                   {
@@ -4300,14 +5148,188 @@ describe("App", () => {
         await flushUiWork();
       });
 
+      await advanceTimers(LIVE_SESSION_RESUME_WATCHDOG_DRIFT_MS + 1000);
+      await settleAsyncUi();
+
+      expect(stateFetchCallCount()).toBe(1);
+      expect(screen.getAllByText("Recovered from live state.")).toHaveLength(2);
+      expect(
+        screen.getByText("Waiting for the next chunk of output..."),
+      ).toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+      setDocumentVisibilityState(originalVisibilityState);
+      HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
+      restoreGlobal("fetch", originalFetch);
+      restoreGlobal("EventSource", originalEventSource);
+      restoreGlobal("ResizeObserver", originalResizeObserver);
+    }
+  });
+
+  it("resets the watchdog drift baseline when a live session delta recovers before a slow reconnect resync settles", async () => {
+    const originalFetch = globalThis.fetch;
+    const originalEventSource = globalThis.EventSource;
+    const originalResizeObserver = globalThis.ResizeObserver;
+    const originalVisibilityState = document.visibilityState;
+    const baseline = new Date("2026-04-02T09:00:00.000Z");
+    const firstStateFetch = createDeferred<Response>();
+    vi.useFakeTimers();
+    vi.setSystemTime(baseline);
+    let stateRequestCount = 0;
+    const fetchMock = vi.fn((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/api/state") {
+        stateRequestCount += 1;
+        if (stateRequestCount === 1) {
+          return firstStateFetch.promise;
+        }
+
+        throw new Error(`Unexpected /api/state call #${stateRequestCount}`);
+      }
+
+      throw new Error(`Unexpected fetch: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal(
+      "EventSource",
+      EventSourceMock as unknown as typeof EventSource,
+    );
+    vi.stubGlobal(
+      "ResizeObserver",
+      ResizeObserverMock as unknown as typeof ResizeObserver,
+    );
+    const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
+    HTMLElement.prototype.scrollIntoView = vi.fn();
+    const stateFetchCallCount = () =>
+      fetchMock.mock.calls.filter(([url]) => String(url) === "/api/state").length;
+    setDocumentVisibilityState("visible");
+    try {
+      await renderApp();
+      const eventSource = latestEventSource();
+      act(() => {
+        eventSource.dispatchOpen();
+        eventSource.dispatchNamedEvent("state", {
+          revision: 1,
+          projects: [],
+          sessions: [
+            makeSession("session-1", {
+              name: "Codex Session",
+              status: "active",
+              preview: "Partial output.",
+              messages: [
+                {
+                  id: "message-user-1",
+                  type: "text",
+                  timestamp: "10:00",
+                  author: "you",
+                  text: "test",
+                },
+                {
+                  id: "message-assistant-partial-1",
+                  type: "text",
+                  timestamp: "10:01",
+                  author: "assistant",
+                  text: "Partial output.",
+                },
+              ],
+            }),
+          ],
+        });
+      });
+      await settleAsyncUi();
+
+      await clickAndSettle(screen.getByRole("button", { name: "Sessions" }));
+      const sessionList = document.querySelector(".session-list");
+      if (!(sessionList instanceof HTMLDivElement)) {
+        throw new Error("Session list not found");
+      }
+
+      const sessionRowLabel = within(sessionList).getByText("Codex Session");
+      const sessionRowButton = sessionRowLabel.closest("button");
+      if (!sessionRowButton) {
+        throw new Error("Session row button not found");
+      }
+
+      await clickAndSettle(sessionRowButton);
+      expect(
+        screen.getByText("Waiting for the next chunk of output..."),
+      ).toBeInTheDocument();
+      fetchMock.mockClear();
+
+      act(() => {
+        eventSource.dispatchError();
+      });
+      await advanceTimers(400);
+      await settleAsyncUi();
+
+      expect(stateFetchCallCount()).toBe(1);
+
+      vi.setSystemTime(
+        new Date(baseline.getTime() + LIVE_SESSION_RESUME_WATCHDOG_DRIFT_MS + 3400),
+      );
       await advanceTimers(1000);
       await settleAsyncUi();
 
-      expect(stateFetchCallCount()).toBe(2);
-      expect(screen.getAllByText("Recovered after wake.")).toHaveLength(2);
+      expect(stateFetchCallCount()).toBe(1);
+
+      act(() => {
+        eventSource.dispatchOpen();
+        eventSource.dispatchNamedEvent("delta", {
+          type: "textReplace",
+          revision: 2,
+          sessionId: "session-1",
+          messageId: "message-assistant-partial-1",
+          messageIndex: 1,
+          text: "Recovered from live delta.",
+          preview: "Recovered from live delta.",
+        });
+      });
+      await settleAsyncUi();
+      expect(screen.getAllByText("Recovered from live delta.")).toHaveLength(2);
+
+      await act(async () => {
+        firstStateFetch.resolve(
+          jsonResponse({
+            // Stale: intentionally below SSE revision 2 - rejected by adoptState,
+            // proving only the live SSE baseline reset matters.
+            revision: 1,
+            projects: [],
+            sessions: [
+              makeSession("session-1", {
+                name: "Codex Session",
+                status: "active",
+                preview: "Partial output.",
+                messages: [
+                  {
+                    id: "message-user-1",
+                    type: "text",
+                    timestamp: "10:00",
+                    author: "you",
+                    text: "test",
+                  },
+                  {
+                    id: "message-assistant-partial-1",
+                    type: "text",
+                    timestamp: "10:01",
+                    author: "assistant",
+                    text: "Partial output.",
+                  },
+                ],
+              }),
+            ],
+          }),
+        );
+        await flushUiWork();
+      });
+
+      await advanceTimers(LIVE_SESSION_RESUME_WATCHDOG_DRIFT_MS + 1000);
+      await settleAsyncUi();
+
+      expect(stateFetchCallCount()).toBe(1);
+      expect(screen.getAllByText("Recovered from live delta.")).toHaveLength(2);
       expect(
-        screen.queryByText("Waiting for the next chunk of output..."),
-      ).not.toBeInTheDocument();
+        screen.getByText("Waiting for the next chunk of output..."),
+      ).toBeInTheDocument();
     } finally {
       vi.useRealTimers();
       setDocumentVisibilityState(originalVisibilityState);
@@ -5058,7 +6080,7 @@ describe("App", () => {
       });
 
       await waitFor(() => {
-        expect(screen.getAllByText("Here.").length).toBeGreaterThan(0);
+        expect(screen.getAllByText("Here.")).toHaveLength(2);
       });
     } finally {
       HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
@@ -5354,7 +6376,8 @@ describe("App", () => {
       } finally {
         window.history.replaceState(window.history.state, "", originalUrl);
         window.localStorage.clear();
-        HTMLElement.prototype.scrollIntoView = originalScrollIntoView;        fetchStateSpy.mockRestore();
+        HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
+        fetchStateSpy.mockRestore();
         createSessionSpy.mockRestore();
         refreshSessionModelOptionsSpy.mockRestore();
         restoreGlobal("EventSource", originalEventSource);
@@ -5363,6 +6386,191 @@ describe("App", () => {
     });
   });
 
+  it("resyncs on the first wake-gap tick for a newly created active session before any SSE arrives", async () => {
+    await withSuppressedActWarnings(async () => {
+      const originalEventSource = globalThis.EventSource;
+      const originalResizeObserver = globalThis.ResizeObserver;
+      const originalUrl = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+      const baseline = new Date("2026-04-02T09:00:00.000Z");
+      let mockedNow = baseline.getTime();
+      const dateNowSpy = vi.spyOn(Date, "now").mockImplementation(() => mockedNow);
+      const createSessionDeferred = createDeferred<{
+        sessionId: string;
+        state: Awaited<ReturnType<typeof api.fetchState>>;
+      }>();
+      const refreshSessionModelOptionsDeferred =
+        createDeferred<Awaited<ReturnType<typeof api.fetchState>>>();
+      let fetchStateCallCount = 0;
+      const fetchStateSpy = vi.spyOn(api, "fetchState").mockImplementation(async () => {
+        fetchStateCallCount += 1;
+        if (fetchStateCallCount === 1) {
+          return {
+            revision: 1,
+            projects: [],
+            sessions: [],
+          };
+        }
+        if (fetchStateCallCount === 2) {
+          return {
+            revision: 4,
+            projects: [],
+            sessions: [
+              makeSession("session-1", {
+                name: "Codex 1",
+                status: "idle",
+                preview: "Here after create wake.",
+                modelOptions: [
+                  {
+                    label: "gpt-5.4",
+                    value: "gpt-5.4",
+                    description: "Latest frontier agentic coding model.",
+                    defaultReasoningEffort: "medium",
+                    supportedReasoningEfforts: ["low", "medium", "high", "xhigh"],
+                  },
+                ],
+                messages: [
+                  {
+                    id: "message-user-1",
+                    type: "text",
+                    timestamp: "10:00",
+                    author: "you",
+                    text: "run the command",
+                  },
+                  {
+                    id: "message-assistant-1",
+                    type: "text",
+                    timestamp: "10:02",
+                    author: "assistant",
+                    text: "Here after create wake.",
+                  },
+                ],
+              }),
+            ],
+          };
+        }
+
+        throw new Error(`Unexpected fetchState call #${fetchStateCallCount}`);
+      });
+      const createSessionSpy = vi
+        .spyOn(api, "createSession")
+        .mockImplementation(() => createSessionDeferred.promise);
+      const refreshSessionModelOptionsSpy = vi
+        .spyOn(api, "refreshSessionModelOptions")
+        .mockImplementation(() => refreshSessionModelOptionsDeferred.promise);
+
+      vi.stubGlobal(
+        "EventSource",
+        EventSourceMock as unknown as typeof EventSource,
+      );
+      vi.stubGlobal(
+        "ResizeObserver",
+        ResizeObserverMock as unknown as typeof ResizeObserver,
+      );
+      const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
+      HTMLElement.prototype.scrollIntoView = vi.fn();
+
+      try {
+        await renderApp();
+
+        await openCreateSessionDialog();
+        await settleAsyncUi();
+        await submitButtonAndSettle(
+          screen.getByRole("button", { name: "Create session" }),
+        );
+
+        expect(createSessionSpy).toHaveBeenCalledTimes(1);
+        await act(async () => {
+          createSessionDeferred.resolve({
+            sessionId: "session-1",
+            state: {
+              revision: 2,
+              projects: [],
+              sessions: [
+                makeSession("session-1", {
+                  name: "Codex 1",
+                  status: "active",
+                  preview: "run the command",
+                  messages: [
+                    {
+                      id: "message-user-1",
+                      type: "text",
+                      timestamp: "10:00",
+                      author: "you",
+                      text: "run the command",
+                    },
+                  ],
+                }),
+              ],
+            },
+          });
+          await flushUiWork();
+        });
+
+        expect(refreshSessionModelOptionsSpy).toHaveBeenCalledWith("session-1");
+        await act(async () => {
+          refreshSessionModelOptionsDeferred.resolve({
+            revision: 3,
+            projects: [],
+            sessions: [
+              makeSession("session-1", {
+                name: "Codex 1",
+                status: "active",
+                preview: "run the command",
+                modelOptions: [
+                  {
+                    label: "gpt-5.4",
+                    value: "gpt-5.4",
+                    description: "Latest frontier agentic coding model.",
+                    defaultReasoningEffort: "medium",
+                    supportedReasoningEfforts: ["low", "medium", "high", "xhigh"],
+                  },
+                ],
+                messages: [
+                  {
+                    id: "message-user-1",
+                    type: "text",
+                    timestamp: "10:00",
+                    author: "you",
+                    text: "run the command",
+                  },
+                ],
+              }),
+            ],
+          });
+          await flushUiWork();
+        });
+        await settleAsyncUi();
+
+        // No SSE state arrives here: the active session exists only because the
+        // create-session REST flow adopted it locally.
+        expect(screen.getByText("Waiting for the next chunk of output...")).toBeInTheDocument();
+        fetchStateSpy.mockClear();
+
+        // Fake timers trigger overlapping React act() work in this create-session
+        // flow, so keep one real watchdog interval and drive only Date.now.
+        mockedNow = baseline.getTime() + LIVE_SESSION_RESUME_WATCHDOG_DRIFT_MS + 2000;
+        await new Promise((resolve) => window.setTimeout(resolve, 1500));
+        await settleAsyncUi();
+
+        await waitFor(() => {
+          expect(fetchStateSpy).toHaveBeenCalledTimes(1);
+          expect(
+            screen.queryByText("Waiting for the next chunk of output..."),
+          ).not.toBeInTheDocument();
+        });
+      } finally {
+        window.history.replaceState(window.history.state, "", originalUrl);
+        window.localStorage.clear();
+        HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
+        dateNowSpy.mockRestore();
+        fetchStateSpy.mockRestore();
+        createSessionSpy.mockRestore();
+        refreshSessionModelOptionsSpy.mockRestore();
+        restoreGlobal("EventSource", originalEventSource);
+        restoreGlobal("ResizeObserver", originalResizeObserver);
+      }
+    });
+  });
   it("adopts the full orchestrator-start state so the next delta does not force a resync", async () => {
     await withSuppressedActWarnings(async () => {
       const originalEventSource = globalThis.EventSource;
@@ -5561,7 +6769,8 @@ describe("App", () => {
       } finally {
         window.history.replaceState(window.history.state, "", originalUrl);
         window.localStorage.clear();
-        HTMLElement.prototype.scrollIntoView = originalScrollIntoView;        fetchStateSpy.mockRestore();
+        HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
+        fetchStateSpy.mockRestore();
         fetchWorkspaceLayoutSpy.mockRestore();
         saveWorkspaceLayoutSpy.mockRestore();
         fetchTemplatesSpy.mockRestore();
@@ -8523,7 +9732,8 @@ describe("App", () => {
       } finally {
         window.history.replaceState(window.history.state, "", originalUrl);
         window.localStorage.clear();
-        HTMLElement.prototype.scrollIntoView = originalScrollIntoView;        fetchStateSpy.mockRestore();
+        HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
+        fetchStateSpy.mockRestore();
         createSessionSpy.mockRestore();
         refreshSessionModelOptionsSpy.mockRestore();
         restoreGlobal("EventSource", originalEventSource);
@@ -8694,7 +9904,8 @@ describe("App", () => {
       } finally {
         window.history.replaceState(window.history.state, "", originalUrl);
         window.localStorage.clear();
-        HTMLElement.prototype.scrollIntoView = originalScrollIntoView;        fetchStateSpy.mockRestore();
+        HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
+        fetchStateSpy.mockRestore();
         updateAppSettingsSpy.mockRestore();
         createSessionSpy.mockRestore();
         refreshSessionModelOptionsSpy.mockRestore();
@@ -8866,7 +10077,8 @@ describe("App", () => {
       } finally {
         window.history.replaceState(window.history.state, "", originalUrl);
         window.localStorage.clear();
-        HTMLElement.prototype.scrollIntoView = originalScrollIntoView;        fetchStateSpy.mockRestore();
+        HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
+        fetchStateSpy.mockRestore();
         updateAppSettingsSpy.mockRestore();
         createSessionSpy.mockRestore();
         refreshSessionModelOptionsSpy.mockRestore();
@@ -9419,7 +10631,3 @@ describe("App", () => {
     expect(secondAttempt.warning).toBeNull();
   });
 });
-
-
-
-

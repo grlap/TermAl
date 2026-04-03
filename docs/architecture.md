@@ -168,6 +168,7 @@ DeltaEvent::TextDelta            { revision, session_id, message_id, delta, prev
 DeltaEvent::TextReplace          { revision, session_id, message_id, message_index, text, preview }
 DeltaEvent::CommandUpdate        { revision, session_id, message_id, command, output, status, preview, ... }
 DeltaEvent::ParallelAgentsUpdate { revision, session_id, message_id, message_index, agents, preview }
+DeltaEvent::OrchestratorsUpdated { revision, orchestrators[] } // IDs inside each instance are scoped to the originating server; translate via sync_remote_state_inner before forwarding remotely.
 ```
 
 `TextDelta` appends streaming text to an in-progress message. `TextReplace` overwrites the full message text when the backend receives an authoritative completed payload that diverges from the streamed draft, so clients should replace the target message body instead of appending.
@@ -566,7 +567,7 @@ No external state library. State lives in `App.tsx` via `useState` and `useRef`:
 On mount, the frontend opens an `EventSource` to `/api/events`:
 
 1. **`state` events** — full state snapshot. Accepted only if `revision > latestRevision` (via `shouldAdoptStateRevision`).
-2. **`delta` events** — incremental updates. Accepted only if `revision === latestRevision + 1` (via `decideDeltaRevisionAction`). If a gap is detected, triggers a full state resync.
+2. **`delta` events** — incremental updates. Accepted only if `revision === latestRevision + 1` (via `decideDeltaRevisionAction`). Session-scoped deltas use the session reducer; `orchestratorsUpdated` is handled separately because it carries orchestrator state without a `sessionId`, and remote forwarding must translate the embedded server-scoped IDs before re-publishing it locally. If a gap is detected, triggers a full state resync.
 
 Applied deltas update the specific session/message in-place via `applyDeltaToSessions()`, avoiding full reconciliation.
 
@@ -578,7 +579,7 @@ Session creation returns `CreateSessionResponse { sessionId, state }` — the fu
 
 ### Theming
 
-17 CSS themes stored as individual `.css` files in `ui/src/themes/`. Each theme defines CSS custom properties (`--ink`, `--paper`, `--line`, background gradients, etc.). The active theme is set via `data-theme` attribute on `<html>` and persisted to `localStorage`.
+16 selectable color themes (defined in `themes.ts`) are stored as `.css` files in `ui/src/themes/`. Each theme defines CSS custom properties (`--ink`, `--paper`, `--line`, background gradients, etc.). The active theme is set via `data-theme` attribute on `<html>` and persisted to `localStorage`.
 
 ### Message Rendering
 
@@ -686,7 +687,7 @@ termal/
 │   │   │   ├── DiffPanel.tsx              # Diff preview panel
 │   │   │   ├── FileSystemPanel.tsx        # Directory browser
 │   │   │   └── GitStatusPanel.tsx         # Git status panel
-│   │   ├── themes/                # 17 CSS theme files
+│   │   ├── themes/                # 16 CSS theme files
 │   │   └── *.test.ts              # Tests
 │   ├── package.json
 │   ├── vite.config.ts             # Dev proxy: /api → :8787
@@ -716,4 +717,5 @@ termal/
 
 **Agent-agnostic message model.** Both Claude and Codex produce the same `Message` variants (Text, Command, Diff, Approval, etc.). The frontend doesn't know which agent produced a message — it just renders the type. This makes adding new agents (Gemini CLI is next) a backend-only change for basic support.
 
-**Custom CSS over Tailwind.** The app uses CSS custom properties for theming with 17 hand-crafted themes. Each theme is a standalone `.css` file that sets color variables. No build-time CSS processing needed.
+**Custom CSS over Tailwind.** The app uses CSS custom properties for theming with 16 hand-crafted themes. Each theme is a standalone `.css` file that sets color variables. No build-time CSS processing needed.
+

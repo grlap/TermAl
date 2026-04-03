@@ -1238,6 +1238,9 @@ export default function App() {
   const stateResyncPendingRef = useRef(false);
   const stateResyncAllowAuthoritativeRollbackRef = useRef(false);
   const stateResyncPreserveWatchdogCooldownRef = useRef(false);
+  const syncAdoptedLiveSessionResumeWatchdogBaselinesRef = useRef<
+    (sessions: Session[], now?: number) => void
+  >(() => {});
   const paneShouldStickToBottomRef = useRef<Record<string, boolean | undefined>>({});
   const paneScrollPositionsRef = useRef<
     Record<string, Record<string, { top: number; shouldStick: boolean }>>
@@ -2001,6 +2004,8 @@ export default function App() {
     setProjects(nextState.projects ?? []);
     setOrchestrators(nextState.orchestrators ?? []);
     adoptSessions(nextState.sessions, options);
+    // Local state adoptions can resume or create active sessions before any SSE arrives.
+    syncAdoptedLiveSessionResumeWatchdogBaselinesRef.current(nextState.sessions);
     if (options?.openSessionId) {
       const openedSession = nextState.sessions.find((session) => session.id === options.openSessionId);
       setSelectedProjectId(openedSession?.projectId ?? ALL_PROJECTS_FILTER_ID);
@@ -2094,9 +2099,9 @@ export default function App() {
     // Track transport activity per session so one noisy active session cannot
     // mask another stalled one.
     let lastLiveTransportActivityAtBySessionId = new Map<string, number>();
-    // Drift-gap detection uses the effect-mount clock baseline; any test that
-    // calls vi.setSystemTime() for this path must do so before renderApp().
-    let lastLiveSessionResumeWatchdogTickAt = Date.now();
+    // Drift-gap detection tracks a baseline per session so unrelated live traffic
+    // cannot mask a wake gap for a different stalled active session.
+    let lastLiveSessionResumeWatchdogTickAtBySessionId = new Map<string, number>();
     let lastWatchdogResyncAttemptAt: number | null = null;
     const eventSource = new EventSource("/api/events");
 
@@ -2148,6 +2153,9 @@ export default function App() {
       now = Date.now(),
       { clearWatchdogCooldown = true }: { clearWatchdogCooldown?: boolean } = {},
     ) {
+      // Snapshot adoption seeds the baseline for every listed session immediately.
+      // Idle entries are harmless because stale-transport checks still gate on
+      // session.status === "active".
       markLiveTransportActivity(
         sessions.map((session) => session.id),
         now,
@@ -2155,29 +2163,44 @@ export default function App() {
       );
     }
 
-    function requestStateResync(options?: {
-      allowAuthoritativeRollback?: boolean;
-      preserveWatchdogCooldown?: boolean;
-    }) {
-      if (cancelled) {
-        return;
+    function markLiveSessionResumeWatchdogBaseline(
+      sessionIds: Iterable<string>,
+      now = Date.now(),
+    ) {
+      for (const sessionId of sessionIds) {
+        lastLiveSessionResumeWatchdogTickAtBySessionId.set(sessionId, now);
       }
+    }
 
-      const shouldPreserveReconnectFallbackUntilSuccess =
-        reconnectStateResyncTimeoutId !== null && !sawReconnectOpenSinceLastError;
-      if (!shouldPreserveReconnectFallbackUntilSuccess) {
-        clearReconnectStateResyncTimeout();
+    function pruneLiveSessionResumeWatchdogBaselineSessions(sessions: Session[]) {
+      const liveSessionIds = new Set(sessions.map((session) => session.id));
+      for (const sessionId of lastLiveSessionResumeWatchdogTickAtBySessionId.keys()) {
+        if (!liveSessionIds.has(sessionId)) {
+          lastLiveSessionResumeWatchdogTickAtBySessionId.delete(sessionId);
+        }
       }
-      // Coalesced resync requests retain the strongest semantics until the next
-      // loop iteration consumes them.
-      if (options?.allowAuthoritativeRollback) {
-        stateResyncAllowAuthoritativeRollbackRef.current = true;
-      }
-      if (options?.preserveWatchdogCooldown) {
-        stateResyncPreserveWatchdogCooldownRef.current = true;
-      }
-      stateResyncPendingRef.current = true;
-      if (stateResyncInFlightRef.current) {
+    }
+
+    function syncLiveSessionResumeWatchdogBaselines(
+      sessions: Session[],
+      now = Date.now(),
+    ) {
+      // Advance every currently known session so idle-to-active transitions do not
+      // inherit a false wake gap from time spent without live streaming.
+      markLiveSessionResumeWatchdogBaseline(
+        sessions.map((session) => session.id),
+        now,
+      );
+      pruneLiveSessionResumeWatchdogBaselineSessions(sessions);
+    }
+    syncAdoptedLiveSessionResumeWatchdogBaselinesRef.current = syncLiveSessionResumeWatchdogBaselines;
+
+    function startStateResyncLoop() {
+      if (
+        cancelled ||
+        stateResyncInFlightRef.current ||
+        !stateResyncPendingRef.current
+      ) {
         return;
       }
 
@@ -2213,18 +2236,23 @@ export default function App() {
                 force: shouldForceRollback,
               });
               if (adopted) {
-                if (shouldPreserveReconnectFallbackUntilSuccess) {
+                if (
+                  reconnectStateResyncTimeoutId !== null &&
+                  !sawReconnectOpenSinceLastError
+                ) {
                   // Pre-reopen delta-triggered resyncs should only disarm the fast reconnect
                   // fallback once a /api/state snapshot has actually been adopted.
                   clearReconnectStateResyncTimeout();
                 }
-                syncLiveTransportActivityFromState(state.sessions, Date.now(), {
+                const adoptedAt = Date.now();
+                syncLiveTransportActivityFromState(state.sessions, adoptedAt, {
                   clearWatchdogCooldown: !preserveWatchdogCooldown,
                 });
                 pruneLiveTransportActivitySessions(
                   lastLiveTransportActivityAtBySessionId,
                   state.sessions,
                 );
+                syncLiveSessionResumeWatchdogBaselines(state.sessions, adoptedAt);
               }
               setRequestError(null);
             } catch (error) {
@@ -2239,9 +2267,40 @@ export default function App() {
             }
           }
         } finally {
-          stateResyncInFlightRef.current = false;
+          if (!cancelled) {
+            // Clear before restarting so startStateResyncLoop's entry guard passes.
+            stateResyncInFlightRef.current = false;
+            if (stateResyncPendingRef.current) {
+              startStateResyncLoop();
+            }
+          }
         }
       })();
+    }
+
+    function requestStateResync(options?: {
+      allowAuthoritativeRollback?: boolean;
+      preserveWatchdogCooldown?: boolean;
+    }) {
+      if (cancelled) {
+        return;
+      }
+
+      if (sawReconnectOpenSinceLastError) {
+        clearReconnectStateResyncTimeout();
+      }
+      // Otherwise preserve the armed reconnect fallback; startStateResyncLoop()
+      // will only disarm it once a /api/state snapshot is actually adopted.
+      // Coalesced resync requests retain the strongest semantics until the next
+      // loop iteration consumes them.
+      if (options?.allowAuthoritativeRollback) {
+        stateResyncAllowAuthoritativeRollbackRef.current = true;
+      }
+      if (options?.preserveWatchdogCooldown) {
+        stateResyncPreserveWatchdogCooldownRef.current = true;
+      }
+      stateResyncPendingRef.current = true;
+      startStateResyncLoop();
     }
 
     function hasPotentiallyStaleLiveSession() {
@@ -2294,7 +2353,6 @@ export default function App() {
         return;
       }
 
-      const elapsedSinceLastWatchdogTick = now - lastLiveSessionResumeWatchdogTickAt;
       if (
         !readNavigatorOnline() ||
         stateResyncInFlightRef.current ||
@@ -2303,11 +2361,18 @@ export default function App() {
         return;
       }
 
-      // Only advance the baseline when this tick is actually evaluating drift.
+      const detectedResumeGap = sessionsRef.current.some((session) => {
+        if (session.status !== "active") {
+          return false;
+        }
+
+        const lastWatchdogTickAt =
+          lastLiveSessionResumeWatchdogTickAtBySessionId.get(session.id) ?? now;
+        return now - lastWatchdogTickAt >= LIVE_SESSION_RESUME_WATCHDOG_DRIFT_MS;
+      });
+      // Only advance baselines when this tick is actually evaluating drift.
       // Pausing during in-flight/pending resyncs avoids consuming a real wake gap.
-      // Advance it even with no active session so an idle-to-active transition does
-      // not inherit a false wake gap from time spent without live streaming.
-      lastLiveSessionResumeWatchdogTickAt = now;
+      syncLiveSessionResumeWatchdogBaselines(sessionsRef.current, now);
       if (
         latestStateRevisionRef.current === null ||
         !hasActivelyStreamingSession()
@@ -2318,8 +2383,6 @@ export default function App() {
       // Wake-gap recovery stays broader than the stale-transport path so a first
       // assistant reply that finished while the machine was asleep can still recover,
       // even when queued follow-ups exist behind the active turn.
-      const detectedResumeGap =
-        elapsedSinceLastWatchdogTick >= LIVE_SESSION_RESUME_WATCHDOG_DRIFT_MS;
       const transportLooksStale = hasPotentiallyStaleTransportSession(now);
       if (!detectedResumeGap && !transportLooksStale) {
         return;
@@ -2352,14 +2415,16 @@ export default function App() {
         const adopted = adoptState(state, { force });
         forceAdoptNextStateEventRef.current = false;
         if (adopted) {
+          const adoptedAt = Date.now();
           clearReconnectStateResyncTimeoutAfterConfirmedReopen();
           // A live SSE state payload proves the stream is healthy again, so it also
           // clears any residual watchdog retry cooldown from an earlier fallback probe.
-          syncLiveTransportActivityFromState(state.sessions);
+          syncLiveTransportActivityFromState(state.sessions, adoptedAt);
           pruneLiveTransportActivitySessions(
             lastLiveTransportActivityAtBySessionId,
             state.sessions,
           );
+          syncLiveSessionResumeWatchdogBaselines(state.sessions, adoptedAt);
         }
         setRequestError(null);
       } catch (error) {
@@ -2395,6 +2460,9 @@ export default function App() {
         }
 
         if (delta.type === "orchestratorsUpdated") {
+          // Global orchestrator updates prove the SSE stream is healthy enough to
+          // clear reconnect fallback state, but they intentionally do not advance
+          // per-session stale-transport clocks because there is no sessionId.
           clearReconnectStateResyncTimeoutAfterConfirmedReopen();
           latestStateRevisionRef.current = delta.revision;
           startTransition(() => {
@@ -2408,8 +2476,12 @@ export default function App() {
         // session reducer only accepts deltas that carry a concrete sessionId.
         const result = applyDeltaToSessions(sessionsRef.current, delta);
         if (result.kind === "applied") {
+          const appliedAt = Date.now();
           clearReconnectStateResyncTimeoutAfterConfirmedReopen();
-          markLiveTransportActivity([delta.sessionId]);
+          // Every session-scoped delta proves liveness for that session, including
+          // any future delta shape that revives it back to "active".
+          markLiveTransportActivity([delta.sessionId], appliedAt);
+          markLiveSessionResumeWatchdogBaseline([delta.sessionId], appliedAt);
           latestStateRevisionRef.current = delta.revision;
           sessionsRef.current = result.sessions;
           startTransition(() => {
@@ -2482,7 +2554,7 @@ export default function App() {
     }
 
     function handleWindowFocus() {
-      if (typeof document !== "undefined" && document.visibilityState === "hidden") {
+      if (document.visibilityState === "hidden") {
         return;
       }
 
@@ -2506,6 +2578,7 @@ export default function App() {
 
     return () => {
       cancelled = true;
+      syncAdoptedLiveSessionResumeWatchdogBaselinesRef.current = () => {};
       clearReconnectStateResyncTimeout();
       if (liveSessionResumeWatchdogIntervalId !== null) {
         window.clearInterval(liveSessionResumeWatchdogIntervalId);
@@ -14357,7 +14430,3 @@ function dropLabelForPlacement(placement: TabDropPlacement) {
       return "Bottom";
   }
 }
-
-
-
-

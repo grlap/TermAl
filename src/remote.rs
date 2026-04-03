@@ -1477,7 +1477,15 @@ impl AppState {
                     });
                 }
             }
-            DeltaEvent::OrchestratorsUpdated { .. } => {}
+            DeltaEvent::OrchestratorsUpdated { .. } => {
+                // TODO: Remote orchestrator forwarding is not implemented yet.
+                // The payload still carries remote instance and session IDs, so
+                // blindly re-publishing it would break local orchestrator actions.
+                // Remote connections intentionally do not mirror orchestrator state
+                // updates until ID translation plus remote orchestrator routing exist.
+                // To implement: translate IDs, add remote orchestrator proxying, then
+                // re-publish a local OrchestratorsUpdated with a fresh revision.
+            }
         }
         Ok(())
     }

@@ -51,6 +51,7 @@ export function sessionHasPotentiallyStaleTransport(
   );
 }
 
+// Mutates the effect-local transport-activity map in place.
 export function pruneLiveTransportActivitySessions(
   liveTransportActivityAtBySessionId: Map<string, number>,
   sessions: Session[],

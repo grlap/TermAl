@@ -101,6 +101,7 @@ describe("Backend connection state", () => {
     if (vi.isFakeTimers()) {
       vi.useRealTimers();
     }
+    vi.unstubAllGlobals();
     HTMLElement.prototype.scrollTo = originalScrollTo;
   });
 
@@ -972,11 +973,13 @@ describe("Backend connection state", () => {
             sessions: [],
           });
         }
-        return jsonResponse({
-          revision: 2,
-          projects: [],
-          sessions: [],
-        });
+        return jsonResponse(
+          makeBackendStateResponse({
+            revision: 2,
+            sessionName: "Recovered Session",
+            preview: "Recovered preview",
+          }),
+        );
       }
       if (target.startsWith("/api/workspaces/")) {
         return new Response("", {
@@ -1063,6 +1066,11 @@ describe("Backend connection state", () => {
         await vi.advanceTimersByTimeAsync(1);
       });
       expect(countStateFetches()).toBe(hydratedStateFetchCount + 2);
+      // Flush the React state update from the adopted fetch response.
+      await act(async () => {
+        await Promise.resolve();
+      });
+      expect(screen.getByText("Recovered preview")).toBeInTheDocument();
     } finally {
       vi.useRealTimers();
       restoreGlobal("fetch", originalFetch);
