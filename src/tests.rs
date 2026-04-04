@@ -222,6 +222,31 @@ impl CodexTurnRecorder for TestRecorder {
     }
 }
 
+fn accept_test_connection(listener: &std::net::TcpListener, label: &str) -> std::net::TcpStream {
+    listener
+        .set_nonblocking(true)
+        .expect("test listener should support nonblocking mode");
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+    loop {
+        match listener.accept() {
+            Ok((stream, _)) => {
+                stream
+                    .set_nonblocking(false)
+                    .expect("accepted test socket should support blocking mode");
+                return stream;
+            }
+            Err(err) if err.kind() == std::io::ErrorKind::WouldBlock => {
+                assert!(
+                    std::time::Instant::now() < deadline,
+                    "{label} timed out waiting for a connection"
+                );
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+            Err(err) => panic!("{label} failed to accept a connection: {err}"),
+        }
+    }
+}
+
 fn test_app_state() -> AppState {
     let persistence_path =
         std::env::temp_dir().join(format!("termal-test-{}.json", Uuid::new_v4()));
@@ -233,10 +258,12 @@ fn test_app_state() -> AppState {
             std::env::temp_dir().join(format!("termal-orchestrators-test-{}.json", Uuid::new_v4())),
         ),
         orchestrator_templates_lock: Arc::new(Mutex::new(())),
+        review_documents_lock: Arc::new(Mutex::new(())),
         state_events: broadcast::channel(16).0,
         delta_events: broadcast::channel(16).0,
         shared_codex_runtime: Arc::new(Mutex::new(None)),
         remote_registry: test_remote_registry(),
+        remote_sse_fallback_resynced_revision: Arc::new(Mutex::new(HashMap::new())),
         stopping_orchestrator_ids: Arc::new(Mutex::new(HashSet::new())),
         stopping_orchestrator_session_ids: Arc::new(Mutex::new(HashMap::new())),
         inner: Arc::new(Mutex::new(StateInner::new())),
@@ -360,6 +387,162 @@ fn create_test_project_session(
     let session_id = record.session.id.clone();
     state.commit_locked(&mut inner).unwrap();
     session_id
+}
+
+fn create_test_remote_project(
+    state: &AppState,
+    remote: &RemoteConfig,
+    root_path: &str,
+    name: &str,
+    remote_project_id: &str,
+) -> String {
+    let mut inner = state.inner.lock().expect("state mutex poisoned");
+    if inner.find_remote(&remote.id).is_none() {
+        inner.preferences.remotes.push(remote.clone());
+    }
+    let project = inner.create_project(
+        Some(name.to_owned()),
+        root_path.to_owned(),
+        remote.id.clone(),
+    );
+    let index = inner
+        .projects
+        .iter()
+        .position(|candidate| candidate.id == project.id)
+        .expect("remote project should exist");
+    inner.projects[index].remote_project_id = Some(remote_project_id.to_owned());
+    state.commit_locked(&mut inner).unwrap();
+    project.id
+}
+
+fn sample_remote_orchestrator_state(
+    remote_project_id: &str,
+    root_path: &str,
+    revision: u64,
+    status: OrchestratorInstanceStatus,
+) -> StateResponse {
+    let draft = sample_orchestrator_template_draft();
+    let template = OrchestratorTemplate {
+        id: "remote-template-1".to_owned(),
+        name: draft.name.clone(),
+        description: draft.description.clone(),
+        project_id: Some(remote_project_id.to_owned()),
+        sessions: draft.sessions.clone(),
+        transitions: draft.transitions.clone(),
+        created_at: "2026-04-03 10:00:00".to_owned(),
+        updated_at: "2026-04-03 10:00:00".to_owned(),
+    };
+    let remote_session_ids_by_template_session_id = draft
+        .sessions
+        .iter()
+        .enumerate()
+        .map(|(index, session)| (session.id.clone(), format!("remote-session-{}", index + 1)))
+        .collect::<HashMap<_, _>>();
+    let sessions = draft
+        .sessions
+        .iter()
+        .map(|template_session| {
+            let agent = template_session.agent;
+            let mut session = Session {
+                id: remote_session_ids_by_template_session_id[&template_session.id].clone(),
+                name: template_session.name.clone(),
+                emoji: agent.avatar().to_owned(),
+                agent,
+                workdir: root_path.to_owned(),
+                project_id: Some(remote_project_id.to_owned()),
+                model: template_session
+                    .model
+                    .clone()
+                    .unwrap_or_else(|| agent.default_model().to_owned()),
+                model_options: Vec::new(),
+                approval_policy: None,
+                reasoning_effort: None,
+                sandbox_mode: None,
+                cursor_mode: agent
+                    .supports_cursor_mode()
+                    .then_some(default_cursor_mode()),
+                claude_effort: agent
+                    .supports_claude_approval_mode()
+                    .then_some(ClaudeEffortLevel::Default),
+                claude_approval_mode: agent
+                    .supports_claude_approval_mode()
+                    .then_some(default_claude_approval_mode()),
+                gemini_approval_mode: agent
+                    .supports_gemini_approval_mode()
+                    .then_some(default_gemini_approval_mode()),
+                external_session_id: None,
+                agent_commands_revision: 0,
+                codex_thread_state: None,
+                status: SessionStatus::Idle,
+                preview: format!("Remote {} ready.", template_session.name),
+                messages: Vec::new(),
+                pending_prompts: Vec::new(),
+            };
+            if session.agent.supports_codex_prompt_settings() {
+                session.approval_policy = Some(default_codex_approval_policy());
+                session.reasoning_effort = Some(default_codex_reasoning_effort());
+                session.sandbox_mode = Some(default_codex_sandbox_mode());
+            }
+            session
+        })
+        .collect::<Vec<_>>();
+    let pending_transitions = if status == OrchestratorInstanceStatus::Stopped {
+        Vec::new()
+    } else {
+        let transition = draft
+            .transitions
+            .first()
+            .expect("sample draft should include a transition");
+        vec![PendingTransition {
+            id: "remote-pending-1".to_owned(),
+            transition_id: transition.id.clone(),
+            source_session_id: remote_session_ids_by_template_session_id
+                [&transition.from_session_id]
+                .clone(),
+            destination_session_id: remote_session_ids_by_template_session_id
+                [&transition.to_session_id]
+                .clone(),
+            completion_revision: 7,
+            rendered_prompt: "Review the implementation.".to_owned(),
+            created_at: "2026-04-03 10:05:00".to_owned(),
+        }]
+    };
+    StateResponse {
+        revision,
+        codex: CodexState::default(),
+        agent_readiness: Vec::new(),
+        preferences: AppPreferences::default(),
+        projects: Vec::new(),
+        orchestrators: vec![OrchestratorInstance {
+            id: "remote-orchestrator-1".to_owned(),
+            remote_id: None,
+            remote_orchestrator_id: None,
+            template_id: template.id.clone(),
+            project_id: remote_project_id.to_owned(),
+            template_snapshot: template,
+            status,
+            session_instances: draft
+                .sessions
+                .iter()
+                .map(|template_session| OrchestratorSessionInstance {
+                    template_session_id: template_session.id.clone(),
+                    session_id: remote_session_ids_by_template_session_id[&template_session.id]
+                        .clone(),
+                    last_completion_revision: None,
+                    last_delivered_completion_revision: None,
+                })
+                .collect(),
+            pending_transitions,
+            created_at: "2026-04-03 10:00:00".to_owned(),
+            error_message: None,
+            completed_at: (status == OrchestratorInstanceStatus::Stopped)
+                .then_some("2026-04-03 10:15:00".to_owned()),
+            stop_in_progress: false,
+            active_session_ids_during_stop: None,
+            stopped_session_ids_during_stop: Vec::new(),
+        }],
+        sessions,
+    }
 }
 
 fn run_git_test_command(repo_root: &FsPath, args: &[&str]) {
@@ -2925,10 +3108,12 @@ fn persists_app_settings_and_applies_them_to_new_sessions() {
         persistence_path: state.persistence_path.clone(),
         orchestrator_templates_path: state.orchestrator_templates_path.clone(),
         orchestrator_templates_lock: state.orchestrator_templates_lock.clone(),
+        review_documents_lock: state.review_documents_lock.clone(),
         state_events: broadcast::channel(16).0,
         delta_events: broadcast::channel(16).0,
         shared_codex_runtime: Arc::new(Mutex::new(None)),
         remote_registry: test_remote_registry(),
+        remote_sse_fallback_resynced_revision: Arc::new(Mutex::new(HashMap::new())),
         stopping_orchestrator_ids: Arc::new(Mutex::new(HashSet::new())),
         stopping_orchestrator_session_ids: Arc::new(Mutex::new(HashMap::new())),
         inner: Arc::new(Mutex::new(reloaded_inner)),
@@ -4974,6 +5159,65 @@ fn import_discovered_codex_threads_normalizes_legacy_local_verbatim_paths() {
     let _ = fs::remove_dir_all(project_root);
 }
 
+// Tests that disable_socket_inheritance clears the Windows inherit flag.
+#[cfg(windows)]
+#[tokio::test]
+async fn disable_socket_inheritance_clears_windows_inherit_flag() {
+    use std::os::windows::io::AsRawSocket as _;
+
+    unsafe extern "system" {
+        fn GetHandleInformation(handle: *mut std::ffi::c_void, flags: *mut u32) -> i32;
+        fn SetHandleInformation(handle: *mut std::ffi::c_void, mask: u32, flags: u32) -> i32;
+    }
+
+    const HANDLE_FLAG_INHERIT: u32 = 0x0000_0001;
+
+    let listener = TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("test listener should bind");
+    let raw = listener.as_raw_socket() as *mut std::ffi::c_void;
+
+    let inherited = unsafe {
+        SetHandleInformation(raw, HANDLE_FLAG_INHERIT, HANDLE_FLAG_INHERIT)
+    };
+    assert_ne!(
+        inherited,
+        0,
+        "test setup should make the socket inheritable: {}",
+        io::Error::last_os_error()
+    );
+
+    let mut flags = 0u32;
+    let queried = unsafe { GetHandleInformation(raw, &mut flags) };
+    assert_ne!(
+        queried,
+        0,
+        "test setup should read socket handle flags: {}",
+        io::Error::last_os_error()
+    );
+    assert_ne!(
+        flags & HANDLE_FLAG_INHERIT,
+        0,
+        "test setup should confirm the inherit bit is set"
+    );
+
+    disable_socket_inheritance(&listener);
+
+    flags = 0;
+    let queried = unsafe { GetHandleInformation(raw, &mut flags) };
+    assert_ne!(
+        queried,
+        0,
+        "socket handle flags should remain queryable after inheritance is disabled: {}",
+        io::Error::last_os_error()
+    );
+    assert_eq!(
+        flags & HANDLE_FLAG_INHERIT,
+        0,
+        "disable_socket_inheritance should clear HANDLE_FLAG_INHERIT"
+    );
+}
+
 // Tests that import discovered Codex threads preserves existing prompt settings.
 #[test]
 fn import_discovered_codex_threads_preserves_existing_prompt_settings() {
@@ -5077,6 +5321,686 @@ async fn create_session_route_returns_created_response() {
     assert_eq!(created_session.agent, Agent::Codex);
     let _ = fs::remove_file(state.persistence_path.as_path());
 }
+
+// Tests that workspace layout routes round-trip put, get, and list calls.
+#[tokio::test]
+async fn workspace_layout_routes_round_trip_put_get_and_list() {
+    let state = test_app_state();
+    let app = app_router(state.clone());
+    let initial_workspace = json!({
+        "panes": [
+            {
+                "id": "pane-1",
+                "kind": "session",
+                "sessionId": "session-1"
+            }
+        ]
+    });
+    let initial_body = serde_json::to_vec(&json!({
+        "controlPanelSide": "left",
+        "themeId": "terminal",
+        "styleId": "style-terminal",
+        "fontSizePx": 14,
+        "editorFontSizePx": 15,
+        "densityPercent": 90,
+        "workspace": initial_workspace.clone()
+    }))
+    .expect("workspace layout body should serialize");
+    let (create_status, create_response): (StatusCode, WorkspaceLayoutResponse) = request_json(
+        &app,
+        Request::builder()
+            .method("PUT")
+            .uri("/api/workspaces/workspace-1")
+            .header("content-type", "application/json")
+            .body(Body::from(initial_body))
+            .unwrap(),
+    )
+    .await;
+
+    assert_eq!(create_status, StatusCode::OK);
+    assert_eq!(create_response.layout.id, "workspace-1");
+    assert_eq!(create_response.layout.revision, 1);
+    assert_eq!(
+        create_response.layout.control_panel_side,
+        WorkspaceControlPanelSide::Left
+    );
+    assert_eq!(create_response.layout.theme_id.as_deref(), Some("terminal"));
+    assert_eq!(
+        create_response.layout.style_id.as_deref(),
+        Some("style-terminal")
+    );
+    assert_eq!(create_response.layout.font_size_px, Some(14));
+    assert_eq!(create_response.layout.editor_font_size_px, Some(15));
+    assert_eq!(create_response.layout.density_percent, Some(90));
+    assert_eq!(create_response.layout.workspace, initial_workspace);
+    assert!(!create_response.layout.updated_at.is_empty());
+
+    let updated_workspace = json!({
+        "activePaneId": "pane-2",
+        "panes": [
+            {
+                "id": "pane-2",
+                "kind": "source",
+                "sourcePath": "src/lib.rs"
+            }
+        ]
+    });
+    let update_body = serde_json::to_vec(&json!({
+        "controlPanelSide": "right",
+        "themeId": "frost",
+        "styleId": "style-editorial",
+        "fontSizePx": 16,
+        "editorFontSizePx": 17,
+        "densityPercent": 110,
+        "workspace": updated_workspace.clone()
+    }))
+    .expect("updated workspace layout body should serialize");
+    let (update_status, update_response): (StatusCode, WorkspaceLayoutResponse) = request_json(
+        &app,
+        Request::builder()
+            .method("PUT")
+            .uri("/api/workspaces/workspace-1")
+            .header("content-type", "application/json")
+            .body(Body::from(update_body))
+            .unwrap(),
+    )
+    .await;
+
+    assert_eq!(update_status, StatusCode::OK);
+    assert_eq!(update_response.layout.id, "workspace-1");
+    assert_eq!(update_response.layout.revision, 2);
+    assert_eq!(
+        update_response.layout.control_panel_side,
+        WorkspaceControlPanelSide::Right
+    );
+    assert_eq!(update_response.layout.theme_id.as_deref(), Some("frost"));
+    assert_eq!(
+        update_response.layout.style_id.as_deref(),
+        Some("style-editorial")
+    );
+    assert_eq!(update_response.layout.font_size_px, Some(16));
+    assert_eq!(update_response.layout.editor_font_size_px, Some(17));
+    assert_eq!(update_response.layout.density_percent, Some(110));
+    assert_eq!(update_response.layout.workspace, updated_workspace.clone());
+    assert!(!update_response.layout.updated_at.is_empty());
+
+    let (get_status, get_response): (StatusCode, WorkspaceLayoutResponse) = request_json(
+        &app,
+        Request::builder()
+            .method("GET")
+            .uri("/api/workspaces/workspace-1")
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
+
+    assert_eq!(get_status, StatusCode::OK);
+    assert_eq!(get_response.layout.id, "workspace-1");
+    assert_eq!(get_response.layout.revision, 2);
+    assert_eq!(
+        get_response.layout.control_panel_side,
+        WorkspaceControlPanelSide::Right
+    );
+    assert_eq!(get_response.layout.theme_id.as_deref(), Some("frost"));
+    assert_eq!(
+        get_response.layout.style_id.as_deref(),
+        Some("style-editorial")
+    );
+    assert_eq!(get_response.layout.font_size_px, Some(16));
+    assert_eq!(get_response.layout.editor_font_size_px, Some(17));
+    assert_eq!(get_response.layout.density_percent, Some(110));
+    assert_eq!(get_response.layout.workspace, updated_workspace);
+    assert!(!get_response.layout.updated_at.is_empty());
+    assert_eq!(
+        get_response.layout.updated_at,
+        update_response.layout.updated_at
+    );
+
+    let (list_status, list_response): (StatusCode, WorkspaceLayoutsResponse) = request_json(
+        &app,
+        Request::builder()
+            .method("GET")
+            .uri("/api/workspaces")
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
+
+    assert_eq!(list_status, StatusCode::OK);
+    assert_eq!(list_response.workspaces.len(), 1);
+    let summary = &list_response.workspaces[0];
+    assert_eq!(summary.id, "workspace-1");
+    assert_eq!(summary.revision, 2);
+    assert_eq!(summary.control_panel_side, WorkspaceControlPanelSide::Right);
+    assert_eq!(summary.theme_id.as_deref(), Some("frost"));
+    assert_eq!(summary.style_id.as_deref(), Some("style-editorial"));
+    assert_eq!(summary.font_size_px, Some(16));
+    assert_eq!(summary.editor_font_size_px, Some(17));
+    assert_eq!(summary.density_percent, Some(110));
+    assert!(!summary.updated_at.is_empty());
+    assert_eq!(summary.updated_at, get_response.layout.updated_at);
+    let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
+// Tests that workspace layout list route orders newer documents first.
+#[tokio::test]
+async fn workspace_layout_list_route_orders_workspaces_by_updated_at_desc() {
+    let state = test_app_state();
+    let app = app_router(state.clone());
+    let layout_body = |side: &str| {
+        serde_json::to_vec(&json!({
+            "controlPanelSide": side,
+            "workspace": { "panes": [] }
+        }))
+        .expect("workspace layout body should serialize")
+    };
+
+    for workspace_id in ["workspace-b", "workspace-a", "workspace-c"] {
+        let (status, _response): (StatusCode, WorkspaceLayoutResponse) = request_json(
+            &app,
+            Request::builder()
+                .method("PUT")
+                .uri(format!("/api/workspaces/{workspace_id}"))
+                .header("content-type", "application/json")
+                .body(Body::from(layout_body("left")))
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+    }
+
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        inner
+            .workspace_layouts
+            .get_mut("workspace-b")
+            .expect("workspace-b should exist")
+            .updated_at = "2026-04-02 08:30:00".to_owned();
+        inner
+            .workspace_layouts
+            .get_mut("workspace-a")
+            .expect("workspace-a should exist")
+            .updated_at = "2026-04-02 08:30:00".to_owned();
+        inner
+            .workspace_layouts
+            .get_mut("workspace-c")
+            .expect("workspace-c should exist")
+            .updated_at = "2026-04-03 09:45:00".to_owned();
+    }
+
+    let (status, response): (StatusCode, WorkspaceLayoutsResponse) = request_json(
+        &app,
+        Request::builder()
+            .method("GET")
+            .uri("/api/workspaces")
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::OK);
+    // Matching timestamps fall back to ascending workspace ID, so the tied
+    // 2026-04-02 entries must appear as `workspace-a` before `workspace-b`.
+    assert_eq!(
+        response
+            .workspaces
+            .iter()
+            .map(|workspace| workspace.id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["workspace-c", "workspace-a", "workspace-b"]
+    );
+    let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
+// Tests that get workspace layout route returns not found for missing IDs.
+#[tokio::test]
+async fn get_workspace_layout_route_returns_not_found_for_missing_id() {
+    let state = test_app_state();
+    let app = app_router(state.clone());
+    let (status, error): (StatusCode, ErrorResponse) = request_json(
+        &app,
+        Request::builder()
+            .method("GET")
+            .uri("/api/workspaces/missing-workspace")
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    assert_eq!(error.error, "workspace layout not found");
+    let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
+// Tests that put workspace layout route rejects malformed payloads.
+#[tokio::test]
+async fn put_workspace_layout_route_rejects_malformed_payloads() {
+    let state = test_app_state();
+    let app = app_router(state.clone());
+    let missing_control_panel_response = request_response(
+        &app,
+        Request::builder()
+            .method("PUT")
+            .uri("/api/workspaces/workspace-1")
+            .header("content-type", "application/json")
+            .body(Body::from(
+                serde_json::to_vec(&json!({ "workspace": {} }))
+                    .expect("missing-control-panel workspace body should serialize"),
+            ))
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(
+        missing_control_panel_response.status(),
+        StatusCode::UNPROCESSABLE_ENTITY
+    );
+    let missing_control_panel_body =
+        to_bytes(missing_control_panel_response.into_body(), usize::MAX)
+            .await
+            .expect("missing-control-panel rejection body should read");
+    let missing_control_panel_text = String::from_utf8(missing_control_panel_body.to_vec())
+        .expect("missing-control-panel rejection body should be UTF-8");
+    assert!(missing_control_panel_text.contains("missing field"));
+    assert!(missing_control_panel_text.contains("controlPanelSide"));
+
+    let missing_workspace_response = request_response(
+        &app,
+        Request::builder()
+            .method("PUT")
+            .uri("/api/workspaces/workspace-1")
+            .header("content-type", "application/json")
+            .body(Body::from(
+                serde_json::to_vec(&json!({ "controlPanelSide": "left" }))
+                    .expect("missing-workspace workspace body should serialize"),
+            ))
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(
+        missing_workspace_response.status(),
+        StatusCode::UNPROCESSABLE_ENTITY
+    );
+    let missing_workspace_body = to_bytes(missing_workspace_response.into_body(), usize::MAX)
+        .await
+        .expect("missing-workspace rejection body should read");
+    let missing_workspace_text = String::from_utf8(missing_workspace_body.to_vec())
+        .expect("missing-workspace rejection body should be UTF-8");
+    assert!(missing_workspace_text.contains("missing field"));
+    assert!(missing_workspace_text.contains("missing field `workspace`"));
+
+    let invalid_enum_response = request_response(
+        &app,
+        Request::builder()
+            .method("PUT")
+            .uri("/api/workspaces/workspace-1")
+            .header("content-type", "application/json")
+            .body(Body::from(
+                serde_json::to_vec(&json!({
+                    "controlPanelSide": "middle",
+                    "workspace": {}
+                }))
+                .expect("invalid-enum workspace body should serialize"),
+            ))
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(
+        invalid_enum_response.status(),
+        StatusCode::UNPROCESSABLE_ENTITY
+    );
+    let invalid_enum_body = to_bytes(invalid_enum_response.into_body(), usize::MAX)
+        .await
+        .expect("invalid-enum rejection body should read");
+    let invalid_enum_text = String::from_utf8(invalid_enum_body.to_vec())
+        .expect("invalid-enum rejection body should be UTF-8");
+    assert!(invalid_enum_text.contains("unknown variant"));
+    let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
+// Tests that review persistence replaces the target without leaving temp files behind.
+#[test]
+fn persist_review_document_replaces_target_without_leaving_temp_files() {
+    let review_root =
+        std::env::temp_dir().join(format!("termal-review-atomic-write-{}", Uuid::new_v4()));
+    fs::create_dir_all(&review_root).expect("review root should exist");
+    let change_set_id = "change-set-atomic-write";
+    let review_path = resolve_review_document_path(&review_root, change_set_id)
+        .expect("review path should resolve");
+    let initial_review = default_review_document(change_set_id);
+    persist_review_document(&review_path, &initial_review)
+        .expect("initial review document should persist");
+
+    let mut updated_review = initial_review.clone();
+    updated_review.revision = 1;
+    persist_review_document(&review_path, &updated_review)
+        .expect("updated review document should persist");
+
+    let loaded_review =
+        load_review_document(&review_path, change_set_id).expect("review document should load");
+    assert_eq!(loaded_review, updated_review);
+
+    let review_dir = review_path
+        .parent()
+        .expect("review file should have a parent");
+    let mut entry_names = fs::read_dir(review_dir)
+        .expect("review directory should list")
+        .map(|entry| {
+            entry
+                .expect("review directory entry should read")
+                .file_name()
+                .to_string_lossy()
+                .into_owned()
+        })
+        .collect::<Vec<_>>();
+    entry_names.sort();
+    assert_eq!(entry_names, vec!["change-set-atomic-write.json".to_owned()]);
+
+    let _ = fs::remove_dir_all(&review_root);
+}
+
+// Tests that the Windows replace helper overwrites an existing target in place.
+#[cfg(windows)]
+#[test]
+fn replace_review_document_file_replaces_existing_target_on_windows() {
+    let review_root =
+        std::env::temp_dir().join(format!("termal-review-windows-replace-{}", Uuid::new_v4()));
+    fs::create_dir_all(&review_root).expect("review root should exist");
+    let review_path = review_root.join("review.json");
+    let temp_path = review_root.join("review.tmp");
+
+    fs::write(&review_path, b"original review").expect("existing review file should be written");
+    fs::write(&temp_path, b"updated review").expect("temp review file should be written");
+
+    replace_review_document_file(&temp_path, &review_path)
+        .expect("existing review file should be replaced");
+
+    assert_eq!(
+        fs::read(&review_path).expect("replaced review file should read"),
+        b"updated review"
+    );
+    assert!(
+        !temp_path.exists(),
+        "replacement temp file should be moved away"
+    );
+
+    let _ = fs::remove_dir_all(&review_root);
+}
+
+// Tests that a directory-sync failure after replacement does not surface as a write failure.
+#[test]
+fn persist_review_document_succeeds_when_directory_sync_fails_after_replace() {
+    let review_root = std::env::temp_dir().join(format!(
+        "termal-review-directory-sync-failure-{}",
+        Uuid::new_v4()
+    ));
+    fs::create_dir_all(&review_root).expect("review root should exist");
+    let change_set_id = "change-set-directory-sync";
+    let review_path = resolve_review_document_path(&review_root, change_set_id)
+        .expect("review path should resolve");
+    let initial_review = default_review_document(change_set_id);
+    persist_review_document_with_directory_sync(&review_path, &initial_review, |_| Ok(()))
+        .expect("initial review document should persist");
+
+    let mut updated_review = initial_review.clone();
+    updated_review.revision = 1;
+    let result = persist_review_document_with_directory_sync(&review_path, &updated_review, |_| {
+        Err(ApiError::internal("simulated directory sync failure"))
+    });
+    assert!(
+        result.is_ok(),
+        "post-rename directory sync failures should not fail the write"
+    );
+
+    let loaded_review =
+        load_review_document(&review_path, change_set_id).expect("review document should load");
+    assert_eq!(loaded_review, updated_review);
+
+    let review_dir = review_path
+        .parent()
+        .expect("review file should have a parent");
+    let mut entry_names = fs::read_dir(review_dir)
+        .expect("review directory should list")
+        .map(|entry| {
+            entry
+                .expect("review directory entry should read")
+                .file_name()
+                .to_string_lossy()
+                .into_owned()
+        })
+        .collect::<Vec<_>>();
+    entry_names.sort();
+    assert_eq!(
+        entry_names,
+        vec!["change-set-directory-sync.json".to_owned()]
+    );
+
+    let _ = fs::remove_dir_all(&review_root);
+}
+
+// Tests that review change-set IDs reject empty values.
+#[test]
+fn resolve_review_document_path_rejects_empty_change_set_ids() {
+    let review_root =
+        std::env::temp_dir().join(format!("termal-review-empty-id-{}", Uuid::new_v4()));
+    fs::create_dir_all(&review_root).expect("review root should exist");
+
+    let error = match resolve_review_document_path(&review_root, "") {
+        Ok(_) => panic!("empty change-set IDs should be rejected"),
+        Err(error) => error,
+    };
+
+    assert_eq!(error.status, StatusCode::BAD_REQUEST);
+    assert_eq!(error.message, "changeSetId cannot be empty");
+
+    let _ = fs::remove_dir_all(&review_root);
+}
+
+// Tests that review change-set IDs reject surrounding whitespace.
+#[test]
+fn resolve_review_document_path_rejects_change_set_ids_with_surrounding_whitespace() {
+    let review_root =
+        std::env::temp_dir().join(format!("termal-review-whitespace-id-{}", Uuid::new_v4()));
+    fs::create_dir_all(&review_root).expect("review root should exist");
+
+    let error = match resolve_review_document_path(&review_root, " change-set-whitespace ") {
+        Ok(_) => panic!("surrounding whitespace should be rejected"),
+        Err(error) => error,
+    };
+
+    assert_eq!(error.status, StatusCode::BAD_REQUEST);
+    assert_eq!(
+        error.message,
+        "changeSetId may not have leading or trailing whitespace"
+    );
+
+    let _ = fs::remove_dir_all(&review_root);
+}
+
+// Tests that review change-set IDs reject overly long values.
+#[test]
+fn resolve_review_document_path_rejects_overlong_change_set_ids() {
+    let review_root =
+        std::env::temp_dir().join(format!("termal-review-long-id-{}", Uuid::new_v4()));
+    fs::create_dir_all(&review_root).expect("review root should exist");
+    let too_long_change_set_id = "a".repeat(MAX_REVIEW_CHANGE_SET_ID_LEN + 1);
+
+    let error = match resolve_review_document_path(&review_root, &too_long_change_set_id) {
+        Ok(_) => panic!("overlong change-set IDs should be rejected"),
+        Err(error) => error,
+    };
+
+    assert_eq!(error.status, StatusCode::BAD_REQUEST);
+    assert_eq!(
+        error.message,
+        format!("changeSetId is too long (max {MAX_REVIEW_CHANGE_SET_ID_LEN} bytes)")
+    );
+
+    let _ = fs::remove_dir_all(&review_root);
+}
+
+// Tests that review handlers validate change-set IDs before remote proxying.
+#[tokio::test]
+async fn review_handlers_validate_change_set_ids_before_remote_proxying() {
+    let state = test_app_state();
+    let remote = RemoteConfig {
+        id: "ssh-lab".to_owned(),
+        name: "SSH Lab".to_owned(),
+        transport: RemoteTransport::Local,
+        enabled: true,
+        host: None,
+        port: None,
+        user: None,
+    };
+    let project_id = create_test_remote_project(
+        &state,
+        &remote,
+        "/remote/repo",
+        "Remote Project",
+        "remote-project-1",
+    );
+
+    let error = get_review(
+        AxumPath(" change-set-remote ".to_owned()),
+        Query(ReviewQuery {
+            project_id: Some(project_id),
+            session_id: None,
+        }),
+        State(state),
+    )
+    .await
+    .expect_err("invalid remote review change-set ID should be rejected before proxying");
+
+    assert_eq!(error.status, StatusCode::BAD_REQUEST);
+    assert_eq!(
+        error.message,
+        "changeSetId may not have leading or trailing whitespace"
+    );
+}
+// Tests that review change-set IDs reject invalid characters.
+#[test]
+fn resolve_review_document_path_rejects_change_set_ids_with_invalid_characters() {
+    let review_root =
+        std::env::temp_dir().join(format!("termal-review-invalid-id-{}", Uuid::new_v4()));
+    fs::create_dir_all(&review_root).expect("review root should exist");
+
+    let error = match resolve_review_document_path(&review_root, "change/set-invalid") {
+        Ok(_) => panic!("invalid-character change-set IDs should be rejected"),
+        Err(error) => error,
+    };
+
+    assert_eq!(error.status, StatusCode::BAD_REQUEST);
+    assert_eq!(
+        error.message,
+        "changeSetId may only contain letters, numbers, '.', '-', and '_'"
+    );
+
+    let _ = fs::remove_dir_all(&review_root);
+}
+
+// Tests that review change-set IDs reject pure-dot values.
+#[test]
+fn resolve_review_document_path_rejects_change_set_ids_consisting_entirely_of_dots() {
+    let review_root = std::env::temp_dir().join(format!("termal-review-dot-id-{}", Uuid::new_v4()));
+    fs::create_dir_all(&review_root).expect("review root should exist");
+
+    let error = match resolve_review_document_path(&review_root, "..") {
+        Ok(_) => panic!("pure-dot change-set IDs should be rejected"),
+        Err(error) => error,
+    };
+
+    assert_eq!(error.status, StatusCode::BAD_REQUEST);
+    assert_eq!(
+        error.message,
+        "changeSetId must not consist entirely of dots"
+    );
+
+    let _ = fs::remove_dir_all(&review_root);
+}
+
+// Tests that review read routes wait for the review document lock.
+#[tokio::test]
+async fn review_read_routes_wait_for_review_document_lock() {
+    let state = test_app_state();
+    let project_root =
+        std::env::temp_dir().join(format!("termal-review-lock-test-{}", Uuid::new_v4()));
+    fs::create_dir_all(&project_root).expect("review lock project root should exist");
+    let project = state
+        .create_project(CreateProjectRequest {
+            name: Some("Review Lock Project".to_owned()),
+            root_path: project_root.to_string_lossy().into_owned(),
+            remote_id: default_local_remote_id(),
+        })
+        .expect("review lock project should be created");
+    let project_id = project.project_id;
+    let app = app_router(state.clone());
+    let change_set_id = "change-set-locked-read";
+    let review_guard = state
+        .review_documents_lock
+        .lock()
+        .expect("review documents mutex poisoned");
+    let review_app = app.clone();
+    let review_future = request_json::<ReviewDocumentResponse>(
+        &review_app,
+        Request::builder()
+            .method("GET")
+            .uri(format!(
+                "/api/reviews/{change_set_id}?projectId={project_id}"
+            ))
+            .body(Body::empty())
+            .unwrap(),
+    );
+    tokio::pin!(review_future);
+    assert!(
+        tokio::time::timeout(Duration::from_millis(100), &mut review_future)
+            .await
+            .is_err()
+    );
+    let summary_app = app.clone();
+    let summary_future = request_json::<ReviewSummaryResponse>(
+        &summary_app,
+        Request::builder()
+            .method("GET")
+            .uri(format!(
+                "/api/reviews/{change_set_id}/summary?projectId={project_id}"
+            ))
+            .body(Body::empty())
+            .unwrap(),
+    );
+    tokio::pin!(summary_future);
+    assert!(
+        tokio::time::timeout(Duration::from_millis(100), &mut summary_future)
+            .await
+            .is_err()
+    );
+    drop(review_guard);
+    let (review_status, review_response) = review_future.await;
+    assert_eq!(review_status, StatusCode::OK);
+    assert_eq!(review_response.review.change_set_id, change_set_id);
+    assert_eq!(review_response.review.revision, 0);
+    assert!(review_response.review.files.is_empty());
+    assert!(review_response.review.threads.is_empty());
+    assert!(
+        review_response
+            .review_file_path
+            .ends_with("change-set-locked-read.json")
+    );
+    let (summary_status, summary_response) = summary_future.await;
+    assert_eq!(summary_status, StatusCode::OK);
+    assert_eq!(summary_response.change_set_id, change_set_id);
+    assert_eq!(summary_response.thread_count, 0);
+    assert_eq!(summary_response.open_thread_count, 0);
+    assert_eq!(summary_response.resolved_thread_count, 0);
+    assert_eq!(summary_response.comment_count, 0);
+    assert!(!summary_response.has_threads);
+    assert!(
+        summary_response
+            .review_file_path
+            .ends_with("change-set-locked-read.json")
+    );
+    let _ = fs::remove_file(state.persistence_path.as_path());
+    let _ = fs::remove_dir_all(&project_root);
+}
+
 // Tests that update session settings route updates session name.
 #[tokio::test]
 async fn update_session_settings_route_updates_session_name() {
@@ -5251,6 +6175,33 @@ async fn submit_approval_route_updates_claude_session_and_delivers_runtime_respo
     drop(inner);
     let _ = fs::remove_file(state.persistence_path.as_path());
 }
+// Tests that the empty SSE fallback payload carries an explicit fallback marker.
+#[test]
+fn empty_state_events_payload_carries_explicit_fallback_marker() {
+    let payload: Value = serde_json::from_str(EMPTY_STATE_EVENTS_PAYLOAD.as_str())
+        .expect("SSE fallback payload should parse");
+    assert_eq!(payload["_sseFallback"], true);
+    assert_eq!(payload["revision"], 0);
+    assert!(payload.get("preferences").is_some());
+    assert!(payload.get("sessions").is_some());
+
+    let decoded: StateEventPayload = serde_json::from_str(EMPTY_STATE_EVENTS_PAYLOAD.as_str())
+        .expect("fallback payload should decode as a state event payload");
+    assert!(decoded.sse_fallback);
+    assert_eq!(decoded.state.revision, 0);
+}
+
+// Tests that fallback SSE payloads can carry the recovered revision.
+#[test]
+fn fallback_state_events_payload_uses_supplied_revision() {
+    let decoded: StateEventPayload = serde_json::from_str(
+        &fallback_state_events_payload(42).expect("fallback payload should encode"),
+    )
+    .expect("fallback payload should decode as a state event payload");
+    assert!(decoded.sse_fallback);
+    assert_eq!(decoded.state.revision, 42);
+}
+
 // Tests that state events route streams initial state and live deltas.
 #[tokio::test]
 async fn state_events_route_streams_initial_state_and_live_deltas() {
@@ -5398,6 +6349,21 @@ async fn state_events_route_streams_orchestrator_creation_state_and_live_orchest
                 instance["id"] == Value::String(instance_id.clone())
                     && instance["status"] == Value::String("paused".to_owned())
             }))
+    );
+    let delta_session_ids = delta["sessions"]
+        .as_array()
+        .expect("orchestrator delta should include referenced sessions")
+        .iter()
+        .map(|session| {
+            session["id"]
+                .as_str()
+                .expect("delta session should include an ID")
+                .to_owned()
+        })
+        .collect::<HashSet<_>>();
+    assert_eq!(
+        delta_session_ids,
+        created_session_ids.into_iter().collect::<HashSet<_>>()
     );
 
     let _ = fs::remove_dir_all(project_root);
@@ -10654,6 +11620,10 @@ fn matches_acp_model_options_by_name_or_label() {
         matching_acp_config_option_value(&config, "model", "GPT-5.3 Codex High Fast"),
         Some("gpt-5.3-codex-high-fast".to_owned())
     );
+    assert_eq!(
+        matching_acp_config_option_value(&config, "model", "Missing Model"),
+        None
+    );
 }
 
 // Tests that canonicalizes session model updates from live model labels.
@@ -10751,6 +11721,24 @@ fn revisions_increase_for_visible_state_changes() {
         )
         .unwrap();
     assert_eq!(updated.revision, 2);
+
+    let renamed = state
+        .update_session_settings(
+            &created.session_id,
+            UpdateSessionSettingsRequest {
+                name: Some("Revision Test Renamed".to_owned()),
+                model: None,
+                sandbox_mode: None,
+                approval_policy: None,
+                reasoning_effort: None,
+                cursor_mode: None,
+                claude_approval_mode: None,
+                claude_effort: None,
+                gemini_approval_mode: None,
+            },
+        )
+        .unwrap();
+    assert_eq!(renamed.revision, 3);
 }
 
 // Tests that renames sessions via settings updates.
@@ -11043,6 +12031,1205 @@ fn removing_remote_stops_event_bridge_worker_and_resets_started_guard() {
     }
 }
 
+// Tests that event-bridge retry boundaries clear fallback resync tracking so a
+// restarted remote can recover even if its revision counter drops.
+#[test]
+fn remote_event_bridge_retry_clears_fallback_resync_tracking() {
+    let state = test_app_state();
+    let remote = RemoteConfig {
+        id: "ssh-lab".to_owned(),
+        name: "SSH Lab".to_owned(),
+        transport: RemoteTransport::Local,
+        enabled: true,
+        host: None,
+        port: None,
+        user: None,
+    };
+    let connection = Arc::new(RemoteConnection {
+        config: Mutex::new(remote.clone()),
+        forwarded_port: 47001,
+        process: Mutex::new(None),
+        event_bridge_started: AtomicBool::new(false),
+        event_bridge_shutdown: AtomicBool::new(false),
+    });
+    state
+        .remote_registry
+        .connections
+        .lock()
+        .expect("remote registry mutex poisoned")
+        .insert(remote.id.clone(), connection.clone());
+
+    state.note_remote_sse_fallback_resync(&remote.id, 4);
+    assert!(state.should_skip_remote_sse_fallback_resync(&remote.id, 4));
+
+    connection.start_event_bridge(state.remote_registry.client.client().clone(), state.clone());
+
+    let deadline = std::time::Instant::now() + Duration::from_secs(1);
+    loop {
+        if !state.should_skip_remote_sse_fallback_resync(&remote.id, 4) {
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "event bridge retry should clear stale fallback tracking"
+        );
+        std::thread::sleep(Duration::from_millis(10));
+    }
+
+    connection.stop_event_bridge();
+
+    let shutdown_deadline = std::time::Instant::now() + Duration::from_secs(1);
+    loop {
+        if !connection.event_bridge_started.load(Ordering::SeqCst) {
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < shutdown_deadline,
+            "event bridge worker should stop after shutdown"
+        );
+        std::thread::sleep(Duration::from_millis(10));
+    }
+
+    let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
+// Tests that remote snapshot sync localizes orchestrators and creates missing proxy sessions.
+#[test]
+fn remote_snapshot_sync_localizes_orchestrators_and_creates_missing_proxy_sessions() {
+    let state = test_app_state();
+    let remote = RemoteConfig {
+        id: "ssh-lab".to_owned(),
+        name: "SSH Lab".to_owned(),
+        transport: RemoteTransport::Local,
+        enabled: true,
+        host: None,
+        port: None,
+        user: None,
+    };
+    let local_project_id = create_test_remote_project(
+        &state,
+        &remote,
+        "/remote/repo",
+        "Remote Project",
+        "remote-project-1",
+    );
+
+    state
+        .apply_remote_state_snapshot(
+            &remote.id,
+            sample_remote_orchestrator_state(
+                "remote-project-1",
+                "/remote/repo",
+                1,
+                OrchestratorInstanceStatus::Running,
+            ),
+        )
+        .expect("remote snapshot should apply");
+
+    let snapshot = state.snapshot();
+    let orchestrator = snapshot
+        .orchestrators
+        .iter()
+        .find(|instance| {
+            instance.remote_orchestrator_id.as_deref() == Some("remote-orchestrator-1")
+        })
+        .cloned()
+        .expect("remote orchestrator should be mirrored");
+    assert_ne!(orchestrator.id, "remote-orchestrator-1");
+    assert_eq!(orchestrator.remote_id.as_deref(), Some(remote.id.as_str()));
+    assert_eq!(orchestrator.project_id, local_project_id);
+    assert_eq!(
+        orchestrator.template_snapshot.project_id.as_deref(),
+        Some(local_project_id.as_str())
+    );
+    assert_eq!(orchestrator.session_instances.len(), 3);
+    assert_eq!(orchestrator.pending_transitions.len(), 1);
+
+    let localized_session_ids = orchestrator
+        .session_instances
+        .iter()
+        .map(|session| session.session_id.clone())
+        .collect::<HashSet<_>>();
+    assert!(localized_session_ids.contains(&orchestrator.pending_transitions[0].source_session_id));
+    assert!(
+        localized_session_ids.contains(&orchestrator.pending_transitions[0].destination_session_id)
+    );
+
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    for remote_session_id in ["remote-session-1", "remote-session-2", "remote-session-3"] {
+        let index = inner
+            .find_remote_session_index(&remote.id, remote_session_id)
+            .expect("remote mirrored session should exist");
+        assert_eq!(
+            inner.sessions[index].session.project_id.as_deref(),
+            Some(local_project_id.as_str())
+        );
+        assert!(localized_session_ids.contains(&inner.sessions[index].session.id));
+    }
+
+    let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
+// Tests that mirrored remote orchestrators never enqueue local pending prompts during resume.
+#[test]
+fn remote_mirrored_orchestrators_do_not_enqueue_local_pending_prompts_on_resume() {
+    let state = test_app_state();
+    let remote = RemoteConfig {
+        id: "ssh-lab".to_owned(),
+        name: "SSH Lab".to_owned(),
+        transport: RemoteTransport::Local,
+        enabled: true,
+        host: None,
+        port: None,
+        user: None,
+    };
+    create_test_remote_project(
+        &state,
+        &remote,
+        "/remote/repo",
+        "Remote Project",
+        "remote-project-1",
+    );
+    state
+        .apply_remote_state_snapshot(
+            &remote.id,
+            sample_remote_orchestrator_state(
+                "remote-project-1",
+                "/remote/repo",
+                1,
+                OrchestratorInstanceStatus::Running,
+            ),
+        )
+        .expect("remote snapshot should apply");
+
+    let destination_local_session_id = {
+        let inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_remote_session_index(&remote.id, "remote-session-2")
+            .expect("remote mirrored destination session should exist");
+        inner.sessions[index].session.id.clone()
+    };
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(&destination_local_session_id)
+            .expect("destination session should exist");
+        inner.sessions[index].session.status = SessionStatus::Active;
+        state.commit_locked(&mut inner).unwrap();
+    }
+
+    state
+        .resume_pending_orchestrator_transitions()
+        .expect("mirrored remote orchestrators should be ignored during local resume");
+
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    let destination = inner
+        .sessions
+        .iter()
+        .find(|record| record.session.id == destination_local_session_id)
+        .expect("destination session should still exist");
+    assert_eq!(destination.session.status, SessionStatus::Active);
+    assert!(destination.queued_prompts.is_empty());
+    assert!(destination.session.pending_prompts.is_empty());
+    assert!(matches!(destination.runtime, SessionRuntime::None));
+    let orchestrator = inner
+        .orchestrator_instances
+        .iter()
+        .find(|instance| {
+            instance.remote_id.as_deref() == Some(remote.id.as_str())
+                && instance.remote_orchestrator_id.as_deref() == Some("remote-orchestrator-1")
+        })
+        .expect("mirrored remote orchestrator should still exist");
+    assert_eq!(orchestrator.pending_transitions.len(), 1);
+
+    let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
+// Tests that remote mirrored orchestrators are skipped by local pending-transition dispatch.
+#[test]
+fn remote_mirrored_orchestrators_skip_pending_transition_dispatch() {
+    let state = test_app_state();
+    let project_root = std::env::temp_dir().join(format!(
+        "termal-remote-orchestrator-next-action-{}",
+        Uuid::new_v4()
+    ));
+    fs::create_dir_all(&project_root).expect("project root should exist");
+    let project_id = create_test_project(&state, &project_root, "Remote Next Action");
+    let template = state
+        .create_orchestrator_template(sample_orchestrator_template_draft())
+        .expect("template should be created")
+        .template;
+    let orchestrator = state
+        .create_orchestrator_instance(CreateOrchestratorInstanceRequest {
+            template_id: template.id,
+            project_id: Some(project_id),
+        })
+        .expect("orchestrator instance should be created")
+        .orchestrator;
+
+    let planner_session_id = orchestrator
+        .session_instances
+        .iter()
+        .find(|instance| instance.template_session_id == "planner")
+        .expect("planner session should be mapped")
+        .session_id
+        .clone();
+    let builder_session_id = orchestrator
+        .session_instances
+        .iter()
+        .find(|instance| instance.template_session_id == "builder")
+        .expect("builder session should be mapped")
+        .session_id
+        .clone();
+
+    let mut inner = state.inner.lock().expect("state mutex poisoned");
+    let instance_index = inner
+        .orchestrator_instances
+        .iter()
+        .position(|instance| instance.id == orchestrator.id)
+        .expect("orchestrator instance should exist");
+    inner.orchestrator_instances[instance_index].pending_transitions = vec![PendingTransition {
+        id: "pending-local-remote-1".to_owned(),
+        transition_id: "planner-to-builder".to_owned(),
+        source_session_id: planner_session_id,
+        destination_session_id: builder_session_id.clone(),
+        completion_revision: 7,
+        rendered_prompt: "Use this plan and implement it.".to_owned(),
+        created_at: "2026-04-03 12:00:00".to_owned(),
+    }];
+    assert!(matches!(
+        next_pending_transition_action(&inner, &HashSet::new()),
+        Some(PendingTransitionAction::Deliver {
+            destination_session_id,
+            ..
+        }) if destination_session_id == builder_session_id
+    ));
+    inner.orchestrator_instances[instance_index].remote_id = Some("ssh-lab".to_owned());
+    inner.orchestrator_instances[instance_index].remote_orchestrator_id =
+        Some("remote-orchestrator-1".to_owned());
+    assert!(
+        next_pending_transition_action(&inner, &HashSet::new()).is_none(),
+        "remote mirrored orchestrators should not enqueue local pending actions"
+    );
+    drop(inner);
+
+    let _ = fs::remove_file(state.persistence_path.as_path());
+    let _ = fs::remove_file(state.orchestrator_templates_path.as_path());
+    let _ = fs::remove_dir_all(project_root);
+}
+
+// Tests that remote mirrored orchestrators are skipped by deadlock detection.
+#[test]
+fn remote_mirrored_orchestrators_skip_deadlock_detection() {
+    let state = test_app_state();
+    let project_root = std::env::temp_dir().join(format!(
+        "termal-remote-orchestrator-deadlock-{}",
+        Uuid::new_v4()
+    ));
+    fs::create_dir_all(&project_root).expect("project root should exist");
+    let project_id = create_test_project(&state, &project_root, "Remote Deadlock");
+    let template = state
+        .create_orchestrator_template(sample_deadlocked_orchestrator_template_draft())
+        .expect("deadlock template should be created")
+        .template;
+    let orchestrator = state
+        .create_orchestrator_instance(CreateOrchestratorInstanceRequest {
+            template_id: template.id,
+            project_id: Some(project_id),
+        })
+        .expect("orchestrator instance should be created")
+        .orchestrator;
+
+    let source_a_session_id = orchestrator
+        .session_instances
+        .iter()
+        .find(|instance| instance.template_session_id == "source-a")
+        .expect("source-a session should be mapped")
+        .session_id
+        .clone();
+    let source_b_session_id = orchestrator
+        .session_instances
+        .iter()
+        .find(|instance| instance.template_session_id == "source-b")
+        .expect("source-b session should be mapped")
+        .session_id
+        .clone();
+    let consolidate_a_session_id = orchestrator
+        .session_instances
+        .iter()
+        .find(|instance| instance.template_session_id == "consolidate-a")
+        .expect("consolidate-a session should be mapped")
+        .session_id
+        .clone();
+    let consolidate_b_session_id = orchestrator
+        .session_instances
+        .iter()
+        .find(|instance| instance.template_session_id == "consolidate-b")
+        .expect("consolidate-b session should be mapped")
+        .session_id
+        .clone();
+
+    let mut inner = state.inner.lock().expect("state mutex poisoned");
+    let instance_index = inner
+        .orchestrator_instances
+        .iter()
+        .position(|instance| instance.id == orchestrator.id)
+        .expect("orchestrator instance should exist");
+    {
+        let instance = &mut inner.orchestrator_instances[instance_index];
+        instance.remote_id = Some("ssh-lab".to_owned());
+        instance.remote_orchestrator_id = Some("remote-orchestrator-1".to_owned());
+        instance.pending_transitions = vec![
+            PendingTransition {
+                id: "pending-consolidate-a".to_owned(),
+                transition_id: "source-a-to-consolidate-a".to_owned(),
+                source_session_id: source_a_session_id,
+                destination_session_id: consolidate_a_session_id.clone(),
+                completion_revision: 3,
+                rendered_prompt: "Source A input.".to_owned(),
+                created_at: "2026-04-03 12:05:00".to_owned(),
+            },
+            PendingTransition {
+                id: "pending-consolidate-b".to_owned(),
+                transition_id: "source-b-to-consolidate-b".to_owned(),
+                source_session_id: source_b_session_id,
+                destination_session_id: consolidate_b_session_id.clone(),
+                completion_revision: 4,
+                rendered_prompt: "Source B input.".to_owned(),
+                created_at: "2026-04-03 12:06:00".to_owned(),
+            },
+        ];
+    }
+
+    let deadlocked_session_ids = detect_deadlocked_consolidate_session_ids(
+        &inner,
+        &inner.orchestrator_instances[instance_index],
+    );
+    assert_eq!(
+        deadlocked_session_ids.into_iter().collect::<HashSet<_>>(),
+        HashSet::from([
+            consolidate_a_session_id.clone(),
+            consolidate_b_session_id.clone(),
+        ])
+    );
+    assert!(
+        !mark_deadlocked_orchestrator_instances(&mut inner, &HashSet::new()),
+        "remote mirrored orchestrators should not be marked as deadlocked"
+    );
+    let instance = &inner.orchestrator_instances[instance_index];
+    assert_eq!(instance.status, OrchestratorInstanceStatus::Running);
+    assert!(instance.error_message.is_none());
+    assert_eq!(instance.pending_transitions.len(), 2);
+    for session_id in [&consolidate_a_session_id, &consolidate_b_session_id] {
+        let index = inner
+            .find_session_index(session_id)
+            .expect("consolidate session should exist");
+        assert_eq!(inner.sessions[index].session.status, SessionStatus::Idle);
+    }
+    drop(inner);
+
+    let _ = fs::remove_file(state.persistence_path.as_path());
+    let _ = fs::remove_file(state.orchestrator_templates_path.as_path());
+    let _ = fs::remove_dir_all(project_root);
+}
+
+// Tests that remote OrchestratorsUpdated deltas localize ids and preserve proxy identity.
+#[test]
+fn remote_orchestrators_updated_delta_localizes_ids_and_preserves_proxy_identity() {
+    let state = test_app_state();
+    let remote = RemoteConfig {
+        id: "ssh-lab".to_owned(),
+        name: "SSH Lab".to_owned(),
+        transport: RemoteTransport::Local,
+        enabled: true,
+        host: None,
+        port: None,
+        user: None,
+    };
+    let local_project_id = create_test_remote_project(
+        &state,
+        &remote,
+        "/remote/repo",
+        "Remote Project",
+        "remote-project-1",
+    );
+    state
+        .apply_remote_state_snapshot(
+            &remote.id,
+            sample_remote_orchestrator_state(
+                "remote-project-1",
+                "/remote/repo",
+                1,
+                OrchestratorInstanceStatus::Running,
+            ),
+        )
+        .expect("initial remote snapshot should apply");
+
+    let initial_snapshot = state.snapshot();
+    let local_orchestrator_id = initial_snapshot
+        .orchestrators
+        .iter()
+        .find(|instance| {
+            instance.remote_orchestrator_id.as_deref() == Some("remote-orchestrator-1")
+        })
+        .expect("remote orchestrator should be mirrored")
+        .id
+        .clone();
+    let mut delta_receiver = state.subscribe_delta_events();
+
+    let remote_delta_state = sample_remote_orchestrator_state(
+        "remote-project-1",
+        "/remote/repo",
+        2,
+        OrchestratorInstanceStatus::Paused,
+    );
+    state
+        .apply_remote_delta_event(
+            &remote.id,
+            DeltaEvent::OrchestratorsUpdated {
+                revision: 2,
+                orchestrators: remote_delta_state.orchestrators.clone(),
+                sessions: remote_delta_state.sessions.clone(),
+            },
+        )
+        .expect("remote orchestrator delta should apply");
+
+    let snapshot = state.snapshot();
+    let orchestrator = snapshot
+        .orchestrators
+        .iter()
+        .find(|instance| {
+            instance.remote_orchestrator_id.as_deref() == Some("remote-orchestrator-1")
+        })
+        .expect("remote orchestrator should remain mirrored");
+    assert_eq!(orchestrator.id, local_orchestrator_id);
+    assert_eq!(orchestrator.status, OrchestratorInstanceStatus::Paused);
+    assert_eq!(orchestrator.project_id, local_project_id);
+    let expected_local_session_ids = orchestrator
+        .session_instances
+        .iter()
+        .map(|instance| instance.session_id.clone())
+        .collect::<HashSet<_>>();
+
+    let delta_payload = delta_receiver
+        .try_recv()
+        .expect("localized orchestrator delta should be published");
+    let delta: DeltaEvent =
+        serde_json::from_str(&delta_payload).expect("delta payload should decode");
+    match delta {
+        DeltaEvent::OrchestratorsUpdated {
+            revision,
+            orchestrators,
+            sessions,
+        } => {
+            assert_eq!(revision, snapshot.revision);
+            let localized = orchestrators
+                .iter()
+                .find(|instance| {
+                    instance.remote_orchestrator_id.as_deref() == Some("remote-orchestrator-1")
+                })
+                .expect("localized delta should contain the mirrored orchestrator");
+            assert_eq!(localized.id, local_orchestrator_id);
+            assert_eq!(localized.status, OrchestratorInstanceStatus::Paused);
+            assert_eq!(
+                sessions
+                    .iter()
+                    .map(|session| session.id.clone())
+                    .collect::<HashSet<_>>(),
+                expected_local_session_ids
+            );
+            assert!(sessions.iter().all(|session| {
+                session.project_id.as_deref() == Some(local_project_id.as_str())
+            }));
+        }
+        _ => panic!("unexpected delta variant"),
+    }
+
+    let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
+// Tests that remote OrchestratorsUpdated deltas can create missing proxy sessions from their payload.
+#[test]
+fn remote_orchestrators_updated_delta_creates_missing_proxy_sessions_from_payload_sessions() {
+    let state = test_app_state();
+    let remote = RemoteConfig {
+        id: "ssh-lab".to_owned(),
+        name: "SSH Lab".to_owned(),
+        transport: RemoteTransport::Local,
+        enabled: true,
+        host: None,
+        port: None,
+        user: None,
+    };
+    let local_project_id = create_test_remote_project(
+        &state,
+        &remote,
+        "/remote/repo",
+        "Remote Project",
+        "remote-project-1",
+    );
+
+    let remote_delta_state = sample_remote_orchestrator_state(
+        "remote-project-1",
+        "/remote/repo",
+        1,
+        OrchestratorInstanceStatus::Running,
+    );
+    state
+        .apply_remote_delta_event(
+            &remote.id,
+            DeltaEvent::OrchestratorsUpdated {
+                revision: 1,
+                orchestrators: remote_delta_state.orchestrators.clone(),
+                sessions: remote_delta_state.sessions.clone(),
+            },
+        )
+        .expect("remote orchestrator delta should create missing proxy sessions");
+
+    let snapshot = state.snapshot();
+    let orchestrator = snapshot
+        .orchestrators
+        .iter()
+        .find(|instance| {
+            instance.remote_id.as_deref() == Some(remote.id.as_str())
+                && instance.remote_orchestrator_id.as_deref() == Some("remote-orchestrator-1")
+        })
+        .cloned()
+        .expect("remote orchestrator should be mirrored from the delta payload");
+    assert_eq!(orchestrator.project_id, local_project_id);
+    assert_eq!(orchestrator.session_instances.len(), 3);
+
+    let localized_session_ids = orchestrator
+        .session_instances
+        .iter()
+        .map(|session| session.session_id.clone())
+        .collect::<HashSet<_>>();
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    for remote_session_id in ["remote-session-1", "remote-session-2", "remote-session-3"] {
+        let index = inner
+            .find_remote_session_index(&remote.id, remote_session_id)
+            .expect("remote mirrored session should exist after delta localization");
+        assert_eq!(
+            inner.sessions[index].session.project_id.as_deref(),
+            Some(local_project_id.as_str())
+        );
+        assert!(localized_session_ids.contains(&inner.sessions[index].session.id));
+    }
+
+    let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
+// Tests that failed remote OrchestratorsUpdated deltas roll back eager proxy-session localization.
+#[test]
+fn remote_orchestrators_updated_delta_rolls_back_proxy_sessions_when_localization_fails() {
+    let state = test_app_state();
+    let remote = RemoteConfig {
+        id: "ssh-lab".to_owned(),
+        name: "SSH Lab".to_owned(),
+        transport: RemoteTransport::Local,
+        enabled: true,
+        host: None,
+        port: None,
+        user: None,
+    };
+    create_test_remote_project(
+        &state,
+        &remote,
+        "/remote/repo",
+        "Remote Project",
+        "remote-project-1",
+    );
+    let mut delta_receiver = state.subscribe_delta_events();
+    let (initial_session_count, initial_next_session_number) = {
+        let inner = state.inner.lock().expect("state mutex poisoned");
+        (inner.sessions.len(), inner.next_session_number)
+    };
+
+    let mut invalid_delta_state = sample_remote_orchestrator_state(
+        "remote-project-1",
+        "/remote/repo",
+        1,
+        OrchestratorInstanceStatus::Running,
+    );
+    invalid_delta_state
+        .sessions
+        .retain(|session| session.id != "remote-session-3");
+
+    let error = state
+        .apply_remote_delta_event(
+            &remote.id,
+            DeltaEvent::OrchestratorsUpdated {
+                revision: 1,
+                orchestrators: invalid_delta_state.orchestrators.clone(),
+                sessions: invalid_delta_state.sessions.clone(),
+            },
+        )
+        .expect_err("invalid remote orchestrator delta should fail localization");
+    assert!(
+        error.to_string().contains("remote session `remote-session-3` not found"),
+        "unexpected error: {error:#}"
+    );
+    assert!(
+        delta_receiver.try_recv().is_err(),
+        "failed remote delta should not publish a localized update"
+    );
+
+    let snapshot = state.snapshot();
+    assert!(
+        !snapshot
+            .orchestrators
+            .iter()
+            .any(|instance| instance.remote_id.as_deref() == Some(remote.id.as_str()))
+    );
+
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    assert_eq!(inner.sessions.len(), initial_session_count);
+    assert_eq!(inner.next_session_number, initial_next_session_number);
+    assert!(
+        inner
+            .find_remote_session_index(&remote.id, "remote-session-1")
+            .is_none()
+    );
+    assert!(
+        inner
+            .find_remote_session_index(&remote.id, "remote-session-2")
+            .is_none()
+    );
+    assert!(
+        inner
+            .find_remote_session_index(&remote.id, "remote-session-3")
+            .is_none()
+    );
+    drop(inner);
+
+    let persisted: Value = serde_json::from_slice(
+        &fs::read(state.persistence_path.as_path()).expect("persisted state file should exist"),
+    )
+    .expect("persisted state should deserialize");
+    let persisted_sessions = persisted["sessions"]
+        .as_array()
+        .expect("persisted sessions should be present");
+    assert_eq!(persisted_sessions.len(), initial_session_count);
+    assert!(!persisted_sessions.iter().any(|candidate| {
+        candidate["remoteSessionId"] == Value::String("remote-session-1".to_owned())
+            || candidate["remoteSessionId"] == Value::String("remote-session-2".to_owned())
+    }));
+    let persisted_orchestrator_instances = persisted["orchestratorInstances"].as_array();
+    assert!(persisted_orchestrator_instances.map_or(true, |instances| {
+        !instances
+            .iter()
+            .any(|instance| instance["remoteId"] == Value::String(remote.id.clone()))
+    }));
+
+    let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
+// Tests that remote orchestrator lifecycle actions proxy to the remote backend and resync local state.
+#[test]
+fn remote_orchestrator_lifecycle_actions_proxy_to_remote_backend_and_resync_local_state() {
+    let state = test_app_state();
+    let remote = RemoteConfig {
+        id: "ssh-lab".to_owned(),
+        name: "SSH Lab".to_owned(),
+        transport: RemoteTransport::Ssh,
+        enabled: true,
+        host: Some("example.com".to_owned()),
+        port: Some(22),
+        user: Some("alice".to_owned()),
+    };
+    create_test_remote_project(
+        &state,
+        &remote,
+        "/remote/repo",
+        "Remote Project",
+        "remote-project-1",
+    );
+    state
+        .apply_remote_state_snapshot(
+            &remote.id,
+            sample_remote_orchestrator_state(
+                "remote-project-1",
+                "/remote/repo",
+                1,
+                OrchestratorInstanceStatus::Running,
+            ),
+        )
+        .expect("initial remote snapshot should apply");
+    let local_orchestrator_id = state
+        .snapshot()
+        .orchestrators
+        .into_iter()
+        .find(|instance| {
+            instance.remote_orchestrator_id.as_deref() == Some("remote-orchestrator-1")
+        })
+        .expect("remote orchestrator should be mirrored")
+        .id;
+
+    let captured = Arc::new(Mutex::new(Vec::<String>::new()));
+    let captured_for_server = captured.clone();
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("test listener should bind");
+    let port = listener.local_addr().expect("listener addr").port();
+    let paused_state = serde_json::to_string(&sample_remote_orchestrator_state(
+        "remote-project-1",
+        "/remote/repo",
+        2,
+        OrchestratorInstanceStatus::Paused,
+    ))
+    .expect("paused state should encode");
+    let resumed_state = serde_json::to_string(&sample_remote_orchestrator_state(
+        "remote-project-1",
+        "/remote/repo",
+        3,
+        OrchestratorInstanceStatus::Running,
+    ))
+    .expect("resumed state should encode");
+    let stopped_state = serde_json::to_string(&sample_remote_orchestrator_state(
+        "remote-project-1",
+        "/remote/repo",
+        4,
+        OrchestratorInstanceStatus::Stopped,
+    ))
+    .expect("stopped state should encode");
+    let server = std::thread::spawn(move || {
+        let mut action_responses = vec![
+            (
+                "POST /api/orchestrators/remote-orchestrator-1/pause HTTP/1.1".to_owned(),
+                paused_state,
+            ),
+            (
+                "POST /api/orchestrators/remote-orchestrator-1/resume HTTP/1.1".to_owned(),
+                resumed_state,
+            ),
+            (
+                "POST /api/orchestrators/remote-orchestrator-1/stop HTTP/1.1".to_owned(),
+                stopped_state,
+            ),
+        ]
+        .into_iter();
+        for _ in 0..6 {
+            let mut stream = accept_test_connection(&listener, "test listener");
+            let mut buffer = Vec::new();
+            let mut chunk = [0u8; 4096];
+            let header_end = loop {
+                let bytes_read = stream.read(&mut chunk).expect("request should read");
+                assert!(bytes_read > 0, "request closed before headers completed");
+                buffer.extend_from_slice(&chunk[..bytes_read]);
+                if let Some(end) = buffer.windows(4).position(|window| window == b"\r\n\r\n") {
+                    break end;
+                }
+            };
+            let request_head = String::from_utf8_lossy(&buffer[..header_end]).to_string();
+            let request_line = request_head
+                .lines()
+                .next()
+                .expect("request line should exist")
+                .to_owned();
+            captured_for_server
+                .lock()
+                .expect("capture mutex poisoned")
+                .push(request_line.clone());
+
+            if request_line.starts_with("GET /api/health ") {
+                stream
+                    .write_all(
+                        b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nConnection: close\r\nContent-Length: 11\r\n\r\n{\"ok\":true}",
+                    )
+                    .expect("health response should write");
+                continue;
+            }
+
+            let (expected_request_line, response_body) = action_responses
+                .next()
+                .expect("action response should still be queued");
+            assert_eq!(request_line, expected_request_line);
+            stream
+                .write_all(
+                    format!(
+                        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nConnection: close\r\nContent-Length: {}\r\n\r\n{}",
+                        response_body.len(),
+                        response_body
+                    )
+                    .as_bytes(),
+                )
+                .expect("state response should write");
+        }
+    });
+    state
+        .remote_registry
+        .connections
+        .lock()
+        .expect("remote registry mutex poisoned")
+        .insert(
+            remote.id.clone(),
+            Arc::new(RemoteConnection {
+                config: Mutex::new(remote.clone()),
+                forwarded_port: port,
+                process: Mutex::new(None),
+                event_bridge_started: AtomicBool::new(false),
+                event_bridge_shutdown: AtomicBool::new(false),
+            }),
+        );
+
+    let paused = state
+        .pause_orchestrator_instance(&local_orchestrator_id)
+        .expect("pause should proxy successfully");
+    assert_eq!(
+        paused
+            .orchestrators
+            .iter()
+            .find(|instance| instance.id == local_orchestrator_id)
+            .expect("paused orchestrator should be present")
+            .status,
+        OrchestratorInstanceStatus::Paused
+    );
+
+    let resumed = state
+        .resume_orchestrator_instance(&local_orchestrator_id)
+        .expect("resume should proxy successfully");
+    assert_eq!(
+        resumed
+            .orchestrators
+            .iter()
+            .find(|instance| instance.id == local_orchestrator_id)
+            .expect("resumed orchestrator should be present")
+            .status,
+        OrchestratorInstanceStatus::Running
+    );
+
+    let stopped = state
+        .stop_orchestrator_instance(&local_orchestrator_id)
+        .expect("stop should proxy successfully");
+    assert_eq!(
+        stopped
+            .orchestrators
+            .iter()
+            .find(|instance| instance.id == local_orchestrator_id)
+            .expect("stopped orchestrator should be present")
+            .status,
+        OrchestratorInstanceStatus::Stopped
+    );
+
+    assert_eq!(
+        captured.lock().expect("capture mutex poisoned").clone(),
+        vec![
+            "GET /api/health HTTP/1.1".to_owned(),
+            "POST /api/orchestrators/remote-orchestrator-1/pause HTTP/1.1".to_owned(),
+            "GET /api/health HTTP/1.1".to_owned(),
+            "POST /api/orchestrators/remote-orchestrator-1/resume HTTP/1.1".to_owned(),
+            "GET /api/health HTTP/1.1".to_owned(),
+            "POST /api/orchestrators/remote-orchestrator-1/stop HTTP/1.1".to_owned(),
+        ]
+    );
+    server.join().expect("server thread should finish");
+    let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
+// Tests that remote snapshot sync keeps the previous remote orchestrators when localization fails.
+#[test]
+fn remote_snapshot_sync_preserves_existing_orchestrators_when_localization_fails() {
+    let state = test_app_state();
+    let remote = RemoteConfig {
+        id: "ssh-lab".to_owned(),
+        name: "SSH Lab".to_owned(),
+        transport: RemoteTransport::Local,
+        enabled: true,
+        host: None,
+        port: None,
+        user: None,
+    };
+    create_test_remote_project(
+        &state,
+        &remote,
+        "/remote/repo",
+        "Remote Project",
+        "remote-project-1",
+    );
+
+    let mut initial_state = sample_remote_orchestrator_state(
+        "remote-project-1",
+        "/remote/repo",
+        1,
+        OrchestratorInstanceStatus::Running,
+    );
+    let mut second_orchestrator = initial_state.orchestrators[0].clone();
+    second_orchestrator.id = "remote-orchestrator-2".to_owned();
+    second_orchestrator.status = OrchestratorInstanceStatus::Paused;
+    initial_state.orchestrators.push(second_orchestrator);
+    state
+        .apply_remote_state_snapshot(&remote.id, initial_state)
+        .expect("initial remote snapshot should apply");
+
+    let initial_remote_orchestrator_ids = state
+        .snapshot()
+        .orchestrators
+        .into_iter()
+        .filter(|instance| instance.remote_id.as_deref() == Some(remote.id.as_str()))
+        .filter_map(|instance| instance.remote_orchestrator_id)
+        .collect::<HashSet<_>>();
+    assert_eq!(
+        initial_remote_orchestrator_ids,
+        [
+            "remote-orchestrator-1".to_owned(),
+            "remote-orchestrator-2".to_owned()
+        ]
+        .into_iter()
+        .collect::<HashSet<_>>()
+    );
+
+    let mut invalid_state = sample_remote_orchestrator_state(
+        "remote-project-1",
+        "/remote/repo",
+        2,
+        OrchestratorInstanceStatus::Running,
+    );
+    invalid_state.orchestrators[0].id = "remote-orchestrator-2".to_owned();
+    let mut invalid_orchestrator = invalid_state.orchestrators[0].clone();
+    invalid_orchestrator.id = "remote-orchestrator-3".to_owned();
+    invalid_orchestrator.session_instances[0].session_id = "missing-remote-session".to_owned();
+    invalid_state.orchestrators.push(invalid_orchestrator);
+
+    state
+        .apply_remote_state_snapshot(&remote.id, invalid_state)
+        .expect("remote snapshot should still apply when orchestrator localization fails");
+
+    let remote_orchestrator_ids = state
+        .snapshot()
+        .orchestrators
+        .into_iter()
+        .filter(|instance| instance.remote_id.as_deref() == Some(remote.id.as_str()))
+        .filter_map(|instance| instance.remote_orchestrator_id)
+        .collect::<HashSet<_>>();
+    assert_eq!(
+        remote_orchestrator_ids,
+        [
+            "remote-orchestrator-1".to_owned(),
+            "remote-orchestrator-2".to_owned()
+        ]
+        .into_iter()
+        .collect::<HashSet<_>>()
+    );
+    assert!(!remote_orchestrator_ids.contains("remote-orchestrator-3"));
+
+    let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
+// Tests that remote snapshot sync preserves referenced sessions when orchestrator localization fails.
+#[test]
+fn remote_snapshot_sync_preserves_sessions_referenced_by_existing_orchestrators_when_localization_fails()
+ {
+    let state = test_app_state();
+    let remote = RemoteConfig {
+        id: "ssh-lab".to_owned(),
+        name: "SSH Lab".to_owned(),
+        transport: RemoteTransport::Local,
+        enabled: true,
+        host: None,
+        port: None,
+        user: None,
+    };
+    create_test_remote_project(
+        &state,
+        &remote,
+        "/remote/repo",
+        "Remote Project",
+        "remote-project-1",
+    );
+
+    let initial_state = sample_remote_orchestrator_state(
+        "remote-project-1",
+        "/remote/repo",
+        1,
+        OrchestratorInstanceStatus::Running,
+    );
+    state
+        .apply_remote_state_snapshot(&remote.id, initial_state)
+        .expect("initial remote snapshot should apply");
+
+    let (preserved_local_session_id, preserved_preview) = {
+        let inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_remote_session_index(&remote.id, "remote-session-1")
+            .expect("remote mirrored session should exist");
+        (
+            inner.sessions[index].session.id.clone(),
+            inner.sessions[index].session.preview.clone(),
+        )
+    };
+
+    let mut invalid_state = sample_remote_orchestrator_state(
+        "remote-project-1",
+        "/remote/repo",
+        2,
+        OrchestratorInstanceStatus::Running,
+    );
+    invalid_state
+        .sessions
+        .retain(|session| session.id != "remote-session-1");
+
+    state
+        .apply_remote_state_snapshot(&remote.id, invalid_state)
+        .expect("remote snapshot should still apply when orchestrator localization fails");
+
+    let snapshot = state.snapshot();
+    assert_eq!(
+        snapshot
+            .sessions
+            .iter()
+            .find(|session| session.id == preserved_local_session_id)
+            .expect("referenced mirrored session should remain")
+            .preview,
+        preserved_preview
+    );
+    let preserved_orchestrator = snapshot
+        .orchestrators
+        .iter()
+        .find(|instance| {
+            instance.remote_id.as_deref() == Some(remote.id.as_str())
+                && instance.remote_orchestrator_id.as_deref() == Some("remote-orchestrator-1")
+        })
+        .expect("existing mirrored orchestrator should remain");
+    assert!(
+        preserved_orchestrator
+            .session_instances
+            .iter()
+            .any(|instance| instance.session_id == preserved_local_session_id)
+    );
+
+    let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
+// Tests that focused remote state sync rolls back eager proxy-session side effects when orchestrator localization fails.
+#[test]
+fn focused_remote_state_sync_rolls_back_proxy_sessions_when_orchestrator_localization_fails() {
+    let state = test_app_state();
+    let remote = RemoteConfig {
+        id: "ssh-lab".to_owned(),
+        name: "SSH Lab".to_owned(),
+        transport: RemoteTransport::Local,
+        enabled: true,
+        host: None,
+        port: None,
+        user: None,
+    };
+    let local_project_id = create_test_remote_project(
+        &state,
+        &remote,
+        "/remote/repo",
+        "Remote Project",
+        "remote-project-1",
+    );
+
+    let mut initial_remote_session = sample_remote_orchestrator_state(
+        "remote-project-1",
+        "/remote/repo",
+        1,
+        OrchestratorInstanceStatus::Running,
+    )
+    .sessions
+    .into_iter()
+    .find(|session| session.id == "remote-session-1")
+    .expect("sample remote session should exist");
+    initial_remote_session.preview = "Before focused sync.".to_owned();
+
+    let local_session_id = {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let local_session_id = upsert_remote_proxy_session_record(
+            &mut inner,
+            &remote.id,
+            &initial_remote_session,
+            Some(local_project_id),
+        );
+        state
+            .commit_locked(&mut inner)
+            .expect("initial focused remote session should persist");
+        local_session_id
+    };
+    let initial_session_count = {
+        let inner = state.inner.lock().expect("state mutex poisoned");
+        inner.sessions.len()
+    };
+
+    let mut invalid_state = sample_remote_orchestrator_state(
+        "remote-project-1",
+        "/remote/repo",
+        2,
+        OrchestratorInstanceStatus::Running,
+    );
+    invalid_state
+        .sessions
+        .retain(|session| session.id != "remote-session-3");
+    invalid_state
+        .sessions
+        .iter_mut()
+        .find(|session| session.id == "remote-session-1")
+        .expect("focused session should remain in the payload")
+        .preview = "Focused sync updated.".to_owned();
+
+    let target = RemoteSessionTarget {
+        local_session_id: local_session_id.clone(),
+        remote: remote.clone(),
+        remote_session_id: "remote-session-1".to_owned(),
+    };
+    state
+        .sync_remote_state_for_target(&target, invalid_state)
+        .expect("focused remote sync should preserve the target session update");
+
+    let snapshot = state.snapshot();
+    assert_eq!(
+        snapshot
+            .sessions
+            .iter()
+            .find(|session| session.id == local_session_id)
+            .expect("focused local session should remain")
+            .preview,
+        "Focused sync updated."
+    );
+    assert!(
+        !snapshot
+            .orchestrators
+            .iter()
+            .any(|instance| { instance.remote_id.as_deref() == Some(remote.id.as_str()) })
+    );
+
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    assert_eq!(inner.sessions.len(), initial_session_count);
+    assert!(
+        inner
+            .find_remote_session_index(&remote.id, "remote-session-2")
+            .is_none()
+    );
+    drop(inner);
+
+    let persisted: Value = serde_json::from_slice(
+        &fs::read(state.persistence_path.as_path()).expect("persisted state file should exist"),
+    )
+    .expect("persisted state should deserialize");
+    let persisted_sessions = persisted["sessions"]
+        .as_array()
+        .expect("persisted sessions should be present");
+    assert_eq!(persisted_sessions.len(), initial_session_count);
+    assert!(!persisted_sessions.iter().any(|candidate| {
+        candidate["remoteSessionId"] == Value::String("remote-session-2".to_owned())
+    }));
+    let persisted_focused = persisted_sessions
+        .iter()
+        .find(|candidate| {
+            candidate["remoteSessionId"] == Value::String("remote-session-1".to_owned())
+        })
+        .expect("focused mirrored session should persist");
+    assert_eq!(
+        persisted_focused["session"]["preview"],
+        Value::String("Focused sync updated.".to_owned())
+    );
+    let persisted_orchestrator_instances = persisted["orchestratorInstances"].as_array();
+    assert!(persisted_orchestrator_instances.map_or(true, |instances| {
+        !instances
+            .iter()
+            .any(|instance| instance["remoteId"] == Value::String(remote.id.clone()))
+    }));
+    let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
 // Tests that remote snapshot sync removes missing proxy sessions.
 #[test]
 fn remote_snapshot_sync_removes_missing_proxy_sessions() {
@@ -11111,6 +13298,268 @@ fn remote_snapshot_sync_removes_missing_proxy_sessions() {
             .preview,
         "Remote session still exists."
     );
+    let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
+// Tests that marked remote fallback payloads dedupe repeated revisions but still
+// resync immediately when a newer fallback revision arrives.
+#[test]
+fn remote_state_event_dedupes_marked_sse_fallback_resyncs_by_revision() {
+    let state = test_app_state();
+    let remote = RemoteConfig {
+        id: "ssh-lab".to_owned(),
+        name: "SSH Lab".to_owned(),
+        transport: RemoteTransport::Ssh,
+        enabled: true,
+        host: Some("example.com".to_owned()),
+        port: Some(22),
+        user: Some("alice".to_owned()),
+    };
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        inner.preferences.remotes.push(remote.clone());
+    }
+    let (remote_local_session_id, local_session_id) = {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let remote_record = inner.create_session(Agent::Codex, None, "/tmp".to_owned(), None, None);
+        let local_record = inner.create_session(Agent::Claude, None, "/tmp".to_owned(), None, None);
+
+        let remote_index = inner
+            .find_session_index(&remote_record.session.id)
+            .expect("remote session should exist");
+        inner.sessions[remote_index].remote_id = Some("ssh-lab".to_owned());
+        inner.sessions[remote_index].remote_session_id = Some("remote-session-keep".to_owned());
+
+        (remote_record.session.id, local_record.session.id)
+    };
+
+    let mut first_full_state_response = state.snapshot();
+    let mut first_remote_session = first_full_state_response
+        .sessions
+        .iter()
+        .find(|session| session.id == remote_local_session_id)
+        .cloned()
+        .expect("remote session should be present in the snapshot");
+    first_remote_session.id = "remote-session-keep".to_owned();
+    first_remote_session.preview = "Hydrated from /api/state v1".to_owned();
+    first_full_state_response.sessions = vec![first_remote_session];
+    let first_full_state_response =
+        serde_json::to_string(&first_full_state_response).expect("state response should encode");
+
+    let mut second_full_state_response = state.snapshot();
+    let mut second_remote_session = second_full_state_response
+        .sessions
+        .iter()
+        .find(|session| session.id == remote_local_session_id)
+        .cloned()
+        .expect("remote session should be present in the snapshot");
+    second_remote_session.id = "remote-session-keep".to_owned();
+    second_remote_session.preview = "Hydrated from /api/state v2".to_owned();
+    second_full_state_response.revision = second_full_state_response.revision.saturating_add(1);
+    second_full_state_response.sessions = vec![second_remote_session];
+    let second_full_state_response =
+        serde_json::to_string(&second_full_state_response).expect("state response should encode");
+
+    let captured = Arc::new(Mutex::new(Vec::<String>::new()));
+    let captured_for_server = captured.clone();
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("test listener should bind");
+    let port = listener.local_addr().expect("listener addr").port();
+    let server = std::thread::spawn(move || {
+        let mut state_responses =
+            vec![first_full_state_response, second_full_state_response].into_iter();
+        for _ in 0..4 {
+            let mut stream = accept_test_connection(&listener, "test listener");
+            let mut buffer = Vec::new();
+            let mut chunk = [0u8; 4096];
+            let header_end = loop {
+                let bytes_read = stream.read(&mut chunk).expect("request should read");
+                assert!(bytes_read > 0, "request closed before headers completed");
+                buffer.extend_from_slice(&chunk[..bytes_read]);
+                if let Some(end) = buffer.windows(4).position(|window| window == b"\r\n\r\n") {
+                    break end;
+                }
+            };
+            let request_head = String::from_utf8_lossy(&buffer[..header_end]).to_string();
+            let request_line = request_head
+                .lines()
+                .next()
+                .expect("request line should exist")
+                .to_owned();
+            captured_for_server
+                .lock()
+                .expect("capture mutex poisoned")
+                .push(request_line.clone());
+
+            if request_line.starts_with("GET /api/health ") {
+                stream
+                    .write_all(
+                        b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nConnection: close\r\nContent-Length: 11\r\n\r\n{\"ok\":true}",
+                    )
+                    .expect("health response should write");
+                continue;
+            }
+
+            if request_line.starts_with("GET /api/state ") {
+                let response = state_responses
+                    .next()
+                    .expect("state response should still be queued");
+                stream
+                    .write_all(
+                        format!(
+                            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nConnection: close\r\nContent-Length: {}\r\n\r\n{}",
+                            response.len(),
+                            response
+                        )
+                        .as_bytes(),
+                    )
+                    .expect("state response should write");
+                continue;
+            }
+
+            panic!("unexpected request: {request_line}");
+        }
+    });
+    state
+        .remote_registry
+        .connections
+        .lock()
+        .expect("remote registry mutex poisoned")
+        .insert(
+            remote.id.clone(),
+            Arc::new(RemoteConnection {
+                config: Mutex::new(remote.clone()),
+                forwarded_port: port,
+                process: Mutex::new(None),
+                event_bridge_started: AtomicBool::new(false),
+                event_bridge_shutdown: AtomicBool::new(false),
+            }),
+        );
+
+    let mut first_fallback_payload: Value =
+        serde_json::from_str(EMPTY_STATE_EVENTS_PAYLOAD.as_str())
+            .expect("fallback payload should parse");
+    first_fallback_payload["revision"] = json!(4);
+    let first_data_lines = serde_json::to_string_pretty(&first_fallback_payload)
+        .expect("first fallback payload should encode")
+        .lines()
+        .map(ToOwned::to_owned)
+        .collect::<Vec<_>>();
+
+    let mut second_fallback_payload = first_fallback_payload.clone();
+    second_fallback_payload["revision"] = json!(5);
+    let second_data_lines = serde_json::to_string_pretty(&second_fallback_payload)
+        .expect("second fallback payload should encode")
+        .lines()
+        .map(ToOwned::to_owned)
+        .collect::<Vec<_>>();
+
+    dispatch_remote_event(&state, "ssh-lab", "state", &first_data_lines)
+        .expect("first fallback state payload should trigger a resync");
+    dispatch_remote_event(&state, "ssh-lab", "state", &first_data_lines)
+        .expect("duplicate fallback revision should be deduped");
+    dispatch_remote_event(&state, "ssh-lab", "state", &second_data_lines)
+        .expect("newer fallback revision should trigger another resync");
+
+    let snapshot = state.snapshot();
+    assert!(
+        snapshot
+            .sessions
+            .iter()
+            .any(|session| session.id == remote_local_session_id)
+    );
+    assert!(
+        snapshot
+            .sessions
+            .iter()
+            .any(|session| session.id == local_session_id)
+    );
+    assert_eq!(
+        snapshot
+            .sessions
+            .iter()
+            .find(|session| session.id == remote_local_session_id)
+            .expect("remote mirrored session should remain")
+            .preview,
+        "Hydrated from /api/state v2"
+    );
+    assert_eq!(
+        captured.lock().expect("capture mutex poisoned").clone(),
+        vec![
+            "GET /api/health HTTP/1.1".to_owned(),
+            "GET /api/state HTTP/1.1".to_owned(),
+            "GET /api/health HTTP/1.1".to_owned(),
+            "GET /api/state HTTP/1.1".to_owned(),
+        ]
+    );
+    server.join().expect("server thread should finish");
+    let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
+// Tests that remote fallback resync tracking is per remote, monotonic within a
+// single event-stream lifetime, and resettable after disconnects.
+#[test]
+fn remote_sse_fallback_resync_tracking_is_per_remote_and_monotonic() {
+    let state = test_app_state();
+
+    assert!(!state.should_skip_remote_sse_fallback_resync("ssh-lab", 0));
+    state.note_remote_sse_fallback_resync("ssh-lab", 0);
+    assert!(state.should_skip_remote_sse_fallback_resync("ssh-lab", 0));
+    assert!(state.should_skip_remote_sse_fallback_resync("ssh-lab", 0));
+    assert!(!state.should_skip_remote_sse_fallback_resync("ssh-lab", 1));
+    assert!(!state.should_skip_remote_sse_fallback_resync("ssh-lab-2", 0));
+
+    state.note_remote_sse_fallback_resync("ssh-lab", 1);
+    assert!(state.should_skip_remote_sse_fallback_resync("ssh-lab", 1));
+    assert!(state.should_skip_remote_sse_fallback_resync("ssh-lab", 0));
+    assert!(!state.should_skip_remote_sse_fallback_resync("ssh-lab-2", 1));
+
+    state.clear_remote_sse_fallback_resync("ssh-lab");
+    assert!(!state.should_skip_remote_sse_fallback_resync("ssh-lab", 1));
+    assert!(!state.should_skip_remote_sse_fallback_resync("ssh-lab", 0));
+    assert!(!state.should_skip_remote_sse_fallback_resync("ssh-lab-2", 1));
+
+    let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
+// Tests that non-fallback empty remote state payloads still apply directly.
+#[test]
+fn remote_state_event_applies_non_fallback_empty_snapshot_payload() {
+    let state = test_app_state();
+    let (removed_local_session_id, local_session_id) = {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let removed = inner.create_session(Agent::Codex, None, "/tmp".to_owned(), None, None);
+        let local = inner.create_session(Agent::Claude, None, "/tmp".to_owned(), None, None);
+
+        let removed_index = inner
+            .find_session_index(&removed.session.id)
+            .expect("remote session should exist");
+        inner.sessions[removed_index].remote_id = Some("ssh-lab".to_owned());
+        inner.sessions[removed_index].remote_session_id = Some("remote-session-gone".to_owned());
+
+        (removed.session.id, local.session.id)
+    };
+
+    let mut remote_state = empty_state_events_response();
+    remote_state.revision = 1;
+    let data_lines =
+        vec![serde_json::to_string(&remote_state).expect("state payload should encode")];
+    dispatch_remote_event(&state, "ssh-lab", "state", &data_lines)
+        .expect("ordinary empty state payload should apply");
+
+    let snapshot = state.snapshot();
+    assert!(
+        !snapshot
+            .sessions
+            .iter()
+            .any(|session| session.id == removed_local_session_id)
+    );
+    assert!(
+        snapshot
+            .sessions
+            .iter()
+            .any(|session| session.id == local_session_id)
+    );
+    let _ = fs::remove_file(state.persistence_path.as_path());
 }
 
 // Tests that remote review put sends scope via query params.
@@ -11122,7 +13571,7 @@ fn remote_review_put_sends_scope_via_query_params() {
     let port = listener.local_addr().expect("listener addr").port();
     let server = std::thread::spawn(move || {
         for _ in 0..2 {
-            let (mut stream, _) = listener.accept().expect("connection should arrive");
+            let mut stream = accept_test_connection(&listener, "test listener");
             let mut buffer = Vec::new();
             let mut chunk = [0u8; 4096];
             let header_end = loop {
@@ -15608,7 +18057,9 @@ fn sample_orchestrator_template_draft() -> OrchestratorTemplateDraft {
                 to_anchor: Some("top".to_owned()),
                 trigger: OrchestratorTransitionTrigger::OnCompletion,
                 result_mode: OrchestratorTransitionResultMode::LastResponse,
-                prompt_template: Some("Use this plan and implement it:\n\n{{result}}".to_owned()),
+                prompt_template: Some("Use this plan and implement it:
+
+{{result}}".to_owned()),
             },
             OrchestratorTemplateTransition {
                 id: "builder-to-reviewer".to_owned(),
@@ -15618,10 +18069,147 @@ fn sample_orchestrator_template_draft() -> OrchestratorTemplateDraft {
                 to_anchor: Some("left".to_owned()),
                 trigger: OrchestratorTransitionTrigger::OnCompletion,
                 result_mode: OrchestratorTransitionResultMode::SummaryAndLastResponse,
-                prompt_template: Some("Review this implementation:\n\n{{result}}".to_owned()),
+                prompt_template: Some("Review this implementation:
+
+{{result}}".to_owned()),
             },
         ],
     }
+}
+
+fn sample_deadlocked_orchestrator_template_draft() -> OrchestratorTemplateDraft {
+    OrchestratorTemplateDraft {
+        name: "Consolidate Deadlock Flow".to_owned(),
+        description: "Exercise remote deadlock skipping.".to_owned(),
+        project_id: None,
+        sessions: vec![
+            OrchestratorSessionTemplate {
+                id: "source-a".to_owned(),
+                name: "Source A".to_owned(),
+                agent: Agent::Claude,
+                model: Some("claude-sonnet-4-5".to_owned()),
+                instructions: "Provide the first source input.".to_owned(),
+                auto_approve: false,
+                input_mode: OrchestratorSessionInputMode::Queue,
+                position: OrchestratorNodePosition { x: 120.0, y: 160.0 },
+            },
+            OrchestratorSessionTemplate {
+                id: "source-b".to_owned(),
+                name: "Source B".to_owned(),
+                agent: Agent::Claude,
+                model: Some("claude-sonnet-4-5".to_owned()),
+                instructions: "Provide the second source input.".to_owned(),
+                auto_approve: false,
+                input_mode: OrchestratorSessionInputMode::Queue,
+                position: OrchestratorNodePosition { x: 120.0, y: 460.0 },
+            },
+            OrchestratorSessionTemplate {
+                id: "consolidate-a".to_owned(),
+                name: "Consolidate A".to_owned(),
+                agent: Agent::Claude,
+                model: Some("claude-sonnet-4-5".to_owned()),
+                instructions: "Wait on source A and consolidate B.".to_owned(),
+                auto_approve: false,
+                input_mode: OrchestratorSessionInputMode::Consolidate,
+                position: OrchestratorNodePosition { x: 760.0, y: 160.0 },
+            },
+            OrchestratorSessionTemplate {
+                id: "consolidate-b".to_owned(),
+                name: "Consolidate B".to_owned(),
+                agent: Agent::Claude,
+                model: Some("claude-sonnet-4-5".to_owned()),
+                instructions: "Wait on source B and consolidate A.".to_owned(),
+                auto_approve: false,
+                input_mode: OrchestratorSessionInputMode::Consolidate,
+                position: OrchestratorNodePosition { x: 760.0, y: 460.0 },
+            },
+        ],
+        transitions: vec![
+            OrchestratorTemplateTransition {
+                id: "source-a-to-consolidate-a".to_owned(),
+                from_session_id: "source-a".to_owned(),
+                to_session_id: "consolidate-a".to_owned(),
+                from_anchor: Some("right".to_owned()),
+                to_anchor: Some("left".to_owned()),
+                trigger: OrchestratorTransitionTrigger::OnCompletion,
+                result_mode: OrchestratorTransitionResultMode::Summary,
+                prompt_template: Some("Source A summary:
+
+{{result}}".to_owned()),
+            },
+            OrchestratorTemplateTransition {
+                id: "consolidate-b-to-consolidate-a".to_owned(),
+                from_session_id: "consolidate-b".to_owned(),
+                to_session_id: "consolidate-a".to_owned(),
+                from_anchor: Some("top".to_owned()),
+                to_anchor: Some("bottom".to_owned()),
+                trigger: OrchestratorTransitionTrigger::OnCompletion,
+                result_mode: OrchestratorTransitionResultMode::Summary,
+                prompt_template: Some("Consolidate B summary:
+
+{{result}}".to_owned()),
+            },
+            OrchestratorTemplateTransition {
+                id: "source-b-to-consolidate-b".to_owned(),
+                from_session_id: "source-b".to_owned(),
+                to_session_id: "consolidate-b".to_owned(),
+                from_anchor: Some("right".to_owned()),
+                to_anchor: Some("left".to_owned()),
+                trigger: OrchestratorTransitionTrigger::OnCompletion,
+                result_mode: OrchestratorTransitionResultMode::Summary,
+                prompt_template: Some("Source B summary:
+
+{{result}}".to_owned()),
+            },
+            OrchestratorTemplateTransition {
+                id: "consolidate-a-to-consolidate-b".to_owned(),
+                from_session_id: "consolidate-a".to_owned(),
+                to_session_id: "consolidate-b".to_owned(),
+                from_anchor: Some("bottom".to_owned()),
+                to_anchor: Some("top".to_owned()),
+                trigger: OrchestratorTransitionTrigger::OnCompletion,
+                result_mode: OrchestratorTransitionResultMode::Summary,
+                prompt_template: Some("Consolidate A summary:
+
+{{result}}".to_owned()),
+            },
+        ],
+    }
+}
+
+// Tests that start_turn_on_record rejects remote proxy sessions directly.
+#[test]
+fn start_turn_on_record_rejects_remote_proxy_sessions() {
+    let state = test_app_state();
+    let session_id = test_session_id(&state, Agent::Codex);
+    let mut inner = state.inner.lock().expect("state mutex poisoned");
+    let index = inner
+        .find_session_index(&session_id)
+        .expect("session should exist");
+    inner.sessions[index].remote_id = Some("ssh-lab".to_owned());
+    inner.sessions[index].remote_session_id = Some("remote-session-1".to_owned());
+
+    let error = match state.start_turn_on_record(
+        &mut inner.sessions[index],
+        "message-remote-proxy".to_owned(),
+        "Dispatch through the remote backend.".to_owned(),
+        Vec::new(),
+        None,
+    ) {
+        Ok(_) => panic!("remote proxy sessions should reject local turn dispatch"),
+        Err(error) => error,
+    };
+
+    assert_eq!(error.status, StatusCode::INTERNAL_SERVER_ERROR);
+    assert_eq!(
+        error.message,
+        "remote proxy sessions must dispatch through the remote backend"
+    );
+    assert!(inner.sessions[index].active_turn_start_message_count.is_none());
+    assert!(inner.sessions[index].session.messages.is_empty());
+    assert!(inner.sessions[index].session.pending_prompts.is_empty());
+
+    let _ = fs::remove_file(state.persistence_path.as_path());
 }
 
 // Tests that failed orchestrator transition dispatch becomes a visible destination error.

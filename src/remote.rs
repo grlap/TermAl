@@ -359,6 +359,7 @@ impl RemoteConnection {
 
                 let remote = connection.config();
                 if !remote.enabled || remote.transport != RemoteTransport::Ssh {
+                    state.clear_remote_sse_fallback_resync(&remote.id);
                     if connection.wait_for_bridge_retry_or_shutdown(REMOTE_EVENT_RETRY_DELAY) {
                         break;
                     }
@@ -368,6 +369,7 @@ impl RemoteConnection {
                 let base_url = match connection.ensure_available(&client) {
                     Ok(base_url) => base_url,
                     Err(_) => {
+                        state.clear_remote_sse_fallback_resync(&remote.id);
                         if connection.wait_for_bridge_retry_or_shutdown(REMOTE_EVENT_RETRY_DELAY) {
                             break;
                         }
@@ -378,6 +380,7 @@ impl RemoteConnection {
                 let response = match client.get(format!("{base_url}/api/events")).send() {
                     Ok(response) => response,
                     Err(_) => {
+                        state.clear_remote_sse_fallback_resync(&remote.id);
                         if connection.wait_for_bridge_retry_or_shutdown(REMOTE_EVENT_RETRY_DELAY) {
                             break;
                         }
@@ -388,6 +391,7 @@ impl RemoteConnection {
                 if let Err(err) = process_remote_event_stream(&state, &remote.id, response) {
                     eprintln!("remote event bridge `{}` disconnected: {err:#}", remote.id);
                 }
+                state.clear_remote_sse_fallback_resync(&remote.id);
                 if connection.wait_for_bridge_retry_or_shutdown(REMOTE_EVENT_RETRY_DELAY) {
                     break;
                 }
@@ -408,6 +412,7 @@ enum RemoteProcessMode {
     ManagedServer,
     TunnelOnly,
 }
+
 /// Represents remote scope.
 #[derive(Clone)]
 struct RemoteScope {
@@ -422,6 +427,14 @@ struct RemoteSessionTarget {
     local_session_id: String,
     remote: RemoteConfig,
     remote_session_id: String,
+}
+
+/// Represents the remote orchestrator target.
+#[derive(Clone)]
+struct RemoteOrchestratorTarget {
+    local_instance_id: String,
+    remote: RemoteConfig,
+    remote_orchestrator_id: String,
 }
 
 /// Represents remote project binding.
@@ -476,6 +489,34 @@ impl AppState {
             local_session_id: session_id.to_owned(),
             remote,
             remote_session_id,
+        }))
+    }
+
+    /// Handles remote orchestrator target.
+    fn remote_orchestrator_target(
+        &self,
+        instance_id: &str,
+    ) -> Result<Option<RemoteOrchestratorTarget>, ApiError> {
+        let (remote_id, remote_orchestrator_id) = {
+            let inner = self.inner.lock().expect("state mutex poisoned");
+            let instance = inner
+                .orchestrator_instances
+                .iter()
+                .find(|instance| instance.id == instance_id)
+                .ok_or_else(|| ApiError::not_found("orchestrator instance not found"))?;
+            let Some(remote_id) = instance.remote_id.clone() else {
+                return Ok(None);
+            };
+            let Some(remote_orchestrator_id) = instance.remote_orchestrator_id.clone() else {
+                return Ok(None);
+            };
+            (remote_id, remote_orchestrator_id)
+        };
+        let remote = self.lookup_remote_config(&remote_id)?;
+        Ok(Some(RemoteOrchestratorTarget {
+            local_instance_id: instance_id.to_owned(),
+            remote,
+            remote_orchestrator_id,
         }))
     }
 
@@ -1226,6 +1267,58 @@ impl AppState {
         Ok(())
     }
 
+    /// Proxies remote pause orchestrator instance.
+    fn proxy_remote_pause_orchestrator_instance(
+        &self,
+        target: RemoteOrchestratorTarget,
+    ) -> Result<StateResponse, ApiError> {
+        self.proxy_remote_orchestrator_state_action(target, "pause")
+    }
+
+    /// Proxies remote resume orchestrator instance.
+    fn proxy_remote_resume_orchestrator_instance(
+        &self,
+        target: RemoteOrchestratorTarget,
+    ) -> Result<StateResponse, ApiError> {
+        self.proxy_remote_orchestrator_state_action(target, "resume")
+    }
+
+    /// Proxies remote stop orchestrator instance.
+    fn proxy_remote_stop_orchestrator_instance(
+        &self,
+        target: RemoteOrchestratorTarget,
+    ) -> Result<StateResponse, ApiError> {
+        self.proxy_remote_orchestrator_state_action(target, "stop")
+    }
+
+    /// Proxies remote orchestrator lifecycle action.
+    fn proxy_remote_orchestrator_state_action(
+        &self,
+        target: RemoteOrchestratorTarget,
+        action: &str,
+    ) -> Result<StateResponse, ApiError> {
+        let remote_state: StateResponse = self.remote_registry.request_json(
+            &target.remote,
+            Method::POST,
+            &format!(
+                "/api/orchestrators/{}/{}",
+                encode_uri_component(&target.remote_orchestrator_id),
+                action
+            ),
+            &[],
+            None,
+        )?;
+        let mut inner = self.inner.lock().expect("state mutex poisoned");
+        sync_remote_state_inner(&mut inner, &target.remote.id, &remote_state, None);
+        self.commit_locked(&mut inner).map_err(|err| {
+            ApiError::internal(format!(
+                "failed to persist remote orchestrator `{}` state: {err:#}",
+                target.local_instance_id
+            ))
+        })?;
+        Ok(self.snapshot_from_inner(&inner))
+    }
+
     /// Applies remote state snapshot.
     fn apply_remote_state_snapshot(
         &self,
@@ -1548,14 +1641,42 @@ impl AppState {
                     });
                 }
             }
-            DeltaEvent::OrchestratorsUpdated { .. } => {
-                // TODO: Remote orchestrator forwarding is not implemented yet.
-                // The payload still carries remote instance and session IDs, so
-                // blindly re-publishing it would break local orchestrator actions.
-                // Remote connections intentionally do not mirror orchestrator state
-                // updates until ID translation plus remote orchestrator routing exist.
-                // To implement: translate IDs, add remote orchestrator proxying, then
-                // re-publish a local OrchestratorsUpdated with a fresh revision.
+            DeltaEvent::OrchestratorsUpdated {
+                orchestrators,
+                sessions,
+                ..
+            } => {
+                let (revision, localized_orchestrators) = {
+                    let mut inner = self.inner.lock().expect("state mutex poisoned");
+                    let local_project_ids_by_remote_project_id =
+                        remote_project_id_map(&inner, remote_id);
+                    let remote_sessions_by_id = (!sessions.is_empty()).then(|| {
+                        sessions
+                            .iter()
+                            .map(|session| (session.id.as_str(), session))
+                            .collect::<HashMap<_, _>>()
+                    });
+                    let rollback_state = (
+                        inner.next_session_number,
+                        inner.sessions.clone(),
+                        inner.orchestrator_instances.clone(),
+                    );
+                    if let Err(err) = sync_remote_orchestrators_inner(
+                        &mut inner,
+                        remote_id,
+                        &orchestrators,
+                        &local_project_ids_by_remote_project_id,
+                        remote_sessions_by_id.as_ref(),
+                    ) {
+                        inner.next_session_number = rollback_state.0;
+                        inner.sessions = rollback_state.1;
+                        inner.orchestrator_instances = rollback_state.2;
+                        return Err(err);
+                    }
+                    let revision = self.commit_persisted_delta_locked(&mut inner)?;
+                    (revision, inner.orchestrator_instances.clone())
+                };
+                self.publish_orchestrators_updated(revision, localized_orchestrators);
             }
         }
         Ok(())
@@ -1568,6 +1689,14 @@ fn sync_remote_state_inner(
     remote_state: &StateResponse,
     focus_remote_session_id: Option<&str>,
 ) {
+    let pre_orchestrator_rollback_state = focus_remote_session_id.is_none().then(|| {
+        (
+            inner.next_session_number,
+            inner.sessions.clone(),
+            inner.orchestrator_instances.clone(),
+        )
+    });
+
     let mut local_project_ids_by_remote_project_id = HashMap::new();
     for project in &inner.projects {
         if project.remote_id == remote_id {
@@ -1594,6 +1723,12 @@ fn sync_remote_state_inner(
             live_remote_session_ids.contains(remote_session_id)
         });
     }
+
+    let remote_sessions_by_id = remote_state
+        .sessions
+        .iter()
+        .map(|session| (session.id.as_str(), session))
+        .collect::<HashMap<_, _>>();
 
     for record in &mut inner.sessions {
         if record.remote_id.as_deref() != Some(remote_id) {
@@ -1622,6 +1757,34 @@ fn sync_remote_state_inner(
             })
             .or_else(|| record.session.project_id.clone());
         apply_remote_session_to_record(record, local_project_id, remote_session);
+    }
+
+    let rollback_state = if focus_remote_session_id.is_some() {
+        Some((
+            inner.next_session_number,
+            inner.sessions.clone(),
+            inner.orchestrator_instances.clone(),
+        ))
+    } else {
+        pre_orchestrator_rollback_state
+    };
+
+    if let Err(err) = sync_remote_orchestrators_inner(
+        inner,
+        remote_id,
+        &remote_state.orchestrators,
+        &local_project_ids_by_remote_project_id,
+        Some(&remote_sessions_by_id),
+    ) {
+        if let Some((next_session_number, sessions, orchestrator_instances)) = rollback_state {
+            inner.next_session_number = next_session_number;
+            inner.sessions = sessions;
+            inner.orchestrator_instances = orchestrator_instances;
+        }
+        eprintln!(
+            "remote state warning> failed to sync remote orchestrators for `{remote_id}` at revision {}: {err:#}",
+            remote_state.revision
+        );
     }
 }
 
@@ -1724,6 +1887,254 @@ fn localize_remote_session(
     session
 }
 
+/// Returns remote project id mapping.
+fn remote_project_id_map(inner: &StateInner, remote_id: &str) -> HashMap<String, String> {
+    let mut map = HashMap::new();
+    for project in &inner.projects {
+        if project.remote_id == remote_id {
+            if let Some(remote_project_id) = project.remote_project_id.as_deref() {
+                map.insert(remote_project_id.to_owned(), project.id.clone());
+            }
+        }
+    }
+    map
+}
+
+/// Returns the localized project id for a remote project.
+fn local_project_id_for_remote_project(
+    local_project_ids_by_remote_project_id: &HashMap<String, String>,
+    remote_project_id: Option<&str>,
+) -> Option<String> {
+    remote_project_id.and_then(|project_id| {
+        local_project_ids_by_remote_project_id
+            .get(project_id)
+            .cloned()
+    })
+}
+
+/// Returns the local session id for a remote session, creating a proxy record
+/// when a full snapshot provides the missing session payload.
+fn local_session_id_for_remote_session(
+    inner: &mut StateInner,
+    remote_id: &str,
+    remote_session_id: &str,
+    remote_sessions_by_id: Option<&HashMap<&str, &Session>>,
+    local_project_ids_by_remote_project_id: &HashMap<String, String>,
+    fallback_local_project_id: Option<&str>,
+) -> Option<String> {
+    if let Some(index) = inner.find_remote_session_index(remote_id, remote_session_id) {
+        return Some(inner.sessions[index].session.id.clone());
+    }
+
+    let remote_session = remote_sessions_by_id?.get(remote_session_id)?;
+    let local_project_id = local_project_id_for_remote_project(
+        local_project_ids_by_remote_project_id,
+        remote_session.project_id.as_deref(),
+    )
+    .or_else(|| fallback_local_project_id.map(str::to_owned));
+    Some(upsert_remote_proxy_session_record(
+        inner,
+        remote_id,
+        remote_session,
+        local_project_id,
+    ))
+}
+
+/// Localizes a remote orchestrator instance.
+fn localize_remote_orchestrator_instance(
+    inner: &mut StateInner,
+    remote_id: &str,
+    remote_orchestrator: &OrchestratorInstance,
+    local_project_ids_by_remote_project_id: &HashMap<String, String>,
+    remote_sessions_by_id: Option<&HashMap<&str, &Session>>,
+) -> Result<OrchestratorInstance, anyhow::Error> {
+    let (existing_local_instance_id, existing_local_project_id) = inner
+        .find_remote_orchestrator_index(remote_id, &remote_orchestrator.id)
+        .and_then(|index| inner.orchestrator_instances.get(index))
+        .map(|instance| (Some(instance.id.clone()), Some(instance.project_id.clone())))
+        .unwrap_or((None, None));
+    let local_project_id = local_project_id_for_remote_project(
+        local_project_ids_by_remote_project_id,
+        Some(remote_orchestrator.project_id.as_str())
+            .filter(|project_id| !project_id.trim().is_empty()),
+    )
+    .or_else(|| {
+        local_project_id_for_remote_project(
+            local_project_ids_by_remote_project_id,
+            remote_orchestrator.template_snapshot.project_id.as_deref(),
+        )
+    })
+    .or(existing_local_project_id);
+
+    let mut session_instances = Vec::with_capacity(remote_orchestrator.session_instances.len());
+    for session_instance in &remote_orchestrator.session_instances {
+        let local_session_id = local_session_id_for_remote_session(
+            inner,
+            remote_id,
+            &session_instance.session_id,
+            remote_sessions_by_id,
+            local_project_ids_by_remote_project_id,
+            local_project_id.as_deref(),
+        )
+        .ok_or_else(|| anyhow!("remote session `{}` not found", session_instance.session_id))?;
+        session_instances.push(OrchestratorSessionInstance {
+            session_id: local_session_id,
+            ..session_instance.clone()
+        });
+    }
+
+    let mut template_snapshot = remote_orchestrator.template_snapshot.clone();
+    template_snapshot.project_id = local_project_id.clone();
+
+    let mut pending_transitions = Vec::with_capacity(remote_orchestrator.pending_transitions.len());
+    for transition in &remote_orchestrator.pending_transitions {
+        let source_session_id = local_session_id_for_remote_session(
+            inner,
+            remote_id,
+            &transition.source_session_id,
+            remote_sessions_by_id,
+            local_project_ids_by_remote_project_id,
+            local_project_id.as_deref(),
+        )
+        .ok_or_else(|| {
+            anyhow!(
+                "remote session `{}` not found",
+                transition.source_session_id
+            )
+        })?;
+        let destination_session_id = local_session_id_for_remote_session(
+            inner,
+            remote_id,
+            &transition.destination_session_id,
+            remote_sessions_by_id,
+            local_project_ids_by_remote_project_id,
+            local_project_id.as_deref(),
+        )
+        .ok_or_else(|| {
+            anyhow!(
+                "remote session `{}` not found",
+                transition.destination_session_id
+            )
+        })?;
+        pending_transitions.push(PendingTransition {
+            source_session_id,
+            destination_session_id,
+            ..transition.clone()
+        });
+    }
+
+    let active_session_ids_during_stop = remote_orchestrator
+        .active_session_ids_during_stop
+        .as_ref()
+        .map(|session_ids| {
+            session_ids
+                .iter()
+                .map(|session_id| {
+                    local_session_id_for_remote_session(
+                        inner,
+                        remote_id,
+                        session_id,
+                        remote_sessions_by_id,
+                        local_project_ids_by_remote_project_id,
+                        local_project_id.as_deref(),
+                    )
+                    .ok_or_else(|| anyhow!("remote session `{session_id}` not found"))
+                })
+                .collect::<Result<Vec<_>, _>>()
+        })
+        .transpose()?;
+    let stopped_session_ids_during_stop = remote_orchestrator
+        .stopped_session_ids_during_stop
+        .iter()
+        .map(|session_id| {
+            local_session_id_for_remote_session(
+                inner,
+                remote_id,
+                session_id,
+                remote_sessions_by_id,
+                local_project_ids_by_remote_project_id,
+                local_project_id.as_deref(),
+            )
+            .ok_or_else(|| anyhow!("remote session `{session_id}` not found"))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+
+    Ok(OrchestratorInstance {
+        id: existing_local_instance_id
+            .unwrap_or_else(|| format!("orchestrator-instance-{}", Uuid::new_v4())),
+        remote_id: Some(remote_id.to_owned()),
+        remote_orchestrator_id: Some(remote_orchestrator.id.clone()),
+        template_id: remote_orchestrator.template_id.clone(),
+        project_id: local_project_id.unwrap_or_default(),
+        template_snapshot,
+        status: remote_orchestrator.status,
+        session_instances,
+        pending_transitions,
+        created_at: remote_orchestrator.created_at.clone(),
+        error_message: remote_orchestrator.error_message.clone(),
+        completed_at: remote_orchestrator.completed_at.clone(),
+        stop_in_progress: remote_orchestrator.stop_in_progress,
+        active_session_ids_during_stop,
+        stopped_session_ids_during_stop,
+    })
+}
+
+/// Syncs remote orchestrators.
+fn sync_remote_orchestrators_inner(
+    inner: &mut StateInner,
+    remote_id: &str,
+    remote_orchestrators: &[OrchestratorInstance],
+    local_project_ids_by_remote_project_id: &HashMap<String, String>,
+    remote_sessions_by_id: Option<&HashMap<&str, &Session>>,
+) -> Result<(), anyhow::Error> {
+    let mut localized_by_remote_orchestrator_id = HashMap::new();
+    let mut localized_remote_orchestrator_ids = Vec::with_capacity(remote_orchestrators.len());
+    for remote_orchestrator in remote_orchestrators {
+        let localized = localize_remote_orchestrator_instance(
+            inner,
+            remote_id,
+            remote_orchestrator,
+            local_project_ids_by_remote_project_id,
+            remote_sessions_by_id,
+        )?;
+        let remote_orchestrator_id = localized
+            .remote_orchestrator_id
+            .clone()
+            .ok_or_else(|| anyhow!("remote orchestrator id missing"))?;
+        if !localized_by_remote_orchestrator_id.contains_key(&remote_orchestrator_id) {
+            localized_remote_orchestrator_ids.push(remote_orchestrator_id.clone());
+        }
+        localized_by_remote_orchestrator_id.insert(remote_orchestrator_id, localized);
+    }
+
+    let mut next_orchestrator_instances = Vec::with_capacity(
+        inner.orchestrator_instances.len() + localized_by_remote_orchestrator_id.len(),
+    );
+    for instance in inner.orchestrator_instances.drain(..) {
+        if instance.remote_id.as_deref() != Some(remote_id) {
+            next_orchestrator_instances.push(instance);
+            continue;
+        }
+        let Some(remote_orchestrator_id) = instance.remote_orchestrator_id.as_deref() else {
+            next_orchestrator_instances.push(instance);
+            continue;
+        };
+        if let Some(localized) = localized_by_remote_orchestrator_id.remove(remote_orchestrator_id)
+        {
+            next_orchestrator_instances.push(localized);
+        }
+    }
+    for remote_orchestrator_id in localized_remote_orchestrator_ids {
+        if let Some(localized) = localized_by_remote_orchestrator_id.remove(&remote_orchestrator_id)
+        {
+            next_orchestrator_instances.push(localized);
+        }
+    }
+    inner.orchestrator_instances = next_orchestrator_instances;
+
+    Ok(())
+}
+
 /// Processes remote event stream.
 fn process_remote_event_stream(
     state: &AppState,
@@ -1772,10 +2183,25 @@ fn dispatch_remote_event(
     let payload = data_lines.join("\n");
     match event_name {
         "state" => {
-            let remote_state: StateResponse = serde_json::from_str(&payload)
+            let remote_payload: StateEventPayload = serde_json::from_str(&payload)
                 .with_context(|| format!("failed to decode remote state event `{remote_id}`"))?;
+            if remote_payload.sse_fallback {
+                if state.should_skip_remote_sse_fallback_resync(
+                    remote_id,
+                    remote_payload.state.revision,
+                ) {
+                    return Ok(());
+                }
+                eprintln!(
+                    "remote event warning> received fallback SSE state payload from `{remote_id}` at revision {}; forcing full state resync",
+                    remote_payload.state.revision
+                );
+                resync_remote_state_snapshot(state, remote_id)?;
+                state.note_remote_sse_fallback_resync(remote_id, remote_payload.state.revision);
+                return Ok(());
+            }
             state
-                .apply_remote_state_snapshot(remote_id, remote_state)
+                .apply_remote_state_snapshot(remote_id, remote_payload.state)
                 .map_err(|err| anyhow!(err.message))?;
         }
         "delta" => {
@@ -1783,22 +2209,28 @@ fn dispatch_remote_event(
                 .with_context(|| format!("failed to decode remote delta event `{remote_id}`"))?;
             if let Err(err) = state.apply_remote_delta_event(remote_id, delta) {
                 eprintln!("remote delta apply failed for `{remote_id}`: {err:#}");
-                let remote = state
-                    .lookup_remote_config(remote_id)
-                    .map_err(|err| anyhow!(err.message))?;
-                let full_state: StateResponse = state
-                    .remote_registry
-                    .request_json(&remote, Method::GET, "/api/state", &[], None)
-                    .map_err(|err| anyhow!(err.message))?;
-                state
-                    .apply_remote_state_snapshot(remote_id, full_state)
-                    .map_err(|err| anyhow!(err.message))?;
+                resync_remote_state_snapshot(state, remote_id)?;
             }
         }
         _ => {}
     }
     Ok(())
 }
+
+fn resync_remote_state_snapshot(state: &AppState, remote_id: &str) -> Result<()> {
+    let remote = state
+        .lookup_remote_config(remote_id)
+        .map_err(|err| anyhow!(err.message))?;
+    let full_state: StateResponse = state
+        .remote_registry
+        .request_json(&remote, Method::GET, "/api/state", &[], None)
+        .map_err(|err| anyhow!(err.message))?;
+    state
+        .apply_remote_state_snapshot(remote_id, full_state)
+        .map_err(|err| anyhow!(err.message))?;
+    Ok(())
+}
+
 /// Applies remote scope to query.
 fn apply_remote_scope_to_query(scope: &RemoteScope, query: &mut Vec<(String, String)>) {
     if let Some(remote_session_id) = scope.remote_session_id.as_deref() {

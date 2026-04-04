@@ -556,6 +556,7 @@ export type OrchestratorsUpdatedEvent = {
   type: "orchestratorsUpdated";
   revision: number;
   orchestrators: OrchestratorInstance[];
+  sessions?: Session[];
 };
 export type DeltaEvent =
   | MessageCreatedEvent

@@ -28,11 +28,9 @@ fn load_state(path: &FsPath) -> Result<Option<StateInner>> {
         .with_context(|| format!("failed to parse `{}`", path.display()))?;
     let persisted: PersistedState = serde_json::from_value(encoded)
         .with_context(|| format!("failed to deserialize state from `{}`", path.display()))?;
-    Ok(Some(
-        persisted
-            .into_inner()
-            .with_context(|| format!("failed to validate state from `{}`", path.display()))?,
-    ))
+    Ok(Some(persisted.into_inner().with_context(|| {
+        format!("failed to validate state from `{}`", path.display())
+    })?))
 }
 
 /// Persists state.
@@ -130,8 +128,7 @@ async fn get_workspace_layout(
     State(state): State<AppState>,
     AxumPath(workspace_id): AxumPath<String>,
 ) -> Result<Json<WorkspaceLayoutResponse>, ApiError> {
-    let response =
-        run_blocking_api(move || state.get_workspace_layout(&workspace_id)).await?;
+    let response = run_blocking_api(move || state.get_workspace_layout(&workspace_id)).await?;
     Ok(Json(response))
 }
 
@@ -141,7 +138,8 @@ async fn put_workspace_layout(
     AxumPath(workspace_id): AxumPath<String>,
     Json(request): Json<PutWorkspaceLayoutRequest>,
 ) -> Result<Json<WorkspaceLayoutResponse>, ApiError> {
-    let response = run_blocking_api(move || state.put_workspace_layout(&workspace_id, request)).await?;
+    let response =
+        run_blocking_api(move || state.put_workspace_layout(&workspace_id, request)).await?;
     Ok(Json(response))
 }
 
@@ -194,10 +192,9 @@ impl AppState {
             | ProjectActionId::FixIt
             | ProjectActionId::KeepIterating
             | ProjectActionId::AskAgentToCommit => {
-                let session_id = summary
-                    .primary_session_id
-                    .clone()
-                    .ok_or_else(|| ApiError::conflict("project does not have a session to target"))?;
+                let session_id = summary.primary_session_id.clone().ok_or_else(|| {
+                    ApiError::conflict("project does not have a session to target")
+                })?;
                 let prompt = action
                     .prompt()
                     .ok_or_else(|| ApiError::internal("project action prompt is missing"))?;
@@ -369,10 +366,7 @@ impl AppState {
                 headline: inputs.project.name,
                 project_id: inputs.project.id,
                 primary_session_id,
-                done_summary: normalize_project_text(
-                    &done_summary,
-                    "The agent is still working.",
-                ),
+                done_summary: normalize_project_text(&done_summary, "The agent is still working."),
                 current_status: active_project_status_text(record),
                 proposed_actions: vec![ProjectActionId::Stop, ProjectActionId::ReviewInTermal],
                 deep_link,
@@ -416,10 +410,7 @@ impl AppState {
             headline: inputs.project.name,
             project_id: inputs.project.id,
             primary_session_id,
-            done_summary: normalize_project_text(
-                &done_summary,
-                "No agent work has started yet.",
-            ),
+            done_summary: normalize_project_text(&done_summary, "No agent work has started yet."),
             current_status: "Idle and unblocked.".to_owned(),
             proposed_actions,
             deep_link,
@@ -438,7 +429,9 @@ impl AppState {
         let sessions = inner
             .sessions
             .iter()
-            .filter(|record| !record.hidden && record.session.project_id.as_deref() == Some(project_id))
+            .filter(|record| {
+                !record.hidden && record.session.project_id.as_deref() == Some(project_id)
+            })
             .cloned()
             .collect();
         Ok(ProjectDigestInputs { project, sessions })
@@ -479,11 +472,11 @@ async fn get_review(
     Query(query): Query<ReviewQuery>,
     State(state): State<AppState>,
 ) -> Result<Json<ReviewDocumentResponse>, ApiError> {
+    validate_review_change_set_id(&change_set_id)?;
     let response = run_blocking_api(move || {
-        if let Some(scope) = state.remote_scope_for_request(
-            query.session_id.as_deref(),
-            query.project_id.as_deref(),
-        )? {
+        if let Some(scope) = state
+            .remote_scope_for_request(query.session_id.as_deref(), query.project_id.as_deref())?
+        {
             return state.remote_get_json(
                 &scope,
                 &format!("/api/reviews/{}", encode_uri_component(&change_set_id)),
@@ -497,7 +490,13 @@ async fn get_review(
             query.project_id.as_deref(),
         )?;
         let review_path = resolve_review_document_path(&review_root, &change_set_id)?;
-        let review = load_review_document(&review_path, &change_set_id)?;
+        let review = {
+            let _review_guard = state
+                .review_documents_lock
+                .lock()
+                .expect("review documents mutex poisoned");
+            load_review_document(&review_path, &change_set_id)?
+        };
         Ok(ReviewDocumentResponse {
             review_file_path: review_path.to_string_lossy().into_owned(),
             review,
@@ -514,11 +513,11 @@ async fn put_review(
     State(state): State<AppState>,
     Json(review): Json<ReviewDocument>,
 ) -> Result<Json<ReviewDocumentResponse>, ApiError> {
+    validate_review_change_set_id(&change_set_id)?;
     let response = run_blocking_api(move || {
-        if let Some(scope) = state.remote_scope_for_request(
-            query.session_id.as_deref(),
-            query.project_id.as_deref(),
-        )? {
+        if let Some(scope) = state
+            .remote_scope_for_request(query.session_id.as_deref(), query.project_id.as_deref())?
+        {
             return state.remote_put_json_with_query_scope(
                 &scope,
                 &format!("/api/reviews/{}", encode_uri_component(&change_set_id)),
@@ -536,8 +535,12 @@ async fn put_review(
         )?;
         let review_path = resolve_review_document_path(&review_root, &change_set_id)?;
         let persisted_review = {
-            let _state_guard = state.inner.lock().expect("state mutex poisoned");
-            let persisted = prepare_review_document_for_write(&review_path, &change_set_id, review)?;
+            let _review_guard = state
+                .review_documents_lock
+                .lock()
+                .expect("review documents mutex poisoned");
+            let persisted =
+                prepare_review_document_for_write(&review_path, &change_set_id, review)?;
             persist_review_document(&review_path, &persisted)?;
             persisted
         };
@@ -556,11 +559,11 @@ async fn get_review_summary(
     Query(query): Query<ReviewQuery>,
     State(state): State<AppState>,
 ) -> Result<Json<ReviewSummaryResponse>, ApiError> {
+    validate_review_change_set_id(&change_set_id)?;
     let response = run_blocking_api(move || {
-        if let Some(scope) = state.remote_scope_for_request(
-            query.session_id.as_deref(),
-            query.project_id.as_deref(),
-        )? {
+        if let Some(scope) = state
+            .remote_scope_for_request(query.session_id.as_deref(), query.project_id.as_deref())?
+        {
             return state.remote_get_json(
                 &scope,
                 &format!(
@@ -577,7 +580,13 @@ async fn get_review_summary(
             query.project_id.as_deref(),
         )?;
         let review_path = resolve_review_document_path(&review_root, &change_set_id)?;
-        let review = load_review_document(&review_path, &change_set_id)?;
+        let review = {
+            let _review_guard = state
+                .review_documents_lock
+                .lock()
+                .expect("review documents mutex poisoned");
+            load_review_document(&review_path, &change_set_id)?
+        };
         let summary = summarize_review_document(&review);
 
         Ok(ReviewSummaryResponse {
@@ -602,10 +611,8 @@ async fn read_file(
     // Step 1: resolve the path (needs brief mutex access). Use a small blocking
     // scope so we don't compete with streaming delta persists for pool time.
     let resolved_path = {
-        let remote_scope = state.remote_scope_for_request(
-            query.session_id.as_deref(),
-            query.project_id.as_deref(),
-        )?;
+        let remote_scope = state
+            .remote_scope_for_request(query.session_id.as_deref(), query.project_id.as_deref())?;
         if let Some(scope) = remote_scope {
             let response: FileResponse = run_blocking_api({
                 let state = state.clone();
@@ -632,15 +639,17 @@ async fn read_file(
     };
 
     // Step 2: read the file using tokio::fs (async, doesn't block the spawn_blocking pool).
-    let metadata = tokio::fs::metadata(&resolved_path).await.map_err(|err| match err.kind() {
-        io::ErrorKind::NotFound => {
-            ApiError::not_found(format!("file not found: {}", resolved_path.display()))
-        }
-        _ => ApiError::internal(format!(
-            "failed to stat file {}: {err}",
-            resolved_path.display()
-        )),
-    })?;
+    let metadata = tokio::fs::metadata(&resolved_path)
+        .await
+        .map_err(|err| match err.kind() {
+            io::ErrorKind::NotFound => {
+                ApiError::not_found(format!("file not found: {}", resolved_path.display()))
+            }
+            _ => ApiError::internal(format!(
+                "failed to stat file {}: {err}",
+                resolved_path.display()
+            )),
+        })?;
     if metadata.len() > MAX_FILE_CONTENT_BYTES as u64 {
         return Err(ApiError::bad_request(format!(
             "file exceeds the {} MB read limit: {}",
@@ -648,19 +657,21 @@ async fn read_file(
             resolved_path.display()
         )));
     }
-    let content = tokio::fs::read_to_string(&resolved_path).await.map_err(|err| match err.kind() {
-        io::ErrorKind::NotFound => {
-            ApiError::not_found(format!("file not found: {}", resolved_path.display()))
-        }
-        io::ErrorKind::InvalidData => ApiError::bad_request(format!(
-            "file is not valid UTF-8: {}",
-            resolved_path.display()
-        )),
-        _ => ApiError::internal(format!(
-            "failed to read file {}: {err}",
-            resolved_path.display()
-        )),
-    })?;
+    let content = tokio::fs::read_to_string(&resolved_path)
+        .await
+        .map_err(|err| match err.kind() {
+            io::ErrorKind::NotFound => {
+                ApiError::not_found(format!("file not found: {}", resolved_path.display()))
+            }
+            io::ErrorKind::InvalidData => ApiError::bad_request(format!(
+                "file is not valid UTF-8: {}",
+                resolved_path.display()
+            )),
+            _ => ApiError::internal(format!(
+                "failed to read file {}: {err}",
+                resolved_path.display()
+            )),
+        })?;
 
     let response = FileResponse {
         path: resolved_path.to_string_lossy().into_owned(),
@@ -736,10 +747,9 @@ async fn read_directory(
     Query(query): Query<FileQuery>,
 ) -> Result<Json<DirectoryResponse>, ApiError> {
     let response = run_blocking_api(move || {
-        if let Some(scope) = state.remote_scope_for_request(
-            query.session_id.as_deref(),
-            query.project_id.as_deref(),
-        )? {
+        if let Some(scope) = state
+            .remote_scope_for_request(query.session_id.as_deref(), query.project_id.as_deref())?
+        {
             return state.remote_get_json(
                 &scope,
                 "/api/fs",
@@ -808,7 +818,9 @@ async fn read_directory(
 
         entries.sort_by(|left, right| {
             let kind_order = match (&left.kind, &right.kind) {
-                (FileSystemEntryKind::Directory, FileSystemEntryKind::File) => std::cmp::Ordering::Less,
+                (FileSystemEntryKind::Directory, FileSystemEntryKind::File) => {
+                    std::cmp::Ordering::Less
+                }
                 (FileSystemEntryKind::File, FileSystemEntryKind::Directory) => {
                     std::cmp::Ordering::Greater
                 }
@@ -852,7 +864,8 @@ async fn search_instructions(
     Query(query): Query<InstructionSearchQuery>,
     State(state): State<AppState>,
 ) -> Result<Json<InstructionSearchResponse>, ApiError> {
-    let response = run_blocking_api(move || state.search_instructions(&query.session_id, &query.q)).await?;
+    let response =
+        run_blocking_api(move || state.search_instructions(&query.session_id, &query.q)).await?;
     Ok(Json(response))
 }
 
@@ -933,7 +946,9 @@ fn search_instruction_phrase(
 ) -> Result<InstructionSearchResponse, ApiError> {
     let trimmed_query = query.trim();
     if trimmed_query.is_empty() {
-        return Err(ApiError::bad_request("instruction search query cannot be empty"));
+        return Err(ApiError::bad_request(
+            "instruction search query cannot be empty",
+        ));
     }
 
     let graph = build_instruction_search_graph(workdir)?;
@@ -967,7 +982,11 @@ fn search_instruction_phrase(
             .to_ascii_lowercase()
             .cmp(&right.path.to_ascii_lowercase())
             .then_with(|| left.line.cmp(&right.line))
-            .then_with(|| left.text.to_ascii_lowercase().cmp(&right.text.to_ascii_lowercase()))
+            .then_with(|| {
+                left.text
+                    .to_ascii_lowercase()
+                    .cmp(&right.text.to_ascii_lowercase())
+            })
     });
 
     Ok(InstructionSearchResponse {
@@ -978,9 +997,7 @@ fn search_instruction_phrase(
 }
 
 /// Builds instruction search graph.
-fn build_instruction_search_graph(
-    workdir: &FsPath,
-) -> Result<InstructionSearchGraph, ApiError> {
+fn build_instruction_search_graph(workdir: &FsPath) -> Result<InstructionSearchGraph, ApiError> {
     let normalized_workdir = normalize_path_best_effort(workdir);
     let seed_paths = discover_instruction_seed_paths(&normalized_workdir)?;
     let mut documents = HashMap::new();
@@ -1031,7 +1048,11 @@ fn build_instruction_search_graph(
                 .to_ascii_lowercase()
                 .cmp(&right.from_path.to_ascii_lowercase())
                 .then_with(|| left.line.cmp(&right.line))
-                .then_with(|| left.to_path.to_ascii_lowercase().cmp(&right.to_path.to_ascii_lowercase()))
+                .then_with(|| {
+                    left.to_path
+                        .to_ascii_lowercase()
+                        .cmp(&right.to_path.to_ascii_lowercase())
+                })
         });
     }
 
@@ -1041,7 +1062,11 @@ fn build_instruction_search_graph(
                 .to_ascii_lowercase()
                 .cmp(&right.from_path.to_ascii_lowercase())
                 .then_with(|| left.line.cmp(&right.line))
-                .then_with(|| left.to_path.to_ascii_lowercase().cmp(&right.to_path.to_ascii_lowercase()))
+                .then_with(|| {
+                    left.to_path
+                        .to_ascii_lowercase()
+                        .cmp(&right.to_path.to_ascii_lowercase())
+                })
         });
     }
 
@@ -1102,7 +1127,9 @@ fn discover_instruction_seed_paths(workdir: &FsPath) -> Result<Vec<PathBuf>, Api
             .to_ascii_lowercase()
             .cmp(&right.to_string_lossy().to_ascii_lowercase())
     });
-    paths.dedup_by(|left, right| normalize_path_best_effort(left) == normalize_path_best_effort(right));
+    paths.dedup_by(|left, right| {
+        normalize_path_best_effort(left) == normalize_path_best_effort(right)
+    });
     Ok(paths)
 }
 
@@ -1142,8 +1169,18 @@ fn is_instruction_seed_path(path: &FsPath, workdir: &FsPath) -> bool {
     let lower_relative = normalized
         .strip_prefix(workdir)
         .ok()
-        .map(|value| value.to_string_lossy().replace('\\', "/").to_ascii_lowercase())
-        .unwrap_or_else(|| normalized.to_string_lossy().replace('\\', "/").to_ascii_lowercase());
+        .map(|value| {
+            value
+                .to_string_lossy()
+                .replace('\\', "/")
+                .to_ascii_lowercase()
+        })
+        .unwrap_or_else(|| {
+            normalized
+                .to_string_lossy()
+                .replace('\\', "/")
+                .to_ascii_lowercase()
+        });
 
     if matches!(
         lower_file_name.as_deref(),
@@ -1221,8 +1258,17 @@ fn classify_instruction_document_kind(path: &FsPath, workdir: &FsPath) -> Instru
     let lower_relative = path
         .strip_prefix(workdir)
         .ok()
-        .map(|value| value.to_string_lossy().replace('\\', "/").to_ascii_lowercase())
-        .unwrap_or_else(|| path.to_string_lossy().replace('\\', "/").to_ascii_lowercase());
+        .map(|value| {
+            value
+                .to_string_lossy()
+                .replace('\\', "/")
+                .to_ascii_lowercase()
+        })
+        .unwrap_or_else(|| {
+            path.to_string_lossy()
+                .replace('\\', "/")
+                .to_ascii_lowercase()
+        });
 
     if matches!(lower_file_name.as_deref(), Some("skill.md")) {
         return InstructionDocumentKind::SkillInstruction;
@@ -1354,8 +1400,7 @@ fn maybe_push_instruction_file_edge(
     raw_target: &str,
     relation: InstructionRelation,
 ) {
-    let Some(target_path) =
-        resolve_instruction_reference_file(&document.path, workdir, raw_target)
+    let Some(target_path) = resolve_instruction_reference_file(&document.path, workdir, raw_target)
     else {
         return;
     };
@@ -1381,8 +1426,12 @@ fn maybe_push_instruction_edge(
     to_path: &FsPath,
     relation: InstructionRelation,
 ) {
-    let normalized_from = normalize_path_best_effort(from_path).to_string_lossy().into_owned();
-    let normalized_to = normalize_path_best_effort(to_path).to_string_lossy().into_owned();
+    let normalized_from = normalize_path_best_effort(from_path)
+        .to_string_lossy()
+        .into_owned();
+    let normalized_to = normalize_path_best_effort(to_path)
+        .to_string_lossy()
+        .into_owned();
     if normalized_from == normalized_to {
         return;
     }
@@ -1491,7 +1540,9 @@ fn instruction_reference_candidates(
     let workdir_relative = normalize_path_best_effort(&workdir.join(target_path));
     if path_contains(&workdir.to_string_lossy(), &workdir_relative)
         && !path_is_in_skipped_instruction_directory(&workdir_relative, workdir)
-        && !candidates.iter().any(|candidate| candidate == &workdir_relative)
+        && !candidates
+            .iter()
+            .any(|candidate| candidate == &workdir_relative)
     {
         candidates.push(workdir_relative);
     }
@@ -1551,20 +1602,7 @@ fn sanitize_instruction_reference(raw: &str) -> String {
         .trim_matches(|character: char| {
             matches!(
                 character,
-                '`'
-                    | '"'
-                    | '\''
-                    | '('
-                    | ')'
-                    | '['
-                    | ']'
-                    | '{'
-                    | '}'
-                    | '<'
-                    | '>'
-                    | ','
-                    | ';'
-                    | ':'
+                '`' | '"' | '\'' | '(' | ')' | '[' | ']' | '{' | '}' | '<' | '>' | ',' | ';' | ':'
             )
         })
         .trim_end_matches('.')
@@ -1612,7 +1650,10 @@ fn collect_markdown_files_in_directory(directory: &FsPath) -> Result<Vec<PathBuf
                 continue;
             }
 
-            if matches!(path.extension().and_then(|value| value.to_str()), Some("md") | Some("mdc")) {
+            if matches!(
+                path.extension().and_then(|value| value.to_str()),
+                Some("md") | Some("mdc")
+            ) {
                 paths.push(normalize_path_best_effort(&path));
             }
         }
@@ -1693,7 +1734,11 @@ fn trace_instruction_roots_recursive(
         return;
     }
 
-    let incoming = graph.incoming.get(current_path).cloned().unwrap_or_default();
+    let incoming = graph
+        .incoming
+        .get(current_path)
+        .cloned()
+        .unwrap_or_default();
     if incoming.is_empty() {
         if let Some(document) = graph.documents.get(current_path) {
             let mut steps = current_steps.clone();
@@ -1723,10 +1768,9 @@ async fn read_git_status(
     Query(query): Query<FileQuery>,
 ) -> Result<Json<GitStatusResponse>, ApiError> {
     // Check remote scope first (brief mutex access).
-    if let Some(scope) = state.remote_scope_for_request(
-        query.session_id.as_deref(),
-        query.project_id.as_deref(),
-    )? {
+    if let Some(scope) =
+        state.remote_scope_for_request(query.session_id.as_deref(), query.project_id.as_deref())?
+    {
         let response = run_blocking_api(move || {
             state.remote_get_json(
                 &scope,
@@ -1738,7 +1782,7 @@ async fn read_git_status(
         return Ok(Json(response));
     }
 
-    // Git status runs child processes — use a dedicated spawn_blocking so it
+    // Git status runs child processes -- use a dedicated spawn_blocking so it
     // doesn't compete with state-mutation tasks in run_blocking_api.
     let response = tokio::task::spawn_blocking(move || {
         let workdir = resolve_existing_requested_path(&query.path, "path")?;
@@ -1754,10 +1798,9 @@ async fn read_git_diff(
     State(state): State<AppState>,
     Json(request): Json<GitDiffRequest>,
 ) -> Result<Json<GitDiffResponse>, ApiError> {
-    if let Some(scope) = state.remote_scope_for_request(
-        request.session_id.as_deref(),
-        request.project_id.as_deref(),
-    )? {
+    if let Some(scope) = state
+        .remote_scope_for_request(request.session_id.as_deref(), request.project_id.as_deref())?
+    {
         let response = run_blocking_api(move || {
             state.remote_post_json(
                 &scope,
@@ -2027,7 +2070,9 @@ fn load_git_diff_for_request(
         change_set_id: format!("git-diff-{diff_hash}"),
         diff,
         diff_id: format!("git:{diff_hash}"),
-        file_path: file_path.exists().then(|| file_path.to_string_lossy().into_owned()),
+        file_path: file_path
+            .exists()
+            .then(|| file_path.to_string_lossy().into_owned()),
         language: infer_language_from_path(FsPath::new(&current_path)).map(str::to_owned),
         summary: format!(
             "{} changes in {}",
@@ -2146,7 +2191,10 @@ fn normalize_git_repo_relative_path(path: &str) -> Result<String, ApiError> {
         ));
     }
 
-    if trimmed.split(['/', '\\']).any(|component| component == "..") {
+    if trimmed
+        .split(['/', '\\'])
+        .any(|component| component == "..")
+    {
         return Err(ApiError::bad_request(
             "git file path cannot contain parent-directory traversal",
         ));
@@ -2179,7 +2227,11 @@ fn load_git_file_diff_text(
 
     let pathspecs = collect_git_pathspecs(current_path, original_path);
     let mut command = Command::new("git");
-    command.arg("-C").arg(repo_root).arg("diff").arg("--find-renames");
+    command
+        .arg("-C")
+        .arg(repo_root)
+        .arg("diff")
+        .arg("--find-renames");
 
     if matches!(section_id, GitDiffSection::Staged) {
         command.arg("--cached");
@@ -2354,7 +2406,11 @@ fn sync_git_repo(workdir: &FsPath) -> Result<GitRepoActionResponse, ApiError> {
         ));
     }
 
-    run_git_repo_command(&repo_root, &["pull", "--ff-only"], "failed to pull git changes")?;
+    run_git_repo_command(
+        &repo_root,
+        &["pull", "--ff-only"],
+        "failed to pull git changes",
+    )?;
     run_git_repo_command(&repo_root, &["push"], "failed to push git changes")?;
     let status = load_git_status_for_path(&workdir)?;
     Ok(GitRepoActionResponse {
@@ -2393,8 +2449,14 @@ fn build_git_push_summary(
     status_before: &GitStatusResponse,
     status_after: &GitStatusResponse,
 ) -> String {
-    let branch = status_after.branch.as_deref().or(status_before.branch.as_deref());
-    let upstream = status_after.upstream.as_deref().or(status_before.upstream.as_deref());
+    let branch = status_after
+        .branch
+        .as_deref()
+        .or(status_before.branch.as_deref());
+    let upstream = status_after
+        .upstream
+        .as_deref()
+        .or(status_before.upstream.as_deref());
     build_git_repo_action_summary("Pushed", branch, upstream)
 }
 
@@ -2403,8 +2465,14 @@ fn build_git_sync_summary(
     status_before: &GitStatusResponse,
     status_after: &GitStatusResponse,
 ) -> String {
-    let branch = status_after.branch.as_deref().or(status_before.branch.as_deref());
-    let upstream = status_after.upstream.as_deref().or(status_before.upstream.as_deref());
+    let branch = status_after
+        .branch
+        .as_deref()
+        .or(status_before.branch.as_deref());
+    let upstream = status_after
+        .upstream
+        .as_deref()
+        .or(status_before.upstream.as_deref());
     build_git_repo_action_summary("Synced", branch, upstream)
 }
 
@@ -2430,14 +2498,89 @@ fn stable_text_hash(value: &str) -> String {
     format!("{hash:016x}")
 }
 
+fn empty_state_events_response() -> StateResponse {
+    StateResponse {
+        revision: 0,
+        codex: CodexState::default(),
+        agent_readiness: Vec::new(),
+        preferences: AppPreferences::default(),
+        projects: Vec::new(),
+        orchestrators: Vec::new(),
+        sessions: Vec::new(),
+    }
+}
+
+#[derive(Deserialize)]
+struct StateEventPayload {
+    #[serde(default, rename = "_sseFallback")]
+    sse_fallback: bool,
+    #[serde(flatten)]
+    state: StateResponse,
+}
+
+#[derive(Serialize)]
+struct FallbackStateEventPayload {
+    #[serde(rename = "_sseFallback")]
+    sse_fallback: bool,
+    #[serde(flatten)]
+    state: StateResponse,
+}
+
+fn fallback_state_events_response(revision: u64) -> FallbackStateEventPayload {
+    let mut state = empty_state_events_response();
+    state.revision = revision;
+    FallbackStateEventPayload {
+        sse_fallback: true,
+        state,
+    }
+}
+
+fn fallback_state_events_payload(revision: u64) -> Result<String, ApiError> {
+    serde_json::to_string(&fallback_state_events_response(revision)).map_err(|err| {
+        ApiError::internal(format!(
+            "failed to serialize fallback SSE state snapshot: {err}"
+        ))
+    })
+}
+
+static EMPTY_STATE_EVENTS_PAYLOAD: LazyLock<String> = LazyLock::new(|| {
+    fallback_state_events_payload(0).expect("empty SSE state payload should serialize")
+});
+
+/// Serializes a full state snapshot for SSE on the blocking pool because snapshot()
+/// acquires the synchronous app-state mutex.
+async fn state_snapshot_payload_for_sse(state: AppState) -> String {
+    run_blocking_api(move || {
+        let snapshot = state.snapshot();
+        match serde_json::to_string(&snapshot) {
+            Ok(payload) => Ok(payload),
+            Err(err) => {
+                eprintln!(
+                    "state events warning> failed to serialize SSE state snapshot at revision {}: {}",
+                    snapshot.revision,
+                    err
+                );
+                fallback_state_events_payload(snapshot.revision)
+            }
+        }
+    })
+    .await
+    .unwrap_or_else(|err| {
+        eprintln!(
+            "state events warning> failed to build SSE fallback state snapshot: {}",
+            err.message
+        );
+        EMPTY_STATE_EVENTS_PAYLOAD.clone()
+    })
+}
+
 /// Streams state and delta events over SSE.
 async fn state_events(
     State(state): State<AppState>,
 ) -> Sse<impl futures_core::Stream<Item = std::result::Result<Event, Infallible>>> {
     let mut state_receiver = state.subscribe_events();
     let mut delta_receiver = state.subscribe_delta_events();
-    let initial_payload = serde_json::to_string(&state.snapshot())
-        .unwrap_or_else(|_| "{\"revision\":0,\"projects\":[],\"sessions\":[]}".to_owned());
+    let initial_payload = state_snapshot_payload_for_sse(state.clone()).await;
 
     let stream = async_stream::stream! {
         yield Ok(Event::default().event("state").data(initial_payload));
@@ -2450,8 +2593,7 @@ async fn state_events(
                     match result {
                         Ok(payload) => yield Ok(Event::default().event("state").data(payload)),
                         Err(broadcast::error::RecvError::Lagged(_)) => {
-                            let payload = serde_json::to_string(&state.snapshot())
-                                .unwrap_or_else(|_| "{\"revision\":0,\"projects\":[],\"sessions\":[]}".to_owned());
+                            let payload = state_snapshot_payload_for_sse(state.clone()).await;
                             yield Ok(Event::default().event("state").data(payload));
                         }
                         Err(broadcast::error::RecvError::Closed) => break,
@@ -2462,8 +2604,7 @@ async fn state_events(
                     match result {
                         Ok(payload) => yield Ok(Event::default().event("delta").data(payload)),
                         Err(broadcast::error::RecvError::Lagged(_)) => {
-                            let payload = serde_json::to_string(&state.snapshot())
-                                .unwrap_or_else(|_| "{\"revision\":0,\"projects\":[],\"sessions\":[]}".to_owned());
+                            let payload = state_snapshot_payload_for_sse(state.clone()).await;
                             yield Ok(Event::default().event("state").data(payload));
                         }
                         Err(broadcast::error::RecvError::Closed) => break,
@@ -2539,7 +2680,8 @@ async fn update_session_settings(
     State(state): State<AppState>,
     Json(request): Json<UpdateSessionSettingsRequest>,
 ) -> Result<Json<StateResponse>, ApiError> {
-    let response = run_blocking_api(move || state.update_session_settings(&session_id, request)).await?;
+    let response =
+        run_blocking_api(move || state.update_session_settings(&session_id, request)).await?;
     Ok(Json(response))
 }
 
@@ -2548,7 +2690,8 @@ async fn refresh_session_model_options(
     AxumPath(session_id): AxumPath<String>,
     State(state): State<AppState>,
 ) -> Result<Json<StateResponse>, ApiError> {
-    let response = run_blocking_api(move || state.refresh_session_model_options(&session_id)).await?;
+    let response =
+        run_blocking_api(move || state.refresh_session_model_options(&session_id)).await?;
     Ok(Json(response))
 }
 
@@ -2627,7 +2770,8 @@ async fn cancel_queued_prompt(
     AxumPath((session_id, prompt_id)): AxumPath<(String, String)>,
     State(state): State<AppState>,
 ) -> Result<Json<StateResponse>, ApiError> {
-    let response = run_blocking_api(move || state.cancel_queued_prompt(&session_id, &prompt_id)).await?;
+    let response =
+        run_blocking_api(move || state.cancel_queued_prompt(&session_id, &prompt_id)).await?;
     Ok(Json(response))
 }
 
@@ -2655,7 +2799,9 @@ async fn submit_approval(
     State(state): State<AppState>,
     Json(request): Json<ApprovalRequest>,
 ) -> Result<Json<StateResponse>, ApiError> {
-    let response = run_blocking_api(move || state.update_approval(&session_id, &message_id, request.decision)).await?;
+    let response =
+        run_blocking_api(move || state.update_approval(&session_id, &message_id, request.decision))
+            .await?;
     Ok(Json(response))
 }
 
@@ -2665,9 +2811,10 @@ async fn submit_user_input(
     State(state): State<AppState>,
     Json(request): Json<UserInputSubmissionRequest>,
 ) -> Result<Json<StateResponse>, ApiError> {
-    let response =
-        run_blocking_api(move || state.submit_codex_user_input(&session_id, &message_id, request.answers))
-            .await?;
+    let response = run_blocking_api(move || {
+        state.submit_codex_user_input(&session_id, &message_id, request.answers)
+    })
+    .await?;
     Ok(Json(response))
 }
 
@@ -2791,16 +2938,16 @@ fn resolve_review_document_path(
 }
 
 /// Loads review document.
-fn load_review_document(
-    path: &FsPath,
-    change_set_id: &str,
-) -> Result<ReviewDocument, ApiError> {
+fn load_review_document(path: &FsPath, change_set_id: &str) -> Result<ReviewDocument, ApiError> {
     if !path.exists() {
         return Ok(default_review_document(change_set_id));
     }
 
     let raw = fs::read(path).map_err(|err| {
-        ApiError::internal(format!("failed to read review file {}: {err}", path.display()))
+        ApiError::internal(format!(
+            "failed to read review file {}: {err}",
+            path.display()
+        ))
     })?;
     let review: ReviewDocument = serde_json::from_slice(&raw).map_err(|err| {
         ApiError::internal(format!(
@@ -2814,20 +2961,163 @@ fn load_review_document(
 
 /// Persists review document.
 fn persist_review_document(path: &FsPath, review: &ReviewDocument) -> Result<(), ApiError> {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).map_err(|err| {
-            ApiError::internal(format!(
-                "failed to create review directory {}: {err}",
-                parent.display()
-            ))
-        })?;
-    }
+    persist_review_document_with_directory_sync(path, review, sync_review_document_directory)
+}
+
+fn persist_review_document_with_directory_sync<F>(
+    path: &FsPath,
+    review: &ReviewDocument,
+    sync_directory: F,
+) -> Result<(), ApiError>
+where
+    F: FnOnce(&FsPath) -> Result<(), ApiError>,
+{
+    let parent = path.parent().ok_or_else(|| {
+        ApiError::internal(format!(
+            "review file {} has no parent directory",
+            path.display()
+        ))
+    })?;
+    fs::create_dir_all(parent).map_err(|err| {
+        ApiError::internal(format!(
+            "failed to create review directory {}: {err}",
+            parent.display()
+        ))
+    })?;
 
     let encoded = serde_json::to_vec_pretty(review)
         .map_err(|err| ApiError::internal(format!("failed to serialize review document: {err}")))?;
-    fs::write(path, encoded).map_err(|err| {
-        ApiError::internal(format!("failed to write review file {}: {err}", path.display()))
+    let file_name = path.file_name().ok_or_else(|| {
+        ApiError::internal(format!(
+            "review file {} is missing a file name",
+            path.display()
+        ))
+    })?;
+    let temp_path = parent.join(format!(
+        ".{}.{}.tmp",
+        file_name.to_string_lossy(),
+        Uuid::new_v4()
+    ));
+
+    let write_result = (|| {
+        let mut temp_file = fs::OpenOptions::new()
+            .create_new(true)
+            .write(true)
+            .open(&temp_path)
+            .map_err(|err| {
+                ApiError::internal(format!(
+                    "failed to create temp review file {}: {err}",
+                    temp_path.display()
+                ))
+            })?;
+        temp_file.write_all(&encoded).map_err(|err| {
+            ApiError::internal(format!(
+                "failed to write temp review file {}: {err}",
+                temp_path.display()
+            ))
+        })?;
+        temp_file.sync_all().map_err(|err| {
+            ApiError::internal(format!(
+                "failed to flush temp review file {}: {err}",
+                temp_path.display()
+            ))
+        })?;
+        drop(temp_file);
+
+        replace_review_document_file(&temp_path, path)?;
+        Ok(())
+    })();
+
+    if let Err(err) = write_result {
+        let _ = fs::remove_file(&temp_path);
+        return Err(err);
+    }
+
+    if let Err(err) = sync_directory(parent) {
+        eprintln!(
+            "review warning> review file {} replaced but parent directory sync failed: {}",
+            path.display(),
+            err.message
+        );
+    }
+
+    Ok(())
+}
+
+#[cfg(windows)]
+const MOVEFILE_REPLACE_EXISTING: u32 = 0x1;
+
+#[cfg(windows)]
+const MOVEFILE_WRITE_THROUGH: u32 = 0x8;
+
+#[cfg(windows)]
+#[link(name = "Kernel32")]
+unsafe extern "system" {
+    fn MoveFileExW(existing_file_name: *const u16, new_file_name: *const u16, flags: u32) -> i32;
+}
+
+#[cfg(not(windows))]
+fn replace_review_document_file(temp_path: &FsPath, path: &FsPath) -> Result<(), ApiError> {
+    fs::rename(temp_path, path).map_err(|err| {
+        ApiError::internal(format!(
+            "failed to replace review file {}: {err}",
+            path.display()
+        ))
     })
+}
+
+#[cfg(windows)]
+fn replace_review_document_file(temp_path: &FsPath, path: &FsPath) -> Result<(), ApiError> {
+    use std::os::windows::ffi::OsStrExt as _;
+
+    let temp_path_wide = temp_path
+        .as_os_str()
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect::<Vec<_>>();
+    let path_wide = path
+        .as_os_str()
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect::<Vec<_>>();
+
+    let moved = unsafe {
+        MoveFileExW(
+            temp_path_wide.as_ptr(),
+            path_wide.as_ptr(),
+            MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
+        )
+    };
+    if moved == 0 {
+        return Err(ApiError::internal(format!(
+            "failed to replace review file {}: {}",
+            path.display(),
+            io::Error::last_os_error()
+        )));
+    }
+
+    Ok(())
+}
+
+#[cfg(not(windows))]
+fn sync_review_document_directory(path: &FsPath) -> Result<(), ApiError> {
+    let directory = fs::File::open(path).map_err(|err| {
+        ApiError::internal(format!(
+            "failed to open review directory {} for sync: {err}",
+            path.display()
+        ))
+    })?;
+    directory.sync_all().map_err(|err| {
+        ApiError::internal(format!(
+            "failed to flush review directory {}: {err}",
+            path.display()
+        ))
+    })
+}
+
+#[cfg(windows)]
+fn sync_review_document_directory(_path: &FsPath) -> Result<(), ApiError> {
+    Ok(())
 }
 
 /// Prepares review document for write.
@@ -2883,6 +3173,8 @@ fn summarize_review_document(review: &ReviewDocument) -> ReviewDocumentSummary {
     summary
 }
 
+const MAX_REVIEW_CHANGE_SET_ID_LEN: usize = 200;
+
 /// Validates review change set ID.
 fn validate_review_change_set_id(change_set_id: &str) -> Result<(), ApiError> {
     let trimmed = change_set_id.trim();
@@ -2890,7 +3182,25 @@ fn validate_review_change_set_id(change_set_id: &str) -> Result<(), ApiError> {
         return Err(ApiError::bad_request("changeSetId cannot be empty"));
     }
 
-    if trimmed
+    if trimmed != change_set_id {
+        return Err(ApiError::bad_request(
+            "changeSetId may not have leading or trailing whitespace",
+        ));
+    }
+
+    if change_set_id.len() > MAX_REVIEW_CHANGE_SET_ID_LEN {
+        return Err(ApiError::bad_request(format!(
+            "changeSetId is too long (max {MAX_REVIEW_CHANGE_SET_ID_LEN} bytes)"
+        )));
+    }
+
+    if change_set_id.chars().all(|character| character == '.') {
+        return Err(ApiError::bad_request(
+            "changeSetId must not consist entirely of dots",
+        ));
+    }
+
+    if change_set_id
         .chars()
         .all(|character| character.is_ascii_alphanumeric() || matches!(character, '-' | '_' | '.'))
     {
@@ -2903,10 +3213,7 @@ fn validate_review_change_set_id(change_set_id: &str) -> Result<(), ApiError> {
 }
 
 /// Validates review document.
-fn validate_review_document(
-    change_set_id: &str,
-    review: &ReviewDocument,
-) -> Result<(), ApiError> {
+fn validate_review_document(change_set_id: &str, review: &ReviewDocument) -> Result<(), ApiError> {
     if review.version != REVIEW_DOCUMENT_VERSION {
         return Err(ApiError::bad_request(format!(
             "unsupported review document version {}",
@@ -4847,15 +5154,10 @@ fn project_git_done_summary(status: &GitStatusResponse) -> Option<String> {
 
 /// Returns the latest project progress summary.
 fn latest_project_progress_summary(record: &SessionRecord) -> Option<(String, String)> {
-    record
-        .session
-        .messages
-        .iter()
-        .rev()
-        .find_map(|message| {
-            project_progress_summary_for_message(message)
-                .map(|summary| (message.id().to_owned(), summary))
-        })
+    record.session.messages.iter().rev().find_map(|message| {
+        project_progress_summary_for_message(message)
+            .map(|summary| (message.id().to_owned(), summary))
+    })
 }
 
 /// Handles project progress summary for message.
@@ -4891,7 +5193,8 @@ fn project_progress_summary_for_message(message: &Message) -> Option<String> {
         | Message::McpElicitationRequest { .. }
         | Message::CodexAppRequest { .. }
         | Message::Text {
-            author: Author::You, ..
+            author: Author::You,
+            ..
         } => None,
     }
 }
@@ -4901,14 +5204,20 @@ fn find_latest_project_pending_approval<'a>(
     sessions: &'a [SessionRecord],
 ) -> Option<(&'a SessionRecord, String)> {
     sessions.iter().rev().find_map(|record| {
-        record.session.messages.iter().rev().find_map(|message| match message {
-            Message::Approval { id, decision, .. }
-                if *decision == ApprovalDecision::Pending && has_live_pending_approval(record, id) =>
-            {
-                Some((record, id.clone()))
-            }
-            _ => None,
-        })
+        record
+            .session
+            .messages
+            .iter()
+            .rev()
+            .find_map(|message| match message {
+                Message::Approval { id, decision, .. }
+                    if *decision == ApprovalDecision::Pending
+                        && has_live_pending_approval(record, id) =>
+                {
+                    Some((record, id.clone()))
+                }
+                _ => None,
+            })
     })
 }
 
@@ -4924,24 +5233,29 @@ fn find_latest_project_pending_nonapproval_interaction<'a>(
     sessions: &'a [SessionRecord],
 ) -> Option<(&'a SessionRecord, String)> {
     sessions.iter().rev().find_map(|record| {
-        record.session.messages.iter().rev().find_map(|message| match message {
-            Message::UserInputRequest { id, state, .. }
-                if *state == InteractionRequestState::Pending =>
-            {
-                Some((record, id.clone()))
-            }
-            Message::McpElicitationRequest { id, state, .. }
-                if *state == InteractionRequestState::Pending =>
-            {
-                Some((record, id.clone()))
-            }
-            Message::CodexAppRequest { id, state, .. }
-                if *state == InteractionRequestState::Pending =>
-            {
-                Some((record, id.clone()))
-            }
-            _ => None,
-        })
+        record
+            .session
+            .messages
+            .iter()
+            .rev()
+            .find_map(|message| match message {
+                Message::UserInputRequest { id, state, .. }
+                    if *state == InteractionRequestState::Pending =>
+                {
+                    Some((record, id.clone()))
+                }
+                Message::McpElicitationRequest { id, state, .. }
+                    if *state == InteractionRequestState::Pending =>
+                {
+                    Some((record, id.clone()))
+                }
+                Message::CodexAppRequest { id, state, .. }
+                    if *state == InteractionRequestState::Pending =>
+                {
+                    Some((record, id.clone()))
+                }
+                _ => None,
+            })
     })
 }
 
@@ -5016,6 +5330,8 @@ enum DeltaEvent {
     OrchestratorsUpdated {
         revision: u64,
         orchestrators: Vec<OrchestratorInstance>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        sessions: Vec<Session>,
     },
 }
 
@@ -5055,7 +5371,9 @@ enum ScopedPathMode {
 
 /// Normalizes optional identifier.
 fn normalize_optional_identifier(value: Option<&str>) -> Option<&str> {
-    value.map(str::trim).filter(|candidate| !candidate.is_empty())
+    value
+        .map(str::trim)
+        .filter(|candidate| !candidate.is_empty())
 }
 
 /// Resolves session project root path.
@@ -5168,7 +5486,9 @@ fn resolve_project_scoped_requested_path(
     let resolved_path = match mode {
         ScopedPathMode::ExistingFile => canonicalize_existing_path(&requested_path, "file")?,
         ScopedPathMode::ExistingPath => canonicalize_existing_path(&requested_path, "path")?,
-        ScopedPathMode::AllowMissingLeaf => canonicalize_path_with_existing_ancestor(&requested_path)?,
+        ScopedPathMode::AllowMissingLeaf => {
+            canonicalize_path_with_existing_ancestor(&requested_path)?
+        }
     };
 
     if resolved_path != project_root && !resolved_path.starts_with(&project_root) {
@@ -5225,10 +5545,7 @@ fn canonicalize_path_with_existing_ancestor(path: &FsPath) -> Result<PathBuf, Ap
         match fs::metadata(probe) {
             Ok(_) => {
                 let mut canonical = fs::canonicalize(probe).map_err(|err| {
-                    ApiError::internal(format!(
-                        "failed to resolve path {}: {err}",
-                        probe.display()
-                    ))
+                    ApiError::internal(format!("failed to resolve path {}: {err}", probe.display()))
                 })?;
                 for component in suffix.iter().rev() {
                     canonical.push(component);

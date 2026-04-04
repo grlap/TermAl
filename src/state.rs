@@ -32,12 +32,19 @@ struct AppState {
     /// Must not be held at the same time as `self.inner`; template file I/O happens
     /// outside the main state mutex so we never invert lock ordering.
     orchestrator_templates_lock: Arc<Mutex<()>>,
+    /// Must not be held at the same time as `self.inner`; review file I/O stays
+    /// outside the main state mutex so disk writes do not stall unrelated state work.
+    review_documents_lock: Arc<Mutex<()>>,
     state_events: broadcast::Sender<String>,
     delta_events: broadcast::Sender<String>,
     /// Lazily created shared Codex app-server reused across Codex sessions.
     shared_codex_runtime: Arc<Mutex<Option<SharedCodexRuntime>>>,
     /// Owns SSH-backed remote connections and their event bridges.
     remote_registry: Arc<RemoteRegistry>,
+    /// Tracks the newest `_sseFallback` revision already recovered per remote
+    /// so duplicate or older fallback events do not trigger redundant
+    /// blocking `/api/state` fetches.
+    remote_sse_fallback_resynced_revision: Arc<Mutex<HashMap<String, u64>>>,
     stopping_orchestrator_ids: Arc<Mutex<HashSet<String>>>,
     stopping_orchestrator_session_ids: Arc<Mutex<HashMap<String, HashSet<String>>>>,
     inner: Arc<Mutex<StateInner>>,
@@ -121,6 +128,7 @@ impl AppState {
             persistence_path: Arc::new(persistence_path),
             orchestrator_templates_path: Arc::new(orchestrator_templates_path),
             orchestrator_templates_lock: Arc::new(Mutex::new(())),
+            review_documents_lock: Arc::new(Mutex::new(())),
             state_events: broadcast::channel(128).0,
             delta_events: broadcast::channel(256).0,
             shared_codex_runtime: Arc::new(Mutex::new(None)),
@@ -129,6 +137,7 @@ impl AppState {
                     .join()
                     .expect("remote registry init thread panicked")?,
             ),
+            remote_sse_fallback_resynced_revision: Arc::new(Mutex::new(HashMap::new())),
             stopping_orchestrator_ids: Arc::new(Mutex::new(HashSet::new())),
             stopping_orchestrator_session_ids: Arc::new(Mutex::new(HashMap::new())),
             inner: Arc::new(Mutex::new(inner)),
@@ -150,6 +159,43 @@ impl AppState {
     fn snapshot(&self) -> StateResponse {
         let inner = self.inner.lock().expect("state mutex poisoned");
         self.snapshot_from_inner(&inner)
+    }
+
+    /// Returns whether a remote fallback-driven /api/state resync can be
+    /// skipped because the same or a newer fallback revision was already
+    /// recovered for that remote within the current event-stream lifetime.
+    fn should_skip_remote_sse_fallback_resync(
+        &self,
+        remote_id: &str,
+        fallback_revision: u64,
+    ) -> bool {
+        self.remote_sse_fallback_resynced_revision
+            .lock()
+            .expect("remote fallback resync mutex poisoned")
+            .get(remote_id)
+            .is_some_and(|last_revision| *last_revision >= fallback_revision)
+    }
+
+    /// Records that a remote fallback-driven /api/state resync recovered the
+    /// given fallback revision.
+    fn note_remote_sse_fallback_resync(&self, remote_id: &str, fallback_revision: u64) {
+        self.remote_sse_fallback_resynced_revision
+            .lock()
+            .expect("remote fallback resync mutex poisoned")
+            .entry(remote_id.to_owned())
+            .and_modify(|last_revision| {
+                *last_revision = (*last_revision).max(fallback_revision);
+            })
+            .or_insert(fallback_revision);
+    }
+
+    /// Clears remote fallback resync tracking when event-stream continuity is
+    /// lost, such as after a disconnect or restart.
+    fn clear_remote_sse_fallback_resync(&self, remote_id: &str) {
+        self.remote_sse_fallback_resynced_revision
+            .lock()
+            .expect("remote fallback resync mutex poisoned")
+            .remove(remote_id);
     }
 
     /// Lists workspace layouts.
@@ -967,6 +1013,12 @@ impl AppState {
         attachments: Vec<PromptImageAttachment>,
         expanded_prompt: Option<String>,
     ) -> std::result::Result<TurnDispatch, ApiError> {
+        if record.is_remote_proxy() {
+            return Err(ApiError::internal(
+                "remote proxy sessions must dispatch through the remote backend",
+            ));
+        }
+
         let message_attachments = attachments
             .iter()
             .map(|attachment| attachment.metadata.clone())
@@ -2789,10 +2841,7 @@ impl AppState {
         };
 
         if let Some((revision, orchestrators)) = orchestrator_delta {
-            self.publish_delta(&DeltaEvent::OrchestratorsUpdated {
-                revision,
-                orchestrators,
-            });
+            self.publish_orchestrators_updated(revision, orchestrators);
         }
 
         if should_dispatch_next {
@@ -5176,6 +5225,18 @@ impl StateInner {
         self.sessions.iter().position(|record| {
             record.remote_id.as_deref() == Some(remote_id)
                 && record.remote_session_id.as_deref() == Some(remote_session_id)
+        })
+    }
+
+    /// Finds remote orchestrator index.
+    fn find_remote_orchestrator_index(
+        &self,
+        remote_id: &str,
+        remote_orchestrator_id: &str,
+    ) -> Option<usize> {
+        self.orchestrator_instances.iter().position(|instance| {
+            instance.remote_id.as_deref() == Some(remote_id)
+                && instance.remote_orchestrator_id.as_deref() == Some(remote_orchestrator_id)
         })
     }
 

@@ -25,7 +25,7 @@ use std::path::{Path as FsPath, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicBool, AtomicU16, Ordering};
 use std::sync::mpsc::{self, Sender};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, LazyLock, Mutex};
 use std::time::Duration;
 
 use anyhow::{Context, Result, anyhow, bail};
@@ -96,6 +96,7 @@ async fn run_server() -> Result<()> {
     let listener = TcpListener::bind(address)
         .await
         .with_context(|| format!("failed to bind backend to {address}"))?;
+    disable_socket_inheritance(&listener);
     let bound = listener
         .local_addr()
         .context("failed to read local backend address")?;
@@ -359,6 +360,29 @@ include!("turns.rs");
 include!("api.rs");
 include!("orchestrators.rs");
 include!("telegram.rs");
+
+/// Marks the listening socket as non-inheritable so child processes (agent
+/// runtimes) do not keep the server port locked after the parent exits.
+#[cfg(windows)]
+fn disable_socket_inheritance(listener: &TcpListener) {
+    use std::os::windows::io::AsRawSocket as _;
+    unsafe extern "system" {
+        fn SetHandleInformation(handle: *mut std::ffi::c_void, mask: u32, flags: u32) -> i32;
+    }
+    const HANDLE_FLAG_INHERIT: u32 = 0x0000_0001;
+    let raw = listener.as_raw_socket() as *mut std::ffi::c_void;
+    // Safety: the raw socket is valid for the lifetime of `listener`.
+    let updated = unsafe { SetHandleInformation(raw, HANDLE_FLAG_INHERIT, 0) };
+    if updated == 0 {
+        eprintln!(
+            "backend warning> failed to disable socket inheritance: {}",
+            io::Error::last_os_error()
+        );
+    }
+}
+
+#[cfg(not(windows))]
+fn disable_socket_inheritance(_listener: &TcpListener) {}
 
 #[cfg(test)]
 mod tests;

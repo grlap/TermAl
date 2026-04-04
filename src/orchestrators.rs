@@ -642,6 +642,10 @@ enum PendingTransitionAction {
 #[serde(rename_all = "camelCase")]
 struct OrchestratorInstance {
     id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    remote_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    remote_orchestrator_id: Option<String>,
     template_id: String,
     #[serde(default)]
     project_id: String,
@@ -850,9 +854,14 @@ impl AppState {
         revision: u64,
         orchestrators: Vec<OrchestratorInstance>,
     ) {
+        let sessions = {
+            let inner = self.inner.lock().expect("state mutex poisoned");
+            referenced_sessions_for_orchestrators(&inner, &orchestrators)
+        };
         self.publish_delta(&DeltaEvent::OrchestratorsUpdated {
             revision,
             orchestrators,
+            sessions,
         });
     }
 
@@ -935,6 +944,8 @@ impl AppState {
 
             let orchestrator = OrchestratorInstance {
                 id: format!("orchestrator-instance-{}", Uuid::new_v4()),
+                remote_id: None,
+                remote_orchestrator_id: None,
                 template_id: template.id.clone(),
                 project_id: project.id.clone(),
                 template_snapshot: template,
@@ -962,6 +973,9 @@ impl AppState {
 
     /// Pauses orchestrator instance.
     fn pause_orchestrator_instance(&self, instance_id: &str) -> Result<StateResponse, ApiError> {
+        if let Some(target) = self.remote_orchestrator_target(instance_id)? {
+            return self.proxy_remote_pause_orchestrator_instance(target);
+        }
         let (state, orchestrators) = {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
             let instance = inner
@@ -995,6 +1009,9 @@ impl AppState {
 
     /// Resumes orchestrator instance.
     fn resume_orchestrator_instance(&self, instance_id: &str) -> Result<StateResponse, ApiError> {
+        if let Some(target) = self.remote_orchestrator_target(instance_id)? {
+            return self.proxy_remote_resume_orchestrator_instance(target);
+        }
         let (state, orchestrators) = {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
             let instance = inner
@@ -1246,6 +1263,9 @@ impl AppState {
 
     /// Stops orchestrator instance.
     fn stop_orchestrator_instance(&self, instance_id: &str) -> Result<StateResponse, ApiError> {
+        if let Some(target) = self.remote_orchestrator_target(instance_id)? {
+            return self.proxy_remote_stop_orchestrator_instance(target);
+        }
         self.begin_orchestrator_stop(instance_id)?;
         let mut resume_after_abort = false;
         let stop_result = (|| {
@@ -1844,6 +1864,50 @@ fn update_orchestrator_delivery_cursor(
     }
 }
 
+fn referenced_sessions_for_orchestrators(
+    inner: &StateInner,
+    orchestrators: &[OrchestratorInstance],
+) -> Vec<Session> {
+    let referenced_session_ids = orchestrators
+        .iter()
+        .flat_map(|instance| {
+            instance
+                .session_instances
+                .iter()
+                .map(|session| session.session_id.as_str())
+                .chain(instance.pending_transitions.iter().flat_map(|transition| {
+                    [
+                        transition.source_session_id.as_str(),
+                        transition.destination_session_id.as_str(),
+                    ]
+                }))
+                .chain(
+                    instance
+                        .active_session_ids_during_stop
+                        .iter()
+                        .flatten()
+                        .map(String::as_str),
+                )
+                .chain(
+                    instance
+                        .stopped_session_ids_during_stop
+                        .iter()
+                        .map(String::as_str),
+                )
+        })
+        .collect::<HashSet<_>>();
+    if referenced_session_ids.is_empty() {
+        return Vec::new();
+    }
+
+    inner
+        .sessions
+        .iter()
+        .filter(|record| referenced_session_ids.contains(record.session.id.as_str()))
+        .map(|record| record.session.clone())
+        .collect()
+}
+
 /// Marks deadlocked orchestrator instances.
 fn mark_deadlocked_orchestrator_instances(
     inner: &mut StateInner,
@@ -1855,6 +1919,7 @@ fn mark_deadlocked_orchestrator_instances(
         .enumerate()
         .filter_map(|(instance_index, instance)| {
             if instance.status != OrchestratorInstanceStatus::Running
+                || instance.remote_id.is_some()
                 || instance.stop_in_progress
                 || stopping_orchestrator_ids.contains(&instance.id)
             {
@@ -2054,6 +2119,7 @@ fn next_pending_transition_action(
 ) -> Option<PendingTransitionAction> {
     for (instance_index, instance) in inner.orchestrator_instances.iter().enumerate() {
         if instance.status != OrchestratorInstanceStatus::Running
+            || instance.remote_id.is_some()
             || instance.stop_in_progress
             || stopping_orchestrator_ids.contains(&instance.id)
         {
