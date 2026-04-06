@@ -118,7 +118,7 @@ All routes are under `/api`. The backend serves JSON, and the frontend proxies r
 
 | Method | Path | Purpose |
 |--------|------|---------|
-| GET | `/api/health` | Health check |
+| GET | `/api/health` | Health check + capability probe |
 | GET | `/api/file?path=...` | Read file content |
 | PUT | `/api/file` | Write file content |
 | GET | `/api/fs?path=...` | List directory entries |
@@ -132,18 +132,19 @@ All routes are under `/api`. The backend serves JSON, and the frontend proxies r
 | GET | `/api/workspaces` | List saved workspace layout summaries |
 | GET | `/api/workspaces/{id}` | Read a persisted workspace layout |
 | PUT | `/api/workspaces/{id}` | Save a persisted workspace layout |
+| DELETE | `/api/workspaces/{id}` | Delete a persisted workspace layout |
 | POST | `/api/settings` | Update app-wide preferences and remote config |
 | GET | `/api/orchestrators/templates` | List orchestrator templates |
 | POST | `/api/orchestrators/templates` | Create orchestrator template |
 | GET | `/api/orchestrators/templates/{id}` | Read orchestrator template |
 | PUT | `/api/orchestrators/templates/{id}` | Update orchestrator template |
-| DELETE | `/api/orchestrators/templates/{id}` | Delete orchestrator template |
+| DELETE | `/api/orchestrators/templates/{id}` (200) -> `OrchestratorTemplatesResponse` | Delete orchestrator template and return the remaining template list so the client can replace local state after deletion |
 | GET | `/api/orchestrators` | List orchestrator instances |
 | POST | `/api/orchestrators` | Create orchestrator instance |
 | GET | `/api/orchestrators/{id}` | Read orchestrator instance |
-| POST | `/api/orchestrators/{id}/pause` | Pause an orchestrator instance |
-| POST | `/api/orchestrators/{id}/resume` | Resume an orchestrator instance |
-| POST | `/api/orchestrators/{id}/stop` | Stop an orchestrator instance |
+| POST | `/api/orchestrators/{id}/pause` | Pause an orchestrator instance -> `StateResponse` |
+| POST | `/api/orchestrators/{id}/resume` | Resume an orchestrator instance -> `StateResponse` |
+| POST | `/api/orchestrators/{id}/stop` | Stop an orchestrator instance -> `StateResponse` |
 | GET | `/api/instructions/search` | Search instruction files for a session/workdir |
 | GET | `/api/events` | SSE stream (state + delta events) |
 | GET | `/api/reviews/{change_set_id}` | Read a persisted diff review document |
@@ -170,6 +171,8 @@ All routes are under `/api`. The backend serves JSON, and the frontend proxies r
 | POST | `/api/sessions/{id}/user-input/{message_id}` | Submit structured Codex user-input answers |
 | POST | `/api/sessions/{id}/mcp-elicitation/{message_id}` | Submit an MCP elicitation response |
 | POST | `/api/sessions/{id}/codex/requests/{message_id}` | Reply to a generic Codex app-server request |
+
+`GET /api/health` currently returns `{ ok: true, supportsInlineOrchestratorTemplates: true }`. Remote launchers use `supportsInlineOrchestratorTemplates` during health probes to decide whether a remote can accept inline local orchestrator templates or must be upgraded first.
 
 ### SSE Event Stream
 

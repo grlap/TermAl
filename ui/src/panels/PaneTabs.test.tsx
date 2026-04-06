@@ -17,7 +17,7 @@ import {
 import { copyTextToClipboard } from "../clipboard";
 import { SESSION_DRAG_MIME_TYPE } from "../session-drag";
 import type { WorkspaceTabDrag } from "../tab-drag";
-import { PaneTabs } from "./PaneTabs";
+import { PaneTabs, formatVisibleTabLabel } from "./PaneTabs";
 import type { CodexState, Project, RemoteConfig, Session } from "../types";
 import type { WorkspaceTab } from "../workspace";
 
@@ -52,6 +52,43 @@ async function clickAndSettle(target: HTMLElement) {
     await Promise.resolve();
   });
 }
+
+describe("formatVisibleTabLabel", () => {
+  it("strips workspace prefixes from visible filesystem and git labels", () => {
+    expect(
+      formatVisibleTabLabel(
+        {
+          id: "tab-files",
+          kind: "filesystem",
+          rootPath: "C:/repo/packages/app",
+          originSessionId: null,
+        },
+        null,
+      ),
+    ).toBe("app");
+    expect(
+      formatVisibleTabLabel(
+        {
+          id: "tab-git",
+          kind: "gitStatus",
+          workdir: "C:/repo/packages/api",
+          originSessionId: null,
+        },
+        null,
+      ),
+    ).toBe("api");
+    expect(
+      formatVisibleTabLabel(
+        {
+          id: "tab-session",
+          kind: "session",
+          sessionId: "session-1",
+        },
+        makeSession("session-1", "C:/repo", "Friendly"),
+      ),
+    ).toBe("Friendly");
+  });
+});
 
 describe("PaneTabs", () => {
   const originalResizeObserver = globalThis.ResizeObserver;
@@ -163,7 +200,7 @@ describe("PaneTabs", () => {
       ],
     });
 
-    fireEvent.contextMenu(screen.getByRole("tab", { name: /Git: app/i }), {
+    fireEvent.contextMenu(screen.getByRole("tab", { name: /Git status: app/i }), {
       clientX: 120,
       clientY: 80,
     });
@@ -229,7 +266,7 @@ describe("PaneTabs", () => {
       ],
     });
 
-    fireEvent.contextMenu(screen.getByRole("tab", { name: /Git: app/i }), {
+    fireEvent.contextMenu(screen.getByRole("tab", { name: /Git status: app/i }), {
       clientX: 120,
       clientY: 80,
     });
@@ -271,7 +308,7 @@ describe("PaneTabs", () => {
       ],
     });
 
-    fireEvent.contextMenu(screen.getByRole("tab", { name: /Git: app/i }), {
+    fireEvent.contextMenu(screen.getByRole("tab", { name: /Git status: app/i }), {
       clientX: 120,
       clientY: 80,
     });

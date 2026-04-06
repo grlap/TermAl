@@ -41,6 +41,24 @@ struct TestRecorder {
     text_deltas: Vec<String>,
     streaming_text_delta_start: Option<usize>,
     streaming_text_active: bool,
+    finish_streaming_text_calls: usize,
+    reset_turn_state_calls: usize,
+}
+
+#[test]
+fn format_runtime_stderr_prefix_includes_timestamp_and_label() {
+    assert_eq!(
+        format_runtime_stderr_prefix("codex", "12:59:03"),
+        "codex stderr [12:59:03]>"
+    );
+    assert_eq!(
+        format_runtime_stderr_prefix("gemini", "12:59:04"),
+        "gemini stderr [12:59:04]>"
+    );
+    assert_eq!(
+        format_runtime_stderr_prefix("claude", "12:59:05"),
+        "claude stderr [12:59:05]>"
+    );
 }
 
 impl TurnRecorder for TestRecorder {
@@ -117,7 +135,13 @@ impl TurnRecorder for TestRecorder {
     fn finish_streaming_text(&mut self) -> Result<()> {
         self.streaming_text_delta_start = None;
         self.streaming_text_active = false;
+        self.finish_streaming_text_calls += 1;
         Ok(())
+    }
+
+    fn reset_turn_state(&mut self) -> Result<()> {
+        self.reset_turn_state_calls += 1;
+        self.finish_streaming_text()
     }
 
     fn command_started(&mut self, _key: &str, command: &str) -> Result<()> {
@@ -222,6 +246,202 @@ impl CodexTurnRecorder for TestRecorder {
     }
 }
 
+#[test]
+fn shared_codex_app_server_event_matches_active_turn_covers_turn_id_and_turnless_events() {
+    assert!(!shared_codex_app_server_event_matches_active_turn(
+        None, false, None
+    ));
+    assert!(shared_codex_app_server_event_matches_active_turn(
+        Some("turn-1"),
+        false,
+        Some("turn-1")
+    ));
+    assert!(!shared_codex_app_server_event_matches_active_turn(
+        Some("turn-1"),
+        false,
+        Some("turn-2")
+    ));
+    assert!(shared_codex_app_server_event_matches_active_turn(
+        Some("turn-1"),
+        true,
+        None
+    ));
+    assert!(!shared_codex_app_server_event_matches_active_turn(
+        Some("turn-1"),
+        false,
+        None
+    ));
+}
+
+#[test]
+fn clear_shared_codex_turn_recorder_state_resets_all_fields() {
+    let mut recorder_state = SessionRecorderState {
+        command_messages: HashMap::from([("cmd-1".to_owned(), "Running".to_owned())]),
+        parallel_agents_messages: HashMap::from([("parallel-1".to_owned(), "Working".to_owned())]),
+        streaming_text_message_id: Some("message-1".to_owned()),
+    };
+
+    clear_shared_codex_turn_recorder_state(&mut recorder_state);
+
+    assert!(recorder_state.command_messages.is_empty());
+    assert!(recorder_state.parallel_agents_messages.is_empty());
+    assert_eq!(recorder_state.streaming_text_message_id, None);
+}
+
+#[test]
+fn clear_shared_codex_turn_session_state_resets_turn_local_fields_and_preserves_thread_id() {
+    let mut session_state = SharedCodexSessionState {
+        recorder: SessionRecorderState {
+            command_messages: HashMap::from([("cmd-1".to_owned(), "Running".to_owned())]),
+            parallel_agents_messages: HashMap::from([(
+                "parallel-1".to_owned(),
+                "Working".to_owned(),
+            )]),
+            streaming_text_message_id: Some("message-1".to_owned()),
+        },
+        thread_id: Some("thread-1".to_owned()),
+        turn_id: Some("turn-1".to_owned()),
+        turn_started: true,
+        turn_state: CodexTurnState {
+            current_agent_message_id: Some("assistant-1".to_owned()),
+            streamed_agent_message_text_by_item_id: HashMap::from([(
+                "item-1".to_owned(),
+                "hello".to_owned(),
+            )]),
+            streamed_agent_message_item_ids: HashSet::from(["item-1".to_owned()]),
+            pending_subagent_results: vec![PendingSubagentResult {
+                title: "Worker".to_owned(),
+                summary: "Done".to_owned(),
+                conversation_id: Some("conversation-1".to_owned()),
+                turn_id: Some("turn-1".to_owned()),
+            }],
+            assistant_output_started: true,
+            first_visible_assistant_message_id: Some("visible-1".to_owned()),
+        },
+    };
+
+    clear_shared_codex_turn_session_state(&mut session_state);
+
+    assert_eq!(session_state.thread_id.as_deref(), Some("thread-1"));
+    assert_eq!(session_state.turn_id, None);
+    assert!(!session_state.turn_started);
+    assert_eq!(session_state.turn_state.current_agent_message_id, None);
+    assert!(
+        session_state
+            .turn_state
+            .streamed_agent_message_text_by_item_id
+            .is_empty()
+    );
+    assert!(
+        session_state
+            .turn_state
+            .streamed_agent_message_item_ids
+            .is_empty()
+    );
+    assert!(session_state.turn_state.pending_subagent_results.is_empty());
+    assert!(!session_state.turn_state.assistant_output_started);
+    assert_eq!(
+        session_state.turn_state.first_visible_assistant_message_id,
+        None
+    );
+    assert!(session_state.recorder.command_messages.is_empty());
+    assert!(session_state.recorder.parallel_agents_messages.is_empty());
+    assert_eq!(session_state.recorder.streaming_text_message_id, None);
+}
+
+#[test]
+fn clear_claude_turn_state_resets_all_fields() {
+    let mut state = ClaudeTurnState {
+        approval_keys_this_turn: HashSet::from(["approval-1".to_owned()]),
+        parallel_agent_group_key: Some("group-1".to_owned()),
+        parallel_agent_order: vec!["agent-1".to_owned()],
+        parallel_agents: HashMap::from([(
+            "agent-1".to_owned(),
+            ParallelAgentProgress {
+                detail: Some("Working".to_owned()),
+                id: "agent-1".to_owned(),
+                status: ParallelAgentStatus::Running,
+                title: "Agent 1".to_owned(),
+            },
+        )]),
+        permission_denied_this_turn: true,
+        pending_tools: HashMap::from([(
+            "tool-1".to_owned(),
+            ClaudeToolUse {
+                command: Some("echo hi".to_owned()),
+                description: Some("Shell".to_owned()),
+                file_path: Some("README.md".to_owned()),
+                name: "bash".to_owned(),
+                subagent_type: Some("worker".to_owned()),
+            },
+        )]),
+        streamed_assistant_text: "partial".to_owned(),
+        saw_text_delta: true,
+    };
+
+    clear_claude_turn_state(&mut state);
+
+    assert!(state.approval_keys_this_turn.is_empty());
+    assert_eq!(state.parallel_agent_group_key, None);
+    assert!(state.parallel_agent_order.is_empty());
+    assert!(state.parallel_agents.is_empty());
+    assert!(!state.permission_denied_this_turn);
+    assert!(state.pending_tools.is_empty());
+    assert!(state.streamed_assistant_text.is_empty());
+    assert!(!state.saw_text_delta);
+}
+
+#[test]
+fn reset_claude_turn_state_clears_all_fields_and_finishes_streaming_text() {
+    let mut state = ClaudeTurnState {
+        approval_keys_this_turn: HashSet::from(["approval-1".to_owned()]),
+        parallel_agent_group_key: Some("group-1".to_owned()),
+        parallel_agent_order: vec!["agent-1".to_owned()],
+        parallel_agents: HashMap::from([(
+            "agent-1".to_owned(),
+            ParallelAgentProgress {
+                detail: Some("Working".to_owned()),
+                id: "agent-1".to_owned(),
+                status: ParallelAgentStatus::Running,
+                title: "Agent 1".to_owned(),
+            },
+        )]),
+        permission_denied_this_turn: true,
+        pending_tools: HashMap::from([(
+            "tool-1".to_owned(),
+            ClaudeToolUse {
+                command: Some("echo hi".to_owned()),
+                description: Some("Shell".to_owned()),
+                file_path: Some("README.md".to_owned()),
+                name: "bash".to_owned(),
+                subagent_type: Some("worker".to_owned()),
+            },
+        )]),
+        streamed_assistant_text: "partial".to_owned(),
+        saw_text_delta: true,
+    };
+    let mut recorder = TestRecorder {
+        streaming_text_delta_start: Some(2),
+        streaming_text_active: true,
+        ..TestRecorder::default()
+    };
+
+    reset_claude_turn_state(&mut state, &mut recorder).unwrap();
+
+    assert!(state.approval_keys_this_turn.is_empty());
+    assert_eq!(state.parallel_agent_group_key, None);
+    assert!(state.parallel_agent_order.is_empty());
+    assert!(state.parallel_agents.is_empty());
+    assert!(!state.permission_denied_this_turn);
+    assert!(state.pending_tools.is_empty());
+    assert!(state.streamed_assistant_text.is_empty());
+    assert!(!state.saw_text_delta);
+    assert_eq!(recorder.reset_turn_state_calls, 1);
+    assert_eq!(recorder.finish_streaming_text_calls, 2);
+    assert_eq!(recorder.streaming_text_delta_start, None);
+    assert!(!recorder.streaming_text_active);
+}
+
 fn accept_test_connection(listener: &std::net::TcpListener, label: &str) -> std::net::TcpStream {
     listener
         .set_nonblocking(true)
@@ -277,6 +497,49 @@ fn test_remote_registry() -> Arc<RemoteRegistry> {
             .expect("remote registry init thread panicked")
             .expect("remote registry should initialize"),
     )
+}
+
+static TEST_HOME_ENV_MUTEX: std::sync::LazyLock<std::sync::Mutex<()>> =
+    std::sync::LazyLock::new(|| std::sync::Mutex::new(()));
+
+#[cfg(windows)]
+const TEST_HOME_ENV_KEY: &str = "USERPROFILE";
+#[cfg(not(windows))]
+const TEST_HOME_ENV_KEY: &str = "HOME";
+
+struct ScopedEnvVar {
+    key: &'static str,
+    original: Option<std::ffi::OsString>,
+}
+
+impl ScopedEnvVar {
+    fn set_path(key: &'static str, value: &FsPath) -> Self {
+        let original = std::env::var_os(key);
+        unsafe {
+            std::env::set_var(key, value.as_os_str());
+        }
+        Self { key, original }
+    }
+
+    fn set(key: &'static str, value: &str) -> Self {
+        let original = std::env::var_os(key);
+        unsafe {
+            std::env::set_var(key, value);
+        }
+        Self { key, original }
+    }
+}
+
+impl Drop for ScopedEnvVar {
+    fn drop(&mut self) {
+        unsafe {
+            if let Some(value) = self.original.as_ref() {
+                std::env::set_var(self.key, value);
+            } else {
+                std::env::remove_var(self.key);
+            }
+        }
+    }
 }
 
 fn write_test_codex_threads_db(
@@ -513,6 +776,7 @@ fn sample_remote_orchestrator_state(
         agent_readiness: Vec::new(),
         preferences: AppPreferences::default(),
         projects: Vec::new(),
+        workspaces: Vec::new(),
         orchestrators: vec![OrchestratorInstance {
             id: "remote-orchestrator-1".to_owned(),
             remote_id: None,
@@ -700,6 +964,65 @@ impl std::io::Write for SharedBufferWriter {
     }
 }
 
+fn take_pending_acp_request(
+    pending_requests: &AcpPendingRequestMap,
+    timeout: Duration,
+) -> (
+    String,
+    std::sync::mpsc::Sender<std::result::Result<Value, AcpResponseError>>,
+) {
+    let deadline = std::time::Instant::now() + timeout;
+    loop {
+        if let Some(request) = {
+            let mut locked = pending_requests
+                .lock()
+                .expect("ACP pending requests mutex poisoned");
+            let request_id = locked.keys().next().cloned();
+            request_id.and_then(|request_id| {
+                locked
+                    .remove(&request_id)
+                    .map(|sender| (request_id, sender))
+            })
+        } {
+            return request;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "ACP request should arrive before timeout"
+        );
+        std::thread::sleep(Duration::from_millis(10));
+    }
+}
+
+fn take_pending_codex_request(
+    pending_requests: &CodexPendingRequestMap,
+    timeout: Duration,
+) -> (
+    String,
+    std::sync::mpsc::Sender<std::result::Result<Value, CodexResponseError>>,
+) {
+    let deadline = std::time::Instant::now() + timeout;
+    loop {
+        if let Some(request) = {
+            let mut locked = pending_requests
+                .lock()
+                .expect("Codex pending requests mutex poisoned");
+            let request_id = locked.keys().next().cloned();
+            request_id.and_then(|request_id| {
+                locked
+                    .remove(&request_id)
+                    .map(|sender| (request_id, sender))
+            })
+        } {
+            return request;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "Codex request should arrive before timeout"
+        );
+        std::thread::sleep(Duration::from_millis(10));
+    }
+}
 fn cursor_permission_request(request_id: &str) -> Value {
     json!({
         "jsonrpc": "2.0",
@@ -1300,10 +1623,174 @@ fn claude_tool_use_after_streamed_text_starts_followup_in_new_message() {
     ));
 }
 
+// Tests that Claude result clears pending tools and ignores late tool results.
+#[test]
+fn claude_result_clears_pending_tools_and_ignores_late_tool_results() {
+    let mut turn_state = ClaudeTurnState::default();
+    let mut recorder = TestRecorder::default();
+    let mut session_id = None;
+
+    handle_claude_event(
+        &json!({
+            "type": "assistant",
+            "message": {
+                "content": [
+                    {
+                        "type": "tool_use",
+                        "id": "bash-1",
+                        "name": "Bash",
+                        "input": {
+                            "command": "pwd"
+                        }
+                    }
+                ]
+            }
+        }),
+        &mut session_id,
+        &mut turn_state,
+        &mut recorder,
+    )
+    .unwrap();
+    handle_claude_event(
+        &json!({
+            "type": "result",
+            "is_error": false
+        }),
+        &mut session_id,
+        &mut turn_state,
+        &mut recorder,
+    )
+    .unwrap();
+
+    assert!(turn_state.pending_tools.is_empty());
+
+    handle_claude_event(
+        &json!({
+            "type": "user",
+            "message": {
+                "content": [
+                    {
+                        "type": "tool_result",
+                        "tool_use_id": "bash-1",
+                        "content": "/tmp/late"
+                    }
+                ]
+            }
+        }),
+        &mut session_id,
+        &mut turn_state,
+        &mut recorder,
+    )
+    .unwrap();
+
+    assert_eq!(
+        recorder.commands,
+        vec![("pwd".to_owned(), String::new(), CommandStatus::Running)]
+    );
+}
+
+// Tests that Claude result resets recorder command keys between turns.
+#[test]
+fn claude_result_resets_recorder_command_keys_between_turns() {
+    let state = test_app_state();
+    let session_id = test_session_id(&state, Agent::Claude);
+    let mut recorder = SessionRecorder::new(state.clone(), session_id.clone());
+    let mut turn_state = ClaudeTurnState::default();
+    let mut external_session_id = None;
+
+    for (command, output) in [("pwd", "/tmp/one"), ("git status", "working tree clean")] {
+        handle_claude_event(
+            &json!({
+                "type": "assistant",
+                "message": {
+                    "content": [
+                        {
+                            "type": "tool_use",
+                            "id": "bash-1",
+                            "name": "Bash",
+                            "input": {
+                                "command": command
+                            }
+                        }
+                    ]
+                }
+            }),
+            &mut external_session_id,
+            &mut turn_state,
+            &mut recorder,
+        )
+        .unwrap();
+        handle_claude_event(
+            &json!({
+                "type": "user",
+                "message": {
+                    "content": [
+                        {
+                            "type": "tool_result",
+                            "tool_use_id": "bash-1",
+                            "content": output
+                        }
+                    ]
+                }
+            }),
+            &mut external_session_id,
+            &mut turn_state,
+            &mut recorder,
+        )
+        .unwrap();
+        handle_claude_event(
+            &json!({
+                "type": "result",
+                "is_error": false
+            }),
+            &mut external_session_id,
+            &mut turn_state,
+            &mut recorder,
+        )
+        .unwrap();
+    }
+
+    let snapshot = state.snapshot();
+    let session = snapshot
+        .sessions
+        .iter()
+        .find(|session| session.id == session_id)
+        .expect("Claude session should exist");
+    let commands = session
+        .messages
+        .iter()
+        .filter_map(|message| match message {
+            Message::Command {
+                command,
+                output,
+                status,
+                ..
+            } => Some((command.clone(), output.clone(), *status)),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+
+    assert_eq!(
+        commands,
+        vec![
+            (
+                "pwd".to_owned(),
+                "/tmp/one".to_owned(),
+                CommandStatus::Success
+            ),
+            (
+                "git status".to_owned(),
+                "working tree clean".to_owned(),
+                CommandStatus::Success
+            ),
+        ]
+    );
+}
+
 // Tests that ACP JSON RPC request without timeout waits for late response.
 #[test]
 fn acp_json_rpc_request_without_timeout_waits_for_late_response() {
-    let pending_requests = Arc::new(Mutex::new(HashMap::new()));
+    let pending_requests: AcpPendingRequestMap = Arc::new(Mutex::new(HashMap::new()));
     let (result_tx, result_rx) = mpsc::channel();
     let request_pending_requests = pending_requests.clone();
 
@@ -1328,23 +1815,7 @@ fn acp_json_rpc_request_without_timeout_waits_for_late_response() {
             .unwrap();
     });
 
-    std::thread::sleep(Duration::from_millis(50));
-
-    let (request_id, sender) = {
-        let mut locked = pending_requests
-            .lock()
-            .expect("ACP pending requests mutex poisoned");
-        assert_eq!(locked.len(), 1);
-        let request_id = locked
-            .keys()
-            .next()
-            .cloned()
-            .expect("request id should exist");
-        let sender = locked
-            .remove(&request_id)
-            .expect("request sender should still be pending");
-        (request_id, sender)
-    };
+    let (request_id, sender) = take_pending_acp_request(&pending_requests, Duration::from_secs(1));
 
     sender.send(Ok(json!({ "ok": true }))).unwrap();
 
@@ -1358,6 +1829,95 @@ fn acp_json_rpc_request_without_timeout_waits_for_late_response() {
         pending_requests
             .lock()
             .expect("ACP pending requests mutex poisoned")
+            .is_empty()
+    );
+}
+
+// Tests that Codex JSON RPC request without timeout waits for late response.
+#[test]
+fn codex_json_rpc_request_without_timeout_waits_for_late_response() {
+    let pending_requests: CodexPendingRequestMap = Arc::new(Mutex::new(HashMap::new()));
+    let (result_tx, result_rx) = mpsc::channel();
+    let request_pending_requests = pending_requests.clone();
+
+    std::thread::spawn(move || {
+        let mut writer = Vec::new();
+        let result = send_codex_json_rpc_request_without_timeout(
+            &mut writer,
+            &request_pending_requests,
+            "turn/start",
+            json!({
+                "threadId": "thread-1",
+            }),
+        )
+        .expect("Codex request should resolve once a response arrives");
+        result_tx
+            .send((
+                String::from_utf8(writer).expect("request payload should be UTF-8"),
+                result,
+            ))
+            .unwrap();
+    });
+
+    let (request_id, sender) =
+        take_pending_codex_request(&pending_requests, Duration::from_secs(1));
+
+    sender.send(Ok(json!({ "ok": true }))).unwrap();
+
+    let (written, result) = result_rx
+        .recv_timeout(Duration::from_secs(1))
+        .expect("late Codex response should unblock the request");
+    assert!(written.contains("\"method\":\"turn/start\""));
+    assert!(written.contains(&format!("\"id\":\"{request_id}\"")));
+    assert_eq!(result, json!({ "ok": true }));
+    assert!(
+        pending_requests
+            .lock()
+            .expect("Codex pending requests mutex poisoned")
+            .is_empty()
+    );
+}
+
+// Tests that Codex JSON RPC request preserves JSON-RPC errors.
+#[test]
+fn codex_json_rpc_request_without_timeout_preserves_json_rpc_errors() {
+    let pending_requests: CodexPendingRequestMap = Arc::new(Mutex::new(HashMap::new()));
+    let (result_tx, result_rx) = mpsc::channel();
+    let request_pending_requests = pending_requests.clone();
+
+    std::thread::spawn(move || {
+        let mut writer = Vec::new();
+        let result = send_codex_json_rpc_request_without_timeout(
+            &mut writer,
+            &request_pending_requests,
+            "turn/start",
+            json!({
+                "threadId": "thread-1",
+            }),
+        );
+        result_tx.send(result).unwrap();
+    });
+
+    let (request_id, sender) =
+        take_pending_codex_request(&pending_requests, Duration::from_secs(1));
+
+    assert!(!request_id.is_empty());
+    sender
+        .send(Err(CodexResponseError::JsonRpc(
+            "thread/start rejected the request".to_owned(),
+        )))
+        .unwrap();
+
+    assert_eq!(
+        result_rx.recv_timeout(Duration::from_secs(1)).unwrap(),
+        Err(CodexResponseError::JsonRpc(
+            "thread/start rejected the request".to_owned(),
+        ))
+    );
+    assert!(
+        pending_requests
+            .lock()
+            .expect("Codex pending requests mutex poisoned")
             .is_empty()
     );
 }
@@ -1386,6 +1946,7 @@ fn acp_prompt_command_keeps_writer_loop_responsive_while_waiting_for_response() 
     let runtime_state = Arc::new(Mutex::new(AcpRuntimeState {
         current_session_id: Some("cursor-session-1".to_owned()),
         is_loading_history: false,
+        supports_session_load: Some(true),
     }));
     let writer = SharedBufferWriter::default();
     let thread_writer = writer.clone();
@@ -1498,7 +2059,7 @@ fn acp_prompt_command_keeps_writer_loop_responsive_while_waiting_for_response() 
 #[test]
 fn fail_pending_acp_requests_releases_waiters() {
     let pending_requests = Arc::new(Mutex::new(HashMap::new()));
-    let (tx, rx) = mpsc::channel::<std::result::Result<Value, String>>();
+    let (tx, rx) = mpsc::channel::<std::result::Result<Value, AcpResponseError>>();
 
     pending_requests
         .lock()
@@ -1515,7 +2076,39 @@ fn fail_pending_acp_requests_releases_waiters() {
     );
     assert_eq!(
         rx.recv_timeout(Duration::from_secs(1)).unwrap(),
-        Err("Cursor ACP runtime exited.".to_owned())
+        Err(AcpResponseError::Transport(
+            "Cursor ACP runtime exited.".to_owned()
+        ))
+    );
+}
+
+// Tests that fail pending Codex requests releases waiters.
+#[test]
+fn fail_pending_codex_requests_releases_waiters() {
+    let pending_requests = Arc::new(Mutex::new(HashMap::new()));
+    let (tx, rx) = mpsc::channel::<std::result::Result<Value, CodexResponseError>>();
+
+    pending_requests
+        .lock()
+        .expect("Codex pending requests mutex poisoned")
+        .insert("req-1".to_owned(), tx);
+
+    fail_pending_codex_requests(
+        &pending_requests,
+        "shared Codex app-server exited while waiting for a pending response",
+    );
+
+    assert!(
+        pending_requests
+            .lock()
+            .expect("Codex pending requests mutex poisoned")
+            .is_empty()
+    );
+    assert_eq!(
+        rx.recv_timeout(Duration::from_secs(1)).unwrap(),
+        Err(CodexResponseError::Transport(
+            "shared Codex app-server exited while waiting for a pending response".to_owned()
+        ))
     );
 }
 
@@ -4554,6 +5147,742 @@ fn shared_codex_compaction_notice_inserts_before_visible_assistant_output() {
     assert!(compact_notice_index < assistant_index);
 }
 
+// Tests that ACP initialize reads load-session support from agent capabilities.
+#[test]
+fn acp_supports_session_load_reads_agent_capabilities() {
+    assert_eq!(
+        acp_supports_session_load(&json!({
+            "agentCapabilities": {
+                "loadSession": false,
+            }
+        })),
+        Some(false)
+    );
+    assert_eq!(
+        acp_supports_session_load(&json!({
+            "agentCapabilities": {
+                "loadSession": true,
+            }
+        })),
+        Some(true)
+    );
+}
+
+// Tests that ACP initialize also reads legacy capability envelopes.
+#[test]
+fn acp_supports_session_load_reads_legacy_capabilities() {
+    assert_eq!(
+        acp_supports_session_load(&json!({
+            "capabilities": {
+                "loadSession": false,
+            }
+        })),
+        Some(false)
+    );
+    assert_eq!(acp_supports_session_load(&json!({})), None);
+}
+
+// Tests that ACP runtimes do not assume session/load support before initialize reports it.
+#[test]
+fn acp_runtime_state_defaults_session_load_support_to_unknown() {
+    assert_eq!(AcpRuntimeState::default().supports_session_load, None);
+}
+
+// Tests that ACP resumes still attempt session/load when initialize omitted the capability bit.
+#[test]
+fn acp_session_resume_attempts_load_when_session_load_support_is_unknown() {
+    let state = test_app_state();
+    let created = state
+        .create_session(CreateSessionRequest {
+            agent: Some(Agent::Cursor),
+            name: Some("Cursor Resume".to_owned()),
+            workdir: Some("/tmp".to_owned()),
+            project_id: None,
+            model: Some("auto".to_owned()),
+            approval_policy: None,
+            reasoning_effort: None,
+            sandbox_mode: None,
+            cursor_mode: Some(CursorMode::Ask),
+            claude_approval_mode: None,
+            claude_effort: None,
+            gemini_approval_mode: None,
+        })
+        .expect("Cursor session should be created");
+    let pending_requests = Arc::new(Mutex::new(HashMap::new()));
+    let runtime_state = Arc::new(Mutex::new(AcpRuntimeState::default()));
+    let writer = SharedBufferWriter::default();
+    let thread_writer = writer.clone();
+    let thread_pending_requests = pending_requests.clone();
+    let thread_state = state.clone();
+    let thread_runtime_state = runtime_state.clone();
+    let thread_session_id = created.session_id.clone();
+    let handle = std::thread::spawn(move || {
+        let mut stdin = thread_writer;
+        ensure_acp_session_ready(
+            &mut stdin,
+            &thread_pending_requests,
+            &thread_state,
+            &thread_session_id,
+            &thread_runtime_state,
+            AcpAgent::Cursor,
+            &AcpPromptCommand {
+                cwd: "/tmp".to_owned(),
+                cursor_mode: Some(CursorMode::Ask),
+                model: "auto".to_owned(),
+                prompt: "Resume the prior session".to_owned(),
+                resume_session_id: Some("cursor-session-1".to_owned()),
+            },
+        )
+    });
+
+    let (_load_request_id, load_sender) =
+        take_pending_acp_request(&pending_requests, Duration::from_secs(1));
+    load_sender
+        .send(Ok(json!({
+            "configOptions": [
+                {
+                    "id": "model",
+                    "currentValue": "auto",
+                    "options": [
+                        {
+                            "value": "auto",
+                            "name": "Auto"
+                        }
+                    ]
+                },
+                {
+                    "id": "mode",
+                    "currentValue": "ask",
+                    "options": [
+                        {
+                            "value": "ask",
+                            "name": "Ask"
+                        }
+                    ]
+                }
+            ]
+        })))
+        .expect("session/load response should send");
+
+    let external_session_id = handle
+        .join()
+        .expect("Cursor ACP worker should finish")
+        .expect("Cursor resume should reuse the persisted session");
+    assert_eq!(external_session_id, "cursor-session-1");
+
+    let written = writer.contents();
+    assert!(
+        written.contains("\"method\":\"session/load\""),
+        "session/load request should be written\n{written}"
+    );
+    assert!(
+        !written.contains("\"method\":\"session/new\""),
+        "session/new should not be written when resuming with unknown capability support\n{written}"
+    );
+
+    let session = state
+        .snapshot()
+        .sessions
+        .into_iter()
+        .find(|session| session.id == created.session_id)
+        .expect("updated Cursor session should be present");
+    assert_eq!(
+        session.external_session_id.as_deref(),
+        Some("cursor-session-1")
+    );
+
+    let runtime_state = runtime_state
+        .lock()
+        .expect("ACP runtime state mutex poisoned");
+    assert_eq!(
+        runtime_state.current_session_id.as_deref(),
+        Some("cursor-session-1")
+    );
+    assert_eq!(runtime_state.supports_session_load, Some(true));
+}
+
+// Tests that ACP skips session/load when initialize explicitly reports it unsupported.
+#[test]
+fn acp_session_resume_skips_load_when_session_load_is_explicitly_unsupported() {
+    let state = test_app_state();
+    let created = state
+        .create_session(CreateSessionRequest {
+            agent: Some(Agent::Cursor),
+            name: Some("Cursor Resume".to_owned()),
+            workdir: Some("/tmp".to_owned()),
+            project_id: None,
+            model: Some("auto".to_owned()),
+            approval_policy: None,
+            reasoning_effort: None,
+            sandbox_mode: None,
+            cursor_mode: Some(CursorMode::Ask),
+            claude_approval_mode: None,
+            claude_effort: None,
+            gemini_approval_mode: None,
+        })
+        .expect("Cursor session should be created");
+    let pending_requests = Arc::new(Mutex::new(HashMap::new()));
+    let runtime_state = Arc::new(Mutex::new(AcpRuntimeState {
+        current_session_id: None,
+        is_loading_history: false,
+        supports_session_load: Some(false),
+    }));
+    let writer = SharedBufferWriter::default();
+    let thread_writer = writer.clone();
+    let thread_pending_requests = pending_requests.clone();
+    let thread_state = state.clone();
+    let thread_runtime_state = runtime_state.clone();
+    let thread_session_id = created.session_id.clone();
+    let handle = std::thread::spawn(move || {
+        let mut stdin = thread_writer;
+        ensure_acp_session_ready(
+            &mut stdin,
+            &thread_pending_requests,
+            &thread_state,
+            &thread_session_id,
+            &thread_runtime_state,
+            AcpAgent::Cursor,
+            &AcpPromptCommand {
+                cwd: "/tmp".to_owned(),
+                cursor_mode: Some(CursorMode::Ask),
+                model: "auto".to_owned(),
+                prompt: "Resume the prior session".to_owned(),
+                resume_session_id: Some("cursor-session-1".to_owned()),
+            },
+        )
+    });
+
+    let (_new_request_id, new_sender) =
+        take_pending_acp_request(&pending_requests, Duration::from_secs(1));
+    new_sender
+        .send(Ok(json!({
+            "sessionId": "cursor-session-new",
+            "configOptions": [
+                {
+                    "id": "model",
+                    "currentValue": "auto",
+                    "options": [
+                        {
+                            "value": "auto",
+                            "name": "Auto"
+                        }
+                    ]
+                },
+                {
+                    "id": "mode",
+                    "currentValue": "ask",
+                    "options": [
+                        {
+                            "value": "ask",
+                            "name": "Ask"
+                        }
+                    ]
+                }
+            ]
+        })))
+        .expect("session/new response should send");
+
+    let external_session_id = handle
+        .join()
+        .expect("Cursor ACP worker should finish")
+        .expect("Cursor resume should start a fresh ACP session");
+    assert_eq!(external_session_id, "cursor-session-new");
+
+    let written = writer.contents();
+    assert!(
+        !written.contains("\"method\":\"session/load\""),
+        "session/load should not be written when support is explicitly unavailable\n{written}"
+    );
+    assert!(
+        written.contains("\"method\":\"session/new\""),
+        "session/new should be written when support is explicitly unavailable\n{written}"
+    );
+
+    let session = state
+        .snapshot()
+        .sessions
+        .into_iter()
+        .find(|session| session.id == created.session_id)
+        .expect("updated Cursor session should be present");
+    assert_eq!(
+        session.external_session_id.as_deref(),
+        Some("cursor-session-new")
+    );
+
+    let runtime_state = runtime_state
+        .lock()
+        .expect("ACP runtime state mutex poisoned");
+    assert_eq!(
+        runtime_state.current_session_id.as_deref(),
+        Some("cursor-session-new")
+    );
+    assert_eq!(runtime_state.supports_session_load, Some(false));
+}
+// Tests that Gemini invalid-session detection searches wrapped anyhow error chains.
+#[test]
+fn gemini_invalid_session_load_error_matches_wrapped_chain_messages() {
+    let err = anyhow::anyhow!("Invalid session identifier").context("session/load failed");
+    assert!(is_gemini_invalid_session_load_error(&err));
+}
+
+// Tests that ACP invalid-session data inspection handles wrapper fields and depth limits.
+#[test]
+fn acp_invalid_session_identifier_detection_handles_wrappers_and_depth_limits() {
+    assert!(acp_error_data_indicates_invalid_session_identifier(
+        &json!({
+            "details": [{
+                "error": "invalidSessionId"
+            }]
+        })
+    ));
+
+    let mut boundary = json!("invalidSessionIdentifier");
+    for _ in 0..10 {
+        boundary = json!({ "details": boundary });
+    }
+    assert!(acp_error_data_indicates_invalid_session_identifier(
+        &boundary
+    ));
+
+    let mut nested = json!("invalidSessionIdentifier");
+    for _ in 0..11 {
+        nested = json!({ "details": nested });
+    }
+    assert!(!acp_error_data_indicates_invalid_session_identifier(
+        &nested
+    ));
+}
+
+// Tests that Gemini settings overrides preserve existing fields while disabling interactive shell.
+#[test]
+fn disable_gemini_interactive_shell_in_settings_preserves_other_values() {
+    let mut settings = json!({
+        "security": {
+            "auth": {
+                "selectedType": "oauth-personal"
+            }
+        },
+        "tools": {
+            "shell": {
+                "enableInteractiveShell": true,
+                "pager": "less"
+            }
+        }
+    });
+
+    disable_gemini_interactive_shell_in_settings(&mut settings);
+
+    assert_eq!(
+        settings.pointer("/tools/shell/enableInteractiveShell"),
+        Some(&Value::Bool(false))
+    );
+    assert_eq!(
+        settings.pointer("/tools/shell/pager"),
+        Some(&Value::String("less".to_owned()))
+    );
+    assert_eq!(
+        settings.pointer("/security/auth/selectedType"),
+        Some(&Value::String("oauth-personal".to_owned()))
+    );
+}
+
+// Tests that Gemini settings overrides create the full shell path from an empty object.
+#[test]
+fn disable_gemini_interactive_shell_in_settings_builds_shell_path_from_empty_object() {
+    let mut settings = json!({});
+
+    disable_gemini_interactive_shell_in_settings(&mut settings);
+
+    assert_eq!(
+        settings.pointer("/tools/shell/enableInteractiveShell"),
+        Some(&Value::Bool(false))
+    );
+}
+
+// Tests that malformed Gemini settings do not block the Windows override path.
+#[test]
+fn load_gemini_settings_json_ignores_malformed_input() {
+    let settings_path =
+        std::env::temp_dir().join(format!("termal-gemini-settings-invalid-{}", Uuid::new_v4()));
+    fs::write(
+        &settings_path,
+        r#"{"security": { "auth": { "selectedType": "oauth-personal" }"#,
+    )
+    .expect("invalid Gemini settings should be written");
+
+    let loaded = load_gemini_settings_json(Some(settings_path.as_path()));
+    assert_eq!(loaded, json!({}));
+    assert_eq!(
+        gemini_selected_auth_type_from_settings_file(settings_path.as_path()),
+        None
+    );
+
+    let _ = fs::remove_file(settings_path);
+}
+
+// Tests that Gemini ACP launch ignores repository dotenv files for child env injection.
+#[test]
+fn gemini_dotenv_env_pairs_ignore_workspace_env_files() {
+    let project_root =
+        std::env::temp_dir().join(format!("termal-gemini-dotenv-env-{}", Uuid::new_v4()));
+    fs::create_dir_all(&project_root).expect("project root should be created");
+    fs::write(
+        project_root.join(".env"),
+        "GEMINI_API_KEY=dotenv-gemini-key\nexport GOOGLE_API_KEY='vertex-key'\nGOOGLE_CLOUD_PROJECT=demo-project\nGOOGLE_CLOUD_LOCATION=us-central1\n",
+    )
+    .expect("Gemini dotenv file should be written");
+
+    let overrides = gemini_dotenv_env_pairs()
+        .into_iter()
+        .collect::<HashMap<_, _>>();
+
+    assert!(overrides.is_empty());
+
+    let _ = fs::remove_dir_all(project_root);
+}
+
+// Tests that Gemini dotenv lookup resolves home-directory files without walking the workdir.
+#[test]
+fn find_gemini_env_file_reads_home_directory_env_files() {
+    let _env_lock = TEST_HOME_ENV_MUTEX
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let home_dir = std::env::temp_dir().join(format!("termal-gemini-home-env-{}", Uuid::new_v4()));
+    let gemini_dir = home_dir.join(".gemini");
+    fs::create_dir_all(&gemini_dir).expect("Gemini home directory should be created");
+
+    {
+        let _home_env = ScopedEnvVar::set_path(TEST_HOME_ENV_KEY, &home_dir);
+        assert_eq!(find_gemini_env_file(), None);
+        let gemini_env = gemini_dir.join(".env");
+        fs::write(&gemini_env, "GEMINI_API_KEY=home-gemini-key\n")
+            .expect("Gemini home env should be written");
+        assert_eq!(find_gemini_env_file(), Some(gemini_env.clone()));
+
+        fs::remove_file(&gemini_env).expect("Gemini home env should be removed");
+        let fallback_env = home_dir.join(".env");
+        fs::write(&fallback_env, "GEMINI_API_KEY=home-fallback-key\n")
+            .expect("home fallback env should be written");
+        assert_eq!(find_gemini_env_file(), Some(fallback_env));
+    }
+
+    let _ = fs::remove_dir_all(home_dir);
+}
+
+// Tests that Gemini ACP auth selection ignores workspace dotenv credentials.
+#[test]
+fn select_acp_auth_method_ignores_workspace_dotenv_credentials() {
+    let project_root = std::env::temp_dir().join(format!(
+        "termal-gemini-auth-method-dotenv-{}",
+        Uuid::new_v4()
+    ));
+    fs::create_dir_all(&project_root).expect("project root should be created");
+    fs::write(
+        project_root.join(".env"),
+        "GEMINI_API_KEY=dotenv-gemini-key\n",
+    )
+    .expect("Gemini dotenv file should be written");
+
+    let initialize_result = json!({
+        "authMethods": [
+            { "id": "vertex-ai" },
+            { "id": "gemini-api-key" }
+        ]
+    });
+    assert_eq!(
+        select_acp_auth_method(
+            &initialize_result,
+            AcpAgent::Gemini,
+            project_root
+                .to_str()
+                .expect("temp path should be valid UTF-8"),
+        ),
+        None
+    );
+
+    let _ = fs::remove_dir_all(project_root);
+}
+
+// Tests that TermAl prepares a Windows Gemini system-settings override file.
+#[test]
+fn prepare_termal_gemini_system_settings_writes_override_file() {
+    if !cfg!(windows) {
+        return;
+    }
+
+    let project_root =
+        std::env::temp_dir().join(format!("termal-gemini-system-settings-{}", Uuid::new_v4()));
+    fs::create_dir_all(&project_root).expect("Gemini override project root should be created");
+    let workdir = project_root
+        .to_str()
+        .expect("test workdir should be valid UTF-8");
+
+    let settings_path = prepare_termal_gemini_system_settings(workdir)
+        .expect("Gemini settings override should prepare")
+        .expect("Windows should create a Gemini settings override");
+    let written: Value = serde_json::from_str(
+        &fs::read_to_string(&settings_path).expect("Gemini override file should be readable"),
+    )
+    .expect("Gemini override file should parse");
+
+    assert_eq!(
+        written.pointer("/tools/shell/enableInteractiveShell"),
+        Some(&Value::Bool(false))
+    );
+
+    let _ = fs::remove_dir_all(project_root);
+}
+
+// Tests that Gemini interactive-shell warnings explain the TermAl override on Windows.
+#[test]
+fn gemini_interactive_shell_warning_respects_workspace_settings() {
+    if !cfg!(windows) {
+        return;
+    }
+
+    // Hold the home-env mutex so this test's USERPROFILE and
+    // GEMINI_CLI_SYSTEM_SETTINGS_PATH redirects don't race with other
+    // home-env tests that run in parallel.
+    let _env_lock = TEST_HOME_ENV_MUTEX
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+
+    let project_root = std::env::temp_dir().join(format!(
+        "termal-gemini-interactive-shell-{}",
+        Uuid::new_v4()
+    ));
+    let settings_dir = project_root.join(".gemini");
+    fs::create_dir_all(&settings_dir).expect("Gemini settings directory should be created");
+    let settings_path = settings_dir.join("settings.json");
+    let workdir = project_root
+        .to_str()
+        .expect("test workdir should be valid UTF-8");
+
+    // Point GEMINI_CLI_SYSTEM_SETTINGS_PATH at a path that does not exist so
+    // the real C:\ProgramData\gemini-cli\settings.json (written by TermAl with
+    // enableInteractiveShell=false) does not shadow the project setting we are
+    // testing here.
+    let absent_system_settings = project_root.join("no-system-settings.json");
+    let _system_env =
+        ScopedEnvVar::set_path("GEMINI_CLI_SYSTEM_SETTINGS_PATH", &absent_system_settings);
+
+    // Redirect USERPROFILE to an empty temp dir so the developer's real
+    // ~/.gemini/settings.json is not consulted either.
+    let empty_home = std::env::temp_dir().join(format!("termal-gemini-home-{}", Uuid::new_v4()));
+    fs::create_dir_all(&empty_home).expect("empty home dir should be created");
+    let _home_env = ScopedEnvVar::set_path(TEST_HOME_ENV_KEY, &empty_home);
+
+    fs::write(
+        &settings_path,
+        r#"{"tools":{"shell":{"enableInteractiveShell":true}}}"#,
+    )
+    .expect("enabled Gemini settings should be written");
+    let enabled_warning = gemini_interactive_shell_warning(workdir)
+        .expect("enabled interactive shell should warn on Windows");
+    assert!(enabled_warning.contains("TermAl forces Gemini"));
+    assert!(enabled_warning.contains(&display_path_for_user(&settings_path)));
+
+    fs::write(
+        &settings_path,
+        r#"{"tools":{"shell":{"enableInteractiveShell":false}}}"#,
+    )
+    .expect("disabled Gemini settings should be written");
+    assert_eq!(gemini_interactive_shell_warning(workdir), None);
+
+    let _ = fs::remove_dir_all(project_root);
+    let _ = fs::remove_dir_all(empty_home);
+}
+
+// Tests that Codex Windows warnings point users toward WSL when shell parsing fails upstream.
+#[test]
+fn codex_windows_shell_warning_matches_platform() {
+    if cfg!(windows) {
+        let warning = codex_windows_shell_warning()
+            .expect("Windows builds should surface the Codex shell warning");
+        assert!(warning.contains("WSL"));
+    } else {
+        assert_eq!(codex_windows_shell_warning(), None);
+    }
+}
+
+// Tests that Codex readiness reflects runtime CLI detection and warning wiring.
+#[test]
+fn codex_agent_readiness_matches_runtime_resolution() {
+    let readiness = codex_agent_readiness();
+
+    assert!(matches!(readiness.agent, Agent::Codex));
+    match readiness.command_path.as_deref() {
+        Some(command_path) => {
+            assert!(matches!(readiness.status, AgentReadinessStatus::Ready));
+            assert!(!readiness.blocking);
+            assert!(readiness.detail.contains(command_path));
+            assert_eq!(readiness.warning_detail, codex_windows_shell_warning());
+        }
+        None => {
+            assert!(matches!(readiness.status, AgentReadinessStatus::Missing));
+            assert!(readiness.blocking);
+            assert!(readiness.detail.contains("Install the `codex` CLI"));
+            assert_eq!(readiness.warning_detail, None);
+        }
+    }
+}
+
+// Tests that AgentReadiness serializes warning_detail as warningDetail.
+#[test]
+fn agent_readiness_serialization_emits_warning_detail_camel_case() {
+    let readiness = AgentReadiness {
+        agent: Agent::Codex,
+        status: AgentReadinessStatus::Ready,
+        blocking: false,
+        detail: "Codex CLI is available.".to_owned(),
+        warning_detail: Some("Use WSL for shell commands on Windows.".to_owned()),
+        command_path: Some("codex".to_owned()),
+    };
+
+    let serialized =
+        serde_json::to_value(&readiness).expect("AgentReadiness should serialize to JSON");
+    assert_eq!(
+        serialized.pointer("/warningDetail"),
+        Some(&Value::String(
+            "Use WSL for shell commands on Windows.".to_owned()
+        ))
+    );
+
+    let serialized_without_warning = serde_json::to_value(AgentReadiness {
+        warning_detail: None,
+        ..readiness
+    })
+    .expect("AgentReadiness without warning detail should serialize to JSON");
+    assert_eq!(serialized_without_warning.get("warningDetail"), None);
+}
+// Tests that Gemini falls back from a rejected session/load to a new ACP session.
+#[test]
+fn gemini_invalid_session_load_falls_back_to_session_new() {
+    // Hold the home-env mutex and set a dummy GEMINI_API_KEY so
+    // validate_agent_session_setup passes on machines without real Gemini
+    // credentials.  The API key is never used for a real network call — the
+    // ACP runtime is driven by SharedBufferWriter throughout the test.
+    let _env_lock = TEST_HOME_ENV_MUTEX
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let _api_key = ScopedEnvVar::set("GEMINI_API_KEY", "test-key-not-real");
+
+    let state = test_app_state();
+    let created = state
+        .create_session(CreateSessionRequest {
+            agent: Some(Agent::Gemini),
+            name: Some("Gemini Resume".to_owned()),
+            workdir: Some("/tmp".to_owned()),
+            project_id: None,
+            model: Some("gemini-pro".to_owned()),
+            approval_policy: None,
+            reasoning_effort: None,
+            sandbox_mode: None,
+            cursor_mode: None,
+            claude_approval_mode: None,
+            claude_effort: None,
+            gemini_approval_mode: Some(default_gemini_approval_mode()),
+        })
+        .expect("Gemini session should be created");
+    let pending_requests = Arc::new(Mutex::new(HashMap::new()));
+    let runtime_state = Arc::new(Mutex::new(AcpRuntimeState {
+        current_session_id: None,
+        is_loading_history: false,
+        supports_session_load: Some(true),
+    }));
+    let writer = SharedBufferWriter::default();
+    let thread_writer = writer.clone();
+    let thread_pending_requests = pending_requests.clone();
+    let thread_state = state.clone();
+    let thread_runtime_state = runtime_state.clone();
+    let thread_session_id = created.session_id.clone();
+    let handle = std::thread::spawn(move || {
+        let mut stdin = thread_writer;
+        ensure_acp_session_ready(
+            &mut stdin,
+            &thread_pending_requests,
+            &thread_state,
+            &thread_session_id,
+            &thread_runtime_state,
+            AcpAgent::Gemini,
+            &AcpPromptCommand {
+                cwd: "/tmp".to_owned(),
+                cursor_mode: None,
+                model: "gemini-pro".to_owned(),
+                prompt: "Resume the prior session".to_owned(),
+                resume_session_id: Some("gemini-session-stale".to_owned()),
+            },
+        )
+    });
+
+    let (_load_request_id, load_sender) =
+        take_pending_acp_request(&pending_requests, Duration::from_secs(1));
+    load_sender
+        .send(Err(AcpResponseError::JsonRpc(AcpJsonRpcError {
+            code: Some(-32602),
+            message: "Invalid session identifier".to_owned(),
+            data: Some(json!({
+                "reason": "invalidSessionIdentifier",
+            })),
+        })))
+        .expect("session/load response should send");
+
+    let (_new_request_id, new_sender) =
+        take_pending_acp_request(&pending_requests, Duration::from_secs(1));
+    new_sender
+        .send(Ok(json!({
+            "sessionId": "gemini-session-new",
+            "configOptions": [
+                {
+                    "id": "model",
+                    "currentValue": "gemini-pro",
+                    "options": [
+                        {
+                            "value": "gemini-pro",
+                            "name": "Gemini Pro"
+                        }
+                    ]
+                }
+            ]
+        })))
+        .expect("session/new response should send");
+
+    let external_session_id = handle
+        .join()
+        .expect("Gemini ACP worker should finish")
+        .expect("Gemini fallback should recover with a new session");
+    assert_eq!(external_session_id, "gemini-session-new");
+    let written = writer.contents();
+    let load_index = written
+        .find("\"method\":\"session/load\"")
+        .expect("session/load request should be written");
+    let new_index = written
+        .find("\"method\":\"session/new\"")
+        .expect("session/new request should be written");
+    assert!(
+        load_index < new_index,
+        "session/load should happen before session/new\n{written}"
+    );
+    let session = state
+        .snapshot()
+        .sessions
+        .into_iter()
+        .find(|session| session.id == created.session_id)
+        .expect("updated Gemini session should be present");
+    assert_eq!(
+        session.external_session_id.as_deref(),
+        Some("gemini-session-new")
+    );
+    assert_eq!(
+        runtime_state
+            .lock()
+            .expect("ACP runtime state mutex poisoned")
+            .current_session_id
+            .as_deref(),
+        Some("gemini-session-new")
+    );
+}
+
 // Tests that shared Codex global notices update Codex state.
 #[test]
 fn shared_codex_global_notices_update_codex_state() {
@@ -5177,9 +6506,7 @@ async fn disable_socket_inheritance_clears_windows_inherit_flag() {
         .expect("test listener should bind");
     let raw = listener.as_raw_socket() as *mut std::ffi::c_void;
 
-    let inherited = unsafe {
-        SetHandleInformation(raw, HANDLE_FLAG_INHERIT, HANDLE_FLAG_INHERIT)
-    };
+    let inherited = unsafe { SetHandleInformation(raw, HANDLE_FLAG_INHERIT, HANDLE_FLAG_INHERIT) };
     assert_ne!(
         inherited,
         0,
@@ -5552,6 +6879,80 @@ async fn workspace_layout_list_route_orders_workspaces_by_updated_at_desc() {
     let _ = fs::remove_file(state.persistence_path.as_path());
 }
 
+// Tests that delete workspace layout route removes a saved workspace and returns the remaining summaries.
+#[tokio::test]
+async fn delete_workspace_layout_route_removes_saved_workspace() {
+    let state = test_app_state();
+    let app = app_router(state.clone());
+    let layout_body = serde_json::to_vec(&json!({
+        "controlPanelSide": "left",
+        "workspace": { "panes": [] }
+    }))
+    .expect("workspace layout body should serialize");
+
+    for workspace_id in ["workspace-1", "workspace-2"] {
+        let (status, _response): (StatusCode, WorkspaceLayoutResponse) = request_json(
+            &app,
+            Request::builder()
+                .method("PUT")
+                .uri(format!("/api/workspaces/{workspace_id}"))
+                .header("content-type", "application/json")
+                .body(Body::from(layout_body.clone()))
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+    }
+
+    let (delete_status, delete_response): (StatusCode, WorkspaceLayoutsResponse) = request_json(
+        &app,
+        Request::builder()
+            .method("DELETE")
+            .uri("/api/workspaces/workspace-1")
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
+
+    assert_eq!(delete_status, StatusCode::OK);
+    assert_eq!(delete_response.workspaces.len(), 1);
+    assert_eq!(delete_response.workspaces[0].id, "workspace-2");
+
+    let (get_status, get_error): (StatusCode, ErrorResponse) = request_json(
+        &app,
+        Request::builder()
+            .method("GET")
+            .uri("/api/workspaces/workspace-1")
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
+
+    assert_eq!(get_status, StatusCode::NOT_FOUND);
+    assert_eq!(get_error.error, "workspace layout not found");
+    let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
+// Tests that delete workspace layout route returns not found for missing IDs.
+#[tokio::test]
+async fn delete_workspace_layout_route_returns_not_found_for_missing_id() {
+    let state = test_app_state();
+    let app = app_router(state.clone());
+    let (status, error): (StatusCode, ErrorResponse) = request_json(
+        &app,
+        Request::builder()
+            .method("DELETE")
+            .uri("/api/workspaces/missing-workspace")
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    assert_eq!(error.error, "workspace layout not found");
+    let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
 // Tests that get workspace layout route returns not found for missing IDs.
 #[tokio::test]
 async fn get_workspace_layout_route_returns_not_found_for_missing_id() {
@@ -5654,6 +7055,79 @@ async fn put_workspace_layout_route_rejects_malformed_payloads() {
     let invalid_enum_text = String::from_utf8(invalid_enum_body.to_vec())
         .expect("invalid-enum rejection body should be UTF-8");
     assert!(invalid_enum_text.contains("unknown variant"));
+    let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
+// Tests that updating an existing workspace layout advances the global revision and publishes state.
+#[test]
+fn updating_existing_workspace_layout_advances_global_revision_and_publishes_state() {
+    let state = test_app_state();
+    state
+        .put_workspace_layout(
+            "workspace-1",
+            PutWorkspaceLayoutRequest {
+                control_panel_side: WorkspaceControlPanelSide::Left,
+                theme_id: None,
+                style_id: None,
+                font_size_px: None,
+                editor_font_size_px: None,
+                density_percent: None,
+                workspace: json!({ "panes": [] }),
+            },
+        )
+        .expect("initial workspace layout should save");
+
+    let revision_after_create = state.inner.lock().expect("state mutex poisoned").revision;
+    let mut state_events = state.subscribe_events();
+    let updated = state
+        .put_workspace_layout(
+            "workspace-1",
+            PutWorkspaceLayoutRequest {
+                control_panel_side: WorkspaceControlPanelSide::Right,
+                theme_id: Some("ink".to_owned()),
+                style_id: None,
+                font_size_px: None,
+                editor_font_size_px: None,
+                density_percent: None,
+                workspace: json!({
+                    "panes": [
+                        {
+                            "id": "pane-1",
+                            "tabs": []
+                        }
+                    ]
+                }),
+            },
+        )
+        .expect("updated workspace layout should save");
+
+    let published_revision = state.inner.lock().expect("state mutex poisoned").revision;
+    assert_eq!(updated.layout.revision, 2);
+    assert_eq!(published_revision, revision_after_create + 1);
+
+    let published_state: StateResponse = serde_json::from_str(
+        &state_events
+            .try_recv()
+            .expect("workspace update should publish a state snapshot"),
+    )
+    .expect("state event should decode");
+    assert_eq!(published_state.revision, published_revision);
+    assert_eq!(published_state.workspaces.len(), 1);
+    assert_eq!(published_state.workspaces[0].id, "workspace-1");
+    assert_eq!(published_state.workspaces[0].revision, 2);
+    assert_eq!(
+        published_state.workspaces[0].control_panel_side,
+        WorkspaceControlPanelSide::Right
+    );
+    assert_eq!(
+        state
+            .get_workspace_layout("workspace-1")
+            .expect("saved workspace layout should be readable")
+            .layout
+            .revision,
+        2
+    );
+
     let _ = fs::remove_file(state.persistence_path.as_path());
 }
 
@@ -6261,6 +7735,118 @@ async fn state_events_route_streams_initial_state_and_live_deltas() {
     assert_eq!(delta["message"]["text"], "Live delta");
     let _ = fs::remove_file(state.persistence_path.as_path());
 }
+
+// Tests that workspace layout mutations publish live SSE state updates with saved summaries.
+#[tokio::test]
+async fn state_events_route_streams_workspace_layout_summary_updates() {
+    let state = test_app_state();
+    let app = app_router(state.clone());
+    let response = request_response(
+        &app,
+        Request::builder()
+            .method("GET")
+            .uri("/api/events")
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let mut body = Box::pin(response.into_body().into_data_stream());
+
+    let initial_event = next_sse_event(&mut body).await;
+    let (initial_name, initial_data) = parse_sse_event(&initial_event);
+    assert_eq!(initial_name, "state");
+    let initial_state: StateResponse =
+        serde_json::from_str(&initial_data).expect("initial SSE payload should parse");
+    assert!(initial_state.workspaces.is_empty());
+
+    let create_layout_body = serde_json::to_vec(&json!({
+        "controlPanelSide": "left",
+        "workspace": { "panes": [] }
+    }))
+    .expect("workspace layout body should serialize");
+    let (save_status, _save_response): (StatusCode, WorkspaceLayoutResponse) = request_json(
+        &app,
+        Request::builder()
+            .method("PUT")
+            .uri("/api/workspaces/workspace-live")
+            .header("content-type", "application/json")
+            .body(Body::from(create_layout_body))
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(save_status, StatusCode::OK);
+
+    let saved_event = next_sse_event(&mut body).await;
+    let (saved_name, saved_data) = parse_sse_event(&saved_event);
+    assert_eq!(saved_name, "state");
+    let saved_state: StateResponse =
+        serde_json::from_str(&saved_data).expect("saved SSE payload should parse");
+    assert_eq!(saved_state.workspaces.len(), 1);
+    assert_eq!(saved_state.workspaces[0].id, "workspace-live");
+    assert_eq!(saved_state.workspaces[0].revision, 1);
+    assert_eq!(
+        saved_state.workspaces[0].control_panel_side,
+        WorkspaceControlPanelSide::Left
+    );
+
+    let update_layout_body = serde_json::to_vec(&json!({
+        "controlPanelSide": "right",
+        "workspace": {
+            "panes": [
+                {
+                    "id": "pane-1",
+                    "tabs": []
+                }
+            ]
+        }
+    }))
+    .expect("updated workspace layout body should serialize");
+    let (update_status, _update_response): (StatusCode, WorkspaceLayoutResponse) = request_json(
+        &app,
+        Request::builder()
+            .method("PUT")
+            .uri("/api/workspaces/workspace-live")
+            .header("content-type", "application/json")
+            .body(Body::from(update_layout_body))
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(update_status, StatusCode::OK);
+
+    let updated_event = next_sse_event(&mut body).await;
+    let (updated_name, updated_data) = parse_sse_event(&updated_event);
+    assert_eq!(updated_name, "state");
+    let updated_state: StateResponse =
+        serde_json::from_str(&updated_data).expect("updated SSE payload should parse");
+    assert_eq!(updated_state.workspaces.len(), 1);
+    assert_eq!(updated_state.workspaces[0].id, "workspace-live");
+    assert_eq!(updated_state.workspaces[0].revision, 2);
+    assert_eq!(
+        updated_state.workspaces[0].control_panel_side,
+        WorkspaceControlPanelSide::Right
+    );
+
+    let (delete_status, _delete_response): (StatusCode, WorkspaceLayoutsResponse) = request_json(
+        &app,
+        Request::builder()
+            .method("DELETE")
+            .uri("/api/workspaces/workspace-live")
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(delete_status, StatusCode::OK);
+
+    let deleted_event = next_sse_event(&mut body).await;
+    let (deleted_name, deleted_data) = parse_sse_event(&deleted_event);
+    assert_eq!(deleted_name, "state");
+    let deleted_state: StateResponse =
+        serde_json::from_str(&deleted_data).expect("deleted SSE payload should parse");
+    assert!(deleted_state.workspaces.is_empty());
+    let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
 // Tests that state events route streams orchestrator creation state and live orchestrator deltas.
 #[tokio::test]
 async fn state_events_route_streams_orchestrator_creation_state_and_live_orchestrator_deltas() {
@@ -6299,6 +7885,7 @@ async fn state_events_route_streams_orchestrator_creation_state_and_live_orchest
         .create_orchestrator_instance(CreateOrchestratorInstanceRequest {
             template_id: template.id,
             project_id: Some(project_id),
+            template: None,
         })
         .expect("orchestrator instance should be created");
     let instance_id = created.orchestrator.id.clone();
@@ -8911,6 +10498,1026 @@ fn shared_codex_agent_message_event_after_turn_completed_is_ignored() {
     assert!(session.messages.is_empty());
 }
 
+// Tests that shared Codex app-server item completed notification after turn completion is ignored.
+#[test]
+fn shared_codex_app_server_item_completed_after_turn_completed_is_ignored() {
+    let state = test_app_state();
+    let session_id = test_session_id(&state, Agent::Codex);
+    let (runtime, _input_rx, process) =
+        test_shared_codex_runtime("shared-codex-app-server-item-completed-after-turn-completed");
+
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(&session_id)
+            .expect("Codex session should exist");
+        inner.sessions[index].runtime = SessionRuntime::Codex(CodexRuntimeHandle {
+            runtime_id: runtime.runtime_id.clone(),
+            input_tx: runtime.input_tx.clone(),
+            process,
+            shared_session: Some(SharedCodexSessionHandle {
+                runtime: runtime.clone(),
+                session_id: session_id.clone(),
+            }),
+        });
+        inner.sessions[index].session.status = SessionStatus::Active;
+    }
+
+    runtime
+        .sessions
+        .lock()
+        .expect("shared Codex session mutex poisoned")
+        .insert(
+            session_id.clone(),
+            SharedCodexSessionState {
+                thread_id: Some("conversation-123".to_owned()),
+                ..SharedCodexSessionState::default()
+            },
+        );
+    runtime
+        .thread_sessions
+        .lock()
+        .expect("shared Codex thread mutex poisoned")
+        .insert("conversation-123".to_owned(), session_id.clone());
+
+    let pending_requests = Arc::new(Mutex::new(HashMap::new()));
+    let turn_started = json!({
+        "method": "turn/started",
+        "params": {
+            "threadId": "conversation-123",
+            "turn": {
+                "id": "turn-finished"
+            }
+        }
+    });
+    let turn_completed = json!({
+        "method": "turn/completed",
+        "params": {
+            "threadId": "conversation-123",
+            "turn": {
+                "id": "turn-finished",
+                "error": null
+            }
+        }
+    });
+    let late_item = json!({
+        "method": "item/completed",
+        "params": {
+            "threadId": "conversation-123",
+            "item": {
+                "type": "commandExecution",
+                "command": "pwd",
+                "aggregatedOutput": "C:/github/Personal/TermAl",
+                "status": "completed",
+                "exitCode": 0
+            }
+        }
+    });
+
+    handle_shared_codex_app_server_message(
+        &turn_started,
+        &state,
+        &runtime.runtime_id,
+        &pending_requests,
+        &runtime.sessions,
+        &runtime.thread_sessions,
+    )
+    .unwrap();
+    handle_shared_codex_app_server_message(
+        &turn_completed,
+        &state,
+        &runtime.runtime_id,
+        &pending_requests,
+        &runtime.sessions,
+        &runtime.thread_sessions,
+    )
+    .unwrap();
+    handle_shared_codex_app_server_message(
+        &late_item,
+        &state,
+        &runtime.runtime_id,
+        &pending_requests,
+        &runtime.sessions,
+        &runtime.thread_sessions,
+    )
+    .unwrap();
+
+    let snapshot = state.snapshot();
+    let session = snapshot
+        .sessions
+        .iter()
+        .find(|session| session.id == session_id)
+        .expect("updated session should be present");
+
+    assert!(session.messages.is_empty());
+}
+
+// Tests that shared Codex turn start clears command recorder keys for a new prompt.
+#[test]
+fn shared_codex_turn_started_clears_command_recorder_keys_for_new_prompt() {
+    let state = test_app_state();
+    let session_id = test_session_id(&state, Agent::Codex);
+    let (runtime, _input_rx, process) =
+        test_shared_codex_runtime("shared-codex-turn-start-clears-command-keys");
+
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(&session_id)
+            .expect("Codex session should exist");
+        inner.sessions[index].runtime = SessionRuntime::Codex(CodexRuntimeHandle {
+            runtime_id: runtime.runtime_id.clone(),
+            input_tx: runtime.input_tx.clone(),
+            process,
+            shared_session: Some(SharedCodexSessionHandle {
+                runtime: runtime.clone(),
+                session_id: session_id.clone(),
+            }),
+        });
+        inner.sessions[index].session.status = SessionStatus::Active;
+    }
+
+    runtime
+        .sessions
+        .lock()
+        .expect("shared Codex session mutex poisoned")
+        .insert(
+            session_id.clone(),
+            SharedCodexSessionState {
+                thread_id: Some("conversation-123".to_owned()),
+                ..SharedCodexSessionState::default()
+            },
+        );
+    runtime
+        .thread_sessions
+        .lock()
+        .expect("shared Codex thread mutex poisoned")
+        .insert("conversation-123".to_owned(), session_id.clone());
+
+    let pending_requests = Arc::new(Mutex::new(HashMap::new()));
+    let turn_started_one = json!({
+        "method": "turn/started",
+        "params": {
+            "threadId": "conversation-123",
+            "turn": {
+                "id": "turn-1"
+            }
+        }
+    });
+    let item_started_one = json!({
+        "method": "item/started",
+        "params": {
+            "threadId": "conversation-123",
+            "item": {
+                "type": "webSearch",
+                "query": "rust anyhow",
+                "action": {
+                    "type": "search",
+                    "queries": ["rust anyhow"]
+                }
+            }
+        }
+    });
+    let item_completed_one = json!({
+        "method": "item/completed",
+        "params": {
+            "threadId": "conversation-123",
+            "item": {
+                "type": "webSearch",
+                "query": "rust anyhow",
+                "action": {
+                    "type": "search",
+                    "queries": ["rust anyhow"]
+                }
+            }
+        }
+    });
+    let turn_completed_one = json!({
+        "method": "turn/completed",
+        "params": {
+            "threadId": "conversation-123",
+            "turn": {
+                "id": "turn-1",
+                "error": null
+            }
+        }
+    });
+    let turn_started_two = json!({
+        "method": "turn/started",
+        "params": {
+            "threadId": "conversation-123",
+            "turn": {
+                "id": "turn-2"
+            }
+        }
+    });
+    let item_started_two = json!({
+        "method": "item/started",
+        "params": {
+            "threadId": "conversation-123",
+            "item": {
+                "type": "webSearch",
+                "query": "serde_json value",
+                "action": {
+                    "type": "search",
+                    "queries": ["serde_json value"]
+                }
+            }
+        }
+    });
+    let item_completed_two = json!({
+        "method": "item/completed",
+        "params": {
+            "threadId": "conversation-123",
+            "item": {
+                "type": "webSearch",
+                "query": "serde_json value",
+                "action": {
+                    "type": "search",
+                    "queries": ["serde_json value"]
+                }
+            }
+        }
+    });
+
+    for message in [
+        &turn_started_one,
+        &item_started_one,
+        &item_completed_one,
+        &turn_completed_one,
+        &turn_started_two,
+        &item_started_two,
+        &item_completed_two,
+    ] {
+        handle_shared_codex_app_server_message(
+            message,
+            &state,
+            &runtime.runtime_id,
+            &pending_requests,
+            &runtime.sessions,
+            &runtime.thread_sessions,
+        )
+        .unwrap();
+    }
+
+    let snapshot = state.snapshot();
+    let session = snapshot
+        .sessions
+        .iter()
+        .find(|session| session.id == session_id)
+        .expect("updated session should be present");
+    let command_messages = session
+        .messages
+        .iter()
+        .filter_map(|message| match message {
+            Message::Command {
+                command,
+                output,
+                status,
+                ..
+            } => Some((command.clone(), output.clone(), *status)),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+
+    assert_eq!(
+        command_messages,
+        vec![
+            (
+                "Web search: rust anyhow".to_owned(),
+                "rust anyhow".to_owned(),
+                CommandStatus::Success,
+            ),
+            (
+                "Web search: serde_json value".to_owned(),
+                "serde_json value".to_owned(),
+                CommandStatus::Success,
+            ),
+        ]
+    );
+}
+
+// Tests that shared Codex turn-completed errors clear recorder state before the next turn.
+#[test]
+fn shared_codex_turn_completed_error_clears_recorder_state() {
+    let state = test_app_state();
+    let session_id = test_session_id(&state, Agent::Codex);
+    let (runtime, _input_rx, process) =
+        test_shared_codex_runtime("shared-codex-turn-completed-error-clears-recorder");
+
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(&session_id)
+            .expect("Codex session should exist");
+        inner.sessions[index].runtime = SessionRuntime::Codex(CodexRuntimeHandle {
+            runtime_id: runtime.runtime_id.clone(),
+            input_tx: runtime.input_tx.clone(),
+            process,
+            shared_session: Some(SharedCodexSessionHandle {
+                runtime: runtime.clone(),
+                session_id: session_id.clone(),
+            }),
+        });
+        inner.sessions[index].session.status = SessionStatus::Active;
+    }
+
+    runtime
+        .sessions
+        .lock()
+        .expect("shared Codex session mutex poisoned")
+        .insert(
+            session_id.clone(),
+            SharedCodexSessionState {
+                recorder: SessionRecorderState {
+                    command_messages: HashMap::from([(
+                        "search".to_owned(),
+                        "command-message".to_owned(),
+                    )]),
+                    parallel_agents_messages: HashMap::from([(
+                        "parallel".to_owned(),
+                        "parallel-message".to_owned(),
+                    )]),
+                    streaming_text_message_id: Some("stream-message".to_owned()),
+                },
+                thread_id: Some("conversation-123".to_owned()),
+                turn_id: Some("turn-1".to_owned()),
+                turn_started: true,
+                turn_state: CodexTurnState {
+                    current_agent_message_id: Some("stream-message".to_owned()),
+                    assistant_output_started: true,
+                    ..CodexTurnState::default()
+                },
+            },
+        );
+    runtime
+        .thread_sessions
+        .lock()
+        .expect("shared Codex thread mutex poisoned")
+        .insert("conversation-123".to_owned(), session_id.clone());
+
+    let pending_requests = Arc::new(Mutex::new(HashMap::new()));
+    let turn_completed = json!({
+        "method": "turn/completed",
+        "params": {
+            "threadId": "conversation-123",
+            "turn": {
+                "id": "turn-1",
+                "error": {
+                    "message": "Turn failed"
+                }
+            }
+        }
+    });
+
+    handle_shared_codex_app_server_message(
+        &turn_completed,
+        &state,
+        &runtime.runtime_id,
+        &pending_requests,
+        &runtime.sessions,
+        &runtime.thread_sessions,
+    )
+    .expect("turn/completed error should be handled");
+
+    let sessions = runtime
+        .sessions
+        .lock()
+        .expect("shared Codex session mutex poisoned");
+    let session_state = sessions
+        .get(&session_id)
+        .expect("shared Codex session state should exist");
+    assert!(session_state.recorder.command_messages.is_empty());
+    assert!(session_state.recorder.parallel_agents_messages.is_empty());
+    assert_eq!(session_state.recorder.streaming_text_message_id, None);
+    assert_eq!(session_state.turn_id, None);
+    assert!(!session_state.turn_started);
+    assert_eq!(session_state.turn_state.current_agent_message_id, None);
+    assert!(!session_state.turn_state.assistant_output_started);
+    drop(sessions);
+
+    let snapshot = state.snapshot();
+    let session = snapshot
+        .sessions
+        .iter()
+        .find(|session| session.id == session_id)
+        .expect("updated session should be present");
+    assert_eq!(session.status, SessionStatus::Error);
+}
+
+// Tests that shared Codex error notifications clear recorder state before the next turn.
+#[test]
+fn shared_codex_error_notification_clears_recorder_state() {
+    let state = test_app_state();
+    let session_id = test_session_id(&state, Agent::Codex);
+    let (runtime, _input_rx, process) =
+        test_shared_codex_runtime("shared-codex-error-notification-clears-recorder");
+
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(&session_id)
+            .expect("Codex session should exist");
+        inner.sessions[index].runtime = SessionRuntime::Codex(CodexRuntimeHandle {
+            runtime_id: runtime.runtime_id.clone(),
+            input_tx: runtime.input_tx.clone(),
+            process,
+            shared_session: Some(SharedCodexSessionHandle {
+                runtime: runtime.clone(),
+                session_id: session_id.clone(),
+            }),
+        });
+        inner.sessions[index].session.status = SessionStatus::Active;
+    }
+
+    runtime
+        .sessions
+        .lock()
+        .expect("shared Codex session mutex poisoned")
+        .insert(
+            session_id.clone(),
+            SharedCodexSessionState {
+                recorder: SessionRecorderState {
+                    command_messages: HashMap::from([(
+                        "search".to_owned(),
+                        "command-message".to_owned(),
+                    )]),
+                    parallel_agents_messages: HashMap::from([(
+                        "parallel".to_owned(),
+                        "parallel-message".to_owned(),
+                    )]),
+                    streaming_text_message_id: Some("stream-message".to_owned()),
+                },
+                thread_id: Some("conversation-123".to_owned()),
+                turn_id: Some("turn-1".to_owned()),
+                turn_started: true,
+                turn_state: CodexTurnState {
+                    current_agent_message_id: Some("stream-message".to_owned()),
+                    assistant_output_started: true,
+                    ..CodexTurnState::default()
+                },
+            },
+        );
+    runtime
+        .thread_sessions
+        .lock()
+        .expect("shared Codex thread mutex poisoned")
+        .insert("conversation-123".to_owned(), session_id.clone());
+
+    let pending_requests = Arc::new(Mutex::new(HashMap::new()));
+    let error_notice = json!({
+        "method": "error",
+        "params": {
+            "threadId": "conversation-123",
+            "turnId": "turn-1",
+            "message": "Codex runtime failure"
+        }
+    });
+
+    handle_shared_codex_app_server_message(
+        &error_notice,
+        &state,
+        &runtime.runtime_id,
+        &pending_requests,
+        &runtime.sessions,
+        &runtime.thread_sessions,
+    )
+    .expect("error notification should be handled");
+
+    let sessions = runtime
+        .sessions
+        .lock()
+        .expect("shared Codex session mutex poisoned");
+    let session_state = sessions
+        .get(&session_id)
+        .expect("shared Codex session state should exist");
+    assert!(session_state.recorder.command_messages.is_empty());
+    assert!(session_state.recorder.parallel_agents_messages.is_empty());
+    assert_eq!(session_state.recorder.streaming_text_message_id, None);
+    assert_eq!(session_state.turn_id, None);
+    assert!(!session_state.turn_started);
+    assert_eq!(session_state.turn_state.current_agent_message_id, None);
+    assert!(!session_state.turn_state.assistant_output_started);
+    drop(sessions);
+
+    let snapshot = state.snapshot();
+    let session = snapshot
+        .sessions
+        .iter()
+        .find(|session| session.id == session_id)
+        .expect("updated session should be present");
+    assert_eq!(session.status, SessionStatus::Error);
+}
+
+// Tests that shared Codex prompt dispatch clears stale command state before notifications arrive.
+#[test]
+fn shared_codex_prompt_dispatch_clears_stale_command_state_before_turn_started_notification() {
+    let state = test_app_state();
+    let session_id = test_session_id(&state, Agent::Codex);
+    let (runtime, _input_rx, process) =
+        test_shared_codex_runtime("shared-codex-prompt-dispatch-clears-stale-state");
+
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(&session_id)
+            .expect("Codex session should exist");
+        inner.sessions[index].runtime = SessionRuntime::Codex(CodexRuntimeHandle {
+            runtime_id: runtime.runtime_id.clone(),
+            input_tx: runtime.input_tx.clone(),
+            process,
+            shared_session: Some(SharedCodexSessionHandle {
+                runtime: runtime.clone(),
+                session_id: session_id.clone(),
+            }),
+        });
+        inner.sessions[index].session.status = SessionStatus::Active;
+    }
+
+    state
+        .upsert_command_message(
+            &session_id,
+            "old-command-message",
+            "Web search: previous turn",
+            "previous turn",
+            CommandStatus::Success,
+        )
+        .unwrap();
+
+    runtime
+        .sessions
+        .lock()
+        .expect("shared Codex session mutex poisoned")
+        .insert(
+            session_id.clone(),
+            SharedCodexSessionState {
+                recorder: SessionRecorderState {
+                    command_messages: HashMap::from([(
+                        "webSearch".to_owned(),
+                        "old-command-message".to_owned(),
+                    )]),
+                    parallel_agents_messages: HashMap::new(),
+                    streaming_text_message_id: Some("stale-stream".to_owned()),
+                },
+                thread_id: Some("conversation-123".to_owned()),
+                turn_id: Some("turn-old".to_owned()),
+                ..SharedCodexSessionState::default()
+            },
+        );
+    runtime
+        .thread_sessions
+        .lock()
+        .expect("shared Codex thread mutex poisoned")
+        .insert("conversation-123".to_owned(), session_id.clone());
+
+    let pending_requests: CodexPendingRequestMap = Arc::new(Mutex::new(HashMap::new()));
+    let pending_requests_for_response = pending_requests.clone();
+    let response_thread = std::thread::spawn(move || {
+        for _ in 0..100 {
+            let sender = {
+                let mut pending = pending_requests_for_response
+                    .lock()
+                    .expect("Codex pending requests mutex poisoned");
+                if let Some(request_id) = pending.keys().next().cloned() {
+                    pending.remove(&request_id)
+                } else {
+                    None
+                }
+            };
+            if let Some(sender) = sender {
+                let _ = sender.send(Ok(json!({
+                    "turn": {
+                        "id": "turn-new"
+                    }
+                })));
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        panic!("turn/start request should be pending");
+    });
+
+    let mut writer = Vec::new();
+    handle_shared_codex_prompt_command(
+        &mut writer,
+        &pending_requests,
+        &state,
+        &runtime.sessions,
+        &runtime.thread_sessions,
+        &session_id,
+        CodexPromptCommand {
+            approval_policy: CodexApprovalPolicy::Never,
+            attachments: Vec::new(),
+            cwd: "/tmp".to_owned(),
+            model: "gpt-5.4".to_owned(),
+            prompt: "check the repo".to_owned(),
+            reasoning_effort: CodexReasoningEffort::Medium,
+            resume_thread_id: None,
+            sandbox_mode: CodexSandboxMode::WorkspaceWrite,
+        },
+    )
+    .unwrap();
+    response_thread
+        .join()
+        .expect("turn/start response thread should join cleanly");
+
+    let item_started = json!({
+        "method": "item/started",
+        "params": {
+            "threadId": "conversation-123",
+            "item": {
+                "type": "webSearch",
+                "query": "serde_json value",
+                "action": {
+                    "type": "search",
+                    "queries": ["serde_json value"]
+                }
+            }
+        }
+    });
+    let turn_started = json!({
+        "method": "turn/started",
+        "params": {
+            "threadId": "conversation-123",
+            "turn": {
+                "id": "turn-new"
+            }
+        }
+    });
+    let item_completed = json!({
+        "method": "item/completed",
+        "params": {
+            "threadId": "conversation-123",
+            "item": {
+                "type": "webSearch",
+                "query": "serde_json value",
+                "action": {
+                    "type": "search",
+                    "queries": ["serde_json value"]
+                }
+            }
+        }
+    });
+
+    handle_shared_codex_app_server_message(
+        &item_started,
+        &state,
+        &runtime.runtime_id,
+        &pending_requests,
+        &runtime.sessions,
+        &runtime.thread_sessions,
+    )
+    .unwrap();
+    handle_shared_codex_app_server_message(
+        &turn_started,
+        &state,
+        &runtime.runtime_id,
+        &pending_requests,
+        &runtime.sessions,
+        &runtime.thread_sessions,
+    )
+    .unwrap();
+    handle_shared_codex_app_server_message(
+        &item_completed,
+        &state,
+        &runtime.runtime_id,
+        &pending_requests,
+        &runtime.sessions,
+        &runtime.thread_sessions,
+    )
+    .unwrap();
+
+    let snapshot = state.snapshot();
+    let session = snapshot
+        .sessions
+        .iter()
+        .find(|session| session.id == session_id)
+        .expect("updated session should be present");
+    let command_messages = session
+        .messages
+        .iter()
+        .filter_map(|message| match message {
+            Message::Command {
+                command,
+                output,
+                status,
+                ..
+            } => Some((command.clone(), output.clone(), *status)),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+
+    assert_eq!(
+        command_messages,
+        vec![
+            (
+                "Web search: previous turn".to_owned(),
+                "previous turn".to_owned(),
+                CommandStatus::Success,
+            ),
+            (
+                "Web search: serde_json value".to_owned(),
+                "serde_json value".to_owned(),
+                CommandStatus::Success,
+            ),
+        ]
+    );
+}
+
+// Tests that shared Codex prompt JSON-RPC errors fail the turn without tearing down the runtime.
+#[test]
+fn shared_codex_prompt_json_rpc_errors_fail_the_turn_without_tearing_down_runtime() {
+    let state = test_app_state();
+    let session_id = test_session_id(&state, Agent::Codex);
+    let (runtime, _input_rx, process) =
+        test_shared_codex_runtime("shared-codex-prompt-jsonrpc-error");
+    let runtime_token = RuntimeToken::Codex(runtime.runtime_id.clone());
+
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(&session_id)
+            .expect("Codex session should exist");
+        inner.sessions[index].runtime = SessionRuntime::Codex(CodexRuntimeHandle {
+            runtime_id: runtime.runtime_id.clone(),
+            input_tx: runtime.input_tx.clone(),
+            process,
+            shared_session: Some(SharedCodexSessionHandle {
+                runtime: runtime.clone(),
+                session_id: session_id.clone(),
+            }),
+        });
+        inner.sessions[index].session.status = SessionStatus::Active;
+        inner.sessions[index].session.preview = "Waiting for Codex".to_owned();
+    }
+
+    handle_shared_codex_prompt_command_result(
+        &state,
+        &session_id,
+        &runtime_token,
+        Err(anyhow::Error::new(CodexResponseError::JsonRpc(
+            "turn/start rejected the request".to_owned(),
+        ))),
+    )
+    .expect("JSON-RPC prompt errors should be recorded as turn failures");
+
+    let snapshot = state.snapshot();
+    let session = snapshot
+        .sessions
+        .iter()
+        .find(|session| session.id == session_id)
+        .expect("updated session should be present");
+    assert_eq!(session.status, SessionStatus::Error);
+    assert_eq!(session.preview, "turn/start rejected the request");
+    assert!(matches!(
+        session.messages.last(),
+        Some(Message::Text { text, .. })
+            if text == "Turn failed: turn/start rejected the request"
+    ));
+
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    let record = inner
+        .sessions
+        .iter()
+        .find(|record| record.session.id == session_id)
+        .expect("Codex session should exist");
+    assert!(matches!(record.runtime, SessionRuntime::Codex(_)));
+}
+
+// Tests that shared Codex app-server agent deltas wait for turn started.
+#[test]
+fn shared_codex_app_server_agent_message_delta_waits_for_turn_started() {
+    let state = test_app_state();
+    let session_id = test_session_id(&state, Agent::Codex);
+    let (runtime, _input_rx, process) =
+        test_shared_codex_runtime("shared-codex-app-server-agent-delta-turn-started");
+
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(&session_id)
+            .expect("Codex session should exist");
+        inner.sessions[index].runtime = SessionRuntime::Codex(CodexRuntimeHandle {
+            runtime_id: runtime.runtime_id.clone(),
+            input_tx: runtime.input_tx.clone(),
+            process,
+            shared_session: Some(SharedCodexSessionHandle {
+                runtime: runtime.clone(),
+                session_id: session_id.clone(),
+            }),
+        });
+        inner.sessions[index].session.status = SessionStatus::Active;
+    }
+
+    runtime
+        .sessions
+        .lock()
+        .expect("shared Codex session mutex poisoned")
+        .insert(
+            session_id.clone(),
+            SharedCodexSessionState {
+                thread_id: Some("conversation-123".to_owned()),
+                turn_id: Some("turn-current".to_owned()),
+                turn_started: false,
+                ..SharedCodexSessionState::default()
+            },
+        );
+    runtime
+        .thread_sessions
+        .lock()
+        .expect("shared Codex thread mutex poisoned")
+        .insert("conversation-123".to_owned(), session_id.clone());
+
+    let pending_requests: CodexPendingRequestMap = Arc::new(Mutex::new(HashMap::new()));
+    let delta = json!({
+        "method": "item/agentMessage/delta",
+        "params": {
+            "threadId": "conversation-123",
+            "itemId": "msg-1",
+            "delta": "Hello"
+        }
+    });
+    let turn_started = json!({
+        "method": "turn/started",
+        "params": {
+            "threadId": "conversation-123",
+            "turn": {
+                "id": "turn-current"
+            }
+        }
+    });
+
+    handle_shared_codex_app_server_message(
+        &delta,
+        &state,
+        &runtime.runtime_id,
+        &pending_requests,
+        &runtime.sessions,
+        &runtime.thread_sessions,
+    )
+    .unwrap();
+
+    let snapshot = state.snapshot();
+    let session = snapshot
+        .sessions
+        .iter()
+        .find(|session| session.id == session_id)
+        .expect("updated session should be present");
+    assert!(session.messages.is_empty());
+
+    handle_shared_codex_app_server_message(
+        &turn_started,
+        &state,
+        &runtime.runtime_id,
+        &pending_requests,
+        &runtime.sessions,
+        &runtime.thread_sessions,
+    )
+    .unwrap();
+    handle_shared_codex_app_server_message(
+        &delta,
+        &state,
+        &runtime.runtime_id,
+        &pending_requests,
+        &runtime.sessions,
+        &runtime.thread_sessions,
+    )
+    .unwrap();
+
+    let snapshot = state.snapshot();
+    let session = snapshot
+        .sessions
+        .iter()
+        .find(|session| session.id == session_id)
+        .expect("updated session should be present");
+    assert_eq!(session.preview, "Hello");
+    assert!(matches!(
+        session.messages.last(),
+        Some(Message::Text { text, .. }) if text == "Hello"
+    ));
+}
+
+// Tests that shared Codex app-server requests wait for turn started.
+#[test]
+fn shared_codex_app_server_request_waits_for_turn_started() {
+    let state = test_app_state();
+    let session_id = test_session_id(&state, Agent::Codex);
+    let (runtime, _input_rx, process) =
+        test_shared_codex_runtime("shared-codex-app-server-request-turn-started");
+
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(&session_id)
+            .expect("Codex session should exist");
+        inner.sessions[index].runtime = SessionRuntime::Codex(CodexRuntimeHandle {
+            runtime_id: runtime.runtime_id.clone(),
+            input_tx: runtime.input_tx.clone(),
+            process,
+            shared_session: Some(SharedCodexSessionHandle {
+                runtime: runtime.clone(),
+                session_id: session_id.clone(),
+            }),
+        });
+        inner.sessions[index].session.status = SessionStatus::Active;
+    }
+
+    runtime
+        .sessions
+        .lock()
+        .expect("shared Codex session mutex poisoned")
+        .insert(
+            session_id.clone(),
+            SharedCodexSessionState {
+                thread_id: Some("conversation-123".to_owned()),
+                turn_id: Some("turn-current".to_owned()),
+                turn_started: false,
+                ..SharedCodexSessionState::default()
+            },
+        );
+    runtime
+        .thread_sessions
+        .lock()
+        .expect("shared Codex thread mutex poisoned")
+        .insert("conversation-123".to_owned(), session_id.clone());
+
+    let pending_requests: CodexPendingRequestMap = Arc::new(Mutex::new(HashMap::new()));
+    let request = json!({
+        "id": "req-1",
+        "method": "item/tool/requestUserInput",
+        "params": {
+            "threadId": "conversation-123",
+            "questions": [
+                {
+                    "header": "Scope",
+                    "id": "scope",
+                    "question": "What should Codex review?"
+                }
+            ]
+        }
+    });
+    let turn_started = json!({
+        "method": "turn/started",
+        "params": {
+            "threadId": "conversation-123",
+            "turn": {
+                "id": "turn-current"
+            }
+        }
+    });
+
+    handle_shared_codex_app_server_message(
+        &request,
+        &state,
+        &runtime.runtime_id,
+        &pending_requests,
+        &runtime.sessions,
+        &runtime.thread_sessions,
+    )
+    .unwrap();
+
+    let snapshot = state.snapshot();
+    let session = snapshot
+        .sessions
+        .iter()
+        .find(|session| session.id == session_id)
+        .expect("updated session should be present");
+    assert!(session.messages.is_empty());
+
+    handle_shared_codex_app_server_message(
+        &turn_started,
+        &state,
+        &runtime.runtime_id,
+        &pending_requests,
+        &runtime.sessions,
+        &runtime.thread_sessions,
+    )
+    .unwrap();
+    handle_shared_codex_app_server_message(
+        &request,
+        &state,
+        &runtime.runtime_id,
+        &pending_requests,
+        &runtime.sessions,
+        &runtime.thread_sessions,
+    )
+    .unwrap();
+
+    let snapshot = state.snapshot();
+    let session = snapshot
+        .sessions
+        .iter()
+        .find(|session| session.id == session_id)
+        .expect("updated session should be present");
+    assert!(matches!(
+        session.messages.last(),
+        Some(Message::UserInputRequest { title, detail, state, .. })
+            if title == "Codex needs input"
+                && detail == "Codex requested additional input for \"Scope\"."
+                && *state == InteractionRequestState::Pending
+    ));
+}
+
 // Tests that Codex app server command approval request records pending approval.
 #[test]
 fn codex_app_server_command_approval_request_records_pending_approval() {
@@ -10626,6 +13233,98 @@ fn codex_thread_state_updates_are_suppressed_while_stop_is_in_progress() {
     let _ = fs::remove_file(state.persistence_path.as_path());
 }
 
+// Tests that shared Codex runtime exit clears state and kills the helper process.
+#[test]
+fn shared_codex_runtime_exit_clears_state_and_kills_process() {
+    let state = test_app_state();
+    let session_id = test_session_id(&state, Agent::Codex);
+    let process = Arc::new(SharedChild::new(test_sleep_child()).unwrap());
+    let (input_tx, _input_rx) = mpsc::channel();
+    let runtime = SharedCodexRuntime {
+        runtime_id: "shared-codex-timeout".to_owned(),
+        input_tx,
+        process: process.clone(),
+        sessions: Arc::new(Mutex::new(HashMap::new())),
+        thread_sessions: Arc::new(Mutex::new(HashMap::new())),
+    };
+    let handle = CodexRuntimeHandle {
+        runtime_id: runtime.runtime_id.clone(),
+        input_tx: runtime.input_tx.clone(),
+        process: process.clone(),
+        shared_session: Some(SharedCodexSessionHandle {
+            runtime: runtime.clone(),
+            session_id: session_id.clone(),
+        }),
+    };
+
+    {
+        let mut shared_runtime = state
+            .shared_codex_runtime
+            .lock()
+            .expect("shared Codex runtime mutex poisoned");
+        *shared_runtime = Some(runtime.clone());
+    }
+
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(&session_id)
+            .expect("Codex session should exist");
+        inner.sessions[index].runtime = SessionRuntime::Codex(handle);
+        inner.sessions[index].session.status = SessionStatus::Active;
+        inner.sessions[index].session.preview = "Streaming reply...".to_owned();
+    }
+
+    state
+        .handle_shared_codex_runtime_exit(
+            "shared-codex-timeout",
+            Some("failed to communicate with shared Codex app-server"),
+        )
+        .expect("shared Codex runtime exit should succeed");
+
+    let snapshot = state.snapshot();
+    let session = snapshot
+        .sessions
+        .iter()
+        .find(|session| session.id == session_id)
+        .expect("Codex session should remain present");
+    assert_eq!(session.status, SessionStatus::Error);
+    assert!(
+        session
+            .preview
+            .contains("failed to communicate with shared Codex app-server")
+    );
+
+    assert!(
+        state
+            .shared_codex_runtime
+            .lock()
+            .expect("shared Codex runtime mutex poisoned")
+            .is_none()
+    );
+
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    let record = inner
+        .sessions
+        .iter()
+        .find(|record| record.session.id == session_id)
+        .expect("Codex session should exist");
+    assert!(matches!(record.runtime, SessionRuntime::None));
+    drop(inner);
+
+    assert!(
+        wait_for_shared_child_exit_timeout(
+            &process,
+            Duration::from_secs(1),
+            "shared Codex runtime"
+        )
+        .expect("wait for shared Codex runtime should succeed")
+        .is_some()
+    );
+
+    let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
 // Tests that runtime exit is suppressed while stop is in progress.
 #[test]
 fn runtime_exit_is_suppressed_while_stop_is_in_progress() {
@@ -11979,6 +14678,7 @@ fn removing_remote_stops_event_bridge_worker_and_resets_started_guard() {
         process: Mutex::new(None),
         event_bridge_started: AtomicBool::new(false),
         event_bridge_shutdown: AtomicBool::new(false),
+        supports_inline_orchestrator_templates: Mutex::new(None),
     });
     state
         .remote_registry
@@ -12051,6 +14751,7 @@ fn remote_event_bridge_retry_clears_fallback_resync_tracking() {
         process: Mutex::new(None),
         event_bridge_started: AtomicBool::new(false),
         event_bridge_shutdown: AtomicBool::new(false),
+        supports_inline_orchestrator_templates: Mutex::new(None),
     });
     state
         .remote_registry
@@ -12072,6 +14773,76 @@ fn remote_event_bridge_retry_clears_fallback_resync_tracking() {
         assert!(
             std::time::Instant::now() < deadline,
             "event bridge retry should clear stale fallback tracking"
+        );
+        std::thread::sleep(Duration::from_millis(10));
+    }
+
+    connection.stop_event_bridge();
+
+    let shutdown_deadline = std::time::Instant::now() + Duration::from_secs(1);
+    loop {
+        if !connection.event_bridge_started.load(Ordering::SeqCst) {
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < shutdown_deadline,
+            "event bridge worker should stop after shutdown"
+        );
+        std::thread::sleep(Duration::from_millis(10));
+    }
+
+    let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
+// Tests that event-bridge retry boundaries also clear stale applied remote
+// revisions so restarted remotes can resume syncing below the old watermark.
+#[test]
+fn remote_event_bridge_retry_clears_applied_revision_tracking() {
+    let state = test_app_state();
+    let remote = RemoteConfig {
+        id: "ssh-lab".to_owned(),
+        name: "SSH Lab".to_owned(),
+        transport: RemoteTransport::Local,
+        enabled: true,
+        host: None,
+        port: None,
+        user: None,
+    };
+    let connection = Arc::new(RemoteConnection {
+        config: Mutex::new(remote.clone()),
+        forwarded_port: 47001,
+        process: Mutex::new(None),
+        event_bridge_started: AtomicBool::new(false),
+        event_bridge_shutdown: AtomicBool::new(false),
+        supports_inline_orchestrator_templates: Mutex::new(None),
+    });
+    state
+        .remote_registry
+        .connections
+        .lock()
+        .expect("remote registry mutex poisoned")
+        .insert(remote.id.clone(), connection.clone());
+
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        inner.note_remote_applied_revision(&remote.id, 4);
+        assert!(inner.should_skip_remote_applied_revision(&remote.id, 4));
+    }
+
+    connection.start_event_bridge(state.remote_registry.client.client().clone(), state.clone());
+
+    let deadline = std::time::Instant::now() + Duration::from_secs(1);
+    loop {
+        let still_skipping = {
+            let inner = state.inner.lock().expect("state mutex poisoned");
+            inner.should_skip_remote_applied_revision(&remote.id, 4)
+        };
+        if !still_skipping {
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "event bridge retry should clear stale applied revision tracking"
         );
         std::thread::sleep(Duration::from_millis(10));
     }
@@ -12263,6 +15034,7 @@ fn remote_mirrored_orchestrators_skip_pending_transition_dispatch() {
         .create_orchestrator_instance(CreateOrchestratorInstanceRequest {
             template_id: template.id,
             project_id: Some(project_id),
+            template: None,
         })
         .expect("orchestrator instance should be created")
         .orchestrator;
@@ -12336,6 +15108,7 @@ fn remote_mirrored_orchestrators_skip_deadlock_detection() {
         .create_orchestrator_instance(CreateOrchestratorInstanceRequest {
             template_id: template.id,
             project_id: Some(project_id),
+            template: None,
         })
         .expect("orchestrator instance should be created")
         .orchestrator;
@@ -12619,6 +15392,73 @@ fn remote_orchestrators_updated_delta_creates_missing_proxy_sessions_from_payloa
     let _ = fs::remove_file(state.persistence_path.as_path());
 }
 
+// Tests that stale remote snapshots cannot overwrite newer orchestrator bridge deltas.
+#[test]
+fn stale_remote_snapshot_does_not_overwrite_newer_orchestrator_delta_state() {
+    let state = test_app_state();
+    let remote = RemoteConfig {
+        id: "ssh-lab".to_owned(),
+        name: "SSH Lab".to_owned(),
+        transport: RemoteTransport::Local,
+        enabled: true,
+        host: None,
+        port: None,
+        user: None,
+    };
+    let local_project_id = create_test_remote_project(
+        &state,
+        &remote,
+        "/remote/repo",
+        "Remote Project",
+        "remote-project-1",
+    );
+
+    let remote_delta_state = sample_remote_orchestrator_state(
+        "remote-project-1",
+        "/remote/repo",
+        2,
+        OrchestratorInstanceStatus::Paused,
+    );
+    state
+        .apply_remote_delta_event(
+            &remote.id,
+            DeltaEvent::OrchestratorsUpdated {
+                revision: 2,
+                orchestrators: remote_delta_state.orchestrators.clone(),
+                sessions: remote_delta_state.sessions.clone(),
+            },
+        )
+        .expect("remote orchestrator delta should apply");
+    let revision_after_delta = state.snapshot().revision;
+
+    state
+        .apply_remote_state_snapshot(
+            &remote.id,
+            sample_remote_orchestrator_state(
+                "remote-project-1",
+                "/remote/repo",
+                1,
+                OrchestratorInstanceStatus::Running,
+            ),
+        )
+        .expect("stale remote snapshot should be ignored");
+
+    let snapshot = state.snapshot();
+    assert_eq!(snapshot.revision, revision_after_delta);
+    let orchestrator = snapshot
+        .orchestrators
+        .iter()
+        .find(|instance| {
+            instance.remote_id.as_deref() == Some(remote.id.as_str())
+                && instance.remote_orchestrator_id.as_deref() == Some("remote-orchestrator-1")
+        })
+        .expect("remote orchestrator should remain mirrored");
+    assert_eq!(orchestrator.project_id, local_project_id);
+    assert_eq!(orchestrator.status, OrchestratorInstanceStatus::Paused);
+
+    let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
 // Tests that failed remote OrchestratorsUpdated deltas roll back eager proxy-session localization.
 #[test]
 fn remote_orchestrators_updated_delta_rolls_back_proxy_sessions_when_localization_fails() {
@@ -12666,7 +15506,9 @@ fn remote_orchestrators_updated_delta_rolls_back_proxy_sessions_when_localizatio
         )
         .expect_err("invalid remote orchestrator delta should fail localization");
     assert!(
-        error.to_string().contains("remote session `remote-session-3` not found"),
+        error
+            .to_string()
+            .contains("remote session `remote-session-3` not found"),
         "unexpected error: {error:#}"
     );
     assert!(
@@ -12720,6 +15562,1227 @@ fn remote_orchestrators_updated_delta_rolls_back_proxy_sessions_when_localizatio
             .iter()
             .any(|instance| instance["remoteId"] == Value::String(remote.id.clone()))
     }));
+
+    let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
+// Tests that remote deltas sharing a revision still apply sequentially.
+#[test]
+fn remote_same_revision_deltas_apply_in_sequence() {
+    let state = test_app_state();
+    let remote = RemoteConfig {
+        id: "ssh-lab".to_owned(),
+        name: "SSH Lab".to_owned(),
+        transport: RemoteTransport::Local,
+        enabled: true,
+        host: None,
+        port: None,
+        user: None,
+    };
+    let local_project_id = create_test_remote_project(
+        &state,
+        &remote,
+        "/remote/repo",
+        "Remote Project",
+        "remote-project-1",
+    );
+    let remote_session = sample_remote_orchestrator_state(
+        "remote-project-1",
+        "/remote/repo",
+        1,
+        OrchestratorInstanceStatus::Running,
+    )
+    .sessions
+    .into_iter()
+    .find(|session| session.id == "remote-session-1")
+    .expect("sample remote session should exist");
+
+    let local_session_id = {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let local_session_id = upsert_remote_proxy_session_record(
+            &mut inner,
+            &remote.id,
+            &remote_session,
+            Some(local_project_id),
+        );
+        state
+            .commit_locked(&mut inner)
+            .expect("remote proxy session should persist");
+        local_session_id
+    };
+    let mut delta_receiver = state.subscribe_delta_events();
+
+    state
+        .apply_remote_delta_event(
+            &remote.id,
+            DeltaEvent::MessageCreated {
+                revision: 2,
+                session_id: "remote-session-1".to_owned(),
+                message_id: "message-1".to_owned(),
+                message_index: 0,
+                message: Message::Text {
+                    attachments: Vec::new(),
+                    id: "message-1".to_owned(),
+                    timestamp: "2026-04-05 10:00:00".to_owned(),
+                    author: Author::Assistant,
+                    text: "First remote message.".to_owned(),
+                    expanded_text: None,
+                },
+                preview: "First remote message.".to_owned(),
+                status: SessionStatus::Active,
+            },
+        )
+        .expect("first same-revision delta should apply");
+    state
+        .apply_remote_delta_event(
+            &remote.id,
+            DeltaEvent::CommandUpdate {
+                revision: 2,
+                session_id: "remote-session-1".to_owned(),
+                message_id: "command-1".to_owned(),
+                message_index: 1,
+                command: "echo ok".to_owned(),
+                command_language: Some("bash".to_owned()),
+                output: "ok".to_owned(),
+                output_language: Some("text".to_owned()),
+                status: CommandStatus::Success,
+                preview: "echo ok".to_owned(),
+            },
+        )
+        .expect("second same-revision delta should apply");
+
+    let first_delta: DeltaEvent = serde_json::from_str(
+        &delta_receiver
+            .try_recv()
+            .expect("first same-revision delta should publish"),
+    )
+    .expect("first delta payload should decode");
+    match first_delta {
+        DeltaEvent::MessageCreated { message_id, .. } => assert_eq!(message_id, "message-1"),
+        _ => panic!("unexpected first delta variant"),
+    }
+
+    let second_delta: DeltaEvent = serde_json::from_str(
+        &delta_receiver
+            .try_recv()
+            .expect("second same-revision delta should publish"),
+    )
+    .expect("second delta payload should decode");
+    // A missing remote command message is localized by creating the message
+    // first, so the published delta is normalized to MessageCreated.
+    match second_delta {
+        DeltaEvent::MessageCreated { message_id, .. } => assert_eq!(message_id, "command-1"),
+        _ => panic!("unexpected second delta variant"),
+    }
+
+    let snapshot = state.snapshot();
+    let session = snapshot
+        .sessions
+        .iter()
+        .find(|session| session.id == local_session_id)
+        .expect("localized remote session should exist");
+    assert_eq!(session.preview, "echo ok");
+    assert_eq!(session.status, SessionStatus::Active);
+    assert_eq!(session.messages.len(), 2);
+    assert!(matches!(
+        session.messages.first(),
+        Some(Message::Text { text, .. }) if text == "First remote message."
+    ));
+    assert!(matches!(
+        session.messages.get(1),
+        Some(Message::Command {
+            command,
+            output,
+            status: CommandStatus::Success,
+            ..
+        }) if command == "echo ok" && output == "ok"
+    ));
+
+    let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
+// Tests that remote project orchestrator creation proxies to the remote backend and localizes the result.
+#[test]
+fn create_orchestrator_instance_proxies_remote_projects_and_localizes_response() {
+    let state = test_app_state();
+    let remote = RemoteConfig {
+        id: "ssh-lab".to_owned(),
+        name: "SSH Lab".to_owned(),
+        transport: RemoteTransport::Ssh,
+        enabled: true,
+        host: Some("example.com".to_owned()),
+        port: Some(22),
+        user: Some("alice".to_owned()),
+    };
+    let local_project_id = create_test_remote_project(
+        &state,
+        &remote,
+        "/remote/repo",
+        "Remote Project",
+        "remote-project-1",
+    );
+    let template = state
+        .create_orchestrator_template(OrchestratorTemplateDraft {
+            project_id: Some(local_project_id.clone()),
+            ..sample_orchestrator_template_draft()
+        })
+        .expect("template should be created")
+        .template;
+
+    let mut remote_state = sample_remote_orchestrator_state(
+        "remote-project-1",
+        "/remote/repo",
+        2,
+        OrchestratorInstanceStatus::Running,
+    );
+    remote_state.orchestrators[0].id = "remote-orchestrator-created".to_owned();
+    remote_state.orchestrators[0].template_id = template.id.clone();
+    remote_state.orchestrators[0].template_snapshot = OrchestratorTemplate {
+        id: template.id.clone(),
+        name: template.name.clone(),
+        description: template.description.clone(),
+        project_id: Some("remote-project-1".to_owned()),
+        sessions: template.sessions.clone(),
+        transitions: template.transitions.clone(),
+        created_at: template.created_at.clone(),
+        updated_at: template.updated_at.clone(),
+    };
+    let remote_orchestrator = remote_state.orchestrators[0].clone();
+    let remote_response = serde_json::to_string(&CreateOrchestratorInstanceResponse {
+        orchestrator: remote_orchestrator,
+        state: remote_state,
+    })
+    .expect("remote orchestrator response should encode");
+
+    let captured = Arc::new(Mutex::new(None::<(String, String)>));
+    let captured_for_server = captured.clone();
+    let requests = Arc::new(Mutex::new(Vec::<String>::new()));
+    let requests_for_server = requests.clone();
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("test listener should bind");
+    let port = listener.local_addr().expect("listener addr").port();
+    let server = std::thread::spawn(move || {
+        for _ in 0..2 {
+            let mut stream = accept_test_connection(&listener, "test listener");
+            let mut buffer = Vec::new();
+            let mut chunk = [0u8; 4096];
+            let header_end = loop {
+                let bytes_read = stream.read(&mut chunk).expect("request should read");
+                assert!(bytes_read > 0, "request closed before headers completed");
+                buffer.extend_from_slice(&chunk[..bytes_read]);
+                if let Some(end) = buffer.windows(4).position(|window| window == b"\r\n\r\n") {
+                    break end;
+                }
+            };
+            let headers = String::from_utf8_lossy(&buffer[..header_end]);
+            let content_length = headers
+                .lines()
+                .find_map(|line| {
+                    let (name, value) = line.split_once(':')?;
+                    name.trim()
+                        .eq_ignore_ascii_case("content-length")
+                        .then_some(value.trim())
+                        .and_then(|value| value.parse::<usize>().ok())
+                })
+                .unwrap_or(0);
+            let body_start = header_end + 4;
+            while buffer.len() < body_start + content_length {
+                let bytes_read = stream.read(&mut chunk).expect("request body should read");
+                if bytes_read == 0 {
+                    break;
+                }
+                buffer.extend_from_slice(&chunk[..bytes_read]);
+            }
+
+            let request_head = String::from_utf8_lossy(&buffer[..body_start]).to_string();
+            let request_line = request_head
+                .lines()
+                .next()
+                .expect("request line should exist")
+                .to_owned();
+            requests_for_server
+                .lock()
+                .expect("capture mutex poisoned")
+                .push(request_line.clone());
+            let body = String::from_utf8_lossy(&buffer[body_start..body_start + content_length])
+                .to_string();
+
+            if request_line.starts_with("GET /api/health ") {
+                stream
+                    .write_all(
+                        b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nConnection: close\r\nContent-Length: 11\r\n\r\n{\"ok\":true}",
+                    )
+                    .expect("health response should write");
+                continue;
+            }
+
+            if request_line.starts_with("POST /api/orchestrators ") {
+                *captured_for_server.lock().expect("capture mutex poisoned") =
+                    Some((request_line.clone(), body));
+                stream
+                    .write_all(
+                        format!(
+                            "HTTP/1.1 201 Created\r\nContent-Type: application/json\r\nConnection: close\r\nContent-Length: {}\r\n\r\n{}",
+                            remote_response.len(),
+                            remote_response
+                        )
+                        .as_bytes(),
+                    )
+                    .expect("orchestrator response should write");
+                continue;
+            }
+
+            panic!("unexpected request: {request_line}");
+        }
+    });
+
+    state
+        .remote_registry
+        .connections
+        .lock()
+        .expect("remote registry mutex poisoned")
+        .insert(
+            remote.id.clone(),
+            Arc::new(RemoteConnection {
+                config: Mutex::new(remote.clone()),
+                forwarded_port: port,
+                process: Mutex::new(None),
+                event_bridge_started: AtomicBool::new(true),
+                event_bridge_shutdown: AtomicBool::new(false),
+                supports_inline_orchestrator_templates: Mutex::new(None),
+            }),
+        );
+
+    let response = state
+        .create_orchestrator_instance(CreateOrchestratorInstanceRequest {
+            template_id: template.id.clone(),
+            project_id: Some(local_project_id.clone()),
+            template: None,
+        })
+        .expect("remote orchestrator should be created");
+
+    assert_ne!(response.orchestrator.id, "remote-orchestrator-created");
+    assert_eq!(
+        response.orchestrator.remote_id.as_deref(),
+        Some(remote.id.as_str())
+    );
+    assert_eq!(
+        response.orchestrator.remote_orchestrator_id.as_deref(),
+        Some("remote-orchestrator-created")
+    );
+    assert_eq!(response.orchestrator.project_id, local_project_id);
+    assert_eq!(response.orchestrator.template_id, template.id);
+    assert_eq!(
+        response
+            .orchestrator
+            .template_snapshot
+            .project_id
+            .as_deref(),
+        Some(response.orchestrator.project_id.as_str())
+    );
+    assert_eq!(
+        response.orchestrator.session_instances.len(),
+        template.sessions.len()
+    );
+    assert!(
+        response
+            .state
+            .orchestrators
+            .iter()
+            .any(|instance| instance.id == response.orchestrator.id)
+    );
+
+    let (request_line, body) = captured
+        .lock()
+        .expect("capture mutex poisoned")
+        .clone()
+        .expect("captured request should exist");
+    assert!(request_line.starts_with("POST /api/orchestrators "));
+    let parsed_body: Value = serde_json::from_str(&body).expect("request body should decode");
+    assert_eq!(
+        parsed_body["templateId"],
+        Value::String(template.id.clone())
+    );
+    assert_eq!(
+        parsed_body["projectId"],
+        Value::String("remote-project-1".to_owned())
+    );
+    assert_eq!(
+        parsed_body["template"]["projectId"],
+        Value::String("remote-project-1".to_owned())
+    );
+    assert_eq!(
+        parsed_body["template"]["name"],
+        Value::String(template.name)
+    );
+
+    server.join().expect("test server should finish");
+    let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
+// Tests that direct remote orchestrator proxy creation localizes the launch and notes the applied revision.
+#[test]
+fn create_remote_orchestrator_proxy_localizes_launch_and_notes_revision() {
+    let state = test_app_state();
+    let remote = RemoteConfig {
+        id: "ssh-lab".to_owned(),
+        name: "SSH Lab".to_owned(),
+        transport: RemoteTransport::Ssh,
+        enabled: true,
+        host: Some("example.com".to_owned()),
+        port: Some(22),
+        user: Some("alice".to_owned()),
+    };
+    let local_project_id = create_test_remote_project(
+        &state,
+        &remote,
+        "/remote/repo",
+        "Remote Project",
+        "remote-project-1",
+    );
+    let template = state
+        .create_orchestrator_template(OrchestratorTemplateDraft {
+            project_id: Some(local_project_id.clone()),
+            ..sample_orchestrator_template_draft()
+        })
+        .expect("template should be created")
+        .template;
+    let project = {
+        let inner = state.inner.lock().expect("state mutex poisoned");
+        inner
+            .find_project(&local_project_id)
+            .cloned()
+            .expect("remote project should exist")
+    };
+
+    let mut remote_state = sample_remote_orchestrator_state(
+        "remote-project-1",
+        "/remote/repo",
+        2,
+        OrchestratorInstanceStatus::Running,
+    );
+    remote_state.orchestrators[0].id = "remote-orchestrator-created".to_owned();
+    remote_state.orchestrators[0].template_id = template.id.clone();
+    remote_state.orchestrators[0].template_snapshot = OrchestratorTemplate {
+        id: template.id.clone(),
+        name: template.name.clone(),
+        description: template.description.clone(),
+        project_id: Some("remote-project-1".to_owned()),
+        sessions: template.sessions.clone(),
+        transitions: template.transitions.clone(),
+        created_at: template.created_at.clone(),
+        updated_at: template.updated_at.clone(),
+    };
+    let remote_response = serde_json::to_string(&CreateOrchestratorInstanceResponse {
+        orchestrator: remote_state.orchestrators[0].clone(),
+        state: remote_state,
+    })
+    .expect("remote orchestrator response should encode");
+
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("test listener should bind");
+    let port = listener.local_addr().expect("listener addr").port();
+    let server = std::thread::spawn(move || {
+        for _ in 0..2 {
+            let mut stream = accept_test_connection(&listener, "test listener");
+            let mut buffer = [0u8; 4096];
+            let bytes_read = stream.read(&mut buffer).expect("request should read");
+            assert!(bytes_read > 0, "request should contain data");
+            let request = String::from_utf8_lossy(&buffer[..bytes_read]);
+            let request_line = request
+                .lines()
+                .next()
+                .expect("request line should exist")
+                .to_owned();
+
+            if request_line.starts_with("GET /api/health ") {
+                stream
+                    .write_all(
+                        b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nConnection: close\r\nContent-Length: 11\r\n\r\n{\"ok\":true}",
+                    )
+                    .expect("health response should write");
+                continue;
+            }
+
+            if request_line.starts_with("POST /api/orchestrators ") {
+                stream
+                    .write_all(
+                        format!(
+                            "HTTP/1.1 201 Created\r\nContent-Type: application/json\r\nConnection: close\r\nContent-Length: {}\r\n\r\n{}",
+                            remote_response.len(),
+                            remote_response
+                        )
+                        .as_bytes(),
+                    )
+                    .expect("orchestrator response should write");
+                continue;
+            }
+
+            panic!("unexpected request: {request_line}");
+        }
+    });
+
+    state
+        .remote_registry
+        .connections
+        .lock()
+        .expect("remote registry mutex poisoned")
+        .insert(
+            remote.id.clone(),
+            Arc::new(RemoteConnection {
+                config: Mutex::new(remote.clone()),
+                forwarded_port: port,
+                process: Mutex::new(None),
+                event_bridge_started: AtomicBool::new(true),
+                event_bridge_shutdown: AtomicBool::new(false),
+                supports_inline_orchestrator_templates: Mutex::new(None),
+            }),
+        );
+
+    let response = state
+        .create_remote_orchestrator_proxy(&template, &project)
+        .expect("remote orchestrator should be localized");
+
+    assert_eq!(
+        response.orchestrator.remote_id.as_deref(),
+        Some(remote.id.as_str())
+    );
+    assert_eq!(
+        response.orchestrator.remote_orchestrator_id.as_deref(),
+        Some("remote-orchestrator-created")
+    );
+    assert_eq!(response.orchestrator.project_id, local_project_id);
+    assert!(
+        response
+            .state
+            .orchestrators
+            .iter()
+            .any(|instance| instance.id == response.orchestrator.id)
+    );
+
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    assert!(
+        inner
+            .find_remote_orchestrator_index(&remote.id, "remote-orchestrator-created")
+            .is_some()
+    );
+    assert!(inner.should_skip_remote_applied_revision(&remote.id, 2));
+    assert!(!inner.should_skip_remote_applied_revision(&remote.id, 3));
+    drop(inner);
+
+    server.join().expect("test server should finish");
+    let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
+// Tests that direct remote orchestrator proxy creation rolls back mirrored sessions and orchestrators when localization fails.
+#[test]
+fn create_remote_orchestrator_proxy_rolls_back_on_localization_failure() {
+    let state = test_app_state();
+    let remote = RemoteConfig {
+        id: "ssh-lab".to_owned(),
+        name: "SSH Lab".to_owned(),
+        transport: RemoteTransport::Ssh,
+        enabled: true,
+        host: Some("example.com".to_owned()),
+        port: Some(22),
+        user: Some("alice".to_owned()),
+    };
+    let local_project_id = create_test_remote_project(
+        &state,
+        &remote,
+        "/remote/repo",
+        "Remote Project",
+        "remote-project-1",
+    );
+    let template = state
+        .create_orchestrator_template(OrchestratorTemplateDraft {
+            project_id: Some(local_project_id.clone()),
+            ..sample_orchestrator_template_draft()
+        })
+        .expect("template should be created")
+        .template;
+    let project = {
+        let inner = state.inner.lock().expect("state mutex poisoned");
+        inner
+            .find_project(&local_project_id)
+            .cloned()
+            .expect("remote project should exist")
+    };
+    let persisted_before = fs::read(state.persistence_path.as_path())
+        .expect("initial state should already be persisted");
+    let initial_next_session_number = {
+        let inner = state.inner.lock().expect("state mutex poisoned");
+        inner.next_session_number
+    };
+
+    let mut remote_state = sample_remote_orchestrator_state(
+        "remote-project-1",
+        "/remote/repo",
+        2,
+        OrchestratorInstanceStatus::Running,
+    );
+    remote_state.orchestrators[0].id = "remote-orchestrator-broken".to_owned();
+    remote_state.orchestrators[0].template_id = template.id.clone();
+    remote_state.orchestrators[0].template_snapshot = OrchestratorTemplate {
+        id: template.id.clone(),
+        name: template.name.clone(),
+        description: template.description.clone(),
+        project_id: Some("remote-project-1".to_owned()),
+        sessions: template.sessions.clone(),
+        transitions: template.transitions.clone(),
+        created_at: template.created_at.clone(),
+        updated_at: template.updated_at.clone(),
+    };
+    remote_state
+        .sessions
+        .retain(|session| session.id != "remote-session-1");
+    let remote_response = serde_json::to_string(&CreateOrchestratorInstanceResponse {
+        orchestrator: remote_state.orchestrators[0].clone(),
+        state: remote_state,
+    })
+    .expect("remote orchestrator response should encode");
+
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("test listener should bind");
+    let port = listener.local_addr().expect("listener addr").port();
+    let server = std::thread::spawn(move || {
+        for _ in 0..2 {
+            let mut stream = accept_test_connection(&listener, "test listener");
+            let mut buffer = [0u8; 4096];
+            let bytes_read = stream.read(&mut buffer).expect("request should read");
+            assert!(bytes_read > 0, "request should contain data");
+            let request = String::from_utf8_lossy(&buffer[..bytes_read]);
+            let request_line = request
+                .lines()
+                .next()
+                .expect("request line should exist")
+                .to_owned();
+
+            if request_line.starts_with("GET /api/health ") {
+                stream
+                    .write_all(
+                        b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nConnection: close\r\nContent-Length: 11\r\n\r\n{\"ok\":true}",
+                    )
+                    .expect("health response should write");
+                continue;
+            }
+
+            if request_line.starts_with("POST /api/orchestrators ") {
+                stream
+                    .write_all(
+                        format!(
+                            "HTTP/1.1 201 Created\r\nContent-Type: application/json\r\nConnection: close\r\nContent-Length: {}\r\n\r\n{}",
+                            remote_response.len(),
+                            remote_response
+                        )
+                        .as_bytes(),
+                    )
+                    .expect("orchestrator response should write");
+                continue;
+            }
+
+            panic!("unexpected request: {request_line}");
+        }
+    });
+
+    state
+        .remote_registry
+        .connections
+        .lock()
+        .expect("remote registry mutex poisoned")
+        .insert(
+            remote.id.clone(),
+            Arc::new(RemoteConnection {
+                config: Mutex::new(remote.clone()),
+                forwarded_port: port,
+                process: Mutex::new(None),
+                event_bridge_started: AtomicBool::new(true),
+                event_bridge_shutdown: AtomicBool::new(false),
+                supports_inline_orchestrator_templates: Mutex::new(None),
+            }),
+        );
+
+    let err = match state.create_remote_orchestrator_proxy(&template, &project) {
+        Ok(_) => panic!("invalid remote orchestrator should fail localization"),
+        Err(err) => err,
+    };
+
+    assert_eq!(err.status, StatusCode::BAD_GATEWAY);
+    assert!(
+        err.message
+            .contains("remote orchestrator could not be localized")
+    );
+
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    assert_eq!(inner.next_session_number, initial_next_session_number);
+    assert!(
+        inner
+            .find_remote_orchestrator_index(&remote.id, "remote-orchestrator-broken")
+            .is_none()
+    );
+    assert!(
+        inner
+            .find_remote_session_index(&remote.id, "remote-session-1")
+            .is_none()
+    );
+    assert!(
+        inner
+            .find_remote_session_index(&remote.id, "remote-session-2")
+            .is_none()
+    );
+    assert!(!inner.should_skip_remote_applied_revision(&remote.id, 2));
+    drop(inner);
+
+    let persisted_after = fs::read(state.persistence_path.as_path())
+        .expect("rolled back state should stay persisted");
+    assert_eq!(persisted_after, persisted_before);
+
+    server.join().expect("test server should finish");
+    let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
+// Tests that stale create responses still materialize the launched remote
+// orchestrator when a newer unrelated revision has already been applied.
+#[test]
+fn create_orchestrator_instance_materializes_stale_remote_launch_response() {
+    let state = test_app_state();
+    let remote = RemoteConfig {
+        id: "ssh-lab".to_owned(),
+        name: "SSH Lab".to_owned(),
+        transport: RemoteTransport::Ssh,
+        enabled: true,
+        host: Some("example.com".to_owned()),
+        port: Some(22),
+        user: Some("alice".to_owned()),
+    };
+    let local_project_id = create_test_remote_project(
+        &state,
+        &remote,
+        "/remote/repo",
+        "Remote Project",
+        "remote-project-1",
+    );
+    let template = state
+        .create_orchestrator_template(OrchestratorTemplateDraft {
+            project_id: Some(local_project_id.clone()),
+            ..sample_orchestrator_template_draft()
+        })
+        .expect("template should be created")
+        .template;
+
+    let mut remote_state = sample_remote_orchestrator_state(
+        "remote-project-1",
+        "/remote/repo",
+        2,
+        OrchestratorInstanceStatus::Running,
+    );
+    remote_state.orchestrators[0].id = "remote-orchestrator-created".to_owned();
+    remote_state.orchestrators[0].template_id = template.id.clone();
+    remote_state.orchestrators[0].template_snapshot = OrchestratorTemplate {
+        id: template.id.clone(),
+        name: template.name.clone(),
+        description: template.description.clone(),
+        project_id: Some("remote-project-1".to_owned()),
+        sessions: template.sessions.clone(),
+        transitions: template.transitions.clone(),
+        created_at: template.created_at.clone(),
+        updated_at: template.updated_at.clone(),
+    };
+    let remote_response = serde_json::to_string(&CreateOrchestratorInstanceResponse {
+        orchestrator: remote_state.orchestrators[0].clone(),
+        state: remote_state,
+    })
+    .expect("remote orchestrator response should encode");
+
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("test listener should bind");
+    let port = listener.local_addr().expect("listener addr").port();
+    let server = std::thread::spawn(move || {
+        for _ in 0..2 {
+            let mut stream = accept_test_connection(&listener, "test listener");
+            let mut buffer = Vec::new();
+            let mut chunk = [0u8; 4096];
+            let header_end = loop {
+                let bytes_read = stream.read(&mut chunk).expect("request should read");
+                assert!(bytes_read > 0, "request closed before headers completed");
+                buffer.extend_from_slice(&chunk[..bytes_read]);
+                if let Some(end) = buffer.windows(4).position(|window| window == b"\r\n\r\n") {
+                    break end;
+                }
+            };
+            let headers = String::from_utf8_lossy(&buffer[..header_end]);
+            let content_length = headers
+                .lines()
+                .find_map(|line| {
+                    let (name, value) = line.split_once(':')?;
+                    name.trim()
+                        .eq_ignore_ascii_case("content-length")
+                        .then_some(value.trim())
+                        .and_then(|value| value.parse::<usize>().ok())
+                })
+                .unwrap_or(0);
+            let body_start = header_end + 4;
+            while buffer.len() < body_start + content_length {
+                let bytes_read = stream.read(&mut chunk).expect("request body should read");
+                if bytes_read == 0 {
+                    break;
+                }
+                buffer.extend_from_slice(&chunk[..bytes_read]);
+            }
+
+            let request_head = String::from_utf8_lossy(&buffer[..body_start]).to_string();
+            let request_line = request_head
+                .lines()
+                .next()
+                .expect("request line should exist")
+                .to_owned();
+
+            if request_line.starts_with("GET /api/health ") {
+                stream
+                    .write_all(
+                        b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nConnection: close\r\nContent-Length: 11\r\n\r\n{\"ok\":true}",
+                    )
+                    .expect("health response should write");
+                continue;
+            }
+
+            if request_line.starts_with("POST /api/orchestrators ") {
+                stream
+                    .write_all(
+                        format!(
+                            "HTTP/1.1 201 Created\r\nContent-Type: application/json\r\nConnection: close\r\nContent-Length: {}\r\n\r\n{}",
+                            remote_response.len(),
+                            remote_response
+                        )
+                        .as_bytes(),
+                    )
+                    .expect("orchestrator response should write");
+                continue;
+            }
+
+            panic!("unexpected request: {request_line}");
+        }
+    });
+
+    state
+        .remote_registry
+        .connections
+        .lock()
+        .expect("remote registry mutex poisoned")
+        .insert(
+            remote.id.clone(),
+            Arc::new(RemoteConnection {
+                config: Mutex::new(remote.clone()),
+                forwarded_port: port,
+                process: Mutex::new(None),
+                event_bridge_started: AtomicBool::new(true),
+                event_bridge_shutdown: AtomicBool::new(false),
+                supports_inline_orchestrator_templates: Mutex::new(None),
+            }),
+        );
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        inner.note_remote_applied_revision(&remote.id, 3);
+    }
+
+    let response = state
+        .create_orchestrator_instance(CreateOrchestratorInstanceRequest {
+            template_id: template.id.clone(),
+            project_id: Some(local_project_id.clone()),
+            template: None,
+        })
+        .expect("stale launch response should still materialize the orchestrator");
+
+    assert_eq!(
+        response.orchestrator.remote_orchestrator_id.as_deref(),
+        Some("remote-orchestrator-created")
+    );
+    assert_eq!(response.orchestrator.project_id, local_project_id);
+    assert!(
+        response
+            .state
+            .orchestrators
+            .iter()
+            .any(|instance| instance.id == response.orchestrator.id)
+    );
+    assert_eq!(
+        response.orchestrator.session_instances.len(),
+        template.sessions.len()
+    );
+
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    assert!(
+        inner
+            .find_remote_orchestrator_index(&remote.id, "remote-orchestrator-created")
+            .is_some()
+    );
+    assert!(inner.should_skip_remote_applied_revision(&remote.id, 3));
+    assert!(!inner.should_skip_remote_applied_revision(&remote.id, 4));
+    drop(inner);
+
+    server.join().expect("test server should finish");
+    let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
+// Tests that remote orchestrator launch reports an upgrade requirement when the remote ignores inline templates.
+#[test]
+fn remote_orchestrator_create_requires_upgrade_when_remote_lacks_inline_template_support() {
+    let state = test_app_state();
+    let remote = RemoteConfig {
+        id: "ssh-lab".to_owned(),
+        name: "SSH Lab".to_owned(),
+        transport: RemoteTransport::Ssh,
+        enabled: true,
+        host: Some("example.com".to_owned()),
+        port: Some(22),
+        user: Some("alice".to_owned()),
+    };
+    let local_project_id = create_test_remote_project(
+        &state,
+        &remote,
+        "/remote/repo",
+        "Remote Project",
+        "remote-project-1",
+    );
+    let template = state
+        .create_orchestrator_template(OrchestratorTemplateDraft {
+            project_id: Some(local_project_id.clone()),
+            ..sample_orchestrator_template_draft()
+        })
+        .expect("template should be created")
+        .template;
+
+    let captured = Arc::new(Mutex::new(None::<String>));
+    let captured_for_server = captured.clone();
+    let requests = Arc::new(Mutex::new(Vec::<String>::new()));
+    let requests_for_server = requests.clone();
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("test listener should bind");
+    let port = listener.local_addr().expect("listener addr").port();
+    let server = std::thread::spawn(move || {
+        for _ in 0..2 {
+            let mut stream = accept_test_connection(&listener, "test listener");
+            let mut buffer = Vec::new();
+            let mut chunk = [0u8; 4096];
+            let header_end = loop {
+                let bytes_read = stream.read(&mut chunk).expect("request should read");
+                assert!(bytes_read > 0, "request closed before headers completed");
+                buffer.extend_from_slice(&chunk[..bytes_read]);
+                if let Some(end) = buffer.windows(4).position(|window| window == b"\r\n\r\n") {
+                    break end;
+                }
+            };
+            let headers = String::from_utf8_lossy(&buffer[..header_end]);
+            let content_length = headers
+                .lines()
+                .find_map(|line| {
+                    let (name, value) = line.split_once(':')?;
+                    name.trim()
+                        .eq_ignore_ascii_case("content-length")
+                        .then_some(value.trim())
+                        .and_then(|value| value.parse::<usize>().ok())
+                })
+                .unwrap_or(0);
+            let body_start = header_end + 4;
+            while buffer.len() < body_start + content_length {
+                let bytes_read = stream.read(&mut chunk).expect("request body should read");
+                if bytes_read == 0 {
+                    break;
+                }
+                buffer.extend_from_slice(&chunk[..bytes_read]);
+            }
+
+            let request_head = String::from_utf8_lossy(&buffer[..body_start]).to_string();
+            let request_line = request_head
+                .lines()
+                .next()
+                .expect("request line should exist")
+                .to_owned();
+            requests_for_server
+                .lock()
+                .expect("capture mutex poisoned")
+                .push(request_line.clone());
+            let body = String::from_utf8_lossy(&buffer[body_start..body_start + content_length])
+                .to_string();
+
+            if request_line.starts_with("GET /api/health ") {
+                stream
+                    .write_all(
+                        b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nConnection: close\r\nContent-Length: 11\r\n\r\n{\"ok\":true}",
+                    )
+                    .expect("health response should write");
+                continue;
+            }
+
+            if request_line.starts_with("POST /api/orchestrators ") {
+                *captured_for_server.lock().expect("capture mutex poisoned") = Some(body);
+                let error_body =
+                    "{\"error\":\"Inline template launch unavailable on this remote\"}";
+                stream
+                    .write_all(
+                        format!(
+                            "HTTP/1.1 404 Not Found\r\nContent-Type: application/json\r\nConnection: close\r\nContent-Length: {}\r\n\r\n{}",
+                            error_body.len(),
+                            error_body
+                        )
+                        .as_bytes(),
+                    )
+                    .expect("remote error response should write");
+                continue;
+            }
+
+            panic!("unexpected request: {request_line}");
+        }
+    });
+
+    state
+        .remote_registry
+        .connections
+        .lock()
+        .expect("remote registry mutex poisoned")
+        .insert(
+            remote.id.clone(),
+            Arc::new(RemoteConnection {
+                config: Mutex::new(remote.clone()),
+                forwarded_port: port,
+                process: Mutex::new(None),
+                event_bridge_started: AtomicBool::new(true),
+                event_bridge_shutdown: AtomicBool::new(false),
+                supports_inline_orchestrator_templates: Mutex::new(None),
+            }),
+        );
+
+    let err = match state.create_orchestrator_instance(CreateOrchestratorInstanceRequest {
+        template_id: template.id.clone(),
+        project_id: Some(local_project_id),
+        template: None,
+    }) {
+        Ok(_) => panic!("old remote should require an upgrade for inline templates"),
+        Err(err) => err,
+    };
+
+    assert_eq!(err.status, StatusCode::BAD_GATEWAY);
+    assert!(err.message.contains("must be upgraded"));
+    // The cached capability should suppress only the post-404 diagnostic probe;
+    // the normal pre-request availability probe still happens in ensure_available.
+    assert_eq!(
+        requests.lock().expect("capture mutex poisoned").clone(),
+        vec![
+            "GET /api/health HTTP/1.1".to_owned(),
+            "POST /api/orchestrators HTTP/1.1".to_owned(),
+        ]
+    );
+    let body = captured
+        .lock()
+        .expect("capture mutex poisoned")
+        .clone()
+        .expect("captured request should exist");
+    let parsed_body: Value = serde_json::from_str(&body).expect("request body should decode");
+    assert_eq!(
+        parsed_body["templateId"],
+        Value::String(template.id.clone())
+    );
+    assert_eq!(
+        parsed_body["template"]["name"],
+        Value::String(template.name.clone())
+    );
+
+    server.join().expect("test server should finish");
+    let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
+// Tests that a pre-cached unsupported inline-template capability still yields the upgrade message
+// without issuing a second health probe after the remote returns 404. The initial
+// ensure_available availability check is still expected before the launch attempt.
+#[test]
+fn remote_orchestrator_create_requires_upgrade_when_inline_template_support_is_precached_false() {
+    let state = test_app_state();
+    let remote = RemoteConfig {
+        id: "ssh-lab".to_owned(),
+        name: "SSH Lab".to_owned(),
+        transport: RemoteTransport::Ssh,
+        enabled: true,
+        host: Some("example.com".to_owned()),
+        port: Some(22),
+        user: Some("alice".to_owned()),
+    };
+    let local_project_id = create_test_remote_project(
+        &state,
+        &remote,
+        "/remote/repo",
+        "Remote Project",
+        "remote-project-1",
+    );
+    let template = state
+        .create_orchestrator_template(OrchestratorTemplateDraft {
+            project_id: Some(local_project_id.clone()),
+            ..sample_orchestrator_template_draft()
+        })
+        .expect("template should be created")
+        .template;
+
+    let requests = Arc::new(Mutex::new(Vec::<String>::new()));
+    let requests_for_server = requests.clone();
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("test listener should bind");
+    let port = listener.local_addr().expect("listener addr").port();
+    let server = std::thread::spawn(move || {
+        for _ in 0..2 {
+            let mut stream = accept_test_connection(&listener, "test listener");
+            let mut buffer = Vec::new();
+            let mut chunk = [0u8; 4096];
+            let header_end = loop {
+                let bytes_read = stream.read(&mut chunk).expect("request should read");
+                assert!(bytes_read > 0, "request closed before headers completed");
+                buffer.extend_from_slice(&chunk[..bytes_read]);
+                if let Some(end) = buffer.windows(4).position(|window| window == b"\r\n\r\n") {
+                    break end;
+                }
+            };
+            let headers = String::from_utf8_lossy(&buffer[..header_end]);
+            let content_length = headers
+                .lines()
+                .find_map(|line| {
+                    let (name, value) = line.split_once(':')?;
+                    name.trim()
+                        .eq_ignore_ascii_case("content-length")
+                        .then_some(value.trim())
+                        .and_then(|value| value.parse::<usize>().ok())
+                })
+                .unwrap_or(0);
+            let body_start = header_end + 4;
+            while buffer.len() < body_start + content_length {
+                let bytes_read = stream.read(&mut chunk).expect("request body should read");
+                if bytes_read == 0 {
+                    break;
+                }
+                buffer.extend_from_slice(&chunk[..bytes_read]);
+            }
+
+            let request_head = String::from_utf8_lossy(&buffer[..body_start]).to_string();
+            let request_line = request_head
+                .lines()
+                .next()
+                .expect("request line should exist")
+                .to_owned();
+            requests_for_server
+                .lock()
+                .expect("capture mutex poisoned")
+                .push(request_line.clone());
+
+            if request_line.starts_with("GET /api/health ") {
+                stream
+                    .write_all(
+                        b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nConnection: close\r\nContent-Length: 11\r\n\r\n{\"ok\":true}",
+                    )
+                    .expect("health response should write");
+                continue;
+            }
+
+            if request_line.starts_with("POST /api/orchestrators ") {
+                let error_body =
+                    "{\"error\":\"Inline template launch unavailable on this remote\"}";
+                stream
+                    .write_all(
+                        format!(
+                            "HTTP/1.1 404 Not Found\r\nContent-Type: application/json\r\nConnection: close\r\nContent-Length: {}\r\n\r\n{}",
+                            error_body.len(),
+                            error_body
+                        )
+                        .as_bytes(),
+                    )
+                    .expect("remote error response should write");
+                continue;
+            }
+
+            panic!("unexpected request: {request_line}");
+        }
+    });
+
+    state
+        .remote_registry
+        .connections
+        .lock()
+        .expect("remote registry mutex poisoned")
+        .insert(
+            remote.id.clone(),
+            Arc::new(RemoteConnection {
+                config: Mutex::new(remote.clone()),
+                forwarded_port: port,
+                process: Mutex::new(None),
+                event_bridge_started: AtomicBool::new(true),
+                event_bridge_shutdown: AtomicBool::new(false),
+                supports_inline_orchestrator_templates: Mutex::new(Some(false)),
+            }),
+        );
+
+    assert_eq!(
+        state
+            .remote_registry
+            .cached_supports_inline_orchestrator_templates(&remote),
+        Some(false)
+    );
+
+    let err = match state.create_orchestrator_instance(CreateOrchestratorInstanceRequest {
+        template_id: template.id.clone(),
+        project_id: Some(local_project_id),
+        template: None,
+    }) {
+        Ok(_) => panic!("old remote should require an upgrade for inline templates"),
+        Err(err) => err,
+    };
+
+    assert_eq!(err.status, StatusCode::BAD_GATEWAY);
+    assert!(err.message.contains("must be upgraded"));
+    // The cached Some(false) capability skips any extra post-404 health probe, but the
+    // initial ensure_available probe still happens before the launch attempt.
+    assert_eq!(
+        requests.lock().expect("capture mutex poisoned").clone(),
+        vec![
+            "GET /api/health HTTP/1.1".to_owned(),
+            "POST /api/orchestrators HTTP/1.1".to_owned(),
+        ]
+    );
+
+    server.join().expect("test server should finish");
+    let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
+// Tests that remote state sync rolls back unmapped orchestrators instead of assigning an empty local project id.
+#[test]
+fn remote_snapshot_sync_skips_orchestrators_without_a_local_project_mapping() {
+    let state = test_app_state();
+    let remote = RemoteConfig {
+        id: "ssh-lab".to_owned(),
+        name: "SSH Lab".to_owned(),
+        transport: RemoteTransport::Local,
+        enabled: true,
+        host: None,
+        port: None,
+        user: None,
+    };
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        inner.preferences.remotes.push(remote.clone());
+        state
+            .commit_locked(&mut inner)
+            .expect("remote should persist");
+    }
+
+    state
+        .apply_remote_state_snapshot(
+            &remote.id,
+            sample_remote_orchestrator_state(
+                "remote-project-unmapped",
+                "/remote/repo",
+                1,
+                OrchestratorInstanceStatus::Running,
+            ),
+        )
+        .expect("snapshot should still apply even when orchestration localization fails");
+
+    let snapshot = state.snapshot();
+    assert!(snapshot.orchestrators.is_empty());
+    assert!(snapshot.sessions.is_empty());
+
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    assert!(inner.orchestrator_instances.is_empty());
+    assert!(inner.sessions.is_empty());
+    drop(inner);
 
     let _ = fs::remove_file(state.persistence_path.as_path());
 }
@@ -12867,6 +16930,7 @@ fn remote_orchestrator_lifecycle_actions_proxy_to_remote_backend_and_resync_loca
                 process: Mutex::new(None),
                 event_bridge_started: AtomicBool::new(false),
                 event_bridge_shutdown: AtomicBool::new(false),
+                supports_inline_orchestrator_templates: Mutex::new(None),
             }),
         );
 
@@ -13230,6 +17294,95 @@ fn focused_remote_state_sync_rolls_back_proxy_sessions_when_orchestrator_localiz
     let _ = fs::remove_file(state.persistence_path.as_path());
 }
 
+// Tests that focused remote sync ignores stale remote revisions instead of
+// rolling an already-mirrored session backward.
+#[test]
+fn focused_remote_state_sync_skips_stale_revision() {
+    let state = test_app_state();
+    let remote = RemoteConfig {
+        id: "ssh-lab".to_owned(),
+        name: "SSH Lab".to_owned(),
+        transport: RemoteTransport::Local,
+        enabled: true,
+        host: None,
+        port: None,
+        user: None,
+    };
+    let local_project_id = create_test_remote_project(
+        &state,
+        &remote,
+        "/remote/repo",
+        "Remote Project",
+        "remote-project-1",
+    );
+
+    let mut initial_remote_session = sample_remote_orchestrator_state(
+        "remote-project-1",
+        "/remote/repo",
+        1,
+        OrchestratorInstanceStatus::Running,
+    )
+    .sessions
+    .into_iter()
+    .find(|session| session.id == "remote-session-1")
+    .expect("sample remote session should exist");
+    initial_remote_session.preview = "Newest preview.".to_owned();
+
+    let local_session_id = {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let local_session_id = upsert_remote_proxy_session_record(
+            &mut inner,
+            &remote.id,
+            &initial_remote_session,
+            Some(local_project_id),
+        );
+        state
+            .commit_locked(&mut inner)
+            .expect("initial focused remote session should persist");
+        inner.note_remote_applied_revision(&remote.id, 3);
+        local_session_id
+    };
+
+    let mut stale_state = sample_remote_orchestrator_state(
+        "remote-project-1",
+        "/remote/repo",
+        2,
+        OrchestratorInstanceStatus::Running,
+    );
+    stale_state
+        .sessions
+        .iter_mut()
+        .find(|session| session.id == "remote-session-1")
+        .expect("focused session should remain in the payload")
+        .preview = "Stale preview should be skipped.".to_owned();
+
+    let target = RemoteSessionTarget {
+        local_session_id: local_session_id.clone(),
+        remote: remote.clone(),
+        remote_session_id: "remote-session-1".to_owned(),
+    };
+    state
+        .sync_remote_state_for_target(&target, stale_state)
+        .expect("stale focused sync should be ignored");
+
+    let snapshot = state.snapshot();
+    assert_eq!(
+        snapshot
+            .sessions
+            .iter()
+            .find(|session| session.id == local_session_id)
+            .expect("focused local session should remain")
+            .preview,
+        "Newest preview."
+    );
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    assert!(inner.should_skip_remote_applied_revision(&remote.id, 3));
+    assert!(!inner.should_skip_remote_applied_revision(&remote.id, 4));
+    drop(inner);
+
+    let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
 // Tests that remote snapshot sync removes missing proxy sessions.
 #[test]
 fn remote_snapshot_sync_removes_missing_proxy_sessions() {
@@ -13432,6 +17585,7 @@ fn remote_state_event_dedupes_marked_sse_fallback_resyncs_by_revision() {
                 process: Mutex::new(None),
                 event_bridge_started: AtomicBool::new(false),
                 event_bridge_shutdown: AtomicBool::new(false),
+                supports_inline_orchestrator_templates: Mutex::new(None),
             }),
         );
 
@@ -13517,6 +17671,242 @@ fn remote_sse_fallback_resync_tracking_is_per_remote_and_monotonic() {
     assert!(!state.should_skip_remote_sse_fallback_resync("ssh-lab", 1));
     assert!(!state.should_skip_remote_sse_fallback_resync("ssh-lab", 0));
     assert!(!state.should_skip_remote_sse_fallback_resync("ssh-lab-2", 1));
+
+    let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
+// Tests that StateInner revision tracking handles first insert, same revision,
+// higher revision, and lower revision without regressing monotonic ordering.
+#[test]
+fn state_inner_remote_applied_revision_methods_cover_monotonic_cases() {
+    let mut inner = StateInner::new();
+
+    assert!(!inner.should_skip_remote_applied_revision("ssh-lab", 1));
+    assert!(!inner.should_skip_remote_applied_delta_revision("ssh-lab", 1));
+
+    inner.note_remote_applied_revision("ssh-lab", 1);
+    assert!(inner.should_skip_remote_applied_revision("ssh-lab", 1));
+    assert!(!inner.should_skip_remote_applied_revision("ssh-lab", 2));
+    assert!(!inner.should_skip_remote_applied_delta_revision("ssh-lab", 1));
+    assert!(!inner.should_skip_remote_applied_delta_revision("ssh-lab", 2));
+
+    inner.note_remote_applied_revision("ssh-lab", 4);
+    assert!(inner.should_skip_remote_applied_revision("ssh-lab", 4));
+    assert!(inner.should_skip_remote_applied_revision("ssh-lab", 3));
+    assert!(!inner.should_skip_remote_applied_revision("ssh-lab", 5));
+    assert!(inner.should_skip_remote_applied_delta_revision("ssh-lab", 3));
+    assert!(!inner.should_skip_remote_applied_delta_revision("ssh-lab", 4));
+    assert!(!inner.should_skip_remote_applied_delta_revision("ssh-lab", 5));
+
+    inner.note_remote_applied_revision("ssh-lab", 2);
+    assert!(inner.should_skip_remote_applied_revision("ssh-lab", 4));
+    assert!(inner.should_skip_remote_applied_revision("ssh-lab", 2));
+    assert!(!inner.should_skip_remote_applied_revision("ssh-lab", 5));
+    assert!(!inner.should_skip_remote_applied_delta_revision("ssh-lab", 4));
+    assert!(!inner.should_skip_remote_applied_delta_revision("ssh-lab", 5));
+    assert!(!inner.should_skip_remote_applied_revision("ssh-lab-2", 1));
+    assert!(!inner.should_skip_remote_applied_delta_revision("ssh-lab-2", 1));
+}
+
+// Tests that raw remote error bodies are sanitized and capped before they reach the UI.
+#[test]
+fn decode_remote_json_sanitizes_and_caps_raw_error_bodies() {
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("test listener should bind");
+    let port = listener.local_addr().expect("listener addr").port();
+    let noisy_body = format!(
+        "<html>\0Service\tUnavailable\r\nDetails {}{}\u{7}</html>",
+        "A".repeat(600),
+        "B".repeat(32)
+    );
+    let response_body_len = noisy_body.as_bytes().len();
+    let server = std::thread::spawn(move || {
+        let mut stream = accept_test_connection(&listener, "test listener");
+        let mut buffer = Vec::new();
+        let mut chunk = [0u8; 4096];
+        loop {
+            let bytes_read = stream.read(&mut chunk).expect("request should read");
+            assert!(bytes_read > 0, "request closed before headers completed");
+            buffer.extend_from_slice(&chunk[..bytes_read]);
+            if buffer.windows(4).any(|window| window == b"\r\n\r\n") {
+                break;
+            }
+        }
+
+        stream
+            .write_all(
+                format!(
+                    "HTTP/1.1 503 Service Unavailable\r\nContent-Type: text/html\r\nConnection: close\r\nContent-Length: {}\r\n\r\n{}",
+                    response_body_len, noisy_body
+                )
+                .as_bytes(),
+            )
+            .expect("error response should write");
+    });
+
+    let client = BlockingHttpClient::builder()
+        .build()
+        .expect("test HTTP client should build");
+    let response = client
+        .get(format!("http://127.0.0.1:{port}/api/health"))
+        .send()
+        .expect("error response should still be returned");
+    let err = match decode_remote_json::<HealthResponse>(response) {
+        Ok(_) => panic!("raw non-JSON 503 should surface as an ApiError"),
+        Err(err) => err,
+    };
+
+    assert_eq!(err.status, StatusCode::SERVICE_UNAVAILABLE);
+    assert!(err.message.contains("Service Unavailable Details"));
+    assert!(err.message.chars().count() <= 512);
+    assert!(err.message.ends_with("..."));
+    assert!(!err.message.contains('\r'));
+    assert!(!err.message.contains('\n'));
+    assert!(!err.message.contains('\t'));
+    assert!(!err.message.chars().any(|ch| ch.is_control()));
+
+    server.join().expect("server thread should finish");
+}
+
+// Tests that structured remote JSON error messages are sanitized and capped before they reach the UI.
+#[test]
+fn decode_remote_json_sanitizes_structured_error_bodies() {
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("test listener should bind");
+    let port = listener.local_addr().expect("listener addr").port();
+    let noisy_message = format!(
+        "Remote\tfailure\r\n{}{}\u{7}",
+        "A".repeat(600),
+        "B".repeat(32)
+    );
+    let response_body = serde_json::to_string(&json!({
+        "error": noisy_message,
+    }))
+    .expect("structured error response should encode");
+    let response_body_len = response_body.as_bytes().len();
+    let server = std::thread::spawn(move || {
+        let mut stream = accept_test_connection(&listener, "test listener");
+        let mut buffer = Vec::new();
+        let mut chunk = [0u8; 4096];
+        loop {
+            let bytes_read = stream.read(&mut chunk).expect("request should read");
+            assert!(bytes_read > 0, "request closed before headers completed");
+            buffer.extend_from_slice(&chunk[..bytes_read]);
+            if buffer.windows(4).any(|window| window == b"\r\n\r\n") {
+                break;
+            }
+        }
+
+        stream
+            .write_all(
+                format!(
+                    "HTTP/1.1 503 Service Unavailable\r\nContent-Type: application/json\r\nConnection: close\r\nContent-Length: {}\r\n\r\n{}",
+                    response_body_len, response_body
+                )
+                .as_bytes(),
+            )
+            .expect("error response should write");
+    });
+
+    let client = BlockingHttpClient::builder()
+        .build()
+        .expect("test HTTP client should build");
+    let response = client
+        .get(format!("http://127.0.0.1:{port}/api/health"))
+        .send()
+        .expect("error response should still be returned");
+    let err = match decode_remote_json::<HealthResponse>(response) {
+        Ok(_) => panic!("structured JSON 503 should surface as an ApiError"),
+        Err(err) => err,
+    };
+
+    assert_eq!(err.status, StatusCode::SERVICE_UNAVAILABLE);
+    assert!(err.message.contains("Remote failure"));
+    assert!(err.message.chars().count() <= 512);
+    assert!(err.message.ends_with("..."));
+    assert!(!err.message.contains('\r'));
+    assert!(!err.message.contains('\n'));
+    assert!(!err.message.contains('\t'));
+    assert!(!err.message.chars().any(|ch| ch.is_control()));
+
+    server.join().expect("server thread should finish");
+}
+
+// Tests that oversized remote error bodies are rejected before they are fully decoded into a String.
+#[test]
+fn decode_remote_json_rejects_oversized_error_bodies() {
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("test listener should bind");
+    let port = listener.local_addr().expect("listener addr").port();
+    let oversized_body = "X".repeat(70_000);
+    let response_body_len = oversized_body.as_bytes().len();
+    let server = std::thread::spawn(move || {
+        let mut stream = accept_test_connection(&listener, "test listener");
+        let mut buffer = Vec::new();
+        let mut chunk = [0u8; 4096];
+        loop {
+            let bytes_read = stream.read(&mut chunk).expect("request should read");
+            assert!(bytes_read > 0, "request closed before headers completed");
+            buffer.extend_from_slice(&chunk[..bytes_read]);
+            if buffer.windows(4).any(|window| window == b"\r\n\r\n") {
+                break;
+            }
+        }
+
+        stream
+            .write_all(
+                format!(
+                    "HTTP/1.1 503 Service Unavailable\r\nContent-Type: text/plain\r\nConnection: close\r\nContent-Length: {}\r\n\r\n{}",
+                    response_body_len, oversized_body
+                )
+                .as_bytes(),
+            )
+            .expect("error response should write");
+    });
+
+    let client = BlockingHttpClient::builder()
+        .build()
+        .expect("test HTTP client should build");
+    let response = client
+        .get(format!("http://127.0.0.1:{port}/api/health"))
+        .send()
+        .expect("error response should still be returned");
+    let err = match decode_remote_json::<HealthResponse>(response) {
+        Ok(_) => panic!("oversized error response should surface as an ApiError"),
+        Err(err) => err,
+    };
+
+    assert_eq!(err.status, StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(err.message, "remote error response too large");
+
+    server.join().expect("server thread should finish");
+}
+
+// Tests that applied remote revisions are tracked per remote, stay monotonic,
+// and can be reset when an event stream is re-established.
+#[test]
+fn remote_applied_revision_tracking_is_per_remote_and_monotonic() {
+    let state = test_app_state();
+
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        assert!(!inner.should_skip_remote_applied_revision("ssh-lab", 0));
+        inner.note_remote_applied_revision("ssh-lab", 0);
+        assert!(inner.should_skip_remote_applied_revision("ssh-lab", 0));
+        assert!(!inner.should_skip_remote_applied_revision("ssh-lab", 1));
+        assert!(!inner.should_skip_remote_applied_revision("ssh-lab-2", 0));
+
+        inner.note_remote_applied_revision("ssh-lab", 2);
+        inner.note_remote_applied_revision("ssh-lab", 1);
+        assert!(inner.should_skip_remote_applied_revision("ssh-lab", 2));
+        assert!(inner.should_skip_remote_applied_revision("ssh-lab", 1));
+        assert!(!inner.should_skip_remote_applied_revision("ssh-lab", 3));
+        assert!(!inner.should_skip_remote_applied_revision("ssh-lab-2", 2));
+    }
+
+    state.clear_remote_applied_revision("ssh-lab");
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    assert!(!inner.should_skip_remote_applied_revision("ssh-lab", 2));
+    assert!(!inner.should_skip_remote_applied_revision("ssh-lab", 0));
+    assert!(!inner.should_skip_remote_applied_revision("ssh-lab-2", 2));
+    drop(inner);
 
     let _ = fs::remove_file(state.persistence_path.as_path());
 }
@@ -13676,6 +18066,7 @@ fn remote_review_put_sends_scope_via_query_params() {
                 process: Mutex::new(None),
                 event_bridge_started: AtomicBool::new(false),
                 event_bridge_shutdown: AtomicBool::new(false),
+                supports_inline_orchestrator_templates: Mutex::new(None),
             }),
         );
 
@@ -14371,6 +18762,29 @@ async fn api_router_sets_local_cors_headers() {
             .headers()
             .get(axum::http::header::ACCESS_CONTROL_ALLOW_ORIGIN),
         Some(&HeaderValue::from_static("http://127.0.0.1:8787")),
+    );
+}
+
+// Tests that health route reports inline orchestrator template compatibility.
+#[tokio::test]
+async fn health_route_reports_inline_orchestrator_template_support() {
+    let (status, response): (StatusCode, Value) = request_json(
+        &app_router(test_app_state()),
+        Request::builder()
+            .method("GET")
+            .uri("/api/health")
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        response,
+        json!({
+            "ok": true,
+            "supportsInlineOrchestratorTemplates": true,
+        })
     );
 }
 
@@ -15599,6 +20013,7 @@ async fn orchestrator_lifecycle_routes_update_state_and_stop_active_sessions() {
         .create_orchestrator_instance(CreateOrchestratorInstanceRequest {
             template_id: template.id,
             project_id: Some(project_id),
+            template: None,
         })
         .expect("orchestrator instance should be created")
         .orchestrator;
@@ -15736,6 +20151,7 @@ async fn orchestrator_stop_route_preserves_running_state_when_a_child_stop_fails
         .create_orchestrator_instance(CreateOrchestratorInstanceRequest {
             template_id: template.id,
             project_id: Some(project_id),
+            template: None,
         })
         .expect("orchestrator instance should be created")
         .orchestrator;
@@ -15887,6 +20303,7 @@ fn aborted_stop_cleanup_preserves_child_work_when_child_stop_persist_fails() {
         .create_orchestrator_instance(CreateOrchestratorInstanceRequest {
             template_id: template.id,
             project_id: Some(project_id),
+            template: None,
         })
         .expect("orchestrator instance should be created")
         .orchestrator;
@@ -16075,6 +20492,7 @@ fn aborted_stop_resume_does_not_redispatch_child_after_child_stop_persist_fails(
         .create_orchestrator_instance(CreateOrchestratorInstanceRequest {
             template_id: template.id,
             project_id: Some(project_id),
+            template: None,
         })
         .expect("orchestrator instance should be created")
         .orchestrator;
@@ -16244,6 +20662,7 @@ fn aborted_stop_restart_does_not_redispatch_child_after_child_stop_persist_fails
         .create_orchestrator_instance(CreateOrchestratorInstanceRequest {
             template_id: template.id,
             project_id: Some(project_id),
+            template: None,
         })
         .expect("orchestrator instance should be created")
         .orchestrator;
@@ -16395,6 +20814,7 @@ fn aborted_stop_restart_does_not_dispatch_orphaned_child_queue_after_child_stop_
         .create_orchestrator_instance(CreateOrchestratorInstanceRequest {
             template_id: template.id,
             project_id: Some(project_id),
+            template: None,
         })
         .expect("orchestrator instance should be created")
         .orchestrator;
@@ -16535,6 +20955,7 @@ fn blocked_session_manual_recovery_dispatch_prioritizes_user_prompt_after_restar
         .create_orchestrator_instance(CreateOrchestratorInstanceRequest {
             template_id: template.id,
             project_id: Some(project_id),
+            template: None,
         })
         .expect("orchestrator instance should be created")
         .orchestrator;
@@ -17039,6 +21460,7 @@ fn aborted_stop_does_not_relaunch_child_work_completed_during_stop() {
         .create_orchestrator_instance(CreateOrchestratorInstanceRequest {
             template_id: template.id,
             project_id: Some(project_id),
+            template: None,
         })
         .expect("orchestrator instance should be created")
         .orchestrator;
@@ -17300,6 +21722,7 @@ fn begin_orchestrator_stop_cleans_up_guards_on_missing_and_stopped_errors() {
         .create_orchestrator_instance(CreateOrchestratorInstanceRequest {
             template_id: template.id,
             project_id: Some(project_id),
+            template: None,
         })
         .expect("orchestrator instance should be created")
         .orchestrator;
@@ -17375,6 +21798,7 @@ fn begin_orchestrator_stop_rolls_back_stop_in_progress_after_persist_failure() {
         .create_orchestrator_instance(CreateOrchestratorInstanceRequest {
             template_id: template.id,
             project_id: Some(project_id),
+            template: None,
         })
         .expect("orchestrator instance should be created")
         .orchestrator;
@@ -17454,6 +21878,7 @@ fn load_state_preserves_pending_transitions_when_stop_in_progress_has_no_stopped
         .create_orchestrator_instance(CreateOrchestratorInstanceRequest {
             template_id: template.id,
             project_id: Some(project_id),
+            template: None,
         })
         .expect("orchestrator instance should be created")
         .orchestrator;
@@ -17583,6 +22008,7 @@ fn load_state_recovers_completed_stop_when_active_children_finished_during_stop(
         .create_orchestrator_instance(CreateOrchestratorInstanceRequest {
             template_id: template.id,
             project_id: Some(project_id),
+            template: None,
         })
         .expect("orchestrator instance should be created")
         .orchestrator;
@@ -17746,6 +22172,7 @@ fn load_state_prunes_only_stopped_child_work_when_recovering_stop_in_progress() 
         .create_orchestrator_instance(CreateOrchestratorInstanceRequest {
             template_id: template.id,
             project_id: Some(project_id),
+            template: None,
         })
         .expect("orchestrator instance should be created")
         .orchestrator;
@@ -17909,6 +22336,7 @@ fn load_state_recovers_completed_stop_when_all_active_children_were_stopped() {
         .create_orchestrator_instance(CreateOrchestratorInstanceRequest {
             template_id: template.id,
             project_id: Some(project_id),
+            template: None,
         })
         .expect("orchestrator instance should be created")
         .orchestrator;
@@ -18011,6 +22439,17 @@ fn load_state_recovers_completed_stop_when_all_active_children_were_stopped() {
     let _ = fs::remove_dir_all(project_root);
 }
 
+// Tests that orchestrator templates round-trip through draft conversion helpers.
+#[test]
+fn orchestrator_template_draft_round_trips_through_template_helpers() {
+    let draft = sample_orchestrator_template_draft();
+    let template = orchestrator_template_from_draft("template-round-trip", draft.clone())
+        .expect("sample draft should normalize into a template");
+    let round_tripped = orchestrator_template_to_draft(&template);
+
+    assert_eq!(round_tripped, draft);
+}
+
 fn sample_orchestrator_template_draft() -> OrchestratorTemplateDraft {
     OrchestratorTemplateDraft {
         name: "Feature Delivery Flow".to_owned(),
@@ -18057,9 +22496,12 @@ fn sample_orchestrator_template_draft() -> OrchestratorTemplateDraft {
                 to_anchor: Some("top".to_owned()),
                 trigger: OrchestratorTransitionTrigger::OnCompletion,
                 result_mode: OrchestratorTransitionResultMode::LastResponse,
-                prompt_template: Some("Use this plan and implement it:
+                prompt_template: Some(
+                    "Use this plan and implement it:
 
-{{result}}".to_owned()),
+{{result}}"
+                        .to_owned(),
+                ),
             },
             OrchestratorTemplateTransition {
                 id: "builder-to-reviewer".to_owned(),
@@ -18069,9 +22511,12 @@ fn sample_orchestrator_template_draft() -> OrchestratorTemplateDraft {
                 to_anchor: Some("left".to_owned()),
                 trigger: OrchestratorTransitionTrigger::OnCompletion,
                 result_mode: OrchestratorTransitionResultMode::SummaryAndLastResponse,
-                prompt_template: Some("Review this implementation:
+                prompt_template: Some(
+                    "Review this implementation:
 
-{{result}}".to_owned()),
+{{result}}"
+                        .to_owned(),
+                ),
             },
         ],
     }
@@ -18133,9 +22578,12 @@ fn sample_deadlocked_orchestrator_template_draft() -> OrchestratorTemplateDraft 
                 to_anchor: Some("left".to_owned()),
                 trigger: OrchestratorTransitionTrigger::OnCompletion,
                 result_mode: OrchestratorTransitionResultMode::Summary,
-                prompt_template: Some("Source A summary:
+                prompt_template: Some(
+                    "Source A summary:
 
-{{result}}".to_owned()),
+{{result}}"
+                        .to_owned(),
+                ),
             },
             OrchestratorTemplateTransition {
                 id: "consolidate-b-to-consolidate-a".to_owned(),
@@ -18145,9 +22593,12 @@ fn sample_deadlocked_orchestrator_template_draft() -> OrchestratorTemplateDraft 
                 to_anchor: Some("bottom".to_owned()),
                 trigger: OrchestratorTransitionTrigger::OnCompletion,
                 result_mode: OrchestratorTransitionResultMode::Summary,
-                prompt_template: Some("Consolidate B summary:
+                prompt_template: Some(
+                    "Consolidate B summary:
 
-{{result}}".to_owned()),
+{{result}}"
+                        .to_owned(),
+                ),
             },
             OrchestratorTemplateTransition {
                 id: "source-b-to-consolidate-b".to_owned(),
@@ -18157,9 +22608,12 @@ fn sample_deadlocked_orchestrator_template_draft() -> OrchestratorTemplateDraft 
                 to_anchor: Some("left".to_owned()),
                 trigger: OrchestratorTransitionTrigger::OnCompletion,
                 result_mode: OrchestratorTransitionResultMode::Summary,
-                prompt_template: Some("Source B summary:
+                prompt_template: Some(
+                    "Source B summary:
 
-{{result}}".to_owned()),
+{{result}}"
+                        .to_owned(),
+                ),
             },
             OrchestratorTemplateTransition {
                 id: "consolidate-a-to-consolidate-b".to_owned(),
@@ -18169,9 +22623,12 @@ fn sample_deadlocked_orchestrator_template_draft() -> OrchestratorTemplateDraft 
                 to_anchor: Some("top".to_owned()),
                 trigger: OrchestratorTransitionTrigger::OnCompletion,
                 result_mode: OrchestratorTransitionResultMode::Summary,
-                prompt_template: Some("Consolidate A summary:
+                prompt_template: Some(
+                    "Consolidate A summary:
 
-{{result}}".to_owned()),
+{{result}}"
+                        .to_owned(),
+                ),
             },
         ],
     }
@@ -18205,7 +22662,11 @@ fn start_turn_on_record_rejects_remote_proxy_sessions() {
         error.message,
         "remote proxy sessions must dispatch through the remote backend"
     );
-    assert!(inner.sessions[index].active_turn_start_message_count.is_none());
+    assert!(
+        inner.sessions[index]
+            .active_turn_start_message_count
+            .is_none()
+    );
     assert!(inner.sessions[index].session.messages.is_empty());
     assert!(inner.sessions[index].session.pending_prompts.is_empty());
 
@@ -18237,6 +22698,7 @@ fn failed_orchestrator_transition_dispatch_becomes_a_visible_destination_error()
         .create_orchestrator_instance(CreateOrchestratorInstanceRequest {
             template_id: template.id,
             project_id: Some(project_id),
+            template: None,
         })
         .expect("orchestrator instance should be created")
         .orchestrator;
@@ -18361,6 +22823,7 @@ fn failed_orchestrator_transition_dispatch_does_not_block_other_instances() {
         .create_orchestrator_instance(CreateOrchestratorInstanceRequest {
             template_id: template.id.clone(),
             project_id: Some(project_id_a),
+            template: None,
         })
         .expect("first orchestrator instance should be created")
         .orchestrator;
@@ -18368,6 +22831,7 @@ fn failed_orchestrator_transition_dispatch_does_not_block_other_instances() {
         .create_orchestrator_instance(CreateOrchestratorInstanceRequest {
             template_id: template.id,
             project_id: Some(project_id_b),
+            template: None,
         })
         .expect("second orchestrator instance should be created")
         .orchestrator;
@@ -18515,6 +22979,7 @@ fn stop_session_does_not_schedule_orchestrator_transitions() {
         .create_orchestrator_instance(CreateOrchestratorInstanceRequest {
             template_id: template.id,
             project_id: Some(project_id),
+            template: None,
         })
         .expect("orchestrator instance should be created")
         .orchestrator;
@@ -18599,6 +23064,7 @@ fn fail_turn_does_not_schedule_orchestrator_transitions() {
         .create_orchestrator_instance(CreateOrchestratorInstanceRequest {
             template_id: template.id,
             project_id: Some(project_id),
+            template: None,
         })
         .expect("orchestrator instance should be created")
         .orchestrator;
@@ -18679,6 +23145,7 @@ fn mark_turn_error_does_not_schedule_orchestrator_transitions() {
         .create_orchestrator_instance(CreateOrchestratorInstanceRequest {
             template_id: template.id,
             project_id: Some(project_id),
+            template: None,
         })
         .expect("orchestrator instance should be created")
         .orchestrator;
@@ -18769,6 +23236,7 @@ fn orchestrator_transition_uses_only_messages_from_the_current_turn() {
         .create_orchestrator_instance(CreateOrchestratorInstanceRequest {
             template_id: template.id,
             project_id: Some(project_id),
+            template: None,
         })
         .expect("orchestrator instance should be created")
         .orchestrator;
@@ -18885,6 +23353,7 @@ fn runtime_exit_does_not_schedule_orchestrator_transitions() {
         .create_orchestrator_instance(CreateOrchestratorInstanceRequest {
             template_id: template.id,
             project_id: Some(project_id),
+            template: None,
         })
         .expect("orchestrator instance should be created")
         .orchestrator;
@@ -18976,6 +23445,7 @@ fn killing_a_session_prunes_its_orchestrator_links() {
         .create_orchestrator_instance(CreateOrchestratorInstanceRequest {
             template_id: template.id,
             project_id: Some(project_id),
+            template: None,
         })
         .expect("orchestrator instance should be created")
         .orchestrator;

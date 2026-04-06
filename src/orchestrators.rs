@@ -501,6 +501,36 @@ fn normalize_orchestrator_template_draft(
     })
 }
 
+/// Builds a runtime template from a draft payload.
+fn orchestrator_template_from_draft(
+    template_id: &str,
+    draft: OrchestratorTemplateDraft,
+) -> Result<OrchestratorTemplate, ApiError> {
+    let normalized = normalize_orchestrator_template_draft(draft)?;
+    let now = stamp_orchestrator_template_now();
+    Ok(OrchestratorTemplate {
+        id: template_id.to_owned(),
+        name: normalized.name,
+        description: normalized.description,
+        project_id: normalized.project_id,
+        sessions: normalized.sessions,
+        transitions: normalized.transitions,
+        created_at: now.clone(),
+        updated_at: now,
+    })
+}
+
+/// Converts a stored template into a launch payload.
+fn orchestrator_template_to_draft(template: &OrchestratorTemplate) -> OrchestratorTemplateDraft {
+    OrchestratorTemplateDraft {
+        name: template.name.clone(),
+        description: template.description.clone(),
+        project_id: template.project_id.clone(),
+        sessions: template.sessions.clone(),
+        transitions: template.transitions.clone(),
+    }
+}
+
 /// Normalizes orchestrator session template.
 fn normalize_orchestrator_session_template(
     template: OrchestratorSessionTemplate,
@@ -670,12 +700,14 @@ struct OrchestratorInstance {
 }
 
 /// Represents the create orchestrator instance request payload.
-#[derive(Deserialize)]
+#[derive(Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct CreateOrchestratorInstanceRequest {
     template_id: String,
     #[serde(default)]
     project_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    template: Option<OrchestratorTemplateDraft>,
 }
 
 /// Represents the orchestrator instances response payload.
@@ -873,7 +905,9 @@ impl AppState {
         let template_id =
             normalize_required_orchestrator_text(&request.template_id, "template id")?;
 
-        let template = {
+        let template = if let Some(inline_template) = request.template.clone() {
+            orchestrator_template_from_draft(&template_id, inline_template)?
+        } else {
             let _guard = self
                 .orchestrator_templates_lock
                 .lock()
@@ -891,28 +925,29 @@ impl AppState {
                 .find(|template| template.id == template_id)
                 .ok_or_else(|| ApiError::not_found("orchestrator template not found"))?
         };
-        let (state, orchestrator) = {
-            let mut inner = self.inner.lock().expect("state mutex poisoned");
-            let project_id = request
-                .project_id
-                .as_deref()
-                .map(str::trim)
-                .filter(|s| !s.is_empty())
-                .or(template.project_id.as_deref())
-                .ok_or_else(|| {
-                    ApiError::bad_request(
-                        "no project specified; set a project on the template or provide one in the request",
-                    )
-                })?;
-            let project = inner
+        let project_id = request
+            .project_id
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .or(template.project_id.as_deref())
+            .ok_or_else(|| {
+                ApiError::bad_request(
+                    "no project specified; set a project on the template or provide one in the request",
+                )
+            })?;
+        let project = {
+            let inner = self.inner.lock().expect("state mutex poisoned");
+            inner
                 .find_project(project_id)
                 .cloned()
-                .ok_or_else(|| ApiError::not_found(format!("unknown project `{project_id}`")))?;
-            if project.remote_id != LOCAL_REMOTE_ID {
-                return Err(ApiError::bad_request(
-                    "runtime orchestrations currently require a local project",
-                ));
-            }
+                .ok_or_else(|| ApiError::not_found(format!("unknown project `{project_id}`")))?
+        };
+        if project.remote_id != LOCAL_REMOTE_ID {
+            return self.create_remote_orchestrator_proxy(&template, &project);
+        }
+        let (state, orchestrator) = {
+            let mut inner = self.inner.lock().expect("state mutex poisoned");
             for template_session in &template.sessions {
                 validate_agent_session_setup(template_session.agent, &project.root_path)
                     .map_err(ApiError::bad_request)?;

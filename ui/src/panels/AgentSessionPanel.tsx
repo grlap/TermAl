@@ -1551,10 +1551,6 @@ function VirtualizedConversationMessageList({
   onCodexAppRequestSubmit: CodexAppRequestSubmitHandler;
 }) {
   const messageHeightsRef = useRef<Record<string, number>>({});
-  const visibleRangeRef = useRef({
-    startIndex: 0,
-    endIndex: messages.length,
-  });
   const [viewport, setViewport] = useState({
     height: DEFAULT_VIRTUALIZED_VIEWPORT_HEIGHT,
     scrollTop: 0,
@@ -1573,6 +1569,8 @@ function VirtualizedConversationMessageList({
     [layoutVersion, messages],
   );
   const layout = useMemo(() => buildVirtualizedMessageLayout(messageHeights), [messageHeights]);
+  const layoutTopsRef = useRef(layout.tops);
+  layoutTopsRef.current = layout.tops;
   const activeViewport = scrollContainerRef.current;
   const viewportHeight =
     activeViewport?.clientHeight && activeViewport.clientHeight > 0
@@ -1590,10 +1588,6 @@ function VirtualizedConversationMessageList({
       ),
     [layout.tops, messageHeights, viewportHeight, viewportScrollTop],
   );
-
-  useEffect(() => {
-    visibleRangeRef.current = visibleRange;
-  }, [visibleRange]);
 
   useEffect(() => {
     messageHeightsRef.current = Object.fromEntries(
@@ -1656,8 +1650,16 @@ function VirtualizedConversationMessageList({
 
     const messageIndex = messageIndexByIdRef.current.get(messageId);
     const node = scrollContainerRef.current;
-    if (node && messageIndex !== undefined && messageIndex < visibleRangeRef.current.startIndex) {
-      node.scrollTop += nextHeight - previousHeight;
+    if (node && messageIndex !== undefined) {
+      const nextScrollTop = getAdjustedVirtualizedScrollTopForHeightChange({
+        currentScrollTop: node.scrollTop,
+        messageTop: layoutTopsRef.current[messageIndex] ?? 0,
+        nextHeight,
+        previousHeight,
+      });
+      if (Math.abs(nextScrollTop - node.scrollTop) >= 0.5) {
+        node.scrollTop = nextScrollTop;
+      }
     }
 
     setLayoutVersion((current) => current + 1);
@@ -2969,6 +2971,33 @@ function findVirtualizedMessageRange(
     startIndex,
     endIndex: Math.max(startIndex + 1, endIndex),
   };
+}
+
+export function getAdjustedVirtualizedScrollTopForHeightChange({
+  currentScrollTop,
+  messageTop,
+  nextHeight,
+  previousHeight,
+}: {
+  currentScrollTop: number;
+  messageTop: number;
+  nextHeight: number;
+  previousHeight: number;
+}) {
+  const heightDelta = nextHeight - previousHeight;
+
+  // Never adjust for messages that start at or below the viewport top.
+  if (messageTop >= currentScrollTop) {
+    return currentScrollTop;
+  }
+
+  // Growing a partially visible message should not jump the viewport. Shrinks
+  // still adjust so the anchor can move upward, floored at zero.
+  if (heightDelta > 0 && messageTop + previousHeight > currentScrollTop) {
+    return currentScrollTop;
+  }
+
+  return Math.max(currentScrollTop + heightDelta, 0);
 }
 
 function estimateConversationMessageHeight(message: Message) {

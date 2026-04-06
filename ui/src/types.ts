@@ -18,6 +18,7 @@ export type AgentReadiness = {
   status: AgentReadinessStatus;
   blocking: boolean;
   detail: string;
+  warningDetail?: string | null;
   commandPath?: string | null;
 };
 

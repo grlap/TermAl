@@ -1,6 +1,12 @@
 # Architecture Review
 
 Focus: State management, layer boundaries, agent-agnostic patterns, design consistency.
+## Development-Phase Compatibility Policy
+- Legacy compatibility means supporting older persisted schema or older local/internal API shapes from previous development builds, such as obsolete orchestrator fields.
+- Do NOT flag missing schema upgrades, migrations, or backward compatibility for ~/.termal/*.json, browser localStorage state, or local/internal API contracts from previous local-only development builds.
+- Path normalization and canonicalization for current inputs are not legacy compatibility work.
+- Intentional breaking changes are acceptable during development; only flag compatibility issues when they break current-tree behavior, current tests, or the current documented contract.
+- Windows, macOS, and Linux are P0 platforms. Flag regressions on those platforms; do not require support beyond them unless the current change claims it.
 
 ## What to check
 
@@ -52,3 +58,4 @@ Focus: State management, layer boundaries, agent-agnostic patterns, design consi
 - The fact that `App.tsx` is a single large file (same reason — iteration speed)
 - Performance micro-optimizations unless architecturally significant
 - Code style preferences (formatting, naming) — leave to linters
+

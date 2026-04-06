@@ -7,19 +7,25 @@ import {
   waitFor,
   within,
 } from "@testing-library/react";
+import { StrictMode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import * as api from "./api";
 import App, {
+  buildControlSurfaceSessionListEntries,
   MarkdownContent,
   ThemedCombobox,
+  formatSessionOrchestratorGroupName,
   describeCodexModelAdjustmentNotice,
   describeSessionModelRefreshError,
   getWorkspaceSplitResizeBounds,
+  resolveAdoptedStateSlices,
   resolveControlPanelWorkspaceRoot,
+  resolveControlSurfaceSectionIdForWorkspaceTab,
   resolveStandaloneControlPanelDockWidthRatio,
   describeUnknownSessionModelWarning,
   resolveUnknownSessionModelSendAttempt,
+  syncMessageStackScrollPosition,
 } from "./App";
 import {
   LIVE_SESSION_RESUME_WATCHDOG_DRIFT_MS,
@@ -27,6 +33,9 @@ import {
   LIVE_SESSION_WATCHDOG_RESYNC_RETRY_COOLDOWN_MS,
 } from "./live-updates";
 import type { AgentReadiness, OrchestratorInstance, Session } from "./types";
+import * as workspaceStorage from "./workspace-storage";
+import { WORKSPACE_LAYOUT_STORAGE_KEY } from "./workspace-storage";
+import type { WorkspaceTab } from "./workspace";
 
 class EventSourceMock {
   static instances: EventSourceMock[] = [];
@@ -190,6 +199,32 @@ function makeWorkspaceLayoutResponse(
   };
 }
 
+type AppTestStateResponse = Awaited<ReturnType<typeof api.fetchState>>;
+
+function makeStateResponse(
+  overrides: Pick<
+    AppTestStateResponse,
+    "revision" | "projects" | "orchestrators" | "workspaces" | "sessions"
+  > &
+    Partial<
+      Pick<AppTestStateResponse, "codex" | "agentReadiness" | "preferences">
+    >,
+): AppTestStateResponse {
+  return {
+    revision: overrides.revision,
+    codex: overrides.codex ?? {},
+    agentReadiness: overrides.agentReadiness ?? [],
+    preferences: overrides.preferences ?? {
+      defaultCodexReasoningEffort: "medium",
+      defaultClaudeEffort: "default",
+    },
+    projects: overrides.projects,
+    orchestrators: overrides.orchestrators,
+    workspaces: overrides.workspaces,
+    sessions: overrides.sessions,
+  };
+}
+
 async function flushUiWork() {
   for (let iteration = 0; iteration < 3; iteration += 1) {
     await Promise.resolve();
@@ -231,6 +266,12 @@ function latestEventSource(): EventSourceMock {
     throw new Error("Event source not created");
   }
   return eventSource;
+}
+
+function stubScrollIntoView() {
+  return vi
+    .spyOn(HTMLElement.prototype, "scrollIntoView")
+    .mockImplementation(() => {});
 }
 
 function setDocumentVisibilityState(value: DocumentVisibilityState) {
@@ -312,7 +353,6 @@ async function withFallbackStateHarness<T>(
 ) {
   const originalEventSource = globalThis.EventSource;
   const originalResizeObserver = globalThis.ResizeObserver;
-  const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
   vi.stubGlobal(
     "EventSource",
     EventSourceMock as unknown as typeof EventSource,
@@ -321,7 +361,7 @@ async function withFallbackStateHarness<T>(
     "ResizeObserver",
     ResizeObserverMock as unknown as typeof ResizeObserver,
   );
-  HTMLElement.prototype.scrollIntoView = vi.fn();
+  const scrollIntoViewSpy = stubScrollIntoView();
 
   try {
     await renderApp();
@@ -338,7 +378,7 @@ async function withFallbackStateHarness<T>(
       sessionList,
     });
   } finally {
-    HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
+    scrollIntoViewSpy.mockRestore();
     restoreGlobal("EventSource", originalEventSource);
     restoreGlobal("ResizeObserver", originalResizeObserver);
   }
@@ -423,7 +463,6 @@ async function renderAppWithProjectAndSession(
   const originalFetch = globalThis.fetch;
   const originalEventSource = globalThis.EventSource;
   const originalResizeObserver = globalThis.ResizeObserver;
-  const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
   const fetchMock = vi.fn(
     async (input: RequestInfo | URL, init?: RequestInit) => {
       const requestUrl = new URL(String(input), "http://localhost");
@@ -479,15 +518,6 @@ async function renderAppWithProjectAndSession(
 
   const priorEventSourceCount = EventSourceMock.instances.length;
 
-  function restoreSetup() {
-    window.localStorage.clear();
-    EventSourceMock.instances.splice(priorEventSourceCount);
-    HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
-    restoreGlobal("fetch", originalFetch);
-    restoreGlobal("EventSource", originalEventSource);
-    restoreGlobal("ResizeObserver", originalResizeObserver);
-  }
-
   window.localStorage.clear();
   vi.stubGlobal("fetch", fetchMock);
   vi.stubGlobal(
@@ -498,7 +528,18 @@ async function renderAppWithProjectAndSession(
     "ResizeObserver",
     ResizeObserverMock as unknown as typeof ResizeObserver,
   );
-  HTMLElement.prototype.scrollIntoView = vi.fn();
+  const scrollIntoViewSpy = vi
+    .spyOn(HTMLElement.prototype, "scrollIntoView")
+    .mockImplementation(() => {});
+
+  function restoreSetup() {
+    window.localStorage.clear();
+    EventSourceMock.instances.splice(priorEventSourceCount);
+    scrollIntoViewSpy.mockRestore();
+    restoreGlobal("fetch", originalFetch);
+    restoreGlobal("EventSource", originalEventSource);
+    restoreGlobal("ResizeObserver", originalResizeObserver);
+  }
 
   try {
     await renderApp();
@@ -950,8 +991,11 @@ describe("App", () => {
         } as unknown as EventSourceMock,
       ]).length;
 
-      const context = await renderAppWithProjectAndSession();
+      let context:
+        | Awaited<ReturnType<typeof renderAppWithProjectAndSession>>
+        | null = null;
       try {
+        context = await renderAppWithProjectAndSession();
         const freshEventSources = EventSourceMock.instances.slice(
           seededEventSourceCount,
         );
@@ -965,8 +1009,8 @@ describe("App", () => {
         ).toBe(true);
         expect(staleDispatchError).not.toHaveBeenCalled();
       } finally {
-        context.cleanup();
         EventSourceMock.instances.splice(priorEventSourceCount);
+        context?.cleanup();
       }
     });
   });
@@ -1134,6 +1178,279 @@ describe("App", () => {
     ).toBeNull();
   });
 
+  it("maps workspace tabs to control panel sections", () => {
+    expect(
+      resolveControlSurfaceSectionIdForWorkspaceTab({
+        id: "tab-files",
+        kind: "filesystem",
+        rootPath: "/repo",
+        originSessionId: null,
+      } satisfies WorkspaceTab),
+    ).toBe("files");
+    expect(
+      resolveControlSurfaceSectionIdForWorkspaceTab({
+        id: "tab-git",
+        kind: "gitStatus",
+        workdir: "/repo",
+        originSessionId: null,
+      } satisfies WorkspaceTab),
+    ).toBe("git");
+    expect(
+      resolveControlSurfaceSectionIdForWorkspaceTab({
+        id: "tab-orchestrators",
+        kind: "orchestratorList",
+        originSessionId: null,
+      } satisfies WorkspaceTab),
+    ).toBe("orchestrators");
+    expect(
+      resolveControlSurfaceSectionIdForWorkspaceTab({
+        id: "tab-projects",
+        kind: "projectList",
+        originSessionId: null,
+      } satisfies WorkspaceTab),
+    ).toBe("projects");
+    expect(
+      resolveControlSurfaceSectionIdForWorkspaceTab({
+        id: "tab-sessions",
+        kind: "sessionList",
+        originSessionId: null,
+      } satisfies WorkspaceTab),
+    ).toBe("sessions");
+    expect(
+      resolveControlSurfaceSectionIdForWorkspaceTab({
+        id: "tab-source",
+        kind: "source",
+        path: "/repo/src/main.rs",
+        originSessionId: null,
+      } satisfies WorkspaceTab),
+    ).toBeNull();
+  });
+
+  it("keeps omitted adoptState slices unchanged", () => {
+    const preservedCodex = {
+      notices: [
+        {
+          kind: "runtimeNotice" as const,
+          level: "warning" as const,
+          title: "Existing notice",
+          detail: "Keep this codex state when omitted.",
+          timestamp: "2026-04-06T00:00:00Z",
+        },
+      ],
+    };
+    const preservedReadiness = [
+      makeReadiness({
+        agent: "Codex",
+        detail: "Keep this readiness state when omitted.",
+      }),
+    ];
+    const preservedProjects = [
+      {
+        id: "project-local",
+        name: "Local",
+        rootPath: "/repo",
+      },
+    ];
+    const preservedOrchestrators = [
+      makeOrchestrator({
+        id: "orchestrator-existing",
+      }),
+    ];
+    const preservedWorkspaces = [
+      {
+        id: "workspace-existing",
+        revision: 3,
+        updatedAt: "2026-04-06 00:00:00",
+        controlPanelSide: "left" as const,
+      },
+    ];
+
+    const adopted = resolveAdoptedStateSlices(
+      {
+        codex: preservedCodex,
+        agentReadiness: preservedReadiness,
+        projects: preservedProjects,
+        orchestrators: preservedOrchestrators,
+        workspaces: preservedWorkspaces,
+      },
+      {},
+    );
+
+    expect(adopted.codex).toBe(preservedCodex);
+    expect(adopted.agentReadiness).toBe(preservedReadiness);
+    expect(adopted.projects).toBe(preservedProjects);
+    expect(adopted.orchestrators).toBe(preservedOrchestrators);
+    expect(adopted.workspaces).toBe(preservedWorkspaces);
+  });
+
+  it("falls back to the template id for blank orchestrator group names", () => {
+    const blankNamedOrchestrator = makeOrchestrator({
+      templateId: "review-flow",
+      templateSnapshot: {
+        ...makeOrchestrator().templateSnapshot,
+        id: "review-flow",
+        name: "   ",
+      },
+    });
+
+    expect(formatSessionOrchestratorGroupName(blankNamedOrchestrator)).toBe(
+      "review-flow",
+    );
+  });
+
+  it("builds control-surface entries with standalone sessions and the newest orchestrator mapping", () => {
+    const templateSnapshot = makeOrchestrator().templateSnapshot;
+    const standaloneSession = makeSession("session-standalone", {
+      name: "Standalone",
+    });
+    const sharedSession = makeSession("session-shared", {
+      name: "Shared",
+    });
+    const latestSession = makeSession("session-latest", {
+      name: "Latest",
+    });
+    const olderOrchestrator = makeOrchestrator({
+      id: "orchestrator-older",
+      templateId: "older-flow",
+      createdAt: "2026-03-30 09:00:00",
+      templateSnapshot: {
+        ...templateSnapshot,
+        id: "older-flow",
+        name: "Older Flow",
+      },
+      sessionInstances: [
+        {
+          templateSessionId: "builder",
+          sessionId: "session-shared",
+          lastCompletionRevision: null,
+          lastDeliveredCompletionRevision: null,
+        },
+      ],
+    });
+    const newestOrchestrator = makeOrchestrator({
+      id: "orchestrator-newest",
+      templateId: "newest-flow",
+      createdAt: "2026-03-30 10:00:00",
+      templateSnapshot: {
+        ...templateSnapshot,
+        id: "newest-flow",
+        name: "   ",
+      },
+      sessionInstances: [
+        {
+          templateSessionId: "builder",
+          sessionId: "session-shared",
+          lastCompletionRevision: null,
+          lastDeliveredCompletionRevision: null,
+        },
+        {
+          templateSessionId: "reviewer",
+          sessionId: "session-latest",
+          lastCompletionRevision: null,
+          lastDeliveredCompletionRevision: null,
+        },
+      ],
+    });
+
+    const entries = buildControlSurfaceSessionListEntries(
+      [standaloneSession, sharedSession, latestSession],
+      [olderOrchestrator, newestOrchestrator],
+    );
+
+    expect(entries).toHaveLength(2);
+    expect(entries[0]).toEqual({
+      kind: "session",
+      session: standaloneSession,
+    });
+
+    const groupedEntry = entries[1];
+    if (!groupedEntry || groupedEntry.kind !== "orchestratorGroup") {
+      throw new Error("Expected an orchestrator group entry");
+    }
+    expect(groupedEntry.orchestrator.id).toBe("orchestrator-newest");
+    expect(groupedEntry.sessions.map((session) => session.id)).toEqual([
+      "session-shared",
+      "session-latest",
+    ]);
+    expect(formatSessionOrchestratorGroupName(groupedEntry.orchestrator)).toBe(
+      "newest-flow",
+    );
+  });
+
+  it("returns no control-surface entries for an empty session list", () => {
+    expect(buildControlSurfaceSessionListEntries([], [makeOrchestrator()])).toEqual(
+      [],
+    );
+  });
+
+  it("adopts explicitly empty adoptState slices", () => {
+    const currentCodex = {
+      notices: [
+        {
+          kind: "runtimeNotice" as const,
+          level: "warning" as const,
+          title: "Existing notice",
+          detail: "This should be replaced by the next state.",
+          timestamp: "2026-04-06T00:00:00Z",
+        },
+      ],
+    };
+    const currentReadiness = [
+      makeReadiness({
+        agent: "Codex",
+        detail: "This should be replaced by the next state.",
+      }),
+    ];
+    const currentProjects = [
+      {
+        id: "project-local",
+        name: "Local",
+        rootPath: "/repo",
+      },
+    ];
+    const currentOrchestrators = [
+      makeOrchestrator({
+        id: "orchestrator-existing",
+      }),
+    ];
+    const currentWorkspaces = [
+      {
+        id: "workspace-existing",
+        revision: 3,
+        updatedAt: "2026-04-06 00:00:00",
+        controlPanelSide: "left" as const,
+      },
+    ];
+    const emptyCodex = { notices: [] };
+    const emptyReadiness: typeof currentReadiness = [];
+    const emptyProjects: typeof currentProjects = [];
+    const emptyOrchestrators: typeof currentOrchestrators = [];
+    const emptyWorkspaces: typeof currentWorkspaces = [];
+
+    const adopted = resolveAdoptedStateSlices(
+      {
+        codex: currentCodex,
+        agentReadiness: currentReadiness,
+        projects: currentProjects,
+        orchestrators: currentOrchestrators,
+        workspaces: currentWorkspaces,
+      },
+      {
+        codex: emptyCodex,
+        agentReadiness: emptyReadiness,
+        projects: emptyProjects,
+        orchestrators: emptyOrchestrators,
+        workspaces: emptyWorkspaces,
+      },
+    );
+
+    expect(adopted.codex).toBe(emptyCodex);
+    expect(adopted.agentReadiness).toBe(emptyReadiness);
+    expect(adopted.projects).toBe(emptyProjects);
+    expect(adopted.orchestrators).toBe(emptyOrchestrators);
+    expect(adopted.workspaces).toBe(emptyWorkspaces);
+  });
+
   it("rewrites model refresh failures into agent-specific guidance", () => {
     expect(
       describeSessionModelRefreshError(
@@ -1150,6 +1467,84 @@ describe("App", () => {
     ).toBe(
       "Claude did not return its live model list in time. Try Refresh models again. If this keeps happening, start a new Claude session.",
     );
+  });
+
+  it("shows the Gemini interactive-shell warning when Gemini is selected", async () => {
+    await withSuppressedActWarnings(async () => {
+      const originalFetch = globalThis.fetch;
+      const originalEventSource = globalThis.EventSource;
+      const originalResizeObserver = globalThis.ResizeObserver;
+      const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url === "/api/state") {
+          return jsonResponse({
+            revision: 1,
+            projects: [],
+            agentReadiness: [
+              makeReadiness({
+                status: "ready",
+                blocking: false,
+                detail:
+                  "Gemini CLI is ready with Google login credentials from /home/testuser/.gemini/oauth_creds.json.",
+                warningDetail:
+                  "TermAl forces Gemini `tools.shell.enableInteractiveShell` to `false` for Windows ACP sessions to avoid PTY startup crashes. The setting in /home/testuser/.gemini/settings.json is left unchanged.",
+              }),
+            ],
+            sessions: [],
+          });
+        }
+
+        throw new Error(`Unexpected fetch: ${url}`);
+      });
+      vi.stubGlobal("fetch", fetchMock);
+      vi.stubGlobal(
+        "EventSource",
+        EventSourceMock as unknown as typeof EventSource,
+      );
+      vi.stubGlobal(
+        "ResizeObserver",
+        ResizeObserverMock as unknown as typeof ResizeObserver,
+      );
+      const scrollIntoViewSpy = stubScrollIntoView();
+
+      try {
+        await renderApp();
+        const eventSource = latestEventSource();
+        act(() => {
+          eventSource.dispatchError();
+        });
+        await settleAsyncUi();
+        await openCreateSessionDialog();
+
+        expect(document.body.textContent ?? "").not.toContain(
+          "TermAl forces Gemini",
+        );
+
+        await selectComboboxOption("Assistant", "Gemini");
+
+        await waitFor(() => {
+          expect(document.body.textContent ?? "").toContain(
+            "TermAl forces Gemini",
+          );
+          expect(document.body.textContent ?? "").toContain(
+            "Gemini CLI is ready with Google login credentials from /home/testuser/.gemini/oauth_creds.json.",
+          );
+        });
+
+        await selectComboboxOption("Assistant", "Codex");
+
+        await waitFor(() => {
+          expect(document.body.textContent ?? "").not.toContain(
+            "TermAl forces Gemini",
+          );
+        });
+      } finally {
+        scrollIntoViewSpy.mockRestore();
+        restoreGlobal("fetch", originalFetch);
+        restoreGlobal("EventSource", originalEventSource);
+        restoreGlobal("ResizeObserver", originalResizeObserver);
+      }
+    });
   });
 
   it("warns before sending a prompt with an unknown session model", () => {
@@ -1189,15 +1584,12 @@ describe("App", () => {
       "ResizeObserver",
       ResizeObserverMock as unknown as typeof ResizeObserver,
     );
-    const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
-    HTMLElement.prototype.scrollIntoView = vi.fn();
+    const scrollIntoViewSpy = stubScrollIntoView();
 
     try {
       await renderApp();
 
-      const eventSource = latestEventSource();
-      expect(eventSource).toBeTruthy();
-
+      const eventSource = latestEventSource();
       act(() => {
         eventSource.dispatchOpen();
         eventSource.dispatchNamedEvent("state", {
@@ -1263,7 +1655,7 @@ describe("App", () => {
       expect(screen.queryByText("Older Session")).not.toBeInTheDocument();
       expect(screen.queryByText("Stale preview")).not.toBeInTheDocument();
     } finally {
-      HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
+      scrollIntoViewSpy.mockRestore();
       restoreGlobal("fetch", originalFetch);
       restoreGlobal("EventSource", originalEventSource);
       restoreGlobal("ResizeObserver", originalResizeObserver);
@@ -1330,8 +1722,7 @@ describe("App", () => {
       "ResizeObserver",
       ResizeObserverMock as unknown as typeof ResizeObserver,
     );
-    const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
-    HTMLElement.prototype.scrollIntoView = vi.fn();
+    const scrollIntoViewSpy = stubScrollIntoView();
     const stateFetchCallCount = () =>
       fetchMock.mock.calls.filter(([url]) => String(url) === "/api/state")
         .length;
@@ -1442,7 +1833,7 @@ describe("App", () => {
       expect(screen.queryByText("Older snapshot.")).not.toBeInTheDocument();
     } finally {
       vi.useRealTimers();
-      HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
+      scrollIntoViewSpy.mockRestore();
       restoreGlobal("fetch", originalFetch);
       restoreGlobal("EventSource", originalEventSource);
       restoreGlobal("ResizeObserver", originalResizeObserver);
@@ -1514,8 +1905,7 @@ describe("App", () => {
       "ResizeObserver",
       ResizeObserverMock as unknown as typeof ResizeObserver,
     );
-    const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
-    HTMLElement.prototype.scrollIntoView = vi.fn();
+    const scrollIntoViewSpy = stubScrollIntoView();
 
     try {
       await renderApp();
@@ -1622,7 +2012,7 @@ describe("App", () => {
       ).not.toBeInTheDocument();
     } finally {
       vi.useRealTimers();
-      HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
+      scrollIntoViewSpy.mockRestore();
       restoreGlobal("fetch", originalFetch);
       restoreGlobal("EventSource", originalEventSource);
       restoreGlobal("ResizeObserver", originalResizeObserver);
@@ -1689,8 +2079,7 @@ describe("App", () => {
       "ResizeObserver",
       ResizeObserverMock as unknown as typeof ResizeObserver,
     );
-    const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
-    HTMLElement.prototype.scrollIntoView = vi.fn();
+    const scrollIntoViewSpy = stubScrollIntoView();
     const stateFetchCallCount = () =>
       fetchMock.mock.calls.filter(([url]) => String(url) === "/api/state")
         .length;
@@ -1809,7 +2198,7 @@ describe("App", () => {
       ).not.toBeInTheDocument();
     } finally {
       vi.useRealTimers();
-      HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
+      scrollIntoViewSpy.mockRestore();
       restoreGlobal("fetch", originalFetch);
       restoreGlobal("EventSource", originalEventSource);
       restoreGlobal("ResizeObserver", originalResizeObserver);
@@ -1831,13 +2220,10 @@ describe("App", () => {
       "ResizeObserver",
       ResizeObserverMock as unknown as typeof ResizeObserver,
     );
-    const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
-    HTMLElement.prototype.scrollIntoView = vi.fn();
+    const scrollIntoViewSpy = stubScrollIntoView();
     try {
       await renderApp();
-      const eventSource = latestEventSource();
-      expect(eventSource).toBeTruthy();
-      act(() => {
+      const eventSource = latestEventSource();      act(() => {
         eventSource.dispatchOpen();
         eventSource.dispatchNamedEvent("state", {
           revision: 1,
@@ -1921,7 +2307,7 @@ describe("App", () => {
         fetchMock.mock.calls.some(([url]) => String(url) === "/api/state"),
       ).toBe(false);
     } finally {
-      HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
+      scrollIntoViewSpy.mockRestore();
       restoreGlobal("fetch", originalFetch);
       restoreGlobal("EventSource", originalEventSource);
       restoreGlobal("ResizeObserver", originalResizeObserver);
@@ -1974,16 +2360,18 @@ describe("App", () => {
           ).toBeInTheDocument();
 
           await act(async () => {
-            resyncStateDeferred.resolve({
+            resyncStateDeferred.resolve(makeStateResponse({
               revision: 1,
               projects: [],
+              orchestrators: [],
+              workspaces: [],
               sessions: [
                 makeSession("session-1", {
                   name: "Recovered Session",
                   preview: "Recovered from /api/state",
                 }),
               ],
-            });
+            }));
             await flushUiWork();
           });
 
@@ -2052,16 +2440,18 @@ describe("App", () => {
           expect(fetchStateSpy).toHaveBeenCalledTimes(1);
 
           await act(async () => {
-            resyncStateDeferred.resolve({
+            resyncStateDeferred.resolve(makeStateResponse({
               revision: 1,
               projects: [],
+              orchestrators: [],
+              workspaces: [],
               sessions: [
                 makeSession("session-1", {
                   name: "Recovered Session",
                   preview: "Recovered from /api/state",
                 }),
               ],
-            });
+            }));
             await flushUiWork();
           });
 
@@ -2116,16 +2506,18 @@ describe("App", () => {
           }
 
           if (fetchStateCallCount === 2) {
-            return {
+            return makeStateResponse({
               revision: 1,
               projects: [],
+              orchestrators: [],
+              workspaces: [],
               sessions: [
                 makeSession("session-1", {
                   name: "Recovered Session",
                   preview: "Recovered after retry",
                 }),
               ],
-            };
+            });
           }
 
           throw new Error(`Unexpected fetchState call #${fetchStateCallCount}`);
@@ -2204,16 +2596,18 @@ describe("App", () => {
           }
 
           if (fetchStateCallCount === 2) {
-            return {
+            return makeStateResponse({
               revision: 2,
               projects: [],
+              orchestrators: [],
+              workspaces: [],
               sessions: [
                 makeSession("session-1", {
                   name: "Recovered Session",
                   preview: "Recovered after live fallback retry",
                 }),
               ],
-            };
+            });
           }
 
           throw new Error(`Unexpected fetchState call #${fetchStateCallCount}`);
@@ -2288,16 +2682,18 @@ describe("App", () => {
           }
 
           if (fetchStateCallCount === 2) {
-            return {
+            return makeStateResponse({
               revision: 1,
               projects: [],
+              orchestrators: [],
+              workspaces: [],
               sessions: [
                 makeSession("session-1", {
                   name: "Recovered Session",
                   preview: "Recovered after initial fallback retry",
                 }),
               ],
-            };
+            });
           }
 
           throw new Error(`Unexpected fetchState call #${fetchStateCallCount}`);
@@ -2344,11 +2740,13 @@ describe("App", () => {
     await withSuppressedActWarnings(async () => {
       const originalEventSource = globalThis.EventSource;
       const originalResizeObserver = globalThis.ResizeObserver;
-      const fetchStateSpy = vi.spyOn(api, "fetchState").mockResolvedValue({
+      const fetchStateSpy = vi.spyOn(api, "fetchState").mockResolvedValue(makeStateResponse({
         revision: 99,
         projects: [],
+        orchestrators: [],
+        workspaces: [],
         sessions: [],
-      });
+      }));
       vi.stubGlobal(
         "EventSource",
         EventSourceMock as unknown as typeof EventSource,
@@ -2357,8 +2755,7 @@ describe("App", () => {
         "ResizeObserver",
         ResizeObserverMock as unknown as typeof ResizeObserver,
       );
-      const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
-      HTMLElement.prototype.scrollIntoView = vi.fn();
+      const scrollIntoViewSpy = stubScrollIntoView();
 
       try {
         await renderApp();
@@ -2404,7 +2801,7 @@ describe("App", () => {
           within(sessionList).queryByText("Visible before empty snapshot"),
         ).not.toBeInTheDocument();
       } finally {
-        HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
+        scrollIntoViewSpy.mockRestore();
         fetchStateSpy.mockRestore();
         restoreGlobal("EventSource", originalEventSource);
         restoreGlobal("ResizeObserver", originalResizeObserver);
@@ -2459,13 +2856,10 @@ describe("App", () => {
       "ResizeObserver",
       ResizeObserverMock as unknown as typeof ResizeObserver,
     );
-    const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
-    HTMLElement.prototype.scrollIntoView = vi.fn();
+    const scrollIntoViewSpy = stubScrollIntoView();
     try {
       await renderApp();
-      const eventSource = latestEventSource();
-      expect(eventSource).toBeTruthy();
-      act(() => {
+      const eventSource = latestEventSource();      act(() => {
         eventSource.dispatchOpen();
         eventSource.dispatchNamedEvent("state", {
           revision: 1,
@@ -2525,7 +2919,7 @@ describe("App", () => {
         screen.queryByText("Waiting for the next chunk of output..."),
       ).not.toBeInTheDocument();
     } finally {
-      HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
+      scrollIntoViewSpy.mockRestore();
       restoreGlobal("fetch", originalFetch);
       restoreGlobal("EventSource", originalEventSource);
       restoreGlobal("ResizeObserver", originalResizeObserver);
@@ -2582,8 +2976,7 @@ describe("App", () => {
       "ResizeObserver",
       ResizeObserverMock as unknown as typeof ResizeObserver,
     );
-    const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
-    HTMLElement.prototype.scrollIntoView = vi.fn();
+    const scrollIntoViewSpy = stubScrollIntoView();
     const stateFetchCallCount = () => stateRequestCount;
     try {
       await renderApp();
@@ -2668,7 +3061,7 @@ describe("App", () => {
       ).toBeInTheDocument();
     } finally {
       vi.useRealTimers();
-      HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
+      scrollIntoViewSpy.mockRestore();
       restoreGlobal("fetch", originalFetch);
       restoreGlobal("EventSource", originalEventSource);
       restoreGlobal("ResizeObserver", originalResizeObserver);
@@ -2726,8 +3119,7 @@ describe("App", () => {
       "ResizeObserver",
       ResizeObserverMock as unknown as typeof ResizeObserver,
     );
-    const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
-    HTMLElement.prototype.scrollIntoView = vi.fn();
+    const scrollIntoViewSpy = stubScrollIntoView();
     const stateFetchCallCount = () => stateRequestCount;
     try {
       await renderApp();
@@ -2833,7 +3225,7 @@ describe("App", () => {
       ).not.toBeInTheDocument();
     } finally {
       vi.useRealTimers();
-      HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
+      scrollIntoViewSpy.mockRestore();
       restoreGlobal("fetch", originalFetch);
       restoreGlobal("EventSource", originalEventSource);
       restoreGlobal("ResizeObserver", originalResizeObserver);
@@ -2887,8 +3279,7 @@ describe("App", () => {
       "ResizeObserver",
       ResizeObserverMock as unknown as typeof ResizeObserver,
     );
-    const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
-    HTMLElement.prototype.scrollIntoView = vi.fn();
+    const scrollIntoViewSpy = stubScrollIntoView();
     setDocumentVisibilityState("visible");
     try {
       await renderApp();
@@ -2963,7 +3354,7 @@ describe("App", () => {
       ).not.toBeInTheDocument();
     } finally {
       setDocumentVisibilityState(originalVisibilityState);
-      HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
+      scrollIntoViewSpy.mockRestore();
       restoreGlobal("fetch", originalFetch);
       restoreGlobal("EventSource", originalEventSource);
       restoreGlobal("ResizeObserver", originalResizeObserver);
@@ -3024,8 +3415,7 @@ describe("App", () => {
       "ResizeObserver",
       ResizeObserverMock as unknown as typeof ResizeObserver,
     );
-    const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
-    HTMLElement.prototype.scrollIntoView = vi.fn();
+    const scrollIntoViewSpy = stubScrollIntoView();
     setDocumentVisibilityState("visible");
     try {
       await renderApp();
@@ -3086,7 +3476,7 @@ describe("App", () => {
       });
     } finally {
       setDocumentVisibilityState(originalVisibilityState);
-      HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
+      scrollIntoViewSpy.mockRestore();
       restoreGlobal("fetch", originalFetch);
       restoreGlobal("EventSource", originalEventSource);
       restoreGlobal("ResizeObserver", originalResizeObserver);
@@ -3144,8 +3534,7 @@ describe("App", () => {
       "ResizeObserver",
       ResizeObserverMock as unknown as typeof ResizeObserver,
     );
-    const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
-    HTMLElement.prototype.scrollIntoView = vi.fn();
+    const scrollIntoViewSpy = stubScrollIntoView();
     const stateFetchCallCount = () =>
       fetchMock.mock.calls.filter(([url]) => String(url) === "/api/state")
         .length;
@@ -3242,7 +3631,7 @@ describe("App", () => {
     } finally {
       vi.useRealTimers();
       setDocumentVisibilityState(originalVisibilityState);
-      HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
+      scrollIntoViewSpy.mockRestore();
       restoreGlobal("fetch", originalFetch);
       restoreGlobal("EventSource", originalEventSource);
       restoreGlobal("ResizeObserver", originalResizeObserver);
@@ -3301,8 +3690,7 @@ describe("App", () => {
       "ResizeObserver",
       ResizeObserverMock as unknown as typeof ResizeObserver,
     );
-    const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
-    HTMLElement.prototype.scrollIntoView = vi.fn();
+    const scrollIntoViewSpy = stubScrollIntoView();
     const stateFetchCallCount = () => stateRequestCount;
     setDocumentVisibilityState("visible");
     try {
@@ -3393,7 +3781,7 @@ describe("App", () => {
     } finally {
       vi.useRealTimers();
       setDocumentVisibilityState(originalVisibilityState);
-      HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
+      scrollIntoViewSpy.mockRestore();
       restoreGlobal("fetch", originalFetch);
       restoreGlobal("EventSource", originalEventSource);
       restoreGlobal("ResizeObserver", originalResizeObserver);
@@ -3452,8 +3840,7 @@ describe("App", () => {
       "ResizeObserver",
       ResizeObserverMock as unknown as typeof ResizeObserver,
     );
-    const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
-    HTMLElement.prototype.scrollIntoView = vi.fn();
+    const scrollIntoViewSpy = stubScrollIntoView();
     const stateFetchCallCount = () => stateRequestCount;
     setDocumentVisibilityState("visible");
     try {
@@ -3545,7 +3932,7 @@ describe("App", () => {
     } finally {
       vi.useRealTimers();
       setDocumentVisibilityState(originalVisibilityState);
-      HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
+      scrollIntoViewSpy.mockRestore();
       restoreGlobal("fetch", originalFetch);
       restoreGlobal("EventSource", originalEventSource);
       restoreGlobal("ResizeObserver", originalResizeObserver);
@@ -3603,8 +3990,7 @@ describe("App", () => {
       "ResizeObserver",
       ResizeObserverMock as unknown as typeof ResizeObserver,
     );
-    const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
-    HTMLElement.prototype.scrollIntoView = vi.fn();
+    const scrollIntoViewSpy = stubScrollIntoView();
     const stateFetchCallCount = () => stateRequestCount;
     setDocumentVisibilityState("visible");
     try {
@@ -3696,7 +4082,7 @@ describe("App", () => {
     } finally {
       vi.useRealTimers();
       setDocumentVisibilityState(originalVisibilityState);
-      HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
+      scrollIntoViewSpy.mockRestore();
       restoreGlobal("fetch", originalFetch);
       restoreGlobal("EventSource", originalEventSource);
       restoreGlobal("ResizeObserver", originalResizeObserver);
@@ -3802,8 +4188,7 @@ describe("App", () => {
       "ResizeObserver",
       ResizeObserverMock as unknown as typeof ResizeObserver,
     );
-    const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
-    HTMLElement.prototype.scrollIntoView = vi.fn();
+    const scrollIntoViewSpy = stubScrollIntoView();
     const stateFetchCallCount = () => stateRequestCount;
     setDocumentVisibilityState("visible");
     try {
@@ -3897,7 +4282,7 @@ describe("App", () => {
     } finally {
       vi.useRealTimers();
       setDocumentVisibilityState(originalVisibilityState);
-      HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
+      scrollIntoViewSpy.mockRestore();
       restoreGlobal("fetch", originalFetch);
       restoreGlobal("EventSource", originalEventSource);
       restoreGlobal("ResizeObserver", originalResizeObserver);
@@ -3977,8 +4362,7 @@ describe("App", () => {
       "ResizeObserver",
       ResizeObserverMock as unknown as typeof ResizeObserver,
     );
-    const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
-    HTMLElement.prototype.scrollIntoView = vi.fn();
+    const scrollIntoViewSpy = stubScrollIntoView();
     const stateFetchCallCount = () => stateRequestCount;
     setDocumentVisibilityState("visible");
     try {
@@ -4094,7 +4478,7 @@ describe("App", () => {
     } finally {
       vi.useRealTimers();
       setDocumentVisibilityState(originalVisibilityState);
-      HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
+      scrollIntoViewSpy.mockRestore();
       restoreGlobal("fetch", originalFetch);
       restoreGlobal("EventSource", originalEventSource);
       restoreGlobal("ResizeObserver", originalResizeObserver);
@@ -4174,8 +4558,7 @@ describe("App", () => {
       "ResizeObserver",
       ResizeObserverMock as unknown as typeof ResizeObserver,
     );
-    const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
-    HTMLElement.prototype.scrollIntoView = vi.fn();
+    const scrollIntoViewSpy = stubScrollIntoView();
     const stateFetchCallCount = () => stateRequestCount;
     setDocumentVisibilityState("visible");
     try {
@@ -4324,7 +4707,7 @@ describe("App", () => {
     } finally {
       vi.useRealTimers();
       setDocumentVisibilityState(originalVisibilityState);
-      HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
+      scrollIntoViewSpy.mockRestore();
       restoreGlobal("fetch", originalFetch);
       restoreGlobal("EventSource", originalEventSource);
       restoreGlobal("ResizeObserver", originalResizeObserver);
@@ -4381,8 +4764,7 @@ describe("App", () => {
       "ResizeObserver",
       ResizeObserverMock as unknown as typeof ResizeObserver,
     );
-    const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
-    HTMLElement.prototype.scrollIntoView = vi.fn();
+    const scrollIntoViewSpy = stubScrollIntoView();
     const stateFetchCallCount = () =>
       fetchMock.mock.calls.filter(([url]) => String(url) === "/api/state")
         .length;
@@ -4446,7 +4828,7 @@ describe("App", () => {
     } finally {
       vi.useRealTimers();
       setDocumentVisibilityState(originalVisibilityState);
-      HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
+      scrollIntoViewSpy.mockRestore();
       restoreGlobal("fetch", originalFetch);
       restoreGlobal("EventSource", originalEventSource);
       restoreGlobal("ResizeObserver", originalResizeObserver);
@@ -4547,8 +4929,7 @@ describe("App", () => {
       "ResizeObserver",
       ResizeObserverMock as unknown as typeof ResizeObserver,
     );
-    const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
-    HTMLElement.prototype.scrollIntoView = vi.fn();
+    const scrollIntoViewSpy = stubScrollIntoView();
     const stateFetchCallCount = () =>
       fetchMock.mock.calls.filter(([url]) => String(url) === "/api/state")
         .length;
@@ -4631,7 +5012,7 @@ describe("App", () => {
     } finally {
       vi.useRealTimers();
       setDocumentVisibilityState(originalVisibilityState);
-      HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
+      scrollIntoViewSpy.mockRestore();
       restoreGlobal("fetch", originalFetch);
       restoreGlobal("EventSource", originalEventSource);
       restoreGlobal("ResizeObserver", originalResizeObserver);
@@ -4739,8 +5120,7 @@ describe("App", () => {
       "ResizeObserver",
       ResizeObserverMock as unknown as typeof ResizeObserver,
     );
-    const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
-    HTMLElement.prototype.scrollIntoView = vi.fn();
+    const scrollIntoViewSpy = stubScrollIntoView();
     const stateFetchCallCount = () => stateRequestCount;
     setDocumentVisibilityState("visible");
     try {
@@ -4823,7 +5203,7 @@ describe("App", () => {
     } finally {
       vi.useRealTimers();
       setDocumentVisibilityState(originalVisibilityState);
-      HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
+      scrollIntoViewSpy.mockRestore();
       restoreGlobal("fetch", originalFetch);
       restoreGlobal("EventSource", originalEventSource);
       restoreGlobal("ResizeObserver", originalResizeObserver);
@@ -4848,8 +5228,7 @@ describe("App", () => {
       "ResizeObserver",
       ResizeObserverMock as unknown as typeof ResizeObserver,
     );
-    const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
-    HTMLElement.prototype.scrollIntoView = vi.fn();
+    const scrollIntoViewSpy = stubScrollIntoView();
     setDocumentVisibilityState("visible");
     try {
       await renderApp();
@@ -4937,7 +5316,7 @@ describe("App", () => {
     } finally {
       vi.useRealTimers();
       setDocumentVisibilityState(originalVisibilityState);
-      HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
+      scrollIntoViewSpy.mockRestore();
       restoreGlobal("fetch", originalFetch);
       restoreGlobal("EventSource", originalEventSource);
       restoreGlobal("ResizeObserver", originalResizeObserver);
@@ -5015,8 +5394,7 @@ describe("App", () => {
       "ResizeObserver",
       ResizeObserverMock as unknown as typeof ResizeObserver,
     );
-    const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
-    HTMLElement.prototype.scrollIntoView = vi.fn();
+    const scrollIntoViewSpy = stubScrollIntoView();
     const stateFetchCallCount = () =>
       fetchMock.mock.calls.filter(([url]) => String(url) === "/api/state")
         .length;
@@ -5112,7 +5490,7 @@ describe("App", () => {
     } finally {
       vi.useRealTimers();
       setDocumentVisibilityState(originalVisibilityState);
-      HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
+      scrollIntoViewSpy.mockRestore();
       restoreGlobal("fetch", originalFetch);
       restoreGlobal("EventSource", originalEventSource);
       restoreGlobal("ResizeObserver", originalResizeObserver);
@@ -5184,8 +5562,7 @@ describe("App", () => {
       "ResizeObserver",
       ResizeObserverMock as unknown as typeof ResizeObserver,
     );
-    const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
-    HTMLElement.prototype.scrollIntoView = vi.fn();
+    const scrollIntoViewSpy = stubScrollIntoView();
     const stateFetchCallCount = () =>
       fetchMock.mock.calls.filter(([url]) => String(url) === "/api/state")
         .length;
@@ -5279,7 +5656,7 @@ describe("App", () => {
     } finally {
       vi.useRealTimers();
       setDocumentVisibilityState(originalVisibilityState);
-      HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
+      scrollIntoViewSpy.mockRestore();
       restoreGlobal("fetch", originalFetch);
       restoreGlobal("EventSource", originalEventSource);
       restoreGlobal("ResizeObserver", originalResizeObserver);
@@ -5337,8 +5714,7 @@ describe("App", () => {
       "ResizeObserver",
       ResizeObserverMock as unknown as typeof ResizeObserver,
     );
-    const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
-    HTMLElement.prototype.scrollIntoView = vi.fn();
+    const scrollIntoViewSpy = stubScrollIntoView();
     const stateFetchCallCount = () =>
       fetchMock.mock.calls.filter(([url]) => String(url) === "/api/state")
         .length;
@@ -5407,7 +5783,7 @@ describe("App", () => {
     } finally {
       vi.useRealTimers();
       setDocumentVisibilityState(originalVisibilityState);
-      HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
+      scrollIntoViewSpy.mockRestore();
       restoreGlobal("fetch", originalFetch);
       restoreGlobal("EventSource", originalEventSource);
       restoreGlobal("ResizeObserver", originalResizeObserver);
@@ -5492,8 +5868,7 @@ describe("App", () => {
       "ResizeObserver",
       ResizeObserverMock as unknown as typeof ResizeObserver,
     );
-    const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
-    HTMLElement.prototype.scrollIntoView = vi.fn();
+    const scrollIntoViewSpy = stubScrollIntoView();
     const stateFetchCallCount = () => stateRequestCount;
     setDocumentVisibilityState("visible");
     try {
@@ -5605,7 +5980,7 @@ describe("App", () => {
     } finally {
       vi.useRealTimers();
       setDocumentVisibilityState(originalVisibilityState);
-      HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
+      scrollIntoViewSpy.mockRestore();
       restoreGlobal("fetch", originalFetch);
       restoreGlobal("EventSource", originalEventSource);
       restoreGlobal("ResizeObserver", originalResizeObserver);
@@ -5644,8 +6019,7 @@ describe("App", () => {
       "ResizeObserver",
       ResizeObserverMock as unknown as typeof ResizeObserver,
     );
-    const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
-    HTMLElement.prototype.scrollIntoView = vi.fn();
+    const scrollIntoViewSpy = stubScrollIntoView();
     const stateFetchCallCount = () =>
       fetchMock.mock.calls.filter(([url]) => String(url) === "/api/state")
         .length;
@@ -5769,7 +6143,7 @@ describe("App", () => {
     } finally {
       vi.useRealTimers();
       setDocumentVisibilityState(originalVisibilityState);
-      HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
+      scrollIntoViewSpy.mockRestore();
       restoreGlobal("fetch", originalFetch);
       restoreGlobal("EventSource", originalEventSource);
       restoreGlobal("ResizeObserver", originalResizeObserver);
@@ -5808,8 +6182,7 @@ describe("App", () => {
       "ResizeObserver",
       ResizeObserverMock as unknown as typeof ResizeObserver,
     );
-    const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
-    HTMLElement.prototype.scrollIntoView = vi.fn();
+    const scrollIntoViewSpy = stubScrollIntoView();
     const stateFetchCallCount = () =>
       fetchMock.mock.calls.filter(([url]) => String(url) === "/api/state")
         .length;
@@ -5964,7 +6337,7 @@ describe("App", () => {
     } finally {
       vi.useRealTimers();
       setDocumentVisibilityState(originalVisibilityState);
-      HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
+      scrollIntoViewSpy.mockRestore();
       restoreGlobal("fetch", originalFetch);
       restoreGlobal("EventSource", originalEventSource);
       restoreGlobal("ResizeObserver", originalResizeObserver);
@@ -6003,8 +6376,7 @@ describe("App", () => {
       "ResizeObserver",
       ResizeObserverMock as unknown as typeof ResizeObserver,
     );
-    const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
-    HTMLElement.prototype.scrollIntoView = vi.fn();
+    const scrollIntoViewSpy = stubScrollIntoView();
     const stateFetchCallCount = () =>
       fetchMock.mock.calls.filter(([url]) => String(url) === "/api/state")
         .length;
@@ -6141,7 +6513,7 @@ describe("App", () => {
     } finally {
       vi.useRealTimers();
       setDocumentVisibilityState(originalVisibilityState);
-      HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
+      scrollIntoViewSpy.mockRestore();
       restoreGlobal("fetch", originalFetch);
       restoreGlobal("EventSource", originalEventSource);
       restoreGlobal("ResizeObserver", originalResizeObserver);
@@ -6204,8 +6576,7 @@ describe("App", () => {
       "ResizeObserver",
       ResizeObserverMock as unknown as typeof ResizeObserver,
     );
-    const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
-    HTMLElement.prototype.scrollIntoView = vi.fn();
+    const scrollIntoViewSpy = stubScrollIntoView();
     const stateFetchCallCount = () =>
       fetchMock.mock.calls.filter(([url]) => String(url) === "/api/state")
         .length;
@@ -6292,7 +6663,7 @@ describe("App", () => {
     } finally {
       vi.useRealTimers();
       setDocumentVisibilityState(originalVisibilityState);
-      HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
+      scrollIntoViewSpy.mockRestore();
       restoreGlobal("fetch", originalFetch);
       restoreGlobal("EventSource", originalEventSource);
       restoreGlobal("ResizeObserver", originalResizeObserver);
@@ -6382,8 +6753,7 @@ describe("App", () => {
       "ResizeObserver",
       ResizeObserverMock as unknown as typeof ResizeObserver,
     );
-    const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
-    HTMLElement.prototype.scrollIntoView = vi.fn();
+    const scrollIntoViewSpy = stubScrollIntoView();
     const stateFetchCallCount = () =>
       fetchMock.mock.calls.filter(([url]) => String(url) === "/api/state")
         .length;
@@ -6475,7 +6845,7 @@ describe("App", () => {
     } finally {
       vi.useRealTimers();
       setDocumentVisibilityState(originalVisibilityState);
-      HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
+      scrollIntoViewSpy.mockRestore();
       restoreGlobal("fetch", originalFetch);
       restoreGlobal("EventSource", originalEventSource);
       restoreGlobal("ResizeObserver", originalResizeObserver);
@@ -6564,8 +6934,7 @@ describe("App", () => {
       "ResizeObserver",
       ResizeObserverMock as unknown as typeof ResizeObserver,
     );
-    const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
-    HTMLElement.prototype.scrollIntoView = vi.fn();
+    const scrollIntoViewSpy = stubScrollIntoView();
     const stateFetchCallCount = () => stateRequestCount;
     setDocumentVisibilityState("visible");
     try {
@@ -6689,7 +7058,7 @@ describe("App", () => {
     } finally {
       vi.useRealTimers();
       setDocumentVisibilityState(originalVisibilityState);
-      HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
+      scrollIntoViewSpy.mockRestore();
       restoreGlobal("fetch", originalFetch);
       restoreGlobal("EventSource", originalEventSource);
       restoreGlobal("ResizeObserver", originalResizeObserver);
@@ -6719,8 +7088,7 @@ describe("App", () => {
         "ResizeObserver",
         ResizeObserverMock as unknown as typeof ResizeObserver,
       );
-      const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
-      HTMLElement.prototype.scrollIntoView = vi.fn();
+      const scrollIntoViewSpy = stubScrollIntoView();
       setDocumentVisibilityState("visible");
       try {
         await renderApp();
@@ -6775,7 +7143,7 @@ describe("App", () => {
       } finally {
         vi.useRealTimers();
         setDocumentVisibilityState(originalVisibilityState);
-        HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
+        scrollIntoViewSpy.mockRestore();
         restoreGlobal("fetch", originalFetch);
         restoreGlobal("EventSource", originalEventSource);
         restoreGlobal("ResizeObserver", originalResizeObserver);
@@ -6805,15 +7173,12 @@ describe("App", () => {
       "ResizeObserver",
       ResizeObserverMock as unknown as typeof ResizeObserver,
     );
-    const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
-    HTMLElement.prototype.scrollIntoView = vi.fn();
+    const scrollIntoViewSpy = stubScrollIntoView();
 
     try {
       await renderApp();
 
-      const eventSource = latestEventSource();
-      expect(eventSource).toBeTruthy();
-
+      const eventSource = latestEventSource();
       act(() => {
         eventSource.dispatchOpen();
         eventSource.dispatchNamedEvent("state", {
@@ -6901,11 +7266,84 @@ describe("App", () => {
         expect(screen.getAllByText("Here.")).toHaveLength(2);
       });
     } finally {
-      HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
+      scrollIntoViewSpy.mockRestore();
       restoreGlobal("fetch", originalFetch);
       restoreGlobal("EventSource", originalEventSource);
       restoreGlobal("ResizeObserver", originalResizeObserver);
     }
+  });
+
+  it("opens the workspace switcher with one refresh under StrictMode", async () => {
+    await withSuppressedActWarnings(async () => {
+      const originalFetch = globalThis.fetch;
+      const originalEventSource = globalThis.EventSource;
+      const originalResizeObserver = globalThis.ResizeObserver;
+      const fetchWorkspaceLayoutsSpy = vi
+        .mocked(api.fetchWorkspaceLayouts)
+        .mockResolvedValue({
+          workspaces: [
+            {
+              id: "monitor-left",
+              revision: 4,
+              updatedAt: "2026-03-28 18:00:00",
+              controlPanelSide: "left",
+            },
+          ],
+        });
+      const fetchMock = vi.fn(
+        async (input: RequestInfo | URL, _init?: RequestInit) => {
+          const requestUrl = new URL(String(input), "http://localhost");
+          if (requestUrl.pathname === "/api/state") {
+            return jsonResponse({
+              revision: 1,
+              projects: [],
+              sessions: [],
+            });
+          }
+
+          throw new Error(
+            `Unexpected fetch: ${requestUrl.pathname}${requestUrl.search}`,
+          );
+        },
+      );
+
+      vi.stubGlobal("fetch", fetchMock);
+      vi.stubGlobal(
+        "EventSource",
+        EventSourceMock as unknown as typeof EventSource,
+      );
+      vi.stubGlobal(
+        "ResizeObserver",
+        ResizeObserverMock as unknown as typeof ResizeObserver,
+      );
+
+      try {
+        await act(async () => {
+          render(
+            <StrictMode>
+              <App />
+            </StrictMode>,
+          );
+        });
+        await settleAsyncUi();
+
+        await clickAndSettle(
+          await screen.findByRole("button", { name: /workspace /i }),
+        );
+
+        await screen.findByRole("dialog", {
+          name: "Workspace switcher",
+        });
+        await waitFor(() => {
+          expect(fetchWorkspaceLayoutsSpy).toHaveBeenCalledTimes(1);
+        });
+      } finally {
+        fetchWorkspaceLayoutsSpy.mockRestore();
+        restoreGlobal("fetch", originalFetch);
+        restoreGlobal("EventSource", originalEventSource);
+        restoreGlobal("ResizeObserver", originalResizeObserver);
+      }
+    });
   });
 
   it("shows a workspace switcher with saved workspaces and can open a new workspace window", async () => {
@@ -7005,16 +7443,827 @@ describe("App", () => {
     });
   });
 
+  it("deletes a saved workspace from the workspace switcher", async () => {
+    await withSuppressedActWarnings(async () => {
+      const originalFetch = globalThis.fetch;
+      const originalEventSource = globalThis.EventSource;
+      const originalResizeObserver = globalThis.ResizeObserver;
+      const fetchWorkspaceLayoutsSpy = vi
+        .mocked(api.fetchWorkspaceLayouts)
+        .mockResolvedValue({
+          workspaces: [
+            {
+              id: "monitor-left",
+              revision: 4,
+              updatedAt: "2026-03-28 18:00:00",
+              controlPanelSide: "left",
+            },
+            {
+              id: "monitor-right",
+              revision: 1,
+              updatedAt: "2026-03-28 17:30:00",
+              controlPanelSide: "right",
+            },
+          ],
+        });
+      const deleteWorkspaceLayoutSpy = vi
+        .spyOn(api, "deleteWorkspaceLayout")
+        .mockResolvedValue({
+          workspaces: [
+            {
+              id: "monitor-right",
+              revision: 1,
+              updatedAt: "2026-03-28 17:30:00",
+              controlPanelSide: "right",
+            },
+          ],
+        });
+      const deleteStoredWorkspaceLayoutSpy = vi.spyOn(
+        workspaceStorage,
+        "deleteStoredWorkspaceLayout",
+      );
+      const fetchMock = vi.fn(
+        async (input: RequestInfo | URL, _init?: RequestInit) => {
+          const requestUrl = new URL(String(input), "http://localhost");
+          if (requestUrl.pathname === "/api/state") {
+            return jsonResponse({
+              revision: 1,
+              projects: [],
+              sessions: [],
+            });
+          }
+
+          throw new Error(
+            `Unexpected fetch: ${requestUrl.pathname}${requestUrl.search}`,
+          );
+        },
+      );
+
+      window.localStorage.setItem(
+        `${WORKSPACE_LAYOUT_STORAGE_KEY}:monitor-left`,
+        JSON.stringify({
+          controlPanelSide: "left",
+          workspace: {
+            root: null,
+            panes: [],
+            activePaneId: null,
+          },
+        }),
+      );
+      vi.stubGlobal("fetch", fetchMock);
+      vi.stubGlobal(
+        "EventSource",
+        EventSourceMock as unknown as typeof EventSource,
+      );
+      vi.stubGlobal(
+        "ResizeObserver",
+        ResizeObserverMock as unknown as typeof ResizeObserver,
+      );
+
+      try {
+        await renderApp();
+
+        await clickAndSettle(
+          await screen.findByRole("button", { name: /workspace /i }),
+        );
+
+        const switcherDialog = await screen.findByRole("dialog", {
+          name: "Workspace switcher",
+        });
+        const deleteButton = within(switcherDialog).getByRole("button", {
+          name: "Delete workspace monitor-left",
+        });
+
+        await clickAndSettle(deleteButton);
+
+        await waitFor(() => {
+          expect(deleteWorkspaceLayoutSpy).toHaveBeenCalledWith("monitor-left");
+        });
+        await waitFor(() => {
+          expect(
+            within(switcherDialog).queryAllByText("monitor-left").length,
+          ).toBe(0);
+        });
+        expect(
+          within(switcherDialog).getByRole("button", {
+            name: "Delete workspace monitor-right",
+          }),
+        ).toBeInTheDocument();
+        expect(deleteStoredWorkspaceLayoutSpy).toHaveBeenCalledWith(
+          "monitor-left",
+        );
+      } finally {
+        fetchWorkspaceLayoutsSpy.mockRestore();
+        deleteWorkspaceLayoutSpy.mockRestore();
+        deleteStoredWorkspaceLayoutSpy.mockRestore();
+        restoreGlobal("fetch", originalFetch);
+        restoreGlobal("EventSource", originalEventSource);
+        restoreGlobal("ResizeObserver", originalResizeObserver);
+        window.localStorage.removeItem(
+          `${WORKSPACE_LAYOUT_STORAGE_KEY}:monitor-left`,
+        );
+      }
+    });
+  });
+
+
+  it("shows workspace delete errors and restores the delete button", async () => {
+    await withSuppressedActWarnings(async () => {
+      const originalFetch = globalThis.fetch;
+      const originalEventSource = globalThis.EventSource;
+      const originalResizeObserver = globalThis.ResizeObserver;
+      const fetchWorkspaceLayoutsSpy = vi
+        .mocked(api.fetchWorkspaceLayouts)
+        .mockResolvedValue({
+          workspaces: [
+            {
+              id: "monitor-left",
+              revision: 4,
+              updatedAt: "2026-03-28 18:00:00",
+              controlPanelSide: "left",
+            },
+            {
+              id: "monitor-right",
+              revision: 1,
+              updatedAt: "2026-03-28 17:30:00",
+              controlPanelSide: "right",
+            },
+          ],
+        });
+      const deleteWorkspaceLayoutSpy = vi
+        .spyOn(api, "deleteWorkspaceLayout")
+        .mockRejectedValue(new Error("Delete failed."));
+      const fetchMock = vi.fn(
+        async (input: RequestInfo | URL, _init?: RequestInit) => {
+          const requestUrl = new URL(String(input), "http://localhost");
+          if (requestUrl.pathname === "/api/state") {
+            return jsonResponse({
+              revision: 1,
+              projects: [],
+              sessions: [],
+            });
+          }
+
+          throw new Error(
+            `Unexpected fetch: ${requestUrl.pathname}${requestUrl.search}`,
+          );
+        },
+      );
+
+      window.localStorage.setItem(
+        `${WORKSPACE_LAYOUT_STORAGE_KEY}:monitor-left`,
+        JSON.stringify({
+          controlPanelSide: "left",
+          workspace: {
+            root: null,
+            panes: [],
+            activePaneId: null,
+          },
+        }),
+      );
+      vi.stubGlobal("fetch", fetchMock);
+      vi.stubGlobal(
+        "EventSource",
+        EventSourceMock as unknown as typeof EventSource,
+      );
+      vi.stubGlobal(
+        "ResizeObserver",
+        ResizeObserverMock as unknown as typeof ResizeObserver,
+      );
+
+      try {
+        await renderApp();
+
+        await clickAndSettle(
+          await screen.findByRole("button", { name: /workspace /i }),
+        );
+
+        const switcherDialog = await screen.findByRole("dialog", {
+          name: "Workspace switcher",
+        });
+        await clickAndSettle(
+          within(switcherDialog).getByRole("button", {
+            name: "Delete workspace monitor-left",
+          }),
+        );
+
+        await waitFor(() => {
+          expect(deleteWorkspaceLayoutSpy).toHaveBeenCalledWith("monitor-left");
+        });
+        expect(await within(switcherDialog).findByText("Delete failed.")).toBeInTheDocument();
+        expect(
+          within(switcherDialog).getAllByText("monitor-left").length,
+        ).toBeGreaterThan(0);
+        expect(
+          within(switcherDialog).getByRole("button", {
+            name: "Delete workspace monitor-left",
+          }),
+        ).toBeEnabled();
+        expect(
+          within(switcherDialog).getByRole("button", {
+            name: "Delete workspace monitor-left",
+          }),
+        ).toHaveTextContent("Delete");
+        expect(
+          window.localStorage.getItem(
+            `${WORKSPACE_LAYOUT_STORAGE_KEY}:monitor-left`,
+          ),
+        ).not.toBeNull();
+      } finally {
+        fetchWorkspaceLayoutsSpy.mockRestore();
+        deleteWorkspaceLayoutSpy.mockRestore();
+        restoreGlobal("fetch", originalFetch);
+        restoreGlobal("EventSource", originalEventSource);
+        restoreGlobal("ResizeObserver", originalResizeObserver);
+        window.localStorage.removeItem(
+          `${WORKSPACE_LAYOUT_STORAGE_KEY}:monitor-left`,
+        );
+      }
+    });
+  });
+
+  it("disables the workspace delete button while the request is in flight", async () => {
+    await withSuppressedActWarnings(async () => {
+      const originalFetch = globalThis.fetch;
+      const originalEventSource = globalThis.EventSource;
+      const originalResizeObserver = globalThis.ResizeObserver;
+      const deleteWorkspaceDeferred = createDeferred<{
+        workspaces: Array<{
+          id: string;
+          revision: number;
+          updatedAt: string;
+          controlPanelSide: "left" | "right";
+        }>;
+      }>();
+      const fetchWorkspaceLayoutsSpy = vi
+        .mocked(api.fetchWorkspaceLayouts)
+        .mockResolvedValue({
+          workspaces: [
+            {
+              id: "monitor-left",
+              revision: 4,
+              updatedAt: "2026-03-28 18:00:00",
+              controlPanelSide: "left",
+            },
+            {
+              id: "monitor-right",
+              revision: 1,
+              updatedAt: "2026-03-28 17:30:00",
+              controlPanelSide: "right",
+            },
+          ],
+        });
+      const deleteWorkspaceLayoutSpy = vi
+        .spyOn(api, "deleteWorkspaceLayout")
+        .mockImplementation((workspaceId: string) => {
+          if (workspaceId === "monitor-left") {
+            return deleteWorkspaceDeferred.promise;
+          }
+          throw new Error(`Unexpected workspace delete: ${workspaceId}`);
+        });
+      const fetchMock = vi.fn(
+        async (input: RequestInfo | URL, _init?: RequestInit) => {
+          const requestUrl = new URL(String(input), "http://localhost");
+          if (requestUrl.pathname === "/api/state") {
+            return jsonResponse({
+              revision: 1,
+              projects: [],
+              sessions: [],
+            });
+          }
+
+          throw new Error(
+            `Unexpected fetch: ${requestUrl.pathname}${requestUrl.search}`,
+          );
+        },
+      );
+
+      window.localStorage.setItem(
+        `${WORKSPACE_LAYOUT_STORAGE_KEY}:monitor-left`,
+        JSON.stringify({
+          controlPanelSide: "left",
+          workspace: {
+            root: null,
+            panes: [],
+            activePaneId: null,
+          },
+        }),
+      );
+      vi.stubGlobal("fetch", fetchMock);
+      vi.stubGlobal(
+        "EventSource",
+        EventSourceMock as unknown as typeof EventSource,
+      );
+      vi.stubGlobal(
+        "ResizeObserver",
+        ResizeObserverMock as unknown as typeof ResizeObserver,
+      );
+
+      try {
+        await renderApp();
+
+        await clickAndSettle(
+          await screen.findByRole("button", { name: /workspace /i }),
+        );
+
+        const switcherDialog = await screen.findByRole("dialog", {
+          name: "Workspace switcher",
+        });
+        await clickAndSettle(
+          within(switcherDialog).getByRole("button", {
+            name: "Delete workspace monitor-left",
+          }),
+        );
+
+        await waitFor(() => {
+          expect(deleteWorkspaceLayoutSpy).toHaveBeenCalledWith("monitor-left");
+        });
+        expect(
+          within(switcherDialog).getByRole("button", {
+            name: "Delete workspace monitor-left",
+          }),
+        ).toBeDisabled();
+        expect(
+          within(switcherDialog).getByRole("button", {
+            name: "Delete workspace monitor-left",
+          }),
+        ).toHaveTextContent("Deleting");
+
+        deleteWorkspaceDeferred.resolve({
+          workspaces: [
+            {
+              id: "monitor-right",
+              revision: 1,
+              updatedAt: "2026-03-28 17:30:00",
+              controlPanelSide: "right",
+            },
+          ],
+        });
+        await settleAsyncUi();
+
+        await waitFor(() => {
+          expect(
+            within(switcherDialog).queryAllByText("monitor-left").length,
+          ).toBe(0);
+        });
+      } finally {
+        fetchWorkspaceLayoutsSpy.mockRestore();
+        deleteWorkspaceLayoutSpy.mockRestore();
+        restoreGlobal("fetch", originalFetch);
+        restoreGlobal("EventSource", originalEventSource);
+        restoreGlobal("ResizeObserver", originalResizeObserver);
+        window.localStorage.removeItem(
+          `${WORKSPACE_LAYOUT_STORAGE_KEY}:monitor-left`,
+        );
+      }
+    });
+  });
+
+  it("ignores stale workspace refresh results after a delete", async () => {
+    await withSuppressedActWarnings(async () => {
+      const originalFetch = globalThis.fetch;
+      const originalEventSource = globalThis.EventSource;
+      const originalResizeObserver = globalThis.ResizeObserver;
+      const staleRefresh = createDeferred<{
+        workspaces: Array<{
+          id: string;
+          revision: number;
+          updatedAt: string;
+          controlPanelSide: "left" | "right";
+        }>;
+      }>();
+      const fetchWorkspaceLayoutsSpy = vi.mocked(api.fetchWorkspaceLayouts);
+      fetchWorkspaceLayoutsSpy.mockResolvedValueOnce({
+        workspaces: [
+          {
+            id: "monitor-left",
+            revision: 4,
+            updatedAt: "2026-03-28 18:00:00",
+            controlPanelSide: "left",
+          },
+          {
+            id: "monitor-right",
+            revision: 1,
+            updatedAt: "2026-03-28 17:30:00",
+            controlPanelSide: "right",
+          },
+        ],
+      });
+      fetchWorkspaceLayoutsSpy.mockReturnValueOnce(staleRefresh.promise);
+      const deleteWorkspaceLayoutSpy = vi
+        .spyOn(api, "deleteWorkspaceLayout")
+        .mockResolvedValue({
+          workspaces: [
+            {
+              id: "monitor-right",
+              revision: 1,
+              updatedAt: "2026-03-28 17:30:00",
+              controlPanelSide: "right",
+            },
+          ],
+        });
+      const fetchMock = vi.fn(
+        async (input: RequestInfo | URL, _init?: RequestInit) => {
+          const requestUrl = new URL(String(input), "http://localhost");
+          if (requestUrl.pathname === "/api/state") {
+            return jsonResponse({
+              revision: 1,
+              projects: [],
+              sessions: [],
+            });
+          }
+
+          throw new Error(
+            `Unexpected fetch: ${requestUrl.pathname}${requestUrl.search}`,
+          );
+        },
+      );
+
+      window.localStorage.setItem(
+        `${WORKSPACE_LAYOUT_STORAGE_KEY}:monitor-left`,
+        JSON.stringify({
+          controlPanelSide: "left",
+          workspace: {
+            root: null,
+            panes: [],
+            activePaneId: null,
+          },
+        }),
+      );
+      vi.stubGlobal("fetch", fetchMock);
+      vi.stubGlobal(
+        "EventSource",
+        EventSourceMock as unknown as typeof EventSource,
+      );
+      vi.stubGlobal(
+        "ResizeObserver",
+        ResizeObserverMock as unknown as typeof ResizeObserver,
+      );
+
+      try {
+        await renderApp();
+
+        const switcherTrigger = await screen.findByRole("button", {
+          name: /workspace /i,
+        });
+        await clickAndSettle(switcherTrigger);
+
+        let switcherDialog = await screen.findByRole("dialog", {
+          name: "Workspace switcher",
+        });
+        expect(within(switcherDialog).getAllByText("monitor-left").length).toBeGreaterThan(0);
+
+        await clickAndSettle(switcherTrigger);
+        await waitFor(() => {
+          expect(
+            screen.queryByRole("dialog", { name: "Workspace switcher" }),
+          ).not.toBeInTheDocument();
+        });
+
+        await clickAndSettle(switcherTrigger);
+        switcherDialog = await screen.findByRole("dialog", {
+          name: "Workspace switcher",
+        });
+
+        await clickAndSettle(
+          within(switcherDialog).getByRole("button", {
+            name: "Delete workspace monitor-left",
+          }),
+        );
+
+        await waitFor(() => {
+          expect(deleteWorkspaceLayoutSpy).toHaveBeenCalledWith("monitor-left");
+        });
+        await waitFor(() => {
+          expect(
+            within(switcherDialog).queryAllByText("monitor-left").length,
+          ).toBe(0);
+        });
+
+        staleRefresh.resolve({
+          workspaces: [
+            {
+              id: "monitor-left",
+              revision: 4,
+              updatedAt: "2026-03-28 18:00:00",
+              controlPanelSide: "left",
+            },
+            {
+              id: "monitor-right",
+              revision: 1,
+              updatedAt: "2026-03-28 17:30:00",
+              controlPanelSide: "right",
+            },
+          ],
+        });
+        await settleAsyncUi();
+
+        await waitFor(() => {
+          expect(
+            within(switcherDialog).queryAllByText("monitor-left").length,
+          ).toBe(0);
+        });
+        expect(fetchWorkspaceLayoutsSpy).toHaveBeenCalledTimes(2);
+        expect(
+          within(switcherDialog).getAllByText("monitor-right").length,
+        ).toBeGreaterThan(0);
+      } finally {
+        deleteWorkspaceLayoutSpy.mockRestore();
+        window.localStorage.clear();
+        restoreGlobal("fetch", originalFetch);
+        restoreGlobal("EventSource", originalEventSource);
+        restoreGlobal("ResizeObserver", originalResizeObserver);
+      }
+    });
+  });
+
+  it("applies overlapping workspace deletes in completion order", async () => {
+    await withSuppressedActWarnings(async () => {
+      const originalFetch = globalThis.fetch;
+      const originalEventSource = globalThis.EventSource;
+      const originalResizeObserver = globalThis.ResizeObserver;
+      const deleteMonitorLeft = createDeferred<{
+        workspaces: Array<{
+          id: string;
+          revision: number;
+          updatedAt: string;
+          controlPanelSide: "left" | "right";
+        }>;
+      }>();
+      const deleteMonitorRight = createDeferred<{
+        workspaces: Array<{
+          id: string;
+          revision: number;
+          updatedAt: string;
+          controlPanelSide: "left" | "right";
+        }>;
+      }>();
+      const fetchWorkspaceLayoutsSpy = vi
+        .mocked(api.fetchWorkspaceLayouts)
+        .mockResolvedValue({
+          workspaces: [
+            {
+              id: "monitor-left",
+              revision: 4,
+              updatedAt: "2026-03-28 18:00:00",
+              controlPanelSide: "left",
+            },
+            {
+              id: "monitor-right",
+              revision: 1,
+              updatedAt: "2026-03-28 17:30:00",
+              controlPanelSide: "right",
+            },
+          ],
+        });
+      const deleteWorkspaceLayoutSpy = vi
+        .spyOn(api, "deleteWorkspaceLayout")
+        .mockImplementation((workspaceId: string) => {
+          if (workspaceId === "monitor-left") {
+            return deleteMonitorLeft.promise;
+          }
+          if (workspaceId === "monitor-right") {
+            return deleteMonitorRight.promise;
+          }
+          throw new Error(`Unexpected workspace delete: ${workspaceId}`);
+        });
+      const fetchMock = vi.fn(
+        async (input: RequestInfo | URL, _init?: RequestInit) => {
+          const requestUrl = new URL(String(input), "http://localhost");
+          if (requestUrl.pathname === "/api/state") {
+            return jsonResponse({
+              revision: 1,
+              projects: [],
+              sessions: [],
+            });
+          }
+
+          throw new Error(
+            `Unexpected fetch: ${requestUrl.pathname}${requestUrl.search}`,
+          );
+        },
+      );
+
+      window.localStorage.setItem(
+        `${WORKSPACE_LAYOUT_STORAGE_KEY}:monitor-left`,
+        JSON.stringify({
+          controlPanelSide: "left",
+          workspace: {
+            root: null,
+            panes: [],
+            activePaneId: null,
+          },
+        }),
+      );
+      window.localStorage.setItem(
+        `${WORKSPACE_LAYOUT_STORAGE_KEY}:monitor-right`,
+        JSON.stringify({
+          controlPanelSide: "right",
+          workspace: {
+            root: null,
+            panes: [],
+            activePaneId: null,
+          },
+        }),
+      );
+      vi.stubGlobal("fetch", fetchMock);
+      vi.stubGlobal(
+        "EventSource",
+        EventSourceMock as unknown as typeof EventSource,
+      );
+      vi.stubGlobal(
+        "ResizeObserver",
+        ResizeObserverMock as unknown as typeof ResizeObserver,
+      );
+
+      try {
+        await renderApp();
+
+        await clickAndSettle(
+          await screen.findByRole("button", { name: /workspace /i }),
+        );
+
+        const switcherDialog = await screen.findByRole("dialog", {
+          name: "Workspace switcher",
+        });
+        await clickAndSettle(
+          within(switcherDialog).getByRole("button", {
+            name: "Delete workspace monitor-left",
+          }),
+        );
+        await waitFor(() => {
+          expect(deleteWorkspaceLayoutSpy).toHaveBeenNthCalledWith(
+            1,
+            "monitor-left",
+          );
+        });
+
+        await clickAndSettle(
+          within(switcherDialog).getByRole("button", {
+            name: "Delete workspace monitor-right",
+          }),
+        );
+        await waitFor(() => {
+          expect(deleteWorkspaceLayoutSpy).toHaveBeenNthCalledWith(
+            2,
+            "monitor-right",
+          );
+        });
+
+        deleteMonitorRight.resolve({
+          workspaces: [
+            {
+              id: "monitor-left",
+              revision: 4,
+              updatedAt: "2026-03-28 18:00:00",
+              controlPanelSide: "left",
+            },
+          ],
+        });
+        await settleAsyncUi();
+
+        await waitFor(() => {
+          expect(
+            within(switcherDialog).queryByText("monitor-right"),
+          ).not.toBeInTheDocument();
+        });
+        expect(
+          within(switcherDialog).getAllByText("monitor-left").length,
+        ).toBeGreaterThan(0);
+
+        deleteMonitorLeft.resolve({ workspaces: [] });
+        await settleAsyncUi();
+
+        await waitFor(() => {
+          expect(
+            within(switcherDialog).queryAllByText("monitor-left").length,
+          ).toBe(0);
+        });
+        expect(
+          window.localStorage.getItem(
+            `${WORKSPACE_LAYOUT_STORAGE_KEY}:monitor-left`,
+          ),
+        ).toBeNull();
+        expect(
+          window.localStorage.getItem(
+            `${WORKSPACE_LAYOUT_STORAGE_KEY}:monitor-right`,
+          ),
+        ).toBeNull();
+      } finally {
+        fetchWorkspaceLayoutsSpy.mockRestore();
+        deleteWorkspaceLayoutSpy.mockRestore();
+        window.localStorage.clear();
+        restoreGlobal("fetch", originalFetch);
+        restoreGlobal("EventSource", originalEventSource);
+        restoreGlobal("ResizeObserver", originalResizeObserver);
+      }
+    });
+  });
+
+  it("does not offer delete for the active workspace in the workspace switcher", async () => {
+    await withSuppressedActWarnings(async () => {
+      const originalFetch = globalThis.fetch;
+      const originalEventSource = globalThis.EventSource;
+      const originalResizeObserver = globalThis.ResizeObserver;
+      const originalUrl = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+      const fetchWorkspaceLayoutsSpy = vi
+        .mocked(api.fetchWorkspaceLayouts)
+        .mockResolvedValue({
+          workspaces: [
+            {
+              id: "monitor-left",
+              revision: 4,
+              updatedAt: "2026-03-28 18:00:00",
+              controlPanelSide: "left",
+            },
+            {
+              id: "monitor-right",
+              revision: 1,
+              updatedAt: "2026-03-28 17:30:00",
+              controlPanelSide: "right",
+            },
+          ],
+        });
+      const deleteWorkspaceLayoutSpy = vi
+        .spyOn(api, "deleteWorkspaceLayout")
+        .mockResolvedValue({ workspaces: [] });
+      const fetchMock = vi.fn(
+        async (input: RequestInfo | URL, _init?: RequestInit) => {
+          const requestUrl = new URL(String(input), "http://localhost");
+          if (requestUrl.pathname === "/api/state") {
+            return jsonResponse({
+              revision: 1,
+              projects: [],
+              sessions: [],
+            });
+          }
+
+          throw new Error(
+            `Unexpected fetch: ${requestUrl.pathname}${requestUrl.search}`,
+          );
+        },
+      );
+
+      window.history.replaceState(
+        window.history.state,
+        "",
+        "/?workspace=monitor-left",
+      );
+      vi.stubGlobal("fetch", fetchMock);
+      vi.stubGlobal(
+        "EventSource",
+        EventSourceMock as unknown as typeof EventSource,
+      );
+      vi.stubGlobal(
+        "ResizeObserver",
+        ResizeObserverMock as unknown as typeof ResizeObserver,
+      );
+
+      try {
+        await renderApp();
+
+        await clickAndSettle(
+          await screen.findByRole("button", { name: /workspace /i }),
+        );
+
+        const switcherDialog = await screen.findByRole("dialog", {
+          name: "Workspace switcher",
+        });
+
+        expect(
+          within(switcherDialog).queryByRole("button", {
+            name: "Delete workspace monitor-left",
+          }),
+        ).not.toBeInTheDocument();
+        expect(
+          within(switcherDialog).getByRole("button", {
+            name: "Delete workspace monitor-right",
+          }),
+        ).toBeInTheDocument();
+        expect(deleteWorkspaceLayoutSpy).not.toHaveBeenCalled();
+      } finally {
+        fetchWorkspaceLayoutsSpy.mockRestore();
+        deleteWorkspaceLayoutSpy.mockRestore();
+        window.history.replaceState(window.history.state, "", originalUrl);
+        restoreGlobal("fetch", originalFetch);
+        restoreGlobal("EventSource", originalEventSource);
+        restoreGlobal("ResizeObserver", originalResizeObserver);
+      }
+    });
+  });
+
   it("flushes a pending workspace layout save with keepalive on pagehide", async () => {
     await withSuppressedActWarnings(async () => {
       const originalEventSource = globalThis.EventSource;
       const originalResizeObserver = globalThis.ResizeObserver;
       const originalUrl = `${window.location.pathname}${window.location.search}${window.location.hash}`;
-      const fetchStateSpy = vi.spyOn(api, "fetchState").mockResolvedValue({
+      const fetchStateSpy = vi.spyOn(api, "fetchState").mockResolvedValue(makeStateResponse({
         revision: 1,
         projects: [],
+        orchestrators: [],
+        workspaces: [],
         sessions: [],
-      });
+      }));
       const fetchWorkspaceLayoutSpy = vi
         .mocked(api.fetchWorkspaceLayout)
         .mockResolvedValue(null);
@@ -7107,8 +8356,7 @@ describe("App", () => {
         "ResizeObserver",
         ResizeObserverMock as unknown as typeof ResizeObserver,
       );
-      const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
-      HTMLElement.prototype.scrollIntoView = vi.fn();
+      const scrollIntoViewSpy = stubScrollIntoView();
 
       try {
         await renderApp();
@@ -7125,9 +8373,11 @@ describe("App", () => {
         await act(async () => {
           createSessionDeferred.resolve({
             sessionId: "session-1",
-            state: {
+            state: makeStateResponse({
               revision: 2,
               projects: [],
+              orchestrators: [],
+              workspaces: [],
               sessions: [
                 {
                   id: "session-1",
@@ -7144,7 +8394,7 @@ describe("App", () => {
                   messages: [],
                 },
               ],
-            },
+            }),
           });
           await flushUiWork();
         });
@@ -7155,9 +8405,11 @@ describe("App", () => {
           );
         });
         await act(async () => {
-          refreshSessionModelOptionsDeferred.resolve({
+          refreshSessionModelOptionsDeferred.resolve(makeStateResponse({
             revision: 3,
             projects: [],
+            orchestrators: [],
+            workspaces: [],
             sessions: [
               {
                 id: "session-1",
@@ -7188,7 +8440,7 @@ describe("App", () => {
                 messages: [],
               },
             ],
-          });
+          }));
           await flushUiWork();
         });
         await screen.findAllByText("Codex 1");
@@ -7196,7 +8448,7 @@ describe("App", () => {
       } finally {
         window.history.replaceState(window.history.state, "", originalUrl);
         window.localStorage.clear();
-        HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
+        scrollIntoViewSpy.mockRestore();
         fetchStateSpy.mockRestore();
         createSessionSpy.mockRestore();
         refreshSessionModelOptionsSpy.mockRestore();
@@ -7228,16 +8480,20 @@ describe("App", () => {
         .mockImplementation(async () => {
           fetchStateCallCount += 1;
           if (fetchStateCallCount === 1) {
-            return {
+            return makeStateResponse({
               revision: 1,
               projects: [],
+              orchestrators: [],
+              workspaces: [],
               sessions: [],
-            };
+            });
           }
           if (fetchStateCallCount === 2) {
-            return {
+            return makeStateResponse({
               revision: 4,
               projects: [],
+              orchestrators: [],
+              workspaces: [],
               sessions: [
                 makeSession("session-1", {
                   name: "Codex 1",
@@ -7275,7 +8531,7 @@ describe("App", () => {
                   ],
                 }),
               ],
-            };
+            });
           }
 
           throw new Error(`Unexpected fetchState call #${fetchStateCallCount}`);
@@ -7295,8 +8551,7 @@ describe("App", () => {
         "ResizeObserver",
         ResizeObserverMock as unknown as typeof ResizeObserver,
       );
-      const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
-      HTMLElement.prototype.scrollIntoView = vi.fn();
+      const scrollIntoViewSpy = stubScrollIntoView();
 
       try {
         await renderApp();
@@ -7311,9 +8566,11 @@ describe("App", () => {
         await act(async () => {
           createSessionDeferred.resolve({
             sessionId: "session-1",
-            state: {
+            state: makeStateResponse({
               revision: 2,
               projects: [],
+              orchestrators: [],
+              workspaces: [],
               sessions: [
                 makeSession("session-1", {
                   name: "Codex 1",
@@ -7330,16 +8587,18 @@ describe("App", () => {
                   ],
                 }),
               ],
-            },
+            }),
           });
           await flushUiWork();
         });
 
         expect(refreshSessionModelOptionsSpy).toHaveBeenCalledWith("session-1");
         await act(async () => {
-          refreshSessionModelOptionsDeferred.resolve({
+          refreshSessionModelOptionsDeferred.resolve(makeStateResponse({
             revision: 3,
             projects: [],
+            orchestrators: [],
+            workspaces: [],
             sessions: [
               makeSession("session-1", {
                 name: "Codex 1",
@@ -7370,7 +8629,7 @@ describe("App", () => {
                 ],
               }),
             ],
-          });
+          }));
           await flushUiWork();
         });
         await settleAsyncUi();
@@ -7398,7 +8657,7 @@ describe("App", () => {
       } finally {
         window.history.replaceState(window.history.state, "", originalUrl);
         window.localStorage.clear();
-        HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
+        scrollIntoViewSpy.mockRestore();
         dateNowSpy.mockRestore();
         fetchStateSpy.mockRestore();
         createSessionSpy.mockRestore();
@@ -7413,11 +8672,13 @@ describe("App", () => {
       const originalEventSource = globalThis.EventSource;
       const originalResizeObserver = globalThis.ResizeObserver;
       const originalUrl = `${window.location.pathname}${window.location.search}${window.location.hash}`;
-      const fetchStateSpy = vi.spyOn(api, "fetchState").mockResolvedValue({
+      const fetchStateSpy = vi.spyOn(api, "fetchState").mockResolvedValue(makeStateResponse({
         revision: 1,
         projects: [],
+        orchestrators: [],
+        workspaces: [],
         sessions: [],
-      });
+      }));
       const fetchWorkspaceLayoutSpy = vi
         .mocked(api.fetchWorkspaceLayout)
         .mockResolvedValue(null);
@@ -7488,7 +8749,7 @@ describe("App", () => {
             createdAt: "2026-03-30 09:06:00",
             completedAt: null,
           },
-          state: {
+          state: makeStateResponse({
             revision: 3,
             projects: [
               {
@@ -7503,6 +8764,8 @@ describe("App", () => {
                 rootPath: "/repo-added",
               },
             ],
+            orchestrators: [],
+            workspaces: [],
             sessions: [
               makeSession("session-orchestrated", {
                 name: "Orchestrated Builder",
@@ -7512,7 +8775,7 @@ describe("App", () => {
                 workdir: "/repo",
               }),
             ],
-          },
+          }),
         });
       vi.stubGlobal(
         "EventSource",
@@ -7522,8 +8785,7 @@ describe("App", () => {
         "ResizeObserver",
         ResizeObserverMock as unknown as typeof ResizeObserver,
       );
-      const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
-      HTMLElement.prototype.scrollIntoView = vi.fn();
+      const scrollIntoViewSpy = stubScrollIntoView();
 
       try {
         await renderApp();
@@ -7606,7 +8868,7 @@ describe("App", () => {
       } finally {
         window.history.replaceState(window.history.state, "", originalUrl);
         window.localStorage.clear();
-        HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
+        scrollIntoViewSpy.mockRestore();
         fetchStateSpy.mockRestore();
         fetchWorkspaceLayoutSpy.mockRestore();
         saveWorkspaceLayoutSpy.mockRestore();
@@ -7622,7 +8884,7 @@ describe("App", () => {
     await withSuppressedActWarnings(async () => {
       const originalEventSource = globalThis.EventSource;
       const originalResizeObserver = globalThis.ResizeObserver;
-      const fetchStateSpy = vi.spyOn(api, "fetchState").mockResolvedValue({
+      const fetchStateSpy = vi.spyOn(api, "fetchState").mockResolvedValue(makeStateResponse({
         revision: 1,
         projects: [
           {
@@ -7633,6 +8895,7 @@ describe("App", () => {
           },
         ],
         orchestrators: [makeOrchestrator()],
+        workspaces: [],
         sessions: [
           makeSession("session-1", {
             name: "Builder",
@@ -7640,7 +8903,7 @@ describe("App", () => {
             workdir: "/repo",
           }),
         ],
-      });
+      }));
       const fetchWorkspaceLayoutSpy = vi
         .mocked(api.fetchWorkspaceLayout)
         .mockResolvedValue(null);
@@ -7659,8 +8922,7 @@ describe("App", () => {
         "ResizeObserver",
         ResizeObserverMock as unknown as typeof ResizeObserver,
       );
-      const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
-      HTMLElement.prototype.scrollIntoView = vi.fn();
+      const scrollIntoViewSpy = stubScrollIntoView();
 
       try {
         await renderApp();
@@ -7681,7 +8943,7 @@ describe("App", () => {
 
         expect(fetchStateSpy).toHaveBeenCalledTimes(1);
       } finally {
-        HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
+        scrollIntoViewSpy.mockRestore();
         fetchStateSpy.mockRestore();
         fetchWorkspaceLayoutSpy.mockRestore();
         saveWorkspaceLayoutSpy.mockRestore();
@@ -7695,7 +8957,7 @@ describe("App", () => {
     await withSuppressedActWarnings(async () => {
       const originalEventSource = globalThis.EventSource;
       const originalResizeObserver = globalThis.ResizeObserver;
-      const fetchStateSpy = vi.spyOn(api, "fetchState").mockResolvedValue({
+      const fetchStateSpy = vi.spyOn(api, "fetchState").mockResolvedValue(makeStateResponse({
         revision: 1,
         projects: [
           {
@@ -7706,6 +8968,7 @@ describe("App", () => {
           },
         ],
         orchestrators: [makeOrchestrator()],
+        workspaces: [],
         sessions: [
           makeSession("session-1", {
             name: "Builder",
@@ -7713,7 +8976,7 @@ describe("App", () => {
             workdir: "/repo",
           }),
         ],
-      });
+      }));
       const fetchWorkspaceLayoutSpy = vi
         .mocked(api.fetchWorkspaceLayout)
         .mockResolvedValue(null);
@@ -7732,8 +8995,7 @@ describe("App", () => {
         "ResizeObserver",
         ResizeObserverMock as unknown as typeof ResizeObserver,
       );
-      const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
-      HTMLElement.prototype.scrollIntoView = vi.fn();
+      const scrollIntoViewSpy = stubScrollIntoView();
       const reviewerTemplateSession = {
         id: "reviewer",
         name: "Reviewer",
@@ -7858,10 +9120,565 @@ describe("App", () => {
         expect(screen.getAllByText("Reviewer output updated.").length).toBeGreaterThan(0);
         expect(fetchStateSpy).not.toHaveBeenCalled();
       } finally {
-        HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
+        scrollIntoViewSpy.mockRestore();
         fetchStateSpy.mockRestore();
         fetchWorkspaceLayoutSpy.mockRestore();
         saveWorkspaceLayoutSpy.mockRestore();
+        restoreGlobal("EventSource", originalEventSource);
+        restoreGlobal("ResizeObserver", originalResizeObserver);
+      }
+    });
+  });
+
+  it("groups orchestrated sessions inside the control panel session list", async () => {
+    await withSuppressedActWarnings(async () => {
+      const originalFetch = globalThis.fetch;
+      const originalEventSource = globalThis.EventSource;
+      const originalResizeObserver = globalThis.ResizeObserver;
+      const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url === "/api/state") {
+          const baseOrchestrator = makeOrchestrator();
+          return jsonResponse({
+            revision: 1,
+            projects: [
+              {
+                id: "project-questly",
+                name: "Questly",
+                rootPath: "/projects/questly",
+              },
+            ],
+            orchestrators: [
+              makeOrchestrator({
+                id: "orchestrator-review-flow",
+                projectId: "project-questly",
+                templateId: "review-flow",
+                templateSnapshot: {
+                  ...baseOrchestrator.templateSnapshot,
+                  id: "review-flow",
+                  name: "Review Flow",
+                  projectId: "project-questly",
+                  sessions: [
+                    {
+                      id: "entry",
+                      name: "Entry",
+                      agent: "Codex",
+                      model: null,
+                      instructions: "Start the review flow.",
+                      autoApprove: true,
+                      inputMode: "queue",
+                      position: { x: 160, y: 220 },
+                    },
+                    {
+                      id: "codex-reviewer",
+                      name: "Codex Reviewer",
+                      agent: "Codex",
+                      model: null,
+                      instructions: "Review the changes.",
+                      autoApprove: true,
+                      inputMode: "queue",
+                      position: { x: 420, y: 220 },
+                    },
+                    {
+                      id: "claude-reviewer",
+                      name: "Claude Reviewer",
+                      agent: "Claude",
+                      model: null,
+                      instructions: "Double-check the review.",
+                      autoApprove: false,
+                      inputMode: "queue",
+                      position: { x: 680, y: 220 },
+                    },
+                  ],
+                },
+                sessionInstances: [
+                  {
+                    templateSessionId: "entry",
+                    sessionId: "session-entry",
+                    lastCompletionRevision: null,
+                    lastDeliveredCompletionRevision: null,
+                  },
+                  {
+                    templateSessionId: "codex-reviewer",
+                    sessionId: "session-codex-reviewer",
+                    lastCompletionRevision: null,
+                    lastDeliveredCompletionRevision: null,
+                  },
+                  {
+                    templateSessionId: "claude-reviewer",
+                    sessionId: "session-claude-reviewer",
+                    lastCompletionRevision: null,
+                    lastDeliveredCompletionRevision: null,
+                  },
+                ],
+                createdAt: "2026-04-03 10:05:00",
+              }),
+            ],
+            sessions: [
+              makeSession("session-entry", {
+                name: "Entry",
+                projectId: "project-questly",
+                workdir: "/projects/questly",
+                preview: 'Running "C:\\WINDOWS\\system32\\wi..."',
+              }),
+              makeSession("session-standalone", {
+                name: "Questly",
+                projectId: "project-questly",
+                workdir: "/projects/questly",
+                preview: "Current open tracked bugs in [bugs.md].",
+              }),
+              makeSession("session-codex-reviewer", {
+                name: "Codex Reviewer",
+                projectId: "project-questly",
+                workdir: "/projects/questly",
+                preview: "Ready for a prompt.",
+              }),
+              makeSession("session-claude-reviewer", {
+                name: "Claude Reviewer",
+                agent: "Claude",
+                model: "claude-sonnet-4-5",
+                projectId: "project-questly",
+                workdir: "/projects/questly",
+                preview: "Ready for a prompt.",
+              }),
+            ],
+          });
+        }
+
+        throw new Error(`Unexpected fetch: ${url}`);
+      });
+
+      vi.stubGlobal("fetch", fetchMock);
+      vi.stubGlobal(
+        "EventSource",
+        EventSourceMock as unknown as typeof EventSource,
+      );
+      vi.stubGlobal(
+        "ResizeObserver",
+        ResizeObserverMock as unknown as typeof ResizeObserver,
+      );
+      const scrollIntoViewSpy = stubScrollIntoView();
+
+      try {
+        await renderApp();
+        const eventSource = latestEventSource();        act(() => {
+          eventSource.dispatchError();
+        });
+        await settleAsyncUi();
+
+        await clickAndSettle(
+          await screen.findByRole("button", { name: "Sessions" }),
+        );
+
+        const sessionList = document.querySelector(".session-list");
+        if (!(sessionList instanceof HTMLDivElement)) {
+          throw new Error("Session list not found");
+        }
+
+        await within(sessionList).findByText("Questly");
+        const orchestratorGroup = await within(sessionList).findByRole("group", {
+          name: /Orchestration Review Flow/i,
+        });
+
+        expect(
+          within(sessionList).getAllByRole("group", {
+            name: /Orchestration Review Flow/i,
+          }),
+        ).toHaveLength(1);
+        expect(within(orchestratorGroup).getByText("3 sessions")).toBeInTheDocument();
+        expect(within(orchestratorGroup).getByText("Entry")).toBeInTheDocument();
+        expect(within(orchestratorGroup).getByText("Codex Reviewer")).toBeInTheDocument();
+        expect(within(orchestratorGroup).getByText("Claude Reviewer")).toBeInTheDocument();
+        expect(within(orchestratorGroup).queryByText("Questly")).not.toBeInTheDocument();
+
+        const collapseButton = within(orchestratorGroup).getByRole("button", {
+          name: /Collapse Review Flow sessions/i,
+        });
+        expect(
+          collapseButton.querySelector(".session-orchestrator-group-chevron"),
+        ).toHaveClass("expanded");
+
+        await clickAndSettle(collapseButton);
+
+        expect(
+          within(orchestratorGroup).queryByText("Codex Reviewer"),
+        ).not.toBeInTheDocument();
+        const expandButton = within(orchestratorGroup).getByRole("button", {
+          name: /Expand Review Flow sessions/i,
+        });
+        expect(
+          expandButton.querySelector(".session-orchestrator-group-chevron"),
+        ).not.toHaveClass("expanded");
+
+        await clickAndSettle(expandButton);
+
+        expect(within(orchestratorGroup).getByText("Codex Reviewer")).toBeInTheDocument();
+      } finally {
+        scrollIntoViewSpy.mockRestore();
+        restoreGlobal("fetch", originalFetch);
+        restoreGlobal("EventSource", originalEventSource);
+        restoreGlobal("ResizeObserver", originalResizeObserver);
+      }
+    });
+  });
+  it("controls orchestrators from the grouped session view", async () => {
+    await withSuppressedActWarnings(async () => {
+      const originalFetch = globalThis.fetch;
+      const originalEventSource = globalThis.EventSource;
+      const originalResizeObserver = globalThis.ResizeObserver;
+      const buildGroupedSessionState = (
+        status: OrchestratorInstance["status"],
+        revision: number,
+      ) => {
+        const baseOrchestrator = makeOrchestrator();
+        return {
+          revision,
+          projects: [
+            {
+              id: "project-questly",
+              name: "Questly",
+              rootPath: "/projects/questly",
+            },
+          ],
+          orchestrators: [
+            makeOrchestrator({
+              id: "orchestrator-review-flow",
+              projectId: "project-questly",
+              templateId: "review-flow",
+              status,
+              completedAt:
+                status === "stopped" ? "2026-04-03 10:12:00" : null,
+              templateSnapshot: {
+                ...baseOrchestrator.templateSnapshot,
+                id: "review-flow",
+                name: "Review Flow",
+                projectId: "project-questly",
+                sessions: [
+                  {
+                    id: "entry",
+                    name: "Entry",
+                    agent: "Codex",
+                    model: null,
+                    instructions: "Start the review flow.",
+                    autoApprove: true,
+                    inputMode: "queue",
+                    position: { x: 160, y: 220 },
+                  },
+                  {
+                    id: "tester",
+                    name: "Tester",
+                    agent: "Codex",
+                    model: null,
+                    instructions: "Run the checks.",
+                    autoApprove: true,
+                    inputMode: "queue",
+                    position: { x: 420, y: 220 },
+                  },
+                ],
+              },
+              sessionInstances: [
+                {
+                  templateSessionId: "entry",
+                  sessionId: "session-entry",
+                  lastCompletionRevision: null,
+                  lastDeliveredCompletionRevision: null,
+                },
+                {
+                  templateSessionId: "tester",
+                  sessionId: "session-tester",
+                  lastCompletionRevision: null,
+                  lastDeliveredCompletionRevision: null,
+                },
+              ],
+              createdAt: "2026-04-03 10:05:00",
+            }),
+          ],
+          sessions: [
+            makeSession("session-entry", {
+              name: "Entry",
+              projectId: "project-questly",
+              workdir: "/projects/questly",
+              preview: "[bugs.md](/C:/github/Personal/questly/docs/status...",
+            }),
+            makeSession("session-tester", {
+              name: "Tester",
+              projectId: "project-questly",
+              workdir: "/projects/questly",
+              preview: "`flutter test` passed on the current tree.",
+            }),
+          ],
+        };
+      };
+      const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url === "/api/state") {
+          return jsonResponse(buildGroupedSessionState("running", 1));
+        }
+
+        if (url === "/api/orchestrators/orchestrator-review-flow/pause") {
+          return jsonResponse(buildGroupedSessionState("paused", 2));
+        }
+
+        if (url === "/api/orchestrators/orchestrator-review-flow/resume") {
+          return jsonResponse(buildGroupedSessionState("running", 3));
+        }
+
+        if (url === "/api/orchestrators/orchestrator-review-flow/stop") {
+          return jsonResponse(buildGroupedSessionState("stopped", 4));
+        }
+
+        throw new Error(`Unexpected fetch: ${url}`);
+      });
+
+      vi.stubGlobal("fetch", fetchMock);
+      vi.stubGlobal(
+        "EventSource",
+        EventSourceMock as unknown as typeof EventSource,
+      );
+      vi.stubGlobal(
+        "ResizeObserver",
+        ResizeObserverMock as unknown as typeof ResizeObserver,
+      );
+      const scrollIntoViewSpy = stubScrollIntoView();
+
+      try {
+        await renderApp();
+        const eventSource = latestEventSource();        act(() => {
+          eventSource.dispatchError();
+        });
+        await settleAsyncUi();
+
+        await clickAndSettle(
+          await screen.findByRole("button", { name: "Sessions" }),
+        );
+
+        const sessionList = document.querySelector(".session-list");
+        if (!(sessionList instanceof HTMLDivElement)) {
+          throw new Error("Session list not found");
+        }
+
+        const orchestratorGroup = await within(sessionList).findByRole("group", {
+          name: /Orchestration Review Flow/i,
+        });
+
+        expect(
+          within(orchestratorGroup).getByRole("button", {
+            name: /^Pause orchestration/,
+          }),
+        ).toBeInTheDocument();
+        expect(
+          within(orchestratorGroup).getByRole("button", {
+            name: /^Stop orchestration/,
+          }),
+        ).toBeInTheDocument();
+
+        await clickAndSettle(
+          within(orchestratorGroup).getByRole("button", {
+            name: /^Pause orchestration/,
+          }),
+        );
+
+        await waitFor(() => {
+          expect(
+            fetchMock.mock.calls.some(
+              ([input]) =>
+                String(input) ===
+                "/api/orchestrators/orchestrator-review-flow/pause",
+            ),
+          ).toBe(true);
+          expect(
+            within(orchestratorGroup).getByRole("button", {
+              name: /^Resume orchestration/,
+            }),
+          ).toBeInTheDocument();
+        });
+
+        await clickAndSettle(
+          within(orchestratorGroup).getByRole("button", {
+            name: /^Resume orchestration/,
+          }),
+        );
+
+        await waitFor(() => {
+          expect(
+            fetchMock.mock.calls.some(
+              ([input]) =>
+                String(input) ===
+                "/api/orchestrators/orchestrator-review-flow/resume",
+            ),
+          ).toBe(true);
+          expect(
+            within(orchestratorGroup).getByRole("button", {
+              name: /^Pause orchestration/,
+            }),
+          ).toBeInTheDocument();
+        });
+
+        await clickAndSettle(
+          within(orchestratorGroup).getByRole("button", {
+            name: /^Stop orchestration/,
+          }),
+        );
+
+        await waitFor(() => {
+          expect(
+            fetchMock.mock.calls.some(
+              ([input]) =>
+                String(input) ===
+                "/api/orchestrators/orchestrator-review-flow/stop",
+            ),
+          ).toBe(true);
+          expect(orchestratorGroup).toHaveAttribute("data-status", "stopped");
+          expect(
+            within(orchestratorGroup).queryByRole("button", {
+              name: /^Resume orchestration/,
+            }),
+          ).not.toBeInTheDocument();
+          expect(
+            within(orchestratorGroup).queryByRole("button", {
+              name: /^Stop orchestration/,
+            }),
+          ).not.toBeInTheDocument();
+        });
+      } finally {
+        scrollIntoViewSpy.mockRestore();
+        restoreGlobal("fetch", originalFetch);
+        restoreGlobal("EventSource", originalEventSource);
+        restoreGlobal("ResizeObserver", originalResizeObserver);
+      }
+    });
+  });
+
+  it("shows orchestrator action errors from the grouped session view", async () => {
+    await withSuppressedActWarnings(async () => {
+      const originalFetch = globalThis.fetch;
+      const originalEventSource = globalThis.EventSource;
+      const originalResizeObserver = globalThis.ResizeObserver;
+      const baseOrchestrator = makeOrchestrator();
+      const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url === "/api/state") {
+          return jsonResponse({
+            revision: 1,
+            projects: [
+              {
+                id: "project-questly",
+                name: "Questly",
+                rootPath: "/projects/questly",
+              },
+            ],
+            orchestrators: [
+              makeOrchestrator({
+                id: "orchestrator-review-flow",
+                projectId: "project-questly",
+                templateId: "review-flow",
+                status: "running",
+                templateSnapshot: {
+                  ...baseOrchestrator.templateSnapshot,
+                  id: "review-flow",
+                  name: "Review Flow",
+                  projectId: "project-questly",
+                  sessions: [
+                    {
+                      id: "entry",
+                      name: "Entry",
+                      agent: "Codex",
+                      model: null,
+                      instructions: "Start the review flow.",
+                      autoApprove: true,
+                      inputMode: "queue",
+                      position: { x: 160, y: 220 },
+                    },
+                  ],
+                },
+                sessionInstances: [
+                  {
+                    templateSessionId: "entry",
+                    sessionId: "session-entry",
+                    lastCompletionRevision: null,
+                    lastDeliveredCompletionRevision: null,
+                  },
+                ],
+                createdAt: "2026-04-03 10:05:00",
+              }),
+            ],
+            sessions: [
+              makeSession("session-entry", {
+                name: "Entry",
+                projectId: "project-questly",
+                workdir: "/projects/questly",
+                preview: "Ready for a prompt.",
+              }),
+            ],
+          });
+        }
+
+        if (url === "/api/orchestrators/orchestrator-review-flow/pause") {
+          return new Response(JSON.stringify({ error: "pause failed" }), {
+            headers: {
+              "Content-Type": "application/json",
+            },
+            status: 500,
+          });
+        }
+
+        throw new Error(`Unexpected fetch: ${url}`);
+      });
+
+      vi.stubGlobal("fetch", fetchMock);
+      vi.stubGlobal(
+        "EventSource",
+        EventSourceMock as unknown as typeof EventSource,
+      );
+      vi.stubGlobal(
+        "ResizeObserver",
+        ResizeObserverMock as unknown as typeof ResizeObserver,
+      );
+      const scrollIntoViewSpy = stubScrollIntoView();
+
+      try {
+        await renderApp();
+        const eventSource = latestEventSource();        act(() => {
+          eventSource.dispatchError();
+        });
+        await settleAsyncUi();
+
+        await clickAndSettle(
+          await screen.findByRole("button", { name: "Sessions" }),
+        );
+
+        const sessionList = document.querySelector(".session-list");
+        if (!(sessionList instanceof HTMLDivElement)) {
+          throw new Error("Session list not found");
+        }
+
+        const orchestratorGroup = await within(sessionList).findByRole("group", {
+          name: /Orchestration Review Flow/i,
+        });
+
+        await clickAndSettle(
+          within(orchestratorGroup).getByRole("button", {
+            name: /^Pause orchestration/,
+          }),
+        );
+
+        await waitFor(() => {
+          expect(screen.getByText("pause failed")).toBeInTheDocument();
+        });
+        expect(orchestratorGroup).toHaveAttribute("data-status", "running");
+        expect(
+          within(orchestratorGroup).getByRole("button", {
+            name: /^Pause orchestration/,
+          }),
+        ).toBeEnabled();
+        expect(
+          within(orchestratorGroup).getByRole("button", {
+            name: /^Stop orchestration/,
+          }),
+        ).toBeEnabled();
+      } finally {
+        scrollIntoViewSpy.mockRestore();
+        restoreGlobal("fetch", originalFetch);
         restoreGlobal("EventSource", originalEventSource);
         restoreGlobal("ResizeObserver", originalResizeObserver);
       }
@@ -7913,14 +9730,11 @@ describe("App", () => {
         "ResizeObserver",
         ResizeObserverMock as unknown as typeof ResizeObserver,
       );
-      const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
-      HTMLElement.prototype.scrollIntoView = vi.fn();
+      const scrollIntoViewSpy = stubScrollIntoView();
 
       try {
         await renderApp();
-        const eventSource = latestEventSource();
-        expect(eventSource).toBeTruthy();
-        act(() => {
+        const eventSource = latestEventSource();        act(() => {
           eventSource.dispatchError();
         });
         await settleAsyncUi();
@@ -7952,7 +9766,7 @@ describe("App", () => {
       } finally {
         window.history.replaceState(window.history.state, "", originalUrl);
         window.localStorage.clear();
-        HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
+        scrollIntoViewSpy.mockRestore();
         restoreGlobal("fetch", originalFetch);
         restoreGlobal("EventSource", originalEventSource);
         restoreGlobal("ResizeObserver", originalResizeObserver);
@@ -8010,14 +9824,11 @@ describe("App", () => {
         "ResizeObserver",
         ResizeObserverMock as unknown as typeof ResizeObserver,
       );
-      const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
-      HTMLElement.prototype.scrollIntoView = vi.fn();
+      const scrollIntoViewSpy = stubScrollIntoView();
 
       try {
         await renderApp();
-        const eventSource = latestEventSource();
-        expect(eventSource).toBeTruthy();
-        act(() => {
+        const eventSource = latestEventSource();        act(() => {
           eventSource.dispatchError();
         });
         await settleAsyncUi();
@@ -8058,7 +9869,7 @@ describe("App", () => {
       } finally {
         window.history.replaceState(window.history.state, "", originalUrl);
         window.localStorage.clear();
-        HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
+        scrollIntoViewSpy.mockRestore();
         restoreGlobal("fetch", originalFetch);
         restoreGlobal("EventSource", originalEventSource);
         restoreGlobal("ResizeObserver", originalResizeObserver);
@@ -8144,14 +9955,11 @@ describe("App", () => {
       "ResizeObserver",
       ResizeObserverMock as unknown as typeof ResizeObserver,
     );
-    const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
-    HTMLElement.prototype.scrollIntoView = vi.fn();
+    const scrollIntoViewSpy = stubScrollIntoView();
 
     try {
       await renderApp();
-      const eventSource = latestEventSource();
-      expect(eventSource).toBeTruthy();
-      act(() => {
+      const eventSource = latestEventSource();      act(() => {
         eventSource.dispatchError();
       });
       await settleAsyncUi();
@@ -8170,7 +9978,7 @@ describe("App", () => {
         ),
       ).not.toBeInTheDocument();
     } finally {
-      HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
+      scrollIntoViewSpy.mockRestore();
       restoreGlobal("fetch", originalFetch);
       restoreGlobal("EventSource", originalEventSource);
       restoreGlobal("ResizeObserver", originalResizeObserver);
@@ -8274,14 +10082,11 @@ describe("App", () => {
         "ResizeObserver",
         ResizeObserverMock as unknown as typeof ResizeObserver,
       );
-      const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
-      HTMLElement.prototype.scrollIntoView = vi.fn();
+      const scrollIntoViewSpy = stubScrollIntoView();
 
       try {
         await renderApp();
-        const eventSource = latestEventSource();
-        expect(eventSource).toBeTruthy();
-        act(() => {
+        const eventSource = latestEventSource();        act(() => {
           eventSource.dispatchError();
         });
         await settleAsyncUi();
@@ -8324,7 +10129,7 @@ describe("App", () => {
           await screen.findByRole("button", { name: "Open tab" }),
         );
         expect(
-          within(getSessionTablist()).getByText(/^Git:/),
+          within(getSessionTablist()).getByText(/^termal$/i),
         ).toBeInTheDocument();
 
         await clickAndSettle(
@@ -8354,7 +10159,7 @@ describe("App", () => {
         ).toBeInTheDocument();
       } finally {
         window.localStorage.clear();
-        HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
+        scrollIntoViewSpy.mockRestore();
         restoreGlobal("fetch", originalFetch);
         restoreGlobal("EventSource", originalEventSource);
         restoreGlobal("ResizeObserver", originalResizeObserver);
@@ -8406,7 +10211,7 @@ describe("App", () => {
                 .getAllByRole("tab")
                 .some((tab) =>
                   expectedTabName.test(
-                    (tab.textContent ?? "").replace(/\u00d7/g, "").trim(),
+                    ((tab.getAttribute("aria-label") ?? tab.textContent ?? "").replace(/\u00d7/g, "").trim()),
                   ),
                 ),
             ).toBe(true);
@@ -8416,7 +10221,7 @@ describe("App", () => {
         await dragDockSectionToWorkspace("Sessions", /^Sessions$/i);
         await dragDockSectionToWorkspace("Orchestrators", /^Orchestrators$/i);
         await dragDockSectionToWorkspace("Files", /Files: termal/i);
-        await dragDockSectionToWorkspace("Git status", /Git: termal/i);
+        await dragDockSectionToWorkspace("Git status", /Git status: termal/i);
       } finally {
         context.cleanup();
       }
@@ -8554,14 +10359,11 @@ describe("App", () => {
         "ResizeObserver",
         ResizeObserverMock as unknown as typeof ResizeObserver,
       );
-      const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
-      HTMLElement.prototype.scrollIntoView = vi.fn();
+      const scrollIntoViewSpy = stubScrollIntoView();
 
       try {
         await renderApp();
-        const eventSource = latestEventSource();
-        expect(eventSource).toBeTruthy();
-        act(() => {
+        const eventSource = latestEventSource();        act(() => {
           eventSource.dispatchError();
         });
         await settleAsyncUi();
@@ -8633,19 +10435,25 @@ describe("App", () => {
               /Session 1/i.test(tabList.textContent ?? ""),
             );
             expect(updatedWorkspaceTabList).toBeTruthy();
-            expect(updatedWorkspaceTabList?.textContent ?? "").toMatch(
-              expectedTabLabel,
-            );
+            expect(
+              within(updatedWorkspaceTabList as HTMLElement)
+                .getAllByRole("tab")
+                .some((tab) =>
+                  expectedTabLabel.test(
+                    ((tab.getAttribute("aria-label") ?? tab.textContent ?? "").replace(/\u00d7/g, "").trim()),
+                  ),
+                ),
+            ).toBe(true);
           });
         }
 
         await dragDockSectionToTabRail("Sessions", /^.*Sessions.*$/i);
         await dragDockSectionToTabRail("Orchestrators", /^.*Orchestrators.*$/i);
         await dragDockSectionToTabRail("Files", /Files:\s*termal/i);
-        await dragDockSectionToTabRail("Git status", /Git:\s*termal/i);
+        await dragDockSectionToTabRail("Git status", /Git status:\s*termal/i);
       } finally {
         window.localStorage.clear();
-        HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
+        scrollIntoViewSpy.mockRestore();
         restoreGlobal("fetch", originalFetch);
         restoreGlobal("EventSource", originalEventSource);
         restoreGlobal("ResizeObserver", originalResizeObserver);
@@ -8782,14 +10590,11 @@ describe("App", () => {
         "ResizeObserver",
         ResizeObserverMock as unknown as typeof ResizeObserver,
       );
-      const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
-      HTMLElement.prototype.scrollIntoView = vi.fn();
+      const scrollIntoViewSpy = stubScrollIntoView();
 
       try {
         await renderApp();
-        const eventSource = latestEventSource();
-        expect(eventSource).toBeTruthy();
-        act(() => {
+        const eventSource = latestEventSource();        act(() => {
           eventSource.dispatchError();
         });
         await settleAsyncUi();
@@ -8829,7 +10634,7 @@ describe("App", () => {
 
         const sessionTablist = getSessionTablist();
         expect(
-          within(sessionTablist).getByText("Git: api"),
+          within(sessionTablist).getByText(/^api$/i),
         ).toBeInTheDocument();
 
         await selectControlPanelProject(/^TermAl$/i);
@@ -8839,7 +10644,7 @@ describe("App", () => {
           ),
         );
         expect(
-          within(sessionTablist).getByText("Git: termal"),
+          within(sessionTablist).getByText(/^termal$/i),
         ).toBeInTheDocument();
         expect(
           within(getControlPanelShell()).getByRole("combobox", {
@@ -8848,7 +10653,7 @@ describe("App", () => {
         ).toHaveTextContent("TermAl");
 
         await clickAndSettle(
-          within(sessionTablist).getByRole("tab", { name: /Git: api/i }),
+          within(sessionTablist).getByRole("tab", { name: /Git status: api/i }),
         );
         expect(
           within(getControlPanelShell()).getByRole("combobox", {
@@ -8857,7 +10662,7 @@ describe("App", () => {
         ).toHaveTextContent("TermAl");
       } finally {
         window.localStorage.clear();
-        HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
+        scrollIntoViewSpy.mockRestore();
         restoreGlobal("fetch", originalFetch);
         restoreGlobal("EventSource", originalEventSource);
         restoreGlobal("ResizeObserver", originalResizeObserver);
@@ -8989,14 +10794,11 @@ describe("App", () => {
         "ResizeObserver",
         ResizeObserverMock as unknown as typeof ResizeObserver,
       );
-      const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
-      HTMLElement.prototype.scrollIntoView = vi.fn();
+      const scrollIntoViewSpy = stubScrollIntoView();
 
       try {
         await renderApp();
-        const eventSource = latestEventSource();
-        expect(eventSource).toBeTruthy();
-        act(() => {
+        const eventSource = latestEventSource();        act(() => {
           eventSource.dispatchError();
         });
         await settleAsyncUi();
@@ -9034,7 +10836,7 @@ describe("App", () => {
       } finally {
         window.history.replaceState(window.history.state, "", originalUrl);
         window.localStorage.clear();
-        HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
+        scrollIntoViewSpy.mockRestore();
         restoreGlobal("fetch", originalFetch);
         restoreGlobal("EventSource", originalEventSource);
         restoreGlobal("ResizeObserver", originalResizeObserver);
@@ -9216,14 +11018,11 @@ describe("App", () => {
         "ResizeObserver",
         ResizeObserverMock as unknown as typeof ResizeObserver,
       );
-      const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
-      HTMLElement.prototype.scrollIntoView = vi.fn();
+      const scrollIntoViewSpy = stubScrollIntoView();
 
       try {
         await renderApp();
-        const eventSource = latestEventSource();
-        expect(eventSource).toBeTruthy();
-        act(() => {
+        const eventSource = latestEventSource();        act(() => {
           eventSource.dispatchError();
         });
         await settleAsyncUi();
@@ -9263,7 +11062,7 @@ describe("App", () => {
       } finally {
         window.history.replaceState(window.history.state, "", originalUrl);
         window.localStorage.clear();
-        HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
+        scrollIntoViewSpy.mockRestore();
         restoreGlobal("fetch", originalFetch);
         restoreGlobal("EventSource", originalEventSource);
         restoreGlobal("ResizeObserver", originalResizeObserver);
@@ -9462,14 +11261,11 @@ describe("App", () => {
         "ResizeObserver",
         ResizeObserverMock as unknown as typeof ResizeObserver,
       );
-      const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
-      HTMLElement.prototype.scrollIntoView = vi.fn();
+      const scrollIntoViewSpy = stubScrollIntoView();
 
       try {
         await renderApp();
-        const eventSource = latestEventSource();
-        expect(eventSource).toBeTruthy();
-        act(() => {
+        const eventSource = latestEventSource();        act(() => {
           eventSource.dispatchError();
         });
         await settleAsyncUi();
@@ -9547,7 +11343,7 @@ describe("App", () => {
       } finally {
         window.history.replaceState(window.history.state, "", originalUrl);
         window.localStorage.clear();
-        HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
+        scrollIntoViewSpy.mockRestore();
         restoreGlobal("fetch", originalFetch);
         restoreGlobal("EventSource", originalEventSource);
         restoreGlobal("ResizeObserver", originalResizeObserver);
@@ -9790,14 +11586,11 @@ describe("App", () => {
         "ResizeObserver",
         ResizeObserverMock as unknown as typeof ResizeObserver,
       );
-      const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
-      HTMLElement.prototype.scrollIntoView = vi.fn();
+      const scrollIntoViewSpy = stubScrollIntoView();
 
       try {
         await renderApp();
-        const eventSource = latestEventSource();
-        expect(eventSource).toBeTruthy();
-        act(() => {
+        const eventSource = latestEventSource();        act(() => {
           eventSource.dispatchError();
         });
         await settleAsyncUi();
@@ -9828,11 +11621,11 @@ describe("App", () => {
           expect(request.searchParams.get("projectId")).toBe("project-api");
         });
 
-        await clickAndSettle(screen.getByRole("tab", { name: /Git: termal/i }));
+        await clickAndSettle(screen.getByRole("tab", { name: /Git status: termal/i }));
 
         await waitFor(() => {
           expect(
-            screen.getByRole("tab", { name: /Git: api/i }),
+            screen.getByRole("tab", { name: /Git status: api/i }),
           ).toBeInTheDocument();
         });
         expect(
@@ -9841,7 +11634,7 @@ describe("App", () => {
           }),
         ).toHaveTextContent("API");
         expect(
-          within(getPaneByTabName(/Git: api/i)).getByRole("combobox", {
+          within(getPaneByTabName(/Git status: api/i)).getByRole("combobox", {
             name: "Project",
           }),
         ).toHaveTextContent("API");
@@ -9854,7 +11647,7 @@ describe("App", () => {
       } finally {
         window.history.replaceState(window.history.state, "", originalUrl);
         window.localStorage.clear();
-        HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
+        scrollIntoViewSpy.mockRestore();
         restoreGlobal("fetch", originalFetch);
         restoreGlobal("EventSource", originalEventSource);
         restoreGlobal("ResizeObserver", originalResizeObserver);
@@ -10056,14 +11849,11 @@ describe("App", () => {
         "ResizeObserver",
         ResizeObserverMock as unknown as typeof ResizeObserver,
       );
-      const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
-      HTMLElement.prototype.scrollIntoView = vi.fn();
+      const scrollIntoViewSpy = stubScrollIntoView();
 
       try {
         await renderApp();
-        const eventSource = latestEventSource();
-        expect(eventSource).toBeTruthy();
-        act(() => {
+        const eventSource = latestEventSource();        act(() => {
           eventSource.dispatchError();
         });
         await settleAsyncUi();
@@ -10123,7 +11913,7 @@ describe("App", () => {
       } finally {
         window.history.replaceState(window.history.state, "", originalUrl);
         window.localStorage.clear();
-        HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
+        scrollIntoViewSpy.mockRestore();
         restoreGlobal("fetch", originalFetch);
         restoreGlobal("EventSource", originalEventSource);
         restoreGlobal("ResizeObserver", originalResizeObserver);
@@ -10327,14 +12117,11 @@ describe("App", () => {
         "ResizeObserver",
         ResizeObserverMock as unknown as typeof ResizeObserver,
       );
-      const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
-      HTMLElement.prototype.scrollIntoView = vi.fn();
+      const scrollIntoViewSpy = stubScrollIntoView();
 
       try {
         await renderApp();
-        const eventSource = latestEventSource();
-        expect(eventSource).toBeTruthy();
-        act(() => {
+        const eventSource = latestEventSource();        act(() => {
           eventSource.dispatchError();
         });
         await settleAsyncUi();
@@ -10379,10 +12166,10 @@ describe("App", () => {
 
         await waitFor(() => {
           expect(
-            screen.getByRole("tab", { name: /Git: termal/i }),
+            screen.getByRole("tab", { name: /Git status: termal/i }),
           ).toBeInTheDocument();
         });
-        expect(screen.queryByRole("tab", { name: /Git: api/i })).toBeNull();
+        expect(screen.queryByRole("tab", { name: /Git status: api/i })).toBeNull();
         await waitFor(() => {
           const request = latestRequestTo("/api/git/status");
           expect(request.searchParams.get("path")).toBe("/projects/termal");
@@ -10392,7 +12179,7 @@ describe("App", () => {
       } finally {
         window.history.replaceState(window.history.state, "", originalUrl);
         window.localStorage.clear();
-        HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
+        scrollIntoViewSpy.mockRestore();
         restoreGlobal("fetch", originalFetch);
         restoreGlobal("EventSource", originalEventSource);
         restoreGlobal("ResizeObserver", originalResizeObserver);
@@ -10430,14 +12217,11 @@ describe("App", () => {
       "ResizeObserver",
       ResizeObserverMock as unknown as typeof ResizeObserver,
     );
-    const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
-    HTMLElement.prototype.scrollIntoView = vi.fn();
+    const scrollIntoViewSpy = stubScrollIntoView();
 
     try {
       await renderApp();
-      const eventSource = latestEventSource();
-      expect(eventSource).toBeTruthy();
-      act(() => {
+      const eventSource = latestEventSource();      act(() => {
         eventSource.dispatchError();
       });
       await settleAsyncUi();
@@ -10461,11 +12245,43 @@ describe("App", () => {
       expect(document.querySelector(".tile-divider-row")).not.toBeNull();
       expect(document.querySelector(".tile-divider-row.fixed")).toBeNull();
     } finally {
-      HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
+      scrollIntoViewSpy.mockRestore();
       restoreGlobal("fetch", originalFetch);
       restoreGlobal("EventSource", originalEventSource);
       restoreGlobal("ResizeObserver", originalResizeObserver);
     }
+  });
+
+  it("stores manual message scroll state immediately when leaving the bottom", () => {
+    const paneScrollPositions: Record<
+      string,
+      {
+        top: number;
+        shouldStick: boolean;
+      }
+    > = {
+      "pane-1:session:session-1": {
+        top: 1200,
+        shouldStick: true,
+      },
+    };
+    const node = {
+      clientHeight: 800,
+      scrollHeight: 2000,
+      scrollTop: 960,
+    };
+
+    const next = syncMessageStackScrollPosition(
+      node,
+      "pane-1:session:session-1",
+      paneScrollPositions,
+    );
+
+    expect(next).toEqual({
+      top: 960,
+      shouldStick: false,
+    });
+    expect(paneScrollPositions["pane-1:session:session-1"]).toEqual(next);
   });
 
   it("uses the control panel pixel minimum instead of the generic row split clamp", () => {
@@ -10534,6 +12350,103 @@ describe("App", () => {
 
     expect(bounds.minRatio).toBeCloseTo(14 / 100, 4);
     expect(bounds.maxRatio).toBeCloseTo(78 / 100, 4);
+  });
+
+  it("uses the standalone control-surface pixel minimum instead of the generic row split clamp", () => {
+    const previousStandalonePaneMinWidth =
+      document.documentElement.style.getPropertyValue(
+        "--standalone-control-surface-pane-min-width",
+      );
+    const previousDensityScale =
+      document.documentElement.style.getPropertyValue("--density-scale");
+    document.documentElement.style.setProperty(
+      "--standalone-control-surface-pane-min-width",
+      "calc(16rem * var(--density-scale))",
+    );
+    document.documentElement.style.setProperty("--density-scale", "1");
+
+    try {
+      const bounds = getWorkspaceSplitResizeBounds(
+        {
+          id: "split-1",
+          type: "split",
+          direction: "row",
+          ratio: 0.5,
+          first: {
+            type: "pane",
+            paneId: "session-pane",
+          },
+          second: {
+            type: "pane",
+            paneId: "git-pane",
+          },
+        },
+        "split-1",
+        "row",
+        1600,
+        new Map([
+          [
+            "session-pane",
+            {
+              id: "session-pane",
+              tabs: [
+                {
+                  id: "session-tab",
+                  kind: "session",
+                  sessionId: "session-1",
+                },
+              ],
+              activeTabId: "session-tab",
+              activeSessionId: "session-1",
+              viewMode: "session",
+              lastSessionViewMode: "session",
+              sourcePath: null,
+            },
+          ],
+          [
+            "git-pane",
+            {
+              id: "git-pane",
+              tabs: [
+                {
+                  id: "git-tab",
+                  kind: "gitStatus",
+                  workdir: "C:/repo",
+                  originSessionId: null,
+                },
+              ],
+              activeTabId: "git-tab",
+              activeSessionId: null,
+              viewMode: "gitStatus",
+              lastSessionViewMode: "session",
+              sourcePath: null,
+            },
+          ],
+        ]),
+      );
+
+      expect(bounds.minRatio).toBeCloseTo(22 / 100, 4);
+      expect(bounds.maxRatio).toBeCloseTo(84 / 100, 4);
+    } finally {
+      if (previousStandalonePaneMinWidth) {
+        document.documentElement.style.setProperty(
+          "--standalone-control-surface-pane-min-width",
+          previousStandalonePaneMinWidth,
+        );
+      } else {
+        document.documentElement.style.removeProperty(
+          "--standalone-control-surface-pane-min-width",
+        );
+      }
+      if (previousDensityScale) {
+        document.documentElement.style.setProperty(
+          "--density-scale",
+          previousDensityScale,
+        );
+      } else {
+        document.documentElement.style.removeProperty("--density-scale");
+      }
+    }
   });
 
   it("matches the standalone control panel width when resolving the initial dock ratio", () => {
@@ -10659,17 +12572,18 @@ describe("App", () => {
         "ResizeObserver",
         ResizeObserverMock as unknown as typeof ResizeObserver,
       );
-      const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
-      HTMLElement.prototype.scrollIntoView = vi.fn();
+      const scrollIntoViewSpy = stubScrollIntoView();
 
       try {
         await renderApp();
         await act(async () => {
-          fetchStateDeferred.resolve({
+          fetchStateDeferred.resolve(makeStateResponse({
             revision: 1,
             projects: [],
+            orchestrators: [],
+            workspaces: [],
             sessions: [],
-          });
+          }));
           await flushUiWork();
         });
 
@@ -10684,9 +12598,11 @@ describe("App", () => {
         await act(async () => {
           createSessionDeferred.resolve({
             sessionId: "session-1",
-            state: {
+            state: makeStateResponse({
               revision: 2,
               projects: [],
+              orchestrators: [],
+              workspaces: [],
               sessions: [
                 {
                   id: "session-1",
@@ -10703,7 +12619,7 @@ describe("App", () => {
                   messages: [],
                 },
               ],
-            },
+            }),
           });
           await flushUiWork();
         });
@@ -10713,9 +12629,11 @@ describe("App", () => {
           );
         });
         await act(async () => {
-          refreshSessionModelOptionsDeferred.resolve({
+          refreshSessionModelOptionsDeferred.resolve(makeStateResponse({
             revision: 3,
             projects: [],
+            orchestrators: [],
+            workspaces: [],
             sessions: [
               {
                 id: "session-1",
@@ -10742,7 +12660,7 @@ describe("App", () => {
                 messages: [],
               },
             ],
-          });
+          }));
           await flushUiWork();
         });
         await clickAndSettle(
@@ -10760,7 +12678,7 @@ describe("App", () => {
       } finally {
         window.history.replaceState(window.history.state, "", originalUrl);
         window.localStorage.clear();
-        HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
+        scrollIntoViewSpy.mockRestore();
         fetchStateSpy.mockRestore();
         createSessionSpy.mockRestore();
         refreshSessionModelOptionsSpy.mockRestore();
@@ -10804,21 +12722,22 @@ describe("App", () => {
         "ResizeObserver",
         ResizeObserverMock as unknown as typeof ResizeObserver,
       );
-      const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
-      HTMLElement.prototype.scrollIntoView = vi.fn();
+      const scrollIntoViewSpy = stubScrollIntoView();
 
       try {
         await renderApp();
         await act(async () => {
-          fetchStateDeferred.resolve({
+          fetchStateDeferred.resolve(makeStateResponse({
             revision: 1,
             preferences: {
               defaultCodexReasoningEffort: "medium",
               defaultClaudeEffort: "default",
             },
             projects: [],
+            orchestrators: [],
+            workspaces: [],
             sessions: [],
-          });
+          }));
           await flushUiWork();
         });
 
@@ -10835,15 +12754,17 @@ describe("App", () => {
           });
         });
         await act(async () => {
-          updateSettingsDeferred.resolve({
+          updateSettingsDeferred.resolve(makeStateResponse({
             revision: 2,
             preferences: {
               defaultCodexReasoningEffort: "high",
               defaultClaudeEffort: "default",
             },
             projects: [],
+            orchestrators: [],
+            workspaces: [],
             sessions: [],
-          });
+          }));
           await flushUiWork();
         });
         await clickAndSettle(
@@ -10870,13 +12791,15 @@ describe("App", () => {
         await act(async () => {
           createSessionDeferred.resolve({
             sessionId: "session-1",
-            state: {
+            state: makeStateResponse({
               revision: 3,
               preferences: {
                 defaultCodexReasoningEffort: "high",
                 defaultClaudeEffort: "default",
               },
               projects: [],
+              orchestrators: [],
+              workspaces: [],
               sessions: [
                 {
                   id: "session-1",
@@ -10893,7 +12816,7 @@ describe("App", () => {
                   messages: [],
                 },
               ],
-            },
+            }),
           });
           await flushUiWork();
         });
@@ -10903,13 +12826,15 @@ describe("App", () => {
           );
         });
         await act(async () => {
-          refreshSessionModelOptionsDeferred.resolve({
+          refreshSessionModelOptionsDeferred.resolve(makeStateResponse({
             revision: 4,
             preferences: {
               defaultCodexReasoningEffort: "high",
               defaultClaudeEffort: "default",
             },
             projects: [],
+            orchestrators: [],
+            workspaces: [],
             sessions: [
               {
                 id: "session-1",
@@ -10926,14 +12851,14 @@ describe("App", () => {
                 messages: [],
               },
             ],
-          });
+          }));
           await flushUiWork();
         });
         await settleAsyncUi();
       } finally {
         window.history.replaceState(window.history.state, "", originalUrl);
         window.localStorage.clear();
-        HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
+        scrollIntoViewSpy.mockRestore();
         fetchStateSpy.mockRestore();
         updateAppSettingsSpy.mockRestore();
         createSessionSpy.mockRestore();
@@ -10979,21 +12904,22 @@ describe("App", () => {
         "ResizeObserver",
         ResizeObserverMock as unknown as typeof ResizeObserver,
       );
-      const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
-      HTMLElement.prototype.scrollIntoView = vi.fn();
+      const scrollIntoViewSpy = stubScrollIntoView();
 
       try {
         await renderApp();
         await act(async () => {
-          fetchStateDeferred.resolve({
+          fetchStateDeferred.resolve(makeStateResponse({
             revision: 1,
             preferences: {
               defaultCodexReasoningEffort: "medium",
               defaultClaudeEffort: "default",
             },
             projects: [],
+            orchestrators: [],
+            workspaces: [],
             sessions: [],
-          });
+          }));
           await flushUiWork();
         });
 
@@ -11010,15 +12936,17 @@ describe("App", () => {
           });
         });
         await act(async () => {
-          updateSettingsDeferred.resolve({
+          updateSettingsDeferred.resolve(makeStateResponse({
             revision: 2,
             preferences: {
               defaultCodexReasoningEffort: "medium",
               defaultClaudeEffort: "max",
             },
             projects: [],
+            orchestrators: [],
+            workspaces: [],
             sessions: [],
-          });
+          }));
           await flushUiWork();
         });
         await clickAndSettle(
@@ -11046,13 +12974,15 @@ describe("App", () => {
         await act(async () => {
           createSessionDeferred.resolve({
             sessionId: "session-1",
-            state: {
+            state: makeStateResponse({
               revision: 3,
               preferences: {
                 defaultCodexReasoningEffort: "medium",
                 defaultClaudeEffort: "max",
               },
               projects: [],
+              orchestrators: [],
+              workspaces: [],
               sessions: [
                 {
                   id: "session-1",
@@ -11068,7 +12998,7 @@ describe("App", () => {
                   messages: [],
                 },
               ],
-            },
+            }),
           });
           await flushUiWork();
         });
@@ -11078,13 +13008,15 @@ describe("App", () => {
           );
         });
         await act(async () => {
-          refreshSessionModelOptionsDeferred.resolve({
+          refreshSessionModelOptionsDeferred.resolve(makeStateResponse({
             revision: 4,
             preferences: {
               defaultCodexReasoningEffort: "medium",
               defaultClaudeEffort: "max",
             },
             projects: [],
+            orchestrators: [],
+            workspaces: [],
             sessions: [
               {
                 id: "session-1",
@@ -11100,14 +13032,14 @@ describe("App", () => {
                 messages: [],
               },
             ],
-          });
+          }));
           await flushUiWork();
         });
         await settleAsyncUi();
       } finally {
         window.history.replaceState(window.history.state, "", originalUrl);
         window.localStorage.clear();
-        HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
+        scrollIntoViewSpy.mockRestore();
         fetchStateSpy.mockRestore();
         updateAppSettingsSpy.mockRestore();
         createSessionSpy.mockRestore();
@@ -11131,8 +13063,7 @@ describe("App", () => {
         "ResizeObserver",
         ResizeObserverMock as unknown as typeof ResizeObserver,
       );
-      const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
-      HTMLElement.prototype.scrollIntoView = vi.fn();
+      const scrollIntoViewSpy = stubScrollIntoView();
 
       const remotes = [
         {
@@ -11157,9 +13088,7 @@ describe("App", () => {
 
       try {
         await renderApp();
-        const eventSource = latestEventSource();
-        expect(eventSource).toBeTruthy();
-
+        const eventSource = latestEventSource();
         await act(async () => {
           eventSource.dispatchOpen();
           eventSource.dispatchNamedEvent("state", {
@@ -11238,7 +13167,7 @@ describe("App", () => {
       } finally {
         window.history.replaceState(window.history.state, "", originalUrl);
         window.localStorage.clear();
-        HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
+        scrollIntoViewSpy.mockRestore();
         restoreGlobal("EventSource", originalEventSource);
         restoreGlobal("ResizeObserver", originalResizeObserver);
       }
@@ -11270,8 +13199,7 @@ describe("App", () => {
         "ResizeObserver",
         ResizeObserverMock as unknown as typeof ResizeObserver,
       );
-      const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
-      HTMLElement.prototype.scrollIntoView = vi.fn();
+      const scrollIntoViewSpy = stubScrollIntoView();
 
       const remotes = [
         {
@@ -11304,9 +13232,7 @@ describe("App", () => {
 
       try {
         await renderApp();
-        const eventSource = latestEventSource();
-        expect(eventSource).toBeTruthy();
-
+        const eventSource = latestEventSource();
         await act(async () => {
           eventSource.dispatchOpen();
           eventSource.dispatchNamedEvent("state", {
@@ -11384,7 +13310,7 @@ describe("App", () => {
         await act(async () => {
           createSessionDeferred.resolve({
             sessionId: "session-2",
-            state: {
+            state: makeStateResponse({
               revision: 2,
               preferences: {
                 defaultCodexReasoningEffort: "medium",
@@ -11392,6 +13318,8 @@ describe("App", () => {
                 remotes,
               },
               projects,
+              orchestrators: [],
+              workspaces: [],
               sessions: [
                 makeSession("session-1", {
                   name: "Remote Session",
@@ -11404,7 +13332,7 @@ describe("App", () => {
                   projectId: "project-remote",
                 }),
               ],
-            },
+            }),
           });
           await flushUiWork();
         });
@@ -11416,7 +13344,7 @@ describe("App", () => {
         });
 
         await act(async () => {
-          refreshSessionModelOptionsDeferred.resolve({
+          refreshSessionModelOptionsDeferred.resolve(makeStateResponse({
             revision: 3,
             preferences: {
               defaultCodexReasoningEffort: "medium",
@@ -11424,6 +13352,8 @@ describe("App", () => {
               remotes,
             },
             projects,
+            orchestrators: [],
+            workspaces: [],
             sessions: [
               makeSession("session-1", {
                 name: "Remote Session",
@@ -11436,7 +13366,7 @@ describe("App", () => {
                 projectId: "project-remote",
               }),
             ],
-          });
+          }));
           await flushUiWork();
         });
 
@@ -11444,7 +13374,7 @@ describe("App", () => {
       } finally {
         window.history.replaceState(window.history.state, "", originalUrl);
         window.localStorage.clear();
-        HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
+        scrollIntoViewSpy.mockRestore();
         createSessionSpy.mockRestore();
         refreshSessionModelOptionsSpy.mockRestore();
         restoreGlobal("EventSource", originalEventSource);
@@ -11469,21 +13399,22 @@ describe("App", () => {
       "ResizeObserver",
       ResizeObserverMock as unknown as typeof ResizeObserver,
     );
-    const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
-    HTMLElement.prototype.scrollIntoView = vi.fn();
+    const scrollIntoViewSpy = stubScrollIntoView();
 
     try {
       await renderApp();
       await act(async () => {
-        fetchStateDeferred.resolve({
+        fetchStateDeferred.resolve(makeStateResponse({
           revision: 1,
           preferences: {
             defaultCodexReasoningEffort: "medium",
             defaultClaudeEffort: "default",
           },
           projects: [],
+          orchestrators: [],
+          workspaces: [],
           sessions: [],
-        });
+        }));
         await flushUiWork();
       });
 
@@ -11515,7 +13446,7 @@ describe("App", () => {
         screen.queryByRole("radiogroup", { name: "UI style" }),
       ).not.toBeInTheDocument();
     } finally {
-      HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
+      scrollIntoViewSpy.mockRestore();
       fetchStateSpy.mockRestore();
       restoreGlobal("EventSource", originalEventSource);
       restoreGlobal("ResizeObserver", originalResizeObserver);
@@ -11538,23 +13469,24 @@ describe("App", () => {
       "ResizeObserver",
       ResizeObserverMock as unknown as typeof ResizeObserver,
     );
-    const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
-    HTMLElement.prototype.scrollIntoView = vi.fn();
+    const scrollIntoViewSpy = stubScrollIntoView();
     window.localStorage.clear();
     document.documentElement.style.removeProperty("--density-scale");
 
     try {
       await renderApp();
       await act(async () => {
-        fetchStateDeferred.resolve({
+        fetchStateDeferred.resolve(makeStateResponse({
           revision: 1,
           preferences: {
             defaultCodexReasoningEffort: "medium",
             defaultClaudeEffort: "default",
           },
           projects: [],
+          orchestrators: [],
+          workspaces: [],
           sessions: [],
-        });
+        }));
         await flushUiWork();
       });
 
@@ -11578,7 +13510,7 @@ describe("App", () => {
       ).toBe("0.85");
       expect(window.localStorage.getItem("termal-ui-density")).toBe("85");
     } finally {
-      HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
+      scrollIntoViewSpy.mockRestore();
       fetchStateSpy.mockRestore();
       restoreGlobal("EventSource", originalEventSource);
       restoreGlobal("ResizeObserver", originalResizeObserver);
@@ -11601,23 +13533,24 @@ describe("App", () => {
       "ResizeObserver",
       ResizeObserverMock as unknown as typeof ResizeObserver,
     );
-    const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
-    HTMLElement.prototype.scrollIntoView = vi.fn();
+    const scrollIntoViewSpy = stubScrollIntoView();
     window.localStorage.clear();
     document.documentElement.removeAttribute("data-ui-style");
 
     try {
       await renderApp();
       await act(async () => {
-        fetchStateDeferred.resolve({
+        fetchStateDeferred.resolve(makeStateResponse({
           revision: 1,
           preferences: {
             defaultCodexReasoningEffort: "medium",
             defaultClaudeEffort: "default",
           },
           projects: [],
+          orchestrators: [],
+          workspaces: [],
           sessions: [],
-        });
+        }));
         await flushUiWork();
       });
 
@@ -11634,7 +13567,7 @@ describe("App", () => {
         "blueprint-style",
       );
     } finally {
-      HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
+      scrollIntoViewSpy.mockRestore();
       fetchStateSpy.mockRestore();
       restoreGlobal("EventSource", originalEventSource);
       restoreGlobal("ResizeObserver", originalResizeObserver);
@@ -11665,3 +13598,4 @@ describe("App", () => {
     expect(secondAttempt.warning).toBeNull();
   });
 });
+

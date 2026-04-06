@@ -18,6 +18,7 @@ import {
 import { AgentIcon } from "../agent-icon";
 import { copyTextToClipboard } from "../clipboard";
 import { FileTabIcon } from "../file-tab-icon";
+import { GitHubMark } from "../github-mark";
 import {
   looksLikeAbsoluteDisplayPath,
   normalizeDisplayPath,
@@ -739,12 +740,14 @@ export function PaneTabs({
             const showDropAfter = activeTabInsertIndex === tabs.length && index === tabs.length - 1;
             const statusTooltipId = showStatusTooltip ? `session-status-${paneId}-${tab.id}` : undefined;
             const tabLabel = formatTabLabel(tab, session);
+            const tabDisplayLabel = formatVisibleTabLabel(tab, session);
 
             return (
               <div
                 key={tab.id}
                 className={`pane-tab-shell ${tabActive ? "active" : ""} ${showStatusTooltip ? "has-status-tooltip" : ""} ${showDropBefore ? "drop-before" : ""} ${showDropAfter ? "drop-after" : ""}`}
                 role="tab"
+                aria-label={tabLabel}
                 aria-selected={tabActive}
                 aria-describedby={activeStatusTooltip?.id === statusTooltipId ? statusTooltipId : undefined}
                 tabIndex={0}
@@ -879,7 +882,7 @@ export function PaneTabs({
                     ) : (
                       <TabKindIcon kind={tab.kind} />
                     )}
-                    <span className="pane-tab-label">{tabLabel}</span>
+                    <span className="pane-tab-label">{tabDisplayLabel}</span>
                     {session?.agent === "Codex" && hasCodexNotices ? (
                       <span
                         className="pane-tab-notice-badge"
@@ -1371,6 +1374,18 @@ function CodexRateLimitMeter({
   );
 }
 
+export function formatVisibleTabLabel(tab: WorkspaceTab, session: Session | null) {
+  if (tab.kind === "filesystem") {
+    return formatPathTabLabel(tab.rootPath, "Workspace");
+  }
+
+  if (tab.kind === "gitStatus") {
+    return formatPathTabLabel(tab.workdir, "Workspace");
+  }
+
+  return formatTabLabel(tab, session);
+}
+
 function formatTabLabel(tab: WorkspaceTab, session: Session | null) {
   if (tab.kind === "session") {
     return session?.name ?? tab.sessionId;
@@ -1385,7 +1400,7 @@ function formatTabLabel(tab: WorkspaceTab, session: Session | null) {
   }
 
   if (tab.kind === "gitStatus") {
-    return `Git: ${formatPathTabLabel(tab.workdir, "Workspace")}`;
+    return `Git status: ${formatPathTabLabel(tab.workdir, "Workspace")}`;
   }
 
   if (tab.kind === "controlPanel") {
@@ -1666,17 +1681,10 @@ function TabKindIcon({ kind }: { kind: string }) {
   const iconProps = { viewBox: "0 0 16 16", focusable: "false" as const, "aria-hidden": true as const, className: "pane-tab-kind-icon" };
   switch (kind) {
     case "gitStatus":
-      return (
-        <svg {...iconProps}>
-          <circle cx="8" cy="3.5" r="1.5" fill="none" stroke="currentColor" strokeWidth="1.3" />
-          <circle cx="4" cy="12.5" r="1.5" fill="none" stroke="currentColor" strokeWidth="1.3" />
-          <circle cx="12" cy="12.5" r="1.5" fill="none" stroke="currentColor" strokeWidth="1.3" />
-          <path d="M8 5v3.5c0 1.5-2.5 2.5-4 2.5M8 8.5c0 1.5 2.5 2.5 4 2.5" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
-        </svg>
-      );
+      return <GitHubMark className="pane-tab-kind-icon pane-tab-kind-icon-github" />;
     case "filesystem":
       return (
-        <svg {...iconProps}>
+        <svg {...iconProps} className="pane-tab-kind-icon pane-tab-kind-icon-files">
           <path d="M3.5 4.25h4l1.15 1.25h4A1.25 1.25 0 0 1 13.9 6.75v5.5a1.25 1.25 0 0 1-1.25 1.25H3.5A1.25 1.25 0 0 1 2.25 12.25v-6.75A1.25 1.25 0 0 1 3.5 4.25Z" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.3" />
         </svg>
       );

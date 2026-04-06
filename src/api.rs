@@ -107,7 +107,10 @@ fn deliver_turn_dispatch(state: &AppState, dispatch: TurnDispatch) -> Result<(),
 
 /// Returns the backend health response.
 async fn health() -> Json<HealthResponse> {
-    Json(HealthResponse { ok: true })
+    Json(HealthResponse {
+        ok: true,
+        supports_inline_orchestrator_templates: true,
+    })
 }
 
 /// Gets state.
@@ -132,7 +135,11 @@ async fn get_workspace_layout(
     Ok(Json(response))
 }
 
-/// Stores workspace layout.
+/// Stores a workspace layout.
+///
+/// Intentionally returns the saved document, while DELETE on the same route
+/// returns the remaining summaries. Save callers may need the full persisted
+/// document; delete callers only need the switcher list.
 async fn put_workspace_layout(
     State(state): State<AppState>,
     AxumPath(workspace_id): AxumPath<String>,
@@ -140,6 +147,19 @@ async fn put_workspace_layout(
 ) -> Result<Json<WorkspaceLayoutResponse>, ApiError> {
     let response =
         run_blocking_api(move || state.put_workspace_layout(&workspace_id, request)).await?;
+    Ok(Json(response))
+}
+
+/// Deletes a workspace layout.
+///
+/// Intentionally returns the remaining workspace summaries, while PUT on the
+/// same route returns the single saved document. See put_workspace_layout for
+/// the rationale behind the asymmetric response shapes.
+async fn delete_workspace_layout(
+    State(state): State<AppState>,
+    AxumPath(workspace_id): AxumPath<String>,
+) -> Result<Json<WorkspaceLayoutsResponse>, ApiError> {
+    let response = run_blocking_api(move || state.delete_workspace_layout(&workspace_id)).await?;
     Ok(Json(response))
 }
 
@@ -2506,6 +2526,7 @@ fn empty_state_events_response() -> StateResponse {
         preferences: AppPreferences::default(),
         projects: Vec::new(),
         orchestrators: Vec::new(),
+        workspaces: Vec::new(),
         sessions: Vec::new(),
     }
 }
@@ -4498,8 +4519,11 @@ struct ErrorResponse {
 
 /// Represents the health response payload.
 #[derive(Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
 struct HealthResponse {
     ok: bool,
+    #[serde(default)]
+    supports_inline_orchestrator_templates: bool,
 }
 
 /// Represents the send message request payload.
@@ -4665,6 +4689,8 @@ struct AgentReadiness {
     blocking: bool,
     detail: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    warning_detail: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     command_path: Option<String>,
 }
 
@@ -4673,15 +4699,18 @@ struct AgentReadiness {
 #[serde(rename_all = "camelCase")]
 struct StateResponse {
     revision: u64,
-    #[serde(default, skip_serializing_if = "CodexState::is_empty")]
+    #[serde(default)]
     codex: CodexState,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[serde(default)]
     agent_readiness: Vec<AgentReadiness>,
     preferences: AppPreferences,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[serde(default)]
     projects: Vec<Project>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[serde(default)]
     orchestrators: Vec<OrchestratorInstance>,
+    #[serde(default)]
+    workspaces: Vec<WorkspaceLayoutSummary>,
+    #[serde(default)]
     sessions: Vec<Session>,
 }
 

@@ -78,6 +78,14 @@ Install that public key on the remote machine:
 ssh-copy-id user@host
 ```
 
+On Windows PowerShell, the equivalent is:
+
+```powershell
+type $env:USERPROFILE\.ssh\id_rsa.pub | ssh {IP-ADDRESS-OR-FQDN} "cat >> .ssh/authorized_keys"
+```
+
+If you generated an Ed25519 key above, use `id_ed25519.pub` instead of `id_rsa.pub`.
+
 Then verify normal SSH works before configuring the remote in TermAl:
 
 ```bash

@@ -27,11 +27,12 @@ import { sanitizeUserFacingErrorMessage } from "./error-messages";
 
 export type StateResponse = {
   revision: number;
-  codex?: CodexState;
-  agentReadiness?: AgentReadiness[];
-  preferences?: AppPreferences;
+  codex: CodexState;
+  agentReadiness: AgentReadiness[];
+  preferences: AppPreferences;
   projects: Project[];
-  orchestrators?: OrchestratorInstance[];
+  orchestrators: OrchestratorInstance[];
+  workspaces: WorkspaceLayoutSummary[];
   sessions: Session[];
 };
 
@@ -315,6 +316,12 @@ export function fetchWorkspaceLayouts() {
   return request<WorkspaceLayoutsResponse>("/api/workspaces");
 }
 
+/**
+ * Saves one workspace layout and returns the saved document.
+ *
+ * DELETE on the same route intentionally returns the remaining summary list
+ * instead, because save and delete callers need different data.
+ */
 export function saveWorkspaceLayout(
   workspaceId: string,
   payload: {
@@ -335,6 +342,20 @@ export function saveWorkspaceLayout(
     body: JSON.stringify(payload),
     keepalive: options?.keepalive,
   });
+}
+
+/**
+ * Deletes one workspace layout and returns the remaining summary list.
+ *
+ * PUT on the same route intentionally returns the saved document instead.
+ */
+export function deleteWorkspaceLayout(workspaceId: string) {
+  return request<WorkspaceLayoutsResponse>(
+    `/api/workspaces/${encodeURIComponent(workspaceId)}`,
+    {
+      method: "DELETE",
+    },
+  );
 }
 
 export function updateAppSettings(payload: {
@@ -408,10 +429,18 @@ export function fetchOrchestratorInstance(instanceId: string) {
 /**
  * Omits empty-string project ids so the backend can fall back to the template project.
  */
-export function createOrchestratorInstance(templateId: string, projectId?: string | null) {
+export function createOrchestratorInstance(
+  templateId: string,
+  projectId?: string | null,
+  template?: OrchestratorTemplateDraft,
+) {
   return request<CreateOrchestratorInstanceResponse>("/api/orchestrators", {
     method: "POST",
-    body: JSON.stringify({ templateId, ...(projectId ? { projectId } : {}) }),
+    body: JSON.stringify({
+      templateId,
+      ...(projectId ? { projectId } : {}),
+      ...(template ? { template } : {}),
+    }),
   });
 }
 

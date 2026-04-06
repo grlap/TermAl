@@ -189,6 +189,16 @@ impl AppState {
             .or_insert(fallback_revision);
     }
 
+    /// Clears the latest applied remote revision when event-stream continuity
+    /// is lost, such as after a disconnect or restart.
+    fn clear_remote_applied_revision(&self, remote_id: &str) {
+        self.inner
+            .lock()
+            .expect("state mutex poisoned")
+            .remote_applied_revisions
+            .remove(remote_id);
+    }
+
     /// Clears remote fallback resync tracking when event-stream continuity is
     /// lost, such as after a disconnect or restart.
     fn clear_remote_sse_fallback_resync(&self, remote_id: &str) {
@@ -201,28 +211,9 @@ impl AppState {
     /// Lists workspace layouts.
     fn list_workspace_layouts(&self) -> Result<WorkspaceLayoutsResponse, ApiError> {
         let inner = self.inner.lock().expect("state mutex poisoned");
-        let mut workspaces: Vec<_> = inner
-            .workspace_layouts
-            .values()
-            .map(|layout| WorkspaceLayoutSummary {
-                id: layout.id.clone(),
-                revision: layout.revision,
-                updated_at: layout.updated_at.clone(),
-                control_panel_side: layout.control_panel_side,
-                theme_id: layout.theme_id.clone(),
-                style_id: layout.style_id.clone(),
-                font_size_px: layout.font_size_px,
-                editor_font_size_px: layout.editor_font_size_px,
-                density_percent: layout.density_percent,
-            })
-            .collect();
-        workspaces.sort_by(|left, right| {
-            right
-                .updated_at
-                .cmp(&left.updated_at)
-                .then_with(|| left.id.cmp(&right.id))
-        });
-        Ok(WorkspaceLayoutsResponse { workspaces })
+        Ok(WorkspaceLayoutsResponse {
+            workspaces: collect_workspace_layout_summaries(inner.workspace_layouts.values()),
+        })
     }
 
     /// Gets workspace layout.
@@ -251,9 +242,9 @@ impl AppState {
             .ok_or_else(|| ApiError::bad_request("workspace id is required"))?
             .to_owned();
         let mut inner = self.inner.lock().expect("state mutex poisoned");
-        let next_revision = inner
-            .workspace_layouts
-            .get(&workspace_id)
+        let existing_layout = inner.workspace_layouts.get(&workspace_id).cloned();
+        let next_revision = existing_layout
+            .as_ref()
             .map(|layout| layout.revision.saturating_add(1))
             .unwrap_or(1);
         let layout = WorkspaceLayoutDocument {
@@ -269,10 +260,32 @@ impl AppState {
             workspace: request.workspace,
         };
         inner.workspace_layouts.insert(workspace_id, layout.clone());
-        self.persist_internal_locked(&inner).map_err(|err| {
-            ApiError::internal(format!("failed to persist workspace layout: {err:#}"))
+        self.commit_locked(&mut inner).map_err(|err| {
+            ApiError::internal(format!(
+                "failed to persist workspace layout update: {err:#}"
+            ))
         })?;
         Ok(WorkspaceLayoutResponse { layout })
+    }
+
+    /// Deletes workspace layout.
+    fn delete_workspace_layout(
+        &self,
+        workspace_id: &str,
+    ) -> Result<WorkspaceLayoutsResponse, ApiError> {
+        let workspace_id = normalize_optional_identifier(Some(workspace_id))
+            .ok_or_else(|| ApiError::bad_request("workspace id is required"))?;
+        let mut inner = self.inner.lock().expect("state mutex poisoned");
+        if inner.workspace_layouts.remove(workspace_id).is_none() {
+            return Err(ApiError::not_found("workspace layout not found"));
+        }
+        let workspaces = collect_workspace_layout_summaries(inner.workspace_layouts.values());
+        self.commit_locked(&mut inner).map_err(|err| {
+            ApiError::internal(format!(
+                "failed to persist workspace layout deletion: {err:#}"
+            ))
+        })?;
+        Ok(WorkspaceLayoutsResponse { workspaces })
     }
 
     /// Lists agent commands.
@@ -598,7 +611,13 @@ impl AppState {
         let snapshot = self.snapshot_from_inner(&inner);
         drop(inner);
         if let Some(remotes) = next_remotes {
-            self.remote_registry.reconcile(&remotes);
+            let changed_ids = self.remote_registry.reconcile(&remotes);
+            // Clear revision watermarks synchronously so the first response
+            // from a newly pointed/restarted remote is not dropped as stale.
+            for remote_id in &changed_ids {
+                self.clear_remote_applied_revision(remote_id);
+                self.clear_remote_sse_fallback_resync(remote_id);
+            }
         }
         Ok(snapshot)
     }
@@ -827,17 +846,29 @@ impl AppState {
     }
 
     /// Clears shared Codex runtime if matches.
-    fn clear_shared_codex_runtime_if_matches(&self, runtime_id: &str) {
-        let mut shared_runtime = self
-            .shared_codex_runtime
-            .lock()
-            .expect("shared Codex runtime mutex poisoned");
-        if shared_runtime
-            .as_ref()
-            .is_some_and(|runtime| runtime.runtime_id == runtime_id)
-        {
-            *shared_runtime = None;
+    fn clear_shared_codex_runtime_if_matches(&self, runtime_id: &str) -> Result<()> {
+        let removed_runtime = {
+            let mut shared_runtime = self
+                .shared_codex_runtime
+                .lock()
+                .expect("shared Codex runtime mutex poisoned");
+            if shared_runtime
+                .as_ref()
+                .is_some_and(|runtime| runtime.runtime_id == runtime_id)
+            {
+                shared_runtime.take()
+            } else {
+                None
+            }
+        };
+
+        if let Some(runtime) = removed_runtime {
+            runtime.kill().with_context(|| {
+                format!("failed to terminate shared Codex runtime `{runtime_id}`")
+            })?;
         }
+
+        Ok(())
     }
 
     /// Handles shared Codex runtime exit.
@@ -864,7 +895,7 @@ impl AppState {
         for session_id in session_ids {
             self.handle_runtime_exit_if_matches(&session_id, &token, error_message)?;
         }
-        self.clear_shared_codex_runtime_if_matches(runtime_id);
+        self.clear_shared_codex_runtime_if_matches(runtime_id)?;
         Ok(())
     }
 
@@ -877,6 +908,7 @@ impl AppState {
             preferences: inner.preferences.clone(),
             projects: inner.projects.clone(),
             orchestrators: inner.orchestrator_instances.clone(),
+            workspaces: collect_workspace_layout_summaries(inner.workspace_layouts.values()),
             sessions: inner
                 .sessions
                 .iter()
@@ -4977,6 +5009,32 @@ fn normalize_workspace_layout_path_field(object: &mut Value, key: &str) {
     *field = Value::String(normalize_local_user_facing_path(path));
 }
 
+/// Builds sorted workspace layout summaries.
+fn collect_workspace_layout_summaries<'a>(
+    layouts: impl Iterator<Item = &'a WorkspaceLayoutDocument>,
+) -> Vec<WorkspaceLayoutSummary> {
+    let mut workspaces = layouts
+        .map(|layout| WorkspaceLayoutSummary {
+            id: layout.id.clone(),
+            revision: layout.revision,
+            updated_at: layout.updated_at.clone(),
+            control_panel_side: layout.control_panel_side,
+            theme_id: layout.theme_id.clone(),
+            style_id: layout.style_id.clone(),
+            font_size_px: layout.font_size_px,
+            editor_font_size_px: layout.editor_font_size_px,
+            density_percent: layout.density_percent,
+        })
+        .collect::<Vec<_>>();
+    workspaces.sort_by(|left, right| {
+        right
+            .updated_at
+            .cmp(&left.updated_at)
+            .then_with(|| left.id.cmp(&right.id))
+    });
+    workspaces
+}
+
 /// Represents state inner.
 struct StateInner {
     codex: CodexState,
@@ -4988,6 +5046,9 @@ struct StateInner {
     /// Stable project records used by local and remote session routing.
     projects: Vec<Project>,
     ignored_discovered_codex_thread_ids: BTreeSet<String>,
+    /// Tracks the latest remote revision applied for each mirrored remote so
+    /// stale snapshots and deltas cannot roll local proxy state backward.
+    remote_applied_revisions: HashMap<String, u64>,
     /// Session records carry the serializable session plus runtime-only state.
     sessions: Vec<SessionRecord>,
     /// Runtime instances for orchestrator templates live beside ordinary sessions.
@@ -5008,10 +5069,39 @@ impl StateInner {
             next_message_number: 1,
             projects: Vec::new(),
             ignored_discovered_codex_thread_ids: BTreeSet::new(),
+            remote_applied_revisions: HashMap::new(),
             sessions: Vec::new(),
             orchestrator_instances: Vec::new(),
             workspace_layouts: BTreeMap::new(),
         }
+    }
+
+    /// Returns whether the supplied remote snapshot revision is stale for this remote.
+    fn should_skip_remote_applied_revision(&self, remote_id: &str, remote_revision: u64) -> bool {
+        self.remote_applied_revisions
+            .get(remote_id)
+            .is_some_and(|latest_revision| *latest_revision >= remote_revision)
+    }
+
+    /// Returns whether the supplied remote delta revision is stale for this remote.
+    fn should_skip_remote_applied_delta_revision(
+        &self,
+        remote_id: &str,
+        remote_revision: u64,
+    ) -> bool {
+        self.remote_applied_revisions
+            .get(remote_id)
+            .is_some_and(|latest_revision| *latest_revision > remote_revision)
+    }
+
+    /// Records the latest applied remote revision for a mirrored remote.
+    fn note_remote_applied_revision(&mut self, remote_id: &str, remote_revision: u64) {
+        self.remote_applied_revisions
+            .entry(remote_id.to_owned())
+            .and_modify(|latest_revision| {
+                *latest_revision = (*latest_revision).max(remote_revision);
+            })
+            .or_insert(remote_revision);
     }
 
     /// Creates project.
@@ -5532,6 +5622,7 @@ impl PersistedState {
             next_message_number: self.next_message_number,
             projects: self.projects,
             ignored_discovered_codex_thread_ids: self.ignored_discovered_codex_thread_ids,
+            remote_applied_revisions: HashMap::new(),
             orchestrator_instances: self.orchestrator_instances,
             workspace_layouts: self.workspace_layouts,
             sessions: self
@@ -7455,6 +7546,13 @@ struct SharedCodexRuntime {
     process: Arc<SharedChild>,
     sessions: SharedCodexSessionMap,
     thread_sessions: SharedCodexThreadMap,
+}
+
+impl SharedCodexRuntime {
+    /// Handles kill.
+    fn kill(&self) -> Result<()> {
+        kill_child_process(&self.process, "shared Codex runtime")
+    }
 }
 
 /// Represents the shared Codex session handle.

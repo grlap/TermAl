@@ -65,6 +65,10 @@ Read docs/architecture.md or relevant source files for deeper context if needed.
 - `std::thread::spawn` for agent runtime threads (intentional — blocking stdio)
 - `0.0.0.0` binding on the HTTP server (configurable, documented as local-only)
 - No authentication (Phase 1 is single-user local)
+- Legacy compatibility means supporting older persisted schema or older local/internal API shapes from previous development builds, such as obsolete orchestrator fields.
+- Do NOT flag missing schema upgrades, migrations, or backward compatibility for ~/.termal/*.json, browser localStorage state, or local/internal API contracts from previous local-only development builds.
+- Path normalization and canonicalization for current inputs are not legacy compatibility work.
+- Windows, macOS, and Linux are P0 platforms. Flag regressions on those platforms; do not require support beyond them unless the current change claims it.
 - Agent-specific protocol differences (Claude=NDJSON, Codex=JSON-RPC) — by design
 
 ## Output Format
@@ -155,3 +159,4 @@ Remove any task items that the reviewed changes have completed (e.g., if a test 
 ### 6d. Skip if clean
 
 If the review found no actionable findings (no new bugs, no resolved bugs, no new tasks), do NOT touch bugs.md. Tell the user "bugs.md is up to date — no changes needed."
+

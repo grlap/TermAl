@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
-import { AgentSessionPanelFooter, RunningIndicator } from "./AgentSessionPanel";
+import { AgentSessionPanelFooter, RunningIndicator, getAdjustedVirtualizedScrollTopForHeightChange } from "./AgentSessionPanel";
 import type { Session } from "../types";
 
 function makeSession(id: string, overrides?: Partial<Session>): Session {
@@ -91,6 +91,78 @@ function renderFooter({
   );
 }
 
+describe("getAdjustedVirtualizedScrollTopForHeightChange", () => {
+  it("preserves the viewport anchor when a measured message above the viewport changes height", () => {
+    expect(
+      getAdjustedVirtualizedScrollTopForHeightChange({
+        currentScrollTop: 1200,
+        messageTop: 900,
+        nextHeight: 260,
+        previousHeight: 180,
+      }),
+    ).toBe(1280);
+  });
+  it("does not jump the viewport when a partially visible message above the fold changes height", () => {
+    expect(
+      getAdjustedVirtualizedScrollTopForHeightChange({
+        currentScrollTop: 1200,
+        messageTop: 1190,
+        nextHeight: 200,
+        previousHeight: 100,
+      }),
+    ).toBe(1200);
+  });
+  it("adjusts when a message is fully above the viewport with its bottom exactly at scrollTop", () => {
+    expect(
+      getAdjustedVirtualizedScrollTopForHeightChange({
+        currentScrollTop: 1200,
+        messageTop: 1000,
+        nextHeight: 260,
+        previousHeight: 200,
+      }),
+    ).toBe(1260);
+  });
+  it("does not adjust when a message starts exactly at the viewport top", () => {
+    expect(
+      getAdjustedVirtualizedScrollTopForHeightChange({
+        currentScrollTop: 1200,
+        messageTop: 1200,
+        nextHeight: 260,
+        previousHeight: 180,
+      }),
+    ).toBe(1200);
+  });
+  it("does not snap back when a newly visible message below the current viewport is measured", () => {
+    expect(
+      getAdjustedVirtualizedScrollTopForHeightChange({
+        currentScrollTop: 1200,
+        messageTop: 1320,
+        nextHeight: 260,
+        previousHeight: 180,
+      }),
+    ).toBe(1200);
+  });
+  it("adjusts when a partially visible message above the fold shrinks", () => {
+    expect(
+      getAdjustedVirtualizedScrollTopForHeightChange({
+        currentScrollTop: 100,
+        messageTop: 50,
+        nextHeight: 60,
+        previousHeight: 100,
+      }),
+    ).toBe(60);
+  });
+  it("floors negative height deltas at zero when the anchor would move above the top", () => {
+    expect(
+      getAdjustedVirtualizedScrollTopForHeightChange({
+        currentScrollTop: 50,
+        messageTop: 20,
+        nextHeight: 100,
+        previousHeight: 200,
+      }),
+    ).toBe(0);
+  });
+});
 describe("AgentSessionPanelFooter", () => {
   it("shows a command badge in the live turn card for slash commands", () => {
     render(<RunningIndicator agent="Codex" lastPrompt="/review-local" />);

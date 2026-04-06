@@ -4,22 +4,26 @@ import type { WorkspaceLayoutSummary } from "./api";
 
 export function WorkspaceSwitcher({
   currentWorkspaceId,
+  deletingWorkspaceIds,
   error,
   isLoading,
   isOpen,
   summaries,
   switcherRef,
+  onDeleteWorkspace,
   onOpenNewWorkspaceHere,
   onOpenNewWorkspaceWindow,
   onOpenWorkspace,
   onToggle,
 }: {
   currentWorkspaceId: string;
+  deletingWorkspaceIds: readonly string[];
   error: string | null;
   isLoading: boolean;
   isOpen: boolean;
   summaries: readonly WorkspaceLayoutSummary[];
   switcherRef: RefObject<HTMLDivElement>;
+  onDeleteWorkspace: (workspaceId: string) => void;
   onOpenNewWorkspaceHere: () => void;
   onOpenNewWorkspaceWindow: () => void;
   onOpenWorkspace: (workspaceId: string) => void;
@@ -38,6 +42,10 @@ export function WorkspaceSwitcher({
 
     return [...byId.values()];
   }, [currentWorkspaceId, summaries]);
+  const deletingWorkspaceIdSet = useMemo(
+    () => new Set(deletingWorkspaceIds),
+    [deletingWorkspaceIds],
+  );
 
   return (
     <div ref={switcherRef} className="workspace-switcher">
@@ -84,31 +92,50 @@ export function WorkspaceSwitcher({
           <div className="workspace-switcher-list" role="list">
             {visibleSummaries.map((summary) => {
               const isCurrent = summary.id === currentWorkspaceId;
+              const isDeleting = deletingWorkspaceIdSet.has(summary.id);
               return (
-                <button
+                <div
                   key={summary.id}
-                  className={`workspace-switcher-item ${isCurrent ? "selected" : ""}`}
-                  type="button"
+                  className="workspace-switcher-item-shell"
                   role="listitem"
-                  onClick={() => onOpenWorkspace(summary.id)}
                 >
-                  <span className="workspace-switcher-item-copy">
-                    <span className="workspace-switcher-item-title-row">
-                      <span className="workspace-switcher-item-title">
-                        {formatWorkspaceSwitcherLabel(summary.id)}
+                  <button
+                    className={`workspace-switcher-item ${isCurrent ? "selected" : ""}`}
+                    type="button"
+                    onClick={() => onOpenWorkspace(summary.id)}
+                  >
+                    <span className="workspace-switcher-item-copy">
+                      <span className="workspace-switcher-item-title-row">
+                        <span className="workspace-switcher-item-title">
+                          {formatWorkspaceSwitcherLabel(summary.id)}
+                        </span>
+                        {isCurrent ? (
+                          <span className="workspace-switcher-item-status">Current</span>
+                        ) : null}
                       </span>
-                      {isCurrent ? (
-                        <span className="workspace-switcher-item-status">Current</span>
-                      ) : null}
+                      <span className="workspace-switcher-item-meta" title={summary.id}>
+                        {summary.id}
+                      </span>
+                      <span className="workspace-switcher-item-meta">
+                        {summary.updatedAt}
+                      </span>
                     </span>
-                    <span className="workspace-switcher-item-meta" title={summary.id}>
-                      {summary.id}
-                    </span>
-                    <span className="workspace-switcher-item-meta">
-                      {summary.updatedAt}
-                    </span>
-                  </span>
-                </button>
+                  </button>
+                  {isCurrent ? null : (
+                    <button
+                      className="ghost-button workspace-switcher-item-delete"
+                      type="button"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        onDeleteWorkspace(summary.id);
+                      }}
+                      disabled={isDeleting}
+                      aria-label={`Delete workspace ${summary.id}`}
+                    >
+                      {isDeleting ? "Deleting" : "Delete"}
+                    </button>
+                  )}
+                </div>
               );
             })}
           </div>

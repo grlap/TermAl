@@ -15,6 +15,7 @@ import {
   deleteOrchestratorTemplate,
   fetchOrchestratorTemplates,
   updateOrchestratorTemplate,
+  type StateResponse,
 } from "../api";
 import type {
   Project,
@@ -41,7 +42,35 @@ const createTemplateMock = vi.mocked(createOrchestratorTemplate);
 const updateTemplateMock = vi.mocked(updateOrchestratorTemplate);
 const deleteTemplateMock = vi.mocked(deleteOrchestratorTemplate);
 
+function makeStateResponse(
+  overrides: Pick<
+    StateResponse,
+    "revision" | "projects" | "orchestrators" | "workspaces" | "sessions"
+  > &
+    Partial<Pick<StateResponse, "codex" | "agentReadiness" | "preferences">>,
+): StateResponse {
+  return {
+    revision: overrides.revision,
+    codex: overrides.codex ?? {},
+    agentReadiness: overrides.agentReadiness ?? [],
+    preferences: overrides.preferences ?? {
+      defaultCodexReasoningEffort: "medium",
+      defaultClaudeEffort: "default",
+    },
+    projects: overrides.projects,
+    orchestrators: overrides.orchestrators,
+    workspaces: overrides.workspaces,
+    sessions: overrides.sessions,
+  };
+}
+
 describe("objectHasOwnWithFallback", () => {
+  it("uses Object.hasOwn when available", () => {
+    const allowlist = { Builder: true };
+
+    expect(objectHasOwnWithFallback(allowlist, "Builder")).toBe(true);
+    expect(objectHasOwnWithFallback(allowlist, "Missing")).toBe(false);
+  });
   it("falls back to hasOwnProperty when Object.hasOwn is unavailable", () => {
     const objectWithHasOwn = Object as ObjectConstructor & {
       hasOwn?: (target: object, key: PropertyKey) => boolean;
@@ -1274,11 +1303,13 @@ describe("OrchestratorTemplatesPanel", () => {
         createdAt: "2026-03-30 09:00:00",
         completedAt: null,
       },
-      state: {
+      state: makeStateResponse({
         revision: 2,
         projects: [makeProject()],
+        orchestrators: [],
+        workspaces: [],
         sessions: [],
-      },
+      }),
     });
     const onStateUpdated = vi.fn();
 
@@ -1307,14 +1338,82 @@ describe("OrchestratorTemplatesPanel", () => {
         "project-a",
       );
     });
-    expect(onStateUpdated).toHaveBeenCalledWith({
-      revision: 2,
-      projects: [makeProject()],
-      sessions: [],
-    });
+    expect(onStateUpdated).toHaveBeenCalledWith(
+      makeStateResponse({
+        revision: 2,
+        projects: [makeProject()],
+        orchestrators: [],
+        workspaces: [],
+        sessions: [],
+      }),
+    );
     expect(
       screen.getByText("Orchestration started: orchestrator-1"),
     ).toBeInTheDocument();
+  });
+
+  it("starts the selected template for a remote project", async () => {
+    fetchTemplatesMock.mockResolvedValue({
+      templates: [
+        makeTemplate({
+          id: "template-run",
+          name: "Run Flow",
+          projectId: "project-a",
+          sessions: [makeSession({ id: "builder", name: "Builder" })],
+        }),
+      ],
+    });
+    createOrchestratorInstanceMock.mockResolvedValue({
+      orchestrator: {
+        id: "orchestrator-remote",
+        templateId: "template-run",
+        projectId: "project-a",
+        templateSnapshot: makeTemplate({
+          id: "template-run",
+          name: "Run Flow",
+          projectId: "project-a",
+          sessions: [makeSession({ id: "builder", name: "Builder" })],
+        }),
+        status: "running",
+        sessionInstances: [],
+        createdAt: "2026-03-30 09:00:00",
+        completedAt: null,
+      },
+      state: makeStateResponse({
+        revision: 2,
+        projects: [makeProject({ remoteId: "ssh-lab" })],
+        orchestrators: [],
+        workspaces: [],
+        sessions: [],
+      }),
+    });
+
+    render(
+      <OrchestratorTemplatesPanel
+        initialTemplateId="template-run"
+        projects={[makeProject({ remoteId: "ssh-lab" })]}
+      />,
+    );
+
+    expect(await screen.findByDisplayValue("Run Flow")).toBeInTheDocument();
+    const runButton = screen
+      .getAllByRole("button", { name: /run/i })
+      .find((candidate) =>
+        /Run on Project A/.test(candidate.getAttribute("title") ?? ""),
+      );
+    if (!runButton) {
+      throw new Error("Run button not found");
+    }
+    expect(runButton).toBeEnabled();
+
+    fireEvent.click(runButton);
+
+    await waitFor(() => {
+      expect(createOrchestratorInstanceMock).toHaveBeenCalledWith(
+        "template-run",
+        "project-a",
+      );
+    });
   });
 
   it("starts on a blank draft when requested", async () => {

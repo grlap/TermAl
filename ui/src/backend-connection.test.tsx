@@ -43,7 +43,7 @@ class EventSourceMock {
     this.onopen?.(new Event("open"));
   }
 
-  dispatchState(state: StateResponse) {
+  dispatchState(state: unknown) {
     const event = new MessageEvent<string>("state", {
       data: JSON.stringify(state),
     });
@@ -105,6 +105,116 @@ describe("Backend connection state", () => {
     HTMLElement.prototype.scrollTo = originalScrollTo;
   });
 
+  it("updates workspace switcher summaries from live SSE state", async () => {
+    const originalFetch = globalThis.fetch;
+    const originalEventSource = globalThis.EventSource;
+    const originalResizeObserver = globalThis.ResizeObserver;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const target = String(input);
+      if (target === "/api/state") {
+        return jsonResponse({
+          revision: 1,
+          projects: [],
+          sessions: [],
+        });
+      }
+      if (target === "/api/workspaces") {
+        return jsonResponse({
+          workspaces: [],
+        });
+      }
+      if (target.startsWith("/api/workspaces/")) {
+        if (init?.method === "PUT") {
+          return jsonResponse({
+            layout: {
+              id: "workspace-live",
+              revision: 1,
+              updatedAt: "2026-04-04 21:15:00",
+              controlPanelSide: "left",
+              workspace: { panes: [] },
+            },
+          });
+        }
+        return new Response("", {
+          status: 404,
+        });
+      }
+
+      throw new Error("Unexpected fetch: " + target);
+    });
+
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal(
+      "EventSource",
+      EventSourceMock as unknown as typeof EventSource,
+    );
+    vi.stubGlobal(
+      "ResizeObserver",
+      ResizeObserverMock as unknown as typeof ResizeObserver,
+    );
+
+    try {
+      render(<App />);
+      const eventSource = latestEventSource();
+
+      act(() => {
+        eventSource.dispatchOpen();
+        eventSource.dispatchState({
+          revision: 1,
+          projects: [],
+          orchestrators: [],
+          sessions: [],
+          workspaces: [],
+        });
+      });
+
+      fireEvent.click(screen.getByRole("button", { name: /workspace /i }));
+      const switcherDialog = await screen.findByRole("dialog", {
+        name: "Workspace switcher",
+      });
+      expect(switcherDialog).toBeInTheDocument();
+
+      act(() => {
+        eventSource.dispatchState({
+          revision: 2,
+          projects: [],
+          orchestrators: [],
+          sessions: [],
+          workspaces: [
+            {
+              id: "monitor-live",
+              revision: 3,
+              updatedAt: "2026-04-04 21:15:00",
+              controlPanelSide: "left",
+            },
+          ],
+        });
+      });
+
+      await waitFor(() => {
+        expect(screen.getAllByText("monitor-live").length).toBeGreaterThan(0);
+      });
+
+      act(() => {
+        eventSource.dispatchState({
+          revision: 3,
+          projects: [],
+          orchestrators: [],
+          sessions: [],
+          workspaces: [],
+        });
+      });
+
+      await waitFor(() => {
+        expect(screen.queryAllByText("monitor-live")).toHaveLength(0);
+      });
+    } finally {
+      vi.stubGlobal("fetch", originalFetch);
+      vi.stubGlobal("EventSource", originalEventSource);
+      vi.stubGlobal("ResizeObserver", originalResizeObserver);
+    }
+  });
+
   it("shows connecting, reconnecting, and offline states around the backend event stream", async () => {
     const originalFetch = globalThis.fetch;
     const originalEventSource = globalThis.EventSource;
@@ -113,7 +223,7 @@ describe("Backend connection state", () => {
       window.navigator,
       "onLine",
     );
-    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const target = String(input);
       if (target === "/api/state") {
         return jsonResponse({
@@ -123,6 +233,17 @@ describe("Backend connection state", () => {
         });
       }
       if (target.startsWith("/api/workspaces/")) {
+        if (init?.method === "PUT") {
+          return jsonResponse({
+            layout: {
+              id: "workspace-live",
+              revision: 1,
+              updatedAt: "2026-04-04 21:15:00",
+              controlPanelSide: "left",
+              workspace: { panes: [] },
+            },
+          });
+        }
         return new Response("", {
           status: 404,
         });
@@ -177,6 +298,8 @@ describe("Backend connection state", () => {
         eventSource.dispatchState({
           revision: 1,
           projects: [],
+          orchestrators: [],
+          workspaces: [],
           sessions: [],
         });
       });
@@ -235,7 +358,7 @@ describe("Backend connection state", () => {
     const originalFetch = globalThis.fetch;
     const originalEventSource = globalThis.EventSource;
     const originalResizeObserver = globalThis.ResizeObserver;
-    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const target = String(input);
       if (target === "/api/state") {
         return jsonResponse({
@@ -245,6 +368,17 @@ describe("Backend connection state", () => {
         });
       }
       if (target.startsWith("/api/workspaces/")) {
+        if (init?.method === "PUT") {
+          return jsonResponse({
+            layout: {
+              id: "workspace-live",
+              revision: 1,
+              updatedAt: "2026-04-04 21:15:00",
+              controlPanelSide: "left",
+              workspace: { panes: [] },
+            },
+          });
+        }
         return new Response("", {
           status: 404,
         });
@@ -277,6 +411,8 @@ describe("Backend connection state", () => {
         eventSource.dispatchState({
           revision: 1,
           projects: [],
+          orchestrators: [],
+          workspaces: [],
           sessions: [],
         });
       });
@@ -318,7 +454,7 @@ describe("Backend connection state", () => {
     const originalFetch = globalThis.fetch;
     const originalEventSource = globalThis.EventSource;
     const originalResizeObserver = globalThis.ResizeObserver;
-    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const target = String(input);
       if (target === "/api/state") {
         return jsonResponse({
@@ -328,6 +464,17 @@ describe("Backend connection state", () => {
         });
       }
       if (target.startsWith("/api/workspaces/")) {
+        if (init?.method === "PUT") {
+          return jsonResponse({
+            layout: {
+              id: "workspace-live",
+              revision: 1,
+              updatedAt: "2026-04-04 21:15:00",
+              controlPanelSide: "left",
+              workspace: { panes: [] },
+            },
+          });
+        }
         return new Response("", {
           status: 404,
         });
@@ -360,6 +507,8 @@ describe("Backend connection state", () => {
         eventSource.dispatchState({
           revision: 1,
           projects: [],
+          orchestrators: [],
+          workspaces: [],
           sessions: [],
         });
       });
@@ -412,7 +561,7 @@ describe("Backend connection state", () => {
     const originalFetch = globalThis.fetch;
     const originalEventSource = globalThis.EventSource;
     const originalResizeObserver = globalThis.ResizeObserver;
-    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const target = String(input);
       if (target === "/api/state") {
         return jsonResponse({
@@ -422,6 +571,17 @@ describe("Backend connection state", () => {
         });
       }
       if (target.startsWith("/api/workspaces/")) {
+        if (init?.method === "PUT") {
+          return jsonResponse({
+            layout: {
+              id: "workspace-live",
+              revision: 1,
+              updatedAt: "2026-04-04 21:15:00",
+              controlPanelSide: "left",
+              workspace: { panes: [] },
+            },
+          });
+        }
         return new Response("", {
           status: 404,
         });
@@ -454,6 +614,8 @@ describe("Backend connection state", () => {
         eventSource.dispatchState({
           revision: 1,
           projects: [],
+          orchestrators: [],
+          workspaces: [],
           sessions: [],
         });
       });
@@ -490,7 +652,7 @@ describe("Backend connection state", () => {
     const originalFetch = globalThis.fetch;
     const originalEventSource = globalThis.EventSource;
     const originalResizeObserver = globalThis.ResizeObserver;
-    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const target = String(input);
       if (target === "/api/state") {
         return jsonResponse({
@@ -500,6 +662,17 @@ describe("Backend connection state", () => {
         });
       }
       if (target.startsWith("/api/workspaces/")) {
+        if (init?.method === "PUT") {
+          return jsonResponse({
+            layout: {
+              id: "workspace-live",
+              revision: 1,
+              updatedAt: "2026-04-04 21:15:00",
+              controlPanelSide: "left",
+              workspace: { panes: [] },
+            },
+          });
+        }
         return new Response("", {
           status: 404,
         });
@@ -532,6 +705,8 @@ describe("Backend connection state", () => {
         eventSource.dispatchState({
           revision: 1,
           projects: [],
+          orchestrators: [],
+          workspaces: [],
           sessions: [],
         });
       });
@@ -555,6 +730,8 @@ describe("Backend connection state", () => {
         eventSource.dispatchState({
           revision: 1,
           projects: [],
+          orchestrators: [],
+          workspaces: [],
           sessions: [],
         });
       });
@@ -576,7 +753,7 @@ describe("Backend connection state", () => {
     const originalFetch = globalThis.fetch;
     const originalEventSource = globalThis.EventSource;
     const originalResizeObserver = globalThis.ResizeObserver;
-    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const target = String(input);
       if (target === "/api/state") {
         return jsonResponse({
@@ -586,6 +763,17 @@ describe("Backend connection state", () => {
         });
       }
       if (target.startsWith("/api/workspaces/")) {
+        if (init?.method === "PUT") {
+          return jsonResponse({
+            layout: {
+              id: "workspace-live",
+              revision: 1,
+              updatedAt: "2026-04-04 21:15:00",
+              controlPanelSide: "left",
+              workspace: { panes: [] },
+            },
+          });
+        }
         return new Response("", {
           status: 404,
         });
@@ -618,6 +806,8 @@ describe("Backend connection state", () => {
         eventSource.dispatchState({
           revision: 1,
           projects: [],
+          orchestrators: [],
+          workspaces: [],
           sessions: [],
         });
       });
@@ -662,7 +852,7 @@ describe("Backend connection state", () => {
     const originalFetch = globalThis.fetch;
     const originalEventSource = globalThis.EventSource;
     const originalResizeObserver = globalThis.ResizeObserver;
-    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const target = String(input);
       if (target === "/api/state") {
         return jsonResponse({
@@ -672,6 +862,17 @@ describe("Backend connection state", () => {
         });
       }
       if (target.startsWith("/api/workspaces/")) {
+        if (init?.method === "PUT") {
+          return jsonResponse({
+            layout: {
+              id: "workspace-live",
+              revision: 1,
+              updatedAt: "2026-04-04 21:15:00",
+              controlPanelSide: "left",
+              workspace: { panes: [] },
+            },
+          });
+        }
         return new Response("", {
           status: 404,
         });
@@ -704,6 +905,8 @@ describe("Backend connection state", () => {
         eventSource.dispatchState({
           revision: 1,
           projects: [],
+          orchestrators: [],
+          workspaces: [],
           sessions: [],
         });
       });
@@ -754,7 +957,7 @@ describe("Backend connection state", () => {
     const originalFetch = globalThis.fetch;
     const originalEventSource = globalThis.EventSource;
     const originalResizeObserver = globalThis.ResizeObserver;
-    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const target = String(input);
       if (target === "/api/state") {
         return jsonResponse(
@@ -766,6 +969,17 @@ describe("Backend connection state", () => {
         );
       }
       if (target.startsWith("/api/workspaces/")) {
+        if (init?.method === "PUT") {
+          return jsonResponse({
+            layout: {
+              id: "workspace-live",
+              revision: 1,
+              updatedAt: "2026-04-04 21:15:00",
+              controlPanelSide: "left",
+              workspace: { panes: [] },
+            },
+          });
+        }
         return new Response("", {
           status: 404,
         });
@@ -864,7 +1078,7 @@ describe("Backend connection state", () => {
     const originalFetch = globalThis.fetch;
     const originalEventSource = globalThis.EventSource;
     const originalResizeObserver = globalThis.ResizeObserver;
-    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const target = String(input);
       if (target === "/api/state") {
         return jsonResponse({
@@ -874,6 +1088,17 @@ describe("Backend connection state", () => {
         });
       }
       if (target.startsWith("/api/workspaces/")) {
+        if (init?.method === "PUT") {
+          return jsonResponse({
+            layout: {
+              id: "workspace-live",
+              revision: 1,
+              updatedAt: "2026-04-04 21:15:00",
+              controlPanelSide: "left",
+              workspace: { panes: [] },
+            },
+          });
+        }
         return new Response("", {
           status: 404,
         });
@@ -906,6 +1131,8 @@ describe("Backend connection state", () => {
         eventSource.dispatchState({
           revision: 1,
           projects: [],
+          orchestrators: [],
+          workspaces: [],
           sessions: [],
         });
       });
@@ -962,7 +1189,7 @@ describe("Backend connection state", () => {
     const originalEventSource = globalThis.EventSource;
     const originalResizeObserver = globalThis.ResizeObserver;
     let stateRequestCount = 0;
-    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const target = String(input);
       if (target === "/api/state") {
         stateRequestCount += 1;
@@ -982,6 +1209,17 @@ describe("Backend connection state", () => {
         );
       }
       if (target.startsWith("/api/workspaces/")) {
+        if (init?.method === "PUT") {
+          return jsonResponse({
+            layout: {
+              id: "workspace-live",
+              revision: 1,
+              updatedAt: "2026-04-04 21:15:00",
+              controlPanelSide: "left",
+              workspace: { panes: [] },
+            },
+          });
+        }
         return new Response("", {
           status: 404,
         });
@@ -1014,6 +1252,8 @@ describe("Backend connection state", () => {
         eventSource.dispatchState({
           revision: 1,
           projects: [],
+          orchestrators: [],
+          workspaces: [],
           sessions: [],
         });
       });
@@ -1084,7 +1324,7 @@ describe("Backend connection state", () => {
     const originalEventSource = globalThis.EventSource;
     const originalResizeObserver = globalThis.ResizeObserver;
     let stateRequestCount = 0;
-    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const target = String(input);
       if (target === "/api/state") {
         stateRequestCount += 1;
@@ -1098,6 +1338,17 @@ describe("Backend connection state", () => {
         });
       }
       if (target.startsWith("/api/workspaces/")) {
+        if (init?.method === "PUT") {
+          return jsonResponse({
+            layout: {
+              id: "workspace-live",
+              revision: 1,
+              updatedAt: "2026-04-04 21:15:00",
+              controlPanelSide: "left",
+              workspace: { panes: [] },
+            },
+          });
+        }
         return new Response("", {
           status: 404,
         });
@@ -1130,6 +1381,8 @@ describe("Backend connection state", () => {
         eventSource.dispatchState({
           revision: 1,
           projects: [],
+          orchestrators: [],
+          workspaces: [],
           sessions: [],
         });
       });
@@ -1195,7 +1448,7 @@ describe("Backend connection state", () => {
     const originalEventSource = globalThis.EventSource;
     const originalResizeObserver = globalThis.ResizeObserver;
     let stateRequestCount = 0;
-    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const target = String(input);
       if (target === "/api/state") {
         stateRequestCount += 1;
@@ -1211,6 +1464,17 @@ describe("Backend connection state", () => {
         );
       }
       if (target.startsWith("/api/workspaces/")) {
+        if (init?.method === "PUT") {
+          return jsonResponse({
+            layout: {
+              id: "workspace-live",
+              revision: 1,
+              updatedAt: "2026-04-04 21:15:00",
+              controlPanelSide: "left",
+              workspace: { panes: [] },
+            },
+          });
+        }
         return new Response("", {
           status: 404,
         });
@@ -1312,12 +1576,23 @@ describe("Backend connection state", () => {
       sessionName: "Recovered Session",
       preview: "Recovered preview",
     });
-    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const target = String(input);
       if (target === "/api/state") {
         return jsonResponse(fallbackState);
       }
       if (target.startsWith("/api/workspaces/")) {
+        if (init?.method === "PUT") {
+          return jsonResponse({
+            layout: {
+              id: "workspace-live",
+              revision: 1,
+              updatedAt: "2026-04-04 21:15:00",
+              controlPanelSide: "left",
+              workspace: { panes: [] },
+            },
+          });
+        }
         return new Response("", {
           status: 404,
         });
@@ -1383,7 +1658,7 @@ describe("Backend connection state", () => {
     const originalFetch = globalThis.fetch;
     const originalEventSource = globalThis.EventSource;
     const originalResizeObserver = globalThis.ResizeObserver;
-    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const target = String(input);
       if (target === "/api/state") {
         return jsonResponse(
@@ -1395,6 +1670,17 @@ describe("Backend connection state", () => {
         );
       }
       if (target.startsWith("/api/workspaces/")) {
+        if (init?.method === "PUT") {
+          return jsonResponse({
+            layout: {
+              id: "workspace-live",
+              revision: 1,
+              updatedAt: "2026-04-04 21:15:00",
+              controlPanelSide: "left",
+              workspace: { panes: [] },
+            },
+          });
+        }
         return new Response("", {
           status: 404,
         });
@@ -1567,7 +1853,15 @@ function makeBackendStateResponse({
 }): StateResponse {
   return {
     revision,
+    codex: {},
+    agentReadiness: [],
+    preferences: {
+      defaultCodexReasoningEffort: "medium",
+      defaultClaudeEffort: "default",
+    },
     projects: [],
+    orchestrators: [],
+    workspaces: [],
     sessions: [
       {
         id: "session-1",

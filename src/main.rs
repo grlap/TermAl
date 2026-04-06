@@ -150,7 +150,9 @@ fn app_router(state: AppState) -> Router {
         .route("/api/workspaces", get(list_workspace_layouts))
         .route(
             "/api/workspaces/{id}",
-            get(get_workspace_layout).put(put_workspace_layout),
+            get(get_workspace_layout)
+                .put(put_workspace_layout)
+                .delete(delete_workspace_layout),
         )
         .route("/api/settings", post(update_app_settings))
         .route(

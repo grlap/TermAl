@@ -1758,8 +1758,10 @@ describe("workspace helpers", () => {
     );
 
     expect(next.panes).toHaveLength(3);
-    expect(sourcePane).toBeTruthy();
-    expect(next.activePaneId).toBe(sourcePane?.id ?? null);
+    if (!sourcePane) {
+      throw new Error("sourcePane not found");
+    }
+    expect(next.activePaneId).toBe(sourcePane.id);
     expect(next.panes.find((pane) => pane.id === "pane-a")).toMatchObject({
       tabs: [makeControlPanelTab("control-a", null)],
       activeTabId: "control-a",
@@ -2555,8 +2557,10 @@ describe("workspace helpers", () => {
     );
 
     expect(next.panes).toHaveLength(3);
-    expect(diffPane).toBeTruthy();
-    expect(next.activePaneId).toBe(diffPane?.id ?? null);
+    if (!diffPane) {
+      throw new Error("diffPane not found");
+    }
+    expect(next.activePaneId).toBe(diffPane.id);
     expect(next.panes.find((pane) => pane.id === "pane-a")).toMatchObject({
       tabs: [makeControlPanelTab("control-a", null)],
       activeTabId: "control-a",

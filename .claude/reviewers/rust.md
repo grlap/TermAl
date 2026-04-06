@@ -1,6 +1,12 @@
 # Rust Review
 
 Focus: Error handling, concurrency, async safety, idiomatic Rust patterns.
+## Development-Phase Compatibility Policy
+- Legacy compatibility means supporting older persisted schema or older local/internal API shapes from previous development builds, such as obsolete orchestrator fields.
+- Do NOT flag missing schema upgrades, migrations, or backward compatibility for ~/.termal/*.json, browser localStorage state, or local/internal API contracts from previous local-only development builds.
+- Path normalization and canonicalization for current inputs are not legacy compatibility work.
+- Intentional breaking changes are acceptable during development; only flag compatibility issues when they break current-tree behavior, current tests, or the current documented contract.
+- Windows, macOS, and Linux are P0 platforms. Flag regressions on those platforms; do not require support beyond them unless the current change claims it.
 
 ## What to check
 
@@ -20,7 +26,7 @@ Focus: Error handling, concurrency, async safety, idiomatic Rust patterns.
 3. **JSON serialization**: Correct use of serde:
    - Flag missing `#[serde(rename_all = "camelCase")]` on structs sent to the frontend
    - Flag `#[serde(skip)]` on fields that should be persisted
-   - Flag `#[serde(default)]` missing on optional fields that may be absent in older persisted data
+   - Flag `#[serde(default)]` missing only when the current tree intentionally allows field absence on live read/write paths and the current contract depends on graceful handling
    - Flag manual JSON construction (`json!({...})`) where a typed struct with `serde::Serialize` would be safer
 
 4. **String handling**:
@@ -50,3 +56,4 @@ Focus: Error handling, concurrency, async safety, idiomatic Rust patterns.
 - Single-file architecture (`main.rs`) — known tradeoff
 - `clone()` on small types like `String` session IDs in non-hot paths
 - `expect("state mutex poisoned")` on mutex locks — this is the project pattern
+

@@ -1,6 +1,12 @@
 # Security Review
 
 Focus: Process spawning, file system access, input validation, local attack surface.
+## Development-Phase Compatibility Policy
+- Legacy compatibility means supporting older persisted schema or older local/internal API shapes from previous development builds, such as obsolete orchestrator fields.
+- Do NOT flag missing schema upgrades, migrations, or backward compatibility for ~/.termal/*.json, browser localStorage state, or local/internal API contracts from previous local-only development builds.
+- Path normalization and canonicalization for current inputs are not legacy compatibility work.
+- Intentional breaking changes are acceptable during development; only flag compatibility issues when they break current-tree behavior, current tests, or the current documented contract.
+- Windows, macOS, and Linux are P0 platforms. Flag regressions on those platforms; do not require support beyond them unless the current change claims it.
 
 ## What to check
 
@@ -48,3 +54,4 @@ Focus: Process spawning, file system access, input validation, local attack surf
 - Claude/Codex having access to the full filesystem (they are local tools run by the user)
 - `0.0.0.0` binding (configurable via `TERMAL_PORT`, documented as local-only)
 - Message history containing file contents (expected behavior for a code agent UI)
+

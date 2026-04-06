@@ -1,4 +1,4 @@
-﻿import {
+import {
   act,
   fireEvent,
   render,
@@ -13,6 +13,7 @@ import {
   pauseOrchestratorInstance,
   resumeOrchestratorInstance,
   stopOrchestratorInstance,
+  type StateResponse,
 } from "../api";
 import { ORCHESTRATOR_TEMPLATES_CHANGED_EVENT } from "../orchestrator-templates-events";
 import type { OrchestratorInstance, OrchestratorTemplate } from "../types";
@@ -244,11 +245,18 @@ function makeOrchestrator(
   };
 }
 
-function makeStateResponse(revision: number) {
+function makeStateResponse(revision: number): StateResponse {
   return {
     revision,
+    codex: {},
+    agentReadiness: [],
+    preferences: {
+      defaultCodexReasoningEffort: "medium",
+      defaultClaudeEffort: "default",
+    },
     projects: [],
     orchestrators: [],
+    workspaces: [],
     sessions: [],
   };
 }

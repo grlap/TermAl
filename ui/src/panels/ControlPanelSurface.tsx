@@ -4,10 +4,10 @@ import {
   useImperativeHandle,
   useRef,
   useState,
-  type CSSProperties,
   type DragEvent as ReactDragEvent,
   type ReactNode,
 } from "react";
+import { GitHubMark } from "../github-mark";
 import {
   TAB_DRAG_MIME_TYPE,
   attachWorkspaceTabDragData,
@@ -68,8 +68,6 @@ type DockDropTarget = {
   position: DockDropPosition;
   sectionId: ControlPanelSectionId;
 };
-
-const GITHUB_MARK_URL = "https://upload.wikimedia.org/wikipedia/commons/9/91/Octicons-mark-github.svg";
 
 const PREFERENCES_ACTION: ControlPanelActionDefinition = {
   label: "Open preferences",
@@ -571,12 +569,7 @@ function OrchestratorsIcon() {
 }
 
 function GitStatusIcon() {
-  return (
-    <span
-      className="control-panel-activity-symbol control-panel-activity-symbol-github"
-      style={{ "--control-panel-icon-mask": `url(${GITHUB_MARK_URL})` } as CSSProperties}
-    />
-  );
+  return <GitHubMark className="control-panel-activity-symbol-github" />;
 }
 
 function SettingsIcon() {

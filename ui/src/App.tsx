@@ -1,5 +1,6 @@
 import {
   startTransition,
+  useCallback,
   useDeferredValue,
   useEffect,
   useLayoutEffect,
@@ -30,6 +31,7 @@ import {
   compactCodexThread,
   createProject,
   createSession,
+  deleteWorkspaceLayout,
   fetchAgentCommands,
   fetchFile,
   fetchGitDiff,
@@ -39,8 +41,11 @@ import {
   fetchWorkspaceLayouts,
   forkCodexThread,
   killSession,
+  pauseOrchestratorInstance,
   pickProjectRoot,
   refreshSessionModelOptions,
+  resumeOrchestratorInstance,
+  stopOrchestratorInstance,
   renameSession,
   rollbackCodexThread,
   saveFile,
@@ -252,6 +257,7 @@ import {
 } from "./workspace";
 import {
   createWorkspaceViewId,
+  deleteStoredWorkspaceLayout,
   ensureWorkspaceViewId,
   getStoredWorkspaceLayout,
   parseStoredWorkspaceLayout,
@@ -387,6 +393,7 @@ type PendingWorkspaceLayoutSave = {
   layout: WorkspaceLayoutPersistencePayload;
   workspaceId: string;
 };
+type OrchestratorRuntimeAction = "pause" | "resume" | "stop";
 type PreferencesTabId =
   | "themes"
   | "appearance"
@@ -405,6 +412,7 @@ const PENDING_SESSION_RENAME_CLOSE_DELAY_MS = 300;
 const DEFAULT_SPLIT_MIN_RATIO = 0.22;
 const DEFAULT_SPLIT_MAX_RATIO = 0.78;
 const CONTROL_PANEL_PANE_MIN_WIDTH_FALLBACK_PX = 20 * 16;
+const STANDALONE_CONTROL_SURFACE_PANE_MIN_WIDTH_FALLBACK_PX = 16 * 16;
 const CONTROL_PANEL_PANE_WIDTH_FALLBACK_PX = 23 * 16;
 
 type SessionConversationItem =
@@ -448,6 +456,63 @@ type StandaloneControlSurfaceViewState = {
   sessionListFilter?: SessionListFilter;
   sessionListSearchQuery?: string;
 };
+
+export function resolveControlSurfaceSectionIdForWorkspaceTab(
+  tab: WorkspaceTab,
+): ControlPanelSectionId | null {
+  switch (tab.kind) {
+    case "filesystem":
+      return "files";
+    case "gitStatus":
+      return "git";
+    case "orchestratorList":
+      return "orchestrators";
+    case "projectList":
+      return "projects";
+    case "sessionList":
+      return "sessions";
+    case "session":
+    case "source":
+    case "controlPanel":
+    case "canvas":
+    case "orchestratorCanvas":
+    case "instructionDebugger":
+    case "diffPreview":
+      return null;
+  }
+}
+
+export function resolveAdoptedStateSlices(
+  current: {
+    codex: CodexState;
+    agentReadiness: AgentReadiness[];
+    projects: Project[];
+    orchestrators: OrchestratorInstance[];
+    workspaces: WorkspaceLayoutSummary[];
+  },
+  nextState: Partial<
+    Pick<
+      StateResponse,
+      "codex" | "agentReadiness" | "projects" | "orchestrators" | "workspaces"
+    >
+  >,
+) {
+  return {
+    codex: nextState.codex !== undefined ? nextState.codex : current.codex,
+    agentReadiness:
+      nextState.agentReadiness !== undefined
+        ? nextState.agentReadiness
+        : current.agentReadiness,
+    projects: nextState.projects !== undefined ? nextState.projects : current.projects,
+    orchestrators:
+      nextState.orchestrators !== undefined
+        ? nextState.orchestrators
+        : current.orchestrators,
+    workspaces:
+      nextState.workspaces !== undefined ? nextState.workspaces : current.workspaces,
+  };
+}
+
 function createControlPanelSectionLauncherTab(
   sectionId: ControlPanelSectionId,
   options: {
@@ -573,6 +638,75 @@ function buildControlSurfaceSessionListState(
   };
 }
 
+type ControlSurfaceSessionListEntry =
+  | { kind: "session"; session: Session }
+  | {
+      kind: "orchestratorGroup";
+      orchestrator: OrchestratorInstance;
+      sessions: Session[];
+    };
+
+export function formatSessionOrchestratorGroupName(
+  orchestrator: OrchestratorInstance,
+) {
+  const trimmedName = orchestrator.templateSnapshot.name.trim();
+  return trimmedName.length > 0 ? trimmedName : orchestrator.templateId;
+}
+
+export function buildControlSurfaceSessionListEntries(
+  sessions: readonly Session[],
+  orchestrators: readonly OrchestratorInstance[],
+): ControlSurfaceSessionListEntry[] {
+  if (!sessions.length) {
+    return [];
+  }
+
+  if (!orchestrators.length) {
+    return sessions.map((session) => ({ kind: "session", session }));
+  }
+
+  const sessionOrchestrators = new Map<string, OrchestratorInstance>();
+  const orderedOrchestrators = [...orchestrators].sort((left, right) =>
+    right.createdAt.localeCompare(left.createdAt),
+  );
+
+  for (const orchestrator of orderedOrchestrators) {
+    for (const sessionInstance of orchestrator.sessionInstances) {
+      if (!sessionOrchestrators.has(sessionInstance.sessionId)) {
+        sessionOrchestrators.set(sessionInstance.sessionId, orchestrator);
+      }
+    }
+  }
+
+  const groupedSessionsByOrchestratorId = new Map<string, Session[]>();
+  const entries: ControlSurfaceSessionListEntry[] = [];
+
+  for (const session of sessions) {
+    const orchestrator = sessionOrchestrators.get(session.id);
+
+    if (!orchestrator) {
+      entries.push({ kind: "session", session });
+      continue;
+    }
+
+    const groupedSessions = groupedSessionsByOrchestratorId.get(orchestrator.id);
+    if (groupedSessions) {
+      groupedSessions.push(session);
+      continue;
+    }
+
+    const nextGroupedSessions = [session];
+    groupedSessionsByOrchestratorId.set(orchestrator.id, nextGroupedSessions);
+    entries.push({
+      kind: "orchestratorGroup",
+      orchestrator,
+      sessions: nextGroupedSessions,
+    });
+  }
+
+  return entries;
+}
+
 function mergeOrchestratorDeltaSessions(
   previousSessions: Session[],
   deltaSessions: Session[] | undefined,
@@ -596,6 +730,23 @@ function mergeOrchestratorDeltaSessions(
   }
 
   return reconcileSessions(previousSessions, nextSessions);
+}
+
+export function syncMessageStackScrollPosition(
+  node: Pick<HTMLElement, "scrollHeight" | "scrollTop" | "clientHeight">,
+  scrollStateKey: string,
+  paneScrollPositions: Record<string, { top: number; shouldStick: boolean }>,
+) {
+  const shouldStick = node.scrollHeight - node.scrollTop - node.clientHeight < 72;
+  paneScrollPositions[scrollStateKey] = {
+    top: node.scrollTop,
+    shouldStick,
+  };
+
+  return {
+    top: node.scrollTop,
+    shouldStick,
+  };
 }
 
 function createInitialWorkspaceBootstrap(workspaceViewId: string) {
@@ -664,6 +815,7 @@ export default function App() {
   const [workspaceSwitcherError, setWorkspaceSwitcherError] = useState<
     string | null
   >(null);
+  const [deletingWorkspaceIds, setDeletingWorkspaceIds] = useState<string[]>([]);
   const [draftsBySessionId, setDraftsBySessionId] = useState<
     Record<string, string>
   >({});
@@ -686,6 +838,10 @@ export default function App() {
   const [stoppingSessionIds, setStoppingSessionIds] = useState<SessionFlagMap>(
     {},
   );
+  const [
+    pendingOrchestratorActionById,
+    setPendingOrchestratorActionById,
+  ] = useState<Record<string, OrchestratorRuntimeAction | undefined>>({});
   const [killingSessionIds, setKillingSessionIds] = useState<SessionFlagMap>(
     {},
   );
@@ -780,6 +936,10 @@ export default function App() {
     standaloneControlSurfaceViewStateByTabId,
     setStandaloneControlSurfaceViewStateByTabId,
   ] = useState<Record<string, StandaloneControlSurfaceViewState>>({});
+  const [
+    collapsedSessionOrchestratorIdsBySurfaceId,
+    setCollapsedSessionOrchestratorIdsBySurfaceId,
+  ] = useState<Record<string, string[]>>({});
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [settingsTab, setSettingsTab] = useState<PreferencesTabId>("themes");
   const [pendingSessionRename, setPendingSessionRename] =
@@ -834,6 +994,8 @@ export default function App() {
   const lastDerivedControlPanelFilesystemRootRef = useRef<string | null>(null);
   const lastDerivedControlPanelGitWorkdirRef = useRef<string | null>(null);
   const workspaceSwitcherRef = useRef<HTMLDivElement | null>(null);
+  const workspaceSummariesRequestTokenRef = useRef(0);
+  const deletingWorkspaceIdsRef = useRef<Set<string>>(new Set());
   const pendingWorkspaceLayoutSaveRef =
     useRef<PendingWorkspaceLayoutSave | null>(null);
   const pendingWorkspaceLayoutSaveTimeoutRef = useRef<number | null>(null);
@@ -841,6 +1003,11 @@ export default function App() {
     (options?: { keepalive?: boolean }) => void
   >(() => {});
   const sessionsRef = useRef<Session[]>([]);
+  const codexStateRef = useRef(codexState);
+  const agentReadinessRef = useRef(agentReadiness);
+  const projectsRef = useRef(projects);
+  const orchestratorsRef = useRef(orchestrators);
+  const workspaceSummariesRef = useRef(workspaceSummaries);
   const latestStateRevisionRef = useRef<number | null>(null);
   const forceAdoptNextStateEventRef = useRef(false);
   const stateResyncInFlightRef = useRef(false);
@@ -1436,26 +1603,67 @@ export default function App() {
     );
   }
 
-  async function refreshWorkspaceSummaries() {
+  function beginWorkspaceSummariesRequest() {
+    workspaceSummariesRequestTokenRef.current += 1;
+    return workspaceSummariesRequestTokenRef.current;
+  }
+
+  function isLatestWorkspaceSummariesRequest(requestToken: number) {
+    return workspaceSummariesRequestTokenRef.current === requestToken;
+  }
+
+  function finishDeletingWorkspace(workspaceId: string) {
+    const nextDeletingWorkspaceIds = new Set(deletingWorkspaceIdsRef.current);
+    nextDeletingWorkspaceIds.delete(workspaceId);
+    deletingWorkspaceIdsRef.current = nextDeletingWorkspaceIds;
+    if (isMountedRef.current) {
+      setDeletingWorkspaceIds([...nextDeletingWorkspaceIds]);
+    }
+  }
+
+  const refreshWorkspaceSummaries = useCallback(async () => {
+    const requestToken = beginWorkspaceSummariesRequest();
+    const workspacesAtRequest = workspaceSummariesRef.current;
     setIsWorkspaceSwitcherLoading(true);
     setWorkspaceSwitcherError(null);
     try {
       const response = await fetchWorkspaceLayouts();
-      if (!isMountedRef.current) {
+      if (
+        !isMountedRef.current ||
+        !isLatestWorkspaceSummariesRequest(requestToken)
+      ) {
         return;
       }
-      setWorkspaceSummaries(response.workspaces);
+      // Only apply the refresh result when the workspace list has not been
+      // updated by another source (SSE-delivered workspace data, a delete
+      // handler, etc.) during the fetch. This avoids overwriting a more
+      // authoritative SSE-delivered list with a stale /api/workspaces
+      // snapshot, while still applying the result when only unrelated
+      // session/orchestrator events arrived.
+      if (workspaceSummariesRef.current === workspacesAtRequest) {
+        workspaceSummariesRef.current = response.workspaces;
+        setWorkspaceSummaries(response.workspaces);
+      }
     } catch (error) {
-      if (!isMountedRef.current) {
+      if (
+        !isMountedRef.current ||
+        !isLatestWorkspaceSummariesRequest(requestToken)
+      ) {
         return;
       }
       setWorkspaceSwitcherError(getErrorMessage(error));
     } finally {
-      if (isMountedRef.current) {
+      if (
+        isMountedRef.current &&
+        isLatestWorkspaceSummariesRequest(requestToken)
+      ) {
         setIsWorkspaceSwitcherLoading(false);
       }
     }
-  }
+    // All captured references are stable: refs (.current access), setState
+    // dispatchers, and imported utilities. Empty deps is intentional.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   function clearPendingWorkspaceLayoutSaveTimeout() {
     if (
@@ -1510,13 +1718,7 @@ export default function App() {
   }
 
   function handleWorkspaceSwitcherToggle() {
-    setIsWorkspaceSwitcherOpen((current) => {
-      const nextOpen = !current;
-      if (nextOpen) {
-        void refreshWorkspaceSummaries();
-      }
-      return nextOpen;
-    });
+    setIsWorkspaceSwitcherOpen((current) => !current);
   }
 
   function handleOpenWorkspaceHere(nextWorkspaceViewId: string) {
@@ -1542,6 +1744,69 @@ export default function App() {
     url.searchParams.set(WORKSPACE_VIEW_QUERY_PARAM, nextWorkspaceViewId);
     window.open(url.toString(), "_blank", "noopener");
     setIsWorkspaceSwitcherOpen(false);
+  }
+
+  async function handleDeleteWorkspace(workspaceId: string) {
+    if (
+      workspaceId === workspaceViewId ||
+      deletingWorkspaceIdsRef.current.has(workspaceId)
+    ) {
+      return;
+    }
+
+    const nextDeletingWorkspaceIds = new Set(deletingWorkspaceIdsRef.current);
+    nextDeletingWorkspaceIds.add(workspaceId);
+    deletingWorkspaceIdsRef.current = nextDeletingWorkspaceIds;
+    setDeletingWorkspaceIds([...nextDeletingWorkspaceIds]);
+    setWorkspaceSwitcherError(null);
+
+    const requestToken = beginWorkspaceSummariesRequest();
+    const workspacesAtRequest = workspaceSummariesRef.current;
+    setIsWorkspaceSwitcherLoading(true);
+    try {
+      const deleteResponse = await deleteWorkspaceLayout(workspaceId);
+      deleteStoredWorkspaceLayout(workspaceId);
+      if (isMountedRef.current) {
+        if (
+          isLatestWorkspaceSummariesRequest(requestToken) &&
+          workspaceSummariesRef.current === workspacesAtRequest
+        ) {
+          // This is the latest workspace request and the workspace list
+          // has not been updated by another source (SSE, another delete,
+          // a refresh) during the flight: the server's post-delete list is
+          // the most up-to-date view and safely reflects concurrent
+          // cross-tab operations.
+          workspaceSummariesRef.current = deleteResponse.workspaces;
+          setWorkspaceSummaries(deleteResponse.workspaces);
+        } else {
+          // Either a newer workspace request was initiated (e.g. a refresh)
+          // or the workspace list was updated by SSE / another handler
+          // during the delete. Don't replace the entire list (the newer
+          // source is more authoritative), but ensure the confirmed-deleted
+          // workspace is removed locally.
+          setWorkspaceSummaries((current) => {
+            const next = current.filter((w) => w.id !== workspaceId);
+            workspaceSummariesRef.current = next;
+            return next;
+          });
+        }
+      }
+    } catch (error) {
+      if (
+        isMountedRef.current &&
+        isLatestWorkspaceSummariesRequest(requestToken)
+      ) {
+        setWorkspaceSwitcherError(getErrorMessage(error));
+      }
+    } finally {
+      finishDeletingWorkspace(workspaceId);
+      if (
+        isMountedRef.current &&
+        isLatestWorkspaceSummariesRequest(requestToken)
+      ) {
+        setIsWorkspaceSwitcherLoading(false);
+      }
+    }
   }
 
   function buildOptimisticSessionSettingsUpdate(
@@ -1758,11 +2023,42 @@ export default function App() {
     }
 
     latestStateRevisionRef.current = nextState.revision;
-    setCodexState(nextState.codex ?? {});
-    setAgentReadiness(nextState.agentReadiness ?? []);
+    const currentCodexState = codexStateRef.current;
+    const currentAgentReadiness = agentReadinessRef.current;
+    const currentProjects = projectsRef.current;
+    const currentOrchestrators = orchestratorsRef.current;
+    const currentWorkspaceSummaries = workspaceSummariesRef.current;
+    const adoptedStateSlices = resolveAdoptedStateSlices(
+      {
+        codex: currentCodexState,
+        agentReadiness: currentAgentReadiness,
+        projects: currentProjects,
+        orchestrators: currentOrchestrators,
+        workspaces: currentWorkspaceSummaries,
+      },
+      nextState,
+    );
+    if (adoptedStateSlices.codex !== currentCodexState) {
+      codexStateRef.current = adoptedStateSlices.codex;
+      setCodexState(adoptedStateSlices.codex);
+    }
+    if (adoptedStateSlices.agentReadiness !== currentAgentReadiness) {
+      agentReadinessRef.current = adoptedStateSlices.agentReadiness;
+      setAgentReadiness(adoptedStateSlices.agentReadiness);
+    }
     syncPreferencesFromState(nextState);
-    setProjects(nextState.projects ?? []);
-    setOrchestrators(nextState.orchestrators ?? []);
+    if (adoptedStateSlices.projects !== currentProjects) {
+      projectsRef.current = adoptedStateSlices.projects;
+      setProjects(adoptedStateSlices.projects);
+    }
+    if (adoptedStateSlices.orchestrators !== currentOrchestrators) {
+      orchestratorsRef.current = adoptedStateSlices.orchestrators;
+      setOrchestrators(adoptedStateSlices.orchestrators);
+    }
+    if (adoptedStateSlices.workspaces !== currentWorkspaceSummaries) {
+      workspaceSummariesRef.current = adoptedStateSlices.workspaces;
+      setWorkspaceSummaries(adoptedStateSlices.workspaces);
+    }
     adoptSessions(nextState.sessions, options);
     // Local state adoptions can resume or create active sessions before any SSE arrives.
     syncAdoptedLiveSessionResumeWatchdogBaselinesRef.current(
@@ -2337,6 +2633,7 @@ export default function App() {
             delta.sessions,
           );
           sessionsRef.current = nextSessions;
+          orchestratorsRef.current = delta.orchestrators;
           startTransition(() => {
             setOrchestrators(delta.orchestrators);
             setSessions(nextSessions);
@@ -2527,6 +2824,33 @@ export default function App() {
   }, [workspace.panes]);
 
   useEffect(() => {
+    const validSurfaceIds = new Set(
+      workspace.panes.flatMap((pane) => {
+        const surfaceIds = [pane.id];
+        for (const tab of pane.tabs) {
+          const sectionId = resolveControlSurfaceSectionIdForWorkspaceTab(tab);
+          if (sectionId) {
+            surfaceIds.push(`${pane.id}-${sectionId}`);
+          }
+        }
+        return surfaceIds;
+      }),
+    );
+    setCollapsedSessionOrchestratorIdsBySurfaceId((current) => {
+      let changed = false;
+      const next: Record<string, string[]> = {};
+      for (const [surfaceId, orchestratorIds] of Object.entries(current)) {
+        if (validSurfaceIds.has(surfaceId)) {
+          next[surfaceId] = orchestratorIds;
+        } else {
+          changed = true;
+        }
+      }
+      return changed ? next : current;
+    });
+  }, [workspace.panes]);
+
+  useEffect(() => {
     if (activeSession) {
       setNewSessionAgent(activeSession.agent);
     }
@@ -2686,6 +3010,14 @@ export default function App() {
       return;
     }
 
+    void refreshWorkspaceSummaries();
+  }, [isWorkspaceSwitcherOpen, refreshWorkspaceSummaries]);
+
+  useEffect(() => {
+    if (!isWorkspaceSwitcherOpen) {
+      return;
+    }
+
     function handlePointerDown(event: PointerEvent) {
       const target = event.target;
       if (!(target instanceof Node)) {
@@ -2717,6 +3049,20 @@ export default function App() {
   useEffect(() => {
     sessionsRef.current = sessions;
   }, [sessions]);
+
+  useEffect(() => {
+    codexStateRef.current = codexState;
+    agentReadinessRef.current = agentReadiness;
+    projectsRef.current = projects;
+    orchestratorsRef.current = orchestrators;
+    workspaceSummariesRef.current = workspaceSummaries;
+  }, [
+    agentReadiness,
+    codexState,
+    orchestrators,
+    projects,
+    workspaceSummaries,
+  ]);
 
   useEffect(() => {
     draftAttachmentsRef.current = draftAttachmentsBySessionId;
@@ -5070,6 +5416,51 @@ export default function App() {
     adoptState(state);
   }
 
+  async function handleOrchestratorRuntimeAction(
+    instanceId: string,
+    action: OrchestratorRuntimeAction,
+  ) {
+    setRequestError(null);
+    setPendingOrchestratorActionById((current) => ({
+      ...current,
+      [instanceId]: action,
+    }));
+
+    try {
+      let state: StateResponse;
+      switch (action) {
+        case "pause":
+          state = await pauseOrchestratorInstance(instanceId);
+          break;
+        case "resume":
+          state = await resumeOrchestratorInstance(instanceId);
+          break;
+        case "stop":
+          state = await stopOrchestratorInstance(instanceId);
+          break;
+      }
+
+      if (!isMountedRef.current) {
+        return;
+      }
+
+      handleOrchestratorStateUpdated(state);
+    } catch (error) {
+      if (!isMountedRef.current) {
+        return;
+      }
+
+      setRequestError(getErrorMessage(error));
+    } finally {
+      if (isMountedRef.current) {
+        setPendingOrchestratorActionById((current) => {
+          const { [instanceId]: _discarded, ...rest } = current;
+          return rest;
+        });
+      }
+    }
+  }
+
   function handleOpenInstructionDebuggerTab(
     paneId: string,
     workdir: string | null,
@@ -5095,6 +5486,8 @@ export default function App() {
   ): JSX.Element {
     const surfaceId = fixedSection ? `${paneId}-${fixedSection}` : paneId;
     const controlPanelProjectFilterId = `control-panel-project-scope-${surfaceId}`;
+    const controlSurfaceCollapsedOrchestratorIds =
+      collapsedSessionOrchestratorIdsBySurfaceId[surfaceId] ?? [];
     const controlSurfacePane = paneLookup.get(paneId) ?? null;
     const controlSurfaceActiveTab = controlSurfacePane
       ? (controlSurfacePane.tabs.find(
@@ -5210,6 +5603,11 @@ export default function App() {
     const controlSurfaceFilteredSessions = standaloneSessionListState
       ? standaloneSessionListState.filteredSessions
       : filteredSessions;
+    const controlSurfaceSessionListEntries =
+      buildControlSurfaceSessionListEntries(
+        controlSurfaceFilteredSessions,
+        orchestrators,
+      );
     const controlSurfaceFilesystemRoot =
       controlSurfaceActiveTab?.kind === "filesystem"
         ? controlSurfaceActiveTab.rootPath
@@ -5222,6 +5620,142 @@ export default function App() {
         : fixedSection === "git"
           ? controlSurfaceWorkspaceRoot
           : controlPanelGitWorkdir;
+
+    function renderControlSurfaceSessionRow(session: Session) {
+      const isActive = session.id === activeSession?.id;
+      const isOpen = openSessionIds.has(session.id);
+      const isKilling = Boolean(killingSessionIds[session.id]);
+      const isKillConfirmationOpen = pendingKillSessionId === session.id;
+      const isKillVisible =
+        isKilling ||
+        isKillConfirmationOpen ||
+        killRevealSessionId === session.id;
+      const searchResult = controlSurfaceSessionListSearchResults.get(session.id);
+
+      return (
+        <div
+          key={`${surfaceId}-${session.id}`}
+          className={`session-row-shell ${isActive ? "selected" : ""} ${isOpen ? "open" : ""} ${isKillVisible ? "kill-armed" : ""}`}
+          onMouseLeave={() => {
+            if (!isKilling && !isKillConfirmationOpen) {
+              setKillRevealSessionId((current) =>
+                current === session.id ? null : current,
+              );
+            }
+          }}
+          onBlur={(event) => {
+            const nextTarget = event.relatedTarget;
+            if (
+              !isKilling &&
+              !isKillConfirmationOpen &&
+              (!(nextTarget instanceof Node) ||
+                !event.currentTarget.contains(nextTarget))
+            ) {
+              setKillRevealSessionId((current) =>
+                current === session.id ? null : current,
+              );
+            }
+          }}
+        >
+          <button
+            className={`session-row ${isActive ? "selected" : ""} ${isOpen ? "open" : ""}`}
+            type="button"
+            draggable
+            onClick={() =>
+              handleSidebarSessionClick(
+                session.id,
+                paneId,
+                !fixedSection,
+              )
+            }
+            title={`${session.agent} / ${session.workdir}`}
+            onDragStart={(event) => {
+              event.dataTransfer.effectAllowed = "copy";
+              attachSessionDragData(
+                event.dataTransfer,
+                session.id,
+                session.name,
+              );
+              const rect = event.currentTarget.getBoundingClientRect();
+              event.dataTransfer.setDragImage(
+                event.currentTarget,
+                Math.max(12, event.clientX - rect.left),
+                Math.max(12, event.clientY - rect.top),
+              );
+            }}
+            onContextMenu={(event) => {
+              event.preventDefault();
+              handleSessionRenameRequest(
+                session.id,
+                event.clientX,
+                event.clientY,
+                event.currentTarget,
+              );
+            }}
+          >
+            <div className="session-copy">
+              <div className="session-title-line">
+                <strong>{session.name}</strong>
+                {searchResult ? (
+                  <span className="session-search-count">
+                    {searchResult.matchCount} hit
+                    {searchResult.matchCount === 1 ? "" : "s"}
+                  </span>
+                ) : null}
+              </div>
+              <div
+                className={`session-preview${searchResult ? " session-preview-search-result" : ""}`}
+                title={searchResult?.snippet ?? session.preview}
+              >
+                {searchResult?.snippet ?? session.preview}
+              </div>
+            </div>
+          </button>
+          <button
+            className="session-row-status-button"
+            type="button"
+            onClick={() =>
+              setKillRevealSessionId((current) =>
+                current === session.id && !isKilling
+                  ? null
+                  : session.id,
+              )
+            }
+            aria-label={`Show session actions for ${session.name}`}
+          >
+            <span
+              className="status-agent-badge session-row-status-badge"
+              data-status={session.status}
+            >
+              <AgentIcon
+                agent={session.agent}
+                className="session-row-status-icon"
+              />
+            </span>
+          </button>
+          <button
+            className="ghost-button session-row-kill"
+            type="button"
+            onClick={(event) => {
+              handleKillSession(
+                session.id,
+                event.currentTarget,
+              );
+            }}
+            disabled={isKilling}
+            aria-expanded={isKillConfirmationOpen}
+            aria-controls={
+              isKillConfirmationOpen
+                ? `kill-session-popover-${session.id}`
+                : undefined
+            }
+            aria-label={`Kill ${session.name}`}
+          >
+            {isKilling ? "Killing" : "Kill"}
+          </button>
+        </div>
+      );
+    }
 
     function buildControlPanelLauncherTab(sectionId: ControlPanelSectionId) {
       return createControlPanelSectionLauncherTab(sectionId, {
@@ -5264,6 +5798,29 @@ export default function App() {
         return {
           ...current,
           [standaloneControlSurfaceTabId]: next,
+        };
+      });
+    }
+
+    function toggleControlSurfaceOrchestratorGroup(orchestratorId: string) {
+      setCollapsedSessionOrchestratorIdsBySurfaceId((current) => {
+        const previous = current[surfaceId] ?? [];
+        const next = previous.includes(orchestratorId)
+          ? previous.filter((candidateId) => candidateId !== orchestratorId)
+          : [...previous, orchestratorId];
+
+        if (!next.length) {
+          if (!(surfaceId in current)) {
+            return current;
+          }
+
+          const { [surfaceId]: _discard, ...rest } = current;
+          return rest;
+        }
+
+        return {
+          ...current,
+          [surfaceId]: next,
         };
       });
     }
@@ -5859,142 +6416,162 @@ export default function App() {
                 </div>
                 <div className="session-list">
                   {controlSurfaceFilteredSessions.length > 0 ? (
-                    controlSurfaceFilteredSessions.map((session) => {
-                      const isActive = session.id === activeSession?.id;
-                      const isOpen = openSessionIds.has(session.id);
-                      const isKilling = Boolean(killingSessionIds[session.id]);
-                      const isKillConfirmationOpen =
-                        pendingKillSessionId === session.id;
-                      const isKillVisible =
-                        isKilling ||
-                        isKillConfirmationOpen ||
-                        killRevealSessionId === session.id;
-                      const searchResult =
-                        controlSurfaceSessionListSearchResults.get(session.id);
+                    controlSurfaceSessionListEntries.map((entry) => {
+                      if (entry.kind === "session") {
+                        return renderControlSurfaceSessionRow(entry.session);
+                      }
+
+                      const groupName = formatSessionOrchestratorGroupName(
+                        entry.orchestrator,
+                      );
+
+                      const isGroupCollapsed =
+                        controlSurfaceCollapsedOrchestratorIds.includes(
+                          entry.orchestrator.id,
+                        );
+                      const groupListId =
+                        `${surfaceId}-orchestrator-group-list-${entry.orchestrator.id}`;
+                      const pendingOrchestratorAction =
+                        pendingOrchestratorActionById[entry.orchestrator.id];
+                      const hasPendingOrchestratorAction =
+                        Boolean(pendingOrchestratorAction);
 
                       return (
-                        <div
-                          key={`${surfaceId}-${session.id}`}
-                          className={`session-row-shell ${isActive ? "selected" : ""} ${isOpen ? "open" : ""} ${isKillVisible ? "kill-armed" : ""}`}
-                          onMouseLeave={() => {
-                            if (!isKilling && !isKillConfirmationOpen) {
-                              setKillRevealSessionId((current) =>
-                                current === session.id ? null : current,
-                              );
-                            }
-                          }}
-                          onBlur={(event) => {
-                            const nextTarget = event.relatedTarget;
-                            if (
-                              !isKilling &&
-                              !isKillConfirmationOpen &&
-                              (!(nextTarget instanceof Node) ||
-                                !event.currentTarget.contains(nextTarget))
-                            ) {
-                              setKillRevealSessionId((current) =>
-                                current === session.id ? null : current,
-                              );
-                            }
-                          }}
+                        <section
+                          key={`${surfaceId}-orchestrator-group-${entry.orchestrator.id}`}
+                          className="session-orchestrator-group"
+                          role="group"
+                          aria-label={`Orchestration ${groupName}`}
+                          data-status={entry.orchestrator.status}
                         >
-                          <button
-                            className={`session-row ${isActive ? "selected" : ""} ${isOpen ? "open" : ""}`}
-                            type="button"
-                            draggable
-                            onClick={() =>
-                              handleSidebarSessionClick(
-                                session.id,
-                                paneId,
-                                !fixedSection,
-                              )
-                            }
-                            title={`${session.agent} / ${session.workdir}`}
-                            onDragStart={(event) => {
-                              event.dataTransfer.effectAllowed = "copy";
-                              attachSessionDragData(
-                                event.dataTransfer,
-                                session.id,
-                                session.name,
-                              );
-                              const rect =
-                                event.currentTarget.getBoundingClientRect();
-                              event.dataTransfer.setDragImage(
-                                event.currentTarget,
-                                Math.max(12, event.clientX - rect.left),
-                                Math.max(12, event.clientY - rect.top),
-                              );
-                            }}
-                            onContextMenu={(event) => {
-                              event.preventDefault();
-                              handleSessionRenameRequest(
-                                session.id,
-                                event.clientX,
-                                event.clientY,
-                                event.currentTarget,
-                              );
-                            }}
-                          >
-                            <div className="session-copy">
-                              <div className="session-title-line">
-                                <strong>{session.name}</strong>
-                                {searchResult ? (
-                                  <span className="session-search-count">
-                                    {searchResult.matchCount} hit
-                                    {searchResult.matchCount === 1 ? "" : "s"}
-                                  </span>
-                                ) : null}
-                              </div>
-                              <div
-                                className={`session-preview${searchResult ? " session-preview-search-result" : ""}`}
-                                title={searchResult?.snippet ?? session.preview}
-                              >
-                                {searchResult?.snippet ?? session.preview}
-                              </div>
-                            </div>
-                          </button>
-                          <button
-                            className="session-row-status-button"
-                            type="button"
-                            onClick={() =>
-                              setKillRevealSessionId((current) =>
-                                current === session.id && !isKilling
-                                  ? null
-                                  : session.id,
-                              )
-                            }
-                            aria-label={`Show session actions for ${session.name}`}
-                          >
-                            <span
-                              className="status-agent-badge session-row-status-badge"
-                              data-status={session.status}
+                          <header className="session-orchestrator-group-header">
+                            <button
+                              className="session-orchestrator-group-toggle"
+                              type="button"
+                              onClick={() =>
+                                toggleControlSurfaceOrchestratorGroup(
+                                  entry.orchestrator.id,
+                                )
+                              }
+                              aria-expanded={!isGroupCollapsed}
+                              aria-controls={
+                                !isGroupCollapsed ? groupListId : undefined
+                              }
+                              aria-label={`${isGroupCollapsed ? "Expand" : "Collapse"} ${groupName} sessions`}
+                              title={isGroupCollapsed ? "Expand sessions" : "Collapse sessions"}
                             >
-                              <AgentIcon
-                                agent={session.agent}
-                                className="session-row-status-icon"
-                              />
+                              <svg
+                                className={`session-orchestrator-group-chevron${!isGroupCollapsed ? " expanded" : ""}`}
+                                viewBox="0 0 12 12"
+                                focusable="false"
+                                aria-hidden="true"
+                              >
+                                <path
+                                  d="M4 2.75 7.75 6 4 9.25"
+                                  fill="none"
+                                  stroke="currentColor"
+                                  strokeLinecap="round"
+                                  strokeLinejoin="round"
+                                  strokeWidth="1.4"
+                                />
+                              </svg>
+                            </button>
+                            <span className="session-orchestrator-group-label">
+                              Orchestration
                             </span>
-                          </button>
-                          <button
-                            className="ghost-button session-row-kill"
-                            type="button"
-                            onClick={(event) => {
-                              handleKillSession(
-                                session.id,
-                                event.currentTarget,
-                              );
-                            }}
-                            disabled={isKilling}
-                            aria-expanded={isKillConfirmationOpen}
-                            aria-controls={
-                              isKillConfirmationOpen
-                                ? `kill-session-popover-${session.id}`
-                                : undefined
-                            }
-                            aria-label={`Kill ${session.name}`}
-                          >
-                            {isKilling ? "Killing" : "Kill"}
-                          </button>
-                        </div>
+                            <strong className="session-orchestrator-group-name">
+                              {groupName}
+                            </strong>
+                            <div className="session-orchestrator-group-meta">
+                              <span className="session-orchestrator-group-count">
+                                {entry.sessions.length === 1
+                                  ? "1 session"
+                                  : `${entry.sessions.length} sessions`}
+                              </span>
+                              {entry.orchestrator.status === "running" ? (
+                                <div className="session-orchestrator-group-actions">
+                                  <button
+                                    className="ghost-button session-orchestrator-group-action"
+                                    type="button"
+                                    aria-label={`Pause orchestration ${entry.orchestrator.id}`}
+                                    onClick={() =>
+                                      void handleOrchestratorRuntimeAction(
+                                        entry.orchestrator.id,
+                                        "pause",
+                                      )
+                                    }
+                                    disabled={hasPendingOrchestratorAction}
+                                  >
+                                    {pendingOrchestratorAction === "pause"
+                                      ? "Pausing..."
+                                      : "Pause"}
+                                  </button>
+                                  <button
+                                    className="ghost-button session-orchestrator-group-action session-orchestrator-group-action-stop"
+                                    type="button"
+                                    aria-label={`Stop orchestration ${entry.orchestrator.id}`}
+                                    onClick={() =>
+                                      void handleOrchestratorRuntimeAction(
+                                        entry.orchestrator.id,
+                                        "stop",
+                                      )
+                                    }
+                                    disabled={hasPendingOrchestratorAction}
+                                  >
+                                    {pendingOrchestratorAction === "stop"
+                                      ? "Stopping..."
+                                      : "Stop"}
+                                  </button>
+                                </div>
+                              ) : entry.orchestrator.status === "paused" ? (
+                                <div className="session-orchestrator-group-actions">
+                                  <button
+                                    className="ghost-button session-orchestrator-group-action"
+                                    type="button"
+                                    aria-label={`Resume orchestration ${entry.orchestrator.id}`}
+                                    onClick={() =>
+                                      void handleOrchestratorRuntimeAction(
+                                        entry.orchestrator.id,
+                                        "resume",
+                                      )
+                                    }
+                                    disabled={hasPendingOrchestratorAction}
+                                  >
+                                    {pendingOrchestratorAction === "resume"
+                                      ? "Resuming..."
+                                      : "Resume"}
+                                  </button>
+                                  <button
+                                    className="ghost-button session-orchestrator-group-action session-orchestrator-group-action-stop"
+                                    type="button"
+                                    aria-label={`Stop orchestration ${entry.orchestrator.id}`}
+                                    onClick={() =>
+                                      void handleOrchestratorRuntimeAction(
+                                        entry.orchestrator.id,
+                                        "stop",
+                                      )
+                                    }
+                                    disabled={hasPendingOrchestratorAction}
+                                  >
+                                    {pendingOrchestratorAction === "stop"
+                                      ? "Stopping..."
+                                      : "Stop"}
+                                  </button>
+                                </div>
+                              ) : null}
+                            </div>
+                          </header>
+                          {!isGroupCollapsed ? (
+                            <div
+                              id={groupListId}
+                              className="session-orchestrator-group-list"
+                            >
+                              {entry.sessions.map((session) =>
+                                renderControlSurfaceSessionRow(session),
+                              )}
+                            </div>
+                          ) : null}
+                        </section>
                       );
                     })
                   ) : (
@@ -6122,11 +6699,13 @@ export default function App() {
       <>
         <WorkspaceSwitcher
           currentWorkspaceId={workspaceViewId}
+          deletingWorkspaceIds={deletingWorkspaceIds}
           error={workspaceSwitcherError}
           isLoading={isWorkspaceSwitcherLoading}
           isOpen={isWorkspaceSwitcherOpen}
           summaries={workspaceSummaries}
           switcherRef={workspaceSwitcherRef}
+          onDeleteWorkspace={handleDeleteWorkspace}
           onOpenNewWorkspaceHere={handleOpenNewWorkspaceHere}
           onOpenNewWorkspaceWindow={handleOpenNewWorkspaceWindow}
           onOpenWorkspace={handleOpenWorkspaceHere}
@@ -6685,6 +7264,13 @@ export default function App() {
                       Binary: {createSessionAgentReadiness.commandPath}
                     </p>
                   ) : null}
+                </article>
+              ) : null}
+
+              {createSessionAgentReadiness?.warningDetail ? (
+                <article className="thread-notice create-session-readiness">
+                  <div className="card-label">Warning</div>
+                  <p>{createSessionAgentReadiness.warningDetail}</p>
                 </article>
               ) : null}
 
@@ -7418,17 +8004,33 @@ function WorkspaceNodeView({
     node.second,
     paneLookup,
   );
-  const shouldMarkControlPanelBranch =
-    node.direction === "row" &&
-    firstContainsControlPanel !== secondContainsControlPanel;
-  const firstBranchClassName =
-    shouldMarkControlPanelBranch && firstContainsControlPanel
-      ? "tile-branch control-panel-branch"
-      : "tile-branch";
-  const secondBranchClassName =
-    shouldMarkControlPanelBranch && secondContainsControlPanel
-      ? "tile-branch control-panel-branch"
-      : "tile-branch";
+  const firstUsesStandaloneControlSurfaceMinWidth =
+    workspaceNodeUsesStandaloneControlSurfaceMinWidth(node.first, paneLookup);
+  const secondUsesStandaloneControlSurfaceMinWidth =
+    workspaceNodeUsesStandaloneControlSurfaceMinWidth(node.second, paneLookup);
+  const branchClassName = (
+    containsControlPanel: boolean,
+    usesStandaloneControlSurfaceMinWidth: boolean,
+  ) =>
+    [
+      "tile-branch",
+      node.direction === "row" && containsControlPanel
+        ? "control-panel-branch"
+        : null,
+      node.direction === "row" && usesStandaloneControlSurfaceMinWidth
+        ? "standalone-control-surface-branch"
+        : null,
+    ]
+      .filter(Boolean)
+      .join(" ");
+  const firstBranchClassName = branchClassName(
+    firstContainsControlPanel,
+    firstUsesStandaloneControlSurfaceMinWidth,
+  );
+  const secondBranchClassName = branchClassName(
+    secondContainsControlPanel,
+    secondUsesStandaloneControlSurfaceMinWidth,
+  );
 
   return (
     <div className={`tile-split tile-split-${node.direction}`}>
@@ -8498,6 +9100,15 @@ function SessionPaneView({
 
     event.preventDefault();
     node.scrollTop = nextScrollTop;
+    const { shouldStick } = syncMessageStackScrollPosition(
+      node,
+      scrollStateKey,
+      paneScrollPositions,
+    );
+    setShouldStickToBottom(shouldStick);
+    if (shouldStick) {
+      setNewResponseIndicator(scrollStateKey, false);
+    }
   }
 
   useEffect(() => {
@@ -9237,13 +9848,12 @@ function SessionPaneView({
         onWheel={handleMessageStackWheel}
         onScroll={(event) => {
           const node = event.currentTarget;
-          const shouldStick =
-            node.scrollHeight - node.scrollTop - node.clientHeight < 72;
+          const { shouldStick } = syncMessageStackScrollPosition(
+            node,
+            scrollStateKey,
+            paneScrollPositions,
+          );
           setShouldStickToBottom(shouldStick);
-          paneScrollPositions[scrollStateKey] = {
-            top: node.scrollTop,
-            shouldStick,
-          };
           if (shouldStick) {
             setNewResponseIndicator(scrollStateKey, false);
           }
@@ -9818,6 +10428,65 @@ function workspaceNodeContainsControlPanel(
   );
 }
 
+function getActiveWorkspacePaneTab(pane: WorkspacePane): WorkspaceTab | null {
+  return (
+    pane.tabs.find((tab) => tab.id === pane.activeTabId) ??
+    pane.tabs[0] ??
+    null
+  );
+}
+
+function paneHasActiveStandaloneControlSurface(pane: WorkspacePane): boolean {
+  const activeTab = getActiveWorkspacePaneTab(pane);
+  return Boolean(
+    activeTab &&
+      activeTab.kind !== "controlPanel" &&
+      CONTROL_SURFACE_KINDS.has(activeTab.kind),
+  );
+}
+
+function workspaceNodeContainsStandaloneControlSurface(
+  node: WorkspaceNode,
+  paneLookup: Map<string, WorkspacePane>,
+): boolean {
+  if (node.type === "pane") {
+    const pane = paneLookup.get(node.paneId);
+    return pane ? paneHasActiveStandaloneControlSurface(pane) : false;
+  }
+
+  return (
+    workspaceNodeContainsStandaloneControlSurface(node.first, paneLookup) ||
+    workspaceNodeContainsStandaloneControlSurface(node.second, paneLookup)
+  );
+}
+
+function workspaceNodeContainsNonControlSurfacePane(
+  node: WorkspaceNode,
+  paneLookup: Map<string, WorkspacePane>,
+): boolean {
+  if (node.type === "pane") {
+    const pane = paneLookup.get(node.paneId);
+    const activeTab = pane ? getActiveWorkspacePaneTab(pane) : null;
+    return activeTab ? !CONTROL_SURFACE_KINDS.has(activeTab.kind) : false;
+  }
+
+  return (
+    workspaceNodeContainsNonControlSurfacePane(node.first, paneLookup) ||
+    workspaceNodeContainsNonControlSurfacePane(node.second, paneLookup)
+  );
+}
+
+function workspaceNodeUsesStandaloneControlSurfaceMinWidth(
+  node: WorkspaceNode,
+  paneLookup: Map<string, WorkspacePane>,
+): boolean {
+  return (
+    !workspaceNodeContainsControlPanel(node, paneLookup) &&
+    !workspaceNodeContainsNonControlSurfacePane(node, paneLookup) &&
+    workspaceNodeContainsStandaloneControlSurface(node, paneLookup)
+  );
+}
+
 function findWorkspaceSplitNode(
   node: WorkspaceNode | null,
   splitId: string,
@@ -9903,19 +10572,53 @@ function resolveRootCssLengthPx(
     return fallbackPx;
   }
 
-  const numericValue = Number.parseFloat(rawValue);
-  if (!Number.isFinite(numericValue)) {
-    return fallbackPx;
+  const rootFontSizePx = Number.parseFloat(rootStyle.fontSize);
+  const resolvedValue = rawValue.replace(
+    /var\((--[\w-]+)\)/g,
+    (_, variableName: string) =>
+      rootStyle.getPropertyValue(variableName).trim() || "0",
+  );
+  const convertLengthToPx = (value: string): number | null => {
+    const numericValue = Number.parseFloat(value);
+    if (!Number.isFinite(numericValue)) {
+      return null;
+    }
+
+    if (value.endsWith("rem")) {
+      return (
+        numericValue * (Number.isFinite(rootFontSizePx) ? rootFontSizePx : 16)
+      );
+    }
+
+    if (value.endsWith("px") || /^-?\d*\.?\d+$/.test(value)) {
+      return numericValue;
+    }
+
+    return null;
+  };
+  const directLengthPx = convertLengthToPx(resolvedValue);
+  if (directLengthPx !== null) {
+    return directLengthPx;
   }
 
-  if (rawValue.endsWith("rem")) {
-    const rootFontSizePx = Number.parseFloat(rootStyle.fontSize);
-    return (
-      numericValue * (Number.isFinite(rootFontSizePx) ? rootFontSizePx : 16)
-    );
+  const calcMultiplicationMatch = resolvedValue.match(
+    /^calc\(\s*([^)]+?)\s*\*\s*([^)]+?)\s*\)$/i,
+  );
+  if (calcMultiplicationMatch) {
+    const left = convertLengthToPx(calcMultiplicationMatch[1].trim());
+    const right = Number.parseFloat(calcMultiplicationMatch[2].trim());
+    if (left !== null && Number.isFinite(right)) {
+      return left * right;
+    }
+
+    const rightLengthPx = convertLengthToPx(calcMultiplicationMatch[2].trim());
+    const leftScalar = Number.parseFloat(calcMultiplicationMatch[1].trim());
+    if (rightLengthPx !== null && Number.isFinite(leftScalar)) {
+      return leftScalar * rightLengthPx;
+    }
   }
 
-  return numericValue;
+  return fallbackPx;
 }
 
 export function getWorkspaceSplitResizeBounds(
@@ -9948,18 +10651,36 @@ export function getWorkspaceSplitResizeBounds(
     0,
     1,
   );
+  const standaloneControlSurfaceMinRatio = clamp(
+    resolveRootCssLengthPx(
+      "--standalone-control-surface-pane-min-width",
+      STANDALONE_CONTROL_SURFACE_PANE_MIN_WIDTH_FALLBACK_PX,
+    ) / size,
+    0,
+    1,
+  );
   const firstMinRatio = workspaceNodeContainsControlPanel(
     splitNode.first,
     paneLookup,
   )
     ? controlPanelMinRatio
-    : DEFAULT_SPLIT_MIN_RATIO;
+    : workspaceNodeUsesStandaloneControlSurfaceMinWidth(
+          splitNode.first,
+          paneLookup,
+        )
+      ? standaloneControlSurfaceMinRatio
+      : DEFAULT_SPLIT_MIN_RATIO;
   const secondMinRatio = workspaceNodeContainsControlPanel(
     splitNode.second,
     paneLookup,
   )
     ? controlPanelMinRatio
-    : DEFAULT_SPLIT_MIN_RATIO;
+    : workspaceNodeUsesStandaloneControlSurfaceMinWidth(
+          splitNode.second,
+          paneLookup,
+        )
+      ? standaloneControlSurfaceMinRatio
+      : DEFAULT_SPLIT_MIN_RATIO;
   const minRatio = firstMinRatio;
   const maxRatio = 1 - secondMinRatio;
 
@@ -10098,3 +10819,7 @@ function resolveWorkspaceTabProjectId(
     null
   );
 }
+
+
+
+

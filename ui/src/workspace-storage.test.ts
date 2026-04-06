@@ -4,6 +4,7 @@ import {
   WORKSPACE_LAYOUT_STORAGE_KEY,
   WORKSPACE_VIEW_QUERY_PARAM,
   createWorkspaceViewId,
+  deleteStoredWorkspaceLayout,
   ensureWorkspaceViewId,
   getStoredWorkspaceLayout,
   parseStoredWorkspaceLayout,
@@ -157,6 +158,27 @@ describe("workspace storage", () => {
       ),
     ).not.toBeNull();
     expect(getStoredWorkspaceLayout(workspaceViewId)).toEqual(layout);
+  });
+
+  it("removes a stored workspace layout by workspace id", () => {
+    const layout: StoredWorkspaceLayout = {
+      controlPanelSide: "left",
+      workspace: {
+        root: null,
+        panes: [],
+        activePaneId: null,
+      },
+    };
+
+    persistWorkspaceLayout(workspaceViewId, layout);
+    deleteStoredWorkspaceLayout(workspaceViewId);
+
+    expect(
+      window.localStorage.getItem(
+        `${WORKSPACE_LAYOUT_STORAGE_KEY}:${workspaceViewId}`,
+      ),
+    ).toBeNull();
+    expect(getStoredWorkspaceLayout(workspaceViewId)).toBeNull();
   });
 
   it("ignores the old global key", () => {

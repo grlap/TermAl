@@ -333,14 +333,10 @@ export function OrchestratorTemplatesPanel({
     draft.sessions.length >= MAX_ORCHESTRATOR_TEMPLATE_SESSIONS;
   const selectedProject =
     projects.find((project) => project.id === draft.projectId) ?? null;
-  const selectedProjectIsLocal = selectedProject
-    ? isLocalRemoteId(selectedProject.remoteId)
-    : false;
   const canRunSelectedTemplate = Boolean(
     selectedTemplateId &&
     draft.projectId &&
     selectedProject &&
-    selectedProjectIsLocal &&
     !isDirty &&
     !isRunning,
   );
@@ -582,7 +578,7 @@ export function OrchestratorTemplatesPanel({
   }
 
   async function runTemplate() {
-    if (!selectedTemplateId || !selectedProject || !selectedProjectIsLocal) {
+    if (!selectedTemplateId || !selectedProject) {
       return;
     }
     setIsRunning(true);
@@ -1159,11 +1155,9 @@ export function OrchestratorTemplatesPanel({
                         ? "Select a project in the template first"
                         : !selectedProject
                           ? "The selected project is no longer available"
-                          : !selectedProjectIsLocal
-                            ? "Runtime orchestrations currently require a local project"
-                            : isDirty
-                              ? "Save changes before running"
-                              : `Run on ${selectedProject.name}`
+                          : isDirty
+                            ? "Save changes before running"
+                            : `Run on ${selectedProject.name}`
                     }
                   >
                     {isRunning ? "Starting..." : "▶ Run"}
@@ -1215,7 +1209,7 @@ export function OrchestratorTemplatesPanel({
                   {projects.map((project) => (
                     <option key={project.id} value={project.id}>
                       {project.name}
-                      {project.remoteId && project.remoteId !== "local"
+                      {project.remoteId && !isLocalRemoteId(project.remoteId)
                         ? ` (${project.remoteId})`
                         : ""}
                     </option>

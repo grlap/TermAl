@@ -26,6 +26,8 @@ const REMOTE_STARTUP_TIMEOUT: Duration = Duration::from_secs(15);
 const REMOTE_HEALTH_POLL_INTERVAL: Duration = Duration::from_millis(250);
 const REMOTE_EVENT_RETRY_DELAY: Duration = Duration::from_secs(2);
 const REMOTE_EVENT_SHUTDOWN_POLL_INTERVAL: Duration = Duration::from_millis(50);
+const MAX_REMOTE_ERROR_BODY_CHARS: usize = 512;
+const MAX_REMOTE_ERROR_BODY_BYTES: usize = 64 * 1024;
 
 static NEXT_REMOTE_FORWARD_PORT: AtomicU16 = AtomicU16::new(REMOTE_FORWARD_PORT_START);
 
@@ -81,8 +83,11 @@ impl RemoteRegistry {
         })
     }
 
-    /// Handles reconcile.
-    fn reconcile(&self, remotes: &[RemoteConfig]) {
+    /// Reconciles the set of remote connections against the latest config list.
+    /// Returns the IDs of remotes whose config changed (connection was torn down
+    /// and watermarks should be cleared by the caller) and the IDs of remotes
+    /// that were removed entirely.
+    fn reconcile(&self, remotes: &[RemoteConfig]) -> Vec<String> {
         let next_by_id = remotes
             .iter()
             .map(|remote| (remote.id.clone(), remote.clone()))
@@ -92,6 +97,7 @@ impl RemoteRegistry {
             .lock()
             .expect("remote registry mutex poisoned");
         let existing_ids = connections.keys().cloned().collect::<Vec<_>>();
+        let mut changed_ids = Vec::new();
         for remote_id in existing_ids {
             let Some(connection) = connections.get(&remote_id).cloned() else {
                 continue;
@@ -99,10 +105,14 @@ impl RemoteRegistry {
             let Some(remote) = next_by_id.get(&remote_id).cloned() else {
                 connection.stop_event_bridge();
                 connections.remove(&remote_id);
+                changed_ids.push(remote_id);
                 continue;
             };
-            connection.update_config(remote);
+            if connection.update_config(remote) {
+                changed_ids.push(remote_id);
+            }
         }
+        changed_ids
     }
 
     /// Handles connection.
@@ -158,6 +168,14 @@ impl RemoteRegistry {
         let connection = self.connection(remote);
         connection.start_event_bridge(self.client.client().clone(), state);
     }
+    /// Returns the cached inline-template capability for the active remote.
+    fn cached_supports_inline_orchestrator_templates(
+        &self,
+        remote: &RemoteConfig,
+    ) -> Option<bool> {
+        let connection = self.connection(remote);
+        connection.cached_supports_inline_orchestrator_templates()
+    }
 }
 
 /// Represents remote connection.
@@ -167,6 +185,7 @@ struct RemoteConnection {
     process: Mutex<Option<RemoteProcessHandle>>,
     event_bridge_started: AtomicBool,
     event_bridge_shutdown: AtomicBool,
+    supports_inline_orchestrator_templates: Mutex<Option<bool>>,
 }
 
 impl RemoteConnection {
@@ -178,6 +197,7 @@ impl RemoteConnection {
             process: Mutex::new(None),
             event_bridge_started: AtomicBool::new(false),
             event_bridge_shutdown: AtomicBool::new(false),
+            supports_inline_orchestrator_templates: Mutex::new(None),
         }
     }
 
@@ -189,13 +209,17 @@ impl RemoteConnection {
             .clone()
     }
 
-    /// Updates config.
-    fn update_config(&self, remote: RemoteConfig) {
+    /// Updates config. Returns `true` when the config actually changed and the
+    /// connection was torn down.
+    fn update_config(&self, remote: RemoteConfig) -> bool {
         let mut config = self.config.lock().expect("remote config mutex poisoned");
         if *config != remote {
             *config = remote;
             drop(config);
             self.disconnect();
+            true
+        } else {
+            false
         }
     }
 
@@ -206,6 +230,10 @@ impl RemoteConnection {
             let _ = handle.child.kill();
             let _ = handle.child.wait();
         }
+        *self
+            .supports_inline_orchestrator_templates
+            .lock()
+            .expect("remote capability mutex poisoned") = None;
     }
 
     /// Stops event bridge.
@@ -237,6 +265,23 @@ impl RemoteConnection {
         format!("http://127.0.0.1:{}", self.forwarded_port)
     }
 
+    /// Returns the cached inline-template capability.
+    fn cached_supports_inline_orchestrator_templates(&self) -> Option<bool> {
+        *self
+            .supports_inline_orchestrator_templates
+            .lock()
+            .expect("remote capability mutex poisoned")
+    }
+
+    /// Caches capabilities reported by the remote health endpoint.
+    fn cache_health_response(&self, payload: &HealthResponse) {
+        *self
+            .supports_inline_orchestrator_templates
+            .lock()
+            .expect("remote capability mutex poisoned") =
+            Some(payload.supports_inline_orchestrator_templates);
+    }
+
     /// Ensures available.
     fn ensure_available(&self, client: &BlockingHttpClient) -> Result<String, ApiError> {
         let remote = self.config();
@@ -249,7 +294,8 @@ impl RemoteConnection {
         }
         let base_url = self.base_url();
 
-        if remote_healthcheck(client, &base_url).is_ok() {
+        if let Ok(payload) = remote_healthcheck(client, &base_url) {
+            self.cache_health_response(&payload);
             return Ok(base_url);
         }
 
@@ -260,7 +306,8 @@ impl RemoteConnection {
                     *process = None;
                 }
                 Ok(None) => {
-                    if remote_healthcheck(client, &base_url).is_ok() {
+                    if let Ok(payload) = remote_healthcheck(client, &base_url) {
+                        self.cache_health_response(&payload);
                         return Ok(base_url);
                     }
                     if let Some(mut handle) = process.take() {
@@ -276,14 +323,16 @@ impl RemoteConnection {
 
         let managed_attempt = self.start_process(&remote, RemoteProcessMode::ManagedServer)?;
         match wait_for_remote_health(client, &base_url, managed_attempt) {
-            Ok(handle) => {
+            Ok((handle, health)) => {
+                self.cache_health_response(&health);
                 *process = Some(handle);
                 Ok(base_url)
             }
             Err(managed_error) => {
                 let tunnel_attempt = self.start_process(&remote, RemoteProcessMode::TunnelOnly)?;
                 match wait_for_remote_health(client, &base_url, tunnel_attempt) {
-                    Ok(handle) => {
+                    Ok((handle, health)) => {
+                        self.cache_health_response(&health);
                         *process = Some(handle);
                         Ok(base_url)
                     }
@@ -359,6 +408,7 @@ impl RemoteConnection {
 
                 let remote = connection.config();
                 if !remote.enabled || remote.transport != RemoteTransport::Ssh {
+                    state.clear_remote_applied_revision(&remote.id);
                     state.clear_remote_sse_fallback_resync(&remote.id);
                     if connection.wait_for_bridge_retry_or_shutdown(REMOTE_EVENT_RETRY_DELAY) {
                         break;
@@ -368,7 +418,12 @@ impl RemoteConnection {
 
                 let base_url = match connection.ensure_available(&client) {
                     Ok(base_url) => base_url,
-                    Err(_) => {
+                    Err(err) => {
+                        eprintln!(
+                            "remote event bridge `{}` failed to connect: {err:#?}",
+                            remote.id
+                        );
+                        state.clear_remote_applied_revision(&remote.id);
                         state.clear_remote_sse_fallback_resync(&remote.id);
                         if connection.wait_for_bridge_retry_or_shutdown(REMOTE_EVENT_RETRY_DELAY) {
                             break;
@@ -379,7 +434,12 @@ impl RemoteConnection {
 
                 let response = match client.get(format!("{base_url}/api/events")).send() {
                     Ok(response) => response,
-                    Err(_) => {
+                    Err(err) => {
+                        eprintln!(
+                            "remote event bridge `{}` failed to connect: {err:#?}",
+                            remote.id
+                        );
+                        state.clear_remote_applied_revision(&remote.id);
                         state.clear_remote_sse_fallback_resync(&remote.id);
                         if connection.wait_for_bridge_retry_or_shutdown(REMOTE_EVENT_RETRY_DELAY) {
                             break;
@@ -391,6 +451,7 @@ impl RemoteConnection {
                 if let Err(err) = process_remote_event_stream(&state, &remote.id, response) {
                     eprintln!("remote event bridge `{}` disconnected: {err:#}", remote.id);
                 }
+                state.clear_remote_applied_revision(&remote.id);
                 state.clear_remote_sse_fallback_resync(&remote.id);
                 if connection.wait_for_bridge_retry_or_shutdown(REMOTE_EVENT_RETRY_DELAY) {
                     break;
@@ -779,23 +840,134 @@ impl AppState {
             .ok_or_else(|| {
                 ApiError::bad_gateway("remote session was not returned by remote state")
             })?;
-        let local_session_id = {
+        let (state, local_session_id) = {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
-            let local_session_id = upsert_remote_proxy_session_record(
+            let applied_remote_revision = apply_remote_state_if_newer_locked(
+                &mut inner,
+                &binding.remote.id,
+                &remote_response.state,
+                Some(remote_response.session_id.as_str()),
+            );
+            let (local_session_id, changed) = ensure_remote_proxy_session_record(
                 &mut inner,
                 &binding.remote.id,
                 &remote_session,
                 Some(binding.local_project_id),
+                applied_remote_revision,
             );
-            self.commit_locked(&mut inner).map_err(|err| {
-                ApiError::internal(format!("failed to persist remote session proxy: {err:#}"))
-            })?;
-            local_session_id
+            if applied_remote_revision {
+                inner.note_remote_applied_revision(
+                    &binding.remote.id,
+                    remote_response.state.revision,
+                );
+            }
+            if applied_remote_revision || changed {
+                self.commit_locked(&mut inner).map_err(|err| {
+                    ApiError::internal(format!("failed to persist remote session proxy: {err:#}"))
+                })?;
+            }
+            (self.snapshot_from_inner(&inner), local_session_id)
         };
 
         Ok(CreateSessionResponse {
             session_id: local_session_id,
-            state: self.snapshot(),
+            state,
+        })
+    }
+
+    /// Creates remote orchestrator proxy.
+    fn create_remote_orchestrator_proxy(
+        &self,
+        template: &OrchestratorTemplate,
+        project: &Project,
+    ) -> Result<CreateOrchestratorInstanceResponse, ApiError> {
+        let Some(binding) = self.ensure_remote_project_binding(&project.id)? else {
+            return Err(ApiError::bad_request("remote project binding is missing"));
+        };
+        let mut remote_template = orchestrator_template_to_draft(template);
+        remote_template.project_id = Some(binding.remote_project_id.clone());
+        let request_body = serde_json::to_value(CreateOrchestratorInstanceRequest {
+            template_id: template.id.clone(),
+            project_id: Some(binding.remote_project_id.clone()),
+            template: Some(remote_template),
+        })
+        .map_err(|err| {
+            ApiError::internal(format!(
+                "failed to encode remote orchestrator create request: {err}"
+            ))
+        })?;
+        let remote_response: CreateOrchestratorInstanceResponse = match self.remote_registry.request_json(
+            &binding.remote,
+            Method::POST,
+            "/api/orchestrators",
+            &[],
+            Some(request_body),
+        ) {
+            Ok(response) => response,
+            Err(err)
+                if err.status == StatusCode::NOT_FOUND
+                    && !matches!(
+                        self.remote_registry
+                            .cached_supports_inline_orchestrator_templates(&binding.remote),
+                        Some(true)
+                    ) =>
+            {
+                return Err(ApiError::bad_gateway(format!(
+                    "remote `{}` must be upgraded before it can launch local orchestrator templates",
+                    binding.remote.name
+                )));
+            }
+            Err(err) => return Err(err),
+        };
+        let (state, local_orchestrator) = {
+            let mut inner = self.inner.lock().expect("state mutex poisoned");
+            let applied_remote_revision = apply_remote_state_if_newer_locked(
+                &mut inner,
+                &binding.remote.id,
+                &remote_response.state,
+                None,
+            );
+            let remote_sessions_by_id = remote_response
+                .state
+                .sessions
+                .iter()
+                .map(|session| (session.id.as_str(), session))
+                .collect::<HashMap<_, _>>();
+            let (local_orchestrator, changed) = match ensure_remote_orchestrator_instance(
+                &mut inner,
+                &binding.remote.id,
+                &remote_response.orchestrator,
+                Some(&remote_sessions_by_id),
+                applied_remote_revision,
+            ) {
+                Ok(result) => result,
+                Err(err) => {
+                    return Err(ApiError::bad_gateway(format!(
+                        "remote orchestrator could not be localized: {err}"
+                    )));
+                }
+            };
+            if applied_remote_revision {
+                inner.note_remote_applied_revision(
+                    &binding.remote.id,
+                    remote_response.state.revision,
+                );
+            }
+            if applied_remote_revision || changed {
+                self.commit_locked(&mut inner).map_err(|err| {
+                    ApiError::internal(format!(
+                        "failed to persist remote orchestrator proxy: {err:#}"
+                    ))
+                })?;
+            }
+            (self.snapshot_from_inner(&inner), local_orchestrator)
+        };
+        self.remote_registry
+            .start_event_bridge(self.clone(), &binding.remote);
+
+        Ok(CreateOrchestratorInstanceResponse {
+            orchestrator: local_orchestrator,
+            state,
         })
     }
 
@@ -831,31 +1003,40 @@ impl AppState {
                 .ok_or_else(|| ApiError::not_found("session not found"))?;
             inner.sessions[index].session.project_id.clone()
         };
-        let local_session_id = {
+        let (state, local_session_id) = {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
-            sync_remote_state_inner(
+            let applied_remote_revision = apply_remote_state_if_newer_locked(
                 &mut inner,
                 &target.remote.id,
                 &remote_response.state,
                 Some(&target.remote_session_id),
             );
-            let local_session_id = upsert_remote_proxy_session_record(
+            let (local_session_id, changed) = ensure_remote_proxy_session_record(
                 &mut inner,
                 &target.remote.id,
                 &remote_session,
                 local_project_id,
+                applied_remote_revision,
             );
-            self.commit_locked(&mut inner).map_err(|err| {
-                ApiError::internal(format!(
-                    "failed to persist remote forked session proxy: {err:#}"
-                ))
-            })?;
-            local_session_id
+            if applied_remote_revision {
+                inner.note_remote_applied_revision(
+                    &target.remote.id,
+                    remote_response.state.revision,
+                );
+            }
+            if applied_remote_revision || changed {
+                self.commit_locked(&mut inner).map_err(|err| {
+                    ApiError::internal(format!(
+                        "failed to persist remote forked session proxy: {err:#}"
+                    ))
+                })?;
+            }
+            (self.snapshot_from_inner(&inner), local_session_id)
         };
 
         Ok(CreateSessionResponse {
             session_id: local_session_id,
-            state: self.snapshot(),
+            state,
         })
     }
 
@@ -1089,18 +1270,26 @@ impl AppState {
             None,
         )?;
         let mut inner = self.inner.lock().expect("state mutex poisoned");
-        sync_remote_state_inner(
+        let applied_remote_revision = apply_remote_state_if_newer_locked(
             &mut inner,
             &target.remote.id,
             &remote_state,
             Some(&target.remote_session_id),
         );
-        if let Some(index) = inner.find_session_index(&target.local_session_id) {
+        let removed = if let Some(index) = inner.find_session_index(&target.local_session_id) {
             inner.sessions.remove(index);
+            true
+        } else {
+            false
+        };
+        if applied_remote_revision {
+            inner.note_remote_applied_revision(&target.remote.id, remote_state.revision);
         }
-        self.commit_locked(&mut inner).map_err(|err| {
-            ApiError::internal(format!("failed to persist remote session removal: {err:#}"))
-        })?;
+        if applied_remote_revision || removed {
+            self.commit_locked(&mut inner).map_err(|err| {
+                ApiError::internal(format!("failed to persist remote session removal: {err:#}"))
+            })?;
+        }
         Ok(self.snapshot_from_inner(&inner))
     }
 
@@ -1255,12 +1444,15 @@ impl AppState {
         remote_state: StateResponse,
     ) -> Result<(), ApiError> {
         let mut inner = self.inner.lock().expect("state mutex poisoned");
-        sync_remote_state_inner(
+        if !apply_remote_state_if_newer_locked(
             &mut inner,
             &target.remote.id,
             &remote_state,
             Some(&target.remote_session_id),
-        );
+        ) {
+            return Ok(());
+        }
+        inner.note_remote_applied_revision(&target.remote.id, remote_state.revision);
         self.commit_locked(&mut inner).map_err(|err| {
             ApiError::internal(format!("failed to persist remote state: {err:#}"))
         })?;
@@ -1309,13 +1501,16 @@ impl AppState {
             None,
         )?;
         let mut inner = self.inner.lock().expect("state mutex poisoned");
-        sync_remote_state_inner(&mut inner, &target.remote.id, &remote_state, None);
-        self.commit_locked(&mut inner).map_err(|err| {
-            ApiError::internal(format!(
-                "failed to persist remote orchestrator `{}` state: {err:#}",
-                target.local_instance_id
-            ))
-        })?;
+        if apply_remote_state_if_newer_locked(&mut inner, &target.remote.id, &remote_state, None)
+        {
+            inner.note_remote_applied_revision(&target.remote.id, remote_state.revision);
+            self.commit_locked(&mut inner).map_err(|err| {
+                ApiError::internal(format!(
+                    "failed to persist remote orchestrator `{}` state: {err:#}",
+                    target.local_instance_id
+                ))
+            })?;
+        }
         Ok(self.snapshot_from_inner(&inner))
     }
 
@@ -1326,7 +1521,10 @@ impl AppState {
         remote_state: StateResponse,
     ) -> Result<(), ApiError> {
         let mut inner = self.inner.lock().expect("state mutex poisoned");
-        sync_remote_state_inner(&mut inner, remote_id, &remote_state, None);
+        if !apply_remote_state_if_newer_locked(&mut inner, remote_id, &remote_state, None) {
+            return Ok(());
+        }
+        inner.note_remote_applied_revision(remote_id, remote_state.revision);
         self.commit_locked(&mut inner).map_err(|err| {
             ApiError::internal(format!("failed to persist remote state: {err:#}"))
         })?;
@@ -1339,6 +1537,7 @@ impl AppState {
         remote_id: &str,
         event: DeltaEvent,
     ) -> Result<(), anyhow::Error> {
+        let remote_revision = delta_event_revision(&event);
         match event {
             DeltaEvent::MessageCreated {
                 message,
@@ -1351,6 +1550,9 @@ impl AppState {
             } => {
                 let (local_session_id, revision) = {
                     let mut inner = self.inner.lock().expect("state mutex poisoned");
+                    if inner.should_skip_remote_applied_delta_revision(remote_id, remote_revision) {
+                        return Ok(());
+                    }
                     let index = inner
                         .find_remote_session_index(remote_id, &session_id)
                         .ok_or_else(|| anyhow!("remote session `{session_id}` not found"))?;
@@ -1362,6 +1564,7 @@ impl AppState {
                     record.session.status = status;
                     let local_session_id = record.session.id.clone();
                     let revision = self.commit_persisted_delta_locked(&mut inner)?;
+                    inner.note_remote_applied_revision(remote_id, remote_revision);
                     (local_session_id, revision)
                 };
                 self.publish_delta(&DeltaEvent::MessageCreated {
@@ -1383,6 +1586,9 @@ impl AppState {
             } => {
                 let (local_session_id, message_index, revision) = {
                     let mut inner = self.inner.lock().expect("state mutex poisoned");
+                    if inner.should_skip_remote_applied_delta_revision(remote_id, remote_revision) {
+                        return Ok(());
+                    }
                     let index = inner
                         .find_remote_session_index(remote_id, &session_id)
                         .ok_or_else(|| anyhow!("remote session `{session_id}` not found"))?;
@@ -1407,6 +1613,7 @@ impl AppState {
                     }
                     let local_session_id = record.session.id.clone();
                     let revision = self.commit_delta_locked(&mut inner)?;
+                    inner.note_remote_applied_revision(remote_id, remote_revision);
                     (local_session_id, message_index, revision)
                 };
                 self.publish_delta(&DeltaEvent::TextDelta {
@@ -1427,6 +1634,9 @@ impl AppState {
             } => {
                 let (local_session_id, message_index, revision) = {
                     let mut inner = self.inner.lock().expect("state mutex poisoned");
+                    if inner.should_skip_remote_applied_delta_revision(remote_id, remote_revision) {
+                        return Ok(());
+                    }
                     let index = inner
                         .find_remote_session_index(remote_id, &session_id)
                         .ok_or_else(|| anyhow!("remote session `{session_id}` not found"))?;
@@ -1456,6 +1666,7 @@ impl AppState {
                     }
                     let local_session_id = record.session.id.clone();
                     let revision = self.commit_delta_locked(&mut inner)?;
+                    inner.note_remote_applied_revision(remote_id, remote_revision);
                     (local_session_id, message_index, revision)
                 };
                 self.publish_delta(&DeltaEvent::TextReplace {
@@ -1481,6 +1692,9 @@ impl AppState {
             } => {
                 let (local_session_id, created_message, revision, session_status) = {
                     let mut inner = self.inner.lock().expect("state mutex poisoned");
+                    if inner.should_skip_remote_applied_delta_revision(remote_id, remote_revision) {
+                        return Ok(());
+                    }
                     let index = inner
                         .find_remote_session_index(remote_id, &session_id)
                         .ok_or_else(|| anyhow!("remote session `{session_id}` not found"))?;
@@ -1537,6 +1751,7 @@ impl AppState {
                     } else {
                         self.commit_delta_locked(&mut inner)?
                     };
+                    inner.note_remote_applied_revision(remote_id, remote_revision);
                     (local_session_id, created_message, revision, session_status)
                 };
                 if let Some(message) = created_message {
@@ -1574,6 +1789,9 @@ impl AppState {
             } => {
                 let (local_session_id, created_message, revision, session_status) = {
                     let mut inner = self.inner.lock().expect("state mutex poisoned");
+                    if inner.should_skip_remote_applied_delta_revision(remote_id, remote_revision) {
+                        return Ok(());
+                    }
                     let index = inner
                         .find_remote_session_index(remote_id, &session_id)
                         .ok_or_else(|| anyhow!("remote session `{session_id}` not found"))?;
@@ -1618,6 +1836,7 @@ impl AppState {
                     } else {
                         self.commit_delta_locked(&mut inner)?
                     };
+                    inner.note_remote_applied_revision(remote_id, remote_revision);
                     (local_session_id, created_message, revision, session_status)
                 };
                 if let Some(message) = created_message {
@@ -1648,6 +1867,9 @@ impl AppState {
             } => {
                 let (revision, localized_orchestrators) = {
                     let mut inner = self.inner.lock().expect("state mutex poisoned");
+                    if inner.should_skip_remote_applied_delta_revision(remote_id, remote_revision) {
+                        return Ok(());
+                    }
                     let local_project_ids_by_remote_project_id =
                         remote_project_id_map(&inner, remote_id);
                     let remote_sessions_by_id = (!sessions.is_empty()).then(|| {
@@ -1674,6 +1896,7 @@ impl AppState {
                         return Err(err);
                     }
                     let revision = self.commit_persisted_delta_locked(&mut inner)?;
+                    inner.note_remote_applied_revision(remote_id, remote_revision);
                     (revision, inner.orchestrator_instances.clone())
                 };
                 self.publish_orchestrators_updated(revision, localized_orchestrators);
@@ -1682,6 +1905,19 @@ impl AppState {
         Ok(())
     }
 }
+
+/// Returns the originating remote revision for a delta event.
+fn delta_event_revision(event: &DeltaEvent) -> u64 {
+    match event {
+        DeltaEvent::MessageCreated { revision, .. }
+        | DeltaEvent::TextDelta { revision, .. }
+        | DeltaEvent::TextReplace { revision, .. }
+        | DeltaEvent::CommandUpdate { revision, .. }
+        | DeltaEvent::ParallelAgentsUpdate { revision, .. }
+        | DeltaEvent::OrchestratorsUpdated { revision, .. } => *revision,
+    }
+}
+
 /// Syncs remote state inner.
 fn sync_remote_state_inner(
     inner: &mut StateInner,
@@ -1788,6 +2024,21 @@ fn sync_remote_state_inner(
     }
 }
 
+/// Applies a remote state snapshot when its revision is newer than the latest
+/// mirrored revision seen for the remote.
+fn apply_remote_state_if_newer_locked(
+    inner: &mut StateInner,
+    remote_id: &str,
+    remote_state: &StateResponse,
+    focus_remote_session_id: Option<&str>,
+) -> bool {
+    if inner.should_skip_remote_applied_revision(remote_id, remote_state.revision) {
+        return false;
+    }
+    sync_remote_state_inner(inner, remote_id, remote_state, focus_remote_session_id);
+    true
+}
+
 /// Applies remote session to record.
 fn apply_remote_session_to_record(
     record: &mut SessionRecord,
@@ -1875,6 +2126,34 @@ fn upsert_remote_proxy_session_record(
     local_session_id
 }
 
+/// Ensures a remote proxy session record exists locally, optionally refreshing
+/// the existing record from the response payload.
+fn ensure_remote_proxy_session_record(
+    inner: &mut StateInner,
+    remote_id: &str,
+    remote_session: &Session,
+    local_project_id: Option<String>,
+    update_existing: bool,
+) -> (String, bool) {
+    if let Some(index) = inner.find_remote_session_index(remote_id, &remote_session.id) {
+        let local_session_id = inner.sessions[index].session.id.clone();
+        if update_existing {
+            apply_remote_session_to_record(
+                &mut inner.sessions[index],
+                local_project_id,
+                remote_session,
+            );
+            return (local_session_id, true);
+        }
+        return (local_session_id, false);
+    }
+
+    (
+        upsert_remote_proxy_session_record(inner, remote_id, remote_session, local_project_id),
+        true,
+    )
+}
+
 /// Handles localize remote session.
 fn localize_remote_session(
     local_session_id: &str,
@@ -1953,18 +2232,26 @@ fn localize_remote_orchestrator_instance(
         .and_then(|index| inner.orchestrator_instances.get(index))
         .map(|instance| (Some(instance.id.clone()), Some(instance.project_id.clone())))
         .unwrap_or((None, None));
+    let remote_project_id = Some(remote_orchestrator.project_id.as_str())
+        .filter(|project_id| !project_id.trim().is_empty())
+        .or_else(|| {
+            remote_orchestrator
+                .template_snapshot
+                .project_id
+                .as_deref()
+                .filter(|project_id| !project_id.trim().is_empty())
+        });
     let local_project_id = local_project_id_for_remote_project(
         local_project_ids_by_remote_project_id,
-        Some(remote_orchestrator.project_id.as_str())
-            .filter(|project_id| !project_id.trim().is_empty()),
+        remote_project_id,
     )
-    .or_else(|| {
-        local_project_id_for_remote_project(
-            local_project_ids_by_remote_project_id,
-            remote_orchestrator.template_snapshot.project_id.as_deref(),
+    .or(existing_local_project_id)
+    .ok_or_else(|| {
+        anyhow!(
+            "no local project for remote project `{}`",
+            remote_project_id.unwrap_or("unknown")
         )
-    })
-    .or(existing_local_project_id);
+    })?;
 
     let mut session_instances = Vec::with_capacity(remote_orchestrator.session_instances.len());
     for session_instance in &remote_orchestrator.session_instances {
@@ -1974,7 +2261,7 @@ fn localize_remote_orchestrator_instance(
             &session_instance.session_id,
             remote_sessions_by_id,
             local_project_ids_by_remote_project_id,
-            local_project_id.as_deref(),
+            Some(local_project_id.as_str()),
         )
         .ok_or_else(|| anyhow!("remote session `{}` not found", session_instance.session_id))?;
         session_instances.push(OrchestratorSessionInstance {
@@ -1984,7 +2271,7 @@ fn localize_remote_orchestrator_instance(
     }
 
     let mut template_snapshot = remote_orchestrator.template_snapshot.clone();
-    template_snapshot.project_id = local_project_id.clone();
+    template_snapshot.project_id = Some(local_project_id.clone());
 
     let mut pending_transitions = Vec::with_capacity(remote_orchestrator.pending_transitions.len());
     for transition in &remote_orchestrator.pending_transitions {
@@ -1994,7 +2281,7 @@ fn localize_remote_orchestrator_instance(
             &transition.source_session_id,
             remote_sessions_by_id,
             local_project_ids_by_remote_project_id,
-            local_project_id.as_deref(),
+            Some(local_project_id.as_str()),
         )
         .ok_or_else(|| {
             anyhow!(
@@ -2008,7 +2295,7 @@ fn localize_remote_orchestrator_instance(
             &transition.destination_session_id,
             remote_sessions_by_id,
             local_project_ids_by_remote_project_id,
-            local_project_id.as_deref(),
+            Some(local_project_id.as_str()),
         )
         .ok_or_else(|| {
             anyhow!(
@@ -2036,7 +2323,7 @@ fn localize_remote_orchestrator_instance(
                         session_id,
                         remote_sessions_by_id,
                         local_project_ids_by_remote_project_id,
-                        local_project_id.as_deref(),
+                        Some(local_project_id.as_str()),
                     )
                     .ok_or_else(|| anyhow!("remote session `{session_id}` not found"))
                 })
@@ -2053,7 +2340,7 @@ fn localize_remote_orchestrator_instance(
                 session_id,
                 remote_sessions_by_id,
                 local_project_ids_by_remote_project_id,
-                local_project_id.as_deref(),
+                Some(local_project_id.as_str()),
             )
             .ok_or_else(|| anyhow!("remote session `{session_id}` not found"))
         })
@@ -2065,7 +2352,7 @@ fn localize_remote_orchestrator_instance(
         remote_id: Some(remote_id.to_owned()),
         remote_orchestrator_id: Some(remote_orchestrator.id.clone()),
         template_id: remote_orchestrator.template_id.clone(),
-        project_id: local_project_id.unwrap_or_default(),
+        project_id: local_project_id,
         template_snapshot,
         status: remote_orchestrator.status,
         session_instances,
@@ -2077,6 +2364,51 @@ fn localize_remote_orchestrator_instance(
         active_session_ids_during_stop,
         stopped_session_ids_during_stop,
     })
+}
+
+fn ensure_remote_orchestrator_instance(
+    inner: &mut StateInner,
+    remote_id: &str,
+    remote_orchestrator: &OrchestratorInstance,
+    remote_sessions_by_id: Option<&HashMap<&str, &Session>>,
+    update_existing: bool,
+) -> Result<(OrchestratorInstance, bool), anyhow::Error> {
+    if let Some(index) = inner.find_remote_orchestrator_index(remote_id, &remote_orchestrator.id)
+    {
+        if !update_existing {
+            return Ok((inner.orchestrator_instances[index].clone(), false));
+        }
+    }
+
+    let rollback_state = (
+        inner.next_session_number,
+        inner.sessions.clone(),
+        inner.orchestrator_instances.clone(),
+    );
+    let local_project_ids_by_remote_project_id = remote_project_id_map(inner, remote_id);
+    let localized = match localize_remote_orchestrator_instance(
+        inner,
+        remote_id,
+        remote_orchestrator,
+        &local_project_ids_by_remote_project_id,
+        remote_sessions_by_id,
+    ) {
+        Ok(localized) => localized,
+        Err(err) => {
+            inner.next_session_number = rollback_state.0;
+            inner.sessions = rollback_state.1;
+            inner.orchestrator_instances = rollback_state.2;
+            return Err(err);
+        }
+    };
+
+    if let Some(index) = inner.find_remote_orchestrator_index(remote_id, &remote_orchestrator.id) {
+        inner.orchestrator_instances[index] = localized.clone();
+    } else {
+        inner.orchestrator_instances.push(localized.clone());
+    }
+
+    Ok((localized, true))
 }
 
 /// Syncs remote orchestrators.
@@ -2428,11 +2760,11 @@ fn wait_for_remote_health(
     client: &BlockingHttpClient,
     base_url: &str,
     mut handle: RemoteProcessHandle,
-) -> std::result::Result<RemoteProcessHandle, String> {
+) -> std::result::Result<(RemoteProcessHandle, HealthResponse), String> {
     let started_at = Instant::now();
     loop {
-        if remote_healthcheck(client, base_url).is_ok() {
-            return Ok(handle);
+        if let Ok(payload) = remote_healthcheck(client, base_url) {
+            return Ok((handle, payload));
         }
         match handle.child.try_wait() {
             Ok(Some(status)) => {
@@ -2486,7 +2818,10 @@ fn read_process_stderr_suffix(child: &mut Child) -> String {
 }
 
 /// Handles remote health check.
-fn remote_healthcheck(client: &BlockingHttpClient, base_url: &str) -> Result<()> {
+fn remote_healthcheck(
+    client: &BlockingHttpClient,
+    base_url: &str,
+) -> Result<HealthResponse> {
     let response = client
         .get(format!("{base_url}/api/health"))
         .timeout(REMOTE_HEALTH_TIMEOUT)
@@ -2495,29 +2830,78 @@ fn remote_healthcheck(client: &BlockingHttpClient, base_url: &str) -> Result<()>
     let payload: HealthResponse =
         decode_remote_json(response).map_err(|err| anyhow!(err.message))?;
     if payload.ok {
-        Ok(())
+        Ok(payload)
     } else {
         Err(anyhow!("remote health endpoint returned ok=false"))
     }
 }
 
+fn sanitize_remote_error_body(raw: &str) -> Option<String> {
+    let sanitized = raw
+        .chars()
+        .filter_map(|ch| match ch {
+            '\r' | '\n' | '\t' => Some(' '),
+            _ if ch.is_control() => None,
+            _ => Some(ch),
+        })
+        .collect::<String>();
+    let collapsed = sanitized.split_whitespace().collect::<Vec<_>>().join(" ");
+    let trimmed = collapsed.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    let mut chars = trimmed.chars();
+    let mut limited = chars
+        .by_ref()
+        .take(MAX_REMOTE_ERROR_BODY_CHARS)
+        .collect::<String>();
+    if chars.next().is_some() {
+        // Truncate by char boundary, not byte offset, to avoid panicking on
+        // multi-byte UTF-8 sequences (emoji, CJK, etc.).
+        let truncate_at = limited
+            .char_indices()
+            .nth(MAX_REMOTE_ERROR_BODY_CHARS - 3)
+            .map(|(i, _)| i)
+            .unwrap_or(limited.len());
+        limited.truncate(truncate_at);
+        limited.push_str("...");
+    }
+    Some(limited)
+}
+
 /// Decodes remote JSON.
 fn decode_remote_json<T: DeserializeOwned>(response: BlockingHttpResponse) -> Result<T, ApiError> {
     let status = response.status();
+    if !status.is_success() {
+        let mut raw = Vec::new();
+        response
+            .take((MAX_REMOTE_ERROR_BODY_BYTES + 1) as u64)
+            .read_to_end(&mut raw)
+            .map_err(|err| {
+                ApiError::bad_gateway(format!("failed to read remote response body: {err}"))
+            })?;
+        if raw.len() > MAX_REMOTE_ERROR_BODY_BYTES {
+            return Err(ApiError::from_status(
+                status,
+                "remote error response too large".to_owned(),
+            ));
+        }
+        if let Ok(error) = serde_json::from_slice::<ErrorResponse>(&raw) {
+            let message = sanitize_remote_error_body(&error.error).unwrap_or_else(|| {
+                format!("remote request failed with status {}", status.as_u16())
+            });
+            return Err(ApiError::from_status(status, message));
+        }
+        let raw = String::from_utf8_lossy(&raw);
+        let message = sanitize_remote_error_body(raw.as_ref())
+            .unwrap_or_else(|| format!("remote request failed with status {}", status.as_u16()));
+        return Err(ApiError::from_status(status, message));
+    }
+
     let raw = response.text().map_err(|err| {
         ApiError::bad_gateway(format!("failed to read remote response body: {err}"))
     })?;
-    if !status.is_success() {
-        if let Ok(error) = serde_json::from_str::<ErrorResponse>(&raw) {
-            return Err(ApiError::from_status(status, error.error));
-        }
-        let message = if raw.trim().is_empty() {
-            format!("remote request failed with status {}", status.as_u16())
-        } else {
-            raw
-        };
-        return Err(ApiError::from_status(status, message));
-    }
     serde_json::from_str(&raw)
         .map_err(|err| ApiError::bad_gateway(format!("failed to decode remote response: {err}")))
 }

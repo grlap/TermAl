@@ -111,6 +111,7 @@ addition to direct get/put by ID.
 GET /api/workspaces
 GET /api/workspaces/{id}
 PUT /api/workspaces/{id}
+DELETE /api/workspaces/{id}
 ```
 
 ### GET `/api/workspaces/{id}`
@@ -152,8 +153,8 @@ Behavior:
 - create the workspace view if it does not exist
 - replace the stored layout document
 - increment `revision`
-- persist without bumping the global app `revision`
-- do not emit a full `/api/state` snapshot
+- bump the global app `revision`
+- emit a fresh `/api/state` snapshot so other connected switchers see the updated summaries
 
 ## Concurrency semantics
 
@@ -197,7 +198,7 @@ The existing frontend workspace validation remains the gatekeeper:
 
 - collaborative live layout editing
 - visual presence indicators showing which browser owns which workspace
-- rename/delete management beyond the current switcher list
+- rename management beyond the current switcher list
 - server-side semantic understanding of every workspace tab variant
 
 Those can come later once the basic multi-browser workflow is solid.
@@ -205,7 +206,7 @@ Those can come later once the basic multi-browser workflow is solid.
 ## Implementation plan
 
 1. Add `workspace_layouts` to the persisted backend state.
-2. Add `GET /api/workspaces/{id}` and `PUT /api/workspaces/{id}`.
+2. Add `GET /api/workspaces/{id}`, `PUT /api/workspaces/{id}`, and `DELETE /api/workspaces/{id}`.
 3. Generate or read `?workspace=<id>` in the frontend.
 4. Move workspace persistence from one global `localStorage` key to:
    - per-workspace local cache
@@ -222,5 +223,5 @@ Those can come later once the basic multi-browser workflow is solid.
 - Opening the exact same `?workspace=<id>` URL in another browser restores the
   same workspace view.
 - Layout persistence no longer depends on one browser-global localStorage key.
-- Workspace layout saves do not bump the main app revision or spam `/api/state`
-  SSE snapshots.
+- Workspace layout saves publish updated `/api/state` snapshots so other browser switchers
+  stay in sync.

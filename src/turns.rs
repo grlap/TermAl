@@ -91,6 +91,10 @@ trait TurnRecorder {
     fn replace_streaming_text(&mut self, text: &str) -> Result<()>;
     /// Finishes streaming text.
     fn finish_streaming_text(&mut self) -> Result<()>;
+    /// Resets per-turn recorder state.
+    fn reset_turn_state(&mut self) -> Result<()> {
+        self.finish_streaming_text()
+    }
     /// Handles command started.
     fn command_started(&mut self, key: &str, command: &str) -> Result<()>;
     /// Handles command completed.
@@ -575,6 +579,12 @@ fn recorder_finish_streaming_text<R: SessionRecorderAccess>(recorder: &mut R) ->
     Ok(())
 }
 
+/// Resets per-turn recorder state.
+fn recorder_reset_turn_state<R: SessionRecorderAccess>(recorder: &mut R) -> Result<()> {
+    reset_recorder_state_fields(recorder.recorder_state_mut());
+    Ok(())
+}
+
 /// Handles recorder command started.
 fn recorder_command_started<R: SessionRecorderAccess>(
     recorder: &mut R,
@@ -872,6 +882,11 @@ impl TurnRecorder for SessionRecorder {
         recorder_finish_streaming_text(self)
     }
 
+    /// Resets turn state.
+    fn reset_turn_state(&mut self) -> Result<()> {
+        recorder_reset_turn_state(self)
+    }
+
     /// Handles command started.
     fn command_started(&mut self, key: &str, command: &str) -> Result<()> {
         recorder_command_started(self, key, command)
@@ -959,6 +974,11 @@ impl TurnRecorder for BorrowedSessionRecorder<'_> {
     /// Finishes streaming text.
     fn finish_streaming_text(&mut self) -> Result<()> {
         recorder_finish_streaming_text(self)
+    }
+
+    /// Resets turn state.
+    fn reset_turn_state(&mut self) -> Result<()> {
+        recorder_reset_turn_state(self)
     }
 
     /// Handles command started.
@@ -1462,6 +1482,11 @@ impl TurnRecorder for DynTurnRecorderRef<'_> {
     /// Finishes streaming text.
     fn finish_streaming_text(&mut self) -> Result<()> {
         self.inner.finish_streaming_text()
+    }
+
+    /// Resets turn state.
+    fn reset_turn_state(&mut self) -> Result<()> {
+        self.inner.reset_turn_state()
     }
 
     /// Handles command started.
@@ -2887,6 +2912,28 @@ fn finish_claude_assistant_text_stream<R: TurnRecorder + ?Sized>(
     Ok(())
 }
 
+/// Clears Claude turn-local state.
+fn clear_claude_turn_state(state: &mut ClaudeTurnState) {
+    state.approval_keys_this_turn.clear();
+    state.parallel_agent_group_key = None;
+    state.parallel_agent_order.clear();
+    state.parallel_agents.clear();
+    state.permission_denied_this_turn = false;
+    state.pending_tools.clear();
+    state.streamed_assistant_text.clear();
+    state.saw_text_delta = false;
+}
+
+/// Resets Claude turn-local parser and recorder state.
+fn reset_claude_turn_state<R: TurnRecorder + ?Sized>(
+    state: &mut ClaudeTurnState,
+    recorder: &mut R,
+) -> Result<()> {
+    finish_claude_assistant_text_stream(state, recorder)?;
+    clear_claude_turn_state(state);
+    recorder.reset_turn_state()
+}
+
 /// Handles Claude event.
 fn handle_claude_event(
     message: &Value,
@@ -2971,12 +3018,7 @@ fn handle_claude_event(
             handle_claude_tool_result(message, state, recorder)?;
         }
         "result" => {
-            finish_claude_assistant_text_stream(state, recorder)?;
-            state.approval_keys_this_turn.clear();
-            state.parallel_agent_group_key = None;
-            state.parallel_agent_order.clear();
-            state.parallel_agents.clear();
-            state.permission_denied_this_turn = false;
+            reset_claude_turn_state(state, recorder)?;
 
             if message
                 .get("is_error")

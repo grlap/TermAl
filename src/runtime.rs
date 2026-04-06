@@ -38,6 +38,16 @@ fn resolve_home_dir() -> Option<PathBuf> {
         .map(PathBuf::from)
 }
 
+/// Returns the current stderr log timestamp.
+fn runtime_stderr_timestamp() -> String {
+    Local::now().format("%H:%M:%S").to_string()
+}
+
+/// Formats a runtime stderr log prefix.
+fn format_runtime_stderr_prefix(label: &str, timestamp: &str) -> String {
+    format!("{label} stderr [{timestamp}]>")
+}
+
 /// Resolves TermAl Codex home.
 fn resolve_termal_codex_home(default_workdir: &str, scope: &str) -> PathBuf {
     resolve_termal_data_dir(default_workdir)
@@ -353,6 +363,7 @@ struct AcpPendingApproval {
 struct AcpRuntimeState {
     current_session_id: Option<String>,
     is_loading_history: bool,
+    supports_session_load: Option<bool>,
 }
 
 /// Tracks ACP turn state.
@@ -403,14 +414,99 @@ enum DispatchTurnResult {
 }
 
 type CodexPendingRequestMap =
-    Arc<Mutex<HashMap<String, Sender<std::result::Result<Value, String>>>>>;
-type AcpPendingRequestMap = Arc<Mutex<HashMap<String, Sender<std::result::Result<Value, String>>>>>;
+    Arc<Mutex<HashMap<String, Sender<std::result::Result<Value, CodexResponseError>>>>>;
+type AcpPendingRequestMap =
+    Arc<Mutex<HashMap<String, Sender<std::result::Result<Value, AcpResponseError>>>>>;
 
 /// Represents the pending ACP JSON RPC request payload.
 struct PendingAcpJsonRpcRequest {
     request_id: String,
-    response_rx: mpsc::Receiver<std::result::Result<Value, String>>,
+    response_rx: mpsc::Receiver<std::result::Result<Value, AcpResponseError>>,
 }
+
+/// Represents a Codex request failure.
+#[derive(Clone, Debug, PartialEq)]
+enum CodexResponseError {
+    JsonRpc(String),
+    Transport(String),
+}
+
+impl CodexResponseError {
+    /// Returns the transport detail when the request failed before Codex sent a JSON-RPC result.
+    fn as_transport(&self) -> Option<&str> {
+        match self {
+            Self::JsonRpc(_) => None,
+            Self::Transport(detail) => Some(detail),
+        }
+    }
+}
+
+impl std::fmt::Display for CodexResponseError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::JsonRpc(detail) | Self::Transport(detail) => f.write_str(detail),
+        }
+    }
+}
+
+impl std::error::Error for CodexResponseError {}
+
+/// Represents an ACP JSON RPC error payload.
+#[derive(Clone, Debug, PartialEq)]
+struct AcpJsonRpcError {
+    code: Option<i64>,
+    message: String,
+    data: Option<Value>,
+}
+
+impl AcpJsonRpcError {
+    /// Returns whether the error explicitly reports an invalid stored session identifier.
+    fn is_invalid_session_identifier(&self) -> bool {
+        self.data
+            .as_ref()
+            .is_some_and(acp_error_data_indicates_invalid_session_identifier)
+            || self.message.contains("Invalid session identifier")
+    }
+}
+
+impl std::fmt::Display for AcpJsonRpcError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self.code {
+            Some(code) => write!(f, "ACP JSON-RPC error {code}: {}", self.message),
+            None => f.write_str(&self.message),
+        }
+    }
+}
+
+impl std::error::Error for AcpJsonRpcError {}
+
+/// Represents an ACP request failure.
+#[derive(Clone, Debug, PartialEq)]
+enum AcpResponseError {
+    JsonRpc(AcpJsonRpcError),
+    Transport(String),
+}
+
+impl AcpResponseError {
+    /// Returns the JSON-RPC error details when the request reached the ACP runtime.
+    fn as_json_rpc(&self) -> Option<&AcpJsonRpcError> {
+        match self {
+            Self::JsonRpc(error) => Some(error),
+            Self::Transport(_) => None,
+        }
+    }
+}
+
+impl std::fmt::Display for AcpResponseError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::JsonRpc(error) => error.fmt(f),
+            Self::Transport(detail) => f.write_str(detail),
+        }
+    }
+}
+
+impl std::error::Error for AcpResponseError {}
 
 /// Represents pending subagent result.
 struct PendingSubagentResult {
@@ -439,12 +535,19 @@ struct SessionRecorderState {
     streaming_text_message_id: Option<String>,
 }
 
+fn reset_recorder_state_fields(recorder_state: &mut SessionRecorderState) {
+    recorder_state.command_messages.clear();
+    recorder_state.parallel_agents_messages.clear();
+    recorder_state.streaming_text_message_id = None;
+}
+
 /// Tracks shared Codex session state.
 #[derive(Default)]
 struct SharedCodexSessionState {
     recorder: SessionRecorderState,
     thread_id: Option<String>,
     turn_id: Option<String>,
+    turn_started: bool,
     turn_state: CodexTurnState,
 }
 
@@ -464,6 +567,16 @@ fn spawn_acp_runtime(
     let mut command = agent.command(AcpLaunchOptions {
         gemini_approval_mode,
     })?;
+    if agent == AcpAgent::Gemini {
+        if let Some(settings_path) = prepare_termal_gemini_system_settings(&cwd)? {
+            command.env("GEMINI_CLI_SYSTEM_SETTINGS_PATH", settings_path);
+        }
+        for (key, value) in gemini_dotenv_env_pairs() {
+            if !env_var_present(&key) {
+                command.env(key, value);
+            }
+        }
+    }
     command
         .current_dir(&cwd)
         .stdin(Stdio::piped())
@@ -499,6 +612,7 @@ fn spawn_acp_runtime(
         let writer_pending_requests = pending_requests.clone();
         let writer_runtime_state = runtime_state.clone();
         let writer_runtime_token = RuntimeToken::Acp(runtime_id.clone());
+        let writer_cwd = cwd.clone();
         std::thread::spawn(move || {
             let mut stdin = stdin;
             let initialize_result = send_acp_json_rpc_request(
@@ -517,7 +631,14 @@ fn spawn_acp_runtime(
                 agent,
             )
             .and_then(|result| {
-                maybe_authenticate_acp_runtime(&mut stdin, &writer_pending_requests, &result, agent)
+                update_acp_runtime_capabilities(&writer_runtime_state, &result);
+                maybe_authenticate_acp_runtime(
+                    &mut stdin,
+                    &writer_pending_requests,
+                    &result,
+                    agent,
+                    &writer_cwd,
+                )
             });
 
             if let Err(err) = initialize_result {
@@ -673,7 +794,10 @@ fn spawn_acp_runtime(
         std::thread::spawn(move || {
             let reader = BufReader::new(stderr);
             for line in reader.lines().map_while(Result::ok) {
-                eprintln!("{} stderr> {line}", agent.label().to_lowercase());
+                let label = agent.label().to_lowercase();
+                let timestamp = runtime_stderr_timestamp();
+                let prefix = format_runtime_stderr_prefix(&label, &timestamp);
+                eprintln!("{prefix} {line}");
             }
         });
     }
@@ -684,40 +808,38 @@ fn spawn_acp_runtime(
         let wait_process = process.clone();
         let wait_pending_requests = pending_requests.clone();
         let wait_runtime_token = RuntimeToken::Acp(runtime_id.clone());
-        std::thread::spawn(move || {
-            match wait_process.wait() {
-                Ok(status) if status.success() => {
-                    fail_pending_acp_requests(
-                        &wait_pending_requests,
-                        &format!(
-                            "{} ACP runtime exited while waiting for a pending response",
-                            agent.label()
-                        ),
-                    );
-                    let _ = wait_state.handle_runtime_exit_if_matches(
-                        &wait_session_id,
-                        &wait_runtime_token,
-                        None,
-                    );
-                }
-                Ok(status) => {
-                    let detail = format!("{} session exited with status {status}", agent.label());
-                    fail_pending_acp_requests(&wait_pending_requests, &detail);
-                    let _ = wait_state.handle_runtime_exit_if_matches(
-                        &wait_session_id,
-                        &wait_runtime_token,
-                        Some(&detail),
-                    );
-                }
-                Err(err) => {
-                    let detail = format!("failed waiting for {} session: {err}", agent.label());
-                    fail_pending_acp_requests(&wait_pending_requests, &detail);
-                    let _ = wait_state.handle_runtime_exit_if_matches(
-                        &wait_session_id,
-                        &wait_runtime_token,
-                        Some(&detail),
-                    );
-                }
+        std::thread::spawn(move || match wait_process.wait() {
+            Ok(status) if status.success() => {
+                fail_pending_acp_requests(
+                    &wait_pending_requests,
+                    &format!(
+                        "{} ACP runtime exited while waiting for a pending response",
+                        agent.label()
+                    ),
+                );
+                let _ = wait_state.handle_runtime_exit_if_matches(
+                    &wait_session_id,
+                    &wait_runtime_token,
+                    None,
+                );
+            }
+            Ok(status) => {
+                let detail = format!("{} session exited with status {status}", agent.label());
+                fail_pending_acp_requests(&wait_pending_requests, &detail);
+                let _ = wait_state.handle_runtime_exit_if_matches(
+                    &wait_session_id,
+                    &wait_runtime_token,
+                    Some(&detail),
+                );
+            }
+            Err(err) => {
+                let detail = format!("failed waiting for {} session: {err}", agent.label());
+                fail_pending_acp_requests(&wait_pending_requests, &detail);
+                let _ = wait_state.handle_runtime_exit_if_matches(
+                    &wait_session_id,
+                    &wait_runtime_token,
+                    Some(&detail),
+                );
             }
         });
     }
@@ -736,8 +858,9 @@ fn maybe_authenticate_acp_runtime(
     pending_requests: &AcpPendingRequestMap,
     initialize_result: &Value,
     agent: AcpAgent,
+    workdir: &str,
 ) -> Result<()> {
-    let Some(method_id) = select_acp_auth_method(initialize_result, agent) else {
+    let Some(method_id) = select_acp_auth_method(initialize_result, agent, workdir) else {
         return Ok(());
     };
 
@@ -752,8 +875,39 @@ fn maybe_authenticate_acp_runtime(
     Ok(())
 }
 
+/// Records ACP runtime capabilities from initialize.
+fn update_acp_runtime_capabilities(
+    runtime_state: &Arc<Mutex<AcpRuntimeState>>,
+    initialize_result: &Value,
+) {
+    let Some(supports_session_load) = acp_supports_session_load(initialize_result) else {
+        return;
+    };
+
+    runtime_state
+        .lock()
+        .expect("ACP runtime state mutex poisoned")
+        .supports_session_load = Some(supports_session_load);
+}
+
+/// Returns whether ACP initialize reported session/load support.
+fn acp_supports_session_load(initialize_result: &Value) -> Option<bool> {
+    initialize_result
+        .pointer("/agentCapabilities/loadSession")
+        .and_then(Value::as_bool)
+        .or_else(|| {
+            initialize_result
+                .pointer("/capabilities/loadSession")
+                .and_then(Value::as_bool)
+        })
+}
+
 /// Handles select ACP auth method.
-fn select_acp_auth_method(initialize_result: &Value, agent: AcpAgent) -> Option<String> {
+fn select_acp_auth_method(
+    initialize_result: &Value,
+    agent: AcpAgent,
+    workdir: &str,
+) -> Option<String> {
     let methods = initialize_result
         .get("authMethods")
         .and_then(Value::as_array)?;
@@ -771,12 +925,9 @@ fn select_acp_auth_method(initialize_result: &Value, agent: AcpAgent) -> Option<
     match agent {
         AcpAgent::Cursor => has_method("cursor_login").then_some("cursor_login".to_owned()),
         AcpAgent::Gemini => {
-            if std::env::var_os("GEMINI_API_KEY").is_some() && has_method("gemini-api-key") {
+            if gemini_api_key_source().is_some() && has_method("gemini-api-key") {
                 Some("gemini-api-key".to_owned())
-            } else if (std::env::var_os("GOOGLE_GENAI_USE_VERTEXAI").is_some()
-                || std::env::var_os("GOOGLE_GENAI_USE_GCA").is_some())
-                && has_method("vertex-ai")
-            {
+            } else if gemini_vertex_auth_source(workdir).is_some() && has_method("vertex-ai") {
                 Some("vertex-ai".to_owned())
             } else {
                 None
@@ -894,16 +1045,24 @@ fn ensure_acp_session_ready(
     agent: AcpAgent,
     command: &AcpPromptCommand,
 ) -> Result<String> {
-    if let Some(existing_session_id) = runtime_state
-        .lock()
-        .expect("ACP runtime state mutex poisoned")
-        .current_session_id
-        .clone()
-    {
+    let (existing_session_id, supports_session_load) = {
+        let state = runtime_state
+            .lock()
+            .expect("ACP runtime state mutex poisoned");
+        (
+            state.current_session_id.clone(),
+            state.supports_session_load,
+        )
+    };
+    if let Some(existing_session_id) = existing_session_id {
         return Ok(existing_session_id);
     }
 
-    let session_result = if let Some(resume_session_id) = command.resume_session_id.as_deref() {
+    let session_result = if let Some(resume_session_id) = command
+        .resume_session_id
+        .as_deref()
+        .filter(|_| supports_session_load != Some(false))
+    {
         {
             let mut state = runtime_state
                 .lock()
@@ -928,30 +1087,25 @@ fn ensure_acp_session_ready(
                 .expect("ACP runtime state mutex poisoned");
             state.is_loading_history = false;
         }
-        result.map(|value| (resume_session_id.to_owned(), value))?
+        match result {
+            Ok(value) => {
+                runtime_state
+                    .lock()
+                    .expect("ACP runtime state mutex poisoned")
+                    .supports_session_load = Some(true);
+                (resume_session_id.to_owned(), value)
+            }
+            Err(err) if agent == AcpAgent::Gemini && is_gemini_invalid_session_load_error(&err) => {
+                runtime_state
+                    .lock()
+                    .expect("ACP runtime state mutex poisoned")
+                    .supports_session_load = Some(true);
+                start_acp_session(writer, pending_requests, agent, &command.cwd)?
+            }
+            Err(err) => return Err(err),
+        }
     } else {
-        let result = send_acp_json_rpc_request(
-            writer,
-            pending_requests,
-            "session/new",
-            json!({
-                "cwd": command.cwd,
-                "mcpServers": [],
-            }),
-            Duration::from_secs(30),
-            agent,
-        )?;
-        let created_session_id = result
-            .get("sessionId")
-            .and_then(Value::as_str)
-            .ok_or_else(|| {
-                anyhow!(
-                    "{} ACP session/new did not return a session id",
-                    agent.label()
-                )
-            })?
-            .to_owned();
-        (created_session_id, result)
+        start_acp_session(writer, pending_requests, agent, &command.cwd)?
     };
 
     let (external_session_id, session_config) = session_result;
@@ -978,6 +1132,37 @@ fn ensure_acp_session_ready(
         .expect("ACP runtime state mutex poisoned")
         .current_session_id = Some(external_session_id.clone());
     Ok(external_session_id)
+}
+
+/// Starts a new ACP session.
+fn start_acp_session(
+    writer: &mut impl Write,
+    pending_requests: &AcpPendingRequestMap,
+    agent: AcpAgent,
+    cwd: &str,
+) -> Result<(String, Value)> {
+    let result = send_acp_json_rpc_request(
+        writer,
+        pending_requests,
+        "session/new",
+        json!({
+            "cwd": cwd,
+            "mcpServers": [],
+        }),
+        Duration::from_secs(30),
+        agent,
+    )?;
+    let created_session_id = result
+        .get("sessionId")
+        .and_then(Value::as_str)
+        .ok_or_else(|| {
+            anyhow!(
+                "{} ACP session/new did not return a session id",
+                agent.label()
+            )
+        })?
+        .to_owned();
+    Ok((created_session_id, result))
 }
 
 /// Handles configure ACP session.
@@ -1157,9 +1342,9 @@ fn handle_acp_message(
                 let response = if let Some(result) = message.get("result") {
                     Ok(result.clone())
                 } else {
-                    Err(summarize_acp_json_rpc_error(
+                    Err(AcpResponseError::JsonRpc(parse_acp_json_rpc_error(
                         message.get("error").unwrap_or(&Value::Null),
-                    ))
+                    )))
                 };
                 let _ = sender.send(response);
             }
@@ -1719,7 +1904,7 @@ fn fail_pending_acp_requests(pending_requests: &AcpPendingRequestMap, detail: &s
         .collect::<Vec<_>>();
 
     for sender in senders {
-        let _ = sender.send(Err(detail.to_owned()));
+        let _ = sender.send(Err(AcpResponseError::Transport(detail.to_owned())));
     }
 }
 
@@ -1746,13 +1931,76 @@ fn acp_request_id_key(id: &Value) -> String {
         .unwrap_or_else(|| id.to_string())
 }
 
-/// Summarizes ACP JSON RPC error.
-fn summarize_acp_json_rpc_error(error: &Value) -> String {
-    if let Some(message) = error.get("message").and_then(Value::as_str) {
-        return message.to_owned();
+/// Parses an ACP JSON RPC error.
+fn parse_acp_json_rpc_error(error: &Value) -> AcpJsonRpcError {
+    AcpJsonRpcError {
+        code: error.get("code").and_then(Value::as_i64),
+        message: error
+            .get("message")
+            .and_then(Value::as_str)
+            .map(str::to_owned)
+            .unwrap_or_else(|| summarize_error(error)),
+        data: error.get("data").cloned(),
     }
+}
 
-    summarize_error(error)
+/// Returns whether a Gemini session/load failure should fall back to session/new.
+fn is_gemini_invalid_session_load_error(err: &anyhow::Error) -> bool {
+    err.downcast_ref::<AcpResponseError>()
+        .and_then(AcpResponseError::as_json_rpc)
+        .is_some_and(AcpJsonRpcError::is_invalid_session_identifier)
+        || err
+            .chain()
+            .any(|chain_err| chain_err.to_string().contains("Invalid session identifier"))
+}
+
+/// Returns whether ACP error data explicitly reports an invalid session identifier.
+fn acp_error_data_indicates_invalid_session_identifier(value: &Value) -> bool {
+    acp_error_data_indicates_invalid_session_identifier_with_depth(value, 10)
+}
+
+/// Returns whether ACP error data explicitly reports an invalid session identifier.
+fn acp_error_data_indicates_invalid_session_identifier_with_depth(
+    value: &Value,
+    remaining_depth: u8,
+) -> bool {
+    match value {
+        Value::String(reason) => acp_reason_indicates_invalid_session_identifier(reason),
+        _ if remaining_depth == 0 => false,
+        Value::Array(entries) => entries.iter().any(|entry| {
+            acp_error_data_indicates_invalid_session_identifier_with_depth(
+                entry,
+                remaining_depth - 1,
+            )
+        }),
+        Value::Object(fields) => {
+            for key in ["reason", "type", "error", "code", "details"] {
+                if fields.get(key).is_some_and(|entry| {
+                    acp_error_data_indicates_invalid_session_identifier_with_depth(
+                        entry,
+                        remaining_depth - 1,
+                    )
+                }) {
+                    return true;
+                }
+            }
+            false
+        }
+        _ => false,
+    }
+}
+
+/// Normalizes reason strings used for invalid-session identifiers across ACP agents.
+fn acp_reason_indicates_invalid_session_identifier(reason: &str) -> bool {
+    let normalized = reason
+        .chars()
+        .filter(|character| character.is_ascii_alphanumeric())
+        .map(|character| character.to_ascii_lowercase())
+        .collect::<String>();
+    matches!(
+        normalized.as_str(),
+        "invalidsessionidentifier" | "invalidsessionid" | "invalidsession"
+    )
 }
 
 /// Handles log unhandled ACP event.
@@ -1814,9 +2062,8 @@ fn spawn_shared_codex_runtime(state: AppState) -> Result<SharedCodexRuntime> {
         .stderr
         .take()
         .context("failed to capture shared Codex app-server stderr")?;
-    let process = Arc::new(
-        SharedChild::new(child).context("failed to share shared Codex app-server child")?,
-    );
+    let process =
+        Arc::new(SharedChild::new(child).context("failed to share shared Codex app-server child")?);
     let (input_tx, input_rx) = mpsc::channel::<CodexRuntimeCommand>();
     let pending_requests: CodexPendingRequestMap = Arc::new(Mutex::new(HashMap::new()));
     let sessions: SharedCodexSessionMap = Arc::new(Mutex::new(HashMap::new()));
@@ -1828,9 +2075,10 @@ fn spawn_shared_codex_runtime(state: AppState) -> Result<SharedCodexRuntime> {
         let writer_sessions = sessions.clone();
         let writer_thread_sessions = thread_sessions.clone();
         let writer_runtime_id = runtime_id.clone();
+        let writer_runtime_token = RuntimeToken::Codex(runtime_id.clone());
         std::thread::spawn(move || {
             let mut stdin = stdin;
-            let initialize_result = send_codex_json_rpc_request(
+            let initialize_result = send_codex_json_rpc_request_without_timeout(
                 &mut stdin,
                 &writer_pending_requests,
                 "initialize",
@@ -1840,8 +2088,8 @@ fn spawn_shared_codex_runtime(state: AppState) -> Result<SharedCodexRuntime> {
                         "version": env!("CARGO_PKG_VERSION"),
                     }
                 }),
-                Duration::from_secs(15),
             )
+            .map_err(anyhow::Error::new)
             .and_then(|_| {
                 write_codex_json_rpc_message(&mut stdin, &json!({ "method": "initialized" }))
             });
@@ -1861,32 +2109,45 @@ fn spawn_shared_codex_runtime(state: AppState) -> Result<SharedCodexRuntime> {
                     CodexRuntimeCommand::Prompt {
                         session_id,
                         command,
-                    } => handle_shared_codex_prompt_command(
-                        &mut stdin,
-                        &writer_pending_requests,
+                    } => handle_shared_codex_prompt_command_result(
                         &writer_state,
-                        &writer_sessions,
-                        &writer_thread_sessions,
                         &session_id,
-                        command,
+                        &writer_runtime_token,
+                        handle_shared_codex_prompt_command(
+                            &mut stdin,
+                            &writer_pending_requests,
+                            &writer_state,
+                            &writer_sessions,
+                            &writer_thread_sessions,
+                            &session_id,
+                            command,
+                        ),
                     ),
                     CodexRuntimeCommand::JsonRpcRequest {
                         method,
                         params,
                         timeout,
                         response_tx,
-                    } => {
-                        let request_result = send_codex_json_rpc_request(
-                            &mut stdin,
-                            &writer_pending_requests,
-                            &method,
-                            params,
-                            timeout,
-                        )
-                        .map_err(|err| format!("{err:#}"));
-                        let _ = response_tx.send(request_result.clone());
-                        request_result.map(|_| ()).map_err(anyhow::Error::msg)
-                    }
+                    } => match send_codex_json_rpc_request(
+                        &mut stdin,
+                        &writer_pending_requests,
+                        &method,
+                        params,
+                        timeout,
+                    ) {
+                        Ok(result) => {
+                            let _ = response_tx.send(Ok(result));
+                            Ok(())
+                        }
+                        Err(CodexResponseError::JsonRpc(detail)) => {
+                            let _ = response_tx.send(Err(detail));
+                            Ok(())
+                        }
+                        Err(CodexResponseError::Transport(detail)) => {
+                            let _ = response_tx.send(Err(detail.clone()));
+                            Err(anyhow!(detail))
+                        }
+                    },
                     CodexRuntimeCommand::JsonRpcResponse { response } => {
                         write_codex_json_rpc_message(
                             &mut stdin,
@@ -1900,32 +2161,41 @@ fn spawn_shared_codex_runtime(state: AppState) -> Result<SharedCodexRuntime> {
                         response_tx,
                         thread_id,
                         turn_id,
-                    } => {
-                        let interrupt_result = send_codex_json_rpc_request(
-                            &mut stdin,
-                            &writer_pending_requests,
-                            "turn/interrupt",
-                            json!({
-                                "threadId": thread_id,
-                                "turnId": turn_id,
-                            }),
-                            Duration::from_secs(30),
-                        )
-                        .map(|_| ())
-                        .map_err(|err| format!("{err:#}"));
-                        let _ = response_tx.send(interrupt_result.clone());
-                        interrupt_result.map_err(anyhow::Error::msg)
-                    }
+                    } => match send_codex_json_rpc_request(
+                        &mut stdin,
+                        &writer_pending_requests,
+                        "turn/interrupt",
+                        json!({
+                            "threadId": thread_id,
+                            "turnId": turn_id,
+                        }),
+                        Duration::from_secs(30),
+                    ) {
+                        Ok(_) => {
+                            let _ = response_tx.send(Ok(()));
+                            Ok(())
+                        }
+                        Err(CodexResponseError::JsonRpc(detail)) => {
+                            let _ = response_tx.send(Err(detail));
+                            Ok(())
+                        }
+                        Err(CodexResponseError::Transport(detail)) => {
+                            let _ = response_tx.send(Err(detail.clone()));
+                            Err(anyhow!(detail))
+                        }
+                    },
                     CodexRuntimeCommand::RefreshModelList { response_tx } => {
-                        let refresh_result =
-                            handle_codex_model_list_refresh(&mut stdin, &writer_pending_requests)
-                                .map_err(|err| format!("{err:#}"));
-                        match refresh_result {
+                        match handle_codex_model_list_refresh(&mut stdin, &writer_pending_requests)
+                        {
                             Ok(model_options) => {
                                 let _ = response_tx.send(Ok(model_options));
                                 Ok(())
                             }
-                            Err(detail) => {
+                            Err(CodexResponseError::JsonRpc(detail)) => {
+                                let _ = response_tx.send(Err(detail));
+                                Ok(())
+                            }
+                            Err(CodexResponseError::Transport(detail)) => {
                                 let _ = response_tx.send(Err(detail.clone()));
                                 Err(anyhow!(detail))
                             }
@@ -1936,9 +2206,7 @@ fn spawn_shared_codex_runtime(state: AppState) -> Result<SharedCodexRuntime> {
                 if let Err(err) = command_result {
                     let _ = writer_state.handle_shared_codex_runtime_exit(
                         &writer_runtime_id,
-                        Some(&format!(
-                            "failed to communicate with shared Codex app-server: {err:#}"
-                        )),
+                        Some(&shared_codex_runtime_command_error_detail(&err)),
                     );
                     break;
                 }
@@ -1955,18 +2223,16 @@ fn spawn_shared_codex_runtime(state: AppState) -> Result<SharedCodexRuntime> {
         std::thread::spawn(move || {
             let mut reader = BufReader::new(stdout);
             let mut raw_line = String::new();
+            let mut runtime_failure: Option<String> = None;
 
             loop {
                 raw_line.clear();
                 let bytes_read = match reader.read_line(&mut raw_line) {
                     Ok(bytes_read) => bytes_read,
                     Err(err) => {
-                        let _ = reader_state.handle_shared_codex_runtime_exit(
-                            &reader_runtime_id,
-                            Some(&format!(
-                                "failed to read stdout from shared Codex app-server: {err}"
-                            )),
-                        );
+                        runtime_failure = Some(format!(
+                            "failed to read stdout from shared Codex app-server: {err}"
+                        ));
                         break;
                     }
                 };
@@ -1978,12 +2244,8 @@ fn spawn_shared_codex_runtime(state: AppState) -> Result<SharedCodexRuntime> {
                 let message: Value = match serde_json::from_str(raw_line.trim_end()) {
                     Ok(message) => message,
                     Err(err) => {
-                        let _ = reader_state.handle_shared_codex_runtime_exit(
-                            &reader_runtime_id,
-                            Some(&format!(
-                                "failed to parse shared Codex app-server JSON line: {err}"
-                            )),
-                        );
+                        runtime_failure =
+                            Some(format!("failed to parse shared Codex app-server JSON line: {err}"));
                         break;
                     }
                 };
@@ -1996,14 +2258,17 @@ fn spawn_shared_codex_runtime(state: AppState) -> Result<SharedCodexRuntime> {
                     &reader_sessions,
                     &reader_thread_sessions,
                 ) {
-                    let _ = reader_state.handle_shared_codex_runtime_exit(
-                        &reader_runtime_id,
-                        Some(&format!(
-                            "failed to handle shared Codex app-server event: {err:#}"
-                        )),
-                    );
+                    runtime_failure = Some(format!(
+                        "failed to handle shared Codex app-server event: {err:#}"
+                    ));
                     break;
                 }
+            }
+
+            if let Some(detail) = runtime_failure.as_deref() {
+                fail_pending_codex_requests(&reader_pending_requests, detail);
+                let _ =
+                    reader_state.handle_shared_codex_runtime_exit(&reader_runtime_id, Some(detail));
             }
 
             let mut sessions = reader_sessions
@@ -2012,6 +2277,7 @@ fn spawn_shared_codex_runtime(state: AppState) -> Result<SharedCodexRuntime> {
             for session_state in sessions.values_mut() {
                 session_state.recorder.streaming_text_message_id = None;
                 session_state.turn_id = None;
+                session_state.turn_started = false;
             }
         });
     }
@@ -2020,7 +2286,9 @@ fn spawn_shared_codex_runtime(state: AppState) -> Result<SharedCodexRuntime> {
         std::thread::spawn(move || {
             let reader = BufReader::new(stderr);
             for line in reader.lines().map_while(Result::ok) {
-                eprintln!("codex stderr> {line}");
+                let timestamp = runtime_stderr_timestamp();
+                let prefix = format_runtime_stderr_prefix("codex", &timestamp);
+                eprintln!("{prefix} {line}");
             }
         });
     }
@@ -2028,24 +2296,31 @@ fn spawn_shared_codex_runtime(state: AppState) -> Result<SharedCodexRuntime> {
     {
         let wait_state = state.clone();
         let wait_process = process.clone();
+        let wait_pending_requests = pending_requests.clone();
         let wait_runtime_id = runtime_id.clone();
-        std::thread::spawn(move || {
-            match wait_process.wait() {
-                Ok(status) if status.success() => {
-                    let _ = wait_state.handle_shared_codex_runtime_exit(&wait_runtime_id, None);
-                }
-                Ok(status) => {
-                    let _ = wait_state.handle_shared_codex_runtime_exit(
-                        &wait_runtime_id,
-                        Some(&format!("shared Codex app-server exited with status {status}")),
-                    );
-                }
-                Err(err) => {
-                    let _ = wait_state.handle_shared_codex_runtime_exit(
-                        &wait_runtime_id,
-                        Some(&format!("failed waiting for shared Codex app-server: {err}")),
-                    );
-                }
+        std::thread::spawn(move || match wait_process.wait() {
+            Ok(status) if status.success() => {
+                fail_pending_codex_requests(
+                    &wait_pending_requests,
+                    "shared Codex app-server exited while waiting for a pending response",
+                );
+                let _ = wait_state.handle_shared_codex_runtime_exit(&wait_runtime_id, None);
+            }
+            Ok(status) => {
+                let detail = format!("shared Codex app-server exited with status {status}");
+                fail_pending_codex_requests(&wait_pending_requests, &detail);
+                let _ = wait_state.handle_shared_codex_runtime_exit(
+                    &wait_runtime_id,
+                    Some(&detail),
+                );
+            }
+            Err(err) => {
+                let detail = format!("failed waiting for shared Codex app-server: {err}");
+                fail_pending_codex_requests(&wait_pending_requests, &detail);
+                let _ = wait_state.handle_shared_codex_runtime_exit(
+                    &wait_runtime_id,
+                    Some(&detail),
+                );
             }
         });
     }
@@ -2071,7 +2346,7 @@ fn remember_shared_codex_thread(
             .lock()
             .expect("shared Codex session mutex poisoned");
         let session_state = sessions.entry(session_id.to_owned()).or_default();
-        session_state.turn_id = None;
+        clear_shared_codex_turn_session_state(session_state);
         session_state.thread_id.replace(thread_id.clone())
     };
 
@@ -2162,7 +2437,7 @@ fn handle_shared_codex_prompt_command(
         thread_id
     } else {
         let result = match command.resume_thread_id.as_deref() {
-            Some(thread_id) => send_codex_json_rpc_request(
+            Some(thread_id) => send_codex_json_rpc_request_without_timeout(
                 writer,
                 pending_requests,
                 "thread/resume",
@@ -2173,9 +2448,8 @@ fn handle_shared_codex_prompt_command(
                     "sandbox": command.sandbox_mode.as_cli_value(),
                     "approvalPolicy": command.approval_policy.as_cli_value(),
                 }),
-                Duration::from_secs(30),
             )?,
-            None => send_codex_json_rpc_request(
+            None => send_codex_json_rpc_request_without_timeout(
                 writer,
                 pending_requests,
                 "thread/start",
@@ -2186,7 +2460,6 @@ fn handle_shared_codex_prompt_command(
                     "approvalPolicy": command.approval_policy.as_cli_value(),
                     "personality": "pragmatic",
                 }),
-                Duration::from_secs(30),
             )?,
         };
 
@@ -2207,7 +2480,16 @@ fn handle_shared_codex_prompt_command(
         command.reasoning_effort,
     )?;
 
-    let turn_result = send_codex_json_rpc_request(
+    {
+        let mut sessions = sessions
+            .lock()
+            .expect("shared Codex session mutex poisoned");
+        let session_state = sessions.entry(session_id.to_owned()).or_default();
+        session_state.thread_id = Some(thread_id.clone());
+        clear_shared_codex_turn_session_state(session_state);
+    }
+
+    let turn_result = send_codex_json_rpc_request_without_timeout(
         writer,
         pending_requests,
         "turn/start",
@@ -2220,7 +2502,6 @@ fn handle_shared_codex_prompt_command(
             "sandboxPolicy": codex_sandbox_policy_value(command.sandbox_mode),
             "input": codex_user_input_items(&command.prompt, &command.attachments),
         }),
-        Duration::from_secs(30),
     )?;
 
     let turn_id = turn_result
@@ -2232,7 +2513,29 @@ fn handle_shared_codex_prompt_command(
         .expect("shared Codex session mutex poisoned");
     let session_state = sessions.entry(session_id.to_owned()).or_default();
     session_state.turn_id = turn_id;
+    session_state.turn_started = false;
     Ok(())
+}
+
+/// Handles shared Codex prompt command results.
+fn handle_shared_codex_prompt_command_result(
+    state: &AppState,
+    session_id: &str,
+    runtime_token: &RuntimeToken,
+    result: Result<()>,
+) -> Result<()> {
+    match result {
+        Ok(()) => Ok(()),
+        Err(err) => {
+            if let Some(CodexResponseError::JsonRpc(detail)) =
+                err.downcast_ref::<CodexResponseError>()
+            {
+                state.fail_turn_if_runtime_matches(session_id, runtime_token, detail)?;
+                return Ok(());
+            }
+            Err(err)
+        }
+    }
 }
 
 /// Handles shared Codex app server message.
@@ -2255,9 +2558,9 @@ fn handle_shared_codex_app_server_message(
                 let response = if let Some(result) = message.get("result") {
                     Ok(result.clone())
                 } else {
-                    Err(summarize_codex_json_rpc_error(
+                    Err(CodexResponseError::JsonRpc(summarize_codex_json_rpc_error(
                         message.get("error").unwrap_or(&Value::Null),
-                    ))
+                    )))
                 };
                 let _ = sender.send(response);
             }
@@ -2340,11 +2643,28 @@ fn handle_shared_codex_app_server_message(
         recorder: recorder_state,
         thread_id,
         turn_id,
+        turn_started,
         turn_state,
     } = session_state;
+    let turn_started_turn_id = (method == "turn/started")
+        .then(|| message.pointer("/params/turn/id").and_then(Value::as_str))
+        .flatten();
+    if method == "turn/started" && turn_started_turn_id != turn_id.as_deref() {
+        clear_shared_codex_turn_recorder_state(recorder_state);
+        clear_codex_turn_state(turn_state);
+        *turn_started = false;
+    }
     let mut recorder = BorrowedSessionRecorder::new(state, &session_id, recorder_state);
 
     if message.get("id").is_some() {
+        let event_turn_id = shared_codex_event_turn_id(message);
+        if !shared_codex_app_server_event_matches_active_turn(
+            turn_id.as_deref(),
+            *turn_started,
+            event_turn_id,
+        ) {
+            return Ok(());
+        }
         return handle_codex_app_server_request(method, message, &mut recorder);
     }
 
@@ -2356,6 +2676,7 @@ fn handle_shared_codex_app_server_message(
         &runtime_token,
         thread_id,
         turn_id,
+        turn_started,
         turn_state,
         thread_sessions,
         &mut recorder,
@@ -2454,12 +2775,7 @@ fn build_shared_codex_global_notice(
     );
     let title = extract_shared_codex_notice_text(
         payload,
-        &[
-            "/title",
-            "/name",
-            "/warning/title",
-            "/deprecation/title",
-        ],
+        &["/title", "/name", "/warning/title", "/deprecation/title"],
     );
     let detail = extract_shared_codex_notice_text(
         payload,
@@ -2514,6 +2830,7 @@ fn handle_shared_codex_app_server_notification(
     runtime_token: &RuntimeToken,
     session_thread_id: &mut Option<String>,
     turn_id: &mut Option<String>,
+    turn_started: &mut bool,
     turn_state: &mut CodexTurnState,
     thread_sessions: &SharedCodexThreadMap,
     recorder: &mut impl TurnRecorder,
@@ -2523,6 +2840,7 @@ fn handle_shared_codex_app_server_notification(
             if let Some(thread_id) = message.pointer("/params/thread/id").and_then(Value::as_str) {
                 let previous_thread_id = session_thread_id.replace(thread_id.to_owned());
                 *turn_id = None;
+                *turn_started = false;
                 let mut thread_sessions = thread_sessions
                     .lock()
                     .expect("shared Codex thread mutex poisoned");
@@ -2551,19 +2869,21 @@ fn handle_shared_codex_app_server_notification(
             )?;
         }
         "turn/started" => {
-            clear_codex_turn_state(turn_state);
-            *turn_id = message
-                .pointer("/params/turn/id")
-                .and_then(Value::as_str)
-                .map(str::to_owned);
-            recorder.finish_streaming_text()?;
+            let next_turn_id = message.pointer("/params/turn/id").and_then(Value::as_str);
+            let turn_changed = turn_id.as_deref() != next_turn_id;
+            *turn_id = next_turn_id.map(str::to_owned);
+            *turn_started = true;
+            if turn_changed {
+                recorder.finish_streaming_text()?;
+            }
         }
         "turn/completed" => {
             if let Some(error) = message.pointer("/params/turn/error") {
                 if !error.is_null() {
                     *turn_id = None;
+                    *turn_started = false;
                     clear_codex_turn_state(turn_state);
-                    recorder.finish_streaming_text()?;
+                    recorder.reset_turn_state()?;
                     state.fail_turn_if_runtime_matches(
                         session_id,
                         runtime_token,
@@ -2574,32 +2894,68 @@ fn handle_shared_codex_app_server_notification(
             }
 
             *turn_id = None;
+            *turn_started = false;
             flush_pending_codex_subagent_results(turn_state, recorder)?;
             clear_codex_turn_state(turn_state);
             recorder.finish_streaming_text()?;
             state.finish_turn_ok_if_runtime_matches(session_id, runtime_token)?;
         }
         "item/started" => {
+            let event_turn_id = shared_codex_event_turn_id(message);
+            if !shared_codex_app_server_event_matches_active_turn(
+                turn_id.as_deref(),
+                *turn_started,
+                event_turn_id,
+            ) {
+                return Ok(());
+            }
             if let Some(item) = message.get("params").and_then(|params| params.get("item")) {
                 handle_codex_app_server_item_started(item, recorder)?;
             }
         }
         "item/completed" => {
+            let event_turn_id = shared_codex_event_turn_id(message);
+            if !shared_codex_app_server_event_matches_active_turn(
+                turn_id.as_deref(),
+                *turn_started,
+                event_turn_id,
+            ) {
+                return Ok(());
+            }
             if let Some(item) = message.get("params").and_then(|params| params.get("item")) {
-                handle_codex_app_server_item_completed(item, state, session_id, turn_state, recorder)?;
+                handle_codex_app_server_item_completed(
+                    item, state, session_id, turn_state, recorder,
+                )?;
             }
         }
         "item/agentMessage/delta" => {
+            let event_turn_id = shared_codex_event_turn_id(message);
+            if !shared_codex_app_server_event_matches_active_turn(
+                turn_id.as_deref(),
+                *turn_started,
+                event_turn_id,
+            ) {
+                return Ok(());
+            }
             let Some(delta) = message.pointer("/params/delta").and_then(Value::as_str) else {
                 return Ok(());
             };
             let Some(item_id) = message.pointer("/params/itemId").and_then(Value::as_str) else {
                 return Ok(());
             };
-            record_codex_agent_message_delta(turn_state, recorder, state, session_id, item_id, delta)?;
+            record_codex_agent_message_delta(
+                turn_state, recorder, state, session_id, item_id, delta,
+            )?;
         }
         "model/rerouted" => {
-            handle_shared_codex_model_rerouted(message, state, session_id, turn_id.as_deref(), turn_state, recorder)?;
+            handle_shared_codex_model_rerouted(
+                message,
+                state,
+                session_id,
+                turn_id.as_deref(),
+                turn_state,
+                recorder,
+            )?;
         }
         "thread/compacted" => {
             handle_shared_codex_thread_compacted(
@@ -2631,7 +2987,9 @@ fn handle_shared_codex_app_server_notification(
         | "thread/realtime/closed" => {}
         "error" => {
             *turn_id = None;
+            *turn_started = false;
             clear_codex_turn_state(turn_state);
+            recorder.reset_turn_state()?;
             let payload = message.get("params").unwrap_or(message);
             let detail = summarize_error(payload);
 
@@ -2773,6 +3131,21 @@ fn shared_codex_event_matches_active_turn(
     }
 }
 
+/// Matches shared Codex app-server events against the active turn.
+fn shared_codex_app_server_event_matches_active_turn(
+    current_turn_id: Option<&str>,
+    turn_started: bool,
+    event_turn_id: Option<&str>,
+) -> bool {
+    match current_turn_id {
+        Some(current) => match event_turn_id {
+            Some(event) => current == event,
+            None => turn_started,
+        },
+        None => false,
+    }
+}
+
 /// Pushes shared Codex turn notice.
 fn push_shared_codex_turn_notice(
     state: &AppState,
@@ -2830,9 +3203,7 @@ fn handle_shared_codex_model_rerouted(
         Some("highRiskCyberActivity") => " because it detected high-risk cyber activity",
         Some(_) | None => "",
     };
-    let notice = format!(
-        "Codex rerouted this turn from `{from_model}` to `{to_model}`{reason}."
-    );
+    let notice = format!("Codex rerouted this turn from `{from_model}` to `{to_model}`{reason}.");
     push_shared_codex_turn_notice(state, session_id, turn_state, &notice)
 }
 
@@ -2850,7 +3221,12 @@ fn handle_shared_codex_thread_compacted(
         return Ok(());
     }
 
-    push_shared_codex_turn_notice(state, session_id, turn_state, "Codex compacted the thread context for this turn.")
+    push_shared_codex_turn_notice(
+        state,
+        session_id,
+        turn_state,
+        "Codex compacted the thread context for this turn.",
+    )
 }
 
 /// Records completed Codex agent message.
@@ -2926,12 +3302,7 @@ fn handle_shared_codex_event_item_completed(
 
             if let Some(text) = text.as_deref() {
                 record_completed_codex_agent_message(
-                    turn_state,
-                    recorder,
-                    state,
-                    session_id,
-                    item_id,
-                    text,
+                    turn_state, recorder, state, session_id, item_id, text,
                 )?;
             }
         }
@@ -2990,6 +3361,19 @@ fn clear_codex_turn_state(turn_state: &mut CodexTurnState) {
     turn_state.pending_subagent_results.clear();
     turn_state.assistant_output_started = false;
     turn_state.first_visible_assistant_message_id = None;
+}
+
+/// Clears shared Codex recorder state that should not leak across turns.
+fn clear_shared_codex_turn_recorder_state(recorder_state: &mut SessionRecorderState) {
+    reset_recorder_state_fields(recorder_state);
+}
+
+/// Clears shared Codex per-turn session state before a new turn starts.
+fn clear_shared_codex_turn_session_state(session_state: &mut SharedCodexSessionState) {
+    session_state.turn_id = None;
+    session_state.turn_started = false;
+    clear_codex_turn_state(&mut session_state.turn_state);
+    clear_shared_codex_turn_recorder_state(&mut session_state.recorder);
 }
 
 /// Buffers Codex subagent result.
@@ -3111,12 +3495,7 @@ fn handle_shared_codex_event_agent_message(
 
     if let Some(item_id) = turn_state.current_agent_message_id.clone() {
         return record_completed_codex_agent_message(
-            turn_state,
-            recorder,
-            state,
-            session_id,
-            &item_id,
-            trimmed,
+            turn_state, recorder, state, session_id, &item_id, trimmed,
         );
     }
 
@@ -3321,7 +3700,9 @@ fn handle_codex_app_server_request(
             );
             let detail = match (
                 reason.trim().is_empty(),
-                permissions_summary.as_deref().filter(|value| !value.is_empty()),
+                permissions_summary
+                    .as_deref()
+                    .filter(|value| !value.is_empty()),
             ) {
                 (true, Some(summary)) => {
                     format!("Codex requested approval to grant additional permissions: {summary}.")
@@ -3354,7 +3735,10 @@ fn handle_codex_app_server_request(
         }
         "item/tool/requestUserInput" => {
             let questions: Vec<UserInputQuestion> = serde_json::from_value(
-                params.get("questions").cloned().unwrap_or_else(|| json!([])),
+                params
+                    .get("questions")
+                    .cloned()
+                    .unwrap_or_else(|| json!([])),
             )
             .context("failed to parse Codex request_user_input questions")?;
             let detail = describe_codex_user_input_request(&questions);
@@ -3391,9 +3775,7 @@ fn handle_codex_app_server_request(
                 &detail,
                 method,
                 params.clone(),
-                CodexPendingAppRequest {
-                    request_id,
-                },
+                CodexPendingAppRequest { request_id },
             )?;
         }
     }
@@ -3499,15 +3881,27 @@ fn describe_codex_permission_request(permissions: &Value) -> Option<String> {
         }
     }
 
-    if permissions.pointer("/network/enabled").and_then(Value::as_bool) == Some(true) {
+    if permissions
+        .pointer("/network/enabled")
+        .and_then(Value::as_bool)
+        == Some(true)
+    {
         parts.push("network access".to_owned());
     }
 
-    if permissions.pointer("/macos/accessibility").and_then(Value::as_bool) == Some(true) {
+    if permissions
+        .pointer("/macos/accessibility")
+        .and_then(Value::as_bool)
+        == Some(true)
+    {
         parts.push("macOS accessibility access".to_owned());
     }
 
-    if permissions.pointer("/macos/calendar").and_then(Value::as_bool) == Some(true) {
+    if permissions
+        .pointer("/macos/calendar")
+        .and_then(Value::as_bool)
+        == Some(true)
+    {
         parts.push("macOS calendar access".to_owned());
     }
 
@@ -3601,12 +3995,7 @@ fn handle_codex_app_server_item_completed(
             let item_id = item.get("id").and_then(Value::as_str).unwrap_or("");
             if let Some(text) = item.get("text").and_then(Value::as_str) {
                 record_completed_codex_agent_message(
-                    turn_state,
-                    recorder,
-                    state,
-                    session_id,
-                    item_id,
-                    text,
+                    turn_state, recorder, state, session_id, item_id, text,
                 )?;
             }
         }
@@ -3678,7 +4067,37 @@ fn send_codex_json_rpc_request(
     method: &str,
     params: Value,
     timeout: Duration,
-) -> Result<Value> {
+) -> std::result::Result<Value, CodexResponseError> {
+    send_codex_json_rpc_request_inner(
+        writer,
+        pending_requests,
+        method,
+        params,
+        Some(timeout),
+    )
+}
+
+/// Handles send Codex JSON RPC request without timeout.
+/// This is intentional because users were frequently hitting Codex timeouts on
+/// long-running requests, so shared Codex setup/turn-start paths wait for the
+/// app-server response instead of enforcing a local deadline.
+fn send_codex_json_rpc_request_without_timeout(
+    writer: &mut impl Write,
+    pending_requests: &CodexPendingRequestMap,
+    method: &str,
+    params: Value,
+) -> std::result::Result<Value, CodexResponseError> {
+    send_codex_json_rpc_request_inner(writer, pending_requests, method, params, None)
+}
+
+/// Handles send Codex JSON RPC request inner.
+fn send_codex_json_rpc_request_inner(
+    writer: &mut impl Write,
+    pending_requests: &CodexPendingRequestMap,
+    method: &str,
+    params: Value,
+    timeout: Option<Duration>,
+) -> std::result::Result<Value, CodexResponseError> {
     let request_id = Uuid::new_v4().to_string();
     let (tx, rx) = mpsc::channel();
     pending_requests
@@ -3698,29 +4117,44 @@ fn send_codex_json_rpc_request(
             .lock()
             .expect("Codex pending requests mutex poisoned")
             .remove(&request_id);
-        return Err(err);
+        return Err(CodexResponseError::Transport(format!("{err:#}")));
     }
 
-    match rx.recv_timeout(timeout) {
-        Ok(Ok(result)) => Ok(result),
-        Ok(Err(err)) => Err(anyhow!(err)),
-        Err(err) => {
-            pending_requests
-                .lock()
-                .expect("Codex pending requests mutex poisoned")
-                .remove(&request_id);
-            Err(anyhow!(
-                "timed out waiting for Codex app-server response to `{method}`: {err}"
-            ))
-        }
-    }
+    let response = match timeout {
+        Some(timeout) => match rx.recv_timeout(timeout) {
+            Ok(response) => response,
+            Err(err) => {
+                pending_requests
+                    .lock()
+                    .expect("Codex pending requests mutex poisoned")
+                    .remove(&request_id);
+                return Err(CodexResponseError::Transport(format!(
+                    "timed out waiting for Codex app-server response to `{method}`: {err}"
+                )));
+            }
+        },
+        None => match rx.recv() {
+            Ok(response) => response,
+            Err(err) => {
+                pending_requests
+                    .lock()
+                    .expect("Codex pending requests mutex poisoned")
+                    .remove(&request_id);
+                return Err(CodexResponseError::Transport(format!(
+                    "failed waiting for Codex app-server response to `{method}`: {err}"
+                )));
+            }
+        },
+    };
+
+    response
 }
 
 /// Handles Codex model list refresh.
 fn handle_codex_model_list_refresh(
     writer: &mut impl Write,
     pending_requests: &CodexPendingRequestMap,
-) -> Result<Vec<SessionModelOption>> {
+) -> std::result::Result<Vec<SessionModelOption>, CodexResponseError> {
     let mut cursor: Option<String> = None;
     let mut model_options = Vec::new();
 
@@ -3747,6 +4181,35 @@ fn handle_codex_model_list_refresh(
     }
 
     Ok(model_options)
+}
+
+/// Marks pending Codex requests as failed.
+fn fail_pending_codex_requests(pending_requests: &CodexPendingRequestMap, detail: &str) {
+    let senders = pending_requests
+        .lock()
+        .expect("Codex pending requests mutex poisoned")
+        .drain()
+        .map(|(_, sender)| sender)
+        .collect::<Vec<_>>();
+
+    for sender in senders {
+        let _ = sender.send(Err(CodexResponseError::Transport(detail.to_owned())));
+    }
+}
+
+/// Formats a shared Codex runtime command failure.
+fn shared_codex_runtime_command_error_detail(err: &anyhow::Error) -> String {
+    if let Some(detail) = err
+        .downcast_ref::<CodexResponseError>()
+        .and_then(CodexResponseError::as_transport)
+    {
+        if detail.contains("shared Codex app-server") {
+            return detail.to_owned();
+        }
+        return format!("failed to communicate with shared Codex app-server: {detail}");
+    }
+
+    format!("failed to communicate with shared Codex app-server: {err:#}")
 }
 
 /// Handles Claude model options.
@@ -4155,6 +4618,7 @@ fn find_command_on_path(command: &str) -> Option<PathBuf> {
 /// Collects agent readiness.
 fn collect_agent_readiness(default_workdir: &str) -> Vec<AgentReadiness> {
     vec![
+        agent_readiness_for(Agent::Codex, default_workdir),
         agent_readiness_for(Agent::Cursor, default_workdir),
         agent_readiness_for(Agent::Gemini, default_workdir),
     ]
@@ -4172,6 +4636,7 @@ fn validate_agent_session_setup(agent: Agent, workdir: &str) -> std::result::Res
 /// Handles agent readiness for.
 fn agent_readiness_for(agent: Agent, workdir: &str) -> AgentReadiness {
     match agent {
+        Agent::Codex => codex_agent_readiness(),
         Agent::Cursor => cursor_agent_readiness(),
         Agent::Gemini => gemini_agent_readiness(workdir),
         _ => AgentReadiness {
@@ -4179,6 +4644,34 @@ fn agent_readiness_for(agent: Agent, workdir: &str) -> AgentReadiness {
             status: AgentReadinessStatus::Ready,
             blocking: false,
             detail: format!("{} is managed by its local CLI runtime.", agent.name()),
+            warning_detail: None,
+            command_path: None,
+        },
+    }
+}
+
+/// Handles Codex agent readiness.
+fn codex_agent_readiness() -> AgentReadiness {
+    let command_path = resolve_codex_executable()
+        .ok()
+        .map(|path| path.display().to_string());
+    match command_path {
+        Some(command_path) => AgentReadiness {
+            agent: Agent::Codex,
+            status: AgentReadinessStatus::Ready,
+            blocking: false,
+            detail: format!("Codex CLI is available at `{command_path}`."),
+            warning_detail: codex_windows_shell_warning(),
+            command_path: Some(command_path),
+        },
+        None => AgentReadiness {
+            agent: Agent::Codex,
+            status: AgentReadinessStatus::Missing,
+            blocking: true,
+            detail:
+                "Install the `codex` CLI and make sure it is on PATH before creating Codex sessions."
+                    .to_owned(),
+            warning_detail: None,
             command_path: None,
         },
     }
@@ -4193,6 +4686,7 @@ fn cursor_agent_readiness() -> AgentReadiness {
             status: AgentReadinessStatus::Ready,
             blocking: false,
             detail: format!("Cursor Agent is available at `{command_path}`."),
+            warning_detail: None,
             command_path: Some(command_path),
         },
         None => AgentReadiness {
@@ -4201,6 +4695,7 @@ fn cursor_agent_readiness() -> AgentReadiness {
             blocking: true,
             detail: "Install `cursor-agent` and make sure it is on PATH before creating Cursor sessions."
                 .to_owned(),
+            warning_detail: None,
             command_path: None,
         },
     }
@@ -4217,126 +4712,127 @@ fn gemini_agent_readiness(workdir: &str) -> AgentReadiness {
                 blocking: true,
                 detail: "Install the `gemini` CLI and make sure it is on PATH before creating Gemini sessions."
                     .to_owned(),
+                warning_detail: None,
                 command_path: None,
             };
         }
     };
     let command_path_display = command_path.display().to_string();
-
-    if let Some(source) = gemini_api_key_source(workdir) {
-        return AgentReadiness {
+    let warning_detail = gemini_interactive_shell_warning(workdir);
+    let build_readiness =
+        |status: AgentReadinessStatus, blocking: bool, detail: String| AgentReadiness {
             agent: Agent::Gemini,
-            status: AgentReadinessStatus::Ready,
-            blocking: false,
-            detail: format!("Gemini CLI is ready with a Gemini API key from {source}."),
-            command_path: Some(command_path_display),
+            status,
+            blocking,
+            detail,
+            warning_detail: warning_detail.clone(),
+            command_path: Some(command_path_display.clone()),
         };
+
+    if let Some(source) = gemini_api_key_source() {
+        return build_readiness(
+            AgentReadinessStatus::Ready,
+            false,
+            format!("Gemini CLI is ready with a Gemini API key from {source}."),
+        );
     }
 
     let selected_auth_type = gemini_selected_auth_type(workdir);
     if selected_auth_type.as_deref() == Some("oauth-personal") {
         if let Some(path) = gemini_oauth_credentials_path().filter(|path| path.is_file()) {
-            return AgentReadiness {
-                agent: Agent::Gemini,
-                status: AgentReadinessStatus::Ready,
-                blocking: false,
-                detail: format!(
+            return build_readiness(
+                AgentReadinessStatus::Ready,
+                false,
+                format!(
                     "Gemini CLI is ready with Google login credentials from {}.",
                     display_path_for_user(&path)
                 ),
-                command_path: Some(command_path_display),
-            };
+            );
         }
-        return AgentReadiness {
-            agent: Agent::Gemini,
-            status: AgentReadinessStatus::NeedsSetup,
-            blocking: true,
-            detail: format!(
+        return build_readiness(
+            AgentReadinessStatus::NeedsSetup,
+            true,
+            format!(
                 "Gemini is configured for Google login, but {} is missing.",
                 gemini_oauth_credentials_path()
                     .as_deref()
                     .map(display_path_for_user)
                     .unwrap_or_else(|| "~/.gemini/oauth_creds.json".to_owned())
             ),
-            command_path: Some(command_path_display),
-        };
+        );
     }
 
     if selected_auth_type.as_deref() == Some("gemini-api-key") {
-        return AgentReadiness {
-            agent: Agent::Gemini,
-            status: AgentReadinessStatus::NeedsSetup,
-            blocking: true,
-            detail: gemini_api_key_missing_detail(workdir),
-            command_path: Some(command_path_display),
-        };
+        return build_readiness(
+            AgentReadinessStatus::NeedsSetup,
+            true,
+            gemini_api_key_missing_detail(),
+        );
     }
 
     if selected_auth_type.as_deref() == Some("vertex-ai") {
         if let Some(source) = gemini_vertex_auth_source(workdir) {
-            return AgentReadiness {
-                agent: Agent::Gemini,
-                status: AgentReadinessStatus::Ready,
-                blocking: false,
-                detail: format!("Gemini CLI is ready with Vertex AI credentials from {source}."),
-                command_path: Some(command_path_display),
-            };
+            return build_readiness(
+                AgentReadinessStatus::Ready,
+                false,
+                format!("Gemini CLI is ready with Vertex AI credentials from {source}."),
+            );
         }
-        return AgentReadiness {
-            agent: Agent::Gemini,
-            status: AgentReadinessStatus::NeedsSetup,
-            blocking: true,
-            detail: "Gemini is configured for Vertex AI, but the required credentials are missing. Set `GOOGLE_API_KEY`, or set both `GOOGLE_CLOUD_PROJECT` and `GOOGLE_CLOUD_LOCATION`."
+        return build_readiness(
+            AgentReadinessStatus::NeedsSetup,
+            true,
+            "Gemini is configured for Vertex AI, but the required credentials are missing. Set `GOOGLE_API_KEY`, or set both `GOOGLE_CLOUD_PROJECT` and `GOOGLE_CLOUD_LOCATION`."
                 .to_owned(),
-            command_path: Some(command_path_display),
-        };
+        );
     }
 
     if selected_auth_type.as_deref() == Some("compute-default-credentials") {
         if let Some(source) = gemini_adc_source() {
-            return AgentReadiness {
-                agent: Agent::Gemini,
-                status: AgentReadinessStatus::Ready,
-                blocking: false,
-                detail: format!(
-                    "Gemini CLI is ready with application default credentials from {source}."
-                ),
-                command_path: Some(command_path_display),
-            };
+            return build_readiness(
+                AgentReadinessStatus::Ready,
+                false,
+                format!("Gemini CLI is ready with application default credentials from {source}."),
+            );
         }
-        return AgentReadiness {
-            agent: Agent::Gemini,
-            status: AgentReadinessStatus::NeedsSetup,
-            blocking: true,
-            detail: "Gemini is configured for application default credentials, but no ADC file was found. Set `GOOGLE_APPLICATION_CREDENTIALS` or run `gcloud auth application-default login`."
+        return build_readiness(
+            AgentReadinessStatus::NeedsSetup,
+            true,
+            "Gemini is configured for application default credentials, but no ADC file was found. Set `GOOGLE_APPLICATION_CREDENTIALS` or run `gcloud auth application-default login`."
                 .to_owned(),
-            command_path: Some(command_path_display),
-        };
+        );
     }
 
     if let Some(source) = gemini_vertex_auth_source(workdir) {
-        return AgentReadiness {
-            agent: Agent::Gemini,
-            status: AgentReadinessStatus::Ready,
-            blocking: false,
-            detail: format!("Gemini CLI is ready with Vertex AI credentials from {source}."),
-            command_path: Some(command_path_display),
-        };
+        return build_readiness(
+            AgentReadinessStatus::Ready,
+            false,
+            format!("Gemini CLI is ready with Vertex AI credentials from {source}."),
+        );
     }
 
-    AgentReadiness {
-        agent: Agent::Gemini,
-        status: AgentReadinessStatus::NeedsSetup,
-        blocking: true,
-        detail: "Gemini CLI needs auth before TermAl can create sessions. Set `GEMINI_API_KEY`, configure Vertex AI env vars, or choose an auth type in `.gemini/settings.json`."
+    build_readiness(
+        AgentReadinessStatus::NeedsSetup,
+        true,
+        "Gemini CLI needs auth before TermAl can create sessions. Set `GEMINI_API_KEY`, configure Vertex AI env vars, or choose an auth type in `.gemini/settings.json`."
             .to_owned(),
-        command_path: Some(command_path_display),
+    )
+}
+
+/// Returns a Windows warning for Codex shell limitations.
+fn codex_windows_shell_warning() -> Option<String> {
+    if !cfg!(windows) {
+        return None;
     }
+
+    Some(
+        "Codex CLI on Windows can still hit upstream PowerShell parser failures for some tool scripts. If you see immediate parser errors, run Codex from WSL for this repo."
+            .to_owned(),
+    )
 }
 
 /// Handles Gemini API key missing detail.
-fn gemini_api_key_missing_detail(workdir: &str) -> String {
-    let env_file = find_gemini_env_file(workdir)
+fn gemini_api_key_missing_detail() -> String {
+    let env_file = find_gemini_env_file()
         .map(|path| display_path_for_user(&path))
         .unwrap_or_else(|| ".env".to_owned());
     format!(
@@ -4345,34 +4841,34 @@ fn gemini_api_key_missing_detail(workdir: &str) -> String {
 }
 
 /// Handles Gemini API key source.
-fn gemini_api_key_source(workdir: &str) -> Option<String> {
-    env_var_source("GEMINI_API_KEY").or_else(|| dotenv_var_source(workdir, "GEMINI_API_KEY"))
+fn gemini_api_key_source() -> Option<String> {
+    env_var_source("GEMINI_API_KEY").or_else(|| dotenv_var_source("GEMINI_API_KEY"))
 }
 
 /// Handles Gemini vertex auth source.
 fn gemini_vertex_auth_source(workdir: &str) -> Option<String> {
     let vertex_enabled = env_var_present("GOOGLE_GENAI_USE_VERTEXAI")
         || env_var_present("GOOGLE_GENAI_USE_GCA")
-        || dotenv_var_present(workdir, "GOOGLE_GENAI_USE_VERTEXAI")
-        || dotenv_var_present(workdir, "GOOGLE_GENAI_USE_GCA");
+        || dotenv_var_present("GOOGLE_GENAI_USE_VERTEXAI")
+        || dotenv_var_present("GOOGLE_GENAI_USE_GCA");
     if !vertex_enabled && gemini_selected_auth_type(workdir).as_deref() != Some("vertex-ai") {
         return None;
     }
 
     if let Some(source) =
-        env_var_source("GOOGLE_API_KEY").or_else(|| dotenv_var_source(workdir, "GOOGLE_API_KEY"))
+        env_var_source("GOOGLE_API_KEY").or_else(|| dotenv_var_source("GOOGLE_API_KEY"))
     {
         return Some(source);
     }
 
     let has_project = env_var_present("GOOGLE_CLOUD_PROJECT")
-        || dotenv_var_present(workdir, "GOOGLE_CLOUD_PROJECT");
+        || dotenv_var_present("GOOGLE_CLOUD_PROJECT");
     let has_location = env_var_present("GOOGLE_CLOUD_LOCATION")
-        || dotenv_var_present(workdir, "GOOGLE_CLOUD_LOCATION");
+        || dotenv_var_present("GOOGLE_CLOUD_LOCATION");
     if has_project && has_location {
         return Some(
             env_var_source("GOOGLE_CLOUD_PROJECT")
-                .or_else(|| dotenv_var_source(workdir, "GOOGLE_CLOUD_PROJECT"))
+                .or_else(|| dotenv_var_source("GOOGLE_CLOUD_PROJECT"))
                 .unwrap_or_else(|| "workspace configuration".to_owned()),
         );
     }
@@ -4410,10 +4906,11 @@ fn gemini_adc_source() -> Option<String> {
 /// Handles Gemini selected auth type.
 fn gemini_selected_auth_type(workdir: &str) -> Option<String> {
     let workspace_settings = PathBuf::from(workdir).join(".gemini").join("settings.json");
+    // System settings are overrides (highest priority), then user, then project.
     for path in [
-        Some(workspace_settings),
-        gemini_user_settings_path(),
         gemini_system_settings_path(),
+        gemini_user_settings_path(),
+        Some(workspace_settings),
     ]
     .into_iter()
     .flatten()
@@ -4425,50 +4922,168 @@ fn gemini_selected_auth_type(workdir: &str) -> Option<String> {
     None
 }
 
+/// Prepares a TermAl-managed Gemini system settings override on Windows.
+fn prepare_termal_gemini_system_settings(default_workdir: &str) -> Result<Option<PathBuf>> {
+    if !cfg!(windows) {
+        return Ok(None);
+    }
+
+    let target_path = resolve_termal_data_dir(default_workdir)
+        .join("gemini-cli")
+        .join("system-settings.json");
+    if let Some(parent) = target_path.parent() {
+        fs::create_dir_all(parent)
+            .with_context(|| format!("failed to create `{}`", parent.display()))?;
+    }
+
+    let source_path =
+        gemini_system_settings_path().filter(|path| path != &target_path && path.is_file());
+    let mut settings = load_gemini_settings_json(source_path.as_deref());
+    disable_gemini_interactive_shell_in_settings(&mut settings);
+
+    let encoded = serde_json::to_vec_pretty(&settings)
+        .context("failed to serialize TermAl Gemini system settings")?;
+    let existing = fs::read(&target_path).ok();
+    if existing.as_deref() != Some(encoded.as_slice()) {
+        fs::write(&target_path, encoded)
+            .with_context(|| format!("failed to write `{}`", target_path.display()))?;
+    }
+
+    Ok(Some(target_path))
+}
+
+/// Loads Gemini settings for the Windows override, ignoring unreadable or malformed input.
+fn load_gemini_settings_json(path: Option<&FsPath>) -> Value {
+    let Some(path) = path else {
+        return json!({});
+    };
+
+    let raw = match fs::read_to_string(path) {
+        Ok(raw) => raw,
+        Err(err) => {
+            eprintln!(
+                "termal> ignoring Gemini settings from `{}` while preparing the Windows ACP override: {err}",
+                path.display()
+            );
+            return json!({});
+        }
+    };
+    if raw.trim().is_empty() {
+        return json!({});
+    }
+
+    match serde_json::from_str(&raw) {
+        Ok(settings) => settings,
+        Err(err) => {
+            eprintln!(
+                "termal> ignoring malformed Gemini settings from `{}` while preparing the Windows ACP override: {err}",
+                path.display()
+            );
+            json!({})
+        }
+    }
+}
+
+/// Forces Gemini interactive shell off while preserving other settings.
+fn disable_gemini_interactive_shell_in_settings(settings: &mut Value) {
+    if !settings.is_object() {
+        *settings = json!({});
+    }
+
+    let root = settings
+        .as_object_mut()
+        .expect("Gemini settings should normalize to an object");
+    let tools = root.entry("tools".to_owned()).or_insert_with(|| json!({}));
+    if !tools.is_object() {
+        *tools = json!({});
+    }
+
+    let shell = tools
+        .as_object_mut()
+        .expect("Gemini settings `tools` should normalize to an object")
+        .entry("shell".to_owned())
+        .or_insert_with(|| json!({}));
+    if !shell.is_object() {
+        *shell = json!({});
+    }
+
+    shell
+        .as_object_mut()
+        .expect("Gemini settings `tools.shell` should normalize to an object")
+        .insert("enableInteractiveShell".to_owned(), Value::Bool(false));
+}
+
+/// Returns a non-blocking Windows note when TermAl overrides Gemini interactive shell.
+fn gemini_interactive_shell_warning(workdir: &str) -> Option<String> {
+    if !cfg!(windows) {
+        return None;
+    }
+
+    match gemini_interactive_shell_setting(workdir) {
+        Some((false, _)) => None,
+        Some((true, path)) => Some(format!(
+            "TermAl forces Gemini `tools.shell.enableInteractiveShell` to `false` for Windows ACP sessions to avoid PTY startup crashes. The setting in {} is left unchanged.",
+            display_path_for_user(&path)
+        )),
+        None => None,
+    }
+}
+
+/// Returns the effective Gemini interactive-shell setting and its source file.
+fn gemini_interactive_shell_setting(workdir: &str) -> Option<(bool, PathBuf)> {
+    let workspace_settings = PathBuf::from(workdir).join(".gemini").join("settings.json");
+    // System settings are overrides (highest priority), then user, then project.
+    for path in [
+        gemini_system_settings_path(),
+        gemini_user_settings_path(),
+        Some(workspace_settings),
+    ]
+    .into_iter()
+    .flatten()
+    {
+        if let Some(enabled) = gemini_interactive_shell_setting_from_settings_file(&path) {
+            return Some((enabled, path));
+        }
+    }
+    None
+}
+
+/// Returns the interactive-shell setting from a Gemini settings file.
+fn gemini_interactive_shell_setting_from_settings_file(path: &FsPath) -> Option<bool> {
+    let raw = fs::read_to_string(path).ok()?;
+    if raw.trim().is_empty() {
+        return None;
+    }
+    serde_json::from_str::<Value>(&raw)
+        .ok()?
+        .pointer("/tools/shell/enableInteractiveShell")
+        .and_then(Value::as_bool)
+}
+
 /// Handles Gemini selected auth type from settings file.
 fn gemini_selected_auth_type_from_settings_file(path: &FsPath) -> Option<String> {
     let raw = fs::read_to_string(path).ok()?;
     if raw.trim().is_empty() {
         return None;
     }
-    if let Ok(parsed) = serde_json::from_str::<Value>(&raw) {
-        return parsed
-            .pointer("/security/auth/selectedType")
-            .and_then(Value::as_str)
-            .map(str::to_owned);
-    }
-    [
-        "oauth-personal",
-        "gemini-api-key",
-        "vertex-ai",
-        "compute-default-credentials",
-    ]
-    .iter()
-    .find_map(|candidate| raw.contains(candidate).then_some((*candidate).to_owned()))
+    serde_json::from_str::<Value>(&raw)
+        .ok()?
+        .pointer("/security/auth/selectedType")
+        .and_then(Value::as_str)
+        .map(str::to_owned)
 }
 
+const GEMINI_DOTENV_ENV_KEYS: &[&str] = &[
+    "GEMINI_API_KEY",
+    "GOOGLE_GENAI_USE_VERTEXAI",
+    "GOOGLE_GENAI_USE_GCA",
+    "GOOGLE_API_KEY",
+    "GOOGLE_CLOUD_PROJECT",
+    "GOOGLE_CLOUD_LOCATION",
+];
+
 /// Finds Gemini environment file.
-fn find_gemini_env_file(workdir: &str) -> Option<PathBuf> {
-    let mut current = PathBuf::from(workdir);
-    loop {
-        let gemini_env_path = current.join(".gemini").join(".env");
-        if gemini_env_path.is_file() {
-            return Some(gemini_env_path);
-        }
-        let env_path = current.join(".env");
-        if env_path.is_file() {
-            return Some(env_path);
-        }
-
-        let Some(parent) = current.parent() else {
-            break;
-        };
-        if parent == current {
-            break;
-        }
-        current = parent.to_path_buf();
-    }
-
+fn find_gemini_env_file() -> Option<PathBuf> {
     let home = home_dir()?;
     let home_gemini_env = home.join(".gemini").join(".env");
     if home_gemini_env.is_file() {
@@ -4478,41 +5093,79 @@ fn find_gemini_env_file(workdir: &str) -> Option<PathBuf> {
     home_env.is_file().then_some(home_env)
 }
 
-/// Handles dotenv var source.
-fn dotenv_var_source(workdir: &str, key: &str) -> Option<String> {
-    let path = find_gemini_env_file(workdir)?;
-    dotenv_file_var_present(&path, key).then(|| display_path_for_user(&path))
-}
-
-/// Handles dotenv var present.
-fn dotenv_var_present(workdir: &str, key: &str) -> bool {
-    find_gemini_env_file(workdir)
-        .as_deref()
-        .map(|path| dotenv_file_var_present(path, key))
-        .unwrap_or(false)
-}
-
-/// Handles dotenv file var present.
-fn dotenv_file_var_present(path: &FsPath, key: &str) -> bool {
-    let Ok(raw) = fs::read_to_string(path) else {
-        return false;
+/// Returns the list of Gemini dotenv file paths that exist, in priority order.
+fn gemini_env_file_paths() -> Vec<PathBuf> {
+    let Some(home) = home_dir() else {
+        return Vec::new();
     };
-    raw.lines().any(|line| {
+    [home.join(".gemini").join(".env"), home.join(".env")]
+        .into_iter()
+        .filter(|p| p.is_file())
+        .collect()
+}
+
+/// Returns Gemini dotenv env pairs for ACP child launches.
+///
+/// Each key is resolved independently across all candidate env files so that
+/// a user who keeps Gemini flags in `~/.gemini/.env` and API keys in `~/.env`
+/// (or vice-versa) gets correct readiness detection and child-env injection.
+fn gemini_dotenv_env_pairs() -> Vec<(String, String)> {
+    let paths = gemini_env_file_paths();
+    if paths.is_empty() {
+        return Vec::new();
+    }
+
+    GEMINI_DOTENV_ENV_KEYS
+        .iter()
+        .filter_map(|key| {
+            paths
+                .iter()
+                .find_map(|path| dotenv_file_var_value(path, key))
+                .map(|value| ((*key).to_owned(), value))
+        })
+        .collect()
+}
+
+/// Returns the source path of a dotenv variable, searching all candidate files.
+fn dotenv_var_source(key: &str) -> Option<String> {
+    gemini_env_file_paths()
+        .iter()
+        .find(|path| dotenv_file_var_value(path, key).is_some())
+        .map(|path| display_path_for_user(path))
+}
+
+/// Returns whether a dotenv variable is present in any candidate file.
+fn dotenv_var_present(key: &str) -> bool {
+    dotenv_var_value(key).is_some()
+}
+
+/// Returns the value of a dotenv variable, searching all candidate files.
+fn dotenv_var_value(key: &str) -> Option<String> {
+    gemini_env_file_paths()
+        .iter()
+        .find_map(|path| dotenv_file_var_value(path, key))
+}
+
+/// Handles dotenv file var value.
+fn dotenv_file_var_value(path: &FsPath, key: &str) -> Option<String> {
+    let Ok(raw) = fs::read_to_string(path) else {
+        return None;
+    };
+    raw.lines().find_map(|line| {
         let trimmed = line.trim();
         if trimmed.is_empty() || trimmed.starts_with('#') {
-            return false;
+            return None;
         }
         let trimmed = trimmed.strip_prefix("export ").unwrap_or(trimmed);
-        let Some((name, value)) = trimmed.split_once('=') else {
-            return false;
-        };
+        let (name, value) = trimmed.split_once('=')?;
         if name.trim() != key {
-            return false;
+            return None;
         }
-        !value
+        let value = value
             .trim()
             .trim_matches(|ch| ch == '"' || ch == '\'')
-            .is_empty()
+            .trim();
+        (!value.is_empty()).then(|| value.to_owned())
     })
 }
 
@@ -4927,11 +5580,10 @@ fn spawn_claude_runtime(
                     };
 
                     if let Some(action) = action {
-                        let action_result = finish_claude_assistant_text_stream(
-                            &mut turn_state,
-                            &mut recorder,
-                        )
-                        .and_then(|_| match action {
+                        let action_result =
+                            finish_claude_assistant_text_stream(&mut turn_state, &mut recorder)
+                                .and_then(|_| {
+                                    match action {
                             ClaudeControlRequestAction::QueueApproval {
                                 title,
                                 command,
@@ -4943,7 +5595,8 @@ fn spawn_claude_runtime(
                                 .map_err(|err| {
                                     anyhow!("failed to auto-approve Claude tool request: {err}")
                                 }),
-                        });
+                        }
+                                });
 
                         if let Err(err) = action_result {
                             let _ = reader_state.fail_turn_if_runtime_matches(
@@ -5015,7 +5668,9 @@ fn spawn_claude_runtime(
         std::thread::spawn(move || {
             let reader = BufReader::new(stderr);
             for line in reader.lines().map_while(Result::ok) {
-                eprintln!("claude stderr> {line}");
+                let timestamp = runtime_stderr_timestamp();
+                let prefix = format_runtime_stderr_prefix("claude", &timestamp);
+                eprintln!("{prefix} {line}");
             }
         });
     }
@@ -5025,29 +5680,27 @@ fn spawn_claude_runtime(
         let wait_state = state.clone();
         let wait_process = process.clone();
         let wait_runtime_token = RuntimeToken::Claude(runtime_id.clone());
-        std::thread::spawn(move || {
-            match wait_process.wait() {
-                Ok(status) if status.success() => {
-                    let _ = wait_state.handle_runtime_exit_if_matches(
-                        &wait_session_id,
-                        &wait_runtime_token,
-                        None,
-                    );
-                }
-                Ok(status) => {
-                    let _ = wait_state.handle_runtime_exit_if_matches(
-                        &wait_session_id,
-                        &wait_runtime_token,
-                        Some(&format!("Claude session exited with status {status}")),
-                    );
-                }
-                Err(err) => {
-                    let _ = wait_state.handle_runtime_exit_if_matches(
-                        &wait_session_id,
-                        &wait_runtime_token,
-                        Some(&format!("failed waiting for Claude session: {err}")),
-                    );
-                }
+        std::thread::spawn(move || match wait_process.wait() {
+            Ok(status) if status.success() => {
+                let _ = wait_state.handle_runtime_exit_if_matches(
+                    &wait_session_id,
+                    &wait_runtime_token,
+                    None,
+                );
+            }
+            Ok(status) => {
+                let _ = wait_state.handle_runtime_exit_if_matches(
+                    &wait_session_id,
+                    &wait_runtime_token,
+                    Some(&format!("Claude session exited with status {status}")),
+                );
+            }
+            Err(err) => {
+                let _ = wait_state.handle_runtime_exit_if_matches(
+                    &wait_session_id,
+                    &wait_runtime_token,
+                    Some(&format!("failed waiting for Claude session: {err}")),
+                );
             }
         });
     }

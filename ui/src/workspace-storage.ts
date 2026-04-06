@@ -68,6 +68,14 @@ export function persistWorkspaceLayout(workspaceViewId: string, layout: StoredWo
   );
 }
 
+export function deleteStoredWorkspaceLayout(workspaceViewId: string) {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  window.localStorage.removeItem(getWorkspaceLayoutStorageKey(workspaceViewId));
+}
+
 export function parseStoredWorkspaceLayout(raw: string | null | undefined): StoredWorkspaceLayout | null {
   if (!raw) {
     return null;
