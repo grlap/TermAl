@@ -114,8 +114,9 @@ async fn health() -> Json<HealthResponse> {
 }
 
 /// Gets state.
-async fn get_state(State(state): State<AppState>) -> Json<StateResponse> {
-    Json(state.snapshot())
+async fn get_state(State(state): State<AppState>) -> Result<Json<StateResponse>, ApiError> {
+    let response = run_blocking_api(move || Ok(state.snapshot())).await?;
+    Ok(Json(response))
 }
 
 /// Lists workspace layouts.
@@ -2781,7 +2782,11 @@ async fn send_message(
         deliver_turn_dispatch(&state, dispatch)?;
     }
 
-    let snapshot = state.snapshot();
+    let snapshot = run_blocking_api({
+        let state = state.clone();
+        move || Ok(state.snapshot())
+    })
+    .await?;
 
     Ok((StatusCode::ACCEPTED, Json(snapshot)))
 }
@@ -4672,7 +4677,7 @@ struct CodexRateLimitWindow {
 }
 
 /// Enumerates agent readiness states.
-#[derive(Clone, Copy, Debug, Deserialize, Serialize)]
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 enum AgentReadinessStatus {
     Ready,
@@ -4681,7 +4686,7 @@ enum AgentReadinessStatus {
 }
 
 /// Represents agent readiness.
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct AgentReadiness {
     agent: Agent,

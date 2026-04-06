@@ -39,6 +39,13 @@ struct AppState {
     delta_events: broadcast::Sender<String>,
     /// Lazily created shared Codex app-server reused across Codex sessions.
     shared_codex_runtime: Arc<Mutex<Option<SharedCodexRuntime>>>,
+    /// Cached app-level agent readiness lives outside `self.inner` so full
+    /// snapshots can clone the latest value without filesystem work under the
+    /// main state mutex.
+    agent_readiness_cache: Arc<RwLock<AgentReadinessCache>>,
+    /// Serializes cache refreshes so concurrent snapshot requests do not all
+    /// repeat the same readiness filesystem probes.
+    agent_readiness_refresh_lock: Arc<Mutex<()>>,
     /// Owns SSH-backed remote connections and their event bridges.
     remote_registry: Arc<RemoteRegistry>,
     /// Tracks the newest `_sseFallback` revision already recovered per remote
@@ -51,6 +58,32 @@ struct AppState {
 }
 
 const SESSION_NOT_RUNNING_CONFLICT_MESSAGE: &str = "session is not currently running";
+const AGENT_READINESS_CACHE_TTL: Duration = Duration::from_secs(5);
+
+#[derive(Clone)]
+struct AgentReadinessCache {
+    snapshot: Vec<AgentReadiness>,
+    expires_at: std::time::Instant,
+    invalidated: bool,
+}
+
+impl AgentReadinessCache {
+    fn fresh(snapshot: Vec<AgentReadiness>) -> Self {
+        Self {
+            snapshot,
+            expires_at: std::time::Instant::now() + AGENT_READINESS_CACHE_TTL,
+            invalidated: false,
+        }
+    }
+
+    fn needs_refresh(&self, now: std::time::Instant) -> bool {
+        self.invalidated || now >= self.expires_at
+    }
+}
+
+fn fresh_agent_readiness_cache(default_workdir: &str) -> AgentReadinessCache {
+    AgentReadinessCache::fresh(collect_agent_readiness(default_workdir))
+}
 
 /// Holds stop session options.
 #[derive(Clone)]
@@ -123,6 +156,9 @@ impl AppState {
             }
         }
 
+        let agent_readiness_cache = Arc::new(RwLock::new(fresh_agent_readiness_cache(
+            &default_workdir,
+        )));
         let state = Self {
             default_workdir,
             persistence_path: Arc::new(persistence_path),
@@ -132,6 +168,8 @@ impl AppState {
             state_events: broadcast::channel(128).0,
             delta_events: broadcast::channel(256).0,
             shared_codex_runtime: Arc::new(Mutex::new(None)),
+            agent_readiness_cache,
+            agent_readiness_refresh_lock: Arc::new(Mutex::new(())),
             remote_registry: Arc::new(
                 std::thread::spawn(RemoteRegistry::new)
                     .join()
@@ -155,10 +193,67 @@ impl AppState {
         Ok(state)
     }
 
-    /// Handles snapshot.
+    /// Builds a full state snapshot with guaranteed-fresh agent readiness.
+    ///
+    /// The cache is refreshed (filesystem I/O) *before* locking `inner`, then
+    /// the snapshot reads `cached_agent_readiness()` *under* the `inner` lock —
+    /// the same path used by `commit_locked` / `publish_state_locked`.  This
+    /// ensures that a `snapshot()` call at revision N uses the same cached
+    /// readiness value that was published in the SSE event for revision N.
     fn snapshot(&self) -> StateResponse {
+        let _ = self.agent_readiness_snapshot();
         let inner = self.inner.lock().expect("state mutex poisoned");
         self.snapshot_from_inner(&inner)
+    }
+
+    fn agent_readiness_snapshot(&self) -> Vec<AgentReadiness> {
+        if let Some(snapshot) = self.cached_agent_readiness_if_fresh() {
+            return snapshot;
+        }
+
+        let _refresh_lock = self
+            .agent_readiness_refresh_lock
+            .lock()
+            .expect("agent readiness refresh mutex poisoned");
+        if let Some(snapshot) = self.cached_agent_readiness_if_fresh() {
+            return snapshot;
+        }
+
+        let snapshot = collect_agent_readiness(&self.default_workdir);
+        let mut cache = self
+            .agent_readiness_cache
+            .write()
+            .expect("agent readiness cache poisoned");
+        *cache = AgentReadinessCache::fresh(snapshot);
+        cache.snapshot.clone()
+    }
+
+    fn cached_agent_readiness_if_fresh(&self) -> Option<Vec<AgentReadiness>> {
+        let cache = self
+            .agent_readiness_cache
+            .read()
+            .expect("agent readiness cache poisoned");
+        let now = std::time::Instant::now();
+        (!cache.needs_refresh(now)).then(|| cache.snapshot.clone())
+    }
+
+    fn cached_agent_readiness(&self) -> Vec<AgentReadiness> {
+        self.agent_readiness_cache
+            .read()
+            .expect("agent readiness cache poisoned")
+            .snapshot
+            .clone()
+    }
+
+    fn invalidate_agent_readiness_cache(&self) {
+        let _refresh_lock = self
+            .agent_readiness_refresh_lock
+            .lock()
+            .expect("agent readiness refresh mutex poisoned");
+        self.agent_readiness_cache
+            .write()
+            .expect("agent readiness cache poisoned")
+            .invalidated = true;
     }
 
     /// Returns whether a remote fallback-driven /api/state resync can be
@@ -392,6 +487,11 @@ impl AppState {
             }
         }
         validate_agent_session_setup(agent, &workdir).map_err(ApiError::bad_request)?;
+        // Refresh the agent readiness cache before the critical section so that
+        // commit_locked's SSE publish and the API response snapshot both carry
+        // up-to-date readiness without filesystem I/O under the inner mutex.
+        self.invalidate_agent_readiness_cache();
+        let _ = self.agent_readiness_snapshot();
         match agent {
             agent if agent.supports_codex_prompt_settings() => {
                 if request.claude_approval_mode.is_some()
@@ -543,16 +643,14 @@ impl AppState {
         }
         self.commit_locked(&mut inner)
             .map_err(|err| ApiError::internal(format!("failed to persist session: {err:#}")))?;
+        let snapshot = self.snapshot_from_inner(&inner);
         drop(inner);
         if let Some(session_id) = hidden_claude_spare_to_spawn {
             self.try_start_hidden_claude_spare(&session_id);
         }
         Ok(CreateSessionResponse {
             session_id: record.session.id,
-            state: {
-                let inner = self.inner.lock().expect("state mutex poisoned");
-                self.snapshot_from_inner(&inner)
-            },
+            state: snapshot,
         })
     }
 
@@ -561,6 +659,18 @@ impl AppState {
         &self,
         request: UpdateAppSettingsRequest,
     ) -> Result<StateResponse, ApiError> {
+        // Normalize remotes outside the lock — pure validation on request data.
+        let normalized_remotes = request
+            .remotes
+            .map(normalize_remote_configs)
+            .transpose()?;
+
+        // Refresh the agent readiness cache before the critical section so that
+        // commit_locked's SSE publish and the API response snapshot both carry
+        // up-to-date readiness without filesystem I/O under the inner mutex.
+        self.invalidate_agent_readiness_cache();
+        let _ = self.agent_readiness_snapshot();
+
         let mut inner = self.inner.lock().expect("state mutex poisoned");
         let mut changed = false;
 
@@ -579,8 +689,7 @@ impl AppState {
         }
 
         let mut next_remotes: Option<Vec<RemoteConfig>> = None;
-        if let Some(remotes) = request.remotes {
-            let normalized_remotes = normalize_remote_configs(remotes)?;
+        if let Some(normalized_remotes) = normalized_remotes {
             let next_remote_ids: HashSet<&str> = normalized_remotes
                 .iter()
                 .map(|remote| remote.id.as_str())
@@ -671,7 +780,7 @@ impl AppState {
     /// Handles commit locked.
     fn commit_locked(&self, inner: &mut StateInner) -> Result<u64> {
         let revision = self.bump_revision_and_persist_locked(inner)?;
-        self.publish_state_locked(inner)?;
+        self.publish_state_locked(inner);
         Ok(revision)
     }
 
@@ -722,12 +831,26 @@ impl AppState {
         }
     }
 
-    /// Publishes state locked.
-    fn publish_state_locked(&self, inner: &StateInner) -> Result<()> {
-        let payload = serde_json::to_string(&self.snapshot_from_inner(inner))
-            .context("failed to serialize session snapshot")?;
-        let _ = self.state_events.send(payload);
-        Ok(())
+    /// Publishes state locked.  Fire-and-forget like [`publish_delta`](Self::publish_delta);
+    /// serialization errors are logged but do not propagate.
+    fn publish_state_locked(&self, inner: &StateInner) {
+        let snapshot = self.snapshot_from_inner(inner);
+        self.publish_snapshot(&snapshot);
+    }
+
+    /// Publishes a pre-built snapshot as an SSE state event.
+    fn publish_snapshot(&self, snapshot: &StateResponse) {
+        match serde_json::to_string(snapshot) {
+            Ok(payload) => {
+                let _ = self.state_events.send(payload);
+            }
+            Err(err) => {
+                eprintln!(
+                    "warning: failed to serialize SSE state snapshot at revision {}: {err}",
+                    snapshot.revision,
+                );
+            }
+        }
     }
 
     /// Handles shared Codex runtime.
@@ -899,12 +1022,37 @@ impl AppState {
         Ok(())
     }
 
-    /// Handles snapshot from inner.
+    /// Builds a snapshot using the latest cached agent readiness **without refreshing**.
+    ///
+    /// This is the hot-path builder used inside `commit_locked` / `publish_state_locked`
+    /// where the `inner` mutex is held and filesystem I/O is not safe.  Callers that
+    /// need guaranteed-fresh readiness (e.g. after an explicit cache invalidation) should
+    /// drop the `inner` lock and use [`snapshot()`](Self::snapshot) instead.
+    ///
+    /// **Design tradeoff:** after the cache TTL expires, mutation paths through
+    /// `commit_locked` will publish SSE events with stale readiness until a
+    /// [`snapshot()`](Self::snapshot) call (e.g. `GET /api/state`, SSE reconnect)
+    /// refreshes the cache.  This staleness can span multiple revisions — it is
+    /// not bounded to a single mutation cycle.  This is acceptable because agent
+    /// readiness changes only when CLI tools are installed or removed (extremely
+    /// rare during an active session), and any `snapshot()` call refreshes the
+    /// cache as a side effect even when the frontend drops the response, so the
+    /// following mutation carries the fresh value.  Paths where freshness matters
+    /// (`create_session`, `update_app_settings`) pre-refresh the cache before
+    /// entering the critical section.
     fn snapshot_from_inner(&self, inner: &StateInner) -> StateResponse {
+        self.snapshot_from_inner_with_agent_readiness(inner, self.cached_agent_readiness())
+    }
+
+    fn snapshot_from_inner_with_agent_readiness(
+        &self,
+        inner: &StateInner,
+        agent_readiness: Vec<AgentReadiness>,
+    ) -> StateResponse {
         StateResponse {
             revision: inner.revision,
             codex: inner.codex.clone(),
-            agent_readiness: collect_agent_readiness(&self.default_workdir),
+            agent_readiness,
             preferences: inner.preferences.clone(),
             projects: inner.projects.clone(),
             orchestrators: inner.orchestrator_instances.clone(),

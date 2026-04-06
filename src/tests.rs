@@ -482,6 +482,8 @@ fn test_app_state() -> AppState {
         state_events: broadcast::channel(16).0,
         delta_events: broadcast::channel(16).0,
         shared_codex_runtime: Arc::new(Mutex::new(None)),
+        agent_readiness_cache: Arc::new(RwLock::new(fresh_agent_readiness_cache("/tmp"))),
+        agent_readiness_refresh_lock: Arc::new(Mutex::new(())),
         remote_registry: test_remote_registry(),
         remote_sse_fallback_resynced_revision: Arc::new(Mutex::new(HashMap::new())),
         stopping_orchestrator_ids: Arc::new(Mutex::new(HashSet::new())),
@@ -3705,6 +3707,8 @@ fn persists_app_settings_and_applies_them_to_new_sessions() {
         state_events: broadcast::channel(16).0,
         delta_events: broadcast::channel(16).0,
         shared_codex_runtime: Arc::new(Mutex::new(None)),
+        agent_readiness_cache: Arc::new(RwLock::new(fresh_agent_readiness_cache("/tmp"))),
+        agent_readiness_refresh_lock: Arc::new(Mutex::new(())),
         remote_registry: test_remote_registry(),
         remote_sse_fallback_resynced_revision: Arc::new(Mutex::new(HashMap::new())),
         stopping_orchestrator_ids: Arc::new(Mutex::new(HashSet::new())),
@@ -5725,6 +5729,261 @@ fn codex_agent_readiness_matches_runtime_resolution() {
             assert_eq!(readiness.warning_detail, None);
         }
     }
+}
+
+fn sentinel_agent_readiness_snapshot() -> Vec<AgentReadiness> {
+    vec![
+        AgentReadiness {
+            agent: Agent::Codex,
+            status: AgentReadinessStatus::NeedsSetup,
+            blocking: true,
+            detail: "sentinel codex readiness".to_owned(),
+            warning_detail: Some("sentinel codex warning".to_owned()),
+            command_path: Some("sentinel-codex".to_owned()),
+        },
+        AgentReadiness {
+            agent: Agent::Cursor,
+            status: AgentReadinessStatus::Missing,
+            blocking: true,
+            detail: "sentinel cursor readiness".to_owned(),
+            warning_detail: None,
+            command_path: Some("sentinel-cursor".to_owned()),
+        },
+        AgentReadiness {
+            agent: Agent::Gemini,
+            status: AgentReadinessStatus::Ready,
+            blocking: false,
+            detail: "sentinel gemini readiness".to_owned(),
+            warning_detail: Some("sentinel gemini warning".to_owned()),
+            command_path: Some("sentinel-gemini".to_owned()),
+        },
+    ]
+}
+
+// Tests that hot-path snapshots use the cached readiness value even when the
+// cache TTL has expired.  `snapshot_from_inner` deliberately skips refresh
+// because it runs under the `inner` mutex where filesystem I/O is unsafe.
+#[test]
+fn snapshot_from_inner_uses_cached_agent_readiness_when_cache_is_stale() {
+    let state = test_app_state();
+    let sentinel = sentinel_agent_readiness_snapshot();
+    {
+        let mut cache = state
+            .agent_readiness_cache
+            .write()
+            .expect("agent readiness cache should not be poisoned");
+        // Only expire the TTL — `invalidated` stays false so the test isolates
+        // the TTL-stale path without conflating the two staleness signals.
+        *cache = AgentReadinessCache {
+            snapshot: sentinel.clone(),
+            expires_at: Instant::now() - AGENT_READINESS_CACHE_TTL,
+            invalidated: false,
+        };
+    }
+
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    let snapshot = state.snapshot_from_inner(&inner);
+    drop(inner);
+
+    assert_eq!(snapshot.agent_readiness, sentinel);
+}
+
+// Tests that app-settings invalidation refreshes readiness before returning a full snapshot.
+#[test]
+fn update_app_settings_refreshes_invalidated_agent_readiness_cache() {
+    let state = test_app_state();
+    let sentinel = sentinel_agent_readiness_snapshot();
+    {
+        let mut cache = state
+            .agent_readiness_cache
+            .write()
+            .expect("agent readiness cache should not be poisoned");
+        *cache = AgentReadinessCache::fresh(sentinel.clone());
+    }
+
+    let next_reasoning_effort = {
+        let current = state
+            .inner
+            .lock()
+            .expect("state mutex poisoned")
+            .preferences
+            .default_codex_reasoning_effort;
+        if current == CodexReasoningEffort::High {
+            CodexReasoningEffort::Medium
+        } else {
+            CodexReasoningEffort::High
+        }
+    };
+
+    let updated = state
+        .update_app_settings(UpdateAppSettingsRequest {
+            default_codex_reasoning_effort: Some(next_reasoning_effort),
+            default_claude_effort: None,
+            remotes: None,
+        })
+        .expect("app settings should update");
+
+    assert_ne!(updated.agent_readiness, sentinel);
+
+    let cache = state
+        .agent_readiness_cache
+        .read()
+        .expect("agent readiness cache should not be poisoned");
+    assert_eq!(cache.snapshot, updated.agent_readiness);
+    assert!(!cache.invalidated);
+}
+
+// Tests that `snapshot()` refreshes agent readiness when the TTL has expired
+// but the cache was not explicitly invalidated.
+#[test]
+fn snapshot_refreshes_agent_readiness_when_ttl_expires() {
+    let state = test_app_state();
+    let sentinel = sentinel_agent_readiness_snapshot();
+    {
+        let mut cache = state
+            .agent_readiness_cache
+            .write()
+            .expect("agent readiness cache should not be poisoned");
+        *cache = AgentReadinessCache {
+            snapshot: sentinel.clone(),
+            expires_at: Instant::now() - AGENT_READINESS_CACHE_TTL,
+            invalidated: false,
+        };
+    }
+
+    let snapshot = state.snapshot();
+
+    // `snapshot()` should have refreshed the cache, producing readiness from a
+    // real `collect_agent_readiness` call rather than returning the sentinel.
+    assert_ne!(snapshot.agent_readiness, sentinel);
+
+    let cache = state
+        .agent_readiness_cache
+        .read()
+        .expect("agent readiness cache should not be poisoned");
+    assert_eq!(cache.snapshot, snapshot.agent_readiness);
+    assert!(!cache.invalidated);
+}
+
+// Tests that hot-path snapshots use the cached readiness value even when the
+// cache has been explicitly invalidated.  Together with the TTL-stale variant
+// above, this confirms `snapshot_from_inner` never refreshes under any conditions.
+#[test]
+fn snapshot_from_inner_uses_cached_agent_readiness_when_cache_is_invalidated() {
+    let state = test_app_state();
+    let sentinel = sentinel_agent_readiness_snapshot();
+    {
+        let mut cache = state
+            .agent_readiness_cache
+            .write()
+            .expect("agent readiness cache should not be poisoned");
+        *cache = AgentReadinessCache {
+            snapshot: sentinel.clone(),
+            // TTL still valid, but explicitly invalidated.
+            expires_at: Instant::now() + AGENT_READINESS_CACHE_TTL,
+            invalidated: true,
+        };
+    }
+
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    let snapshot = state.snapshot_from_inner(&inner);
+    drop(inner);
+
+    assert_eq!(snapshot.agent_readiness, sentinel);
+}
+
+// Tests that `update_app_settings` publishes an SSE event whose revision and
+// agent readiness match the returned API response, eliminating the stale-SSE /
+// duplicate-revision race.
+#[test]
+fn update_app_settings_sse_matches_api_response() {
+    let state = test_app_state();
+    let sentinel = sentinel_agent_readiness_snapshot();
+    {
+        let mut cache = state
+            .agent_readiness_cache
+            .write()
+            .expect("agent readiness cache should not be poisoned");
+        *cache = AgentReadinessCache::fresh(sentinel.clone());
+    }
+
+    let mut state_events = state.subscribe_events();
+    let next_reasoning_effort = {
+        let current = state
+            .inner
+            .lock()
+            .expect("state mutex poisoned")
+            .preferences
+            .default_codex_reasoning_effort;
+        if current == CodexReasoningEffort::High {
+            CodexReasoningEffort::Medium
+        } else {
+            CodexReasoningEffort::High
+        }
+    };
+    let api_response = state
+        .update_app_settings(UpdateAppSettingsRequest {
+            default_codex_reasoning_effort: Some(next_reasoning_effort),
+            default_claude_effort: None,
+            remotes: None,
+        })
+        .expect("app settings should update");
+
+    let published: StateResponse = serde_json::from_str(
+        &state_events
+            .try_recv()
+            .expect("update_app_settings should publish a state snapshot"),
+    )
+    .expect("SSE state event should decode");
+
+    assert_eq!(published.revision, api_response.revision);
+    assert_eq!(published.agent_readiness, api_response.agent_readiness);
+}
+
+// Tests that `create_session` refreshes the agent readiness cache so the SSE
+// event and API response carry fresh (non-sentinel) readiness.
+#[test]
+fn create_session_refreshes_agent_readiness_cache() {
+    let state = test_app_state();
+    let sentinel = sentinel_agent_readiness_snapshot();
+    {
+        let mut cache = state
+            .agent_readiness_cache
+            .write()
+            .expect("agent readiness cache should not be poisoned");
+        *cache = AgentReadinessCache::fresh(sentinel.clone());
+    }
+
+    let mut state_events = state.subscribe_events();
+    let created = state
+        .create_session(CreateSessionRequest {
+            agent: Some(Agent::Codex),
+            name: Some("Cache Test".to_owned()),
+            workdir: Some("/tmp".to_owned()),
+            project_id: None,
+            model: None,
+            approval_policy: None,
+            reasoning_effort: None,
+            sandbox_mode: None,
+            cursor_mode: None,
+            claude_approval_mode: None,
+            claude_effort: None,
+            gemini_approval_mode: None,
+        })
+        .expect("session should be created");
+
+    // The API response should carry freshly-computed readiness, not the sentinel.
+    assert_ne!(created.state.agent_readiness, sentinel);
+
+    // The SSE event should match the API response exactly.
+    let published: StateResponse = serde_json::from_str(
+        &state_events
+            .try_recv()
+            .expect("create_session should publish a state snapshot"),
+    )
+    .expect("SSE state event should decode");
+    assert_eq!(published.revision, created.state.revision);
+    assert_eq!(published.agent_readiness, created.state.agent_readiness);
 }
 
 // Tests that AgentReadiness serializes warning_detail as warningDetail.
