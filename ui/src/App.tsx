@@ -147,7 +147,7 @@ import {
 } from "./remotes";
 import { resolvePaneScrollCommand } from "./pane-keyboard";
 import {
-  BackendConnectionStatus,
+  ControlPanelConnectionIndicator,
   WorkspaceSwitcher,
 } from "./workspace-shell-controls";
 import {
@@ -372,6 +372,28 @@ const RECONNECT_STATE_RESYNC_DELAY_MS = 400;
 const LIVE_SESSION_RESUME_WATCHDOG_INTERVAL_MS = 1000;
 
 const WORKSPACE_LAYOUT_PERSIST_DELAY_MS = 150;
+
+function shouldInlineControlPanelBackendIssue(message: string | null) {
+  if (message === null) {
+    return false;
+  }
+
+  const normalized = message.trim().toLowerCase();
+  if (normalized.length === 0) {
+    return false;
+  }
+
+  return (
+    normalized.startsWith("request failed with status 502") ||
+    normalized.startsWith("request failed with status 503") ||
+    normalized.startsWith("the termal backend is unavailable") ||
+    normalized.startsWith("the running backend does not expose ") ||
+    normalized.includes("failed to fetch") ||
+    normalized.includes("networkerror") ||
+    normalized.includes("load failed")
+  );
+}
+
 // Re-exported from ./types for backward compatibility
 export type { SessionSettingsField, SessionSettingsValue } from "./types";
 type SessionErrorMap = Record<string, string | undefined>;
@@ -1087,6 +1109,7 @@ export default function App() {
   const stateResyncAllowAuthoritativeRollbackRef = useRef(false);
   const stateResyncPreserveReconnectFallbackRef = useRef(false);
   const stateResyncPreserveWatchdogCooldownRef = useRef(false);
+  const requestBackendReconnectRef = useRef<() => void>(() => {});
   const syncAdoptedLiveSessionResumeWatchdogBaselinesRef = useRef<
     (sessions: Session[], now?: number) => void
   >(() => {});
@@ -1145,6 +1168,57 @@ export default function App() {
       ),
     [workspace.panes],
   );
+  const workspaceShowsInlineControlPanelStatus = useMemo(
+    () =>
+      workspace.panes.some((pane) => {
+        const activeTab =
+          pane.tabs.find((tab) => tab.id === pane.activeTabId) ??
+          pane.tabs[0] ??
+          null;
+        return (
+          activeTab?.kind === "controlPanel" ||
+          activeTab?.kind === "orchestratorList" ||
+          activeTab?.kind === "sessionList" ||
+          activeTab?.kind === "projectList"
+        );
+      }),
+    [workspace.panes],
+  );
+  const controlPanelInlineIssueDetail =
+    backendConnectionIssueDetail ??
+    (shouldInlineControlPanelBackendIssue(requestError) ? requestError : null);
+  const requestErrorShownInline =
+    requestError !== null &&
+    workspaceShowsInlineControlPanelStatus &&
+    controlPanelInlineIssueDetail === requestError;
+
+  function reportRequestError(message: string) {
+    setRequestError(message);
+    if (!shouldInlineControlPanelBackendIssue(message)) {
+      return;
+    }
+
+    setBackendConnectionIssueDetail(message);
+    if (!readNavigatorOnline()) {
+      setBackendConnectionState("offline");
+      return;
+    }
+
+    setBackendConnectionState((current) =>
+      current === "offline"
+        ? current
+        : latestStateRevisionRef.current === null
+          ? "connecting"
+          : "reconnecting",
+    );
+    requestBackendReconnectRef.current();
+  }
+
+  function clearRecoveredBackendRequestError() {
+    setRequestError((current) =>
+      shouldInlineControlPanelBackendIssue(current) ? null : current,
+    );
+  }
   const selectedProject =
     selectedProjectId === ALL_PROJECTS_FILTER_ID
       ? null
@@ -2161,7 +2235,7 @@ export default function App() {
       if (!isMountedRef.current) {
         return;
       }
-      setRequestError(getErrorMessage(error));
+      reportRequestError(getErrorMessage(error));
       try {
         const state = await fetchState();
         if (!isMountedRef.current) {
@@ -2197,14 +2271,19 @@ export default function App() {
 
   useEffect(() => {
     function handleBrowserOnline() {
+      let shouldRequestReconnect = false;
       setBackendConnectionState((current) => {
         if (current === "connected") {
           return current;
         }
+        shouldRequestReconnect = true;
         return latestStateRevisionRef.current === null
           ? "connecting"
           : "reconnecting";
       });
+      if (shouldRequestReconnect) {
+        requestBackendReconnectRef.current();
+      }
     }
 
     function handleBrowserOffline() {
@@ -2452,6 +2531,10 @@ export default function App() {
                 );
               }
               setBackendConnectionIssueDetail(null);
+              clearRecoveredBackendRequestError();
+              setBackendConnectionState((current) =>
+                current === "reconnecting" ? "connected" : current,
+              );
             } catch (error) {
               if (!cancelled) {
                 setBackendConnectionIssueDetail(getErrorMessage(error));
@@ -2518,6 +2601,11 @@ export default function App() {
       stateResyncPendingRef.current = true;
       startStateResyncLoop();
     }
+    requestBackendReconnectRef.current = () => {
+      requestStateResync({
+        allowAuthoritativeRollback: latestStateRevisionRef.current !== null,
+      });
+    };
 
     function hasPotentiallyStaleLiveSession() {
       return sessionsRef.current.some((session) => session.status !== "idle");
@@ -2657,6 +2745,7 @@ export default function App() {
           syncLiveSessionResumeWatchdogBaselines(state.sessions, adoptedAt);
         }
         setBackendConnectionIssueDetail(null);
+        clearRecoveredBackendRequestError();
       } catch (error) {
         if (!cancelled) {
           setBackendConnectionIssueDetail(getErrorMessage(error));
@@ -2682,6 +2771,7 @@ export default function App() {
         if (revisionAction === "ignore") {
           clearReconnectStateResyncTimeoutAfterConfirmedReopen();
           setBackendConnectionIssueDetail(null);
+          clearRecoveredBackendRequestError();
           return;
         }
         if (revisionAction === "resync") {
@@ -2712,6 +2802,7 @@ export default function App() {
             setSessions(nextSessions);
           });
           setBackendConnectionIssueDetail(null);
+          clearRecoveredBackendRequestError();
           return;
         }
 
@@ -2731,6 +2822,7 @@ export default function App() {
             setSessions(sessionsRef.current);
           });
           setBackendConnectionIssueDetail(null);
+          clearRecoveredBackendRequestError();
           return;
         }
 
@@ -2752,6 +2844,7 @@ export default function App() {
         }
         setBackendConnectionState("connected");
         setBackendConnectionIssueDetail(null);
+        clearRecoveredBackendRequestError();
       }
     };
     eventSource.onerror = () => {
@@ -2826,6 +2919,7 @@ export default function App() {
 
     return () => {
       cancelled = true;
+      requestBackendReconnectRef.current = () => {};
       syncAdoptedLiveSessionResumeWatchdogBaselinesRef.current = () => {};
       clearInitialStateResyncRetryTimeout();
       clearReconnectStateResyncTimeout();
@@ -3573,7 +3667,7 @@ export default function App() {
         if (!restoredAttachments) {
           releaseDraftAttachments(attachments);
         }
-        setRequestError(getErrorMessage(error));
+        reportRequestError(getErrorMessage(error));
       } finally {
         setSendingSessionIds((current) =>
           setSessionFlag(current, sessionId, false),
@@ -3765,7 +3859,7 @@ export default function App() {
       if (!isMountedRef.current) {
         return false;
       }
-      setRequestError(getErrorMessage(error));
+      reportRequestError(getErrorMessage(error));
       return false;
     } finally {
       if (isMountedRef.current) {
@@ -3813,7 +3907,7 @@ export default function App() {
       setRequestError(null);
       return true;
     } catch (error) {
-      setRequestError(getErrorMessage(error));
+      reportRequestError(getErrorMessage(error));
       return false;
     } finally {
       setIsCreatingProject(false);
@@ -3836,7 +3930,7 @@ export default function App() {
         setRequestError(null);
       }
     } catch (error) {
-      setRequestError(getErrorMessage(error));
+      reportRequestError(getErrorMessage(error));
     } finally {
       setIsCreatingProject(false);
     }
@@ -3852,7 +3946,7 @@ export default function App() {
       adoptState(state);
       setRequestError(null);
     } catch (error) {
-      setRequestError(getErrorMessage(error));
+      reportRequestError(getErrorMessage(error));
     }
   }
 
@@ -3866,7 +3960,7 @@ export default function App() {
       adoptState(state);
       setRequestError(null);
     } catch (error) {
-      setRequestError(getErrorMessage(error));
+      reportRequestError(getErrorMessage(error));
     }
   }
 
@@ -3886,7 +3980,7 @@ export default function App() {
       adoptState(state);
       setRequestError(null);
     } catch (error) {
-      setRequestError(getErrorMessage(error));
+      reportRequestError(getErrorMessage(error));
     }
   }
 
@@ -3900,7 +3994,7 @@ export default function App() {
       adoptState(state);
       setRequestError(null);
     } catch (error) {
-      setRequestError(getErrorMessage(error));
+      reportRequestError(getErrorMessage(error));
     }
   }
 
@@ -3921,7 +4015,7 @@ export default function App() {
       } catch {
         // Keep the original request error below; state refresh is best-effort.
       }
-      setRequestError(getErrorMessage(error));
+      reportRequestError(getErrorMessage(error));
     }
   }
 
@@ -3934,7 +4028,7 @@ export default function App() {
       adoptState(state);
       setRequestError(null);
     } catch (error) {
-      setRequestError(getErrorMessage(error));
+      reportRequestError(getErrorMessage(error));
     } finally {
       setStoppingSessionIds((current) =>
         setSessionFlag(current, sessionId, false),
@@ -3974,7 +4068,7 @@ export default function App() {
         return;
       }
 
-      setRequestError(getErrorMessage(error));
+      reportRequestError(getErrorMessage(error));
     } finally {
       if (isMountedRef.current) {
         setKillingSessionIds((current) =>
@@ -4141,7 +4235,7 @@ export default function App() {
         return;
       }
 
-      setRequestError(getErrorMessage(error));
+      reportRequestError(getErrorMessage(error));
     } finally {
       if (isMountedRef.current) {
         setUpdatingSessionIds((current) =>
@@ -4238,7 +4332,7 @@ export default function App() {
         return;
       }
 
-      setRequestError(getErrorMessage(error));
+      reportRequestError(getErrorMessage(error));
     } finally {
       if (isMountedRef.current) {
         setIsCreating(false);
@@ -4387,7 +4481,7 @@ export default function App() {
           ),
         );
       }
-      setRequestError(getErrorMessage(error));
+      reportRequestError(getErrorMessage(error));
     } finally {
       setUpdatingSessionIds((current) =>
         setSessionFlag(current, sessionId, false),
@@ -4460,7 +4554,7 @@ export default function App() {
         ...current,
         [sessionId]: message,
       }));
-      setRequestError(message);
+      reportRequestError(message);
     } finally {
       if (!isMountedRef.current) {
         return;
@@ -4498,7 +4592,7 @@ export default function App() {
       if (!isMountedRef.current) {
         return;
       }
-      setRequestError(getErrorMessage(error));
+      reportRequestError(getErrorMessage(error));
     } finally {
       if (isMountedRef.current) {
         setUpdatingSessionIds((current) =>
@@ -4546,7 +4640,7 @@ export default function App() {
       if (!isMountedRef.current) {
         return;
       }
-      setRequestError(getErrorMessage(error));
+      reportRequestError(getErrorMessage(error));
     } finally {
       if (isMountedRef.current) {
         setUpdatingSessionIds((current) =>
@@ -5542,7 +5636,7 @@ export default function App() {
         return;
       }
 
-      setRequestError(getErrorMessage(error));
+      reportRequestError(getErrorMessage(error));
     } finally {
       if (isMountedRef.current) {
         setPendingOrchestratorActionById((current) => {
@@ -6784,26 +6878,29 @@ export default function App() {
 
   function renderControlPanelPaneBarActions(): JSX.Element {
     return (
-      <>
-        <WorkspaceSwitcher
-          currentWorkspaceId={workspaceViewId}
-          deletingWorkspaceIds={deletingWorkspaceIds}
-          error={workspaceSwitcherError}
-          isLoading={isWorkspaceSwitcherLoading}
-          isOpen={isWorkspaceSwitcherOpen}
-          summaries={workspaceSummaries}
-          switcherRef={workspaceSwitcherRef}
-          onDeleteWorkspace={handleDeleteWorkspace}
-          onOpenNewWorkspaceHere={handleOpenNewWorkspaceHere}
-          onOpenNewWorkspaceWindow={handleOpenNewWorkspaceWindow}
-          onOpenWorkspace={handleOpenWorkspaceHere}
-          onToggle={handleWorkspaceSwitcherToggle}
-        />
-        <BackendConnectionStatus
-          state={backendConnectionState}
-          issueDetail={backendConnectionIssueDetail}
-        />
-      </>
+      <WorkspaceSwitcher
+        currentWorkspaceId={workspaceViewId}
+        deletingWorkspaceIds={deletingWorkspaceIds}
+        error={workspaceSwitcherError}
+        isLoading={isWorkspaceSwitcherLoading}
+        isOpen={isWorkspaceSwitcherOpen}
+        summaries={workspaceSummaries}
+        switcherRef={workspaceSwitcherRef}
+        onDeleteWorkspace={handleDeleteWorkspace}
+        onOpenNewWorkspaceHere={handleOpenNewWorkspaceHere}
+        onOpenNewWorkspaceWindow={handleOpenNewWorkspaceWindow}
+        onOpenWorkspace={handleOpenWorkspaceHere}
+        onToggle={handleWorkspaceSwitcherToggle}
+      />
+    );
+  }
+
+  function renderControlPanelPaneBarStatus(): JSX.Element | null {
+    return (
+      <ControlPanelConnectionIndicator
+        state={backendConnectionState}
+        issueDetail={controlPanelInlineIssueDetail}
+      />
     );
   }
 
@@ -6813,7 +6910,7 @@ export default function App() {
       <div className="background-orbit background-orbit-right" />
 
       <main className="workspace-shell">
-        {requestError ? (
+        {requestError && !requestErrorShownInline ? (
           <article className="thread-notice workspace-notice">
             <div className="card-label">Backend</div>
             <p>{requestError}</p>
@@ -6908,6 +7005,9 @@ export default function App() {
               onUnarchiveCodexThread={handleUnarchiveCodexThread}
               onOrchestratorStateUpdated={handleOrchestratorStateUpdated}
               renderControlPanel={renderWorkspaceControlSurface}
+              renderControlPanelPaneBarStatus={
+                renderControlPanelPaneBarStatus
+              }
               renderControlPanelPaneBarActions={
                 renderControlPanelPaneBarActions
               }
@@ -7755,6 +7855,7 @@ function WorkspaceNodeView({
   onUnarchiveCodexThread,
   onOrchestratorStateUpdated,
   renderControlPanel,
+  renderControlPanelPaneBarStatus,
   renderControlPanelPaneBarActions,
   backendConnectionState,
 }: {
@@ -7937,6 +8038,7 @@ function WorkspaceNodeView({
     paneId: string,
     fixedSection?: ControlPanelSectionId | null,
   ) => JSX.Element;
+  renderControlPanelPaneBarStatus: () => JSX.Element | null;
   renderControlPanelPaneBarActions: () => JSX.Element;
   backendConnectionState: BackendConnectionState;
 }) {
@@ -8081,6 +8183,7 @@ function WorkspaceNodeView({
         onUnarchiveCodexThread={onUnarchiveCodexThread}
         onOrchestratorStateUpdated={onOrchestratorStateUpdated}
         renderControlPanel={renderControlPanel}
+        renderControlPanelPaneBarStatus={renderControlPanelPaneBarStatus}
         renderControlPanelPaneBarActions={renderControlPanelPaneBarActions}
         backendConnectionState={backendConnectionState}
       />
@@ -8205,6 +8308,7 @@ function WorkspaceNodeView({
           onUnarchiveCodexThread={onUnarchiveCodexThread}
           onOrchestratorStateUpdated={onOrchestratorStateUpdated}
           renderControlPanel={renderControlPanel}
+          renderControlPanelPaneBarStatus={renderControlPanelPaneBarStatus}
           renderControlPanelPaneBarActions={renderControlPanelPaneBarActions}
           backendConnectionState={backendConnectionState}
         />
@@ -8295,6 +8399,7 @@ function WorkspaceNodeView({
           onUnarchiveCodexThread={onUnarchiveCodexThread}
           onOrchestratorStateUpdated={onOrchestratorStateUpdated}
           renderControlPanel={renderControlPanel}
+          renderControlPanelPaneBarStatus={renderControlPanelPaneBarStatus}
           renderControlPanelPaneBarActions={renderControlPanelPaneBarActions}
           backendConnectionState={backendConnectionState}
         />
@@ -8378,6 +8483,7 @@ function SessionPaneView({
   onUnarchiveCodexThread,
   onOrchestratorStateUpdated,
   renderControlPanel,
+  renderControlPanelPaneBarStatus,
   renderControlPanelPaneBarActions,
   backendConnectionState,
 }: {
@@ -8555,6 +8661,7 @@ function SessionPaneView({
     paneId: string,
     fixedSection?: ControlPanelSectionId | null,
   ) => JSX.Element;
+  renderControlPanelPaneBarStatus: () => JSX.Element | null;
   renderControlPanelPaneBarActions: () => JSX.Element;
   backendConnectionState: BackendConnectionState;
 }) {
@@ -9804,6 +9911,9 @@ function SessionPaneView({
               onTabDrop={onTabDrop}
               onRenameSessionRequest={onRenameSessionRequest}
             />
+            {activeControlSurfaceTab
+              ? renderControlPanelPaneBarStatus()
+              : null}
           </div>
           {activeTab?.kind === "controlPanel" ? (
             <div className="pane-bar-right">

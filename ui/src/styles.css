@@ -1998,6 +1998,119 @@ textarea {
   box-shadow: none;
 }
 
+.control-panel-pane-status-shell {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  flex: none;
+  z-index: 6;
+}
+
+.control-panel-pane-status {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: calc(1.35rem * var(--density-scale));
+  min-width: calc(1.35rem * var(--density-scale));
+  height: calc(1.35rem * var(--density-scale));
+  padding: 0;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--signal-red) 48%, transparent);
+  background: color-mix(in srgb, var(--accent-red-bg) 92%, var(--surface-white));
+  color: var(--signal-red);
+  box-shadow:
+    inset 0 0 0 1px color-mix(in srgb, var(--surface-white) 40%, transparent),
+    0 0 0 1px color-mix(in srgb, var(--signal-red) 10%, transparent);
+  flex: none;
+  cursor: help;
+  outline: none;
+}
+
+.control-panel-pane-status:focus-visible {
+  box-shadow:
+    inset 0 0 0 1px color-mix(in srgb, var(--surface-white) 40%, transparent),
+    0 0 0 0.22rem var(--focus-ring);
+}
+
+.control-panel-pane-status-spinner {
+  width: calc(0.78rem * var(--density-scale));
+  height: calc(0.78rem * var(--density-scale));
+  border-width: 2px;
+  border-color: color-mix(in srgb, var(--signal-red) 42%, transparent);
+  border-top-color: var(--signal-red);
+}
+
+.control-panel-pane-status-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: calc(0.8rem * var(--density-scale));
+  height: calc(0.8rem * var(--density-scale));
+  flex: none;
+}
+
+.control-panel-pane-status-icon .workspace-connection-icon {
+  width: 100%;
+  height: 100%;
+}
+
+.control-panel-pane-status-tooltip {
+  position: absolute;
+  left: 50%;
+  top: calc(100% + var(--space-lg));
+  z-index: 8;
+  display: grid;
+  gap: 0.35rem;
+  inline-size: min(16rem, calc(100vw - 2rem));
+  padding: var(--space-xl) calc(0.95rem * var(--density-scale));
+  border: 1px solid var(--tooltip-border);
+  border-radius: 1rem;
+  background: color-mix(in srgb, var(--tooltip-bg) 90%, black);
+  box-shadow: var(--tooltip-shadow);
+  color: var(--tooltip-fg);
+  box-sizing: border-box;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateX(-50%) translateY(0.3rem) scale(0.98);
+  transform-origin: center top;
+  transition:
+    opacity 160ms ease,
+    transform 160ms ease;
+}
+
+.control-panel-pane-status-tooltip::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  bottom: 100%;
+  transform: translateX(-50%);
+  border-width: 0.5rem;
+  border-style: solid;
+  border-color: transparent transparent color-mix(in srgb, var(--tooltip-bg) 90%, black) transparent;
+}
+
+.control-panel-pane-status-tooltip-label {
+  font-family: var(--code-font);
+  font-size: 0.7rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--tooltip-label);
+}
+
+.control-panel-pane-status-tooltip-detail {
+  margin: 0;
+  color: inherit;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  line-height: 1.45;
+}
+
+.control-panel-pane-status-shell:hover .control-panel-pane-status-tooltip,
+.control-panel-pane-status-shell:focus-within .control-panel-pane-status-tooltip {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0) scale(1);
+}
+
 .pane-tabs-shell {
   display: flex;
   align-items: center;

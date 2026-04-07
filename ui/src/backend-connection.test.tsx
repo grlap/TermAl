@@ -9,7 +9,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { StateResponse } from "./api";
 import App from "./App";
-import { BackendConnectionStatus } from "./workspace-shell-controls";
+import {
+  BackendConnectionStatus,
+  ControlPanelConnectionIndicator,
+} from "./workspace-shell-controls";
 
 class EventSourceMock {
   static instances: EventSourceMock[] = [];
@@ -87,6 +90,24 @@ function latestEventSource(): EventSourceMock {
     throw new Error("Event source not created");
   }
   return eventSource;
+}
+
+function expectNoControlPanelConnectionIssue() {
+  expect(
+    screen.queryByLabelText("Control panel backend connecting"),
+  ).toBeNull();
+  expect(
+    screen.queryByLabelText("Control panel backend reconnecting"),
+  ).toBeNull();
+  expect(
+    screen.queryByLabelText("Control panel backend offline"),
+  ).toBeNull();
+}
+
+async function waitForNoControlPanelConnectionIssue() {
+  await waitFor(() => {
+    expectNoControlPanelConnectionIssue();
+  });
 }
 
 describe("Backend connection state", () => {
@@ -256,6 +277,24 @@ describe("Backend connection state", () => {
     expect(screen.queryByRole("tooltip")).toBeNull();
   });
 
+  it("shows backend issue details in the control panel badge tooltip", () => {
+    render(
+      <ControlPanelConnectionIndicator
+        state="connected"
+        issueDetail="Request failed with status 500."
+      />,
+    );
+
+    const badge = screen.getByLabelText("Control panel issue");
+    fireEvent.mouseEnter(badge);
+
+    expect(badge).toBeInTheDocument();
+    expect(screen.getByRole("tooltip")).toHaveTextContent("Issue");
+    expect(screen.getByRole("tooltip")).toHaveTextContent(
+      "Request failed with status 500.",
+    );
+  });
+
   it("shows connecting, reconnecting, and offline states around the backend event stream", async () => {
     const originalFetch = globalThis.fetch;
     const originalEventSource = globalThis.EventSource;
@@ -309,8 +348,20 @@ describe("Backend connection state", () => {
 
     try {
       const { container } = render(<App />);
+      const countStateFetches = () =>
+        fetchMock.mock.calls.filter(([url]) => String(url) === "/api/state")
+          .length;
 
-      expect(screen.getByLabelText("Connecting")).toBeInTheDocument();
+      expect(
+        screen.queryByLabelText("Control panel backend connecting"),
+      ).toBeNull();
+      expect(
+        screen.queryByLabelText("Control panel backend reconnecting"),
+      ).toBeNull();
+      expect(
+        screen.queryByLabelText("Control panel backend offline"),
+      ).toBeNull();
+      expect(container.querySelector(".workspace-connection-status")).toBeNull();
       expect(container.querySelector(".workspace-status-strip")).toBeNull();
       const workspaceSwitcherTrigger = screen.getByRole("button", {
         name: /workspace /i,
@@ -332,8 +383,16 @@ describe("Backend connection state", () => {
         eventSource.dispatchOpen();
       });
       await waitFor(() => {
-        expect(screen.getByLabelText("Connected")).toBeInTheDocument();
+        expect(
+          screen.queryByLabelText("Control panel backend reconnecting"),
+        ).toBeNull();
       });
+      expect(
+        screen.queryByLabelText("Control panel backend reconnecting"),
+      ).toBeNull();
+      expect(
+        screen.queryByLabelText("Control panel backend offline"),
+      ).toBeNull();
 
       act(() => {
         eventSource.dispatchState({
@@ -349,38 +408,55 @@ describe("Backend connection state", () => {
         eventSource.dispatchError();
       });
       await waitFor(() => {
-        expect(screen.getByLabelText("Reconnecting")).toBeInTheDocument();
+        expect(
+          screen.getByLabelText("Control panel backend reconnecting"),
+        ).toBeInTheDocument();
       });
-      fireEvent.mouseEnter(screen.getByLabelText("Reconnecting"));
+      fireEvent.mouseEnter(
+        screen.getByLabelText("Control panel backend reconnecting"),
+      );
       const reconnectTooltip = await screen.findByRole("tooltip");
       expect(reconnectTooltip).toHaveTextContent("Reconnecting");
       expect(reconnectTooltip).toHaveTextContent(
         "Live updates are disconnected. Trying to reconnect.",
       );
-      const reconnectFetchCount = fetchMock.mock.calls.length;
-      expect(reconnectFetchCount).toBeGreaterThanOrEqual(1);
+      const reconnectFetchCount = countStateFetches();
 
       Object.defineProperty(window.navigator, "onLine", {
         configurable: true,
         value: false,
       });
       fireEvent(window, new Event("offline"));
-      expect(screen.getByLabelText("Offline")).toBeInTheDocument();
+      expect(
+        screen.getByLabelText("Control panel backend offline"),
+      ).toBeInTheDocument();
 
       Object.defineProperty(window.navigator, "onLine", {
         configurable: true,
         value: true,
       });
       fireEvent(window, new Event("online"));
-      expect(screen.getByLabelText("Reconnecting")).toBeInTheDocument();
-      expect(fetchMock).toHaveBeenCalledTimes(reconnectFetchCount);
+      expect(
+        screen.getByLabelText("Control panel backend reconnecting"),
+      ).toBeInTheDocument();
+      await waitFor(() => {
+        expect(countStateFetches()).toBeGreaterThan(reconnectFetchCount);
+      });
 
       act(() => {
         eventSource.dispatchOpen();
       });
       await waitFor(() => {
-        expect(screen.getByLabelText("Connected")).toBeInTheDocument();
+        expect(
+          screen.queryByLabelText("Control panel backend reconnecting"),
+        ).toBeNull();
       });
+      expect(
+        screen.queryByLabelText("Control panel backend reconnecting"),
+      ).toBeNull();
+      expect(
+        screen.queryByLabelText("Control panel backend offline"),
+      ).toBeNull();
     } finally {
       if (ownNavigatorOnlineDescriptor) {
         Object.defineProperty(
@@ -391,6 +467,88 @@ describe("Backend connection state", () => {
       } else {
         Reflect.deleteProperty(window.navigator, "onLine");
       }
+      restoreGlobal("fetch", originalFetch);
+      restoreGlobal("EventSource", originalEventSource);
+      restoreGlobal("ResizeObserver", originalResizeObserver);
+    }
+  });
+
+  it("clears the reconnecting badge after a successful state resync even before a fresh SSE open", async () => {
+    const originalFetch = globalThis.fetch;
+    const originalEventSource = globalThis.EventSource;
+    const originalResizeObserver = globalThis.ResizeObserver;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const target = String(input);
+      if (target === "/api/state") {
+        return jsonResponse({
+          revision: 1,
+          projects: [],
+          sessions: [],
+        });
+      }
+      if (target.startsWith("/api/workspaces/")) {
+        if (init?.method === "PUT") {
+          return jsonResponse({
+            layout: {
+              id: "workspace-live",
+              revision: 1,
+              updatedAt: "2026-04-04 21:15:00",
+              controlPanelSide: "left",
+              workspace: { panes: [] },
+            },
+          });
+        }
+        return new Response("", {
+          status: 404,
+        });
+      }
+
+      throw new Error(`Unexpected fetch: ${target}`);
+    });
+
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal(
+      "EventSource",
+      EventSourceMock as unknown as typeof EventSource,
+    );
+    vi.stubGlobal(
+      "ResizeObserver",
+      ResizeObserverMock as unknown as typeof ResizeObserver,
+    );
+
+    try {
+      render(<App />);
+
+      const eventSource = latestEventSource();
+      act(() => {
+        eventSource.dispatchOpen();
+        eventSource.dispatchState({
+          revision: 1,
+          projects: [],
+          orchestrators: [],
+          workspaces: [],
+          sessions: [],
+        });
+      });
+      await waitForNoControlPanelConnectionIssue();
+
+      vi.useFakeTimers();
+      act(() => {
+        eventSource.dispatchError();
+      });
+      expect(
+        screen.getByLabelText("Control panel backend reconnecting"),
+      ).toBeInTheDocument();
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(400);
+      });
+      await act(async () => {
+        await Promise.resolve();
+      });
+      expectNoControlPanelConnectionIssue();
+    } finally {
+      vi.useRealTimers();
       restoreGlobal("fetch", originalFetch);
       restoreGlobal("EventSource", originalEventSource);
       restoreGlobal("ResizeObserver", originalResizeObserver);
@@ -459,9 +617,7 @@ describe("Backend connection state", () => {
           sessions: [],
         });
       });
-      await waitFor(() => {
-        expect(screen.getByLabelText("Connected")).toBeInTheDocument();
-      });
+      await waitForNoControlPanelConnectionIssue();
 
       const hydratedStateFetchCount = countStateFetches();
       vi.useFakeTimers();
@@ -469,12 +625,14 @@ describe("Backend connection state", () => {
       act(() => {
         eventSource.dispatchError();
       });
-      expect(screen.getByLabelText("Reconnecting")).toBeInTheDocument();
+      expect(
+        screen.getByLabelText("Control panel backend reconnecting"),
+      ).toBeInTheDocument();
 
       act(() => {
         eventSource.dispatchOpen();
       });
-      expect(screen.getByLabelText("Connected")).toBeInTheDocument();
+      expectNoControlPanelConnectionIssue();
 
       await act(async () => {
         await vi.advanceTimersByTimeAsync(399);
@@ -555,9 +713,7 @@ describe("Backend connection state", () => {
           sessions: [],
         });
       });
-      await waitFor(() => {
-        expect(screen.getByLabelText("Connected")).toBeInTheDocument();
-      });
+      await waitForNoControlPanelConnectionIssue();
 
       const hydratedStateFetchCount = countStateFetches();
       vi.useFakeTimers();
@@ -565,7 +721,9 @@ describe("Backend connection state", () => {
       act(() => {
         eventSource.dispatchError();
       });
-      expect(screen.getByLabelText("Reconnecting")).toBeInTheDocument();
+      expect(
+        screen.getByLabelText("Control panel backend reconnecting"),
+      ).toBeInTheDocument();
 
       await act(async () => {
         await vi.advanceTimersByTimeAsync(100);
@@ -573,7 +731,7 @@ describe("Backend connection state", () => {
       act(() => {
         eventSource.dispatchOpen();
       });
-      expect(screen.getByLabelText("Connected")).toBeInTheDocument();
+      expectNoControlPanelConnectionIssue();
 
       await act(async () => {
         await vi.advanceTimersByTimeAsync(100);
@@ -581,7 +739,9 @@ describe("Backend connection state", () => {
       act(() => {
         eventSource.dispatchError();
       });
-      expect(screen.getByLabelText("Reconnecting")).toBeInTheDocument();
+      expect(
+        screen.getByLabelText("Control panel backend reconnecting"),
+      ).toBeInTheDocument();
 
       await act(async () => {
         await vi.advanceTimersByTimeAsync(399);
@@ -662,9 +822,7 @@ describe("Backend connection state", () => {
           sessions: [],
         });
       });
-      await waitFor(() => {
-        expect(screen.getByLabelText("Connected")).toBeInTheDocument();
-      });
+      await waitForNoControlPanelConnectionIssue();
 
       const hydratedStateFetchCount = countStateFetches();
       vi.useFakeTimers();
@@ -672,7 +830,9 @@ describe("Backend connection state", () => {
       act(() => {
         eventSource.dispatchError();
       });
-      expect(screen.getByLabelText("Reconnecting")).toBeInTheDocument();
+      expect(
+        screen.getByLabelText("Control panel backend reconnecting"),
+      ).toBeInTheDocument();
 
       await act(async () => {
         await vi.advanceTimersByTimeAsync(399);
@@ -753,9 +913,7 @@ describe("Backend connection state", () => {
           sessions: [],
         });
       });
-      await waitFor(() => {
-        expect(screen.getByLabelText("Connected")).toBeInTheDocument();
-      });
+      await waitForNoControlPanelConnectionIssue();
 
       const hydratedStateFetchCount = countStateFetches();
       vi.useFakeTimers();
@@ -763,7 +921,9 @@ describe("Backend connection state", () => {
       act(() => {
         eventSource.dispatchError();
       });
-      expect(screen.getByLabelText("Reconnecting")).toBeInTheDocument();
+      expect(
+        screen.getByLabelText("Control panel backend reconnecting"),
+      ).toBeInTheDocument();
 
       await act(async () => {
         await vi.advanceTimersByTimeAsync(100);
@@ -778,7 +938,7 @@ describe("Backend connection state", () => {
           sessions: [],
         });
       });
-      expect(screen.getByLabelText("Connected")).toBeInTheDocument();
+      expectNoControlPanelConnectionIssue();
 
       await act(async () => {
         await vi.advanceTimersByTimeAsync(400);
@@ -854,9 +1014,7 @@ describe("Backend connection state", () => {
           sessions: [],
         });
       });
-      await waitFor(() => {
-        expect(screen.getByLabelText("Connected")).toBeInTheDocument();
-      });
+      await waitForNoControlPanelConnectionIssue();
 
       const hydratedStateFetchCount = countStateFetches();
       vi.useFakeTimers();
@@ -864,7 +1022,9 @@ describe("Backend connection state", () => {
       act(() => {
         eventSource.dispatchError();
       });
-      expect(screen.getByLabelText("Reconnecting")).toBeInTheDocument();
+      expect(
+        screen.getByLabelText("Control panel backend reconnecting"),
+      ).toBeInTheDocument();
 
       await act(async () => {
         await vi.advanceTimersByTimeAsync(100);
@@ -877,7 +1037,7 @@ describe("Backend connection state", () => {
           orchestrators: [],
         });
       });
-      expect(screen.getByLabelText("Connected")).toBeInTheDocument();
+      expectNoControlPanelConnectionIssue();
 
       await act(async () => {
         await vi.advanceTimersByTimeAsync(400);
@@ -953,9 +1113,7 @@ describe("Backend connection state", () => {
           sessions: [],
         });
       });
-      await waitFor(() => {
-        expect(screen.getByLabelText("Connected")).toBeInTheDocument();
-      });
+      await waitForNoControlPanelConnectionIssue();
 
       const hydratedStateFetchCount = countStateFetches();
       vi.useFakeTimers();
@@ -963,7 +1121,9 @@ describe("Backend connection state", () => {
       act(() => {
         eventSource.dispatchError();
       });
-      expect(screen.getByLabelText("Reconnecting")).toBeInTheDocument();
+      expect(
+        screen.getByLabelText("Control panel backend reconnecting"),
+      ).toBeInTheDocument();
 
       await act(async () => {
         await vi.advanceTimersByTimeAsync(100);
@@ -977,7 +1137,9 @@ describe("Backend connection state", () => {
           orchestrators: [],
         });
       });
-      expect(screen.getByLabelText("Reconnecting")).toBeInTheDocument();
+      expect(
+        screen.getByLabelText("Control panel backend reconnecting"),
+      ).toBeInTheDocument();
 
       await act(async () => {
         await vi.advanceTimersByTimeAsync(299);
@@ -1068,7 +1230,9 @@ describe("Backend connection state", () => {
       act(() => {
         eventSource.dispatchError();
       });
-      expect(screen.getByLabelText("Reconnecting")).toBeInTheDocument();
+      expect(
+        screen.getByLabelText("Control panel backend reconnecting"),
+      ).toBeInTheDocument();
 
       await act(async () => {
         await vi.advanceTimersByTimeAsync(100);
@@ -1094,7 +1258,9 @@ describe("Backend connection state", () => {
         });
       });
       expect(screen.getByText("Streaming preview")).toBeInTheDocument();
-      expect(screen.getByLabelText("Reconnecting")).toBeInTheDocument();
+      expect(
+        screen.getByLabelText("Control panel backend reconnecting"),
+      ).toBeInTheDocument();
 
       await act(async () => {
         await vi.advanceTimersByTimeAsync(299);
@@ -1179,9 +1345,7 @@ describe("Backend connection state", () => {
           sessions: [],
         });
       });
-      await waitFor(() => {
-        expect(screen.getByLabelText("Connected")).toBeInTheDocument();
-      });
+      await waitForNoControlPanelConnectionIssue();
 
       const hydratedStateFetchCount = countStateFetches();
       vi.useFakeTimers();
@@ -1189,7 +1353,9 @@ describe("Backend connection state", () => {
       act(() => {
         eventSource.dispatchError();
       });
-      expect(screen.getByLabelText("Reconnecting")).toBeInTheDocument();
+      expect(
+        screen.getByLabelText("Control panel backend reconnecting"),
+      ).toBeInTheDocument();
 
       await act(async () => {
         await vi.advanceTimersByTimeAsync(100);
@@ -1213,7 +1379,7 @@ describe("Backend connection state", () => {
           status: "active",
         });
       });
-      expect(screen.getByLabelText("Connected")).toBeInTheDocument();
+      expectNoControlPanelConnectionIssue();
 
       await act(async () => {
         await vi.advanceTimersByTimeAsync(400);
@@ -1300,9 +1466,7 @@ describe("Backend connection state", () => {
           sessions: [],
         });
       });
-      await waitFor(() => {
-        expect(screen.getByLabelText("Connected")).toBeInTheDocument();
-      });
+      await waitForNoControlPanelConnectionIssue();
 
       const hydratedStateFetchCount = countStateFetches();
       vi.useFakeTimers();
@@ -1310,7 +1474,9 @@ describe("Backend connection state", () => {
       act(() => {
         eventSource.dispatchError();
       });
-      expect(screen.getByLabelText("Reconnecting")).toBeInTheDocument();
+      expect(
+        screen.getByLabelText("Control panel backend reconnecting"),
+      ).toBeInTheDocument();
 
       await act(async () => {
         await vi.advanceTimersByTimeAsync(100);
@@ -1429,9 +1595,7 @@ describe("Backend connection state", () => {
           sessions: [],
         });
       });
-      await waitFor(() => {
-        expect(screen.getByLabelText("Connected")).toBeInTheDocument();
-      });
+      await waitForNoControlPanelConnectionIssue();
 
       const hydratedStateFetchCount = countStateFetches();
       vi.useFakeTimers();
@@ -1439,7 +1603,9 @@ describe("Backend connection state", () => {
       act(() => {
         eventSource.dispatchError();
       });
-      expect(screen.getByLabelText("Reconnecting")).toBeInTheDocument();
+      expect(
+        screen.getByLabelText("Control panel backend reconnecting"),
+      ).toBeInTheDocument();
 
       await act(async () => {
         await vi.advanceTimersByTimeAsync(100);
@@ -1563,7 +1729,9 @@ describe("Backend connection state", () => {
       act(() => {
         eventSource.dispatchError();
       });
-      expect(screen.getByLabelText("Reconnecting")).toBeInTheDocument();
+      expect(
+        screen.getByLabelText("Control panel backend reconnecting"),
+      ).toBeInTheDocument();
 
       await act(async () => {
         await vi.advanceTimersByTimeAsync(100);
@@ -1677,7 +1845,9 @@ describe("Backend connection state", () => {
       act(() => {
         eventSource.dispatchError();
       });
-      expect(screen.getByLabelText("Reconnecting")).toBeInTheDocument();
+      expect(
+        screen.getByLabelText("Control panel backend reconnecting"),
+      ).toBeInTheDocument();
 
       await act(async () => {
         await vi.advanceTimersByTimeAsync(400);
@@ -1765,7 +1935,9 @@ describe("Backend connection state", () => {
       act(() => {
         eventSource.dispatchError();
       });
-      expect(screen.getByLabelText("Reconnecting")).toBeInTheDocument();
+      expect(
+        screen.getByLabelText("Control panel backend reconnecting"),
+      ).toBeInTheDocument();
 
       await act(async () => {
         await vi.advanceTimersByTimeAsync(400);

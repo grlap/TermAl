@@ -203,6 +203,79 @@ function describeBackendConnectionState(
   }
 }
 
+export function ControlPanelConnectionIndicator({
+  issueDetail = null,
+  state,
+}: {
+  issueDetail?: string | null;
+  state: BackendConnectionState;
+}) {
+  const descriptor = describeBackendConnectionState(state);
+  const tooltipId = useId();
+  const [isTooltipVisible, setIsTooltipVisible] = useState(false);
+  const detail = issueDetail ?? (state === "connected" ? null : descriptor.detail);
+  if (detail === null || (state === "connecting" && issueDetail === null)) {
+    return null;
+  }
+
+  const showSpinner = descriptor.icon === "spinner" || issueDetail !== null;
+  const showGenericIssueLabel = issueDetail !== null && state === "connected";
+  const displayLabel = showGenericIssueLabel ? "Issue" : descriptor.label;
+  const ariaLabel = showGenericIssueLabel
+    ? "Control panel issue"
+    : `Control panel backend ${descriptor.label.toLowerCase()}`;
+
+  return (
+    <div
+      className="control-panel-pane-status-shell"
+      onBlur={(event) => {
+        const nextTarget = event.relatedTarget;
+        if (nextTarget instanceof Node && event.currentTarget.contains(nextTarget)) {
+          return;
+        }
+        setIsTooltipVisible(false);
+      }}
+      onFocus={() => {
+        setIsTooltipVisible(true);
+      }}
+      onMouseEnter={() => {
+        setIsTooltipVisible(true);
+      }}
+      onMouseLeave={() => {
+        setIsTooltipVisible(false);
+      }}
+    >
+      <span
+        className="control-panel-pane-status"
+        role="img"
+        aria-label={ariaLabel}
+        aria-describedby={isTooltipVisible ? tooltipId : undefined}
+        tabIndex={0}
+      >
+        {showSpinner ? (
+          <span
+            className="activity-spinner control-panel-pane-status-spinner"
+            aria-hidden="true"
+          />
+        ) : (
+          <span className="control-panel-pane-status-icon" aria-hidden="true">
+            <BackendConnectionIcon state="offline" />
+          </span>
+        )}
+      </span>
+      <div
+        id={tooltipId}
+        className="control-panel-pane-status-tooltip"
+        role="tooltip"
+        aria-hidden={isTooltipVisible ? undefined : true}
+      >
+        <div className="control-panel-pane-status-tooltip-label">{displayLabel}</div>
+        <div className="control-panel-pane-status-tooltip-detail">{detail}</div>
+      </div>
+    </div>
+  );
+}
+
 export function BackendConnectionStatus({
   issueDetail = null,
   state,

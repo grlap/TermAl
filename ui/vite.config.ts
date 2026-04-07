@@ -16,6 +16,49 @@ function monacoEsmCssStub() {
   };
 }
 
+function configureBackendUnavailableProxy(proxy: {
+  on(
+    event: "error",
+    listener: (
+      error: Error,
+      req: unknown,
+      res:
+        | {
+            headersSent?: boolean;
+            writableEnded?: boolean;
+            writeHead(
+              statusCode: number,
+              headers?: Record<string, string>,
+            ): void;
+            end(body?: string): void;
+          }
+        | unknown,
+    ) => void,
+  ): void;
+}) {
+  proxy.on("error", (_error, _req, res) => {
+    if (
+      !res ||
+      typeof res !== "object" ||
+      !("writeHead" in res) ||
+      typeof res.writeHead !== "function" ||
+      !("end" in res) ||
+      typeof res.end !== "function"
+    ) {
+      return;
+    }
+
+    if (res.headersSent || res.writableEnded) {
+      return;
+    }
+
+    res.writeHead(502, { "Content-Type": "text/plain" });
+    res.end(
+      "The TermAl backend is unavailable. Start it again and wait for reconnect.",
+    );
+  });
+}
+
 export default defineConfig({
   plugins: [
     monacoEsmCssStub(),
@@ -74,6 +117,7 @@ export default defineConfig({
         // Prevent the proxy from closing the long-lived SSE connection.
         timeout: 0,
         proxyTimeout: 0,
+        configure: configureBackendUnavailableProxy,
       },
       "/api": {
         target: "http://127.0.0.1:8787",
@@ -81,6 +125,7 @@ export default defineConfig({
         // Allow large image attachments (base64-encoded PNGs can exceed 2 MB in the JSON body).
         timeout: 120_000,
         proxyTimeout: 120_000,
+        configure: configureBackendUnavailableProxy,
       },
     },
   },

@@ -5,6 +5,48 @@ and cleanup notes do not belong here.
 
 ## Active Repo Bugs
 
+## Backend reconnect behavior is driven by user-facing error text
+
+**Severity:** Medium - transport recovery now depends on parsing formatted error strings in the UI layer.
+
+`App.tsx` classifies backend-unavailable failures through `shouldInlineControlPanelBackendIssue()` and then mutates `backendConnectionState` / `backendConnectionIssueDetail` from the generic request error path. That makes reconnect behavior depend on the exact wording returned by `api.ts` and the Vite proxy, instead of a structured transport error from the API layer. If the message text changes, the reconnect UI can stop firing even though the underlying failure mode is unchanged.
+
+**Current behavior:**
+- Generic request catch blocks can promote a user-facing error message into the reconnect state machine.
+- The transport state is inferred from formatted text such as `Request failed with status 502.` or `The TermAl backend is unavailable.`
+
+**Proposal:**
+- Return a structured backend-unavailable error from `api.ts` instead of inferring transport state from display text.
+- Keep the reconnect decision in the transport layer and let UI copy use the structured error, not the other way around.
+
+## Successful `/api/state` fallback can report "connected" before SSE reopens
+
+**Severity:** Medium - the control-panel status can stop showing reconnecting
+even while the live SSE stream is still down.
+
+The fallback `/api/state` recovery path now clears
+`backendConnectionIssueDetail` and also forces `backendConnectionState` from
+`reconnecting` to `connected` after a successful HTTP snapshot fetch. That
+proves the backend responds to requests again, but it does not prove that the
+`EventSource` transport has reopened or that live delta/state events are
+flowing.
+
+This makes the connection indicator optimistic in a way the rest of the
+reconnect logic does not support. The spinner can disappear before
+`eventSource.onopen` or another live SSE event confirms that real-time
+transport recovery is complete.
+
+**Current behavior:**
+- A successful fallback `/api/state` fetch can clear the reconnecting badge.
+- The SSE stream can still be disconnected until a later reopen event.
+
+**Proposal:**
+- Clear transient request-error text on successful fallback state fetches, but
+  keep `backendConnectionState` as `reconnecting` until SSE reopen is
+  confirmed.
+- If needed, separate HTTP reachability from SSE transport health in the UI so
+  the status can be precise without staying noisy.
+
 ## Late workspace hydration can still restore a stale control-panel side
 
 **Severity:** Medium - a late workspace layout fetch can persist an obsolete
@@ -147,6 +189,14 @@ filesystem I/O is not safe under the mutex.
 - [ ] Add keyboard and ARIA coverage for the backend connection tooltip:
   test focus/blur-driven visibility and assert `aria-describedby` /
   `aria-hidden` wiring instead of relying only on hover and class-name checks.
+- [ ] Add structured-error coverage for backend reconnect handling:
+  prove the reconnect UI still fires when the proxy/backend-unavailable message
+  changes, and cover the dev-proxy `502` path plus the `reportRequestError()`
+  reconnect side effect so the retry path no longer depends on a fragile text
+  match or an untested Vite proxy error.
+- [ ] Extend reconnect recovery coverage to clear inline backend error text:
+  after a successful `/api/state` fallback, assert the inline banner / tooltip
+  request error disappears together with any reconnect indicator changes.
 
 ## Known External Limitations
 
