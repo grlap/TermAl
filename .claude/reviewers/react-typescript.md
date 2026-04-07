@@ -38,18 +38,25 @@ Focus: Hook correctness, component performance, type safety, React 18 patterns.
    - `reconcileSessions()` must preserve object identity for unchanged sessions
    - Flag missing error handling on `EventSource` connection failures
 
-6. **Workspace state management**:
+6. **DOM stability under re-renders (text selection preservation)**:
+   - Flag expensive render subtrees (ReactMarkdown, syntax highlighters, rich text renderers) that regenerate their entire DOM tree on every parent re-render. These destroy active browser text selections because the selection is anchored to specific DOM nodes.
+   - Fix pattern: wrap the output in `useMemo` keyed on the content inputs, and access callbacks via `useRef` so they don't invalidate the memo.
+   - Compare with stable patterns: simple `<pre><code>` blocks survive re-renders because React reconciliation can reuse their DOM nodes. Complex component trees (ReactMarkdown custom `components` prop with inline functions) cannot.
+   - Flag any component that accepts a callback prop AND produces a deep DOM tree — if the callback identity changes on every render, the entire subtree remounts.
+   - Also flag natively draggable elements (`<a>`, `<img>`) inside selectable text areas that don't have `draggable={false}` — browsers start a native drag instead of extending text selection.
+
+7. **Workspace state management**:
    - Binary tree operations (split, close, move tab) must maintain tree invariants
    - Flag orphaned panes or tabs after split/close operations
    - Flag workspace state updates that don't trigger proper re-renders
    - Tab drag-drop must handle edge cases (same pane, last tab, cross-pane)
 
-7. **Monaco Editor integration**:
+8. **Monaco Editor integration**:
    - Flag Monaco instances not properly disposed on unmount
    - Flag theme mismatches between TermAl themes and Monaco themes
    - Flag language detection that doesn't handle edge cases (unknown extensions)
 
-8. **Accessibility basics**:
+9. **Accessibility basics**:
    - Flag interactive elements without keyboard support (click handlers without onKeyDown)
    - Flag missing `role` attributes on custom widgets (slash menu, approval cards)
    - Flag missing `aria-label` on icon-only buttons

@@ -3338,6 +3338,7 @@ export default function App() {
     };
   }, [isSettingsOpen, pendingKillSessionId]);
 
+
   useEffect(() => {
     function handlePointerMove(event: PointerEvent) {
       const resizeState = resizeStateRef.current;

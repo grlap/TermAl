@@ -3613,6 +3613,10 @@ textarea {
   padding-block: var(--bubble-card-padding-y);
 }
 
+.message-card a {
+  -webkit-user-drag: none;
+}
+
 .message-card,
 .thread-notice,
 .empty-state {

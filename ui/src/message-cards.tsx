@@ -2233,11 +2233,22 @@ export function MarkdownContent({
   searchHighlightTone?: SearchHighlightTone;
   workspaceRoot?: string | null;
 }) {
-  const highlightChildren = (children: ReactNode) =>
-    highlightReactNodeText(children, searchQuery, searchHighlightTone);
+  // Keep callback in a ref so the memoized ReactMarkdown output stays stable
+  // even when the parent re-renders with a new function reference.  Without
+  // this, every re-render regenerates the entire markdown DOM tree, which
+  // destroys any active browser text selection.
+  const onOpenSourceLinkRef = useRef(onOpenSourceLink);
+  onOpenSourceLinkRef.current = onOpenSourceLink;
+  // Track presence (not identity) of the callback as a memo dependency so the
+  // rendered tree changes structurally when the prop goes from absent to present
+  // or vice versa.  The ref handles identity-only changes without rememoizing.
+  const hasOpenSourceLink = onOpenSourceLink != null;
 
-  return (
-    <div className="markdown-copy">
+  const rendered = useMemo(() => {
+    const highlightChildren = (children: ReactNode) =>
+      highlightReactNodeText(children, searchQuery, searchHighlightTone);
+
+    return (
       <ReactMarkdown
         transformLinkUri={transformMarkdownLinkUri}
         components={{
@@ -2247,12 +2258,12 @@ export function MarkdownContent({
             const displayLabel = buildMarkdownHrefDisplayLabel(href, children, workspaceRoot);
             const handleClick = (event: ReactMouseEvent<HTMLAnchorElement>) => {
               props.onClick?.(event);
-              if (event.defaultPrevented || !fileLinkTarget || !onOpenSourceLink) {
+              if (event.defaultPrevented || !fileLinkTarget || !onOpenSourceLinkRef.current) {
                 return;
               }
 
               event.preventDefault();
-              onOpenSourceLink({
+              onOpenSourceLinkRef.current({
                 ...fileLinkTarget,
                 openInNewTab: event.ctrlKey || event.metaKey,
               });
@@ -2262,6 +2273,7 @@ export function MarkdownContent({
               <a
                 {...props}
                 href={href}
+                draggable={false}
                 target={isExternalLink ? "_blank" : undefined}
                 rel={isExternalLink ? "noreferrer" : undefined}
                 onClick={handleClick}
@@ -2278,17 +2290,17 @@ export function MarkdownContent({
               : null;
 
             if (inline) {
-              if (inlineFileLinkTarget && onOpenSourceLink) {
+              if (inlineFileLinkTarget && hasOpenSourceLink) {
                 const handleInlineCodeClick = (event: ReactMouseEvent<HTMLAnchorElement>) => {
                   event.preventDefault();
-                  onOpenSourceLink({
+                  onOpenSourceLinkRef.current?.({
                     ...inlineFileLinkTarget,
                     openInNewTab: event.ctrlKey || event.metaKey,
                   });
                 };
 
                 return (
-                  <a className="inline-code-link" href={code} onClick={handleInlineCodeClick}>
+                  <a className="inline-code-link" href={code} draggable={false} onClick={handleInlineCodeClick}>
                     <code className={className} {...props}>
                       {highlightChildren(children)}
                     </code>
@@ -2348,8 +2360,10 @@ export function MarkdownContent({
       >
         {markdown}
       </ReactMarkdown>
-    </div>
-  );
+    );
+  }, [markdown, searchQuery, searchHighlightTone, workspaceRoot, hasOpenSourceLink]);
+
+  return <div className="markdown-copy">{rendered}</div>;
 }
 
 function resolveMarkdownFileLinkTarget(

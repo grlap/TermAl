@@ -9,6 +9,18 @@ No active repo bugs are currently tracked.
 
 ## Resolved
 
+Mouse text selection resetting in the idle UI: `App.tsx` recreates
+`onOpenSourceLink` on every parent render, and `MarkdownContent` used to rebuild
+its entire `ReactMarkdown` subtree whenever that callback identity changed. That
+replaced the DOM nodes the browser selection was anchored to, collapsing active
+text selections even when message content itself was unchanged. Fixed by
+memoizing the rendered markdown on content/search/workspace inputs, reading the
+callback through a ref so identity-only callback changes do not rebuild the
+subtree, and marking markdown links as non-draggable so native drag initiation
+does not steal selection. Added tests covering inline code file references both
+with and without `onOpenSourceLink`, plus a rerender regression that verifies
+the inline code link DOM nodes survive callback identity churn.
+
 Agent readiness mutex contention: `snapshot_from_inner` was recomputing
 `collect_agent_readiness` (PATH scanning, dotenv/settings file reads) under the
 app-state mutex on every snapshot. On Windows this meant ~648 stat() calls per
@@ -18,7 +30,7 @@ with a 5-second TTL outside `state.inner`, double-checked locking refresh, expli
 invalidation on session creation and settings changes, and moving `GET /api/state`
 to `run_blocking_api`. Handlers that already hold the `inner` lock use `cached_agent_readiness()` which
 can serve stale readiness beyond the 5s TTL if only `commit_locked` paths run
-(staleness persists until a `snapshot()` call refreshes the cache) — this is a
+(staleness persists until a `snapshot()` call refreshes the cache) - this is a
 documented tradeoff, not a bug, since filesystem I/O is not safe under the mutex.
 
 ## Known External Limitations
