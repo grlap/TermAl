@@ -58,7 +58,7 @@ describe("orchestrator geometry helpers", () => {
   it("returns anchor positions and nearest anchors for a session card", () => {
     const session = makeSession();
 
-    expect(anchorPosition(session, "left")).toEqual({ x: 100, y: 298 });
+    expect(anchorPosition(session, "left")).toEqual({ x: 100, y: 288 });
     expect(anchorPosition(session, "top-right")).toEqual({ x: 420, y: 200 });
     expect(nearestAnchorSide(session, 430, 300)).toBe("right");
     expect(nearestAnchorPosition(session, 250, 205)).toEqual({ x: 260, y: 200 });
@@ -105,15 +105,15 @@ describe("orchestrator geometry helpers", () => {
       toSession,
     );
 
-    expect(geometry.path).toBe("M 420 298 L 600 298");
+    expect(geometry.path).toBe("M 420 288 L 600 288");
     expect(geometry.startX).toBe(420);
-    expect(geometry.startY).toBe(298);
+    expect(geometry.startY).toBe(288);
     expect(geometry.endX).toBe(600);
-    expect(geometry.endY).toBe(298);
+    expect(geometry.endY).toBe(288);
     expect(geometry.midpointX).toBe(510);
-    expect(geometry.midpointY).toBe(298);
+    expect(geometry.midpointY).toBe(288);
     expect(geometry.noteX).toBe(510);
-    expect(geometry.noteY).toBe(316);
+    expect(geometry.noteY).toBe(306);
     expect(geometry.title).toBe("transition-1: Builder -> Reviewer");
   });
 
@@ -127,15 +127,15 @@ describe("orchestrator geometry helpers", () => {
       session,
     );
 
-    expect(geometry.path).toBe("M 420 298 C 540 298, 260 80, 260 200");
+    expect(geometry.path).toBe("M 420 288 C 540 288, 260 80, 260 200");
     expect(geometry.startX).toBe(420);
-    expect(geometry.startY).toBe(298);
+    expect(geometry.startY).toBe(288);
     expect(geometry.endX).toBe(260);
     expect(geometry.endY).toBe(200);
     expect(geometry.midpointX).toBeCloseTo(385, 6);
-    expect(geometry.midpointY).toBeCloseTo(204, 6);
-    expect(geometry.noteX).toBeCloseTo(395.5, 3);
-    expect(geometry.noteY).toBeCloseTo(189.38, 3);
+    expect(geometry.midpointY).toBeCloseTo(199, 6);
+    expect(geometry.noteX).toBeCloseTo(395.04718046169467, 6);
+    expect(geometry.noteY).toBeCloseTo(184.06500201639983, 6);
     expect(geometry.title).toBe("transition-1: Builder -> Builder");
   });
 

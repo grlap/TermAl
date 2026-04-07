@@ -66,6 +66,12 @@ export const THEMES = [
     swatches: ["#f3f4f6", "#607d93", "#d86f58"],
   },
   {
+    id: "silver-white",
+    name: "Silver White",
+    description: "Neutral whites with cool grey chrome and restrained slate accents.",
+    swatches: ["#f5f6f7", "#a5adb6", "#4c5e70"],
+  },
+  {
     id: "porcelain-white",
     name: "Porcelain White",
     description: "Polished porcelain surfaces with jade, plum, and brushed-silver accents.",

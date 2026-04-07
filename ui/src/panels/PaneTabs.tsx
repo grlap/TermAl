@@ -19,6 +19,7 @@ import { AgentIcon } from "../agent-icon";
 import { copyTextToClipboard } from "../clipboard";
 import { FileTabIcon } from "../file-tab-icon";
 import { GitHubMark } from "../github-mark";
+import { OrchestratorIcon } from "../orchestrator-icon";
 import {
   looksLikeAbsoluteDisplayPath,
   normalizeDisplayPath,
@@ -1725,14 +1726,7 @@ function TabKindIcon({ kind }: { kind: string }) {
         </svg>
       );
     case "orchestratorList":
-      return (
-        <svg {...iconProps}>
-          <circle cx="8" cy="4.5" r="2.2" fill="none" stroke="currentColor" strokeWidth="1.3" />
-          <circle cx="4" cy="13" r="1.5" fill="none" stroke="currentColor" strokeWidth="1.3" />
-          <circle cx="12" cy="13" r="1.5" fill="none" stroke="currentColor" strokeWidth="1.3" />
-          <path d="M6.5 6.2L4.5 11.5M9.5 6.2l2 5.3" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
-        </svg>
-      );
+      return <OrchestratorIcon className="pane-tab-kind-icon" />;
     default:
       return null;
   }

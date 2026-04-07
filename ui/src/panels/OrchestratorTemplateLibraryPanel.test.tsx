@@ -9,6 +9,7 @@ import {
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
+  createOrchestratorInstance,
   fetchOrchestratorTemplates,
   pauseOrchestratorInstance,
   resumeOrchestratorInstance,
@@ -20,12 +21,14 @@ import type { OrchestratorInstance, OrchestratorTemplate } from "../types";
 import { OrchestratorTemplateLibraryPanel } from "./OrchestratorTemplateLibraryPanel";
 
 vi.mock("../api", () => ({
+  createOrchestratorInstance: vi.fn(),
   fetchOrchestratorTemplates: vi.fn(),
   pauseOrchestratorInstance: vi.fn(),
   resumeOrchestratorInstance: vi.fn(),
   stopOrchestratorInstance: vi.fn(),
 }));
 
+const createOrchestratorInstanceMock = vi.mocked(createOrchestratorInstance);
 const fetchTemplatesMock = vi.mocked(fetchOrchestratorTemplates);
 const pauseOrchestratorInstanceMock = vi.mocked(pauseOrchestratorInstance);
 const resumeOrchestratorInstanceMock = vi.mocked(resumeOrchestratorInstance);
@@ -33,6 +36,7 @@ const stopOrchestratorInstanceMock = vi.mocked(stopOrchestratorInstance);
 
 describe("OrchestratorTemplateLibraryPanel", () => {
   beforeEach(() => {
+    createOrchestratorInstanceMock.mockReset();
     fetchTemplatesMock.mockReset();
     pauseOrchestratorInstanceMock.mockReset();
     resumeOrchestratorInstanceMock.mockReset();
@@ -59,6 +63,39 @@ describe("OrchestratorTemplateLibraryPanel", () => {
 
     expect(onOpenCanvas).toHaveBeenCalledWith("template-1");
     expect(onNewCanvas).not.toHaveBeenCalled();
+  });
+
+  it("starts a runtime from a saved template and forwards the returned state", async () => {
+    const onStateUpdated = vi.fn();
+    fetchTemplatesMock.mockResolvedValue({
+      templates: [makeTemplate({ id: "template-run", projectId: "project-run" })],
+    });
+    createOrchestratorInstanceMock.mockResolvedValue({
+      orchestrator: makeOrchestrator({ id: "runtime-started" }),
+      state: makeStateResponse(7),
+    });
+
+    render(
+      <OrchestratorTemplateLibraryPanel
+        onNewCanvas={() => {}}
+        onOpenCanvas={() => {}}
+        onStateUpdated={onStateUpdated}
+      />,
+    );
+
+    expect(await screen.findByText("Delivery Flow")).toBeInTheDocument();
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Run orchestration" }),
+    );
+
+    await waitFor(() => {
+      expect(createOrchestratorInstanceMock).toHaveBeenCalledWith(
+        "template-run",
+        "project-run",
+      );
+      expect(onStateUpdated).toHaveBeenCalledWith(makeStateResponse(7));
+    });
   });
 
   it("offers a blank canvas when the library is empty", async () => {

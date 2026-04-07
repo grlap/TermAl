@@ -1,4 +1,4 @@
-﻿import { useMemo, type RefObject } from "react";
+﻿import { useId, useMemo, useState, type RefObject } from "react";
 
 import type { WorkspaceLayoutSummary } from "./api";
 
@@ -161,45 +161,96 @@ function formatWorkspaceSwitcherLabel(workspaceId: string) {
 
 type BackendConnectionState = "connecting" | "connected" | "reconnecting" | "offline";
 
-function describeBackendConnectionState(state: BackendConnectionState) {
+type BackendConnectionDescriptor = {
+  detail: string;
+  icon: "spinner" | "connected" | "offline";
+  label: string;
+  tone: "active" | "idle" | "error";
+};
+
+function describeBackendConnectionState(
+  state: BackendConnectionState,
+): BackendConnectionDescriptor {
   switch (state) {
     case "connecting":
       return {
         detail: "Connecting to the TermAl backend.",
-        icon: "spinner" as const,
+        icon: "spinner",
         label: "Connecting",
-        tone: "active" as const,
+        tone: "active",
       };
     case "connected":
       return {
         detail: "Live updates are connected.",
-        icon: "connected" as const,
+        icon: "connected",
         label: "Connected",
-        tone: "idle" as const,
+        tone: "idle",
       };
     case "reconnecting":
       return {
         detail: "Live updates are disconnected. Trying to reconnect.",
-        icon: "spinner" as const,
+        icon: "spinner",
         label: "Reconnecting",
-        tone: "active" as const,
+        tone: "error",
       };
     case "offline":
       return {
         detail: "The browser is offline or cannot reach the backend.",
-        icon: "offline" as const,
+        icon: "offline",
         label: "Offline",
-        tone: "error" as const,
+        tone: "error",
       };
   }
 }
 
-export function BackendConnectionStatus({ state }: { state: BackendConnectionState }) {
+export function BackendConnectionStatus({
+  issueDetail = null,
+  state,
+}: {
+  issueDetail?: string | null;
+  state: BackendConnectionState;
+}) {
   const descriptor = describeBackendConnectionState(state);
+  const tooltipId = useId();
+  const [isTooltipVisible, setIsTooltipVisible] = useState(false);
+  const hasIssue = descriptor.tone === "error" || issueDetail !== null;
+  const tooltipDetail = issueDetail ?? (state === "connected" ? null : descriptor.detail);
+  const hasTooltip = tooltipDetail !== null;
 
   return (
-    <div className="workspace-connection-status" role="status" aria-live="polite" title={descriptor.detail}>
-      <span className={`chip chip-status chip-status-${descriptor.tone} workspace-connection-chip`}>
+    <div
+      className={`workspace-connection-status ${hasIssue ? "has-issue" : ""} ${hasTooltip ? "has-tooltip" : ""}`.trim()}
+      role="status"
+      aria-live="polite"
+      onBlur={(event) => {
+        const nextTarget = event.relatedTarget;
+        if (nextTarget instanceof Node && event.currentTarget.contains(nextTarget)) {
+          return;
+        }
+        setIsTooltipVisible(false);
+      }}
+      onFocus={() => {
+        if (hasTooltip) {
+          setIsTooltipVisible(true);
+        }
+      }}
+      onMouseEnter={() => {
+        if (hasTooltip) {
+          setIsTooltipVisible(true);
+        }
+      }}
+      onMouseLeave={() => {
+        if (hasTooltip) {
+          setIsTooltipVisible(false);
+        }
+      }}
+    >
+      <span
+        className={`chip chip-status chip-status-${hasIssue ? "error" : descriptor.tone} workspace-connection-chip`}
+        aria-describedby={hasTooltip && isTooltipVisible ? tooltipId : undefined}
+        aria-label={descriptor.label}
+        tabIndex={hasTooltip ? 0 : undefined}
+      >
         {descriptor.icon === "spinner" ? (
           <span className="activity-spinner workspace-connection-spinner" aria-hidden="true" />
         ) : (
@@ -207,10 +258,20 @@ export function BackendConnectionStatus({ state }: { state: BackendConnectionSta
         )}
         <span className="visually-hidden">{descriptor.label}</span>
       </span>
+      {hasTooltip ? (
+        <div
+          id={tooltipId}
+          className="activity-tooltip workspace-connection-tooltip"
+          role="tooltip"
+          aria-hidden={isTooltipVisible ? undefined : true}
+        >
+          <div className="activity-tooltip-label">{descriptor.label}</div>
+          <p>{tooltipDetail}</p>
+        </div>
+      ) : null}
     </div>
   );
 }
-
 function BackendConnectionIcon({ state }: { state: "connected" | "offline" }) {
   if (state === "connected") {
     return (

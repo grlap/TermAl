@@ -1,0 +1,153 @@
+[data-theme="silver-white"] {
+  color-scheme: light;
+  --paper: #f5f6f7;
+  --paper-strong: #ffffff;
+  --ink: #1e252b;
+  --muted: #69747d;
+  --line: rgba(30, 37, 43, 0.12);
+  --panel: rgba(255, 255, 255, 0.86);
+  --panel-strong: rgba(255, 255, 255, 0.95);
+  --signal-red: #c56e5f;
+  --signal-gold: #b79d73;
+  --signal-green: #6e9284;
+  --signal-blue: #667b91;
+  --signal-rose: #8f7b89;
+  --shadow: 0 24px 60px rgba(34, 42, 50, 0.12);
+  --heading-font: "Avenir Next", "Segoe UI", "Helvetica Neue", sans-serif;
+  --body-font: "Avenir Next", "Segoe UI", "Helvetica Neue", sans-serif;
+  --button-radius: 0.98rem;
+  --button-radius-tight: 0.76rem;
+  --button-radius-large: 1.08rem;
+
+  /* Background & texture */
+  --bg-gradient-start: #eceff2;
+  --bg-radial-warm: rgba(143, 123, 137, 0.05);
+  --bg-radial-cool: rgba(102, 123, 145, 0.08);
+  --texture-line: rgba(30, 37, 43, 0.02);
+  --texture-mask: linear-gradient(180deg, rgba(0, 0, 0, 0.72), transparent);
+
+  /* Surfaces */
+  --surface-white: rgba(255, 255, 255, 0.84);
+  --surface-white-strong: rgba(255, 255, 255, 0.66);
+  --surface-white-soft: rgba(248, 249, 250, 0.8);
+  --surface-warm: rgba(245, 246, 247, 0.68);
+  --surface-warm-bar: rgba(246, 247, 248, 0.8);
+  --surface-card: rgba(255, 255, 255, 0.9);
+  --surface-composer: rgba(251, 252, 252, 0.82);
+  --surface-footer: rgba(246, 247, 248, 0.58);
+
+  /* Code blocks */
+  --code-bg: #fbfcfd;
+  --code-fg: #34404a;
+  --diff-bg-start: #fcfdfe;
+  --diff-bg-end: #f6f8f9;
+  --diff-fg: #41505b;
+  --inline-code-bg: rgba(52, 64, 74, 0.08);
+  --inline-code-fg: #536472;
+  --syntax-plain: #34404a;
+  --syntax-comment: #8b949d;
+  --syntax-keyword: #8f7484;
+  --syntax-string: #9f855c;
+  --syntax-function: #5f7388;
+  --syntax-type: #6f8f82;
+  --syntax-variable: #34404a;
+  --syntax-number: #6f8297;
+  --syntax-operator: #87929b;
+  --syntax-tag: #8f7484;
+  --syntax-emphasis: #34404a;
+  --syntax-inserted: #6f8f82;
+  --syntax-deleted: #b86455;
+
+  /* Borders & decorations */
+  --orbit-border: rgba(30, 37, 43, 0.07);
+  --divider-bg: rgba(30, 37, 43, 0.1);
+  --tab-grip-dot: rgba(30, 37, 43, 0.26);
+  --pane-empty-border: rgba(30, 37, 43, 0.14);
+
+  /* Focus & accents */
+  --focus-ring: rgba(102, 123, 145, 0.26);
+  --accent-red-bg: rgba(197, 110, 95, 0.1);
+  --accent-red-border: rgba(197, 110, 95, 0.2);
+  --accent-red-glow: rgba(197, 110, 95, 0.18);
+  --accent-red-border-strong: rgba(197, 110, 95, 0.28);
+  --accent-red-shadow: rgba(197, 110, 95, 0.08);
+  --accent-red-end: #d17d6e;
+  --accent-blue-bg: rgba(102, 123, 145, 0.1);
+  --accent-blue-border: rgba(102, 123, 145, 0.2);
+  --accent-blue-soft: rgba(102, 123, 145, 0.06);
+  --accent-gold-border: rgba(183, 157, 115, 0.32);
+  --accent-rose-bg: rgba(143, 123, 137, 0.1);
+  --accent-rose-border: rgba(143, 123, 137, 0.18);
+
+  /* Active tab & view button gradients */
+  --tab-active-bg: linear-gradient(135deg, rgba(102, 123, 145, 0.12), rgba(143, 123, 137, 0.05));
+  --tab-active-border: rgba(102, 123, 145, 0.2);
+  --view-selected-bg: linear-gradient(135deg, rgba(102, 123, 145, 0.14), rgba(143, 123, 137, 0.08));
+  --view-selected-border: rgba(102, 123, 145, 0.22);
+
+  /* Status dots */
+  --status-green-glow: rgba(110, 146, 132, 0.14);
+  --status-green-ring: rgba(110, 146, 132, 0.16);
+  --status-green-ring-bright: rgba(110, 146, 132, 0.8);
+  --status-green-ring-mid: rgba(110, 146, 132, 0.36);
+  --status-gold-glow: rgba(183, 157, 115, 0.14);
+  --status-rose-glow: rgba(143, 123, 137, 0.14);
+
+  /* Special surfaces */
+  --backdrop-bg: rgba(34, 42, 50, 0.2);
+  --tooltip-bg: rgba(44, 51, 58, 0.96);
+  --tooltip-fg: rgba(247, 249, 250, 0.95);
+  --tooltip-label: rgba(197, 208, 219, 0.88);
+  --tooltip-arrow: rgba(44, 51, 58, 0.96);
+  --tooltip-border: rgba(30, 37, 43, 0.1);
+  --tooltip-shadow: 0 18px 32px rgba(34, 42, 50, 0.18);
+  --notice-border: rgba(102, 123, 145, 0.16);
+  --notice-bg: rgba(255, 255, 255, 0.92);
+  --activity-border: rgba(102, 123, 145, 0.14);
+  --activity-bg: linear-gradient(135deg, rgba(102, 123, 145, 0.05), rgba(255, 255, 255, 0.94));
+  --spinner-track: rgba(102, 123, 145, 0.14);
+  --avatar-bg: linear-gradient(135deg, rgba(102, 123, 145, 0.12), rgba(143, 123, 137, 0.08));
+
+  /* Bubbles & cards */
+  --bubble-you-bg: linear-gradient(135deg, rgba(102, 123, 145, 0.09), rgba(102, 123, 145, 0.04));
+  --new-response-bg: linear-gradient(135deg, #667b91, #4c5e70);
+  --new-response-shadow: rgba(41, 51, 61, 0.18);
+  --approval-bg: linear-gradient(180deg, rgba(252, 252, 252, 0.94), rgba(255, 255, 255, 0.88));
+  --approval-button-reject-bg: rgba(143, 123, 137, 0.12);
+  --pending-border: rgba(102, 123, 145, 0.18);
+  --pending-bg: linear-gradient(135deg, rgba(102, 123, 145, 0.08), rgba(102, 123, 145, 0.03));
+  --pending-dismiss-border: rgba(30, 37, 43, 0.07);
+  --pending-dismiss-bg: rgba(255, 255, 255, 0.66);
+  --pending-dismiss-fg: rgba(78, 90, 101, 0.56);
+  --pending-dismiss-hover-bg: rgba(255, 255, 255, 0.8);
+  --pending-dismiss-hover-fg: rgba(30, 37, 43, 0.72);
+
+  /* Blockquote */
+  --blockquote-border: rgba(102, 123, 145, 0.2);
+
+  /* Attachment */
+  --attachment-border: rgba(102, 123, 145, 0.14);
+  --attachment-bg: rgba(102, 123, 145, 0.05);
+  --attachment-preview-bg: rgba(30, 37, 43, 0.05);
+
+  /* Drop zone */
+  --drop-active-bg: rgba(102, 123, 145, 0.1);
+  --drop-active-border: rgba(102, 123, 145, 0.34);
+  --drop-label-bg: rgba(255, 255, 255, 0.95);
+
+  /* Button gradient */
+  --button-primary-bg: linear-gradient(135deg, #667b91, #4c5e70);
+  --button-primary-shadow: rgba(102, 123, 145, 0.18);
+
+  /* Session row */
+  --session-status-border: rgba(30, 37, 43, 0.07);
+  --session-status-bg: rgba(255, 255, 255, 0.82);
+  --session-status-hover-bg: rgba(255, 255, 255, 0.93);
+  --session-open-border: rgba(102, 123, 145, 0.16);
+
+  /* Markdown table header */
+  --table-header-bg: rgba(255, 255, 255, 0.64);
+
+  /* Pane active */
+  --pane-active-shadow: 0 0 0 1px rgba(102, 123, 145, 0.12);
+}

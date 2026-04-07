@@ -1589,7 +1589,8 @@ describe("App", () => {
     try {
       await renderApp();
 
-      const eventSource = latestEventSource();
+      const eventSource = latestEventSource();
+
       act(() => {
         eventSource.dispatchOpen();
         eventSource.dispatchNamedEvent("state", {
@@ -2223,7 +2224,8 @@ describe("App", () => {
     const scrollIntoViewSpy = stubScrollIntoView();
     try {
       await renderApp();
-      const eventSource = latestEventSource();      act(() => {
+      const eventSource = latestEventSource();
+      act(() => {
         eventSource.dispatchOpen();
         eventSource.dispatchNamedEvent("state", {
           revision: 1,
@@ -2859,7 +2861,8 @@ describe("App", () => {
     const scrollIntoViewSpy = stubScrollIntoView();
     try {
       await renderApp();
-      const eventSource = latestEventSource();      act(() => {
+      const eventSource = latestEventSource();
+      act(() => {
         eventSource.dispatchOpen();
         eventSource.dispatchNamedEvent("state", {
           revision: 1,
@@ -7178,7 +7181,8 @@ describe("App", () => {
     try {
       await renderApp();
 
-      const eventSource = latestEventSource();
+      const eventSource = latestEventSource();
+
       act(() => {
         eventSource.dispatchOpen();
         eventSource.dispatchNamedEvent("state", {
@@ -9261,7 +9265,8 @@ describe("App", () => {
 
       try {
         await renderApp();
-        const eventSource = latestEventSource();        act(() => {
+        const eventSource = latestEventSource();
+        act(() => {
           eventSource.dispatchError();
         });
         await settleAsyncUi();
@@ -9285,7 +9290,17 @@ describe("App", () => {
             name: /Orchestration Review Flow/i,
           }),
         ).toHaveLength(1);
-        expect(within(orchestratorGroup).getByText("3 sessions")).toBeInTheDocument();
+        const orchestratorHeaderCopy = orchestratorGroup.querySelector(
+          ".session-orchestrator-group-copy",
+        );
+        if (!(orchestratorHeaderCopy instanceof HTMLElement)) {
+          throw new Error("Expected orchestrator header copy block");
+        }
+        expect(
+          within(orchestratorHeaderCopy).getByText("Orchestration"),
+        ).toBeInTheDocument();
+        expect(within(orchestratorHeaderCopy).getByText("Review Flow")).toBeInTheDocument();
+        expect(within(orchestratorHeaderCopy).getByText("3 sessions")).toBeInTheDocument();
         expect(within(orchestratorGroup).getByText("Entry")).toBeInTheDocument();
         expect(within(orchestratorGroup).getByText("Codex Reviewer")).toBeInTheDocument();
         expect(within(orchestratorGroup).getByText("Claude Reviewer")).toBeInTheDocument();
@@ -9443,7 +9458,8 @@ describe("App", () => {
 
       try {
         await renderApp();
-        const eventSource = latestEventSource();        act(() => {
+        const eventSource = latestEventSource();
+        act(() => {
           eventSource.dispatchError();
         });
         await settleAsyncUi();
@@ -9638,7 +9654,8 @@ describe("App", () => {
 
       try {
         await renderApp();
-        const eventSource = latestEventSource();        act(() => {
+        const eventSource = latestEventSource();
+        act(() => {
           eventSource.dispatchError();
         });
         await settleAsyncUi();
@@ -9734,7 +9751,8 @@ describe("App", () => {
 
       try {
         await renderApp();
-        const eventSource = latestEventSource();        act(() => {
+        const eventSource = latestEventSource();
+        act(() => {
           eventSource.dispatchError();
         });
         await settleAsyncUi();
@@ -9828,7 +9846,8 @@ describe("App", () => {
 
       try {
         await renderApp();
-        const eventSource = latestEventSource();        act(() => {
+        const eventSource = latestEventSource();
+        act(() => {
           eventSource.dispatchError();
         });
         await settleAsyncUi();
@@ -9959,7 +9978,8 @@ describe("App", () => {
 
     try {
       await renderApp();
-      const eventSource = latestEventSource();      act(() => {
+      const eventSource = latestEventSource();
+      act(() => {
         eventSource.dispatchError();
       });
       await settleAsyncUi();
@@ -10086,7 +10106,8 @@ describe("App", () => {
 
       try {
         await renderApp();
-        const eventSource = latestEventSource();        act(() => {
+        const eventSource = latestEventSource();
+        act(() => {
           eventSource.dispatchError();
         });
         await settleAsyncUi();
@@ -10363,7 +10384,8 @@ describe("App", () => {
 
       try {
         await renderApp();
-        const eventSource = latestEventSource();        act(() => {
+        const eventSource = latestEventSource();
+        act(() => {
           eventSource.dispatchError();
         });
         await settleAsyncUi();
@@ -10594,7 +10616,8 @@ describe("App", () => {
 
       try {
         await renderApp();
-        const eventSource = latestEventSource();        act(() => {
+        const eventSource = latestEventSource();
+        act(() => {
           eventSource.dispatchError();
         });
         await settleAsyncUi();
@@ -10798,7 +10821,8 @@ describe("App", () => {
 
       try {
         await renderApp();
-        const eventSource = latestEventSource();        act(() => {
+        const eventSource = latestEventSource();
+        act(() => {
           eventSource.dispatchError();
         });
         await settleAsyncUi();
@@ -11022,7 +11046,8 @@ describe("App", () => {
 
       try {
         await renderApp();
-        const eventSource = latestEventSource();        act(() => {
+        const eventSource = latestEventSource();
+        act(() => {
           eventSource.dispatchError();
         });
         await settleAsyncUi();
@@ -11265,7 +11290,8 @@ describe("App", () => {
 
       try {
         await renderApp();
-        const eventSource = latestEventSource();        act(() => {
+        const eventSource = latestEventSource();
+        act(() => {
           eventSource.dispatchError();
         });
         await settleAsyncUi();
@@ -11590,7 +11616,8 @@ describe("App", () => {
 
       try {
         await renderApp();
-        const eventSource = latestEventSource();        act(() => {
+        const eventSource = latestEventSource();
+        act(() => {
           eventSource.dispatchError();
         });
         await settleAsyncUi();
@@ -11853,7 +11880,8 @@ describe("App", () => {
 
       try {
         await renderApp();
-        const eventSource = latestEventSource();        act(() => {
+        const eventSource = latestEventSource();
+        act(() => {
           eventSource.dispatchError();
         });
         await settleAsyncUi();
@@ -12121,7 +12149,8 @@ describe("App", () => {
 
       try {
         await renderApp();
-        const eventSource = latestEventSource();        act(() => {
+        const eventSource = latestEventSource();
+        act(() => {
           eventSource.dispatchError();
         });
         await settleAsyncUi();
@@ -12221,7 +12250,8 @@ describe("App", () => {
 
     try {
       await renderApp();
-      const eventSource = latestEventSource();      act(() => {
+      const eventSource = latestEventSource();
+      act(() => {
         eventSource.dispatchError();
       });
       await settleAsyncUi();
@@ -12245,6 +12275,352 @@ describe("App", () => {
       expect(document.querySelector(".tile-divider-row")).not.toBeNull();
       expect(document.querySelector(".tile-divider-row.fixed")).toBeNull();
     } finally {
+      scrollIntoViewSpy.mockRestore();
+      restoreGlobal("fetch", originalFetch);
+      restoreGlobal("EventSource", originalEventSource);
+      restoreGlobal("ResizeObserver", originalResizeObserver);
+    }
+  });
+
+  it("does not let a late workspace layout fetch overwrite a manual control panel resize", async () => {
+    const originalFetch = globalThis.fetch;
+    const originalEventSource = globalThis.EventSource;
+    const originalResizeObserver = globalThis.ResizeObserver;
+    const originalUrl = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+    const layoutStorageKey = `${WORKSPACE_LAYOUT_STORAGE_KEY}:test-control-panel-resize-race`;
+    const fetchWorkspaceLayoutDeferred =
+      createDeferred<Awaited<ReturnType<typeof api.fetchWorkspaceLayout>> | null>();
+    const fetchWorkspaceLayoutSpy = vi
+      .mocked(api.fetchWorkspaceLayout)
+      .mockImplementation(() => fetchWorkspaceLayoutDeferred.promise);
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/api/state") {
+        return jsonResponse({
+          revision: 1,
+          projects: [],
+          sessions: [
+            makeSession("session-1", {
+              name: "Session 1",
+              preview: "Ready for a prompt.",
+            }),
+          ],
+        });
+      }
+
+      throw new Error(`Unexpected fetch: ${url}`);
+    });
+
+    window.history.replaceState(
+      window.history.state,
+      "",
+      "/?workspace=test-control-panel-resize-race",
+    );
+    window.localStorage.clear();
+    window.localStorage.setItem(
+      layoutStorageKey,
+      JSON.stringify({
+        controlPanelSide: "left",
+        workspace: {
+          root: {
+            id: "split-root",
+            type: "split",
+            direction: "row",
+            ratio: 0.22,
+            first: {
+              type: "pane",
+              paneId: "pane-control",
+            },
+            second: {
+              type: "pane",
+              paneId: "pane-session",
+            },
+          },
+          panes: [
+            {
+              id: "pane-control",
+              tabs: [
+                {
+                  id: "tab-control",
+                  kind: "controlPanel",
+                  originSessionId: null,
+                },
+              ],
+              activeTabId: "tab-control",
+              activeSessionId: null,
+              viewMode: "controlPanel",
+              lastSessionViewMode: "session",
+              sourcePath: null,
+            },
+            {
+              id: "pane-session",
+              tabs: [
+                {
+                  id: "tab-session",
+                  kind: "session",
+                  sessionId: "session-1",
+                },
+              ],
+              activeTabId: "tab-session",
+              activeSessionId: "session-1",
+              viewMode: "session",
+              lastSessionViewMode: "session",
+              sourcePath: null,
+            },
+          ],
+          activePaneId: "pane-session",
+        },
+      }),
+    );
+
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal(
+      "EventSource",
+      EventSourceMock as unknown as typeof EventSource,
+    );
+    vi.stubGlobal(
+      "ResizeObserver",
+      ResizeObserverMock as unknown as typeof ResizeObserver,
+    );
+    const scrollIntoViewSpy = stubScrollIntoView();
+
+    try {
+      await renderApp();
+      const divider = document.querySelector(".tile-divider-row");
+      if (!(divider instanceof HTMLDivElement)) {
+        throw new Error("Control panel divider not found");
+      }
+      const split = divider.parentElement;
+      if (!(split instanceof HTMLDivElement)) {
+        throw new Error("Control panel split container not found");
+      }
+      Object.defineProperty(split, "getBoundingClientRect", {
+        configurable: true,
+        value: () =>
+          ({
+            bottom: 800,
+            height: 800,
+            left: 0,
+            right: 2000,
+            top: 0,
+            width: 2000,
+            x: 0,
+            y: 0,
+            toJSON: () => ({}),
+          }) satisfies DOMRect,
+      });
+
+      await act(async () => {
+        fireEvent.pointerDown(divider, { clientX: 440, clientY: 40 });
+        fireEvent.pointerMove(window, { clientX: 840, clientY: 40 });
+        fireEvent.pointerUp(window);
+        await flushUiWork();
+      });
+
+      await act(async () => {
+        fetchWorkspaceLayoutDeferred.resolve({
+          layout: {
+            id: "workspace-test",
+            revision: 1,
+            updatedAt: "2026-03-30 09:00:00",
+            controlPanelSide: "left",
+            workspace: {
+              root: {
+                id: "split-root",
+                type: "split",
+                direction: "row",
+                ratio: 0.22,
+                first: {
+                  type: "pane",
+                  paneId: "pane-control",
+                },
+                second: {
+                  type: "pane",
+                  paneId: "pane-session",
+                },
+              },
+              panes: [
+                {
+                  id: "pane-control",
+                  tabs: [
+                    {
+                      id: "tab-control",
+                      kind: "controlPanel",
+                      originSessionId: null,
+                    },
+                  ],
+                  activeTabId: "tab-control",
+                  activeSessionId: null,
+                  viewMode: "controlPanel",
+                  lastSessionViewMode: "session",
+                  sourcePath: null,
+                },
+                {
+                  id: "pane-session",
+                  tabs: [
+                    {
+                      id: "tab-session",
+                      kind: "session",
+                      sessionId: "session-1",
+                    },
+                  ],
+                  activeTabId: "tab-session",
+                  activeSessionId: "session-1",
+                  viewMode: "session",
+                  lastSessionViewMode: "session",
+                  sourcePath: null,
+                },
+              ],
+              activePaneId: "pane-session",
+            },
+          },
+        });
+        await flushUiWork();
+      });
+
+      await waitFor(() => {
+        const persistedLayoutRaw = window.localStorage.getItem(layoutStorageKey);
+        expect(persistedLayoutRaw).not.toBeNull();
+        const persistedLayout = JSON.parse(persistedLayoutRaw ?? "null") as {
+          workspace: {
+            root: {
+              ratio: number;
+            } | null;
+          };
+        };
+        expect(persistedLayout.workspace.root?.ratio).toBeCloseTo(0.42, 5);
+      });
+    } finally {
+      window.history.replaceState(window.history.state, "", originalUrl);
+      window.localStorage.clear();
+      scrollIntoViewSpy.mockRestore();
+      fetchWorkspaceLayoutSpy.mockRestore();
+      restoreGlobal("fetch", originalFetch);
+      restoreGlobal("EventSource", originalEventSource);
+      restoreGlobal("ResizeObserver", originalResizeObserver);
+    }
+  });
+
+  it("clamps a saved docked control panel layout up to the current minimum width", async () => {
+    const originalFetch = globalThis.fetch;
+    const originalEventSource = globalThis.EventSource;
+    const originalResizeObserver = globalThis.ResizeObserver;
+    const originalUrl = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+    const layoutStorageKey = `${WORKSPACE_LAYOUT_STORAGE_KEY}:test-control-panel-min-clamp`;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/api/state") {
+        return jsonResponse({
+          revision: 1,
+          projects: [],
+          sessions: [
+            makeSession("session-1", {
+              name: "Session 1",
+              preview: "Ready for a prompt.",
+            }),
+          ],
+        });
+      }
+
+      throw new Error(`Unexpected fetch: ${url}`);
+    });
+
+    window.history.replaceState(
+      window.history.state,
+      "",
+      "/?workspace=test-control-panel-min-clamp",
+    );
+    window.localStorage.clear();
+    window.localStorage.setItem(
+      layoutStorageKey,
+      JSON.stringify({
+        controlPanelSide: "left",
+        workspace: {
+          root: {
+            id: "split-root",
+            type: "split",
+            direction: "row",
+            ratio: 0.22,
+            first: {
+              type: "pane",
+              paneId: "pane-control",
+            },
+            second: {
+              type: "pane",
+              paneId: "pane-session",
+            },
+          },
+          panes: [
+            {
+              id: "pane-control",
+              tabs: [
+                {
+                  id: "tab-control",
+                  kind: "controlPanel",
+                  originSessionId: null,
+                },
+              ],
+              activeTabId: "tab-control",
+              activeSessionId: null,
+              viewMode: "controlPanel",
+              lastSessionViewMode: "session",
+              sourcePath: null,
+            },
+            {
+              id: "pane-session",
+              tabs: [
+                {
+                  id: "tab-session",
+                  kind: "session",
+                  sessionId: "session-1",
+                },
+              ],
+              activeTabId: "tab-session",
+              activeSessionId: "session-1",
+              viewMode: "session",
+              lastSessionViewMode: "session",
+              sourcePath: null,
+            },
+          ],
+          activePaneId: "pane-session",
+        },
+      }),
+    );
+
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal(
+      "EventSource",
+      EventSourceMock as unknown as typeof EventSource,
+    );
+    vi.stubGlobal(
+      "ResizeObserver",
+      ResizeObserverMock as unknown as typeof ResizeObserver,
+    );
+    Object.defineProperty(document.documentElement, "clientWidth", {
+      configurable: true,
+      value: 1000,
+    });
+    const scrollIntoViewSpy = stubScrollIntoView();
+
+    try {
+      await renderApp();
+
+      await waitFor(() => {
+        const persistedLayoutRaw = window.localStorage.getItem(layoutStorageKey);
+        expect(persistedLayoutRaw).not.toBeNull();
+        const persistedLayout = JSON.parse(persistedLayoutRaw ?? "null") as {
+          workspace: {
+            root: {
+              ratio: number;
+            } | null;
+          };
+        };
+        expect(persistedLayout.workspace.root?.ratio).toBeCloseTo(0.64, 5);
+      });
+    } finally {
+      delete (document.documentElement as { clientWidth?: number }).clientWidth;
+      window.history.replaceState(window.history.state, "", originalUrl);
+      window.localStorage.clear();
       scrollIntoViewSpy.mockRestore();
       restoreGlobal("fetch", originalFetch);
       restoreGlobal("EventSource", originalEventSource);
@@ -12455,7 +12831,7 @@ describe("App", () => {
     );
     document.documentElement.style.setProperty(
       "--control-panel-pane-width",
-      "23rem",
+      "40rem",
     );
 
     const workspaceStage = document.createElement("div");
@@ -12469,7 +12845,7 @@ describe("App", () => {
 
     try {
       expect(resolveStandaloneControlPanelDockWidthRatio(0.24)).toBeCloseTo(
-        (23 * 16) / 1200,
+        (40 * 16) / 1200,
         5,
       );
     } finally {
@@ -12497,11 +12873,11 @@ describe("App", () => {
       );
     document.documentElement.style.setProperty(
       "--control-panel-pane-width",
-      "23rem",
+      "40rem",
     );
     document.documentElement.style.setProperty(
       "--control-panel-pane-min-width",
-      "20rem",
+      "40rem",
     );
 
     const workspaceStage = document.createElement("div");
@@ -12515,7 +12891,7 @@ describe("App", () => {
 
     try {
       expect(resolveStandaloneControlPanelDockWidthRatio(0.24)).toBeCloseTo(
-        (20 * 16) / (20 * 16 + 400 * 0.22),
+        1 / (1 + 0.22),
         5,
       );
     } finally {
@@ -13088,7 +13464,8 @@ describe("App", () => {
 
       try {
         await renderApp();
-        const eventSource = latestEventSource();
+        const eventSource = latestEventSource();
+
         await act(async () => {
           eventSource.dispatchOpen();
           eventSource.dispatchNamedEvent("state", {
@@ -13232,7 +13609,8 @@ describe("App", () => {
 
       try {
         await renderApp();
-        const eventSource = latestEventSource();
+        const eventSource = latestEventSource();
+
         await act(async () => {
           eventSource.dispatchOpen();
           eventSource.dispatchNamedEvent("state", {

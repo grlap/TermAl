@@ -151,6 +151,10 @@ import {
   WorkspaceSwitcher,
 } from "./workspace-shell-controls";
 import {
+  RuntimeActionButton,
+  type RuntimeAction,
+} from "./runtime-action-button";
+import {
   AgentSessionPanel,
   AgentSessionPanelFooter,
 } from "./panels/AgentSessionPanel";
@@ -393,7 +397,7 @@ type PendingWorkspaceLayoutSave = {
   layout: WorkspaceLayoutPersistencePayload;
   workspaceId: string;
 };
-type OrchestratorRuntimeAction = "pause" | "resume" | "stop";
+type OrchestratorRuntimeAction = RuntimeAction;
 type PreferencesTabId =
   | "themes"
   | "appearance"
@@ -411,9 +415,12 @@ const PENDING_KILL_CLOSE_DELAY_MS = 180;
 const PENDING_SESSION_RENAME_CLOSE_DELAY_MS = 300;
 const DEFAULT_SPLIT_MIN_RATIO = 0.22;
 const DEFAULT_SPLIT_MAX_RATIO = 0.78;
-const CONTROL_PANEL_PANE_MIN_WIDTH_FALLBACK_PX = 20 * 16;
+// 40rem is the minimum acceptable docked control-panel width. Keep these
+// fallbacks aligned with the CSS dock width/min-width so saved layouts do not
+// permit a narrower manual resize that later snaps back.
+const CONTROL_PANEL_PANE_MIN_WIDTH_FALLBACK_PX = 40 * 16;
 const STANDALONE_CONTROL_SURFACE_PANE_MIN_WIDTH_FALLBACK_PX = 16 * 16;
-const CONTROL_PANEL_PANE_WIDTH_FALLBACK_PX = 23 * 16;
+const CONTROL_PANEL_PANE_WIDTH_FALLBACK_PX = 40 * 16;
 
 type SessionConversationItem =
   | {
@@ -749,6 +756,69 @@ export function syncMessageStackScrollPosition(
   };
 }
 
+function getDockedControlPanelWidthRatioForWorkspace(
+  workspace: WorkspaceState,
+): number | null {
+  const controlPanelPaneId =
+    workspace.panes.find((pane) =>
+      pane.tabs.some((tab) => tab.kind === "controlPanel"),
+    )?.id ?? null;
+  if (
+    !controlPanelPaneId ||
+    !workspace.root ||
+    workspace.root.type !== "split" ||
+    workspace.root.direction !== "row"
+  ) {
+    return null;
+  }
+
+  if (
+    workspace.root.first.type === "pane" &&
+    workspace.root.first.paneId === controlPanelPaneId
+  ) {
+    return workspace.root.ratio;
+  }
+
+  if (
+    workspace.root.second.type === "pane" &&
+    workspace.root.second.paneId === controlPanelPaneId
+  ) {
+    return 1 - workspace.root.ratio;
+  }
+
+  return null;
+}
+
+function resolvePreferredControlPanelWidthRatio(
+  workspace: WorkspaceState,
+): number {
+  const minimumWidthRatio = resolveStandaloneControlPanelDockWidthRatio(
+    DEFAULT_CONTROL_PANEL_DOCK_WIDTH_RATIO,
+  );
+  const currentWidthRatio = getDockedControlPanelWidthRatioForWorkspace(
+    workspace,
+  );
+
+  return currentWidthRatio === null
+    ? minimumWidthRatio
+    : Math.max(currentWidthRatio, minimumWidthRatio);
+}
+
+function hydrateControlPanelLayout(
+  workspace: WorkspaceState,
+  side: ControlPanelSide,
+): WorkspaceState {
+  const workspaceWithControlPanel = ensureControlPanelInWorkspaceState(
+    workspace,
+  );
+
+  return dockControlPanelAtWorkspaceEdge(
+    workspaceWithControlPanel,
+    side,
+    resolvePreferredControlPanelWidthRatio(workspaceWithControlPanel),
+  );
+}
+
 function createInitialWorkspaceBootstrap(workspaceViewId: string) {
   const storedLayout = getStoredWorkspaceLayout(workspaceViewId);
   const controlPanelSide: ControlPanelSide =
@@ -760,14 +830,12 @@ function createInitialWorkspaceBootstrap(workspaceViewId: string) {
     storedLayout?.editorFontSizePx ?? getStoredEditorFontSizePreference();
   const densityPercent =
     storedLayout?.densityPercent ?? getStoredDensityPreference();
-  const workspace = dockControlPanelAtWorkspaceEdge(
-    ensureControlPanelInWorkspaceState(
-      storedLayout?.workspace ?? {
-        root: null,
-        panes: [],
-        activePaneId: null,
-      },
-    ),
+  const workspace = hydrateControlPanelLayout(
+    storedLayout?.workspace ?? {
+      root: null,
+      panes: [],
+      activePaneId: null,
+    },
     controlPanelSide,
   );
 
@@ -870,6 +938,8 @@ export default function App() {
   const [sessionSettingNotices, setSessionSettingNotices] =
     useState<SessionNoticeMap>({});
   const [requestError, setRequestError] = useState<string | null>(null);
+  const [backendConnectionIssueDetail, setBackendConnectionIssueDetail] =
+    useState<string | null>(null);
   const [backendConnectionState, setBackendConnectionState] =
     useState<BackendConnectionState>(() =>
       readNavigatorOnline() ? "connecting" : "offline",
@@ -971,6 +1041,8 @@ export default function App() {
     startY: number;
     size: number;
   } | null>(null);
+  const ignoreFetchedWorkspaceLayoutRef = useRef(false);
+  const workspaceLayoutLoadPendingRef = useRef(false);
   const draftAttachmentsRef = useRef<Record<string, DraftImageAttachment[]>>(
     {},
   );
@@ -2137,6 +2209,7 @@ export default function App() {
 
     function handleBrowserOffline() {
       setBackendConnectionState("offline");
+      setBackendConnectionIssueDetail(null);
     }
 
     window.addEventListener("online", handleBrowserOnline);
@@ -2378,10 +2451,10 @@ export default function App() {
                   adoptedAt,
                 );
               }
-              setRequestError(null);
+              setBackendConnectionIssueDetail(null);
             } catch (error) {
               if (!cancelled) {
-                setRequestError(getErrorMessage(error));
+                setBackendConnectionIssueDetail(getErrorMessage(error));
                 if (
                   preserveReconnectFallback &&
                   reconnectStateResyncTimeoutId === null
@@ -2583,10 +2656,10 @@ export default function App() {
           );
           syncLiveSessionResumeWatchdogBaselines(state.sessions, adoptedAt);
         }
-        setRequestError(null);
+        setBackendConnectionIssueDetail(null);
       } catch (error) {
         if (!cancelled) {
-          setRequestError(getErrorMessage(error));
+          setBackendConnectionIssueDetail(getErrorMessage(error));
         }
       } finally {
         if (!cancelled) {
@@ -2608,7 +2681,7 @@ export default function App() {
         );
         if (revisionAction === "ignore") {
           clearReconnectStateResyncTimeoutAfterConfirmedReopen();
-          setRequestError(null);
+          setBackendConnectionIssueDetail(null);
           return;
         }
         if (revisionAction === "resync") {
@@ -2638,7 +2711,7 @@ export default function App() {
             setOrchestrators(delta.orchestrators);
             setSessions(nextSessions);
           });
-          setRequestError(null);
+          setBackendConnectionIssueDetail(null);
           return;
         }
 
@@ -2657,7 +2730,7 @@ export default function App() {
           startTransition(() => {
             setSessions(sessionsRef.current);
           });
-          setRequestError(null);
+          setBackendConnectionIssueDetail(null);
           return;
         }
 
@@ -2678,7 +2751,7 @@ export default function App() {
           forceAdoptNextStateEventRef.current = true;
         }
         setBackendConnectionState("connected");
-        setRequestError(null);
+        setBackendConnectionIssueDetail(null);
       }
     };
     eventSource.onerror = () => {
@@ -2883,6 +2956,8 @@ export default function App() {
 
   useEffect(() => {
     let cancelled = false;
+    workspaceLayoutLoadPendingRef.current = true;
+    ignoreFetchedWorkspaceLayoutRef.current = false;
     setIsWorkspaceLayoutReady(false);
 
     void fetchWorkspaceLayout(workspaceViewId)
@@ -2906,6 +2981,9 @@ export default function App() {
           : null;
 
         if (nextLayout) {
+          // Always apply preference fields from the server layout. The
+          // ignore flag only protects workspace split ratios so a manual
+          // drag during initial hydration isn't overwritten by a late fetch.
           setControlPanelSide(nextLayout.controlPanelSide);
           if (nextLayout.themeId) {
             setThemeId(nextLayout.themeId);
@@ -2922,15 +3000,18 @@ export default function App() {
           if (nextLayout.densityPercent !== undefined) {
             setDensityPercent(nextLayout.densityPercent);
           }
-          setWorkspace(
-            dockControlPanelAtWorkspaceEdge(
-              ensureControlPanelInWorkspaceState(nextLayout.workspace),
-              nextLayout.controlPanelSide,
-            ),
-          );
-          persistWorkspaceLayout(workspaceViewId, nextLayout);
+          if (!ignoreFetchedWorkspaceLayoutRef.current) {
+            setWorkspace(
+              hydrateControlPanelLayout(
+                nextLayout.workspace,
+                nextLayout.controlPanelSide,
+              ),
+            );
+            persistWorkspaceLayout(workspaceViewId, nextLayout);
+          }
         }
 
+        workspaceLayoutLoadPendingRef.current = false;
         setIsWorkspaceLayoutReady(true);
       })
       .catch((error) => {
@@ -2939,12 +3020,14 @@ export default function App() {
           error,
         );
         if (!cancelled) {
+          workspaceLayoutLoadPendingRef.current = false;
           setIsWorkspaceLayoutReady(true);
         }
       });
 
     return () => {
       cancelled = true;
+      workspaceLayoutLoadPendingRef.current = false;
     };
   }, [workspaceViewId]);
 
@@ -3355,6 +3438,14 @@ export default function App() {
         resizeState.minRatio,
         resizeState.maxRatio,
       );
+      if (
+        workspaceLayoutLoadPendingRef.current &&
+        nextRatio !== resizeState.startRatio
+      ) {
+        // Keep a manual resize from being overwritten by a late initial layout
+        // fetch for the current workspace.
+        ignoreFetchedWorkspaceLayoutRef.current = true;
+      }
 
       setWorkspace((current) =>
         updateSplitRatio(current, resizeState.splitId, nextRatio),
@@ -6477,87 +6568,83 @@ export default function App() {
                                 />
                               </svg>
                             </button>
-                            <span className="session-orchestrator-group-label">
-                              Orchestration
-                            </span>
-                            <strong className="session-orchestrator-group-name">
-                              {groupName}
-                            </strong>
-                            <div className="session-orchestrator-group-meta">
-                              <span className="session-orchestrator-group-count">
-                                {entry.sessions.length === 1
-                                  ? "1 session"
-                                  : `${entry.sessions.length} sessions`}
+                            <div className="session-orchestrator-group-copy">
+                              <span className="session-orchestrator-group-label">
+                                Orchestration
                               </span>
+                              <div className="session-orchestrator-group-title-row">
+                                <strong className="session-orchestrator-group-name">
+                                  {groupName}
+                                </strong>
+                                <span className="session-orchestrator-group-count">
+                                  {entry.sessions.length === 1
+                                    ? "1 session"
+                                    : `${entry.sessions.length} sessions`}
+                                </span>
+                              </div>
+                            </div>
+                            <div className="session-orchestrator-group-meta">
                               {entry.orchestrator.status === "running" ? (
                                 <div className="session-orchestrator-group-actions">
-                                  <button
-                                    className="ghost-button session-orchestrator-group-action"
-                                    type="button"
-                                    aria-label={`Pause orchestration ${entry.orchestrator.id}`}
+                                  <OrchestratorRuntimeActionButton
+                                    action="pause"
+                                    orchestratorId={entry.orchestrator.id}
+                                    isPending={
+                                      pendingOrchestratorAction === "pause"
+                                    }
+                                    disabled={hasPendingOrchestratorAction}
                                     onClick={() =>
                                       void handleOrchestratorRuntimeAction(
                                         entry.orchestrator.id,
                                         "pause",
                                       )
                                     }
+                                  />
+                                  <OrchestratorRuntimeActionButton
+                                    action="stop"
+                                    orchestratorId={entry.orchestrator.id}
+                                    isPending={
+                                      pendingOrchestratorAction === "stop"
+                                    }
                                     disabled={hasPendingOrchestratorAction}
-                                  >
-                                    {pendingOrchestratorAction === "pause"
-                                      ? "Pausing..."
-                                      : "Pause"}
-                                  </button>
-                                  <button
-                                    className="ghost-button session-orchestrator-group-action session-orchestrator-group-action-stop"
-                                    type="button"
-                                    aria-label={`Stop orchestration ${entry.orchestrator.id}`}
                                     onClick={() =>
                                       void handleOrchestratorRuntimeAction(
                                         entry.orchestrator.id,
                                         "stop",
                                       )
                                     }
-                                    disabled={hasPendingOrchestratorAction}
-                                  >
-                                    {pendingOrchestratorAction === "stop"
-                                      ? "Stopping..."
-                                      : "Stop"}
-                                  </button>
+                                  />
                                 </div>
                               ) : entry.orchestrator.status === "paused" ? (
                                 <div className="session-orchestrator-group-actions">
-                                  <button
-                                    className="ghost-button session-orchestrator-group-action"
-                                    type="button"
-                                    aria-label={`Resume orchestration ${entry.orchestrator.id}`}
+                                  <OrchestratorRuntimeActionButton
+                                    action="resume"
+                                    orchestratorId={entry.orchestrator.id}
+                                    isPending={
+                                      pendingOrchestratorAction === "resume"
+                                    }
+                                    disabled={hasPendingOrchestratorAction}
                                     onClick={() =>
                                       void handleOrchestratorRuntimeAction(
                                         entry.orchestrator.id,
                                         "resume",
                                       )
                                     }
+                                  />
+                                  <OrchestratorRuntimeActionButton
+                                    action="stop"
+                                    orchestratorId={entry.orchestrator.id}
+                                    isPending={
+                                      pendingOrchestratorAction === "stop"
+                                    }
                                     disabled={hasPendingOrchestratorAction}
-                                  >
-                                    {pendingOrchestratorAction === "resume"
-                                      ? "Resuming..."
-                                      : "Resume"}
-                                  </button>
-                                  <button
-                                    className="ghost-button session-orchestrator-group-action session-orchestrator-group-action-stop"
-                                    type="button"
-                                    aria-label={`Stop orchestration ${entry.orchestrator.id}`}
                                     onClick={() =>
                                       void handleOrchestratorRuntimeAction(
                                         entry.orchestrator.id,
                                         "stop",
                                       )
                                     }
-                                    disabled={hasPendingOrchestratorAction}
-                                  >
-                                    {pendingOrchestratorAction === "stop"
-                                      ? "Stopping..."
-                                      : "Stop"}
-                                  </button>
+                                  />
                                 </div>
                               ) : null}
                             </div>
@@ -6712,7 +6799,10 @@ export default function App() {
           onOpenWorkspace={handleOpenWorkspaceHere}
           onToggle={handleWorkspaceSwitcherToggle}
         />
-        <BackendConnectionStatus state={backendConnectionState} />
+        <BackendConnectionStatus
+          state={backendConnectionState}
+          issueDetail={backendConnectionIssueDetail}
+        />
       </>
     );
   }
@@ -10526,7 +10616,10 @@ export function resolveStandaloneControlPanelDockWidthRatio(
       ".workspace-stage.workspace-stage-control-panel-only",
     ) ?? document.querySelector(".workspace-stage");
   const stageWidth =
-    workspaceStage instanceof HTMLElement ? workspaceStage.clientWidth : 0;
+    workspaceStage instanceof HTMLElement && workspaceStage.clientWidth > 0
+      ? workspaceStage.clientWidth
+      : (document.documentElement?.clientWidth ??
+          (typeof window !== "undefined" ? window.innerWidth : 0));
   if (stageWidth <= 0) {
     return fallbackRatio;
   }
@@ -10704,6 +10797,49 @@ export function getWorkspaceSplitResizeBounds(
   };
 }
 
+function OrchestratorRuntimeActionButton({
+  action,
+  orchestratorId,
+  isPending,
+  disabled,
+  onClick,
+}: {
+  action: "pause" | "resume" | "stop";
+  orchestratorId: string;
+  isPending: boolean;
+  disabled: boolean;
+  onClick: () => void;
+}) {
+  const label =
+    action === "pause"
+      ? `Pause orchestration ${orchestratorId}`
+      : action === "resume"
+        ? `Resume orchestration ${orchestratorId}`
+        : `Stop orchestration ${orchestratorId}`;
+  const title = isPending
+    ? action === "pause"
+      ? "Pausing orchestration"
+      : action === "resume"
+        ? "Resuming orchestration"
+        : "Stopping orchestration"
+    : action === "pause"
+      ? "Pause orchestration"
+      : action === "resume"
+        ? "Resume orchestration"
+        : "Stop orchestration";
+
+  return (
+    <RuntimeActionButton
+      action={action}
+      ariaLabel={label}
+      title={title}
+      classNamePrefix="session-orchestrator-group-action"
+      isPending={isPending}
+      disabled={disabled}
+      onClick={onClick}
+    />
+  );
+}
 function SessionFindBar({
   inputRef,
   query,

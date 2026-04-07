@@ -37,7 +37,7 @@ import type {
 const BOARD_WIDTH = 2560;
 const BOARD_HEIGHT = 1600;
 const CARD_WIDTH = 320;
-const CARD_HEIGHT = 196;
+const CARD_HEIGHT = 176;
 const BOARD_MARGIN = 32;
 const MIN_ZOOM = 0.5;
 const MAX_ZOOM = 2;

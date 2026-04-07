@@ -653,14 +653,14 @@ describe("OrchestratorTemplatesPanel", () => {
     }
 
     expect(card.style.left).toBe("32px");
-    expect(card.style.top).toBe("1372px");
+    expect(card.style.top).toBe("1392px");
 
     act(() => {
       window.dispatchEvent(new Event("pagehide"));
     });
 
     expect(window.localStorage.getItem(stateKey)).toContain('"x":32');
-    expect(window.localStorage.getItem(stateKey)).toContain('"y":1372');
+    expect(window.localStorage.getItem(stateKey)).toContain('"y":1392');
   });
 
   it("ignores restored drafts with an invalid transition prompt template", async () => {

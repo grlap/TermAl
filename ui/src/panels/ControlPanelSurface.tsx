@@ -8,6 +8,7 @@ import {
   type ReactNode,
 } from "react";
 import { GitHubMark } from "../github-mark";
+import { OrchestratorIcon } from "../orchestrator-icon";
 import {
   TAB_DRAG_MIME_TYPE,
   attachWorkspaceTabDragData,
@@ -552,20 +553,7 @@ function ProjectsIcon() {
 }
 
 function OrchestratorsIcon() {
-  return (
-    <svg viewBox="0 0 20 20" focusable="false" aria-hidden="true">
-      <circle cx="10" cy="5.5" r="2.5" fill="none" stroke="currentColor" strokeWidth="1.5" />
-      <circle cx="5" cy="16.5" r="1.8" fill="none" stroke="currentColor" strokeWidth="1.5" />
-      <circle cx="15" cy="16.5" r="1.8" fill="none" stroke="currentColor" strokeWidth="1.5" />
-      <path
-        d="M8.2 7.5 5.8 14.7M11.8 7.5l2.4 7.2"
-        fill="none"
-        stroke="currentColor"
-        strokeLinecap="round"
-        strokeWidth="1.5"
-      />
-    </svg>
-  );
+  return <OrchestratorIcon />;
 }
 
 function GitStatusIcon() {
