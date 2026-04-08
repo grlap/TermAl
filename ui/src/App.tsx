@@ -2511,10 +2511,10 @@ export default function App() {
                 clearInitialStateResyncRetryTimeout();
                 if (
                   reconnectStateResyncTimeoutId !== null &&
-                  (preserveReconnectFallback || !sawReconnectOpenSinceLastError)
+                  sawReconnectOpenSinceLastError
                 ) {
-                  // Pre-reopen delta-triggered resyncs should only disarm the fast reconnect
-                  // fallback once a /api/state snapshot has actually been adopted.
+                  // Once the stream itself has reopened, an adopted snapshot can
+                  // disarm any leftover reconnect fallback timer.
                   clearReconnectStateResyncTimeout();
                 }
                 const adoptedAt = Date.now();
@@ -2532,9 +2532,16 @@ export default function App() {
               }
               setBackendConnectionIssueDetail(null);
               clearRecoveredBackendRequestError();
-              setBackendConnectionState((current) =>
-                current === "reconnecting" ? "connected" : current,
-              );
+              if (
+                requestedRevision !== null &&
+                !sawReconnectOpenSinceLastError &&
+                reconnectStateResyncTimeoutId === null
+              ) {
+                // Keep polling the authoritative snapshot until the live SSE
+                // transport proves it reopened. Otherwise completed replies can
+                // stay hidden after the first fallback fetch.
+                scheduleReconnectStateResync();
+              }
             } catch (error) {
               if (!cancelled) {
                 setBackendConnectionIssueDetail(getErrorMessage(error));

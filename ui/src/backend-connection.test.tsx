@@ -473,18 +473,38 @@ describe("Backend connection state", () => {
     }
   });
 
-  it("clears the reconnecting badge after a successful state resync even before a fresh SSE open", async () => {
+  it("keeps reconnect polling active until a fresh SSE open confirms recovery", async () => {
     const originalFetch = globalThis.fetch;
     const originalEventSource = globalThis.EventSource;
     const originalResizeObserver = globalThis.ResizeObserver;
+    let stateRequestCount = 0;
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const target = String(input);
       if (target === "/api/state") {
-        return jsonResponse({
-          revision: 1,
-          projects: [],
-          sessions: [],
-        });
+        stateRequestCount += 1;
+        if (stateRequestCount === 1) {
+          return jsonResponse({
+            revision: 1,
+            projects: [],
+            sessions: [],
+          });
+        }
+        if (stateRequestCount === 2) {
+          return jsonResponse(
+            makeBackendStateResponse({
+              revision: 2,
+              sessionName: "Recovered Session",
+              preview: "Recovered preview",
+            }),
+          );
+        }
+        return jsonResponse(
+          makeBackendStateResponse({
+            revision: 3,
+            sessionName: "Recovered Session",
+            preview: "Recovered again",
+          }),
+        );
       }
       if (target.startsWith("/api/workspaces/")) {
         if (init?.method === "PUT") {
@@ -505,6 +525,9 @@ describe("Backend connection state", () => {
 
       throw new Error(`Unexpected fetch: ${target}`);
     });
+    const countStateFetches = () =>
+      fetchMock.mock.calls.filter(([url]) => String(url) === "/api/state")
+        .length;
 
     vi.stubGlobal("fetch", fetchMock);
     vi.stubGlobal(
@@ -532,6 +555,7 @@ describe("Backend connection state", () => {
       });
       await waitForNoControlPanelConnectionIssue();
 
+      const hydratedStateFetchCount = countStateFetches();
       vi.useFakeTimers();
       act(() => {
         eventSource.dispatchError();
@@ -542,6 +566,27 @@ describe("Backend connection state", () => {
 
       await act(async () => {
         await vi.advanceTimersByTimeAsync(400);
+      });
+      expect(
+        screen.getByLabelText("Control panel backend reconnecting"),
+      ).toBeInTheDocument();
+      expect(countStateFetches()).toBe(hydratedStateFetchCount + 1);
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(399);
+      });
+      expect(countStateFetches()).toBe(hydratedStateFetchCount + 1);
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1);
+      });
+      expect(
+        screen.getByLabelText("Control panel backend reconnecting"),
+      ).toBeInTheDocument();
+      expect(countStateFetches()).toBe(hydratedStateFetchCount + 2);
+
+      act(() => {
+        eventSource.dispatchOpen();
       });
       await act(async () => {
         await Promise.resolve();

@@ -37,6 +37,9 @@ Focus: Hook correctness, component performance, type safety, React 18 patterns.
    - Flag delta application that mutates state directly instead of producing new objects
    - `reconcileSessions()` must preserve object identity for unchanged sessions
    - Flag missing error handling on `EventSource` connection failures
+   - Flag reconnect flows that clear `reconnecting`, stop fallback polling, or otherwise report the backend as recovered before `EventSource.onopen` or a confirmed post-reopen live event
+   - A successful `/api/state` fallback fetch repairs the snapshot only; it does not prove the live stream is healthy again
+   - Flag regressions where the newest assistant message only appears after sending another prompt, changing focus, or triggering some unrelated rerender
 
 6. **DOM stability under re-renders (text selection preservation)**:
    - Flag expensive render subtrees (ReactMarkdown, syntax highlighters, rich text renderers) that regenerate their entire DOM tree on every parent re-render. These destroy active browser text selections because the selection is anchored to specific DOM nodes.

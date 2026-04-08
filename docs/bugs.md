@@ -19,33 +19,19 @@ and cleanup notes do not belong here.
 - Return a structured backend-unavailable error from `api.ts` instead of inferring transport state from display text.
 - Keep the reconnect decision in the transport layer and let UI copy use the structured error, not the other way around.
 
-## Successful `/api/state` fallback can report "connected" before SSE reopens
+## Reconnect fallback can hammer `/api/state` while SSE stays down
 
-**Severity:** Medium - the control-panel status can stop showing reconnecting
-even while the live SSE stream is still down.
+**Severity:** Medium - recovery now preserves correctness by polling full state every 400 ms until SSE reopens, which can create avoidable backend load.
 
-The fallback `/api/state` recovery path now clears
-`backendConnectionIssueDetail` and also forces `backendConnectionState` from
-`reconnecting` to `connected` after a successful HTTP snapshot fetch. That
-proves the backend responds to requests again, but it does not prove that the
-`EventSource` transport has reopened or that live delta/state events are
-flowing.
-
-This makes the connection indicator optimistic in a way the rest of the
-reconnect logic does not support. The spinner can disappear before
-`eventSource.onopen` or another live SSE event confirms that real-time
-transport recovery is complete.
+The reconnect fix correctly keeps polling after successful fallback snapshots until `EventSource.onopen` or a confirmed live event proves the stream recovered. But `scheduleReconnectStateResync()` re-arms the next full `/api/state` fetch at the fixed `RECONNECT_STATE_RESYNC_DELAY_MS = 400` cadence every time. If HTTP remains healthy while SSE is impaired, the client will continue issuing full snapshot requests about 2.5 times per second indefinitely.
 
 **Current behavior:**
-- A successful fallback `/api/state` fetch can clear the reconnecting badge.
-- The SSE stream can still be disconnected until a later reopen event.
+- A reconnecting client keeps fetching `/api/state` every 400 ms after each successful fallback response until live SSE recovery is confirmed.
+- Long-lived SSE-only failures can therefore turn one disconnected tab into a steady high-rate snapshot poller even when no visible state is changing.
 
 **Proposal:**
-- Clear transient request-error text on successful fallback state fetches, but
-  keep `backendConnectionState` as `reconnecting` until SSE reopen is
-  confirmed.
-- If needed, separate HTTP reachability from SSE transport health in the UI so
-  the status can be precise without staying noisy.
+- Keep the fast initial fallback for quick recovery, but back off or cap the retry cadence after the first few attempts until SSE proves it reopened.
+- Add regression coverage for the intended retry policy so reconnect correctness does not depend on an unbounded fixed-rate loop.
 
 ## Late workspace hydration can still restore a stale control-panel side
 
@@ -116,6 +102,14 @@ diagnostic text can end up in the main workspace chrome.
   still needed.
 
 ## Resolved
+
+Reconnect fallback no longer stops after a no-op `/api/state` response:
+successful fallback snapshots now keep reconnect polling armed until
+`EventSource.onopen` or a confirmed live SSE event proves the stream is back,
+even when the fetched snapshot is stale or redundant. Covered by the reconnect
+polling regression in `ui/src/backend-connection.test.tsx`.
+
+Successful `/api/state` fallback no longer reports the backend as connected before SSE reopens: reconnect polling stays armed until `EventSource.onopen` or a confirmed live event proves the stream is back. The regression is now covered by the reconnect-state test in `ui/src/backend-connection.test.tsx`.
 
 Connection status tooltip dismissing when mousing from chip to tooltip:
 `BackendConnectionStatus` now keeps its hover/focus handlers on the parent
@@ -197,6 +191,10 @@ filesystem I/O is not safe under the mutex.
 - [ ] Extend reconnect recovery coverage to clear inline backend error text:
   after a successful `/api/state` fallback, assert the inline banner / tooltip
   request error disappears together with any reconnect indicator changes.
+- [ ] Add reconnect retry-policy coverage:
+  assert the fallback loop backs off or otherwise caps steady-state `/api/state`
+  polling while SSE remains down, without regressing the initial fast recovery
+  path.
 
 ## Known External Limitations
 

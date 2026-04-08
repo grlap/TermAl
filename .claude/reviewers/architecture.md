@@ -41,6 +41,9 @@ Focus: State management, layer boundaries, agent-agnostic patterns, design consi
    - Flag delta events that don't bump revision
    - Flag full state events sent where a delta would suffice (performance)
    - Flag missing revision fields on new event types
+   - Flag reconnect paths that treat a successful `/api/state` fallback fetch as proof that live SSE streaming has recovered
+   - A fallback snapshot may restore visible state, but recovery is not complete until `EventSource.onopen` or a confirmed post-reopen live event proves the stream is back
+   - Flag changes that can leave the latest assistant message hidden until another prompt or unrelated local action forces a refresh
 
 6. **Separation of concerns**:
    - Backend (`main.rs`) handles state, persistence, agent protocols

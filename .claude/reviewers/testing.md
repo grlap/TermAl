@@ -41,6 +41,8 @@ Focus: Test coverage for changes, test quality, Vitest patterns.
    - Stale revision handling (delta with gap, state with lower revision)
    - Rapid successive state updates
    - SSE reconnection scenarios
+   - For reconnect fixes, require a test that distinguishes snapshot recovery from live-stream recovery: after a disconnect, `/api/state` may refresh visible state, but the app must keep recovering until SSE actually reopens
+   - Flag missing coverage for the regression where a completed/latest assistant message stays hidden until the user sends another prompt or otherwise forces a rerender
 
 6. **Snapshot / diff parsing tests**:
    - Unified diff parsing edge cases (empty diff, binary files, new files, deleted files)
