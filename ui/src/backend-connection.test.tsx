@@ -295,6 +295,43 @@ describe("Backend connection state", () => {
     );
   });
 
+  it("retries when clicking the reconnecting workspace connection status", () => {
+    const onRetry = vi.fn();
+
+    render(
+      <BackendConnectionStatus state="reconnecting" onRetry={onRetry} />,
+    );
+
+    const chip = screen.getByLabelText("Reconnecting");
+    fireEvent.mouseEnter(chip);
+    expect(screen.getByRole("tooltip")).toHaveTextContent(
+      "Click the status to retry now.",
+    );
+
+    fireEvent.click(chip);
+    expect(onRetry).toHaveBeenCalledTimes(1);
+  });
+
+  it("retries when clicking the reconnecting control panel badge", () => {
+    const onRetry = vi.fn();
+
+    render(
+      <ControlPanelConnectionIndicator
+        state="reconnecting"
+        onRetry={onRetry}
+      />,
+    );
+
+    const badge = screen.getByLabelText("Control panel backend reconnecting");
+    fireEvent.mouseEnter(badge);
+    expect(screen.getByRole("tooltip")).toHaveTextContent(
+      "Click the status to retry now.",
+    );
+
+    fireEvent.click(badge);
+    expect(onRetry).toHaveBeenCalledTimes(1);
+  });
+
   it("shows connecting, reconnecting, and offline states around the backend event stream", async () => {
     const originalFetch = globalThis.fetch;
     const originalEventSource = globalThis.EventSource;
@@ -418,8 +455,9 @@ describe("Backend connection state", () => {
       const reconnectTooltip = await screen.findByRole("tooltip");
       expect(reconnectTooltip).toHaveTextContent("Reconnecting");
       expect(reconnectTooltip).toHaveTextContent(
-        "Live updates are disconnected. Trying to reconnect.",
+        "Live updates are disconnected. Retrying automatically with backoff.",
       );
+      expect(reconnectTooltip).toHaveTextContent("Click the status to retry now.");
       const reconnectFetchCount = countStateFetches();
 
       Object.defineProperty(window.navigator, "onLine", {
@@ -473,7 +511,7 @@ describe("Backend connection state", () => {
     }
   });
 
-  it("keeps reconnect polling active until a fresh SSE open confirms recovery", async () => {
+  it("backs off reconnect polling until a fresh SSE open confirms recovery", async () => {
     const originalFetch = globalThis.fetch;
     const originalEventSource = globalThis.EventSource;
     const originalResizeObserver = globalThis.ResizeObserver;
@@ -573,7 +611,7 @@ describe("Backend connection state", () => {
       expect(countStateFetches()).toBe(hydratedStateFetchCount + 1);
 
       await act(async () => {
-        await vi.advanceTimersByTimeAsync(399);
+        await vi.advanceTimersByTimeAsync(799);
       });
       expect(countStateFetches()).toBe(hydratedStateFetchCount + 1);
 
@@ -600,6 +638,118 @@ describe("Backend connection state", () => {
     }
   });
 
+  it("retries immediately and resets the reconnect backoff when clicking the reconnect badge", async () => {
+    const originalFetch = globalThis.fetch;
+    const originalEventSource = globalThis.EventSource;
+    const originalResizeObserver = globalThis.ResizeObserver;
+    let stateRequestCount = 0;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const target = String(input);
+      if (target === "/api/state") {
+        stateRequestCount += 1;
+        return jsonResponse({
+          revision: stateRequestCount,
+          projects: [],
+          sessions: [],
+        });
+      }
+      if (target.startsWith("/api/workspaces/")) {
+        if (init?.method === "PUT") {
+          return jsonResponse({
+            layout: {
+              id: "workspace-live",
+              revision: 1,
+              updatedAt: "2026-04-04 21:15:00",
+              controlPanelSide: "left",
+              workspace: { panes: [] },
+            },
+          });
+        }
+        return new Response("", {
+          status: 404,
+        });
+      }
+
+      throw new Error(`Unexpected fetch: ${target}`);
+    });
+    const countStateFetches = () =>
+      fetchMock.mock.calls.filter(([url]) => String(url) === "/api/state")
+        .length;
+
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal(
+      "EventSource",
+      EventSourceMock as unknown as typeof EventSource,
+    );
+    vi.stubGlobal(
+      "ResizeObserver",
+      ResizeObserverMock as unknown as typeof ResizeObserver,
+    );
+
+    try {
+      render(<App />);
+
+      const eventSource = latestEventSource();
+      act(() => {
+        eventSource.dispatchOpen();
+        eventSource.dispatchState({
+          revision: 1,
+          projects: [],
+          orchestrators: [],
+          workspaces: [],
+          sessions: [],
+        });
+      });
+      await waitForNoControlPanelConnectionIssue();
+
+      const hydratedStateFetchCount = countStateFetches();
+      vi.useFakeTimers();
+      act(() => {
+        eventSource.dispatchError();
+      });
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(400);
+      });
+      expect(countStateFetches()).toBe(hydratedStateFetchCount + 1);
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(200);
+      });
+      expect(countStateFetches()).toBe(hydratedStateFetchCount + 1);
+
+      fireEvent.click(
+        screen.getByLabelText("Control panel backend reconnecting"),
+      );
+      await act(async () => {
+        await Promise.resolve();
+      });
+      expect(countStateFetches()).toBe(hydratedStateFetchCount + 2);
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(399);
+      });
+      expect(countStateFetches()).toBe(hydratedStateFetchCount + 2);
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1);
+      });
+      expect(countStateFetches()).toBe(hydratedStateFetchCount + 3);
+
+      act(() => {
+        eventSource.dispatchOpen();
+      });
+      await act(async () => {
+        await Promise.resolve();
+      });
+      expectNoControlPanelConnectionIssue();
+    } finally {
+      vi.useRealTimers();
+      restoreGlobal("fetch", originalFetch);
+      restoreGlobal("EventSource", originalEventSource);
+      restoreGlobal("ResizeObserver", originalResizeObserver);
+    }
+  });
   it("keeps the reconnect fallback fetch armed when the stream reopens without usable data", async () => {
     const originalFetch = globalThis.fetch;
     const originalEventSource = globalThis.EventSource;

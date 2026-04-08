@@ -1,4 +1,4 @@
-﻿import { useId, useMemo, useState, type RefObject } from "react";
+import { useId, useMemo, useState, type RefObject } from "react";
 
 import type { WorkspaceLayoutSummary } from "./api";
 
@@ -188,7 +188,7 @@ function describeBackendConnectionState(
       };
     case "reconnecting":
       return {
-        detail: "Live updates are disconnected. Trying to reconnect.",
+        detail: "Live updates are disconnected. Retrying automatically with backoff.",
         icon: "spinner",
         label: "Reconnecting",
         tone: "error",
@@ -205,9 +205,11 @@ function describeBackendConnectionState(
 
 export function ControlPanelConnectionIndicator({
   issueDetail = null,
+  onRetry = null,
   state,
 }: {
   issueDetail?: string | null;
+  onRetry?: (() => void) | null;
   state: BackendConnectionState;
 }) {
   const descriptor = describeBackendConnectionState(state);
@@ -218,6 +220,7 @@ export function ControlPanelConnectionIndicator({
     return null;
   }
 
+  const canRetry = onRetry !== null && (state === "connecting" || state === "reconnecting");
   const showSpinner = descriptor.icon === "spinner" || issueDetail !== null;
   const showGenericIssueLabel = issueDetail !== null && state === "connected";
   const displayLabel = showGenericIssueLabel ? "Issue" : descriptor.label;
@@ -227,7 +230,7 @@ export function ControlPanelConnectionIndicator({
 
   return (
     <div
-      className="control-panel-pane-status-shell"
+      className={`control-panel-pane-status-shell ${canRetry ? "is-actionable" : ""}`.trim()}
       onBlur={(event) => {
         const nextTarget = event.relatedTarget;
         if (nextTarget instanceof Node && event.currentTarget.contains(nextTarget)) {
@@ -245,24 +248,47 @@ export function ControlPanelConnectionIndicator({
         setIsTooltipVisible(false);
       }}
     >
-      <span
-        className="control-panel-pane-status"
-        role="img"
-        aria-label={ariaLabel}
-        aria-describedby={isTooltipVisible ? tooltipId : undefined}
-        tabIndex={0}
-      >
-        {showSpinner ? (
-          <span
-            className="activity-spinner control-panel-pane-status-spinner"
-            aria-hidden="true"
-          />
-        ) : (
-          <span className="control-panel-pane-status-icon" aria-hidden="true">
-            <BackendConnectionIcon state="offline" />
-          </span>
-        )}
-      </span>
+      {canRetry ? (
+        <button
+          className="control-panel-pane-status is-actionable"
+          type="button"
+          onClick={() => {
+            onRetry?.();
+          }}
+          aria-label={ariaLabel}
+          aria-describedby={isTooltipVisible ? tooltipId : undefined}
+        >
+          {showSpinner ? (
+            <span
+              className="activity-spinner control-panel-pane-status-spinner"
+              aria-hidden="true"
+            />
+          ) : (
+            <span className="control-panel-pane-status-icon" aria-hidden="true">
+              <BackendConnectionIcon state="offline" />
+            </span>
+          )}
+        </button>
+      ) : (
+        <span
+          className="control-panel-pane-status"
+          role="img"
+          aria-label={ariaLabel}
+          aria-describedby={isTooltipVisible ? tooltipId : undefined}
+          tabIndex={0}
+        >
+          {showSpinner ? (
+            <span
+              className="activity-spinner control-panel-pane-status-spinner"
+              aria-hidden="true"
+            />
+          ) : (
+            <span className="control-panel-pane-status-icon" aria-hidden="true">
+              <BackendConnectionIcon state="offline" />
+            </span>
+          )}
+        </span>
+      )}
       <div
         id={tooltipId}
         className="control-panel-pane-status-tooltip"
@@ -271,6 +297,11 @@ export function ControlPanelConnectionIndicator({
       >
         <div className="control-panel-pane-status-tooltip-label">{displayLabel}</div>
         <div className="control-panel-pane-status-tooltip-detail">{detail}</div>
+        {canRetry ? (
+          <div className="control-panel-pane-status-tooltip-action">
+            Click the status to retry now.
+          </div>
+        ) : null}
       </div>
     </div>
   );
@@ -278,9 +309,11 @@ export function ControlPanelConnectionIndicator({
 
 export function BackendConnectionStatus({
   issueDetail = null,
+  onRetry = null,
   state,
 }: {
   issueDetail?: string | null;
+  onRetry?: (() => void) | null;
   state: BackendConnectionState;
 }) {
   const descriptor = describeBackendConnectionState(state);
@@ -289,10 +322,11 @@ export function BackendConnectionStatus({
   const hasIssue = descriptor.tone === "error" || issueDetail !== null;
   const tooltipDetail = issueDetail ?? (state === "connected" ? null : descriptor.detail);
   const hasTooltip = tooltipDetail !== null;
+  const canRetry = onRetry !== null && (state === "connecting" || state === "reconnecting");
 
   return (
     <div
-      className={`workspace-connection-status ${hasIssue ? "has-issue" : ""} ${hasTooltip ? "has-tooltip" : ""}`.trim()}
+      className={`workspace-connection-status ${hasIssue ? "has-issue" : ""} ${hasTooltip ? "has-tooltip" : ""} ${canRetry ? "is-actionable" : ""}`.trim()}
       role="status"
       aria-live="polite"
       onBlur={(event) => {
@@ -318,19 +352,38 @@ export function BackendConnectionStatus({
         }
       }}
     >
-      <span
-        className={`chip chip-status chip-status-${hasIssue ? "error" : descriptor.tone} workspace-connection-chip`}
-        aria-describedby={hasTooltip && isTooltipVisible ? tooltipId : undefined}
-        aria-label={descriptor.label}
-        tabIndex={hasTooltip ? 0 : undefined}
-      >
-        {descriptor.icon === "spinner" ? (
-          <span className="activity-spinner workspace-connection-spinner" aria-hidden="true" />
-        ) : (
-          <BackendConnectionIcon state={descriptor.icon} />
-        )}
-        <span className="visually-hidden">{descriptor.label}</span>
-      </span>
+      {canRetry ? (
+        <button
+          className={`chip chip-status chip-status-${hasIssue ? "error" : descriptor.tone} workspace-connection-chip is-actionable`}
+          type="button"
+          onClick={() => {
+            onRetry?.();
+          }}
+          aria-describedby={hasTooltip && isTooltipVisible ? tooltipId : undefined}
+          aria-label={descriptor.label}
+        >
+          {descriptor.icon === "spinner" ? (
+            <span className="activity-spinner workspace-connection-spinner" aria-hidden="true" />
+          ) : (
+            <BackendConnectionIcon state={descriptor.icon} />
+          )}
+          <span className="visually-hidden">{descriptor.label}</span>
+        </button>
+      ) : (
+        <span
+          className={`chip chip-status chip-status-${hasIssue ? "error" : descriptor.tone} workspace-connection-chip`}
+          aria-describedby={hasTooltip && isTooltipVisible ? tooltipId : undefined}
+          aria-label={descriptor.label}
+          tabIndex={hasTooltip ? 0 : undefined}
+        >
+          {descriptor.icon === "spinner" ? (
+            <span className="activity-spinner workspace-connection-spinner" aria-hidden="true" />
+          ) : (
+            <BackendConnectionIcon state={descriptor.icon} />
+          )}
+          <span className="visually-hidden">{descriptor.label}</span>
+        </span>
+      )}
       {hasTooltip ? (
         <div
           id={tooltipId}
@@ -340,6 +393,11 @@ export function BackendConnectionStatus({
         >
           <div className="activity-tooltip-label">{descriptor.label}</div>
           <p>{tooltipDetail}</p>
+          {canRetry ? (
+            <p className="workspace-connection-tooltip-action">
+              Click the status to retry now.
+            </p>
+          ) : null}
         </div>
       ) : null}
     </div>

@@ -144,7 +144,7 @@ textarea {
 
 /* box-shadow transitions are expensive (full repaint of the stacking context).
    Only apply them to interactive controls where the visual benefit outweighs
-   the cost — not to .message-card or other frequently-updated elements. */
+   the cost ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â not to .message-card or other frequently-updated elements. */
 .ghost-button,
 .chip,
 .composer,
@@ -1035,6 +1035,10 @@ textarea {
   cursor: help;
 }
 
+.workspace-connection-status.is-actionable {
+  cursor: default;
+}
+
 .workspace-switcher {
   position: relative;
   flex: none;
@@ -1219,8 +1223,16 @@ textarea {
   justify-content: center;
   min-width: 2.35rem;
   padding: 0.38rem 0.58rem;
+  font: inherit;
   font-weight: 700;
+  line-height: inherit;
+  appearance: none;
+  -webkit-appearance: none;
   outline: none;
+}
+
+.workspace-connection-chip.is-actionable {
+  cursor: pointer;
 }
 
 .workspace-connection-chip:focus-visible {
@@ -1266,6 +1278,13 @@ textarea {
 .workspace-connection-tooltip::after {
   left: auto;
   right: calc(0.7rem * var(--density-scale));
+}
+
+.workspace-connection-tooltip-action {
+  margin: 0;
+  color: var(--tooltip-label);
+  font-size: 0.78rem;
+  line-height: 1.4;
 }
 
 .workspace-connection-status.has-tooltip:hover .workspace-connection-tooltip,
@@ -2022,8 +2041,15 @@ textarea {
     inset 0 0 0 1px color-mix(in srgb, var(--surface-white) 40%, transparent),
     0 0 0 1px color-mix(in srgb, var(--signal-red) 10%, transparent);
   flex: none;
+  font: inherit;
+  appearance: none;
+  -webkit-appearance: none;
   cursor: help;
   outline: none;
+}
+
+.control-panel-pane-status.is-actionable {
+  cursor: pointer;
 }
 
 .control-panel-pane-status:focus-visible {
@@ -2105,6 +2131,11 @@ textarea {
   line-height: 1.45;
 }
 
+.control-panel-pane-status-tooltip-action {
+  color: var(--tooltip-label);
+  font-size: 0.76rem;
+  line-height: 1.4;
+}
 .control-panel-pane-status-shell:hover .control-panel-pane-status-tooltip,
 .control-panel-pane-status-shell:focus-within .control-panel-pane-status-tooltip {
   opacity: 1;
@@ -8409,7 +8440,7 @@ textarea {
   opacity: 0.92;
 }
 
-/* Edge connector dots — appear on hover near card edges */
+/* Edge connector dots ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â appear on hover near card edges */
 
 .orchestrator-board-connector {
   position: absolute;

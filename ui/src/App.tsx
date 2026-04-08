@@ -369,6 +369,7 @@ import {
 
 const TAB_DRAG_STALE_TIMEOUT_MS = 15000;
 const RECONNECT_STATE_RESYNC_DELAY_MS = 400;
+const RECONNECT_STATE_RESYNC_MAX_DELAY_MS = 5000;
 const LIVE_SESSION_RESUME_WATCHDOG_INTERVAL_MS = 1000;
 
 const WORKSPACE_LAYOUT_PERSIST_DELAY_MS = 150;
@@ -1218,6 +1219,19 @@ export default function App() {
     setRequestError((current) =>
       shouldInlineControlPanelBackendIssue(current) ? null : current,
     );
+  }
+
+  function handleRetryBackendConnection() {
+    if (!readNavigatorOnline()) {
+      return;
+    }
+
+    setBackendConnectionIssueDetail(null);
+    clearRecoveredBackendRequestError();
+    setBackendConnectionState(
+      latestStateRevisionRef.current === null ? "connecting" : "reconnecting",
+    );
+    requestBackendReconnectRef.current();
   }
   const selectedProject =
     selectedProjectId === ALL_PROJECTS_FILTER_ID
@@ -2308,6 +2322,7 @@ export default function App() {
       typeof window.setTimeout
     > | null = null;
     let sawReconnectOpenSinceLastError = false;
+    let nextReconnectStateResyncDelayMs = RECONNECT_STATE_RESYNC_DELAY_MS;
     let liveSessionResumeWatchdogIntervalId: ReturnType<
       typeof window.setInterval
     > | null = null;
@@ -2349,6 +2364,19 @@ export default function App() {
       reconnectStateResyncTimeoutId = null;
     }
 
+    function resetReconnectStateResyncBackoff() {
+      nextReconnectStateResyncDelayMs = RECONNECT_STATE_RESYNC_DELAY_MS;
+    }
+
+    function consumeReconnectStateResyncDelayMs() {
+      const delayMs = nextReconnectStateResyncDelayMs;
+      nextReconnectStateResyncDelayMs = Math.min(
+        nextReconnectStateResyncDelayMs * 2,
+        RECONNECT_STATE_RESYNC_MAX_DELAY_MS,
+      );
+      return delayMs;
+    }
+
     function scheduleFallbackStateResyncRetry(
       requestedRevision: number | null,
       options: {
@@ -2378,11 +2406,18 @@ export default function App() {
       }
 
       clearReconnectStateResyncTimeout();
+      resetReconnectStateResyncBackoff();
     }
 
-    function scheduleReconnectStateResync() {
+    function scheduleReconnectStateResync(options?: {
+      resetBackoff?: boolean;
+    }) {
       sawReconnectOpenSinceLastError = false;
+      if (options?.resetBackoff) {
+        resetReconnectStateResyncBackoff();
+      }
       clearReconnectStateResyncTimeout();
+      const delayMs = consumeReconnectStateResyncDelayMs();
       reconnectStateResyncTimeoutId = window.setTimeout(() => {
         reconnectStateResyncTimeoutId = null;
         if (
@@ -2394,7 +2429,7 @@ export default function App() {
         }
 
         requestStateResync({ allowAuthoritativeRollback: true });
-      }, RECONNECT_STATE_RESYNC_DELAY_MS);
+      }, delayMs);
     }
 
     function markLiveTransportActivity(
@@ -2514,8 +2549,10 @@ export default function App() {
                   sawReconnectOpenSinceLastError
                 ) {
                   // Once the stream itself has reopened, an adopted snapshot can
-                  // disarm any leftover reconnect fallback timer.
+                  // disarm any leftover reconnect fallback timer and reset the
+                  // next reconnect cycle back to the fast initial delay.
                   clearReconnectStateResyncTimeout();
+                  resetReconnectStateResyncBackoff();
                 }
                 const adoptedAt = Date.now();
                 syncLiveTransportActivityFromState(state.sessions, adoptedAt, {
@@ -2609,6 +2646,14 @@ export default function App() {
       startStateResyncLoop();
     }
     requestBackendReconnectRef.current = () => {
+      if (cancelled || !readNavigatorOnline()) {
+        return;
+      }
+
+      sawReconnectOpenSinceLastError = false;
+      clearInitialStateResyncRetryTimeout();
+      clearReconnectStateResyncTimeout();
+      resetReconnectStateResyncBackoff();
       requestStateResync({
         allowAuthoritativeRollback: latestStateRevisionRef.current !== null,
       });
@@ -2859,6 +2904,7 @@ export default function App() {
         return;
       }
 
+      const hadReconnectOpenSinceLastError = sawReconnectOpenSinceLastError;
       sawReconnectOpenSinceLastError = false;
       const isOnline = readNavigatorOnline();
       const hasHydratedState = latestStateRevisionRef.current !== null;
@@ -2872,6 +2918,7 @@ export default function App() {
       if (!isOnline) {
         clearInitialStateResyncRetryTimeout();
         clearReconnectStateResyncTimeout();
+        resetReconnectStateResyncBackoff();
         return;
       }
 
@@ -2882,7 +2929,19 @@ export default function App() {
 
       // Prefer the SSE reconnect snapshot when it arrives quickly, but fall back to /api/state
       // so completed assistant replies do not stay hidden until another user action forces a refresh.
-      scheduleReconnectStateResync();
+      if (hadReconnectOpenSinceLastError) {
+        // The stream had reopened since the previous error, so this is a new
+        // failure cycle. Discard any stale timer and start fresh at the fast
+        // initial delay.
+        clearReconnectStateResyncTimeout();
+        resetReconnectStateResyncBackoff();
+        scheduleReconnectStateResync();
+      } else if (reconnectStateResyncTimeoutId === null) {
+        // Repeated error during the same outage — only schedule if no
+        // fallback timer is already pending so the exponential backoff
+        // is preserved.
+        scheduleReconnectStateResync();
+      }
     };
     liveSessionResumeWatchdogIntervalId = window.setInterval(
       handleLiveSessionResumeWatchdogTick,
@@ -6907,6 +6966,12 @@ export default function App() {
       <ControlPanelConnectionIndicator
         state={backendConnectionState}
         issueDetail={controlPanelInlineIssueDetail}
+        onRetry={
+          backendConnectionState === "connecting" ||
+          backendConnectionState === "reconnecting"
+            ? handleRetryBackendConnection
+            : undefined
+        }
       />
     );
   }

@@ -3,7 +3,65 @@
 This file tracks reproduced, current issues. Resolved work, speculative refactors,
 and cleanup notes do not belong here.
 
+Also fixed in the current tree: reconnect backoff no longer resets to the
+initial 400ms delay on repeated `EventSource.onerror` callbacks during the same
+outage. The reconnect handler now only resets the cadence for a new failure
+cycle after a confirmed reopen or an explicit manual retry, so same-outage
+errors preserve the pending fallback timer instead of flattening the backoff.
+
 ## Active Repo Bugs
+
+## Manual reconnect retry can stop fallback polling
+
+**Severity:** High - clicking the advertised retry action during an outage can leave recovery stalled after one failed `/api/state` request.
+
+The new manual retry path clears both reconnect timers and resets the backoff before issuing a one-shot `requestStateResync()`. That resync does not preserve the reconnect fallback, so if the forced `/api/state` fetch fails, the catch path records the error and exits without scheduling another timer. A user can therefore click "retry now" while SSE is still down and accidentally cancel the automatic snapshot polling that was keeping recovery alive.
+
+**Current behavior:**
+- Manual retry cancels the existing reconnect timeout before firing an immediate `/api/state` fetch.
+- If that fetch fails, the reconnect loop is no longer armed and recovery depends on a later `EventSource.onerror`, browser online event, or another manual action.
+
+**Proposal:**
+- Preserve or immediately re-arm the reconnect fallback when manual retries call `requestStateResync()`.
+- Add a regression that clicks the reconnect badge, forces the manual fetch to fail, and asserts automatic polling remains armed until live recovery is confirmed.
+
+## Em-dash characters in CSS comments corrupted to UTF-8 mojibake
+
+**Severity:** Medium - signals a broken encoding pipeline that will corrupt functional CSS if it reaches a property value or `content:` string.
+
+Two em-dash characters (`—`, U+2014) in `ui/src/styles.css` comments (around lines 147 and 8443) were double-encoded into multi-byte mojibake sequences (`ÃƒÆ'Ã‚Â¢…`). The corruption is a classic UTF-8 → Latin-1 → UTF-8 round-trip artifact, likely introduced by a line-ending conversion step (`core.autocrlf`), an editor re-save, or a pre-commit hook.
+
+**Current behavior:**
+- Two CSS comments contain garbled multi-byte sequences instead of em-dashes.
+- The corruption is non-functional (comments only) but will accumulate on each re-save if the root cause is not identified.
+
+**Proposal:**
+- Restore the original `—` (U+2014) in both comments, or replace with `--`.
+- Identify and fix the encoding pipeline step that caused the corruption (check `core.autocrlf`, editor encoding settings, and any file-processing hooks).
+
+## Cold-start fallback retry bypasses exponential backoff
+
+**Severity:** Medium - the initial-hydration and `preserveReconnectFallback`
+retry paths poll `/api/state` at a fixed 400ms rate with no backoff.
+
+`scheduleFallbackStateResyncRetry` always uses the fixed
+`RECONNECT_STATE_RESYNC_DELAY_MS` constant instead of
+`consumeReconnectStateResyncDelayMs()`. The new exponential backoff only applies
+to `scheduleReconnectStateResync`, so cold-start retries or failed
+fallback-marked resyncs poll at 2.5 req/sec indefinitely if the backend stays
+down.
+
+**Current behavior:**
+- `scheduleFallbackStateResyncRetry` fires at 400ms regardless of how many
+  times it has already retried.
+- Only `scheduleReconnectStateResync` uses the exponential backoff series.
+
+**Proposal:**
+- Route `scheduleFallbackStateResyncRetry` through the same
+  `consumeReconnectStateResyncDelayMs()` backoff, or add an independent backoff
+  for the cold-start path.
+- Document any intentional deviation (e.g., "fast retries during initial load
+  are acceptable because they only fire on first page load").
 
 ## Backend reconnect behavior is driven by user-facing error text
 
@@ -18,20 +76,6 @@ and cleanup notes do not belong here.
 **Proposal:**
 - Return a structured backend-unavailable error from `api.ts` instead of inferring transport state from display text.
 - Keep the reconnect decision in the transport layer and let UI copy use the structured error, not the other way around.
-
-## Reconnect fallback can hammer `/api/state` while SSE stays down
-
-**Severity:** Medium - recovery now preserves correctness by polling full state every 400 ms until SSE reopens, which can create avoidable backend load.
-
-The reconnect fix correctly keeps polling after successful fallback snapshots until `EventSource.onopen` or a confirmed live event proves the stream recovered. But `scheduleReconnectStateResync()` re-arms the next full `/api/state` fetch at the fixed `RECONNECT_STATE_RESYNC_DELAY_MS = 400` cadence every time. If HTTP remains healthy while SSE is impaired, the client will continue issuing full snapshot requests about 2.5 times per second indefinitely.
-
-**Current behavior:**
-- A reconnecting client keeps fetching `/api/state` every 400 ms after each successful fallback response until live SSE recovery is confirmed.
-- Long-lived SSE-only failures can therefore turn one disconnected tab into a steady high-rate snapshot poller even when no visible state is changing.
-
-**Proposal:**
-- Keep the fast initial fallback for quick recovery, but back off or cap the retry cadence after the first few attempts until SSE proves it reopened.
-- Add regression coverage for the intended retry policy so reconnect correctness does not depend on an unbounded fixed-rate loop.
 
 ## Late workspace hydration can still restore a stale control-panel side
 
@@ -78,6 +122,29 @@ later successful sync happens to clear it.
   event, or only render issue text for fresh failures tied to the current
   connection state.
 - Add regression coverage for the offline -> online transition.
+
+## Cold-start reconnect retry path lacks regression coverage
+
+**Severity:** Low - the actionable `connecting` retry branch can regress
+without a test catching it.
+
+The new retry affordance is wired for both `connecting` and `reconnecting`, but
+the added tests only exercise the `reconnecting` path. The cold-start branch
+uses a different state transition (`latestStateRevisionRef.current === null`)
+and only appears after an initial fetch failure, so it can break without any
+current regression failing.
+
+**Current behavior:**
+- Tests cover clicking retry from the reconnecting state only.
+- No regression test verifies that a cold-start failure exposes the actionable
+  `connecting` indicator and that clicking it triggers the expected retry flow.
+
+**Proposal:**
+- Add an app-level regression that starts with no hydrated revision, forces the
+  initial `/api/state` request to fail, clicks the connecting retry indicator,
+  and asserts the retry flow runs.
+- Keep the reconnecting-path test, but cover the cold-start branch too so both
+  user-visible retry states are exercised.
 
 ## Connection tooltip exposes raw backend error text
 
@@ -188,13 +255,26 @@ filesystem I/O is not safe under the mutex.
   changes, and cover the dev-proxy `502` path plus the `reportRequestError()`
   reconnect side effect so the retry path no longer depends on a fragile text
   match or an untested Vite proxy error.
+- [ ] Extend reconnect backoff progression coverage:
+  assert the full exponential series (400, 800, 1600, 3200, 5000ms cap),
+  verify repeated `EventSource.onerror` callbacks do not reset the sequence
+  during one outage, and confirm the cap holds at 5000ms instead of 6400ms.
+- [ ] Add failed manual-retry coverage for the reconnect badge:
+  click retry while SSE remains disconnected, force the immediate `/api/state`
+  request to fail, and assert the automatic reconnect fallback stays armed.
+- [ ] Add cold-start retry coverage for the connecting badge:
+  start with no hydrated revision, force the initial `/api/state` request to
+  fail, click the actionable connecting indicator, and assert the retry flow
+  runs.
+- [ ] Remove dead `resetBackoff` option from `scheduleReconnectStateResync`:
+  no call site passes it; all callers reset externally via
+  `resetReconnectStateResyncBackoff()`.
+- [ ] Wire `onRetry` on the workspace-bar `BackendConnectionStatus` render site:
+  currently only the control-panel badge exposes the retry affordance; the main
+  workspace-bar chip does not.
 - [ ] Extend reconnect recovery coverage to clear inline backend error text:
   after a successful `/api/state` fallback, assert the inline banner / tooltip
   request error disappears together with any reconnect indicator changes.
-- [ ] Add reconnect retry-policy coverage:
-  assert the fallback loop backs off or otherwise caps steady-state `/api/state`
-  polling while SSE remains down, without regressing the initial fast recovery
-  path.
 
 ## Known External Limitations
 
