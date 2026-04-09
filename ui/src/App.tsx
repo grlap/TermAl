@@ -40,6 +40,7 @@ import {
   fetchWorkspaceLayout,
   fetchWorkspaceLayouts,
   forkCodexThread,
+  isBackendUnavailableError,
   killSession,
   pauseOrchestratorInstance,
   pickProjectRoot,
@@ -65,7 +66,6 @@ import {
   updateSessionSettings,
 } from "./api";
 import { AgentIcon } from "./agent-icon";
-import { formatUserFacingError } from "./error-messages";
 import {
   LIVE_SESSION_RESUME_WATCHDOG_DRIFT_MS,
   LIVE_SESSION_WATCHDOG_RESYNC_RETRY_COOLDOWN_MS,
@@ -373,26 +373,20 @@ const RECONNECT_STATE_RESYNC_MAX_DELAY_MS = 5000;
 const LIVE_SESSION_RESUME_WATCHDOG_INTERVAL_MS = 1000;
 
 const WORKSPACE_LAYOUT_PERSIST_DELAY_MS = 150;
+const BACKEND_UNAVAILABLE_ISSUE_DETAIL =
+  "Could not reach the TermAl backend. Retrying automatically.";
+const BACKEND_SYNC_ISSUE_DETAIL =
+  "A live backend update could not be processed. Waiting for the next successful sync.";
 
-function shouldInlineControlPanelBackendIssue(message: string | null) {
-  if (message === null) {
-    return false;
+function describeBackendConnectionIssueDetail(error: unknown) {
+  if (isBackendUnavailableError(error)) {
+    // Incompatible backend serving HTML instead of JSON — surface the restart
+    // instruction directly rather than the generic connectivity message.
+    return error.restartRequired
+      ? error.message
+      : BACKEND_UNAVAILABLE_ISSUE_DETAIL;
   }
-
-  const normalized = message.trim().toLowerCase();
-  if (normalized.length === 0) {
-    return false;
-  }
-
-  return (
-    normalized.startsWith("request failed with status 502") ||
-    normalized.startsWith("request failed with status 503") ||
-    normalized.startsWith("the termal backend is unavailable") ||
-    normalized.startsWith("the running backend does not expose ") ||
-    normalized.includes("failed to fetch") ||
-    normalized.includes("networkerror") ||
-    normalized.includes("load failed")
-  );
+  return BACKEND_SYNC_ISSUE_DETAIL;
 }
 
 // Re-exported from ./types for backward compatibility
@@ -961,12 +955,36 @@ export default function App() {
   const [sessionSettingNotices, setSessionSettingNotices] =
     useState<SessionNoticeMap>({});
   const [requestError, setRequestError] = useState<string | null>(null);
+  const [backendInlineRequestErrorMessage, setBackendInlineRequestErrorMessage] =
+    useState<string | null>(null);
   const [backendConnectionIssueDetail, setBackendConnectionIssueDetail] =
     useState<string | null>(null);
-  const [backendConnectionState, setBackendConnectionState] =
-    useState<BackendConnectionState>(() =>
-      readNavigatorOnline() ? "connecting" : "offline",
-    );
+  const initialBackendConnectionState: BackendConnectionState =
+    readNavigatorOnline() ? "connecting" : "offline";
+  const [backendConnectionState, setBackendConnectionStateRaw] =
+    useState<BackendConnectionState>(initialBackendConnectionState);
+  const backendConnectionStateRef = useRef<BackendConnectionState>(
+    initialBackendConnectionState,
+  );
+  const setBackendConnectionState = useCallback(
+    (
+      next:
+        | BackendConnectionState
+        | ((current: BackendConnectionState) => BackendConnectionState),
+    ) => {
+      if (typeof next === "function") {
+        setBackendConnectionStateRaw((current) => {
+          const resolved = next(current);
+          backendConnectionStateRef.current = resolved;
+          return resolved;
+        });
+      } else {
+        backendConnectionStateRef.current = next;
+        setBackendConnectionStateRaw(next);
+      }
+    },
+    [],
+  );
   const [sessionListFilter, setSessionListFilter] =
     useState<SessionListFilter>("all");
   const [sessionListSearchQuery, setSessionListSearchQuery] = useState("");
@@ -1065,6 +1083,8 @@ export default function App() {
     size: number;
   } | null>(null);
   const ignoreFetchedWorkspaceLayoutRef = useRef(false);
+  const backendInlineRequestErrorMessageRef = useRef<string | null>(null);
+  const workspaceLayoutRestartErrorMessageRef = useRef<string | null>(null);
   const workspaceLayoutLoadPendingRef = useRef(false);
   const draftAttachmentsRef = useRef<Record<string, DraftImageAttachment[]>>(
     {},
@@ -1110,7 +1130,10 @@ export default function App() {
   const stateResyncAllowAuthoritativeRollbackRef = useRef(false);
   const stateResyncPreserveReconnectFallbackRef = useRef(false);
   const stateResyncPreserveWatchdogCooldownRef = useRef(false);
+  const stateResyncRearmOnSuccessRef = useRef(false);
+  const stateResyncRearmOnFailureRef = useRef(false);
   const requestBackendReconnectRef = useRef<() => void>(() => {});
+  const requestActionRecoveryResyncRef = useRef<() => void>(() => {});
   const syncAdoptedLiveSessionResumeWatchdogBaselinesRef = useRef<
     (sessions: Session[], now?: number) => void
   >(() => {});
@@ -1185,40 +1208,85 @@ export default function App() {
       }),
     [workspace.panes],
   );
-  const controlPanelInlineIssueDetail =
-    backendConnectionIssueDetail ??
-    (shouldInlineControlPanelBackendIssue(requestError) ? requestError : null);
+  function setBackendInlineRequestError(message: string | null) {
+    backendInlineRequestErrorMessageRef.current = message;
+    setBackendInlineRequestErrorMessage(message);
+  }
+
+  useEffect(() => {
+    if (requestError === null) {
+      setBackendInlineRequestError(null);
+    }
+  }, [requestError]);
+  const controlPanelInlineIssueDetail = backendConnectionIssueDetail;
   const requestErrorShownInline =
     requestError !== null &&
     workspaceShowsInlineControlPanelStatus &&
-    controlPanelInlineIssueDetail === requestError;
+    backendInlineRequestErrorMessage !== null &&
+    requestError === backendInlineRequestErrorMessage;
 
-  function reportRequestError(message: string) {
+  function reportRequestError(
+    error: unknown | string,
+    options?: {
+      message?: string;
+    },
+  ) {
+    const message =
+      options?.message ?? (typeof error === "string" ? error : getErrorMessage(error));
     setRequestError(message);
-    if (!shouldInlineControlPanelBackendIssue(message)) {
+    if (typeof error === "string" || !isBackendUnavailableError(error)) {
+      setBackendInlineRequestError(null);
       return;
     }
 
-    setBackendConnectionIssueDetail(message);
     if (!readNavigatorOnline()) {
+      // Preserve the inline error marker so clearRecoveredBackendRequestError
+      // can match and clear the requestError when the browser reconnects.
+      setBackendInlineRequestError(message);
+      setBackendConnectionIssueDetail(null);
       setBackendConnectionState("offline");
       return;
     }
 
-    setBackendConnectionState((current) =>
-      current === "offline"
-        ? current
-        : latestStateRevisionRef.current === null
-          ? "connecting"
-          : "reconnecting",
-    );
-    requestBackendReconnectRef.current();
+    // Incompatible backend serving HTML — show the restart instruction in the
+    // request error toast but do not trigger auto-reconnect since the backend
+    // IS reachable and reconnect success would immediately clear the guidance.
+    // The toast is NOT cleared by transport-level recovery (SSE open, state
+    // adoption) because those cannot prove the specific incompatible route is
+    // fixed. It clears when the exact route that raised it succeeds (e.g.
+    // workspace layout re-fetch via workspaceLayoutRestartErrorMessageRef),
+    // through page reload (real TermAl restart), the next successful user
+    // action (which calls setRequestError(null)), or a new error overwriting
+    // it.
+    if (error.restartRequired) {
+      setBackendInlineRequestError(null);
+      return;
+    }
+
+    setBackendInlineRequestError(message);
+    setBackendConnectionIssueDetail(BACKEND_UNAVAILABLE_ISSUE_DETAIL);
+    // Do NOT mutate backendConnectionState here. The connection badge reflects
+    // the SSE transport state, and a one-off action 502 does not mean the SSE
+    // stream is down. Mutating it to "reconnecting" would leave a permanent
+    // badge because the action-recovery resync only clears error text — only
+    // EventSource.onopen / confirmReconnectRecoveryFromLiveEvent restore
+    // "connected", and those won't fire when the stream never went down.
+    //
+    // The inline request error + issue detail are enough to surface the error.
+    // The action-recovery probe will clear both on success.
+    requestActionRecoveryResyncRef.current();
   }
 
   function clearRecoveredBackendRequestError() {
+    const inlineRequestErrorMessage = backendInlineRequestErrorMessageRef.current;
+    if (inlineRequestErrorMessage === null) {
+      return;
+    }
+
     setRequestError((current) =>
-      shouldInlineControlPanelBackendIssue(current) ? null : current,
+      current === inlineRequestErrorMessage ? null : current,
     );
+    setBackendInlineRequestError(null);
   }
 
   function handleRetryBackendConnection() {
@@ -2249,7 +2317,7 @@ export default function App() {
       if (!isMountedRef.current) {
         return;
       }
-      reportRequestError(getErrorMessage(error));
+      reportRequestError(error);
       try {
         const state = await fetchState();
         if (!isMountedRef.current) {
@@ -2285,16 +2353,22 @@ export default function App() {
 
   useEffect(() => {
     function handleBrowserOnline() {
-      let shouldRequestReconnect = false;
-      setBackendConnectionState((current) => {
-        if (current === "connected") {
-          return current;
-        }
-        shouldRequestReconnect = true;
-        return latestStateRevisionRef.current === null
-          ? "connecting"
-          : "reconnecting";
-      });
+      // Read the current connection state from the ref instead of relying on
+      // a side-effect inside the setBackendConnectionState updater. React 18
+      // does not guarantee eager evaluation of functional updaters, so the
+      // previous pattern (capturing shouldRequestReconnect inside the updater)
+      // could skip the reconnect request when the browser comes back online.
+      const currentConnectionState = backendConnectionStateRef.current;
+      const shouldRequestReconnect = currentConnectionState !== "connected";
+      if (shouldRequestReconnect) {
+        setBackendConnectionState(
+          latestStateRevisionRef.current === null
+            ? "connecting"
+            : "reconnecting",
+        );
+      }
+      setBackendConnectionIssueDetail(null);
+      clearRecoveredBackendRequestError();
       if (shouldRequestReconnect) {
         requestBackendReconnectRef.current();
       }
@@ -2303,6 +2377,7 @@ export default function App() {
     function handleBrowserOffline() {
       setBackendConnectionState("offline");
       setBackendConnectionIssueDetail(null);
+      clearRecoveredBackendRequestError();
     }
 
     window.addEventListener("online", handleBrowserOnline);
@@ -2334,6 +2409,8 @@ export default function App() {
     stateResyncAllowAuthoritativeRollbackRef.current = false;
     stateResyncPreserveReconnectFallbackRef.current = false;
     stateResyncPreserveWatchdogCooldownRef.current = false;
+    stateResyncRearmOnSuccessRef.current = false;
+    stateResyncRearmOnFailureRef.current = false;
     // Track transport activity per session so one noisy active session cannot
     // mask another stalled one.
     let lastLiveTransportActivityAtBySessionId = new Map<string, number>();
@@ -2386,6 +2463,7 @@ export default function App() {
       },
     ) {
       clearInitialStateResyncRetryTimeout();
+      const delayMs = consumeReconnectStateResyncDelayMs();
       initialStateResyncRetryTimeoutId = window.setTimeout(() => {
         initialStateResyncRetryTimeoutId = null;
         if (
@@ -2397,7 +2475,7 @@ export default function App() {
         }
 
         requestStateResync(options);
-      }, RECONNECT_STATE_RESYNC_DELAY_MS);
+      }, delayMs);
     }
 
     function clearReconnectStateResyncTimeoutAfterConfirmedReopen() {
@@ -2409,10 +2487,22 @@ export default function App() {
       resetReconnectStateResyncBackoff();
     }
 
+    function confirmReconnectRecoveryFromLiveEvent() {
+      if (!sawReconnectOpenSinceLastError) {
+        return;
+      }
+
+      clearReconnectStateResyncTimeoutAfterConfirmedReopen();
+      setBackendConnectionState("connected");
+    }
+
     function scheduleReconnectStateResync(options?: {
       resetBackoff?: boolean;
     }) {
-      sawReconnectOpenSinceLastError = false;
+      // Preserve any reopen proof until a real EventSource.onerror starts a new
+      // outage cycle. Otherwise a bad post-reopen event can arm fallback polling
+      // and strand the client in "reconnecting" even when later events on the
+      // same socket are healthy.
       if (options?.resetBackoff) {
         resetReconnectStateResyncBackoff();
       }
@@ -2428,7 +2518,10 @@ export default function App() {
           return;
         }
 
-        requestStateResync({ allowAuthoritativeRollback: true });
+        requestStateResync({
+          allowAuthoritativeRollback: true,
+          rearmOnSuccess: true,
+        });
       }, delayMs);
     }
 
@@ -2522,6 +2615,12 @@ export default function App() {
             const preserveWatchdogCooldown =
               stateResyncPreserveWatchdogCooldownRef.current;
             stateResyncPreserveWatchdogCooldownRef.current = false;
+            const rearmOnSuccess =
+              stateResyncRearmOnSuccessRef.current;
+            stateResyncRearmOnSuccessRef.current = false;
+            const rearmOnFailure =
+              stateResyncRearmOnFailureRef.current;
+            stateResyncRearmOnFailureRef.current = false;
             const requestedRevision = latestStateRevisionRef.current;
 
             try {
@@ -2570,19 +2669,28 @@ export default function App() {
               setBackendConnectionIssueDetail(null);
               clearRecoveredBackendRequestError();
               if (
+                rearmOnSuccess &&
                 requestedRevision !== null &&
+                latestStateRevisionRef.current === requestedRevision &&
                 !sawReconnectOpenSinceLastError &&
                 reconnectStateResyncTimeoutId === null
               ) {
-                // Keep polling the authoritative snapshot until the live SSE
-                // transport proves it reopened. Otherwise completed replies can
-                // stay hidden after the first fallback fetch.
+                // Reconnect fallback probes must keep polling authoritative
+                // state until the live SSE transport proves it reopened.
+                // Generic watchdog or wake-gap resyncs stay one-shot.
                 scheduleReconnectStateResync();
               }
             } catch (error) {
               if (!cancelled) {
-                setBackendConnectionIssueDetail(getErrorMessage(error));
-                if (
+                setBackendConnectionIssueDetail(
+                  describeBackendConnectionIssueDetail(error),
+                );
+                const errorRequiresRestart =
+                  isBackendUnavailableError(error) && error.restartRequired;
+                if (errorRequiresRestart) {
+                  // Incompatible backend serving HTML — retrying will produce
+                  // the same result until the user restarts.
+                } else if (
                   preserveReconnectFallback &&
                   reconnectStateResyncTimeoutId === null
                 ) {
@@ -2593,6 +2701,15 @@ export default function App() {
                     preserveReconnectFallback,
                     preserveWatchdogCooldown,
                   });
+                } else if (
+                  rearmOnFailure &&
+                  reconnectStateResyncTimeoutId === null &&
+                  requestedRevision !== null
+                ) {
+                  // Re-arm reconnect polling so a failed one-shot probe (e.g.
+                  // manual retry) does not leave the client without any automatic
+                  // recovery path until the next EventSource onerror fires.
+                  scheduleReconnectStateResync();
                 }
               }
               break;
@@ -2618,6 +2735,8 @@ export default function App() {
       allowAuthoritativeRollback?: boolean;
       preserveReconnectFallback?: boolean;
       preserveWatchdogCooldown?: boolean;
+      rearmOnSuccess?: boolean;
+      rearmOnFailure?: boolean;
     }) {
       if (cancelled) {
         return;
@@ -2642,6 +2761,12 @@ export default function App() {
       if (options?.preserveWatchdogCooldown) {
         stateResyncPreserveWatchdogCooldownRef.current = true;
       }
+      if (options?.rearmOnSuccess) {
+        stateResyncRearmOnSuccessRef.current = true;
+      }
+      if (options?.rearmOnFailure) {
+        stateResyncRearmOnFailureRef.current = true;
+      }
       stateResyncPendingRef.current = true;
       startStateResyncLoop();
     }
@@ -2654,6 +2779,28 @@ export default function App() {
       clearInitialStateResyncRetryTimeout();
       clearReconnectStateResyncTimeout();
       resetReconnectStateResyncBackoff();
+      // Manual retry is intentionally an immediate `/api/state` probe. It does
+      // not preserve any currently armed reconnect timer, but success or
+      // failure both hand control back to the normal reconnect cycle.
+      requestStateResync({
+        allowAuthoritativeRollback: latestStateRevisionRef.current !== null,
+        rearmOnSuccess: true,
+        rearmOnFailure: true,
+      });
+    };
+    requestActionRecoveryResyncRef.current = () => {
+      if (cancelled || !readNavigatorOnline()) {
+        return;
+      }
+
+      // Action-error recovery is a plain one-shot `/api/state` probe. Unlike
+      // the manual retry path it must NOT reset `sawReconnectOpenSinceLastError`
+      // or re-arm reconnect polling, because the SSE stream may still be
+      // healthy — only the individual request endpoint returned a transient
+      // backend-unavailable error (e.g. a one-off 502). Touching SSE-level
+      // state here would cause the successful probe to schedule reconnect
+      // polling that never disarms until an unrelated EventSource onerror/onopen
+      // cycle resets the flag.
       requestStateResync({
         allowAuthoritativeRollback: latestStateRevisionRef.current !== null,
       });
@@ -2783,6 +2930,11 @@ export default function App() {
         const force = forceAdoptNextStateEventRef.current;
         const adopted = adoptState(state, { force });
         forceAdoptNextStateEventRef.current = false;
+        // Confirm recovery only after adoption succeeds. If adoptState throws
+        // (bad payload, reducer error), the catch block must keep the client in
+        // the reconnecting state with fallback polling armed rather than
+        // prematurely marking the connection as healthy.
+        confirmReconnectRecoveryFromLiveEvent();
         if (adopted) {
           clearInitialStateResyncRetryTimeout();
           const adoptedAt = Date.now();
@@ -2800,7 +2952,20 @@ export default function App() {
         clearRecoveredBackendRequestError();
       } catch (error) {
         if (!cancelled) {
-          setBackendConnectionIssueDetail(getErrorMessage(error));
+          setBackendConnectionIssueDetail(
+            describeBackendConnectionIssueDetail(error),
+          );
+          // A bad reconnect state payload must not leave the client marked as
+          // connected without a usable snapshot. Restore "reconnecting" so the
+          // retry affordance stays available (onopen already set "connected"),
+          // and re-arm fallback polling so recovery continues via /api/state.
+          if (
+            sawReconnectOpenSinceLastError &&
+            reconnectStateResyncTimeoutId === null
+          ) {
+            setBackendConnectionState("reconnecting");
+            scheduleReconnectStateResync();
+          }
         }
       } finally {
         if (!cancelled) {
@@ -2821,13 +2986,21 @@ export default function App() {
           delta.revision,
         );
         if (revisionAction === "ignore") {
+          // An ignored delta still proves transport health — we successfully
+          // received and parsed a live SSE payload.
+          confirmReconnectRecoveryFromLiveEvent();
           clearReconnectStateResyncTimeoutAfterConfirmedReopen();
           setBackendConnectionIssueDetail(null);
           clearRecoveredBackendRequestError();
           return;
         }
         if (revisionAction === "resync") {
-          requestStateResync();
+          // A revision gap means we missed events but the stream IS working.
+          // Do NOT confirm recovery yet — if the follow-up /api/state fetch
+          // fails, the client must stay in the reconnecting state. Use
+          // rearmOnFailure so a failed resync re-arms polling instead of
+          // stalling recovery.
+          requestStateResync({ rearmOnFailure: true });
           return;
         }
 
@@ -2835,6 +3008,7 @@ export default function App() {
           // Global orchestrator updates prove the SSE stream is healthy enough to
           // clear reconnect fallback state. When the delta also carries session
           // snapshots, treat those specific ids as live data for watchdog baselines.
+          confirmReconnectRecoveryFromLiveEvent();
           clearReconnectStateResyncTimeoutAfterConfirmedReopen();
           const appliedAt = Date.now();
           if (delta.sessions?.length) {
@@ -2862,6 +3036,7 @@ export default function App() {
         // session reducer only accepts deltas that carry a concrete sessionId.
         const result = applyDeltaToSessions(sessionsRef.current, delta);
         if (result.kind === "applied") {
+          confirmReconnectRecoveryFromLiveEvent();
           const appliedAt = Date.now();
           clearReconnectStateResyncTimeoutAfterConfirmedReopen();
           // Every session-scoped delta proves liveness for that session, including
@@ -2878,9 +3053,20 @@ export default function App() {
           return;
         }
 
-        requestStateResync();
+        // Unrecognized delta type — resync to get an authoritative snapshot.
+        requestStateResync({ rearmOnFailure: true });
       } catch {
-        requestStateResync();
+        // Parse or reducer failure — restore reconnecting state so the retry
+        // affordance stays available, and re-arm polling.
+        if (
+          sawReconnectOpenSinceLastError &&
+          reconnectStateResyncTimeoutId === null
+        ) {
+          setBackendConnectionState("reconnecting");
+          scheduleReconnectStateResync();
+        } else {
+          requestStateResync({ rearmOnFailure: true });
+        }
       }
     }
 
@@ -2986,6 +3172,7 @@ export default function App() {
     return () => {
       cancelled = true;
       requestBackendReconnectRef.current = () => {};
+      requestActionRecoveryResyncRef.current = () => {};
       syncAdoptedLiveSessionResumeWatchdogBaselinesRef.current = () => {};
       clearInitialStateResyncRetryTimeout();
       clearReconnectStateResyncTimeout();
@@ -3141,10 +3328,14 @@ export default function App() {
           : null;
 
         if (nextLayout) {
-          // Always apply preference fields from the server layout. The
-          // ignore flag only protects workspace split ratios so a manual
-          // drag during initial hydration isn't overwritten by a late fetch.
-          setControlPanelSide(nextLayout.controlPanelSide);
+          const shouldApplyFetchedWorkspaceLayout =
+            !ignoreFetchedWorkspaceLayoutRef.current;
+          // A manual layout change during hydration claims the workspace tree
+          // and dock side locally, but still allows the server-stored visual
+          // preferences to merge in once the fetch resolves.
+          if (shouldApplyFetchedWorkspaceLayout) {
+            setControlPanelSide(nextLayout.controlPanelSide);
+          }
           if (nextLayout.themeId) {
             setThemeId(nextLayout.themeId);
           }
@@ -3160,7 +3351,7 @@ export default function App() {
           if (nextLayout.densityPercent !== undefined) {
             setDensityPercent(nextLayout.densityPercent);
           }
-          if (!ignoreFetchedWorkspaceLayoutRef.current) {
+          if (shouldApplyFetchedWorkspaceLayout) {
             setWorkspace(
               hydrateControlPanelLayout(
                 nextLayout.workspace,
@@ -3171,6 +3362,17 @@ export default function App() {
           }
         }
 
+        // A successful layout fetch proves the route that restart-required
+        // errors report as broken is now functional. Clear the stale toast
+        // only if the current requestError is the exact message we set.
+        const staleRestartMessage =
+          workspaceLayoutRestartErrorMessageRef.current;
+        if (staleRestartMessage !== null) {
+          workspaceLayoutRestartErrorMessageRef.current = null;
+          setRequestError((current) =>
+            current === staleRestartMessage ? null : current,
+          );
+        }
         workspaceLayoutLoadPendingRef.current = false;
         setIsWorkspaceLayoutReady(true);
       })
@@ -3180,6 +3382,13 @@ export default function App() {
           error,
         );
         if (!cancelled) {
+          // Restart-required errors indicate an incompatible backend; surface
+          // the restart instruction to the user instead of silently degrading.
+          if (isBackendUnavailableError(error) && error.restartRequired) {
+            const message = getErrorMessage(error);
+            workspaceLayoutRestartErrorMessageRef.current = message;
+            reportRequestError(error);
+          }
           workspaceLayoutLoadPendingRef.current = false;
           setIsWorkspaceLayoutReady(true);
         }
@@ -3733,7 +3942,7 @@ export default function App() {
         if (!restoredAttachments) {
           releaseDraftAttachments(attachments);
         }
-        reportRequestError(getErrorMessage(error));
+        reportRequestError(error);
       } finally {
         setSendingSessionIds((current) =>
           setSessionFlag(current, sessionId, false),
@@ -3925,7 +4134,7 @@ export default function App() {
       if (!isMountedRef.current) {
         return false;
       }
-      reportRequestError(getErrorMessage(error));
+      reportRequestError(error);
       return false;
     } finally {
       if (isMountedRef.current) {
@@ -3973,7 +4182,7 @@ export default function App() {
       setRequestError(null);
       return true;
     } catch (error) {
-      reportRequestError(getErrorMessage(error));
+      reportRequestError(error);
       return false;
     } finally {
       setIsCreatingProject(false);
@@ -3996,7 +4205,7 @@ export default function App() {
         setRequestError(null);
       }
     } catch (error) {
-      reportRequestError(getErrorMessage(error));
+      reportRequestError(error);
     } finally {
       setIsCreatingProject(false);
     }
@@ -4012,7 +4221,7 @@ export default function App() {
       adoptState(state);
       setRequestError(null);
     } catch (error) {
-      reportRequestError(getErrorMessage(error));
+      reportRequestError(error);
     }
   }
 
@@ -4026,7 +4235,7 @@ export default function App() {
       adoptState(state);
       setRequestError(null);
     } catch (error) {
-      reportRequestError(getErrorMessage(error));
+      reportRequestError(error);
     }
   }
 
@@ -4046,7 +4255,7 @@ export default function App() {
       adoptState(state);
       setRequestError(null);
     } catch (error) {
-      reportRequestError(getErrorMessage(error));
+      reportRequestError(error);
     }
   }
 
@@ -4060,7 +4269,7 @@ export default function App() {
       adoptState(state);
       setRequestError(null);
     } catch (error) {
-      reportRequestError(getErrorMessage(error));
+      reportRequestError(error);
     }
   }
 
@@ -4081,7 +4290,7 @@ export default function App() {
       } catch {
         // Keep the original request error below; state refresh is best-effort.
       }
-      reportRequestError(getErrorMessage(error));
+      reportRequestError(error);
     }
   }
 
@@ -4094,7 +4303,7 @@ export default function App() {
       adoptState(state);
       setRequestError(null);
     } catch (error) {
-      reportRequestError(getErrorMessage(error));
+      reportRequestError(error);
     } finally {
       setStoppingSessionIds((current) =>
         setSessionFlag(current, sessionId, false),
@@ -4134,7 +4343,7 @@ export default function App() {
         return;
       }
 
-      reportRequestError(getErrorMessage(error));
+      reportRequestError(error);
     } finally {
       if (isMountedRef.current) {
         setKillingSessionIds((current) =>
@@ -4301,7 +4510,7 @@ export default function App() {
         return;
       }
 
-      reportRequestError(getErrorMessage(error));
+      reportRequestError(error);
     } finally {
       if (isMountedRef.current) {
         setUpdatingSessionIds((current) =>
@@ -4398,7 +4607,7 @@ export default function App() {
         return;
       }
 
-      reportRequestError(getErrorMessage(error));
+      reportRequestError(error);
     } finally {
       if (isMountedRef.current) {
         setIsCreating(false);
@@ -4547,7 +4756,7 @@ export default function App() {
           ),
         );
       }
-      reportRequestError(getErrorMessage(error));
+      reportRequestError(error);
     } finally {
       setUpdatingSessionIds((current) =>
         setSessionFlag(current, sessionId, false),
@@ -4620,7 +4829,7 @@ export default function App() {
         ...current,
         [sessionId]: message,
       }));
-      reportRequestError(message);
+      reportRequestError(error, { message });
     } finally {
       if (!isMountedRef.current) {
         return;
@@ -4658,7 +4867,7 @@ export default function App() {
       if (!isMountedRef.current) {
         return;
       }
-      reportRequestError(getErrorMessage(error));
+      reportRequestError(error);
     } finally {
       if (isMountedRef.current) {
         setUpdatingSessionIds((current) =>
@@ -4706,7 +4915,7 @@ export default function App() {
       if (!isMountedRef.current) {
         return;
       }
-      reportRequestError(getErrorMessage(error));
+      reportRequestError(error);
     } finally {
       if (isMountedRef.current) {
         setUpdatingSessionIds((current) =>
@@ -5702,7 +5911,7 @@ export default function App() {
         return;
       }
 
-      reportRequestError(getErrorMessage(error));
+      reportRequestError(error);
     } finally {
       if (isMountedRef.current) {
         setPendingOrchestratorActionById((current) => {
@@ -11138,7 +11347,3 @@ function resolveWorkspaceTabProjectId(
     null
   );
 }
-
-
-
-

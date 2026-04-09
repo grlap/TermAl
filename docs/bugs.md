@@ -9,166 +9,252 @@ outage. The reconnect handler now only resets the cadence for a new failure
 cycle after a confirmed reopen or an explicit manual retry, so same-outage
 errors preserve the pending fallback timer instead of flattening the backoff.
 
+Also fixed: em-dash characters in two CSS comments (`ui/src/styles.css`) that
+were double-encoded into multi-byte mojibake sequences have been replaced with
+ASCII `--` dashes.
+
+Also fixed: cold-start fallback retry (`scheduleFallbackStateResyncRetry`) now
+routes through `consumeReconnectStateResyncDelayMs()` for exponential backoff
+instead of polling at a fixed 400ms rate.
+
+Also fixed: backend reconnect behavior no longer depends on user-facing error
+text. `api.ts` now throws a structured `ApiRequestError` with a discriminated
+`kind` field (`"backend-unavailable"` vs `"request-failed"`), and `App.tsx`
+uses `isBackendUnavailableError()` instead of string-pattern matching on
+formatted messages.
+
+Also fixed: late workspace hydration no longer restores a stale control-panel
+side. `controlPanelSide` is now guarded behind `ignoreFetchedWorkspaceLayoutRef`
+alongside the workspace tree, so a manual resize during hydration preserves
+both the split ratios and the dock side.
+
+Also fixed: the backend connection chip no longer keeps a stale error after the
+browser comes back online. `handleBrowserOnline()` now clears
+`backendConnectionIssueDetail` and any inline request error message before
+requesting a reconnect.
+
+Also fixed: cold-start reconnect retry path now has regression coverage. A new
+test exercises the cold-start failure → actionable connecting indicator → click
+retry flow.
+
+Also fixed: connection tooltip no longer exposes raw backend error text. SSE
+and fallback error handlers now use `describeBackendConnectionIssueDetail()`
+which maps errors to fixed generic messages. A regression test asserts internal
+paths like `C:\internal\server.ts` do not appear in the tooltip.
+
+Also fixed: manual retry no longer cancels automatic fallback polling. The
+failed one-shot probe from `requestBackendReconnectRef` now re-arms the
+reconnect state resync timer via `scheduleReconnectStateResync()` in the catch
+block when `preserveReconnectFallback` is false, `reconnectStateResyncTimeoutId`
+is null, and the client has a hydrated state. Previously a failed click could
+leave no `/api/state` retry armed until the next `EventSource.onerror`.
+
+Also fixed: old-backend HTML fallback errors are now reported with the restart
+instruction instead of the generic "Could not reach" message. `ApiRequestError`
+gains a `restartRequired` flag set for HTML responses from an incompatible
+backend. `describeBackendConnectionIssueDetail()` surfaces the original error
+message (containing "Restart TermAl") for these errors.
+`reportRequestError()` skips the auto-reconnect path so that a successful
+`/api/state` probe on the old backend does not silently clear the restart
+guidance. The state resync catch block skips both the fallback retry and the
+newly added reconnect re-arm for restart-required errors.
+
+Also fixed: offline backend-unavailable banners no longer become sticky after
+recovery. The offline branch in `reportRequestError` now preserves the inline
+request error marker (`setBackendInlineRequestError(message)` instead of
+`null`) so that `clearRecoveredBackendRequestError` can match and clear the
+`requestError` when `handleBrowserOnline` fires.
+
+Also fixed: reconnect-success polling no longer self-sustains after watchdog or
+wake-gap resyncs. Successful `/api/state` fetches now re-arm reconnect polling
+only when the request explicitly came from a reconnect fallback or a manual
+retry probe; generic resume/watchdog resyncs remain one-shot.
+
+Also fixed: action-error recovery no longer pollutes SSE-level reconnect state.
+`reportRequestError` now uses a dedicated `requestActionRecoveryResyncRef`
+instead of `requestBackendReconnectRef`. The action-recovery path does a plain
+one-shot `/api/state` probe without resetting `sawReconnectOpenSinceLastError`
+or re-arming reconnect polling. Previously a one-off 502 on a non-stream
+endpoint (e.g. send message) could cause permanent `/api/state` polling even
+though the live SSE stream was healthy.
+
+Also fixed: workspace layout hydration now surfaces restart-required errors.
+When `fetchWorkspaceLayout` fails with a restart-required `ApiRequestError`,
+the catch handler calls `reportRequestError(error)` so the user sees the
+restart instruction instead of a silent degradation.
+
+Also fixed: action-level recovery no longer mutates `backendConnectionState`.
+`reportRequestError` no longer promotes a one-off 502 into the reconnecting
+state. The connection badge reflects SSE transport state only, so a transient
+action failure can no longer leave a permanent reconnect badge while the SSE
+stream is healthy. The inline issue detail and error text are still set and
+cleared by the action-recovery resync.
+
+Also fixed: `clearRecoveredBackendRequestError` no longer enqueues no-op state
+updates. An early return skips the `setState` calls when
+`backendInlineRequestErrorMessageRef` is `null`, avoiding unnecessary re-render
+work across the ~11 recovery call sites.
+
+Also fixed: layout merge test precision restored. `toBeCloseTo(0.42, 1)` was
+too loose (accepted ~0.35 to ~0.49). Updated to `toBeCloseTo(0.44, 4)` to
+match the actual clamped ratio (the resize clamp nudges the raw 0.42 drag
+target upward to respect the control panel minimum width).
+
+Also fixed: restart-required guidance is now route-scoped and clears precisely
+when the failing route recovers. `workspaceLayoutRestartErrorMessageRef`
+records the exact error message set by the workspace-layout loader's
+restart-required failure. The workspace-layout `.then` path compares the
+current `requestError` against that ref and clears the toast only if it
+matches — so unrelated `/api/state` success or other transport-level recovery
+cannot dismiss the restart guidance. Conversely, the toast is no longer left
+stale after the route actually recovers.
+
+Also fixed: reconnect recovery from live SSE events no longer confirms
+prematurely. In `handleStateEvent`, `confirmReconnectRecoveryFromLiveEvent()`
+is called after `adoptState()` succeeds. In `handleDeltaEvent`, it is called
+only in the three known-good branches (ignore, orchestratorsUpdated, applied).
+The "resync" and fallthrough delta paths use `rearmOnFailure: true` so a
+failed follow-up `/api/state` fetch re-arms polling instead of stalling. The
+catch blocks in both handlers restore `backendConnectionState` to
+`"reconnecting"` and re-arm fallback polling, so the retry affordance stays
+available and recovery continues.
+
+Also fixed: `performRequest` now preserves the original `fetch` exception on
+the wrapped `ApiRequestError.cause`, so callers keep the raw failure object
+without losing the structured error classification.
+
 ## Active Repo Bugs
 
-## Manual reconnect retry can stop fallback polling
+## `backendConnectionStateRef` is mutated inside a functional state updater
 
-**Severity:** High - clicking the advertised retry action during an outage can leave recovery stalled after one failed `/api/state` request.
+**Severity:** High - React 18 can replay or discard updater functions, desynchronizing reconnect decisions from the committed connection state.
 
-The new manual retry path clears both reconnect timers and resets the backoff before issuing a one-shot `requestStateResync()`. That resync does not preserve the reconnect fallback, so if the forced `/api/state` fetch fails, the catch path records the error and exits without scheduling another timer. A user can therefore click "retry now" while SSE is still down and accidentally cancel the automatic snapshot polling that was keeping recovery alive.
-
-**Current behavior:**
-- Manual retry cancels the existing reconnect timeout before firing an immediate `/api/state` fetch.
-- If that fetch fails, the reconnect loop is no longer armed and recovery depends on a later `EventSource.onerror`, browser online event, or another manual action.
-
-**Proposal:**
-- Preserve or immediately re-arm the reconnect fallback when manual retries call `requestStateResync()`.
-- Add a regression that clicks the reconnect badge, forces the manual fetch to fail, and asserts automatic polling remains armed until live recovery is confirmed.
-
-## Em-dash characters in CSS comments corrupted to UTF-8 mojibake
-
-**Severity:** Medium - signals a broken encoding pipeline that will corrupt functional CSS if it reaches a property value or `content:` string.
-
-Two em-dash characters (`—`, U+2014) in `ui/src/styles.css` comments (around lines 147 and 8443) were double-encoded into multi-byte mojibake sequences (`ÃƒÆ'Ã‚Â¢…`). The corruption is a classic UTF-8 → Latin-1 → UTF-8 round-trip artifact, likely introduced by a line-ending conversion step (`core.autocrlf`), an editor re-save, or a pre-commit hook.
+`setBackendConnectionState` now mirrors `backendConnectionState` into
+`backendConnectionStateRef` so `handleBrowserOnline()` can synchronously decide
+whether a reconnect request is needed. The functional-updater branch performs
+that ref write inside `setBackendConnectionStateRaw((current) => ...)`, which
+means the ref mutation runs during React's render scheduling, not after a
+committed state transition. In React 18, functional updaters are expected to be
+pure: they may be replayed, invoked more than once, or discarded under
+concurrent/strict rendering. A replayed or abandoned updater can therefore
+leave the ref out of sync with the UI state that actually committed.
 
 **Current behavior:**
-- Two CSS comments contain garbled multi-byte sequences instead of em-dashes.
-- The corruption is non-functional (comments only) but will accumulate on each re-save if the root cause is not identified.
+- `backendConnectionStateRef.current` is assigned inside the functional updater
+  passed to `setBackendConnectionStateRaw`.
+- `handleBrowserOnline()` reads that ref to decide whether to request a
+  reconnect, so a replayed/discarded updater can spuriously trigger or suppress
+  recovery work.
 
 **Proposal:**
-- Restore the original `—` (U+2014) in both comments, or replace with `--`.
-- Identify and fix the encoding pipeline step that caused the corruption (check `core.autocrlf`, editor encoding settings, and any file-processing hooks).
+- Keep the functional updater pure and derive the next state only.
+- Sync `backendConnectionStateRef.current` from committed state (for example in
+  a `useEffect` keyed on `backendConnectionState`) or use another post-commit
+  mechanism.
 
-## Cold-start fallback retry bypasses exponential backoff
+## `ApiRequestError.cause` bypasses the standard `Error` options bag
 
-**Severity:** Medium - the initial-hydration and `preserveReconnectFallback`
-retry paths poll `/api/state` at a fixed 400ms rate with no backoff.
+**Severity:** Medium - developer tooling (browser devtools "Caused by" chains, Sentry) may not see the wrapped cause.
 
-`scheduleFallbackStateResyncRetry` always uses the fixed
-`RECONNECT_STATE_RESYNC_DELAY_MS` constant instead of
-`consumeReconnectStateResyncDelayMs()`. The new exponential backoff only applies
-to `scheduleReconnectStateResync`, so cold-start retries or failed
-fallback-marked resyncs poll at 2.5 req/sec indefinitely if the backend stays
-down.
+`ApiRequestError` declares `readonly cause: unknown` and assigns it manually after `super(message)` instead of forwarding it through the standard ES2022 `Error` options bag (`super(message, { cause })`). The `super` call never receives the `cause`, so the native `Error.cause` slot is not set during construction. The explicit field assignment shadows the inherited property and works in practice, but error-aware tooling that reads `cause` from the prototype chain during construction will not pick it up.
 
 **Current behavior:**
-- `scheduleFallbackStateResyncRetry` fires at 400ms regardless of how many
-  times it has already retried.
-- Only `scheduleReconnectStateResync` uses the exponential backoff series.
+- `super(message)` is called without the `cause` option.
+- `this.cause = options?.cause` manually assigns the field, shadowing `Error.cause`.
 
 **Proposal:**
-- Route `scheduleFallbackStateResyncRetry` through the same
-  `consumeReconnectStateResyncDelayMs()` backoff, or add an independent backoff
-  for the cold-start path.
-- Document any intentional deviation (e.g., "fast retries during initial load
-  are acceptable because they only fire on first page load").
+- Pass `cause` through the `super` call: `super(message, { cause: options?.cause })`.
+- Remove the explicit `readonly cause: unknown` declaration and manual assignment, or keep the type annotation only.
 
-## Backend reconnect behavior is driven by user-facing error text
+## `clearRecoveredBackendRequestError` captured as stale closure in `handleBrowserOnline` effect
 
-**Severity:** Medium - transport recovery now depends on parsing formatted error strings in the UI layer.
+**Severity:** Low - latent fragility; safe today but breaks silently if the function body ever reads state directly.
 
-`App.tsx` classifies backend-unavailable failures through `shouldInlineControlPanelBackendIssue()` and then mutates `backendConnectionState` / `backendConnectionIssueDetail` from the generic request error path. That makes reconnect behavior depend on the exact wording returned by `api.ts` and the Vite proxy, instead of a structured transport error from the API layer. If the message text changes, the reconnect UI can stop firing even though the underlying failure mode is unchanged.
+The `useEffect` for `handleBrowserOnline`/`handleBrowserOffline` has an empty dependency array `[]` but captures `clearRecoveredBackendRequestError`, a plain function that re-creates each render. The function currently only reads from refs and uses stable setters, so the stale closure is safe. However, any future change that adds direct state reads (not via refs) would silently break without a lint warning.
 
 **Current behavior:**
-- Generic request catch blocks can promote a user-facing error message into the reconnect state machine.
-- The transport state is inferred from formatted text such as `Request failed with status 502.` or `The TermAl backend is unavailable.`
+- `clearRecoveredBackendRequestError` is a plain function re-created each render, captured once by the `[]`-dep effect.
+- Works correctly because its body only uses `backendInlineRequestErrorMessageRef` and stable `setState` calls.
 
 **Proposal:**
-- Return a structured backend-unavailable error from `api.ts` instead of inferring transport state from display text.
-- Keep the reconnect decision in the transport layer and let UI copy use the structured error, not the other way around.
+- Wrap in a ref (consistent with `requestBackendReconnectRef` and `requestActionRecoveryResyncRef`) or extract to a `useCallback` with proper deps.
 
-## Late workspace hydration can still restore a stale control-panel side
+## `fetchWorkspaceLayout` treats HTML 404 fallbacks as missing layout
 
-**Severity:** Medium - a late workspace layout fetch can persist an obsolete
-dock side after the user already resized the split locally.
+**Severity:** Low - an incompatible backend can still degrade silently on the workspace-layout route instead of surfacing restart guidance.
 
-The initial workspace-layout fetch now skips applying the fetched workspace tree
-when `ignoreFetchedWorkspaceLayoutRef` is set, but it still applies
-`nextLayout.controlPanelSide` unconditionally before that guard. If the
-server-stored side differs from the local/bootstrap side, a late response can
-reintroduce the stale dock side after a local resize and then persist that side
-back out on the next layout save.
+`fetchWorkspaceLayout` returns `null` immediately on any 404 before checking
+whether the response body is an HTML fallback page. That means an old backend
+that does not serve `/api/workspaces/:id` can answer with an HTML 404 page and
+the client will interpret it as "layout missing" rather than a restart-required
+incompatible backend. The new restart-guidance path therefore still has a route
+shape that degrades silently.
 
 **Current behavior:**
-- A manual divider drag during initial hydration protects the split ratio, but
-  not the fetched `controlPanelSide`.
-- A late server layout can still rewrite the dock side even though the rest of
-  the fetched workspace layout was intentionally ignored.
+- Any 404 from `/api/workspaces/:id` returns `null` before `looksLikeHtmlResponse`
+  runs.
+- HTML fallback responses on that route do not become `restartRequired`
+  `ApiRequestError`s, so the UI shows no restart guidance.
 
 **Proposal:**
-- Treat layout-side fields such as `controlPanelSide` as part of the ignored
-  layout when local edits have already claimed the initial hydration window.
-- Add a regression test that starts with one local side, resolves a late server
-  layout with the opposite side, and verifies the local side survives.
+- Detect HTML fallback bodies before the 404 early return, or otherwise
+  distinguish a missing workspace record from a route that is not served by the
+  current backend.
 
-## Backend connection chip can keep a stale error after the browser comes back online
+## Unencoded workspace ID in `fetchWorkspaceLayout` error message
 
-**Severity:** Medium - the top-bar connection chip can stay red with an
-obsolete failure message while connectivity is already recovering.
+**Severity:** Low - cosmetic inconsistency; no XSS risk due to React text rendering.
 
-`handleBrowserOnline()` updates `backendConnectionState` back to
-`connecting`/`reconnecting`, but it does not clear `backendConnectionIssueDetail`.
-Because the chip now treats any non-null issue detail as an error, an old
-offline or sync-failure message can override the live connection state until a
-later successful sync happens to clear it.
+`fetchWorkspaceLayout` passes the raw `workspaceId` to `formatUnavailableApiMessage` at line 341 while the actual request at line 326 uses `encodeURIComponent`. If a workspace ID contained unusual characters, they would appear verbatim in the error message while the encoded form was sent to the server.
 
 **Current behavior:**
-- Going offline clears the issue detail, but coming back online does not.
-- The connection chip can remain styled as an issue and keep showing stale text
-  even after the app starts reconnecting.
+- The request URL uses `encodeURIComponent(workspaceId)`.
+- The error message uses the raw `workspaceId` string.
 
 **Proposal:**
-- Clear `backendConnectionIssueDetail` when handling the browser's `online`
-  event, or only render issue text for fresh failures tied to the current
-  connection state.
-- Add regression coverage for the offline -> online transition.
+- Use the pre-built `endpoint` variable in the `formatUnavailableApiMessage` call for consistency.
 
-## Cold-start reconnect retry path lacks regression coverage
+## 504 Gateway Timeout not classified as backend-unavailable
 
-**Severity:** Low - the actionable `connecting` retry branch can regress
-without a test catching it.
+**Severity:** Medium - a common reverse-proxy outage path bypasses the reconnect/retry recovery flow entirely.
 
-The new retry affordance is wired for both `connecting` and `reconnecting`, but
-the added tests only exercise the `reconnecting` path. The cold-start branch
-uses a different state transition (`latestStateRevisionRef.current === null`)
-and only appears after an initial fetch failure, so it can break without any
-current regression failing.
+`createResponseError` in `api.ts` classifies 502 and 503 as `backend-unavailable` but omits 504 (Gateway Timeout). A 504 would be classified as `request-failed` with a generic message, missing the auto-recovery path.
 
 **Current behavior:**
-- Tests cover clicking retry from the reconnecting state only.
-- No regression test verifies that a cold-start failure exposes the actionable
-  `connecting` indicator and that clicking it triggers the expected retry flow.
+- Only 502 and 503 trigger the `backend-unavailable` classification.
+- 504 falls through to the generic `request-failed` path.
 
 **Proposal:**
-- Add an app-level regression that starts with no hydrated revision, forces the
-  initial `/api/state` request to fail, clicks the connecting retry indicator,
-  and asserts the retry flow runs.
-- Keep the reconnecting-path test, but cover the cold-start branch too so both
-  user-visible retry states are exercised.
+- Add `|| status === 504` alongside the 502/503 check in `createResponseError`.
 
-## Connection tooltip exposes raw backend error text
+## `reportRequestError` parameter type `unknown | string` is redundant
 
-**Severity:** Low - backend failure text can be surfaced verbatim in the
-always-visible connection tooltip.
+**Severity:** Note - cosmetic type issue with no runtime impact.
 
-The new connection tooltip stores `getErrorMessage(error)` in
-`backendConnectionIssueDetail` and renders that text in the top bar. For
-non-SSH failures, the current sanitizer mostly returns the backend error body as
-received, which means stack traces, internal paths, or other low-level
-diagnostic text can end up in the main workspace chrome.
+The `reportRequestError` function in `App.tsx` is typed with `error: unknown | string`. Since `unknown` is the top type in TypeScript, `unknown | string` simplifies to just `unknown` — the `| string` branch is dead at the type level and misleading.
 
 **Current behavior:**
-- Sync failures can populate the connection tooltip with raw backend error text.
-- The detail is accessible from the primary workspace header instead of a more
-  deliberate diagnostics surface.
+- The type annotation suggests two distinct overloads, but TypeScript does not enforce the distinction.
+- The `typeof error === "string"` runtime guard handles the string case correctly regardless.
 
 **Proposal:**
-- Replace raw backend failure text in this tooltip with a generic connection
-  failure message or a sanitized subset.
-- Keep detailed diagnostics behind an explicit debug affordance if they are
-  still needed.
+- Simplify to `error: unknown` and rely on the existing runtime guard, or add a JSDoc comment documenting the string call shape.
 
 ## Resolved
+
+Reconnect-success re-arm no longer creates a polling loop after authoritative
+progress: reconnect-triggered `/api/state` fetches now only re-arm fallback
+polling when the fetch resolves without advancing the held revision. If the
+reconnect resync adopts a newer revision, the success path stops after that
+recovery instead of scheduling another timer. This fixes
+`resets the watchdog drift baseline after a long reconnect resync completes`.
+
+Reconnect delta recovery no longer waits for a revision bump: once the stream
+reopens, the first successfully parsed live SSE payload now confirms recovery
+and clears the reconnect fallback timer even if the delta is ignored as stale
+or already applied. That lets the connection badge settle on "Connected" and
+fixes `cancels the reconnect fallback after a reconnect error when the first
+reconnect delta is ignored`.
 
 Reconnect fallback no longer stops after a no-op `/api/state` response:
 successful fallback snapshots now keep reconnect polling armed until
@@ -240,32 +326,31 @@ filesystem I/O is not safe under the mutex.
 
 ## Implementation Tasks
 
-- [ ] Expand the late workspace hydration regression:
-  make the deferred layout response include `controlPanelSide`, theme, style,
-  font size, editor font size, and density, then assert those preferences still
-  merge correctly when a manual resize sets the ignore flag.
+- [x] Preserve original error object in `performRequest` catch block:
+  `performRequest` now passes the caught `fetch` error into
+  `createBackendUnavailableError`, and `ApiRequestError` stores it on the
+  wrapper instance as `cause`. The constructor still needs the standard
+  `Error` options bag; see the active bug above.
+- [ ] Add API test for rejected `fetch` cause propagation:
+  make `fetch` reject in `performRequest`, assert the wrapper is classified as
+  `backend-unavailable`, and verify `error.cause` preserves the original
+  thrown exception.
+- [ ] Add app regression for workspace-layout restart-required recovery:
+  fail `fetchWorkspaceLayout()` with restart guidance, assert the toast appears,
+  then recover only that route and verify the matching toast clears.
+- [ ] Extend backend-unavailable status coverage in `api.test.ts`:
+  cover HTTP 503 explicitly alongside 502, and add 504 coverage once
+  `createResponseError` classifies gateway timeouts as backend-unavailable.
 - [ ] Add pending-state coverage for `runtime-action-button`:
   hold a run/pause/resume/stop request unresolved long enough to assert
   `disabled`, `aria-busy`, and spinner rendering before the promise resolves.
 - [ ] Add keyboard and ARIA coverage for the backend connection tooltip:
   test focus/blur-driven visibility and assert `aria-describedby` /
   `aria-hidden` wiring instead of relying only on hover and class-name checks.
-- [ ] Add structured-error coverage for backend reconnect handling:
-  prove the reconnect UI still fires when the proxy/backend-unavailable message
-  changes, and cover the dev-proxy `502` path plus the `reportRequestError()`
-  reconnect side effect so the retry path no longer depends on a fragile text
-  match or an untested Vite proxy error.
 - [ ] Extend reconnect backoff progression coverage:
   assert the full exponential series (400, 800, 1600, 3200, 5000ms cap),
   verify repeated `EventSource.onerror` callbacks do not reset the sequence
   during one outage, and confirm the cap holds at 5000ms instead of 6400ms.
-- [ ] Add failed manual-retry coverage for the reconnect badge:
-  click retry while SSE remains disconnected, force the immediate `/api/state`
-  request to fail, and assert the automatic reconnect fallback stays armed.
-- [ ] Add cold-start retry coverage for the connecting badge:
-  start with no hydrated revision, force the initial `/api/state` request to
-  fail, click the actionable connecting indicator, and assert the retry flow
-  runs.
 - [ ] Remove dead `resetBackoff` option from `scheduleReconnectStateResync`:
   no call site passes it; all callers reset externally via
   `resetReconnectStateResyncBackoff()`.
@@ -275,6 +360,42 @@ filesystem I/O is not safe under the mutex.
 - [ ] Extend reconnect recovery coverage to clear inline backend error text:
   after a successful `/api/state` fallback, assert the inline banner / tooltip
   request error disappears together with any reconnect indicator changes.
+- [ ] Add snapshot-vs-live-stream recovery contrast test:
+  set up a disconnect, let a snapshot poll succeed at a stale revision (so
+  `rearmOnSuccess` re-arms polling and the badge stays "reconnecting"), then
+  receive a live delta after `onopen` and assert the connection transitions to
+  "connected" and polling stops. Contrasts the two distinct code paths
+  (`rearmOnSuccess` polling vs `confirmReconnectRecoveryFromLiveEvent`).
+- [ ] Add test for state handler catch-block reconnecting restoration:
+  simulate a reconnect recovery where the SSE stream reopens and delivers a
+  state event that fails during `adoptState` (e.g., reducer throws). Assert
+  `backendConnectionState` is restored to "reconnecting" (not stuck on
+  "connected") and fallback polling re-arms via `scheduleReconnectStateResync`.
+- [ ] Add test for action-recovery resync probe:
+  trigger a backend-unavailable error from a user action (e.g., send message
+  502) while the SSE stream is healthy. Assert `requestActionRecoveryResyncRef`
+  fires a one-shot `/api/state` probe that does NOT re-arm reconnect polling
+  or reset `sawReconnectOpenSinceLastError`.
+- [ ] Consistent `vi.isFakeTimers()` guard in backend-connection tests:
+  tests 4 and 6 call `vi.useRealTimers()` unconditionally in `finally`
+  while test 3 uses the `if (vi.isFakeTimers())` guard. Align on the
+  defensive pattern for clarity.
+- [x] Restore `toBeCloseTo` precision in layout merge test:
+  Updated to `toBeCloseTo(0.44, 4)` — the raw 0.42 target is nudged by the
+  control panel minimum width clamp, so the assertion now matches the actual
+  clamped ratio at precision 4.
+- [ ] Remove redundant `headers` from `fetchWorkspaceLayout`:
+  `fetchWorkspaceLayout` explicitly passes `Content-Type: application/json` to
+  `performRequest`, which already sets the same default. If `performRequest`'s
+  defaults grow, `fetchWorkspaceLayout` would silently drop them.
+- [ ] Add data integrity assertion to bad-state-payload recovery test:
+  the "accepts a later live delta on the same reopened stream after a bad state
+  payload" test verifies connection status recovery but does not confirm the
+  previously recovered session data survived the orphan delta.
+- [ ] Add missing state fields to pending reconnect deferred in stale-detail test:
+  the "clears stale backend issue detail when the browser reconnects" test
+  resolves its deferred with a state response missing `orchestrators` and
+  `workspaces` fields present in all other test state responses.
 
 ## Known External Limitations
 

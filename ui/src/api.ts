@@ -259,22 +259,56 @@ export type AgentCommandsResponse = {
   commands: AgentCommand[];
 };
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(path, {
-    headers: {
-      "Content-Type": "application/json",
+export type ApiRequestErrorKind = "backend-unavailable" | "request-failed";
+
+export class ApiRequestError extends Error {
+  readonly cause: unknown;
+  readonly kind: ApiRequestErrorKind;
+  readonly status: number | null;
+  readonly restartRequired: boolean;
+
+  constructor(
+    kind: ApiRequestErrorKind,
+    message: string,
+    options?: {
+      status?: number | null;
+      restartRequired?: boolean;
+      cause?: unknown;
     },
-    ...init,
-  });
+  ) {
+    super(message);
+    this.cause = options?.cause;
+    this.name = "ApiRequestError";
+    this.kind = kind;
+    this.status = options?.status ?? null;
+    this.restartRequired = options?.restartRequired ?? false;
+    Object.setPrototypeOf(this, new.target.prototype);
+  }
+}
+
+export function isBackendUnavailableError(
+  error: unknown,
+): error is ApiRequestError {
+  return (
+    error instanceof ApiRequestError && error.kind === "backend-unavailable"
+  );
+}
+
+async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  const response = await performRequest(path, init);
 
   const contentType = response.headers.get("content-type") ?? "";
   const raw = await response.text();
   if (looksLikeHtmlResponse(raw, contentType)) {
-    throw new Error(formatUnavailableApiMessage(path, response.status));
+    throw createBackendUnavailableError(
+      formatUnavailableApiMessage(path, response.status),
+      response.status,
+      { restartRequired: true },
+    );
   }
 
   if (!response.ok) {
-    throw new Error(extractError(raw, response.status));
+    throw createResponseError(raw, response.status);
   }
 
   if (!raw) {
@@ -289,7 +323,8 @@ export function fetchState() {
 }
 
 export async function fetchWorkspaceLayout(workspaceId: string) {
-  const response = await fetch(`/api/workspaces/${encodeURIComponent(workspaceId)}`, {
+  const endpoint = `/api/workspaces/${encodeURIComponent(workspaceId)}`;
+  const response = await performRequest(endpoint, {
     headers: {
       "Content-Type": "application/json",
     },
@@ -302,11 +337,15 @@ export async function fetchWorkspaceLayout(workspaceId: string) {
   const contentType = response.headers.get("content-type") ?? "";
   const raw = await response.text();
   if (looksLikeHtmlResponse(raw, contentType)) {
-    throw new Error(formatUnavailableApiMessage(`/api/workspaces/${workspaceId}`, response.status));
+    throw createBackendUnavailableError(
+      formatUnavailableApiMessage(`/api/workspaces/${workspaceId}`, response.status),
+      response.status,
+      { restartRequired: true },
+    );
   }
 
   if (!response.ok) {
-    throw new Error(extractError(raw, response.status));
+    throw createResponseError(raw, response.status);
   }
 
   return raw ? (JSON.parse(raw) as WorkspaceLayoutResponse) : null;
@@ -825,6 +864,48 @@ export function syncGitChanges(payload: {
   return request<GitRepoActionResponse>("/api/git/sync", {
     method: "POST",
     body: JSON.stringify(payload),
+  });
+}
+
+async function performRequest(path: string, init?: RequestInit) {
+  try {
+    return await fetch(path, {
+      headers: {
+        "Content-Type": "application/json",
+      },
+      ...init,
+    });
+  } catch (error) {
+    throw createBackendUnavailableError(
+      "The TermAl backend is unavailable.",
+      undefined,
+      { cause: error },
+    );
+  }
+}
+
+function createBackendUnavailableError(
+  message: string,
+  status?: number,
+  options?: { restartRequired?: boolean; cause?: unknown },
+) {
+  return new ApiRequestError("backend-unavailable", message, {
+    status,
+    restartRequired: options?.restartRequired,
+    cause: options?.cause,
+  });
+}
+
+function createResponseError(raw: string, status: number) {
+  if (status === 502 || status === 503) {
+    return createBackendUnavailableError(
+      "The TermAl backend is unavailable.",
+      status,
+    );
+  }
+
+  return new ApiRequestError("request-failed", extractError(raw, status), {
+    status,
   });
 }
 

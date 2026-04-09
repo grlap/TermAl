@@ -144,7 +144,7 @@ textarea {
 
 /* box-shadow transitions are expensive (full repaint of the stacking context).
    Only apply them to interactive controls where the visual benefit outweighs
-   the cost ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â not to .message-card or other frequently-updated elements. */
+   the cost -- not to .message-card or other frequently-updated elements. */
 .ghost-button,
 .chip,
 .composer,
@@ -8440,7 +8440,7 @@ textarea {
   opacity: 0.92;
 }
 
-/* Edge connector dots ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â appear on hover near card edges */
+/* Edge connector dots -- appear on hover near card edges */
 
 .orchestrator-board-connector {
   position: absolute;

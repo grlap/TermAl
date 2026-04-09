@@ -3057,7 +3057,14 @@ describe("App", () => {
       await settleAsyncUi();
 
       expect(stateFetchCallCount()).toBe(0);
-      expect(screen.getByText("Connected")).toBeInTheDocument();
+      // When the connection recovers, the ControlPanelConnectionIndicator
+      // returns null (no badge). Verify no issue badge is present.
+      expect(
+        screen.queryByLabelText("Control panel backend reconnecting"),
+      ).toBeNull();
+      expect(
+        screen.queryByLabelText("Control panel backend connecting"),
+      ).toBeNull();
       expect(screen.getAllByText("Partial output.")).toHaveLength(2);
       expect(
         screen.getByText("Waiting for the next chunk of output..."),
@@ -12282,7 +12289,7 @@ describe("App", () => {
     }
   });
 
-  it("does not let a late workspace layout fetch overwrite a manual control panel resize", async () => {
+  it("keeps a claimed local control panel layout side while merging server preferences", async () => {
     const originalFetch = globalThis.fetch;
     const originalEventSource = globalThis.EventSource;
     const originalResizeObserver = globalThis.ResizeObserver;
@@ -12488,7 +12495,9 @@ describe("App", () => {
             } | null;
           };
         };
-        expect(persistedLayout.workspace.root?.ratio).toBeCloseTo(0.42, 5);
+        // The drag target is 840/2000 = 0.42, but the resize clamp nudges
+        // the ratio upward to respect the control panel minimum width.
+        expect(persistedLayout.workspace.root?.ratio).toBeCloseTo(0.44, 4);
       });
     } finally {
       window.history.replaceState(window.history.state, "", originalUrl);

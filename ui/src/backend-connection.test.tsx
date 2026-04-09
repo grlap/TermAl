@@ -84,6 +84,14 @@ function jsonResponse(body: unknown) {
   });
 }
 
+function createDeferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((resolvePromise) => {
+    resolve = resolvePromise;
+  });
+  return { promise, resolve };
+}
+
 function latestEventSource(): EventSourceMock {
   const eventSource = EventSourceMock.instances[EventSourceMock.instances.length - 1];
   if (!eventSource) {
@@ -330,6 +338,321 @@ describe("Backend connection state", () => {
 
     fireEvent.click(badge);
     expect(onRetry).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows a sanitized connecting retry tooltip after a cold-start backend failure", async () => {
+    const originalFetch = globalThis.fetch;
+    const originalEventSource = globalThis.EventSource;
+    const originalResizeObserver = globalThis.ResizeObserver;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const target = String(input);
+      if (target === "/api/state") {
+        return new Response(
+          JSON.stringify({
+            error: "proxy failed while reading C:\\internal\\server.ts",
+          }),
+          {
+            status: 502,
+            headers: {
+              "Content-Type": "application/json",
+            },
+          },
+        );
+      }
+      if (target.startsWith("/api/workspaces/")) {
+        return new Response("", {
+          status: 404,
+        });
+      }
+
+      throw new Error(`Unexpected fetch: ${target}`);
+    });
+    const countStateFetches = () =>
+      fetchMock.mock.calls.filter(([url]) => String(url) === "/api/state")
+        .length;
+
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal(
+      "EventSource",
+      EventSourceMock as unknown as typeof EventSource,
+    );
+    vi.stubGlobal(
+      "ResizeObserver",
+      ResizeObserverMock as unknown as typeof ResizeObserver,
+    );
+
+    try {
+      render(<App />);
+
+      const eventSource = latestEventSource();
+      act(() => {
+        eventSource.dispatchError();
+      });
+
+      await waitFor(() => {
+        expect(countStateFetches()).toBe(1);
+      });
+      const badge = await screen.findByLabelText(
+        "Control panel backend connecting",
+      );
+      fireEvent.mouseEnter(badge);
+      const tooltip = await screen.findByRole("tooltip");
+      expect(tooltip).toHaveTextContent("Connecting");
+      expect(tooltip).toHaveTextContent(
+        "Could not reach the TermAl backend. Retrying automatically.",
+      );
+      expect(tooltip).not.toHaveTextContent("C:\\internal\\server.ts");
+      expect(tooltip).toHaveTextContent("Click the status to retry now.");
+
+      fireEvent.click(badge);
+      await waitFor(() => {
+        expect(countStateFetches()).toBe(2);
+      });
+    } finally {
+      restoreGlobal("fetch", originalFetch);
+      restoreGlobal("EventSource", originalEventSource);
+      restoreGlobal("ResizeObserver", originalResizeObserver);
+    }
+  });
+
+  it("clears stale backend issue detail when the browser reconnects", async () => {
+    const originalFetch = globalThis.fetch;
+    const originalEventSource = globalThis.EventSource;
+    const originalResizeObserver = globalThis.ResizeObserver;
+    const pendingReconnect = createDeferred<Response>();
+    let stateRequestCount = 0;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const target = String(input);
+      if (target === "/api/state") {
+        stateRequestCount += 1;
+        if (stateRequestCount === 1) {
+          return new Response(
+            JSON.stringify({
+              error: "proxy failed while reading C:\\internal\\server.ts",
+            }),
+            {
+              status: 502,
+              headers: {
+                "Content-Type": "application/json",
+              },
+            },
+          );
+        }
+        return pendingReconnect.promise;
+      }
+      if (target.startsWith("/api/workspaces/")) {
+        if (init?.method === "PUT") {
+          return jsonResponse({
+            layout: {
+              id: "workspace-live",
+              revision: 1,
+              updatedAt: "2026-04-04 21:15:00",
+              controlPanelSide: "left",
+              workspace: { panes: [] },
+            },
+          });
+        }
+        return new Response("", {
+          status: 404,
+        });
+      }
+
+      throw new Error(`Unexpected fetch: ${target}`);
+    });
+
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal(
+      "EventSource",
+      EventSourceMock as unknown as typeof EventSource,
+    );
+    vi.stubGlobal(
+      "ResizeObserver",
+      ResizeObserverMock as unknown as typeof ResizeObserver,
+    );
+
+    try {
+      render(<App />);
+
+      const eventSource = latestEventSource();
+      act(() => {
+        eventSource.dispatchOpen();
+        eventSource.dispatchState({
+          revision: 1,
+          projects: [],
+          orchestrators: [],
+          workspaces: [],
+          sessions: [],
+        });
+      });
+      await waitForNoControlPanelConnectionIssue();
+
+      vi.useFakeTimers();
+      act(() => {
+        eventSource.dispatchError();
+      });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(400);
+      });
+
+      const reconnectBadge = screen.getByLabelText(
+        "Control panel backend reconnecting",
+      );
+      act(() => {
+        fireEvent.mouseEnter(reconnectBadge);
+      });
+      expect(screen.getByRole("tooltip")).toHaveTextContent(
+        "Could not reach the TermAl backend. Retrying automatically.",
+      );
+
+      act(() => {
+        fireEvent(window, new Event("online"));
+      });
+      expect(stateRequestCount).toBe(2);
+
+      act(() => {
+        fireEvent.mouseEnter(
+          screen.getByLabelText("Control panel backend reconnecting"),
+        );
+      });
+      const tooltip = screen.getByRole("tooltip");
+      expect(tooltip).toHaveTextContent(
+        "Live updates are disconnected. Retrying automatically with backoff.",
+      );
+      expect(tooltip).not.toHaveTextContent(
+        "Could not reach the TermAl backend. Retrying automatically.",
+      );
+    } finally {
+      pendingReconnect.resolve(
+        jsonResponse({
+          revision: 2,
+          projects: [],
+          sessions: [],
+        }),
+      );
+      if (vi.isFakeTimers()) {
+        vi.useRealTimers();
+      }
+      restoreGlobal("fetch", originalFetch);
+      restoreGlobal("EventSource", originalEventSource);
+      restoreGlobal("ResizeObserver", originalResizeObserver);
+    }
+  });
+
+  it("backs off marked fallback state retries after repeated fetch failures", async () => {
+    const originalFetch = globalThis.fetch;
+    const originalEventSource = globalThis.EventSource;
+    const originalResizeObserver = globalThis.ResizeObserver;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const target = String(input);
+      if (target === "/api/state") {
+        return new Response(
+          JSON.stringify({
+            error: "proxy failed while reading C:\\internal\\server.ts",
+          }),
+          {
+            status: 502,
+            headers: {
+              "Content-Type": "application/json",
+            },
+          },
+        );
+      }
+      if (target.startsWith("/api/workspaces/")) {
+        if (init?.method === "PUT") {
+          return jsonResponse({
+            layout: {
+              id: "workspace-live",
+              revision: 1,
+              updatedAt: "2026-04-04 21:15:00",
+              controlPanelSide: "left",
+              workspace: { panes: [] },
+            },
+          });
+        }
+        return new Response("", {
+          status: 404,
+        });
+      }
+
+      throw new Error(`Unexpected fetch: ${target}`);
+    });
+    const countStateFetches = () =>
+      fetchMock.mock.calls.filter(([url]) => String(url) === "/api/state")
+        .length;
+
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal(
+      "EventSource",
+      EventSourceMock as unknown as typeof EventSource,
+    );
+    vi.stubGlobal(
+      "ResizeObserver",
+      ResizeObserverMock as unknown as typeof ResizeObserver,
+    );
+
+    try {
+      render(<App />);
+
+      const eventSource = latestEventSource();
+      act(() => {
+        eventSource.dispatchOpen();
+        eventSource.dispatchState({
+          revision: 1,
+          projects: [],
+          orchestrators: [],
+          workspaces: [],
+          sessions: [],
+        });
+      });
+      await waitForNoControlPanelConnectionIssue();
+
+      vi.useFakeTimers();
+      act(() => {
+        eventSource.dispatchState({
+          revision: 1,
+          projects: [],
+          orchestrators: [],
+          workspaces: [],
+          sessions: [],
+          _sseFallback: true,
+        });
+      });
+
+      // Flush the async fetch chain started by the SSE fallback handler.
+      // advanceTimersByTimeAsync(0) drains pending microtasks without
+      // advancing the clock, so the retry timer stays pending.
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0);
+      });
+      expect(countStateFetches()).toBe(1);
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(399);
+      });
+      expect(countStateFetches()).toBe(1);
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1);
+      });
+      expect(countStateFetches()).toBe(2);
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(799);
+      });
+      expect(countStateFetches()).toBe(2);
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1);
+      });
+      expect(countStateFetches()).toBe(3);
+    } finally {
+      if (vi.isFakeTimers()) {
+        vi.useRealTimers();
+      }
+      restoreGlobal("fetch", originalFetch);
+      restoreGlobal("EventSource", originalEventSource);
+      restoreGlobal("ResizeObserver", originalResizeObserver);
+    }
   });
 
   it("shows connecting, reconnecting, and offline states around the backend event stream", async () => {
@@ -724,17 +1047,16 @@ describe("Backend connection state", () => {
       await act(async () => {
         await Promise.resolve();
       });
+      // Manual click triggers an immediate state fetch.
       expect(countStateFetches()).toBe(hydratedStateFetchCount + 2);
 
+      // The successful probe adopted a newer revision, so reconnect polling
+      // correctly stops — there is no need to keep probing when the backend
+      // proved reachable with fresh data. Verify no further fetch fires.
       await act(async () => {
-        await vi.advanceTimersByTimeAsync(399);
+        await vi.advanceTimersByTimeAsync(5000);
       });
       expect(countStateFetches()).toBe(hydratedStateFetchCount + 2);
-
-      await act(async () => {
-        await vi.advanceTimersByTimeAsync(1);
-      });
-      expect(countStateFetches()).toBe(hydratedStateFetchCount + 3);
 
       act(() => {
         eventSource.dispatchOpen();
@@ -1973,6 +2295,139 @@ describe("Backend connection state", () => {
     }
   });
 
+  it("accepts a later live delta on the same reopened stream after a bad state payload", async () => {
+    const originalFetch = globalThis.fetch;
+    const originalEventSource = globalThis.EventSource;
+    const originalResizeObserver = globalThis.ResizeObserver;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const target = String(input);
+      if (target === "/api/state") {
+        return jsonResponse(
+          makeBackendStateResponse({
+            revision: 2,
+            sessionName: "Recovered Session",
+            preview: "Recovered preview",
+          }),
+        );
+      }
+      if (target.startsWith("/api/workspaces/")) {
+        if (init?.method === "PUT") {
+          return jsonResponse({
+            layout: {
+              id: "workspace-live",
+              revision: 1,
+              updatedAt: "2026-04-04 21:15:00",
+              controlPanelSide: "left",
+              workspace: { panes: [] },
+            },
+          });
+        }
+        return new Response("", {
+          status: 404,
+        });
+      }
+
+      throw new Error(`Unexpected fetch: ${target}`);
+    });
+    const countStateFetches = () =>
+      fetchMock.mock.calls.filter(([url]) => String(url) === "/api/state")
+        .length;
+
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal(
+      "EventSource",
+      EventSourceMock as unknown as typeof EventSource,
+    );
+    vi.stubGlobal(
+      "ResizeObserver",
+      ResizeObserverMock as unknown as typeof ResizeObserver,
+    );
+
+    try {
+      render(<App />);
+
+      const eventSource = latestEventSource();
+      expect(eventSource).toBeDefined();
+
+      act(() => {
+        eventSource.dispatchOpen();
+        eventSource.dispatchState(
+          makeBackendStateResponse({
+            revision: 1,
+            sessionName: "Original Session",
+            preview: "Original preview",
+          }),
+        );
+      });
+      expect(await screen.findByText("Original Session")).toBeInTheDocument();
+
+      vi.useFakeTimers();
+      act(() => {
+        eventSource.dispatchError();
+      });
+      expect(
+        screen.getByLabelText("Control panel backend reconnecting"),
+      ).toBeInTheDocument();
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(400);
+      });
+      expect(countStateFetches()).toBe(1);
+      expect(screen.getByText("Recovered Session")).toBeInTheDocument();
+
+      act(() => {
+        eventSource.dispatchOpen();
+      });
+      await act(async () => {
+        await Promise.resolve();
+      });
+      expectNoControlPanelConnectionIssue();
+
+      act(() => {
+        eventSource.dispatchState(null);
+      });
+      await act(async () => {
+        await Promise.resolve();
+      });
+      expect(
+        screen.getByLabelText("Control panel backend reconnecting"),
+      ).toBeInTheDocument();
+
+      act(() => {
+        eventSource.dispatchDelta({
+          type: "messageCreated",
+          revision: 2,
+          sessionId: "missing-session",
+          messageId: "message-live",
+          messageIndex: 0,
+          message: {
+            id: "message-live",
+            type: "text",
+            timestamp: "10:01",
+            author: "assistant",
+            text: "live",
+          },
+          preview: "Live preview",
+          status: "active",
+        });
+      });
+      await act(async () => {
+        await Promise.resolve();
+      });
+      expectNoControlPanelConnectionIssue();
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(400);
+      });
+      expect(countStateFetches()).toBe(1);
+    } finally {
+      vi.useRealTimers();
+      restoreGlobal("fetch", originalFetch);
+      restoreGlobal("EventSource", originalEventSource);
+      restoreGlobal("ResizeObserver", originalResizeObserver);
+    }
+  });
+
   it("adopts a same-revision reconnect fallback snapshot after backend restart", async () => {
     const originalFetch = globalThis.fetch;
     const originalEventSource = globalThis.EventSource;
@@ -2144,6 +2599,292 @@ describe("Backend connection state", () => {
       expect(screen.getByText("Recovered Session")).toBeInTheDocument();
       expect(screen.getByText("Recovered preview")).toBeInTheDocument();
       expect(screen.queryByText("Original Session")).toBeNull();
+    } finally {
+      vi.useRealTimers();
+      restoreGlobal("fetch", originalFetch);
+      restoreGlobal("EventSource", originalEventSource);
+      restoreGlobal("ResizeObserver", originalResizeObserver);
+    }
+  });
+
+  it("re-arms reconnect polling after a failed manual retry", async () => {
+    const originalFetch = globalThis.fetch;
+    const originalEventSource = globalThis.EventSource;
+    const originalResizeObserver = globalThis.ResizeObserver;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const target = String(input);
+      if (target === "/api/state") {
+        return new Response(
+          JSON.stringify({ error: "proxy failed" }),
+          {
+            status: 502,
+            headers: { "Content-Type": "application/json" },
+          },
+        );
+      }
+      if (target.startsWith("/api/workspaces/")) {
+        if (init?.method === "PUT") {
+          return jsonResponse({
+            layout: {
+              id: "workspace-live",
+              revision: 1,
+              updatedAt: "2026-04-04 21:15:00",
+              controlPanelSide: "left",
+              workspace: { panes: [] },
+            },
+          });
+        }
+        return new Response("", { status: 404 });
+      }
+
+      throw new Error(`Unexpected fetch: ${target}`);
+    });
+    const countStateFetches = () =>
+      fetchMock.mock.calls.filter(([url]) => String(url) === "/api/state")
+        .length;
+
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal(
+      "EventSource",
+      EventSourceMock as unknown as typeof EventSource,
+    );
+    vi.stubGlobal(
+      "ResizeObserver",
+      ResizeObserverMock as unknown as typeof ResizeObserver,
+    );
+
+    try {
+      render(<App />);
+
+      const eventSource = latestEventSource();
+      act(() => {
+        eventSource.dispatchOpen();
+        eventSource.dispatchState({
+          revision: 1,
+          projects: [],
+          orchestrators: [],
+          workspaces: [],
+          sessions: [],
+        });
+      });
+      await waitForNoControlPanelConnectionIssue();
+
+      vi.useFakeTimers();
+      const baseCount = countStateFetches();
+      act(() => {
+        eventSource.dispatchError();
+      });
+
+      // First reconnect fallback fires at 400ms and fails with 502.
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(400);
+      });
+      expect(countStateFetches()).toBe(baseCount + 1);
+
+      // Manual retry: immediate one-shot fetch that also fails.
+      fireEvent.click(
+        screen.getByLabelText("Control panel backend reconnecting"),
+      );
+      await act(async () => {
+        await Promise.resolve();
+      });
+      expect(countStateFetches()).toBe(baseCount + 2);
+
+      // The failed manual retry should re-arm the reconnect polling at the
+      // reset backoff (400ms). Previously no more fetches would fire until
+      // the next EventSource onerror.
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(399);
+      });
+      expect(countStateFetches()).toBe(baseCount + 2);
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1);
+      });
+      expect(countStateFetches()).toBe(baseCount + 3);
+    } finally {
+      vi.useRealTimers();
+      restoreGlobal("fetch", originalFetch);
+      restoreGlobal("EventSource", originalEventSource);
+      restoreGlobal("ResizeObserver", originalResizeObserver);
+    }
+  });
+
+  it("shows the restart instruction when the backend serves HTML instead of JSON", async () => {
+    const originalFetch = globalThis.fetch;
+    const originalEventSource = globalThis.EventSource;
+    const originalResizeObserver = globalThis.ResizeObserver;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const target = String(input);
+      if (target === "/api/state") {
+        return new Response(
+          "<!DOCTYPE html><html><body>Old backend</body></html>",
+          {
+            status: 200,
+            headers: { "Content-Type": "text/html" },
+          },
+        );
+      }
+      if (target.startsWith("/api/workspaces/")) {
+        if (init?.method === "PUT") {
+          return jsonResponse({
+            layout: {
+              id: "workspace-live",
+              revision: 1,
+              updatedAt: "2026-04-04 21:15:00",
+              controlPanelSide: "left",
+              workspace: { panes: [] },
+            },
+          });
+        }
+        return new Response("", { status: 404 });
+      }
+
+      throw new Error(`Unexpected fetch: ${target}`);
+    });
+    const countStateFetches = () =>
+      fetchMock.mock.calls.filter(([url]) => String(url) === "/api/state")
+        .length;
+
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal(
+      "EventSource",
+      EventSourceMock as unknown as typeof EventSource,
+    );
+    vi.stubGlobal(
+      "ResizeObserver",
+      ResizeObserverMock as unknown as typeof ResizeObserver,
+    );
+
+    try {
+      render(<App />);
+
+      const eventSource = latestEventSource();
+      act(() => {
+        eventSource.dispatchError();
+      });
+
+      await waitFor(() => {
+        expect(countStateFetches()).toBe(1);
+      });
+
+      const badge = await screen.findByLabelText(
+        "Control panel backend connecting",
+      );
+      fireEvent.mouseEnter(badge);
+      const tooltip = await screen.findByRole("tooltip");
+      // The tooltip must surface the restart instruction, not the generic
+      // "Could not reach" fallback.
+      expect(tooltip).toHaveTextContent("Restart TermAl");
+      expect(tooltip).toHaveTextContent("/api/state");
+      expect(tooltip).not.toHaveTextContent(
+        "Could not reach the TermAl backend. Retrying automatically.",
+      );
+    } finally {
+      restoreGlobal("fetch", originalFetch);
+      restoreGlobal("EventSource", originalEventSource);
+      restoreGlobal("ResizeObserver", originalResizeObserver);
+    }
+  });
+
+  it("does not schedule reconnect retry for restart-required errors on hydrated sessions", async () => {
+    const originalFetch = globalThis.fetch;
+    const originalEventSource = globalThis.EventSource;
+    const originalResizeObserver = globalThis.ResizeObserver;
+    let stateRequestCount = 0;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const target = String(input);
+      if (target === "/api/state") {
+        stateRequestCount += 1;
+        // The backend serves HTML (incompatible version); hydration
+        // arrived via the SSE state event, not via /api/state.
+        return new Response(
+          "<!DOCTYPE html><html><body>Old backend</body></html>",
+          {
+            status: 200,
+            headers: { "Content-Type": "text/html" },
+          },
+        );
+      }
+      if (target.startsWith("/api/workspaces/")) {
+        if (init?.method === "PUT") {
+          return jsonResponse({
+            layout: {
+              id: "workspace-live",
+              revision: 1,
+              updatedAt: "2026-04-04 21:15:00",
+              controlPanelSide: "left",
+              workspace: { panes: [] },
+            },
+          });
+        }
+        return new Response("", { status: 404 });
+      }
+
+      throw new Error(`Unexpected fetch: ${target}`);
+    });
+    const countStateFetches = () =>
+      fetchMock.mock.calls.filter(([url]) => String(url) === "/api/state")
+        .length;
+
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal(
+      "EventSource",
+      EventSourceMock as unknown as typeof EventSource,
+    );
+    vi.stubGlobal(
+      "ResizeObserver",
+      ResizeObserverMock as unknown as typeof ResizeObserver,
+    );
+
+    try {
+      render(<App />);
+
+      const eventSource = latestEventSource();
+      act(() => {
+        eventSource.dispatchOpen();
+        eventSource.dispatchState({
+          revision: 1,
+          projects: [],
+          orchestrators: [],
+          workspaces: [],
+          sessions: [],
+        });
+      });
+      await waitForNoControlPanelConnectionIssue();
+
+      vi.useFakeTimers();
+      const baseCount = countStateFetches();
+      act(() => {
+        eventSource.dispatchError();
+      });
+
+      // The reconnect fallback at 400ms fetches HTML -- restart-required error.
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(400);
+      });
+      expect(countStateFetches()).toBe(baseCount + 1);
+
+      // No further automatic retries should be scheduled because the error
+      // indicates an incompatible backend that requires a restart.
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(10000);
+      });
+      expect(countStateFetches()).toBe(baseCount + 1);
+
+      // The tooltip should show the restart instruction.
+      const badge = screen.getByLabelText(
+        "Control panel backend reconnecting",
+      );
+      act(() => {
+        fireEvent.mouseEnter(badge);
+      });
+      const tooltip = screen.getByRole("tooltip");
+      expect(tooltip).toHaveTextContent("Restart TermAl");
+      expect(tooltip).toHaveTextContent("/api/state");
+      expect(tooltip).not.toHaveTextContent(
+        "Could not reach the TermAl backend. Retrying automatically.",
+      );
     } finally {
       vi.useRealTimers();
       restoreGlobal("fetch", originalFetch);

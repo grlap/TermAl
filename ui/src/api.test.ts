@@ -1,8 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
+  ApiRequestError,
   createOrchestratorInstance,
   deleteWorkspaceLayout,
+  fetchState,
+  isBackendUnavailableError,
   saveFile,
 } from "./api";
 
@@ -161,5 +164,77 @@ describe("deleteWorkspaceLayout", () => {
       }),
     );
     expect(result).toEqual(responseBody);
+  });
+});
+
+describe("fetchState", () => {
+  const originalFetch = globalThis.fetch;
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    if (originalFetch === undefined) {
+      delete (globalThis as Partial<typeof globalThis>).fetch;
+      return;
+    }
+    globalThis.fetch = originalFetch;
+  });
+
+  it("classifies proxy 502 failures as structured backend-unavailable errors", async () => {
+    expect.assertions(3);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            error: "proxy failed while reading C:\\internal\\server.ts",
+          }),
+          {
+            status: 502,
+            headers: {
+              "Content-Type": "application/json",
+            },
+          },
+        ),
+      ),
+    );
+
+    try {
+      await fetchState();
+      throw new Error("Expected fetchState to reject");
+    } catch (error) {
+      expect(isBackendUnavailableError(error)).toBe(true);
+      expect(error).toBeInstanceOf(Error);
+      expect((error as Error).message).toBe(
+        "The TermAl backend is unavailable.",
+      );
+    }
+  });
+
+  it("sets restartRequired on HTML fallback errors from an incompatible backend", async () => {
+    expect.assertions(4);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(
+          "<!DOCTYPE html><html><body>Old backend</body></html>",
+          {
+            status: 200,
+            headers: {
+              "Content-Type": "text/html",
+            },
+          },
+        ),
+      ),
+    );
+
+    try {
+      await fetchState();
+      throw new Error("Expected fetchState to reject");
+    } catch (error) {
+      expect(isBackendUnavailableError(error)).toBe(true);
+      expect(error).toBeInstanceOf(ApiRequestError);
+      expect((error as ApiRequestError).restartRequired).toBe(true);
+      expect((error as Error).message).toContain("Restart TermAl");
+    }
   });
 });
