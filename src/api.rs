@@ -33,17 +33,24 @@ fn load_state(path: &FsPath) -> Result<Option<StateInner>> {
     })?))
 }
 
-/// Persists state.
-fn persist_state(path: &FsPath, inner: &StateInner) -> Result<()> {
-    let persisted = PersistedState::from_inner(inner);
+/// Persists state from a pre-built `PersistedState` snapshot.
+fn persist_state_from_persisted(path: &FsPath, persisted: &PersistedState) -> Result<()> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)
             .with_context(|| format!("failed to create `{}`", parent.display()))?;
     }
 
     let encoded =
-        serde_json::to_vec_pretty(&persisted).context("failed to serialize persisted state")?;
+        serde_json::to_vec_pretty(persisted).context("failed to serialize persisted state")?;
     fs::write(path, encoded).with_context(|| format!("failed to write `{}`", path.display()))
+}
+
+/// Persists state directly from `StateInner` (used in tests for synchronous
+/// setup of persisted state files).
+#[cfg(test)]
+fn persist_state(path: &FsPath, inner: &StateInner) -> Result<()> {
+    let persisted = PersistedState::from_inner(inner);
+    persist_state_from_persisted(path, &persisted)
 }
 
 /// Delivers turn dispatch.

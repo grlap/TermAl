@@ -24,6 +24,14 @@ mutex.
 */
 
 /// Tracks app state.
+/// A queued persist request carrying a pre-cloned state snapshot and the
+/// target path.  The background persist thread drains these sequentially,
+/// serializing and writing outside the state mutex.
+struct PersistRequest {
+    path: Arc<PathBuf>,
+    state: PersistedState,
+}
+
 #[derive(Clone)]
 struct AppState {
     default_workdir: String,
@@ -37,6 +45,11 @@ struct AppState {
     review_documents_lock: Arc<Mutex<()>>,
     state_events: broadcast::Sender<String>,
     delta_events: broadcast::Sender<String>,
+    /// Background persistence channel. `persist_internal_locked` sends a
+    /// pre-cloned `PersistedState` snapshot through this channel; a
+    /// dedicated thread serializes it to JSON and writes the file so the
+    /// state mutex is never held during I/O.
+    persist_tx: mpsc::Sender<PersistRequest>,
     /// Lazily created shared Codex app-server reused across Codex sessions.
     shared_codex_runtime: Arc<Mutex<Option<SharedCodexRuntime>>>,
     /// Cached app-level agent readiness lives outside `self.inner` so full
@@ -156,9 +169,30 @@ impl AppState {
             }
         }
 
-        let agent_readiness_cache = Arc::new(RwLock::new(fresh_agent_readiness_cache(
-            &default_workdir,
-        )));
+        let agent_readiness_cache =
+            Arc::new(RwLock::new(fresh_agent_readiness_cache(&default_workdir)));
+        let (persist_tx, persist_rx) = mpsc::channel::<PersistRequest>();
+
+        // Background persist thread: drains queued snapshots and writes
+        // the latest one. Intermediate snapshots are skipped (only the
+        // last queued state matters for durability).
+        std::thread::Builder::new()
+            .name("termal-persist".to_owned())
+            .spawn(move || {
+                while let Ok(mut request) = persist_rx.recv() {
+                    // Drain any queued snapshots — only the newest matters.
+                    while let Ok(newer) = persist_rx.try_recv() {
+                        request = newer;
+                    }
+                    if let Err(err) =
+                        persist_state_from_persisted(&request.path, &request.state)
+                    {
+                        eprintln!("[termal] background persist failed: {err:#}");
+                    }
+                }
+            })
+            .expect("failed to spawn persist thread");
+
         let state = Self {
             default_workdir,
             persistence_path: Arc::new(persistence_path),
@@ -167,6 +201,7 @@ impl AppState {
             review_documents_lock: Arc::new(Mutex::new(())),
             state_events: broadcast::channel(128).0,
             delta_events: broadcast::channel(256).0,
+            persist_tx,
             shared_codex_runtime: Arc::new(Mutex::new(None)),
             agent_readiness_cache,
             agent_readiness_refresh_lock: Arc::new(Mutex::new(())),
@@ -660,10 +695,7 @@ impl AppState {
         request: UpdateAppSettingsRequest,
     ) -> Result<StateResponse, ApiError> {
         // Normalize remotes outside the lock — pure validation on request data.
-        let normalized_remotes = request
-            .remotes
-            .map(normalize_remote_configs)
-            .transpose()?;
+        let normalized_remotes = request.remotes.map(normalize_remote_configs).transpose()?;
 
         // Refresh the agent readiness cache before the critical section so that
         // commit_locked's SSE publish and the API response snapshot both carry
@@ -785,9 +817,25 @@ impl AppState {
     }
 
     // Internal bookkeeping changes should be persisted without advancing the client-visible revision.
-    /// Persists internal locked.
+    /// Persists internal locked. Clones the persisted projection while
+    /// holding the lock (fast — just Arc bumps and shallow copies), then
+    /// sends the snapshot to a background thread for serialization and file
+    /// I/O so other requests are not blocked behind the state mutex.
     fn persist_internal_locked(&self, inner: &StateInner) -> Result<()> {
-        persist_state(self.persistence_path.as_path(), inner)
+        let persisted = PersistedState::from_inner(inner);
+        if self
+            .persist_tx
+            .send(PersistRequest {
+                path: self.persistence_path.clone(),
+                state: persisted.clone(),
+            })
+            .is_err()
+        {
+            // Channel disconnected (no background thread, e.g. in tests).
+            // Fall back to synchronous persistence.
+            persist_state_from_persisted(&self.persistence_path, &persisted)?;
+        }
+        Ok(())
     }
 
     // Delta-producing changes advance the revision without publishing a full snapshot; the delta event
@@ -2562,6 +2610,76 @@ impl AppState {
         Ok(())
     }
 
+    /// Sets external session ID only if the session still belongs to the expected runtime.
+    ///
+    /// Returns `Ok(true)` when the id was set, `Ok(false)` when the runtime token
+    /// no longer matches (session was stopped or rebound), and `Err` on lookup
+    /// failure. This avoids the TOCTOU gap of a separate
+    /// `session_matches_runtime_token` check followed by `set_external_session_id`.
+    fn set_external_session_id_if_runtime_matches(
+        &self,
+        session_id: &str,
+        token: &RuntimeToken,
+        external_session_id: String,
+    ) -> Result<bool> {
+        let mut inner = self.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(session_id)
+            .ok_or_else(|| anyhow!("session `{session_id}` not found"))?;
+        let record = &mut inner.sessions[index];
+        if !record.runtime.matches_runtime_token(token) {
+            return Ok(false);
+        }
+        set_record_external_session_id(record, Some(external_session_id));
+        if inner.sessions[index]
+            .session
+            .agent
+            .supports_codex_prompt_settings()
+        {
+            let external_session_id = inner.sessions[index].external_session_id.clone();
+            inner.allow_discovered_codex_thread(external_session_id.as_deref());
+        }
+        self.commit_locked(&mut inner)?;
+        Ok(true)
+    }
+
+    /// Clears external session ID when the expected runtime still owns the session.
+    ///
+    /// When `suppress_rediscovery` is `true` and the session agent supports Codex
+    /// prompt settings, the cleared thread ID is added to the ignored-discovery
+    /// set so it does not resurface as a new imported session. Pass `true` for
+    /// newly created threads (`thread/start`) that would otherwise be orphaned,
+    /// and `false` for resumed pre-existing threads (`thread/resume`) whose
+    /// discovery state should be preserved.
+    fn clear_external_session_id_if_runtime_matches(
+        &self,
+        session_id: &str,
+        token: &RuntimeToken,
+        external_session_id: &str,
+        suppress_rediscovery: bool,
+    ) -> Result<()> {
+        let mut inner = self.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(session_id)
+            .ok_or_else(|| anyhow!("session `{session_id}` not found"))?;
+        let record = &mut inner.sessions[index];
+        if !record.runtime.matches_runtime_token(token) {
+            return Ok(());
+        }
+        if record.external_session_id.as_deref() != Some(external_session_id) {
+            return Ok(());
+        }
+
+        let should_ignore_thread =
+            suppress_rediscovery && record.session.agent.supports_codex_prompt_settings();
+        set_record_external_session_id(record, None);
+        if should_ignore_thread {
+            inner.ignore_discovered_codex_thread(Some(external_session_id));
+        }
+        self.commit_locked(&mut inner)?;
+        Ok(())
+    }
+
     /// Sets Codex thread state if runtime matches.
     fn set_codex_thread_state_if_runtime_matches(
         &self,
@@ -2738,23 +2856,28 @@ impl AppState {
         Ok(())
     }
 
-    /// Records Codex runtime config.
-    fn record_codex_runtime_config(
+    /// Records Codex runtime config when the expected runtime still owns the session.
+    fn record_codex_runtime_config_if_runtime_matches(
         &self,
         session_id: &str,
+        token: &RuntimeToken,
         sandbox_mode: CodexSandboxMode,
         approval_policy: CodexApprovalPolicy,
         reasoning_effort: CodexReasoningEffort,
-    ) -> Result<()> {
+    ) -> Result<bool> {
         let mut inner = self.inner.lock().expect("state mutex poisoned");
         let index = inner
             .find_session_index(session_id)
             .ok_or_else(|| anyhow!("session `{session_id}` not found"))?;
-        inner.sessions[index].active_codex_sandbox_mode = Some(sandbox_mode);
-        inner.sessions[index].active_codex_approval_policy = Some(approval_policy);
-        inner.sessions[index].active_codex_reasoning_effort = Some(reasoning_effort);
+        let record = &mut inner.sessions[index];
+        if !record.runtime.matches_runtime_token(token) {
+            return Ok(false);
+        }
+        record.active_codex_sandbox_mode = Some(sandbox_mode);
+        record.active_codex_approval_policy = Some(approval_policy);
+        record.active_codex_reasoning_effort = Some(reasoning_effort);
         self.persist_internal_locked(&inner)?;
-        Ok(())
+        Ok(true)
     }
 
     /// Handles Claude approval mode.
@@ -3506,6 +3629,7 @@ impl AppState {
                 .find_visible_session_index(session_id)
                 .ok_or_else(|| ApiError::not_found("session not found"))?;
             let message_id = inner.next_message_id();
+            let mut thread_id_to_suppress = None;
             {
                 let record = &mut inner.sessions[index];
                 record.runtime = SessionRuntime::None;
@@ -3517,6 +3641,11 @@ impl AppState {
                 if clear_external_session_id {
                     // Interrupt failures can leave the detached Codex thread running, so any
                     // queued or future prompt must start a fresh thread instead of resuming it.
+                    // Capture the thread id before clearing so we can suppress its rediscovery
+                    // after the record borrow is released.
+                    if record.session.agent.supports_codex_prompt_settings() {
+                        thread_id_to_suppress = record.external_session_id.clone();
+                    }
                     set_record_external_session_id(record, None);
                 }
                 record.session.status = SessionStatus::Idle;
@@ -3529,6 +3658,14 @@ impl AppState {
                     text: "Turn stopped by user.".to_owned(),
                     expanded_text: None,
                 });
+            }
+
+            // Suppress rediscovery of the detached thread after the record
+            // borrow is released. Without this, the still-running thread
+            // would resurface as a new imported session on the next
+            // import_discovered_codex_threads pass.
+            if let Some(ref thread_id) = thread_id_to_suppress {
+                inner.ignore_discovered_codex_thread(Some(thread_id));
             }
 
             inner.sessions[index].active_turn_start_message_count = None;
@@ -4187,7 +4324,10 @@ impl AppState {
                 .send(CodexRuntimeCommand::JsonRpcResponse {
                     response: CodexJsonRpcResponseCommand {
                         request_id: pending.request_id.clone(),
-                        result: codex_approval_result(&pending.kind, decision),
+                        payload: CodexJsonRpcResponsePayload::Result(codex_approval_result(
+                            &pending.kind,
+                            decision,
+                        )),
                     },
                 })
                 .map_err(|err| {
@@ -4317,7 +4457,9 @@ impl AppState {
             .send(CodexRuntimeCommand::JsonRpcResponse {
                 response: CodexJsonRpcResponseCommand {
                     request_id: pending.request_id.clone(),
-                    result: json!({ "answers": response_answers }),
+                    payload: CodexJsonRpcResponsePayload::Result(
+                        json!({ "answers": response_answers }),
+                    ),
                 },
             })
             .map_err(|err| {
@@ -4404,10 +4546,10 @@ impl AppState {
             .send(CodexRuntimeCommand::JsonRpcResponse {
                 response: CodexJsonRpcResponseCommand {
                     request_id: pending.request_id.clone(),
-                    result: json!({
+                    payload: CodexJsonRpcResponsePayload::Result(json!({
                         "action": action,
                         "content": normalized_content
-                    }),
+                    })),
                 },
             })
             .map_err(|err| {
@@ -4492,7 +4634,7 @@ impl AppState {
             .send(CodexRuntimeCommand::JsonRpcResponse {
                 response: CodexJsonRpcResponseCommand {
                     request_id: pending.request_id.clone(),
-                    result: result.clone(),
+                    payload: CodexJsonRpcResponsePayload::Result(result.clone()),
                 },
             })
             .map_err(|err| {
@@ -5711,7 +5853,7 @@ impl StateInner {
 }
 
 /// Tracks persisted state.
-#[derive(Deserialize, Serialize)]
+#[derive(Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct PersistedState {
     #[serde(default, skip_serializing_if = "CodexState::is_empty")]
@@ -5815,7 +5957,7 @@ fn same_codex_notice_identity(left: &CodexNotice, right: &CodexNotice) -> bool {
 }
 
 /// Represents a persisted session record.
-#[derive(Deserialize, Serialize)]
+#[derive(Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct PersistedSessionRecord {
     active_codex_approval_policy: Option<CodexApprovalPolicy>,
@@ -7697,8 +7839,29 @@ struct SharedCodexRuntime {
 }
 
 impl SharedCodexRuntime {
-    /// Handles kill.
+    /// Sends a graceful shutdown notification to the app-server, waits briefly
+    /// for the process to exit, then escalates to a hard kill if necessary.
     fn kill(&self) -> Result<()> {
+        // Attempt graceful shutdown by sending a `shutdown` notification.
+        // The send may fail if the writer thread already exited — that is
+        // fine, we will fall through to the hard kill.
+        let _ = self
+            .input_tx
+            .send(CodexRuntimeCommand::JsonRpcNotification {
+                method: "shutdown".to_owned(),
+            });
+
+        // Give the app-server a moment to exit cleanly before escalating.
+        if wait_for_shared_child_exit_timeout(
+            &self.process,
+            Duration::from_secs(3),
+            "shared Codex runtime",
+        )?
+        .is_some()
+        {
+            return Ok(());
+        }
+
         kill_child_process(&self.process, "shared Codex runtime")
     }
 }

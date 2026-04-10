@@ -262,7 +262,7 @@ export type AgentCommandsResponse = {
 export type ApiRequestErrorKind = "backend-unavailable" | "request-failed";
 
 export class ApiRequestError extends Error {
-  readonly cause: unknown;
+  declare readonly cause: unknown;
   readonly kind: ApiRequestErrorKind;
   readonly status: number | null;
   readonly restartRequired: boolean;
@@ -276,8 +276,10 @@ export class ApiRequestError extends Error {
       cause?: unknown;
     },
   ) {
-    super(message);
-    this.cause = options?.cause;
+    // TypeScript's current lib target in this repo does not yet model the ES2022
+    // Error options bag, but supported runtimes do and tooling reads it there.
+    // @ts-expect-error ES2022 Error options are available at runtime.
+    super(message, { cause: options?.cause });
     this.name = "ApiRequestError";
     this.kind = kind;
     this.status = options?.status ?? null;
@@ -330,18 +332,18 @@ export async function fetchWorkspaceLayout(workspaceId: string) {
     },
   });
 
-  if (response.status === 404) {
-    return null;
-  }
-
   const contentType = response.headers.get("content-type") ?? "";
   const raw = await response.text();
   if (looksLikeHtmlResponse(raw, contentType)) {
     throw createBackendUnavailableError(
-      formatUnavailableApiMessage(`/api/workspaces/${workspaceId}`, response.status),
+      formatUnavailableApiMessage(endpoint, response.status),
       response.status,
       { restartRequired: true },
     );
+  }
+
+  if (response.status === 404) {
+    return null;
   }
 
   if (!response.ok) {
@@ -897,7 +899,7 @@ function createBackendUnavailableError(
 }
 
 function createResponseError(raw: string, status: number) {
-  if (status === 502 || status === 503) {
+  if (status === 502 || status === 503 || status === 504) {
     return createBackendUnavailableError(
       "The TermAl backend is unavailable.",
       status,

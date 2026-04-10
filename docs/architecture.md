@@ -484,15 +484,17 @@ codex app-server   # JSON-RPC over stdin/stdout
 
 **Protocol:** JSON-RPC 2.0 over stdio. One shared app-server process is reused across all live Codex sessions, and each session is mapped onto its own Codex thread inside that process.
 
-**Thread architecture:** The shared process still uses the same four helper threads as the other runtimes:
-1. **Writer** - serializes queued commands and JSON-RPC responses to stdin
-2. **Reader** - parses stdout JSON lines and routes events to the correct session recorder
-3. **Stderr** - logs diagnostic output
-4. **Waiter** - watches for child-process exit and tears down any attached sessions
+**Thread architecture:** The shared process uses four helper threads:
+1. **Writer** — serializes queued commands and JSON-RPC responses to stdin. All JSON-RPC requests except `initialize` (startup handshake) and `model/list` (pagination) are **fire-and-forget**: the writer writes the request and immediately returns to process the next command. Response waiting is handled by short-lived waiter threads spawned per-request, so one slow Codex response never blocks other sessions or commands.
+2. **Reader** — parses stdout JSON lines and routes events to the correct session recorder. Non-JSON lines (log output, warnings) are skipped and logged to stderr rather than treated as fatal errors, so a single malformed line does not tear down the shared runtime.
+3. **Stderr** — logs diagnostic output.
+4. **Waiter** — watches for child-process exit and tears down any attached sessions.
+
+**Fire-and-forget flow for prompts:** When a session already has a thread ID, the writer sends `turn/start` directly and returns. When a new thread is needed, the writer sends `thread/start` (or `thread/resume`) as a fire-and-forget write and spawns a waiter thread. That waiter extracts the thread ID from the response and feeds a `StartTurnAfterSetup` command back through the writer's command channel, which then sends `turn/start`. The writer thread never blocks on either step.
 
 **Lifecycle:**
-1. Spawn shared process -> send `initialize` RPC -> receive capabilities
-2. For each session, send `thread/start` (new) or `thread/resume` (existing) -> receive thread ID
+1. Spawn shared process -> send `initialize` RPC -> receive capabilities (only blocking step)
+2. For each session, send `thread/start` (new) or `thread/resume` (existing) -> waiter thread extracts thread ID
 3. On user message, send `turn/start` with input items (text + optional image attachments)
 4. Receive notifications such as `item/agentMessage/delta`, `item/completed`, and `turn/completed`
 5. On approval or structured interaction, surface a TermAl message card and answer via JSON-RPC once the user responds

@@ -4,6 +4,7 @@ import {
   ApiRequestError,
   createOrchestratorInstance,
   deleteWorkspaceLayout,
+  fetchWorkspaceLayout,
   fetchState,
   isBackendUnavailableError,
   saveFile,
@@ -210,6 +211,51 @@ describe("fetchState", () => {
     }
   });
 
+  it("classifies proxy 503 and 504 failures as structured backend-unavailable errors", async () => {
+    expect.assertions(6);
+
+    for (const status of [503, 504]) {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn().mockResolvedValue(
+          new Response(JSON.stringify({ error: `proxy failed (${status})` }), {
+            status,
+            headers: {
+              "Content-Type": "application/json",
+            },
+          }),
+        ),
+      );
+
+      try {
+        await fetchState();
+        throw new Error(`Expected fetchState to reject for HTTP ${status}`);
+      } catch (error) {
+        expect(isBackendUnavailableError(error)).toBe(true);
+        expect((error as ApiRequestError).status).toBe(status);
+        expect((error as Error).message).toBe(
+          "The TermAl backend is unavailable.",
+        );
+      }
+    }
+  });
+
+  it("preserves the original fetch rejection on ApiRequestError.cause", async () => {
+    expect.assertions(4);
+    const rootCause = new TypeError("network unreachable");
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(rootCause));
+
+    try {
+      await fetchState();
+      throw new Error("Expected fetchState to reject");
+    } catch (error) {
+      expect(isBackendUnavailableError(error)).toBe(true);
+      expect(error).toBeInstanceOf(ApiRequestError);
+      expect((error as ApiRequestError).cause).toBe(rootCause);
+      expect((error as ApiRequestError).status).toBeNull();
+    }
+  });
+
   it("sets restartRequired on HTML fallback errors from an incompatible backend", async () => {
     expect.assertions(4);
     vi.stubGlobal(
@@ -235,6 +281,47 @@ describe("fetchState", () => {
       expect(error).toBeInstanceOf(ApiRequestError);
       expect((error as ApiRequestError).restartRequired).toBe(true);
       expect((error as Error).message).toContain("Restart TermAl");
+    }
+  });
+});
+
+describe("fetchWorkspaceLayout", () => {
+  const originalFetch = globalThis.fetch;
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    if (originalFetch === undefined) {
+      delete (globalThis as Partial<typeof globalThis>).fetch;
+      return;
+    }
+    globalThis.fetch = originalFetch;
+  });
+
+  it("treats HTML 404 fallbacks as restart-required backend errors", async () => {
+    expect.assertions(5);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response("<!DOCTYPE html><html><body>Not found</body></html>", {
+          status: 404,
+          headers: {
+            "Content-Type": "text/html",
+          },
+        }),
+      ),
+    );
+
+    try {
+      await fetchWorkspaceLayout("workspace/one two");
+      throw new Error("Expected fetchWorkspaceLayout to reject");
+    } catch (error) {
+      expect(isBackendUnavailableError(error)).toBe(true);
+      expect(error).toBeInstanceOf(ApiRequestError);
+      expect((error as ApiRequestError).restartRequired).toBe(true);
+      expect((error as Error).message).toContain(
+        "/api/workspaces/workspace%2Fone%20two (HTTP 404)",
+      );
+      expect((error as Error).message).not.toContain("/api/workspaces/workspace/one two");
     }
   });
 });

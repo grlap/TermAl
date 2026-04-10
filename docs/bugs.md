@@ -123,122 +123,339 @@ Also fixed: `performRequest` now preserves the original `fetch` exception on
 the wrapped `ApiRequestError.cause`, so callers keep the raw failure object
 without losing the structured error classification.
 
+Also fixed: a single non-JSON line on the shared Codex app-server's stdout
+(log output, warnings, partial writes) no longer kills the reader thread. The
+reader now skips non-JSON and empty lines with a `continue` instead of
+`break`ing out of the loop, logging the skipped content to stderr. Previously
+one bad line orphaned all pending JSON-RPC requests and hung the writer thread
+indefinitely.
+
+Also fixed: the shared Codex writer thread no longer blocks on JSON-RPC
+responses. All requests except `initialize` (startup handshake) are now
+fire-and-forget: the writer writes the request and immediately returns to
+process the next command. Response waiting is handled by short-lived
+per-request waiter threads. For prompt commands that need a new thread, the
+waiter extracts the thread ID from the `thread/start` response and feeds a
+`StartTurnAfterSetup` command back through the writer's command channel.
+`model/list` pagination uses the same pattern via `RefreshModelListPage`
+internal commands. This prevents one slow Codex response from blocking all
+other sessions and commands on the shared runtime.
+
+Also fixed: `fetchWorkspaceLayout` error message now uses the pre-built
+`endpoint` variable (which already applies `encodeURIComponent`) instead of
+interpolating the raw `workspaceId`, eliminating a cosmetic inconsistency
+between the encoded request URL and the error text.
+
+Also fixed: 504 Gateway Timeout is now classified as `backend-unavailable`
+alongside 502 and 503 in `createResponseError`, so reverse-proxy timeouts
+trigger the same auto-recovery path instead of falling through to the generic
+`request-failed` classification.
+
+Also fixed: `reportRequestError` parameter type simplified from
+`unknown | string` to `unknown`. The `| string` branch was dead at the type
+level since `unknown` is the top type; the existing `typeof error === "string"`
+runtime guard handles the string case regardless.
+
+Also fixed: killing one Codex session no longer tears down the entire shared
+runtime. Session-scoped errors (e.g. "session not found" from a killed
+session) in the reader thread are now logged and skipped instead of setting
+`runtime_failure` and breaking the reader loop. `handle_shared_codex_start_turn`
+catches missing-session errors from `record_codex_runtime_config` and returns
+`Ok(())` instead of propagating with `?`. The thread-setup waiter checks
+`session_matches_runtime_token` before sending `StartTurnAfterSetup`, silently
+dropping if the session was killed during setup.
+
+Also fixed: invalid UTF-8 on the shared Codex app-server's stdout no longer
+kills the reader thread. `BufReader::read_line` (which returns `Err` on
+non-UTF-8) was replaced with `read_until(b'\n')` plus
+`String::from_utf8_lossy`. Invalid byte sequences are lossily replaced with
+`U+FFFD` and the line proceeds to JSON parsing, where it is skipped as bad
+JSON if necessary.
+
+Also fixed: clean EOF on the shared Codex app-server's stdout now fails active
+sessions. The reader thread always calls `fail_pending_codex_requests` and
+`handle_shared_codex_runtime_exit` on exit, not just when `runtime_failure` is
+set. Previously a graceful process exit left sessions stuck as "active" in the
+UI with no events ever arriving.
+
+Also fixed: `SharedCodexRuntime::kill()` now sends a `shutdown` JSON-RPC
+notification to the app-server and waits up to 3 seconds for a clean exit
+before escalating to `process.kill()`. Previously the app-server was
+immediately killed with no chance to flush state or clean up resources.
+
+Also fixed: shared Codex setup and turn-start timeouts are now generous
+enough to accommodate slow cold starts, auth handshakes, and large thread
+resumes. `initialize` and `thread/start`/`thread/resume` wait up to 180
+seconds (previously 30), and `turn/start` waits up to 120 seconds
+(previously 60). The earlier 30–60 second ceilings could fire on a healthy
+but slow Codex session, treating the timeout as a transport failure that
+tore down the shared runtime and dropped every attached session.
+
+Also fixed: failed `StartTurnAfterSetup` rollback now restores
+thread-discovery bookkeeping. `clear_external_session_id_if_runtime_matches`
+calls `ignore_discovered_codex_thread` when the session agent supports Codex
+prompt settings, symmetrically undoing the `allow_discovered_codex_thread`
+that `set_external_session_id` performed during setup. Previously the
+orphan thread remained absent from the ignored set, so the next
+`import_discovered_codex_threads` call created a duplicate imported session
+for the same Codex thread.
+
+Also fixed: `handle_shared_codex_start_turn` no longer races with
+`turn/started` notifications. The request ID is pre-allocated via
+`start_codex_json_rpc_request_with_id` and `pending_turn_start_request_id`
+is installed before the request hits the wire, so the reader thread always
+sees the marker before it can process the corresponding `turn/started`
+notification.
+
+Also fixed: failed `StartTurnAfterSetup` handoff no longer orphans a shared
+Codex session. The send result is now checked explicitly; on failure,
+`forget_shared_codex_thread` rolls back the provisional thread/session
+mapping, `clear_external_session_id_if_runtime_matches` removes the external
+session ID, and the session is routed through the runtime-exit failure path.
+
+Also fixed: stale shared Codex setup waiters can no longer persist runtime
+config onto the wrong runtime. `handle_shared_codex_start_turn` now checks
+`session_matches_runtime_token` before persisting `active_codex_*` fields or
+mutating shared session state, returning early if the session has been
+rebound to a different runtime.
+
+Also fixed: undeliverable Codex server request rejection now sends a
+protocol-valid JSON-RPC error response. A new `CodexJsonRpcResponsePayload`
+enum separates `Result` and `Error` variants, and
+`codex_json_rpc_response_message` generates the correct wire format for
+each. The `-32001` rejection is now a top-level `error` object instead of a
+nested object inside `result`.
+
+Also fixed: `ApiRequestError.cause` now uses the standard ES2022 `Error`
+options bag via `super(message, { cause: options?.cause })` with a
+`declare readonly cause` annotation. Developer tooling that reads the
+native `Error.cause` slot now correctly discovers the causal chain.
+
+Also fixed: `clearRecoveredBackendRequestError` is now wrapped in
+`useCallback` with an empty dependency array, making it a stable reference.
+The `refreshWorkspaceSummaries` effect now explicitly lists it and
+`setBackendConnectionState` as dependencies, removing the ESLint
+suppression comment.
+
+Also fixed: `fetchWorkspaceLayout` now detects HTML fallback bodies before
+the 404 early return, so an incompatible backend returning an HTML 404 page
+triggers the restart-required error path instead of silently returning
+`null`.
+
+Also fixed: `handle_shared_codex_start_turn` now records `active_codex_*`
+settings through `record_codex_runtime_config_if_runtime_matches()`, which
+holds the state lock across both the runtime-token check and the config
+write. This closes the small TOCTOU gap between the old
+`session_matches_runtime_token()` pre-check and the later config persist.
+
+Also fixed: shared Codex model-list pagination is now capped at 50 pages.
+`RefreshModelListPage` carries an explicit `page_count`, and both the
+fire-and-forget runtime path and the blocking test helper bail with a clear
+error instead of spawning unbounded waiter threads if `nextCursor` never
+terminates.
+
+Also fixed: the `online`/`offline` listener effect and the main SSE
+`EventSource` effect in `App.tsx` now explicitly depend on
+`clearRecoveredBackendRequestError` and `setBackendConnectionState`. The
+callbacks remain stable, but the dependency arrays are now lint-clean and
+future-proof if either callback ever gains real dependencies.
+
+Also fixed: the best-effort shared-Codex stop path now suppresses
+rediscovery of the detached thread. When `interrupt_and_detach()` fails
+and the stop proceeds as best-effort, the cleared `external_session_id`
+thread is added to `ignored_discovered_codex_thread_ids`. Without this,
+the still-running detached thread would resurface as a new imported
+session on the next `import_discovered_codex_threads` pass, even though
+the user explicitly stopped the session.
+
+Also fixed: `clear_external_session_id_if_runtime_matches` now takes a
+`suppress_rediscovery` flag and only adds the cleared thread to the
+ignored-discovery set when the flag is `true`. The `StartTurnAfterSetup`
+rollback path passes `true` for `thread/start` (newly created orphan
+thread) and `false` for `thread/resume` (pre-existing thread whose
+discovery state should be preserved). Previously the rollback
+unconditionally ignored the thread, which could permanently hide a valid
+resumed thread from discovery.
+
+Also fixed: shared Codex response timeouts no longer tear down the entire
+shared runtime. `CodexResponseError` gains a `Timeout` variant, and
+`wait_for_codex_json_rpc_response` now distinguishes
+`RecvTimeoutError::Timeout` (slow operation) from
+`RecvTimeoutError::Disconnected` (channel broken). The thread-setup and
+turn-start waiters handle `Timeout` as a per-session failure (like
+`JsonRpc`) — failing only the affected turn — instead of routing it
+through `handle_shared_codex_runtime_exit` which would drop every attached
+session. The `initialize` path still tears down on timeout because the
+runtime cannot function without initialization.
+
+Also fixed: the thread-setup waiter's runtime-token check and
+`set_external_session_id` call are now atomic.
+`set_external_session_id_if_runtime_matches` holds the state lock across
+both the token check and the external session id write, following the same
+pattern as `record_codex_runtime_config_if_runtime_matches`. Previously a
+session could be stopped or rebound in the gap between the two calls,
+allowing a stale waiter to resurrect an `external_session_id` on a session
+that had already moved on.
+
+Also fixed: late Codex final-output events are no longer dropped after
+`turn/completed`. Shared-runtime and REPL sessions now retain just-completed
+turn context long enough to accept late `codex/event/agent_message`,
+`codex/event/item_completed`, and app-server `item/completed` agent-message
+payloads that arrive immediately after turn completion, while still
+ignoring unrelated non-message app-server items once the turn is finished.
+
+Also fixed: post-prompt safety-net polling now correctly adopts server state
+after a restart. The polling `adoptState` call passes `{ force: true,
+allowRevisionDowngrade: true }` so a restarted server whose persisted
+revision is lower than the browser's is still adopted. Previously the poll
+called `adoptState(freshState)` with no options, which silently rejected the
+snapshot when the revision had been downgraded by a restart. The premature
+cancellation heuristic (`> revisionAtDispatch + 1`) was also removed — the
+poll now stops only when the session is no longer active. The interval is
+tracked in a ref so rapid prompts don't stack independent polls, and cleanup
+runs on unmount.
+
 ## Active Repo Bugs
 
-## `backendConnectionStateRef` is mutated inside a functional state updater
+## `backendConnectionStateRef` can miss reconnects while React state is between commits
 
-**Severity:** High - React 18 can replay or discard updater functions, desynchronizing reconnect decisions from the committed connection state.
+**Severity:** High - browser-online recovery can stall until a later event.
 
-`setBackendConnectionState` now mirrors `backendConnectionState` into
-`backendConnectionStateRef` so `handleBrowserOnline()` can synchronously decide
-whether a reconnect request is needed. The functional-updater branch performs
-that ref write inside `setBackendConnectionStateRaw((current) => ...)`, which
-means the ref mutation runs during React's render scheduling, not after a
-committed state transition. In React 18, functional updaters are expected to be
-pure: they may be replayed, invoked more than once, or discarded under
-concurrent/strict rendering. A replayed or abandoned updater can therefore
-leave the ref out of sync with the UI state that actually committed.
+`backendConnectionStateRef` is now synchronized from `backendConnectionState`
+inside `useLayoutEffect`, but `handleBrowserOnline()` still reads the ref
+synchronously to decide whether to request a reconnect. That leaves a window
+after `setBackendConnectionState(...)` where the committed state is still
+catching up and the ref reports the previous value.
 
 **Current behavior:**
-- `backendConnectionStateRef.current` is assigned inside the functional updater
-  passed to `setBackendConnectionStateRaw`.
-- `handleBrowserOnline()` reads that ref to decide whether to request a
-  reconnect, so a replayed/discarded updater can spuriously trigger or suppress
-  recovery work.
+- if the browser comes back online during the state-to-ref gap,
+  `handleBrowserOnline()` can conclude the app is already connected
+  and skip the reconnect request
+- the UI can then stay stuck until a later SSE or polling event happens
 
 **Proposal:**
-- Keep the functional updater pure and derive the next state only.
-- Sync `backendConnectionStateRef.current` from committed state (for example in
-  a `useEffect` keyed on `backendConnectionState`) or use another post-commit
-  mechanism.
+- keep the ref in lockstep with the state transition path that online/offline
+  handlers use, or stop making reconnect decisions from a synchronously read ref
+- add a regression that fires `online` in the same turn as the state transition
 
-## `ApiRequestError.cause` bypasses the standard `Error` options bag
+## Shared Codex reader suppresses real app-server state/persistence failures
 
-**Severity:** Medium - developer tooling (browser devtools "Caused by" chains, Sentry) may not see the wrapped cause.
+**Severity:** High - internal failures can be hidden while sessions stay half-mutated.
 
-`ApiRequestError` declares `readonly cause: unknown` and assigns it manually after `super(message)` instead of forwarding it through the standard ES2022 `Error` options bag (`super(message, { cause })`). The `super` call never receives the `cause`, so the native `Error.cause` slot is not set during construction. The explicit field assignment shadows the inherited property and works in practice, but error-aware tooling that reads `cause` from the prototype chain during construction will not pick it up.
+The shared Codex reader now logs and ignores every `Err` returned by
+`handle_shared_codex_app_server_message`. That is correct for stale-session
+cases like "session not found", but the same path can also surface real
+commit, persistence, or internal state-update failures. Those errors should not
+be downgraded to a benign warning.
 
 **Current behavior:**
-- `super(message)` is called without the `cause` option.
-- `this.cause = options?.cause` manually assigns the field, shadowing `Error.cause`.
+- commit or persistence failures are logged and skipped instead of failing
+  the affected runtime/session
+- the runtime can continue running with partially applied state and no clear
+  recovery path for the user
 
 **Proposal:**
-- Pass `cause` through the `super` call: `super(message, { cause: options?.cause })`.
-- Remove the explicit `readonly cause: unknown` declaration and manual assignment, or keep the type annotation only.
+- distinguish expected stale-session/runtime-mismatch errors from real
+  internal failures
+- keep skipping the former, but route the latter through the existing
+  runtime-exit or session-failure path
 
-## `clearRecoveredBackendRequestError` captured as stale closure in `handleBrowserOnline` effect
+## Shared Codex setup helpers swallow persistence failures as stale-session misses
 
-**Severity:** Low - latent fragility; safe today but breaks silently if the function body ever reads state directly.
+**Severity:** Medium - prompt setup can fail silently while leaving stale runtime state behind.
 
-The `useEffect` for `handleBrowserOnline`/`handleBrowserOffline` has an empty dependency array `[]` but captures `clearRecoveredBackendRequestError`, a plain function that re-creates each render. The function currently only reads from refs and uses stable setters, so the stale closure is safe. However, any future change that adds direct state reads (not via refs) would silently break without a lint warning.
+`set_external_session_id_if_runtime_matches` and
+`record_codex_runtime_config_if_runtime_matches` can fail after mutating
+in-memory state. Their callers now treat any `Err` as if the session simply
+vanished or no longer matched the runtime token, which collapses a real
+persistence failure into a silent no-op.
 
 **Current behavior:**
-- `clearRecoveredBackendRequestError` is a plain function re-created each render, captured once by the `[]`-dep effect.
-- Works correctly because its body only uses `backendInlineRequestErrorMessageRef` and stable `setState` calls.
+- thread setup or turn handoff can drop the user's prompt without surfacing
+  the persistence error
+- in-memory state may already be partly updated even though the operation
+  reports success to the caller
 
 **Proposal:**
-- Wrap in a ref (consistent with `requestBackendReconnectRef` and `requestActionRecoveryResyncRef`) or extract to a `useCallback` with proper deps.
+- return a distinct outcome for lookup/runtime-mismatch versus commit/persist failure
+- fail the session/runtime on commit or persistence errors instead of swallowing them
 
-## `fetchWorkspaceLayout` treats HTML 404 fallbacks as missing layout
+## Paginated Codex model refresh can hang until timeout if the continuation cannot queue
 
-**Severity:** Low - an incompatible backend can still degrade silently on the workspace-layout route instead of surfacing restart guidance.
+**Severity:** Medium - model refresh can appear frozen for 30 seconds before failing.
 
-`fetchWorkspaceLayout` returns `null` immediately on any 404 before checking
-whether the response body is an HTML fallback page. That means an old backend
-that does not serve `/api/workspaces/:id` can answer with an HTML 404 page and
-the client will interpret it as "layout missing" rather than a restart-required
-incompatible backend. The new restart-guidance path therefore still has a route
-shape that degrades silently.
+`fire_codex_model_list_page()` enqueues a follow-up `RefreshModelListPage`
+command when the app-server returns `nextCursor`, but it currently ignores the
+result of that `send()`. If the writer thread has already exited or is
+shutting down, the continuation is dropped and the original response channel
+is never resolved.
 
 **Current behavior:**
-- Any 404 from `/api/workspaces/:id` returns `null` before `looksLikeHtmlResponse`
-  runs.
-- HTML fallback responses on that route do not become `restartRequired`
-  `ApiRequestError`s, so the UI shows no restart guidance.
+- multi-page model refresh can sit until the 30-second caller timeout even
+  though the runtime has already lost the continuation
+- the user sees a hung refresh instead of a prompt failure
 
 **Proposal:**
-- Detect HTML fallback bodies before the 404 early return, or otherwise
-  distinguish a missing workspace record from a route that is not served by the
-  current backend.
+- check the enqueue result for the follow-up page request
+- on failure, immediately resolve the original response channel with an error
+  or route it through the runtime-exit path
 
-## Unencoded workspace ID in `fetchWorkspaceLayout` error message
+## `completed_turn_id` keeps stale turn state alive indefinitely after turn completion
 
-**Severity:** Low - cosmetic inconsistency; no XSS risk due to React text rendering.
+**Severity:** Medium - memory leak per turn and unbounded late-event acceptance window.
 
-`fetchWorkspaceLayout` passes the raw `workspaceId` to `formatUnavailableApiMessage` at line 341 while the actual request at line 326 uses `encodeURIComponent`. If a workspace ID contained unusual characters, they would appear verbatim in the error message while the encoded form was sent to the server.
+After `turn/completed`, `completed_turn_id` is set but `clear_codex_turn_state`
+is deliberately not called (to accept late final-output events). The turn state
+(`streamed_agent_message_text_by_item_id`, `streamed_agent_message_item_ids`,
+etc.) persists until the next `turn/started` or error — an unbounded window.
+During that window, stale turn state accumulates memory and a replayed event
+matching the completed turn ID is silently accepted.
 
 **Current behavior:**
-- The request URL uses `encodeURIComponent(workspaceId)`.
-- The error message uses the raw `workspaceId` string.
+- turn state maps grow with each completed turn and are only cleared on the
+  next turn start
+- a stray or replayed event from a completed turn is accepted without bound
 
 **Proposal:**
-- Use the pre-built `endpoint` variable in the `formatUnavailableApiMessage` call for consistency.
+- clear `completed_turn_id` and call `clear_codex_turn_state` after a bounded
+  lifetime (e.g. N seconds or after the first non-agentMessage event)
+- alternatively, clear on the next state adoption or the next `turn/started`
+  for any session on the same thread
 
-## 504 Gateway Timeout not classified as backend-unavailable
+## `JsonRpcNotification` omits `"jsonrpc": "2.0"` version field
 
-**Severity:** Medium - a common reverse-proxy outage path bypasses the reconnect/retry recovery flow entirely.
+**Severity:** Medium - new `shutdown` notification may be silently rejected by a strict Codex app-server.
 
-`createResponseError` in `api.ts` classifies 502 and 503 as `backend-unavailable` but omits 504 (Gateway Timeout). A 504 would be classified as `request-failed` with a generic message, missing the auto-recovery path.
+`CodexRuntimeCommand::JsonRpcNotification` writes `{"method": ...}` without
+the `"jsonrpc": "2.0"` field required by the JSON-RPC 2.0 spec. The existing
+`initialized` notification follows the same pattern and works empirically, but
+a future app-server version with strict validation could reject the frame.
 
 **Current behavior:**
-- Only 502 and 503 trigger the `backend-unavailable` classification.
-- 504 falls through to the generic `request-failed` path.
+- `shutdown` notification is sent as `{"method":"shutdown"}` without the
+  version field
+- empirically accepted by the current Codex app-server
 
 **Proposal:**
-- Add `|| status === 504` alongside the 502/503 check in `createResponseError`.
+- add `"jsonrpc": "2.0"` to the notification JSON, and audit existing
+  notifications (`initialized`) for the same omission
 
-## `reportRequestError` parameter type `unknown | string` is redundant
+## SSE hot path now emits unconditional `console.debug` noise
 
-**Severity:** Note - cosmetic type issue with no runtime impact.
+**Severity:** Low - high-volume sessions pay avoidable logging overhead in the browser.
 
-The `reportRequestError` function in `App.tsx` is typed with `error: unknown | string`. Since `unknown` is the top type in TypeScript, `unknown | string` simplifies to just `unknown` — the `| string` branch is dead at the type level and misleading.
+Three new `console.debug` calls were added directly in the SSE `state` and
+`delta` event handlers. Those paths run for every streamed event, so the extra
+string formatting and console work will accumulate on busy sessions and clutter
+production logs.
 
 **Current behavior:**
-- The type annotation suggests two distinct overloads, but TypeScript does not enforce the distinction.
-- The `typeof error === "string"` runtime guard handles the string case correctly regardless.
+- streamed sessions emit debug lines for normal state/delta traffic
+- browser consoles become noisy and the hot path does extra work in production
 
 **Proposal:**
-- Simplify to `error: unknown` and rely on the existing runtime guard, or add a JSDoc comment documenting the string call shape.
+- remove the logs before merge, or gate them behind an explicit dev-only flag
+- keep any retained diagnostics off the per-event hot path
 
 ## Resolved
 
@@ -326,21 +543,9 @@ filesystem I/O is not safe under the mutex.
 
 ## Implementation Tasks
 
-- [x] Preserve original error object in `performRequest` catch block:
-  `performRequest` now passes the caught `fetch` error into
-  `createBackendUnavailableError`, and `ApiRequestError` stores it on the
-  wrapper instance as `cause`. The constructor still needs the standard
-  `Error` options bag; see the active bug above.
-- [ ] Add API test for rejected `fetch` cause propagation:
-  make `fetch` reject in `performRequest`, assert the wrapper is classified as
-  `backend-unavailable`, and verify `error.cause` preserves the original
-  thrown exception.
 - [ ] Add app regression for workspace-layout restart-required recovery:
   fail `fetchWorkspaceLayout()` with restart guidance, assert the toast appears,
   then recover only that route and verify the matching toast clears.
-- [ ] Extend backend-unavailable status coverage in `api.test.ts`:
-  cover HTTP 503 explicitly alongside 502, and add 504 coverage once
-  `createResponseError` classifies gateway timeouts as backend-unavailable.
 - [ ] Add pending-state coverage for `runtime-action-button`:
   hold a run/pause/resume/stop request unresolved long enough to assert
   `disabled`, `aria-busy`, and spinner rendering before the promise resolves.
@@ -396,6 +601,46 @@ filesystem I/O is not safe under the mutex.
   the "clears stale backend issue detail when the browser reconnects" test
   resolves its deferred with a state response missing `orchestrators` and
   `workspaces` fields present in all other test state responses.
+- [ ] Add consecutive bad JSON line threshold to shared Codex reader:
+  the `continue` on bad JSON can mask a dying Codex process writing garbage.
+  After N consecutive unparseable lines (e.g. 5), treat it as a runtime
+  failure instead of continuing indefinitely.
+- [ ] Explicit `drop(stdin)` in shared Codex writer thread on exit:
+  stdin is dropped implicitly when the writer thread exits, but the drop
+  order relative to shared-state mutexes is uncontrolled. An explicit
+  `drop(stdin)` before cleanup would signal intent and prevent future
+  refactoring from delaying the pipe close.
+- [ ] Add stdin write backpressure detection to shared Codex writer:
+  `write_all` + `flush` block if the Codex process is frozen and the OS
+  pipe buffer fills. A watchdog timer or non-blocking write mode would
+  detect a stuck writer thread instead of silently blocking all commands.
+- [ ] Pass `--listen stdio://` explicitly when spawning `codex app-server`:
+  the app-server defaults to stdio but if the default ever changes, the
+  spawn would break silently. Explicit flag for defense-in-depth.
+- [x] Add max page count limit to `fire_codex_model_list_page`:
+  pagination is now capped at 50 pages in both the runtime path and the
+  blocking test helper, preventing unbounded waiter-thread churn if a
+  misbehaving Codex app-server returns `nextCursor` indefinitely.
+- [ ] Add `adoptState` revision downgrade guard test:
+  assert `adoptState` returns `false` when `force` is true but
+  `allowRevisionDowngrade` is false and `nextState.revision` is lower.
+  Cover the complementary case where `allowRevisionDowngrade: true` permits
+  the rollback.
+- [ ] Add `completed_turn_id` window boundary test:
+  run two consecutive turns, deliver a late `agentMessage` from the first
+  turn after the second turn has started, and assert it is rejected.
+- [ ] Add `shared_codex_event_matches_visible_turn` unit tests:
+  cover matching active turn, matching completed turn, mismatched completed
+  turn (should return false), and `None` event turn ID with a completed turn.
+- [ ] Add `fetchWorkspaceLayout` JSON-body 404 test:
+  verify that a standard JSON 404 returns `null` (not an error) to protect
+  the reordered HTML-fallback check.
+- [ ] Truncate raw child-process content in shared Codex reader stderr log:
+  the `eprintln!` for non-JSON lines prints the full line verbatim; truncate
+  to a bounded length (e.g. 200 chars) to avoid leaking secrets in logs.
+- [ ] Cap `line_buf` growth in shared Codex reader thread:
+  `read_until` buffers with no size limit; a line without a newline from a
+  misbehaving child process could consume unbounded memory.
 
 ## Known External Limitations
 

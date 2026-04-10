@@ -291,6 +291,7 @@ fn clear_shared_codex_turn_recorder_state_resets_all_fields() {
 #[test]
 fn clear_shared_codex_turn_session_state_resets_turn_local_fields_and_preserves_thread_id() {
     let mut session_state = SharedCodexSessionState {
+        pending_turn_start_request_id: Some("turn-start-1".to_owned()),
         recorder: SessionRecorderState {
             command_messages: HashMap::from([("cmd-1".to_owned(), "Running".to_owned())]),
             parallel_agents_messages: HashMap::from([(
@@ -301,6 +302,7 @@ fn clear_shared_codex_turn_session_state_resets_turn_local_fields_and_preserves_
         },
         thread_id: Some("thread-1".to_owned()),
         turn_id: Some("turn-1".to_owned()),
+        completed_turn_id: Some("turn-0".to_owned()),
         turn_started: true,
         turn_state: CodexTurnState {
             current_agent_message_id: Some("assistant-1".to_owned()),
@@ -322,8 +324,10 @@ fn clear_shared_codex_turn_session_state_resets_turn_local_fields_and_preserves_
 
     clear_shared_codex_turn_session_state(&mut session_state);
 
+    assert_eq!(session_state.pending_turn_start_request_id, None);
     assert_eq!(session_state.thread_id.as_deref(), Some("thread-1"));
     assert_eq!(session_state.turn_id, None);
+    assert_eq!(session_state.completed_turn_id, None);
     assert!(!session_state.turn_started);
     assert_eq!(session_state.turn_state.current_agent_message_id, None);
     assert!(
@@ -481,6 +485,7 @@ fn test_app_state() -> AppState {
         review_documents_lock: Arc::new(Mutex::new(())),
         state_events: broadcast::channel(16).0,
         delta_events: broadcast::channel(16).0,
+        persist_tx: mpsc::channel().0,
         shared_codex_runtime: Arc::new(Mutex::new(None)),
         agent_readiness_cache: Arc::new(RwLock::new(fresh_agent_readiness_cache("/tmp"))),
         agent_readiness_refresh_lock: Arc::new(Mutex::new(())),
@@ -1916,6 +1921,42 @@ fn codex_json_rpc_request_without_timeout_preserves_json_rpc_errors() {
             "thread/start rejected the request".to_owned(),
         ))
     );
+    assert!(
+        pending_requests
+            .lock()
+            .expect("Codex pending requests mutex poisoned")
+            .is_empty()
+    );
+}
+
+// Tests that waiting for a Codex JSON-RPC response times out and clears the pending request.
+#[test]
+fn codex_json_rpc_response_wait_timeout_clears_pending_request() {
+    let pending_requests: CodexPendingRequestMap = Arc::new(Mutex::new(HashMap::new()));
+    let mut writer = Vec::new();
+
+    let pending_request = start_codex_json_rpc_request(
+        &mut writer,
+        &pending_requests,
+        "turn/start",
+        json!({
+            "threadId": "thread-1",
+        }),
+    )
+    .expect("Codex request should be queued");
+
+    let result = wait_for_codex_json_rpc_response(
+        &pending_requests,
+        pending_request,
+        "turn/start",
+        Some(Duration::from_millis(10)),
+    );
+
+    assert!(matches!(
+        result,
+        Err(CodexResponseError::Timeout(detail))
+            if detail.contains("timed out waiting for Codex app-server response to `turn/start`")
+    ));
     assert!(
         pending_requests
             .lock()
@@ -3706,6 +3747,7 @@ fn persists_app_settings_and_applies_them_to_new_sessions() {
         review_documents_lock: state.review_documents_lock.clone(),
         state_events: broadcast::channel(16).0,
         delta_events: broadcast::channel(16).0,
+        persist_tx: mpsc::channel().0,
         shared_codex_runtime: Arc::new(Mutex::new(None)),
         agent_readiness_cache: Arc::new(RwLock::new(fresh_agent_readiness_cache("/tmp"))),
         agent_readiness_refresh_lock: Arc::new(Mutex::new(())),
@@ -4405,6 +4447,51 @@ fn refreshes_codex_model_options_from_runtime() {
     );
 }
 
+// Tests that shared Codex model-list pagination fails after the configured page cap.
+#[test]
+fn shared_codex_model_list_pagination_stops_after_max_pages() {
+    let pending_requests: CodexPendingRequestMap = Arc::new(Mutex::new(HashMap::new()));
+    let (input_tx, input_rx) = mpsc::channel();
+    let (response_tx, response_rx) = mpsc::channel();
+    let mut writer = Vec::new();
+
+    fire_codex_model_list_page(
+        &mut writer,
+        &pending_requests,
+        &input_tx,
+        Some("cursor-50".to_owned()),
+        Vec::new(),
+        SHARED_CODEX_MODEL_LIST_MAX_PAGES,
+        response_tx,
+    )
+    .unwrap();
+
+    let (_request_id, sender) =
+        take_pending_codex_request(&pending_requests, Duration::from_secs(1));
+    sender
+        .send(Ok(json!({
+            "data": [],
+            "nextCursor": "cursor-51"
+        })))
+        .unwrap();
+
+    let result = response_rx
+        .recv_timeout(Duration::from_secs(1))
+        .expect("model list response should arrive");
+    assert_eq!(
+        result,
+        Err(format!(
+            "Codex model list pagination exceeded {} pages.",
+            SHARED_CODEX_MODEL_LIST_MAX_PAGES
+        ))
+    );
+    match input_rx.recv_timeout(Duration::from_millis(100)) {
+        Err(mpsc::RecvTimeoutError::Timeout) => {}
+        Ok(_) => panic!("model list pagination should not queue another page past the cap"),
+        Err(err) => panic!("unexpected model list pagination channel error: {err}"),
+    }
+}
+
 // Tests that fork Codex thread creates a new local session.
 #[test]
 fn fork_codex_thread_creates_a_new_local_session() {
@@ -4922,6 +5009,7 @@ fn shared_codex_archive_notifications_update_thread_state() {
         &pending_requests,
         &runtime.sessions,
         &runtime.thread_sessions,
+        &mpsc::channel::<CodexRuntimeCommand>().0,
     )
     .unwrap();
 
@@ -4943,6 +5031,7 @@ fn shared_codex_archive_notifications_update_thread_state() {
         &pending_requests,
         &runtime.sessions,
         &runtime.thread_sessions,
+        &mpsc::channel::<CodexRuntimeCommand>().0,
     )
     .unwrap();
 
@@ -5021,6 +5110,7 @@ fn shared_codex_model_rerouted_notification_records_notice() {
         &pending_requests,
         &runtime.sessions,
         &runtime.thread_sessions,
+        &mpsc::channel::<CodexRuntimeCommand>().0,
     )
     .unwrap();
 
@@ -5117,6 +5207,7 @@ fn shared_codex_compaction_notice_inserts_before_visible_assistant_output() {
         &pending_requests,
         &runtime.sessions,
         &runtime.thread_sessions,
+        &mpsc::channel::<CodexRuntimeCommand>().0,
     )
     .unwrap();
 
@@ -6172,6 +6263,7 @@ fn shared_codex_global_notices_update_codex_state() {
         &pending_requests,
         &runtime.sessions,
         &runtime.thread_sessions,
+        &mpsc::channel::<CodexRuntimeCommand>().0,
     )
     .unwrap();
     handle_shared_codex_app_server_message(
@@ -6181,6 +6273,7 @@ fn shared_codex_global_notices_update_codex_state() {
         &pending_requests,
         &runtime.sessions,
         &runtime.thread_sessions,
+        &mpsc::channel::<CodexRuntimeCommand>().0,
     )
     .unwrap();
     handle_shared_codex_app_server_message(
@@ -6190,6 +6283,7 @@ fn shared_codex_global_notices_update_codex_state() {
         &pending_requests,
         &runtime.sessions,
         &runtime.thread_sessions,
+        &mpsc::channel::<CodexRuntimeCommand>().0,
     )
     .unwrap();
 
@@ -6245,6 +6339,7 @@ fn shared_codex_threadless_runtime_notice_is_recorded() {
         &pending_requests,
         &runtime.sessions,
         &runtime.thread_sessions,
+        &mpsc::channel::<CodexRuntimeCommand>().0,
     )
     .unwrap();
 
@@ -8668,6 +8763,7 @@ fn shared_codex_task_complete_event_buffers_subagent_result_until_final_agent_me
         &pending_requests,
         &runtime.sessions,
         &runtime.thread_sessions,
+        &mpsc::channel::<CodexRuntimeCommand>().0,
     )
     .unwrap();
     handle_shared_codex_app_server_message(
@@ -8677,6 +8773,7 @@ fn shared_codex_task_complete_event_buffers_subagent_result_until_final_agent_me
         &pending_requests,
         &runtime.sessions,
         &runtime.thread_sessions,
+        &mpsc::channel::<CodexRuntimeCommand>().0,
     )
     .unwrap();
 
@@ -8695,6 +8792,7 @@ fn shared_codex_task_complete_event_buffers_subagent_result_until_final_agent_me
         &pending_requests,
         &runtime.sessions,
         &runtime.thread_sessions,
+        &mpsc::channel::<CodexRuntimeCommand>().0,
     )
     .unwrap();
 
@@ -8797,6 +8895,7 @@ fn shared_codex_agent_message_event_without_turn_id_uses_active_turn() {
         &pending_requests,
         &runtime.sessions,
         &runtime.thread_sessions,
+        &mpsc::channel::<CodexRuntimeCommand>().0,
     )
     .unwrap();
     handle_shared_codex_app_server_message(
@@ -8806,6 +8905,7 @@ fn shared_codex_agent_message_event_without_turn_id_uses_active_turn() {
         &pending_requests,
         &runtime.sessions,
         &runtime.thread_sessions,
+        &mpsc::channel::<CodexRuntimeCommand>().0,
     )
     .unwrap();
 
@@ -8917,6 +9017,7 @@ fn shared_codex_agent_message_event_ignores_stale_turn_id_from_params_id() {
         &pending_requests,
         &runtime.sessions,
         &runtime.thread_sessions,
+        &mpsc::channel::<CodexRuntimeCommand>().0,
     )
     .unwrap();
     handle_shared_codex_app_server_message(
@@ -8926,6 +9027,7 @@ fn shared_codex_agent_message_event_ignores_stale_turn_id_from_params_id() {
         &pending_requests,
         &runtime.sessions,
         &runtime.thread_sessions,
+        &mpsc::channel::<CodexRuntimeCommand>().0,
     )
     .unwrap();
     handle_shared_codex_app_server_message(
@@ -8935,6 +9037,7 @@ fn shared_codex_agent_message_event_ignores_stale_turn_id_from_params_id() {
         &pending_requests,
         &runtime.sessions,
         &runtime.thread_sessions,
+        &mpsc::channel::<CodexRuntimeCommand>().0,
     )
     .unwrap();
 
@@ -8953,6 +9056,7 @@ fn shared_codex_agent_message_event_ignores_stale_turn_id_from_params_id() {
         &pending_requests,
         &runtime.sessions,
         &runtime.thread_sessions,
+        &mpsc::channel::<CodexRuntimeCommand>().0,
     )
     .unwrap();
 
@@ -9067,6 +9171,7 @@ fn shared_codex_task_complete_event_stays_in_current_turn_after_prior_assistant_
         &pending_requests,
         &runtime.sessions,
         &runtime.thread_sessions,
+        &mpsc::channel::<CodexRuntimeCommand>().0,
     )
     .unwrap();
     handle_shared_codex_app_server_message(
@@ -9076,6 +9181,7 @@ fn shared_codex_task_complete_event_stays_in_current_turn_after_prior_assistant_
         &pending_requests,
         &runtime.sessions,
         &runtime.thread_sessions,
+        &mpsc::channel::<CodexRuntimeCommand>().0,
     )
     .unwrap();
 
@@ -9097,6 +9203,7 @@ fn shared_codex_task_complete_event_stays_in_current_turn_after_prior_assistant_
         &pending_requests,
         &runtime.sessions,
         &runtime.thread_sessions,
+        &mpsc::channel::<CodexRuntimeCommand>().0,
     )
     .unwrap();
 
@@ -9192,6 +9299,7 @@ fn shared_codex_task_complete_event_without_active_turn_is_ignored() {
         &pending_requests,
         &runtime.sessions,
         &runtime.thread_sessions,
+        &mpsc::channel::<CodexRuntimeCommand>().0,
     )
     .unwrap();
 
@@ -9300,6 +9408,7 @@ fn shared_codex_task_complete_event_after_streaming_output_inserts_before_answer
         &pending_requests,
         &runtime.sessions,
         &runtime.thread_sessions,
+        &mpsc::channel::<CodexRuntimeCommand>().0,
     )
     .unwrap();
     handle_shared_codex_app_server_message(
@@ -9309,6 +9418,7 @@ fn shared_codex_task_complete_event_after_streaming_output_inserts_before_answer
         &pending_requests,
         &runtime.sessions,
         &runtime.thread_sessions,
+        &mpsc::channel::<CodexRuntimeCommand>().0,
     )
     .unwrap();
     handle_shared_codex_app_server_message(
@@ -9318,6 +9428,7 @@ fn shared_codex_task_complete_event_after_streaming_output_inserts_before_answer
         &pending_requests,
         &runtime.sessions,
         &runtime.thread_sessions,
+        &mpsc::channel::<CodexRuntimeCommand>().0,
     )
     .unwrap();
     handle_shared_codex_app_server_message(
@@ -9327,6 +9438,7 @@ fn shared_codex_task_complete_event_after_streaming_output_inserts_before_answer
         &pending_requests,
         &runtime.sessions,
         &runtime.thread_sessions,
+        &mpsc::channel::<CodexRuntimeCommand>().0,
     )
     .unwrap();
 
@@ -9450,6 +9562,7 @@ fn shared_codex_task_complete_event_ignores_stale_summary_from_previous_turn() {
         &pending_requests,
         &runtime.sessions,
         &runtime.thread_sessions,
+        &mpsc::channel::<CodexRuntimeCommand>().0,
     )
     .unwrap();
     handle_shared_codex_app_server_message(
@@ -9459,6 +9572,7 @@ fn shared_codex_task_complete_event_ignores_stale_summary_from_previous_turn() {
         &pending_requests,
         &runtime.sessions,
         &runtime.thread_sessions,
+        &mpsc::channel::<CodexRuntimeCommand>().0,
     )
     .unwrap();
     handle_shared_codex_app_server_message(
@@ -9468,6 +9582,7 @@ fn shared_codex_task_complete_event_ignores_stale_summary_from_previous_turn() {
         &pending_requests,
         &runtime.sessions,
         &runtime.thread_sessions,
+        &mpsc::channel::<CodexRuntimeCommand>().0,
     )
     .unwrap();
 
@@ -9486,6 +9601,7 @@ fn shared_codex_task_complete_event_ignores_stale_summary_from_previous_turn() {
         &pending_requests,
         &runtime.sessions,
         &runtime.thread_sessions,
+        &mpsc::channel::<CodexRuntimeCommand>().0,
     )
     .unwrap();
 
@@ -9587,6 +9703,7 @@ fn shared_codex_task_complete_event_drops_buffered_summary_on_failed_turn() {
         &pending_requests,
         &runtime.sessions,
         &runtime.thread_sessions,
+        &mpsc::channel::<CodexRuntimeCommand>().0,
     )
     .unwrap();
     handle_shared_codex_app_server_message(
@@ -9596,6 +9713,7 @@ fn shared_codex_task_complete_event_drops_buffered_summary_on_failed_turn() {
         &pending_requests,
         &runtime.sessions,
         &runtime.thread_sessions,
+        &mpsc::channel::<CodexRuntimeCommand>().0,
     )
     .unwrap();
     handle_shared_codex_app_server_message(
@@ -9605,6 +9723,7 @@ fn shared_codex_task_complete_event_drops_buffered_summary_on_failed_turn() {
         &pending_requests,
         &runtime.sessions,
         &runtime.thread_sessions,
+        &mpsc::channel::<CodexRuntimeCommand>().0,
     )
     .unwrap();
 
@@ -9695,6 +9814,7 @@ fn shared_codex_turn_completed_flushes_buffered_subagent_results_after_output_st
         &pending_requests,
         &runtime.sessions,
         &runtime.thread_sessions,
+        &mpsc::channel::<CodexRuntimeCommand>().0,
     )
     .unwrap();
 
@@ -9803,6 +9923,7 @@ fn shared_codex_item_completed_event_records_agent_message() {
         &pending_requests,
         &runtime.sessions,
         &runtime.thread_sessions,
+        &mpsc::channel::<CodexRuntimeCommand>().0,
     )
     .unwrap();
     handle_shared_codex_app_server_message(
@@ -9812,6 +9933,7 @@ fn shared_codex_item_completed_event_records_agent_message() {
         &pending_requests,
         &runtime.sessions,
         &runtime.thread_sessions,
+        &mpsc::channel::<CodexRuntimeCommand>().0,
     )
     .unwrap();
 
@@ -9941,6 +10063,7 @@ fn shared_codex_item_completed_event_ignores_stale_turn_id_from_params_id() {
         &pending_requests,
         &runtime.sessions,
         &runtime.thread_sessions,
+        &mpsc::channel::<CodexRuntimeCommand>().0,
     )
     .unwrap();
     handle_shared_codex_app_server_message(
@@ -9950,6 +10073,7 @@ fn shared_codex_item_completed_event_ignores_stale_turn_id_from_params_id() {
         &pending_requests,
         &runtime.sessions,
         &runtime.thread_sessions,
+        &mpsc::channel::<CodexRuntimeCommand>().0,
     )
     .unwrap();
     handle_shared_codex_app_server_message(
@@ -9959,6 +10083,7 @@ fn shared_codex_item_completed_event_ignores_stale_turn_id_from_params_id() {
         &pending_requests,
         &runtime.sessions,
         &runtime.thread_sessions,
+        &mpsc::channel::<CodexRuntimeCommand>().0,
     )
     .unwrap();
 
@@ -9977,6 +10102,7 @@ fn shared_codex_item_completed_event_ignores_stale_turn_id_from_params_id() {
         &pending_requests,
         &runtime.sessions,
         &runtime.thread_sessions,
+        &mpsc::channel::<CodexRuntimeCommand>().0,
     )
     .unwrap();
 
@@ -10088,6 +10214,7 @@ fn shared_codex_item_completed_event_concatenates_multipart_agent_message() {
         &pending_requests,
         &runtime.sessions,
         &runtime.thread_sessions,
+        &mpsc::channel::<CodexRuntimeCommand>().0,
     )
     .unwrap();
     handle_shared_codex_app_server_message(
@@ -10097,6 +10224,7 @@ fn shared_codex_item_completed_event_concatenates_multipart_agent_message() {
         &pending_requests,
         &runtime.sessions,
         &runtime.thread_sessions,
+        &mpsc::channel::<CodexRuntimeCommand>().0,
     )
     .unwrap();
 
@@ -10208,6 +10336,7 @@ fn shared_codex_agent_message_content_delta_event_ignores_stale_turn_id_from_par
         &pending_requests,
         &runtime.sessions,
         &runtime.thread_sessions,
+        &mpsc::channel::<CodexRuntimeCommand>().0,
     )
     .unwrap();
     handle_shared_codex_app_server_message(
@@ -10217,6 +10346,7 @@ fn shared_codex_agent_message_content_delta_event_ignores_stale_turn_id_from_par
         &pending_requests,
         &runtime.sessions,
         &runtime.thread_sessions,
+        &mpsc::channel::<CodexRuntimeCommand>().0,
     )
     .unwrap();
     handle_shared_codex_app_server_message(
@@ -10226,6 +10356,7 @@ fn shared_codex_agent_message_content_delta_event_ignores_stale_turn_id_from_par
         &pending_requests,
         &runtime.sessions,
         &runtime.thread_sessions,
+        &mpsc::channel::<CodexRuntimeCommand>().0,
     )
     .unwrap();
 
@@ -10244,6 +10375,7 @@ fn shared_codex_agent_message_content_delta_event_ignores_stale_turn_id_from_par
         &pending_requests,
         &runtime.sessions,
         &runtime.thread_sessions,
+        &mpsc::channel::<CodexRuntimeCommand>().0,
     )
     .unwrap();
 
@@ -10348,6 +10480,7 @@ fn shared_codex_agent_message_final_event_appends_missing_suffix_after_streamed_
         &pending_requests,
         &runtime.sessions,
         &runtime.thread_sessions,
+        &mpsc::channel::<CodexRuntimeCommand>().0,
     )
     .unwrap();
     handle_shared_codex_app_server_message(
@@ -10357,6 +10490,7 @@ fn shared_codex_agent_message_final_event_appends_missing_suffix_after_streamed_
         &pending_requests,
         &runtime.sessions,
         &runtime.thread_sessions,
+        &mpsc::channel::<CodexRuntimeCommand>().0,
     )
     .unwrap();
     handle_shared_codex_app_server_message(
@@ -10366,6 +10500,7 @@ fn shared_codex_agent_message_final_event_appends_missing_suffix_after_streamed_
         &pending_requests,
         &runtime.sessions,
         &runtime.thread_sessions,
+        &mpsc::channel::<CodexRuntimeCommand>().0,
     )
     .unwrap();
 
@@ -10465,6 +10600,7 @@ fn shared_codex_agent_message_final_event_replaces_divergent_streamed_text() {
         &pending_requests,
         &runtime.sessions,
         &runtime.thread_sessions,
+        &mpsc::channel::<CodexRuntimeCommand>().0,
     )
     .unwrap();
     handle_shared_codex_app_server_message(
@@ -10474,6 +10610,7 @@ fn shared_codex_agent_message_final_event_replaces_divergent_streamed_text() {
         &pending_requests,
         &runtime.sessions,
         &runtime.thread_sessions,
+        &mpsc::channel::<CodexRuntimeCommand>().0,
     )
     .unwrap();
     let snapshot = state.snapshot();
@@ -10493,6 +10630,7 @@ fn shared_codex_agent_message_final_event_replaces_divergent_streamed_text() {
         &pending_requests,
         &runtime.sessions,
         &runtime.thread_sessions,
+        &mpsc::channel::<CodexRuntimeCommand>().0,
     )
     .unwrap();
     let snapshot = state.snapshot();
@@ -10600,6 +10738,7 @@ fn shared_codex_agent_message_content_delta_streams_without_duplicate_final_mess
         &pending_requests,
         &runtime.sessions,
         &runtime.thread_sessions,
+        &mpsc::channel::<CodexRuntimeCommand>().0,
     )
     .unwrap();
     handle_shared_codex_app_server_message(
@@ -10609,6 +10748,7 @@ fn shared_codex_agent_message_content_delta_streams_without_duplicate_final_mess
         &pending_requests,
         &runtime.sessions,
         &runtime.thread_sessions,
+        &mpsc::channel::<CodexRuntimeCommand>().0,
     )
     .unwrap();
     handle_shared_codex_app_server_message(
@@ -10618,6 +10758,7 @@ fn shared_codex_agent_message_content_delta_streams_without_duplicate_final_mess
         &pending_requests,
         &runtime.sessions,
         &runtime.thread_sessions,
+        &mpsc::channel::<CodexRuntimeCommand>().0,
     )
     .unwrap();
     handle_shared_codex_app_server_message(
@@ -10627,6 +10768,7 @@ fn shared_codex_agent_message_content_delta_streams_without_duplicate_final_mess
         &pending_requests,
         &runtime.sessions,
         &runtime.thread_sessions,
+        &mpsc::channel::<CodexRuntimeCommand>().0,
     )
     .unwrap();
 
@@ -10644,9 +10786,9 @@ fn shared_codex_agent_message_content_delta_streams_without_duplicate_final_mess
     ));
 }
 
-// Tests that shared Codex agent message event after turn completed is ignored.
+// Tests that shared Codex final agent messages still land after turn completion.
 #[test]
-fn shared_codex_agent_message_event_after_turn_completed_is_ignored() {
+fn shared_codex_agent_message_event_after_turn_completed_is_recorded() {
     let state = test_app_state();
     let session_id = test_session_id(&state, Agent::Codex);
     let (runtime, _input_rx, process) =
@@ -10726,6 +10868,7 @@ fn shared_codex_agent_message_event_after_turn_completed_is_ignored() {
         &pending_requests,
         &runtime.sessions,
         &runtime.thread_sessions,
+        &mpsc::channel::<CodexRuntimeCommand>().0,
     )
     .unwrap();
     handle_shared_codex_app_server_message(
@@ -10735,6 +10878,7 @@ fn shared_codex_agent_message_event_after_turn_completed_is_ignored() {
         &pending_requests,
         &runtime.sessions,
         &runtime.thread_sessions,
+        &mpsc::channel::<CodexRuntimeCommand>().0,
     )
     .unwrap();
     handle_shared_codex_app_server_message(
@@ -10744,6 +10888,7 @@ fn shared_codex_agent_message_event_after_turn_completed_is_ignored() {
         &pending_requests,
         &runtime.sessions,
         &runtime.thread_sessions,
+        &mpsc::channel::<CodexRuntimeCommand>().0,
     )
     .unwrap();
 
@@ -10754,10 +10899,115 @@ fn shared_codex_agent_message_event_after_turn_completed_is_ignored() {
         .find(|session| session.id == session_id)
         .expect("updated session should be present");
 
-    assert!(session.messages.is_empty());
+    assert_eq!(session.messages.len(), 1);
+    assert!(matches!(
+        session.messages.last(),
+        Some(Message::Text { text, .. }) if text == "Late shared Codex answer."
+    ));
 }
 
-// Tests that shared Codex app-server item completed notification after turn completion is ignored.
+// Tests that shared Codex app-server agentMessage completion after turn completion is recorded.
+#[test]
+fn shared_codex_app_server_agent_message_completed_after_turn_completed_is_recorded() {
+    let state = test_app_state();
+    let session_id = test_session_id(&state, Agent::Codex);
+    let (runtime, _input_rx, process) =
+        test_shared_codex_runtime("shared-codex-agent-item-after-turn-completed");
+
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(&session_id)
+            .expect("Codex session should exist");
+        inner.sessions[index].runtime = SessionRuntime::Codex(CodexRuntimeHandle {
+            runtime_id: runtime.runtime_id.clone(),
+            input_tx: runtime.input_tx.clone(),
+            process,
+            shared_session: Some(SharedCodexSessionHandle {
+                runtime: runtime.clone(),
+                session_id: session_id.clone(),
+            }),
+        });
+        inner.sessions[index].session.status = SessionStatus::Active;
+    }
+
+    runtime
+        .sessions
+        .lock()
+        .expect("shared Codex session mutex poisoned")
+        .insert(
+            session_id.clone(),
+            SharedCodexSessionState {
+                thread_id: Some("conversation-123".to_owned()),
+                ..SharedCodexSessionState::default()
+            },
+        );
+    runtime
+        .thread_sessions
+        .lock()
+        .expect("shared Codex thread mutex poisoned")
+        .insert("conversation-123".to_owned(), session_id.clone());
+
+    let pending_requests = Arc::new(Mutex::new(HashMap::new()));
+    let turn_started = json!({
+        "method": "turn/started",
+        "params": {
+            "threadId": "conversation-123",
+            "turn": {
+                "id": "turn-finished"
+            }
+        }
+    });
+    let turn_completed = json!({
+        "method": "turn/completed",
+        "params": {
+            "threadId": "conversation-123",
+            "turn": {
+                "id": "turn-finished",
+                "error": null
+            }
+        }
+    });
+    let late_item = json!({
+        "method": "item/completed",
+        "params": {
+            "threadId": "conversation-123",
+            "item": {
+                "id": "msg-final",
+                "type": "agentMessage",
+                "text": "Late app-server final answer."
+            }
+        }
+    });
+
+    for message in [&turn_started, &turn_completed, &late_item] {
+        handle_shared_codex_app_server_message(
+            message,
+            &state,
+            &runtime.runtime_id,
+            &pending_requests,
+            &runtime.sessions,
+            &runtime.thread_sessions,
+            &mpsc::channel::<CodexRuntimeCommand>().0,
+        )
+        .unwrap();
+    }
+
+    let snapshot = state.snapshot();
+    let session = snapshot
+        .sessions
+        .iter()
+        .find(|session| session.id == session_id)
+        .expect("updated session should be present");
+
+    assert_eq!(session.messages.len(), 1);
+    assert!(matches!(
+        session.messages.last(),
+        Some(Message::Text { text, .. }) if text == "Late app-server final answer."
+    ));
+}
+
+// Tests that shared Codex app-server non-message item completion after turn completion is ignored.
 #[test]
 fn shared_codex_app_server_item_completed_after_turn_completed_is_ignored() {
     let state = test_app_state();
@@ -10840,6 +11090,7 @@ fn shared_codex_app_server_item_completed_after_turn_completed_is_ignored() {
         &pending_requests,
         &runtime.sessions,
         &runtime.thread_sessions,
+        &mpsc::channel::<CodexRuntimeCommand>().0,
     )
     .unwrap();
     handle_shared_codex_app_server_message(
@@ -10849,6 +11100,7 @@ fn shared_codex_app_server_item_completed_after_turn_completed_is_ignored() {
         &pending_requests,
         &runtime.sessions,
         &runtime.thread_sessions,
+        &mpsc::channel::<CodexRuntimeCommand>().0,
     )
     .unwrap();
     handle_shared_codex_app_server_message(
@@ -10858,6 +11110,7 @@ fn shared_codex_app_server_item_completed_after_turn_completed_is_ignored() {
         &pending_requests,
         &runtime.sessions,
         &runtime.thread_sessions,
+        &mpsc::channel::<CodexRuntimeCommand>().0,
     )
     .unwrap();
 
@@ -11015,6 +11268,7 @@ fn shared_codex_turn_started_clears_command_recorder_keys_for_new_prompt() {
             &pending_requests,
             &runtime.sessions,
             &runtime.thread_sessions,
+            &mpsc::channel::<CodexRuntimeCommand>().0,
         )
         .unwrap();
     }
@@ -11088,6 +11342,7 @@ fn shared_codex_turn_completed_error_clears_recorder_state() {
         .insert(
             session_id.clone(),
             SharedCodexSessionState {
+                pending_turn_start_request_id: Some("turn-start-1".to_owned()),
                 recorder: SessionRecorderState {
                     command_messages: HashMap::from([(
                         "search".to_owned(),
@@ -11101,6 +11356,7 @@ fn shared_codex_turn_completed_error_clears_recorder_state() {
                 },
                 thread_id: Some("conversation-123".to_owned()),
                 turn_id: Some("turn-1".to_owned()),
+                completed_turn_id: None,
                 turn_started: true,
                 turn_state: CodexTurnState {
                     current_agent_message_id: Some("stream-message".to_owned()),
@@ -11136,6 +11392,7 @@ fn shared_codex_turn_completed_error_clears_recorder_state() {
         &pending_requests,
         &runtime.sessions,
         &runtime.thread_sessions,
+        &mpsc::channel::<CodexRuntimeCommand>().0,
     )
     .expect("turn/completed error should be handled");
 
@@ -11196,6 +11453,7 @@ fn shared_codex_error_notification_clears_recorder_state() {
         .insert(
             session_id.clone(),
             SharedCodexSessionState {
+                pending_turn_start_request_id: Some("turn-start-1".to_owned()),
                 recorder: SessionRecorderState {
                     command_messages: HashMap::from([(
                         "search".to_owned(),
@@ -11209,6 +11467,7 @@ fn shared_codex_error_notification_clears_recorder_state() {
                 },
                 thread_id: Some("conversation-123".to_owned()),
                 turn_id: Some("turn-1".to_owned()),
+                completed_turn_id: None,
                 turn_started: true,
                 turn_state: CodexTurnState {
                     current_agent_message_id: Some("stream-message".to_owned()),
@@ -11240,6 +11499,7 @@ fn shared_codex_error_notification_clears_recorder_state() {
         &pending_requests,
         &runtime.sessions,
         &runtime.thread_sessions,
+        &mpsc::channel::<CodexRuntimeCommand>().0,
     )
     .expect("error notification should be handled");
 
@@ -11357,12 +11617,17 @@ fn shared_codex_prompt_dispatch_clears_stale_command_state_before_turn_started_n
     });
 
     let mut writer = Vec::new();
+    // The session already has a thread_id so the fast path is taken and
+    // input_tx is unused, but the parameter is still required.
+    let (dummy_input_tx, _dummy_input_rx) = mpsc::channel::<CodexRuntimeCommand>();
     handle_shared_codex_prompt_command(
         &mut writer,
         &pending_requests,
         &state,
+        &runtime.runtime_id,
         &runtime.sessions,
         &runtime.thread_sessions,
+        &dummy_input_tx,
         &session_id,
         CodexPromptCommand {
             approval_policy: CodexApprovalPolicy::Never,
@@ -11425,6 +11690,7 @@ fn shared_codex_prompt_dispatch_clears_stale_command_state_before_turn_started_n
         &pending_requests,
         &runtime.sessions,
         &runtime.thread_sessions,
+        &mpsc::channel::<CodexRuntimeCommand>().0,
     )
     .unwrap();
     handle_shared_codex_app_server_message(
@@ -11434,6 +11700,7 @@ fn shared_codex_prompt_dispatch_clears_stale_command_state_before_turn_started_n
         &pending_requests,
         &runtime.sessions,
         &runtime.thread_sessions,
+        &mpsc::channel::<CodexRuntimeCommand>().0,
     )
     .unwrap();
     handle_shared_codex_app_server_message(
@@ -11443,6 +11710,7 @@ fn shared_codex_prompt_dispatch_clears_stale_command_state_before_turn_started_n
         &pending_requests,
         &runtime.sessions,
         &runtime.thread_sessions,
+        &mpsc::channel::<CodexRuntimeCommand>().0,
     )
     .unwrap();
 
@@ -11481,6 +11749,582 @@ fn shared_codex_prompt_dispatch_clears_stale_command_state_before_turn_started_n
             ),
         ]
     );
+}
+
+// Tests that a fast turn/started notification cannot restore stale pending turn state.
+#[test]
+fn shared_codex_turn_started_notification_does_not_restore_pending_state() {
+    struct RaceWriter<F: FnMut()> {
+        buffer: Vec<u8>,
+        injected: bool,
+        on_turn_start_written: F,
+    }
+
+    impl<F: FnMut()> std::io::Write for RaceWriter<F> {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            self.buffer.extend_from_slice(buf);
+            if !self.injected && self.buffer.ends_with(b"\n") {
+                let line = std::str::from_utf8(&self.buffer)
+                    .expect("turn/start payload should stay valid UTF-8");
+                if line.contains("\"method\":\"turn/start\"") {
+                    self.injected = true;
+                    (self.on_turn_start_written)();
+                }
+            }
+            Ok(buf.len())
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    let state = test_app_state();
+    let session_id = test_session_id(&state, Agent::Codex);
+    let (runtime, _input_rx, process) = test_shared_codex_runtime("shared-codex-turn-start-race");
+
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(&session_id)
+            .expect("Codex session should exist");
+        inner.sessions[index].runtime = SessionRuntime::Codex(CodexRuntimeHandle {
+            runtime_id: runtime.runtime_id.clone(),
+            input_tx: runtime.input_tx.clone(),
+            process,
+            shared_session: Some(SharedCodexSessionHandle {
+                runtime: runtime.clone(),
+                session_id: session_id.clone(),
+            }),
+        });
+        inner.sessions[index].session.status = SessionStatus::Active;
+    }
+
+    runtime
+        .sessions
+        .lock()
+        .expect("shared Codex session mutex poisoned")
+        .insert(
+            session_id.clone(),
+            SharedCodexSessionState {
+                thread_id: Some("conversation-123".to_owned()),
+                ..SharedCodexSessionState::default()
+            },
+        );
+    runtime
+        .thread_sessions
+        .lock()
+        .expect("shared Codex thread mutex poisoned")
+        .insert("conversation-123".to_owned(), session_id.clone());
+
+    let pending_requests: CodexPendingRequestMap = Arc::new(Mutex::new(HashMap::new()));
+    let callback_state = state.clone();
+    let callback_pending_requests = pending_requests.clone();
+    let callback_sessions = runtime.sessions.clone();
+    let callback_thread_sessions = runtime.thread_sessions.clone();
+    let callback_runtime_id = runtime.runtime_id.clone();
+    let (callback_input_tx, _callback_input_rx) = mpsc::channel::<CodexRuntimeCommand>();
+    let mut writer = RaceWriter {
+        buffer: Vec::new(),
+        injected: false,
+        on_turn_start_written: move || {
+            handle_shared_codex_app_server_message(
+                &json!({
+                    "method": "turn/started",
+                    "params": {
+                        "threadId": "conversation-123",
+                        "turn": {
+                            "id": "turn-fast"
+                        }
+                    }
+                }),
+                &callback_state,
+                &callback_runtime_id,
+                &callback_pending_requests,
+                &callback_sessions,
+                &callback_thread_sessions,
+                &callback_input_tx,
+            )
+            .expect("turn/started callback should be handled");
+        },
+    };
+
+    handle_shared_codex_start_turn(
+        &mut writer,
+        &pending_requests,
+        &state,
+        &runtime.runtime_id,
+        &runtime.sessions,
+        &session_id,
+        "conversation-123",
+        CodexPromptCommand {
+            approval_policy: CodexApprovalPolicy::Never,
+            attachments: Vec::new(),
+            cwd: "/tmp".to_owned(),
+            model: "gpt-5.4".to_owned(),
+            prompt: "inspect race handling".to_owned(),
+            reasoning_effort: CodexReasoningEffort::Medium,
+            resume_thread_id: None,
+            sandbox_mode: CodexSandboxMode::WorkspaceWrite,
+        },
+    )
+    .unwrap();
+
+    {
+        let sessions = runtime
+            .sessions
+            .lock()
+            .expect("shared Codex session mutex poisoned");
+        let session_state = sessions
+            .get(&session_id)
+            .expect("shared Codex session state should exist");
+        assert_eq!(session_state.turn_id.as_deref(), Some("turn-fast"));
+        assert!(session_state.turn_started);
+        assert_eq!(session_state.pending_turn_start_request_id, None);
+    }
+
+    let (_request_id, sender) =
+        take_pending_codex_request(&pending_requests, Duration::from_secs(1));
+    sender
+        .send(Ok(json!({
+            "turn": {
+                "id": "turn-fast"
+            }
+        })))
+        .unwrap();
+}
+
+// Tests that a failed StartTurnAfterSetup handoff rolls back provisional thread registration.
+#[test]
+fn shared_codex_thread_setup_handoff_failure_rolls_back_registration() {
+    let state = test_app_state();
+    let session_id = test_session_id(&state, Agent::Codex);
+    let (runtime, _runtime_input_rx, process) =
+        test_shared_codex_runtime("shared-codex-thread-setup-handoff-failure");
+
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(&session_id)
+            .expect("Codex session should exist");
+        inner.sessions[index].runtime = SessionRuntime::Codex(CodexRuntimeHandle {
+            runtime_id: runtime.runtime_id.clone(),
+            input_tx: runtime.input_tx.clone(),
+            process,
+            shared_session: Some(SharedCodexSessionHandle {
+                runtime: runtime.clone(),
+                session_id: session_id.clone(),
+            }),
+        });
+        inner.sessions[index].session.status = SessionStatus::Active;
+    }
+
+    let pending_requests: CodexPendingRequestMap = Arc::new(Mutex::new(HashMap::new()));
+    let mut writer = Vec::new();
+    let (input_tx, input_rx) = mpsc::channel::<CodexRuntimeCommand>();
+    drop(input_rx);
+
+    handle_shared_codex_prompt_command(
+        &mut writer,
+        &pending_requests,
+        &state,
+        &runtime.runtime_id,
+        &runtime.sessions,
+        &runtime.thread_sessions,
+        &input_tx,
+        &session_id,
+        CodexPromptCommand {
+            approval_policy: CodexApprovalPolicy::Never,
+            attachments: Vec::new(),
+            cwd: "/tmp".to_owned(),
+            model: "gpt-5.4".to_owned(),
+            prompt: "start the turn".to_owned(),
+            reasoning_effort: CodexReasoningEffort::Medium,
+            resume_thread_id: None,
+            sandbox_mode: CodexSandboxMode::WorkspaceWrite,
+        },
+    )
+    .unwrap();
+
+    let (_request_id, sender) =
+        take_pending_codex_request(&pending_requests, Duration::from_secs(1));
+    sender
+        .send(Ok(json!({
+            "thread": {
+                "id": "conversation-orphan"
+            }
+        })))
+        .unwrap();
+
+    let deadline = std::time::Instant::now() + Duration::from_secs(1);
+    loop {
+        let (runtime_cleared, external_session_id, status, preview) = {
+            let inner = state.inner.lock().expect("state mutex poisoned");
+            let index = inner
+                .find_session_index(&session_id)
+                .expect("Codex session should exist");
+            let record = &inner.sessions[index];
+            (
+                matches!(record.runtime, SessionRuntime::None),
+                record.external_session_id.clone(),
+                record.session.status,
+                record.session.preview.clone(),
+            )
+        };
+        let (shared_thread_id, has_thread_mapping) = {
+            let sessions = runtime
+                .sessions
+                .lock()
+                .expect("shared Codex session mutex poisoned");
+            let thread_id = sessions
+                .get(&session_id)
+                .and_then(|session| session.thread_id.clone());
+            drop(sessions);
+            let thread_sessions = runtime
+                .thread_sessions
+                .lock()
+                .expect("shared Codex thread mutex poisoned");
+            (
+                thread_id,
+                thread_sessions.contains_key("conversation-orphan"),
+            )
+        };
+
+        if runtime_cleared
+            && external_session_id.is_none()
+            && shared_thread_id.is_none()
+            && !has_thread_mapping
+        {
+            assert_eq!(status, SessionStatus::Error);
+            assert!(preview.contains("failed to queue shared Codex turn/start after thread setup"));
+            break;
+        }
+
+        assert!(
+            std::time::Instant::now() < deadline,
+            "failed StartTurnAfterSetup handoff should roll back provisional thread registration"
+        );
+        std::thread::sleep(Duration::from_millis(10));
+    }
+}
+
+// Tests that stale StartTurnAfterSetup callbacks do not persist runtime config onto another runtime.
+#[test]
+fn shared_codex_stale_start_turn_handoff_skips_runtime_config_persistence() {
+    let state = test_app_state();
+    let session_id = test_session_id(&state, Agent::Codex);
+    let (other_runtime, _other_input_rx) = test_codex_runtime_handle("other-runtime");
+    let sessions: SharedCodexSessionMap = Arc::new(Mutex::new(HashMap::new()));
+    let pending_requests: CodexPendingRequestMap = Arc::new(Mutex::new(HashMap::new()));
+    let mut writer = Vec::new();
+
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(&session_id)
+            .expect("Codex session should exist");
+        inner.sessions[index].runtime = SessionRuntime::Codex(other_runtime);
+        inner.sessions[index].active_codex_approval_policy = None;
+        inner.sessions[index].active_codex_reasoning_effort = None;
+        inner.sessions[index].active_codex_sandbox_mode = None;
+    }
+
+    handle_shared_codex_start_turn(
+        &mut writer,
+        &pending_requests,
+        &state,
+        "stale-runtime",
+        &sessions,
+        &session_id,
+        "conversation-stale",
+        CodexPromptCommand {
+            approval_policy: CodexApprovalPolicy::OnRequest,
+            attachments: Vec::new(),
+            cwd: "/tmp".to_owned(),
+            model: "gpt-5.4".to_owned(),
+            prompt: "stale handoff".to_owned(),
+            reasoning_effort: CodexReasoningEffort::XHigh,
+            resume_thread_id: None,
+            sandbox_mode: CodexSandboxMode::DangerFullAccess,
+        },
+    )
+    .unwrap();
+
+    assert!(writer.is_empty());
+    assert!(
+        pending_requests
+            .lock()
+            .expect("Codex pending requests mutex poisoned")
+            .is_empty()
+    );
+    assert!(
+        sessions
+            .lock()
+            .expect("shared Codex session mutex poisoned")
+            .is_empty()
+    );
+
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    let index = inner
+        .find_session_index(&session_id)
+        .expect("Codex session should exist");
+    assert_eq!(inner.sessions[index].active_codex_approval_policy, None);
+    assert_eq!(inner.sessions[index].active_codex_reasoning_effort, None);
+    assert_eq!(inner.sessions[index].active_codex_sandbox_mode, None);
+}
+
+// Tests that undeliverable shared Codex server requests return a protocol-valid JSON-RPC error.
+#[test]
+fn shared_codex_undeliverable_server_request_returns_json_rpc_error() {
+    let state = test_app_state();
+    let pending_requests: CodexPendingRequestMap = Arc::new(Mutex::new(HashMap::new()));
+    let sessions: SharedCodexSessionMap = Arc::new(Mutex::new(HashMap::new()));
+    let thread_sessions: SharedCodexThreadMap = Arc::new(Mutex::new(HashMap::new()));
+    let (input_tx, input_rx) = mpsc::channel::<CodexRuntimeCommand>();
+
+    handle_shared_codex_app_server_message(
+        &json!({
+            "jsonrpc": "2.0",
+            "id": "request-missing-session",
+            "method": "session/request_permission",
+            "params": {
+                "threadId": "missing-thread"
+            }
+        }),
+        &state,
+        "shared-codex-missing-session",
+        &pending_requests,
+        &sessions,
+        &thread_sessions,
+        &input_tx,
+    )
+    .unwrap();
+
+    match input_rx.recv_timeout(Duration::from_secs(1)).unwrap() {
+        CodexRuntimeCommand::JsonRpcResponse { response } => {
+            assert_eq!(
+                codex_json_rpc_response_message(&response),
+                json!({
+                    "id": "request-missing-session",
+                    "error": {
+                        "code": -32001,
+                        "message": "Session unavailable; request could not be delivered."
+                    }
+                })
+            );
+        }
+        _ => panic!("expected JSON-RPC rejection"),
+    }
+}
+
+// Tests that shared Codex prompt dispatch keeps the writer loop responsive while turn/start waits.
+#[test]
+fn shared_codex_prompt_command_keeps_writer_loop_responsive_while_turn_start_is_pending() {
+    let state = test_app_state();
+    let session_id = test_session_id(&state, Agent::Codex);
+    let (runtime, _runtime_input_rx, process) =
+        test_shared_codex_runtime("shared-codex-prompt-writer-responsive");
+
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(&session_id)
+            .expect("Codex session should exist");
+        inner.sessions[index].runtime = SessionRuntime::Codex(CodexRuntimeHandle {
+            runtime_id: runtime.runtime_id.clone(),
+            input_tx: runtime.input_tx.clone(),
+            process,
+            shared_session: Some(SharedCodexSessionHandle {
+                runtime: runtime.clone(),
+                session_id: session_id.clone(),
+            }),
+        });
+        inner.sessions[index].session.status = SessionStatus::Active;
+    }
+
+    runtime
+        .sessions
+        .lock()
+        .expect("shared Codex session mutex poisoned")
+        .insert(
+            session_id.clone(),
+            SharedCodexSessionState {
+                thread_id: Some("conversation-123".to_owned()),
+                ..SharedCodexSessionState::default()
+            },
+        );
+    runtime
+        .thread_sessions
+        .lock()
+        .expect("shared Codex thread mutex poisoned")
+        .insert("conversation-123".to_owned(), session_id.clone());
+
+    let pending_requests: CodexPendingRequestMap = Arc::new(Mutex::new(HashMap::new()));
+    let writer = SharedBufferWriter::default();
+    let thread_writer = writer.clone();
+    let thread_pending_requests = pending_requests.clone();
+    let thread_state = state.clone();
+    let thread_runtime = runtime.clone();
+    let (input_tx, input_rx) = mpsc::channel();
+    let thread_input_tx = input_tx.clone();
+
+    let writer_thread = std::thread::spawn(move || {
+        let mut stdin = thread_writer;
+        let runtime_token = RuntimeToken::Codex(thread_runtime.runtime_id.clone());
+        while let Ok(command) = input_rx.recv_timeout(Duration::from_millis(250)) {
+            match command {
+                CodexRuntimeCommand::Prompt {
+                    session_id,
+                    command,
+                } => {
+                    handle_shared_codex_prompt_command_result(
+                        &thread_state,
+                        &session_id,
+                        &runtime_token,
+                        handle_shared_codex_prompt_command(
+                            &mut stdin,
+                            &thread_pending_requests,
+                            &thread_state,
+                            &thread_runtime.runtime_id,
+                            &thread_runtime.sessions,
+                            &thread_runtime.thread_sessions,
+                            &thread_input_tx,
+                            &session_id,
+                            command,
+                        ),
+                    )
+                    .unwrap();
+                }
+                CodexRuntimeCommand::StartTurnAfterSetup {
+                    session_id,
+                    thread_id,
+                    command,
+                } => {
+                    handle_shared_codex_prompt_command_result(
+                        &thread_state,
+                        &session_id,
+                        &runtime_token,
+                        handle_shared_codex_start_turn(
+                            &mut stdin,
+                            &thread_pending_requests,
+                            &thread_state,
+                            &thread_runtime.runtime_id,
+                            &thread_runtime.sessions,
+                            &session_id,
+                            &thread_id,
+                            command,
+                        ),
+                    )
+                    .unwrap();
+                }
+                CodexRuntimeCommand::JsonRpcResponse { response } => {
+                    write_codex_json_rpc_message(
+                        &mut stdin,
+                        &codex_json_rpc_response_message(&response),
+                    )
+                    .unwrap();
+                }
+                _ => panic!("unexpected shared Codex runtime command"),
+            }
+        }
+    });
+
+    input_tx
+        .send(CodexRuntimeCommand::Prompt {
+            session_id: session_id.clone(),
+            command: CodexPromptCommand {
+                approval_policy: CodexApprovalPolicy::Never,
+                attachments: Vec::new(),
+                cwd: "/tmp".to_owned(),
+                model: "gpt-5.4".to_owned(),
+                prompt: "check the repo".to_owned(),
+                reasoning_effort: CodexReasoningEffort::Medium,
+                resume_thread_id: None,
+                sandbox_mode: CodexSandboxMode::WorkspaceWrite,
+            },
+        })
+        .unwrap();
+
+    let deadline = std::time::Instant::now() + Duration::from_secs(1);
+    loop {
+        let written = writer.contents();
+        let pending_count = pending_requests
+            .lock()
+            .expect("Codex pending requests mutex poisoned")
+            .len();
+        if written.contains("\"method\":\"turn/start\"") && pending_count == 1 {
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "turn/start request should stay pending while the writer loop remains active"
+        );
+        std::thread::sleep(Duration::from_millis(10));
+    }
+
+    input_tx
+        .send(CodexRuntimeCommand::JsonRpcResponse {
+            response: CodexJsonRpcResponseCommand {
+                request_id: json!("approval-1"),
+                payload: CodexJsonRpcResponsePayload::Result(json!({
+                    "outcome": "approved",
+                })),
+            },
+        })
+        .unwrap();
+
+    let deadline = std::time::Instant::now() + Duration::from_secs(1);
+    loop {
+        let written = writer.contents();
+        if written.contains("\"id\":\"approval-1\"") {
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "writer loop should still write JSON-RPC responses while turn/start is pending"
+        );
+        std::thread::sleep(Duration::from_millis(10));
+    }
+
+    let (_request_id, sender) =
+        take_pending_codex_request(&pending_requests, Duration::from_secs(1));
+    sender
+        .send(Ok(json!({
+            "turn": {
+                "id": "turn-1"
+            }
+        })))
+        .unwrap();
+
+    let deadline = std::time::Instant::now() + Duration::from_secs(1);
+    loop {
+        let (turn_id, pending_turn_start) = {
+            let sessions = runtime
+                .sessions
+                .lock()
+                .expect("shared Codex session mutex poisoned");
+            let session_state = sessions
+                .get(&session_id)
+                .expect("shared Codex session state should exist");
+            (
+                session_state.turn_id.clone(),
+                session_state.pending_turn_start_request_id.clone(),
+            )
+        };
+        if turn_id.as_deref() == Some("turn-1") && pending_turn_start.is_none() {
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "turn/start waiter should record the turn id after the response arrives"
+        );
+        std::thread::sleep(Duration::from_millis(10));
+    }
+
+    drop(input_tx);
+    writer_thread
+        .join()
+        .expect("shared Codex writer thread should join cleanly");
 }
 
 // Tests that shared Codex prompt JSON-RPC errors fail the turn without tearing down the runtime.
@@ -11613,6 +12457,7 @@ fn shared_codex_app_server_agent_message_delta_waits_for_turn_started() {
         &pending_requests,
         &runtime.sessions,
         &runtime.thread_sessions,
+        &mpsc::channel::<CodexRuntimeCommand>().0,
     )
     .unwrap();
 
@@ -11631,6 +12476,7 @@ fn shared_codex_app_server_agent_message_delta_waits_for_turn_started() {
         &pending_requests,
         &runtime.sessions,
         &runtime.thread_sessions,
+        &mpsc::channel::<CodexRuntimeCommand>().0,
     )
     .unwrap();
     handle_shared_codex_app_server_message(
@@ -11640,6 +12486,7 @@ fn shared_codex_app_server_agent_message_delta_waits_for_turn_started() {
         &pending_requests,
         &runtime.sessions,
         &runtime.thread_sessions,
+        &mpsc::channel::<CodexRuntimeCommand>().0,
     )
     .unwrap();
 
@@ -11732,6 +12579,7 @@ fn shared_codex_app_server_request_waits_for_turn_started() {
         &pending_requests,
         &runtime.sessions,
         &runtime.thread_sessions,
+        &mpsc::channel::<CodexRuntimeCommand>().0,
     )
     .unwrap();
 
@@ -11750,6 +12598,7 @@ fn shared_codex_app_server_request_waits_for_turn_started() {
         &pending_requests,
         &runtime.sessions,
         &runtime.thread_sessions,
+        &mpsc::channel::<CodexRuntimeCommand>().0,
     )
     .unwrap();
     handle_shared_codex_app_server_message(
@@ -11759,6 +12608,7 @@ fn shared_codex_app_server_request_waits_for_turn_started() {
         &pending_requests,
         &runtime.sessions,
         &runtime.thread_sessions,
+        &mpsc::channel::<CodexRuntimeCommand>().0,
     )
     .unwrap();
 
@@ -12370,6 +13220,133 @@ fn repl_codex_streamed_agent_message_skips_duplicate_completed_text() {
     assert!(repl_state.current_turn_id.is_none());
 }
 
+// Tests that REPL Codex final agent messages still land after turn completion.
+#[test]
+fn repl_codex_agent_message_after_turn_completed_is_recorded() {
+    let mut recorder = TestRecorder::default();
+    let mut repl_state = ReplCodexSessionState::default();
+    let turn_started = json!({
+        "method": "turn/started",
+        "params": {
+            "threadId": "conversation-123",
+            "turn": {
+                "id": "turn-finished"
+            }
+        }
+    });
+    let turn_completed = json!({
+        "method": "turn/completed",
+        "params": {
+            "threadId": "conversation-123",
+            "turn": {
+                "id": "turn-finished",
+                "error": null
+            }
+        }
+    });
+    let late_message = json!({
+        "method": "codex/event/agent_message",
+        "params": {
+            "conversationId": "conversation-123",
+            "id": "turn-finished",
+            "msg": {
+                "message": "Late REPL answer.",
+                "phase": "final_answer",
+                "type": "agent_message"
+            }
+        }
+    });
+
+    handle_repl_codex_app_server_notification(
+        "turn/started",
+        &turn_started,
+        &mut repl_state,
+        &mut recorder,
+    )
+    .unwrap();
+    handle_repl_codex_app_server_notification(
+        "turn/completed",
+        &turn_completed,
+        &mut repl_state,
+        &mut recorder,
+    )
+    .unwrap();
+    handle_repl_codex_app_server_notification(
+        "codex/event/agent_message",
+        &late_message,
+        &mut repl_state,
+        &mut recorder,
+    )
+    .unwrap();
+
+    assert_eq!(recorder.texts, vec!["Late REPL answer.".to_owned()]);
+    assert!(repl_state.turn_completed);
+    assert!(repl_state.current_turn_id.is_none());
+}
+
+// Tests that REPL Codex app-server agentMessage completions still land after turn completion.
+#[test]
+fn repl_codex_app_server_agent_message_completed_after_turn_completed_is_recorded() {
+    let mut recorder = TestRecorder::default();
+    let mut repl_state = ReplCodexSessionState::default();
+    let turn_started = json!({
+        "method": "turn/started",
+        "params": {
+            "threadId": "conversation-123",
+            "turn": {
+                "id": "turn-finished"
+            }
+        }
+    });
+    let turn_completed = json!({
+        "method": "turn/completed",
+        "params": {
+            "threadId": "conversation-123",
+            "turn": {
+                "id": "turn-finished",
+                "error": null
+            }
+        }
+    });
+    let late_item = json!({
+        "method": "item/completed",
+        "params": {
+            "threadId": "conversation-123",
+            "item": {
+                "id": "item-final",
+                "type": "agentMessage",
+                "text": "Late REPL item answer."
+            }
+        }
+    });
+
+    handle_repl_codex_app_server_notification(
+        "turn/started",
+        &turn_started,
+        &mut repl_state,
+        &mut recorder,
+    )
+    .unwrap();
+    handle_repl_codex_app_server_notification(
+        "turn/completed",
+        &turn_completed,
+        &mut repl_state,
+        &mut recorder,
+    )
+    .unwrap();
+    handle_repl_codex_app_server_notification(
+        "item/completed",
+        &late_item,
+        &mut repl_state,
+        &mut recorder,
+    )
+    .unwrap();
+
+    assert_eq!(recorder.texts, vec!["Late REPL item answer.".to_owned()]);
+    assert!(repl_state.turn_completed);
+    assert!(repl_state.current_turn_id.is_none());
+}
+
 // Tests that Codex app server web search item records command lifecycle.
 #[test]
 fn codex_app_server_web_search_item_records_command_lifecycle() {
@@ -12591,6 +13568,7 @@ fn shared_codex_agent_message_event_uses_conversation_id_for_session_routing() {
         &pending_requests,
         &runtime.sessions,
         &runtime.thread_sessions,
+        &mpsc::channel::<CodexRuntimeCommand>().0,
     )
     .unwrap();
     handle_shared_codex_app_server_message(
@@ -12600,6 +13578,7 @@ fn shared_codex_agent_message_event_uses_conversation_id_for_session_routing() {
         &pending_requests,
         &runtime.sessions,
         &runtime.thread_sessions,
+        &mpsc::channel::<CodexRuntimeCommand>().0,
     )
     .unwrap();
 
@@ -19456,7 +20435,10 @@ fn project_action_approve_routes_to_the_live_project_approval() {
     match input_rx.recv_timeout(Duration::from_secs(1)).unwrap() {
         CodexRuntimeCommand::JsonRpcResponse { response } => {
             assert_eq!(response.request_id, json!("req-project-approve"));
-            assert_eq!(response.result, json!({ "decision": "accept" }));
+            assert_eq!(
+                response.payload,
+                CodexJsonRpcResponsePayload::Result(json!({ "decision": "accept" }))
+            );
         }
         _ => panic!("expected approval response"),
     }
@@ -20631,6 +21613,9 @@ fn aborted_stop_cleanup_preserves_child_work_when_child_stop_persist_fails() {
         .begin_orchestrator_stop(&instance_id)
         .expect("stop should be marked in progress");
     state.persistence_path = Arc::new(failing_persistence_path.clone());
+    // Force synchronous persistence so the error propagates instead of
+    // being swallowed by the background persist thread.
+    state.persist_tx = mpsc::channel().0;
 
     let error = state
         .stop_session_with_options(
@@ -20807,6 +21792,9 @@ fn aborted_stop_resume_does_not_redispatch_child_after_child_stop_persist_fails(
         .begin_orchestrator_stop(&instance_id)
         .expect("stop should be marked in progress");
     state.persistence_path = Arc::new(failing_persistence_path.clone());
+    // Force synchronous persistence so the error propagates instead of
+    // being swallowed by the background persist thread.
+    state.persist_tx = mpsc::channel().0;
 
     let error = state
         .stop_session_with_options(
@@ -20977,6 +21965,9 @@ fn aborted_stop_restart_does_not_redispatch_child_after_child_stop_persist_fails
         .begin_orchestrator_stop(&instance_id)
         .expect("stop should be marked in progress");
     state.persistence_path = Arc::new(failing_persistence_path.clone());
+    // Force synchronous persistence so the error propagates instead of
+    // being swallowed by the background persist thread.
+    state.persist_tx = mpsc::channel().0;
 
     let error = state
         .stop_session_with_options(
@@ -21118,6 +22109,9 @@ fn aborted_stop_restart_does_not_dispatch_orphaned_child_queue_after_child_stop_
         .begin_orchestrator_stop(&instance_id)
         .expect("stop should be marked in progress");
     state.persistence_path = Arc::new(failing_persistence_path.clone());
+    // Force synchronous persistence so the error propagates instead of
+    // being swallowed by the background persist thread.
+    state.persist_tx = mpsc::channel().0;
 
     let error = state
         .stop_session_with_options(
@@ -21259,6 +22253,7 @@ fn blocked_session_manual_recovery_dispatch_prioritizes_user_prompt_after_restar
         .begin_orchestrator_stop(&instance_id)
         .expect("stop should be marked in progress");
     state.persistence_path = Arc::new(failing_persistence_path.clone());
+    state.persist_tx = mpsc::channel().0;
 
     let error = state
         .stop_session_with_options(
@@ -21458,6 +22453,7 @@ fn blocked_session_manual_recovery_preserves_user_prompt_fifo_after_plain_stop_p
     }
 
     state.persistence_path = Arc::new(failing_persistence_path.clone());
+    state.persist_tx = mpsc::channel().0;
     let stop_error = state
         .stop_session_with_options(&session_id, StopSessionOptions::default())
         .err()
@@ -21604,6 +22600,7 @@ fn blocked_session_manual_recovery_prioritizes_existing_user_queue_ahead_of_stal
     }
 
     state.persistence_path = Arc::new(failing_persistence_path.clone());
+    state.persist_tx = mpsc::channel().0;
     let stop_error = state
         .stop_session_with_options(&session_id, StopSessionOptions::default())
         .err()
@@ -22063,6 +23060,7 @@ fn begin_orchestrator_stop_rolls_back_stop_in_progress_after_persist_failure() {
         .orchestrator;
     let instance_id = orchestrator.id.clone();
     state.persistence_path = Arc::new(failing_persistence_path.clone());
+    state.persist_tx = mpsc::channel().0;
 
     let error = state
         .begin_orchestrator_stop(&instance_id)
@@ -22122,12 +23120,15 @@ fn load_state_preserves_pending_transitions_when_stop_in_progress_has_no_stopped
     let persistence_path = state_root.join("sessions.json");
     let orchestrator_templates_path = state_root.join("orchestrators.json");
 
-    let state = AppState::new_with_paths(
+    let mut state = AppState::new_with_paths(
         normalized_root.clone(),
         persistence_path.clone(),
         orchestrator_templates_path.clone(),
     )
     .expect("state should initialize");
+    // Force synchronous persistence so file reads in this test see the
+    // written data immediately.
+    state.persist_tx = mpsc::channel().0;
     let project_id = create_test_project(&state, &project_root, "Restart Recovery Project");
     let template = state
         .create_orchestrator_template(sample_orchestrator_template_draft())
@@ -22252,12 +23253,15 @@ fn load_state_recovers_completed_stop_when_active_children_finished_during_stop(
     let persistence_path = state_root.join("sessions.json");
     let orchestrator_templates_path = state_root.join("orchestrators.json");
 
-    let state = AppState::new_with_paths(
+    let mut state = AppState::new_with_paths(
         normalized_root.clone(),
         persistence_path.clone(),
         orchestrator_templates_path.clone(),
     )
     .expect("state should initialize");
+    // Force synchronous persistence so file reads in this test see the
+    // written data immediately.
+    state.persist_tx = mpsc::channel().0;
     let project_id = create_test_project(&state, &project_root, "Restart Recovery Project");
     let template = state
         .create_orchestrator_template(sample_orchestrator_template_draft())
@@ -22416,12 +23420,13 @@ fn load_state_prunes_only_stopped_child_work_when_recovering_stop_in_progress() 
     let persistence_path = state_root.join("sessions.json");
     let orchestrator_templates_path = state_root.join("orchestrators.json");
 
-    let state = AppState::new_with_paths(
+    let mut state = AppState::new_with_paths(
         normalized_root.clone(),
         persistence_path.clone(),
         orchestrator_templates_path.clone(),
     )
     .expect("state should initialize");
+    state.persist_tx = mpsc::channel().0;
     let project_id = create_test_project(&state, &project_root, "Recovery Queue Project");
     let template = state
         .create_orchestrator_template(sample_orchestrator_template_draft())
@@ -22580,12 +23585,13 @@ fn load_state_recovers_completed_stop_when_all_active_children_were_stopped() {
     let persistence_path = state_root.join("sessions.json");
     let orchestrator_templates_path = state_root.join("orchestrators.json");
 
-    let state = AppState::new_with_paths(
+    let mut state = AppState::new_with_paths(
         normalized_root.clone(),
         persistence_path.clone(),
         orchestrator_templates_path.clone(),
     )
     .expect("state should initialize");
+    state.persist_tx = mpsc::channel().0;
     let project_id = create_test_project(&state, &project_root, "Completed Recovery Project");
     let template = state
         .create_orchestrator_template(sample_orchestrator_template_draft())

@@ -1408,6 +1408,7 @@ fn run_codex_turn(
 struct ReplCodexSessionState {
     resolved_session_id: Option<String>,
     current_turn_id: Option<String>,
+    completed_turn_id: Option<String>,
     turn_state: CodexTurnState,
     turn_completed: bool,
     turn_failed: Option<String>,
@@ -1995,6 +1996,7 @@ fn handle_repl_codex_app_server_notification(
                 .pointer("/params/turn/id")
                 .and_then(Value::as_str)
                 .map(str::to_owned);
+            repl_state.completed_turn_id = None;
             repl_state.turn_completed = false;
             recorder.finish_streaming_text()?;
         }
@@ -2002,6 +2004,7 @@ fn handle_repl_codex_app_server_notification(
             if let Some(error) = message.pointer("/params/turn/error") {
                 if !error.is_null() {
                     repl_state.current_turn_id = None;
+                    repl_state.completed_turn_id = None;
                     clear_codex_turn_state(&mut repl_state.turn_state);
                     recorder.finish_streaming_text()?;
                     repl_state.turn_failed = Some(summarize_error(error));
@@ -2009,7 +2012,7 @@ fn handle_repl_codex_app_server_notification(
                 }
             }
 
-            repl_state.current_turn_id = None;
+            repl_state.completed_turn_id = repl_state.current_turn_id.take();
             {
                 let mut recorder_ref = DynTurnRecorderRef::new(recorder);
                 flush_pending_codex_subagent_results(
@@ -2017,7 +2020,6 @@ fn handle_repl_codex_app_server_notification(
                     &mut recorder_ref,
                 )?;
             }
-            clear_codex_turn_state(&mut repl_state.turn_state);
             recorder.finish_streaming_text()?;
             repl_state.turn_completed = true;
         }
@@ -2029,14 +2031,22 @@ fn handle_repl_codex_app_server_notification(
         }
         "item/completed" => {
             if let Some(item) = message.get("params").and_then(|params| params.get("item")) {
-                handle_repl_codex_app_server_item_completed(
-                    item,
-                    &mut repl_state.turn_state,
-                    recorder,
-                )?;
+                let allow_late_agent_message = repl_state.current_turn_id.is_none()
+                    && repl_state.completed_turn_id.is_some()
+                    && matches!(item.get("type").and_then(Value::as_str), Some("agentMessage"));
+                if repl_state.current_turn_id.is_some() || allow_late_agent_message {
+                    handle_repl_codex_app_server_item_completed(
+                        item,
+                        &mut repl_state.turn_state,
+                        recorder,
+                    )?;
+                }
             }
         }
         "item/agentMessage/delta" => {
+            if repl_state.current_turn_id.is_none() && repl_state.completed_turn_id.is_none() {
+                return Ok(());
+            }
             let Some(delta) = message.pointer("/params/delta").and_then(Value::as_str) else {
                 return Ok(());
             };
@@ -2066,6 +2076,7 @@ fn handle_repl_codex_app_server_notification(
         }
         "error" => {
             repl_state.current_turn_id = None;
+            repl_state.completed_turn_id = None;
             clear_codex_turn_state(&mut repl_state.turn_state);
             repl_state.turn_failed =
                 Some(summarize_error(message.get("params").unwrap_or(message)));
@@ -2074,6 +2085,7 @@ fn handle_repl_codex_app_server_notification(
             handle_repl_codex_event_item_completed(
                 message,
                 repl_state.current_turn_id.as_deref(),
+                repl_state.completed_turn_id.as_deref(),
                 &mut repl_state.turn_state,
                 recorder,
             )?;
@@ -2082,6 +2094,7 @@ fn handle_repl_codex_app_server_notification(
             handle_repl_codex_event_agent_message_content_delta(
                 message,
                 repl_state.current_turn_id.as_deref(),
+                repl_state.completed_turn_id.as_deref(),
                 &mut repl_state.turn_state,
                 recorder,
             )?;
@@ -2090,6 +2103,7 @@ fn handle_repl_codex_app_server_notification(
             handle_repl_codex_event_agent_message(
                 message,
                 repl_state.current_turn_id.as_deref(),
+                repl_state.completed_turn_id.as_deref(),
                 &mut repl_state.turn_state,
                 recorder,
             )?;
@@ -2165,6 +2179,23 @@ fn handle_repl_codex_task_complete(
         shared_codex_event_turn_id(message),
     );
     Ok(())
+}
+
+/// Matches REPL Codex final-output events against either the active turn or
+/// the most recently completed turn.
+fn repl_codex_event_matches_visible_turn(
+    current_turn_id: Option<&str>,
+    completed_turn_id: Option<&str>,
+    event_turn_id: Option<&str>,
+) -> bool {
+    if shared_codex_event_matches_active_turn(current_turn_id, event_turn_id) {
+        return true;
+    }
+
+    matches!(
+        (current_turn_id, completed_turn_id, event_turn_id),
+        (None, Some(completed), Some(event)) if completed == event
+    )
 }
 
 /// Handles REPL Codex model rerouted.
@@ -2260,11 +2291,15 @@ fn record_repl_codex_completed_agent_message(
 fn handle_repl_codex_event_item_completed(
     message: &Value,
     current_turn_id: Option<&str>,
+    completed_turn_id: Option<&str>,
     turn_state: &mut CodexTurnState,
     recorder: &mut dyn TurnRecorder,
 ) -> Result<()> {
-    if !shared_codex_event_matches_active_turn(current_turn_id, shared_codex_event_turn_id(message))
-    {
+    if !repl_codex_event_matches_visible_turn(
+        current_turn_id,
+        completed_turn_id,
+        shared_codex_event_turn_id(message),
+    ) {
         return Ok(());
     }
 
@@ -2312,11 +2347,15 @@ fn handle_repl_codex_event_item_completed(
 fn handle_repl_codex_event_agent_message_content_delta(
     message: &Value,
     current_turn_id: Option<&str>,
+    completed_turn_id: Option<&str>,
     turn_state: &mut CodexTurnState,
     recorder: &mut dyn TurnRecorder,
 ) -> Result<()> {
-    if !shared_codex_event_matches_active_turn(current_turn_id, shared_codex_event_turn_id(message))
-    {
+    if !repl_codex_event_matches_visible_turn(
+        current_turn_id,
+        completed_turn_id,
+        shared_codex_event_turn_id(message),
+    ) {
         return Ok(());
     }
 
@@ -2337,11 +2376,15 @@ fn handle_repl_codex_event_agent_message_content_delta(
 fn handle_repl_codex_event_agent_message(
     message: &Value,
     current_turn_id: Option<&str>,
+    completed_turn_id: Option<&str>,
     turn_state: &mut CodexTurnState,
     recorder: &mut dyn TurnRecorder,
 ) -> Result<()> {
-    if !shared_codex_event_matches_active_turn(current_turn_id, shared_codex_event_turn_id(message))
-    {
+    if !repl_codex_event_matches_visible_turn(
+        current_turn_id,
+        completed_turn_id,
+        shared_codex_event_turn_id(message),
+    ) {
         return Ok(());
     }
 

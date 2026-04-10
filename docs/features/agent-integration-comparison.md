@@ -10,7 +10,7 @@ Cross-agent reference for TermAl adapter design.
 | Transport | stdin/stdout only | stdin/stdout or WebSocket | Spawned CLI stdout or stdio (ACP) | stdin/stdout only |
 | Bidirectional | Yes | Yes | No (stream-json) / Yes (ACP) | Yes |
 | Server mode | No | `codex app-server` | `--experimental-acp` | `cursor agent acp` |
-| Best TermAl integration | Spawn child and speak NDJSON over stdio | Spawn app-server and speak JSON-RPC over stdio | Spawn CLI in ACP mode over stdio | Spawn `agent acp` and speak JSON-RPC over stdio |
+| Best TermAl integration | Spawn child and speak NDJSON over stdio | Spawn shared app-server and speak JSON-RPC over stdio (fire-and-forget writer, resilient reader) | Spawn CLI in ACP mode over stdio | Spawn `agent acp` and speak JSON-RPC over stdio |
 
 ## Session persistence
 

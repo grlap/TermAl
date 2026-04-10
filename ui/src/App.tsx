@@ -972,19 +972,13 @@ export default function App() {
         | BackendConnectionState
         | ((current: BackendConnectionState) => BackendConnectionState),
     ) => {
-      if (typeof next === "function") {
-        setBackendConnectionStateRaw((current) => {
-          const resolved = next(current);
-          backendConnectionStateRef.current = resolved;
-          return resolved;
-        });
-      } else {
-        backendConnectionStateRef.current = next;
-        setBackendConnectionStateRaw(next);
-      }
+      setBackendConnectionStateRaw(next);
     },
     [],
   );
+  useLayoutEffect(() => {
+    backendConnectionStateRef.current = backendConnectionState;
+  }, [backendConnectionState]);
   const [sessionListFilter, setSessionListFilter] =
     useState<SessionListFilter>("all");
   const [sessionListSearchQuery, setSessionListSearchQuery] = useState("");
@@ -1093,6 +1087,12 @@ export default function App() {
   const draggedTabRef = useRef<WorkspaceTabDrag | null>(null);
   const launcherDraggedTabRef = useRef<WorkspaceTabDrag | null>(null);
   const isMountedRef = useRef(true);
+  const activePromptPollIntervalRef = useRef<ReturnType<
+    typeof setInterval
+  > | null>(null);
+  const activePromptPollTimeoutRef = useRef<ReturnType<
+    typeof setTimeout
+  > | null>(null);
   const sessionListSearchInputRef = useRef<HTMLInputElement>(null);
   const pendingSessionRenameTriggerRef = useRef<HTMLElement | null>(null);
   const pendingSessionRenamePopoverRef = useRef<HTMLFormElement | null>(null);
@@ -1226,7 +1226,7 @@ export default function App() {
     requestError === backendInlineRequestErrorMessage;
 
   function reportRequestError(
-    error: unknown | string,
+    error: unknown,
     options?: {
       message?: string;
     },
@@ -1277,7 +1277,7 @@ export default function App() {
     requestActionRecoveryResyncRef.current();
   }
 
-  function clearRecoveredBackendRequestError() {
+  const clearRecoveredBackendRequestError = useCallback(() => {
     const inlineRequestErrorMessage = backendInlineRequestErrorMessageRef.current;
     if (inlineRequestErrorMessage === null) {
       return;
@@ -1287,7 +1287,7 @@ export default function App() {
       current === inlineRequestErrorMessage ? null : current,
     );
     setBackendInlineRequestError(null);
-  }
+  }, []);
 
   function handleRetryBackendConnection() {
     if (!readNavigatorOnline()) {
@@ -1888,10 +1888,9 @@ export default function App() {
         setIsWorkspaceSwitcherLoading(false);
       }
     }
-    // All captured references are stable: refs (.current access), setState
-    // dispatchers, and imported utilities. Empty deps is intentional.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    // All dependencies are stable callbacks or refs, so re-subscribing only
+    // happens if the browser-recovery handler itself changes.
+  }, [clearRecoveredBackendRequestError, setBackendConnectionState]);
 
   function clearPendingWorkspaceLayoutSaveTimeout() {
     if (
@@ -2232,6 +2231,9 @@ export default function App() {
     nextState: StateResponse,
     options?: {
       force?: boolean;
+      /** Allow adopting a snapshot with a lower revision than the current one.
+       *  Only used for backend restart rollbacks where the revision counter resets. */
+      allowRevisionDowngrade?: boolean;
       openSessionId?: string;
       paneId?: string | null;
     },
@@ -2246,6 +2248,21 @@ export default function App() {
         latestStateRevisionRef.current,
         nextState.revision,
       )
+    ) {
+      return false;
+    }
+
+    // Guard against force-adoption downgrading the held revision unless
+    // the caller explicitly allows it (backend restart rollback). The SSE
+    // state event sets `force` to handle equal-revision reconnects, but a
+    // /api/state fetch or delta may have already advanced the client past
+    // the SSE snapshot. Adopting a lower revision would drop messages that
+    // were applied via deltas between the snapshot and now.
+    if (
+      options?.force &&
+      !options?.allowRevisionDowngrade &&
+      latestStateRevisionRef.current !== null &&
+      nextState.revision < latestStateRevisionRef.current
     ) {
       return false;
     }
@@ -2386,7 +2403,7 @@ export default function App() {
       window.removeEventListener("online", handleBrowserOnline);
       window.removeEventListener("offline", handleBrowserOffline);
     };
-  }, []);
+  }, [clearRecoveredBackendRequestError, setBackendConnectionState]);
 
   useEffect(() => {
     let cancelled = false;
@@ -2521,6 +2538,7 @@ export default function App() {
         requestStateResync({
           allowAuthoritativeRollback: true,
           rearmOnSuccess: true,
+          rearmOnFailure: true,
         });
       }, delayMs);
     }
@@ -2640,6 +2658,7 @@ export default function App() {
                 // while it was in flight, even when a crashed backend restarted below the last
                 // streamed client revision.
                 force: shouldForceRollback,
+                allowRevisionDowngrade: shouldForceRollback,
               });
               if (adopted) {
                 clearInitialStateResyncRetryTimeout();
@@ -2916,6 +2935,13 @@ export default function App() {
 
       try {
         const state = JSON.parse(event.data) as StateEventPayload;
+        console.debug(
+          "[termal:sse] state event rev=%d current=%s force=%s fallback=%s",
+          state.revision,
+          latestStateRevisionRef.current,
+          forceAdoptNextStateEventRef.current,
+          state._sseFallback ?? false,
+        );
         if (state._sseFallback) {
           // Marked fallback payloads only signal that the client should refetch
           // the authoritative snapshot from /api/state.
@@ -2928,7 +2954,14 @@ export default function App() {
         }
 
         const force = forceAdoptNextStateEventRef.current;
-        const adopted = adoptState(state, { force });
+        // SSE state events are always the first event on a new connection
+        // (before any deltas), so there is no risk of a delta racing ahead
+        // and being overwritten. Allow revision downgrade so a restarted
+        // server (whose persisted revision may be lower) is adopted.
+        const adopted = adoptState(state, {
+          force,
+          allowRevisionDowngrade: force,
+        });
         forceAdoptNextStateEventRef.current = false;
         // Confirm recovery only after adoption succeeds. If adoptState throws
         // (bad payload, reducer error), the catch block must keep the client in
@@ -2985,9 +3018,17 @@ export default function App() {
           latestStateRevisionRef.current,
           delta.revision,
         );
+        console.debug(
+          "[termal:sse] delta event type=%s rev=%d current=%s action=%s",
+          delta.type,
+          delta.revision,
+          latestStateRevisionRef.current,
+          revisionAction,
+        );
         if (revisionAction === "ignore") {
-          // An ignored delta still proves transport health — we successfully
-          // received and parsed a live SSE payload.
+          // An ignored delta proves the client already has data at this
+          // revision or newer — the snapshot that advanced the revision was
+          // authoritative. Transport is healthy and the client is caught up.
           confirmReconnectRecoveryFromLiveEvent();
           clearReconnectStateResyncTimeoutAfterConfirmedReopen();
           setBackendConnectionIssueDetail(null);
@@ -3035,6 +3076,15 @@ export default function App() {
         // Non-session deltas such as orchestratorsUpdated are handled above; the
         // session reducer only accepts deltas that carry a concrete sessionId.
         const result = applyDeltaToSessions(sessionsRef.current, delta);
+        if (result.kind !== "applied") {
+          console.debug(
+            "[termal:sse] delta NOT applied: kind=%s type=%s session=%s rev=%d",
+            result.kind,
+            delta.type,
+            "sessionId" in delta ? delta.sessionId : "?",
+            delta.revision,
+          );
+        }
         if (result.kind === "applied") {
           confirmReconnectRecoveryFromLiveEvent();
           const appliedAt = Date.now();
@@ -3194,7 +3244,7 @@ export default function App() {
       );
       eventSource.close();
     };
-  }, []);
+  }, [clearRecoveredBackendRequestError, setBackendConnectionState]);
 
   useEffect(() => {
     setSelectedProjectId((current) => {
@@ -3576,6 +3626,14 @@ export default function App() {
     isMountedRef.current = true;
     return () => {
       isMountedRef.current = false;
+      if (activePromptPollIntervalRef.current !== null) {
+        clearInterval(activePromptPollIntervalRef.current);
+        activePromptPollIntervalRef.current = null;
+      }
+      if (activePromptPollTimeoutRef.current !== null) {
+        clearTimeout(activePromptPollTimeoutRef.current);
+        activePromptPollTimeoutRef.current = null;
+      }
     };
   }, []);
 
@@ -3910,6 +3968,66 @@ export default function App() {
         adoptState(state);
         releaseDraftAttachments(attachments);
         setRequestError(null);
+        // Safety net: if the SSE stream is dead (e.g. after a server
+        // restart the proxy may not forward the connection close), the
+        // agent's response would never arrive via deltas. Poll the
+        // authoritative snapshot every few seconds until the session is
+        // no longer active. If SSE is healthy, the polls are no-ops
+        // (same revision) and stop once the turn completes.
+        // Clear any previous safety-net poll so rapid prompts don't
+        // stack independent intervals.
+        if (activePromptPollIntervalRef.current !== null) {
+          clearInterval(activePromptPollIntervalRef.current);
+        }
+        if (activePromptPollTimeoutRef.current !== null) {
+          clearTimeout(activePromptPollTimeoutRef.current);
+        }
+        activePromptPollIntervalRef.current = setInterval(async () => {
+          if (!isMountedRef.current) {
+            if (activePromptPollIntervalRef.current !== null) {
+              clearInterval(activePromptPollIntervalRef.current);
+              activePromptPollIntervalRef.current = null;
+            }
+            return;
+          }
+          try {
+            const freshState = await fetchState();
+            if (!isMountedRef.current) {
+              if (activePromptPollIntervalRef.current !== null) {
+                clearInterval(activePromptPollIntervalRef.current);
+                activePromptPollIntervalRef.current = null;
+              }
+              return;
+            }
+            // Allow revision downgrade so a restarted server (whose
+            // persisted revision may be lower) is adopted.
+            adoptState(freshState, {
+              force: true,
+              allowRevisionDowngrade: true,
+            });
+            // Stop once the session is no longer active.
+            if (
+              !freshState.sessions?.some(
+                (session) =>
+                  session.id === sessionId && session.status === "active",
+              )
+            ) {
+              if (activePromptPollIntervalRef.current !== null) {
+                clearInterval(activePromptPollIntervalRef.current);
+                activePromptPollIntervalRef.current = null;
+              }
+            }
+          } catch {
+            // Best-effort; next interval will retry.
+          }
+        }, 3000);
+        // Hard cap: stop polling after 5 minutes regardless.
+        activePromptPollTimeoutRef.current = setTimeout(() => {
+          if (activePromptPollIntervalRef.current !== null) {
+            clearInterval(activePromptPollIntervalRef.current);
+            activePromptPollIntervalRef.current = null;
+          }
+        }, 5 * 60 * 1000);
       } catch (error) {
         let restoredDraft = false;
         let restoredAttachments = false;
