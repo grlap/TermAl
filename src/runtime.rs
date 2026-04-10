@@ -2154,6 +2154,127 @@ fn spawn_codex_runtime(
 }
 
 /// Spawns shared Codex runtime.
+const SHARED_CODEX_STDIN_WRITE_TIMEOUT: Duration = Duration::from_secs(30);
+const SHARED_CODEX_STDIN_WATCHDOG_POLL_INTERVAL: Duration = Duration::from_millis(250);
+
+#[derive(Clone, Debug)]
+struct SharedCodexStdinActivity {
+    operation: &'static str,
+    started_at: std::time::Instant,
+    timed_out: bool,
+}
+
+type SharedCodexStdinActivityState = Arc<Mutex<Option<SharedCodexStdinActivity>>>;
+
+struct SharedCodexStdinActivityGuard<'a> {
+    activity: &'a SharedCodexStdinActivityState,
+}
+
+impl<'a> SharedCodexStdinActivityGuard<'a> {
+    fn new(
+        activity: &'a SharedCodexStdinActivityState,
+        operation: &'static str,
+    ) -> SharedCodexStdinActivityGuard<'a> {
+        *activity
+            .lock()
+            .expect("shared Codex stdin activity mutex poisoned") = Some(SharedCodexStdinActivity {
+            operation,
+            started_at: std::time::Instant::now(),
+            timed_out: false,
+        });
+        SharedCodexStdinActivityGuard { activity }
+    }
+}
+
+impl Drop for SharedCodexStdinActivityGuard<'_> {
+    fn drop(&mut self) {
+        *self
+            .activity
+            .lock()
+            .expect("shared Codex stdin activity mutex poisoned") = None;
+    }
+}
+
+struct SharedCodexWatchedWriter<W> {
+    inner: W,
+    activity: SharedCodexStdinActivityState,
+}
+
+impl<W> SharedCodexWatchedWriter<W> {
+    fn new(inner: W, activity: SharedCodexStdinActivityState) -> Self {
+        SharedCodexWatchedWriter { inner, activity }
+    }
+}
+
+impl<W: Write> Write for SharedCodexWatchedWriter<W> {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        let _guard = SharedCodexStdinActivityGuard::new(&self.activity, "write");
+        self.inner.write(buf)
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        let _guard = SharedCodexStdinActivityGuard::new(&self.activity, "flush");
+        self.inner.flush()
+    }
+}
+
+fn shared_codex_stdin_timeout_detail(
+    operation: &'static str,
+    timeout: Duration,
+) -> String {
+    // Log the internal detail to stderr; return a generic user-facing message.
+    eprintln!(
+        "[termal] shared Codex writer thread blocked on stdin {operation} for over {}s",
+        timeout.as_secs()
+    );
+    "Agent communication timed out.".to_owned()
+}
+
+fn spawn_shared_codex_stdin_watchdog(
+    state: &AppState,
+    runtime_id: &str,
+    activity: &SharedCodexStdinActivityState,
+    stop_rx: mpsc::Receiver<()>,
+    timeout: Duration,
+    poll_interval: Duration,
+) -> Result<()> {
+    let watchdog_state = state.clone();
+    let watchdog_runtime_id = runtime_id.to_owned();
+    let watchdog_activity = activity.clone();
+    std::thread::Builder::new()
+        .name("termal-codex-stdin-watchdog".to_owned())
+        .spawn(move || loop {
+            match stop_rx.recv_timeout(poll_interval) {
+                Ok(_) | Err(mpsc::RecvTimeoutError::Disconnected) => break,
+                Err(mpsc::RecvTimeoutError::Timeout) => {}
+            }
+
+            let timed_out_operation = {
+                let mut locked = watchdog_activity
+                    .lock()
+                    .expect("shared Codex stdin activity mutex poisoned");
+                match locked.as_mut() {
+                    Some(entry)
+                        if !entry.timed_out && entry.started_at.elapsed() >= timeout =>
+                    {
+                        entry.timed_out = true;
+                        Some(entry.operation)
+                    }
+                    _ => None,
+                }
+            };
+
+            if let Some(operation) = timed_out_operation {
+                let detail = shared_codex_stdin_timeout_detail(operation, timeout);
+                let _ = watchdog_state
+                    .handle_shared_codex_runtime_exit(&watchdog_runtime_id, Some(&detail));
+                break;
+            }
+        })
+        .context("failed to spawn shared Codex stdin watchdog")?;
+    Ok(())
+}
+
 fn spawn_shared_codex_runtime(state: AppState) -> Result<SharedCodexRuntime> {
     // Codex threads carry their own cwd, so one shared app-server can serve all sessions.
     let codex_home = prepare_termal_codex_home(&state.default_workdir, "shared-app-server")?;
@@ -2197,8 +2318,18 @@ fn spawn_shared_codex_runtime(state: AppState) -> Result<SharedCodexRuntime> {
         let writer_runtime_id = runtime_id.clone();
         let writer_runtime_token = RuntimeToken::Codex(runtime_id.clone());
         let writer_input_tx = input_tx.clone();
+        let writer_activity: SharedCodexStdinActivityState = Arc::new(Mutex::new(None));
+        let (watchdog_stop_tx, watchdog_stop_rx) = mpsc::channel();
+        spawn_shared_codex_stdin_watchdog(
+            &writer_state,
+            &writer_runtime_id,
+            &writer_activity,
+            watchdog_stop_rx,
+            SHARED_CODEX_STDIN_WRITE_TIMEOUT,
+            SHARED_CODEX_STDIN_WATCHDOG_POLL_INTERVAL,
+        )?;
         std::thread::spawn(move || {
-            let mut stdin = stdin;
+            let mut stdin = SharedCodexWatchedWriter::new(stdin, writer_activity);
             let initialize_result = send_codex_json_rpc_request(
                 &mut stdin,
                 &writer_pending_requests,
@@ -2221,6 +2352,7 @@ fn spawn_shared_codex_runtime(state: AppState) -> Result<SharedCodexRuntime> {
 
             if let Err(err) = initialize_result {
                 drop(stdin);
+                let _ = watchdog_stop_tx.send(());
                 let _ = writer_state.handle_shared_codex_runtime_exit(
                     &writer_runtime_id,
                     Some(&format!(
@@ -2409,6 +2541,7 @@ fn spawn_shared_codex_runtime(state: AppState) -> Result<SharedCodexRuntime> {
             // Close the pipe before thread teardown so the child can observe EOF
             // promptly even if later cleanup work is refactored.
             drop(stdin);
+            let _ = watchdog_stop_tx.send(());
         });
     }
 
@@ -2799,15 +2932,16 @@ fn handle_shared_codex_prompt_command(
                         return;
                     }
                     Err(err) => {
-                        let detail = format!(
-                            "failed to persist shared Codex thread registration for session `{}`: {err:#}",
+                        eprintln!(
+                            "runtime state warning> failed to persist shared Codex thread \
+                             registration for session `{}`: {err:#}",
                             waiter_session_id
                         );
                         fail_shared_codex_turn_without_runtime_exit(
                             &waiter_state,
                             &waiter_session_id,
                             &waiter_runtime_id,
-                            &detail,
+                            "Failed to save session state. Check disk space and permissions.",
                             "persisting shared Codex thread registration",
                         );
                         return;
@@ -2911,14 +3045,15 @@ fn handle_shared_codex_start_turn(
             return Ok(());
         }
         Err(err) => {
-            let detail = format!(
-                "failed to persist shared Codex runtime config for session `{session_id}`: {err:#}"
+            eprintln!(
+                "runtime state warning> failed to persist shared Codex runtime config \
+                 for session `{session_id}`: {err:#}"
             );
             fail_shared_codex_turn_without_runtime_exit(
                 state,
                 session_id,
                 runtime_id,
-                &detail,
+                "Failed to save session state. Check disk space and permissions.",
                 "persisting shared Codex runtime config",
             );
             return Ok(());
@@ -4156,15 +4291,17 @@ fn truncate_child_stdout_log_line(line: &str, max_chars: usize) -> String {
 
 fn shared_codex_bad_json_streak_failure_detail(
     consecutive_bad_json_lines: usize,
-    line: &str,
+    _line: &str,
 ) -> Option<String> {
     if consecutive_bad_json_lines < SHARED_CODEX_MAX_CONSECUTIVE_BAD_JSON_LINES {
         return None;
     }
 
+    // Use a generic message for the user-facing failure detail.  Raw child
+    // stdout content is already logged to stderr per-line as it arrives and
+    // should not leak into persisted session state or SSE updates.
     Some(format!(
-        "shared Codex app-server wrote {consecutive_bad_json_lines} consecutive non-JSON stdout lines; last line preview: {}",
-        truncate_child_stdout_log_line(line, SHARED_CODEX_STDOUT_LOG_PREVIEW_MAX_CHARS)
+        "shared Codex app-server produced {consecutive_bad_json_lines} consecutive non-JSON stdout lines"
     ))
 }
 

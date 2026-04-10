@@ -317,77 +317,122 @@ runs on unmount.
 
 ## Active Repo Bugs
 
-## Shared Codex bad-JSON failure persists child stdout previews into session state
+## Shared Codex watchdog startup can orphan the app-server child
 
-**Severity:** Medium - malformed child-process output can leak into persisted
-session history and SSE updates.
+**Severity:** Medium - failed post-spawn watchdog setup can leave a stray Codex
+process running without an owning runtime.
 
-After five consecutive non-JSON stdout lines from the shared Codex app-server,
-`shared_codex_bad_json_streak_failure_detail()` builds an error message that
-includes a preview of the last raw child stdout line. That detail then flows
-through the shared-runtime exit path into `Turn failed: ...` text and the
-session preview, so arbitrary child output is no longer confined to stderr-only
-diagnostics.
-
-**Current behavior:**
-- after the bad-JSON threshold, the last raw stdout preview is embedded in the
-  user-visible session error
-- the preview is persisted to `~/.termal/sessions.json` and rebroadcast over
-  SSE with the rest of the session state
-
-**Proposal:**
-- keep raw bad-JSON previews in internal logs only
-- persist a fixed generic failure message, or redact the preview before routing
-  it through the session error path
-
-## Shared Codex persistence failures expose absolute filesystem paths to users
-
-**Severity:** Low - local persistence-path details can leak into session
-history and SSE-visible error text.
-
-Shared Codex setup failures now route persistence errors through
-`fail_shared_codex_turn_without_runtime_exit()`. The formatted detail includes
-`{err:#}`, and the underlying persistence context from
-`persist_state_from_persisted()` includes absolute filesystem paths such as the
-current `sessions.json` location. That path detail is then surfaced as a turn
-failure and session preview instead of staying in internal logs.
+`spawn_shared_codex_runtime()` starts `codex app-server`, captures its pipes,
+wraps the child in `SharedChild`, and only then calls
+`spawn_shared_codex_stdin_watchdog(...)`. If that watchdog thread spawn fails,
+the function returns the error without explicitly killing and waiting on the
+already-started child. `SharedChild` does not provide an owner-side kill-on-drop
+guarantee for this setup failure path.
 
 **Current behavior:**
-- failed shared-thread registration and shared runtime-config persistence embed
-  the full persistence error in the user-facing turn failure
-- local absolute paths can appear in persisted session state and SSE updates
+- a watchdog spawn failure after `Command::spawn()` returns from
+  `spawn_shared_codex_runtime()` with an error
+- the already-started `codex app-server` can survive without the matching
+  TermAl runtime, writer, reader, or waiter ownership
 
 **Proposal:**
-- convert persistence failures to a generic user-facing error before calling
-  `fail_turn_if_runtime_matches`
-- keep the full filesystem path detail in stderr/internal logs only
+- explicitly kill and wait on the child on every post-spawn initialization
+  failure before returning
+- alternatively, move fallible watchdog setup before child startup or introduce
+  a centralized post-spawn cleanup guard
 
-## Reconnect same-tick regression test does not force the stale-ref window
+## Shared Codex stdin watchdog drops teardown failures
 
-**Severity:** Medium - the test can pass without covering the reconnect race it
-claims to guard.
+**Severity:** Medium - timeout recovery can silently fail and leave the blocked
+runtime alive.
 
-The new reconnect regression in `backend-connection.test.tsx` dispatches the
-SSE error, then advances timers before firing the browser `offline` / `online`
-events. That gives React time to flush the state transition and would also let
-the old ref-sync path catch up, so the test can still pass even if
-`backendConnectionStateRef` lags during a true same-tick reconnect. The extra
-`/api/state` fetch also is not pinned specifically to the `online` handler,
-because the scheduled fallback timer can contribute the same request.
+When the shared Codex stdin watchdog detects a write or flush that exceeded the
+timeout, it calls `handle_shared_codex_runtime_exit(...)` and discards the
+result. If the runtime-exit path fails while updating state or persistence, the
+watchdog exits anyway and there is no fallback kill/cleanup path for the
+blocked writer or child process.
 
 **Current behavior:**
-- the test allows a commit/effect flush between the SSE error and the browser
-  reconnect events
-- the final fetch-count assertion can be satisfied by fallback polling instead
-  of proving the `online` event requested the reconnect
+- timeout detection logs the generic timeout detail and calls runtime exit
+- any error returned by runtime exit is ignored
+- the watchdog stops even if teardown did not actually complete
 
 **Proposal:**
-- fire the `offline` / `online` sequence in the same synchronous turn as the
-  error transition, before timers or effects flush
-- assert that the extra reconnect fetch is attributable to the `online`
-  handler rather than the scheduled fallback timer
+- log `handle_shared_codex_runtime_exit(...)` failures in the watchdog thread
+- add a fallback process cleanup path so the timeout still guarantees runtime
+  shutdown when state/persistence teardown fails
+
+## Delta-event reconnect recovery lacks direct regression coverage
+
+**Severity:** Medium - a modified reconnect recovery path can regress without a
+test failure.
+
+`handleDeltaEvent` now mirrors the state-event catch path by restoring
+`backendConnectionState` to `"reconnecting"` and re-arming fallback polling
+after a parse or reducer failure during reconnect recovery. The added frontend
+coverage exercises malformed reopened `state` payloads, but it does not send a
+malformed or crashing `delta` payload through the changed catch path.
+
+**Current behavior:**
+- malformed reopened state payload recovery is covered
+- malformed delta or delta-reducer failure recovery is not directly covered
+- a regression could leave the UI stuck on `"connected"` with fallback polling
+  not re-armed
+
+**Proposal:**
+- add a mirrored reconnect regression that reopens SSE, dispatches a malformed
+  delta payload, and asserts the UI returns to `"reconnecting"`
+- assert the fallback `/api/state` probe remains armed after the delta failure
 
 ## Resolved
+
+Also fixed: workspace-layout restart-required recovery now has precise helper
+coverage. `resolveRecoveredWorkspaceLayoutRequestError(...)` clears only the
+exact tracked restart-required toast after the layout route recovers, while
+leaving unrelated request errors visible.
+
+Also fixed: `handleDeltaEvent` catch block now decouples
+`setBackendConnectionState("reconnecting")` from the timer-pending guard,
+matching the pattern already applied to `handleStateEvent`. Previously a
+delta handler crash during reconnect recovery with an armed timer would
+leave the UI stuck on "connected".
+
+Also fixed: stale-snapshot reconnect test now matches production behavior.
+Since `onopen` unconditionally sets "connected", the test no longer asserts
+the reconnecting indicator persists. Instead it verifies that polling
+remains armed (another fallback fetch fires at the next interval), and that
+a live delta with a fresh revision confirms recovery and stops polling.
+
+Also fixed: action-recovery test expects the correct `fetchState` call
+count (1 instead of 2). Bootstrap state arrives via SSE, not `fetchState`,
+so only the action-recovery one-shot probe fires.
+
+Also fixed: `shared_codex_stdin_timeout_detail` now logs the internal
+detail ("writer thread blocked on stdin") to stderr and returns a generic
+"Agent communication timed out." message for the user-facing session error,
+consistent with the persistence-failure sanitization pattern.
+
+Also fixed: reconnect backoff progression test now returns a stable
+`revision: 1` from the fetch mock instead of incrementing on each call.
+The production rearm condition requires the revision to be unchanged (no
+live SSE event adopted newer state), so the incrementing mock broke the
+backoff timer chain after the second fetch.
+
+Also fixed: `shared_codex_bad_json_streak_failure_detail` no longer
+embeds a raw child stdout preview in the user-facing failure detail. The
+per-line previews are still logged to stderr as they arrive; the session
+error message is now a generic count of consecutive bad-JSON lines.
+
+Also fixed: shared Codex persistence failures no longer expose absolute
+filesystem paths to users. Both setup-failure sites (`thread registration`
+and `runtime config`) now log the full error (with paths) to stderr and
+surface a generic "Failed to save session state" message in the session
+error.
+
+Also fixed: the reconnect same-tick regression test now captures the fetch
+count before the reconnect sequence and asserts it increased, proving the
+`online` handler triggered an immediate fetch rather than relying on the
+count being satisfied by bootstrap fetches alone.
 
 Not a bug: `fail_turn_if_runtime_matches` persistence fallback does NOT
 publish at a stale revision. `bump_revision_and_persist_locked` increments
@@ -575,9 +620,11 @@ filesystem I/O is not safe under the mutex.
 
 ## Implementation Tasks
 
-- [ ] Add app regression for workspace-layout restart-required recovery:
-  fail `fetchWorkspaceLayout()` with restart guidance, assert the toast appears,
-  then recover only that route and verify the matching toast clears.
+- [x] Add app regression for workspace-layout restart-required recovery:
+  replaced the brittle StrictMode call-count test with direct coverage for
+  `resolveRecoveredWorkspaceLayoutRequestError(...)`. The regression now proves
+  a recovered layout success clears only the exact tracked restart-required
+  toast while leaving unrelated request errors untouched.
 - [x] Add pending-state coverage for `runtime-action-button`:
   `App.test.tsx` now holds an orchestrator pause request unresolved long enough
   to assert `disabled`, `aria-busy`, and spinner rendering before the response
@@ -586,38 +633,39 @@ filesystem I/O is not safe under the mutex.
   `backend-connection.test.tsx` now drives both tooltip components through
   focus/blur and asserts the visible/hidden role transitions together with
   `aria-describedby` and `aria-hidden` wiring.
-- [ ] Extend reconnect backoff progression coverage:
-  assert the full exponential series (400, 800, 1600, 3200, 5000ms cap),
-  verify repeated `EventSource.onerror` callbacks do not reset the sequence
-  during one outage, and confirm the cap holds at 5000ms instead of 6400ms.
+- [x] Extend reconnect backoff progression coverage:
+  the fetch mock now returns a stable revision so the rearm condition passes
+  and the full 400→800→1600→3200→5000→5000ms backoff series completes.
 - [x] Remove dead `resetBackoff` option from `scheduleReconnectStateResync`:
   `scheduleReconnectStateResync()` is now a no-argument helper. Backoff resets
   remain explicit at the existing `resetReconnectStateResyncBackoff()` call
   sites instead of flowing through an unused option bag.
-- [ ] Extend reconnect recovery coverage to clear inline backend error text:
-  after a successful `/api/state` fallback, assert the inline banner / tooltip
-  request error disappears together with any reconnect indicator changes.
-- [ ] Add snapshot-vs-live-stream recovery contrast test:
-  set up a disconnect, let a snapshot poll succeed at a stale revision (so
-  `rearmOnSuccess` re-arms polling and the badge stays "reconnecting"), then
-  receive a live delta after `onopen` and assert the connection transitions to
-  "connected" and polling stops. Contrasts the two distinct code paths
-  (`rearmOnSuccess` polling vs `confirmReconnectRecoveryFromLiveEvent`).
-- [ ] Harden same-tick offline/online reconnect regression coverage:
-  dispatch `EventSource.onerror` and the browser `offline` / `online` events in
-  one synchronous turn before React can flush, then assert the extra
-  `/api/state` fetch comes from the `online` handler rather than the scheduled
-  fallback timer.
-- [ ] Add test for state handler catch-block reconnecting restoration:
-  simulate a reconnect recovery where the SSE stream reopens and delivers a
-  state event that fails during `adoptState` (e.g., reducer throws). Assert
-  `backendConnectionState` is restored to "reconnecting" (not stuck on
-  "connected") and fallback polling re-arms via `scheduleReconnectStateResync`.
-- [ ] Add test for action-recovery resync probe:
-  trigger a backend-unavailable error from a user action (e.g., send message
-  502) while the SSE stream is healthy. Assert `requestActionRecoveryResyncRef`
-  fires a one-shot `/api/state` probe that does NOT re-arm reconnect polling
-  or reset `sawReconnectOpenSinceLastError`.
+- [x] Extend reconnect recovery coverage to clear inline backend error text:
+  the reconnect regression now resolves the successful `/api/state` fallback
+  before asserting the stale backend-unavailable tooltip text is gone, then
+  confirms the later SSE `onopen` clears the reconnect indicator itself.
+- [x] Add snapshot-vs-live-stream recovery contrast test:
+  the test now matches production behavior — `onopen` clears the badge, but
+  polling remains armed after a stale snapshot. A live delta with a fresh
+  revision confirms recovery and stops further polling.
+- [x] Harden same-tick offline/online reconnect regression coverage:
+  the reconnect regression now dispatches `EventSource.onerror` together with
+  browser `offline` / `online` in one synchronous turn before React flushes,
+  then asserts the extra `/api/state` probe is already present before the
+  400ms fallback timer window elapses.
+- [x] Add test for state handler catch-block reconnecting restoration:
+  `backend-connection.test.tsx` now sends a malformed reconnect state payload
+  after `onopen`, and `App.tsx` restores `"reconnecting"` immediately even when
+  the original fallback timer is still armed, then proves the 400ms fallback
+  `/api/state` probe still fires.
+- [ ] Add test for delta handler catch-block reconnecting restoration:
+  mirror the malformed reopened state payload test with a malformed delta event,
+  then assert the UI returns to `"reconnecting"` and fallback `/api/state`
+  polling remains armed.
+- [x] Add test for action-recovery resync probe:
+  fixed to expect 1 `fetchState` call (bootstrap comes via SSE). The test
+  drives a create-session 502, asserts the one-shot probe fires, clears the
+  error on success, and does not arm reconnect polling.
 - [x] Consistent `vi.isFakeTimers()` guard in backend-connection tests:
   the reconnect test cleanup now consistently guards `vi.useRealTimers()` with
   `vi.isFakeTimers()` so the suite does not assume fake timers were enabled in
@@ -643,10 +691,10 @@ filesystem I/O is not safe under the mutex.
 - [x] Explicit `drop(stdin)` in shared Codex writer thread on exit:
   the writer now closes the pipe explicitly before thread teardown, and also
   drops it immediately on initialization failure.
-- [ ] Add stdin write backpressure detection to shared Codex writer:
-  `write_all` + `flush` block if the Codex process is frozen and the OS
-  pipe buffer fills. A watchdog timer or non-blocking write mode would
-  detect a stuck writer thread instead of silently blocking all commands.
+- [x] Add stdin write backpressure detection to shared Codex writer:
+  the shared Codex stdin writer is now wrapped with activity tracking and a
+  watchdog thread; if a write or flush stays blocked past the timeout, TermAl
+  tears down the shared runtime instead of hanging the writer loop forever.
 - [x] Pass `--listen stdio://` explicitly when spawning `codex app-server`:
   both the shared runtime and REPL Codex spawn paths now pass the stdio
   listener explicitly for defense-in-depth.

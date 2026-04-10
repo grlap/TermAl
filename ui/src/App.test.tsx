@@ -19,6 +19,7 @@ import App, {
   describeCodexModelAdjustmentNotice,
   describeSessionModelRefreshError,
   getWorkspaceSplitResizeBounds,
+  resolveRecoveredWorkspaceLayoutRequestError,
   resolveAdoptedStateSlices,
   resolveControlPanelWorkspaceRoot,
   resolveControlSurfaceSectionIdForWorkspaceTab,
@@ -8545,6 +8546,121 @@ describe("App", () => {
     });
   });
 
+  it("uses a one-shot state probe after a backend-unavailable create-session error", async () => {
+    await withSuppressedActWarnings(async () => {
+      const originalEventSource = globalThis.EventSource;
+      const originalResizeObserver = globalThis.ResizeObserver;
+      const originalUrl = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+      const actionRecoveryDeferred =
+        createDeferred<Awaited<ReturnType<typeof api.fetchState>>>();
+      const fetchStateSpy = vi
+        .spyOn(api, "fetchState")
+        .mockImplementation(() => {
+          // Bootstrap state arrives via SSE, not fetchState, so the only
+          // call here is the action-recovery one-shot probe.
+          return actionRecoveryDeferred.promise;
+        });
+      const createSessionSpy = vi
+        .spyOn(api, "createSession")
+        .mockRejectedValue(
+          new api.ApiRequestError(
+            "backend-unavailable",
+            "The TermAl backend is unavailable.",
+            { status: 502 },
+          ),
+        );
+
+      vi.stubGlobal(
+        "EventSource",
+        EventSourceMock as unknown as typeof EventSource,
+      );
+      vi.stubGlobal(
+        "ResizeObserver",
+        ResizeObserverMock as unknown as typeof ResizeObserver,
+      );
+      const scrollIntoViewSpy = stubScrollIntoView();
+
+      try {
+        await renderApp();
+
+        const eventSource = latestEventSource();
+        act(() => {
+          eventSource.dispatchOpen();
+        });
+        await settleAsyncUi();
+
+        expect(
+          screen.queryByLabelText("Control panel backend connecting"),
+        ).toBeNull();
+        expect(
+          screen.queryByLabelText("Control panel backend reconnecting"),
+        ).toBeNull();
+        expect(screen.queryByLabelText("Control panel issue")).toBeNull();
+
+        await openCreateSessionDialog();
+        await settleAsyncUi();
+        await submitButtonAndSettle(
+          screen.getByRole("button", { name: "Create session" }),
+        );
+
+        await waitFor(() => {
+          expect(createSessionSpy).toHaveBeenCalledTimes(1);
+          expect(fetchStateSpy).toHaveBeenCalledTimes(1);
+        });
+        expect(
+          await screen.findByText("The TermAl backend is unavailable."),
+        ).toBeInTheDocument();
+        expect(
+          screen.queryByLabelText("Control panel backend reconnecting"),
+        ).toBeNull();
+
+        await act(async () => {
+          actionRecoveryDeferred.resolve(
+            makeStateResponse({
+              revision: 2,
+              projects: [],
+              orchestrators: [],
+              workspaces: [],
+              sessions: [],
+            }),
+          );
+          await flushUiWork();
+        });
+
+        await waitFor(() => {
+          expect(
+            screen.queryByText("The TermAl backend is unavailable."),
+          ).toBeNull();
+        });
+        expect(screen.queryByLabelText("Control panel issue")).toBeNull();
+        expect(
+          screen.queryByLabelText("Control panel backend connecting"),
+        ).toBeNull();
+        expect(
+          screen.queryByLabelText("Control panel backend reconnecting"),
+        ).toBeNull();
+        expect(
+          screen.queryByLabelText("Control panel backend offline"),
+        ).toBeNull();
+
+        vi.useFakeTimers();
+        await advanceTimers(5000);
+        expect(fetchStateSpy).toHaveBeenCalledTimes(1);
+        expect(
+          screen.queryByLabelText("Control panel backend reconnecting"),
+        ).toBeNull();
+      } finally {
+        window.history.replaceState(window.history.state, "", originalUrl);
+        window.localStorage.clear();
+        scrollIntoViewSpy.mockRestore();
+        fetchStateSpy.mockRestore();
+        createSessionSpy.mockRestore();
+        restoreGlobal("EventSource", originalEventSource);
+        restoreGlobal("ResizeObserver", originalResizeObserver);
+      }
+    });
+  });
+
   it("resyncs on the first wake-gap tick for a newly created active session before any SSE arrives", async () => {
     await withSuppressedActWarnings(async () => {
       const originalEventSource = globalThis.EventSource;
@@ -12766,6 +12882,37 @@ describe("App", () => {
     }
   });
 
+  it("clears the tracked workspace-layout restart-required notice after recovery", () => {
+    const restartMessage =
+      "The running backend does not expose /api/workspaces/test-layout-restart-recovery (HTTP 200). Restart TermAl so the latest API routes are loaded.";
+
+    expect(
+      resolveRecoveredWorkspaceLayoutRequestError(
+        restartMessage,
+        restartMessage,
+      ),
+    ).toBeNull();
+  });
+
+  it("preserves unrelated request errors when a workspace layout recovers", () => {
+    const restartMessage =
+      "The running backend does not expose /api/workspaces/test-layout-restart-recovery (HTTP 200). Restart TermAl so the latest API routes are loaded.";
+    const unrelatedError = "Could not refresh projects.";
+
+    expect(
+      resolveRecoveredWorkspaceLayoutRequestError(
+        unrelatedError,
+        restartMessage,
+      ),
+    ).toBe(unrelatedError);
+    expect(
+      resolveRecoveredWorkspaceLayoutRequestError(
+        unrelatedError,
+        null,
+      ),
+    ).toBe(unrelatedError);
+  });
+
   it("clamps a saved docked control panel layout up to the current minimum width", async () => {
     const originalFetch = globalThis.fetch;
     const originalEventSource = globalThis.EventSource;
@@ -14241,4 +14388,3 @@ describe("App", () => {
     expect(secondAttempt.warning).toBeNull();
   });
 });
-

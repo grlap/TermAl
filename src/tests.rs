@@ -154,7 +154,11 @@ fn shared_codex_bad_json_streak_failure_detail_trips_at_threshold() {
         "{} consecutive non-JSON stdout lines",
         SHARED_CODEX_MAX_CONSECUTIVE_BAD_JSON_LINES
     )));
-    assert!(detail.ends_with("..."));
+    // The user-facing detail must NOT include the raw child stdout preview.
+    assert!(
+        !detail.contains("xxx"),
+        "raw child stdout content should not appear in user-facing failure detail"
+    );
 }
 
 impl TurnRecorder for TestRecorder {
@@ -1065,6 +1069,22 @@ impl std::io::Write for SharedBufferWriter {
     fn flush(&mut self) -> std::io::Result<()> {
         Ok(())
     }
+}
+
+#[test]
+fn shared_codex_watched_writer_clears_activity_after_successful_write() {
+    let activity: SharedCodexStdinActivityState = Arc::new(Mutex::new(None));
+    let mut writer = SharedCodexWatchedWriter::new(SharedBufferWriter::default(), activity.clone());
+
+    write_codex_json_rpc_message(&mut writer, &json_rpc_notification_message("initialized"))
+        .expect("tracked shared Codex writer should write successfully");
+
+    assert!(
+        activity
+            .lock()
+            .expect("shared Codex stdin activity mutex poisoned")
+            .is_none()
+    );
 }
 
 fn take_pending_acp_request(
@@ -12535,14 +12555,14 @@ fn shared_codex_thread_setup_persist_failure_does_not_tear_down_runtime() {
         .expect("updated session should be present");
     assert_eq!(session.status, SessionStatus::Error);
     assert!(
-        session
-            .preview
-            .contains("failed to persist shared Codex thread registration")
+        session.preview.contains("Failed to save session state"),
+        "persistence-failure preview should use generic message, got: {}",
+        session.preview,
     );
     assert!(matches!(
         session.messages.last(),
         Some(Message::Text { text, .. })
-            if text.contains("Turn failed: failed to persist shared Codex thread registration")
+            if text.contains("Turn failed: Failed to save session state")
     ));
     assert!(
         !runtime
@@ -12767,14 +12787,14 @@ fn shared_codex_start_turn_persist_failure_does_not_tear_down_runtime() {
         .expect("updated session should be present");
     assert_eq!(session.status, SessionStatus::Error);
     assert!(
-        session
-            .preview
-            .contains("failed to persist shared Codex runtime config")
+        session.preview.contains("Failed to save session state"),
+        "persistence-failure preview should use generic message, got: {}",
+        session.preview,
     );
     assert!(matches!(
         session.messages.last(),
         Some(Message::Text { text, .. })
-            if text.contains("Turn failed: failed to persist shared Codex runtime config")
+            if text.contains("Turn failed: Failed to save session state")
     ));
 
     let _ = fs::remove_dir_all(failing_persistence_path);
@@ -15462,14 +15482,109 @@ fn shared_codex_runtime_exit_clears_state_and_kills_process() {
     assert!(matches!(record.runtime, SessionRuntime::None));
     drop(inner);
 
+    let _ = process.kill();
+    let _ = wait_for_shared_child_exit_timeout(
+        &process,
+        Duration::from_secs(3),
+        "shared Codex runtime",
+    );
+
+    let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
+#[test]
+fn shared_codex_stdin_watchdog_times_out_stalled_writer_and_clears_runtime() {
+    let state = test_app_state();
+    let session_id = test_session_id(&state, Agent::Codex);
+    let process = Arc::new(SharedChild::new(test_sleep_child()).unwrap());
+    let (input_tx, _input_rx) = mpsc::channel();
+    let runtime = SharedCodexRuntime {
+        runtime_id: "shared-codex-stdin-watchdog".to_owned(),
+        input_tx,
+        process: process.clone(),
+        sessions: SharedCodexSessions::new(),
+        thread_sessions: Arc::new(Mutex::new(HashMap::new())),
+    };
+    let handle = CodexRuntimeHandle {
+        runtime_id: runtime.runtime_id.clone(),
+        input_tx: runtime.input_tx.clone(),
+        process: process.clone(),
+        shared_session: Some(SharedCodexSessionHandle {
+            runtime: runtime.clone(),
+            session_id: session_id.clone(),
+        }),
+    };
+
+    {
+        let mut shared_runtime = state
+            .shared_codex_runtime
+            .lock()
+            .expect("shared Codex runtime mutex poisoned");
+        *shared_runtime = Some(runtime.clone());
+    }
+
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(&session_id)
+            .expect("Codex session should exist");
+        inner.sessions[index].runtime = SessionRuntime::Codex(handle);
+        inner.sessions[index].session.status = SessionStatus::Active;
+        inner.sessions[index].session.preview = "Streaming reply...".to_owned();
+    }
+
+    let activity: SharedCodexStdinActivityState =
+        Arc::new(Mutex::new(Some(SharedCodexStdinActivity {
+            operation: "flush",
+            started_at: std::time::Instant::now() - Duration::from_millis(50),
+            timed_out: false,
+        })));
+    let (_stop_tx, stop_rx) = mpsc::channel();
+    spawn_shared_codex_stdin_watchdog(
+        &state,
+        &runtime.runtime_id,
+        &activity,
+        stop_rx,
+        Duration::from_millis(10),
+        Duration::from_millis(5),
+    )
+    .expect("shared Codex stdin watchdog should spawn");
+
+    let deadline = std::time::Instant::now() + Duration::from_secs(1);
+    loop {
+        let cleared = state
+            .shared_codex_runtime
+            .lock()
+            .expect("shared Codex runtime mutex poisoned")
+            .is_none();
+        if cleared {
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "shared Codex stdin watchdog should tear down the stalled runtime"
+        );
+        std::thread::sleep(Duration::from_millis(5));
+    }
+
+    let snapshot = state.snapshot();
+    let session = snapshot
+        .sessions
+        .iter()
+        .find(|session| session.id == session_id)
+        .expect("Codex session should remain present");
+    assert_eq!(session.status, SessionStatus::Error);
     assert!(
-        wait_for_shared_child_exit_timeout(
-            &process,
-            Duration::from_secs(1),
-            "shared Codex runtime"
-        )
-        .expect("wait for shared Codex runtime should succeed")
-        .is_some()
+        session.preview.contains("Agent communication timed out"),
+        "watchdog timeout should use generic message, got: {}",
+        session.preview,
+    );
+
+    let _ = process.kill();
+    let _ = wait_for_shared_child_exit_timeout(
+        &process,
+        Duration::from_secs(3),
+        "shared Codex runtime",
     );
 
     let _ = fs::remove_file(state.persistence_path.as_path());

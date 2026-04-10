@@ -389,6 +389,19 @@ function describeBackendConnectionIssueDetail(error: unknown) {
   return BACKEND_SYNC_ISSUE_DETAIL;
 }
 
+export function resolveRecoveredWorkspaceLayoutRequestError(
+  currentRequestError: string | null,
+  workspaceLayoutRestartErrorMessage: string | null,
+) {
+  if (workspaceLayoutRestartErrorMessage === null) {
+    return currentRequestError;
+  }
+
+  return currentRequestError === workspaceLayoutRestartErrorMessage
+    ? null
+    : currentRequestError;
+}
+
 // Re-exported from ./types for backward compatibility
 export type { SessionSettingsField, SessionSettingsValue } from "./types";
 type SessionErrorMap = Record<string, string | undefined>;
@@ -2969,12 +2982,11 @@ export default function App() {
           // connected without a usable snapshot. Restore "reconnecting" so the
           // retry affordance stays available (onopen already set "connected"),
           // and re-arm fallback polling so recovery continues via /api/state.
-          if (
-            sawReconnectOpenSinceLastError &&
-            reconnectStateResyncTimeoutId === null
-          ) {
+          if (sawReconnectOpenSinceLastError) {
             setBackendConnectionState("reconnecting");
-            scheduleReconnectStateResync();
+            if (reconnectStateResyncTimeoutId === null) {
+              scheduleReconnectStateResync();
+            }
           }
         }
       } finally {
@@ -3069,12 +3081,11 @@ export default function App() {
       } catch {
         // Parse or reducer failure — restore reconnecting state so the retry
         // affordance stays available, and re-arm polling.
-        if (
-          sawReconnectOpenSinceLastError &&
-          reconnectStateResyncTimeoutId === null
-        ) {
+        if (sawReconnectOpenSinceLastError) {
           setBackendConnectionState("reconnecting");
-          scheduleReconnectStateResync();
+          if (reconnectStateResyncTimeoutId === null) {
+            scheduleReconnectStateResync();
+          }
         } else {
           requestStateResync({ rearmOnFailure: true });
         }
@@ -3381,7 +3392,10 @@ export default function App() {
         if (staleRestartMessage !== null) {
           workspaceLayoutRestartErrorMessageRef.current = null;
           setRequestError((current) =>
-            current === staleRestartMessage ? null : current,
+            resolveRecoveredWorkspaceLayoutRequestError(
+              current,
+              staleRestartMessage,
+            ),
           );
         }
         workspaceLayoutLoadPendingRef.current = false;
