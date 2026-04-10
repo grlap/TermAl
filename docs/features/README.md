@@ -13,6 +13,7 @@ Use the files here for the detailed feature design and implementation notes.
 - [Slash Commands](./slash-commands.md)
 - [Gemini CLI Integration](./gemini-cli-integration.md)
 - [Diff Review Workflow](./diff-review-workflow.md)
+- [File Change Awareness](./file-change-awareness.md)
 - [Concurrent Session Link Cards](./concurrent-session-link-cards.md)
 - [Instruction Debugger](./instruction-debugger.md)
 - [Territory Visualization](./territory-visualization.md)
