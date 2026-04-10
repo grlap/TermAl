@@ -316,7 +316,7 @@ import {
 } from "./session-list-filter";
 import {
   decideDeltaRevisionAction,
-  shouldAdoptStateRevision,
+  shouldAdoptSnapshotRevision,
 } from "./state-revision";
 import {
   TAB_DRAG_CHANNEL_NAME,
@@ -967,18 +967,14 @@ export default function App() {
     initialBackendConnectionState,
   );
   const setBackendConnectionState = useCallback(
-    (
-      next:
-        | BackendConnectionState
-        | ((current: BackendConnectionState) => BackendConnectionState),
-    ) => {
+    (next: BackendConnectionState) => {
+      // Write the ref eagerly so same-tick online/offline handlers observe the
+      // next connection state before React commits.
+      backendConnectionStateRef.current = next;
       setBackendConnectionStateRaw(next);
     },
     [],
   );
-  useLayoutEffect(() => {
-    backendConnectionStateRef.current = backendConnectionState;
-  }, [backendConnectionState]);
   const [sessionListFilter, setSessionListFilter] =
     useState<SessionListFilter>("all");
   const [sessionListSearchQuery, setSessionListSearchQuery] = useState("");
@@ -1716,25 +1712,36 @@ export default function App() {
           : [];
       }),
     );
+    // Avoid rewriting workspace state when an adopted snapshot preserves the
+    // same reconciled sessions. Workspace autosave is keyed off `workspace`
+    // identity, so an identity-only rewrite here can create a loop:
+    // workspace PUT -> SSE state snapshot -> adoptSessions -> workspace save.
+    const shouldReconcileWorkspace =
+      mergedSessions !== previousSessions || Boolean(options?.openSessionId);
 
     sessionsRef.current = mergedSessions;
     setSessions(mergedSessions);
-    setWorkspace((current) => {
-      const reconciled = applyControlPanelLayout(
-        reconcileWorkspaceState(current, mergedSessions),
-      );
-      if (!options?.openSessionId) {
-        return reconciled;
-      }
+    if (shouldReconcileWorkspace) {
+      setWorkspace((current) => {
+        const reconciled =
+          mergedSessions !== previousSessions
+            ? applyControlPanelLayout(
+                reconcileWorkspaceState(current, mergedSessions),
+              )
+            : current;
+        if (!options?.openSessionId) {
+          return reconciled;
+        }
 
-      return applyControlPanelLayout(
-        openSessionInWorkspaceState(
-          reconciled,
-          options.openSessionId,
-          options.paneId ?? null,
-        ),
-      );
-    });
+        return applyControlPanelLayout(
+          openSessionInWorkspaceState(
+            reconciled,
+            options.openSessionId,
+            options.paneId ?? null,
+          ),
+        );
+      });
+    }
     setDraftsBySessionId((current) =>
       pruneSessionValues(current, availableSessionIds),
     );
@@ -2243,26 +2250,11 @@ export default function App() {
     }
 
     if (
-      !options?.force &&
-      !shouldAdoptStateRevision(
+      !shouldAdoptSnapshotRevision(
         latestStateRevisionRef.current,
         nextState.revision,
+        options,
       )
-    ) {
-      return false;
-    }
-
-    // Guard against force-adoption downgrading the held revision unless
-    // the caller explicitly allows it (backend restart rollback). The SSE
-    // state event sets `force` to handle equal-revision reconnects, but a
-    // /api/state fetch or delta may have already advanced the client past
-    // the SSE snapshot. Adopting a lower revision would drop messages that
-    // were applied via deltas between the snapshot and now.
-    if (
-      options?.force &&
-      !options?.allowRevisionDowngrade &&
-      latestStateRevisionRef.current !== null &&
-      nextState.revision < latestStateRevisionRef.current
     ) {
       return false;
     }
@@ -2370,11 +2362,8 @@ export default function App() {
 
   useEffect(() => {
     function handleBrowserOnline() {
-      // Read the current connection state from the ref instead of relying on
-      // a side-effect inside the setBackendConnectionState updater. React 18
-      // does not guarantee eager evaluation of functional updaters, so the
-      // previous pattern (capturing shouldRequestReconnect inside the updater)
-      // could skip the reconnect request when the browser comes back online.
+      // Keep reconnect decisions in sync with the same ref-backed state path
+      // that all backend connection transitions use.
       const currentConnectionState = backendConnectionStateRef.current;
       const shouldRequestReconnect = currentConnectionState !== "connected";
       if (shouldRequestReconnect) {
@@ -2513,16 +2502,11 @@ export default function App() {
       setBackendConnectionState("connected");
     }
 
-    function scheduleReconnectStateResync(options?: {
-      resetBackoff?: boolean;
-    }) {
+    function scheduleReconnectStateResync() {
       // Preserve any reopen proof until a real EventSource.onerror starts a new
       // outage cycle. Otherwise a bad post-reopen event can arm fallback polling
       // and strand the client in "reconnecting" even when later events on the
       // same socket are healthy.
-      if (options?.resetBackoff) {
-        resetReconnectStateResyncBackoff();
-      }
       clearReconnectStateResyncTimeout();
       const delayMs = consumeReconnectStateResyncDelayMs();
       reconnectStateResyncTimeoutId = window.setTimeout(() => {
@@ -2935,13 +2919,6 @@ export default function App() {
 
       try {
         const state = JSON.parse(event.data) as StateEventPayload;
-        console.debug(
-          "[termal:sse] state event rev=%d current=%s force=%s fallback=%s",
-          state.revision,
-          latestStateRevisionRef.current,
-          forceAdoptNextStateEventRef.current,
-          state._sseFallback ?? false,
-        );
         if (state._sseFallback) {
           // Marked fallback payloads only signal that the client should refetch
           // the authoritative snapshot from /api/state.
@@ -3018,13 +2995,6 @@ export default function App() {
           latestStateRevisionRef.current,
           delta.revision,
         );
-        console.debug(
-          "[termal:sse] delta event type=%s rev=%d current=%s action=%s",
-          delta.type,
-          delta.revision,
-          latestStateRevisionRef.current,
-          revisionAction,
-        );
         if (revisionAction === "ignore") {
           // An ignored delta proves the client already has data at this
           // revision or newer — the snapshot that advanced the revision was
@@ -3076,15 +3046,6 @@ export default function App() {
         // Non-session deltas such as orchestratorsUpdated are handled above; the
         // session reducer only accepts deltas that carry a concrete sessionId.
         const result = applyDeltaToSessions(sessionsRef.current, delta);
-        if (result.kind !== "applied") {
-          console.debug(
-            "[termal:sse] delta NOT applied: kind=%s type=%s session=%s rev=%d",
-            result.kind,
-            delta.type,
-            "sessionId" in delta ? delta.sessionId : "?",
-            delta.revision,
-          );
-        }
         if (result.kind === "applied") {
           confirmReconnectRecoveryFromLiveEvent();
           const appliedAt = Date.now();

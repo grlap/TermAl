@@ -297,6 +297,28 @@ describe("fetchWorkspaceLayout", () => {
     globalThis.fetch = originalFetch;
   });
 
+  it("returns null for JSON 404 responses", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ error: "layout missing" }), {
+        status: 404,
+        headers: {
+          "Content-Type": "application/json",
+        },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(fetchWorkspaceLayout("workspace/one two")).resolves.toBeNull();
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/workspaces/workspace%2Fone%20two",
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          "Content-Type": "application/json",
+        }),
+      }),
+    );
+  });
+
   it("treats HTML 404 fallbacks as restart-required backend errors", async () => {
     expect.assertions(5);
     vi.stubGlobal(

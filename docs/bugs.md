@@ -317,147 +317,179 @@ runs on unmount.
 
 ## Active Repo Bugs
 
-## `backendConnectionStateRef` can miss reconnects while React state is between commits
+## Shared Codex bad-JSON failure persists child stdout previews into session state
 
-**Severity:** High - browser-online recovery can stall until a later event.
+**Severity:** Medium - malformed child-process output can leak into persisted
+session history and SSE updates.
 
-`backendConnectionStateRef` is now synchronized from `backendConnectionState`
-inside `useLayoutEffect`, but `handleBrowserOnline()` still reads the ref
-synchronously to decide whether to request a reconnect. That leaves a window
-after `setBackendConnectionState(...)` where the committed state is still
-catching up and the ref reports the previous value.
-
-**Current behavior:**
-- if the browser comes back online during the state-to-ref gap,
-  `handleBrowserOnline()` can conclude the app is already connected
-  and skip the reconnect request
-- the UI can then stay stuck until a later SSE or polling event happens
-
-**Proposal:**
-- keep the ref in lockstep with the state transition path that online/offline
-  handlers use, or stop making reconnect decisions from a synchronously read ref
-- add a regression that fires `online` in the same turn as the state transition
-
-## Shared Codex reader suppresses real app-server state/persistence failures
-
-**Severity:** High - internal failures can be hidden while sessions stay half-mutated.
-
-The shared Codex reader now logs and ignores every `Err` returned by
-`handle_shared_codex_app_server_message`. That is correct for stale-session
-cases like "session not found", but the same path can also surface real
-commit, persistence, or internal state-update failures. Those errors should not
-be downgraded to a benign warning.
+After five consecutive non-JSON stdout lines from the shared Codex app-server,
+`shared_codex_bad_json_streak_failure_detail()` builds an error message that
+includes a preview of the last raw child stdout line. That detail then flows
+through the shared-runtime exit path into `Turn failed: ...` text and the
+session preview, so arbitrary child output is no longer confined to stderr-only
+diagnostics.
 
 **Current behavior:**
-- commit or persistence failures are logged and skipped instead of failing
-  the affected runtime/session
-- the runtime can continue running with partially applied state and no clear
-  recovery path for the user
+- after the bad-JSON threshold, the last raw stdout preview is embedded in the
+  user-visible session error
+- the preview is persisted to `~/.termal/sessions.json` and rebroadcast over
+  SSE with the rest of the session state
 
 **Proposal:**
-- distinguish expected stale-session/runtime-mismatch errors from real
-  internal failures
-- keep skipping the former, but route the latter through the existing
-  runtime-exit or session-failure path
+- keep raw bad-JSON previews in internal logs only
+- persist a fixed generic failure message, or redact the preview before routing
+  it through the session error path
 
-## Shared Codex setup helpers swallow persistence failures as stale-session misses
+## Shared Codex persistence failures expose absolute filesystem paths to users
 
-**Severity:** Medium - prompt setup can fail silently while leaving stale runtime state behind.
+**Severity:** Low - local persistence-path details can leak into session
+history and SSE-visible error text.
 
-`set_external_session_id_if_runtime_matches` and
-`record_codex_runtime_config_if_runtime_matches` can fail after mutating
-in-memory state. Their callers now treat any `Err` as if the session simply
-vanished or no longer matched the runtime token, which collapses a real
-persistence failure into a silent no-op.
+Shared Codex setup failures now route persistence errors through
+`fail_shared_codex_turn_without_runtime_exit()`. The formatted detail includes
+`{err:#}`, and the underlying persistence context from
+`persist_state_from_persisted()` includes absolute filesystem paths such as the
+current `sessions.json` location. That path detail is then surfaced as a turn
+failure and session preview instead of staying in internal logs.
 
 **Current behavior:**
-- thread setup or turn handoff can drop the user's prompt without surfacing
-  the persistence error
-- in-memory state may already be partly updated even though the operation
-  reports success to the caller
+- failed shared-thread registration and shared runtime-config persistence embed
+  the full persistence error in the user-facing turn failure
+- local absolute paths can appear in persisted session state and SSE updates
 
 **Proposal:**
-- return a distinct outcome for lookup/runtime-mismatch versus commit/persist failure
-- fail the session/runtime on commit or persistence errors instead of swallowing them
+- convert persistence failures to a generic user-facing error before calling
+  `fail_turn_if_runtime_matches`
+- keep the full filesystem path detail in stderr/internal logs only
 
-## Paginated Codex model refresh can hang until timeout if the continuation cannot queue
+## Reconnect same-tick regression test does not force the stale-ref window
 
-**Severity:** Medium - model refresh can appear frozen for 30 seconds before failing.
+**Severity:** Medium - the test can pass without covering the reconnect race it
+claims to guard.
 
-`fire_codex_model_list_page()` enqueues a follow-up `RefreshModelListPage`
-command when the app-server returns `nextCursor`, but it currently ignores the
-result of that `send()`. If the writer thread has already exited or is
-shutting down, the continuation is dropped and the original response channel
-is never resolved.
+The new reconnect regression in `backend-connection.test.tsx` dispatches the
+SSE error, then advances timers before firing the browser `offline` / `online`
+events. That gives React time to flush the state transition and would also let
+the old ref-sync path catch up, so the test can still pass even if
+`backendConnectionStateRef` lags during a true same-tick reconnect. The extra
+`/api/state` fetch also is not pinned specifically to the `online` handler,
+because the scheduled fallback timer can contribute the same request.
 
 **Current behavior:**
-- multi-page model refresh can sit until the 30-second caller timeout even
-  though the runtime has already lost the continuation
-- the user sees a hung refresh instead of a prompt failure
+- the test allows a commit/effect flush between the SSE error and the browser
+  reconnect events
+- the final fetch-count assertion can be satisfied by fallback polling instead
+  of proving the `online` event requested the reconnect
 
 **Proposal:**
-- check the enqueue result for the follow-up page request
-- on failure, immediately resolve the original response channel with an error
-  or route it through the runtime-exit path
-
-## `completed_turn_id` keeps stale turn state alive indefinitely after turn completion
-
-**Severity:** Medium - memory leak per turn and unbounded late-event acceptance window.
-
-After `turn/completed`, `completed_turn_id` is set but `clear_codex_turn_state`
-is deliberately not called (to accept late final-output events). The turn state
-(`streamed_agent_message_text_by_item_id`, `streamed_agent_message_item_ids`,
-etc.) persists until the next `turn/started` or error — an unbounded window.
-During that window, stale turn state accumulates memory and a replayed event
-matching the completed turn ID is silently accepted.
-
-**Current behavior:**
-- turn state maps grow with each completed turn and are only cleared on the
-  next turn start
-- a stray or replayed event from a completed turn is accepted without bound
-
-**Proposal:**
-- clear `completed_turn_id` and call `clear_codex_turn_state` after a bounded
-  lifetime (e.g. N seconds or after the first non-agentMessage event)
-- alternatively, clear on the next state adoption or the next `turn/started`
-  for any session on the same thread
-
-## `JsonRpcNotification` omits `"jsonrpc": "2.0"` version field
-
-**Severity:** Medium - new `shutdown` notification may be silently rejected by a strict Codex app-server.
-
-`CodexRuntimeCommand::JsonRpcNotification` writes `{"method": ...}` without
-the `"jsonrpc": "2.0"` field required by the JSON-RPC 2.0 spec. The existing
-`initialized` notification follows the same pattern and works empirically, but
-a future app-server version with strict validation could reject the frame.
-
-**Current behavior:**
-- `shutdown` notification is sent as `{"method":"shutdown"}` without the
-  version field
-- empirically accepted by the current Codex app-server
-
-**Proposal:**
-- add `"jsonrpc": "2.0"` to the notification JSON, and audit existing
-  notifications (`initialized`) for the same omission
-
-## SSE hot path now emits unconditional `console.debug` noise
-
-**Severity:** Low - high-volume sessions pay avoidable logging overhead in the browser.
-
-Three new `console.debug` calls were added directly in the SSE `state` and
-`delta` event handlers. Those paths run for every streamed event, so the extra
-string formatting and console work will accumulate on busy sessions and clutter
-production logs.
-
-**Current behavior:**
-- streamed sessions emit debug lines for normal state/delta traffic
-- browser consoles become noisy and the hot path does extra work in production
-
-**Proposal:**
-- remove the logs before merge, or gate them behind an explicit dev-only flag
-- keep any retained diagnostics off the per-event hot path
+- fire the `offline` / `online` sequence in the same synchronous turn as the
+  error transition, before timers or effects flush
+- assert that the extra reconnect fetch is attributable to the `online`
+  handler rather than the scheduled fallback timer
 
 ## Resolved
+
+Not a bug: `fail_turn_if_runtime_matches` persistence fallback does NOT
+publish at a stale revision. `bump_revision_and_persist_locked` increments
+`inner.revision` (line 869) *before* calling `persist_internal_locked`,
+so when persistence fails and `commit_locked` returns `Err`, the in-memory
+revision is already advanced. The fallback `publish_state_locked` publishes
+at the bumped revision, which SSE clients adopt normally. The regression
+test at `tests.rs:15298` asserts `snapshot.revision == baseline_revision + 1`
+and at line 15317 confirms the published SSE event carries the same
+advanced revision.
+
+Also fixed: `api.test.ts` JSON 404 test assertion corrected from
+`Accept: "application/json"` to `"Content-Type": "application/json"` to
+match what `performRequest` actually sends.
+
+Also fixed: ACP `session/set_config_option` requests now include
+`"jsonrpc": "2.0"`. Both inline construction sites (`state.rs`, model
+option and cursor mode) now emit the required version field.
+
+Also fixed: ACP JSON-RPC responses now include `"jsonrpc": "2.0"`. The three
+missing sites — automatic approval (`runtime.rs`), unsupported-method error
+(`runtime.rs`), and user-initiated approval (`state.rs`) — now emit the
+required version field, matching the systematic Codex fix.
+
+Also fixed: `fail_turn_if_runtime_matches` now publishes state to the
+frontend even when persistence fails. Previously a disk error during
+`commit_locked` would leave in-memory state updated (status → Error,
+error message pushed) but never published, so the frontend would stay
+stuck showing an active turn.
+
+Also fixed: the shared Codex stdout line cap was raised from 64 KB to
+16 MB. Legitimate large JSON-RPC payloads (e.g. `aggregatedOutput` from
+long command executions) can easily exceed 64 KB. The drain-and-skip
+behavior for lines exceeding the cap still protects against pathological
+no-newline streams.
+
+Also fixed: the `backendConnectionStateRef` lockstep regression now has a
+passing fake-timer test. The reconnect test advances fake timers explicitly
+instead of waiting on a frozen `waitFor(...)` polling interval.
+
+Also fixed: `shared_codex_app_server_error_is_stale_session` now matches only
+the exact `session `{id}` not found` shape. Sub-entity misses such as
+`message `{id}` not found` and `anchor message `{id}` not found` are no longer
+downgraded to benign stale-session noise.
+
+Also fixed: persistence failures while registering a shared Codex thread or
+recording shared-runtime config no longer tear down the entire shared Codex
+runtime. Those failures now stay session-scoped and only attempt to fail the
+affected turn.
+
+Also fixed: shared Codex completed-turn cleanup now runs through a single
+runtime-owned cleanup worker instead of spawning one detached sleeper thread
+per completed turn. Cleanup work naturally stops when the shared session map
+is dropped.
+
+Also fixed: the eager `backendConnectionStateRef` write in
+`setBackendConnectionState(...)` now fully replaces the old layout-effect sync
+path. The redundant `useLayoutEffect` mirror was removed and the eager write
+is documented inline.
+
+Also fixed: REPL-mode Codex app-server responses now route through the shared
+JSON-RPC response formatter, so result frames include `"jsonrpc": "2.0"` along
+with the already-audited shared-runtime request/response sites.
+
+Also fixed: oversized JSON-RPC lines on shared Codex app-server stdout no
+longer tear down the shared runtime. `read_capped_child_stdout_line` now
+drains lines that exceed the 64 KB safety cap and discards them with a
+stderr warning, keeping the reader aligned with the next newline-delimited
+message. Previously a legitimate large payload (e.g. `aggregatedOutput`
+from a long `git diff` or build log) would trip the cap and kill every
+attached session.
+
+Also fixed: `backendConnectionStateRef` now stays in lockstep with
+`setBackendConnectionState(...)` so back-to-back `offline` / `online` events
+cannot skip the reconnect request before `useLayoutEffect` runs.
+
+Also fixed: the shared Codex reader now only downgrades stale missing-session
+errors. Real app-server handling failures set `runtime_failure`, fail pending
+work, and route the runtime through the normal exit path.
+
+Also fixed: `set_external_session_id_if_runtime_matches` and
+`record_codex_runtime_config_if_runtime_matches` now return distinct
+lookup/runtime-mismatch outcomes while preserving real commit/persistence
+failures as `Err`. Shared Codex setup callers now tear down the affected
+runtime on those failures instead of silently dropping the prompt.
+
+Also fixed: paginated Codex model refresh now checks the continuation
+`send()` result. If the next `RefreshModelListPage` cannot queue, the original
+caller receives an immediate error instead of hanging until timeout.
+
+Also fixed: shared Codex `completed_turn_id` state now has a bounded cleanup
+window. Late final-output events are still accepted briefly after
+`turn/completed`, then a short cleanup clears `completed_turn_id` and the
+residual turn-state maps so stale events are no longer accepted indefinitely.
+
+Also fixed: shared Codex notifications now include `"jsonrpc": "2.0"`, and the
+same version field is now emitted for the audited `initialized` notification,
+Codex requests, and JSON-RPC responses for protocol consistency.
+
+Also fixed: unconditional `console.debug` calls were removed from the SSE
+`state` / `delta` hot path so production sessions no longer pay per-event
+logging overhead or spam the browser console.
 
 Reconnect-success re-arm no longer creates a polling loop after authoritative
 progress: reconnect-triggered `/api/state` fetches now only re-arm fallback
@@ -546,22 +578,22 @@ filesystem I/O is not safe under the mutex.
 - [ ] Add app regression for workspace-layout restart-required recovery:
   fail `fetchWorkspaceLayout()` with restart guidance, assert the toast appears,
   then recover only that route and verify the matching toast clears.
-- [ ] Add pending-state coverage for `runtime-action-button`:
-  hold a run/pause/resume/stop request unresolved long enough to assert
-  `disabled`, `aria-busy`, and spinner rendering before the promise resolves.
-- [ ] Add keyboard and ARIA coverage for the backend connection tooltip:
-  test focus/blur-driven visibility and assert `aria-describedby` /
-  `aria-hidden` wiring instead of relying only on hover and class-name checks.
+- [x] Add pending-state coverage for `runtime-action-button`:
+  `App.test.tsx` now holds an orchestrator pause request unresolved long enough
+  to assert `disabled`, `aria-busy`, and spinner rendering before the response
+  transitions the group to its paused state.
+- [x] Add keyboard and ARIA coverage for the backend connection tooltip:
+  `backend-connection.test.tsx` now drives both tooltip components through
+  focus/blur and asserts the visible/hidden role transitions together with
+  `aria-describedby` and `aria-hidden` wiring.
 - [ ] Extend reconnect backoff progression coverage:
   assert the full exponential series (400, 800, 1600, 3200, 5000ms cap),
   verify repeated `EventSource.onerror` callbacks do not reset the sequence
   during one outage, and confirm the cap holds at 5000ms instead of 6400ms.
-- [ ] Remove dead `resetBackoff` option from `scheduleReconnectStateResync`:
-  no call site passes it; all callers reset externally via
-  `resetReconnectStateResyncBackoff()`.
-- [ ] Wire `onRetry` on the workspace-bar `BackendConnectionStatus` render site:
-  currently only the control-panel badge exposes the retry affordance; the main
-  workspace-bar chip does not.
+- [x] Remove dead `resetBackoff` option from `scheduleReconnectStateResync`:
+  `scheduleReconnectStateResync()` is now a no-argument helper. Backoff resets
+  remain explicit at the existing `resetReconnectStateResyncBackoff()` call
+  sites instead of flowing through an unused option bag.
 - [ ] Extend reconnect recovery coverage to clear inline backend error text:
   after a successful `/api/state` fallback, assert the inline banner / tooltip
   request error disappears together with any reconnect indicator changes.
@@ -571,6 +603,11 @@ filesystem I/O is not safe under the mutex.
   receive a live delta after `onopen` and assert the connection transitions to
   "connected" and polling stops. Contrasts the two distinct code paths
   (`rearmOnSuccess` polling vs `confirmReconnectRecoveryFromLiveEvent`).
+- [ ] Harden same-tick offline/online reconnect regression coverage:
+  dispatch `EventSource.onerror` and the browser `offline` / `online` events in
+  one synchronous turn before React can flush, then assert the extra
+  `/api/state` fetch comes from the `online` handler rather than the scheduled
+  fallback timer.
 - [ ] Add test for state handler catch-block reconnecting restoration:
   simulate a reconnect recovery where the SSE stream reopens and delivers a
   state event that fails during `adoptState` (e.g., reducer throws). Assert
@@ -581,66 +618,101 @@ filesystem I/O is not safe under the mutex.
   502) while the SSE stream is healthy. Assert `requestActionRecoveryResyncRef`
   fires a one-shot `/api/state` probe that does NOT re-arm reconnect polling
   or reset `sawReconnectOpenSinceLastError`.
-- [ ] Consistent `vi.isFakeTimers()` guard in backend-connection tests:
-  tests 4 and 6 call `vi.useRealTimers()` unconditionally in `finally`
-  while test 3 uses the `if (vi.isFakeTimers())` guard. Align on the
-  defensive pattern for clarity.
+- [x] Consistent `vi.isFakeTimers()` guard in backend-connection tests:
+  the reconnect test cleanup now consistently guards `vi.useRealTimers()` with
+  `vi.isFakeTimers()` so the suite does not assume fake timers were enabled in
+  every branch before `finally` runs.
 - [x] Restore `toBeCloseTo` precision in layout merge test:
   Updated to `toBeCloseTo(0.44, 4)` — the raw 0.42 target is nudged by the
   control panel minimum width clamp, so the assertion now matches the actual
   clamped ratio at precision 4.
-- [ ] Remove redundant `headers` from `fetchWorkspaceLayout`:
-  `fetchWorkspaceLayout` explicitly passes `Content-Type: application/json` to
-  `performRequest`, which already sets the same default. If `performRequest`'s
-  defaults grow, `fetchWorkspaceLayout` would silently drop them.
-- [ ] Add data integrity assertion to bad-state-payload recovery test:
-  the "accepts a later live delta on the same reopened stream after a bad state
-  payload" test verifies connection status recovery but does not confirm the
-  previously recovered session data survived the orphan delta.
-- [ ] Add missing state fields to pending reconnect deferred in stale-detail test:
-  the "clears stale backend issue detail when the browser reconnects" test
-  resolves its deferred with a state response missing `orchestrators` and
-  `workspaces` fields present in all other test state responses.
-- [ ] Add consecutive bad JSON line threshold to shared Codex reader:
-  the `continue` on bad JSON can mask a dying Codex process writing garbage.
-  After N consecutive unparseable lines (e.g. 5), treat it as a runtime
-  failure instead of continuing indefinitely.
-- [ ] Explicit `drop(stdin)` in shared Codex writer thread on exit:
-  stdin is dropped implicitly when the writer thread exits, but the drop
-  order relative to shared-state mutexes is uncontrolled. An explicit
-  `drop(stdin)` before cleanup would signal intent and prevent future
-  refactoring from delaying the pipe close.
+- [x] Remove redundant `headers` from `fetchWorkspaceLayout`:
+  `fetchWorkspaceLayout` now delegates directly to `performRequest(endpoint)`,
+  preserving the shared default headers in one place.
+- [x] Add data integrity assertion to bad-state-payload recovery test:
+  the reconnect regression now reasserts that the recovered session name and
+  preview survive the later orphan delta, and that the ignored delta does not
+  leak its preview into the UI.
+- [x] Add missing state fields to pending reconnect deferred in stale-detail test:
+  the deferred reconnect response now uses the standard `makeBackendStateResponse`
+  fixture so `orchestrators` and `workspaces` stay aligned with the rest of the
+  backend-connection suite.
+- [x] Add consecutive bad JSON line threshold to shared Codex reader:
+  after 5 consecutive unparseable stdout lines, the shared Codex runtime now
+  treats the stream as failed instead of continuing indefinitely.
+- [x] Explicit `drop(stdin)` in shared Codex writer thread on exit:
+  the writer now closes the pipe explicitly before thread teardown, and also
+  drops it immediately on initialization failure.
 - [ ] Add stdin write backpressure detection to shared Codex writer:
   `write_all` + `flush` block if the Codex process is frozen and the OS
   pipe buffer fills. A watchdog timer or non-blocking write mode would
   detect a stuck writer thread instead of silently blocking all commands.
-- [ ] Pass `--listen stdio://` explicitly when spawning `codex app-server`:
-  the app-server defaults to stdio but if the default ever changes, the
-  spawn would break silently. Explicit flag for defense-in-depth.
+- [x] Pass `--listen stdio://` explicitly when spawning `codex app-server`:
+  both the shared runtime and REPL Codex spawn paths now pass the stdio
+  listener explicitly for defense-in-depth.
 - [x] Add max page count limit to `fire_codex_model_list_page`:
   pagination is now capped at 50 pages in both the runtime path and the
   blocking test helper, preventing unbounded waiter-thread churn if a
   misbehaving Codex app-server returns `nextCursor` indefinitely.
-- [ ] Add `adoptState` revision downgrade guard test:
-  assert `adoptState` returns `false` when `force` is true but
-  `allowRevisionDowngrade` is false and `nextState.revision` is lower.
-  Cover the complementary case where `allowRevisionDowngrade: true` permits
-  the rollback.
-- [ ] Add `completed_turn_id` window boundary test:
-  run two consecutive turns, deliver a late `agentMessage` from the first
-  turn after the second turn has started, and assert it is rejected.
-- [ ] Add `shared_codex_event_matches_visible_turn` unit tests:
-  cover matching active turn, matching completed turn, mismatched completed
-  turn (should return false), and `None` event turn ID with a completed turn.
-- [ ] Add `fetchWorkspaceLayout` JSON-body 404 test:
-  verify that a standard JSON 404 returns `null` (not an error) to protect
-  the reordered HTML-fallback check.
-- [ ] Truncate raw child-process content in shared Codex reader stderr log:
-  the `eprintln!` for non-JSON lines prints the full line verbatim; truncate
-  to a bounded length (e.g. 200 chars) to avoid leaking secrets in logs.
-- [ ] Cap `line_buf` growth in shared Codex reader thread:
-  `read_until` buffers with no size limit; a line without a newline from a
-  misbehaving child process could consume unbounded memory.
+- [x] Add `adoptState` revision downgrade guard test:
+  the guard now lives in the pure `shouldAdoptSnapshotRevision` helper, and
+  `state-revision.test.ts` covers forced equal-revision adoption, forced
+  downgrade rejection without `allowRevisionDowngrade`, and the explicit
+  rollback case when downgrades are allowed.
+- [x] Add `completed_turn_id` window boundary test:
+  the shared-Codex regression suite now covers the handoff from one turn to the
+  next and asserts that a late first-turn `agentMessage` is rejected once the
+  second turn has started and cleared `completed_turn_id`.
+- [x] Add `shared_codex_event_matches_visible_turn` unit tests:
+  full branch coverage — matching active turn, matching completed turn,
+  mismatched completed turn rejection, `None` event turn ID with a
+  completed turn, orphan event with no active/completed turn, and
+  completed-turn match blocked by active-turn priority.
+- [x] Add `fetchWorkspaceLayout` JSON-body 404 test:
+  `api.test.ts` now covers the non-HTML 404 path and asserts the call resolves
+  to `null` while still using the encoded workspace route.
+- [x] Truncate raw child-process content in shared Codex reader stderr log:
+  non-JSON stdout log previews are now capped at 200 characters before they
+  are emitted to stderr.
+- [x] Cap `line_buf` growth in shared Codex reader thread:
+  the reader now uses a capped incremental line read instead of unbounded
+  `read_until`, so a child that never emits a newline cannot grow memory
+  without bound.
+- [x] Add wrapped-cause test case for stale-session error classifier:
+  `shared_codex_app_server_error_classifier_only_ignores_missing_sessions` now
+  covers both wrapped stale-session errors and wrapped sub-entity misses, so
+  the `err.chain().any(...)` traversal stays regression-tested.
+- [x] Remove unused functional-updater overload from `setBackendConnectionState`:
+  the setter now accepts only concrete `BackendConnectionState` values, which
+  matches every call site and removes the misleading React-style updater shape.
+- [x] Add `"jsonrpc": "2.0"` to ACP JSON-RPC response construction sites:
+  all three ACP response sites now include `"jsonrpc": "2.0"` — automatic
+  approval, unsupported-method error, and user-initiated approval.
+- [x] Assert session error state in persistence-failure tests:
+  both shared-Codex persistence-failure tests now assert the session ends in
+  `SessionStatus::Error`, the preview carries the persistence-failure detail,
+  and a `Turn failed: ...` assistant message is present.
+- [x] Consider typed JSON-RPC message structs to prevent `"jsonrpc"` omissions:
+  JSON-RPC request, notification, result-response, and error-response builders
+  now flow through typed message structs, and the direct helper tests lock in
+  the required `"jsonrpc": "2.0"` field for each message shape.
+- [x] Add test for `fail_turn_if_runtime_matches` persistence fallback:
+  the new regression test forces synchronous persistence failure and asserts
+  the session still publishes an Error snapshot with the turn-failure message.
+- [x] Add `codex_json_rpc_response_message` Error variant unit test:
+  direct formatter coverage now checks the `Error` payload in addition to the
+  existing `Result` payload and indirect server-request rejection test.
+- [x] Add `"jsonrpc": "2.0"` to ACP `session/set_config_option` sites:
+  both inline construction sites now include the version field.
+- [x] Fix `api.test.ts` JSON 404 header assertion:
+  corrected from `Accept` to `Content-Type` to match `performRequest`.
+- [x] Migrate pre-existing ACP test to typed JSON-RPC builder:
+  the prompt-loop ACP regression now uses `json_rpc_result_response_message`
+  and asserts the serialized writer output still carries `"jsonrpc":"2.0"`.
+- [x] Add `shouldAdoptSnapshotRevision` non-force and null-revision test cases:
+  `state-revision.test.ts` now covers no-options delegation, `force: false`
+  delegation back to `shouldAdoptStateRevision`, and `currentRevision === null`
+  with `force: true`.
 
 ## Known External Limitations
 

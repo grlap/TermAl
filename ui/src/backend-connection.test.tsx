@@ -262,6 +262,33 @@ describe("Backend connection state", () => {
     expect(container.querySelector(".workspace-connection-status.has-issue")).not.toBeNull();
   });
 
+  it("shows and hides the backend connection tooltip on focus with ARIA wiring", () => {
+    render(
+      <BackendConnectionStatus
+        state="reconnecting"
+        issueDetail="Request failed with status 500."
+      />,
+    );
+
+    const chip = screen.getByLabelText("Reconnecting");
+    const tooltip = screen.getByRole("tooltip", { hidden: true });
+
+    expect(chip).not.toHaveAttribute("aria-describedby");
+    expect(tooltip).toHaveAttribute("aria-hidden", "true");
+
+    fireEvent.focus(chip);
+
+    expect(screen.getByRole("tooltip")).toBe(tooltip);
+    expect(chip).toHaveAttribute("aria-describedby", tooltip.id);
+    expect(tooltip).not.toHaveAttribute("aria-hidden");
+
+    fireEvent.blur(chip);
+
+    expect(screen.queryByRole("tooltip")).toBeNull();
+    expect(chip).not.toHaveAttribute("aria-describedby");
+    expect(tooltip).toHaveAttribute("aria-hidden", "true");
+  });
+
   it("keeps the backend issue tooltip visible while moving from the chip toward the tooltip", () => {
     const { container } = render(
       <BackendConnectionStatus
@@ -301,6 +328,33 @@ describe("Backend connection state", () => {
     expect(screen.getByRole("tooltip")).toHaveTextContent(
       "Request failed with status 500.",
     );
+  });
+
+  it("shows and hides the control panel tooltip on focus with ARIA wiring", () => {
+    render(
+      <ControlPanelConnectionIndicator
+        state="connected"
+        issueDetail="Request failed with status 500."
+      />,
+    );
+
+    const badge = screen.getByLabelText("Control panel issue");
+    const tooltip = screen.getByRole("tooltip", { hidden: true });
+
+    expect(badge).not.toHaveAttribute("aria-describedby");
+    expect(tooltip).toHaveAttribute("aria-hidden", "true");
+
+    fireEvent.focus(badge);
+
+    expect(screen.getByRole("tooltip")).toBe(tooltip);
+    expect(badge).toHaveAttribute("aria-describedby", tooltip.id);
+    expect(tooltip).not.toHaveAttribute("aria-hidden");
+
+    fireEvent.blur(badge);
+
+    expect(screen.queryByRole("tooltip")).toBeNull();
+    expect(badge).not.toHaveAttribute("aria-describedby");
+    expect(tooltip).toHaveAttribute("aria-hidden", "true");
   });
 
   it("retries when clicking the reconnecting workspace connection status", () => {
@@ -523,11 +577,13 @@ describe("Backend connection state", () => {
       );
     } finally {
       pendingReconnect.resolve(
-        jsonResponse({
-          revision: 2,
-          projects: [],
-          sessions: [],
-        }),
+        jsonResponse(
+          makeBackendStateResponse({
+            revision: 2,
+            sessionName: "Recovered Session",
+            preview: "Recovered preview",
+          }),
+        ),
       );
       if (vi.isFakeTimers()) {
         vi.useRealTimers();
@@ -834,6 +890,122 @@ describe("Backend connection state", () => {
     }
   });
 
+  it("requests reconnect when offline and online fire before the state ref effect commits", async () => {
+    const originalFetch = globalThis.fetch;
+    const originalEventSource = globalThis.EventSource;
+    const originalResizeObserver = globalThis.ResizeObserver;
+    const ownNavigatorOnlineDescriptor = Object.getOwnPropertyDescriptor(
+      window.navigator,
+      "onLine",
+    );
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const target = String(input);
+      if (target === "/api/state") {
+        return jsonResponse({
+          revision: 1,
+          projects: [],
+          sessions: [],
+        });
+      }
+      if (target.startsWith("/api/workspaces/")) {
+        if (init?.method === "PUT") {
+          return jsonResponse({
+            layout: {
+              id: "workspace-live",
+              revision: 1,
+              updatedAt: "2026-04-04 21:15:00",
+              controlPanelSide: "left",
+              workspace: { panes: [] },
+            },
+          });
+        }
+        return new Response("", { status: 404 });
+      }
+
+      throw new Error(`Unexpected fetch: ${target}`);
+    });
+
+    Object.defineProperty(window.navigator, "onLine", {
+      configurable: true,
+      value: true,
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal(
+      "EventSource",
+      EventSourceMock as unknown as typeof EventSource,
+    );
+    vi.stubGlobal(
+      "ResizeObserver",
+      ResizeObserverMock as unknown as typeof ResizeObserver,
+    );
+
+    try {
+      render(<App />);
+      const countStateFetches = () =>
+        fetchMock.mock.calls.filter(([url]) => String(url) === "/api/state")
+          .length;
+      const eventSource = latestEventSource();
+
+      act(() => {
+        eventSource.dispatchOpen();
+        eventSource.dispatchState({
+          revision: 1,
+          projects: [],
+          orchestrators: [],
+          workspaces: [],
+          sessions: [],
+        });
+      });
+      await waitForNoControlPanelConnectionIssue();
+
+      vi.useFakeTimers();
+      act(() => {
+        eventSource.dispatchError();
+      });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0);
+      });
+      expect(
+        screen.getByLabelText("Control panel backend reconnecting"),
+      ).toBeInTheDocument();
+      const reconnectFetchCount = countStateFetches();
+
+      act(() => {
+        Object.defineProperty(window.navigator, "onLine", {
+          configurable: true,
+          value: false,
+        });
+        fireEvent(window, new Event("offline"));
+        Object.defineProperty(window.navigator, "onLine", {
+          configurable: true,
+          value: true,
+        });
+        fireEvent(window, new Event("online"));
+      });
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0);
+      });
+      expect(countStateFetches()).toBe(reconnectFetchCount + 1);
+    } finally {
+      if (vi.isFakeTimers()) {
+        vi.useRealTimers();
+      }
+      if (ownNavigatorOnlineDescriptor) {
+        Object.defineProperty(
+          window.navigator,
+          "onLine",
+          ownNavigatorOnlineDescriptor,
+        );
+      } else {
+        Reflect.deleteProperty(window.navigator, "onLine");
+      }
+      restoreGlobal("fetch", originalFetch);
+      restoreGlobal("EventSource", originalEventSource);
+      restoreGlobal("ResizeObserver", originalResizeObserver);
+    }
+  });
+
   it("backs off reconnect polling until a fresh SSE open confirms recovery", async () => {
     const originalFetch = globalThis.fetch;
     const originalEventSource = globalThis.EventSource;
@@ -954,7 +1126,9 @@ describe("Backend connection state", () => {
       });
       expectNoControlPanelConnectionIssue();
     } finally {
-      vi.useRealTimers();
+      if (vi.isFakeTimers()) {
+        vi.useRealTimers();
+      }
       restoreGlobal("fetch", originalFetch);
       restoreGlobal("EventSource", originalEventSource);
       restoreGlobal("ResizeObserver", originalResizeObserver);
@@ -1066,7 +1240,9 @@ describe("Backend connection state", () => {
       });
       expectNoControlPanelConnectionIssue();
     } finally {
-      vi.useRealTimers();
+      if (vi.isFakeTimers()) {
+        vi.useRealTimers();
+      }
       restoreGlobal("fetch", originalFetch);
       restoreGlobal("EventSource", originalEventSource);
       restoreGlobal("ResizeObserver", originalResizeObserver);
@@ -1161,7 +1337,9 @@ describe("Backend connection state", () => {
       });
       expect(countStateFetches()).toBe(hydratedStateFetchCount + 1);
     } finally {
-      vi.useRealTimers();
+      if (vi.isFakeTimers()) {
+        vi.useRealTimers();
+      }
       restoreGlobal("fetch", originalFetch);
       restoreGlobal("EventSource", originalEventSource);
       restoreGlobal("ResizeObserver", originalResizeObserver);
@@ -1270,7 +1448,9 @@ describe("Backend connection state", () => {
       });
       expect(countStateFetches()).toBe(hydratedStateFetchCount + 1);
     } finally {
-      vi.useRealTimers();
+      if (vi.isFakeTimers()) {
+        vi.useRealTimers();
+      }
       restoreGlobal("fetch", originalFetch);
       restoreGlobal("EventSource", originalEventSource);
       restoreGlobal("ResizeObserver", originalResizeObserver);
@@ -1361,7 +1541,9 @@ describe("Backend connection state", () => {
       });
       expect(countStateFetches()).toBe(hydratedStateFetchCount + 1);
     } finally {
-      vi.useRealTimers();
+      if (vi.isFakeTimers()) {
+        vi.useRealTimers();
+      }
       restoreGlobal("fetch", originalFetch);
       restoreGlobal("EventSource", originalEventSource);
       restoreGlobal("ResizeObserver", originalResizeObserver);
@@ -1462,7 +1644,9 @@ describe("Backend connection state", () => {
       });
       expect(countStateFetches()).toBe(hydratedStateFetchCount);
     } finally {
-      vi.useRealTimers();
+      if (vi.isFakeTimers()) {
+        vi.useRealTimers();
+      }
       restoreGlobal("fetch", originalFetch);
       restoreGlobal("EventSource", originalEventSource);
       restoreGlobal("ResizeObserver", originalResizeObserver);
@@ -1561,7 +1745,9 @@ describe("Backend connection state", () => {
       });
       expect(countStateFetches()).toBe(hydratedStateFetchCount);
     } finally {
-      vi.useRealTimers();
+      if (vi.isFakeTimers()) {
+        vi.useRealTimers();
+      }
       restoreGlobal("fetch", originalFetch);
       restoreGlobal("EventSource", originalEventSource);
       restoreGlobal("ResizeObserver", originalResizeObserver);
@@ -1668,7 +1854,9 @@ describe("Backend connection state", () => {
       });
       expect(countStateFetches()).toBe(hydratedStateFetchCount + 1);
     } finally {
-      vi.useRealTimers();
+      if (vi.isFakeTimers()) {
+        vi.useRealTimers();
+      }
       restoreGlobal("fetch", originalFetch);
       restoreGlobal("EventSource", originalEventSource);
       restoreGlobal("ResizeObserver", originalResizeObserver);
@@ -1793,7 +1981,9 @@ describe("Backend connection state", () => {
       });
       expect(screen.getByText("Recovered preview")).toBeInTheDocument();
     } finally {
-      vi.useRealTimers();
+      if (vi.isFakeTimers()) {
+        vi.useRealTimers();
+      }
       restoreGlobal("fetch", originalFetch);
       restoreGlobal("EventSource", originalEventSource);
       restoreGlobal("ResizeObserver", originalResizeObserver);
@@ -1903,7 +2093,9 @@ describe("Backend connection state", () => {
       });
       expect(countStateFetches()).toBe(hydratedStateFetchCount);
     } finally {
-      vi.useRealTimers();
+      if (vi.isFakeTimers()) {
+        vi.useRealTimers();
+      }
       restoreGlobal("fetch", originalFetch);
       restoreGlobal("EventSource", originalEventSource);
       restoreGlobal("ResizeObserver", originalResizeObserver);
@@ -2038,7 +2230,9 @@ describe("Backend connection state", () => {
       });
       expect(screen.getByText("Recovered preview")).toBeInTheDocument();
     } finally {
-      vi.useRealTimers();
+      if (vi.isFakeTimers()) {
+        vi.useRealTimers();
+      }
       restoreGlobal("fetch", originalFetch);
       restoreGlobal("EventSource", originalEventSource);
       restoreGlobal("ResizeObserver", originalResizeObserver);
@@ -2162,7 +2356,9 @@ describe("Backend connection state", () => {
       });
       expect(countStateFetches()).toBe(hydratedStateFetchCount + 2);
     } finally {
-      vi.useRealTimers();
+      if (vi.isFakeTimers()) {
+        vi.useRealTimers();
+      }
       restoreGlobal("fetch", originalFetch);
       restoreGlobal("EventSource", originalEventSource);
       restoreGlobal("ResizeObserver", originalResizeObserver);
@@ -2288,7 +2484,9 @@ describe("Backend connection state", () => {
       });
       expect(countStateFetches()).toBe(hydratedStateFetchCount + 2);
     } finally {
-      vi.useRealTimers();
+      if (vi.isFakeTimers()) {
+        vi.useRealTimers();
+      }
       restoreGlobal("fetch", originalFetch);
       restoreGlobal("EventSource", originalEventSource);
       restoreGlobal("ResizeObserver", originalResizeObserver);
@@ -2415,13 +2613,19 @@ describe("Backend connection state", () => {
         await Promise.resolve();
       });
       expectNoControlPanelConnectionIssue();
+      expect(screen.getByText("Recovered Session")).toBeInTheDocument();
+      expect(screen.getByText("Recovered preview")).toBeInTheDocument();
+      expect(screen.queryByText("Original Session")).toBeNull();
+      expect(screen.queryByText("Live preview")).toBeNull();
 
       await act(async () => {
         await vi.advanceTimersByTimeAsync(400);
       });
       expect(countStateFetches()).toBe(1);
     } finally {
-      vi.useRealTimers();
+      if (vi.isFakeTimers()) {
+        vi.useRealTimers();
+      }
       restoreGlobal("fetch", originalFetch);
       restoreGlobal("EventSource", originalEventSource);
       restoreGlobal("ResizeObserver", originalResizeObserver);
@@ -2510,7 +2714,9 @@ describe("Backend connection state", () => {
       expect(screen.getByText("Recovered preview")).toBeInTheDocument();
       expect(screen.queryByText("Original Session")).toBeNull();
     } finally {
-      vi.useRealTimers();
+      if (vi.isFakeTimers()) {
+        vi.useRealTimers();
+      }
       restoreGlobal("fetch", originalFetch);
       restoreGlobal("EventSource", originalEventSource);
       restoreGlobal("ResizeObserver", originalResizeObserver);
@@ -2600,7 +2806,9 @@ describe("Backend connection state", () => {
       expect(screen.getByText("Recovered preview")).toBeInTheDocument();
       expect(screen.queryByText("Original Session")).toBeNull();
     } finally {
-      vi.useRealTimers();
+      if (vi.isFakeTimers()) {
+        vi.useRealTimers();
+      }
       restoreGlobal("fetch", originalFetch);
       restoreGlobal("EventSource", originalEventSource);
       restoreGlobal("ResizeObserver", originalResizeObserver);
@@ -2703,7 +2911,9 @@ describe("Backend connection state", () => {
       });
       expect(countStateFetches()).toBe(baseCount + 3);
     } finally {
-      vi.useRealTimers();
+      if (vi.isFakeTimers()) {
+        vi.useRealTimers();
+      }
       restoreGlobal("fetch", originalFetch);
       restoreGlobal("EventSource", originalEventSource);
       restoreGlobal("ResizeObserver", originalResizeObserver);
@@ -2886,7 +3096,9 @@ describe("Backend connection state", () => {
         "Could not reach the TermAl backend. Retrying automatically.",
       );
     } finally {
-      vi.useRealTimers();
+      if (vi.isFakeTimers()) {
+        vi.useRealTimers();
+      }
       restoreGlobal("fetch", originalFetch);
       restoreGlobal("EventSource", originalEventSource);
       restoreGlobal("ResizeObserver", originalResizeObserver);
@@ -2985,7 +3197,9 @@ describe("Backend connection state", () => {
       expect(screen.getByText("Newer preview")).toBeInTheDocument();
       expect(screen.queryByText("Recovered Session")).toBeNull();
     } finally {
-      vi.useRealTimers();
+      if (vi.isFakeTimers()) {
+        vi.useRealTimers();
+      }
       restoreGlobal("fetch", originalFetch);
       restoreGlobal("EventSource", originalEventSource);
       restoreGlobal("ResizeObserver", originalResizeObserver);

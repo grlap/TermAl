@@ -136,6 +136,15 @@ fn bootstrap_default_local_state(default_workdir: &str) -> StateInner {
     inner
 }
 
+/// Describes whether a runtime-gated mutation actually applied.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[must_use]
+enum RuntimeMatchOutcome {
+    Applied,
+    SessionMissing,
+    RuntimeMismatch,
+}
+
 impl AppState {
     /// Creates a new instance.
     fn new(default_workdir: String) -> Result<Self> {
@@ -1923,15 +1932,15 @@ impl AppState {
                         {
                             acp_config_updates.push((
                                 handle.clone(),
-                                json!({
-                                    "id": Uuid::new_v4().to_string(),
-                                    "method": "session/set_config_option",
-                                    "params": {
+                                json_rpc_request_message(
+                                    Uuid::new_v4().to_string(),
+                                    "session/set_config_option",
+                                    json!({
                                         "sessionId": external_session_id,
                                         "optionId": "model",
                                         "value": model,
-                                    }
-                                }),
+                                    }),
+                                ),
                             ));
                         }
                     }
@@ -1944,15 +1953,15 @@ impl AppState {
                         {
                             acp_config_updates.push((
                                 handle.clone(),
-                                json!({
-                                    "id": Uuid::new_v4().to_string(),
-                                    "method": "session/set_config_option",
-                                    "params": {
+                                json_rpc_request_message(
+                                    Uuid::new_v4().to_string(),
+                                    "session/set_config_option",
+                                    json!({
                                         "sessionId": external_session_id,
                                         "optionId": "mode",
                                         "value": cursor_mode.as_acp_value(),
-                                    }
-                                }),
+                                    }),
+                                ),
                             ));
                         }
                     }
@@ -2612,23 +2621,22 @@ impl AppState {
 
     /// Sets external session ID only if the session still belongs to the expected runtime.
     ///
-    /// Returns `Ok(true)` when the id was set, `Ok(false)` when the runtime token
-    /// no longer matches (session was stopped or rebound), and `Err` on lookup
-    /// failure. This avoids the TOCTOU gap of a separate
+    /// Returns the applied/skipped outcome, or `Err` when commit/persistence
+    /// fails after the in-memory mutation has begun. This avoids the TOCTOU gap of a separate
     /// `session_matches_runtime_token` check followed by `set_external_session_id`.
     fn set_external_session_id_if_runtime_matches(
         &self,
         session_id: &str,
         token: &RuntimeToken,
         external_session_id: String,
-    ) -> Result<bool> {
+    ) -> Result<RuntimeMatchOutcome> {
         let mut inner = self.inner.lock().expect("state mutex poisoned");
-        let index = inner
-            .find_session_index(session_id)
-            .ok_or_else(|| anyhow!("session `{session_id}` not found"))?;
+        let Some(index) = inner.find_session_index(session_id) else {
+            return Ok(RuntimeMatchOutcome::SessionMissing);
+        };
         let record = &mut inner.sessions[index];
         if !record.runtime.matches_runtime_token(token) {
-            return Ok(false);
+            return Ok(RuntimeMatchOutcome::RuntimeMismatch);
         }
         set_record_external_session_id(record, Some(external_session_id));
         if inner.sessions[index]
@@ -2640,7 +2648,7 @@ impl AppState {
             inner.allow_discovered_codex_thread(external_session_id.as_deref());
         }
         self.commit_locked(&mut inner)?;
-        Ok(true)
+        Ok(RuntimeMatchOutcome::Applied)
     }
 
     /// Clears external session ID when the expected runtime still owns the session.
@@ -2864,20 +2872,20 @@ impl AppState {
         sandbox_mode: CodexSandboxMode,
         approval_policy: CodexApprovalPolicy,
         reasoning_effort: CodexReasoningEffort,
-    ) -> Result<bool> {
+    ) -> Result<RuntimeMatchOutcome> {
         let mut inner = self.inner.lock().expect("state mutex poisoned");
-        let index = inner
-            .find_session_index(session_id)
-            .ok_or_else(|| anyhow!("session `{session_id}` not found"))?;
+        let Some(index) = inner.find_session_index(session_id) else {
+            return Ok(RuntimeMatchOutcome::SessionMissing);
+        };
         let record = &mut inner.sessions[index];
         if !record.runtime.matches_runtime_token(token) {
-            return Ok(false);
+            return Ok(RuntimeMatchOutcome::RuntimeMismatch);
         }
         record.active_codex_sandbox_mode = Some(sandbox_mode);
         record.active_codex_approval_policy = Some(approval_policy);
         record.active_codex_reasoning_effort = Some(reasoning_effort);
         self.persist_internal_locked(&inner)?;
-        Ok(true)
+        Ok(RuntimeMatchOutcome::Applied)
     }
 
     /// Handles Claude approval mode.
@@ -2979,7 +2987,19 @@ impl AppState {
             record.session.preview = make_preview(cleaned);
             record.active_turn_start_message_count = None;
             let has_queued_prompts = !record.queued_prompts.is_empty();
-            self.commit_locked(&mut inner)?;
+            match self.commit_locked(&mut inner) {
+                Ok(_) => {}
+                Err(err) => {
+                    // Persistence failed but the in-memory state is already
+                    // updated. Publish anyway so the frontend sees the error
+                    // state instead of being stuck on an active turn.
+                    eprintln!(
+                        "state warning> failed to persist turn failure for session `{session_id}`, \
+                         publishing in-memory state: {err:#}"
+                    );
+                    self.publish_state_locked(&inner);
+                }
+            }
             has_queued_prompts
         };
 
@@ -4363,15 +4383,17 @@ impl AppState {
 
             handle
                 .input_tx
-                .send(AcpRuntimeCommand::JsonRpcMessage(json!({
-                    "id": pending.request_id.clone(),
-                    "result": {
-                        "outcome": {
-                            "outcome": "selected",
-                            "optionId": option_id,
-                        }
-                    }
-                })))
+                .send(AcpRuntimeCommand::JsonRpcMessage(
+                    json_rpc_result_response_message(
+                        pending.request_id.clone(),
+                        json!({
+                            "outcome": {
+                                "outcome": "selected",
+                                "optionId": option_id,
+                            }
+                        }),
+                    ),
+                ))
                 .map_err(|err| {
                     ApiError::internal(format!(
                         "failed to deliver approval response to agent session: {err}"

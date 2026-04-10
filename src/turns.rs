@@ -1249,7 +1249,10 @@ fn run_codex_turn(
     let cwd = normalize_local_user_facing_path(cwd);
     let codex_home = prepare_termal_codex_home(&cwd, "repl")?;
     let mut command = codex_command()?;
-    command.arg("app-server").env("CODEX_HOME", &codex_home);
+    command
+        .arg("app-server")
+        .args(["--listen", "stdio://"])
+        .env("CODEX_HOME", &codex_home);
 
     let mut child = command
         .stdin(Stdio::piped())
@@ -1297,7 +1300,10 @@ fn run_codex_turn(
             }),
             Duration::from_secs(15),
         )?;
-        write_codex_json_rpc_message(&mut child_stdin, &json!({ "method": "initialized" }))?;
+        write_codex_json_rpc_message(
+            &mut child_stdin,
+            &json_rpc_notification_message("initialized"),
+        )?;
 
         let thread_result = match external_session_id {
             Some(thread_id) => send_repl_codex_json_rpc_request(
@@ -1577,11 +1583,7 @@ fn send_repl_codex_json_rpc_request(
     let request_id = Uuid::new_v4().to_string();
     write_codex_json_rpc_message(
         writer,
-        &json!({
-            "id": request_id,
-            "method": method,
-            "params": params,
-        }),
+        &json_rpc_request_message(request_id.clone(), method, params),
     )?;
 
     loop {
@@ -1846,9 +1848,9 @@ fn handle_repl_codex_app_server_request(
 
     write_codex_json_rpc_message(
         writer,
-        &json!({
-            "id": request_id,
-            "result": result,
+        &codex_json_rpc_response_message(&CodexJsonRpcResponseCommand {
+            request_id,
+            payload: CodexJsonRpcResponsePayload::Result(result),
         }),
     )
 }

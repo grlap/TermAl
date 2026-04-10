@@ -8336,6 +8336,82 @@ describe("App", () => {
     });
   });
 
+  it("does not resave workspace layout when SSE state preserves the same sessions", async () => {
+    await withSuppressedActWarnings(async () => {
+      vi.useFakeTimers();
+      const originalEventSource = globalThis.EventSource;
+      const originalResizeObserver = globalThis.ResizeObserver;
+      const fetchStateSpy = vi.spyOn(api, "fetchState").mockResolvedValue(makeStateResponse({
+        revision: 1,
+        projects: [],
+        orchestrators: [],
+        workspaces: [
+          {
+            id: "workspace-current",
+            revision: 1,
+            updatedAt: "2026-04-10 10:00:00",
+            controlPanelSide: "left",
+          },
+        ],
+        sessions: [],
+      }));
+      const fetchWorkspaceLayoutSpy = vi
+        .mocked(api.fetchWorkspaceLayout)
+        .mockResolvedValue(null);
+      const saveWorkspaceLayoutSpy = vi
+        .mocked(api.saveWorkspaceLayout)
+        .mockResolvedValue(
+          makeWorkspaceLayoutResponse({
+            id: "workspace-current",
+            updatedAt: "2026-04-10 10:00:01",
+          }),
+        );
+      window.localStorage.clear();
+      vi.stubGlobal(
+        "EventSource",
+        EventSourceMock as unknown as typeof EventSource,
+      );
+      vi.stubGlobal(
+        "ResizeObserver",
+        ResizeObserverMock as unknown as typeof ResizeObserver,
+      );
+
+      try {
+        await renderApp();
+        await advanceTimers(200);
+        saveWorkspaceLayoutSpy.mockClear();
+
+        await dispatchStateEvent(
+          latestEventSource(),
+          makeStateResponse({
+            revision: 2,
+            projects: [],
+            orchestrators: [],
+            workspaces: [
+              {
+                id: "workspace-current",
+                revision: 2,
+                updatedAt: "2026-04-10 10:00:02",
+                controlPanelSide: "left",
+              },
+            ],
+            sessions: [],
+          }),
+        );
+
+        await advanceTimers(200);
+        expect(saveWorkspaceLayoutSpy).not.toHaveBeenCalled();
+      } finally {
+        window.localStorage.clear();
+        fetchStateSpy.mockRestore();
+        fetchWorkspaceLayoutSpy.mockRestore();
+        saveWorkspaceLayoutSpy.mockRestore();
+        restoreGlobal("EventSource", originalEventSource);
+        restoreGlobal("ResizeObserver", originalResizeObserver);
+      }
+    });
+  });
+
   it("refreshes model options after creating a new Codex session", async () => {
     await withSuppressedActWarnings(async () => {
       const originalEventSource = globalThis.EventSource;
@@ -9700,6 +9776,186 @@ describe("App", () => {
             name: /^Stop orchestration/,
           }),
         ).toBeEnabled();
+      } finally {
+        scrollIntoViewSpy.mockRestore();
+        restoreGlobal("fetch", originalFetch);
+        restoreGlobal("EventSource", originalEventSource);
+        restoreGlobal("ResizeObserver", originalResizeObserver);
+      }
+    });
+  });
+
+  it("shows pending orchestrator actions as busy and disabled until the request resolves", async () => {
+    await withSuppressedActWarnings(async () => {
+      const originalFetch = globalThis.fetch;
+      const originalEventSource = globalThis.EventSource;
+      const originalResizeObserver = globalThis.ResizeObserver;
+      const baseOrchestrator = makeOrchestrator();
+      const pauseDeferred = createDeferred<Response>();
+      const buildGroupedSessionState = (
+        status: "running" | "paused" | "stopped",
+        revision: number,
+      ) => {
+        const sessionInstances =
+          status === "stopped"
+            ? []
+            : [
+                {
+                  templateSessionId: "entry",
+                  sessionId: "session-entry",
+                  lastCompletionRevision: null,
+                  lastDeliveredCompletionRevision: null,
+                },
+              ];
+        const sessions =
+          status === "stopped"
+            ? []
+            : [
+                makeSession("session-entry", {
+                  name: "Entry",
+                  projectId: "project-questly",
+                  workdir: "/projects/questly",
+                  preview: "Ready for a prompt.",
+                }),
+              ];
+
+        return {
+          revision,
+          projects: [
+            {
+              id: "project-questly",
+              name: "Questly",
+              rootPath: "/projects/questly",
+            },
+          ],
+          orchestrators: [
+            makeOrchestrator({
+              id: "orchestrator-review-flow",
+              projectId: "project-questly",
+              templateId: "review-flow",
+              status,
+              templateSnapshot: {
+                ...baseOrchestrator.templateSnapshot,
+                id: "review-flow",
+                name: "Review Flow",
+                projectId: "project-questly",
+                sessions: [
+                  {
+                    id: "entry",
+                    name: "Entry",
+                    agent: "Codex",
+                    model: null,
+                    instructions: "Start the review flow.",
+                    autoApprove: true,
+                    inputMode: "queue",
+                    position: { x: 160, y: 220 },
+                  },
+                ],
+              },
+              sessionInstances,
+              createdAt: "2026-04-03 10:05:00",
+            }),
+          ],
+          sessions,
+        };
+      };
+      const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url === "/api/state") {
+          return jsonResponse(buildGroupedSessionState("running", 1));
+        }
+
+        if (url === "/api/orchestrators/orchestrator-review-flow/pause") {
+          return pauseDeferred.promise;
+        }
+
+        throw new Error(`Unexpected fetch: ${url}`);
+      });
+
+      vi.stubGlobal("fetch", fetchMock);
+      vi.stubGlobal(
+        "EventSource",
+        EventSourceMock as unknown as typeof EventSource,
+      );
+      vi.stubGlobal(
+        "ResizeObserver",
+        ResizeObserverMock as unknown as typeof ResizeObserver,
+      );
+      const scrollIntoViewSpy = stubScrollIntoView();
+
+      try {
+        await renderApp();
+        const eventSource = latestEventSource();
+        act(() => {
+          eventSource.dispatchError();
+        });
+        await settleAsyncUi();
+
+        await clickAndSettle(
+          await screen.findByRole("button", { name: "Sessions" }),
+        );
+
+        const sessionList = document.querySelector(".session-list");
+        if (!(sessionList instanceof HTMLDivElement)) {
+          throw new Error("Session list not found");
+        }
+
+        const orchestratorGroup = await within(sessionList).findByRole("group", {
+          name: /Orchestration Review Flow/i,
+        });
+
+        await act(async () => {
+          fireEvent.click(
+            within(orchestratorGroup).getByRole("button", {
+              name: /^Pause orchestration/,
+            }),
+          );
+        });
+        await settleAsyncUi();
+
+        expect(
+          fetchMock.mock.calls.some(
+            ([input]) =>
+              String(input) === "/api/orchestrators/orchestrator-review-flow/pause",
+          ),
+        ).toBe(true);
+
+        const pendingPauseButton = within(orchestratorGroup).getByRole("button", {
+          name: /^Pause orchestration/,
+        });
+        const pendingStopButton = within(orchestratorGroup).getByRole("button", {
+          name: /^Stop orchestration/,
+        });
+
+        expect(pendingPauseButton).toBeDisabled();
+        expect(pendingPauseButton).toHaveAttribute("aria-busy", "true");
+        expect(
+          pendingPauseButton.querySelector(
+            ".session-orchestrator-group-action-spinner",
+          ),
+        ).not.toBeNull();
+        expect(pendingStopButton).toBeDisabled();
+        expect(pendingStopButton).not.toHaveAttribute("aria-busy");
+
+        await act(async () => {
+          pauseDeferred.resolve(jsonResponse(buildGroupedSessionState("paused", 2)));
+          await Promise.resolve();
+        });
+        await settleAsyncUi();
+
+        await waitFor(() => {
+          const resumeButton = within(orchestratorGroup).getByRole("button", {
+            name: /^Resume orchestration/,
+          });
+          expect(orchestratorGroup).toHaveAttribute("data-status", "paused");
+          expect(resumeButton).toBeEnabled();
+          expect(resumeButton).not.toHaveAttribute("aria-busy");
+          expect(
+            within(orchestratorGroup).getByRole("button", {
+              name: /^Stop orchestration/,
+            }),
+          ).toBeEnabled();
+        });
       } finally {
         scrollIntoViewSpy.mockRestore();
         restoreGlobal("fetch", originalFetch);

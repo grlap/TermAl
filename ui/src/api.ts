@@ -326,11 +326,7 @@ export function fetchState() {
 
 export async function fetchWorkspaceLayout(workspaceId: string) {
   const endpoint = `/api/workspaces/${encodeURIComponent(workspaceId)}`;
-  const response = await performRequest(endpoint, {
-    headers: {
-      "Content-Type": "application/json",
-    },
-  });
+  const response = await performRequest(endpoint);
 
   const contentType = response.headers.get("content-type") ?? "";
   const raw = await response.text();

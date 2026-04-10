@@ -255,6 +255,42 @@ struct CodexJsonRpcResponseCommand {
     payload: CodexJsonRpcResponsePayload,
 }
 
+const JSON_RPC_VERSION: &str = "2.0";
+
+#[derive(Serialize)]
+struct JsonRpcNotificationMessage<'a> {
+    jsonrpc: &'static str,
+    method: &'a str,
+}
+
+#[derive(Serialize)]
+struct JsonRpcRequestMessage<'a> {
+    jsonrpc: &'static str,
+    id: Value,
+    method: &'a str,
+    params: Value,
+}
+
+#[derive(Serialize)]
+struct JsonRpcResultResponseMessage {
+    jsonrpc: &'static str,
+    id: Value,
+    result: Value,
+}
+
+#[derive(Serialize)]
+struct JsonRpcErrorObject {
+    code: i64,
+    message: String,
+}
+
+#[derive(Serialize)]
+struct JsonRpcErrorResponseMessage {
+    jsonrpc: &'static str,
+    id: Value,
+    error: JsonRpcErrorObject,
+}
+
 /// Tracks an in-flight Codex JSON-RPC request.
 struct PendingCodexJsonRpcRequest {
     request_id: String,
@@ -590,7 +626,54 @@ struct SharedCodexSessionState {
     turn_state: CodexTurnState,
 }
 
-type SharedCodexSessionMap = Arc<Mutex<HashMap<String, SharedCodexSessionState>>>;
+#[cfg(test)]
+const SHARED_CODEX_COMPLETED_TURN_GRACE_PERIOD: Duration = Duration::from_millis(25);
+#[cfg(not(test))]
+const SHARED_CODEX_COMPLETED_TURN_GRACE_PERIOD: Duration = Duration::from_secs(5);
+const SHARED_CODEX_STDOUT_LINE_MAX_BYTES: usize = 16 * 1024 * 1024;
+const SHARED_CODEX_STDOUT_LOG_PREVIEW_MAX_CHARS: usize = 200;
+const SHARED_CODEX_MAX_CONSECUTIVE_BAD_JSON_LINES: usize = 5;
+
+#[derive(Clone)]
+struct SharedCodexCompletedTurnCleanup {
+    session_id: String,
+    completed_turn_id: String,
+    due_at: std::time::Instant,
+}
+
+struct SharedCodexSessions {
+    inner: Mutex<HashMap<String, SharedCodexSessionState>>,
+    cleanup_tx: mpsc::Sender<SharedCodexCompletedTurnCleanup>,
+}
+
+impl SharedCodexSessions {
+    fn new() -> SharedCodexSessionMap {
+        let (cleanup_tx, cleanup_rx) = mpsc::channel();
+        let sessions = Arc::new(Self {
+            inner: Mutex::new(HashMap::new()),
+            cleanup_tx,
+        });
+        spawn_shared_codex_completed_turn_cleanup_worker(&sessions, cleanup_rx);
+        sessions
+    }
+
+    fn lock(
+        &self,
+    ) -> std::sync::LockResult<std::sync::MutexGuard<'_, HashMap<String, SharedCodexSessionState>>>
+    {
+        self.inner.lock()
+    }
+
+    fn schedule_completed_turn_cleanup(&self, session_id: &str, completed_turn_id: &str) {
+        let _ = self.cleanup_tx.send(SharedCodexCompletedTurnCleanup {
+            session_id: session_id.to_owned(),
+            completed_turn_id: completed_turn_id.to_owned(),
+            due_at: std::time::Instant::now() + SHARED_CODEX_COMPLETED_TURN_GRACE_PERIOD,
+        });
+    }
+}
+
+type SharedCodexSessionMap = Arc<SharedCodexSessions>;
 type SharedCodexThreadMap = Arc<Mutex<HashMap<String, String>>>;
 
 /// Spawns ACP runtime.
@@ -1468,15 +1551,17 @@ fn handle_acp_request(
                 acp_permission_response_option_id(agent, state, session_id, &approval)?
             {
                 input_tx
-                    .send(AcpRuntimeCommand::JsonRpcMessage(json!({
-                        "id": approval.request_id.clone(),
-                        "result": {
-                            "outcome": {
-                                "outcome": "selected",
-                                "optionId": option_id,
-                            }
-                        }
-                    })))
+                    .send(AcpRuntimeCommand::JsonRpcMessage(
+                        json_rpc_result_response_message(
+                            approval.request_id.clone(),
+                            json!({
+                                "outcome": {
+                                    "outcome": "selected",
+                                    "optionId": option_id,
+                                }
+                            }),
+                        ),
+                    ))
                     .map_err(|err| {
                         anyhow!(
                             "failed to deliver automatic {} approval response: {err}",
@@ -1493,13 +1578,13 @@ fn handle_acp_request(
             }
         }
         _ => {
-            let _ = input_tx.send(AcpRuntimeCommand::JsonRpcMessage(json!({
-                "id": request_id,
-                "error": {
-                    "code": -32601,
-                    "message": format!("unsupported ACP request `{method}`"),
-                }
-            })));
+            let _ = input_tx.send(AcpRuntimeCommand::JsonRpcMessage(
+                json_rpc_error_response_message(
+                    request_id.clone(),
+                    -32601,
+                    format!("unsupported ACP request `{method}`"),
+                ),
+            ));
             log_unhandled_acp_event(agent, &format!("unhandled ACP request `{method}`"), message);
         }
     }
@@ -1853,12 +1938,7 @@ fn start_acp_json_rpc_request(
 
     if let Err(err) = write_acp_json_rpc_message(
         writer,
-        &json!({
-            "jsonrpc": "2.0",
-            "id": request_id,
-            "method": method,
-            "params": params,
-        }),
+        &json_rpc_request_message(request_id.clone(), method, params),
         agent,
     ) {
         pending_requests
@@ -2081,6 +2161,7 @@ fn spawn_shared_codex_runtime(state: AppState) -> Result<SharedCodexRuntime> {
     let mut command = codex_command()?;
     command
         .arg("app-server")
+        .args(["--listen", "stdio://"])
         .env("CODEX_HOME", &codex_home)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -2105,7 +2186,7 @@ fn spawn_shared_codex_runtime(state: AppState) -> Result<SharedCodexRuntime> {
         Arc::new(SharedChild::new(child).context("failed to share shared Codex app-server child")?);
     let (input_tx, input_rx) = mpsc::channel::<CodexRuntimeCommand>();
     let pending_requests: CodexPendingRequestMap = Arc::new(Mutex::new(HashMap::new()));
-    let sessions: SharedCodexSessionMap = Arc::new(Mutex::new(HashMap::new()));
+    let sessions = SharedCodexSessions::new();
     let thread_sessions: SharedCodexThreadMap = Arc::new(Mutex::new(HashMap::new()));
 
     {
@@ -2132,10 +2213,14 @@ fn spawn_shared_codex_runtime(state: AppState) -> Result<SharedCodexRuntime> {
             )
             .map_err(anyhow::Error::new)
             .and_then(|_| {
-                write_codex_json_rpc_message(&mut stdin, &json!({ "method": "initialized" }))
+                write_codex_json_rpc_message(
+                    &mut stdin,
+                    &json_rpc_notification_message("initialized"),
+                )
             });
 
             if let Err(err) = initialize_result {
+                drop(stdin);
                 let _ = writer_state.handle_shared_codex_runtime_exit(
                     &writer_runtime_id,
                     Some(&format!(
@@ -2235,7 +2320,10 @@ fn spawn_shared_codex_runtime(state: AppState) -> Result<SharedCodexRuntime> {
                         )
                     }
                     CodexRuntimeCommand::JsonRpcNotification { method } => {
-                        write_codex_json_rpc_message(&mut stdin, &json!({ "method": method }))
+                        write_codex_json_rpc_message(
+                            &mut stdin,
+                            &json_rpc_notification_message(&method),
+                        )
                     }
                     CodexRuntimeCommand::InterruptTurn {
                         response_tx,
@@ -2317,6 +2405,10 @@ fn spawn_shared_codex_runtime(state: AppState) -> Result<SharedCodexRuntime> {
                     break;
                 }
             }
+
+            // Close the pipe before thread teardown so the child can observe EOF
+            // promptly even if later cleanup work is refactored.
+            drop(stdin);
         });
     }
 
@@ -2330,13 +2422,16 @@ fn spawn_shared_codex_runtime(state: AppState) -> Result<SharedCodexRuntime> {
         std::thread::spawn(move || {
             let mut reader = BufReader::new(stdout);
             let mut line_buf = Vec::new();
+            let mut consecutive_bad_json_lines = 0usize;
             let mut runtime_failure: Option<String> = None;
 
             loop {
-                line_buf.clear();
-                // Use read_until instead of read_line so invalid UTF-8
-                // sequences do not kill the reader thread.
-                let bytes_read = match reader.read_until(b'\n', &mut line_buf) {
+                let bytes_read = match read_capped_child_stdout_line(
+                    &mut reader,
+                    &mut line_buf,
+                    SHARED_CODEX_STDOUT_LINE_MAX_BYTES,
+                    "shared Codex app-server stdout",
+                ) {
                     Ok(bytes_read) => bytes_read,
                     Err(err) => {
                         runtime_failure = Some(format!(
@@ -2353,15 +2448,32 @@ fn spawn_shared_codex_runtime(state: AppState) -> Result<SharedCodexRuntime> {
                 let raw_line = String::from_utf8_lossy(&line_buf);
                 let trimmed = raw_line.trim_end();
                 if trimmed.is_empty() {
+                    consecutive_bad_json_lines = 0;
                     continue;
                 }
                 let message: Value = match serde_json::from_str(trimmed) {
-                    Ok(message) => message,
+                    Ok(message) => {
+                        consecutive_bad_json_lines = 0;
+                        message
+                    }
                     Err(err) => {
+                        consecutive_bad_json_lines += 1;
+                        let preview = truncate_child_stdout_log_line(
+                            trimmed,
+                            SHARED_CODEX_STDOUT_LOG_PREVIEW_MAX_CHARS,
+                        );
                         eprintln!(
                             "[termal] skipping non-JSON line from shared Codex app-server \
-                             ({err}): {trimmed}"
+                             ({err}, {consecutive_bad_json_lines}/{}): {preview}",
+                            SHARED_CODEX_MAX_CONSECUTIVE_BAD_JSON_LINES,
                         );
+                        if let Some(detail) = shared_codex_bad_json_streak_failure_detail(
+                            consecutive_bad_json_lines,
+                            trimmed,
+                        ) {
+                            runtime_failure = Some(detail);
+                            break;
+                        }
                         continue;
                     }
                 };
@@ -2375,12 +2487,16 @@ fn spawn_shared_codex_runtime(state: AppState) -> Result<SharedCodexRuntime> {
                     &reader_thread_sessions,
                     &reader_input_tx,
                 ) {
-                    // Session-scoped errors (session removed while processing
-                    // an event for it) must not tear down the shared runtime.
-                    // Only true transport/runtime failures should be fatal.
-                    eprintln!(
-                        "[termal] non-fatal error handling shared Codex app-server event: {err:#}"
-                    );
+                    if shared_codex_app_server_error_is_stale_session(&err) {
+                        eprintln!(
+                            "[termal] non-fatal error handling shared Codex app-server event: {err:#}"
+                        );
+                        continue;
+                    }
+                    runtime_failure = Some(format!(
+                        "failed to handle shared Codex app-server event: {err:#}"
+                    ));
+                    break;
                 }
             }
 
@@ -2677,19 +2793,26 @@ fn handle_shared_codex_prompt_command(
                     &runtime_token,
                     thread_id.clone(),
                 ) {
-                    Ok(false) => {
+                    Ok(RuntimeMatchOutcome::SessionMissing | RuntimeMatchOutcome::RuntimeMismatch) => {
                         // Session was stopped or rebound while we waited for
                         // thread setup — silently discard the stale result.
                         return;
                     }
                     Err(err) => {
-                        eprintln!(
-                            "runtime state warning> failed to set external session id for `{}`: {err:#}",
+                        let detail = format!(
+                            "failed to persist shared Codex thread registration for session `{}`: {err:#}",
                             waiter_session_id
+                        );
+                        fail_shared_codex_turn_without_runtime_exit(
+                            &waiter_state,
+                            &waiter_session_id,
+                            &waiter_runtime_id,
+                            &detail,
+                            "persisting shared Codex thread registration",
                         );
                         return;
                     }
-                    Ok(true) => {}
+                    Ok(RuntimeMatchOutcome::Applied) => {}
                 }
                 remember_shared_codex_thread(
                     &waiter_sessions,
@@ -2776,21 +2899,30 @@ fn handle_shared_codex_start_turn(
 
     // Session may have been killed between thread setup and StartTurnAfterSetup
     // arriving. Fail the turn gracefully instead of crashing the shared runtime.
-    let recorded_runtime_config = match state.record_codex_runtime_config_if_runtime_matches(
+    match state.record_codex_runtime_config_if_runtime_matches(
         session_id,
         &runtime_token,
         command.sandbox_mode,
         command.approval_policy,
         command.reasoning_effort,
     ) {
-        Ok(recorded_runtime_config) => recorded_runtime_config,
-        Err(err) => {
-            eprintln!("[termal] session `{session_id}` removed during Codex turn setup: {err:#}");
+        Ok(RuntimeMatchOutcome::Applied) => {}
+        Ok(RuntimeMatchOutcome::SessionMissing | RuntimeMatchOutcome::RuntimeMismatch) => {
             return Ok(());
         }
-    };
-    if !recorded_runtime_config {
-        return Ok(());
+        Err(err) => {
+            let detail = format!(
+                "failed to persist shared Codex runtime config for session `{session_id}`: {err:#}"
+            );
+            fail_shared_codex_turn_without_runtime_exit(
+                state,
+                session_id,
+                runtime_id,
+                &detail,
+                "persisting shared Codex runtime config",
+            );
+            return Ok(());
+        }
     }
 
     {
@@ -2923,6 +3055,26 @@ fn handle_shared_codex_start_turn(
     Ok(())
 }
 
+fn fail_shared_codex_turn_without_runtime_exit(
+    state: &AppState,
+    session_id: &str,
+    runtime_id: &str,
+    detail: &str,
+    context: &str,
+) {
+    if let Err(err) = state.fail_turn_if_runtime_matches(
+        session_id,
+        &RuntimeToken::Codex(runtime_id.to_owned()),
+        detail,
+    ) {
+        eprintln!(
+            "runtime state warning> failed to mark shared Codex turn error for session `{}` after {}: {err:#}",
+            session_id,
+            context,
+        );
+    }
+}
+
 /// Handles shared Codex prompt command results.
 fn handle_shared_codex_prompt_command_result(
     state: &AppState,
@@ -3045,14 +3197,14 @@ fn handle_shared_codex_app_server_message(
         return Ok(());
     }
 
-    let mut sessions = sessions
+    let mut shared_sessions = sessions
         .lock()
         .expect("shared Codex session mutex poisoned");
     // Lazy registration: the session may exist in state.inner (via
     // find_shared_codex_session_id) but not yet in the shared session map
     // because remember_shared_codex_thread hasn't run. Insert a default
     // entry so early events from Codex are not dropped.
-    let session_state = sessions.entry(session_id.clone()).or_default();
+    let session_state = shared_sessions.entry(session_id.clone()).or_default();
     let SharedCodexSessionState {
         pending_turn_start_request_id,
         recorder: recorder_state,
@@ -3092,6 +3244,7 @@ fn handle_shared_codex_app_server_message(
         state,
         &session_id,
         &runtime_token,
+        sessions,
         thread_id,
         turn_id,
         completed_turn_id,
@@ -3248,6 +3401,7 @@ fn handle_shared_codex_app_server_notification(
     state: &AppState,
     session_id: &str,
     runtime_token: &RuntimeToken,
+    sessions: &SharedCodexSessionMap,
     session_thread_id: &mut Option<String>,
     turn_id: &mut Option<String>,
     completed_turn_id: &mut Option<String>,
@@ -3333,6 +3487,13 @@ fn handle_shared_codex_app_server_notification(
             flush_pending_codex_subagent_results(turn_state, recorder)?;
             recorder.finish_streaming_text()?;
             state.finish_turn_ok_if_runtime_matches(session_id, runtime_token)?;
+            if let Some(completed_turn_id) = completed_turn_id.as_deref() {
+                schedule_shared_codex_completed_turn_cleanup(
+                    sessions,
+                    session_id,
+                    completed_turn_id,
+                );
+            }
         }
         "item/started" => {
             let event_turn_id = shared_codex_event_turn_id(message);
@@ -3843,14 +4004,212 @@ fn clear_shared_codex_turn_recorder_state(recorder_state: &mut SessionRecorderSt
     reset_recorder_state_fields(recorder_state);
 }
 
+fn spawn_shared_codex_completed_turn_cleanup_worker(
+    sessions: &SharedCodexSessionMap,
+    cleanup_rx: mpsc::Receiver<SharedCodexCompletedTurnCleanup>,
+) {
+    let weak_sessions = Arc::downgrade(sessions);
+    std::thread::Builder::new()
+        .name("termal-codex-cleanup".to_owned())
+        .spawn(move || {
+            let mut pending = Vec::<SharedCodexCompletedTurnCleanup>::new();
+            loop {
+                if !run_due_shared_codex_completed_turn_cleanups(&weak_sessions, &mut pending) {
+                    break;
+                }
+
+                let next_timeout = pending
+                    .iter()
+                    .map(|cleanup| cleanup.due_at)
+                    .min()
+                    .map(|due_at| due_at.saturating_duration_since(std::time::Instant::now()));
+
+                let next_cleanup = match next_timeout {
+                    Some(timeout) => match cleanup_rx.recv_timeout(timeout) {
+                        Ok(cleanup) => Some(cleanup),
+                        Err(mpsc::RecvTimeoutError::Timeout) => None,
+                        Err(mpsc::RecvTimeoutError::Disconnected) => break,
+                    },
+                    None => match cleanup_rx.recv() {
+                        Ok(cleanup) => Some(cleanup),
+                        Err(_) => break,
+                    },
+                };
+
+                if let Some(cleanup) = next_cleanup {
+                    pending.push(cleanup);
+                }
+            }
+        })
+        .expect("failed to spawn shared Codex cleanup worker");
+}
+
+fn run_due_shared_codex_completed_turn_cleanups(
+    weak_sessions: &std::sync::Weak<SharedCodexSessions>,
+    pending: &mut Vec<SharedCodexCompletedTurnCleanup>,
+) -> bool {
+    let now = std::time::Instant::now();
+    if !pending.iter().any(|cleanup| cleanup.due_at <= now) {
+        return true;
+    }
+
+    let Some(sessions) = weak_sessions.upgrade() else {
+        return false;
+    };
+    let mut sessions = sessions
+        .lock()
+        .expect("shared Codex session mutex poisoned");
+    let mut index = 0usize;
+    while index < pending.len() {
+        if pending[index].due_at > now {
+            index += 1;
+            continue;
+        }
+
+        let cleanup = pending.swap_remove(index);
+        let Some(session_state) = sessions.get_mut(&cleanup.session_id) else {
+            continue;
+        };
+        if session_state.turn_id.is_some()
+            || session_state.completed_turn_id.as_deref() != Some(&cleanup.completed_turn_id)
+        {
+            continue;
+        }
+        clear_shared_codex_completed_turn_state_fields(
+            &mut session_state.completed_turn_id,
+            &mut session_state.turn_state,
+            &mut session_state.recorder,
+        );
+    }
+    true
+}
+
+fn read_capped_child_stdout_line(
+    reader: &mut impl BufRead,
+    line_buf: &mut Vec<u8>,
+    max_bytes: usize,
+    stream_label: &str,
+) -> io::Result<usize> {
+    line_buf.clear();
+    let mut total_read = 0usize;
+
+    loop {
+        let available = reader.fill_buf()?;
+        if available.is_empty() {
+            return Ok(total_read);
+        }
+
+        let newline_index = available.iter().position(|byte| *byte == b'\n');
+        let consume_len = newline_index.map_or(available.len(), |index| index + 1);
+        if total_read + consume_len > max_bytes {
+            // The line exceeds the safety cap.  Drain the remainder so the
+            // reader stays aligned with the next newline-delimited message,
+            // but discard the content instead of tearing down the runtime.
+            // Legitimate large messages (e.g. aggregatedOutput from long
+            // command executions) can exceed the cap.
+            reader.consume(consume_len);
+            total_read += consume_len;
+            if newline_index.is_none() {
+                loop {
+                    let buf = reader.fill_buf()?;
+                    if buf.is_empty() {
+                        break;
+                    }
+                    let nl = buf.iter().position(|b| *b == b'\n');
+                    let n = nl.map_or(buf.len(), |i| i + 1);
+                    reader.consume(n);
+                    total_read += n;
+                    if nl.is_some() {
+                        break;
+                    }
+                }
+            }
+            eprintln!(
+                "[termal] skipping oversized {stream_label} line \
+                 ({total_read} bytes, cap {max_bytes} bytes)"
+            );
+            line_buf.clear();
+            return Ok(total_read);
+        }
+
+        line_buf.extend_from_slice(&available[..consume_len]);
+        reader.consume(consume_len);
+        total_read += consume_len;
+
+        if newline_index.is_some() {
+            return Ok(total_read);
+        }
+    }
+}
+
+fn truncate_child_stdout_log_line(line: &str, max_chars: usize) -> String {
+    let mut truncated = String::new();
+    for (index, ch) in line.chars().enumerate() {
+        if index == max_chars {
+            truncated.push_str("...");
+            return truncated;
+        }
+        truncated.push(ch);
+    }
+    truncated
+}
+
+fn shared_codex_bad_json_streak_failure_detail(
+    consecutive_bad_json_lines: usize,
+    line: &str,
+) -> Option<String> {
+    if consecutive_bad_json_lines < SHARED_CODEX_MAX_CONSECUTIVE_BAD_JSON_LINES {
+        return None;
+    }
+
+    Some(format!(
+        "shared Codex app-server wrote {consecutive_bad_json_lines} consecutive non-JSON stdout lines; last line preview: {}",
+        truncate_child_stdout_log_line(line, SHARED_CODEX_STDOUT_LOG_PREVIEW_MAX_CHARS)
+    ))
+}
+
+fn clear_shared_codex_completed_turn_state_fields(
+    completed_turn_id: &mut Option<String>,
+    turn_state: &mut CodexTurnState,
+    recorder_state: &mut SessionRecorderState,
+) {
+    *completed_turn_id = None;
+    clear_codex_turn_state(turn_state);
+    clear_shared_codex_turn_recorder_state(recorder_state);
+}
+
 /// Clears shared Codex per-turn session state before a new turn starts.
 fn clear_shared_codex_turn_session_state(session_state: &mut SharedCodexSessionState) {
     session_state.pending_turn_start_request_id = None;
     session_state.turn_id = None;
-    session_state.completed_turn_id = None;
     session_state.turn_started = false;
-    clear_codex_turn_state(&mut session_state.turn_state);
-    clear_shared_codex_turn_recorder_state(&mut session_state.recorder);
+    clear_shared_codex_completed_turn_state_fields(
+        &mut session_state.completed_turn_id,
+        &mut session_state.turn_state,
+        &mut session_state.recorder,
+    );
+}
+
+fn schedule_shared_codex_completed_turn_cleanup(
+    sessions: &SharedCodexSessionMap,
+    session_id: &str,
+    completed_turn_id: &str,
+) {
+    sessions.schedule_completed_turn_cleanup(session_id, completed_turn_id);
+}
+
+fn shared_codex_app_server_error_is_stale_session(err: &anyhow::Error) -> bool {
+    err.chain().any(|cause| {
+        let message = cause.to_string();
+        let Some(session_id) = message
+            .strip_prefix("session `")
+            .and_then(|message| message.strip_suffix("` not found"))
+        else {
+            return false;
+        };
+
+        !session_id.is_empty() && !session_id.contains('`')
+    })
 }
 
 /// Buffers Codex subagent result.
@@ -4601,11 +4960,7 @@ fn start_codex_json_rpc_request_with_id(
 
     if let Err(err) = write_codex_json_rpc_message(
         writer,
-        &json!({
-            "id": request_id,
-            "method": method,
-            "params": params,
-        }),
+        &json_rpc_request_message(request_id.clone(), method, params),
     ) {
         pending_requests
             .lock()
@@ -4734,12 +5089,23 @@ fn fire_codex_model_list_page(
                         )));
                         return;
                     }
-                    let _ = waiter_input_tx.send(CodexRuntimeCommand::RefreshModelListPage {
-                        cursor: next_cursor,
-                        accumulated: model_options,
-                        page_count: page_count + 1,
-                        response_tx,
-                    });
+                    if let Err(err) =
+                        waiter_input_tx.send(CodexRuntimeCommand::RefreshModelListPage {
+                            cursor: next_cursor,
+                            accumulated: model_options,
+                            page_count: page_count + 1,
+                            response_tx,
+                        })
+                    {
+                        let detail = err.to_string();
+                        let CodexRuntimeCommand::RefreshModelListPage { response_tx, .. } = err.0
+                        else {
+                            unreachable!("model list pagination should only queue page commands");
+                        };
+                        let _ = response_tx.send(Err(format!(
+                            "failed to queue next Codex model list page: {detail}"
+                        )));
+                    }
                 } else {
                     let _ = response_tx.send(Ok(model_options));
                 }
@@ -5176,19 +5542,57 @@ fn write_codex_json_rpc_message(writer: &mut impl Write, message: &Value) -> Res
         .context("failed to flush Codex app-server stdin")
 }
 
+fn json_rpc_notification_message(method: &str) -> Value {
+    serde_json::to_value(JsonRpcNotificationMessage {
+        jsonrpc: JSON_RPC_VERSION,
+        method,
+    })
+    .expect("JSON-RPC notification should serialize")
+}
+
+fn json_rpc_request_message(request_id: impl Into<Value>, method: &str, params: Value) -> Value {
+    serde_json::to_value(JsonRpcRequestMessage {
+        jsonrpc: JSON_RPC_VERSION,
+        id: request_id.into(),
+        method,
+        params,
+    })
+    .expect("JSON-RPC request should serialize")
+}
+
+fn json_rpc_result_response_message(request_id: impl Into<Value>, result: Value) -> Value {
+    serde_json::to_value(JsonRpcResultResponseMessage {
+        jsonrpc: JSON_RPC_VERSION,
+        id: request_id.into(),
+        result,
+    })
+    .expect("JSON-RPC result response should serialize")
+}
+
+fn json_rpc_error_response_message(
+    request_id: impl Into<Value>,
+    code: i64,
+    message: impl Into<String>,
+) -> Value {
+    serde_json::to_value(JsonRpcErrorResponseMessage {
+        jsonrpc: JSON_RPC_VERSION,
+        id: request_id.into(),
+        error: JsonRpcErrorObject {
+            code,
+            message: message.into(),
+        },
+    })
+    .expect("JSON-RPC error response should serialize")
+}
+
 fn codex_json_rpc_response_message(response: &CodexJsonRpcResponseCommand) -> Value {
     match &response.payload {
-        CodexJsonRpcResponsePayload::Result(result) => json!({
-            "id": response.request_id,
-            "result": result,
-        }),
-        CodexJsonRpcResponsePayload::Error { code, message } => json!({
-            "id": response.request_id,
-            "error": {
-                "code": code,
-                "message": message,
-            },
-        }),
+        CodexJsonRpcResponsePayload::Result(result) => {
+            json_rpc_result_response_message(response.request_id.clone(), result.clone())
+        }
+        CodexJsonRpcResponsePayload::Error { code, message } => {
+            json_rpc_error_response_message(response.request_id.clone(), *code, message.clone())
+        }
     }
 }
 
