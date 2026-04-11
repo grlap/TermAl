@@ -3842,6 +3842,18 @@ textarea {
   min-height: 1px;
 }
 
+.load-earlier-messages {
+  display: flex;
+  justify-content: center;
+  padding: 0.75rem 0;
+  z-index: 1;
+}
+
+.load-earlier-messages-button {
+  font-size: 0.8rem;
+  opacity: 0.7;
+}
+
 .virtualized-message-slot {
   position: absolute;
   left: 0;

@@ -9931,39 +9931,38 @@ function SessionPaneView({
     });
   }
 
+  /** Scroll a node to its absolute bottom, repeating until scrollHeight
+   *  stabilizes (handles virtualized lists where rendering newly-visible
+   *  messages changes the total height). */
+  function settleScrollToBottom(node: HTMLElement) {
+    node.scrollTop = node.scrollHeight;
+    let prevHeight = node.scrollHeight;
+    let stableCount = 0;
+    const interval = setInterval(() => {
+      if (!node.isConnected) {
+        clearInterval(interval);
+        return;
+      }
+      node.scrollTop = node.scrollHeight;
+      if (node.scrollHeight === prevHeight) {
+        stableCount += 1;
+        if (stableCount >= 3) {
+          clearInterval(interval);
+        }
+      } else {
+        stableCount = 0;
+      }
+      prevHeight = node.scrollHeight;
+    }, 50);
+    setTimeout(() => clearInterval(interval), 30000);
+  }
+
   function scrollMessageStackToBoundary(boundary: "top" | "bottom") {
     if (boundary === "bottom") {
-      // Jump to the absolute bottom. For virtualized lists, a single
-      // scrollTo may not reach the true bottom because rendering
-      // newly-visible messages changes scrollHeight. Use a timer-based
-      // loop that gives the browser time to lay out each batch, instead
-      // of chasing frame-by-frame which is slow on extremely long
-      // conversations.
       {
         const node = messageStackRef.current;
         if (node) {
-          node.scrollTop = node.scrollHeight;
-          let prevHeight = node.scrollHeight;
-          let stableCount = 0;
-          const jumpInterval = setInterval(() => {
-            if (!messageStackRef.current) {
-              clearInterval(jumpInterval);
-              return;
-            }
-            messageStackRef.current.scrollTop =
-              messageStackRef.current.scrollHeight;
-            if (messageStackRef.current.scrollHeight === prevHeight) {
-              stableCount += 1;
-              if (stableCount >= 3) {
-                clearInterval(jumpInterval);
-              }
-            } else {
-              stableCount = 0;
-            }
-            prevHeight = messageStackRef.current.scrollHeight;
-          }, 50);
-          // Hard cap: stop after 30 seconds.
-          setTimeout(() => clearInterval(jumpInterval), 30000);
+          settleScrollToBottom(node);
         }
       }
       setShouldStickToBottom(true);
@@ -10181,9 +10180,8 @@ function SessionPaneView({
       if (saved) {
         if (saved.shouldStick) {
           // New messages may have arrived while this tab was inactive.
-          // Honour the stick intent by scrolling to the actual bottom
-          // instead of restoring the stale saved top offset.
-          node.scrollTop = node.scrollHeight;
+          // Honour the stick intent by scrolling to the actual bottom.
+          settleScrollToBottom(node);
         } else {
           const maxScrollTop = Math.max(node.scrollHeight - node.clientHeight, 0);
           node.scrollTop = Math.min(saved.top, maxScrollTop);
@@ -10193,10 +10191,10 @@ function SessionPaneView({
       }
 
       if (defaultScrollToBottom) {
-        node.scrollTop = node.scrollHeight;
+        settleScrollToBottom(node);
         setShouldStickToBottom(true);
         paneScrollPositions[scrollStateKey] = {
-          top: node.scrollTop,
+          top: Number.MAX_SAFE_INTEGER,
           shouldStick: true,
         };
         return;
@@ -10334,12 +10332,10 @@ function SessionPaneView({
       // state asynchronously). If the initial intent was to stick to the
       // bottom, honour it now that content has arrived.
       if (getShouldStickToBottom()) {
-        const frameId = window.requestAnimationFrame(() => {
-          scrollToLatestMessage("auto");
-        });
-        return () => {
-          window.cancelAnimationFrame(frameId);
-        };
+        const node = messageStackRef.current;
+        if (node) {
+          settleScrollToBottom(node);
+        }
       }
       return;
     }

@@ -112,6 +112,12 @@ const CONVERSATION_VIRTUALIZATION_MIN_MESSAGES = 80;
 const VIRTUALIZED_MESSAGE_OVERSCAN_PX = 960;
 const VIRTUALIZED_MESSAGE_GAP_PX = 12;
 const DEFAULT_VIRTUALIZED_VIEWPORT_HEIGHT = 720;
+/** Maximum number of messages to render initially. Older messages load on scroll-up. */
+const RENDER_WINDOW_INITIAL_SIZE = 200;
+/** Number of additional messages to prepend when the user scrolls near the top. */
+const RENDER_WINDOW_LOAD_MORE = 200;
+/** Scroll-top threshold (px) at which older messages are loaded. */
+const RENDER_WINDOW_LOAD_MORE_THRESHOLD_PX = 400;
 const EMPTY_MATCHED_ITEM_KEYS = new Set<string>();
 const STATIC_MODEL_OPTIONS: Readonly<Record<Session["agent"], readonly SessionModelChoice[]>> = {
   Claude: [],
@@ -1557,16 +1563,43 @@ function VirtualizedConversationMessageList({
   });
   const [layoutVersion, setLayoutVersion] = useState(0);
 
+  // Render window: only keep the last N messages in the layout to avoid
+  // computing positions for thousands of off-screen items. Older messages
+  // are loaded on scroll-up.
+  const [renderWindowSize, setRenderWindowSize] = useState(
+    Math.min(RENDER_WINDOW_INITIAL_SIZE, messages.length),
+  );
+  const prevMessageCountRef = useRef(messages.length);
+  // When new messages arrive (agent responding), keep the window anchored
+  // to the bottom by expanding it to cover the new messages.
+  if (messages.length > prevMessageCountRef.current) {
+    const growth = messages.length - prevMessageCountRef.current;
+    if (renderWindowSize + growth <= messages.length) {
+      // Expand window by the number of new messages so they're visible.
+      // This runs during render (before effects) so the layout is correct
+      // on the first paint.
+      setRenderWindowSize((prev) => Math.min(prev + growth, messages.length));
+    }
+  }
+  prevMessageCountRef.current = messages.length;
+
+  const windowStartIndex = Math.max(0, messages.length - renderWindowSize);
+  const windowedMessages = useMemo(
+    () => messages.slice(windowStartIndex),
+    [messages, windowStartIndex],
+  );
+  const hasOlderMessages = windowStartIndex > 0;
+
   const messageIndexById = useMemo(
-    () => new Map(messages.map((message, index) => [message.id, index])),
-    [messages],
+    () => new Map(windowedMessages.map((message, index) => [message.id, index])),
+    [windowedMessages],
   );
   const messageHeights = useMemo(
     () =>
-      messages.map(
+      windowedMessages.map(
         (message) => messageHeightsRef.current[message.id] ?? estimateConversationMessageHeight(message),
       ),
-    [layoutVersion, messages],
+    [layoutVersion, windowedMessages],
   );
   const layout = useMemo(() => buildVirtualizedMessageLayout(messageHeights), [messageHeights]);
   const layoutTopsRef = useRef(layout.tops);
@@ -1591,11 +1624,11 @@ function VirtualizedConversationMessageList({
 
   useEffect(() => {
     messageHeightsRef.current = Object.fromEntries(
-      messages
+      windowedMessages
         .filter((message) => messageHeightsRef.current[message.id] !== undefined)
         .map((message) => [message.id, messageHeightsRef.current[message.id] as number]),
     );
-  }, [messages]);
+  }, [windowedMessages]);
 
   useLayoutEffect(() => {
     const node = scrollContainerRef.current;
@@ -1627,10 +1660,49 @@ function VirtualizedConversationMessageList({
     };
   }, [scrollContainerRef, sessionId]);
 
+  // Load older messages when the user scrolls near the top of the window.
+  useEffect(() => {
+    if (!hasOlderMessages) {
+      return;
+    }
+
+    const node = scrollContainerRef.current;
+    if (!node) {
+      return;
+    }
+
+    function handleScroll() {
+      if (!node || node.scrollTop > RENDER_WINDOW_LOAD_MORE_THRESHOLD_PX) {
+        return;
+      }
+
+      // Expand the window. Adjust scrollTop so the current view stays
+      // in place instead of jumping when new items are prepended.
+      const prevScrollHeight = node.scrollHeight;
+      setRenderWindowSize((prev) => Math.min(prev + RENDER_WINDOW_LOAD_MORE, messages.length));
+      // The layout change happens asynchronously after React re-renders.
+      // Use a RAF to read the new scrollHeight and adjust.
+      requestAnimationFrame(() => {
+        if (!node) {
+          return;
+        }
+        const heightDelta = node.scrollHeight - prevScrollHeight;
+        if (heightDelta > 0) {
+          node.scrollTop += heightDelta;
+        }
+      });
+    }
+
+    node.addEventListener("scroll", handleScroll, { passive: true });
+    return () => {
+      node.removeEventListener("scroll", handleScroll);
+    };
+  }, [hasOlderMessages, messages.length, scrollContainerRef]);
+
   // Stabilize handler references so MeasuredMessageCard memo can skip
   // re-renders for messages whose data and position haven't changed.
-  const messagesRef = useRef(messages);
-  messagesRef.current = messages;
+  const messagesRef = useRef(windowedMessages);
+  messagesRef.current = windowedMessages;
   const messageIndexByIdRef = useRef(messageIndexById);
   messageIndexByIdRef.current = messageIndexById;
 
@@ -1685,7 +1757,26 @@ function VirtualizedConversationMessageList({
 
   return (
     <div className="virtualized-message-list" style={{ height: layout.totalHeight }}>
-      {messages
+      {hasOlderMessages && visibleRange.startIndex === 0 && (
+        <div
+          className="load-earlier-messages"
+          style={{ position: "absolute", top: 0, left: 0, right: 0 }}
+        >
+          <button
+            type="button"
+            className="ghost-button load-earlier-messages-button"
+            onClick={() =>
+              setRenderWindowSize((prev) =>
+                Math.min(prev + RENDER_WINDOW_LOAD_MORE, messages.length),
+              )
+            }
+          >
+            Load {Math.min(RENDER_WINDOW_LOAD_MORE, windowStartIndex)} earlier
+            messages ({windowStartIndex} hidden)
+          </button>
+        </div>
+      )}
+      {windowedMessages
         .slice(visibleRange.startIndex, visibleRange.endIndex)
         .map((message, visibleIndex) => {
           const messageIndex = visibleRange.startIndex + visibleIndex;
@@ -1694,7 +1785,7 @@ function VirtualizedConversationMessageList({
               key={message.id}
               renderMessageCard={renderMessageCard}
               message={message}
-              preferImmediateHeavyRender={messageIndex >= messages.length - 2}
+              preferImmediateHeavyRender={messageIndex >= windowedMessages.length - 2}
               top={layout.tops[messageIndex] ?? 0}
               onApprovalDecision={boundApprovalDecision}
               onUserInputSubmit={boundUserInputSubmit}
