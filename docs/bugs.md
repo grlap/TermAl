@@ -528,6 +528,68 @@ summary cards can appear per turn completion.
 - this makes the grace window fire-once, collecting all late events into a
   single summary
 
+## DiffPanel `handleSave` still reads from React closure, not from refs
+
+**Severity:** Medium - user-initiated save can send stale content or baseHash.
+
+The rebase paths in `DiffPanel` (`handleApplyDiffEditsToDiskVersion`, watcher
+effect) were migrated to read `latestFileRef.current` and `editValueRef.current`
+post-await. The user-initiated `handleSave` still captures `latestFile` and
+`editValue` from the React closure before `await onSaveFile(...)`. If the user
+triggers save while a watcher rebase is in-flight, the save can send pre-rebase
+content or an outdated `baseHash`.
+
+**Current behavior:**
+- `handleSave` reads `latestFile.path`, `editValue`, and `latestFile.contentHash`
+  from the React closure before the async save call
+- a concurrent watcher-driven rebase can update the refs after `handleSave`
+  captures the closure values
+- the save may send stale content that has already been rebased
+
+**Proposal:**
+- read `latestFileRef.current` and `editValueRef.current` at the top of
+  `handleSave`, matching the pattern applied to `handleApplyDiffEditsToDiskVersion`
+
+## `mergeWorkspaceFilesChangedEvents` drops same-revision changes
+
+**Severity:** Medium - file-change hints from same-revision events can be lost.
+
+`mergeWorkspaceFilesChangedEvents` treats equal revisions as duplicates and
+returns the current (earlier) event unchanged. If the backend sends two distinct
+file-change SSE events with the same revision but different paths (e.g., from
+different scopes flushed in the same coalesce window), the second set of paths
+is silently dropped and those tabs will not refresh.
+
+**Current behavior:**
+- the guard `next.revision <= current.revision` enters a branch that returns
+  `current` when revisions are equal
+- the second event's changes array is discarded without merging
+
+**Proposal:**
+- merge changes when revisions are equal, or document this as intentional dedup
+  with a comment explaining why same-revision events are expected to carry
+  identical paths
+
+## Orchestrator model combobox can show duplicate entries for differently-cased models
+
+**Severity:** Low - a model value with different casing can appear twice in the
+combobox dropdown.
+
+`orchestratorSessionModelOptions` deduplicates via a `seenValues` set that
+normalizes with `.trim().toLowerCase()`, but the tail check
+`options.some((o) => o.value === normalizedModel)` uses case-sensitive comparison.
+If a session's persisted model value has different casing from the option list
+(e.g. `"GPT-5.4"` vs `"gpt-5.4"`), the tail check fails and a duplicate entry
+is appended.
+
+**Current behavior:**
+- `pushOption` normalizes to lowercase for dedup
+- the fallback `.some()` check compares raw values
+
+**Proposal:**
+- use case-insensitive comparison in the tail check:
+  `options.some((o) => o.value.trim().toLowerCase() === normalizedModel.toLowerCase())`
+
 ## Claude default model sentinel can leak into live set_model
 
 **Severity:** Low - a running Claude session can receive TermAl's internal
@@ -797,6 +859,10 @@ filesystem I/O is not safe under the mutex.
 - [ ] P2: Complete Claude CLI model-argument matrix coverage:
   assert one-shot explicit models include `--model`, and persistent default
   sessions omit `--model default`.
+- [ ] P2: Add grace-window expired-deadline negative test:
+  set `active_turn_file_change_grace_deadline` to an already-expired `Instant`,
+  call `record_active_turn_file_changes`, and assert no `FileChanges` message
+  is produced. This locks in the time-boundary enforcement.
 - [ ] P2: Assert DiffPanel deleted-file recovery actions:
   extend the deleted-file watcher recovery test to assert `Apply my edits to
   disk version`, `Save anyway`, and `Reload from disk` are visible.
