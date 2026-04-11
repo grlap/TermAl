@@ -9931,40 +9931,9 @@ function SessionPaneView({
     });
   }
 
-  /** Scroll a node to its absolute bottom, repeating until scrollHeight
-   *  stabilizes (handles virtualized lists where rendering newly-visible
-   *  messages changes the total height). */
-  function settleScrollToBottom(node: HTMLElement) {
-    node.scrollTop = node.scrollHeight;
-    let prevHeight = node.scrollHeight;
-    let stableCount = 0;
-    const interval = setInterval(() => {
-      if (!node.isConnected) {
-        clearInterval(interval);
-        return;
-      }
-      node.scrollTop = node.scrollHeight;
-      if (node.scrollHeight === prevHeight) {
-        stableCount += 1;
-        if (stableCount >= 3) {
-          clearInterval(interval);
-        }
-      } else {
-        stableCount = 0;
-      }
-      prevHeight = node.scrollHeight;
-    }, 50);
-    setTimeout(() => clearInterval(interval), 30000);
-  }
-
   function scrollMessageStackToBoundary(boundary: "top" | "bottom") {
     if (boundary === "bottom") {
-      {
-        const node = messageStackRef.current;
-        if (node) {
-          settleScrollToBottom(node);
-        }
-      }
+      scheduleSettledScrollToBottom("auto", { maxAttempts: 60 });
       setShouldStickToBottom(true);
       paneScrollPositions[scrollStateKey] = {
         top: Number.MAX_SAFE_INTEGER,
@@ -10178,20 +10147,21 @@ function SessionPaneView({
 
       const saved = paneScrollPositions[scrollStateKey];
       if (saved) {
-        if (saved.shouldStick) {
-          // New messages may have arrived while this tab was inactive.
-          // Honour the stick intent by scrolling to the actual bottom.
-          settleScrollToBottom(node);
-        } else {
-          const maxScrollTop = Math.max(node.scrollHeight - node.clientHeight, 0);
-          node.scrollTop = Math.min(saved.top, maxScrollTop);
-        }
+        // TODO: restore the exact saved scroll offset on tab switch.
+        // The virtualizer recalculates layout from estimated heights on
+        // remount, so the saved pixel offset no longer maps to the same
+        // messages. A proper fix needs to save the first-visible message
+        // ID and scroll to its position in the new layout. For now,
+        // always scroll to the bottom — this is correct for the common
+        // case (user was at the bottom chatting) and acceptable for the
+        // scrolled-up case (user loses their position but can scroll back).
+        scheduleSettledScrollToBottom("auto", { maxAttempts: 60 });
         setShouldStickToBottom(saved.shouldStick);
         return;
       }
 
       if (defaultScrollToBottom) {
-        settleScrollToBottom(node);
+        scheduleSettledScrollToBottom("auto", { maxAttempts: 60 });
         setShouldStickToBottom(true);
         paneScrollPositions[scrollStateKey] = {
           top: Number.MAX_SAFE_INTEGER,
@@ -10332,10 +10302,7 @@ function SessionPaneView({
       // state asynchronously). If the initial intent was to stick to the
       // bottom, honour it now that content has arrived.
       if (getShouldStickToBottom()) {
-        const node = messageStackRef.current;
-        if (node) {
-          settleScrollToBottom(node);
-        }
+        scheduleSettledScrollToBottom("auto", { maxAttempts: 60 });
       }
       return;
     }
