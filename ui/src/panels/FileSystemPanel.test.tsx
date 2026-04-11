@@ -189,6 +189,62 @@ describe("FileSystemPanel", () => {
 
     expect(onOpenRootPath).toHaveBeenCalledWith("/repo/docs");
   });
+
+  it("refreshes visible directories and git decorations after a watcher event", async () => {
+    let rootReadCount = 0;
+    fetchDirectoryMock.mockImplementation(async (path) => {
+      if (path !== "/repo") {
+        throw new Error(`Unexpected directory request: ${path}`);
+      }
+      rootReadCount += 1;
+      return makeDirectoryResponse(
+        "repo",
+        "/repo",
+        rootReadCount === 1
+          ? [{ kind: "file", name: "README.md", path: "/repo/README.md" }]
+          : [
+              { kind: "file", name: "README.md", path: "/repo/README.md" },
+              { kind: "file", name: "agent.rs", path: "/repo/agent.rs" },
+            ],
+      );
+    });
+    fetchGitStatusMock
+      .mockResolvedValueOnce(makeStatusResponse([]))
+      .mockResolvedValue(makeStatusResponse([{ path: "agent.rs", worktreeStatus: "M" }]));
+
+    const { container, rerender } = render(
+      <FileSystemPanel
+        rootPath="/repo"
+        sessionId="session-1"
+        workspaceFilesChangedEvent={null}
+        showPathControls={false}
+        onOpenPath={() => {}}
+        onOpenRootPath={() => {}}
+      />,
+    );
+
+    expect(await screen.findByRole("button", { name: /^README\.md/i })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^agent\.rs/i })).not.toBeInTheDocument();
+
+    rerender(
+      <FileSystemPanel
+        rootPath="/repo"
+        sessionId="session-1"
+        workspaceFilesChangedEvent={{
+          revision: 1,
+          changes: [{ path: "/repo/agent.rs", kind: "created" }],
+        }}
+        showPathControls={false}
+        onOpenPath={() => {}}
+        onOpenRootPath={() => {}}
+      />,
+    );
+
+    expect(await screen.findByRole("button", { name: /^agent\.rs/i })).toBeInTheDocument();
+    await waitFor(() => {
+      expect(container.querySelector(".filesystem-git-badge-modified")).not.toBeNull();
+    });
+  });
 });
 
 function makeDirectoryResponse(

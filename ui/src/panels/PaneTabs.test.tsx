@@ -17,7 +17,7 @@ import {
 import { copyTextToClipboard } from "../clipboard";
 import { SESSION_DRAG_MIME_TYPE } from "../session-drag";
 import type { WorkspaceTabDrag } from "../tab-drag";
-import { PaneTabs, formatVisibleTabLabel } from "./PaneTabs";
+import { PaneTabs, formatVisibleTabLabel, type PaneTabDecoration } from "./PaneTabs";
 import type { CodexState, Project, RemoteConfig, Session } from "../types";
 import type { WorkspaceTab } from "../workspace";
 
@@ -925,6 +925,32 @@ describe("PaneTabs", () => {
     expect(tooltip).toHaveTextContent("Model:");
     expect(tooltip).toHaveTextContent("claude-custom-build");
   });
+
+  it("shows source tab state decorations", () => {
+    renderPaneTabs({
+      tabDecorations: {
+        "tab-source": {
+          label: "Unsaved",
+          tone: "warning",
+          title: "This file has unsaved editor changes.",
+        },
+      },
+      tabs: [
+        {
+          id: "tab-source",
+          kind: "source",
+          path: "C:/repo/src/main.rs",
+          originSessionId: null,
+        },
+      ],
+    });
+
+    expect(screen.getByText("Unsaved")).toBeInTheDocument();
+    expect(screen.getByText("Unsaved")).toHaveAttribute(
+      "title",
+      "This file has unsaved editor changes.",
+    );
+  });
 });
 
 function renderPaneTabs({
@@ -937,6 +963,7 @@ function renderPaneTabs({
   projectLookup = new Map<string, Project>(),
   remoteLookup = new Map<string, RemoteConfig>(),
   sessionLookup = new Map<string, Session>(),
+  tabDecorations,
   tabs,
 }: {
   codexState?: CodexState;
@@ -958,6 +985,7 @@ function renderPaneTabs({
   projectLookup?: Map<string, Project>;
   remoteLookup?: Map<string, RemoteConfig>;
   sessionLookup?: Map<string, Session>;
+  tabDecorations?: Record<string, PaneTabDecoration | undefined>;
   tabs: WorkspaceTab[];
 }) {
   return render(
@@ -976,6 +1004,7 @@ function renderPaneTabs({
       projectLookup={projectLookup}
       remoteLookup={remoteLookup}
       sessionLookup={sessionLookup}
+      tabDecorations={tabDecorations}
       tabs={tabs}
       windowId="window-1"
     />,

@@ -2,6 +2,7 @@ import type {
   ApprovalMessage,
   CommandMessage,
   DiffMessage,
+  FileChangesMessage,
   ImageAttachment,
   MarkdownMessage,
   Message,
@@ -185,6 +186,8 @@ function collectMessageSearchText(message: Message) {
       return collectMarkdownSearchText(message);
     case "parallelAgents":
       return collectParallelAgentsSearchText(message);
+    case "fileChanges":
+      return collectFileChangesSearchText(message);
     case "subagentResult":
       return collectSubagentResultSearchText(message);
     case "approval":
@@ -214,6 +217,12 @@ function collectParallelAgentsSearchText(message: ParallelAgentsMessage) {
   return joinSearchableParts(
     message.agents.flatMap((agent) => [agent.title, agent.detail]),
   );
+}
+function collectFileChangesSearchText(message: FileChangesMessage) {
+  return joinSearchableParts([
+    message.title,
+    ...message.files.flatMap((file) => [file.path, file.kind]),
+  ]);
 }
 function collectSubagentResultSearchText(message: SubagentResultMessage) {
   return joinSearchableParts([message.title, message.summary, message.conversationId, message.turnId]);

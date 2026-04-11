@@ -45,6 +45,9 @@ struct AppState {
     review_documents_lock: Arc<Mutex<()>>,
     state_events: broadcast::Sender<String>,
     delta_events: broadcast::Sender<String>,
+    file_events: broadcast::Sender<String>,
+    #[cfg_attr(test, allow(dead_code))]
+    file_events_revision: Arc<AtomicU64>,
     /// Background persistence channel. `persist_internal_locked` sends a
     /// pre-cloned `PersistedState` snapshot through this channel; a
     /// dedicated thread serializes it to JSON and writes the file so the
@@ -96,6 +99,248 @@ impl AgentReadinessCache {
 
 fn fresh_agent_readiness_cache(default_workdir: &str) -> AgentReadinessCache {
     AgentReadinessCache::fresh(collect_agent_readiness(default_workdir))
+}
+
+#[cfg(not(test))]
+const WORKSPACE_FILE_WATCH_ROOT_REFRESH_MS: Duration = Duration::from_secs(2);
+#[cfg(not(test))]
+const WORKSPACE_FILE_WATCH_COALESCE_MS: Duration = Duration::from_millis(250);
+#[cfg(not(test))]
+const WORKSPACE_FILE_WATCH_RECV_TIMEOUT_MS: Duration = Duration::from_millis(100);
+
+#[cfg(not(test))]
+fn run_workspace_file_watcher(state: AppState) {
+    let (event_tx, event_rx) = mpsc::channel::<notify::Result<NotifyEvent>>();
+    let mut watcher = match RecommendedWatcher::new(
+        move |result| {
+            let _ = event_tx.send(result);
+        },
+        NotifyConfig::default(),
+    ) {
+        Ok(watcher) => watcher,
+        Err(err) => {
+            eprintln!("file watch> failed to start workspace watcher: {err}");
+            return;
+        }
+    };
+
+    let mut watched_roots = BTreeSet::<PathBuf>::new();
+    let mut pending_changes = BTreeMap::<String, WorkspaceFileChangeEvent>::new();
+    let mut last_change_at: Option<std::time::Instant> = None;
+    let mut next_root_refresh_at = std::time::Instant::now();
+
+    loop {
+        let now = std::time::Instant::now();
+        if now >= next_root_refresh_at {
+            reconcile_workspace_file_watch_roots(&state, &mut watcher, &mut watched_roots);
+            next_root_refresh_at = now + WORKSPACE_FILE_WATCH_ROOT_REFRESH_MS;
+        }
+
+        match event_rx.recv_timeout(WORKSPACE_FILE_WATCH_RECV_TIMEOUT_MS) {
+            Ok(Ok(event)) => {
+                let changes = workspace_file_changes_from_notify_event(&event);
+                state.record_active_turn_file_changes(&changes);
+                for change in changes {
+                    pending_changes.insert(change.path.clone(), change);
+                    last_change_at = Some(std::time::Instant::now());
+                }
+            }
+            Ok(Err(err)) => {
+                eprintln!("file watch> workspace watcher error: {err}");
+            }
+            Err(mpsc::RecvTimeoutError::Timeout) => {}
+            Err(mpsc::RecvTimeoutError::Disconnected) => break,
+        }
+
+        if last_change_at.is_some_and(|at| at.elapsed() >= WORKSPACE_FILE_WATCH_COALESCE_MS) {
+            let changes = pending_changes.values().cloned().collect::<Vec<_>>();
+            pending_changes.clear();
+            last_change_at = None;
+            state.publish_workspace_files_changed(changes);
+        }
+    }
+}
+
+#[cfg(not(test))]
+fn reconcile_workspace_file_watch_roots(
+    state: &AppState,
+    watcher: &mut RecommendedWatcher,
+    watched_roots: &mut BTreeSet<PathBuf>,
+) {
+    let next_roots = collect_workspace_file_watch_roots(state);
+    let next_root_set = next_roots.iter().cloned().collect::<BTreeSet<_>>();
+    for root in watched_roots
+        .difference(&next_root_set)
+        .cloned()
+        .collect::<Vec<_>>()
+    {
+        if let Err(err) = watcher.unwatch(&root) {
+            eprintln!("file watch> failed to unwatch {}: {err}", root.display());
+        }
+        watched_roots.remove(&root);
+    }
+
+    for root in next_roots {
+        if watched_roots.contains(&root) {
+            continue;
+        }
+
+        match watcher.watch(&root, RecursiveMode::Recursive) {
+            Ok(()) => {
+                watched_roots.insert(root);
+            }
+            Err(err) => {
+                eprintln!("file watch> failed to watch {}: {err}", root.display());
+            }
+        }
+    }
+}
+
+#[cfg(not(test))]
+fn collect_workspace_file_watch_roots(state: &AppState) -> Vec<PathBuf> {
+    let roots = {
+        let inner = state.inner.lock().expect("state mutex poisoned");
+        let local_project_ids = inner
+            .projects
+            .iter()
+            .filter(|project| project.remote_id == LOCAL_REMOTE_ID)
+            .map(|project| project.id.as_str())
+            .collect::<HashSet<_>>();
+        let mut roots = Vec::new();
+        for project in &inner.projects {
+            if project.remote_id == LOCAL_REMOTE_ID {
+                roots.push(project.root_path.clone());
+            }
+        }
+        for record in &inner.sessions {
+            if record.remote_id.is_some() {
+                continue;
+            }
+
+            let is_local_session = record
+                .session
+                .project_id
+                .as_deref()
+                .map(|project_id| local_project_ids.contains(project_id))
+                .unwrap_or(true);
+            if is_local_session {
+                roots.push(record.session.workdir.clone());
+            }
+        }
+        roots
+    };
+
+    let mut canonical_roots = roots
+        .into_iter()
+        .filter_map(|root| canonical_workspace_file_watch_root(&root))
+        .collect::<Vec<_>>();
+    canonical_roots.sort();
+    canonical_roots.dedup();
+    prune_nested_workspace_file_watch_roots(canonical_roots)
+}
+
+#[cfg(not(test))]
+fn canonical_workspace_file_watch_root(root: &str) -> Option<PathBuf> {
+    let trimmed = root.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    let canonical = fs::canonicalize(trimmed).ok()?;
+    canonical.is_dir().then(|| normalize_user_facing_path(&canonical))
+}
+
+#[cfg(not(test))]
+fn prune_nested_workspace_file_watch_roots(mut roots: Vec<PathBuf>) -> Vec<PathBuf> {
+    roots.sort_by_key(|root| root.components().count());
+    let mut pruned = Vec::<PathBuf>::new();
+    for root in roots {
+        if pruned.iter().any(|existing| root.starts_with(existing)) {
+            continue;
+        }
+        pruned.push(root);
+    }
+    pruned
+}
+
+#[cfg(not(test))]
+fn workspace_file_changes_from_notify_event(event: &NotifyEvent) -> Vec<WorkspaceFileChangeEvent> {
+    let Some(kind) = workspace_file_change_kind(&event.kind) else {
+        return Vec::new();
+    };
+
+    event
+        .paths
+        .iter()
+        .filter(|path| !is_ignored_workspace_file_event_path(path))
+        .map(|path| workspace_file_change_from_path(path, kind))
+        .collect()
+}
+
+#[cfg(not(test))]
+fn workspace_file_change_kind(kind: &NotifyEventKind) -> Option<WorkspaceFileChangeKind> {
+    match kind {
+        NotifyEventKind::Access(_) => None,
+        NotifyEventKind::Create(_) => Some(WorkspaceFileChangeKind::Created),
+        NotifyEventKind::Modify(_) => Some(WorkspaceFileChangeKind::Modified),
+        NotifyEventKind::Remove(_) => Some(WorkspaceFileChangeKind::Deleted),
+        NotifyEventKind::Any | NotifyEventKind::Other => Some(WorkspaceFileChangeKind::Other),
+    }
+}
+
+fn merge_workspace_file_change_kind(
+    current: WorkspaceFileChangeKind,
+    next: WorkspaceFileChangeKind,
+) -> WorkspaceFileChangeKind {
+    match (current, next) {
+        (WorkspaceFileChangeKind::Deleted, _) | (_, WorkspaceFileChangeKind::Deleted) => {
+            WorkspaceFileChangeKind::Deleted
+        }
+        (WorkspaceFileChangeKind::Created, _) | (_, WorkspaceFileChangeKind::Created) => {
+            WorkspaceFileChangeKind::Created
+        }
+        (WorkspaceFileChangeKind::Modified, _) | (_, WorkspaceFileChangeKind::Modified) => {
+            WorkspaceFileChangeKind::Modified
+        }
+        _ => WorkspaceFileChangeKind::Other,
+    }
+}
+
+#[cfg(not(test))]
+fn workspace_file_change_from_path(
+    path: &FsPath,
+    kind: WorkspaceFileChangeKind,
+) -> WorkspaceFileChangeEvent {
+    let metadata = fs::metadata(path).ok();
+    WorkspaceFileChangeEvent {
+        path: normalize_user_facing_path(path).to_string_lossy().into_owned(),
+        kind,
+        mtime_ms: metadata.as_ref().and_then(file_metadata_mtime_ms),
+        size_bytes: metadata.map(|metadata| metadata.len()),
+    }
+}
+
+#[cfg(not(test))]
+fn is_ignored_workspace_file_event_path(path: &FsPath) -> bool {
+    const IGNORED_COMPONENTS: &[&str] = &[
+        ".git",
+        ".hg",
+        ".svn",
+        ".termal",
+        ".next",
+        ".nuxt",
+        ".vite",
+        "dist",
+        "node_modules",
+        "target",
+    ];
+
+    path.components().any(|component| {
+        let value = component.as_os_str().to_string_lossy();
+        IGNORED_COMPONENTS
+            .iter()
+            .any(|ignored| value.eq_ignore_ascii_case(ignored))
+    })
 }
 
 /// Holds stop session options.
@@ -210,6 +455,8 @@ impl AppState {
             review_documents_lock: Arc::new(Mutex::new(())),
             state_events: broadcast::channel(128).0,
             delta_events: broadcast::channel(256).0,
+            file_events: broadcast::channel(256).0,
+            file_events_revision: Arc::new(AtomicU64::new(0)),
             persist_tx,
             shared_codex_runtime: Arc::new(Mutex::new(None)),
             agent_readiness_cache,
@@ -230,6 +477,8 @@ impl AppState {
             state.persist_internal_locked(&inner)?;
         }
         state.restore_remote_event_bridges();
+        #[cfg(not(test))]
+        state.spawn_workspace_file_watcher();
         if let Err(err) = state.resume_pending_orchestrator_transitions() {
             eprintln!("orchestrator> failed resuming pending transitions: {err:#}");
         }
@@ -881,10 +1130,61 @@ impl AppState {
         self.delta_events.subscribe()
     }
 
+    /// Handles subscribe file events.
+    fn subscribe_file_events(&self) -> broadcast::Receiver<String> {
+        self.file_events.subscribe()
+    }
+
     /// Publishes delta.
     fn publish_delta(&self, event: &DeltaEvent) {
         if let Ok(payload) = serde_json::to_string(event) {
             let _ = self.delta_events.send(payload);
+        }
+    }
+
+    /// Publishes workspace file changes.
+    #[cfg_attr(test, allow(dead_code))]
+    fn publish_workspace_files_changed(&self, changes: Vec<WorkspaceFileChangeEvent>) {
+        if changes.is_empty() {
+            return;
+        }
+
+        let event = WorkspaceFilesChangedEvent {
+            revision: self.file_events_revision.fetch_add(1, Ordering::Relaxed) + 1,
+            changes,
+        };
+        if let Ok(payload) = serde_json::to_string(&event) {
+            let _ = self.file_events.send(payload);
+        }
+    }
+
+    /// Records watcher changes against currently active local turns.
+    fn record_active_turn_file_changes(&self, changes: &[WorkspaceFileChangeEvent]) {
+        if changes.is_empty() {
+            return;
+        }
+
+        let mut inner = self.inner.lock().expect("state mutex poisoned");
+        for record in &mut inner.sessions {
+            if record.active_turn_start_message_count.is_none()
+                || record.is_remote_proxy()
+                || record.hidden
+            {
+                continue;
+            }
+
+            for change in changes {
+                let path = change.path.trim();
+                if path.is_empty() || !path_contains(&record.session.workdir, FsPath::new(path)) {
+                    continue;
+                }
+
+                record
+                    .active_turn_file_changes
+                    .entry(path.to_owned())
+                    .and_modify(|kind| *kind = merge_workspace_file_change_kind(*kind, change.kind))
+                    .or_insert(change.kind);
+            }
         }
     }
 
@@ -908,6 +1208,15 @@ impl AppState {
                 );
             }
         }
+    }
+
+    #[cfg(not(test))]
+    fn spawn_workspace_file_watcher(&self) {
+        let state = self.clone();
+        std::thread::Builder::new()
+            .name("termal-file-watch".to_owned())
+            .spawn(move || run_workspace_file_watcher(state))
+            .expect("failed to spawn file watcher thread");
     }
 
     /// Handles shared Codex runtime.
@@ -1473,6 +1782,7 @@ impl AppState {
         };
 
         record.orchestrator_auto_dispatch_blocked = false;
+        record.active_turn_file_changes.clear();
         push_message_on_record(
             record,
             Message::Text {
@@ -2942,6 +3252,7 @@ impl AppState {
         record.runtime_stop_in_progress = false;
         record.deferred_stop_callbacks.clear();
         record.active_turn_start_message_count = None;
+        record.active_turn_file_changes.clear();
         clear_all_pending_requests(record);
         self.commit_locked(&mut inner)?;
         Ok(())
@@ -2961,6 +3272,8 @@ impl AppState {
                 .find_session_index(session_id)
                 .ok_or_else(|| anyhow!("session `{session_id}` not found"))?;
             let message_id = (!cleaned.is_empty()).then(|| inner.next_message_id());
+            let file_change_message_id = (!inner.sessions[index].active_turn_file_changes.is_empty())
+                .then(|| inner.next_message_id());
             let record = &mut inner.sessions[index];
             if !record.runtime.matches_runtime_token(token) {
                 return Ok(());
@@ -2981,6 +3294,9 @@ impl AppState {
                     text: format!("Turn failed: {cleaned}"),
                     expanded_text: None,
                 });
+            }
+            if let Some(message_id) = file_change_message_id {
+                push_active_turn_file_changes_on_record(record, message_id);
             }
 
             record.session.status = SessionStatus::Error;
@@ -3087,6 +3403,8 @@ impl AppState {
             let index = inner
                 .find_session_index(session_id)
                 .ok_or_else(|| anyhow!("session `{session_id}` not found"))?;
+            let file_change_message_id = (!inner.sessions[index].active_turn_file_changes.is_empty())
+                .then(|| inner.next_message_id());
             let record = &mut inner.sessions[index];
             if !record.runtime.matches_runtime_token(token) {
                 return Ok(());
@@ -3101,6 +3419,9 @@ impl AppState {
             record.session.status = SessionStatus::Error;
             if !cleaned.is_empty() {
                 record.session.preview = make_preview(cleaned);
+            }
+            if let Some(message_id) = file_change_message_id {
+                push_active_turn_file_changes_on_record(record, message_id);
             }
             inner.sessions[index].active_turn_start_message_count = None;
             let has_queued_prompts = !inner.sessions[index].queued_prompts.is_empty();
@@ -3132,6 +3453,8 @@ impl AppState {
             let index = inner
                 .find_session_index(session_id)
                 .ok_or_else(|| anyhow!("session `{session_id}` not found"))?;
+            let file_change_message_id = (!inner.sessions[index].active_turn_file_changes.is_empty())
+                .then(|| inner.next_message_id());
             let record = &mut inner.sessions[index];
             if !record.runtime.matches_runtime_token(token) {
                 return Ok(());
@@ -3156,6 +3479,9 @@ impl AppState {
                 session_id,
                 completion_revision,
             );
+            if let Some(message_id) = file_change_message_id {
+                push_active_turn_file_changes_on_record(&mut inner.sessions[index], message_id);
+            }
             inner.sessions[index].active_turn_start_message_count = None;
             self.commit_locked(&mut inner)?;
             let orchestrator_delta = orchestrator_changed
@@ -3225,6 +3551,8 @@ impl AppState {
             } else {
                 None
             };
+            let file_change_message_id = (!inner.sessions[index].active_turn_file_changes.is_empty())
+                .then(|| inner.next_message_id());
             let has_queued_prompts = {
                 let record = &mut inner.sessions[index];
                 record.runtime = SessionRuntime::None;
@@ -3247,6 +3575,9 @@ impl AppState {
                     }
                     record.session.status = SessionStatus::Error;
                     record.session.preview = make_preview(detail);
+                }
+                if let Some(message_id) = file_change_message_id {
+                    push_active_turn_file_changes_on_record(record, message_id);
                 }
                 !record.queued_prompts.is_empty()
             };
@@ -3649,6 +3980,8 @@ impl AppState {
                 .find_visible_session_index(session_id)
                 .ok_or_else(|| ApiError::not_found("session not found"))?;
             let message_id = inner.next_message_id();
+            let file_change_message_id = (!inner.sessions[index].active_turn_file_changes.is_empty())
+                .then(|| inner.next_message_id());
             let mut thread_id_to_suppress = None;
             {
                 let record = &mut inner.sessions[index];
@@ -3678,6 +4011,9 @@ impl AppState {
                     text: "Turn stopped by user.".to_owned(),
                     expanded_text: None,
                 });
+                if let Some(message_id) = file_change_message_id {
+                    push_active_turn_file_changes_on_record(record, message_id);
+                }
             }
 
             // Suppress rediscovery of the detached thread after the record
@@ -4713,9 +5049,14 @@ impl AppState {
             let index = inner
                 .find_session_index(session_id)
                 .ok_or_else(|| anyhow!("session `{session_id}` not found"))?;
+            let file_change_message_id = (!inner.sessions[index].active_turn_file_changes.is_empty())
+                .then(|| inner.next_message_id());
             let record = &mut inner.sessions[index];
             record.session.status = SessionStatus::Error;
             record.session.preview = make_preview(cleaned);
+            if let Some(message_id) = file_change_message_id {
+                push_active_turn_file_changes_on_record(record, message_id);
+            }
             record.active_turn_start_message_count = None;
             self.commit_locked(&mut inner)?;
         }
@@ -5463,6 +5804,7 @@ impl StateInner {
             active_codex_reasoning_effort: None,
             active_codex_sandbox_mode: None,
             active_turn_start_message_count: None,
+            active_turn_file_changes: BTreeMap::new(),
             agent_commands: Vec::new(),
             codex_approval_policy: default_codex_approval_policy(),
             codex_reasoning_effort: self.preferences.default_codex_reasoning_effort,
@@ -6042,6 +6384,7 @@ impl PersistedSessionRecord {
             active_codex_reasoning_effort: self.active_codex_reasoning_effort,
             active_codex_sandbox_mode: self.active_codex_sandbox_mode,
             active_turn_start_message_count: None,
+            active_turn_file_changes: BTreeMap::new(),
             agent_commands: Vec::new(),
             codex_approval_policy: self.codex_approval_policy,
             codex_reasoning_effort: self.codex_reasoning_effort,
@@ -6190,6 +6533,7 @@ struct SessionRecord {
     active_codex_reasoning_effort: Option<CodexReasoningEffort>,
     active_codex_sandbox_mode: Option<CodexSandboxMode>,
     active_turn_start_message_count: Option<usize>,
+    active_turn_file_changes: BTreeMap<String, WorkspaceFileChangeKind>,
     agent_commands: Vec<AgentCommand>,
     codex_approval_policy: CodexApprovalPolicy,
     codex_reasoning_effort: CodexReasoningEffort,
@@ -6247,6 +6591,7 @@ fn reset_hidden_claude_spare_record(record: &mut SessionRecord) {
     record.runtime_stop_in_progress = false;
     record.deferred_stop_callbacks.clear();
     record.active_turn_start_message_count = None;
+    record.active_turn_file_changes.clear();
 }
 
 /// Returns whether pending requests.
@@ -7329,6 +7674,38 @@ fn insert_message_on_record(record: &mut SessionRecord, index: usize, message: M
 /// Pushes message on record.
 fn push_message_on_record(record: &mut SessionRecord, message: Message) -> usize {
     insert_message_on_record(record, record.session.messages.len(), message)
+}
+
+/// Pushes the active turn file-change summary on record.
+fn push_active_turn_file_changes_on_record(
+    record: &mut SessionRecord,
+    message_id: String,
+) -> bool {
+    if record.active_turn_file_changes.is_empty() {
+        return false;
+    }
+
+    let files = std::mem::take(&mut record.active_turn_file_changes)
+        .into_iter()
+        .map(|(path, kind)| FileChangeSummaryEntry { path, kind })
+        .collect::<Vec<_>>();
+    let count = files.len();
+    let title = if count == 1 {
+        "Agent changed 1 file".to_owned()
+    } else {
+        format!("Agent changed {count} files")
+    };
+    push_message_on_record(
+        record,
+        Message::FileChanges {
+            id: message_id,
+            timestamp: stamp_now(),
+            author: Author::Assistant,
+            title,
+            files,
+        },
+    );
+    true
 }
 
 /// Pushes session markdown note on record.

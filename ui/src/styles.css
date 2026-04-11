@@ -2461,6 +2461,30 @@ textarea {
   flex: none;
 }
 
+.pane-tab-state-badge {
+  flex: none;
+  border-radius: 999px;
+  padding: 0.08rem 0.38rem;
+  border: 1px solid color-mix(in srgb, currentColor 42%, transparent);
+  font-size: 0.63rem;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  line-height: 1.15;
+  text-transform: uppercase;
+}
+
+.pane-tab-state-badge-warning {
+  color: color-mix(in srgb, var(--signal-gold) 82%, var(--ink));
+}
+
+.pane-tab-state-badge-danger {
+  color: var(--danger-text, #b3261e);
+}
+
+.pane-tab-state-badge-info {
+  color: var(--signal-blue);
+}
+
 .pane-tab-close {
   border: 0;
   border-radius: var(--control-radius-button);
@@ -4175,6 +4199,11 @@ textarea {
   justify-self: start;
 }
 
+.file-changes-card {
+  width: min(42rem, 100%);
+  justify-self: start;
+}
+
 .command-card-label {
   margin-bottom: 0.18rem;
 }
@@ -4245,6 +4274,56 @@ textarea {
   align-items: flex-start;
   gap: var(--space-sm);
   flex: none;
+}
+
+.file-changes-title {
+  margin: 0;
+  color: var(--ink);
+  font-weight: 700;
+}
+
+.file-change-row {
+  align-items: center;
+}
+
+.file-change-row .command-row-body,
+.file-change-row .command-row-actions {
+  align-items: center;
+}
+
+.file-change-kind {
+  display: inline-grid;
+  place-items: center;
+  min-width: 1.35rem;
+  height: 1.35rem;
+  border-radius: 999px;
+  background: var(--surface-cream);
+  color: var(--muted);
+  font-size: 0.68rem;
+}
+
+.file-change-kind-created {
+  background: var(--status-green-glow);
+  color: var(--signal-green);
+}
+
+.file-change-kind-modified,
+.file-change-kind-other {
+  background: var(--accent-blue-bg);
+  color: var(--signal-blue);
+}
+
+.file-change-kind-deleted {
+  background: var(--accent-rose-bg);
+  color: var(--signal-rose);
+}
+
+.file-change-path {
+  min-width: 0;
+  color: var(--ink);
+  font-family: var(--code-font);
+  font-size: 0.82rem;
+  overflow-wrap: anywhere;
 }
 
 .command-status-chip {
@@ -4609,6 +4688,34 @@ textarea {
   min-height: 0;
   color: var(--muted);
   background: var(--surface-white);
+}
+
+.source-file-change-notice {
+  flex: none;
+}
+
+.source-file-change-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  margin-top: 0.65rem;
+}
+
+.source-compare-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.65rem;
+  padding: 0.42rem 0.6rem;
+  border-bottom: 1px solid var(--line);
+  background: color-mix(in srgb, var(--surface-white) 92%, var(--signal-blue) 8%);
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.source-compare-close {
+  min-height: 1.75rem;
+  padding: 0.22rem 0.55rem;
 }
 
 .diff-preview-loading-state {

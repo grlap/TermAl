@@ -317,6 +317,177 @@ runs on unmount.
 
 ## Active Repo Bugs
 
+## SourcePanel auto-rebase can overwrite edits typed during disk fetch
+
+**Severity:** High - dirty-buffer recovery can silently drop user input.
+
+`SourcePanel` starts `handleApplyLocalEditsToDiskVersion()` from the watcher
+path, awaits `onFetchLatestFile(...)`, then rebases using the `editorValue` and
+`fileState` captured before the await. If the user continues typing while the
+disk fetch is in flight, the later async continuation can commit a merge that
+does not include those keystrokes.
+
+**Current behavior:**
+- auto-rebase snapshots the editor buffer before the async file fetch
+- typing during the fetch is not guaranteed to be included in the merged buffer
+- closing or replacing the tab while the fetch is pending can still leave an
+  async continuation with stale component state
+
+**Proposal:**
+- track the latest editor value and file-state snapshot in refs and read them
+  immediately before committing a rebase result
+- cancel or ignore stale in-flight rebases when the file path, tab, or base
+  content changes
+
+## Stale-save `baseHash` check can race with external writers
+
+**Severity:** High - stale-save protection is advisory, not atomic.
+
+The `/api/file` write path reads and hashes the current file, compares that hash
+with the client's `baseHash`, and then performs `fs::write`. Another process can
+modify the same file after the hash check but before the write, leaving a small
+check-then-write window where TermAl can still clobber newer disk content.
+
+**Current behavior:**
+- current disk content is hashed before writing
+- the destination file is written after the hash check without an exclusive
+  handle or second validation step
+- a concurrent writer in the gap can still be overwritten
+
+**Proposal:**
+- make the write path atomic with respect to the destination file where the
+  platform allows it
+- otherwise revalidate as close as possible to replacement and document the
+  remaining cross-process race as advisory protection
+
+## `workspaceFilesChanged` events lack workspace scope
+
+**Severity:** Medium - watcher hints can refresh the wrong workspace tab.
+
+`workspaceFilesChanged` currently broadcasts path-only changes. The frontend
+then matches by exact path and suffix fallback. In a multi-workspace UI, two
+sessions or projects can contain the same relative path, so a watcher event from
+one root can incorrectly refresh or mark a tab from another root.
+
+**Current behavior:**
+- watcher events do not include `projectId`, `sessionId`, or canonical root
+- frontend matching can fall back to suffix comparison for relative diff paths
+- same relative path in different workspace roots is ambiguous
+
+**Proposal:**
+- include a canonical root or origin identifier in `WorkspaceFilesChangedEvent`
+- require origin/root match before path matching source tabs or git diff tabs
+
+## `workspaceFilesChanged` hint handling is lossy and unordered
+
+**Severity:** Medium - open files can miss refresh hints or process stale hints.
+
+The frontend stores only one `workspaceFilesChangedEvent` value. Rapid SSE
+file-change events can replace earlier unprocessed hints. The handler also does
+not reject non-increasing file-event revisions, unlike the main state/delta
+stream.
+
+**Current behavior:**
+- a newer file-change hint replaces the previous hint in React state
+- earlier paths can be dropped before source/diff refresh effects process them
+- stale or replayed file-event revisions are accepted
+
+**Proposal:**
+- track the latest file-event revision and ignore non-increasing events
+- buffer or merge pending file-change hints by revision/path before draining
+  them to source and diff refresh logic
+
+## Fast agent turns can miss changed-file summaries
+
+**Severity:** Medium - the "Agent changed files" card can omit quick edits.
+
+Turn-scoped file-change recording is tied to active-turn bookkeeping. Native
+filesystem watchers can deliver events after a short turn has already completed,
+especially when the OS batches notifications. Those late events are outside the
+active-turn window and can be omitted from the summary card.
+
+**Current behavior:**
+- active-turn file accumulation stops when the turn completion path clears the
+  active turn state
+- watcher delivery is asynchronous relative to agent process completion
+- fast file edits near turn end can miss the summary card
+
+**Proposal:**
+- keep a short grace-period buffer after turn completion before finalizing the
+  changed-files card
+- or flush/associate pending watcher events with the just-finished turn before
+  clearing active-turn bookkeeping
+
+## DiffPanel deleted-file watcher recovery lacks direct test coverage
+
+**Severity:** Medium - a high-risk dirty-buffer recovery branch can regress silently.
+
+The diff-preview watcher path handles `kind === "deleted"` by preserving the
+dirty edit buffer and exposing recovery actions. Existing tests cover refresh,
+dirty rebase, and stale-save recovery, but not the deleted-file branch.
+
+**Current behavior:**
+- deleted-file handling in `DiffPanel` is implemented but not directly asserted
+- a regression could drop the dirty buffer or hide recovery actions without a
+  failing test
+
+**Proposal:**
+- add a `DiffPanel` test that sends a deleted `workspaceFilesChangedEvent`
+- assert the dirty editor value remains intact, the deletion notice renders, and
+  recovery actions are available
+
+## DiffPanel watcher rebase reads stale `editValue` and `latestFile` from closure
+
+**Severity:** High - dirty-buffer rebase can silently merge against outdated editor content.
+
+The watcher-reaction `useEffect` in `DiffPanel.tsx` captures `editValue` and
+`latestFile` in its closure but omits them from the dependency array. If the
+user types between the watcher event firing and the async `fetchFile` resolution,
+`rebaseContentOntoDisk` computes against a stale `editValue`.
+
+**Current behavior:**
+- the rebase reads `editValue` and `latestFile.content` from closed-over values
+  that are not refreshed when the effect re-fires
+- a keystroke between the watcher event and the fetch resolution is invisible to
+  the rebase
+
+**Proposal:**
+- read `editValue` and `latestFile` via refs so the async continuation sees the
+  latest snapshot
+- cancel or ignore stale in-flight watcher refreshes when the edit buffer or
+  base file snapshot changes
+
+## Duplicated path-normalization utilities across App.tsx and DiffPanel.tsx
+
+**Severity:** Medium - divergence risk for watcher-event path matching.
+
+`normalizeWorkspaceFileEventPath` and `workspaceFilesChangedEventChangeForPath`
+are copy-pasted identically in both `App.tsx` and `DiffPanel.tsx`.
+`isStaleFileSaveError` is also duplicated in `DiffPanel.tsx` and
+`SourcePanel.tsx`. If one copy is updated and the other is not, path matching
+will silently diverge.
+
+**Current behavior:**
+- identical functions in two files with no shared import
+
+**Proposal:**
+- extract into a shared module (e.g., `workspace-file-events.ts`)
+
+## `merge_workspace_file_change_kind` maps Delete+Create to Deleted
+
+**Severity:** Medium - agent turn summary can report a recreated file as deleted.
+
+The priority order in `merge_workspace_file_change_kind` checks `Deleted` first,
+so `(Deleted, Created)` merges to `Deleted`. In a common agent workflow — delete
+a file and recreate it in the same coalescing window — the turn summary would
+report the file as `Deleted` when the end result is that the file exists.
+
+**Current behavior:**
+- `(Deleted, Created)` returns `Deleted`
+
+**Proposal:**
+- map `(Deleted, Created)` to `Created` or `Modified`
+
 ## Shared Codex watchdog startup can orphan the app-server child
 
 **Severity:** Medium - failed post-spawn watchdog setup can leave a stray Codex
@@ -761,6 +932,28 @@ filesystem I/O is not safe under the mutex.
   `state-revision.test.ts` now covers no-options delegation, `force: false`
   delegation back to `shouldAdoptStateRevision`, and `currentRevision === null`
   with `force: true`.
+- [ ] Add unit tests for path-normalization utilities:
+  `normalizeWorkspaceFileEventPath`, `joinWorkspacePath`,
+  `workspaceFileChangeMatchesCandidate` contain cross-platform logic
+  (Windows drive letter lowercasing, suffix matching) with no direct tests.
+- [ ] Add `merge_workspace_file_change_kind` unit test:
+  the merge function has specific ordering semantics (Deleted wins over all)
+  that should be verified directly, including the `(Deleted, Created)` edge.
+- [ ] Add DiffPanel "Apply my edits to disk version" and "Reload from disk" tests:
+  the stale-save recovery test covers "Save anyway" but not the other two
+  recovery actions.
+- [ ] Add DiffPanel deleted-file watcher recovery test:
+  send a deleted `workspaceFilesChangedEvent`, then assert the dirty diff edit
+  buffer is preserved and the recovery actions remain available.
+- [ ] Add `rebaseContentOntoDisk` edge case tests:
+  empty files, identical content (no-op merge), and files exceeding
+  `MAX_REBASE_DIFF_CELLS` guard are not covered.
+- [ ] Add `shouldAdoptSnapshotRevision` test for `force: true` with omitted
+  `allowRevisionDowngrade` (i.e., `undefined`): lock in that the implicit
+  falsy default blocks downgrades.
+- [ ] Update `docs/architecture.md` for `workspaceFilesChanged` SSE event:
+  the architecture doc says `/api/events` has "two event types" but there is
+  now a third. Also document the new `FileChanges` message variant.
 
 ## Known External Limitations
 

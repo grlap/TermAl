@@ -106,6 +106,9 @@ export type PickProjectRootResponse = {
 export type FileResponse = {
   path: string;
   content: string;
+  contentHash?: string | null;
+  mtimeMs?: number | null;
+  sizeBytes?: number | null;
   language?: string | null;
 };
 
@@ -743,15 +746,23 @@ export function fetchFile(path: string, scope?: RequestScope) {
   return request<FileResponse>(`/api/file?${query.toString()}`);
 }
 
-export function saveFile(path: string, content: string, scope?: RequestScope) {
-  const sessionId = scope?.sessionId?.trim();
-  const projectId = scope?.projectId?.trim();
+export type SaveFileOptions = RequestScope & {
+  baseHash?: string | null;
+  overwrite?: boolean;
+};
+
+export function saveFile(path: string, content: string, options?: SaveFileOptions) {
+  const sessionId = options?.sessionId?.trim();
+  const projectId = options?.projectId?.trim();
+  const baseHash = options?.baseHash?.trim();
 
   return request<FileResponse>("/api/file", {
     method: "PUT",
     body: JSON.stringify({
       path,
       content,
+      ...(baseHash ? { baseHash } : {}),
+      ...(options?.overwrite !== undefined ? { overwrite: options.overwrite } : {}),
       ...(sessionId ? { sessionId } : {}),
       ...(projectId ? { projectId } : {}),
     }),

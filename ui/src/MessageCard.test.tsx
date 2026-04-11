@@ -6,6 +6,7 @@ import type {
   ApprovalMessage,
   CodexAppRequestMessage,
   DiffMessage,
+  FileChangesMessage,
   McpElicitationRequestMessage,
   TextMessage,
   ThinkingMessage,
@@ -92,6 +93,42 @@ describe("MessageCard", () => {
     expect(screen.queryByText("/repo/src/app.ts")).not.toBeInTheDocument();
     expect(screen.getByText("+2")).toBeInTheDocument();
     expect(screen.getByText("-2")).toBeInTheDocument();
+  });
+
+  it("renders agent changed files with open actions", () => {
+    const onOpenSourceLink = vi.fn();
+    const message: FileChangesMessage = {
+      id: "message-files",
+      type: "fileChanges",
+      author: "assistant",
+      timestamp: "10:04",
+      title: "Agent changed 2 files",
+      files: [
+        { path: "/repo/src/app.ts", kind: "modified" },
+        { path: "/repo/src/new.ts", kind: "created" },
+      ],
+    };
+
+    render(
+      <MessageCard
+        message={message}
+        onApprovalDecision={vi.fn()}
+        onOpenSourceLink={onOpenSourceLink}
+        onUserInputSubmit={vi.fn()}
+        workspaceRoot="/repo"
+      />,
+    );
+
+    expect(screen.getByText("Agent changed 2 files")).toBeInTheDocument();
+    expect(screen.getByText("src/app.ts")).toBeInTheDocument();
+    expect(screen.getByText("src/new.ts")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Open src/app.ts" }));
+
+    expect(onOpenSourceLink).toHaveBeenCalledWith({
+      path: "/repo/src/app.ts",
+      openInNewTab: false,
+    });
   });
 
   it("shows canceled approvals as a resolved decision", () => {

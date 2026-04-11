@@ -1,10 +1,14 @@
-import { Suspense, lazy, useEffect, useState } from "react";
+import { Suspense, lazy, useEffect, useRef, useState } from "react";
 import { copyTextToClipboard } from "../clipboard";
 import type { MonacoCodeEditorStatus } from "../MonacoCodeEditor";
 import { resolveMonacoLanguage, type MonacoAppearance } from "../monaco";
+import type { WorkspaceFileChangeKind } from "../types";
 
 const MonacoCodeEditor = lazy(() =>
   import("../MonacoCodeEditor").then(({ MonacoCodeEditor }) => ({ default: MonacoCodeEditor })),
+);
+const MonacoDiffEditor = lazy(() =>
+  import("../MonacoDiffEditor").then(({ MonacoDiffEditor }) => ({ default: MonacoDiffEditor })),
 );
 
 const DEFAULT_EDITOR_STATUS: MonacoCodeEditorStatus = {
@@ -36,10 +40,20 @@ const LANGUAGE_LABELS: Record<string, string> = {
   yaml: "YAML",
 };
 
+const MAX_REBASE_DIFF_CELLS = 4_000_000;
+
 export type SourceFileState = {
   status: "idle" | "loading" | "ready" | "error";
   path: string;
   content: string;
+  contentHash?: string | null;
+  mtimeMs?: number | null;
+  sizeBytes?: number | null;
+  staleOnDisk?: boolean;
+  externalChangeKind?: WorkspaceFileChangeKind | null;
+  externalContentHash?: string | null;
+  externalMtimeMs?: number | null;
+  externalSizeBytes?: number | null;
   error: string | null;
   language: string | null;
 };
@@ -50,6 +64,15 @@ export type SourcePanelFocus = {
   token: string | null;
 };
 
+export type ContentRebaseResult =
+  | { status: "clean"; content: string }
+  | { status: "conflict"; reason: string };
+
+export type SourceSaveOptions = {
+  baseHash?: string | null;
+  overwrite?: boolean;
+};
+
 export function SourcePanel({
   editorAppearance,
   editorFontSizePx,
@@ -57,6 +80,10 @@ export function SourcePanel({
   sourceFocus = null,
   sourcePath,
   onOpenInstructionDebugger,
+  onDirtyChange,
+  onFetchLatestFile,
+  onAdoptFileState,
+  onReloadFile,
   onSaveFile,
 }: {
   editorAppearance: MonacoAppearance;
@@ -65,20 +92,40 @@ export function SourcePanel({
   sourceFocus?: SourcePanelFocus | null;
   sourcePath: string | null;
   onOpenInstructionDebugger?: (() => void) | null;
-  onSaveFile: (path: string, content: string) => Promise<void>;
+  onDirtyChange?: (isDirty: boolean) => void;
+  onFetchLatestFile?: (path: string) => Promise<SourceFileState>;
+  onAdoptFileState?: (fileState: SourceFileState) => void;
+  onReloadFile?: (path: string) => Promise<void>;
+  onSaveFile: (
+    path: string,
+    content: string,
+    options?: SourceSaveOptions,
+  ) => Promise<void>;
 }) {
   const [editorValue, setEditorValue] = useState("");
-  const [saveError, setSaveError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [saveConflictOnDisk, setSaveConflictOnDisk] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [isReloading, setIsReloading] = useState(false);
+  const [isRebasing, setIsRebasing] = useState(false);
+  const [isLoadingCompare, setIsLoadingCompare] = useState(false);
+  const [compareDiskContent, setCompareDiskContent] = useState<string | null>(null);
   const [editorStatus, setEditorStatus] = useState<MonacoCodeEditorStatus>(DEFAULT_EDITOR_STATUS);
   const [copiedPath, setCopiedPath] = useState(false);
+  const pendingEditorValueRef = useRef<string | null>(null);
+  const lastAutoRebaseKeyRef = useRef<string | null>(null);
   const isDirty = fileState.status === "ready" && editorValue !== fileState.content;
 
   useEffect(() => {
     if (fileState.status === "ready") {
-      setEditorValue(fileState.content);
-      setSaveError(null);
-      setEditorStatus(createEditorStatusSnapshot(fileState.content));
+      const pendingEditorValue = pendingEditorValueRef.current;
+      pendingEditorValueRef.current = null;
+      const nextEditorValue = pendingEditorValue ?? fileState.content;
+      setEditorValue(nextEditorValue);
+      setActionError(null);
+      setSaveConflictOnDisk(false);
+      setCompareDiskContent(null);
+      setEditorStatus(createEditorStatusSnapshot(nextEditorValue));
       return;
     }
 
@@ -86,7 +133,16 @@ export function SourcePanel({
       setEditorValue("");
       setEditorStatus(DEFAULT_EDITOR_STATUS);
     }
-  }, [fileState.content, fileState.path, fileState.status]);
+  }, [
+    fileState.content,
+    fileState.contentHash,
+    fileState.path,
+    fileState.status,
+  ]);
+
+  useEffect(() => {
+    onDirtyChange?.(isDirty);
+  }, [isDirty, onDirtyChange]);
 
   useEffect(() => {
     if (!copiedPath) {
@@ -102,19 +158,106 @@ export function SourcePanel({
     };
   }, [copiedPath]);
 
-  async function handleSave() {
-    if (fileState.status !== "ready" || !isDirty || isSaving) {
+  async function handleSave(options?: SourceSaveOptions) {
+    const canRestoreDeletedFile =
+      options?.overwrite && fileState.status === "ready" && fileDeletedOnDisk;
+    if (fileState.status !== "ready" || (!isDirty && !canRestoreDeletedFile) || isSaving) {
       return;
     }
 
     setIsSaving(true);
-    setSaveError(null);
+    setActionError(null);
+    setSaveConflictOnDisk(false);
     try {
-      await onSaveFile(fileState.path, editorValue);
+      await onSaveFile(fileState.path, editorValue, options);
     } catch (error) {
-      setSaveError(getErrorMessage(error));
+      const message = getErrorMessage(error);
+      setActionError(message);
+      if (isStaleFileSaveError(message)) {
+        setSaveConflictOnDisk(true);
+      }
     } finally {
       setIsSaving(false);
+    }
+  }
+
+  function handleEditorChange(nextValue: string) {
+    setEditorValue(nextValue);
+    onDirtyChange?.(
+      fileState.status === "ready" && nextValue !== fileState.content,
+    );
+  }
+
+  async function handleReloadFromDisk() {
+    if (fileState.status !== "ready" || !onReloadFile || isReloading) {
+      return;
+    }
+
+    setIsReloading(true);
+    setActionError(null);
+    try {
+      await onReloadFile(fileState.path);
+    } catch (error) {
+      setActionError(getErrorMessage(error));
+    } finally {
+      setIsReloading(false);
+    }
+  }
+
+  async function handleApplyLocalEditsToDiskVersion() {
+    if (
+      fileState.status !== "ready" ||
+      !isDirty ||
+      !onFetchLatestFile ||
+      !onAdoptFileState ||
+      isRebasing
+    ) {
+      return;
+    }
+
+    setIsRebasing(true);
+    setActionError(null);
+    try {
+      const latestFileState = await onFetchLatestFile(fileState.path);
+      const rebaseResult = rebaseContentOntoDisk(
+        fileState.content,
+        editorValue,
+        latestFileState.content,
+      );
+      if (rebaseResult.status === "conflict") {
+        setActionError(rebaseResult.reason);
+        return;
+      }
+
+      pendingEditorValueRef.current = rebaseResult.content;
+      onAdoptFileState(latestFileState);
+      setEditorValue(rebaseResult.content);
+      onDirtyChange?.(rebaseResult.content !== latestFileState.content);
+    } catch (error) {
+      setActionError(getErrorMessage(error));
+    } finally {
+      setIsRebasing(false);
+    }
+  }
+
+  async function handleShowCompare() {
+    if (
+      fileState.status !== "ready" ||
+      !onFetchLatestFile ||
+      isLoadingCompare
+    ) {
+      return;
+    }
+
+    setIsLoadingCompare(true);
+    setActionError(null);
+    try {
+      const latestFileState = await onFetchLatestFile(fileState.path);
+      setCompareDiskContent(latestFileState.content);
+    } catch (error) {
+      setActionError(getErrorMessage(error));
+    } finally {
+      setIsLoadingCompare(false);
     }
   }
 
@@ -131,13 +274,65 @@ export function SourcePanel({
     }
   }
 
-  const saveStateLabel = saveError ? "Save failed" : isSaving ? "Saving..." : isDirty ? "Unsaved changes" : null;
+  const saveStateLabel = actionError
+    ? "Action failed"
+    : isSaving
+      ? "Saving..."
+      : isRebasing
+        ? "Applying edits..."
+        : fileState.status === "ready" && fileState.staleOnDisk
+          ? fileState.externalChangeKind === "deleted"
+            ? "Deleted on disk"
+            : "Changed on disk"
+          : isDirty
+            ? "Unsaved changes"
+            : null;
   const displayPath = fileState.path.trim() || sourcePath?.trim() || "";
   const activeInstructionPath = displayPath;
   const canCopyPath = displayPath.length > 0;
   const canDebugInstructions =
     typeof onOpenInstructionDebugger === "function" &&
     isInstructionLikePath(activeInstructionPath);
+  const hasExternalDiskChange =
+    fileState.status === "ready" &&
+    (fileState.staleOnDisk || saveConflictOnDisk);
+  const externalChangeKind =
+    fileState.status === "ready" ? fileState.externalChangeKind ?? null : null;
+  const fileDeletedOnDisk =
+    hasExternalDiskChange && externalChangeKind === "deleted";
+  const externalChangeKey =
+    fileState.status === "ready" && fileState.staleOnDisk
+      ? [
+          fileState.path,
+          fileState.externalChangeKind ?? "",
+          fileState.contentHash ?? "",
+          fileState.externalContentHash ?? "",
+        ].join("\0")
+      : "";
+
+  useEffect(() => {
+    if (
+      !externalChangeKey ||
+      fileDeletedOnDisk ||
+      !isDirty ||
+      isRebasing ||
+      !onFetchLatestFile ||
+      !onAdoptFileState ||
+      lastAutoRebaseKeyRef.current === externalChangeKey
+    ) {
+      return;
+    }
+
+    lastAutoRebaseKeyRef.current = externalChangeKey;
+    void handleApplyLocalEditsToDiskVersion();
+  }, [
+    externalChangeKey,
+    fileDeletedOnDisk,
+    isDirty,
+    isRebasing,
+    onAdoptFileState,
+    onFetchLatestFile,
+  ]);
 
   return (
     <div className={`source-pane${fileState.status === "ready" ? " has-editor" : ""}`}>
@@ -196,32 +391,126 @@ export function SourcePanel({
         </article>
       ) : null}
 
-      {saveError ? (
+      {actionError ? (
         <article className="thread-notice">
-          <div className="card-label">Save failed</div>
-          <p>{saveError}</p>
+          <div className="card-label">Action failed</div>
+          <p>{actionError}</p>
+        </article>
+      ) : null}
+
+      {hasExternalDiskChange ? (
+        <article className="thread-notice source-file-change-notice">
+          <div className="card-label">
+            {fileDeletedOnDisk ? "File deleted on disk" : "File changed on disk"}
+          </div>
+          {fileDeletedOnDisk ? (
+            <p>
+              Another process deleted this file after you opened it. Your editor
+              buffer is still preserved here; restore it to the same path if you
+              want to recreate the file.
+            </p>
+          ) : (
+            <p>
+              Another process changed this file after you opened it. You can try
+              applying your local edits on top of the disk version, reload from
+              disk, or intentionally overwrite the disk file.
+            </p>
+          )}
+          <div className="source-file-change-actions">
+            {isDirty && !fileDeletedOnDisk ? (
+              <button
+                className="ghost-button"
+                type="button"
+                disabled={!onFetchLatestFile || isLoadingCompare}
+                onClick={() => void handleShowCompare()}
+              >
+                {isLoadingCompare ? "Loading compare..." : "Compare"}
+              </button>
+            ) : null}
+            {isDirty && !fileDeletedOnDisk ? (
+              <button
+                className="ghost-button"
+                type="button"
+                disabled={!onFetchLatestFile || !onAdoptFileState || isRebasing}
+                onClick={() => void handleApplyLocalEditsToDiskVersion()}
+              >
+                {isRebasing ? "Applying..." : "Apply my edits to disk version"}
+              </button>
+            ) : null}
+            {isDirty || fileDeletedOnDisk ? (
+              <button
+                className="ghost-button"
+                type="button"
+                disabled={isSaving}
+                onClick={() => void handleSave({ overwrite: true })}
+              >
+                {isSaving
+                  ? "Saving..."
+                  : fileDeletedOnDisk
+                    ? "Restore file"
+                    : "Save anyway"}
+              </button>
+            ) : null}
+            {!fileDeletedOnDisk ? (
+              <button
+                className="ghost-button"
+                type="button"
+                disabled={!onReloadFile || isReloading}
+                onClick={() => void handleReloadFromDisk()}
+              >
+                {isReloading ? "Reloading..." : "Reload from disk"}
+              </button>
+            ) : null}
+          </div>
         </article>
       ) : null}
 
       {fileState.status === "ready" ? (
         <div className="source-editor-region">
           <div className="source-editor-shell source-editor-shell-with-statusbar">
-            <Suspense fallback={<div className="source-editor-loading">Loading editor...</div>}>
-              <MonacoCodeEditor
-                appearance={editorAppearance}
-                ariaLabel={`Source editor for ${fileState.path}`}
-                fontSizePx={editorFontSizePx}
-                highlightedColumnNumber={sourceFocus?.column ?? null}
-                highlightedLineNumber={sourceFocus?.line ?? null}
-                highlightToken={sourceFocus?.token ?? null}
-                language={fileState.language}
-                path={fileState.path}
-                value={editorValue}
-                onChange={setEditorValue}
-                onSave={() => void handleSave()}
-                onStatusChange={setEditorStatus}
-              />
-            </Suspense>
+            {compareDiskContent !== null ? (
+              <>
+                <div className="source-compare-toolbar">
+                  <span>Comparing disk version to your editor buffer</span>
+                  <button
+                    className="ghost-button source-compare-close"
+                    type="button"
+                    onClick={() => setCompareDiskContent(null)}
+                  >
+                    Back to edit
+                  </button>
+                </div>
+                <Suspense fallback={<div className="source-editor-loading">Loading compare...</div>}>
+                  <MonacoDiffEditor
+                    appearance={editorAppearance}
+                    ariaLabel={`Source compare for ${fileState.path}`}
+                    fontSizePx={editorFontSizePx}
+                    language={fileState.language}
+                    modifiedValue={editorValue}
+                    originalValue={compareDiskContent}
+                    path={fileState.path}
+                    readOnly
+                  />
+                </Suspense>
+              </>
+            ) : (
+              <Suspense fallback={<div className="source-editor-loading">Loading editor...</div>}>
+                <MonacoCodeEditor
+                  appearance={editorAppearance}
+                  ariaLabel={`Source editor for ${fileState.path}`}
+                  fontSizePx={editorFontSizePx}
+                  highlightedColumnNumber={sourceFocus?.column ?? null}
+                  highlightedLineNumber={sourceFocus?.line ?? null}
+                  highlightToken={sourceFocus?.token ?? null}
+                  language={fileState.language}
+                  path={fileState.path}
+                  value={editorValue}
+                  onChange={handleEditorChange}
+                  onSave={() => void handleSave()}
+                  onStatusChange={setEditorStatus}
+                />
+              </Suspense>
+            )}
             <footer className="source-editor-statusbar" aria-label="Editor status">
               <div className="source-editor-statusbar-group">
                 {saveStateLabel ? <span className="source-editor-statusbar-item source-editor-statusbar-state">{saveStateLabel}</span> : null}
@@ -239,6 +528,212 @@ export function SourcePanel({
       ) : null}
     </div>
   );
+}
+
+type LineDiffRange = {
+  start: number;
+  end: number;
+  replacement: string[];
+};
+
+export function rebaseContentOntoDisk(
+  baseContent: string,
+  localContent: string,
+  diskContent: string,
+): ContentRebaseResult {
+  // Be conservative here: false conflicts are recoverable, silent edit loss is not.
+  const baseLines = splitContentLines(baseContent);
+  const localLines = splitContentLines(localContent);
+  const diskLines = splitContentLines(diskContent);
+  const localRanges = diffLineRanges(baseLines, localLines);
+  const diskRanges = diffLineRanges(baseLines, diskLines);
+
+  if (!localRanges || !diskRanges) {
+    return {
+      status: "conflict",
+      reason:
+        "Could not apply edits automatically because the file is too large to merge safely.",
+    };
+  }
+
+  for (const localRange of localRanges) {
+    for (const diskRange of diskRanges) {
+      if (!lineDiffRangesConflict(localRange, diskRange)) {
+        continue;
+      }
+
+      return {
+        status: "conflict",
+        reason:
+          "Could not apply your edits cleanly because they overlap with disk changes.",
+      };
+    }
+  }
+
+  const mergedRanges = dedupeEquivalentRanges([...diskRanges, ...localRanges]);
+  mergedRanges.sort((left, right) => {
+    const startOrder = left.start - right.start;
+    if (startOrder !== 0) {
+      return startOrder;
+    }
+    return left.end - right.end;
+  });
+
+  const mergedLines: string[] = [];
+  let cursor = 0;
+  for (const range of mergedRanges) {
+    if (range.start < cursor) {
+      return {
+        status: "conflict",
+        reason:
+          "Could not apply your edits cleanly because the merged ranges overlap.",
+      };
+    }
+
+    mergedLines.push(...baseLines.slice(cursor, range.start));
+    mergedLines.push(...range.replacement);
+    cursor = range.end;
+  }
+  mergedLines.push(...baseLines.slice(cursor));
+
+  return {
+    status: "clean",
+    content: mergedLines.join(""),
+  };
+}
+
+function splitContentLines(content: string) {
+  return content.match(/[^\n]*\n|[^\n]+/g) ?? [];
+}
+
+function diffLineRanges(
+  baseLines: string[],
+  changedLines: string[],
+): LineDiffRange[] | null {
+  const anchors = buildLineLcsAnchors(baseLines, changedLines);
+  if (!anchors) {
+    return null;
+  }
+
+  const ranges: LineDiffRange[] = [];
+  let baseCursor = 0;
+  let changedCursor = 0;
+
+  for (const anchor of anchors) {
+    if (anchor.baseIndex > baseCursor || anchor.changedIndex > changedCursor) {
+      ranges.push({
+        start: baseCursor,
+        end: anchor.baseIndex,
+        replacement: changedLines.slice(changedCursor, anchor.changedIndex),
+      });
+    }
+    baseCursor = anchor.baseIndex + 1;
+    changedCursor = anchor.changedIndex + 1;
+  }
+
+  if (baseCursor < baseLines.length || changedCursor < changedLines.length) {
+    ranges.push({
+      start: baseCursor,
+      end: baseLines.length,
+      replacement: changedLines.slice(changedCursor),
+    });
+  }
+
+  return ranges.filter(
+    (range) => range.start !== range.end || range.replacement.length > 0,
+  );
+}
+
+function buildLineLcsAnchors(baseLines: string[], changedLines: string[]) {
+  const rows = baseLines.length + 1;
+  const columns = changedLines.length + 1;
+  if (rows * columns > MAX_REBASE_DIFF_CELLS) {
+    return null;
+  }
+
+  const lengths = new Uint32Array(rows * columns);
+  const indexFor = (row: number, column: number) => row * columns + column;
+
+  for (let row = baseLines.length - 1; row >= 0; row -= 1) {
+    for (let column = changedLines.length - 1; column >= 0; column -= 1) {
+      lengths[indexFor(row, column)] =
+        baseLines[row] === changedLines[column]
+          ? lengths[indexFor(row + 1, column + 1)] + 1
+          : Math.max(
+              lengths[indexFor(row + 1, column)],
+              lengths[indexFor(row, column + 1)],
+            );
+    }
+  }
+
+  const anchors: Array<{ baseIndex: number; changedIndex: number }> = [];
+  let row = 0;
+  let column = 0;
+  while (row < baseLines.length && column < changedLines.length) {
+    if (baseLines[row] === changedLines[column]) {
+      anchors.push({ baseIndex: row, changedIndex: column });
+      row += 1;
+      column += 1;
+    } else if (
+      lengths[indexFor(row + 1, column)] >=
+      lengths[indexFor(row, column + 1)]
+    ) {
+      row += 1;
+    } else {
+      column += 1;
+    }
+  }
+
+  return anchors;
+}
+
+function lineDiffRangesConflict(left: LineDiffRange, right: LineDiffRange) {
+  const leftMatchesRight =
+    left.start === right.start &&
+    left.end === right.end &&
+    lineArraysEqual(left.replacement, right.replacement);
+  if (leftMatchesRight) {
+    return false;
+  }
+
+  const bothInsertAtSamePosition =
+    left.start === left.end &&
+    right.start === right.end &&
+    left.start === right.start;
+  if (bothInsertAtSamePosition) {
+    return true;
+  }
+
+  return left.start < right.end && right.start < left.end;
+}
+
+function dedupeEquivalentRanges(ranges: LineDiffRange[]) {
+  const deduped: LineDiffRange[] = [];
+  for (const range of ranges) {
+    if (
+      deduped.some(
+        (current) =>
+          current.start === range.start &&
+          current.end === range.end &&
+          lineArraysEqual(current.replacement, range.replacement),
+      )
+    ) {
+      continue;
+    }
+    deduped.push(range);
+  }
+  return deduped;
+}
+
+function lineArraysEqual(left: string[], right: string[]) {
+  return (
+    left.length === right.length &&
+    left.every((line, index) => line === right[index])
+  );
+}
+
+function isStaleFileSaveError(message: string) {
+  return message.toLowerCase().includes("file changed on disk before save");
 }
 
 function EmptyState({ title, body }: { title: string; body: string }) {

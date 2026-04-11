@@ -111,7 +111,41 @@ describe("saveFile", () => {
     );
     vi.stubGlobal("fetch", fetchMock);
 
-    await saveFile("/repo/src/app.ts", "updated", { sessionId: "" });
+    await saveFile("/repo/src/app.ts", "updated", {
+      sessionId: "",
+      baseHash: "sha256:base",
+    });
+
+    const [, init] = fetchMock.mock.calls[0] ?? [];
+    const parsedBody = JSON.parse(String(init?.body)) as Record<string, unknown>;
+    expect(parsedBody).toEqual({
+      path: "/repo/src/app.ts",
+      content: "updated",
+      baseHash: "sha256:base",
+    });
+    expect(Object.prototype.hasOwnProperty.call(parsedBody, "sessionId")).toBe(false);
+  });
+
+  it("omits empty base hashes from the request body", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          path: "/repo/src/app.ts",
+          content: "updated",
+        }),
+        {
+          status: 200,
+          headers: {
+            "Content-Type": "application/json",
+          },
+        },
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await saveFile("/repo/src/app.ts", "updated", {
+      baseHash: " ",
+    });
 
     const [, init] = fetchMock.mock.calls[0] ?? [];
     const parsedBody = JSON.parse(String(init?.body)) as Record<string, unknown>;
@@ -119,7 +153,6 @@ describe("saveFile", () => {
       path: "/repo/src/app.ts",
       content: "updated",
     });
-    expect(Object.prototype.hasOwnProperty.call(parsedBody, "sessionId")).toBe(false);
   });
 });
 

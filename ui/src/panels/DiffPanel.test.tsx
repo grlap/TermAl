@@ -244,6 +244,142 @@ describe("DiffPanel", () => {
     expect(await screen.findByTestId("monaco-code-editor")).toHaveValue("const latest = true;\n");
   });
 
+  it("refreshes the open diff file when a watcher event touches it", async () => {
+    fetchFileMock
+      .mockResolvedValueOnce({
+        content: "const value = 'initial';\n",
+        language: "typescript",
+        path: "/repo/src/example.ts",
+      })
+      .mockResolvedValueOnce({
+        content: "const value = 'external';\n",
+        language: "typescript",
+        path: "/repo/src/example.ts",
+      });
+
+    const { rerender } = render(
+      <DiffPanel
+        appearance="dark"
+        fontSizePx={13}
+        changeType="edit"
+        diff={["@@ -1 +1 @@", "-const value = 'base';", "+const value = 'initial';"].join("\n")}
+        diffMessageId="diff-watch"
+        filePath="/repo/src/example.ts"
+        language="typescript"
+        sessionId="session-1"
+        workspaceRoot="/repo"
+        workspaceFilesChangedEvent={null}
+        onOpenPath={() => {}}
+        onSaveFile={async () => {}}
+        summary="Updated example file"
+      />,
+    );
+
+    await waitFor(() => {
+      expect(fetchFileMock).toHaveBeenCalledTimes(1);
+    });
+    expect(await screen.findByTestId("monaco-diff-editor-modified")).toHaveValue(
+      "const value = 'initial';\n",
+    );
+
+    rerender(
+      <DiffPanel
+        appearance="dark"
+        fontSizePx={13}
+        changeType="edit"
+        diff={["@@ -1 +1 @@", "-const value = 'base';", "+const value = 'external';"].join("\n")}
+        diffMessageId="diff-watch"
+        filePath="/repo/src/example.ts"
+        language="typescript"
+        sessionId="session-1"
+        workspaceRoot="/repo"
+        workspaceFilesChangedEvent={{
+          revision: 2,
+          changes: [{ path: "/repo/src/example.ts", kind: "modified" }],
+        }}
+        onOpenPath={() => {}}
+        onSaveFile={async () => {}}
+        summary="Updated example file"
+      />,
+    );
+
+    await waitFor(() => {
+      expect(fetchFileMock).toHaveBeenCalledTimes(2);
+    });
+    expect(await screen.findByTestId("monaco-diff-editor-modified")).toHaveValue(
+      "const value = 'external';\n",
+    );
+    expect(screen.getByText("File refreshed from disk.")).toBeInTheDocument();
+  });
+
+  it("rebases dirty diff edits onto non-overlapping disk changes", async () => {
+    fetchFileMock
+      .mockResolvedValueOnce({
+        content: "alpha\nbeta\n",
+        language: "typescript",
+        path: "/repo/src/example.ts",
+      })
+      .mockResolvedValueOnce({
+        content: "alpha\nbeta disk\n",
+        language: "typescript",
+        path: "/repo/src/example.ts",
+      });
+
+    const { rerender } = render(
+      <DiffPanel
+        appearance="dark"
+        fontSizePx={13}
+        changeType="edit"
+        diff={["@@ -1,2 +1,2 @@", " alpha", "-beta base", "+beta"].join("\n")}
+        diffMessageId="diff-rebase"
+        filePath="/repo/src/example.ts"
+        language="typescript"
+        sessionId="session-1"
+        workspaceRoot="/repo"
+        workspaceFilesChangedEvent={null}
+        onOpenPath={() => {}}
+        onSaveFile={async () => {}}
+        summary="Updated example file"
+      />,
+    );
+
+    const modifiedEditor = await screen.findByTestId("monaco-diff-editor-modified");
+    await changeAndSettle(modifiedEditor, {
+      target: { value: "alpha local\nbeta\n" },
+    });
+
+    rerender(
+      <DiffPanel
+        appearance="dark"
+        fontSizePx={13}
+        changeType="edit"
+        diff={["@@ -1,2 +1,2 @@", " alpha", "-beta base", "+beta disk"].join("\n")}
+        diffMessageId="diff-rebase"
+        filePath="/repo/src/example.ts"
+        language="typescript"
+        sessionId="session-1"
+        workspaceRoot="/repo"
+        workspaceFilesChangedEvent={{
+          revision: 3,
+          changes: [{ path: "/repo/src/example.ts", kind: "modified" }],
+        }}
+        onOpenPath={() => {}}
+        onSaveFile={async () => {}}
+        summary="Updated example file"
+      />,
+    );
+
+    await waitFor(() => {
+      expect(fetchFileMock).toHaveBeenCalledTimes(2);
+    });
+    expect(await screen.findByTestId("monaco-diff-editor-modified")).toHaveValue(
+      "alpha local\nbeta disk\n",
+    );
+    expect(
+      screen.getByText("File changed on disk; your diff edits were applied on top."),
+    ).toBeInTheDocument();
+  });
+
   it("renders plain added and removed stats with +/- markers", async () => {
     await act(async () => {
       render(
@@ -315,10 +451,16 @@ describe("DiffPanel", () => {
   it("supports editing and saving from the full diff view", async () => {
     fetchFileMock.mockResolvedValue({
       content: "const latest = true;\n",
+      contentHash: "sha256:base",
       language: "typescript",
       path: "/repo/src/example.ts",
     });
-    const onSaveFile = vi.fn(async () => {});
+    const onSaveFile = vi.fn(async () => ({
+      content: "const latest = false;\n",
+      contentHash: "sha256:saved",
+      language: "typescript",
+      path: "/repo/src/example.ts",
+    }));
 
     await act(async () => {
       render(
@@ -348,7 +490,65 @@ describe("DiffPanel", () => {
     await clickAndSettle(screen.getByRole("button", { name: "Mock diff save" }));
 
     await waitFor(() => {
-      expect(onSaveFile).toHaveBeenCalledWith("/repo/src/example.ts", "const latest = false;\n");
+      expect(onSaveFile).toHaveBeenCalledWith("/repo/src/example.ts", "const latest = false;\n", {
+        baseHash: "sha256:base",
+      });
+    });
+  });
+
+  it("offers recovery actions after stale diff edit saves", async () => {
+    fetchFileMock.mockResolvedValue({
+      content: "const latest = true;\n",
+      contentHash: "sha256:base",
+      language: "typescript",
+      path: "/repo/src/example.ts",
+    });
+    const onSaveFile = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("file changed on disk before save"))
+      .mockResolvedValueOnce({
+        content: "const latest = false;\n",
+        contentHash: "sha256:mine",
+        language: "typescript",
+        path: "/repo/src/example.ts",
+      });
+
+    render(
+      <DiffPanel
+        appearance="dark"
+        fontSizePx={13}
+        changeType="edit"
+        diff={["@@ -1 +1 @@", "-old line", "+new line"].join("\n")}
+        diffMessageId="diff-stale-save"
+        filePath="/repo/src/example.ts"
+        language="typescript"
+        sessionId="session-1"
+        onOpenPath={() => {}}
+        onSaveFile={onSaveFile}
+        summary="Updated example file"
+      />,
+    );
+
+    const editor = await screen.findByTestId("monaco-diff-editor-modified");
+    await changeAndSettle(editor, { target: { value: "const latest = false;\n" } });
+    await clickAndSettle(screen.getByRole("button", { name: "Mock diff save" }));
+
+    expect(await screen.findByText("Save failed")).toBeInTheDocument();
+    expect(screen.getByText(/file changed on disk before save/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Apply my edits to disk version" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Reload from disk" })).toBeInTheDocument();
+
+    await clickAndSettle(screen.getByRole("button", { name: "Save anyway" }));
+
+    await waitFor(() => {
+      expect(onSaveFile).toHaveBeenLastCalledWith(
+        "/repo/src/example.ts",
+        "const latest = false;\n",
+        {
+          baseHash: "sha256:base",
+          overwrite: true,
+        },
+      );
     });
   });
 

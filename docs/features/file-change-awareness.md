@@ -1,6 +1,16 @@
-# Feature Brief: File Change Awareness
+### Feature Brief: File Change Awareness
+aaa
+bbb
+ccc
+ddd
+eee
 
+fff
+
+lll
 Backlog source: proposed feature brief; not yet linked from `docs/bugs.md`.
+
+zzzz
 
 ## Problem
 
@@ -52,6 +62,90 @@ The guiding rule is:
 **Never auto-overwrite a dirty user buffer.**
 
 Auto-reload is only safe when the open editor tab has no unsaved local edits.
+
+## Current implementation status
+
+Implemented in the current tree:
+
+- `GET /api/file` returns `contentHash`, `mtimeMs`, and `sizeBytes`.
+- `PUT /api/file` accepts `baseHash` and `overwrite`; stale writes return
+  `409 Conflict` unless the user explicitly overwrites.
+- The backend watches active local workspace/session roots with `notify`,
+  coalesces filesystem events, and broadcasts `workspaceFilesChanged` over SSE.
+- Open source-editor panes react to watcher events for their current file
+  instead of polling the current file hash.
+- Clean open buffers auto-refresh when the disk file changes.
+- Dirty open buffers are marked as changed on disk and TermAl attempts a
+  conservative line-based rebase onto the new disk version.
+- If rebase succeeds, the editor keeps the user's edits on top of the new disk
+  content and remains dirty.
+- If rebase conflicts, the user's buffer is left untouched and the editor shows
+  actions for rebase retry, reload from disk, or save anyway.
+- Conflicts can be compared in a side-by-side Monaco diff view showing disk
+  content versus the current editor buffer.
+- Visible file-tree directories refresh from watcher events, including git
+  status badges, so agent edits appear without pressing Refresh.
+- Open git diff preview tabs keep the original diff request and refresh it when
+  the watched file changes on disk.
+- Dirty edits made inside a git diff preview are conservatively rebased onto
+  non-overlapping disk changes instead of only preserving the old buffer.
+- Stale saves from git diff preview edit mode expose recovery actions:
+  apply edits to the disk version, reload from disk, or save anyway.
+- The active source tab shows `Unsaved`, `Changed`, or `Conflict` badges.
+- If an open file is deleted on disk, the source editor preserves the buffer
+  and offers to restore the file.
+- Active agent turns accumulate watcher changes under their session workdir and
+  append an "Agent changed files" card when the turn ends.
+
+## Next-session handoff
+
+Start by validating the implemented watcher path end to end before adding more
+UI surface area.
+
+Run these checks first:
+
+- `cargo check`
+- `cargo test active_turn_file_changes_are_summarized_on_record`
+- `cargo test write_file_rejects_stale_base_hash`
+- `cd ui && npx tsc --noEmit`
+- `cd ui && npm test -- DiffPanel.test.tsx SourcePanel.test.tsx FileSystemPanel.test.tsx PaneTabs.test.tsx MessageCard.test.tsx api.test.ts`
+
+Manual test matrix:
+
+- Regular source tab, clean buffer: open a file in TermAl, edit it in Notepad,
+  and confirm the TermAl editor reloads from disk without polling.
+- Regular source tab, dirty buffer, non-overlapping disk edit: type an unsaved
+  change in TermAl, edit a different line in Notepad, and confirm TermAl rebases
+  the unsaved edit onto the disk version.
+- Regular source tab, dirty buffer, overlapping disk edit: edit the same line in
+  TermAl and Notepad, and confirm TermAl keeps the user's buffer and reports a
+  conflict instead of merging.
+- Regular source tab, deleted file: delete the open file externally and confirm
+  TermAl preserves the buffer and offers to restore it.
+- Git status/diff: open a git diff preview, edit the file in Notepad, and
+  confirm the open diff preview refreshes without closing/reopening it.
+- Git diff edit, dirty buffer, non-overlapping disk edit: edit in the diff
+  preview, edit a different line in Notepad, and confirm TermAl applies the diff
+  edit on top of the new disk version.
+- Git diff edit, dirty buffer, overlapping disk edit: edit the same line in the
+  diff preview and Notepad, and confirm TermAl reports a merge conflict instead
+  of silently choosing one side.
+- Agent turn visibility: run an agent turn that modifies files under the
+  session workdir and confirm the conversation receives an "Agent changed files"
+  card when the turn finishes.
+
+Important implementation constraints for future changes:
+
+- Do not reintroduce frontend polling for source editors or file trees unless it
+  is an explicit fallback for watcher failure.
+- Keep dirty-buffer handling conservative. A false conflict is acceptable;
+  silent edit loss is not.
+- Keep `baseHash` checks on every UI save path, including saves from git diff
+  preview edit mode.
+- Watcher events are hints, not authoritative state. For open editors and diff
+  previews, fetch the current file or git diff before mutating visible content.
+- Remote projects are not covered by the local filesystem watcher unless the
+  remote bridge emits equivalent `workspaceFilesChanged` events.
 
 ## User experience
 
@@ -116,36 +210,33 @@ local changes relative to the new disk version.
 
 ### File watching
 
-Add a backend watcher for active workspace roots:
+Backend watcher for active workspace roots:
 
-- use the Rust `notify` crate where available
-- keep a polling fallback if native watching is unreliable
+- use the Rust `notify` crate
 - watch only active workspace/session roots
 - ignore noisy directories such as `.git`, `node_modules`, `target`,
   `.next`, `.vite`, and common build caches
-- coalesce events for roughly 250-500ms before broadcasting
+- coalesce events for roughly 250ms before broadcasting
 
-Proposed SSE event:
+SSE event data for the `workspaceFilesChanged` event:
 
 ```json
 {
-  "type": "workspaceFilesChanged",
   "revision": 42,
-  "workspaceRoot": "C:\\github\\Personal\\TermAl",
   "changes": [
     {
-      "path": "src/runtime.rs",
+      "path": "C:\\github\\Personal\\TermAl\\src\\runtime.rs",
       "kind": "modified",
       "mtimeMs": 1775860000000,
-      "size": 123456,
-      "contentHash": "sha256:..."
+      "sizeBytes": 123456
     }
   ]
 }
 ```
 
-The event should include enough metadata for the frontend to decide whether an
-open buffer is stale without immediately fetching every changed file.
+The event intentionally does not include content hashes for every changed file.
+The frontend treats watcher events as hints and fetches full file metadata only
+for open source tabs that match a changed path.
 
 ### Save preconditions
 
@@ -383,7 +474,7 @@ This makes agent edits visible without requiring the user to run `git diff`.
 
 ## MVP
 
-Ship the safety path first:
+Implemented safety path:
 
 - backend file watcher for active workspace roots
 - coalesced `workspaceFilesChanged` SSE event
@@ -393,17 +484,21 @@ Ship the safety path first:
 - conflict banner when dirty-buffer rebase cannot apply cleanly
 - `baseHash` / `409 Conflict` protection on file saves
 - simple "Agent changed files" card after turn completion
+- watcher-triggered refresh for open git diff previews
+- dirty git-diff edit buffers rebase onto non-overlapping disk changes
+- stale git-diff edit saves show recovery actions instead of trapping at
+  "Save failed"
 
 ## Later enhancements
 
-- Monaco side-by-side diff for user buffer vs disk.
 - Line-based three-way merge using base, user buffer, and disk/agent version.
 - Monaco merge editor for conflicted dirty buffers.
 - "Review all agent changes" workspace panel.
-- Git status badges in the file tree.
+- Transient non-git "changed by this turn" badges in the file tree.
 - Auto-follow files changed by the currently active agent turn.
 - Per-agent and per-turn file change filters.
 - Persist recent file-change notifications across browser reloads.
+- Polling fallback for roots where native filesystem watching is unavailable.
 
 ## Open questions
 

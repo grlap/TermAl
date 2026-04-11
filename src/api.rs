@@ -53,6 +53,23 @@ fn persist_state(path: &FsPath, inner: &StateInner) -> Result<()> {
     persist_state_from_persisted(path, &persisted)
 }
 
+/// Returns a stable content identity for source-editor conflict detection.
+fn file_content_hash(content: &[u8]) -> String {
+    let digest = Sha256::digest(content);
+    format!("sha256:{digest:x}")
+}
+
+/// Converts filesystem modified time to JavaScript-friendly milliseconds.
+fn file_metadata_mtime_ms(metadata: &fs::Metadata) -> Option<u64> {
+    let millis = metadata
+        .modified()
+        .ok()?
+        .duration_since(UNIX_EPOCH)
+        .ok()?
+        .as_millis();
+    Some(millis.min(u128::from(u64::MAX)) as u64)
+}
+
 /// Delivers turn dispatch.
 fn deliver_turn_dispatch(state: &AppState, dispatch: TurnDispatch) -> Result<(), ApiError> {
     match dispatch {
@@ -701,8 +718,13 @@ async fn read_file(
             )),
         })?;
 
+    let response_metadata = tokio::fs::metadata(&resolved_path).await.ok();
+    let metadata_for_response = response_metadata.as_ref().unwrap_or(&metadata);
     let response = FileResponse {
         path: resolved_path.to_string_lossy().into_owned(),
+        content_hash: Some(file_content_hash(content.as_bytes())),
+        mtime_ms: file_metadata_mtime_ms(metadata_for_response),
+        size_bytes: Some(metadata_for_response.len()),
         content,
         language: infer_language_from_path(&resolved_path).map(str::to_owned),
     };
@@ -725,6 +747,8 @@ async fn write_file(
                 json!({
                     "path": request.path.clone(),
                     "content": request.content.clone(),
+                    "baseHash": request.base_hash.clone(),
+                    "overwrite": request.overwrite,
                 }),
             );
         }
@@ -743,6 +767,51 @@ async fn write_file(
             &request.path,
             ScopedPathMode::AllowMissingLeaf,
         )?;
+        let should_check_base = request
+            .base_hash
+            .as_deref()
+            .map(str::trim)
+            .filter(|hash| !hash.is_empty())
+            .filter(|_| !request.overwrite);
+        if let Some(base_hash) = should_check_base {
+            // The editor sends the content hash it originally loaded. Refuse
+            // stale saves by default so agent/user edits do not silently clobber
+            // each other; explicit overwrite is the only bypass.
+            let current_metadata = fs::metadata(&resolved_path).map_err(|err| match err.kind() {
+                io::ErrorKind::NotFound => ApiError::conflict(format!(
+                    "file changed on disk before save: {} was deleted",
+                    resolved_path.display()
+                )),
+                _ => ApiError::internal(format!(
+                    "failed to stat file before save {}: {err}",
+                    resolved_path.display()
+                )),
+            })?;
+            if current_metadata.len() > MAX_FILE_CONTENT_BYTES as u64 {
+                return Err(ApiError::conflict(format!(
+                    "file changed on disk before save: {} exceeds the read limit",
+                    resolved_path.display()
+                )));
+            }
+
+            let current_content = fs::read(&resolved_path).map_err(|err| match err.kind() {
+                io::ErrorKind::NotFound => ApiError::conflict(format!(
+                    "file changed on disk before save: {} was deleted",
+                    resolved_path.display()
+                )),
+                _ => ApiError::internal(format!(
+                    "failed to read file before save {}: {err}",
+                    resolved_path.display()
+                )),
+            })?;
+            let current_hash = file_content_hash(&current_content);
+            if current_hash != base_hash {
+                return Err(ApiError::conflict(format!(
+                    "file changed on disk before save: {}",
+                    resolved_path.display()
+                )));
+            }
+        }
         if let Some(parent) = resolved_path.parent() {
             fs::create_dir_all(parent).map_err(|err| {
                 ApiError::internal(format!(
@@ -752,15 +821,20 @@ async fn write_file(
             })?;
         }
 
+        let content_hash = file_content_hash(request.content.as_bytes());
         fs::write(&resolved_path, request.content.as_bytes()).map_err(|err| {
             ApiError::internal(format!(
                 "failed to write file {}: {err}",
                 resolved_path.display()
             ))
         })?;
+        let metadata = fs::metadata(&resolved_path).ok();
 
         Ok(FileResponse {
             path: resolved_path.to_string_lossy().into_owned(),
+            content_hash: Some(content_hash),
+            mtime_ms: metadata.as_ref().and_then(file_metadata_mtime_ms),
+            size_bytes: metadata.map(|metadata| metadata.len()),
             content: request.content,
             language: infer_language_from_path(&resolved_path).map(str::to_owned),
         })
@@ -2555,6 +2629,44 @@ struct FallbackStateEventPayload {
     state: StateResponse,
 }
 
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[cfg_attr(test, allow(dead_code))]
+#[serde(rename_all = "camelCase")]
+enum WorkspaceFileChangeKind {
+    Created,
+    Modified,
+    Deleted,
+    Other,
+}
+
+/// Represents a file changed during an agent turn.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct FileChangeSummaryEntry {
+    path: String,
+    kind: WorkspaceFileChangeKind,
+}
+
+#[derive(Clone, Deserialize, Serialize)]
+#[cfg_attr(test, allow(dead_code))]
+#[serde(rename_all = "camelCase")]
+struct WorkspaceFileChangeEvent {
+    path: String,
+    kind: WorkspaceFileChangeKind,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    mtime_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    size_bytes: Option<u64>,
+}
+
+#[derive(Deserialize, Serialize)]
+#[cfg_attr(test, allow(dead_code))]
+#[serde(rename_all = "camelCase")]
+struct WorkspaceFilesChangedEvent {
+    revision: u64,
+    changes: Vec<WorkspaceFileChangeEvent>,
+}
+
 fn fallback_state_events_response(revision: u64) -> FallbackStateEventPayload {
     let mut state = empty_state_events_response();
     state.revision = revision;
@@ -2609,6 +2721,7 @@ async fn state_events(
 ) -> Sse<impl futures_core::Stream<Item = std::result::Result<Event, Infallible>>> {
     let mut state_receiver = state.subscribe_events();
     let mut delta_receiver = state.subscribe_delta_events();
+    let mut file_receiver = state.subscribe_file_events();
     let initial_payload = state_snapshot_payload_for_sse(state.clone()).await;
 
     let stream = async_stream::stream! {
@@ -2636,6 +2749,14 @@ async fn state_events(
                             let payload = state_snapshot_payload_for_sse(state.clone()).await;
                             yield Ok(Event::default().event("state").data(payload));
                         }
+                        Err(broadcast::error::RecvError::Closed) => break,
+                    }
+                }
+
+                result = file_receiver.recv() => {
+                    match result {
+                        Ok(payload) => yield Ok(Event::default().event("workspaceFilesChanged").data(payload)),
+                        Err(broadcast::error::RecvError::Lagged(_)) => {}
                         Err(broadcast::error::RecvError::Closed) => break,
                     }
                 }
@@ -3943,6 +4064,14 @@ enum Message {
         author: Author,
         agents: Vec<ParallelAgentProgress>,
     },
+    #[serde(rename = "fileChanges")]
+    FileChanges {
+        id: String,
+        timestamp: String,
+        author: Author,
+        title: String,
+        files: Vec<FileChangeSummaryEntry>,
+    },
     Approval {
         id: String,
         timestamp: String,
@@ -4026,6 +4155,7 @@ impl Message {
             | Self::Markdown { id, .. }
             | Self::SubagentResult { id, .. }
             | Self::ParallelAgents { id, .. }
+            | Self::FileChanges { id, .. }
             | Self::Approval { id, .. }
             | Self::UserInputRequest { id, .. }
             | Self::McpElicitationRequest { id, .. }
@@ -4047,6 +4177,7 @@ impl Message {
             Self::CodexAppRequest { title, .. } => Some(make_preview(title)),
             Self::Diff { summary, .. } => Some(make_preview(summary)),
             Self::SubagentResult { .. } => None,
+            Self::FileChanges { .. } => None,
             Self::ParallelAgents { agents, .. } => Some(parallel_agents_preview_text(agents)),
             Self::Command { .. } => None,
         }
@@ -4196,15 +4327,25 @@ fn default_codex_thread_rollback_turns() -> usize {
 struct WriteFileRequest {
     path: String,
     content: String,
+    base_hash: Option<String>,
+    #[serde(default)]
+    overwrite: bool,
     project_id: Option<String>,
     session_id: Option<String>,
 }
 
 /// Represents the file response payload.
 #[derive(Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
 struct FileResponse {
     path: String,
     content: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    content_hash: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    mtime_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    size_bytes: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     language: Option<String>,
 }
@@ -5229,6 +5370,7 @@ fn project_progress_summary_for_message(message: &Message) -> Option<String> {
             }
         }
         Message::ParallelAgents { agents, .. } => Some(parallel_agents_preview_text(agents)),
+        Message::FileChanges { .. } => None,
         Message::Approval { .. }
         | Message::UserInputRequest { .. }
         | Message::McpElicitationRequest { .. }

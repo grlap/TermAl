@@ -3,6 +3,7 @@ import type {
   CodexAppRequestMessage,
   CommandMessage,
   DiffMessage,
+  FileChangesMessage,
   ImageAttachment,
   MarkdownMessage,
   Message,
@@ -162,6 +163,8 @@ function reconcileMessage(previous: Message, next: Message): Message {
       return reconcileMarkdownMessage(previous as MarkdownMessage, next);
     case "parallelAgents":
       return reconcileParallelAgentsMessage(previous as ParallelAgentsMessage, next);
+    case "fileChanges":
+      return reconcileFileChangesMessage(previous as FileChangesMessage, next);
     case "subagentResult":
       return reconcileSubagentResultMessage(previous as SubagentResultMessage, next);
     case "approval":
@@ -282,6 +285,25 @@ function reconcileParallelAgentsMessage(
         nextAgent.status === agent.status &&
         (nextAgent.detail ?? null) === (agent.detail ?? null)
       );
+    })
+  ) {
+    return previous;
+  }
+
+  return next;
+}
+function reconcileFileChangesMessage(
+  previous: FileChangesMessage,
+  next: FileChangesMessage,
+): FileChangesMessage {
+  if (
+    previous.timestamp === next.timestamp &&
+    previous.author === next.author &&
+    previous.title === next.title &&
+    previous.files.length === next.files.length &&
+    previous.files.every((file, index) => {
+      const nextFile = next.files[index];
+      return nextFile?.path === file.path && nextFile.kind === file.kind;
     })
   ) {
     return previous;

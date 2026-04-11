@@ -5257,48 +5257,6 @@ fn fire_codex_model_list_page(
     Ok(())
 }
 
-/// Handles Codex model list refresh (blocking, used in tests).
-#[cfg(test)]
-fn handle_codex_model_list_refresh(
-    writer: &mut impl Write,
-    pending_requests: &CodexPendingRequestMap,
-) -> std::result::Result<Vec<SessionModelOption>, CodexResponseError> {
-    let mut cursor: Option<String> = None;
-    let mut model_options = Vec::new();
-    let mut page_count = 0usize;
-
-    loop {
-        if page_count >= SHARED_CODEX_MODEL_LIST_MAX_PAGES {
-            return Err(CodexResponseError::Transport(format!(
-                "Codex model list pagination exceeded {} pages.",
-                SHARED_CODEX_MODEL_LIST_MAX_PAGES
-            )));
-        }
-        page_count += 1;
-        let result = send_codex_json_rpc_request(
-            writer,
-            pending_requests,
-            "model/list",
-            json!({
-                "cursor": cursor,
-                "includeHidden": false,
-                "limit": 100,
-            }),
-            Duration::from_secs(30),
-        )?;
-        model_options.extend(codex_model_options(&result));
-        cursor = result
-            .get("nextCursor")
-            .and_then(Value::as_str)
-            .map(str::to_owned);
-        if cursor.is_none() {
-            break;
-        }
-    }
-
-    Ok(model_options)
-}
-
 /// Auto-rejects a Codex app-server request (one with an `id` field, no
 /// `result`/`error`) that cannot be delivered to any session. Sends an error
 /// response through the writer so the app-server does not hang waiting for an

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   fetchDirectory,
   fetchGitStatus,
@@ -7,6 +7,7 @@ import {
   type GitStatusFile,
   type GitStatusResponse,
 } from "../api";
+import type { WorkspaceFilesChangedEvent } from "../types";
 import { gitStatusTone } from "./git-status-tree";
 
 type GitDecorationTone = ReturnType<typeof gitStatusTone>;
@@ -51,6 +52,7 @@ export function FileSystemPanel({
   rootPath,
   sessionId,
   projectId = null,
+  workspaceFilesChangedEvent = null,
   showPathControls = true,
 }: {
   onOpenPath: (path: string, options?: FileSystemOpenOptions) => void;
@@ -58,6 +60,7 @@ export function FileSystemPanel({
   rootPath: string | null;
   sessionId: string | null;
   projectId?: string | null;
+  workspaceFilesChangedEvent?: WorkspaceFilesChangedEvent | null;
   showPathControls?: boolean;
 }) {
   const [rootDraft, setRootDraft] = useState(rootPath ?? "");
@@ -66,6 +69,8 @@ export function FileSystemPanel({
   const [expandedPaths, setExpandedPaths] = useState<Record<string, true | undefined>>({});
   const [loadingPaths, setLoadingPaths] = useState<Record<string, true | undefined>>({});
   const [gitDecorations, setGitDecorations] = useState<FileSystemGitDecorations>(createEmptyGitDecorations());
+  const directoriesByPathRef = useRef(directoriesByPath);
+  const expandedPathsRef = useRef(expandedPaths);
   const normalizedRootPath = rootPath?.trim() ?? "";
   const normalizedSessionId = sessionId?.trim() ?? "";
   const normalizedProjectId = projectId?.trim() ?? "";
@@ -82,6 +87,14 @@ export function FileSystemPanel({
   useEffect(() => {
     setRootDraft(rootPath ?? "");
   }, [rootPath]);
+
+  useEffect(() => {
+    directoriesByPathRef.current = directoriesByPath;
+  }, [directoriesByPath]);
+
+  useEffect(() => {
+    expandedPathsRef.current = expandedPaths;
+  }, [expandedPaths]);
 
   useEffect(() => {
     if (!normalizedRootPath) {
@@ -142,6 +155,101 @@ export function FileSystemPanel({
       cancelled = true;
     };
   }, [hasScope, normalizedProjectId, normalizedRootPath, normalizedSessionId]);
+
+  useEffect(() => {
+    if (
+      !workspaceFilesChangedEvent ||
+      !normalizedRootPath ||
+      !hasScope ||
+      !workspaceFilesChangedEventTouchesRoot(
+        workspaceFilesChangedEvent,
+        normalizedRootPath,
+      )
+    ) {
+      return;
+    }
+
+    let cancelled = false;
+
+    async function refreshVisibleTree() {
+      try {
+        const statusPromise = fetchGitStatus(normalizedRootPath, normalizedSessionId || null, {
+          projectId: normalizedProjectId || null,
+        });
+        const expandedDirectoryPaths = Object.keys(expandedPathsRef.current).filter(
+          (path) => directoriesByPathRef.current[path],
+        );
+        const directoryPromises = expandedDirectoryPaths.map(async (path) => {
+          try {
+            const response = await fetchDirectory(path, {
+              sessionId: normalizedSessionId || null,
+              projectId: normalizedProjectId || null,
+            });
+            return { path, response };
+          } catch (error) {
+            return { path, error };
+          }
+        });
+
+        const [statusResult, directoryResults] = await Promise.all([
+          statusPromise.then(
+            (status) => ({ status }),
+            () => ({ status: null }),
+          ),
+          Promise.all(directoryPromises),
+        ]);
+        if (cancelled) {
+          return;
+        }
+
+        if (statusResult.status) {
+          setGitDecorations(buildGitDecorations(statusResult.status, normalizedRootPath));
+        }
+
+        setDirectoriesByPath((current) => {
+          let nextState = current;
+          for (const result of directoryResults) {
+            if (!("response" in result)) {
+              continue;
+            }
+            if (nextState === current) {
+              nextState = { ...current };
+            }
+            nextState[result.path] = result.response;
+          }
+          return nextState;
+        });
+        setErrorsByPath((current) => {
+          let nextState = current;
+          for (const result of directoryResults) {
+            if (!("error" in result)) {
+              continue;
+            }
+            if (nextState === current) {
+              nextState = { ...current };
+            }
+            nextState[result.path] = getErrorMessage(result.error);
+          }
+          return nextState;
+        });
+      } catch {
+        // Watcher events are refresh hints. Ignore transient failures here; the
+        // explicit folder refresh button still surfaces request errors.
+      }
+    }
+
+    void refreshVisibleTree();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    hasScope,
+    normalizedProjectId,
+    normalizedRootPath,
+    normalizedSessionId,
+    workspaceFilesChangedEvent,
+  ]);
 
   async function loadDirectory(path: string, force = false) {
     if (!force && (directoriesByPath[path] || loadingPaths[path])) {
@@ -586,6 +694,29 @@ function normalizePath(path: string) {
   }
 
   return normalized.endsWith("/") ? normalized.slice(0, -1) : normalized;
+}
+
+function normalizeWatcherPath(path: string) {
+  const normalized = normalizePath(path);
+  return /^[a-z]:\//i.test(normalized) ? normalized.toLowerCase() : normalized;
+}
+
+function workspaceFilesChangedEventTouchesRoot(
+  event: WorkspaceFilesChangedEvent,
+  rootPath: string,
+) {
+  const normalizedRoot = normalizeWatcherPath(rootPath);
+  if (!normalizedRoot) {
+    return false;
+  }
+
+  return event.changes.some((change) => {
+    const changedPath = normalizeWatcherPath(change.path);
+    return (
+      changedPath === normalizedRoot ||
+      changedPath.startsWith(`${normalizedRoot}/`)
+    );
+  });
 }
 
 function pathBaseName(path: string) {

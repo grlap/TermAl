@@ -18,7 +18,8 @@ import type { MonacoDiffEditorHandle, MonacoDiffEditorStatus } from "../MonacoDi
 import { buildDiffPreviewModel } from "../diff-preview";
 import { resolveMonacoLanguage, type MonacoAppearance } from "../monaco";
 import { normalizeDisplayPath, relativizePathToWorkspace } from "../path-display";
-import type { DiffMessage } from "../types";
+import type { DiffMessage, WorkspaceFilesChangedEvent } from "../types";
+import { rebaseContentOntoDisk, type SourceSaveOptions } from "./SourcePanel";
 import { StructuredDiffView } from "./StructuredDiffView";
 
 const MonacoCodeEditor = lazy(() =>
@@ -34,6 +35,7 @@ type LatestFileState = {
   status: "idle" | "loading" | "ready" | "error";
   path: string;
   content: string;
+  contentHash?: string | null;
   error: string | null;
   language: string | null;
 };
@@ -101,6 +103,7 @@ export function DiffPanel({
   projectId = null,
   originAgentName = null,
   workspaceRoot = null,
+  workspaceFilesChangedEvent = null,
   onOpenPath,
   onInsertReviewIntoPrompt,
   onOpenConversation,
@@ -120,10 +123,11 @@ export function DiffPanel({
   projectId?: string | null;
   originAgentName?: string | null;
   workspaceRoot?: string | null;
+  workspaceFilesChangedEvent?: WorkspaceFilesChangedEvent | null;
   onOpenPath: (path: string) => void;
   onInsertReviewIntoPrompt?: (reviewFilePath: string, prompt: string) => void;
   onOpenConversation?: () => void;
-  onSaveFile: (path: string, content: string) => Promise<void>;
+  onSaveFile: (path: string, content: string, options?: SourceSaveOptions) => Promise<FileResponse | void>;
   summary: string;
 }) {
   const [latestFile, setLatestFile] = useState<LatestFileState>(() => createInitialLatestFileState(filePath));
@@ -141,13 +145,18 @@ export function DiffPanel({
   const [visualBaseContent, setVisualBaseContent] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
+  const [isRebasingFile, setIsRebasingFile] = useState(false);
+  const [isReloadingFile, setIsReloadingFile] = useState(false);
+  const [diffEditConflictOnDisk, setDiffEditConflictOnDisk] = useState(false);
   const [reviewSaveError, setReviewSaveError] = useState<string | null>(null);
   const [isSavingReview, setIsSavingReview] = useState(false);
+  const [externalFileNotice, setExternalFileNotice] = useState<string | null>(null);
   const [editEditorStatus, setEditEditorStatus] = useState<MonacoCodeEditorStatus>(DEFAULT_EDITOR_STATUS);
   const [visualEditorStatus, setVisualEditorStatus] = useState<MonacoDiffEditorStatus>(DEFAULT_DIFF_EDITOR_STATUS);
   const [copiedPath, setCopiedPath] = useState(false);
   const [copiedReviewPath, setCopiedReviewPath] = useState(false);
   const diffEditorRef = useRef<MonacoDiffEditorHandle | null>(null);
+  const pendingEditValueRef = useRef<string | null>(null);
 
   const previewSourceContent = visualBaseContent ?? (latestFile.status === "ready" ? latestFile.content : null);
   const preview = useMemo(
@@ -163,8 +172,12 @@ export function DiffPanel({
     setEditEditorStatus(DEFAULT_EDITOR_STATUS);
     setVisualEditorStatus(DEFAULT_DIFF_EDITOR_STATUS);
     setSaveError(null);
+    setExternalFileNotice(null);
+    setDiffEditConflictOnDisk(false);
     setReviewSaveError(null);
     setIsSaving(false);
+    setIsRebasingFile(false);
+    setIsReloadingFile(false);
     setIsSavingReview(false);
   }, [diffMessageId, filePath, preview.hasStructuredPreview]);
 
@@ -174,11 +187,15 @@ export function DiffPanel({
     if (!filePath) {
       setLatestFile(createInitialLatestFileState(null));
       setVisualBaseContent(null);
+      setExternalFileNotice(null);
+      setDiffEditConflictOnDisk(false);
       return;
     }
 
     if (!hasScope) {
       setVisualBaseContent(null);
+      setExternalFileNotice(null);
+      setDiffEditConflictOnDisk(false);
       setLatestFile({
         status: "error",
         path: filePath,
@@ -190,6 +207,8 @@ export function DiffPanel({
     }
 
     setVisualBaseContent(null);
+    setExternalFileNotice(null);
+    setDiffEditConflictOnDisk(false);
     setLatestFile({
       status: "loading",
       path: filePath,
@@ -208,6 +227,8 @@ export function DiffPanel({
         }
 
         setVisualBaseContent(response.content);
+        setExternalFileNotice(null);
+        setDiffEditConflictOnDisk(false);
         setLatestFile(toLatestFileState(response));
       })
       .catch((error) => {
@@ -295,13 +316,16 @@ export function DiffPanel({
 
   useEffect(() => {
     if (latestFile.status === "ready") {
-      setEditValue(latestFile.content);
+      const pendingEditValue = pendingEditValueRef.current;
+      pendingEditValueRef.current = null;
+      setEditValue(pendingEditValue ?? latestFile.content);
       setSaveError(null);
-      setEditEditorStatus(createEditorStatusSnapshot(latestFile.content));
+      setEditEditorStatus(createEditorStatusSnapshot(pendingEditValue ?? latestFile.content));
       return;
     }
 
     if (latestFile.status !== "loading") {
+      pendingEditValueRef.current = null;
       setEditValue("");
       setEditEditorStatus(DEFAULT_EDITOR_STATUS);
     }
@@ -349,6 +373,95 @@ export function DiffPanel({
   );
 
   useEffect(() => {
+    if (!workspaceFilesChangedEvent || !filePath || !hasScope) {
+      return;
+    }
+
+    const change = workspaceFilesChangedEventChangeForPath(workspaceFilesChangedEvent, filePath);
+    if (!change) {
+      return;
+    }
+
+    const wasDirty = latestFile.status === "ready" && editValue !== latestFile.content;
+    if (change.kind === "deleted") {
+      if (wasDirty) {
+        setExternalFileNotice("The file was deleted on disk. Your diff edit buffer is preserved.");
+        setDiffEditConflictOnDisk(true);
+        return;
+      }
+
+      setVisualBaseContent(null);
+      setDiffEditConflictOnDisk(false);
+      setLatestFile({
+        status: "error",
+        path: filePath,
+        content: "",
+        error: "File was deleted on disk.",
+        language: language ?? null,
+      });
+      setEditValue("");
+      setExternalFileNotice("The file was deleted on disk.");
+      return;
+    }
+
+    let cancelled = false;
+    void fetchFile(filePath, {
+      sessionId: normalizedSessionId || null,
+      projectId: normalizedProjectId || null,
+    })
+      .then((response) => {
+        if (cancelled) {
+          return;
+        }
+
+        if (wasDirty && latestFile.status === "ready") {
+          const rebaseResult = rebaseContentOntoDisk(
+            latestFile.content,
+            editValue,
+            response.content,
+          );
+          if (rebaseResult.status === "conflict") {
+            setExternalFileNotice(rebaseResult.reason);
+            setDiffEditConflictOnDisk(true);
+            return;
+          }
+
+          pendingEditValueRef.current = rebaseResult.content;
+          setVisualBaseContent(response.content);
+          setLatestFile(toLatestFileState(response));
+          setEditValue(rebaseResult.content);
+          setExternalFileNotice("File changed on disk; your diff edits were applied on top.");
+          setDiffEditConflictOnDisk(false);
+          return;
+        }
+
+        setVisualBaseContent(response.content);
+        setLatestFile(toLatestFileState(response));
+        setExternalFileNotice("File refreshed from disk.");
+        setDiffEditConflictOnDisk(false);
+      })
+      .catch((error) => {
+        if (cancelled) {
+          return;
+        }
+
+        setExternalFileNotice(`File changed on disk, but refresh failed: ${getErrorMessage(error)}`);
+        setDiffEditConflictOnDisk(wasDirty);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    workspaceFilesChangedEvent,
+    filePath,
+    hasScope,
+    language,
+    normalizedProjectId,
+    normalizedSessionId,
+  ]);
+
+  useEffect(() => {
     if (!copiedPath) {
       return;
     }
@@ -376,7 +489,7 @@ export function DiffPanel({
     };
   }, [copiedReviewPath]);
 
-  async function handleSave() {
+  async function handleSave(options?: SourceSaveOptions) {
     if (latestFile.status !== "ready" || !isDirty || isSaving) {
       return;
     }
@@ -384,21 +497,107 @@ export function DiffPanel({
     setIsSaving(true);
     setSaveError(null);
     try {
-      await onSaveFile(latestFile.path, editValue);
-      setLatestFile((current) => {
-        if (current.status !== "ready") {
-          return current;
-        }
-
-        return {
-          ...current,
-          content: editValue,
-        };
+      const response = await onSaveFile(latestFile.path, editValue, {
+        baseHash: latestFile.contentHash ?? null,
+        overwrite: options?.overwrite,
       });
+      if (response) {
+        setVisualBaseContent(response.content);
+        setLatestFile(toLatestFileState(response));
+      } else {
+        setLatestFile((current) => {
+          if (current.status !== "ready") {
+            return current;
+          }
+
+          return {
+            ...current,
+            content: editValue,
+            contentHash: null,
+          };
+        });
+      }
+      setExternalFileNotice(null);
+      setDiffEditConflictOnDisk(false);
     } catch (error) {
-      setSaveError(getErrorMessage(error));
+      const message = getErrorMessage(error);
+      setSaveError(message);
+      if (isStaleFileSaveError(message)) {
+        setExternalFileNotice(
+          "The file changed on disk before save. Apply your edits to the disk version, reload from disk, or save anyway.",
+        );
+        setDiffEditConflictOnDisk(true);
+      }
     } finally {
       setIsSaving(false);
+    }
+  }
+
+  async function handleApplyDiffEditsToDiskVersion() {
+    if (
+      latestFile.status !== "ready" ||
+      !isDirty ||
+      !hasScope ||
+      isRebasingFile
+    ) {
+      return;
+    }
+
+    setIsRebasingFile(true);
+    setSaveError(null);
+    try {
+      const response = await fetchFile(latestFile.path, {
+        sessionId: normalizedSessionId || null,
+        projectId: normalizedProjectId || null,
+      });
+      const rebaseResult = rebaseContentOntoDisk(
+        latestFile.content,
+        editValue,
+        response.content,
+      );
+      if (rebaseResult.status === "conflict") {
+        setExternalFileNotice(rebaseResult.reason);
+        setDiffEditConflictOnDisk(true);
+        return;
+      }
+
+      pendingEditValueRef.current = rebaseResult.content;
+      setVisualBaseContent(response.content);
+      setLatestFile(toLatestFileState(response));
+      setEditValue(rebaseResult.content);
+      setExternalFileNotice("Your diff edits were applied on top of the disk version.");
+      setDiffEditConflictOnDisk(false);
+    } catch (error) {
+      setExternalFileNotice(`Could not load the disk version: ${getErrorMessage(error)}`);
+      setDiffEditConflictOnDisk(true);
+    } finally {
+      setIsRebasingFile(false);
+    }
+  }
+
+  async function handleReloadDiffFileFromDisk() {
+    if (latestFile.status !== "ready" || !hasScope || isReloadingFile) {
+      return;
+    }
+
+    setIsReloadingFile(true);
+    setSaveError(null);
+    try {
+      const response = await fetchFile(latestFile.path, {
+        sessionId: normalizedSessionId || null,
+        projectId: normalizedProjectId || null,
+      });
+      pendingEditValueRef.current = null;
+      setVisualBaseContent(response.content);
+      setLatestFile(toLatestFileState(response));
+      setEditValue(response.content);
+      setExternalFileNotice("File reloaded from disk.");
+      setDiffEditConflictOnDisk(false);
+    } catch (error) {
+      setExternalFileNotice(`Could not reload from disk: ${getErrorMessage(error)}`);
+      setDiffEditConflictOnDisk(true);
+    } finally {
+      setIsReloadingFile(false);
     }
   }
 
@@ -662,6 +861,37 @@ export function DiffPanel({
         ) : null}
         {reviewSaveError ? (
           <p className="support-copy diff-preview-note">{`Review update failed: ${reviewSaveError}`}</p>
+        ) : null}
+        {externalFileNotice ? (
+          <p className="support-copy diff-preview-note">{externalFileNotice}</p>
+        ) : null}
+        {diffEditConflictOnDisk && latestFile.status === "ready" ? (
+          <div className="source-file-change-actions diff-preview-file-change-actions">
+            <button
+              className="ghost-button"
+              type="button"
+              disabled={!isDirty || isRebasingFile}
+              onClick={() => void handleApplyDiffEditsToDiskVersion()}
+            >
+              {isRebasingFile ? "Applying..." : "Apply my edits to disk version"}
+            </button>
+            <button
+              className="ghost-button"
+              type="button"
+              disabled={isSaving || !isDirty}
+              onClick={() => void handleSave({ overwrite: true })}
+            >
+              {isSaving ? "Saving..." : "Save anyway"}
+            </button>
+            <button
+              className="ghost-button"
+              type="button"
+              disabled={isReloadingFile}
+              onClick={() => void handleReloadDiffFileFromDisk()}
+            >
+              {isReloadingFile ? "Reloading..." : "Reload from disk"}
+            </button>
+          </div>
         ) : null}
         {!normalizedChangeSetId && preview.hasStructuredPreview ? (
           <p className="support-copy diff-preview-note">
@@ -1121,9 +1351,45 @@ function toLatestFileState(response: FileResponse): LatestFileState {
     status: "ready",
     path: response.path,
     content: response.content,
+    contentHash: response.contentHash ?? null,
     error: null,
     language: response.language ?? null,
   };
+}
+
+function normalizeWorkspaceFileEventPath(path: string) {
+  const normalized = path.trim().replace(/\\+/g, "/").replace(/\/+/g, "/");
+  if (!normalized) {
+    return "";
+  }
+
+  const withoutTrailingSlash =
+    normalized.length > 1 && !/^[a-z]:\/$/i.test(normalized)
+      ? normalized.replace(/\/+$/g, "")
+      : normalized;
+
+  return /^[a-z]:\//i.test(withoutTrailingSlash)
+    ? withoutTrailingSlash.toLowerCase()
+    : withoutTrailingSlash;
+}
+
+function workspaceFilesChangedEventChangeForPath(
+  event: WorkspaceFilesChangedEvent,
+  targetPath: string,
+) {
+  const normalizedTargetPath = normalizeWorkspaceFileEventPath(targetPath);
+  if (!normalizedTargetPath) {
+    return null;
+  }
+
+  return event.changes.find(
+    (change) =>
+      normalizeWorkspaceFileEventPath(change.path) === normalizedTargetPath,
+  ) ?? null;
+}
+
+function isStaleFileSaveError(message: string) {
+  return message.toLowerCase().includes("file changed on disk before save");
 }
 
 function createEditorStatusSnapshot(content: string): MonacoCodeEditorStatus {

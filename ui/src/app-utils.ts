@@ -261,6 +261,10 @@ export function messageChangeMarker(message: Message) {
       return `${message.type}:${message.agents.length}:${message.agents
         .map((agent) => `${agent.id}:${agent.status}:${agent.detail?.length ?? 0}`)
         .join("|")}`;
+    case "fileChanges":
+      return `${message.type}:${message.files.length}:${message.files
+        .map((file) => `${file.kind}:${file.path}`)
+        .join("|")}`;
     case "subagentResult":
       return `${message.type}:${message.title.length}:${message.summary.length}`;
     case "approval":

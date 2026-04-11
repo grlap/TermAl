@@ -585,6 +585,8 @@ fn test_app_state() -> AppState {
         review_documents_lock: Arc::new(Mutex::new(())),
         state_events: broadcast::channel(16).0,
         delta_events: broadcast::channel(16).0,
+        file_events: broadcast::channel(16).0,
+        file_events_revision: Arc::new(AtomicU64::new(0)),
         persist_tx: mpsc::channel().0,
         shared_codex_runtime: Arc::new(Mutex::new(None)),
         agent_readiness_cache: Arc::new(RwLock::new(fresh_agent_readiness_cache("/tmp"))),
@@ -3866,6 +3868,8 @@ fn persists_app_settings_and_applies_them_to_new_sessions() {
         review_documents_lock: state.review_documents_lock.clone(),
         state_events: broadcast::channel(16).0,
         delta_events: broadcast::channel(16).0,
+        file_events: broadcast::channel(16).0,
+        file_events_revision: Arc::new(AtomicU64::new(0)),
         persist_tx: mpsc::channel().0,
         shared_codex_runtime: Arc::new(Mutex::new(None)),
         agent_readiness_cache: Arc::new(RwLock::new(fresh_agent_readiness_cache("/tmp"))),
@@ -21093,6 +21097,14 @@ async fn read_and_write_file_accept_project_id_without_session() {
         "fn main() {}
 "
     );
+    assert_eq!(
+        read_response.content_hash.as_deref(),
+        Some(file_content_hash(read_response.content.as_bytes()).as_str())
+    );
+    assert_eq!(
+        read_response.size_bytes,
+        Some(read_response.content.len() as u64)
+    );
 
     let Json(write_response) = write_file(
         State(state),
@@ -21101,6 +21113,8 @@ async fn read_and_write_file_accept_project_id_without_session() {
             content: "pub fn generated() {}
 "
             .to_owned(),
+            base_hash: None,
+            overwrite: false,
             project_id: Some(project.project_id),
             session_id: None,
         }),
@@ -21113,8 +21127,175 @@ async fn read_and_write_file_accept_project_id_without_session() {
         "pub fn generated() {}
 "
     );
+    assert_eq!(
+        write_response.content_hash.as_deref(),
+        Some(file_content_hash(write_response.content.as_bytes()).as_str())
+    );
 
     fs::remove_dir_all(root).unwrap();
+}
+
+// Tests that write file rejects stale editor base hashes.
+#[tokio::test]
+async fn write_file_rejects_stale_base_hash() {
+    let state = test_app_state();
+    let root =
+        std::env::temp_dir().join(format!("termal-project-file-stale-base-{}", Uuid::new_v4()));
+    let existing_file = root.join("src").join("main.rs");
+
+    fs::create_dir_all(existing_file.parent().unwrap()).unwrap();
+    fs::write(&existing_file, "fn main() {}\n").unwrap();
+
+    let project = state
+        .create_project(CreateProjectRequest {
+            name: Some("Project Files".to_owned()),
+            root_path: root.to_string_lossy().into_owned(),
+            remote_id: default_local_remote_id(),
+        })
+        .unwrap();
+
+    let Json(read_response) = read_file(
+        State(state.clone()),
+        Query(FileQuery {
+            path: existing_file.to_string_lossy().into_owned(),
+            project_id: Some(project.project_id.clone()),
+            session_id: None,
+        }),
+    )
+    .await
+    .unwrap();
+    let base_hash = read_response
+        .content_hash
+        .expect("read response should include a content hash");
+
+    fs::write(&existing_file, "fn main() { println!(\"agent\"); }\n").unwrap();
+
+    let error = match write_file(
+        State(state.clone()),
+        Json(WriteFileRequest {
+            path: existing_file.to_string_lossy().into_owned(),
+            content: "fn main() { println!(\"user\"); }\n".to_owned(),
+            base_hash: Some(base_hash),
+            overwrite: false,
+            project_id: Some(project.project_id.clone()),
+            session_id: None,
+        }),
+    )
+    .await
+    {
+        Ok(_) => panic!("stale file write should fail"),
+        Err(error) => error,
+    };
+
+    assert_eq!(error.status, StatusCode::CONFLICT);
+    assert!(error.message.contains("file changed on disk before save"));
+    assert_eq!(
+        fs::read_to_string(&existing_file).unwrap(),
+        "fn main() { println!(\"agent\"); }\n"
+    );
+
+    let Json(overwrite_response) = write_file(
+        State(state),
+        Json(WriteFileRequest {
+            path: existing_file.to_string_lossy().into_owned(),
+            content: "fn main() { println!(\"user\"); }\n".to_owned(),
+            base_hash: Some("sha256:stale".to_owned()),
+            overwrite: true,
+            project_id: Some(project.project_id),
+            session_id: None,
+        }),
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(
+        overwrite_response.content,
+        "fn main() { println!(\"user\"); }\n"
+    );
+    assert_eq!(
+        fs::read_to_string(&existing_file).unwrap(),
+        "fn main() { println!(\"user\"); }\n"
+    );
+
+    fs::remove_dir_all(root).unwrap();
+}
+
+// Tests that watcher changes are summarized for the active local agent turn.
+#[test]
+fn active_turn_file_changes_are_summarized_on_record() {
+    let state = test_app_state();
+    let root = std::env::temp_dir().join(format!(
+        "termal-active-turn-file-changes-{}",
+        Uuid::new_v4()
+    ));
+    let changed_file = root.join("src").join("main.rs");
+    let ignored_file = std::env::temp_dir().join(format!(
+        "termal-active-turn-file-changes-outside-{}.rs",
+        Uuid::new_v4()
+    ));
+
+    fs::create_dir_all(changed_file.parent().unwrap()).unwrap();
+    fs::write(&changed_file, "fn main() {}\n").unwrap();
+    fs::write(&ignored_file, "pub fn outside() {}\n").unwrap();
+
+    let session_id = {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let record = inner.create_session(
+            Agent::Codex,
+            Some("Files".to_owned()),
+            root.to_string_lossy().into_owned(),
+            None,
+            None,
+        );
+        let session_id = record.session.id.clone();
+        let index = inner.find_session_index(&session_id).unwrap();
+        inner.sessions[index].active_turn_start_message_count =
+            Some(inner.sessions[index].session.messages.len());
+        session_id
+    };
+
+    state.record_active_turn_file_changes(&[
+        WorkspaceFileChangeEvent {
+            path: changed_file.to_string_lossy().into_owned(),
+            kind: WorkspaceFileChangeKind::Modified,
+            mtime_ms: None,
+            size_bytes: None,
+        },
+        WorkspaceFileChangeEvent {
+            path: ignored_file.to_string_lossy().into_owned(),
+            kind: WorkspaceFileChangeKind::Modified,
+            mtime_ms: None,
+            size_bytes: None,
+        },
+    ]);
+
+    let mut inner = state.inner.lock().expect("state mutex poisoned");
+    let index = inner.find_session_index(&session_id).unwrap();
+    assert_eq!(
+        inner.sessions[index].active_turn_file_changes.len(),
+        1,
+        "only files under the session workdir should be tracked",
+    );
+
+    let message_id = inner.next_message_id();
+    assert!(push_active_turn_file_changes_on_record(
+        &mut inner.sessions[index],
+        message_id,
+    ));
+    assert!(inner.sessions[index].active_turn_file_changes.is_empty());
+    match inner.sessions[index].session.messages.last() {
+        Some(Message::FileChanges { title, files, .. }) => {
+            assert_eq!(title, "Agent changed 1 file");
+            assert_eq!(files.len(), 1);
+            assert_eq!(files[0].path, changed_file.to_string_lossy());
+            assert_eq!(files[0].kind, WorkspaceFileChangeKind::Modified);
+        }
+        other => panic!("expected file changes message, got {other:?}"),
+    }
+
+    drop(inner);
+    fs::remove_dir_all(root).unwrap();
+    fs::remove_file(ignored_file).unwrap();
 }
 
 // Tests that read file returns not found for missing project file.
@@ -21277,6 +21458,8 @@ async fn write_file_rejects_content_over_size_limit() {
         Json(WriteFileRequest {
             path: output_file.to_string_lossy().into_owned(),
             content: oversized_content,
+            base_hash: None,
+            overwrite: false,
             project_id: Some(project.project_id),
             session_id: None,
         }),

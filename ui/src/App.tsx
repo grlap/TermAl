@@ -57,6 +57,7 @@ import {
   submitCodexAppRequest,
   submitMcpElicitation,
   submitUserInput,
+  type FileResponse,
   type GitDiffRequestPayload,
   type GitDiffSection,
   type StateResponse,
@@ -169,10 +170,14 @@ import { FileSystemPanel } from "./panels/FileSystemPanel";
 import { GitStatusPanel } from "./panels/GitStatusPanel";
 import { InstructionDebuggerPanel } from "./panels/InstructionDebuggerPanel";
 import { OrchestratorTemplateLibraryPanel } from "./panels/OrchestratorTemplateLibraryPanel";
-import { PaneTabs } from "./panels/PaneTabs";
+import { PaneTabs, type PaneTabDecoration } from "./panels/PaneTabs";
 import { OrchestratorTemplatesPanel } from "./panels/OrchestratorTemplatesPanel";
 import { SessionCanvasPanel } from "./panels/SessionCanvasPanel";
-import { SourcePanel, type SourceFileState } from "./panels/SourcePanel";
+import {
+  SourcePanel,
+  type SourceFileState,
+  type SourceSaveOptions,
+} from "./panels/SourcePanel";
 import {
   buildSessionListSearchResultFromIndex,
   buildSessionSearchIndex,
@@ -209,6 +214,8 @@ import type {
   SessionModelOption,
   SessionSettingsField,
   SessionSettingsValue,
+  WorkspaceFilesChangedEvent,
+  WorkspaceFileChange,
 } from "./types";
 import {
   activatePane,
@@ -255,6 +262,7 @@ import {
   type SessionPaneViewMode,
   type TabDropPlacement,
   type WorkspaceNode,
+  type WorkspaceDiffPreviewTab,
   type WorkspacePane,
   type WorkspaceState,
   type WorkspaceTab,
@@ -440,6 +448,155 @@ type PendingSessionRename = {
   clientY: number;
   sessionId: string;
 };
+
+function sourceFileStateFromResponse(response: FileResponse): SourceFileState {
+  return {
+    status: "ready",
+    path: response.path,
+    content: response.content,
+    contentHash: response.contentHash ?? null,
+    mtimeMs: response.mtimeMs ?? null,
+    sizeBytes: response.sizeBytes ?? null,
+    staleOnDisk: false,
+    externalChangeKind: null,
+    externalContentHash: null,
+    externalMtimeMs: null,
+    externalSizeBytes: null,
+    error: null,
+    language: response.language ?? null,
+  };
+}
+
+function normalizeWorkspaceFileEventPath(path: string) {
+  const normalized = path.trim().replace(/\\+/g, "/").replace(/\/+/g, "/");
+  if (!normalized) {
+    return "";
+  }
+
+  const withoutTrailingSlash =
+    normalized.length > 1 && !/^[a-z]:\/$/i.test(normalized)
+      ? normalized.replace(/\/+$/g, "")
+      : normalized;
+
+  return /^[a-z]:\//i.test(withoutTrailingSlash)
+    ? withoutTrailingSlash.toLowerCase()
+    : withoutTrailingSlash;
+}
+
+function workspaceFilesChangedEventChangeForPath(
+  event: WorkspaceFilesChangedEvent,
+  targetPath: string,
+): WorkspaceFileChange | null {
+  const normalizedTargetPath = normalizeWorkspaceFileEventPath(targetPath);
+  if (!normalizedTargetPath) {
+    return null;
+  }
+
+  return event.changes.find(
+    (change) =>
+      normalizeWorkspaceFileEventPath(change.path) === normalizedTargetPath,
+  ) ?? null;
+}
+
+function workspacePathIsAbsolute(path: string) {
+  const normalized = normalizeWorkspaceFileEventPath(path);
+  return (
+    normalized.startsWith("/") ||
+    normalized.startsWith("//") ||
+    /^[a-z]:\//i.test(normalized)
+  );
+}
+
+function joinWorkspacePath(rootPath: string | null | undefined, childPath: string | null | undefined) {
+  const trimmedChild = childPath?.trim() ?? "";
+  if (!trimmedChild || workspacePathIsAbsolute(trimmedChild)) {
+    return trimmedChild;
+  }
+
+  const trimmedRoot = rootPath?.trim() ?? "";
+  if (!trimmedRoot) {
+    return trimmedChild;
+  }
+
+  return `${trimmedRoot.replace(/[\\/]+$/g, "")}/${trimmedChild.replace(/^[\\/]+/g, "")}`;
+}
+
+function workspaceFileChangeMatchesCandidate(changePath: string, candidatePath: string | null | undefined) {
+  const normalizedChangePath = normalizeWorkspaceFileEventPath(changePath);
+  const normalizedCandidatePath = normalizeWorkspaceFileEventPath(candidatePath ?? "");
+  if (!normalizedChangePath || !normalizedCandidatePath) {
+    return false;
+  }
+
+  if (normalizedChangePath === normalizedCandidatePath) {
+    return true;
+  }
+
+  if (workspacePathIsAbsolute(candidatePath ?? "")) {
+    return false;
+  }
+
+  return normalizedChangePath.endsWith(`/${normalizedCandidatePath}`);
+}
+
+function workspaceFilesChangedEventTouchesGitDiffTab(
+  event: WorkspaceFilesChangedEvent,
+  tab: WorkspaceDiffPreviewTab,
+) {
+  const request = tab.gitDiffRequest ?? null;
+  const candidates = [
+    tab.filePath,
+    request?.path,
+    request?.originalPath,
+    joinWorkspacePath(request?.workdir, request?.path),
+    joinWorkspacePath(request?.workdir, request?.originalPath),
+  ];
+
+  return event.changes.some((change) =>
+    candidates.some((candidatePath) =>
+      workspaceFileChangeMatchesCandidate(change.path, candidatePath),
+    ),
+  );
+}
+
+type GitDiffPreviewRefresh = {
+  request: GitDiffRequestPayload;
+  requestKey: string;
+  sectionId: GitDiffSection;
+};
+
+function collectGitDiffPreviewRefreshes(
+  workspace: WorkspaceState,
+  event: WorkspaceFilesChangedEvent,
+): GitDiffPreviewRefresh[] {
+  const refreshes = new Map<string, GitDiffPreviewRefresh>();
+
+  for (const pane of workspace.panes) {
+    for (const tab of pane.tabs) {
+      if (
+        tab.kind !== "diffPreview" ||
+        !tab.gitDiffRequestKey ||
+        !tab.gitDiffRequest ||
+        !workspaceFilesChangedEventTouchesGitDiffTab(event, tab)
+      ) {
+        continue;
+      }
+
+      refreshes.set(tab.gitDiffRequestKey, {
+        request: tab.gitDiffRequest,
+        requestKey: tab.gitDiffRequestKey,
+        sectionId: tab.gitSectionId ?? tab.gitDiffRequest.sectionId,
+      });
+    }
+  }
+
+  return Array.from(refreshes.values());
+}
+
+function isSourceFileMissingError(error: unknown) {
+  const message = getErrorMessage(error).toLowerCase();
+  return message.includes("file not found") || message.includes("not found");
+}
 
 const PENDING_KILL_CLOSE_DELAY_MS = 180;
 const PENDING_SESSION_RENAME_CLOSE_DELAY_MS = 300;
@@ -1071,6 +1228,9 @@ export default function App() {
     } | null>(null);
   const [windowId] = useState(() => crypto.randomUUID());
   const [draggedTab, setDraggedTab] = useState<WorkspaceTabDrag | null>(null);
+  const [workspaceFilesChangedEvent, setWorkspaceFilesChangedEvent] =
+    useState<WorkspaceFilesChangedEvent | null>(null);
+  const gitDiffPreviewRefreshVersionsRef = useRef<Map<string, number>>(new Map());
   const [launcherDraggedTab, setLauncherDraggedTab] =
     useState<WorkspaceTabDrag | null>(null);
   const [externalDraggedTab, setExternalDraggedTab] =
@@ -1127,6 +1287,7 @@ export default function App() {
     (options?: { keepalive?: boolean }) => void
   >(() => {});
   const sessionsRef = useRef<Session[]>([]);
+  const workspaceRef = useRef(workspace);
   const codexStateRef = useRef(codexState);
   const agentReadinessRef = useRef(agentReadiness);
   const projectsRef = useRef(projects);
@@ -3092,8 +3253,32 @@ export default function App() {
       }
     }
 
+    function handleWorkspaceFilesChangedEvent(event: MessageEvent<string>) {
+      if (cancelled) {
+        return;
+      }
+
+      try {
+        const filesChanged = JSON.parse(event.data) as WorkspaceFilesChangedEvent;
+        confirmReconnectRecoveryFromLiveEvent();
+        clearReconnectStateResyncTimeoutAfterConfirmedReopen();
+        setBackendConnectionIssueDetail(null);
+        clearRecoveredBackendRequestError();
+        startTransition(() => {
+          setWorkspaceFilesChangedEvent(filesChanged);
+        });
+      } catch {
+        // File-change events are non-authoritative hints. If one is malformed,
+        // keep the main state stream alive and wait for the next event/snapshot.
+      }
+    }
+
     eventSource.addEventListener("state", handleStateEvent as EventListener);
     eventSource.addEventListener("delta", handleDeltaEvent as EventListener);
+    eventSource.addEventListener(
+      "workspaceFilesChanged",
+      handleWorkspaceFilesChangedEvent as EventListener,
+    );
     eventSource.onopen = () => {
       if (!cancelled) {
         sawReconnectOpenSinceLastError = true;
@@ -3213,6 +3398,10 @@ export default function App() {
       eventSource.removeEventListener(
         "delta",
         handleDeltaEvent as EventListener,
+      );
+      eventSource.removeEventListener(
+        "workspaceFilesChanged",
+        handleWorkspaceFilesChangedEvent as EventListener,
       );
       eventSource.close();
     };
@@ -3528,6 +3717,10 @@ export default function App() {
   }, [sessions]);
 
   useEffect(() => {
+    workspaceRef.current = workspace;
+  }, [workspace]);
+
+  useEffect(() => {
     codexStateRef.current = codexState;
     agentReadinessRef.current = agentReadiness;
     projectsRef.current = projects;
@@ -3544,6 +3737,82 @@ export default function App() {
   useEffect(() => {
     draftAttachmentsRef.current = draftAttachmentsBySessionId;
   }, [draftAttachmentsBySessionId]);
+
+  useEffect(() => {
+    if (!workspaceFilesChangedEvent) {
+      return;
+    }
+
+    const refreshes = collectGitDiffPreviewRefreshes(
+      workspaceRef.current,
+      workspaceFilesChangedEvent,
+    );
+    if (refreshes.length === 0) {
+      return;
+    }
+
+    for (const refresh of refreshes) {
+      const currentVersion =
+        (gitDiffPreviewRefreshVersionsRef.current.get(refresh.requestKey) ?? 0) + 1;
+      gitDiffPreviewRefreshVersionsRef.current.set(refresh.requestKey, currentVersion);
+
+      void fetchGitDiff(refresh.request)
+        .then((diffPreview) => {
+          if (
+            gitDiffPreviewRefreshVersionsRef.current.get(refresh.requestKey) !==
+            currentVersion
+          ) {
+            return;
+          }
+
+          setWorkspace((current) =>
+            applyControlPanelLayout(
+              updateGitDiffPreviewTabInWorkspaceState(
+                current,
+                refresh.requestKey,
+                (tab) => ({
+                  ...tab,
+                  changeType: diffPreview.changeType,
+                  changeSetId: diffPreview.changeSetId ?? null,
+                  diff: diffPreview.diff,
+                  filePath: diffPreview.filePath ?? tab.filePath,
+                  gitSectionId: refresh.sectionId,
+                  language: diffPreview.language ?? null,
+                  summary: diffPreview.summary,
+                  isLoading: false,
+                  loadError: null,
+                }),
+              ),
+            ),
+          );
+        })
+        .catch((error) => {
+          if (
+            gitDiffPreviewRefreshVersionsRef.current.get(refresh.requestKey) !==
+            currentVersion
+          ) {
+            return;
+          }
+
+          const errorMessage = getErrorMessage(error);
+          setWorkspace((current) =>
+            applyControlPanelLayout(
+              updateGitDiffPreviewTabInWorkspaceState(
+                current,
+                refresh.requestKey,
+                (tab) => ({
+                  ...tab,
+                  diff: "",
+                  summary: `Failed to refresh ${refresh.sectionId} changes in ${refresh.request.path}`,
+                  isLoading: false,
+                  loadError: errorMessage,
+                }),
+              ),
+            ),
+          );
+        });
+    }
+  }, [workspaceFilesChangedEvent]);
 
   useEffect(() => {
     if (typeof BroadcastChannel === "undefined") {
@@ -5742,6 +6011,7 @@ export default function App() {
       originProjectId,
       summary: pendingGitDiffPreviewSummary(gitSectionId, request.path),
       gitDiffRequestKey: requestKey,
+      gitDiffRequest: request,
       isLoading: true,
       loadError: null,
     };
@@ -6777,6 +7047,7 @@ export default function App() {
                 rootPath={controlSurfaceFilesystemRoot}
                 sessionId={controlPanelLauncherOriginSessionId}
                 projectId={controlPanelLauncherOriginProjectId}
+                workspaceFilesChangedEvent={workspaceFilesChangedEvent}
                 showPathControls={false}
                 onOpenPath={(path, options) =>
                   handleOpenSourceTab(
@@ -7385,6 +7656,7 @@ export default function App() {
               renderControlPanelPaneBarActions={
                 renderControlPanelPaneBarActions
               }
+              workspaceFilesChangedEvent={workspaceFilesChangedEvent}
               backendConnectionState={backendConnectionState}
             />
           ) : (
@@ -8232,6 +8504,7 @@ function WorkspaceNodeView({
   renderControlPanelPaneBarStatus,
   renderControlPanelPaneBarActions,
   backendConnectionState,
+  workspaceFilesChangedEvent,
 }: {
   node: WorkspaceNode;
   codexState: CodexState;
@@ -8415,6 +8688,7 @@ function WorkspaceNodeView({
   renderControlPanelPaneBarStatus: () => JSX.Element | null;
   renderControlPanelPaneBarActions: () => JSX.Element;
   backendConnectionState: BackendConnectionState;
+  workspaceFilesChangedEvent: WorkspaceFilesChangedEvent | null;
 }) {
   if (node.type === "pane") {
     const pane = paneLookup.get(node.paneId);
@@ -8560,6 +8834,7 @@ function WorkspaceNodeView({
         renderControlPanelPaneBarStatus={renderControlPanelPaneBarStatus}
         renderControlPanelPaneBarActions={renderControlPanelPaneBarActions}
         backendConnectionState={backendConnectionState}
+        workspaceFilesChangedEvent={workspaceFilesChangedEvent}
       />
     );
   }
@@ -8684,6 +8959,7 @@ function WorkspaceNodeView({
           renderControlPanel={renderControlPanel}
           renderControlPanelPaneBarStatus={renderControlPanelPaneBarStatus}
           renderControlPanelPaneBarActions={renderControlPanelPaneBarActions}
+          workspaceFilesChangedEvent={workspaceFilesChangedEvent}
           backendConnectionState={backendConnectionState}
         />
       </div>
@@ -8775,6 +9051,7 @@ function WorkspaceNodeView({
           renderControlPanel={renderControlPanel}
           renderControlPanelPaneBarStatus={renderControlPanelPaneBarStatus}
           renderControlPanelPaneBarActions={renderControlPanelPaneBarActions}
+          workspaceFilesChangedEvent={workspaceFilesChangedEvent}
           backendConnectionState={backendConnectionState}
         />
       </div>
@@ -8859,6 +9136,7 @@ function SessionPaneView({
   renderControlPanel,
   renderControlPanelPaneBarStatus,
   renderControlPanelPaneBarActions,
+  workspaceFilesChangedEvent,
   backendConnectionState,
 }: {
   pane: WorkspacePane;
@@ -9037,6 +9315,7 @@ function SessionPaneView({
   ) => JSX.Element;
   renderControlPanelPaneBarStatus: () => JSX.Element | null;
   renderControlPanelPaneBarActions: () => JSX.Element;
+  workspaceFilesChangedEvent: WorkspaceFilesChangedEvent | null;
   backendConnectionState: BackendConnectionState;
 }) {
   const activeTab =
@@ -9188,9 +9467,20 @@ function SessionPaneView({
     status: "idle",
     path: "",
     content: "",
+    contentHash: null,
+    mtimeMs: null,
+    sizeBytes: null,
+    staleOnDisk: false,
+    externalChangeKind: null,
+    externalContentHash: null,
+    externalMtimeMs: null,
+    externalSizeBytes: null,
     error: null,
     language: null,
   });
+  const [sourceEditorDirty, setSourceEditorDirty] = useState(false);
+  const fileStateRef = useRef(fileState);
+  const sourceEditorDirtyRef = useRef(false);
   const messageStackRef = useRef<HTMLElement | null>(null);
   const paneTopRef = useRef<HTMLDivElement | null>(null);
   const [activeDropPlacement, setActiveDropPlacement] = useState<Exclude<
@@ -9206,6 +9496,10 @@ function SessionPaneView({
   const [newResponseIndicatorByKey, setNewResponseIndicatorByKey] = useState<
     Record<string, true | undefined>
   >({});
+
+  useEffect(() => {
+    fileStateRef.current = fileState;
+  }, [fileState]);
 
   function renderWorkspaceTabProjectScope(
     scopeId: string,
@@ -9465,6 +9759,7 @@ function SessionPaneView({
     content: string,
     sessionId: string | null,
     projectId: string | null,
+    options?: SourceSaveOptions,
   ) {
     if (!sessionId && !projectId) {
       throw new Error(
@@ -9475,14 +9770,60 @@ function SessionPaneView({
     const response = await saveFile(path, content, {
       sessionId,
       projectId,
+      baseHash:
+        options?.baseHash !== undefined
+          ? options.baseHash
+          : fileState.status === "ready" && fileState.path === path
+            ? fileState.contentHash
+            : null,
+      overwrite: options?.overwrite,
     });
-    setFileState({
-      status: "ready",
-      path: response.path,
-      content: response.content,
-      error: null,
-      language: response.language ?? null,
+    sourceEditorDirtyRef.current = false;
+    setSourceEditorDirty(false);
+    setFileState(sourceFileStateFromResponse(response));
+    return response;
+  }
+
+  async function handleSourceFileReload(
+    path: string,
+    sessionId: string | null,
+    projectId: string | null,
+  ) {
+    const nextFileState = await handleSourceFileFetchLatest(
+      path,
+      sessionId,
+      projectId,
+    );
+    sourceEditorDirtyRef.current = false;
+    setSourceEditorDirty(false);
+    setFileState(nextFileState);
+  }
+
+  async function handleSourceFileFetchLatest(
+    path: string,
+    sessionId: string | null,
+    projectId: string | null,
+  ) {
+    if (!sessionId && !projectId) {
+      throw new Error(
+        "This file view is no longer associated with a live session or project.",
+      );
+    }
+
+    const response = await fetchFile(path, {
+      sessionId,
+      projectId,
     });
+    return sourceFileStateFromResponse(response);
+  }
+
+  function handleSourceFileAdopt(nextFileState: SourceFileState) {
+    setFileState(nextFileState);
+  }
+
+  function handleSourceEditorDirtyChange(isDirty: boolean) {
+    sourceEditorDirtyRef.current = isDirty;
+    setSourceEditorDirty(isDirty);
   }
 
   function setNewResponseIndicator(key: string, visible: boolean) {
@@ -10054,10 +10395,20 @@ function SessionPaneView({
           status: "error",
           path,
           content: "",
+          contentHash: null,
+          mtimeMs: null,
+          sizeBytes: null,
+          staleOnDisk: false,
+          externalChangeKind: null,
+          externalContentHash: null,
+          externalMtimeMs: null,
+          externalSizeBytes: null,
           error:
             "This file view is no longer associated with a live session or project.",
           language: null,
         });
+        sourceEditorDirtyRef.current = false;
+        setSourceEditorDirty(false);
         return;
       }
 
@@ -10065,9 +10416,19 @@ function SessionPaneView({
         status: "loading",
         path,
         content: "",
+        contentHash: null,
+        mtimeMs: null,
+        sizeBytes: null,
+        staleOnDisk: false,
+        externalChangeKind: null,
+        externalContentHash: null,
+        externalMtimeMs: null,
+        externalSizeBytes: null,
         error: null,
         language: null,
       });
+      sourceEditorDirtyRef.current = false;
+      setSourceEditorDirty(false);
 
       try {
         const response = await fetchFile(path, {
@@ -10078,13 +10439,9 @@ function SessionPaneView({
           return;
         }
 
-        setFileState({
-          status: "ready",
-          path: response.path,
-          content: response.content,
-          error: null,
-          language: response.language ?? null,
-        });
+        sourceEditorDirtyRef.current = false;
+        setSourceEditorDirty(false);
+        setFileState(sourceFileStateFromResponse(response));
       } catch (error) {
         if (cancelled) {
           return;
@@ -10094,9 +10451,19 @@ function SessionPaneView({
           status: "error",
           path,
           content: "",
+          contentHash: null,
+          mtimeMs: null,
+          sizeBytes: null,
+          staleOnDisk: false,
+          externalChangeKind: null,
+          externalContentHash: null,
+          externalMtimeMs: null,
+          externalSizeBytes: null,
           error: getErrorMessage(error),
           language: null,
         });
+        sourceEditorDirtyRef.current = false;
+        setSourceEditorDirty(false);
       }
     }
 
@@ -10107,9 +10474,19 @@ function SessionPaneView({
         status: "idle",
         path: "",
         content: "",
+        contentHash: null,
+        mtimeMs: null,
+        sizeBytes: null,
+        staleOnDisk: false,
+        externalChangeKind: null,
+        externalContentHash: null,
+        externalMtimeMs: null,
+        externalSizeBytes: null,
         error: null,
         language: null,
       });
+      sourceEditorDirtyRef.current = false;
+      setSourceEditorDirty(false);
     }
 
     return () => {
@@ -10123,11 +10500,173 @@ function SessionPaneView({
   ]);
 
   useEffect(() => {
+    if (
+      !workspaceFilesChangedEvent ||
+      pane.viewMode !== "source" ||
+      !pane.sourcePath ||
+      (!activeSourceOriginSessionId && !activeSourceOriginProjectId)
+    ) {
+      return;
+    }
+
+    const fileChangeEvent = workspaceFilesChangedEvent;
+    let cancelled = false;
+
+    async function checkOpenSourceFile() {
+      const current = fileStateRef.current;
+      if (
+        current.status !== "ready" ||
+        current.path !== pane.sourcePath ||
+        !current.contentHash
+      ) {
+        return;
+      }
+
+      const fileChange = workspaceFilesChangedEventChangeForPath(
+        fileChangeEvent,
+        current.path,
+      );
+      if (!fileChange) {
+        return;
+      }
+
+      if (fileChange.kind === "deleted") {
+        setFileState((latest) =>
+          latest.status === "ready" &&
+          latest.path === current.path &&
+          latest.contentHash === current.contentHash
+            ? {
+                ...latest,
+                staleOnDisk: true,
+                externalChangeKind: "deleted",
+                externalContentHash: null,
+                externalMtimeMs: fileChange.mtimeMs ?? null,
+                externalSizeBytes: fileChange.sizeBytes ?? null,
+              }
+            : latest,
+        );
+        return;
+      }
+
+      try {
+        const response = await fetchFile(current.path, {
+          sessionId: activeSourceOriginSessionId,
+          projectId: activeSourceOriginProjectId,
+        });
+        if (cancelled) {
+          return;
+        }
+
+        const nextHash = response.contentHash ?? null;
+        if (!nextHash || nextHash === current.contentHash) {
+          if (current.staleOnDisk) {
+            setFileState((latest) =>
+              latest.status === "ready" &&
+              latest.path === current.path &&
+              latest.contentHash === current.contentHash
+                ? {
+                    ...latest,
+                    staleOnDisk: false,
+                    externalChangeKind: null,
+                    externalContentHash: null,
+                    externalMtimeMs: null,
+                    externalSizeBytes: null,
+                  }
+                : latest,
+            );
+          }
+          return;
+        }
+
+        if (sourceEditorDirtyRef.current) {
+          setFileState((latest) =>
+            latest.status === "ready" &&
+            latest.path === current.path &&
+            latest.contentHash === current.contentHash
+              ? {
+                  ...latest,
+                  staleOnDisk: true,
+                  externalChangeKind: fileChange.kind,
+                  externalContentHash: nextHash,
+                  externalMtimeMs: response.mtimeMs ?? null,
+                  externalSizeBytes: response.sizeBytes ?? null,
+                }
+              : latest,
+          );
+          return;
+        }
+
+        setFileState(sourceFileStateFromResponse(response));
+      } catch (error) {
+        if (!cancelled && isSourceFileMissingError(error)) {
+          setFileState((latest) =>
+            latest.status === "ready" &&
+            latest.path === current.path &&
+            latest.contentHash === current.contentHash
+              ? {
+                  ...latest,
+                  staleOnDisk: true,
+                  externalChangeKind: "deleted",
+                  externalContentHash: null,
+                  externalMtimeMs: fileChange.mtimeMs ?? null,
+                  externalSizeBytes: fileChange.sizeBytes ?? null,
+                }
+              : latest,
+          );
+        }
+        // Other transient read errors stay out of the editor. The explicit file
+        // load and save paths still surface failures where the user can act.
+      }
+    }
+
+    void checkOpenSourceFile();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    activeSourceOriginProjectId,
+    activeSourceOriginSessionId,
+    pane.sourcePath,
+    pane.viewMode,
+    workspaceFilesChangedEvent,
+  ]);
+
+  useEffect(() => {
     if (!showDropOverlay) {
       setActiveDropPlacement(null);
       setPointerDraggedTab(null);
     }
   }, [showDropOverlay]);
+
+  const tabDecorations = useMemo<Record<string, PaneTabDecoration>>(() => {
+    if (!activeSourceTab || fileState.status !== "ready") {
+      return {};
+    }
+
+    let decoration: PaneTabDecoration | null = null;
+    if (fileState.staleOnDisk && sourceEditorDirty) {
+      decoration = {
+        label: "Conflict",
+        tone: "danger",
+        title: "This file changed on disk while you have unsaved edits.",
+      };
+    } else if (fileState.staleOnDisk) {
+      decoration = {
+        label: "Changed",
+        tone: "info",
+        title: "This file changed on disk.",
+      };
+    } else if (sourceEditorDirty) {
+      decoration = {
+        label: "Unsaved",
+        tone: "warning",
+        title: "This file has unsaved editor changes.",
+      };
+    }
+
+    return decoration ? { [activeSourceTab.id]: decoration } : {};
+  }, [activeSourceTab, fileState, sourceEditorDirty]);
 
   return (
     <section
@@ -10278,6 +10817,7 @@ function SessionPaneView({
               sessionLookup={sessionLookup}
               draggedTab={draggedTab}
               getKnownDraggedTab={getKnownDraggedTab}
+              tabDecorations={tabDecorations}
               onSelectTab={onSelectTab}
               onCloseTab={onCloseTab}
               onTabDragStart={onTabDragStart}
@@ -10499,14 +11039,31 @@ function SessionPaneView({
                     )
                 : null
             }
-            onSaveFile={(path, content) =>
-              handleSourceFileSave(
+            onDirtyChange={handleSourceEditorDirtyChange}
+            onFetchLatestFile={(path) =>
+              handleSourceFileFetchLatest(
                 path,
-                content,
                 activeSourceOriginSessionId,
                 activeSourceOriginProjectId,
               )
             }
+            onAdoptFileState={handleSourceFileAdopt}
+            onReloadFile={(path) =>
+              handleSourceFileReload(
+                path,
+                activeSourceOriginSessionId,
+                activeSourceOriginProjectId,
+              )
+            }
+            onSaveFile={async (path, content, options) => {
+              await handleSourceFileSave(
+                path,
+                content,
+                activeSourceOriginSessionId,
+                activeSourceOriginProjectId,
+                options,
+              );
+            }}
           />
         ) : activeFilesystemTab ? (
           shouldRenderFilesystemProjectScope ? (
@@ -10541,6 +11098,7 @@ function SessionPaneView({
                 rootPath={activeFilesystemScopedRootPath}
                 sessionId={activeFilesystemScopedSessionId}
                 projectId={activeFilesystemScopeProjectId}
+                workspaceFilesChangedEvent={workspaceFilesChangedEvent}
                 showPathControls={false}
                 onOpenPath={(path, options) =>
                   onOpenSourceTab(
@@ -10566,6 +11124,7 @@ function SessionPaneView({
               rootPath={activeFilesystemTab.rootPath}
               sessionId={activeFilesystemOriginSessionId}
               projectId={activeFilesystemOriginProjectId}
+              workspaceFilesChangedEvent={workspaceFilesChangedEvent}
               onOpenPath={(path, options) =>
                 onOpenSourceTab(
                   pane.id,
@@ -10726,6 +11285,7 @@ function SessionPaneView({
                   : null
               }
               workspaceRoot={activeDiffWorkspaceRoot}
+              workspaceFilesChangedEvent={workspaceFilesChangedEvent}
               onOpenPath={(path) =>
                 onOpenSourceTab(
                   pane.id,

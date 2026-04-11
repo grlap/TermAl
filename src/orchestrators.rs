@@ -2396,6 +2396,7 @@ fn transition_message_summary(message: &Message) -> Option<String> {
             }
         }
         Message::ParallelAgents { agents, .. } => Some(parallel_agents_preview_text(agents)),
+        Message::FileChanges { .. } => None,
         Message::Approval { .. }
         | Message::UserInputRequest { .. }
         | Message::McpElicitationRequest { .. }
@@ -2439,6 +2440,15 @@ fn transition_message_text(message: &Message) -> Option<String> {
                 .to_owned(),
         ),
         Message::ParallelAgents { agents, .. } => Some(parallel_agents_preview_text(agents)),
+        Message::FileChanges { title, files, .. } => {
+            let paths = files
+                .iter()
+                .map(|file| file.path.trim())
+                .filter(|path| !path.is_empty())
+                .collect::<Vec<_>>()
+                .join("\n");
+            Some(format!("{}\n\n{}", title.trim(), paths).trim().to_owned())
+        }
         Message::Thinking { title, lines, .. } => {
             let mut parts = vec![title.trim().to_owned()];
             let detail = lines

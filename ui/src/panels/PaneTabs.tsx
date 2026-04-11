@@ -75,6 +75,12 @@ type GitTabContextMenuState = {
   workdir: string;
 };
 
+export type PaneTabDecoration = {
+  label: string;
+  tone: "warning" | "danger" | "info";
+  title: string;
+};
+
 export function PaneTabs({
   paneId,
   windowId,
@@ -86,6 +92,7 @@ export function PaneTabs({
   sessionLookup,
   draggedTab,
   getKnownDraggedTab,
+  tabDecorations,
   onSelectTab,
   onCloseTab,
   onTabDragStart,
@@ -103,6 +110,7 @@ export function PaneTabs({
   sessionLookup: Map<string, Session>;
   draggedTab: WorkspaceTabDrag | null;
   getKnownDraggedTab: () => WorkspaceTabDrag | null;
+  tabDecorations?: Record<string, PaneTabDecoration | undefined>;
   onSelectTab: (paneId: string, tabId: string) => void;
   onCloseTab: (paneId: string, tabId: string) => void;
   onTabDragStart: (drag: WorkspaceTabDrag) => void;
@@ -742,6 +750,7 @@ export function PaneTabs({
             const statusTooltipId = showStatusTooltip ? `session-status-${paneId}-${tab.id}` : undefined;
             const tabLabel = formatTabLabel(tab, session);
             const tabDisplayLabel = formatVisibleTabLabel(tab, session);
+            const tabDecoration = tabDecorations?.[tab.id] ?? null;
 
             return (
               <div
@@ -891,6 +900,14 @@ export function PaneTabs({
                         title={formatCodexNoticeBadgeLabel(codexNotices.length)}
                       >
                         {codexNotices.length}
+                      </span>
+                    ) : null}
+                    {tabDecoration ? (
+                      <span
+                        className={`pane-tab-state-badge pane-tab-state-badge-${tabDecoration.tone}`}
+                        title={tabDecoration.title}
+                      >
+                        {tabDecoration.label}
                       </span>
                     ) : null}
                   </span>

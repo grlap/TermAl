@@ -23,10 +23,10 @@ use std::io::{self, BufRead, BufReader, Write};
 use std::net::SocketAddr;
 use std::path::{Path as FsPath, PathBuf};
 use std::process::{Child, Command, Stdio};
-use std::sync::atomic::{AtomicBool, AtomicU16, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU16, AtomicU64, Ordering};
 use std::sync::mpsc::{self, Sender};
 use std::sync::{Arc, LazyLock, Mutex, RwLock};
-use std::time::Duration;
+use std::time::{Duration, UNIX_EPOCH};
 
 use anyhow::{Context, Result, anyhow, bail};
 use axum::extract::DefaultBodyLimit;
@@ -38,8 +38,14 @@ use axum::routing::{get, post};
 use axum::{Json, Router};
 use base64::Engine as _;
 use chrono::Local;
+#[cfg(not(test))]
+use notify::{
+    Config as NotifyConfig, Event as NotifyEvent, EventKind as NotifyEventKind,
+    RecommendedWatcher, RecursiveMode, Watcher,
+};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
+use sha2::{Digest, Sha256};
 use shared_child::SharedChild;
 use tokio::net::TcpListener;
 use tokio::sync::broadcast;

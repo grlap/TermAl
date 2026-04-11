@@ -258,6 +258,7 @@ export type Message =
   | DiffMessage
   | MarkdownMessage
   | ParallelAgentsMessage
+  | FileChangesMessage
   | SubagentResultMessage
   | ApprovalMessage
   | UserInputRequestMessage
@@ -334,6 +335,17 @@ export type ParallelAgentProgress = {
 export type ParallelAgentsMessage = BaseMessage & {
   type: "parallelAgents";
   agents: ParallelAgentProgress[];
+};
+
+export type FileChangeSummaryFile = {
+  path: string;
+  kind: WorkspaceFileChangeKind;
+};
+
+export type FileChangesMessage = BaseMessage & {
+  type: "fileChanges";
+  title: string;
+  files: FileChangeSummaryFile[];
 };
 
 export type SubagentResultMessage = BaseMessage & {
@@ -559,6 +571,25 @@ export type OrchestratorsUpdatedEvent = {
   orchestrators: OrchestratorInstance[];
   sessions?: Session[];
 };
+
+export type WorkspaceFileChangeKind =
+  | "created"
+  | "modified"
+  | "deleted"
+  | "other";
+
+export type WorkspaceFileChange = {
+  path: string;
+  kind: WorkspaceFileChangeKind;
+  mtimeMs?: number | null;
+  sizeBytes?: number | null;
+};
+
+export type WorkspaceFilesChangedEvent = {
+  revision: number;
+  changes: WorkspaceFileChange[];
+};
+
 export type DeltaEvent =
   | MessageCreatedEvent
   | TextDeltaEvent

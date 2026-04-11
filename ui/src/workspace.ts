@@ -1,4 +1,4 @@
-import type { GitDiffSection } from "./api";
+import type { GitDiffRequestPayload, GitDiffSection } from "./api";
 import type { DiffMessage, Session } from "./types";
 
 export type SessionPaneViewMode = "session" | "prompt" | "commands" | "diffs";
@@ -123,6 +123,7 @@ export type WorkspaceDiffPreviewTab = {
   originProjectId?: string | null;
   summary: string;
   gitDiffRequestKey?: string | null;
+  gitDiffRequest?: GitDiffRequestPayload | null;
   isLoading?: boolean;
   loadError?: string | null;
 };
@@ -376,6 +377,7 @@ export function createDiffPreviewTab({
   originProjectId = null,
   summary,
   gitDiffRequestKey = null,
+  gitDiffRequest = null,
   isLoading = false,
   loadError = null,
 }: {
@@ -390,6 +392,7 @@ export function createDiffPreviewTab({
   originProjectId?: string | null;
   summary: string;
   gitDiffRequestKey?: string | null;
+  gitDiffRequest?: GitDiffRequestPayload | null;
   isLoading?: boolean;
   loadError?: string | null;
 }): WorkspaceDiffPreviewTab {
@@ -412,6 +415,7 @@ export function createDiffPreviewTab({
     ...projectOriginProps(normalizedOriginProjectId),
     summary,
     ...(normalizedGitDiffRequestKey ? { gitDiffRequestKey: normalizedGitDiffRequestKey } : {}),
+    ...(gitDiffRequest ? { gitDiffRequest } : {}),
     ...(isLoading ? { isLoading: true } : {}),
     ...(normalizedLoadError ? { loadError: normalizedLoadError } : {}),
   };
@@ -1171,6 +1175,7 @@ export function openDiffPreviewInWorkspaceState(
     originProjectId?: string | null;
     summary: string;
     gitDiffRequestKey?: string | null;
+    gitDiffRequest?: GitDiffRequestPayload | null;
     isLoading?: boolean;
     loadError?: string | null;
   },
