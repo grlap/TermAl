@@ -9933,7 +9933,45 @@ function SessionPaneView({
 
   function scrollMessageStackToBoundary(boundary: "top" | "bottom") {
     if (boundary === "bottom") {
-      scrollToLatestMessage("smooth");
+      // Jump to the absolute bottom. For virtualized lists, a single
+      // scrollTo may not reach the true bottom because rendering
+      // newly-visible messages changes scrollHeight. Use a timer-based
+      // loop that gives the browser time to lay out each batch, instead
+      // of chasing frame-by-frame which is slow on extremely long
+      // conversations.
+      {
+        const node = messageStackRef.current;
+        if (node) {
+          node.scrollTop = node.scrollHeight;
+          let prevHeight = node.scrollHeight;
+          let stableCount = 0;
+          const jumpInterval = setInterval(() => {
+            if (!messageStackRef.current) {
+              clearInterval(jumpInterval);
+              return;
+            }
+            messageStackRef.current.scrollTop =
+              messageStackRef.current.scrollHeight;
+            if (messageStackRef.current.scrollHeight === prevHeight) {
+              stableCount += 1;
+              if (stableCount >= 3) {
+                clearInterval(jumpInterval);
+              }
+            } else {
+              stableCount = 0;
+            }
+            prevHeight = messageStackRef.current.scrollHeight;
+          }, 50);
+          // Hard cap: stop after 30 seconds.
+          setTimeout(() => clearInterval(jumpInterval), 30000);
+        }
+      }
+      setShouldStickToBottom(true);
+      paneScrollPositions[scrollStateKey] = {
+        top: Number.MAX_SAFE_INTEGER,
+        shouldStick: true,
+      };
+      setNewResponseIndicator(scrollStateKey, false);
       return;
     }
 
@@ -10141,8 +10179,15 @@ function SessionPaneView({
 
       const saved = paneScrollPositions[scrollStateKey];
       if (saved) {
-        const maxScrollTop = Math.max(node.scrollHeight - node.clientHeight, 0);
-        node.scrollTop = Math.min(saved.top, maxScrollTop);
+        if (saved.shouldStick) {
+          // New messages may have arrived while this tab was inactive.
+          // Honour the stick intent by scrolling to the actual bottom
+          // instead of restoring the stale saved top offset.
+          node.scrollTop = node.scrollHeight;
+        } else {
+          const maxScrollTop = Math.max(node.scrollHeight - node.clientHeight, 0);
+          node.scrollTop = Math.min(saved.top, maxScrollTop);
+        }
         setShouldStickToBottom(saved.shouldStick);
         return;
       }
@@ -10280,10 +10325,22 @@ function SessionPaneView({
 
     const previousSignature = paneContentSignatures[scrollStateKey];
     paneContentSignatures[scrollStateKey] = visibleContentSignature;
-    if (
-      previousSignature === undefined ||
-      previousSignature === visibleContentSignature
-    ) {
+    if (previousSignature === visibleContentSignature) {
+      return;
+    }
+    if (previousSignature === undefined) {
+      // First content after mount. The useLayoutEffect already tried to
+      // scroll, but messages may not have been available yet (SSE loads
+      // state asynchronously). If the initial intent was to stick to the
+      // bottom, honour it now that content has arrived.
+      if (getShouldStickToBottom()) {
+        const frameId = window.requestAnimationFrame(() => {
+          scrollToLatestMessage("auto");
+        });
+        return () => {
+          window.cancelAnimationFrame(frameId);
+        };
+      }
       return;
     }
 

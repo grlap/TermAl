@@ -55,6 +55,21 @@ export function resolvePaneScrollCommand(
     return makePaneScrollCommand(event.key === "PageUp" ? "up" : "down", event.shiftKey);
   }
 
+  // Ctrl+Home / Ctrl+End — standard Windows/Linux jump to boundary.
+  // Cmd+Home / Cmd+End on macOS.
+  if (event.key === "Home" || event.key === "End") {
+    if (event.ctrlKey || event.metaKey) {
+      return { kind: "boundary", direction: event.key === "Home" ? "up" : "down" };
+    }
+
+    // Plain Home/End when not in a text input — jump to boundary.
+    if (!event.altKey && !event.shiftKey) {
+      return { kind: "boundary", direction: event.key === "Home" ? "up" : "down" };
+    }
+
+    return null;
+  }
+
   if (event.key !== "ArrowUp" && event.key !== "ArrowDown") {
     return null;
   }

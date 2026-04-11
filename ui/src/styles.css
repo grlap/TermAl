@@ -3818,6 +3818,11 @@ textarea {
 
 .message-slot {
   display: block;
+  /* Let the browser skip layout and painting for off-screen messages.
+     This dramatically reduces DOM cost for long conversations and helps
+     preserve scroll position when the tab is backgrounded. */
+  content-visibility: auto;
+  contain-intrinsic-size: auto 120px;
 }
 
 .message-slot.session-search-hit > .message-card {
