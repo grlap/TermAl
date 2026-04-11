@@ -8,6 +8,8 @@ import "monaco-editor/esm/vs/language/css/monaco.contribution";
 import "monaco-editor/esm/vs/language/html/monaco.contribution";
 import "monaco-editor/esm/vs/language/json/monaco.contribution";
 import "monaco-editor/esm/vs/language/typescript/monaco.contribution";
+import "monaco-editor/esm/vs/basic-languages/javascript/javascript.contribution";
+import "monaco-editor/esm/vs/basic-languages/typescript/typescript.contribution";
 import "monaco-editor/esm/vs/basic-languages/dart/dart.contribution";
 import "monaco-editor/esm/vs/basic-languages/dockerfile/dockerfile.contribution";
 import "monaco-editor/esm/vs/basic-languages/go/go.contribution";
