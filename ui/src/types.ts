@@ -581,6 +581,8 @@ export type WorkspaceFileChangeKind =
 export type WorkspaceFileChange = {
   path: string;
   kind: WorkspaceFileChangeKind;
+  rootPath?: string | null;
+  sessionId?: string | null;
   mtimeMs?: number | null;
   sizeBytes?: number | null;
 };

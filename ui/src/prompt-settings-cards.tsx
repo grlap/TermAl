@@ -410,7 +410,7 @@ export function ClaudePromptSettingsCard({
             ? "Refreshing Claude's live model list from the session."
             : session.modelOptions?.length
               ? "Claude exposes its live model list during session initialization. Model changes are applied live to the session, and you can still paste a full model id if you need something outside the current list. Ask keeps approval cards, Auto-approve continues through tool requests, Plan keeps Claude in read-only analysis mode, and effort changes restart Claude before the next prompt."
-              : "Start the Claude session once to load its live model list. New Claude sessions begin on Sonnet, and you can still paste a full Claude model id manually."}
+              : "Start the Claude session once to load its live model list. New Claude sessions use Claude's default model, and you can still paste a full Claude model id manually."}
           {modelCapabilityHint ? ` ${modelCapabilityHint}` : ""}
         </p>
       </div>

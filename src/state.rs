@@ -75,6 +75,7 @@ struct AppState {
 
 const SESSION_NOT_RUNNING_CONFLICT_MESSAGE: &str = "session is not currently running";
 const AGENT_READINESS_CACHE_TTL: Duration = Duration::from_secs(5);
+const ACTIVE_TURN_FILE_CHANGE_GRACE: Duration = Duration::from_millis(750);
 
 #[derive(Clone)]
 struct AgentReadinessCache {
@@ -109,6 +110,13 @@ const WORKSPACE_FILE_WATCH_COALESCE_MS: Duration = Duration::from_millis(250);
 const WORKSPACE_FILE_WATCH_RECV_TIMEOUT_MS: Duration = Duration::from_millis(100);
 
 #[cfg(not(test))]
+#[derive(Clone)]
+struct WorkspaceFileWatchScope {
+    root_path: PathBuf,
+    session_id: Option<String>,
+}
+
+#[cfg(not(test))]
 fn run_workspace_file_watcher(state: AppState) {
     let (event_tx, event_rx) = mpsc::channel::<notify::Result<NotifyEvent>>();
     let mut watcher = match RecommendedWatcher::new(
@@ -125,6 +133,7 @@ fn run_workspace_file_watcher(state: AppState) {
     };
 
     let mut watched_roots = BTreeSet::<PathBuf>::new();
+    let mut watch_scopes = Vec::<WorkspaceFileWatchScope>::new();
     let mut pending_changes = BTreeMap::<String, WorkspaceFileChangeEvent>::new();
     let mut last_change_at: Option<std::time::Instant> = None;
     let mut next_root_refresh_at = std::time::Instant::now();
@@ -132,16 +141,30 @@ fn run_workspace_file_watcher(state: AppState) {
     loop {
         let now = std::time::Instant::now();
         if now >= next_root_refresh_at {
-            reconcile_workspace_file_watch_roots(&state, &mut watcher, &mut watched_roots);
+            reconcile_workspace_file_watch_roots(
+                &state,
+                &mut watcher,
+                &mut watched_roots,
+                &mut watch_scopes,
+            );
             next_root_refresh_at = now + WORKSPACE_FILE_WATCH_ROOT_REFRESH_MS;
         }
 
         match event_rx.recv_timeout(WORKSPACE_FILE_WATCH_RECV_TIMEOUT_MS) {
             Ok(Ok(event)) => {
-                let changes = workspace_file_changes_from_notify_event(&event);
+                let changes = workspace_file_changes_from_notify_event(&event, &watch_scopes);
                 state.record_active_turn_file_changes(&changes);
                 for change in changes {
-                    pending_changes.insert(change.path.clone(), change);
+                    let key = workspace_file_change_event_key(&change);
+                    pending_changes
+                        .entry(key)
+                        .and_modify(|current| {
+                            current.kind =
+                                merge_workspace_file_change_kind(current.kind, change.kind);
+                            current.mtime_ms = change.mtime_ms;
+                            current.size_bytes = change.size_bytes;
+                        })
+                        .or_insert(change);
                     last_change_at = Some(std::time::Instant::now());
                 }
             }
@@ -166,8 +189,15 @@ fn reconcile_workspace_file_watch_roots(
     state: &AppState,
     watcher: &mut RecommendedWatcher,
     watched_roots: &mut BTreeSet<PathBuf>,
+    watch_scopes: &mut Vec<WorkspaceFileWatchScope>,
 ) {
-    let next_roots = collect_workspace_file_watch_roots(state);
+    let next_scopes = collect_workspace_file_watch_scopes(state);
+    let next_roots = prune_nested_workspace_file_watch_roots(
+        next_scopes
+            .iter()
+            .map(|scope| scope.root_path.clone())
+            .collect::<Vec<_>>(),
+    );
     let next_root_set = next_roots.iter().cloned().collect::<BTreeSet<_>>();
     for root in watched_roots
         .difference(&next_root_set)
@@ -194,10 +224,12 @@ fn reconcile_workspace_file_watch_roots(
             }
         }
     }
+
+    *watch_scopes = next_scopes;
 }
 
 #[cfg(not(test))]
-fn collect_workspace_file_watch_roots(state: &AppState) -> Vec<PathBuf> {
+fn collect_workspace_file_watch_scopes(state: &AppState) -> Vec<WorkspaceFileWatchScope> {
     let roots = {
         let inner = state.inner.lock().expect("state mutex poisoned");
         let local_project_ids = inner
@@ -209,7 +241,7 @@ fn collect_workspace_file_watch_roots(state: &AppState) -> Vec<PathBuf> {
         let mut roots = Vec::new();
         for project in &inner.projects {
             if project.remote_id == LOCAL_REMOTE_ID {
-                roots.push(project.root_path.clone());
+                roots.push((project.root_path.clone(), None));
             }
         }
         for record in &inner.sessions {
@@ -224,19 +256,33 @@ fn collect_workspace_file_watch_roots(state: &AppState) -> Vec<PathBuf> {
                 .map(|project_id| local_project_ids.contains(project_id))
                 .unwrap_or(true);
             if is_local_session {
-                roots.push(record.session.workdir.clone());
+                roots.push((
+                    record.session.workdir.clone(),
+                    Some(record.session.id.clone()),
+                ));
             }
         }
         roots
     };
 
-    let mut canonical_roots = roots
+    let mut scopes = roots
         .into_iter()
-        .filter_map(|root| canonical_workspace_file_watch_root(&root))
+        .filter_map(|(root, session_id)| {
+            canonical_workspace_file_watch_root(&root).map(|root_path| WorkspaceFileWatchScope {
+                root_path,
+                session_id,
+            })
+        })
         .collect::<Vec<_>>();
-    canonical_roots.sort();
-    canonical_roots.dedup();
-    prune_nested_workspace_file_watch_roots(canonical_roots)
+    scopes.sort_by(|left, right| {
+        left.root_path
+            .cmp(&right.root_path)
+            .then_with(|| left.session_id.cmp(&right.session_id))
+    });
+    scopes.dedup_by(|left, right| {
+        left.root_path == right.root_path && left.session_id == right.session_id
+    });
+    scopes
 }
 
 #[cfg(not(test))]
@@ -264,7 +310,10 @@ fn prune_nested_workspace_file_watch_roots(mut roots: Vec<PathBuf>) -> Vec<PathB
 }
 
 #[cfg(not(test))]
-fn workspace_file_changes_from_notify_event(event: &NotifyEvent) -> Vec<WorkspaceFileChangeEvent> {
+fn workspace_file_changes_from_notify_event(
+    event: &NotifyEvent,
+    watch_scopes: &[WorkspaceFileWatchScope],
+) -> Vec<WorkspaceFileChangeEvent> {
     let Some(kind) = workspace_file_change_kind(&event.kind) else {
         return Vec::new();
     };
@@ -273,7 +322,7 @@ fn workspace_file_changes_from_notify_event(event: &NotifyEvent) -> Vec<Workspac
         .paths
         .iter()
         .filter(|path| !is_ignored_workspace_file_event_path(path))
-        .map(|path| workspace_file_change_from_path(path, kind))
+        .flat_map(|path| workspace_file_changes_from_path(path, kind, watch_scopes))
         .collect()
 }
 
@@ -293,6 +342,10 @@ fn merge_workspace_file_change_kind(
     next: WorkspaceFileChangeKind,
 ) -> WorkspaceFileChangeKind {
     match (current, next) {
+        (WorkspaceFileChangeKind::Deleted, WorkspaceFileChangeKind::Created)
+        | (WorkspaceFileChangeKind::Created, WorkspaceFileChangeKind::Deleted) => {
+            WorkspaceFileChangeKind::Modified
+        }
         (WorkspaceFileChangeKind::Deleted, _) | (_, WorkspaceFileChangeKind::Deleted) => {
             WorkspaceFileChangeKind::Deleted
         }
@@ -307,17 +360,69 @@ fn merge_workspace_file_change_kind(
 }
 
 #[cfg(not(test))]
-fn workspace_file_change_from_path(
+fn workspace_file_changes_from_path(
     path: &FsPath,
     kind: WorkspaceFileChangeKind,
-) -> WorkspaceFileChangeEvent {
+    watch_scopes: &[WorkspaceFileWatchScope],
+) -> Vec<WorkspaceFileChangeEvent> {
     let metadata = fs::metadata(path).ok();
-    WorkspaceFileChangeEvent {
-        path: normalize_user_facing_path(path).to_string_lossy().into_owned(),
-        kind,
-        mtime_ms: metadata.as_ref().and_then(file_metadata_mtime_ms),
-        size_bytes: metadata.map(|metadata| metadata.len()),
+    let normalized_path = normalize_user_facing_path(path);
+    let path_string = normalized_path.to_string_lossy().into_owned();
+    let mtime_ms = metadata.as_ref().and_then(file_metadata_mtime_ms);
+    let size_bytes = metadata.as_ref().map(|metadata| metadata.len());
+    let mut matching_scopes = watch_scopes
+        .iter()
+        .filter(|scope| normalized_path.starts_with(&scope.root_path))
+        .collect::<Vec<_>>();
+    matching_scopes.sort_by(|left, right| {
+        right
+            .root_path
+            .components()
+            .count()
+            .cmp(&left.root_path.components().count())
+            .then_with(|| left.session_id.cmp(&right.session_id))
+    });
+
+    if matching_scopes.is_empty() {
+        return vec![WorkspaceFileChangeEvent {
+            path: path_string,
+            kind,
+            root_path: None,
+            session_id: None,
+            mtime_ms,
+            size_bytes,
+        }];
     }
+
+    let mut seen = HashSet::<(PathBuf, Option<String>)>::new();
+    matching_scopes
+        .into_iter()
+        .filter_map(|scope| {
+            let key = (scope.root_path.clone(), scope.session_id.clone());
+            if !seen.insert(key) {
+                return None;
+            }
+
+            Some(WorkspaceFileChangeEvent {
+                path: path_string.clone(),
+                kind,
+                root_path: Some(scope.root_path.to_string_lossy().into_owned()),
+                session_id: scope.session_id.clone(),
+                mtime_ms,
+                size_bytes,
+            })
+        })
+        .collect()
+}
+
+#[cfg_attr(test, allow(dead_code))]
+fn workspace_file_change_event_key(change: &WorkspaceFileChangeEvent) -> String {
+    format!(
+        "{}\0{}\0{}",
+        change.root_path.as_deref().unwrap_or(""),
+        change.session_id.as_deref().unwrap_or(""),
+        change.path
+    )
 }
 
 #[cfg(not(test))]
@@ -1165,15 +1270,32 @@ impl AppState {
         }
 
         let mut inner = self.inner.lock().expect("state mutex poisoned");
-        for record in &mut inner.sessions {
-            if record.active_turn_start_message_count.is_none()
-                || record.is_remote_proxy()
-                || record.hidden
-            {
+        let now = std::time::Instant::now();
+        let mut late_summary_session_indexes = Vec::<usize>::new();
+        for index in 0..inner.sessions.len() {
+            let record = &mut inner.sessions[index];
+            if record.is_remote_proxy() || record.hidden {
+                continue;
+            }
+
+            let is_active_turn = record.active_turn_start_message_count.is_some();
+            let is_grace_turn = record
+                .active_turn_file_change_grace_deadline
+                .is_some_and(|deadline| now <= deadline);
+            if !is_active_turn && !is_grace_turn {
+                record.active_turn_file_change_grace_deadline = None;
                 continue;
             }
 
             for change in changes {
+                if change
+                    .session_id
+                    .as_deref()
+                    .is_some_and(|session_id| session_id != record.session.id)
+                {
+                    continue;
+                }
+
                 let path = change.path.trim();
                 if path.is_empty() || !path_contains(&record.session.workdir, FsPath::new(path)) {
                     continue;
@@ -1185,6 +1307,24 @@ impl AppState {
                     .and_modify(|kind| *kind = merge_workspace_file_change_kind(*kind, change.kind))
                     .or_insert(change.kind);
             }
+
+            if !is_active_turn && is_grace_turn && !record.active_turn_file_changes.is_empty() {
+                late_summary_session_indexes.push(index);
+            }
+        }
+
+        if late_summary_session_indexes.is_empty() {
+            return;
+        }
+
+        for index in late_summary_session_indexes {
+            let message_id = inner.next_message_id();
+            push_active_turn_file_changes_on_record(&mut inner.sessions[index], message_id);
+        }
+        if let Err(err) = self.commit_locked(&mut inner) {
+            eprintln!(
+                "state warning> failed to persist late turn file-change summary: {err:#}"
+            );
         }
     }
 
@@ -1783,6 +1923,7 @@ impl AppState {
 
         record.orchestrator_auto_dispatch_blocked = false;
         record.active_turn_file_changes.clear();
+        record.active_turn_file_change_grace_deadline = None;
         push_message_on_record(
             record,
             Message::Text {
@@ -3251,8 +3392,7 @@ impl AppState {
         record.orchestrator_auto_dispatch_blocked = false;
         record.runtime_stop_in_progress = false;
         record.deferred_stop_callbacks.clear();
-        record.active_turn_start_message_count = None;
-        record.active_turn_file_changes.clear();
+        clear_active_turn_file_change_tracking(record);
         clear_all_pending_requests(record);
         self.commit_locked(&mut inner)?;
         Ok(())
@@ -3301,7 +3441,7 @@ impl AppState {
 
             record.session.status = SessionStatus::Error;
             record.session.preview = make_preview(cleaned);
-            record.active_turn_start_message_count = None;
+            finish_active_turn_file_change_tracking(record);
             let has_queued_prompts = !record.queued_prompts.is_empty();
             match self.commit_locked(&mut inner) {
                 Ok(_) => {}
@@ -3423,7 +3563,7 @@ impl AppState {
             if let Some(message_id) = file_change_message_id {
                 push_active_turn_file_changes_on_record(record, message_id);
             }
-            inner.sessions[index].active_turn_start_message_count = None;
+            finish_active_turn_file_change_tracking(&mut inner.sessions[index]);
             let has_queued_prompts = !inner.sessions[index].queued_prompts.is_empty();
             self.commit_locked(&mut inner)?;
             has_queued_prompts
@@ -3482,7 +3622,7 @@ impl AppState {
             if let Some(message_id) = file_change_message_id {
                 push_active_turn_file_changes_on_record(&mut inner.sessions[index], message_id);
             }
-            inner.sessions[index].active_turn_start_message_count = None;
+            finish_active_turn_file_change_tracking(&mut inner.sessions[index]);
             self.commit_locked(&mut inner)?;
             let orchestrator_delta = orchestrator_changed
                 .then(|| (inner.revision, inner.orchestrator_instances.clone()));
@@ -3581,7 +3721,7 @@ impl AppState {
                 }
                 !record.queued_prompts.is_empty()
             };
-            inner.sessions[index].active_turn_start_message_count = None;
+            finish_active_turn_file_change_tracking(&mut inner.sessions[index]);
             self.commit_locked(&mut inner)?;
             has_queued_prompts
         };
@@ -4024,7 +4164,7 @@ impl AppState {
                 inner.ignore_discovered_codex_thread(Some(thread_id));
             }
 
-            inner.sessions[index].active_turn_start_message_count = None;
+            finish_active_turn_file_change_tracking(&mut inner.sessions[index]);
             let mut stopped_orchestrator_instance_index = None;
             let mut added_stopped_session_id = false;
             if let Some(orchestrator_instance_id) = orchestrator_stop_instance_id.as_deref() {
@@ -5057,7 +5197,7 @@ impl AppState {
             if let Some(message_id) = file_change_message_id {
                 push_active_turn_file_changes_on_record(record, message_id);
             }
-            record.active_turn_start_message_count = None;
+            finish_active_turn_file_change_tracking(record);
             self.commit_locked(&mut inner)?;
         }
 
@@ -5805,6 +5945,7 @@ impl StateInner {
             active_codex_sandbox_mode: None,
             active_turn_start_message_count: None,
             active_turn_file_changes: BTreeMap::new(),
+            active_turn_file_change_grace_deadline: None,
             agent_commands: Vec::new(),
             codex_approval_policy: default_codex_approval_policy(),
             codex_reasoning_effort: self.preferences.default_codex_reasoning_effort,
@@ -6385,6 +6526,7 @@ impl PersistedSessionRecord {
             active_codex_sandbox_mode: self.active_codex_sandbox_mode,
             active_turn_start_message_count: None,
             active_turn_file_changes: BTreeMap::new(),
+            active_turn_file_change_grace_deadline: None,
             agent_commands: Vec::new(),
             codex_approval_policy: self.codex_approval_policy,
             codex_reasoning_effort: self.codex_reasoning_effort,
@@ -6534,6 +6676,7 @@ struct SessionRecord {
     active_codex_sandbox_mode: Option<CodexSandboxMode>,
     active_turn_start_message_count: Option<usize>,
     active_turn_file_changes: BTreeMap<String, WorkspaceFileChangeKind>,
+    active_turn_file_change_grace_deadline: Option<std::time::Instant>,
     agent_commands: Vec<AgentCommand>,
     codex_approval_policy: CodexApprovalPolicy,
     codex_reasoning_effort: CodexReasoningEffort,
@@ -6590,8 +6733,7 @@ fn reset_hidden_claude_spare_record(record: &mut SessionRecord) {
     record.orchestrator_auto_dispatch_blocked = false;
     record.runtime_stop_in_progress = false;
     record.deferred_stop_callbacks.clear();
-    record.active_turn_start_message_count = None;
-    record.active_turn_file_changes.clear();
+    clear_active_turn_file_change_tracking(record);
 }
 
 /// Returns whether pending requests.
@@ -7674,6 +7816,20 @@ fn insert_message_on_record(record: &mut SessionRecord, index: usize, message: M
 /// Pushes message on record.
 fn push_message_on_record(record: &mut SessionRecord, message: Message) -> usize {
     insert_message_on_record(record, record.session.messages.len(), message)
+}
+
+/// Keeps a short post-turn window for watcher events that arrive after completion.
+fn finish_active_turn_file_change_tracking(record: &mut SessionRecord) {
+    record.active_turn_start_message_count = None;
+    record.active_turn_file_change_grace_deadline =
+        Some(std::time::Instant::now() + ACTIVE_TURN_FILE_CHANGE_GRACE);
+}
+
+/// Clears active turn file-change tracking.
+fn clear_active_turn_file_change_tracking(record: &mut SessionRecord) {
+    record.active_turn_start_message_count = None;
+    record.active_turn_file_changes.clear();
+    record.active_turn_file_change_grace_deadline = None;
 }
 
 /// Pushes the active turn file-change summary on record.

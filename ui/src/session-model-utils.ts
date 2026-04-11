@@ -28,9 +28,7 @@ export type ComboboxOption = {
 };
 
 export const NEW_SESSION_MODEL_OPTIONS: Readonly<Record<AgentType, readonly ComboboxOption[]>> = {
-  Claude: [
-    { label: "Sonnet", value: "sonnet" },
-  ],
+  Claude: [{ label: "Default", value: "default" }],
   Codex: [{ label: "GPT-5.4", value: "gpt-5.4" }],
   Cursor: [{ label: "Auto", value: "auto" }],
   Gemini: [{ label: "Auto", value: "auto" }],
@@ -77,7 +75,7 @@ export function usesSessionModelPicker(agent: AgentType): boolean {
 export function createSessionModelHint(agent: AgentType): string {
   switch (agent) {
     case "Claude":
-      return "Claude model selection lives on the session itself. TermAl asks Claude for its live model list after the session opens, and you can always enter a full Claude model id manually. New Claude sessions start on Sonnet.";
+      return "Claude model selection lives on the session itself. TermAl asks Claude for its live model list after the session opens, and you can always enter a full Claude model id manually. New Claude sessions use Claude's default model.";
     case "Codex":
       return "Codex model selection lives on the session itself. TermAl asks Codex for its live model list after the session opens, and you can always enter a full Codex model id manually.";
     case "Cursor":

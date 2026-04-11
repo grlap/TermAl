@@ -224,22 +224,22 @@
 
 [data-ui-style="terminal-style"] .message-card.utility-card .command-icon-button {
   border-radius: var(--terminal-control-radius);
-  border-color: color-mix(in srgb, var(--signal-green) 22%, var(--line));
+  border-color: var(--terminal-action-border, color-mix(in srgb, var(--signal-green) 22%, var(--line)));
   background: transparent;
-  color: color-mix(in srgb, var(--signal-green) 72%, var(--muted));
+  color: var(--terminal-action-fg, color-mix(in srgb, var(--signal-green) 72%, var(--muted)));
 }
 
 [data-ui-style="terminal-style"] .message-card.utility-card .command-icon-button:hover {
-  border-color: color-mix(in srgb, var(--signal-green) 44%, var(--line));
-  background: color-mix(in srgb, var(--signal-green) 10%, transparent);
-  color: var(--signal-green);
+  border-color: var(--terminal-action-hover-border, color-mix(in srgb, var(--signal-green) 44%, var(--line)));
+  background: var(--terminal-action-hover-bg, color-mix(in srgb, var(--signal-green) 10%, transparent));
+  color: var(--terminal-action-hover-fg, var(--signal-green));
   transform: none;
 }
 
 [data-ui-style="terminal-style"] .message-card.utility-card .command-icon-button.copied {
-  border-color: color-mix(in srgb, var(--signal-green) 38%, var(--line));
-  background: color-mix(in srgb, var(--signal-green) 12%, transparent);
-  color: var(--signal-green);
+  border-color: var(--terminal-action-copied-border, color-mix(in srgb, var(--signal-green) 38%, var(--line)));
+  background: var(--terminal-action-copied-bg, color-mix(in srgb, var(--signal-green) 12%, transparent));
+  color: var(--terminal-action-copied-fg, var(--signal-green));
 }
 
 [data-ui-style="terminal-style"] .message-card.utility-card .command-icon-button:disabled {

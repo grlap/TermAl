@@ -732,6 +732,48 @@ async fn read_file(
 }
 
 /// Writes file.
+fn validate_file_base_hash(resolved_path: &FsPath, base_hash: &str) -> Result<(), ApiError> {
+    // The editor sends the content hash it originally loaded. Refuse stale
+    // saves by default so agent/user edits do not silently clobber each other;
+    // explicit overwrite is the only bypass.
+    let current_metadata = fs::metadata(resolved_path).map_err(|err| match err.kind() {
+        io::ErrorKind::NotFound => ApiError::conflict(format!(
+            "file changed on disk before save: {} was deleted",
+            resolved_path.display()
+        )),
+        _ => ApiError::internal(format!(
+            "failed to stat file before save {}: {err}",
+            resolved_path.display()
+        )),
+    })?;
+    if current_metadata.len() > MAX_FILE_CONTENT_BYTES as u64 {
+        return Err(ApiError::conflict(format!(
+            "file changed on disk before save: {} exceeds the read limit",
+            resolved_path.display()
+        )));
+    }
+
+    let current_content = fs::read(resolved_path).map_err(|err| match err.kind() {
+        io::ErrorKind::NotFound => ApiError::conflict(format!(
+            "file changed on disk before save: {} was deleted",
+            resolved_path.display()
+        )),
+        _ => ApiError::internal(format!(
+            "failed to read file before save {}: {err}",
+            resolved_path.display()
+        )),
+    })?;
+    let current_hash = file_content_hash(&current_content);
+    if current_hash != base_hash {
+        return Err(ApiError::conflict(format!(
+            "file changed on disk before save: {}",
+            resolved_path.display()
+        )));
+    }
+
+    Ok(())
+}
+
 async fn write_file(
     State(state): State<AppState>,
     Json(request): Json<WriteFileRequest>,
@@ -774,43 +816,7 @@ async fn write_file(
             .filter(|hash| !hash.is_empty())
             .filter(|_| !request.overwrite);
         if let Some(base_hash) = should_check_base {
-            // The editor sends the content hash it originally loaded. Refuse
-            // stale saves by default so agent/user edits do not silently clobber
-            // each other; explicit overwrite is the only bypass.
-            let current_metadata = fs::metadata(&resolved_path).map_err(|err| match err.kind() {
-                io::ErrorKind::NotFound => ApiError::conflict(format!(
-                    "file changed on disk before save: {} was deleted",
-                    resolved_path.display()
-                )),
-                _ => ApiError::internal(format!(
-                    "failed to stat file before save {}: {err}",
-                    resolved_path.display()
-                )),
-            })?;
-            if current_metadata.len() > MAX_FILE_CONTENT_BYTES as u64 {
-                return Err(ApiError::conflict(format!(
-                    "file changed on disk before save: {} exceeds the read limit",
-                    resolved_path.display()
-                )));
-            }
-
-            let current_content = fs::read(&resolved_path).map_err(|err| match err.kind() {
-                io::ErrorKind::NotFound => ApiError::conflict(format!(
-                    "file changed on disk before save: {} was deleted",
-                    resolved_path.display()
-                )),
-                _ => ApiError::internal(format!(
-                    "failed to read file before save {}: {err}",
-                    resolved_path.display()
-                )),
-            })?;
-            let current_hash = file_content_hash(&current_content);
-            if current_hash != base_hash {
-                return Err(ApiError::conflict(format!(
-                    "file changed on disk before save: {}",
-                    resolved_path.display()
-                )));
-            }
+            validate_file_base_hash(&resolved_path, base_hash)?;
         }
         if let Some(parent) = resolved_path.parent() {
             fs::create_dir_all(parent).map_err(|err| {
@@ -822,6 +828,9 @@ async fn write_file(
         }
 
         let content_hash = file_content_hash(request.content.as_bytes());
+        if let Some(base_hash) = should_check_base {
+            validate_file_base_hash(&resolved_path, base_hash)?;
+        }
         fs::write(&resolved_path, request.content.as_bytes()).map_err(|err| {
             ApiError::internal(format!(
                 "failed to write file {}: {err}",
@@ -2654,6 +2663,10 @@ struct WorkspaceFileChangeEvent {
     path: String,
     kind: WorkspaceFileChangeKind,
     #[serde(skip_serializing_if = "Option::is_none")]
+    root_path: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    session_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     mtime_ms: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     size_bytes: Option<u64>,
@@ -3530,7 +3543,7 @@ impl Agent {
     fn default_model(self) -> &'static str {
         match self {
             Self::Codex => "gpt-5.4",
-            Self::Claude => "sonnet",
+            Self::Claude => "default",
             Self::Cursor => "auto",
             Self::Gemini => "auto",
         }

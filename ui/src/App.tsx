@@ -215,7 +215,6 @@ import type {
   SessionSettingsField,
   SessionSettingsValue,
   WorkspaceFilesChangedEvent,
-  WorkspaceFileChange,
 } from "./types";
 import {
   activatePane,
@@ -262,7 +261,6 @@ import {
   type SessionPaneViewMode,
   type TabDropPlacement,
   type WorkspaceNode,
-  type WorkspaceDiffPreviewTab,
   type WorkspacePane,
   type WorkspaceState,
   type WorkspaceTab,
@@ -374,6 +372,11 @@ import {
   type SessionAgentCommandMap,
   type SessionFlagMap,
 } from "./app-utils";
+import {
+  mergeWorkspaceFilesChangedEvents,
+  workspaceFilesChangedEventChangeForPath,
+  workspaceFilesChangedEventTouchesGitDiffTab,
+} from "./workspace-file-events";
 
 const TAB_DRAG_STALE_TIMEOUT_MS = 15000;
 const RECONNECT_STATE_RESYNC_DELAY_MS = 400;
@@ -465,98 +468,6 @@ function sourceFileStateFromResponse(response: FileResponse): SourceFileState {
     error: null,
     language: response.language ?? null,
   };
-}
-
-function normalizeWorkspaceFileEventPath(path: string) {
-  const normalized = path.trim().replace(/\\+/g, "/").replace(/\/+/g, "/");
-  if (!normalized) {
-    return "";
-  }
-
-  const withoutTrailingSlash =
-    normalized.length > 1 && !/^[a-z]:\/$/i.test(normalized)
-      ? normalized.replace(/\/+$/g, "")
-      : normalized;
-
-  return /^[a-z]:\//i.test(withoutTrailingSlash)
-    ? withoutTrailingSlash.toLowerCase()
-    : withoutTrailingSlash;
-}
-
-function workspaceFilesChangedEventChangeForPath(
-  event: WorkspaceFilesChangedEvent,
-  targetPath: string,
-): WorkspaceFileChange | null {
-  const normalizedTargetPath = normalizeWorkspaceFileEventPath(targetPath);
-  if (!normalizedTargetPath) {
-    return null;
-  }
-
-  return event.changes.find(
-    (change) =>
-      normalizeWorkspaceFileEventPath(change.path) === normalizedTargetPath,
-  ) ?? null;
-}
-
-function workspacePathIsAbsolute(path: string) {
-  const normalized = normalizeWorkspaceFileEventPath(path);
-  return (
-    normalized.startsWith("/") ||
-    normalized.startsWith("//") ||
-    /^[a-z]:\//i.test(normalized)
-  );
-}
-
-function joinWorkspacePath(rootPath: string | null | undefined, childPath: string | null | undefined) {
-  const trimmedChild = childPath?.trim() ?? "";
-  if (!trimmedChild || workspacePathIsAbsolute(trimmedChild)) {
-    return trimmedChild;
-  }
-
-  const trimmedRoot = rootPath?.trim() ?? "";
-  if (!trimmedRoot) {
-    return trimmedChild;
-  }
-
-  return `${trimmedRoot.replace(/[\\/]+$/g, "")}/${trimmedChild.replace(/^[\\/]+/g, "")}`;
-}
-
-function workspaceFileChangeMatchesCandidate(changePath: string, candidatePath: string | null | undefined) {
-  const normalizedChangePath = normalizeWorkspaceFileEventPath(changePath);
-  const normalizedCandidatePath = normalizeWorkspaceFileEventPath(candidatePath ?? "");
-  if (!normalizedChangePath || !normalizedCandidatePath) {
-    return false;
-  }
-
-  if (normalizedChangePath === normalizedCandidatePath) {
-    return true;
-  }
-
-  if (workspacePathIsAbsolute(candidatePath ?? "")) {
-    return false;
-  }
-
-  return normalizedChangePath.endsWith(`/${normalizedCandidatePath}`);
-}
-
-function workspaceFilesChangedEventTouchesGitDiffTab(
-  event: WorkspaceFilesChangedEvent,
-  tab: WorkspaceDiffPreviewTab,
-) {
-  const request = tab.gitDiffRequest ?? null;
-  const candidates = [
-    tab.filePath,
-    request?.path,
-    request?.originalPath,
-    joinWorkspacePath(request?.workdir, request?.path),
-    joinWorkspacePath(request?.workdir, request?.originalPath),
-  ];
-
-  return event.changes.some((change) =>
-    candidates.some((candidatePath) =>
-      workspaceFileChangeMatchesCandidate(change.path, candidatePath),
-    ),
-  );
 }
 
 type GitDiffPreviewRefresh = {
@@ -1230,6 +1141,10 @@ export default function App() {
   const [draggedTab, setDraggedTab] = useState<WorkspaceTabDrag | null>(null);
   const [workspaceFilesChangedEvent, setWorkspaceFilesChangedEvent] =
     useState<WorkspaceFilesChangedEvent | null>(null);
+  const workspaceFilesChangedEventBufferRef =
+    useRef<WorkspaceFilesChangedEvent | null>(null);
+  const workspaceFilesChangedEventFlushTimeoutRef = useRef<number | null>(null);
+  const lastWorkspaceFilesChangedRevisionRef = useRef<number | null>(null);
   const gitDiffPreviewRefreshVersionsRef = useRef<Map<string, number>>(new Map());
   const [launcherDraggedTab, setLauncherDraggedTab] =
     useState<WorkspaceTabDrag | null>(null);
@@ -3001,6 +2916,44 @@ export default function App() {
       );
     }
 
+    function flushWorkspaceFilesChangedEventBuffer() {
+      workspaceFilesChangedEventFlushTimeoutRef.current = null;
+      const bufferedEvent = workspaceFilesChangedEventBufferRef.current;
+      workspaceFilesChangedEventBufferRef.current = null;
+      if (!bufferedEvent || cancelled) {
+        return;
+      }
+
+      startTransition(() => {
+        setWorkspaceFilesChangedEvent(bufferedEvent);
+      });
+    }
+
+    function enqueueWorkspaceFilesChangedEvent(
+      filesChanged: WorkspaceFilesChangedEvent,
+    ) {
+      const lastRevision = lastWorkspaceFilesChangedRevisionRef.current;
+      if (lastRevision !== null && filesChanged.revision <= lastRevision) {
+        return;
+      }
+
+      lastWorkspaceFilesChangedRevisionRef.current = filesChanged.revision;
+      workspaceFilesChangedEventBufferRef.current =
+        mergeWorkspaceFilesChangedEvents(
+          workspaceFilesChangedEventBufferRef.current,
+          filesChanged,
+        );
+
+      if (workspaceFilesChangedEventFlushTimeoutRef.current !== null) {
+        return;
+      }
+
+      workspaceFilesChangedEventFlushTimeoutRef.current = window.setTimeout(
+        flushWorkspaceFilesChangedEventBuffer,
+        0,
+      );
+    }
+
     function markResumeResyncIfNeeded() {
       if (latestStateRevisionRef.current === null) {
         return;
@@ -3264,9 +3217,7 @@ export default function App() {
         clearReconnectStateResyncTimeoutAfterConfirmedReopen();
         setBackendConnectionIssueDetail(null);
         clearRecoveredBackendRequestError();
-        startTransition(() => {
-          setWorkspaceFilesChangedEvent(filesChanged);
-        });
+        enqueueWorkspaceFilesChangedEvent(filesChanged);
       } catch {
         // File-change events are non-authoritative hints. If one is malformed,
         // keep the main state stream alive and wait for the next event/snapshot.
@@ -3383,6 +3334,11 @@ export default function App() {
       syncAdoptedLiveSessionResumeWatchdogBaselinesRef.current = () => {};
       clearInitialStateResyncRetryTimeout();
       clearReconnectStateResyncTimeout();
+      if (workspaceFilesChangedEventFlushTimeoutRef.current !== null) {
+        window.clearTimeout(workspaceFilesChangedEventFlushTimeoutRef.current);
+        workspaceFilesChangedEventFlushTimeoutRef.current = null;
+      }
+      workspaceFilesChangedEventBufferRef.current = null;
       if (liveSessionResumeWatchdogIntervalId !== null) {
         window.clearInterval(liveSessionResumeWatchdogIntervalId);
       }
@@ -8395,6 +8351,7 @@ export default function App() {
                 ) : settingsTab === "orchestrators" ? (
                   <OrchestratorTemplatesPanel
                     projects={projects}
+                    sessions={sessions}
                     onStateUpdated={handleOrchestratorStateUpdated}
                   />
                 ) : settingsTab === "codex-prompts" ? (
@@ -9374,6 +9331,13 @@ function SessionPaneView({
       : null) ??
     (activeDiffOriginProjectId
       ? (projectLookup.get(activeDiffOriginProjectId)?.rootPath ?? null)
+      : null);
+  const activeSourceWorkspaceRoot =
+    (activeSourceOriginSessionId
+      ? (sessionLookup.get(activeSourceOriginSessionId)?.workdir ?? null)
+      : null) ??
+    (activeSourceOriginProjectId
+      ? (projectLookup.get(activeSourceOriginProjectId)?.rootPath ?? null)
       : null);
   const isSessionTabActive = activeTab?.kind === "session";
   const sessionTabs = useMemo(
@@ -10545,6 +10509,10 @@ function SessionPaneView({
       const fileChange = workspaceFilesChangedEventChangeForPath(
         fileChangeEvent,
         current.path,
+        {
+          rootPath: activeSourceWorkspaceRoot,
+          sessionId: activeSourceOriginSessionId,
+        },
       );
       if (!fileChange) {
         return;
@@ -10647,6 +10615,7 @@ function SessionPaneView({
   }, [
     activeSourceOriginProjectId,
     activeSourceOriginSessionId,
+    activeSourceWorkspaceRoot,
     pane.sourcePath,
     pane.viewMode,
     workspaceFilesChangedEvent,
@@ -11023,6 +10992,7 @@ function SessionPaneView({
             initialTemplateId={activeOrchestratorCanvasTab.templateId ?? null}
             persistenceKey={activeOrchestratorCanvasTab.id}
             projects={Array.from(projectLookup.values())}
+            sessions={allKnownSessions}
             onStateUpdated={onOrchestratorStateUpdated}
             startMode={
               activeOrchestratorCanvasTab.startMode === "new"

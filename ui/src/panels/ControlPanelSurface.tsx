@@ -78,11 +78,11 @@ const PREFERENCES_ACTION: ControlPanelActionDefinition = {
 export function ControlPanelSectionIcon({ sectionId }: { sectionId: ControlPanelSectionId }) {
   switch (sectionId) {
     case "files":
-      return <FilesIcon />;
+      return <ProjectsIcon />;
     case "sessions":
       return <SessionsIcon />;
     case "projects":
-      return <ProjectsIcon />;
+      return <FilesIcon />;
     case "orchestrators":
       return <OrchestratorsIcon />;
     case "git":

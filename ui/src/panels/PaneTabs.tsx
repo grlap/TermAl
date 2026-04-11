@@ -1724,7 +1724,9 @@ function TabKindIcon({ kind }: { kind: string }) {
     case "projectList":
       return (
         <svg {...iconProps}>
-          <path d="M3.5 4.25h4l1.15 1.25h4A1.25 1.25 0 0 1 13.9 6.75v5.5a1.25 1.25 0 0 1-1.25 1.25H3.5A1.25 1.25 0 0 1 2.25 12.25v-6.75A1.25 1.25 0 0 1 3.5 4.25Z" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.3" />
+          <path d="M4.25 2.75h4.8l2.7 2.7v7.05a1.25 1.25 0 0 1-1.25 1.25H4.25A1.25 1.25 0 0 1 3 12.5V4a1.25 1.25 0 0 1 1.25-1.25Z" fill="none" stroke="currentColor" strokeLinejoin="round" strokeWidth="1.3" />
+          <path d="M9 3v2.25c0 .28.22.5.5.5h2.25" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
+          <path d="M5.25 8h5.5M5.25 10.25h5.5M5.25 12.5h3.9" fill="none" stroke="currentColor" strokeLinecap="round" strokeWidth="1.3" />
         </svg>
       );
     case "instructionDebugger":

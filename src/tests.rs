@@ -3083,6 +3083,7 @@ fn creates_claude_sessions_with_default_ask_mode() {
 
     let record = inner.create_session(Agent::Claude, None, "/tmp".to_owned(), None, None);
 
+    assert_eq!(record.session.model, "default");
     assert_eq!(
         record.session.claude_approval_mode,
         Some(ClaudeApprovalMode::Ask)
@@ -3093,6 +3094,59 @@ fn creates_claude_sessions_with_default_ask_mode() {
     );
     assert_eq!(record.session.approval_policy, None);
     assert_eq!(record.session.sandbox_mode, None);
+}
+
+// Tests that Claude's default model delegates to Claude Code instead of forcing Sonnet.
+#[test]
+fn claude_default_model_delegates_to_claude_cli_default() {
+    assert_eq!(Agent::Claude.default_model(), "default");
+    assert_eq!(claude_cli_model_arg("default"), None);
+    assert_eq!(claude_cli_model_arg(" Default "), None);
+    assert_eq!(claude_cli_model_arg("opus"), Some("opus"));
+    assert_eq!(
+        claude_cli_oneshot_args(
+            " default ",
+            ClaudeApprovalMode::Ask,
+            ClaudeEffortLevel::Default,
+            ClaudeCliSessionArg::SessionId("session-a"),
+        ),
+        vec![
+            "-p",
+            "--verbose",
+            "--output-format",
+            "stream-json",
+            "--include-partial-messages",
+            "--session-id",
+            "session-a",
+        ],
+    );
+    assert_eq!(
+        claude_cli_persistent_args(
+            "opus",
+            ClaudeApprovalMode::Plan,
+            ClaudeEffortLevel::High,
+            Some("claude-session"),
+        ),
+        vec![
+            "--model",
+            "opus",
+            "-p",
+            "--verbose",
+            "--output-format",
+            "stream-json",
+            "--input-format",
+            "stream-json",
+            "--include-partial-messages",
+            "--permission-prompt-tool",
+            "stdio",
+            "--permission-mode",
+            "plan",
+            "--effort",
+            "high",
+            "--resume",
+            "claude-session",
+        ],
+    );
 }
 
 // Tests that creates Claude sessions with requested plan mode.
@@ -4495,6 +4549,7 @@ fn syncs_claude_model_options_into_session_state() {
         .find(|session| session.id == created.session_id)
         .expect("synced Claude session should be present");
 
+    assert_eq!(session.model, "default");
     assert_eq!(session.model_options, model_options);
 }
 
@@ -15547,6 +15602,7 @@ fn shared_codex_stdin_watchdog_times_out_stalled_writer_and_clears_runtime() {
     spawn_shared_codex_stdin_watchdog(
         &state,
         &runtime.runtime_id,
+        process.clone(),
         &activity,
         stop_rx,
         Duration::from_millis(10),
@@ -21258,12 +21314,16 @@ fn active_turn_file_changes_are_summarized_on_record() {
         WorkspaceFileChangeEvent {
             path: changed_file.to_string_lossy().into_owned(),
             kind: WorkspaceFileChangeKind::Modified,
+            root_path: None,
+            session_id: None,
             mtime_ms: None,
             size_bytes: None,
         },
         WorkspaceFileChangeEvent {
             path: ignored_file.to_string_lossy().into_owned(),
             kind: WorkspaceFileChangeKind::Modified,
+            root_path: None,
+            session_id: None,
             mtime_ms: None,
             size_bytes: None,
         },
@@ -21296,6 +21356,79 @@ fn active_turn_file_changes_are_summarized_on_record() {
     drop(inner);
     fs::remove_dir_all(root).unwrap();
     fs::remove_file(ignored_file).unwrap();
+}
+
+#[test]
+fn merge_workspace_file_change_kind_treats_delete_create_as_modified() {
+    assert_eq!(
+        merge_workspace_file_change_kind(
+            WorkspaceFileChangeKind::Deleted,
+            WorkspaceFileChangeKind::Created,
+        ),
+        WorkspaceFileChangeKind::Modified,
+    );
+    assert_eq!(
+        merge_workspace_file_change_kind(
+            WorkspaceFileChangeKind::Created,
+            WorkspaceFileChangeKind::Deleted,
+        ),
+        WorkspaceFileChangeKind::Modified,
+    );
+}
+
+#[test]
+fn late_turn_file_changes_are_summarized_during_grace_window() {
+    let state = test_app_state();
+    let root = std::env::temp_dir().join(format!("termal-late-file-change-{}", Uuid::new_v4()));
+    fs::create_dir_all(&root).unwrap();
+    let changed_file = root.join("generated.rs");
+    fs::write(&changed_file, "fn generated() {}\n").unwrap();
+
+    let session_id = {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let record = inner.create_session(
+            Agent::Codex,
+            Some("Files".to_owned()),
+            root.to_string_lossy().into_owned(),
+            None,
+            None,
+        );
+        let session_id = record.session.id.clone();
+        inner.sessions.push(record);
+        let index = inner.find_session_index(&session_id).unwrap();
+        inner.sessions[index].active_turn_start_message_count =
+            Some(inner.sessions[index].session.messages.len());
+        finish_active_turn_file_change_tracking(&mut inner.sessions[index]);
+        session_id
+    };
+
+    state.record_active_turn_file_changes(&[WorkspaceFileChangeEvent {
+        path: changed_file.to_string_lossy().into_owned(),
+        kind: WorkspaceFileChangeKind::Created,
+        root_path: Some(root.to_string_lossy().into_owned()),
+        session_id: Some(session_id.clone()),
+        mtime_ms: None,
+        size_bytes: None,
+    }]);
+
+    let snapshot = state.snapshot();
+    let session = snapshot
+        .sessions
+        .iter()
+        .find(|session| session.id == session_id)
+        .expect("session should exist");
+    let files = session
+        .messages
+        .iter()
+        .find_map(|message| match message {
+            Message::FileChanges { files, .. } => Some(files),
+            _ => None,
+        })
+        .expect("late watcher event should create a file-change summary");
+    assert_eq!(files.len(), 1);
+    assert_eq!(files[0].kind, WorkspaceFileChangeKind::Created);
+    assert_eq!(files[0].path, changed_file.to_string_lossy());
+    fs::remove_dir_all(root).unwrap();
 }
 
 // Tests that read file returns not found for missing project file.

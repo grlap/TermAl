@@ -138,6 +138,7 @@ describe("theme helpers", () => {
         "workbench-light",
         "silver-white",
         "porcelain-white",
+        "code-black",
         "obsidian-black",
         "oxide-black",
         "evergreen-night",

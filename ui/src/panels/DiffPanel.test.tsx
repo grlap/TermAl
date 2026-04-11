@@ -380,6 +380,65 @@ describe("DiffPanel", () => {
     ).toBeInTheDocument();
   });
 
+  it("preserves dirty diff edits when a watcher event reports deletion", async () => {
+    fetchFileMock.mockResolvedValueOnce({
+      content: "alpha\nbeta\n",
+      language: "typescript",
+      path: "/repo/src/example.ts",
+    });
+
+    const { rerender } = render(
+      <DiffPanel
+        appearance="dark"
+        fontSizePx={13}
+        changeType="edit"
+        diff={["@@ -1,2 +1,2 @@", " alpha", "-beta base", "+beta"].join("\n")}
+        diffMessageId="diff-delete-watch"
+        filePath="/repo/src/example.ts"
+        language="typescript"
+        sessionId="session-1"
+        workspaceRoot="/repo"
+        workspaceFilesChangedEvent={null}
+        onOpenPath={() => {}}
+        onSaveFile={async () => {}}
+        summary="Updated example file"
+      />,
+    );
+
+    const modifiedEditor = await screen.findByTestId("monaco-diff-editor-modified");
+    await changeAndSettle(modifiedEditor, {
+      target: { value: "alpha local\nbeta\n" },
+    });
+
+    rerender(
+      <DiffPanel
+        appearance="dark"
+        fontSizePx={13}
+        changeType="edit"
+        diff={["@@ -1,2 +1,2 @@", " alpha", "-beta base", "+beta"].join("\n")}
+        diffMessageId="diff-delete-watch"
+        filePath="/repo/src/example.ts"
+        language="typescript"
+        sessionId="session-1"
+        workspaceRoot="/repo"
+        workspaceFilesChangedEvent={{
+          revision: 4,
+          changes: [{ path: "/repo/src/example.ts", kind: "deleted" }],
+        }}
+        onOpenPath={() => {}}
+        onSaveFile={async () => {}}
+        summary="Updated example file"
+      />,
+    );
+
+    expect(await screen.findByTestId("monaco-diff-editor-modified")).toHaveValue(
+      "alpha local\nbeta\n",
+    );
+    expect(
+      screen.getByText("The file was deleted on disk. Your diff edit buffer is preserved."),
+    ).toBeInTheDocument();
+  });
+
   it("renders plain added and removed stats with +/- markers", async () => {
     await act(async () => {
       render(

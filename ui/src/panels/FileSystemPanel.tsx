@@ -8,6 +8,7 @@ import {
   type GitStatusResponse,
 } from "../api";
 import type { WorkspaceFilesChangedEvent } from "../types";
+import { workspaceFilesChangedEventTouchesRoot } from "../workspace-file-events";
 import { gitStatusTone } from "./git-status-tree";
 
 type GitDecorationTone = ReturnType<typeof gitStatusTone>;
@@ -164,6 +165,10 @@ export function FileSystemPanel({
       !workspaceFilesChangedEventTouchesRoot(
         workspaceFilesChangedEvent,
         normalizedRootPath,
+        {
+          rootPath: normalizedRootPath,
+          sessionId: normalizedSessionId || null,
+        },
       )
     ) {
       return;
@@ -694,29 +699,6 @@ function normalizePath(path: string) {
   }
 
   return normalized.endsWith("/") ? normalized.slice(0, -1) : normalized;
-}
-
-function normalizeWatcherPath(path: string) {
-  const normalized = normalizePath(path);
-  return /^[a-z]:\//i.test(normalized) ? normalized.toLowerCase() : normalized;
-}
-
-function workspaceFilesChangedEventTouchesRoot(
-  event: WorkspaceFilesChangedEvent,
-  rootPath: string,
-) {
-  const normalizedRoot = normalizeWatcherPath(rootPath);
-  if (!normalizedRoot) {
-    return false;
-  }
-
-  return event.changes.some((change) => {
-    const changedPath = normalizeWatcherPath(change.path);
-    return (
-      changedPath === normalizedRoot ||
-      changedPath.startsWith(`${normalizedRoot}/`)
-    );
-  });
 }
 
 function pathBaseName(path: string) {

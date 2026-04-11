@@ -84,6 +84,12 @@ export const THEMES = [
     swatches: ["#1a1a1f", "#e07050", "#5a9ac0"],
   },
   {
+    id: "code-black",
+    name: "Code Black",
+    description: "Near-black editor chrome with graphite panels, blue actions, and amber status accents.",
+    swatches: ["#1e1e1e", "#3794ff", "#d7ba7d"],
+  },
+  {
     id: "obsidian-black",
     name: "Obsidian Black",
     description: "True-black glass with electric cyan, ember orange, and violet highlights.",

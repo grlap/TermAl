@@ -19,6 +19,7 @@ import { buildDiffPreviewModel } from "../diff-preview";
 import { resolveMonacoLanguage, type MonacoAppearance } from "../monaco";
 import { normalizeDisplayPath, relativizePathToWorkspace } from "../path-display";
 import type { DiffMessage, WorkspaceFilesChangedEvent } from "../types";
+import { workspaceFilesChangedEventChangeForPath } from "../workspace-file-events";
 import { rebaseContentOntoDisk, type SourceSaveOptions } from "./SourcePanel";
 import { StructuredDiffView } from "./StructuredDiffView";
 
@@ -157,6 +158,16 @@ export function DiffPanel({
   const [copiedReviewPath, setCopiedReviewPath] = useState(false);
   const diffEditorRef = useRef<MonacoDiffEditorHandle | null>(null);
   const pendingEditValueRef = useRef<string | null>(null);
+  const latestFileRef = useRef(latestFile);
+  const editValueRef = useRef(editValue);
+
+  useEffect(() => {
+    latestFileRef.current = latestFile;
+  }, [latestFile]);
+
+  useEffect(() => {
+    editValueRef.current = editValue;
+  }, [editValue]);
 
   const previewSourceContent = visualBaseContent ?? (latestFile.status === "ready" ? latestFile.content : null);
   const preview = useMemo(
@@ -377,12 +388,22 @@ export function DiffPanel({
       return;
     }
 
-    const change = workspaceFilesChangedEventChangeForPath(workspaceFilesChangedEvent, filePath);
+    const change = workspaceFilesChangedEventChangeForPath(
+      workspaceFilesChangedEvent,
+      filePath,
+      {
+        rootPath: workspaceRoot,
+        sessionId: normalizedSessionId || null,
+      },
+    );
     if (!change) {
       return;
     }
 
-    const wasDirty = latestFile.status === "ready" && editValue !== latestFile.content;
+    const currentFile = latestFileRef.current;
+    const currentEditValue = editValueRef.current;
+    const wasDirty =
+      currentFile.status === "ready" && currentEditValue !== currentFile.content;
     if (change.kind === "deleted") {
       if (wasDirty) {
         setExternalFileNotice("The file was deleted on disk. Your diff edit buffer is preserved.");
@@ -414,10 +435,16 @@ export function DiffPanel({
           return;
         }
 
-        if (wasDirty && latestFile.status === "ready") {
+        const latestSnapshot = latestFileRef.current;
+        const latestEditValue = editValueRef.current;
+        const isCurrentlyDirty =
+          latestSnapshot.status === "ready" &&
+          latestSnapshot.path === filePath &&
+          latestEditValue !== latestSnapshot.content;
+        if (isCurrentlyDirty) {
           const rebaseResult = rebaseContentOntoDisk(
-            latestFile.content,
-            editValue,
+            latestSnapshot.content,
+            latestEditValue,
             response.content,
           );
           if (rebaseResult.status === "conflict") {
@@ -459,6 +486,7 @@ export function DiffPanel({
     language,
     normalizedProjectId,
     normalizedSessionId,
+    workspaceRoot,
   ]);
 
   useEffect(() => {
@@ -534,9 +562,11 @@ export function DiffPanel({
   }
 
   async function handleApplyDiffEditsToDiskVersion() {
+    const currentFile = latestFileRef.current;
+    const currentEditValue = editValueRef.current;
     if (
-      latestFile.status !== "ready" ||
-      !isDirty ||
+      currentFile.status !== "ready" ||
+      currentEditValue === currentFile.content ||
       !hasScope ||
       isRebasingFile
     ) {
@@ -546,13 +576,22 @@ export function DiffPanel({
     setIsRebasingFile(true);
     setSaveError(null);
     try {
-      const response = await fetchFile(latestFile.path, {
+      const response = await fetchFile(currentFile.path, {
         sessionId: normalizedSessionId || null,
         projectId: normalizedProjectId || null,
       });
+      const latestSnapshot = latestFileRef.current;
+      const latestEditValue = editValueRef.current;
+      if (
+        latestSnapshot.status !== "ready" ||
+        latestSnapshot.path !== currentFile.path
+      ) {
+        return;
+      }
+
       const rebaseResult = rebaseContentOntoDisk(
-        latestFile.content,
-        editValue,
+        latestSnapshot.content,
+        latestEditValue,
         response.content,
       );
       if (rebaseResult.status === "conflict") {
@@ -1355,37 +1394,6 @@ function toLatestFileState(response: FileResponse): LatestFileState {
     error: null,
     language: response.language ?? null,
   };
-}
-
-function normalizeWorkspaceFileEventPath(path: string) {
-  const normalized = path.trim().replace(/\\+/g, "/").replace(/\/+/g, "/");
-  if (!normalized) {
-    return "";
-  }
-
-  const withoutTrailingSlash =
-    normalized.length > 1 && !/^[a-z]:\/$/i.test(normalized)
-      ? normalized.replace(/\/+$/g, "")
-      : normalized;
-
-  return /^[a-z]:\//i.test(withoutTrailingSlash)
-    ? withoutTrailingSlash.toLowerCase()
-    : withoutTrailingSlash;
-}
-
-function workspaceFilesChangedEventChangeForPath(
-  event: WorkspaceFilesChangedEvent,
-  targetPath: string,
-) {
-  const normalizedTargetPath = normalizeWorkspaceFileEventPath(targetPath);
-  if (!normalizedTargetPath) {
-    return null;
-  }
-
-  return event.changes.find(
-    (change) =>
-      normalizeWorkspaceFileEventPath(change.path) === normalizedTargetPath,
-  ) ?? null;
 }
 
 function isStaleFileSaveError(message: string) {

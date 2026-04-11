@@ -4,6 +4,7 @@ import {
   fireEvent,
   render,
   screen,
+  within,
   waitFor,
 } from "@testing-library/react";
 import { StrictMode } from "react";
@@ -22,6 +23,7 @@ import type {
   OrchestratorSessionTemplate,
   OrchestratorTemplate,
   OrchestratorTemplateTransition,
+  Session,
 } from "../types";
 import {
   objectHasOwnWithFallback,
@@ -41,6 +43,33 @@ const createOrchestratorInstanceMock = vi.mocked(createOrchestratorInstance);
 const createTemplateMock = vi.mocked(createOrchestratorTemplate);
 const updateTemplateMock = vi.mocked(updateOrchestratorTemplate);
 const deleteTemplateMock = vi.mocked(deleteOrchestratorTemplate);
+
+async function selectComboboxOption(
+  name: string,
+  optionName: string | RegExp,
+) {
+  fireEvent.click(await screen.findByRole("combobox", { name }));
+
+  const listbox = await screen.findByRole("listbox");
+  const option = within(listbox)
+    .getAllByRole("option")
+    .find((candidate) => {
+      const label =
+        candidate.querySelector(".combo-option-label")?.textContent?.trim() ??
+        candidate.textContent?.trim() ??
+        "";
+
+      return typeof optionName === "string"
+        ? label === optionName
+        : optionName.test(label);
+    });
+
+  if (!option) {
+    throw new Error(`Combobox option not found for ${String(optionName)}`);
+  }
+
+  fireEvent.click(option);
+}
 
 function makeStateResponse(
   overrides: Pick<
@@ -227,6 +256,184 @@ describe("OrchestratorTemplatesPanel", () => {
         }),
       );
     });
+  });
+
+  it("saves a session model override from the template draft", async () => {
+    fetchTemplatesMock.mockResolvedValue({ templates: [] });
+    createTemplateMock.mockResolvedValue({
+      template: makeTemplate({
+        id: "orchestrator-template-model",
+        name: "Model Flow",
+        sessions: [
+          makeSession({
+            id: "session-1",
+            name: "Session 1",
+            model: "gpt-5.4",
+          }),
+        ],
+      }),
+    });
+
+    render(<OrchestratorTemplatesPanel />);
+
+    await screen.findByText(
+      "No orchestration templates yet. Start a new one and save it here.",
+    );
+
+    fireEvent.change(screen.getByLabelText("Template name"), {
+      target: { value: "Model Flow" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Add session" }));
+    await selectComboboxOption("Model", "GPT-5.4");
+    fireEvent.click(screen.getByRole("button", { name: "Create template" }));
+
+    await waitFor(() => {
+      expect(createTemplateMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          name: "Model Flow",
+          sessions: [
+            expect.objectContaining({
+              id: "session-1",
+              model: "gpt-5.4",
+            }),
+          ],
+        }),
+      );
+    });
+  });
+
+  it("offers live model options from known sessions", async () => {
+    fetchTemplatesMock.mockResolvedValue({ templates: [] });
+    createTemplateMock.mockResolvedValue({
+      template: makeTemplate({
+        id: "orchestrator-template-live-model",
+        name: "Live Model Flow",
+        sessions: [
+          makeSession({
+            id: "session-1",
+            name: "Session 1",
+            model: "gpt-5.5",
+          }),
+        ],
+      }),
+    });
+
+    render(
+      <OrchestratorTemplatesPanel
+        sessions={[
+          makeRuntimeSession({
+            agent: "Codex",
+            modelOptions: [
+              {
+                label: "GPT-5.5",
+                value: "gpt-5.5",
+                description: "Latest Codex model",
+                badges: ["Preview"],
+              },
+            ],
+          }),
+        ]}
+      />,
+    );
+
+    await screen.findByText(
+      "No orchestration templates yet. Start a new one and save it here.",
+    );
+
+    fireEvent.change(screen.getByLabelText("Template name"), {
+      target: { value: "Live Model Flow" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Add session" }));
+    await selectComboboxOption("Model", "GPT-5.5");
+    fireEvent.click(screen.getByRole("button", { name: "Create template" }));
+
+    await waitFor(() => {
+      expect(createTemplateMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          name: "Live Model Flow",
+          sessions: [
+            expect.objectContaining({
+              id: "session-1",
+              model: "gpt-5.5",
+            }),
+          ],
+        }),
+      );
+    });
+  });
+
+  it("resets the session model when the agent changes", async () => {
+    fetchTemplatesMock.mockResolvedValue({ templates: [] });
+    createTemplateMock.mockResolvedValue({
+      template: makeTemplate({
+        id: "orchestrator-template-agent-reset",
+        name: "Agent Reset Flow",
+        sessions: [
+          makeSession({
+            id: "session-1",
+            name: "Session 1",
+            agent: "Claude",
+            model: "",
+          }),
+        ],
+      }),
+    });
+
+    render(<OrchestratorTemplatesPanel />);
+
+    await screen.findByText(
+      "No orchestration templates yet. Start a new one and save it here.",
+    );
+
+    fireEvent.change(screen.getByLabelText("Template name"), {
+      target: { value: "Agent Reset Flow" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Add session" }));
+    await selectComboboxOption("Model", "GPT-5.4");
+    await selectComboboxOption("Agent", "Claude");
+    fireEvent.click(screen.getByRole("button", { name: "Create template" }));
+
+    await waitFor(() => {
+      expect(createTemplateMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          name: "Agent Reset Flow",
+          sessions: [
+            expect.objectContaining({
+              id: "session-1",
+              agent: "Claude",
+              model: "",
+            }),
+          ],
+        }),
+      );
+    });
+  });
+
+  it("shows only one Default option for Claude session models", async () => {
+    fetchTemplatesMock.mockResolvedValue({ templates: [] });
+
+    render(<OrchestratorTemplatesPanel />);
+
+    await screen.findByText(
+      "No orchestration templates yet. Start a new one and save it here.",
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Add session" }));
+    await selectComboboxOption("Agent", "Claude");
+    fireEvent.click(await screen.findByRole("combobox", { name: "Model" }));
+
+    const listbox = await screen.findByRole("listbox");
+    const defaultOptions = within(listbox)
+      .getAllByRole("option")
+      .filter((option) => {
+        const label =
+          option.querySelector(".combo-option-label")?.textContent?.trim() ??
+          option.textContent?.trim() ??
+          "";
+        return label === "Default";
+      });
+
+    expect(defaultOptions).toHaveLength(1);
   });
 
   it("clears dirty state after saving an existing template", async () => {
@@ -1645,6 +1852,23 @@ function makeProject(overrides: Partial<Project> = {}): Project {
     name: "Project A",
     rootPath: "/repo",
     remoteId: "local",
+    ...overrides,
+  };
+}
+
+function makeRuntimeSession(overrides: Partial<Session> = {}): Session {
+  return {
+    id: "runtime-session",
+    name: "Runtime Session",
+    emoji: "C",
+    agent: "Codex",
+    workdir: "/repo",
+    projectId: "project-a",
+    model: "gpt-5.4",
+    modelOptions: [],
+    status: "idle",
+    preview: "",
+    messages: [],
     ...overrides,
   };
 }

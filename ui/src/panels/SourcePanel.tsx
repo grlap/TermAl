@@ -114,7 +114,17 @@ export function SourcePanel({
   const [copiedPath, setCopiedPath] = useState(false);
   const pendingEditorValueRef = useRef<string | null>(null);
   const lastAutoRebaseKeyRef = useRef<string | null>(null);
+  const fileStateRef = useRef(fileState);
+  const editorValueRef = useRef(editorValue);
   const isDirty = fileState.status === "ready" && editorValue !== fileState.content;
+
+  useEffect(() => {
+    fileStateRef.current = fileState;
+  }, [fileState]);
+
+  useEffect(() => {
+    editorValueRef.current = editorValue;
+  }, [editorValue]);
 
   useEffect(() => {
     if (fileState.status === "ready") {
@@ -205,9 +215,11 @@ export function SourcePanel({
   }
 
   async function handleApplyLocalEditsToDiskVersion() {
+    const currentFileState = fileStateRef.current;
+    const currentEditorValue = editorValueRef.current;
     if (
-      fileState.status !== "ready" ||
-      !isDirty ||
+      currentFileState.status !== "ready" ||
+      currentEditorValue === currentFileState.content ||
       !onFetchLatestFile ||
       !onAdoptFileState ||
       isRebasing
@@ -218,10 +230,25 @@ export function SourcePanel({
     setIsRebasing(true);
     setActionError(null);
     try {
-      const latestFileState = await onFetchLatestFile(fileState.path);
+      const latestFileState = await onFetchLatestFile(currentFileState.path);
+      const latestEditorSnapshot = editorValueRef.current;
+      const latestFileSnapshot = fileStateRef.current;
+      if (
+        latestFileSnapshot.status !== "ready" ||
+        latestFileSnapshot.path !== currentFileState.path
+      ) {
+        return;
+      }
+
+      if (latestEditorSnapshot === latestFileSnapshot.content) {
+        onAdoptFileState(latestFileState);
+        onDirtyChange?.(false);
+        return;
+      }
+
       const rebaseResult = rebaseContentOntoDisk(
-        fileState.content,
-        editorValue,
+        latestFileSnapshot.content,
+        latestEditorSnapshot,
         latestFileState.content,
       );
       if (rebaseResult.status === "conflict") {

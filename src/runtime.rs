@@ -2233,6 +2233,7 @@ fn shared_codex_stdin_timeout_detail(
 fn spawn_shared_codex_stdin_watchdog(
     state: &AppState,
     runtime_id: &str,
+    process: Arc<SharedChild>,
     activity: &SharedCodexStdinActivityState,
     stop_rx: mpsc::Receiver<()>,
     timeout: Duration,
@@ -2240,6 +2241,7 @@ fn spawn_shared_codex_stdin_watchdog(
 ) -> Result<()> {
     let watchdog_state = state.clone();
     let watchdog_runtime_id = runtime_id.to_owned();
+    let watchdog_process = process;
     let watchdog_activity = activity.clone();
     std::thread::Builder::new()
         .name("termal-codex-stdin-watchdog".to_owned())
@@ -2266,8 +2268,20 @@ fn spawn_shared_codex_stdin_watchdog(
 
             if let Some(operation) = timed_out_operation {
                 let detail = shared_codex_stdin_timeout_detail(operation, timeout);
-                let _ = watchdog_state
-                    .handle_shared_codex_runtime_exit(&watchdog_runtime_id, Some(&detail));
+                if let Err(err) = watchdog_state
+                    .handle_shared_codex_runtime_exit(&watchdog_runtime_id, Some(&detail))
+                {
+                    eprintln!(
+                        "[termal] shared Codex watchdog cleanup failed; killing app-server: {err:#}"
+                    );
+                    if let Err(kill_err) =
+                        kill_child_process(&watchdog_process, "shared Codex runtime")
+                    {
+                        eprintln!(
+                            "[termal] shared Codex watchdog fallback kill failed: {kill_err:#}"
+                        );
+                    }
+                }
                 break;
             }
         })
@@ -2320,14 +2334,24 @@ fn spawn_shared_codex_runtime(state: AppState) -> Result<SharedCodexRuntime> {
         let writer_input_tx = input_tx.clone();
         let writer_activity: SharedCodexStdinActivityState = Arc::new(Mutex::new(None));
         let (watchdog_stop_tx, watchdog_stop_rx) = mpsc::channel();
-        spawn_shared_codex_stdin_watchdog(
+        if let Err(err) = spawn_shared_codex_stdin_watchdog(
             &writer_state,
             &writer_runtime_id,
+            process.clone(),
             &writer_activity,
             watchdog_stop_rx,
             SHARED_CODEX_STDIN_WRITE_TIMEOUT,
             SHARED_CODEX_STDIN_WATCHDOG_POLL_INTERVAL,
-        )?;
+        ) {
+            if let Err(kill_err) =
+                kill_child_process(&process, "shared Codex runtime after watchdog startup failure")
+            {
+                eprintln!(
+                    "[termal] failed to clean up shared Codex app-server after watchdog startup failure: {kill_err:#}"
+                );
+            }
+            return Err(err);
+        }
         std::thread::spawn(move || {
             let mut stdin = SharedCodexWatchedWriter::new(stdin, writer_activity);
             let initialize_result = send_codex_json_rpc_request(
@@ -5312,6 +5336,91 @@ fn shared_codex_runtime_command_error_detail(err: &anyhow::Error) -> String {
     format!("failed to communicate with shared Codex app-server: {err:#}")
 }
 
+/// Returns the Claude CLI model argument, or None to use Claude's own default selector.
+fn claude_cli_model_arg(model: &str) -> Option<&str> {
+    let model = model.trim();
+    if model.is_empty() || model.eq_ignore_ascii_case("default") {
+        return None;
+    }
+    Some(model)
+}
+
+enum ClaudeCliSessionArg<'a> {
+    Resume(&'a str),
+    SessionId(&'a str),
+}
+
+fn push_claude_cli_common_args(
+    args: &mut Vec<String>,
+    model: &str,
+) {
+    if let Some(model) = claude_cli_model_arg(model) {
+        args.extend(["--model".to_owned(), model.to_owned()]);
+    }
+    args.extend([
+        "-p".to_owned(),
+        "--verbose".to_owned(),
+        "--output-format".to_owned(),
+        "stream-json".to_owned(),
+    ]);
+}
+
+fn push_claude_cli_permission_args(
+    args: &mut Vec<String>,
+    approval_mode: ClaudeApprovalMode,
+    effort: ClaudeEffortLevel,
+) {
+    if let Some(permission_mode) = approval_mode.initial_cli_permission_mode() {
+        args.extend(["--permission-mode".to_owned(), permission_mode.to_owned()]);
+    }
+    if let Some(effort) = effort.as_cli_value() {
+        args.extend(["--effort".to_owned(), effort.to_owned()]);
+    }
+}
+
+fn claude_cli_oneshot_args(
+    model: &str,
+    approval_mode: ClaudeApprovalMode,
+    effort: ClaudeEffortLevel,
+    session_arg: ClaudeCliSessionArg<'_>,
+) -> Vec<String> {
+    let mut args = Vec::new();
+    push_claude_cli_common_args(&mut args, model);
+    args.push("--include-partial-messages".to_owned());
+    push_claude_cli_permission_args(&mut args, approval_mode, effort);
+    match session_arg {
+        ClaudeCliSessionArg::Resume(session_id) => {
+            args.extend(["--resume".to_owned(), session_id.to_owned()]);
+        }
+        ClaudeCliSessionArg::SessionId(session_id) => {
+            args.extend(["--session-id".to_owned(), session_id.to_owned()]);
+        }
+    }
+    args
+}
+
+fn claude_cli_persistent_args(
+    model: &str,
+    approval_mode: ClaudeApprovalMode,
+    effort: ClaudeEffortLevel,
+    resume_session_id: Option<&str>,
+) -> Vec<String> {
+    let mut args = Vec::new();
+    push_claude_cli_common_args(&mut args, model);
+    args.extend([
+        "--input-format".to_owned(),
+        "stream-json".to_owned(),
+        "--include-partial-messages".to_owned(),
+        "--permission-prompt-tool".to_owned(),
+        "stdio".to_owned(),
+    ]);
+    push_claude_cli_permission_args(&mut args, approval_mode, effort);
+    if let Some(resume_session_id) = resume_session_id {
+        args.extend(["--resume".to_owned(), resume_session_id.to_owned()]);
+    }
+    args
+}
+
 /// Handles Claude model options.
 fn claude_model_options(message: &Value) -> Option<Vec<SessionModelOption>> {
     let models = message.pointer("/response/response/models")?.as_array()?;
@@ -6515,29 +6624,14 @@ fn spawn_claude_runtime(
     let runtime_id = Uuid::new_v4().to_string();
     let cwd = normalize_local_user_facing_path(&cwd);
     let mut command = Command::new("claude");
-    command.current_dir(&cwd).args([
-        "--model",
+    command.current_dir(&cwd);
+    command.args(claude_cli_persistent_args(
         &model,
-        "-p",
-        "--verbose",
-        "--output-format",
-        "stream-json",
-        "--input-format",
-        "stream-json",
-        "--include-partial-messages",
-        "--permission-prompt-tool",
-        "stdio",
-    ]);
-    if let Some(permission_mode) = approval_mode.initial_cli_permission_mode() {
-        command.args(["--permission-mode", permission_mode]);
-    }
-    if let Some(effort) = effort.as_cli_value() {
-        command.args(["--effort", effort]);
-    }
+        approval_mode,
+        effort,
+        resume_session_id.as_deref(),
+    ));
     command.env("CLAUDE_CODE_ENTRYPOINT", "termal");
-    if let Some(resume_session_id) = resume_session_id {
-        command.args(["--resume", &resume_session_id]);
-    }
 
     let mut child = command
         .stdin(Stdio::piped())

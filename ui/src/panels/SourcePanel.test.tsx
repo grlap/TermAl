@@ -49,6 +49,14 @@ vi.mock("../MonacoDiffEditor", () => ({
 
 const copyTextToClipboardMock = vi.mocked(copyTextToClipboard);
 
+function createDeferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((resolvePromise) => {
+    resolve = resolvePromise;
+  });
+  return { promise, resolve };
+}
+
 const readyFileState: SourceFileState = {
   status: "ready",
   path: "src/main.rs",
@@ -164,6 +172,71 @@ describe("SourcePanel", () => {
     await waitFor(() => {
       expect(onDirtyChange).toHaveBeenLastCalledWith(true);
     });
+  });
+
+  it("auto-rebases the latest editor buffer after a disk refresh returns", async () => {
+    const latestFile = createDeferred<SourceFileState>();
+    const onFetchLatestFile = vi.fn(() => latestFile.promise);
+    const onAdoptFileState = vi.fn();
+    const { rerender } = render(
+      <SourcePanel
+        editorAppearance={editorAppearance}
+        editorFontSizePx={14}
+        fileState={{
+          ...readyFileState,
+          content: "alpha\nbeta\n",
+          contentHash: "sha256:base",
+        }}
+        sourcePath="src/main.rs"
+        onFetchLatestFile={onFetchLatestFile}
+        onAdoptFileState={onAdoptFileState}
+        onSaveFile={vi.fn()}
+      />,
+    );
+
+    const editor = await screen.findByLabelText("Source editor for src/main.rs");
+    fireEvent.change(editor, {
+      target: { value: "alpha local\nbeta\n" },
+    });
+    rerender(
+      <SourcePanel
+        editorAppearance={editorAppearance}
+        editorFontSizePx={14}
+        fileState={{
+          ...readyFileState,
+          content: "alpha\nbeta\n",
+          contentHash: "sha256:base",
+          staleOnDisk: true,
+          externalContentHash: "sha256:disk",
+        }}
+        sourcePath="src/main.rs"
+        onFetchLatestFile={onFetchLatestFile}
+        onAdoptFileState={onAdoptFileState}
+        onSaveFile={vi.fn()}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(onFetchLatestFile).toHaveBeenCalledWith("src/main.rs");
+    });
+    fireEvent.change(editor, {
+      target: { value: "alpha latest\nbeta\n" },
+    });
+    latestFile.resolve({
+      ...readyFileState,
+      content: "alpha\nbeta disk\n",
+      contentHash: "sha256:disk",
+    });
+
+    await waitFor(() => {
+      expect(editor).toHaveValue("alpha latest\nbeta disk\n");
+    });
+    expect(onAdoptFileState).toHaveBeenCalledWith(
+      expect.objectContaining({
+        content: "alpha\nbeta disk\n",
+        contentHash: "sha256:disk",
+      }),
+    );
   });
 
   it("can intentionally overwrite after a disk-change conflict", async () => {

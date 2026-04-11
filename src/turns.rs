@@ -2683,33 +2683,19 @@ fn run_claude_turn(
 ) -> Result<String> {
     let cwd = normalize_local_user_facing_path(cwd);
     let mut command = Command::new("claude");
-    command.current_dir(&cwd).args([
-        "--model",
+    command.current_dir(&cwd);
+    let expected_session_id = session_id
+        .map(str::to_owned)
+        .unwrap_or_else(|| Uuid::new_v4().to_string());
+    let session_arg = session_id
+        .map(ClaudeCliSessionArg::Resume)
+        .unwrap_or(ClaudeCliSessionArg::SessionId(&expected_session_id));
+    command.args(claude_cli_oneshot_args(
         model,
-        "-p",
-        "--verbose",
-        "--output-format",
-        "stream-json",
-        "--include-partial-messages",
-    ]);
-    if let Some(permission_mode) = approval_mode.initial_cli_permission_mode() {
-        command.args(["--permission-mode", permission_mode]);
-    }
-    if let Some(effort) = effort.as_cli_value() {
-        command.args(["--effort", effort]);
-    }
-
-    let expected_session_id = match session_id {
-        Some(session_id) => {
-            command.args(["--resume", session_id]);
-            session_id.to_owned()
-        }
-        None => {
-            let session_id = Uuid::new_v4().to_string();
-            command.args(["--session-id", &session_id]);
-            session_id
-        }
-    };
+        approval_mode,
+        effort,
+        session_arg,
+    ));
 
     let mut child = command
         .stdin(Stdio::piped())

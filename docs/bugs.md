@@ -315,245 +315,240 @@ poll now stops only when the session is no longer active. The interval is
 tracked in a ref so rapid prompts don't stack independent polls, and cleanup
 runs on unmount.
 
+Also fixed: source and diff editor watcher rebases no longer use stale React
+closures after an async disk fetch. `SourcePanel` and `DiffPanel` now keep the
+latest file snapshot and editor buffer in refs, then re-read those refs
+immediately before applying a rebase. Dirty edits typed while the disk fetch is
+in flight are included instead of being overwritten by the older closure.
+
+Also fixed: `/api/file` stale-save protection now revalidates the `baseHash`
+again immediately before `fs::write`. This keeps the existing advisory,
+cross-process behavior but narrows the check-then-write race window after
+parent-directory creation and response hash preparation.
+
+Also fixed: `workspaceFilesChanged` hints now carry canonical root/session
+scope and the frontend matches through a shared `workspace-file-events.ts`
+module. `App.tsx` batches same-tick file hints by increasing revision, ignores
+non-increasing revisions, and merges path changes before source, diff, file
+tree, and git diff preview refresh logic sees them.
+
+Also fixed: fast agent turns now keep a short post-completion file-change
+grace window. Watcher events that arrive just after turn completion can still
+be associated with the just-finished local turn and produce an "Agent changed
+files" summary card.
+
+Also fixed: `merge_workspace_file_change_kind` now reports Delete+Create and
+Create+Delete pairs as `Modified`, matching the pragmatic "file exists but was
+replaced" interpretation for coalesced watcher events.
+
+Also fixed: shared Codex app-server startup and stdin-timeout cleanup now have
+explicit fallback process cleanup. If watchdog startup fails after the child is
+spawned, the child is killed before returning. If stdin timeout teardown fails,
+the watchdog logs the failure and falls back to killing the shared app-server
+process.
+
+Also fixed: reconnect recovery has direct malformed-delta coverage. The
+backend connection regression suite now mirrors the malformed state-payload
+test with a reopened stream that delivers a crashing delta payload, then
+asserts the UI returns to `"reconnecting"` and the fallback `/api/state` probe
+remains armed.
+
+Also fixed: the orchestrator session model combobox now deduplicates
+default-like options, so Claude no longer shows two indistinguishable
+`Default` entries. Switching an orchestrator session's agent also has direct
+coverage proving the previous model override is cleared.
+
+Also fixed: focused coverage was added for Claude CLI argument construction,
+the Delete+Create file-change merge edge case, late turn file-change
+summaries, and DiffPanel deleted-file watcher recovery.
+
 ## Active Repo Bugs
 
-## SourcePanel auto-rebase can overwrite edits typed during disk fetch
+## Project-scoped new-file writes can escape the workspace root
 
-**Severity:** High - dirty-buffer recovery can silently drop user input.
+**Severity:** High - API writes for missing files can bypass the selected
+project or session file boundary.
 
-`SourcePanel` starts `handleApplyLocalEditsToDiskVersion()` from the watcher
-path, awaits `onFetchLatestFile(...)`, then rebases using the `editorValue` and
-`fileState` captured before the await. If the user continues typing while the
-disk fetch is in flight, the later async continuation can commit a merge that
-does not include those keystrokes.
-
-**Current behavior:**
-- auto-rebase snapshots the editor buffer before the async file fetch
-- typing during the fetch is not guaranteed to be included in the merged buffer
-- closing or replacing the tab while the fetch is pending can still leave an
-  async continuation with stale component state
-
-**Proposal:**
-- track the latest editor value and file-state snapshot in refs and read them
-  immediately before committing a rebase result
-- cancel or ignore stale in-flight rebases when the file path, tab, or base
-  content changes
-
-## Stale-save `baseHash` check can race with external writers
-
-**Severity:** High - stale-save protection is advisory, not atomic.
-
-The `/api/file` write path reads and hashes the current file, compares that hash
-with the client's `baseHash`, and then performs `fs::write`. Another process can
-modify the same file after the hash check but before the write, leaving a small
-check-then-write window where TermAl can still clobber newer disk content.
+`canonicalize_path_with_existing_ancestor` canonicalizes only the existing
+ancestor of a requested path, then appends unresolved missing suffix components
+back onto it. If that missing suffix contains `..`, the later containment check
+can pass lexically even though the filesystem resolves the final write outside
+the project root.
 
 **Current behavior:**
-- current disk content is hashed before writing
-- the destination file is written after the hash check without an exclusive
-  handle or second validation step
-- a concurrent writer in the gap can still be overwritten
+- missing-leaf paths can retain `.` or `..` components after ancestor
+  canonicalization
+- containment is checked before the final parent exists and before the final
+  filesystem path has been resolved
+- `create_dir_all` and the file write can then resolve traversal outside the
+  selected root
 
 **Proposal:**
-- make the write path atomic with respect to the destination file where the
-  platform allows it
-- otherwise revalidate as close as possible to replacement and document the
-  remaining cross-process race as advisory protection
+- reject or normalize `.` and `..` components in unresolved missing suffixes
+- after creating a missing parent directory, canonicalize that parent and verify
+  it is still inside the canonical project or session root
+- construct the final file path from a verified in-scope parent plus a
+  validated leaf name
 
-## `workspaceFilesChanged` events lack workspace scope
+## File-change hints stop refreshing after backend restart
 
-**Severity:** Medium - watcher hints can refresh the wrong workspace tab.
+**Severity:** High - open source, diff, and tree views can remain stale after a
+backend restart.
 
-`workspaceFilesChanged` currently broadcasts path-only changes. The frontend
-then matches by exact path and suffix fallback. In a multi-workspace UI, two
-sessions or projects can contain the same relative path, so a watcher event from
-one root can incorrectly refresh or mark a tab from another root.
+The frontend treats `workspaceFilesChanged.revision` as globally monotonic for
+the browser session, but the backend file-event revision counter is
+process-local and restarts from `1`. After a backend restart, the frontend can
+drop all new file-change hints until the restarted backend exceeds the old
+process's highest file-event revision.
 
 **Current behavior:**
-- watcher events do not include `projectId`, `sessionId`, or canonical root
-- frontend matching can fall back to suffix comparison for relative diff paths
-- same relative path in different workspace roots is ambiguous
+- `lastWorkspaceFilesChangedRevisionRef` survives SSE reconnects and backend
+  restarts
+- new backend processes emit low file-event revisions again
+- lower revisions are discarded as stale, so file tabs and diff views can miss
+  refresh hints after recovery
 
 **Proposal:**
-- include a canonical root or origin identifier in `WorkspaceFilesChangedEvent`
-- require origin/root match before path matching source tabs or git diff tabs
+- reset the file-event revision gate and pending event buffer on a confirmed
+  new EventSource stream or backend epoch
+- alternatively include a backend/stream epoch in `workspaceFilesChanged` and
+  compare `(epoch, revision)` instead of revision alone
 
-## `workspaceFilesChanged` hint handling is lossy and unordered
+## Editor rebase can drop the newest keystrokes
 
-**Severity:** Medium - open files can miss refresh hints or process stale hints.
+**Severity:** High - a stale disk rebase can overwrite text the user just typed.
 
-The frontend stores only one `workspaceFilesChangedEvent` value. Rapid SSE
-file-change events can replace earlier unprocessed hints. The handler also does
-not reject non-increasing file-event revisions, unlike the main state/delta
-stream.
+`SourcePanel` and `DiffPanel` use "latest editor value" refs during async
+disk-rebase work, but those refs are updated by passive React effects rather
+than synchronously in every edit path. If a fetch resolves before the passive
+effect flushes, the rebase can read the previous buffer.
 
 **Current behavior:**
-- a newer file-change hint replaces the previous hint in React state
-- earlier paths can be dropped before source/diff refresh effects process them
-- stale or replayed file-event revisions are accepted
+- editor change handlers update React state first and rely on later effects to
+  refresh the latest-value refs
+- async disk fetch continuations can resume before those effects run
+- the rebase can apply against an older editor buffer and lose the newest
+  keystroke batch
 
 **Proposal:**
-- track the latest file-event revision and ignore non-increasing events
-- buffer or merge pending file-change hints by revision/path before draining
-  them to source and diff refresh logic
+- update the relevant latest-value refs synchronously before calling state
+  setters in every editor change path
+- update the same refs alongside programmatic editor value changes
+- consider small setter helpers so `SourcePanel` and `DiffPanel` cannot drift
+  apart again
 
-## Fast agent turns can miss changed-file summaries
+## Active-turn file summaries can include sibling-session changes
 
-**Severity:** Medium - the "Agent changed files" card can omit quick edits.
+**Severity:** Medium - concurrent sessions in the same project can get
+incorrect "Agent changed files" summaries.
 
-Turn-scoped file-change recording is tied to active-turn bookkeeping. Native
-filesystem watchers can deliver events after a short turn has already completed,
-especially when the OS batches notifications. Those late events are outside the
-active-turn window and can be omitted from the summary card.
+The watcher can emit both project-scoped changes without `sessionId` and
+session-scoped changes for matching roots. `record_active_turn_file_changes`
+rejects mismatched non-empty session IDs, but still accepts the unscoped
+project copy for every active session whose workdir contains the path.
 
 **Current behavior:**
-- active-turn file accumulation stops when the turn completion path clears the
-  active turn state
-- watcher delivery is asynchronous relative to agent process completion
-- fast file edits near turn end can miss the summary card
+- unscoped project-root watcher events are accepted for active-turn attribution
+- sessions sharing a project can match the same unscoped path
+- one session's file changes can be summarized on another active session
 
 **Proposal:**
-- keep a short grace-period buffer after turn completion before finalizing the
-  changed-files card
-- or flush/associate pending watcher events with the just-finished turn before
-  clearing active-turn bookkeeping
+- prefer session-scoped watcher events for active-turn attribution
+- ignore project-scoped duplicates when a session-scoped event exists for that
+  path
+- use project-scoped events only as a fallback when no session scope matched
 
-## DiffPanel deleted-file watcher recovery lacks direct test coverage
+## Idle runtime exits can open late file-change grace windows
 
-**Severity:** Medium - a high-risk dirty-buffer recovery branch can regress silently.
+**Severity:** Medium - user or external filesystem edits can be misattributed
+to an assistant turn.
 
-The diff-preview watcher path handles `kind === "deleted"` by preserving the
-dirty edit buffer and exposing recovery actions. Existing tests cover refresh,
-dirty rebase, and stale-save recovery, but not the deleted-file branch.
+`finish_active_turn_file_change_tracking` opens the late file-change grace
+window even when there was no active turn to finish. Idle runtime-exit paths can
+call the helper unconditionally, leaving a short window where unrelated file
+events may be committed as assistant "Agent changed files" messages.
 
 **Current behavior:**
-- deleted-file handling in `DiffPanel` is implemented but not directly asserted
-- a regression could drop the dirty buffer or hide recovery actions without a
-  failing test
+- the grace deadline can be set when `active_turn_start_message_count` was not
+  present
+- idle runtime exits can therefore arm assistant file-change tracking
+- later watcher events during the grace window can be attributed to a turn that
+  did not happen
 
 **Proposal:**
-- add a `DiffPanel` test that sends a deleted `workspaceFilesChangedEvent`
-- assert the dirty editor value remains intact, the deletion notice renders, and
-  recovery actions are available
+- set `active_turn_file_change_grace_deadline` only when an active turn was
+  actually finished
+- otherwise clear the active-turn file tracking fields without opening a grace
+  window
 
-## DiffPanel watcher rebase reads stale `editValue` and `latestFile` from closure
+## Source auto-rebase can adopt stale state after tab close
 
-**Severity:** High - dirty-buffer rebase can silently merge against outdated editor content.
+**Severity:** Medium - an obsolete source-panel fetch can mutate parent pane
+state after the user has moved on.
 
-The watcher-reaction `useEffect` in `DiffPanel.tsx` captures `editValue` and
-`latestFile` in its closure but omits them from the dependency array. If the
-user types between the watcher event firing and the async `fetchFile` resolution,
-`rebaseContentOntoDisk` computes against a stale `editValue`.
+The source auto-rebase path can still call `onAdoptFileState` after the source
+panel has unmounted. React will ignore local state updates after unmount, but
+the parent callback can still replace pane file state for a tab that was closed
+or switched away while the disk fetch was pending.
 
 **Current behavior:**
-- the rebase reads `editValue` and `latestFile.content` from closed-over values
-  that are not refreshed when the effect re-fires
-- a keystroke between the watcher event and the fetch resolution is invisible to
-  the rebase
+- closing or switching away from a source tab does not cancel an in-flight
+  auto-rebase continuation
+- the continuation can still call `onAdoptFileState`
+- parent pane state can be overwritten by an obsolete file-state adoption
 
 **Proposal:**
-- read `editValue` and `latestFile` via refs so the async continuation sees the
-  latest snapshot
-- cancel or ignore stale in-flight watcher refreshes when the edit buffer or
-  base file snapshot changes
+- guard auto-rebase continuations with a mounted/request token and check it
+  immediately before calling `onAdoptFileState`
+- or validate the active tab/path in the parent adoption callback before
+  mutating pane state
 
-## Duplicated path-normalization utilities across App.tsx and DiffPanel.tsx
+## Grace-window late file-change summaries can fire multiple times per turn
 
-**Severity:** Medium - divergence risk for watcher-event path matching.
+**Severity:** Medium - a completed turn can produce multiple "Agent changed files"
+summary cards instead of one.
 
-`normalizeWorkspaceFileEventPath` and `workspaceFilesChangedEventChangeForPath`
-are copy-pasted identically in both `App.tsx` and `DiffPanel.tsx`.
-`isStaleFileSaveError` is also duplicated in `DiffPanel.tsx` and
-`SourcePanel.tsx`. If one copy is updated and the other is not, path matching
-will silently diverge.
+`record_active_turn_file_changes` pushes a late summary when it sees accumulated
+file changes during the grace window, but does not clear
+`active_turn_file_change_grace_deadline` afterward. Since
+`push_active_turn_file_changes_on_record` drains the `BTreeMap` via
+`std::mem::take`, any subsequent watcher batch within the 750ms window will
+accumulate new changes and produce another summary message — each committed
+separately. With the 250ms coalesce interval, up to 3 separate file-change
+summary cards can appear per turn completion.
 
 **Current behavior:**
-- identical functions in two files with no shared import
+- the grace deadline remains set after the first late summary fires
+- subsequent watcher batches during the same window produce additional summaries
+- each late summary triggers a separate `commit_locked` call
 
 **Proposal:**
-- extract into a shared module (e.g., `workspace-file-events.ts`)
+- clear `active_turn_file_change_grace_deadline = None` on each record after
+  pushing late summaries in the loop at `state.rs:1320-1323`
+- this makes the grace window fire-once, collecting all late events into a
+  single summary
 
-## `merge_workspace_file_change_kind` maps Delete+Create to Deleted
+## Claude default model sentinel can leak into live set_model
 
-**Severity:** Medium - agent turn summary can report a recreated file as deleted.
+**Severity:** Low - a running Claude session can receive TermAl's internal
+`"default"` sentinel instead of a real Claude model identifier.
 
-The priority order in `merge_workspace_file_change_kind` checks `Deleted` first,
-so `(Deleted, Created)` merges to `Deleted`. In a common agent workflow — delete
-a file and recreate it in the same coalescing window — the turn summary would
-report the file as `Deleted` when the end result is that the file exists.
+Claude startup argument construction treats `"default"` as "omit `--model`",
+delegating to Claude CLI defaults. The live Claude NDJSON model-update path can
+still send `{"subtype":"set_model","model":"default"}` to a running session,
+which does not match the startup behavior.
 
 **Current behavior:**
-- `(Deleted, Created)` returns `Deleted`
+- CLI startup omits `--model` for the `"default"` sentinel
+- live model updates can send `"default"` verbatim through Claude's control
+  protocol
+- startup and live-update semantics can diverge for the same selected model
 
 **Proposal:**
-- map `(Deleted, Created)` to `Created` or `Modified`
-
-## Shared Codex watchdog startup can orphan the app-server child
-
-**Severity:** Medium - failed post-spawn watchdog setup can leave a stray Codex
-process running without an owning runtime.
-
-`spawn_shared_codex_runtime()` starts `codex app-server`, captures its pipes,
-wraps the child in `SharedChild`, and only then calls
-`spawn_shared_codex_stdin_watchdog(...)`. If that watchdog thread spawn fails,
-the function returns the error without explicitly killing and waiting on the
-already-started child. `SharedChild` does not provide an owner-side kill-on-drop
-guarantee for this setup failure path.
-
-**Current behavior:**
-- a watchdog spawn failure after `Command::spawn()` returns from
-  `spawn_shared_codex_runtime()` with an error
-- the already-started `codex app-server` can survive without the matching
-  TermAl runtime, writer, reader, or waiter ownership
-
-**Proposal:**
-- explicitly kill and wait on the child on every post-spawn initialization
-  failure before returning
-- alternatively, move fallible watchdog setup before child startup or introduce
-  a centralized post-spawn cleanup guard
-
-## Shared Codex stdin watchdog drops teardown failures
-
-**Severity:** Medium - timeout recovery can silently fail and leave the blocked
-runtime alive.
-
-When the shared Codex stdin watchdog detects a write or flush that exceeded the
-timeout, it calls `handle_shared_codex_runtime_exit(...)` and discards the
-result. If the runtime-exit path fails while updating state or persistence, the
-watchdog exits anyway and there is no fallback kill/cleanup path for the
-blocked writer or child process.
-
-**Current behavior:**
-- timeout detection logs the generic timeout detail and calls runtime exit
-- any error returned by runtime exit is ignored
-- the watchdog stops even if teardown did not actually complete
-
-**Proposal:**
-- log `handle_shared_codex_runtime_exit(...)` failures in the watchdog thread
-- add a fallback process cleanup path so the timeout still guarantees runtime
-  shutdown when state/persistence teardown fails
-
-## Delta-event reconnect recovery lacks direct regression coverage
-
-**Severity:** Medium - a modified reconnect recovery path can regress without a
-test failure.
-
-`handleDeltaEvent` now mirrors the state-event catch path by restoring
-`backendConnectionState` to `"reconnecting"` and re-arming fallback polling
-after a parse or reducer failure during reconnect recovery. The added frontend
-coverage exercises malformed reopened `state` payloads, but it does not send a
-malformed or crashing `delta` payload through the changed catch path.
-
-**Current behavior:**
-- malformed reopened state payload recovery is covered
-- malformed delta or delta-reducer failure recovery is not directly covered
-- a regression could leave the UI stuck on `"connected"` with fallback polling
-  not re-armed
-
-**Proposal:**
-- add a mirrored reconnect regression that reopens SSE, dispatches a malformed
-  delta payload, and asserts the UI returns to `"reconnecting"`
-- assert the fallback `/api/state` probe remains armed after the delta failure
+- route live Claude model updates through the same model normalization used by
+  startup argument construction
+- avoid sending `set_model` for the default sentinel, or require a restart when
+  switching a running Claude session back to CLI default behavior
 
 ## Resolved
 
@@ -791,6 +786,20 @@ filesystem I/O is not safe under the mutex.
 
 ## Implementation Tasks
 
+- [ ] P2: Add direct workspace file-event matching tests:
+  cover Windows paths, slash and trailing-slash normalization, relative suffix
+  matching, mismatched session/root rejection, git diff request candidates,
+  stale revision ignores, and delete+create merging to `modified`.
+- [ ] P2: Add backend watcher scope-generation tests:
+  extract the event-shaping or scope-matching logic into a testable helper and
+  cover project-only scope, session scope, nested roots, duplicate scopes, and
+  no-scope fallback.
+- [ ] P2: Complete Claude CLI model-argument matrix coverage:
+  assert one-shot explicit models include `--model`, and persistent default
+  sessions omit `--model default`.
+- [ ] P2: Assert DiffPanel deleted-file recovery actions:
+  extend the deleted-file watcher recovery test to assert `Apply my edits to
+  disk version`, `Save anyway`, and `Reload from disk` are visible.
 - [x] Add app regression for workspace-layout restart-required recovery:
   replaced the brittle StrictMode call-count test with direct coverage for
   `resolveRecoveredWorkspaceLayoutRequestError(...)`. The regression now proves
@@ -829,10 +838,6 @@ filesystem I/O is not safe under the mutex.
   after `onopen`, and `App.tsx` restores `"reconnecting"` immediately even when
   the original fallback timer is still armed, then proves the 400ms fallback
   `/api/state` probe still fires.
-- [ ] Add test for delta handler catch-block reconnecting restoration:
-  mirror the malformed reopened state payload test with a malformed delta event,
-  then assert the UI returns to `"reconnecting"` and fallback `/api/state`
-  polling remains armed.
 - [x] Add test for action-recovery resync probe:
   fixed to expect 1 `fetchState` call (bootstrap comes via SSE). The test
   drives a create-session 502, asserts the one-shot probe fires, clears the
@@ -932,19 +937,31 @@ filesystem I/O is not safe under the mutex.
   `state-revision.test.ts` now covers no-options delegation, `force: false`
   delegation back to `shouldAdoptStateRevision`, and `currentRevision === null`
   with `force: true`.
-- [ ] Add unit tests for path-normalization utilities:
-  `normalizeWorkspaceFileEventPath`, `joinWorkspacePath`,
-  `workspaceFileChangeMatchesCandidate` contain cross-platform logic
-  (Windows drive letter lowercasing, suffix matching) with no direct tests.
-- [ ] Add `merge_workspace_file_change_kind` unit test:
-  the merge function has specific ordering semantics (Deleted wins over all)
-  that should be verified directly, including the `(Deleted, Created)` edge.
+- [x] Add Claude command-argument construction tests:
+  `claude_cli_oneshot_args` and `claude_cli_persistent_args` now build the
+  command argument vectors used by `run_claude_turn` and `spawn_claude_runtime`.
+  The regression test asserts default models omit `--model`, explicit models
+  are passed through, and session/resume, permission, effort, and persistent
+  stdio flags are included in the expected order.
+- [ ] Add unit tests for `workspace-file-events.ts`:
+  `normalizeWorkspaceFileEventPath`, `workspaceFileChangeMatchesScope`,
+  `workspaceFileChangeMatchesCandidate`, `mergeWorkspaceFilesChangedEvents`,
+  `workspaceFilesChangedEventTouchesRoot`, and `workspacePathContains` contain
+  cross-platform path normalization, scope-based session/root filtering, and
+  event-buffering merge logic with no direct tests. This module is the single
+  source of truth for `App.tsx`, `DiffPanel.tsx`, and `FileSystemPanel.tsx`.
+- [ ] Add DiffPanel ref-based auto-rebase test:
+  mirror the SourcePanel deferred-resolution pattern — type into the diff editor
+  after the watcher triggers `fetchFile` but before the fetch resolves, then
+  assert the final content includes the late keystrokes via `latestFileRef` /
+  `editValueRef`.
+- [ ] Add App.tsx file-change event buffering test:
+  dispatch two `workspaceFilesChanged` SSE events in the same tick and assert
+  only one merged `workspaceFilesChangedEvent` state update occurs. Also assert
+  that a non-increasing revision is ignored.
 - [ ] Add DiffPanel "Apply my edits to disk version" and "Reload from disk" tests:
   the stale-save recovery test covers "Save anyway" but not the other two
   recovery actions.
-- [ ] Add DiffPanel deleted-file watcher recovery test:
-  send a deleted `workspaceFilesChangedEvent`, then assert the dirty diff edit
-  buffer is preserved and the recovery actions remain available.
 - [ ] Add `rebaseContentOntoDisk` edge case tests:
   empty files, identical content (no-op merge), and files exceeding
   `MAX_REBASE_DIFF_CELLS` guard are not covered.

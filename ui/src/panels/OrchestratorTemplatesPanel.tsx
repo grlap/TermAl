@@ -18,8 +18,14 @@ import {
   updateOrchestratorTemplate,
 } from "../api";
 import { sanitizeUserFacingErrorMessage } from "../error-messages";
+import { ThemedCombobox } from "../preferences-panels";
 import { isLocalRemoteId } from "../remotes";
 import { dispatchOrchestratorTemplatesChangedEvent } from "../orchestrator-templates-events";
+import {
+  formatSessionModelOptionLabel,
+  NEW_SESSION_MODEL_OPTIONS,
+  type ComboboxOption,
+} from "../session-model-utils";
 import type {
   AgentType,
   ExhaustiveValueCoverage,
@@ -32,6 +38,7 @@ import type {
   OrchestratorTransitionAnchor,
   OrchestratorTransitionResultMode,
   Project,
+  Session,
 } from "../types";
 
 const BOARD_WIDTH = 2560;
@@ -194,12 +201,14 @@ export function OrchestratorTemplatesPanel({
   initialTemplateId = null,
   persistenceKey = null,
   projects = [],
+  sessions = [],
   onStateUpdated,
   startMode = "browse",
 }: {
   initialTemplateId?: string | null;
   persistenceKey?: string | null;
   projects?: Project[];
+  sessions?: readonly Session[];
   onStateUpdated?: (state: import("../api").StateResponse) => void;
   startMode?: "browse" | "edit" | "new";
 }) {
@@ -325,6 +334,10 @@ export function OrchestratorTemplatesPanel({
   const referenceDraftSignature = useMemo(
     () => JSON.stringify(savedDraft),
     [savedDraft],
+  );
+  const modelOptionsByAgent = useMemo(
+    () => buildOrchestratorModelOptionsByAgent(sessions),
+    [sessions],
   );
   const isDirty = draftSignature !== referenceDraftSignature;
   const isCanvasMode = startMode !== "browse";
@@ -609,6 +622,21 @@ export function OrchestratorTemplatesPanel({
       ...current,
       sessions: current.sessions.map((session) =>
         session.id === sessionId ? { ...session, [key]: value } : session,
+      ),
+    }));
+  }
+
+  function setSessionAgent(sessionId: string, nextAgent: AgentType) {
+    setDraft((current) => ({
+      ...current,
+      sessions: current.sessions.map((session) =>
+        session.id === sessionId
+          ? {
+              ...session,
+              agent: nextAgent,
+              model: session.agent === nextAgent ? session.model : "",
+            }
+          : session,
       ),
     }));
   }
@@ -1704,24 +1732,43 @@ export function OrchestratorTemplatesPanel({
                           >
                             Agent
                           </label>
-                          <select
+                          <ThemedCombobox
                             id={`session-agent-${session.id}`}
-                            className="themed-input orchestrator-select"
+                            className="orchestrator-select"
                             value={session.agent}
-                            onChange={(event) =>
-                              setSessionField(
+                            options={AGENT_OPTIONS as readonly ComboboxOption[]}
+                            onChange={(nextValue) =>
+                              setSessionAgent(
                                 session.id,
-                                "agent",
-                                event.target.value as AgentType,
+                                nextValue as AgentType,
                               )
                             }
+                          />
+                        </div>
+                        <div className="session-control-group orchestrator-form-full-width">
+                          <label
+                            className="session-control-label"
+                            htmlFor={`session-model-${session.id}`}
                           >
-                            {AGENT_OPTIONS.map((option) => (
-                              <option key={option.value} value={option.value}>
-                                {option.label}
-                              </option>
-                            ))}
-                          </select>
+                            Model
+                          </label>
+                          <ThemedCombobox
+                            id={`session-model-${session.id}`}
+                            className="orchestrator-select"
+                            value={session.model?.trim() ?? ""}
+                            options={orchestratorSessionModelOptions(
+                              session.agent,
+                              session.model,
+                              modelOptionsByAgent,
+                            )}
+                            onChange={(nextValue) =>
+                              setSessionField(
+                                session.id,
+                                "model",
+                                nextValue,
+                              )
+                            }
+                          />
                         </div>
                         <div className="session-control-group orchestrator-toggle-group">
                           <label
@@ -1995,6 +2042,95 @@ function emptyDraft(): OrchestratorTemplateDraft {
     sessions: [],
     transitions: [],
   };
+}
+
+function orchestratorSessionModelOptions(
+  agent: AgentType,
+  model?: string | null,
+  modelOptionsByAgent: ReadonlyMap<AgentType, readonly ComboboxOption[]> = EMPTY_ORCHESTRATOR_MODEL_OPTIONS,
+): ComboboxOption[] {
+  const normalizedModel = model?.trim() ?? "";
+  const liveOptions = modelOptionsByAgent.get(agent) ?? [];
+  const sourceOptions = liveOptions.length
+    ? liveOptions
+    : NEW_SESSION_MODEL_OPTIONS[agent];
+  const options: ComboboxOption[] = [];
+  const seenValues = new Set<string>();
+  const pushOption = (option: ComboboxOption) => {
+    const normalizedValue = option.value.trim().toLowerCase();
+    const isDefaultLike =
+      normalizedValue === "" ||
+      (normalizedValue === "default" &&
+        option.label.trim().toLowerCase() === "default");
+    const key = isDefaultLike ? "__default__" : normalizedValue;
+    if (seenValues.has(key)) {
+      return;
+    }
+
+    seenValues.add(key);
+    options.push(option);
+  };
+
+  pushOption(
+    {
+      label: "Default",
+      value: "",
+      description: "Use this assistant's default model",
+    },
+  );
+  for (const option of sourceOptions) {
+    pushOption(option);
+  }
+
+  if (
+    normalizedModel &&
+    !options.some((option) => option.value === normalizedModel)
+  ) {
+    pushOption({
+      label: formatSessionModelOptionLabel(normalizedModel),
+      value: normalizedModel,
+    });
+  }
+
+  return options;
+}
+
+const EMPTY_ORCHESTRATOR_MODEL_OPTIONS = new Map<
+  AgentType,
+  readonly ComboboxOption[]
+>();
+
+function buildOrchestratorModelOptionsByAgent(
+  sessions: readonly Session[],
+): ReadonlyMap<AgentType, readonly ComboboxOption[]> {
+  const optionsByAgent = new Map<AgentType, ComboboxOption[]>();
+
+  for (const session of sessions) {
+    if (!session.modelOptions?.length) {
+      continue;
+    }
+
+    const agentOptions = optionsByAgent.get(session.agent) ?? [];
+    const seenValues = new Set(agentOptions.map((option) => option.value));
+
+    for (const option of session.modelOptions) {
+      if (seenValues.has(option.value)) {
+        continue;
+      }
+
+      seenValues.add(option.value);
+      agentOptions.push({
+        label: option.label,
+        value: option.value,
+        description: option.description ?? undefined,
+        badges: option.badges?.length ? option.badges : undefined,
+      });
+    }
+
+    optionsByAgent.set(session.agent, agentOptions);
+  }
+
+  return optionsByAgent;
 }
 
 function templateToDraft(
