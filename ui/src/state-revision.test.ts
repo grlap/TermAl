@@ -31,6 +31,11 @@ describe("state revision helpers", () => {
         allowRevisionDowngrade: true,
       }),
     ).toBe(true);
+    expect(
+      shouldAdoptSnapshotRevision(4, 3, {
+        force: true,
+      }),
+    ).toBe(false);
   });
 
   it("delegates non-forced snapshot adoption to the standard revision helper", () => {

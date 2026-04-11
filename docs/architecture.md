@@ -176,12 +176,13 @@ All routes are under `/api`. The backend serves JSON, and the frontend proxies r
 
 ### SSE Event Stream
 
-`GET /api/events` returns a Server-Sent Events stream with two event types:
+`GET /api/events` returns a Server-Sent Events stream with three event types:
 
 - **`state`** — full `StateResponse` JSON. Sent on initial connect, after `commit_locked()`, and as a recovery when the client falls behind.
 - **`delta`** ? incremental `DeltaEvent` JSON. Sent during streaming (text deltas, text replacements, command output updates). Cheaper than full state.
+- **`workspaceFilesChanged`** - coalesced local workspace file watcher hints. Sent outside the main state revision stream with its own monotonically increasing file-event revision so source, diff, file tree, and git-preview panels can refresh only when touched paths match their scope.
 
-Both carry a `revision: u64` field. The frontend uses this to reject stale snapshots and detect gaps in the delta sequence.
+All three carry a `revision: u64` field. `state` and `delta` share the main state revision counter, which the frontend uses to reject stale snapshots and detect gaps in the delta sequence. `workspaceFilesChanged` uses a separate file-event revision counter; the frontend batches same-tick file events and ignores file-event revisions strictly older than the last seen revision (same-revision events are merged while buffered).
 
 ```
 DeltaEvent::TextDelta            { revision, session_id, message_id, delta, preview }
@@ -190,6 +191,19 @@ DeltaEvent::CommandUpdate        { revision, session_id, message_id, command, ou
 DeltaEvent::ParallelAgentsUpdate { revision, session_id, message_id, message_index, agents, preview }
 DeltaEvent::OrchestratorsUpdated { revision, orchestrators[] } // IDs inside each instance are scoped to the originating server; translate via sync_remote_state_inner before forwarding remotely.
 ```
+
+```
+WorkspaceFilesChangedEvent {
+  revision,
+  changes: [
+    { path, kind, rootPath?, sessionId?, mtimeMs?, sizeBytes? }
+  ]
+}
+```
+
+`kind` is `created`, `modified`, `deleted`, or `other`. `rootPath` and `sessionId`
+scope a watcher hint when it can be tied to a project root or session workdir;
+unscoped events still carry the absolute changed path as a fallback.
 
 `TextDelta` appends streaming text to an in-progress message. `TextReplace` overwrites the full message text when the backend receives an authoritative completed payload that diverges from the streamed draft, so clients should replace the target message body instead of appending.
 
@@ -534,6 +548,7 @@ All agent integrations normalize into the same TermAl message model. Some varian
 | `Command` | command, output, status, languages | Tool calls and shell execution |
 | `Diff` | file_path, summary, diff, change_type | File edit/create tools |
 | `Markdown` | title, markdown | Structured markdown output |
+| `FileChanges` | title, files[] | Local workspace watcher summary for files changed during or just after an agent turn |
 | `SubagentResult` | title, summary, conversation_id, turn_id | Codex subagent/task results |
 | `ParallelAgents` | agents[] | Codex parallel-agent progress |
 | `Approval` | title, command, detail, decision | Permission requests |

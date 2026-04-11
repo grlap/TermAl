@@ -3121,6 +3121,25 @@ fn claude_default_model_delegates_to_claude_cli_default() {
         ],
     );
     assert_eq!(
+        claude_cli_oneshot_args(
+            "opus",
+            ClaudeApprovalMode::Ask,
+            ClaudeEffortLevel::Default,
+            ClaudeCliSessionArg::SessionId("session-a"),
+        ),
+        vec![
+            "--model",
+            "opus",
+            "-p",
+            "--verbose",
+            "--output-format",
+            "stream-json",
+            "--include-partial-messages",
+            "--session-id",
+            "session-a",
+        ],
+    );
+    assert_eq!(
         claude_cli_persistent_args(
             "opus",
             ClaudeApprovalMode::Plan,
@@ -3145,6 +3164,25 @@ fn claude_default_model_delegates_to_claude_cli_default() {
             "high",
             "--resume",
             "claude-session",
+        ],
+    );
+    assert_eq!(
+        claude_cli_persistent_args(
+            " default ",
+            ClaudeApprovalMode::Ask,
+            ClaudeEffortLevel::Default,
+            None,
+        ),
+        vec![
+            "-p",
+            "--verbose",
+            "--output-format",
+            "stream-json",
+            "--input-format",
+            "stream-json",
+            "--include-partial-messages",
+            "--permission-prompt-tool",
+            "stdio",
         ],
     );
 }
@@ -4431,6 +4469,83 @@ fn updates_claude_session_model_settings_without_restarting_runtime() {
     match command {
         ClaudeRuntimeCommand::SetModel(model) => assert_eq!(model, "opus"),
         _ => panic!("expected Claude model update command"),
+    }
+}
+
+#[test]
+fn updating_running_claude_session_to_default_model_requires_restart() {
+    let state = test_app_state();
+
+    let created = state
+        .create_session(CreateSessionRequest {
+            agent: Some(Agent::Claude),
+            name: Some("Claude Default".to_owned()),
+            workdir: Some("/tmp".to_owned()),
+            project_id: None,
+            model: Some("sonnet".to_owned()),
+            approval_policy: None,
+            reasoning_effort: None,
+            sandbox_mode: None,
+            cursor_mode: None,
+            claude_approval_mode: Some(ClaudeApprovalMode::Ask),
+            claude_effort: None,
+            gemini_approval_mode: None,
+        })
+        .unwrap();
+
+    let child = test_exit_success_child();
+    let (input_tx, input_rx) = mpsc::channel();
+    let runtime = ClaudeRuntimeHandle {
+        runtime_id: "claude-default-model-update".to_owned(),
+        input_tx,
+        process: Arc::new(SharedChild::new(child).unwrap()),
+    };
+
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(&created.session_id)
+            .expect("Claude session should exist");
+        inner.sessions[index].runtime = SessionRuntime::Claude(runtime);
+    }
+
+    let updated = state
+        .update_session_settings(
+            &created.session_id,
+            UpdateSessionSettingsRequest {
+                name: None,
+                model: Some("default".to_owned()),
+                sandbox_mode: None,
+                approval_policy: None,
+                reasoning_effort: None,
+                cursor_mode: None,
+                claude_approval_mode: None,
+                claude_effort: None,
+                gemini_approval_mode: None,
+            },
+        )
+        .unwrap();
+
+    let session = updated
+        .sessions
+        .iter()
+        .find(|session| session.id == created.session_id)
+        .expect("updated Claude session should be present");
+    assert_eq!(session.model, "default");
+
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    let record = inner
+        .sessions
+        .iter()
+        .find(|record| record.session.id == created.session_id)
+        .expect("Claude session should exist");
+    assert!(record.runtime_reset_required);
+    drop(inner);
+
+    match input_rx.recv_timeout(Duration::from_millis(100)) {
+        Err(mpsc::RecvTimeoutError::Timeout) => {}
+        Ok(_) => panic!("default sentinel should not be sent to Claude"),
+        Err(err) => panic!("unexpected Claude command channel error: {err}"),
     }
 }
 
@@ -21191,6 +21306,68 @@ async fn read_and_write_file_accept_project_id_without_session() {
     fs::remove_dir_all(root).unwrap();
 }
 
+#[tokio::test]
+async fn write_file_rejects_missing_path_traversal_outside_project() {
+    let state = test_app_state();
+    let root =
+        std::env::temp_dir().join(format!("termal-project-file-traversal-{}", Uuid::new_v4()));
+    let outside_root = std::env::temp_dir().join(format!(
+        "termal-project-file-traversal-outside-{}",
+        Uuid::new_v4()
+    ));
+    let outside_file = outside_root.join("escape.rs");
+    let traversal_file = root
+        .join("missing")
+        .join("..")
+        .join("..")
+        .join(
+            outside_root
+                .file_name()
+                .expect("outside root should have a name"),
+        )
+        .join("escape.rs");
+
+    fs::create_dir_all(&root).unwrap();
+
+    let project = state
+        .create_project(CreateProjectRequest {
+            name: Some("Project Files".to_owned()),
+            root_path: root.to_string_lossy().into_owned(),
+            remote_id: default_local_remote_id(),
+        })
+        .unwrap();
+
+    let error = match write_file(
+        State(state),
+        Json(WriteFileRequest {
+            path: traversal_file.to_string_lossy().into_owned(),
+            content: "pub fn escape() {}\n".to_owned(),
+            base_hash: None,
+            overwrite: false,
+            project_id: Some(project.project_id),
+            session_id: None,
+        }),
+    )
+    .await
+    {
+        Ok(_) => panic!("traversal write should fail"),
+        Err(error) => error,
+    };
+
+    assert_eq!(error.status, StatusCode::BAD_REQUEST);
+    assert!(
+        error
+            .message
+            .contains("cannot contain unresolved `.` or `..`")
+            || error.message.contains("must stay inside project")
+    );
+    assert!(!outside_file.exists());
+    fs::remove_dir_all(root).unwrap();
+    if outside_root.exists() {
+        fs::remove_dir_all(outside_root).unwrap();
+    }
+}
+
 // Tests that write file rejects stale editor base hashes.
 #[tokio::test]
 async fn write_file_rejects_stale_base_hash() {
@@ -21359,6 +21536,77 @@ fn active_turn_file_changes_are_summarized_on_record() {
 }
 
 #[test]
+fn active_turn_file_changes_prefer_session_scoped_watcher_hints() {
+    let state = test_app_state();
+    let root =
+        std::env::temp_dir().join(format!("termal-active-turn-file-scope-{}", Uuid::new_v4()));
+    let changed_file = root.join("src").join("main.rs");
+    fs::create_dir_all(changed_file.parent().unwrap()).unwrap();
+    fs::write(&changed_file, "fn main() {}\n").unwrap();
+
+    let (first_session_id, second_session_id) = {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let first = inner.create_session(
+            Agent::Codex,
+            Some("First".to_owned()),
+            root.to_string_lossy().into_owned(),
+            None,
+            None,
+        );
+        let first_session_id = first.session.id.clone();
+        let second = inner.create_session(
+            Agent::Codex,
+            Some("Second".to_owned()),
+            root.to_string_lossy().into_owned(),
+            None,
+            None,
+        );
+        let second_session_id = second.session.id.clone();
+        for session_id in [&first_session_id, &second_session_id] {
+            let index = inner.find_session_index(session_id).unwrap();
+            inner.sessions[index].active_turn_start_message_count =
+                Some(inner.sessions[index].session.messages.len());
+        }
+        (first_session_id, second_session_id)
+    };
+
+    state.record_active_turn_file_changes(&[
+        WorkspaceFileChangeEvent {
+            path: changed_file.to_string_lossy().into_owned(),
+            kind: WorkspaceFileChangeKind::Modified,
+            root_path: Some(root.to_string_lossy().into_owned()),
+            session_id: None,
+            mtime_ms: None,
+            size_bytes: None,
+        },
+        WorkspaceFileChangeEvent {
+            path: changed_file.to_string_lossy().into_owned(),
+            kind: WorkspaceFileChangeKind::Modified,
+            root_path: Some(root.to_string_lossy().into_owned()),
+            session_id: Some(first_session_id.clone()),
+            mtime_ms: None,
+            size_bytes: None,
+        },
+    ]);
+
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    let first = inner
+        .sessions
+        .iter()
+        .find(|record| record.session.id == first_session_id)
+        .expect("first session should exist");
+    let second = inner
+        .sessions
+        .iter()
+        .find(|record| record.session.id == second_session_id)
+        .expect("second session should exist");
+    assert_eq!(first.active_turn_file_changes.len(), 1);
+    assert!(second.active_turn_file_changes.is_empty());
+    drop(inner);
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn merge_workspace_file_change_kind_treats_delete_create_as_modified() {
     assert_eq!(
         merge_workspace_file_change_kind(
@@ -21374,6 +21622,138 @@ fn merge_workspace_file_change_kind_treats_delete_create_as_modified() {
         ),
         WorkspaceFileChangeKind::Modified,
     );
+}
+
+fn canonical_test_watch_path(path: &FsPath) -> PathBuf {
+    normalize_user_facing_path(&fs::canonicalize(path).expect("test path should canonicalize"))
+}
+
+#[test]
+fn workspace_file_watch_scopes_include_project_and_session_roots() {
+    let state = test_app_state();
+    let root = std::env::temp_dir().join(format!("termal-watch-scopes-{}", Uuid::new_v4()));
+    let project_root = root.join("project");
+    let session_root = root.join("session");
+    fs::create_dir_all(&project_root).unwrap();
+    fs::create_dir_all(&session_root).unwrap();
+
+    create_test_project(&state, &project_root, "Watch Project");
+    let session_id = {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let record = inner.create_session(
+            Agent::Codex,
+            Some("Watch Session".to_owned()),
+            session_root.to_string_lossy().into_owned(),
+            None,
+            None,
+        );
+        record.session.id
+    };
+
+    let scopes = collect_workspace_file_watch_scopes(&state)
+        .into_iter()
+        .map(|scope| (scope.root_path, scope.session_id))
+        .collect::<Vec<_>>();
+
+    assert!(scopes.contains(&(canonical_test_watch_path(&project_root), None)));
+    assert!(scopes.contains(&(canonical_test_watch_path(&session_root), Some(session_id),)));
+
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn workspace_file_watch_roots_prune_nested_roots() {
+    let root = std::env::temp_dir().join(format!("termal-watch-nested-{}", Uuid::new_v4()));
+    let nested = root.join("packages").join("app");
+    fs::create_dir_all(&nested).unwrap();
+    let root = canonical_test_watch_path(&root);
+    let nested = canonical_test_watch_path(&nested);
+
+    assert_eq!(
+        prune_nested_workspace_file_watch_roots(vec![nested.clone(), root.clone()]),
+        vec![root.clone()],
+    );
+    assert_eq!(
+        prune_nested_workspace_file_watch_roots(vec![root.clone(), nested]),
+        vec![root.clone()],
+    );
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn workspace_file_changes_from_path_uses_specific_unique_scopes() {
+    let root = std::env::temp_dir().join(format!("termal-watch-change-{}", Uuid::new_v4()));
+    let nested = root.join("packages").join("app");
+    let changed_file = nested.join("src").join("main.rs");
+    fs::create_dir_all(changed_file.parent().unwrap()).unwrap();
+    fs::write(&changed_file, "fn main() {}\n").unwrap();
+    let root_path = canonical_test_watch_path(&root);
+    let nested_path = canonical_test_watch_path(&nested);
+    let changed_path = canonical_test_watch_path(&changed_file)
+        .to_string_lossy()
+        .into_owned();
+
+    let changes = workspace_file_changes_from_path(
+        &changed_file,
+        WorkspaceFileChangeKind::Modified,
+        &[
+            WorkspaceFileWatchScope {
+                root_path: root_path.clone(),
+                session_id: None,
+            },
+            WorkspaceFileWatchScope {
+                root_path: nested_path.clone(),
+                session_id: Some("session-1".to_owned()),
+            },
+            WorkspaceFileWatchScope {
+                root_path: nested_path.clone(),
+                session_id: Some("session-1".to_owned()),
+            },
+            WorkspaceFileWatchScope {
+                root_path: nested_path.clone(),
+                session_id: Some("session-2".to_owned()),
+            },
+        ],
+    );
+
+    assert_eq!(changes.len(), 3);
+    assert!(changes.iter().all(|change| change.path == changed_path));
+    assert!(changes.iter().any(|change| {
+        change.root_path.as_deref() == Some(nested_path.to_string_lossy().as_ref())
+            && change.session_id.as_deref() == Some("session-1")
+    }));
+    assert!(changes.iter().any(|change| {
+        change.root_path.as_deref() == Some(nested_path.to_string_lossy().as_ref())
+            && change.session_id.as_deref() == Some("session-2")
+    }));
+    assert!(changes.iter().any(|change| {
+        change.root_path.as_deref() == Some(root_path.to_string_lossy().as_ref())
+            && change.session_id.is_none()
+    }));
+
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn workspace_file_changes_from_path_emits_unscoped_fallback() {
+    let root = std::env::temp_dir().join(format!("termal-watch-fallback-{}", Uuid::new_v4()));
+    let changed_file = root.join("generated.rs");
+    fs::create_dir_all(&root).unwrap();
+    fs::write(&changed_file, "fn generated() {}\n").unwrap();
+    let changed_path = canonical_test_watch_path(&changed_file)
+        .to_string_lossy()
+        .into_owned();
+
+    let changes =
+        workspace_file_changes_from_path(&changed_file, WorkspaceFileChangeKind::Created, &[]);
+
+    assert_eq!(changes.len(), 1);
+    assert_eq!(changes[0].path, changed_path);
+    assert_eq!(changes[0].kind, WorkspaceFileChangeKind::Created);
+    assert_eq!(changes[0].root_path, None);
+    assert_eq!(changes[0].session_id, None);
+
+    fs::remove_dir_all(root).unwrap();
 }
 
 #[test]
@@ -21394,7 +21774,6 @@ fn late_turn_file_changes_are_summarized_during_grace_window() {
             None,
         );
         let session_id = record.session.id.clone();
-        inner.sessions.push(record);
         let index = inner.find_session_index(&session_id).unwrap();
         inner.sessions[index].active_turn_start_message_count =
             Some(inner.sessions[index].session.messages.len());
@@ -21428,6 +21807,143 @@ fn late_turn_file_changes_are_summarized_during_grace_window() {
     assert_eq!(files.len(), 1);
     assert_eq!(files[0].kind, WorkspaceFileChangeKind::Created);
     assert_eq!(files[0].path, changed_file.to_string_lossy());
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn expired_late_turn_file_change_grace_window_does_not_emit_summary() {
+    let state = test_app_state();
+    let root = std::env::temp_dir().join(format!(
+        "termal-expired-late-file-change-{}",
+        Uuid::new_v4()
+    ));
+    fs::create_dir_all(&root).unwrap();
+    let changed_file = root.join("generated.rs");
+    fs::write(&changed_file, "fn generated() {}\n").unwrap();
+
+    let session_id = {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let record = inner.create_session(
+            Agent::Codex,
+            Some("Expired Files".to_owned()),
+            root.to_string_lossy().into_owned(),
+            None,
+            None,
+        );
+        let session_id = record.session.id.clone();
+        let index = inner.find_session_index(&session_id).unwrap();
+        inner.sessions[index].active_turn_file_change_grace_deadline =
+            Some(std::time::Instant::now() - Duration::from_millis(1));
+        session_id
+    };
+
+    state.record_active_turn_file_changes(&[WorkspaceFileChangeEvent {
+        path: changed_file.to_string_lossy().into_owned(),
+        kind: WorkspaceFileChangeKind::Created,
+        root_path: Some(root.to_string_lossy().into_owned()),
+        session_id: Some(session_id.clone()),
+        mtime_ms: None,
+        size_bytes: None,
+    }]);
+
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    let record = inner
+        .sessions
+        .iter()
+        .find(|record| record.session.id == session_id)
+        .expect("session should exist");
+    assert!(record.active_turn_file_change_grace_deadline.is_none());
+    assert!(record.active_turn_file_changes.is_empty());
+    assert!(
+        record
+            .session
+            .messages
+            .iter()
+            .all(|message| !matches!(message, Message::FileChanges { .. }))
+    );
+    drop(inner);
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn idle_finish_active_turn_file_change_tracking_does_not_open_grace_window() {
+    let mut inner = StateInner::new();
+    let mut record = inner.create_session(
+        Agent::Codex,
+        Some("Idle Files".to_owned()),
+        "/tmp".to_owned(),
+        None,
+        None,
+    );
+    record.active_turn_file_changes.insert(
+        "/tmp/generated.rs".to_owned(),
+        WorkspaceFileChangeKind::Created,
+    );
+
+    finish_active_turn_file_change_tracking(&mut record);
+
+    assert!(record.active_turn_start_message_count.is_none());
+    assert!(record.active_turn_file_change_grace_deadline.is_none());
+    assert!(record.active_turn_file_changes.is_empty());
+}
+
+#[test]
+fn late_turn_file_change_grace_window_emits_only_once() {
+    let state = test_app_state();
+    let root =
+        std::env::temp_dir().join(format!("termal-late-file-change-once-{}", Uuid::new_v4()));
+    fs::create_dir_all(&root).unwrap();
+    let first_file = root.join("first.rs");
+    let second_file = root.join("second.rs");
+    fs::write(&first_file, "fn first() {}\n").unwrap();
+    fs::write(&second_file, "fn second() {}\n").unwrap();
+
+    let session_id = {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let record = inner.create_session(
+            Agent::Codex,
+            Some("Files".to_owned()),
+            root.to_string_lossy().into_owned(),
+            None,
+            None,
+        );
+        let session_id = record.session.id.clone();
+        let index = inner.find_session_index(&session_id).unwrap();
+        inner.sessions[index].active_turn_start_message_count =
+            Some(inner.sessions[index].session.messages.len());
+        finish_active_turn_file_change_tracking(&mut inner.sessions[index]);
+        session_id
+    };
+
+    state.record_active_turn_file_changes(&[WorkspaceFileChangeEvent {
+        path: first_file.to_string_lossy().into_owned(),
+        kind: WorkspaceFileChangeKind::Created,
+        root_path: Some(root.to_string_lossy().into_owned()),
+        session_id: Some(session_id.clone()),
+        mtime_ms: None,
+        size_bytes: None,
+    }]);
+    state.record_active_turn_file_changes(&[WorkspaceFileChangeEvent {
+        path: second_file.to_string_lossy().into_owned(),
+        kind: WorkspaceFileChangeKind::Created,
+        root_path: Some(root.to_string_lossy().into_owned()),
+        session_id: Some(session_id.clone()),
+        mtime_ms: None,
+        size_bytes: None,
+    }]);
+
+    let snapshot = state.snapshot();
+    let session = snapshot
+        .sessions
+        .iter()
+        .find(|session| session.id == session_id)
+        .expect("session should exist");
+    let file_change_messages = session
+        .messages
+        .iter()
+        .filter(|message| matches!(message, Message::FileChanges { .. }))
+        .count();
+    assert_eq!(file_change_messages, 1);
     fs::remove_dir_all(root).unwrap();
 }
 

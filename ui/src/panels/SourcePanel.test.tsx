@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { copyTextToClipboard } from "../clipboard";
@@ -400,6 +400,63 @@ describe("SourcePanel", () => {
     });
   });
 
+  it("does not adopt auto-rebase state after unmount", async () => {
+    const latestFile = createDeferred<SourceFileState>();
+    const onFetchLatestFile = vi.fn(() => latestFile.promise);
+    const onAdoptFileState = vi.fn();
+    const baseFileState: SourceFileState = {
+      ...readyFileState,
+      content: "alpha\nbeta\n",
+      contentHash: "sha256:base",
+    };
+
+    const { rerender, unmount } = render(
+      <SourcePanel
+        editorAppearance={editorAppearance}
+        editorFontSizePx={14}
+        fileState={baseFileState}
+        sourcePath="src/main.rs"
+        onAdoptFileState={onAdoptFileState}
+        onFetchLatestFile={onFetchLatestFile}
+        onSaveFile={vi.fn()}
+      />,
+    );
+
+    fireEvent.change(await screen.findByLabelText("Source editor for src/main.rs"), {
+      target: { value: "alpha local\nbeta\n" },
+    });
+    rerender(
+      <SourcePanel
+        editorAppearance={editorAppearance}
+        editorFontSizePx={14}
+        fileState={{
+          ...baseFileState,
+          staleOnDisk: true,
+          externalContentHash: "sha256:disk",
+        }}
+        sourcePath="src/main.rs"
+        onAdoptFileState={onAdoptFileState}
+        onFetchLatestFile={onFetchLatestFile}
+        onSaveFile={vi.fn()}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(onFetchLatestFile).toHaveBeenCalledWith("src/main.rs");
+    });
+    unmount();
+    await act(async () => {
+      latestFile.resolve({
+        ...baseFileState,
+        content: "alpha\nbeta disk\n",
+        contentHash: "sha256:disk",
+      });
+      await Promise.resolve();
+    });
+
+    expect(onAdoptFileState).not.toHaveBeenCalled();
+  });
+
   it("rebases local edits onto non-overlapping disk changes", () => {
     const result = rebaseContentOntoDisk(
       "alpha\nbeta\ngamma\n",
@@ -421,5 +478,42 @@ describe("SourcePanel", () => {
     );
 
     expect(result.status).toBe("conflict");
+  });
+
+  it("rebases empty-file edits when only one side changed", () => {
+    expect(rebaseContentOntoDisk("", "local\n", "")).toEqual({
+      status: "clean",
+      content: "local\n",
+    });
+    expect(rebaseContentOntoDisk("", "", "disk\n")).toEqual({
+      status: "clean",
+      content: "disk\n",
+    });
+  });
+
+  it("deduplicates identical local and disk edits as a no-op merge", () => {
+    expect(
+      rebaseContentOntoDisk(
+        "alpha\nbeta\n",
+        "alpha\nshared\n",
+        "alpha\nshared\n",
+      ),
+    ).toEqual({
+      status: "clean",
+      content: "alpha\nshared\n",
+    });
+  });
+
+  it("rejects merges that exceed the diff cell guard", () => {
+    const largeBase = Array.from({ length: 2000 }, (_, index) => `base ${index}\n`).join("");
+    const largeLocal = Array.from({ length: 2000 }, (_, index) => `local ${index}\n`).join("");
+
+    const result = rebaseContentOntoDisk(largeBase, largeLocal, largeBase);
+
+    expect(result).toEqual({
+      status: "conflict",
+      reason:
+        "Could not apply edits automatically because the file is too large to merge safely.",
+    });
   });
 });

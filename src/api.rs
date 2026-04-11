@@ -802,7 +802,7 @@ async fn write_file(
             )));
         }
 
-        let resolved_path = resolve_project_scoped_requested_path(
+        let mut resolved_path = resolve_project_scoped_requested_path(
             &state,
             request.session_id.as_deref(),
             request.project_id.as_deref(),
@@ -826,6 +826,12 @@ async fn write_file(
                 ))
             })?;
         }
+        resolved_path = verify_scoped_write_path_after_parent_creation(
+            &state,
+            request.session_id.as_deref(),
+            request.project_id.as_deref(),
+            &resolved_path,
+        )?;
 
         let content_hash = file_content_hash(request.content.as_bytes());
         if let Some(base_hash) = should_check_base {
@@ -5734,7 +5740,7 @@ fn canonicalize_path_with_existing_ancestor(path: &FsPath) -> Result<PathBuf, Ap
             .join(path)
     };
 
-    let mut suffix = Vec::new();
+    let mut suffix = Vec::<std::ffi::OsString>::new();
     let mut probe = absolute.as_path();
 
     loop {
@@ -5744,6 +5750,7 @@ fn canonicalize_path_with_existing_ancestor(path: &FsPath) -> Result<PathBuf, Ap
                     ApiError::internal(format!("failed to resolve path {}: {err}", probe.display()))
                 })?;
                 for component in suffix.iter().rev() {
+                    validate_missing_path_component(component)?;
                     canonical.push(component);
                 }
                 return Ok(normalize_user_facing_path(&canonical));
@@ -5772,6 +5779,57 @@ fn canonicalize_path_with_existing_ancestor(path: &FsPath) -> Result<PathBuf, Ap
             }
         }
     }
+}
+
+/// Validates an unresolved path component before appending it to a canonical
+/// ancestor. Missing suffixes must not contain traversal components because
+/// containment checks run before the missing parent exists.
+fn validate_missing_path_component(component: &std::ffi::OsStr) -> Result<(), ApiError> {
+    if component.is_empty() || component == "." || component == ".." {
+        return Err(ApiError::bad_request(
+            "new file paths cannot contain unresolved `.` or `..` components",
+        ));
+    }
+
+    Ok(())
+}
+
+/// Verifies the write parent after any missing directories are created.
+fn verify_scoped_write_path_after_parent_creation(
+    state: &AppState,
+    session_id: Option<&str>,
+    project_id: Option<&str>,
+    resolved_path: &FsPath,
+) -> Result<PathBuf, ApiError> {
+    let project_root = resolve_request_project_root_path(state, session_id, project_id)?;
+    let file_name = resolved_path.file_name().ok_or_else(|| {
+        ApiError::bad_request(format!("file path is invalid: {}", resolved_path.display()))
+    })?;
+    validate_missing_path_component(file_name)?;
+    let parent = resolved_path.parent().ok_or_else(|| {
+        ApiError::bad_request(format!("file path is invalid: {}", resolved_path.display()))
+    })?;
+    let canonical_parent = fs::canonicalize(parent)
+        .map(|path| normalize_user_facing_path(&path))
+        .map_err(|err| match err.kind() {
+            io::ErrorKind::NotFound => {
+                ApiError::not_found(format!("parent directory not found: {}", parent.display()))
+            }
+            _ => ApiError::internal(format!(
+                "failed to resolve parent directory {}: {err}",
+                parent.display()
+            )),
+        })?;
+
+    if canonical_parent != project_root && !canonical_parent.starts_with(&project_root) {
+        return Err(ApiError::bad_request(format!(
+            "path `{}` must stay inside project `{}`",
+            resolved_path.display(),
+            project_root.display()
+        )));
+    }
+
+    Ok(normalize_user_facing_path(&canonical_parent.join(file_name)))
 }
 
 /// Normalizes user facing path.

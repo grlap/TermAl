@@ -114,9 +114,15 @@ export function SourcePanel({
   const [copiedPath, setCopiedPath] = useState(false);
   const pendingEditorValueRef = useRef<string | null>(null);
   const lastAutoRebaseKeyRef = useRef<string | null>(null);
+  const mountedRef = useRef(false);
+  const rebaseRequestTokenRef = useRef(0);
   const fileStateRef = useRef(fileState);
   const editorValueRef = useRef(editorValue);
   const isDirty = fileState.status === "ready" && editorValue !== fileState.content;
+  const setEditorValueState = (nextValue: string) => {
+    editorValueRef.current = nextValue;
+    setEditorValue(nextValue);
+  };
 
   useEffect(() => {
     fileStateRef.current = fileState;
@@ -127,11 +133,19 @@ export function SourcePanel({
   }, [editorValue]);
 
   useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      rebaseRequestTokenRef.current += 1;
+    };
+  }, []);
+
+  useEffect(() => {
     if (fileState.status === "ready") {
       const pendingEditorValue = pendingEditorValueRef.current;
       pendingEditorValueRef.current = null;
       const nextEditorValue = pendingEditorValue ?? fileState.content;
-      setEditorValue(nextEditorValue);
+      setEditorValueState(nextEditorValue);
       setActionError(null);
       setSaveConflictOnDisk(false);
       setCompareDiskContent(null);
@@ -140,7 +154,7 @@ export function SourcePanel({
     }
 
     if (fileState.status !== "loading") {
-      setEditorValue("");
+      setEditorValueState("");
       setEditorStatus(DEFAULT_EDITOR_STATUS);
     }
   }, [
@@ -169,9 +183,18 @@ export function SourcePanel({
   }, [copiedPath]);
 
   async function handleSave(options?: SourceSaveOptions) {
+    const currentFileState = fileStateRef.current;
+    const currentEditorValue = editorValueRef.current;
     const canRestoreDeletedFile =
-      options?.overwrite && fileState.status === "ready" && fileDeletedOnDisk;
-    if (fileState.status !== "ready" || (!isDirty && !canRestoreDeletedFile) || isSaving) {
+      options?.overwrite && currentFileState.status === "ready" && fileDeletedOnDisk;
+    const isCurrentDirty =
+      currentFileState.status === "ready" &&
+      currentEditorValue !== currentFileState.content;
+    if (
+      currentFileState.status !== "ready" ||
+      (!isCurrentDirty && !canRestoreDeletedFile) ||
+      isSaving
+    ) {
       return;
     }
 
@@ -179,7 +202,7 @@ export function SourcePanel({
     setActionError(null);
     setSaveConflictOnDisk(false);
     try {
-      await onSaveFile(fileState.path, editorValue, options);
+      await onSaveFile(currentFileState.path, currentEditorValue, options);
     } catch (error) {
       const message = getErrorMessage(error);
       setActionError(message);
@@ -192,7 +215,7 @@ export function SourcePanel({
   }
 
   function handleEditorChange(nextValue: string) {
-    setEditorValue(nextValue);
+    setEditorValueState(nextValue);
     onDirtyChange?.(
       fileState.status === "ready" && nextValue !== fileState.content,
     );
@@ -229,8 +252,13 @@ export function SourcePanel({
 
     setIsRebasing(true);
     setActionError(null);
+    const requestToken = rebaseRequestTokenRef.current + 1;
+    rebaseRequestTokenRef.current = requestToken;
     try {
       const latestFileState = await onFetchLatestFile(currentFileState.path);
+      if (!mountedRef.current || rebaseRequestTokenRef.current !== requestToken) {
+        return;
+      }
       const latestEditorSnapshot = editorValueRef.current;
       const latestFileSnapshot = fileStateRef.current;
       if (
@@ -258,12 +286,16 @@ export function SourcePanel({
 
       pendingEditorValueRef.current = rebaseResult.content;
       onAdoptFileState(latestFileState);
-      setEditorValue(rebaseResult.content);
+      setEditorValueState(rebaseResult.content);
       onDirtyChange?.(rebaseResult.content !== latestFileState.content);
     } catch (error) {
-      setActionError(getErrorMessage(error));
+      if (mountedRef.current && rebaseRequestTokenRef.current === requestToken) {
+        setActionError(getErrorMessage(error));
+      }
     } finally {
-      setIsRebasing(false);
+      if (mountedRef.current && rebaseRequestTokenRef.current === requestToken) {
+        setIsRebasing(false);
+      }
     }
   }
 

@@ -160,6 +160,21 @@ export function DiffPanel({
   const pendingEditValueRef = useRef<string | null>(null);
   const latestFileRef = useRef(latestFile);
   const editValueRef = useRef(editValue);
+  const setLatestFileState = (
+    next:
+      | LatestFileState
+      | ((current: LatestFileState) => LatestFileState),
+  ) => {
+    setLatestFile((current) => {
+      const resolved = typeof next === "function" ? next(current) : next;
+      latestFileRef.current = resolved;
+      return resolved;
+    });
+  };
+  const setEditValueState = (nextValue: string) => {
+    editValueRef.current = nextValue;
+    setEditValue(nextValue);
+  };
 
   useEffect(() => {
     latestFileRef.current = latestFile;
@@ -196,7 +211,7 @@ export function DiffPanel({
     let cancelled = false;
 
     if (!filePath) {
-      setLatestFile(createInitialLatestFileState(null));
+      setLatestFileState(createInitialLatestFileState(null));
       setVisualBaseContent(null);
       setExternalFileNotice(null);
       setDiffEditConflictOnDisk(false);
@@ -207,7 +222,7 @@ export function DiffPanel({
       setVisualBaseContent(null);
       setExternalFileNotice(null);
       setDiffEditConflictOnDisk(false);
-      setLatestFile({
+      setLatestFileState({
         status: "error",
         path: filePath,
         content: "",
@@ -220,7 +235,7 @@ export function DiffPanel({
     setVisualBaseContent(null);
     setExternalFileNotice(null);
     setDiffEditConflictOnDisk(false);
-    setLatestFile({
+    setLatestFileState({
       status: "loading",
       path: filePath,
       content: "",
@@ -240,14 +255,14 @@ export function DiffPanel({
         setVisualBaseContent(response.content);
         setExternalFileNotice(null);
         setDiffEditConflictOnDisk(false);
-        setLatestFile(toLatestFileState(response));
+        setLatestFileState(toLatestFileState(response));
       })
       .catch((error) => {
         if (cancelled) {
           return;
         }
 
-        setLatestFile({
+        setLatestFileState({
           status: "error",
           path: filePath,
           content: "",
@@ -329,7 +344,7 @@ export function DiffPanel({
     if (latestFile.status === "ready") {
       const pendingEditValue = pendingEditValueRef.current;
       pendingEditValueRef.current = null;
-      setEditValue(pendingEditValue ?? latestFile.content);
+      setEditValueState(pendingEditValue ?? latestFile.content);
       setSaveError(null);
       setEditEditorStatus(createEditorStatusSnapshot(pendingEditValue ?? latestFile.content));
       return;
@@ -337,7 +352,7 @@ export function DiffPanel({
 
     if (latestFile.status !== "loading") {
       pendingEditValueRef.current = null;
-      setEditValue("");
+      setEditValueState("");
       setEditEditorStatus(DEFAULT_EDITOR_STATUS);
     }
   }, [latestFile.content, latestFile.path, latestFile.status]);
@@ -413,14 +428,14 @@ export function DiffPanel({
 
       setVisualBaseContent(null);
       setDiffEditConflictOnDisk(false);
-      setLatestFile({
+      setLatestFileState({
         status: "error",
         path: filePath,
         content: "",
         error: "File was deleted on disk.",
         language: language ?? null,
       });
-      setEditValue("");
+      setEditValueState("");
       setExternalFileNotice("The file was deleted on disk.");
       return;
     }
@@ -455,15 +470,15 @@ export function DiffPanel({
 
           pendingEditValueRef.current = rebaseResult.content;
           setVisualBaseContent(response.content);
-          setLatestFile(toLatestFileState(response));
-          setEditValue(rebaseResult.content);
+          setLatestFileState(toLatestFileState(response));
+          setEditValueState(rebaseResult.content);
           setExternalFileNotice("File changed on disk; your diff edits were applied on top.");
           setDiffEditConflictOnDisk(false);
           return;
         }
 
         setVisualBaseContent(response.content);
-        setLatestFile(toLatestFileState(response));
+        setLatestFileState(toLatestFileState(response));
         setExternalFileNotice("File refreshed from disk.");
         setDiffEditConflictOnDisk(false);
       })
@@ -518,29 +533,33 @@ export function DiffPanel({
   }, [copiedReviewPath]);
 
   async function handleSave(options?: SourceSaveOptions) {
-    if (latestFile.status !== "ready" || !isDirty || isSaving) {
+    const currentFile = latestFileRef.current;
+    const currentEditValue = editValueRef.current;
+    const isCurrentDirty =
+      currentFile.status === "ready" && currentEditValue !== currentFile.content;
+    if (currentFile.status !== "ready" || !isCurrentDirty || isSaving) {
       return;
     }
 
     setIsSaving(true);
     setSaveError(null);
     try {
-      const response = await onSaveFile(latestFile.path, editValue, {
-        baseHash: latestFile.contentHash ?? null,
+      const response = await onSaveFile(currentFile.path, currentEditValue, {
+        baseHash: currentFile.contentHash ?? null,
         overwrite: options?.overwrite,
       });
       if (response) {
         setVisualBaseContent(response.content);
-        setLatestFile(toLatestFileState(response));
+        setLatestFileState(toLatestFileState(response));
       } else {
-        setLatestFile((current) => {
+        setLatestFileState((current) => {
           if (current.status !== "ready") {
             return current;
           }
 
           return {
             ...current,
-            content: editValue,
+            content: currentEditValue,
             contentHash: null,
           };
         });
@@ -602,8 +621,8 @@ export function DiffPanel({
 
       pendingEditValueRef.current = rebaseResult.content;
       setVisualBaseContent(response.content);
-      setLatestFile(toLatestFileState(response));
-      setEditValue(rebaseResult.content);
+      setLatestFileState(toLatestFileState(response));
+      setEditValueState(rebaseResult.content);
       setExternalFileNotice("Your diff edits were applied on top of the disk version.");
       setDiffEditConflictOnDisk(false);
     } catch (error) {
@@ -628,8 +647,8 @@ export function DiffPanel({
       });
       pendingEditValueRef.current = null;
       setVisualBaseContent(response.content);
-      setLatestFile(toLatestFileState(response));
-      setEditValue(response.content);
+      setLatestFileState(toLatestFileState(response));
+      setEditValueState(response.content);
       setExternalFileNotice("File reloaded from disk.");
       setDiffEditConflictOnDisk(false);
     } catch (error) {
@@ -949,7 +968,7 @@ export function DiffPanel({
               filePath,
               language,
               latestFile,
-              onChange: setEditValue,
+              onChange: setEditValueState,
               onSave: handleSave,
               onStatusChange: setEditEditorStatus,
             })}
@@ -980,7 +999,7 @@ export function DiffPanel({
                   fontSizePx={fontSizePx}
                   ariaLabel={filePath ? `Diff preview for ${filePath}` : "Diff preview"}
                   language={latestFile.status === "ready" ? latestFile.language ?? language ?? null : language}
-                  onChange={canEditVisualDiff ? setEditValue : undefined}
+                  onChange={canEditVisualDiff ? setEditValueState : undefined}
                   onSave={canEditVisualDiff ? () => void handleSave() : undefined}
                   onStatusChange={setVisualEditorStatus}
                   path={filePath}

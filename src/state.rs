@@ -109,7 +109,6 @@ const WORKSPACE_FILE_WATCH_COALESCE_MS: Duration = Duration::from_millis(250);
 #[cfg(not(test))]
 const WORKSPACE_FILE_WATCH_RECV_TIMEOUT_MS: Duration = Duration::from_millis(100);
 
-#[cfg(not(test))]
 #[derive(Clone)]
 struct WorkspaceFileWatchScope {
     root_path: PathBuf,
@@ -228,7 +227,6 @@ fn reconcile_workspace_file_watch_roots(
     *watch_scopes = next_scopes;
 }
 
-#[cfg(not(test))]
 fn collect_workspace_file_watch_scopes(state: &AppState) -> Vec<WorkspaceFileWatchScope> {
     let roots = {
         let inner = state.inner.lock().expect("state mutex poisoned");
@@ -285,7 +283,6 @@ fn collect_workspace_file_watch_scopes(state: &AppState) -> Vec<WorkspaceFileWat
     scopes
 }
 
-#[cfg(not(test))]
 fn canonical_workspace_file_watch_root(root: &str) -> Option<PathBuf> {
     let trimmed = root.trim();
     if trimmed.is_empty() {
@@ -296,7 +293,6 @@ fn canonical_workspace_file_watch_root(root: &str) -> Option<PathBuf> {
     canonical.is_dir().then(|| normalize_user_facing_path(&canonical))
 }
 
-#[cfg(not(test))]
 fn prune_nested_workspace_file_watch_roots(mut roots: Vec<PathBuf>) -> Vec<PathBuf> {
     roots.sort_by_key(|root| root.components().count());
     let mut pruned = Vec::<PathBuf>::new();
@@ -359,7 +355,6 @@ fn merge_workspace_file_change_kind(
     }
 }
 
-#[cfg(not(test))]
 fn workspace_file_changes_from_path(
     path: &FsPath,
     kind: WorkspaceFileChangeKind,
@@ -1269,6 +1264,11 @@ impl AppState {
             return;
         }
 
+        let session_scoped_change_paths = changes
+            .iter()
+            .filter(|change| change.session_id.as_deref().is_some_and(|value| !value.trim().is_empty()))
+            .map(|change| change.path.trim().to_owned())
+            .collect::<HashSet<_>>();
         let mut inner = self.inner.lock().expect("state mutex poisoned");
         let now = std::time::Instant::now();
         let mut late_summary_session_indexes = Vec::<usize>::new();
@@ -1288,6 +1288,10 @@ impl AppState {
             }
 
             for change in changes {
+                let path = change.path.trim();
+                if change.session_id.is_none() && session_scoped_change_paths.contains(path) {
+                    continue;
+                }
                 if change
                     .session_id
                     .as_deref()
@@ -1296,7 +1300,6 @@ impl AppState {
                     continue;
                 }
 
-                let path = change.path.trim();
                 if path.is_empty() || !path_contains(&record.session.workdir, FsPath::new(path)) {
                     continue;
                 }
@@ -1320,6 +1323,7 @@ impl AppState {
         for index in late_summary_session_indexes {
             let message_id = inner.next_message_id();
             push_active_turn_file_changes_on_record(&mut inner.sessions[index], message_id);
+            inner.sessions[index].active_turn_file_change_grace_deadline = None;
         }
         if let Err(err) = self.commit_locked(&mut inner) {
             eprintln!(
@@ -2355,7 +2359,11 @@ impl AppState {
                         if should_restart_for_effort {
                             record.runtime_reset_required = true;
                         } else if let SessionRuntime::Claude(handle) = &record.runtime {
-                            claude_model_update = Some((handle.clone(), model.to_owned()));
+                            if claude_cli_model_arg(model).is_some() {
+                                claude_model_update = Some((handle.clone(), model.to_owned()));
+                            } else {
+                                record.runtime_reset_required = true;
+                            }
                         }
                     }
                 }
@@ -7820,9 +7828,14 @@ fn push_message_on_record(record: &mut SessionRecord, message: Message) -> usize
 
 /// Keeps a short post-turn window for watcher events that arrive after completion.
 fn finish_active_turn_file_change_tracking(record: &mut SessionRecord) {
-    record.active_turn_start_message_count = None;
-    record.active_turn_file_change_grace_deadline =
-        Some(std::time::Instant::now() + ACTIVE_TURN_FILE_CHANGE_GRACE);
+    if record.active_turn_start_message_count.take().is_some() {
+        record.active_turn_file_change_grace_deadline =
+            Some(std::time::Instant::now() + ACTIVE_TURN_FILE_CHANGE_GRACE);
+        return;
+    }
+
+    record.active_turn_file_changes.clear();
+    record.active_turn_file_change_grace_deadline = None;
 }
 
 /// Clears active turn file-change tracking.

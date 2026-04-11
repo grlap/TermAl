@@ -72,7 +72,7 @@ function normalizedSessionId(sessionId: string | null | undefined) {
   return sessionId?.trim() ?? "";
 }
 
-function workspaceFileChangeMatchesScope(
+export function workspaceFileChangeMatchesScope(
   change: WorkspaceFileChange,
   scope?: WorkspaceFileChangeScope,
 ) {
@@ -211,8 +211,12 @@ export function mergeWorkspaceFilesChangedEvents(
   current: WorkspaceFilesChangedEvent | null,
   next: WorkspaceFilesChangedEvent,
 ): WorkspaceFilesChangedEvent {
-  if (!current || next.revision <= current.revision) {
-    return !current || next.revision > current.revision ? next : current;
+  if (!current) {
+    return next;
+  }
+
+  if (next.revision < current.revision) {
+    return current;
   }
 
   const changesByKey = new Map<string, WorkspaceFileChange>();

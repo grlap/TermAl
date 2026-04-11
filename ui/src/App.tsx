@@ -2929,11 +2929,20 @@ export default function App() {
       });
     }
 
+    function resetWorkspaceFilesChangedEventGate() {
+      lastWorkspaceFilesChangedRevisionRef.current = null;
+      workspaceFilesChangedEventBufferRef.current = null;
+      if (workspaceFilesChangedEventFlushTimeoutRef.current !== null) {
+        window.clearTimeout(workspaceFilesChangedEventFlushTimeoutRef.current);
+        workspaceFilesChangedEventFlushTimeoutRef.current = null;
+      }
+    }
+
     function enqueueWorkspaceFilesChangedEvent(
       filesChanged: WorkspaceFilesChangedEvent,
     ) {
       const lastRevision = lastWorkspaceFilesChangedRevisionRef.current;
-      if (lastRevision !== null && filesChanged.revision <= lastRevision) {
+      if (lastRevision !== null && filesChanged.revision < lastRevision) {
         return;
       }
 
@@ -3232,6 +3241,7 @@ export default function App() {
     );
     eventSource.onopen = () => {
       if (!cancelled) {
+        resetWorkspaceFilesChangedEventGate();
         sawReconnectOpenSinceLastError = true;
         if (latestStateRevisionRef.current !== null) {
           // A restarted backend can reconnect with the same persisted revision but a

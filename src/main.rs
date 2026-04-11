@@ -40,8 +40,8 @@ use base64::Engine as _;
 use chrono::Local;
 #[cfg(not(test))]
 use notify::{
-    Config as NotifyConfig, Event as NotifyEvent, EventKind as NotifyEventKind,
-    RecommendedWatcher, RecursiveMode, Watcher,
+    Config as NotifyConfig, Event as NotifyEvent, EventKind as NotifyEventKind, RecommendedWatcher,
+    RecursiveMode, Watcher,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};

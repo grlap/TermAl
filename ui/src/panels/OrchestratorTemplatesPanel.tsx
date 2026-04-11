@@ -2084,7 +2084,10 @@ function orchestratorSessionModelOptions(
 
   if (
     normalizedModel &&
-    !options.some((option) => option.value === normalizedModel)
+    !options.some(
+      (option) =>
+        option.value.trim().toLowerCase() === normalizedModel.toLowerCase(),
+    )
   ) {
     pushOption({
       label: formatSessionModelOptionLabel(normalizedModel),
