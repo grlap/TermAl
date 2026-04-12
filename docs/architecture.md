@@ -128,12 +128,12 @@ All routes are under `/api`. The backend serves JSON, and the frontend proxies r
 | POST | `/api/git/commit` | Create a git commit from staged changes |
 | POST | `/api/git/push` | Push the current repo |
 | POST | `/api/git/sync` | Pull, rebase, or otherwise sync the current repo |
-| POST | `/api/terminal/run` | Run a bounded shell command in a project- or session-scoped working directory |
+| POST | `/api/terminal/run` | Run a bounded shell command in a project- or session-scoped working directory. Request body enforces `command` ≤ 20,000 chars and `workdir` ≤ 4,096 chars (no interior NUL bytes). Returns 429 (`{ "error": ... }`) when the concurrency cap for that destination is exhausted; local and remote commands have independent budgets of 4 in-flight requests each. When the destination is remote, a 429 emitted by the remote host is re-emitted locally with the remote's display name prefixed onto the error message (e.g. `remote alice: too many local terminal commands are already running; limit is 4`), so the caller can distinguish a local cap rejection from a remote-side propagation. |
 | GET | `/api/state` | Full state snapshot |
 | GET | `/api/workspaces` | List saved workspace layout summaries |
 | GET | `/api/workspaces/{id}` | Read a persisted workspace layout |
 | PUT | `/api/workspaces/{id}` | Save a persisted workspace layout |
-| DELETE | `/api/workspaces/{id}` | Delete a persisted workspace layout |
+| DELETE | `/api/workspaces/{id}` (200) -> `WorkspaceLayoutsResponse` | Delete a persisted workspace layout and return the remaining layout summaries |
 | POST | `/api/settings` | Update app-wide preferences and remote config |
 | GET | `/api/orchestrators/templates` | List orchestrator templates |
 | POST | `/api/orchestrators/templates` | Create orchestrator template |

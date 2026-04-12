@@ -1,9 +1,22 @@
-import { type FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import {
+  type FormEvent,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
 
-import { runTerminalCommand, type TerminalCommandResponse } from "../api";
+import {
+  ApiRequestError,
+  runTerminalCommand,
+  type TerminalCommandResponse,
+} from "../api";
 import { getErrorMessage } from "../app-utils";
 
-type TerminalHistoryEntry = {
+export type TerminalHistoryEntry = {
   command: string;
   error: string | null;
   id: string;
@@ -13,7 +26,176 @@ type TerminalHistoryEntry = {
   workdir: string;
 };
 
-const terminalHistoryById = new Map<string, TerminalHistoryEntry[]>();
+type TerminalHistoryStore = {
+  history: TerminalHistoryEntry[];
+  listeners: Set<() => void>;
+};
+
+const terminalHistoryById = new Map<string, TerminalHistoryStore>();
+const inFlightTerminalEntries = new Set<string>();
+const emptyTerminalHistory: readonly TerminalHistoryEntry[] = [];
+let liveTerminalIds: Set<string> | null = null;
+
+function getOrCreateTerminalHistoryStore(terminalId: string) {
+  let store = terminalHistoryById.get(terminalId);
+  if (!store) {
+    // Initialize with the shared `emptyTerminalHistory` constant so the
+    // post-subscribe snapshot keeps the same referential identity as the
+    // render-time snapshot returned by `getTerminalHistorySnapshot` when
+    // the store did not yet exist. Without this, React's tearing check
+    // would see two distinct empty arrays via `Object.is` and schedule a
+    // wasted re-render on every first-mount of a TerminalPanel. The cast
+    // is safe because both `reconcileStaleRunningEntries` and
+    // `setTerminalHistory` replace `store.history` with a freshly-built
+    // array instead of mutating in place.
+    store = {
+      history: emptyTerminalHistory as TerminalHistoryEntry[],
+      listeners: new Set(),
+    };
+    terminalHistoryById.set(terminalId, store);
+  }
+
+  return store;
+}
+
+function reconcileStaleRunningEntries(store: TerminalHistoryStore) {
+  let changed = false;
+  const history = store.history.map((entry) => {
+    if (entry.status !== "running" || inFlightTerminalEntries.has(entry.id)) {
+      return entry;
+    }
+
+    changed = true;
+    return { ...entry, status: "error" as const, error: "Interrupted" };
+  });
+
+  if (changed) {
+    store.history = history;
+  }
+
+  return changed;
+}
+
+function getTerminalHistorySnapshot(terminalId: string) {
+  return terminalHistoryById.get(terminalId)?.history ?? emptyTerminalHistory;
+}
+
+function subscribeTerminalHistory(terminalId: string, listener: () => void) {
+  const store = getOrCreateTerminalHistoryStore(terminalId);
+  const changed = reconcileStaleRunningEntries(store);
+  store.listeners.add(listener);
+  if (changed) {
+    listener();
+  }
+
+  return () => {
+    terminalHistoryById.get(terminalId)?.listeners.delete(listener);
+    pruneClosedTerminalHistory(terminalId);
+  };
+}
+
+function setTerminalHistory(
+  terminalId: string,
+  updater: (history: TerminalHistoryEntry[]) => TerminalHistoryEntry[],
+) {
+  const store = getOrCreateTerminalHistoryStore(terminalId);
+  const nextHistory = updater(store.history);
+  store.history = nextHistory;
+  for (const listener of Array.from(store.listeners)) {
+    listener();
+  }
+  // Intentionally NOT calling `pruneClosedTerminalHistory(terminalId)`
+  // here. Three prune sites already cover every cleanup path without
+  // coupling prune to the listener-notification loop:
+  //
+  // 1. `subscribeTerminalHistory`'s cleanup closure runs when a
+  //    component unmounts and drops its subscription. This is the usual
+  //    "panel closed while idle" case.
+  // 2. The App-level `pruneTerminalPanelHistory` effect keyed on
+  //    `terminalTabIdsKey` runs whenever the set of live terminal tabs
+  //    changes, catching tab close even when the panel's own unmount
+  //    ordering races the effect's dep-change check.
+  // 3. `handleSubmit`'s `finally` block calls
+  //    `pruneClosedTerminalHistory(terminalId)` once the in-flight entry
+  //    count has been decremented. This is the load-bearing path for a
+  //    command that finishes AFTER the panel has unmounted: the earlier
+  //    subscribe-cleanup prune saw a store with a running entry and
+  //    bailed out, and the completion callback needs to re-run prune so
+  //    the store gets collected now that the running entry is done.
+  //
+  // Calling prune from inside this listener-notification loop would
+  // open a re-entrant race on top of all three: a listener that
+  // unsubscribes during its own notification can drop `listeners.size`
+  // to zero mid-iteration, after which the prune would delete the store
+  // the outer iteration is still writing into. Omitting the call here
+  // eliminates the race by construction without losing any cleanup
+  // coverage, because the three sites above collectively dominate it.
+}
+
+function updateTerminalHistoryEntry(
+  terminalId: string,
+  entryId: string,
+  updater: (entry: TerminalHistoryEntry) => TerminalHistoryEntry,
+) {
+  setTerminalHistory(terminalId, (history) =>
+    history.map((entry) => (entry.id === entryId ? updater(entry) : entry)),
+  );
+}
+
+function hasRunningTerminalEntry(history: readonly TerminalHistoryEntry[]) {
+  return history.some((entry) => entry.status === "running");
+}
+
+function pruneClosedTerminalHistory(terminalId: string) {
+  if (!liveTerminalIds || liveTerminalIds.has(terminalId)) {
+    return;
+  }
+
+  const store = terminalHistoryById.get(terminalId);
+  if (store && store.listeners.size === 0 && !hasRunningTerminalEntry(store.history)) {
+    terminalHistoryById.delete(terminalId);
+  }
+}
+
+export function pruneTerminalPanelHistory(activeTerminalIds: Iterable<string>) {
+  liveTerminalIds = new Set(activeTerminalIds);
+  for (const terminalId of Array.from(terminalHistoryById.keys())) {
+    pruneClosedTerminalHistory(terminalId);
+  }
+}
+
+export function resetTerminalPanelStateForTests() {
+  terminalHistoryById.clear();
+  inFlightTerminalEntries.clear();
+  liveTerminalIds = null;
+}
+
+export function setTerminalPanelHistoryForTests(
+  terminalId: string,
+  history: TerminalHistoryEntry[],
+) {
+  terminalHistoryById.set(terminalId, {
+    history,
+    listeners: new Set(),
+  });
+}
+
+export function getTerminalPanelHistoryForTests(terminalId: string) {
+  return terminalHistoryById.get(terminalId)?.history ?? null;
+}
+
+/**
+ * Test-only helper that returns the number of live subscribers currently
+ * attached to a terminal store. Returns `null` if no store entry exists for
+ * the id. Used by the mounted-panel prune test to assert that
+ * `pruneClosedTerminalHistory`'s `listeners.size === 0` gate was actually
+ * exercised — without this helper, a wipe-and-recreate refactor (delete
+ * the store, recreate it when the next `setTerminalHistory` runs) could
+ * leave no observable trace beyond the component's own re-subscription.
+ */
+export function getTerminalPanelListenerCountForTests(terminalId: string) {
+  return terminalHistoryById.get(terminalId)?.listeners.size ?? null;
+}
 
 export function TerminalPanel({
   projectId = null,
@@ -36,16 +218,30 @@ export function TerminalPanel({
   const hasScope = Boolean(normalizedProjectId || normalizedSessionId);
   const [commandDraft, setCommandDraft] = useState("");
   const [workdirDraft, setWorkdirDraft] = useState(normalizedWorkdir);
-  const [history, setHistory] = useState<TerminalHistoryEntry[]>(
-    () =>
-      (terminalHistoryById.get(terminalId) ?? []).map((entry) =>
-        entry.status === "running"
-          ? { ...entry, status: "error" as const, error: "Interrupted" }
-          : entry,
-      ),
+  // `useCallback` keyed on `terminalId` so that React does not tear down
+  // and re-subscribe on every render. The subscribe path runs
+  // `reconcileStaleRunningEntries` each time it fires; re-subscribing on
+  // every commit would double that work under StrictMode for no benefit.
+  const subscribe = useCallback(
+    (listener: () => void) => subscribeTerminalHistory(terminalId, listener),
+    [terminalId],
   );
+  const getSnapshot = useCallback(
+    () => getTerminalHistorySnapshot(terminalId),
+    [terminalId],
+  );
+  const history = useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const isRunning = history.some((entry) => entry.status === "running");
+  const isRunningRef = useRef(isRunning);
+  // `workdirDraftDirtyRef` is the one remaining guard for the workdir draft
+  // sync effect: once the user edits the input the draft is "dirty" and we
+  // stop reconciling it with the incoming prop until they either submit (the
+  // Use button) or the parent explicitly clears the draft. Dirty drafts
+  // intentionally outlast blur, so that clicking away from the input and back
+  // does not silently discard typed edits on the next prop reconcile.
+  const workdirDraftDirtyRef = useRef(false);
+  const shouldStickToBottomRef = useRef(true);
   const canRun = Boolean(commandDraft.trim() && normalizedWorkdir && hasScope && !isRunning);
   const terminalLabel = useMemo(
     () => formatTerminalWorkdirLabel(normalizedWorkdir),
@@ -53,16 +249,20 @@ export function TerminalPanel({
   );
 
   useEffect(() => {
+    isRunningRef.current = isRunning;
+  }, [isRunning]);
+
+  useEffect(() => {
+    if (workdirDraftDirtyRef.current) {
+      return;
+    }
+
     setWorkdirDraft(normalizedWorkdir);
   }, [normalizedWorkdir]);
 
-  useEffect(() => {
-    terminalHistoryById.set(terminalId, history);
-  }, [history, terminalId]);
-
-  useEffect(() => {
+  useLayoutEffect(() => {
     const node = scrollRef.current;
-    if (!node) {
+    if (!node || !shouldStickToBottomRef.current) {
       return;
     }
     node.scrollTop = node.scrollHeight;
@@ -71,10 +271,11 @@ export function TerminalPanel({
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const command = commandDraft.trim();
-    if (!command || !normalizedWorkdir || !hasScope || isRunning) {
+    if (!command || !normalizedWorkdir || !hasScope || isRunningRef.current) {
       return;
     }
 
+    isRunningRef.current = true;
     const entryId = crypto.randomUUID();
     const startedAt = new Date().toLocaleTimeString();
     const entry: TerminalHistoryEntry = {
@@ -86,7 +287,8 @@ export function TerminalPanel({
       status: "running",
       workdir: normalizedWorkdir,
     };
-    setHistory((current) => [...current, entry]);
+    inFlightTerminalEntries.add(entryId);
+    setTerminalHistory(terminalId, (current) => [...current, entry]);
     setCommandDraft("");
 
     try {
@@ -96,40 +298,32 @@ export function TerminalPanel({
         sessionId: normalizedSessionId || null,
         workdir: normalizedWorkdir,
       });
-      const updater = (item: TerminalHistoryEntry) =>
-        item.id === entryId
-          ? {
-              ...item,
-              response,
-              status: "done" as const,
-              workdir: response.workdir,
-            }
-          : item;
-      setHistory((current) => current.map(updater));
-      const cached = terminalHistoryById.get(terminalId);
-      if (cached) {
-        terminalHistoryById.set(terminalId, cached.map(updater));
-      }
+      updateTerminalHistoryEntry(terminalId, entryId, (item) => ({
+        ...item,
+        response,
+        status: "done" as const,
+        workdir: response.workdir,
+      }));
     } catch (error) {
-      const updater = (item: TerminalHistoryEntry) =>
-        item.id === entryId
-          ? {
-              ...item,
-              error: getErrorMessage(error),
-              status: "error" as const,
-            }
-          : item;
-      setHistory((current) => current.map(updater));
-      const cached = terminalHistoryById.get(terminalId);
-      if (cached) {
-        terminalHistoryById.set(terminalId, cached.map(updater));
-      }
+      updateTerminalHistoryEntry(terminalId, entryId, (item) => ({
+        ...item,
+        error: formatTerminalCommandError(error),
+        status: "error" as const,
+      }));
+    } finally {
+      inFlightTerminalEntries.delete(entryId);
+      const store = terminalHistoryById.get(terminalId);
+      isRunningRef.current = Boolean(
+        store && hasRunningTerminalEntry(store.history),
+      );
+      pruneClosedTerminalHistory(terminalId);
     }
   }
 
   function clearHistory() {
-    setHistory([]);
-    terminalHistoryById.delete(terminalId);
+    // Reuse the shared constant so repeated clears do not introduce new
+    // array identities that React would have to reconcile.
+    setTerminalHistory(terminalId, () => emptyTerminalHistory as TerminalHistoryEntry[]);
   }
 
   return (
@@ -156,6 +350,7 @@ export function TerminalPanel({
             event.preventDefault();
             const nextWorkdir = workdirDraft.trim();
             if (nextWorkdir) {
+              workdirDraftDirtyRef.current = false;
               onOpenWorkdir(nextWorkdir);
             }
           }}
@@ -167,7 +362,10 @@ export function TerminalPanel({
             id={`terminal-workdir-${terminalId}`}
             className="terminal-workdir-input"
             value={workdirDraft}
-            onChange={(event) => setWorkdirDraft(event.target.value)}
+            onChange={(event) => {
+              workdirDraftDirtyRef.current = true;
+              setWorkdirDraft(event.target.value);
+            }}
             spellCheck={false}
           />
           <button className="ghost-button terminal-workdir-button" type="submit">
@@ -182,7 +380,17 @@ export function TerminalPanel({
         </div>
       ) : null}
 
-      <div ref={scrollRef} className="terminal-history" role="log" aria-live="polite">
+      <div
+        ref={scrollRef}
+        className="terminal-history"
+        role="log"
+        aria-live="polite"
+        onScroll={(event) => {
+          shouldStickToBottomRef.current = isTerminalHistoryScrolledToBottom(
+            event.currentTarget,
+          );
+        }}
+      >
         {history.length === 0 ? (
           <div className="terminal-empty-state">
             Run a command in this workspace.
@@ -269,12 +477,26 @@ export function formatTerminalResult(response: TerminalCommandResponse | null) {
   return `Exit ${code} in ${formatDuration(response.durationMs)}`;
 }
 
+function formatTerminalCommandError(error: unknown) {
+  const message = getErrorMessage(error);
+  if (error instanceof ApiRequestError && error.status === 429) {
+    return `${message} (rate limit - try again in a moment)`;
+  }
+
+  return message;
+}
+
 function formatDuration(durationMs: number) {
   if (durationMs < 1000) {
     return `${durationMs}ms`;
   }
 
   return `${(durationMs / 1000).toFixed(1)}s`;
+}
+
+function isTerminalHistoryScrolledToBottom(node: HTMLElement) {
+  const bottomGap = node.scrollHeight - node.clientHeight - node.scrollTop;
+  return bottomGap <= 4;
 }
 
 export function formatTerminalWorkdirLabel(workdir: string) {

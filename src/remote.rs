@@ -594,6 +594,39 @@ impl AppState {
         }))
     }
 
+    /// Peeks whether a terminal request with the given identifiers would
+    /// resolve to a remote scope, using only in-memory state (no network
+    /// I/O). Callers use this to decide which concurrency semaphore to
+    /// acquire before invoking `remote_scope_for_request`, which can
+    /// otherwise trigger `ensure_remote_project_binding`'s unbounded
+    /// `POST /api/projects` call outside the 429 rate limit on a burst of
+    /// first-time remote terminal requests.
+    fn terminal_request_is_remote(
+        &self,
+        session_id: Option<&str>,
+        project_id: Option<&str>,
+    ) -> bool {
+        let inner = self.inner.lock().expect("state mutex poisoned");
+        if let Some(session_id) = normalize_optional_identifier(session_id) {
+            if let Some(index) = inner.find_session_index(session_id) {
+                let record = &inner.sessions[index];
+                if record.remote_id.is_some() && record.remote_session_id.is_some() {
+                    return true;
+                }
+            }
+        }
+
+        if let Some(project_id) = normalize_optional_identifier(project_id) {
+            if let Some(project) = inner.find_project(project_id) {
+                if project.remote_id != LOCAL_REMOTE_ID {
+                    return true;
+                }
+            }
+        }
+
+        false
+    }
+
     /// Handles remote scope for request.
     fn remote_scope_for_request(
         &self,

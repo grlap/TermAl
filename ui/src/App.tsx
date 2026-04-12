@@ -173,7 +173,10 @@ import { OrchestratorTemplateLibraryPanel } from "./panels/OrchestratorTemplateL
 import { PaneTabs, type PaneTabDecoration } from "./panels/PaneTabs";
 import { OrchestratorTemplatesPanel } from "./panels/OrchestratorTemplatesPanel";
 import { SessionCanvasPanel } from "./panels/SessionCanvasPanel";
-import { TerminalPanel } from "./panels/TerminalPanel";
+import {
+  TerminalPanel,
+  pruneTerminalPanelHistory,
+} from "./panels/TerminalPanel";
 import {
   SourcePanel,
   type SourceFileState,
@@ -3721,6 +3724,30 @@ export default function App() {
   useEffect(() => {
     workspaceRef.current = workspace;
   }, [workspace]);
+
+  const terminalTabIds = useMemo(
+    () =>
+      workspace.panes.flatMap((pane) =>
+        pane.tabs.flatMap((tab) => (tab.kind === "terminal" ? [tab.id] : [])),
+      ),
+    [workspace.panes],
+  );
+  // Sort before joining so that tab drag-drop reorders do not re-fire the
+  // prune effect: the effect cares about membership, not order.
+  const terminalTabIdsKey = useMemo(
+    () => terminalTabIds.slice().sort().join("\0"),
+    [terminalTabIds],
+  );
+
+  // `terminalTabIds` is intentionally read from closure without being listed
+  // in the dep array: the membership-based `terminalTabIdsKey` is the
+  // source of truth for when this effect should re-run, and listing both
+  // would fire it on every reorder even though nothing about membership
+  // changed.
+  useEffect(() => {
+    pruneTerminalPanelHistory(terminalTabIds);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [terminalTabIdsKey]);
 
   useEffect(() => {
     codexStateRef.current = codexState;
@@ -9783,7 +9810,7 @@ function SessionPaneView({
           : activeGitStatusTab
             ? `${pane.id}:gitStatus:${activeGitStatusTab.workdir ?? "empty"}`
             : activeTerminalTab
-              ? `${pane.id}:terminal:${activeTerminalTab.workdir ?? "empty"}`
+              ? `${pane.id}:terminal:${activeTerminalTab.id}`
               : activeInstructionDebuggerTab
                 ? `${pane.id}:instructionDebugger:${activeInstructionDebuggerTab.originSessionId ?? activeInstructionDebuggerTab.workdir ?? "empty"}`
                 : activeDiffPreviewTab
@@ -11423,68 +11450,68 @@ function SessionPaneView({
             />
           )
         ) : activeTerminalTab ? (
-          shouldRenderTerminalProjectScope ? (
-            <section
-              className="control-panel-section-stack terminal-section-stack"
-              aria-label="Terminal"
-            >
-              {renderWorkspaceTabProjectScope(
-                `workspace-project-scope-${pane.id}-terminal`,
-                activeTerminalScopeProjectId,
-                (nextProjectId) => {
-                  const nextProject = projectLookup.get(nextProjectId) ?? null;
-                  if (!nextProject) {
-                    return;
-                  }
+          <section
+            className="control-panel-section-stack terminal-section-stack"
+            aria-label="Terminal"
+          >
+            {shouldRenderTerminalProjectScope
+              ? renderWorkspaceTabProjectScope(
+                  `workspace-project-scope-${pane.id}-terminal`,
+                  activeTerminalScopeProjectId,
+                  (nextProjectId) => {
+                    const nextProject = projectLookup.get(nextProjectId) ?? null;
+                    if (!nextProject) {
+                      return;
+                    }
 
-                  onOpenTerminalTab(
-                    pane.id,
-                    resolveControlPanelWorkspaceRoot(nextProject, null),
-                    resolveWorkspaceScopedSessionId(
-                      nextProjectId,
-                      null,
-                      activeSession,
-                      allKnownSessions,
-                      sessionLookup,
-                    ),
-                    nextProject.id,
-                  );
-                },
-              )}
-              <TerminalPanel
-                key={activeTerminalTab.id}
-                terminalId={activeTerminalTab.id}
-                projectId={activeTerminalScopeProjectId}
-                sessionId={activeTerminalScopedSessionId}
-                showPathControls={false}
-                workdir={activeTerminalScopedWorkdir}
-                onOpenWorkdir={(path) =>
-                  onOpenTerminalTab(
-                    pane.id,
-                    path,
-                    activeTerminalScopedSessionId,
-                    activeTerminalScopeProjectId,
-                  )
-                }
-              />
-            </section>
-          ) : (
+                    onOpenTerminalTab(
+                      pane.id,
+                      resolveControlPanelWorkspaceRoot(nextProject, null),
+                      resolveWorkspaceScopedSessionId(
+                        nextProjectId,
+                        null,
+                        activeSession,
+                        allKnownSessions,
+                        sessionLookup,
+                      ),
+                      nextProject.id,
+                    );
+                  },
+                )
+              : null}
             <TerminalPanel
               key={activeTerminalTab.id}
               terminalId={activeTerminalTab.id}
-              projectId={activeTerminalOriginProjectId}
-              sessionId={activeTerminalOriginSessionId}
-              workdir={activeTerminalTab.workdir}
+              projectId={
+                shouldRenderTerminalProjectScope
+                  ? activeTerminalScopeProjectId
+                  : activeTerminalOriginProjectId
+              }
+              sessionId={
+                shouldRenderTerminalProjectScope
+                  ? activeTerminalScopedSessionId
+                  : activeTerminalOriginSessionId
+              }
+              showPathControls={!shouldRenderTerminalProjectScope}
+              workdir={
+                shouldRenderTerminalProjectScope
+                  ? activeTerminalScopedWorkdir
+                  : activeTerminalTab.workdir
+              }
               onOpenWorkdir={(path) =>
                 onOpenTerminalTab(
                   pane.id,
                   path,
-                  activeTerminalOriginSessionId,
-                  activeTerminalOriginProjectId,
+                  shouldRenderTerminalProjectScope
+                    ? activeTerminalScopedSessionId
+                    : activeTerminalOriginSessionId,
+                  shouldRenderTerminalProjectScope
+                    ? activeTerminalScopeProjectId
+                    : activeTerminalOriginProjectId,
                 )
               }
             />
-          )
+          </section>
         ) : activeInstructionDebuggerTab ? (
           <InstructionDebuggerPanel
             session={activeInstructionDebuggerSession}

@@ -1395,6 +1395,7 @@ dependencies = [
  "base64",
  "chrono",
  "futures-core",
+ "libc",
  "notify",
  "reqwest",
  "rusqlite",
@@ -1406,6 +1407,7 @@ dependencies = [
  "tower",
  "tower-http",
  "uuid",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]

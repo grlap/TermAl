@@ -462,6 +462,20 @@ export function normalizeWorkspaceStatePaths(workspace: WorkspaceState): Workspa
               path: normalizeWorkspacePath(tab.path),
             };
           }
+          // IMPORTANT: every branch below uses `...tab` spread to preserve
+          // fields other than the normalized path. That is load-bearing for
+          // `originSessionId` on all branches and for `originProjectId` on
+          // the terminal branch in particular — both drive remote-scope
+          // resolution in `TerminalPanel`. The spread pattern is asymmetric
+          // with `reconcileWorkspaceState` below, which explicitly
+          // destructures and re-attaches origin fields via
+          // `projectOriginProps(...)`. If you rewrite this normalizer to
+          // enumerate fields explicitly (e.g., to match the reducer's
+          // style), use `projectOriginProps(...)` to re-attach origins or
+          // you will silently drop them for every tab that hasn't been
+          // reconciled yet. The round-trip tests in
+          // `ui/src/workspace-storage.test.ts` pin `originProjectId` on
+          // terminal tabs; keep those green.
           if (tab.kind === "filesystem") {
             return {
               ...tab,
@@ -2521,6 +2535,24 @@ function resolveCanvasOpenTargetPaneId(
  * Updates workdir, originSessionId, and originProjectId on standalone tabs
  * (gitStatus, filesystem) so they reflect the newly-selected session's project.
  */
+/**
+ * Rescope the active tab of a control-surface pane to a new
+ * session/project context. Called when the user activates a pane so that
+ * control surfaces auto-follow the ambient session.
+ *
+ * NOTE: terminal tabs are deliberately NOT rescoped here even though they
+ * render inside a `.control-panel-section-stack terminal-section-stack`
+ * wrapper in `App.tsx` (which can make them look like control surfaces).
+ * A terminal's `originProjectId` is load-bearing for its command history
+ * — the history store is keyed on the per-tab UUID, but the routing scope
+ * for `runTerminalCommand` comes from `originProjectId` via the
+ * `TerminalPanel` `projectId` prop, and silently reassigning that on
+ * every pane activation would make history bleed across projects. Users
+ * rescope a terminal explicitly via the project-scope dropdown at
+ * `App.tsx` (`shouldRenderTerminalProjectScope`); this function should
+ * leave terminal tabs alone. See also `CONTROL_SURFACE_KINDS` below,
+ * which intentionally excludes `"terminal"` for the same reason.
+ */
 export function rescopeControlSurfacePane(
   workspace: WorkspaceState,
   controlSurfacePaneId: string,
@@ -2547,6 +2579,9 @@ export function rescopeControlSurfacePane(
   } else if (activeTab.kind === "controlPanel" || activeTab.kind === "sessionList" || activeTab.kind === "projectList" || activeTab.kind === "orchestratorList") {
     updatedTab = { ...activeTab, originSessionId: sessionId ?? activeTab.originSessionId, originProjectId: projectId };
   }
+  // Terminal tabs intentionally have no branch here — see the doc comment
+  // above. Do NOT add one without also taking `TerminalPanel`'s history
+  // keying and its project-scope dropdown into account.
 
   if (!updatedTab || updatedTab === activeTab) {
     return workspace;
@@ -2599,6 +2634,21 @@ function paneContainsControlPanel(pane: WorkspacePane) {
   return pane.tabs.some((tab) => tab.kind === "controlPanel");
 }
 
+/**
+ * Tabs that represent "ambient" control surfaces — views that should
+ * auto-follow the user's current session/project context when the pane
+ * is activated. `rescopeControlSurfacePane` uses this set to decide
+ * which panes are candidates for auto-rescoping.
+ *
+ * `"terminal"` is deliberately NOT in this set. Terminal tabs render
+ * inside a `.control-panel-section-stack terminal-section-stack` wrapper
+ * and expose a project-scope dropdown, so they can look like control
+ * surfaces, but their `originProjectId` is pinned at creation time and
+ * must not drift: the `TerminalPanel` project-scope prop flows into
+ * `runTerminalCommand`'s remote-scope lookup, and auto-rescoping would
+ * make command history bleed across projects. See the doc comment on
+ * `rescopeControlSurfacePane` above for the full rationale.
+ */
 export const CONTROL_SURFACE_KINDS: ReadonlySet<string> = new Set([
   "controlPanel", "sessionList", "projectList", "orchestratorList",
   "gitStatus", "filesystem",

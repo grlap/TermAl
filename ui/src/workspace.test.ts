@@ -2230,6 +2230,61 @@ describe("workspace helpers", () => {
       makeGitStatusTab("git-a", legacyWorkdir, "session-a"),
     ]);
   });
+
+  it("openTerminalInWorkspaceState reuses a restored terminal tab with a legacy Windows verbatim workdir", () => {
+    const legacyWorkdir = String.raw`\\?\C:\repo`;
+    const normalizedWorkdir = String.raw`C:\repo`;
+    const paneA = makePane(
+      "pane-a",
+      [makeTerminalTab("terminal-a", legacyWorkdir, "session-a", "project-a")],
+      {
+        activeTabId: "terminal-a",
+        activeSessionId: "session-a",
+        viewMode: "terminal",
+      },
+    );
+    const paneB = makePane("pane-b", [makeSessionTab("tab-b", "session-b")]);
+
+    const next = openTerminalInWorkspaceState(
+      makeSplitWorkspace(paneA, paneB, paneB.id),
+      normalizedWorkdir,
+      paneB.id,
+      "session-a",
+      "project-a",
+    );
+
+    const terminalPane = next.panes.find((pane) => pane.id === "pane-a");
+    expect(next.activePaneId).toBe("pane-a");
+    expect(terminalPane?.activeTabId).toBe("terminal-a");
+    expect(terminalPane?.tabs).toEqual([
+      makeTerminalTab("terminal-a", legacyWorkdir, "session-a", "project-a"),
+    ]);
+  });
+
+  it("openTerminalInWorkspaceState creates separate null-workdir terminal tabs", () => {
+    const pane = makePane("pane-a", [
+      makeSessionTab("tab-a", "session-a"),
+      makeTerminalTab("terminal-a", null, "session-a", "project-a"),
+    ]);
+
+    const next = openTerminalInWorkspaceState(
+      makeSinglePaneWorkspace(pane),
+      null,
+      "pane-a",
+      "session-a",
+      "project-a",
+    );
+
+    expect(next.panes[0].tabs).toHaveLength(3);
+    expect(next.panes[0].tabs[2]).toEqual({
+      id: expect.any(String),
+      kind: "terminal",
+      workdir: null,
+      originSessionId: "session-a",
+      originProjectId: "project-a",
+    });
+    expect(next.panes[0].activeTabId).toBe(next.panes[0].tabs[2]?.id ?? null);
+  });
   it("openSessionListInWorkspaceState creates a sessions tab and switches the pane mode", () => {
     const next = openSessionListInWorkspaceState(
       makeSinglePaneWorkspace(

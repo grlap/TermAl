@@ -68,12 +68,16 @@ struct AppState {
     /// so duplicate or older fallback events do not trigger redundant
     /// blocking `/api/state` fetches.
     remote_sse_fallback_resynced_revision: Arc<Mutex<HashMap<String, u64>>>,
+    terminal_local_command_semaphore: Arc<tokio::sync::Semaphore>,
+    terminal_remote_command_semaphore: Arc<tokio::sync::Semaphore>,
     stopping_orchestrator_ids: Arc<Mutex<HashSet<String>>>,
     stopping_orchestrator_session_ids: Arc<Mutex<HashMap<String, HashSet<String>>>>,
     inner: Arc<Mutex<StateInner>>,
 }
 
 const SESSION_NOT_RUNNING_CONFLICT_MESSAGE: &str = "session is not currently running";
+const TERMINAL_LOCAL_COMMAND_CONCURRENCY_LIMIT: usize = 4;
+const TERMINAL_REMOTE_COMMAND_CONCURRENCY_LIMIT: usize = 4;
 const AGENT_READINESS_CACHE_TTL: Duration = Duration::from_secs(5);
 const ACTIVE_TURN_FILE_CHANGE_GRACE: Duration = Duration::from_millis(750);
 
@@ -567,6 +571,12 @@ impl AppState {
                     .expect("remote registry init thread panicked")?,
             ),
             remote_sse_fallback_resynced_revision: Arc::new(Mutex::new(HashMap::new())),
+            terminal_local_command_semaphore: Arc::new(tokio::sync::Semaphore::new(
+                TERMINAL_LOCAL_COMMAND_CONCURRENCY_LIMIT,
+            )),
+            terminal_remote_command_semaphore: Arc::new(tokio::sync::Semaphore::new(
+                TERMINAL_REMOTE_COMMAND_CONCURRENCY_LIMIT,
+            )),
             stopping_orchestrator_ids: Arc::new(Mutex::new(HashSet::new())),
             stopping_orchestrator_session_ids: Arc::new(Mutex::new(HashMap::new())),
             inner: Arc::new(Mutex::new(inner)),

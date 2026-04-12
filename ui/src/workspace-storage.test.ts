@@ -254,6 +254,13 @@ describe("workspace storage", () => {
                 originSessionId: "session-1",
               },
               {
+                id: "tab-terminal",
+                kind: "terminal",
+                workdir: legacyRoot,
+                originSessionId: "session-1",
+                originProjectId: "project-1",
+              },
+              {
                 id: "tab-debug",
                 kind: "instructionDebugger",
                 workdir: legacyRoot,
@@ -309,6 +316,22 @@ describe("workspace storage", () => {
                 kind: "gitStatus",
                 workdir: normalizedRoot,
                 originSessionId: "session-1",
+              },
+              {
+                id: "tab-terminal",
+                kind: "terminal",
+                workdir: normalizedRoot,
+                originSessionId: "session-1",
+                // Pin that `originProjectId` survives
+                // `normalizeWorkspaceStatePaths`: the field drives
+                // remote-scope resolution in `TerminalPanel` via
+                // `runTerminalCommand`'s `projectId`, and the normalizer's
+                // terminal branch preserves it only incidentally via the
+                // `...tab` spread at `ui/src/workspace.ts` (the terminal
+                // history store itself is keyed on the per-tab UUID, not
+                // on `originProjectId`). A future refactor that enumerates
+                // fields explicitly would silently drop this field.
+                originProjectId: "project-1",
               },
               {
                 id: "tab-debug",
@@ -373,6 +396,13 @@ describe("workspace storage", () => {
                 originSessionId: "session-1",
               },
               {
+                id: "tab-terminal",
+                kind: "terminal",
+                workdir: legacyRoot,
+                originSessionId: "session-1",
+                originProjectId: "project-1",
+              },
+              {
                 id: "tab-debug",
                 kind: "instructionDebugger",
                 workdir: legacyRoot,
@@ -428,6 +458,15 @@ describe("workspace storage", () => {
                 kind: "gitStatus",
                 workdir: normalizedRoot,
                 originSessionId: "session-1",
+              },
+              {
+                id: "tab-terminal",
+                kind: "terminal",
+                workdir: normalizedRoot,
+                originSessionId: "session-1",
+                // See the legacy-path round-trip test above for the
+                // rationale pinning `originProjectId`.
+                originProjectId: "project-1",
               },
               {
                 id: "tab-debug",

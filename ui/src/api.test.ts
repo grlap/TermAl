@@ -7,6 +7,7 @@ import {
   fetchWorkspaceLayout,
   fetchState,
   isBackendUnavailableError,
+  runTerminalCommand,
   saveFile,
 } from "./api";
 
@@ -153,6 +154,124 @@ describe("saveFile", () => {
       path: "/repo/src/app.ts",
       content: "updated",
     });
+  });
+});
+
+describe("runTerminalCommand", () => {
+  const originalFetch = globalThis.fetch;
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    if (originalFetch === undefined) {
+      delete (globalThis as Partial<typeof globalThis>).fetch;
+      return;
+    }
+    globalThis.fetch = originalFetch;
+  });
+
+  it("serializes the terminal command request and maps the backend response", async () => {
+    const responseBody = {
+      command: "npm test",
+      durationMs: 42,
+      exitCode: 7,
+      outputTruncated: true,
+      shell: "PowerShell",
+      stderr: "warn\n",
+      stdout: "ok\n",
+      success: false,
+      timedOut: false,
+      workdir: "C:/repo",
+    };
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify(responseBody), {
+        status: 200,
+        headers: {
+          "Content-Type": "application/json",
+        },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      runTerminalCommand({
+        command: "npm test",
+        projectId: "project-a",
+        sessionId: null,
+        workdir: "C:/repo",
+      }),
+    ).resolves.toEqual(responseBody);
+
+    // Structurally compare the serialized body rather than coupling to
+    // insertion order via `JSON.stringify(...)` string equality: a
+    // refactor that reorders fields in `runTerminalCommand`'s call site
+    // (or inserts an object spread) is semantically unchanged and should
+    // not fail this test.
+    const init = fetchMock.mock.calls[0]?.[1] as RequestInit | undefined;
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/terminal/run",
+      expect.objectContaining({
+        method: "POST",
+        headers: expect.objectContaining({
+          "Content-Type": "application/json",
+        }),
+      }),
+    );
+    expect(JSON.parse(init?.body as string)).toEqual({
+      command: "npm test",
+      projectId: "project-a",
+      sessionId: null,
+      workdir: "C:/repo",
+    });
+  });
+
+  it("maps a 429 backend response to ApiRequestError with status 429", async () => {
+    // Five assertions below: instanceof, status, kind, and two message
+    // substrings. `.kind === "request-failed"` is the discriminator that
+    // `isBackendUnavailableError` branches on — pinning it ensures a
+    // regression that miscategorizes 429 as `"backend-unavailable"` would
+    // fail this test instead of silently routing user-retryable rate
+    // limits through the "backend is down" UX.
+    expect.assertions(5);
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          error: "too many local terminal commands are already running; limit is 4",
+        }),
+        {
+          status: 429,
+          headers: {
+            "Content-Type": "application/json",
+          },
+        },
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    try {
+      await runTerminalCommand({
+        command: "echo blocked",
+        projectId: "project-a",
+        sessionId: null,
+        workdir: "C:/repo",
+      });
+      throw new Error("Expected runTerminalCommand to reject on 429");
+    } catch (error) {
+      // Pin the precondition that `formatTerminalCommandError`'s
+      // rate-limit branch in `TerminalPanel.tsx` depends on: a fetch
+      // rejection on 429 must surface as `ApiRequestError` with
+      // `status === 429`, `kind === "request-failed"`, and the backend
+      // message preserved. The rate-limit suffix text itself
+      // (`(rate limit - try again in a moment)`) is pinned by a
+      // separate TerminalPanel integration test; this test covers only
+      // the fetch → ApiRequestError mapping, not the suffix rendering.
+      expect(error).toBeInstanceOf(ApiRequestError);
+      expect((error as ApiRequestError).status).toBe(429);
+      expect((error as ApiRequestError).kind).toBe("request-failed");
+      expect((error as Error).message).toContain(
+        "too many local terminal commands",
+      );
+      expect((error as Error).message).toContain("limit is 4");
+    }
   });
 });
 
