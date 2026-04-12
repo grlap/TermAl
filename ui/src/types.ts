@@ -129,6 +129,7 @@ export type RemoteConfig = {
 
 export type AppPreferences = {
   defaultCodexReasoningEffort: CodexReasoningEffort;
+  defaultClaudeApprovalMode: ClaudeApprovalMode;
   defaultClaudeEffort: ClaudeEffortLevel;
   remotes?: RemoteConfig[] | null;
 };

@@ -4275,6 +4275,7 @@ fn persists_app_settings_and_applies_them_to_new_sessions() {
     let updated = state
         .update_app_settings(UpdateAppSettingsRequest {
             default_codex_reasoning_effort: Some(CodexReasoningEffort::High),
+            default_claude_approval_mode: Some(ClaudeApprovalMode::AutoApprove),
             default_claude_effort: Some(ClaudeEffortLevel::Max),
             remotes: None,
         })
@@ -4283,6 +4284,10 @@ fn persists_app_settings_and_applies_them_to_new_sessions() {
     assert_eq!(
         updated.preferences.default_codex_reasoning_effort,
         CodexReasoningEffort::High
+    );
+    assert_eq!(
+        updated.preferences.default_claude_approval_mode,
+        ClaudeApprovalMode::AutoApprove
     );
     assert_eq!(
         updated.preferences.default_claude_effort,
@@ -4296,6 +4301,10 @@ fn persists_app_settings_and_applies_them_to_new_sessions() {
     assert_eq!(
         reloaded_inner.preferences.default_codex_reasoning_effort,
         CodexReasoningEffort::High
+    );
+    assert_eq!(
+        reloaded_inner.preferences.default_claude_approval_mode,
+        ClaudeApprovalMode::AutoApprove
     );
     assert_eq!(
         reloaded_inner.preferences.default_claude_effort,
@@ -4379,6 +4388,10 @@ fn persists_app_settings_and_applies_them_to_new_sessions() {
         .iter()
         .find(|session| session.id == claude_created.session_id)
         .expect("created Claude session should be present");
+    assert_eq!(
+        claude_session.claude_approval_mode,
+        Some(ClaudeApprovalMode::AutoApprove)
+    );
     assert_eq!(claude_session.claude_effort, Some(ClaudeEffortLevel::Max));
 
     let _ = fs::remove_file(state.persistence_path.as_path());
@@ -6597,6 +6610,7 @@ fn update_app_settings_refreshes_invalidated_agent_readiness_cache() {
     let updated = state
         .update_app_settings(UpdateAppSettingsRequest {
             default_codex_reasoning_effort: Some(next_reasoning_effort),
+            default_claude_approval_mode: None,
             default_claude_effort: None,
             remotes: None,
         })
@@ -6703,6 +6717,7 @@ fn update_app_settings_sse_matches_api_response() {
     let api_response = state
         .update_app_settings(UpdateAppSettingsRequest {
             default_codex_reasoning_effort: Some(next_reasoning_effort),
+            default_claude_approval_mode: None,
             default_claude_effort: None,
             remotes: None,
         })
@@ -17292,6 +17307,7 @@ fn persists_remote_settings() {
     let updated = state
         .update_app_settings(UpdateAppSettingsRequest {
             default_codex_reasoning_effort: None,
+            default_claude_approval_mode: None,
             default_claude_effort: None,
             remotes: Some(vec![
                 RemoteConfig::local(),
@@ -17331,6 +17347,7 @@ fn rejects_remote_settings_with_unsafe_remote_id() {
 
     let error = match state.update_app_settings(UpdateAppSettingsRequest {
         default_codex_reasoning_effort: None,
+        default_claude_approval_mode: None,
         default_claude_effort: None,
         remotes: Some(vec![
             RemoteConfig::local(),
@@ -17363,6 +17380,7 @@ fn rejects_remote_settings_with_invalid_ssh_host() {
 
     let error = match state.update_app_settings(UpdateAppSettingsRequest {
         default_codex_reasoning_effort: None,
+        default_claude_approval_mode: None,
         default_claude_effort: None,
         remotes: Some(vec![
             RemoteConfig::local(),
@@ -17392,6 +17410,7 @@ fn rejects_remote_settings_with_invalid_ssh_user() {
 
     let error = match state.update_app_settings(UpdateAppSettingsRequest {
         default_codex_reasoning_effort: None,
+        default_claude_approval_mode: None,
         default_claude_effort: None,
         remotes: Some(vec![
             RemoteConfig::local(),
@@ -20943,6 +20962,7 @@ fn creates_sessions_for_remote_projects_over_ssh() {
     state
         .update_app_settings(UpdateAppSettingsRequest {
             default_codex_reasoning_effort: None,
+            default_claude_approval_mode: None,
             default_claude_effort: None,
             remotes: Some(vec![
                 RemoteConfig::local(),
@@ -21047,6 +21067,55 @@ fn creates_projects_and_assigns_sessions_to_them() {
         Some(project.project_id.as_str())
     );
     assert_eq!(session.workdir, expected_root);
+}
+
+// Tests that deleting a project keeps its sessions valid and visible globally.
+#[test]
+fn deletes_projects_and_unassigns_existing_sessions() {
+    let state = test_app_state();
+    let root = std::env::temp_dir().join(format!("termal-delete-project-{}", Uuid::new_v4()));
+    fs::create_dir_all(&root).unwrap();
+
+    let project = state
+        .create_project(CreateProjectRequest {
+            name: Some("Delete Project".to_owned()),
+            root_path: root.to_string_lossy().into_owned(),
+            remote_id: default_local_remote_id(),
+        })
+        .unwrap();
+    let created = state
+        .create_session(CreateSessionRequest {
+            agent: Some(Agent::Codex),
+            name: Some("Project Session".to_owned()),
+            workdir: None,
+            project_id: Some(project.project_id.clone()),
+            model: None,
+            approval_policy: None,
+            reasoning_effort: None,
+            sandbox_mode: None,
+            cursor_mode: None,
+            claude_approval_mode: None,
+            claude_effort: None,
+            gemini_approval_mode: None,
+        })
+        .unwrap();
+
+    let deleted = state.delete_project(&project.project_id).unwrap();
+
+    assert!(
+        deleted
+            .projects
+            .iter()
+            .all(|entry| entry.id != project.project_id)
+    );
+    let session = deleted
+        .sessions
+        .iter()
+        .find(|session| session.id == created.session_id)
+        .expect("created session should remain visible");
+    assert_eq!(session.project_id, None);
+
+    fs::remove_dir_all(root).unwrap();
 }
 
 // Tests that rejects session workdirs outside the selected project.

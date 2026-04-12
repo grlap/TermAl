@@ -201,23 +201,26 @@ function makeWorkspaceLayoutResponse(
 }
 
 type AppTestStateResponse = Awaited<ReturnType<typeof api.fetchState>>;
+type AppTestStateResponseOverrides = Pick<
+  AppTestStateResponse,
+  "revision" | "projects" | "orchestrators" | "workspaces" | "sessions"
+> &
+  Partial<
+    Pick<AppTestStateResponse, "codex" | "agentReadiness"> & {
+      preferences: Partial<AppTestStateResponse["preferences"]>;
+    }
+  >;
 
-function makeStateResponse(
-  overrides: Pick<
-    AppTestStateResponse,
-    "revision" | "projects" | "orchestrators" | "workspaces" | "sessions"
-  > &
-    Partial<
-      Pick<AppTestStateResponse, "codex" | "agentReadiness" | "preferences">
-    >,
-): AppTestStateResponse {
+function makeStateResponse(overrides: AppTestStateResponseOverrides): AppTestStateResponse {
   return {
     revision: overrides.revision,
     codex: overrides.codex ?? {},
     agentReadiness: overrides.agentReadiness ?? [],
-    preferences: overrides.preferences ?? {
+    preferences: {
       defaultCodexReasoningEffort: "medium",
+      defaultClaudeApprovalMode: "ask",
       defaultClaudeEffort: "default",
+      ...overrides.preferences,
     },
     projects: overrides.projects,
     orchestrators: overrides.orchestrators,
@@ -13519,6 +13522,7 @@ describe("App", () => {
             revision: 1,
             preferences: {
               defaultCodexReasoningEffort: "medium",
+              defaultClaudeApprovalMode: "auto-approve",
               defaultClaudeEffort: "default",
             },
             projects: [],
@@ -13728,6 +13732,7 @@ describe("App", () => {
             revision: 2,
             preferences: {
               defaultCodexReasoningEffort: "medium",
+              defaultClaudeApprovalMode: "auto-approve",
               defaultClaudeEffort: "max",
             },
             projects: [],
@@ -13755,6 +13760,7 @@ describe("App", () => {
           expect(createSessionSpy).toHaveBeenCalledWith(
             expect.objectContaining({
               agent: "Claude",
+              claudeApprovalMode: "auto-approve",
               claudeEffort: "max",
             }),
           );
@@ -13766,6 +13772,7 @@ describe("App", () => {
               revision: 3,
               preferences: {
                 defaultCodexReasoningEffort: "medium",
+                defaultClaudeApprovalMode: "auto-approve",
                 defaultClaudeEffort: "max",
               },
               projects: [],
@@ -13779,7 +13786,7 @@ describe("App", () => {
                   agent: "Claude",
                   workdir: "/tmp",
                   model: "claude-sonnet-4-20250514",
-                  claudeApprovalMode: "ask",
+                  claudeApprovalMode: "auto-approve",
                   claudeEffort: "max",
                   status: "idle",
                   preview: "Ready for a prompt.",
@@ -13800,6 +13807,7 @@ describe("App", () => {
             revision: 4,
             preferences: {
               defaultCodexReasoningEffort: "medium",
+              defaultClaudeApprovalMode: "auto-approve",
               defaultClaudeEffort: "max",
             },
             projects: [],
@@ -13813,7 +13821,7 @@ describe("App", () => {
                 agent: "Claude",
                 workdir: "/tmp",
                 model: "claude-sonnet-4-20250514",
-                claudeApprovalMode: "ask",
+                claudeApprovalMode: "auto-approve",
                 claudeEffort: "max",
                 status: "idle",
                 preview: "Ready for a prompt.",

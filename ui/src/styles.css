@@ -2543,6 +2543,10 @@ textarea {
   color: var(--signal-red);
 }
 
+.project-context-menu {
+  min-width: 13.5rem;
+}
+
 .pane-tab-status-tooltip {
   --pane-tab-status-arrow-left: 1.4rem;
   position: fixed;

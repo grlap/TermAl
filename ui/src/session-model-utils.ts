@@ -2,6 +2,7 @@ import type {
   AgentReadiness,
   AgentType,
   AppPreferences,
+  ClaudeApprovalMode,
   ClaudeEffortLevel,
   CodexReasoningEffort,
   Project,
@@ -61,6 +62,7 @@ export const ALL_CODEX_REASONING_EFFORTS = CODEX_REASONING_EFFORT_OPTIONS.map(
   (option) => option.value,
 ) as CodexReasoningEffort[];
 export const DEFAULT_CODEX_REASONING_EFFORT: CodexReasoningEffort = "medium";
+export const DEFAULT_CLAUDE_APPROVAL_MODE: ClaudeApprovalMode = "ask";
 export const DEFAULT_CLAUDE_EFFORT: ClaudeEffortLevel = "default";
 export const FALLBACK_CLAUDE_EFFORTS = ["low", "medium", "high"] as ClaudeEffortLevel[];
 
@@ -143,6 +145,8 @@ export function resolveAppPreferences(preferences?: AppPreferences | null) {
   return {
     defaultCodexReasoningEffort:
       preferences?.defaultCodexReasoningEffort ?? DEFAULT_CODEX_REASONING_EFFORT,
+    defaultClaudeApprovalMode:
+      preferences?.defaultClaudeApprovalMode ?? DEFAULT_CLAUDE_APPROVAL_MODE,
     defaultClaudeEffort: preferences?.defaultClaudeEffort ?? DEFAULT_CLAUDE_EFFORT,
     remotes: normalizeRemoteConfigs(preferences?.remotes),
   };

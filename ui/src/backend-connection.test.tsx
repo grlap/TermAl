@@ -3795,6 +3795,7 @@ function makeBackendStateResponse({
     agentReadiness: [],
     preferences: {
       defaultCodexReasoningEffort: "medium",
+      defaultClaudeApprovalMode: "ask",
       defaultClaudeEffort: "default",
     },
     projects: [],

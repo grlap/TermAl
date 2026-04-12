@@ -289,6 +289,7 @@ function makeStateResponse(revision: number): StateResponse {
     agentReadiness: [],
     preferences: {
       defaultCodexReasoningEffort: "medium",
+      defaultClaudeApprovalMode: "ask",
       defaultClaudeEffort: "default",
     },
     projects: [],

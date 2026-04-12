@@ -34,7 +34,7 @@ use axum::extract::{Path as AxumPath, Query, State};
 use axum::http::{HeaderValue, StatusCode};
 use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::response::{IntoResponse, Response};
-use axum::routing::{get, post};
+use axum::routing::{delete, get, post};
 use axum::{Json, Router};
 use base64::Engine as _;
 use chrono::Local;
@@ -200,6 +200,7 @@ fn app_router(state: AppState) -> Router {
             get(get_review_summary),
         )
         .route("/api/projects", post(create_project))
+        .route("/api/projects/{id}", delete(delete_project))
         .route("/api/projects/{id}/digest", get(get_project_digest))
         .route(
             "/api/projects/{id}/actions/{action_id}",

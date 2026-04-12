@@ -2639,6 +2639,8 @@ impl RemoteConfig {
 struct AppPreferences {
     #[serde(default = "default_codex_reasoning_effort")]
     default_codex_reasoning_effort: CodexReasoningEffort,
+    #[serde(default = "default_claude_approval_mode")]
+    default_claude_approval_mode: ClaudeApprovalMode,
     #[serde(default = "default_claude_effort")]
     default_claude_effort: ClaudeEffortLevel,
     #[serde(default = "default_remote_configs")]
@@ -2650,6 +2652,7 @@ impl Default for AppPreferences {
     fn default() -> Self {
         Self {
             default_codex_reasoning_effort: default_codex_reasoning_effort(),
+            default_claude_approval_mode: default_claude_approval_mode(),
             default_claude_effort: default_claude_effort(),
             remotes: default_remote_configs(),
         }

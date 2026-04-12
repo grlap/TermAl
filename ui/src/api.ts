@@ -413,6 +413,7 @@ export function deleteWorkspaceLayout(workspaceId: string) {
 
 export function updateAppSettings(payload: {
   defaultCodexReasoningEffort?: CodexReasoningEffort;
+  defaultClaudeApprovalMode?: ClaudeApprovalMode;
   defaultClaudeEffort?: ClaudeEffortLevel;
   remotes?: RemoteConfig[];
 }) {
@@ -433,6 +434,12 @@ export function createProject(payload: CreateProjectRequest) {
   return request<CreateProjectResponse>("/api/projects", {
     method: "POST",
     body: JSON.stringify(payload),
+  });
+}
+
+export function deleteProject(projectId: string) {
+  return request<StateResponse>(`/api/projects/${encodeURIComponent(projectId)}`, {
+    method: "DELETE",
   });
 }
 

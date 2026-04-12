@@ -11,6 +11,7 @@ import {
   type ClipboardEvent as ReactClipboardEvent,
   type DragEvent as ReactDragEvent,
   type KeyboardEvent as ReactKeyboardEvent,
+  type MouseEvent as ReactMouseEvent,
   type PointerEvent as ReactPointerEvent,
   type ReactNode,
   type RefObject,
@@ -31,6 +32,7 @@ import {
   compactCodexThread,
   createProject,
   createSession,
+  deleteProject,
   deleteWorkspaceLayout,
   fetchAgentCommands,
   fetchFile,
@@ -78,6 +80,7 @@ import {
   areRemoteConfigsEqual,
   createSessionModelHint,
   DEFAULT_CLAUDE_EFFORT,
+  DEFAULT_CLAUDE_APPROVAL_MODE,
   DEFAULT_CODEX_REASONING_EFFORT,
   defaultNewSessionModel,
   describeCodexModelAdjustmentNotice,
@@ -455,6 +458,23 @@ type PendingSessionRename = {
   clientX: number;
   clientY: number;
   sessionId: string;
+};
+type ProjectContextMenu = {
+  clientX: number;
+  clientY: number;
+  paneId: string | null;
+  projectId: string;
+};
+type ProjectListSectionProps = {
+  paneId: string;
+  projectSessionCounts: ReadonlyMap<string, number>;
+  projects: Project[];
+  remoteLookup: ReadonlyMap<string, RemoteConfig>;
+  selectedProjectId: string;
+  sessionCount: number;
+  onProjectScopeChange: (projectId: string) => void;
+  onRemoveProject: (project: Project) => void;
+  onStartSession: (paneId: string | null, projectId: string) => void;
 };
 
 function sourceFileStateFromResponse(response: FileResponse): SourceFileState {
@@ -1094,7 +1114,7 @@ export default function App() {
   const [defaultCodexReasoningEffort, setDefaultCodexReasoningEffort] =
     useState<CodexReasoningEffort>(DEFAULT_CODEX_REASONING_EFFORT);
   const [defaultClaudeApprovalMode, setDefaultClaudeApprovalMode] =
-    useState<ClaudeApprovalMode>("ask");
+    useState<ClaudeApprovalMode>(DEFAULT_CLAUDE_APPROVAL_MODE);
   const [defaultClaudeEffort, setDefaultClaudeEffort] =
     useState<ClaudeEffortLevel>(DEFAULT_CLAUDE_EFFORT);
   const [remoteConfigs, setRemoteConfigs] = useState<RemoteConfig[]>(
@@ -2354,6 +2374,7 @@ export default function App() {
   function syncPreferencesFromState(nextState: StateResponse) {
     const preferences = resolveAppPreferences(nextState.preferences);
     setDefaultCodexReasoningEffort(preferences.defaultCodexReasoningEffort);
+    setDefaultClaudeApprovalMode(preferences.defaultClaudeApprovalMode);
     setDefaultClaudeEffort(preferences.defaultClaudeEffort);
     setRemoteConfigs((current) =>
       areRemoteConfigsEqual(current, preferences.remotes)
@@ -2440,6 +2461,7 @@ export default function App() {
 
   async function persistAppPreferences(payload: {
     defaultCodexReasoningEffort?: CodexReasoningEffort;
+    defaultClaudeApprovalMode?: ClaudeApprovalMode;
     defaultClaudeEffort?: ClaudeEffortLevel;
     remotes?: RemoteConfig[];
   }) {
@@ -2477,6 +2499,17 @@ export default function App() {
 
     setDefaultCodexReasoningEffort(nextValue);
     void persistAppPreferences({ defaultCodexReasoningEffort: nextValue });
+  }
+
+  function handleDefaultClaudeApprovalModeChange(
+    nextValue: ClaudeApprovalMode,
+  ) {
+    if (nextValue === defaultClaudeApprovalMode) {
+      return;
+    }
+
+    setDefaultClaudeApprovalMode(nextValue);
+    void persistAppPreferences({ defaultClaudeApprovalMode: nextValue });
   }
 
   function handleDefaultClaudeEffortChange(nextValue: ClaudeEffortLevel) {
@@ -4413,6 +4446,56 @@ export default function App() {
     setCreateSessionProjectId(defaultProjectId);
     setRequestError(null);
     setIsCreateSessionOpen(true);
+  }
+
+  function resetRemovedProjectSelection(projectId: string) {
+    setSelectedProjectId((current) =>
+      current === projectId ? ALL_PROJECTS_FILTER_ID : current,
+    );
+    setStandaloneControlSurfaceViewStateByTabId((current) => {
+      let changed = false;
+      const nextState: Record<string, StandaloneControlSurfaceViewState> = {};
+
+      for (const [tabId, viewState] of Object.entries(current)) {
+        if (viewState.projectId === projectId) {
+          changed = true;
+          nextState[tabId] = {
+            ...viewState,
+            projectId: ALL_PROJECTS_FILTER_ID,
+          };
+          continue;
+        }
+
+        nextState[tabId] = viewState;
+      }
+
+      return changed ? nextState : current;
+    });
+  }
+
+  function handleProjectMenuStartSession(
+    paneId: string | null,
+    projectId: string,
+  ) {
+    openCreateSessionDialog(paneId, projectId);
+  }
+
+  async function handleProjectMenuRemoveProject(project: Project) {
+    const confirmed = window.confirm(
+      `Remove "${project.name}" from TermAl? Existing sessions stay in All projects. Files on disk are not deleted.`,
+    );
+    if (!confirmed) {
+      return;
+    }
+
+    try {
+      const state = await deleteProject(project.id);
+      adoptState(state);
+      resetRemovedProjectSelection(project.id);
+      setRequestError(null);
+    } catch (error) {
+      reportRequestError(error);
+    }
   }
 
   async function handleNewSession({
@@ -7187,61 +7270,19 @@ export default function App() {
 
         case "projects":
           return (
-            <section
-              className="control-panel-section-stack"
-              aria-label="Projects"
-            >
-              <section className="project-controls" aria-label="Projects">
-                <div className="project-controls-header">
-                  <div className="session-control-label">Projects</div>
-                  <span className="project-count-badge">{projects.length}</span>
-                </div>
-                <div className="project-list" role="list">
-                  <button
-                    className={`project-row ${controlSurfaceSelectedProjectId === ALL_PROJECTS_FILTER_ID ? "selected" : ""}`}
-                    type="button"
-                    onClick={() =>
-                      handleControlSurfaceProjectScopeChange(
-                        ALL_PROJECTS_FILTER_ID,
-                      )
-                    }
-                  >
-                    <span className="project-row-copy">
-                      <strong>All projects</strong>
-                      <span className="project-row-path">
-                        Show every session in this window.
-                      </span>
-                    </span>
-                    <span className="project-row-count">{sessions.length}</span>
-                  </button>
-                  {projects.map((project) => {
-                    const isSelected =
-                      project.id === controlSurfaceSelectedProjectId;
-
-                    return (
-                      <button
-                        key={project.id}
-                        className={`project-row ${isSelected ? "selected" : ""}`}
-                        type="button"
-                        onClick={() =>
-                          handleControlSurfaceProjectScopeChange(project.id)
-                        }
-                      >
-                        <span className="project-row-copy">
-                          <strong>{project.name}</strong>
-                          <span className="project-row-path">
-                            {describeProjectScope(project, remoteLookup)}
-                          </span>
-                        </span>
-                        <span className="project-row-count">
-                          {projectSessionCounts.get(project.id) ?? 0}
-                        </span>
-                      </button>
-                    );
-                  })}
-                </div>
-              </section>
-            </section>
+            <ProjectListSection
+              paneId={paneId}
+              projectSessionCounts={projectSessionCounts}
+              projects={projects}
+              remoteLookup={remoteLookup}
+              selectedProjectId={controlSurfaceSelectedProjectId}
+              sessionCount={sessions.length}
+              onProjectScopeChange={handleControlSurfaceProjectScopeChange}
+              onRemoveProject={(project) =>
+                void handleProjectMenuRemoveProject(project)
+              }
+              onStartSession={handleProjectMenuStartSession}
+            />
           );
 
         case "sessions":
@@ -8477,7 +8518,7 @@ export default function App() {
                     defaultClaudeApprovalMode={defaultClaudeApprovalMode}
                     defaultClaudeEffort={defaultClaudeEffort}
                     onSelectEffort={handleDefaultClaudeEffortChange}
-                    onSelectMode={setDefaultClaudeApprovalMode}
+                    onSelectMode={handleDefaultClaudeApprovalModeChange}
                   />
                 )}
               </div>
@@ -8486,6 +8527,238 @@ export default function App() {
         </div>
       ) : null}
     </div>
+  );
+}
+
+function ProjectListSection({
+  paneId,
+  projectSessionCounts,
+  projects,
+  remoteLookup,
+  selectedProjectId,
+  sessionCount,
+  onProjectScopeChange,
+  onRemoveProject,
+  onStartSession,
+}: ProjectListSectionProps) {
+  const [contextMenu, setContextMenu] = useState<ProjectContextMenu | null>(
+    null,
+  );
+  const [contextMenuStyle, setContextMenuStyle] =
+    useState<CSSProperties | null>(null);
+  const contextMenuRef = useRef<HTMLDivElement | null>(null);
+  const contextMenuProject = contextMenu
+    ? (projects.find((project) => project.id === contextMenu.projectId) ?? null)
+    : null;
+
+  function closeContextMenu() {
+    setContextMenu(null);
+    setContextMenuStyle(null);
+  }
+
+  function updateContextMenuPosition(
+    menu = contextMenu,
+    node = contextMenuRef.current,
+  ) {
+    if (!menu) {
+      setContextMenuStyle(null);
+      return;
+    }
+
+    if (!node || typeof window === "undefined") {
+      setContextMenuStyle({
+        left: menu.clientX,
+        top: menu.clientY,
+      });
+      return;
+    }
+
+    const menuRect = node.getBoundingClientRect();
+    const viewportPadding = 12;
+    const left = clamp(
+      menu.clientX,
+      viewportPadding,
+      window.innerWidth - menuRect.width - viewportPadding,
+    );
+    const top = clamp(
+      menu.clientY,
+      viewportPadding,
+      window.innerHeight - menuRect.height - viewportPadding,
+    );
+
+    setContextMenuStyle({
+      left,
+      top,
+    });
+  }
+
+  function openContextMenu(
+    event: ReactMouseEvent<HTMLButtonElement>,
+    project: Project,
+  ) {
+    event.preventDefault();
+    event.stopPropagation();
+    setContextMenu({
+      clientX: event.clientX,
+      clientY: event.clientY,
+      paneId,
+      projectId: project.id,
+    });
+    setContextMenuStyle({
+      left: event.clientX,
+      top: event.clientY,
+    });
+  }
+
+  useEffect(() => {
+    if (!contextMenu) {
+      return;
+    }
+
+    function handlePointerDown(event: PointerEvent) {
+      const target = event.target;
+      if (
+        target instanceof Node &&
+        contextMenuRef.current?.contains(target)
+      ) {
+        return;
+      }
+
+      closeContextMenu();
+    }
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        closeContextMenu();
+      }
+    }
+
+    function handleViewportChange() {
+      closeContextMenu();
+    }
+
+    window.addEventListener("pointerdown", handlePointerDown, true);
+    window.addEventListener("keydown", handleKeyDown);
+    window.addEventListener("resize", handleViewportChange);
+    window.addEventListener("scroll", handleViewportChange, true);
+
+    return () => {
+      window.removeEventListener("pointerdown", handlePointerDown, true);
+      window.removeEventListener("keydown", handleKeyDown);
+      window.removeEventListener("resize", handleViewportChange);
+      window.removeEventListener("scroll", handleViewportChange, true);
+    };
+  }, [contextMenu]);
+
+  useEffect(() => {
+    if (!contextMenu || contextMenuProject) {
+      return;
+    }
+
+    closeContextMenu();
+  }, [contextMenu, contextMenuProject]);
+
+  useLayoutEffect(() => {
+    if (!contextMenu) {
+      setContextMenuStyle(null);
+      return;
+    }
+
+    updateContextMenuPosition();
+  }, [contextMenu]);
+
+  return (
+    <section className="control-panel-section-stack" aria-label="Projects">
+      <section className="project-controls" aria-label="Projects">
+        <div className="project-controls-header">
+          <div className="session-control-label">Projects</div>
+          <span className="project-count-badge">{projects.length}</span>
+        </div>
+        <div className="project-list" role="list">
+          <button
+            className={`project-row ${selectedProjectId === ALL_PROJECTS_FILTER_ID ? "selected" : ""}`}
+            type="button"
+            onClick={() => onProjectScopeChange(ALL_PROJECTS_FILTER_ID)}
+          >
+            <span className="project-row-copy">
+              <strong>All projects</strong>
+              <span className="project-row-path">
+                Show every session in this window.
+              </span>
+            </span>
+            <span className="project-row-count">{sessionCount}</span>
+          </button>
+          {projects.map((project) => {
+            const isSelected = project.id === selectedProjectId;
+
+            return (
+              <button
+                key={project.id}
+                className={`project-row ${isSelected ? "selected" : ""}`}
+                type="button"
+                onClick={() => onProjectScopeChange(project.id)}
+                onContextMenu={(event) => openContextMenu(event, project)}
+                aria-haspopup="menu"
+                aria-expanded={
+                  contextMenu?.projectId === project.id ? "true" : undefined
+                }
+              >
+                <span className="project-row-copy">
+                  <strong>{project.name}</strong>
+                  <span className="project-row-path">
+                    {describeProjectScope(project, remoteLookup)}
+                  </span>
+                </span>
+                <span className="project-row-count">
+                  {projectSessionCounts.get(project.id) ?? 0}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      </section>
+      {contextMenu && contextMenuProject && typeof document !== "undefined"
+        ? createPortal(
+            <div
+              ref={contextMenuRef}
+              className="pane-tab-context-menu panel project-context-menu"
+              role="menu"
+              aria-label={`${contextMenuProject.name} project actions`}
+              style={
+                contextMenuStyle ?? {
+                  left: contextMenu.clientX,
+                  top: contextMenu.clientY,
+                }
+              }
+            >
+              <button
+                className="pane-tab-context-menu-item"
+                type="button"
+                role="menuitem"
+                onClick={() => {
+                  closeContextMenu();
+                  onStartSession(contextMenu.paneId, contextMenu.projectId);
+                }}
+              >
+                Start new session
+              </button>
+              <button
+                className="pane-tab-context-menu-item pane-tab-context-menu-item-danger"
+                type="button"
+                role="menuitem"
+                onClick={() => {
+                  closeContextMenu();
+                  onRemoveProject(contextMenuProject);
+                }}
+              >
+                Remove project
+              </button>
+            </div>,
+            document.body,
+          )
+        : null}
+    </section>
   );
 }
 

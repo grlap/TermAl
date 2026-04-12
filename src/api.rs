@@ -3733,6 +3733,15 @@ async fn create_project(
     Ok((StatusCode::CREATED, Json(response)))
 }
 
+/// Deletes project.
+async fn delete_project(
+    AxumPath(project_id): AxumPath<String>,
+    State(state): State<AppState>,
+) -> Result<Json<StateResponse>, ApiError> {
+    let response = run_blocking_api(move || state.delete_project(&project_id)).await?;
+    Ok(Json(response))
+}
+
 /// Gets project digest.
 async fn get_project_digest(
     AxumPath(project_id): AxumPath<String>,
@@ -5227,6 +5236,7 @@ struct CreateProjectRequest {
 #[serde(rename_all = "camelCase")]
 struct UpdateAppSettingsRequest {
     default_codex_reasoning_effort: Option<CodexReasoningEffort>,
+    default_claude_approval_mode: Option<ClaudeApprovalMode>,
     default_claude_effort: Option<ClaudeEffortLevel>,
     remotes: Option<Vec<RemoteConfig>>,
 }

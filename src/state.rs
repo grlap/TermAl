@@ -956,7 +956,7 @@ impl AppState {
                 .unwrap_or_else(|| agent.default_model().to_owned());
             let final_approval_mode = request
                 .claude_approval_mode
-                .unwrap_or_else(default_claude_approval_mode);
+                .unwrap_or(inner.preferences.default_claude_approval_mode);
             let final_effort = request
                 .claude_effort
                 .unwrap_or(inner.preferences.default_claude_effort);
@@ -1081,6 +1081,13 @@ impl AppState {
             }
         }
 
+        if let Some(default_claude_approval_mode) = request.default_claude_approval_mode {
+            if inner.preferences.default_claude_approval_mode != default_claude_approval_mode {
+                inner.preferences.default_claude_approval_mode = default_claude_approval_mode;
+                changed = true;
+            }
+        }
+
         if let Some(default_claude_effort) = request.default_claude_effort {
             if inner.preferences.default_claude_effort != default_claude_effort {
                 inner.preferences.default_claude_effort = default_claude_effort;
@@ -1175,6 +1182,31 @@ impl AppState {
             project_id: project.id,
             state: self.snapshot_from_inner(&inner),
         })
+    }
+
+    /// Deletes project and keeps its sessions visible outside project scope.
+    fn delete_project(&self, project_id: &str) -> Result<StateResponse, ApiError> {
+        let project_id = normalize_optional_identifier(Some(project_id))
+            .ok_or_else(|| ApiError::bad_request("project id is required"))?;
+        let mut inner = self.inner.lock().expect("state mutex poisoned");
+        let Some(project_index) = inner
+            .projects
+            .iter()
+            .position(|project| project.id == project_id)
+        else {
+            return Err(ApiError::not_found("project not found"));
+        };
+
+        inner.projects.remove(project_index);
+        for record in &mut inner.sessions {
+            if record.session.project_id.as_deref() == Some(project_id) {
+                record.session.project_id = None;
+            }
+        }
+
+        self.commit_locked(&mut inner)
+            .map_err(|err| ApiError::internal(format!("failed to remove project: {err:#}")))?;
+        Ok(self.snapshot_from_inner(&inner))
     }
 
     /// Handles commit locked.
@@ -6002,7 +6034,7 @@ impl StateInner {
                     .then_some(default_cursor_mode()),
                 claude_approval_mode: agent
                     .supports_claude_approval_mode()
-                    .then_some(default_claude_approval_mode()),
+                    .then_some(self.preferences.default_claude_approval_mode),
                 claude_effort: agent
                     .supports_claude_approval_mode()
                     .then_some(self.preferences.default_claude_effort),
@@ -6025,6 +6057,7 @@ impl StateInner {
             record.session.reasoning_effort = Some(record.codex_reasoning_effort);
             record.session.sandbox_mode = Some(record.codex_sandbox_mode);
         } else if record.session.agent.supports_claude_approval_mode() {
+            record.session.claude_approval_mode = Some(self.preferences.default_claude_approval_mode);
             record.session.claude_effort = Some(self.preferences.default_claude_effort);
         }
 

@@ -84,6 +84,7 @@ function makeStateResponse(
     agentReadiness: overrides.agentReadiness ?? [],
     preferences: overrides.preferences ?? {
       defaultCodexReasoningEffort: "medium",
+      defaultClaudeApprovalMode: "ask",
       defaultClaudeEffort: "default",
     },
     projects: overrides.projects,
