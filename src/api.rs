@@ -2130,6 +2130,212 @@ async fn sync_git_changes(
     .await?;
     Ok(Json(response))
 }
+
+/// Runs a terminal command.
+async fn run_terminal_command(
+    State(state): State<AppState>,
+    Json(request): Json<TerminalCommandRequest>,
+) -> Result<Json<TerminalCommandResponse>, ApiError> {
+    if let Some(scope) = state.remote_scope_for_request(
+        request.session_id.as_deref(),
+        request.project_id.as_deref(),
+    )? {
+        let response = run_blocking_api(move || {
+            state.remote_post_json_with_timeout(
+                &scope,
+                "/api/terminal/run",
+                json!({
+                    "command": request.command,
+                    "workdir": request.workdir,
+                }),
+                REMOTE_TERMINAL_COMMAND_TIMEOUT,
+            )
+        })
+        .await?;
+        return Ok(Json(response));
+    }
+
+    let response = tokio::task::spawn_blocking(move || {
+        let command = request.command.trim().to_owned();
+        if command.is_empty() {
+            return Err(ApiError::bad_request("terminal command cannot be empty"));
+        }
+        if command.chars().count() > TERMINAL_COMMAND_MAX_CHARS {
+            return Err(ApiError::bad_request(format!(
+                "terminal command cannot exceed {TERMINAL_COMMAND_MAX_CHARS} characters"
+            )));
+        }
+
+        let workdir = resolve_project_scoped_requested_path(
+            &state,
+            request.session_id.as_deref(),
+            request.project_id.as_deref(),
+            &request.workdir,
+            ScopedPathMode::ExistingPath,
+        )?;
+        run_terminal_shell_command(&command, &workdir)
+    })
+    .await
+    .map_err(|err| ApiError::internal(format!("terminal command task failed: {err}")))??;
+    Ok(Json(response))
+}
+
+/// Runs a terminal shell command in the requested workdir.
+fn run_terminal_shell_command(
+    command: &str,
+    workdir: &FsPath,
+) -> Result<TerminalCommandResponse, ApiError> {
+    let (shell_label, mut child_command) = build_terminal_shell_command(command);
+    let started_at = std::time::Instant::now();
+    let mut child = child_command
+        .current_dir(workdir)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|err| ApiError::internal(format!("failed to start terminal command: {err}")))?;
+
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| ApiError::internal("failed to capture terminal command stdout"))?;
+    let stderr = child
+        .stderr
+        .take()
+        .ok_or_else(|| ApiError::internal("failed to capture terminal command stderr"))?;
+    let stdout_reader = std::thread::spawn(move || read_capped_terminal_output(stdout));
+    let stderr_reader = std::thread::spawn(move || read_capped_terminal_output(stderr));
+    let process = Arc::new(
+        SharedChild::new(child)
+            .map_err(|err| ApiError::internal(format!("failed to share terminal child: {err}")))?,
+    );
+
+    let mut status = wait_for_shared_child_exit_timeout(
+        &process,
+        TERMINAL_COMMAND_TIMEOUT,
+        "terminal command",
+    )
+    .map_err(|err| ApiError::internal(format!("{err:#}")))?;
+    let timed_out = status.is_none();
+    if timed_out {
+        kill_child_process(&process, "terminal command")
+            .map_err(|err| ApiError::internal(format!("{err:#}")))?;
+        status = wait_for_shared_child_exit_timeout(
+            &process,
+            Duration::from_millis(250),
+            "terminal command",
+        )
+        .map_err(|err| ApiError::internal(format!("{err:#}")))?;
+    }
+
+    let (stdout, stdout_truncated) = join_terminal_output_reader(
+        stdout_reader,
+        "stdout",
+        TERMINAL_OUTPUT_READER_JOIN_TIMEOUT,
+    )?;
+    let (stderr, stderr_truncated) = join_terminal_output_reader(
+        stderr_reader,
+        "stderr",
+        TERMINAL_OUTPUT_READER_JOIN_TIMEOUT,
+    )?;
+    let duration_ms = started_at
+        .elapsed()
+        .as_millis()
+        .min(u128::from(u64::MAX)) as u64;
+
+    Ok(TerminalCommandResponse {
+        command: command.to_owned(),
+        duration_ms,
+        exit_code: status.and_then(|exit_status| exit_status.code()),
+        output_truncated: stdout_truncated || stderr_truncated,
+        shell: shell_label.to_owned(),
+        stderr,
+        stdout,
+        success: !timed_out && status.map(|exit_status| exit_status.success()).unwrap_or(false),
+        timed_out,
+        workdir: normalize_user_facing_path(workdir)
+            .to_string_lossy()
+            .into_owned(),
+    })
+}
+
+/// Builds the platform shell command used by the terminal panel.
+fn build_terminal_shell_command(command: &str) -> (&'static str, Command) {
+    #[cfg(windows)]
+    {
+        let mut shell = Command::new("powershell.exe");
+        shell.args([
+            "-NoLogo",
+            "-NoProfile",
+            "-NonInteractive",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-Command",
+            command,
+        ]);
+        ("PowerShell", shell)
+    }
+
+    #[cfg(not(windows))]
+    {
+        let mut shell = Command::new("sh");
+        shell.args(["-lc", command]);
+        ("sh", shell)
+    }
+}
+
+/// Reads command output while storing only a bounded prefix.
+fn read_capped_terminal_output(mut reader: impl std::io::Read) -> io::Result<(String, bool)> {
+    let mut stored = Vec::new();
+    let mut truncated = false;
+    let mut buf = [0u8; 8192];
+
+    loop {
+        let bytes_read = std::io::Read::read(&mut reader, &mut buf)?;
+        if bytes_read == 0 {
+            break;
+        }
+
+        let remaining = TERMINAL_OUTPUT_MAX_BYTES.saturating_sub(stored.len());
+        if remaining == 0 {
+            truncated = true;
+            continue;
+        }
+
+        let take = bytes_read.min(remaining);
+        stored.extend_from_slice(&buf[..take]);
+        if take < bytes_read {
+            truncated = true;
+        }
+    }
+
+    Ok((String::from_utf8_lossy(&stored).into_owned(), truncated))
+}
+
+/// Joins a terminal output reader with a bounded timeout. If the reader does
+/// not complete within `timeout` (e.g. a background child keeps the pipe open),
+/// returns an empty string with `truncated = true` so the request can finish.
+fn join_terminal_output_reader(
+    handle: std::thread::JoinHandle<io::Result<(String, bool)>>,
+    stream_label: &str,
+    timeout: Duration,
+) -> Result<(String, bool), ApiError> {
+    let (tx, rx) = std::sync::mpsc::sync_channel(1);
+    std::thread::spawn(move || {
+        let _ = tx.send(handle.join());
+    });
+    match rx.recv_timeout(timeout) {
+        Ok(result) => result
+            .map_err(|_| ApiError::internal(format!("terminal {stream_label} reader panicked")))?
+            .map_err(|err| {
+                ApiError::internal(format!(
+                    "failed to read terminal command {stream_label}: {err}"
+                ))
+            }),
+        Err(_) => Ok((String::new(), true)),
+    }
+}
+
 /// Loads Git diff for request.
 fn load_git_diff_for_request(
     workdir: &FsPath,
@@ -4513,6 +4719,48 @@ struct GitCommitResponse {
 struct GitRepoActionResponse {
     status: GitStatusResponse,
     summary: String,
+}
+
+const TERMINAL_COMMAND_MAX_CHARS: usize = 20_000;
+const TERMINAL_COMMAND_TIMEOUT: Duration = Duration::from_secs(60);
+const TERMINAL_OUTPUT_MAX_BYTES: usize = 512 * 1024;
+
+/// Remote proxy timeout for terminal commands. Exceeds [`TERMINAL_COMMAND_TIMEOUT`]
+/// so the remote backend can timeout and respond before the local proxy gives up.
+const REMOTE_TERMINAL_COMMAND_TIMEOUT: Duration = Duration::from_secs(75);
+
+/// Maximum time to wait for terminal output-reader threads after the child
+/// process exits. Background children that inherit stdout/stderr can keep the
+/// pipe open indefinitely; this prevents the request from blocking forever.
+const TERMINAL_OUTPUT_READER_JOIN_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// Represents a terminal command request.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct TerminalCommandRequest {
+    command: String,
+    workdir: String,
+    #[serde(default)]
+    project_id: Option<String>,
+    #[serde(default)]
+    session_id: Option<String>,
+}
+
+/// Represents a terminal command response.
+#[derive(Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct TerminalCommandResponse {
+    command: String,
+    duration_ms: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    exit_code: Option<i32>,
+    output_truncated: bool,
+    shell: String,
+    stderr: String,
+    stdout: String,
+    success: bool,
+    timed_out: bool,
+    workdir: String,
 }
 
 const REVIEW_DOCUMENT_VERSION: u32 = 1;

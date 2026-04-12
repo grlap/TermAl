@@ -1401,6 +1401,10 @@ export function formatVisibleTabLabel(tab: WorkspaceTab, session: Session | null
     return formatPathTabLabel(tab.workdir, "Workspace");
   }
 
+  if (tab.kind === "terminal") {
+    return formatPathTabLabel(tab.workdir, "Terminal");
+  }
+
   return formatTabLabel(tab, session);
 }
 
@@ -1419,6 +1423,10 @@ function formatTabLabel(tab: WorkspaceTab, session: Session | null) {
 
   if (tab.kind === "gitStatus") {
     return `Git status: ${formatPathTabLabel(tab.workdir, "Workspace")}`;
+  }
+
+  if (tab.kind === "terminal") {
+    return `Terminal: ${formatPathTabLabel(tab.workdir, "Workspace")}`;
   }
 
   if (tab.kind === "controlPanel") {
@@ -1700,6 +1708,14 @@ function TabKindIcon({ kind }: { kind: string }) {
   switch (kind) {
     case "gitStatus":
       return <GitHubMark className="pane-tab-kind-icon pane-tab-kind-icon-github" />;
+    case "terminal":
+      return (
+        <svg {...iconProps}>
+          <path d="M3 5.25 5.75 8 3 10.75" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.3" />
+          <path d="M7 11h5.5" fill="none" stroke="currentColor" strokeLinecap="round" strokeWidth="1.3" />
+          <rect x="2" y="3" width="12" height="10" rx="1.2" fill="none" stroke="currentColor" strokeWidth="1.3" />
+        </svg>
+      );
     case "filesystem":
       return (
         <svg {...iconProps} className="pane-tab-kind-icon pane-tab-kind-icon-files">

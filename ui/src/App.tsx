@@ -173,6 +173,7 @@ import { OrchestratorTemplateLibraryPanel } from "./panels/OrchestratorTemplateL
 import { PaneTabs, type PaneTabDecoration } from "./panels/PaneTabs";
 import { OrchestratorTemplatesPanel } from "./panels/OrchestratorTemplatesPanel";
 import { SessionCanvasPanel } from "./panels/SessionCanvasPanel";
+import { TerminalPanel } from "./panels/TerminalPanel";
 import {
   SourcePanel,
   type SourceFileState,
@@ -243,6 +244,7 @@ import {
   openSessionInWorkspaceState,
   openSessionListInWorkspaceState,
   openSourceInWorkspaceState,
+  openTerminalInWorkspaceState,
   placeSessionDropInWorkspaceState,
   placeDraggedTab,
   placeExternalTab,
@@ -581,6 +583,7 @@ export function resolveControlSurfaceSectionIdForWorkspaceTab(
     case "controlPanel":
     case "canvas":
     case "orchestratorCanvas":
+    case "terminal":
     case "instructionDebugger":
     case "diffPreview":
       return null;
@@ -6085,6 +6088,25 @@ export default function App() {
     );
   }
 
+  function handleOpenTerminalTab(
+    paneId: string,
+    workdir: string | null,
+    originSessionId: string | null,
+    originProjectId: string | null,
+  ) {
+    setWorkspace((current) =>
+      applyControlPanelLayout(
+        openTerminalInWorkspaceState(
+          current,
+          workdir,
+          paneId,
+          originSessionId,
+          originProjectId,
+        ),
+      ),
+    );
+  }
+
   function handleOpenSessionListTab(
     paneId: string,
     originSessionId: string | null,
@@ -7582,6 +7604,7 @@ export default function App() {
               onOpenGitStatusDiffPreviewTab={handleOpenGitStatusDiffPreviewTab}
               onOpenFilesystemTab={handleOpenFilesystemTab}
               onOpenGitStatusTab={handleOpenGitStatusTab}
+              onOpenTerminalTab={handleOpenTerminalTab}
               onOpenInstructionDebuggerTab={handleOpenInstructionDebuggerTab}
               onOpenCanvasTab={handleOpenCanvasTab}
               onUpsertCanvasSessionCard={handleUpsertCanvasSessionCard}
@@ -8436,6 +8459,7 @@ function WorkspaceNodeView({
   onOpenGitStatusDiffPreviewTab,
   onOpenFilesystemTab,
   onOpenGitStatusTab,
+  onOpenTerminalTab,
   onOpenInstructionDebuggerTab,
   onOpenCanvasTab,
   onUpsertCanvasSessionCard,
@@ -8556,6 +8580,12 @@ function WorkspaceNodeView({
     originProjectId: string | null,
   ) => void;
   onOpenGitStatusTab: (
+    paneId: string,
+    workdir: string | null,
+    originSessionId: string | null,
+    originProjectId: string | null,
+  ) => void;
+  onOpenTerminalTab: (
     paneId: string,
     workdir: string | null,
     originSessionId: string | null,
@@ -8766,6 +8796,7 @@ function WorkspaceNodeView({
         onOpenGitStatusDiffPreviewTab={onOpenGitStatusDiffPreviewTab}
         onOpenFilesystemTab={onOpenFilesystemTab}
         onOpenGitStatusTab={onOpenGitStatusTab}
+        onOpenTerminalTab={onOpenTerminalTab}
         onOpenInstructionDebuggerTab={onOpenInstructionDebuggerTab}
         onOpenCanvasTab={onOpenCanvasTab}
         onUpsertCanvasSessionCard={onUpsertCanvasSessionCard}
@@ -8892,6 +8923,7 @@ function WorkspaceNodeView({
           onOpenGitStatusDiffPreviewTab={onOpenGitStatusDiffPreviewTab}
           onOpenFilesystemTab={onOpenFilesystemTab}
           onOpenGitStatusTab={onOpenGitStatusTab}
+          onOpenTerminalTab={onOpenTerminalTab}
           onOpenInstructionDebuggerTab={onOpenInstructionDebuggerTab}
           onOpenCanvasTab={onOpenCanvasTab}
           onUpsertCanvasSessionCard={onUpsertCanvasSessionCard}
@@ -8984,6 +9016,7 @@ function WorkspaceNodeView({
           onOpenGitStatusDiffPreviewTab={onOpenGitStatusDiffPreviewTab}
           onOpenFilesystemTab={onOpenFilesystemTab}
           onOpenGitStatusTab={onOpenGitStatusTab}
+          onOpenTerminalTab={onOpenTerminalTab}
           onOpenInstructionDebuggerTab={onOpenInstructionDebuggerTab}
           onOpenCanvasTab={onOpenCanvasTab}
           onUpsertCanvasSessionCard={onUpsertCanvasSessionCard}
@@ -9069,6 +9102,7 @@ function SessionPaneView({
   onOpenGitStatusDiffPreviewTab,
   onOpenFilesystemTab,
   onOpenGitStatusTab,
+  onOpenTerminalTab,
   onOpenInstructionDebuggerTab,
   onOpenCanvasTab,
   onUpsertCanvasSessionCard,
@@ -9184,6 +9218,12 @@ function SessionPaneView({
     originProjectId: string | null,
   ) => void;
   onOpenGitStatusTab: (
+    paneId: string,
+    workdir: string | null,
+    originSessionId: string | null,
+    originProjectId: string | null,
+  ) => void;
+  onOpenTerminalTab: (
     paneId: string,
     workdir: string | null,
     originSessionId: string | null,
@@ -9309,6 +9349,7 @@ function SessionPaneView({
   const activeFilesystemTab =
     activeTab?.kind === "filesystem" ? activeTab : null;
   const activeGitStatusTab = activeTab?.kind === "gitStatus" ? activeTab : null;
+  const activeTerminalTab = activeTab?.kind === "terminal" ? activeTab : null;
   const activeInstructionDebuggerTab =
     activeTab?.kind === "instructionDebugger" ? activeTab : null;
   const activeDiffPreviewTab =
@@ -9323,6 +9364,10 @@ function SessionPaneView({
     activeGitStatusTab?.originSessionId ?? null;
   const activeGitStatusOriginProjectId =
     activeGitStatusTab?.originProjectId ?? null;
+  const activeTerminalOriginSessionId =
+    activeTerminalTab?.originSessionId ?? null;
+  const activeTerminalOriginProjectId =
+    activeTerminalTab?.originProjectId ?? null;
   const activeInstructionDebuggerOriginSessionId =
     activeInstructionDebuggerTab?.originSessionId ?? null;
   const activeInstructionDebuggerOriginProjectId =
@@ -9399,6 +9444,14 @@ function SessionPaneView({
         projectLookup,
       )
     : null;
+  const activeTerminalScopeProjectId = activeTerminalTab
+    ? resolveWorkspaceScopedProjectId(
+        activeTerminalOriginProjectId,
+        activeTerminalOriginSessionId,
+        sessionLookup,
+        projectLookup,
+      )
+    : null;
   const activeFilesystemScopedSessionId = activeFilesystemScopeProjectId
     ? resolveWorkspaceScopedSessionId(
         activeFilesystemScopeProjectId,
@@ -9417,6 +9470,15 @@ function SessionPaneView({
         sessionLookup,
       )
     : activeGitStatusOriginSessionId;
+  const activeTerminalScopedSessionId = activeTerminalScopeProjectId
+    ? resolveWorkspaceScopedSessionId(
+        activeTerminalScopeProjectId,
+        activeTerminalOriginSessionId,
+        activeSession,
+        allKnownSessions,
+        sessionLookup,
+      )
+    : activeTerminalOriginSessionId;
   const activeFilesystemScopedRootPath =
     activeFilesystemTab?.rootPath ??
     (activeFilesystemScopeProjectId
@@ -9433,10 +9495,20 @@ function SessionPaneView({
           null,
         )
       : null);
+  const activeTerminalScopedWorkdir =
+    activeTerminalTab?.workdir ??
+    (activeTerminalScopeProjectId
+      ? resolveControlPanelWorkspaceRoot(
+          projectLookup.get(activeTerminalScopeProjectId) ?? null,
+          null,
+        )
+      : null);
   const shouldRenderFilesystemProjectScope =
     !!activeFilesystemScopeProjectId && workspaceProjectOptions.length > 0;
   const shouldRenderGitProjectScope =
     !!activeGitScopeProjectId && workspaceProjectOptions.length > 0;
+  const shouldRenderTerminalProjectScope =
+    !!activeTerminalScopeProjectId && workspaceProjectOptions.length > 0;
   const [fileState, setFileState] = useState<SourceFileState>({
     status: "idle",
     path: "",
@@ -9564,6 +9636,11 @@ function SessionPaneView({
     }
 
     const cachedSessionIds = new Set(cachedSessionOrder);
+    for (const tab of pane.tabs) {
+      if (tab.kind === "session") {
+        cachedSessionIds.add(tab.sessionId);
+      }
+    }
     cachedSessionIds.add(activeSession.id);
     const next = sessions.filter((session) => cachedSessionIds.has(session.id));
     const prev = mountedSessionsRef.current;
@@ -9575,7 +9652,7 @@ function SessionPaneView({
     }
     mountedSessionsRef.current = next;
     return next;
-  }, [activeSession, cachedSessionOrder, sessions]);
+  }, [activeSession, cachedSessionOrder, pane.tabs, sessions]);
   const sessionConversationSignature = useMemo(
     () =>
       pane.viewMode === "session" && activeSession
@@ -9647,11 +9724,13 @@ function SessionPaneView({
           ? `${pane.id}:filesystem:${activeFilesystemTab.rootPath ?? "empty"}`
           : activeGitStatusTab
             ? `${pane.id}:gitStatus:${activeGitStatusTab.workdir ?? "empty"}`
-            : activeInstructionDebuggerTab
-              ? `${pane.id}:instructionDebugger:${activeInstructionDebuggerTab.originSessionId ?? activeInstructionDebuggerTab.workdir ?? "empty"}`
-              : activeDiffPreviewTab
-                ? `${pane.id}:diffPreview:${activeDiffPreviewTab.diffMessageId}`
-                : `${pane.id}:${pane.viewMode}:${activeSession?.id ?? "empty"}`;
+            : activeTerminalTab
+              ? `${pane.id}:terminal:${activeTerminalTab.workdir ?? "empty"}`
+              : activeInstructionDebuggerTab
+                ? `${pane.id}:instructionDebugger:${activeInstructionDebuggerTab.originSessionId ?? activeInstructionDebuggerTab.workdir ?? "empty"}`
+                : activeDiffPreviewTab
+                  ? `${pane.id}:diffPreview:${activeDiffPreviewTab.diffMessageId}`
+                  : `${pane.id}:${pane.viewMode}:${activeSession?.id ?? "empty"}`;
   const defaultScrollToBottom =
     pane.viewMode === "session" ||
     pane.viewMode === "commands" ||
@@ -10112,7 +10191,28 @@ function SessionPaneView({
     };
   }
 
+  function restoreMessageStackScrollTop(targetTop: number) {
+    const node = messageStackRef.current;
+    if (!node) {
+      return false;
+    }
+
+    const maxScrollTop = Math.max(node.scrollHeight - node.clientHeight, 0);
+    if (targetTop > maxScrollTop + 1) {
+      return false;
+    }
+
+    const nextTop = clamp(targetTop, 0, maxScrollTop);
+    node.scrollTop = nextTop;
+    paneScrollPositions[scrollStateKey] = {
+      top: targetTop,
+      shouldStick: false,
+    };
+    return true;
+  }
+
   useLayoutEffect(() => {
+    let restoreCleanup: (() => void) | undefined;
     const frameId = window.requestAnimationFrame(() => {
       const node = messageStackRef.current;
       if (!node) {
@@ -10121,21 +10221,24 @@ function SessionPaneView({
 
       const saved = paneScrollPositions[scrollStateKey];
       if (saved) {
-        // TODO: restore the exact saved scroll offset on tab switch.
-        // The virtualizer recalculates layout from estimated heights on
-        // remount, so the saved pixel offset no longer maps to the same
-        // messages. A proper fix needs to save the first-visible message
-        // ID and scroll to its position in the new layout. For now,
-        // always scroll to the bottom — this is correct for the common
-        // case (user was at the bottom chatting) and acceptable for the
-        // scrolled-up case (user loses their position but can scroll back).
-        scheduleSettledScrollToBottom("auto", { maxAttempts: 60 });
         setShouldStickToBottom(saved.shouldStick);
+        if (saved.shouldStick) {
+          restoreCleanup = scheduleSettledScrollToBottom("auto", {
+            maxAttempts: 60,
+          });
+        } else if (!restoreMessageStackScrollTop(saved.top)) {
+          setShouldStickToBottom(true);
+          restoreCleanup = scheduleSettledScrollToBottom("auto", {
+            maxAttempts: 60,
+          });
+        }
         return;
       }
 
       if (defaultScrollToBottom) {
-        scheduleSettledScrollToBottom("auto", { maxAttempts: 60 });
+        restoreCleanup = scheduleSettledScrollToBottom("auto", {
+          maxAttempts: 60,
+        });
         setShouldStickToBottom(true);
         paneScrollPositions[scrollStateKey] = {
           top: Number.MAX_SAFE_INTEGER,
@@ -10154,6 +10257,7 @@ function SessionPaneView({
 
     return () => {
       window.cancelAnimationFrame(frameId);
+      restoreCleanup?.();
     };
   }, [defaultScrollToBottom, scrollStateKey]);
 
@@ -10275,8 +10379,16 @@ function SessionPaneView({
       // scroll, but messages may not have been available yet (SSE loads
       // state asynchronously). If the initial intent was to stick to the
       // bottom, honour it now that content has arrived.
-      if (getShouldStickToBottom()) {
-        scheduleSettledScrollToBottom("auto", { maxAttempts: 60 });
+      const saved = paneScrollPositions[scrollStateKey];
+      if (saved && !saved.shouldStick) {
+        if (!restoreMessageStackScrollTop(saved.top)) {
+          setShouldStickToBottom(true);
+          return scheduleSettledScrollToBottom("auto", { maxAttempts: 60 });
+        }
+        return;
+      }
+      if (getShouldStickToBottom() || saved?.shouldStick) {
+        return scheduleSettledScrollToBottom("auto", { maxAttempts: 60 });
       }
       return;
     }
@@ -10904,6 +11016,20 @@ function SessionPaneView({
                 className="pane-view-button"
                 type="button"
                 onClick={() =>
+                  onOpenTerminalTab(
+                    pane.id,
+                    activeSession?.workdir ?? null,
+                    activeSession?.id ?? null,
+                    activeSession?.projectId ?? null,
+                  )
+                }
+              >
+                Terminal
+              </button>
+              <button
+                className="pane-view-button"
+                type="button"
+                onClick={() =>
                   onOpenInstructionDebuggerTab(
                     pane.id,
                     activeSession?.workdir ?? null,
@@ -10958,7 +11084,7 @@ function SessionPaneView({
 
       <section
         ref={messageStackRef}
-        className={`message-stack${activeControlSurfaceTab || activeOrchestratorCanvasTab ? " control-panel-stack" : ""}${activeSourceTab || activeDiffPreviewTab ? " editor-panel-stack" : ""}`}
+        className={`message-stack${activeControlSurfaceTab || activeOrchestratorCanvasTab ? " control-panel-stack" : ""}${activeSourceTab || activeDiffPreviewTab ? " editor-panel-stack" : ""}${activeTerminalTab ? " terminal-panel-stack" : ""}`}
         onWheel={handleMessageStackWheel}
         onScroll={(event) => {
           const node = event.currentTarget;
@@ -11217,6 +11343,69 @@ function SessionPaneView({
                   path,
                   activeGitStatusOriginSessionId,
                   activeGitStatusOriginProjectId,
+                )
+              }
+            />
+          )
+        ) : activeTerminalTab ? (
+          shouldRenderTerminalProjectScope ? (
+            <section
+              className="control-panel-section-stack terminal-section-stack"
+              aria-label="Terminal"
+            >
+              {renderWorkspaceTabProjectScope(
+                `workspace-project-scope-${pane.id}-terminal`,
+                activeTerminalScopeProjectId,
+                (nextProjectId) => {
+                  const nextProject = projectLookup.get(nextProjectId) ?? null;
+                  if (!nextProject) {
+                    return;
+                  }
+
+                  onOpenTerminalTab(
+                    pane.id,
+                    resolveControlPanelWorkspaceRoot(nextProject, null),
+                    resolveWorkspaceScopedSessionId(
+                      nextProjectId,
+                      null,
+                      activeSession,
+                      allKnownSessions,
+                      sessionLookup,
+                    ),
+                    nextProject.id,
+                  );
+                },
+              )}
+              <TerminalPanel
+                key={activeTerminalTab.id}
+                terminalId={activeTerminalTab.id}
+                projectId={activeTerminalScopeProjectId}
+                sessionId={activeTerminalScopedSessionId}
+                showPathControls={false}
+                workdir={activeTerminalScopedWorkdir}
+                onOpenWorkdir={(path) =>
+                  onOpenTerminalTab(
+                    pane.id,
+                    path,
+                    activeTerminalScopedSessionId,
+                    activeTerminalScopeProjectId,
+                  )
+                }
+              />
+            </section>
+          ) : (
+            <TerminalPanel
+              key={activeTerminalTab.id}
+              terminalId={activeTerminalTab.id}
+              projectId={activeTerminalOriginProjectId}
+              sessionId={activeTerminalOriginSessionId}
+              workdir={activeTerminalTab.workdir}
+              onOpenWorkdir={(path) =>
+                onOpenTerminalTab(
+                  pane.id,
+                  path,
+                  activeTerminalOriginSessionId,
+                  activeTerminalOriginProjectId,
                 )
               }
             />
@@ -11498,6 +11687,7 @@ function SessionPaneView({
       activeSourceTab ||
       activeFilesystemTab ||
       activeGitStatusTab ||
+      activeTerminalTab ||
       activeInstructionDebuggerTab ||
       activeDiffPreviewTab ? null : (
         <AgentSessionPanelFooter
@@ -11513,7 +11703,7 @@ function SessionPaneView({
           isSessionBusy={isSessionBusy}
           isUpdating={isUpdating}
           showNewResponseIndicator={showNewResponseIndicator}
-          footerModeLabel={labelForPaneViewMode(pane.viewMode)}
+          footerModeLabel={labelForPaneViewMode(pane.lastSessionViewMode)}
           onScrollToLatest={() => scrollToLatestMessage("smooth")}
           onDraftCommit={onDraftCommit}
           onDraftAttachmentRemove={onDraftAttachmentRemove}

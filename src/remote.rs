@@ -138,6 +138,19 @@ impl RemoteRegistry {
         query: &[(String, String)],
         body: Option<Value>,
     ) -> Result<T, ApiError> {
+        self.request_json_with_timeout(remote, method, path, query, body, REMOTE_REQUEST_TIMEOUT)
+    }
+
+    /// Handles request JSON with an explicit timeout.
+    fn request_json_with_timeout<T: DeserializeOwned>(
+        &self,
+        remote: &RemoteConfig,
+        method: Method,
+        path: &str,
+        query: &[(String, String)],
+        body: Option<Value>,
+        timeout: Duration,
+    ) -> Result<T, ApiError> {
         let connection = self.connection(remote);
         let base_url = connection.ensure_available(self.client.client())?;
         let url = format!("{base_url}{path}");
@@ -145,7 +158,7 @@ impl RemoteRegistry {
             .client
             .client()
             .request(method, &url)
-            .timeout(REMOTE_REQUEST_TIMEOUT);
+            .timeout(timeout);
         if !query.is_empty() {
             request = request.query(query);
         }
@@ -635,6 +648,24 @@ impl AppState {
             path,
             &[],
             Some(apply_remote_scope_to_body(scope, body)),
+        )
+    }
+
+    /// Handles remote post JSON with an explicit timeout.
+    fn remote_post_json_with_timeout<T: DeserializeOwned>(
+        &self,
+        scope: &RemoteScope,
+        path: &str,
+        body: Value,
+        timeout: Duration,
+    ) -> Result<T, ApiError> {
+        self.remote_registry.request_json_with_timeout(
+            &scope.remote,
+            Method::POST,
+            path,
+            &[],
+            Some(apply_remote_scope_to_body(scope, body)),
+            timeout,
         )
     }
 

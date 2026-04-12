@@ -165,6 +165,19 @@ export type GitRepoActionResponse = {
   summary: string;
 };
 
+export type TerminalCommandResponse = {
+  command: string;
+  durationMs: number;
+  exitCode?: number | null;
+  outputTruncated: boolean;
+  shell: string;
+  stderr: string;
+  stdout: string;
+  success: boolean;
+  timedOut: boolean;
+  workdir: string;
+};
+
 export type ReviewCommentAuthor = "user" | "agent";
 export type ReviewThreadStatus = "open" | "resolved" | "applied" | "dismissed";
 
@@ -871,6 +884,18 @@ export function syncGitChanges(payload: {
   workdir: string;
 }) {
   return request<GitRepoActionResponse>("/api/git/sync", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function runTerminalCommand(payload: {
+  command: string;
+  sessionId?: string | null;
+  projectId?: string | null;
+  workdir: string;
+}) {
+  return request<TerminalCommandResponse>("/api/terminal/run", {
     method: "POST",
     body: JSON.stringify(payload),
   });

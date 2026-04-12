@@ -128,6 +128,7 @@ All routes are under `/api`. The backend serves JSON, and the frontend proxies r
 | POST | `/api/git/commit` | Create a git commit from staged changes |
 | POST | `/api/git/push` | Push the current repo |
 | POST | `/api/git/sync` | Pull, rebase, or otherwise sync the current repo |
+| POST | `/api/terminal/run` | Run a bounded shell command in a project- or session-scoped working directory |
 | GET | `/api/state` | Full state snapshot |
 | GET | `/api/workspaces` | List saved workspace layout summaries |
 | GET | `/api/workspaces/{id}` | Read a persisted workspace layout |

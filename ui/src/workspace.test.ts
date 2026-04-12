@@ -14,6 +14,7 @@ import {
   openDiffPreviewInWorkspaceState,
   openFilesystemInWorkspaceState,
   openGitStatusInWorkspaceState,
+  openTerminalInWorkspaceState,
   openInstructionDebuggerInWorkspaceState,
   openOrchestratorCanvasInWorkspaceState,
   openOrchestratorListInWorkspaceState,
@@ -96,6 +97,21 @@ function makeGitStatusTab(
     kind: "gitStatus",
     workdir,
     originSessionId,
+  };
+}
+
+function makeTerminalTab(
+  id: string,
+  workdir: string | null,
+  originSessionId: string | null,
+  originProjectId: string | null = null,
+): WorkspaceTab {
+  return {
+    id,
+    kind: "terminal",
+    workdir,
+    originSessionId,
+    ...(originProjectId ? { originProjectId } : {}),
   };
 }
 
@@ -2074,6 +2090,87 @@ describe("workspace helpers", () => {
     expect(next.panes.find((pane) => pane.id === "pane-a")?.activeTabId).toBe(
       "git-a",
     );
+  });
+
+  it("openTerminalInWorkspaceState creates a terminal tab and switches the pane mode", () => {
+    const next = openTerminalInWorkspaceState(
+      makeSinglePaneWorkspace(
+        makePane("pane-a", [makeSessionTab("tab-a", "session-a")]),
+      ),
+      "/tmp/project",
+      "pane-a",
+      "session-a",
+      "project-a",
+    );
+
+    expect(next.panes[0].tabs).toHaveLength(2);
+    expect(next.panes[0].tabs[1]).toEqual({
+      id: expect.any(String),
+      kind: "terminal",
+      workdir: "/tmp/project",
+      originSessionId: "session-a",
+      originProjectId: "project-a",
+    });
+    expect(next.panes[0].viewMode).toBe("terminal");
+    expect(next.panes[0].activeSessionId).toBe("session-a");
+  });
+
+  it("openTerminalInWorkspaceState focuses an existing terminal tab for the same workdir and scope", () => {
+    const paneA = makePane(
+      "pane-a",
+      [makeTerminalTab("terminal-a", "/tmp/project", "session-a", "project-a")],
+      {
+        activeTabId: "terminal-a",
+        activeSessionId: "session-a",
+        viewMode: "terminal",
+      },
+    );
+    const paneB = makePane("pane-b", [makeSessionTab("tab-b", "session-b")]);
+
+    const next = openTerminalInWorkspaceState(
+      makeSplitWorkspace(paneA, paneB, paneB.id),
+      "/tmp/project",
+      paneB.id,
+      "session-a",
+      "project-a",
+    );
+
+    expect(next.activePaneId).toBe("pane-a");
+    expect(next.panes.find((pane) => pane.id === "pane-a")?.activeTabId).toBe(
+      "terminal-a",
+    );
+  });
+
+  it("openTerminalInWorkspaceState keeps terminal tabs distinct by session and project scope", () => {
+    const paneA = makePane(
+      "pane-a",
+      [makeTerminalTab("terminal-a", "/tmp/project", "session-a", "project-a")],
+      {
+        activeTabId: "terminal-a",
+        activeSessionId: "session-a",
+        viewMode: "terminal",
+      },
+    );
+    const paneB = makePane("pane-b", [makeSessionTab("tab-b", "session-b")]);
+
+    const next = openTerminalInWorkspaceState(
+      makeSplitWorkspace(paneA, paneB, paneB.id),
+      "/tmp/project",
+      paneB.id,
+      "session-b",
+      "project-b",
+    );
+
+    const targetPane = next.panes.find((pane) => pane.id === "pane-b");
+    expect(next.activePaneId).toBe("pane-b");
+    expect(targetPane?.tabs).toHaveLength(2);
+    expect(targetPane?.tabs[1]).toEqual({
+      id: expect.any(String),
+      kind: "terminal",
+      workdir: "/tmp/project",
+      originSessionId: "session-b",
+      originProjectId: "project-b",
+    });
   });
 
   it("openFilesystemInWorkspaceState reuses a restored filesystem tab with a legacy Windows verbatim root", () => {

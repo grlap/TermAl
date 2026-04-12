@@ -1487,16 +1487,7 @@ function ConversationMessageList({
 }) {
   const hasConversationSearch = conversationSearchQuery.trim().length > 0;
 
-  // Inactive cached sessions with many messages should not render the full
-  // non-virtualized message list — the container is hidden anyway and rendering
-  // hundreds of message cards just to tear them down on tab return causes the
-  // multi-second tab-switch stall.  Return nothing; the session content will
-  // rebuild via the virtualized path when the tab becomes active again.
-  if (!isActive && messages.length >= CONVERSATION_VIRTUALIZATION_MIN_MESSAGES) {
-    return null;
-  }
-
-  if (hasConversationSearch || !isActive || messages.length < CONVERSATION_VIRTUALIZATION_MIN_MESSAGES) {
+  if (hasConversationSearch || messages.length < CONVERSATION_VIRTUALIZATION_MIN_MESSAGES) {
     return (
       <>
         {/* Only the active mounted page exposes find anchors so cached hidden pages cannot hijack scroll targets. */}
@@ -1525,6 +1516,7 @@ function ConversationMessageList({
 
   return (
     <VirtualizedConversationMessageList
+      isActive={isActive}
       renderMessageCard={renderMessageCard}
       sessionId={sessionId}
       messages={messages}
@@ -1538,6 +1530,7 @@ function ConversationMessageList({
 }
 
 function VirtualizedConversationMessageList({
+  isActive,
   renderMessageCard,
   sessionId,
   messages,
@@ -1547,6 +1540,7 @@ function VirtualizedConversationMessageList({
   onMcpElicitationSubmit,
   onCodexAppRequestSubmit,
 }: {
+  isActive: boolean;
   renderMessageCard: RenderMessageCard;
   sessionId: string;
   messages: Message[];
@@ -1604,7 +1598,7 @@ function VirtualizedConversationMessageList({
   const layout = useMemo(() => buildVirtualizedMessageLayout(messageHeights), [messageHeights]);
   const layoutTopsRef = useRef(layout.tops);
   layoutTopsRef.current = layout.tops;
-  const activeViewport = scrollContainerRef.current;
+  const activeViewport = isActive ? scrollContainerRef.current : null;
   const viewportHeight =
     activeViewport?.clientHeight && activeViewport.clientHeight > 0
       ? activeViewport.clientHeight
@@ -1631,6 +1625,10 @@ function VirtualizedConversationMessageList({
   }, [windowedMessages]);
 
   useLayoutEffect(() => {
+    if (!isActive) {
+      return;
+    }
+
     const node = scrollContainerRef.current;
     if (!node) {
       return;
@@ -1658,11 +1656,11 @@ function VirtualizedConversationMessageList({
       node.removeEventListener("scroll", syncViewport);
       resizeObserver.disconnect();
     };
-  }, [scrollContainerRef, sessionId]);
+  }, [isActive, scrollContainerRef, sessionId]);
 
   // Load older messages when the user scrolls near the top of the window.
   useEffect(() => {
-    if (!hasOlderMessages) {
+    if (!isActive || !hasOlderMessages) {
       return;
     }
 
@@ -1697,7 +1695,7 @@ function VirtualizedConversationMessageList({
     return () => {
       node.removeEventListener("scroll", handleScroll);
     };
-  }, [hasOlderMessages, messages.length, scrollContainerRef]);
+  }, [hasOlderMessages, isActive, messages.length, scrollContainerRef]);
 
   // Stabilize handler references so MeasuredMessageCard memo can skip
   // re-renders for messages whose data and position haven't changed.
@@ -1754,6 +1752,10 @@ function VirtualizedConversationMessageList({
     (messageId: string, result: JsonValue) => onCodexAppRequestSubmit(sessionId, messageId, result),
     [sessionId, onCodexAppRequestSubmit],
   );
+
+  if (!isActive) {
+    return null;
+  }
 
   return (
     <div className="virtualized-message-list" style={{ height: layout.totalHeight }}>

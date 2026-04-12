@@ -130,6 +130,33 @@ fn read_capped_child_stdout_line_drains_oversized_line_at_eof() {
 }
 
 #[test]
+fn read_capped_terminal_output_bounds_stored_prefix() {
+    let (empty_output, empty_truncated) =
+        read_capped_terminal_output(std::io::Cursor::new(Vec::<u8>::new())).unwrap();
+    assert_eq!(empty_output, "");
+    assert!(!empty_truncated);
+
+    let (small_output, small_truncated) =
+        read_capped_terminal_output(std::io::Cursor::new(b"hello terminal".to_vec())).unwrap();
+    assert_eq!(small_output, "hello terminal");
+    assert!(!small_truncated);
+
+    let exact_output = "x".repeat(TERMINAL_OUTPUT_MAX_BYTES);
+    let (exact_output_result, exact_truncated) =
+        read_capped_terminal_output(std::io::Cursor::new(exact_output.clone().into_bytes()))
+            .unwrap();
+    assert_eq!(exact_output_result, exact_output);
+    assert!(!exact_truncated);
+
+    let oversized_prefix = "y".repeat(TERMINAL_OUTPUT_MAX_BYTES);
+    let oversized_output = format!("{oversized_prefix}tail");
+    let (oversized_output_result, oversized_truncated) =
+        read_capped_terminal_output(std::io::Cursor::new(oversized_output.into_bytes())).unwrap();
+    assert_eq!(oversized_output_result, oversized_prefix);
+    assert!(oversized_truncated);
+}
+
+#[test]
 fn truncate_child_stdout_log_line_appends_ellipsis_only_when_needed() {
     assert_eq!(truncate_child_stdout_log_line("abcdef", 4), "abcd...");
     assert_eq!(truncate_child_stdout_log_line("abc", 4), "abc");
@@ -21226,6 +21253,133 @@ async fn health_route_reports_inline_orchestrator_template_support() {
             "supportsInlineOrchestratorTemplates": true,
         })
     );
+}
+
+#[tokio::test]
+async fn terminal_run_route_rejects_invalid_requests() {
+    let state = test_app_state();
+    let root = std::env::temp_dir().join(format!("termal-terminal-validation-{}", Uuid::new_v4()));
+    let outside_root = std::env::temp_dir().join(format!(
+        "termal-terminal-validation-outside-{}",
+        Uuid::new_v4()
+    ));
+    fs::create_dir_all(&root).unwrap();
+    fs::create_dir_all(&outside_root).unwrap();
+
+    let project = state
+        .create_project(CreateProjectRequest {
+            name: Some("Terminal".to_owned()),
+            root_path: root.to_string_lossy().into_owned(),
+            remote_id: default_local_remote_id(),
+        })
+        .unwrap();
+    let app = app_router(state);
+    let project_id = project.project_id;
+    let root_path = root.to_string_lossy().into_owned();
+    let outside_path = outside_root.to_string_lossy().into_owned();
+
+    let (empty_status, empty_response): (StatusCode, Value) = request_json(
+        &app,
+        Request::builder()
+            .method("POST")
+            .uri("/api/terminal/run")
+            .header(axum::http::header::CONTENT_TYPE, "application/json")
+            .body(Body::from(
+                json!({
+                    "command": "   ",
+                    "projectId": project_id,
+                    "workdir": root_path,
+                })
+                .to_string(),
+            ))
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(empty_status, StatusCode::BAD_REQUEST);
+    assert_eq!(
+        empty_response,
+        json!({ "error": "terminal command cannot be empty" })
+    );
+
+    let (oversized_status, oversized_response): (StatusCode, Value) = request_json(
+        &app,
+        Request::builder()
+            .method("POST")
+            .uri("/api/terminal/run")
+            .header(axum::http::header::CONTENT_TYPE, "application/json")
+            .body(Body::from(
+                json!({
+                    "command": "x".repeat(TERMINAL_COMMAND_MAX_CHARS + 1),
+                    "projectId": project_id,
+                    "workdir": root_path,
+                })
+                .to_string(),
+            ))
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(oversized_status, StatusCode::BAD_REQUEST);
+    assert_eq!(
+        oversized_response,
+        json!({
+            "error": format!(
+                "terminal command cannot exceed {TERMINAL_COMMAND_MAX_CHARS} characters"
+            )
+        })
+    );
+
+    let (outside_status, outside_response): (StatusCode, Value) = request_json(
+        &app,
+        Request::builder()
+            .method("POST")
+            .uri("/api/terminal/run")
+            .header(axum::http::header::CONTENT_TYPE, "application/json")
+            .body(Body::from(
+                json!({
+                    "command": "echo ok",
+                    "projectId": project_id,
+                    "workdir": outside_path,
+                })
+                .to_string(),
+            ))
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(outside_status, StatusCode::BAD_REQUEST);
+    assert!(
+        outside_response["error"]
+            .as_str()
+            .unwrap()
+            .contains("must stay inside project")
+    );
+
+    let (multibyte_status, multibyte_response): (StatusCode, Value) = request_json(
+        &app,
+        Request::builder()
+            .method("POST")
+            .uri("/api/terminal/run")
+            .header(axum::http::header::CONTENT_TYPE, "application/json")
+            .body(Body::from(
+                json!({
+                    "command": "é".repeat(TERMINAL_COMMAND_MAX_CHARS),
+                    "projectId": project_id,
+                    "workdir": outside_path,
+                })
+                .to_string(),
+            ))
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(multibyte_status, StatusCode::BAD_REQUEST);
+    let multibyte_error = multibyte_response["error"].as_str().unwrap();
+    assert!(
+        multibyte_error.contains("must stay inside project"),
+        "expected scope validation, got {multibyte_error:?}"
+    );
+    assert!(!multibyte_error.contains("cannot exceed"));
+
+    fs::remove_dir_all(root).unwrap();
+    fs::remove_dir_all(outside_root).unwrap();
 }
 
 // Tests that read and write file accept project ID without session.

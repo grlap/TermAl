@@ -85,6 +85,8 @@ export function labelForPaneViewMode(viewMode: PaneViewMode) {
       return "Files";
     case "gitStatus":
       return "Git status";
+    case "terminal":
+      return "Terminal";
     case "instructionDebugger":
       return "Instructions";
     case "diffPreview":

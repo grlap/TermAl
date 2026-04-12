@@ -18,6 +18,7 @@ const PANE_VIEW_MODES: readonly PaneViewMode[] = [
   "source",
   "filesystem",
   "gitStatus",
+  "terminal",
   "instructionDebugger",
   "diffPreview",
 ];
@@ -51,6 +52,12 @@ export function isWorkspaceTab(value: unknown): value is WorkspaceTab {
         isOptionalNullableString(value.originProjectId)
       );
     case "gitStatus":
+      return (
+        isNullableString(value.workdir) &&
+        isNullableString(value.originSessionId) &&
+        isOptionalNullableString(value.originProjectId)
+      );
+    case "terminal":
       return (
         isNullableString(value.workdir) &&
         isNullableString(value.originSessionId) &&

@@ -16,6 +16,7 @@ Use the files here for the detailed feature design and implementation notes.
 - [File Change Awareness](./file-change-awareness.md)
 - [Concurrent Session Link Cards](./concurrent-session-link-cards.md)
 - [Instruction Debugger](./instruction-debugger.md)
+- [Markdown Document View](./markdown-document-view.md)
 - [Territory Visualization](./territory-visualization.md)
 - [WhatsApp Integration](./whatsapp-integration.md)
 - [Agent Integration Comparison](./agent-integration-comparison.md)

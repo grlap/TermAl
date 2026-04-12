@@ -152,6 +152,7 @@ fn app_router(state: AppState) -> Router {
         .route("/api/git/commit", post(commit_git_changes))
         .route("/api/git/push", post(push_git_changes))
         .route("/api/git/sync", post(sync_git_changes))
+        .route("/api/terminal/run", post(run_terminal_command))
         .route("/api/state", get(get_state))
         .route("/api/workspaces", get(list_workspace_layouts))
         .route(

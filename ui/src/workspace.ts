@@ -13,6 +13,7 @@ export type PaneViewMode =
   | "source"
   | "filesystem"
   | "gitStatus"
+  | "terminal"
   | "instructionDebugger"
   | "diffPreview";
 
@@ -44,6 +45,14 @@ export type WorkspaceFilesystemTab = {
 export type WorkspaceGitStatusTab = {
   id: string;
   kind: "gitStatus";
+  workdir: string | null;
+  originSessionId: string | null;
+  originProjectId?: string | null;
+};
+
+export type WorkspaceTerminalTab = {
+  id: string;
+  kind: "terminal";
   workdir: string | null;
   originSessionId: string | null;
   originProjectId?: string | null;
@@ -133,6 +142,7 @@ export type WorkspaceTab =
   | WorkspaceSourceTab
   | WorkspaceFilesystemTab
   | WorkspaceGitStatusTab
+  | WorkspaceTerminalTab
   | WorkspaceControlPanelTab
   | WorkspaceOrchestratorListTab
   | WorkspaceCanvasTab
@@ -252,6 +262,23 @@ export function createGitStatusTab(
     kind: "gitStatus",
     workdir: normalizeWorkspacePath(workdir),
     originSessionId,
+    ...projectOriginProps(normalizedOriginProjectId),
+  };
+}
+
+export function createTerminalTab(
+  workdir: string | null = null,
+  originSessionId: string | null = null,
+  originProjectId: string | null = null,
+): WorkspaceTerminalTab {
+  const normalizedOriginSessionId = normalizeWorkspaceIdentifier(originSessionId);
+  const normalizedOriginProjectId = normalizeWorkspaceIdentifier(originProjectId);
+
+  return {
+    id: crypto.randomUUID(),
+    kind: "terminal",
+    workdir: normalizeWorkspacePath(workdir),
+    originSessionId: normalizedOriginSessionId,
     ...projectOriginProps(normalizedOriginProjectId),
   };
 }
@@ -441,7 +468,11 @@ export function normalizeWorkspaceStatePaths(workspace: WorkspaceState): Workspa
               rootPath: normalizeWorkspacePath(tab.rootPath),
             };
           }
-          if (tab.kind === "gitStatus" || tab.kind === "instructionDebugger") {
+          if (
+            tab.kind === "gitStatus" ||
+            tab.kind === "terminal" ||
+            tab.kind === "instructionDebugger"
+          ) {
             return {
               ...tab,
               workdir: normalizeWorkspacePath(tab.workdir),
@@ -513,6 +544,18 @@ export function reconcileWorkspaceState(current: WorkspaceState, sessions: Sessi
         }
 
         if (tab.kind === "gitStatus") {
+          const { originProjectId: _ignoredOriginProjectId, ...tabWithoutOriginProjectId } = tab;
+          return [
+            {
+              ...tabWithoutOriginProjectId,
+              originSessionId,
+              ...projectOriginProps(originProjectId),
+              workdir: normalizeWorkspacePath(tab.workdir),
+            },
+          ];
+        }
+
+        if (tab.kind === "terminal") {
           const { originProjectId: _ignoredOriginProjectId, ...tabWithoutOriginProjectId } = tab;
           return [
             {
@@ -832,6 +875,35 @@ export function openGitStatusInWorkspaceState(
   return openTabInWorkspaceState(
     workspace,
     createGitStatusTab(normalizedWorkdir, originSessionId, originProjectId),
+    preferredPaneId,
+  );
+}
+
+export function openTerminalInWorkspaceState(
+  workspace: WorkspaceState,
+  workdir: string | null,
+  preferredPaneId: string | null,
+  originSessionId: string | null,
+  originProjectId: string | null = null,
+): WorkspaceState {
+  const normalizedWorkdir = normalizeWorkspacePath(workdir);
+  const normalizedOriginSessionId = normalizeWorkspaceIdentifier(originSessionId);
+  const normalizedOriginProjectId = normalizeWorkspaceIdentifier(originProjectId);
+  if (normalizedWorkdir) {
+    const existing = findTerminalTab(
+      workspace,
+      normalizedWorkdir,
+      normalizedOriginSessionId,
+      normalizedOriginProjectId,
+    );
+    if (existing) {
+      return activatePane(workspace, existing.paneId, existing.tab.id);
+    }
+  }
+
+  return openTabInWorkspaceState(
+    workspace,
+    createTerminalTab(normalizedWorkdir, normalizedOriginSessionId, normalizedOriginProjectId),
     preferredPaneId,
   );
 }
@@ -1998,6 +2070,16 @@ function syncPaneState(pane: WorkspacePane): WorkspacePane {
     };
   }
 
+  if (activeTab.kind === "terminal") {
+    return {
+      ...pane,
+      activeTabId: activeTab.id,
+      activeSessionId: resolveOriginSessionId(activeTab.originSessionId, pane.activeSessionId, pane.tabs),
+      viewMode: "terminal",
+      sourcePath: null,
+    };
+  }
+
   return {
     ...pane,
     activeTabId: activeTab.id,
@@ -2075,6 +2157,31 @@ function findGitStatusTab(workspace: WorkspaceState, workdir: string) {
       (candidate): candidate is WorkspaceGitStatusTab =>
         candidate.kind === "gitStatus" &&
         normalizeWorkspacePath(candidate.workdir) === normalizedWorkdir,
+    );
+    if (tab) {
+      return { paneId: pane.id, tab };
+    }
+  }
+
+  return null;
+}
+
+function findTerminalTab(
+  workspace: WorkspaceState,
+  workdir: string,
+  originSessionId: string | null,
+  originProjectId: string | null,
+) {
+  const normalizedWorkdir = normalizeWorkspacePath(workdir);
+  const normalizedOriginSessionId = normalizeWorkspaceIdentifier(originSessionId);
+  const normalizedOriginProjectId = normalizeWorkspaceIdentifier(originProjectId);
+  for (const pane of workspace.panes) {
+    const tab = pane.tabs.find(
+      (candidate): candidate is WorkspaceTerminalTab =>
+        candidate.kind === "terminal" &&
+        normalizeWorkspacePath(candidate.workdir) === normalizedWorkdir &&
+        normalizeWorkspaceIdentifier(candidate.originSessionId) === normalizedOriginSessionId &&
+        normalizeWorkspaceIdentifier(candidate.originProjectId ?? null) === normalizedOriginProjectId,
     );
     if (tab) {
       return { paneId: pane.id, tab };
