@@ -1234,6 +1234,9 @@ export default function App() {
   const paneContentSignaturesRef = useRef<
     Record<string, Record<string, string>>
   >({});
+  const forceSessionScrollToBottomRef = useRef<
+    Record<string, true | undefined>
+  >({});
 
   const projectLookup = useMemo(
     () => new Map(projects.map((project) => [project.id, project])),
@@ -1782,6 +1785,36 @@ export default function App() {
       side,
       preferredControlPanelWidthRatio,
     );
+  }
+
+  function markSessionTabsForBottomAfterWorkspaceRebuild(
+    workspaceState: WorkspaceState,
+    options?: {
+      sessionIds?: readonly string[];
+      tabs?: readonly WorkspaceTab[];
+    },
+  ) {
+    const sessionIds = new Set<string>();
+    for (const pane of workspaceState.panes) {
+      for (const tab of pane.tabs) {
+        if (tab.kind === "session") {
+          sessionIds.add(tab.sessionId);
+        }
+      }
+    }
+
+    for (const sessionId of options?.sessionIds ?? []) {
+      sessionIds.add(sessionId);
+    }
+    for (const tab of options?.tabs ?? []) {
+      if (tab.kind === "session") {
+        sessionIds.add(tab.sessionId);
+      }
+    }
+
+    for (const sessionId of sessionIds) {
+      forceSessionScrollToBottomRef.current[sessionId] = true;
+    }
   }
 
   function adoptSessions(
@@ -5558,6 +5591,7 @@ export default function App() {
   }
 
   function handleSplitPane(paneId: string, direction: "row" | "column") {
+    markSessionTabsForBottomAfterWorkspaceRebuild(workspaceRef.current);
     setWorkspace((current) =>
       applyControlPanelLayout(splitPane(current, paneId, direction)),
     );
@@ -5702,6 +5736,9 @@ export default function App() {
   ) {
     const droppedSession = readSessionDragData(dataTransfer ?? null);
     if (droppedSession) {
+      markSessionTabsForBottomAfterWorkspaceRebuild(workspaceRef.current, {
+        sessionIds: [droppedSession.sessionId],
+      });
       startTransition(() => {
         setWorkspace((current) => {
           const nextWorkspace = placeSessionDropInWorkspaceState(
@@ -5742,6 +5779,9 @@ export default function App() {
 
     if (currentDraggedTab) {
       const drop = currentDraggedTab;
+      markSessionTabsForBottomAfterWorkspaceRebuild(workspaceRef.current, {
+        tabs: [drop.tab],
+      });
       draggedTabRef.current = null;
       setDraggedTab(null);
       const nextControlPanelSide =
@@ -5772,6 +5812,9 @@ export default function App() {
 
     if (currentLauncherDraggedTab) {
       const drop = currentLauncherDraggedTab;
+      markSessionTabsForBottomAfterWorkspaceRebuild(workspaceRef.current, {
+        tabs: [drop.tab],
+      });
       launcherDraggedTabRef.current = null;
       setLauncherDraggedTab(null);
       flushSync(() => {
@@ -5795,6 +5838,9 @@ export default function App() {
     }
 
     const drop = currentExternalDraggedTab;
+    markSessionTabsForBottomAfterWorkspaceRebuild(workspaceRef.current, {
+      tabs: [drop.tab],
+    });
     setExternalDraggedTab((current) =>
       current?.dragId === drop.dragId ? null : current,
     );
@@ -7584,6 +7630,7 @@ export default function App() {
               paneShouldStickToBottomRef={paneShouldStickToBottomRef}
               paneScrollPositionsRef={paneScrollPositionsRef}
               paneContentSignaturesRef={paneContentSignaturesRef}
+              forceSessionScrollToBottomRef={forceSessionScrollToBottomRef}
               pendingScrollToBottomRequest={pendingScrollToBottomRequest}
               windowId={windowId}
               draggedTab={activeDraggedTab}
@@ -8439,6 +8486,7 @@ function WorkspaceNodeView({
   paneShouldStickToBottomRef,
   paneScrollPositionsRef,
   paneContentSignaturesRef,
+  forceSessionScrollToBottomRef,
   pendingScrollToBottomRequest,
   windowId,
   draggedTab,
@@ -8525,6 +8573,9 @@ function WorkspaceNodeView({
   >;
   paneContentSignaturesRef: React.MutableRefObject<
     Record<string, Record<string, string>>
+  >;
+  forceSessionScrollToBottomRef: React.MutableRefObject<
+    Record<string, true | undefined>
   >;
   pendingScrollToBottomRequest: {
     sessionId: string;
@@ -8777,6 +8828,7 @@ function WorkspaceNodeView({
         paneShouldStickToBottomRef={paneShouldStickToBottomRef}
         paneScrollPositionsRef={paneScrollPositionsRef}
         paneContentSignaturesRef={paneContentSignaturesRef}
+        forceSessionScrollToBottomRef={forceSessionScrollToBottomRef}
         pendingScrollToBottomRequest={pendingScrollToBottomRequest}
         windowId={windowId}
         draggedTab={draggedTab}
@@ -8903,6 +8955,7 @@ function WorkspaceNodeView({
           paneShouldStickToBottomRef={paneShouldStickToBottomRef}
           paneScrollPositionsRef={paneScrollPositionsRef}
           paneContentSignaturesRef={paneContentSignaturesRef}
+          forceSessionScrollToBottomRef={forceSessionScrollToBottomRef}
           pendingScrollToBottomRequest={pendingScrollToBottomRequest}
           windowId={windowId}
           draggedTab={draggedTab}
@@ -8996,6 +9049,7 @@ function WorkspaceNodeView({
           paneShouldStickToBottomRef={paneShouldStickToBottomRef}
           paneScrollPositionsRef={paneScrollPositionsRef}
           paneContentSignaturesRef={paneContentSignaturesRef}
+          forceSessionScrollToBottomRef={forceSessionScrollToBottomRef}
           pendingScrollToBottomRequest={pendingScrollToBottomRequest}
           windowId={windowId}
           draggedTab={draggedTab}
@@ -9083,6 +9137,7 @@ function SessionPaneView({
   paneShouldStickToBottomRef,
   paneScrollPositionsRef,
   paneContentSignaturesRef,
+  forceSessionScrollToBottomRef,
   pendingScrollToBottomRequest,
   windowId,
   draggedTab,
@@ -9168,6 +9223,9 @@ function SessionPaneView({
   >;
   paneContentSignaturesRef: React.MutableRefObject<
     Record<string, Record<string, string>>
+  >;
+  forceSessionScrollToBottomRef: React.MutableRefObject<
+    Record<string, true | undefined>
   >;
   pendingScrollToBottomRequest: {
     sessionId: string;
@@ -10219,6 +10277,23 @@ function SessionPaneView({
         return;
       }
 
+      const shouldForceBottomAfterWorkspaceRebuild =
+        defaultScrollToBottom &&
+        activeSession &&
+        forceSessionScrollToBottomRef.current[activeSession.id];
+      if (shouldForceBottomAfterWorkspaceRebuild) {
+        delete forceSessionScrollToBottomRef.current[activeSession.id];
+        setShouldStickToBottom(true);
+        paneScrollPositions[scrollStateKey] = {
+          top: Number.MAX_SAFE_INTEGER,
+          shouldStick: true,
+        };
+        restoreCleanup = scheduleSettledScrollToBottom("auto", {
+          maxAttempts: 60,
+        });
+        return;
+      }
+
       const saved = paneScrollPositions[scrollStateKey];
       if (saved) {
         setShouldStickToBottom(saved.shouldStick);
@@ -10259,7 +10334,7 @@ function SessionPaneView({
       window.cancelAnimationFrame(frameId);
       restoreCleanup?.();
     };
-  }, [defaultScrollToBottom, scrollStateKey]);
+  }, [activeSession?.id, defaultScrollToBottom, scrollStateKey]);
 
   useLayoutEffect(() => {
     if (!hasSessionFindQuery || !activeSessionSearchMatch) {
