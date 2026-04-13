@@ -5,23 +5,6 @@ and cleanup notes do not belong here.
 
 ## Active Repo Bugs
 
-## Terminal commands can run without timeout
-
-**Severity:** High - unbounded terminal commands can hold processes and concurrency permits indefinitely.
-
-The current terminal command changes route both JSON and streaming local executions through the shared runner with no process timeout. The remote stream proxy also uses a no-timeout response path. Even if the API contract explicitly allows long-running commands, the implementation still needs a watchdog or idle timeout so hung local shells and stalled remote peers cannot pin terminal capacity forever.
-
-**Current behavior:**
-- `run_terminal_shell_command()` calls `run_terminal_shell_command_with_timeout_and_stream(..., None, None)`.
-- `run_terminal_shell_command_streaming()` calls the same runner with `None` and a stream sender.
-- The runner calls `process.wait()` for `None`, so long-running commands can hold terminal permits forever.
-- Remote streaming uses `remote_post_response_without_timeout()`, so a remote that accepts the request and never finishes the stream can hold the remote terminal permit and blocking task forever.
-
-**Proposal:**
-- Restore a bounded watchdog for both JSON and streaming local terminal runs, or add an explicit idle/read timeout with process-tree cleanup.
-- Keep remote stream reads bounded by a response, idle, or watchdog timeout that releases permits on timeout/disconnect.
-- Add regression coverage proving hung local and remote terminal requests release permits.
-
 ## Terminal stream parser treats partial SSE chunks as complete frames
 
 **Severity:** High - streamed terminal output can fail intermittently on normal network chunk boundaries.

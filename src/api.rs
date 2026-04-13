@@ -2304,6 +2304,9 @@ async fn run_terminal_command_stream(
                     "command": command,
                     "workdir": workdir_request,
                 });
+                // Remote streamed terminals also intentionally avoid a response
+                // timeout so long-running user commands can keep producing
+                // output for as long as the remote backend allows.
                 let response = state.remote_post_response_without_timeout(
                     &scope,
                     "/api/terminal/run/stream",
@@ -2589,6 +2592,8 @@ fn run_terminal_shell_command(
     command: &str,
     workdir: &FsPath,
 ) -> Result<TerminalCommandResponse, ApiError> {
+    // No production timeout is intentional. Users run long-lived commands
+    // here, such as `flutter run`, dev servers, and file watchers.
     run_terminal_shell_command_with_timeout_and_stream(command, workdir, None, None)
 }
 
@@ -2597,6 +2602,8 @@ fn run_terminal_shell_command_streaming(
     workdir: &FsPath,
     event_tx: TerminalCommandStreamSender,
 ) -> Result<TerminalCommandResponse, ApiError> {
+    // Streaming terminal sessions are expected to stay open until the command
+    // exits or the user stops it; do not add a watchdog timeout here.
     run_terminal_shell_command_with_timeout_and_stream(command, workdir, None, Some(event_tx))
 }
 
