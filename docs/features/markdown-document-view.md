@@ -1,6 +1,10 @@
 # Feature Brief: Markdown Document View
 
-Backlog source: proposed feature brief; not yet linked from `docs/bugs.md`.
+## Status
+
+Planned. Agent messages already render Markdown through the shared message
+renderer, but normal `.md` source files and Markdown diffs do not yet have a
+dedicated document preview/editing workflow.
 
 ## Problem
 

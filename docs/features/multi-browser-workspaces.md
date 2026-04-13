@@ -1,17 +1,15 @@
 # Feature Brief: Multi-Browser Workspaces
 
-Backlog source: proposed feature brief; not yet linked from `docs/bugs.md`.
+## Status
+
+Implemented.
 
 ## Problem
 
-This brief originally described workspace layout as browser-local only. The
-current implementation is more capable: each workspace view is cached per
-workspace in browser `localStorage` and persisted on the backend, and the UI
-now includes a workspace switcher backed by the server.
-
-The remaining problem is documentation clarity. Readers need the actual
-multi-browser model and API surface that shipped, including the server list
-route and switcher-driven flow.
+Browser-local layout storage is not enough for a control room that may run in
+several browser windows or on several monitors. Each window needs an independent
+layout when desired, and an intentional shared layout when the same URL is
+opened elsewhere.
 
 ## Core idea
 
@@ -72,8 +70,8 @@ any pending debounced save before navigation so the backend copy stays current.
 
 ## Data model
 
-Workspace views should live in the main persisted backend state alongside
-projects, sessions, and orchestration instances.
+Workspace views live in the main persisted backend state alongside projects,
+sessions, and orchestration instances.
 
 ```rust
 struct WorkspaceLayoutDocument {
@@ -99,8 +97,8 @@ struct StateInner {
 }
 ```
 
-The backend treats the nested `workspace` payload as an opaque JSON document in
-Phase 1. The frontend remains responsible for schema validation.
+The backend treats the nested `workspace` payload as an opaque JSON document.
+The frontend remains responsible for schema validation.
 
 ## API
 
@@ -183,8 +181,9 @@ The frontend boot order becomes:
 
 ### Persistence
 
-Workspace persistence should be debounced slightly so split dragging and canvas
-dragging do not write on every pointer move.
+Workspace persistence is debounced slightly so split dragging and canvas
+dragging do not write on every pointer move. Pending saves are flushed with
+`keepalive` on pagehide/unload paths where possible.
 
 ### Validation
 

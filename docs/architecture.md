@@ -25,12 +25,11 @@ Optional sidecar:
 **Persistence:** `~/.termal/sessions.json` stores sessions, projects, preferences, remote config, workspace layouts, and orchestrator instances. `~/.termal/orchestrators.json` stores orchestrator templates.
 **Real-time:** Server-Sent Events with a monotonic revision counter for ordering.
 
-**Current status:** The current implementation uses server-backed workspace layouts with per-workspace local cache warm starts.
+**Current status:** The current implementation includes server-backed workspace layouts, project-scoped SSH remotes, orchestrator templates and runtime instances, session-scoped model controls, workspace terminal tabs, file-change awareness, and the Telegram relay.
 
-**Remote direction:** The long-term remote model keeps the browser on a single
-local TermAl server. That local server stores preferences, manages remote
-connections, and routes project work to local or remote TermAl servers over
-SSH-managed tunnels.
+**Remote model:** The browser connects to a single local TermAl server. That
+server stores preferences, manages remote connections, and routes project work
+to local or remote TermAl servers over SSH-managed tunnels.
 
 ---
 
@@ -177,6 +176,29 @@ All routes are under `/api`. The backend serves JSON, and the frontend proxies r
 
 `GET /api/health` currently returns `{ ok: true, supportsInlineOrchestratorTemplates: true }`. Remote launchers use `supportsInlineOrchestratorTemplates` during health probes to decide whether a remote can accept inline local orchestrator templates or must be upgraded first.
 
+### Terminal Command Execution
+
+Workspace terminal tabs are command runners, not full PTY emulators. Each run
+executes one shell command in a session- or project-scoped working directory and
+records a history entry inside the tab. The frontend uses the streamed endpoint
+by default so stdout and stderr arrive incrementally.
+
+Design constraints:
+
+- Local and remote commands have independent concurrency caps of four in-flight
+  commands each; rejected requests return 429.
+- Commands intentionally have no production timeout because users run long-lived
+  foreground tools such as dev servers, `flutter run`, watches, and REPL-like
+  processes.
+- Captured stdout/stderr are bounded and marked truncated when the cap is hit.
+- Local streamed commands observe SSE disconnects and kill the local process
+  tree when the user leaves the stream.
+- Remote streamed commands proxy the remote `/api/terminal/run/stream` SSE
+  contract when available, and fall back to the JSON route only when the remote
+  returns 404 or 405 for the stream route.
+- Remote successful non-SSE responses are protocol errors rather than a reason
+  to run the command again through the JSON endpoint.
+
 ### SSE Event Stream
 
 `GET /api/events` returns a Server-Sent Events stream with three event types:
@@ -216,22 +238,30 @@ On broadcast channel lag, the backend falls back to sending a full state snapsho
 
 ```
 ~/.termal/
-└── sessions.json    # PersistedState (JSON)
+|-- sessions.json          # PersistedState (sessions, projects, preferences, remotes, workspaces, instances)
+|-- orchestrators.json     # reusable orchestrator templates
+`-- telegram-bot.json      # optional Telegram relay chat binding
 ```
 
-`PersistedState` is a projection of `StateInner` that excludes runtime handles, pending approval maps, and empty collections. It stores the revision counter, session configs, message history, Codex state, and persisted workspace layout documents keyed by workspace ID. On startup, the backend loads this file and reconstructs `StateInner`.
+`PersistedState` is a projection of `StateInner` that excludes runtime handles,
+pending approval maps, and empty collections. It stores the revision counter,
+session configs, message history, Codex state, projects, remote preferences,
+orchestrator instances, and persisted workspace layout documents keyed by
+workspace ID. On startup, the backend loads this file and reconstructs
+`StateInner`. Template definitions live in `orchestrators.json` so reusable
+workflow designs can be managed separately from running instances.
 
 ---
 
-## Remote Architecture Direction
+## Remote Architecture
 
-The chosen remote architecture is:
+The implemented remote architecture is:
 
 `Browser -> local TermAl server -> remote TermAl server`
 
-The browser should not manage multiple backend origins directly. Instead, the
-local server remains the control plane and exposes the single browser-facing
-`/api` and `/api/events` interface.
+The browser does not manage multiple backend origins directly. Instead, the
+local server is the control plane and exposes the single browser-facing `/api`
+and `/api/events` interface.
 
 ### Topology
 
@@ -256,13 +286,13 @@ local server remains the control plane and exposes the single browser-facing
 │ - supervises SSH sessions and remote servers                │
 └──────────────┬───────────────────────────────┬──────────────┘
                │                               │
-               │ local execution               │ SSH bootstrap + persistent tunnel
+               │ local execution               │ SSH managed start + persistent tunnel
                ▼                               ▼
 ┌──────────────────────────────┐   ┌──────────────────────────────────────────┐
 │ Local machine runtime        │   │ Remote machine                           │
 │ LocalConnector               │   │ sshd                                     │
-│ - local projects             │   │  └─ runs bootstrap script, then          │
-│ - local agent processes      │   │     starts or reuses `termal server`     │
+│ - local projects             │   │  └─ runs or reuses `termal server`       │
+│ - local agent processes      │   │     through ssh -L port forwarding       │
 │                              │   │     bound to 127.0.0.1 on remote host    │
 └──────────────────────────────┘   └───────────────────┬──────────────────────┘
                                                        │ tunneled HTTP + SSE
@@ -296,25 +326,25 @@ projectId -> remoteId lookup in local control plane
 
 For a remote machine:
 
-1. The local TermAl server uses SSH to connect to the remote host.
-2. For managed SSH remotes, SSH can run a bootstrap script in a configured
-   TermAl checkout on the remote machine.
-3. The bootstrap script updates that checkout (`git fetch`, `git checkout`,
-   `git pull --ff-only`) and starts the backend from source.
-4. The first useful version can use `cargo run -- server` for convenience,
-   though `cargo build --release && ./target/release/termal server` is the
-   better long-lived default.
-5. The remote TermAl server listens on `127.0.0.1` only on the remote machine.
-6. The local TermAl server keeps a persistent SSH tunnel to that remote server.
-7. The local TermAl server speaks the normal TermAl HTTP and SSE protocol over
+1. The local TermAl server uses the system `ssh` client to connect to the
+   remote host.
+2. Managed mode runs `termal server` on the remote over that SSH session.
+3. If managed mode does not become healthy, TermAl falls back to tunnel-only
+   mode (`ssh -N`) and expects a TermAl server to already be listening on the
+   remote host.
+4. The remote TermAl server listens on `127.0.0.1:8787` on the remote machine.
+5. The local TermAl server keeps a persistent local-forward tunnel to that
+   remote server.
+6. The local TermAl server speaks the normal TermAl HTTP and SSE protocol over
    that tunnel.
 
 This is intentionally similar to the Remote-SSH shape used by editor tooling:
 SSH is used to reach the machine, start the remote server, and carry the
 transport. The browser still only talks to the local control plane.
-For the first managed iteration, the control plane updates source on the remote
-instead of copying prebuilt binaries. That avoids cross-compilation while still
-letting one laptop manage multiple machines.
+The current remote config stores only connection settings (`id`, `name`,
+`transport`, `enabled`, `host`, `port`, and `user`). Source checkout management,
+binary installation, and remote upgrade orchestration are intentionally outside
+the current shipped config surface.
 
 ### Control Plane Responsibilities
 
@@ -340,7 +370,7 @@ Remote ownership is assigned at the project level.
 - Each project has a `remoteId`.
 - Each session belongs to a project.
 - Each session inherits its routing from the owning project.
-- File, directory, git, review, and session creation flows should route by
+- File, directory, git, review, terminal, and session creation flows route by
   project ownership.
 
 This avoids teaching the UI to choose a backend for every action. The user
@@ -350,35 +380,28 @@ from that association.
 ### Session and Project Identity
 
 Remote-native ids cannot be trusted to be globally unique across multiple
-machines. The local control plane must therefore expose collision-safe browser
-ids for projects and sessions.
+machines. The local control plane therefore exposes local browser-facing ids for
+proxy projects, sessions, and orchestrator instances, while storing the
+remote-native ids in runtime/persisted mapping fields such as
+`remote_session_id`, `remote_project_id`, and `remote_orchestrator_id`.
 
-Examples:
-
-- `local::project-1`
-- `build-box::project-1`
-- `local::session-3`
-- `build-box::session-3`
-
-Whether these are literal exposed ids or stable local aliases is an
-implementation detail, but the browser should only deal with globally unique
-identifiers.
+The browser should treat those local ids as canonical. Remote-native ids remain
+an internal proxying detail.
 
 ### State and Event Aggregation
 
-The browser should continue to consume one state stream from the local control
-plane.
+The browser consumes one state stream from the local control plane.
 
-That means the local server must:
+That means the local server:
 
-- fetch or subscribe to state from each configured remote
-- merge those states into one browser-facing `StateResponse`
-- rewrite project and session ids into browser-safe ids
-- emit one aggregate SSE stream
-- use its own aggregate revision counter instead of forwarding raw remote
+- fetches or subscribes to state from each configured remote
+- merges those states into one browser-facing `StateResponse`
+- rewrites project/session/orchestrator ids into browser-safe local ids
+- emits one aggregate SSE stream
+- uses its own aggregate revision counter instead of forwarding raw remote
   revisions directly
 
-The frontend should not need to know whether a project is local or remote in
+The frontend does not need to know whether a project is local or remote in
 order to consume normal state and delta updates.
 
 ### SSH as the Permanent Remote Transport
@@ -397,34 +420,26 @@ Design constraints:
 - System `ssh` and `ssh-agent` should be preferred over custom browser-managed
   key handling.
 
-### V0 Managed Bootstrap
+### Managed SSH Startup
 
-The first managed-remote bootstrap should optimize for developer-controlled
-machines rather than general-purpose machine provisioning.
+The current managed startup mode is intentionally small:
 
-Assumptions:
+1. Build an SSH command with batch mode, local port forwarding, and keepalive
+   settings.
+2. Run `termal server` on the remote host.
+3. Probe the forwarded local URL until `/api/health` succeeds.
+4. Cache the remote capabilities and begin proxying REST/SSE through the
+   tunnel.
+5. If that path fails, try tunnel-only mode and probe the same forwarded URL.
 
-- The remote machine already has `git`, `cargo`, and the Rust toolchain
-  installed.
-- The remote machine already has a local TermAl checkout at a configured path.
-- The local machine can push commits before asking a remote to update.
-
-Recommended flow:
-
-1. SSH into the remote machine.
-2. `cd` to the configured TermAl checkout.
-3. Fast-forward that checkout to the desired branch, tag, or commit.
-4. Start `termal server` from source in that checkout.
-5. Reuse the existing tunnel, health check, and SSE bridge design.
-
-This keeps the remote-control-plane design intact while deferring binary
-distribution, artifact caching, checksums, and cross-compilation support to a
-later iteration.
+This keeps the transport model simple and uses the user's normal system SSH
+configuration and `ssh-agent`. It does not currently update remote source
+checkouts or install TermAl binaries.
 
 ### API Shape
 
-The remote TermAl server should expose the same HTTP and SSE protocol shape as a
-local TermAl server as much as possible.
+The remote TermAl server exposes the same HTTP and SSE protocol shape as a local
+TermAl server as much as possible.
 
 This keeps the system simpler:
 
@@ -447,15 +462,15 @@ With at least two implementations:
 
 ### UI Implications
 
-The UI should evolve toward:
+The UI now follows these constraints:
 
 - one browser connection to the local TermAl server
-- a Settings surface for remote configuration
-- project creation that requires selecting a remote
-- session creation that requires selecting a project
-- remote-aware project/session status display
+- a Settings > Remotes surface for SSH configuration
+- project creation with a remote selector
+- session creation scoped to a project
+- remote-aware project/session labels and errors
 
-The UI should not evolve toward:
+The UI should still not evolve toward:
 
 - direct browser connections to multiple backends
 - one backend picker per action
@@ -598,6 +613,11 @@ App.tsx (main orchestrator)
 └── Theme switcher
 ```
 
+The current workspace also includes standalone control-surface tabs
+(`controlPanel`, `sessionList`, `projectList`, `orchestratorList`),
+orchestrator canvases, terminal tabs, and instruction-debugger tabs. The block
+above is intentionally high-level rather than an exhaustive component tree.
+
 ### Workspace System
 
 The workspace is a **binary tree** of panes. Each node is either a leaf (pane) or a split (two children with a direction and ratio).
@@ -612,15 +632,22 @@ WorkspacePane = {
 }
 ```
 
-**Tab types:** session, source, filesystem, gitStatus, diffPreview. Tabs are draggable between panes.
+**Tab types:** session, source, filesystem, gitStatus, terminal, controlPanel,
+orchestratorList, canvas, orchestratorCanvas, sessionList, projectList,
+instructionDebugger, and diffPreview. Tabs are draggable between panes and can
+be split into adjacent panes by dropping on pane edges.
 
 **View modes per pane:**
 - Session modes: `session` (chat), `prompt` (input focus), `commands` (command list), `diffs` (diff list)
 - Tool modes: `source`, `filesystem`, `gitStatus`, `diffPreview`
 
 When a session becomes active in a pane, the frontend keeps the existing
-scroll-to-latest behavior and also autofocuses the composer so typing can begin
-immediately.
+scroll-to-latest behavior and autofocuses the composer so typing can begin
+immediately. Session conversation pages remain mounted for live tabs where
+possible, which preserves browser scroll state across ordinary tab switches.
+When a pane rebuild really does remount a session view, TermAl restores the
+saved offset or forces the view back to the latest response when that tab had
+been pinned to the bottom.
 
 ### State Management
 
@@ -650,7 +677,15 @@ Session creation returns `CreateSessionResponse { sessionId, state }` — the fu
 
 ### Theming
 
-16 selectable color themes (defined in `themes.ts`) are stored as `.css` files in `ui/src/themes/`. Each theme defines CSS custom properties (`--ink`, `--paper`, `--line`, background gradients, etc.). The active theme is set via `data-theme` attribute on `<html>` and persisted to `localStorage`.
+18 selectable color themes (defined in `themes.ts`) are stored as `.css` files
+in `ui/src/themes/`. Each theme defines CSS custom properties (`--ink`,
+`--paper`, `--line`, background gradients, Monaco colors, etc.). The active
+theme is set via `data-theme` on `<html>` and persisted to `localStorage`.
+
+Chrome style is separate from color theme. The user can keep the theme's own
+chrome or choose Terminal, Editorial, Studio, or Blueprint styling with
+`data-ui-style`. Global UI font size, editor font size, and density are also
+runtime preferences.
 
 ### Message Rendering
 
@@ -661,7 +696,10 @@ Messages are rendered as typed cards:
 - **Command** — `IN` / `OUT` layout with copy button, collapsible output, status indicator
 - **Diff** — file path header, summary line, unified diff with syntax highlighting. Click to open in diff preview tab
 - **Markdown** — rendered markdown block
+- **FileChanges** — agent turn summary listing changed files from workspace watcher events
+- **SubagentResult / ParallelAgents** — Codex subagent output and parallel-agent progress
 - **Approval** — title, command detail, accept/reject/accept-for-session buttons
+- **UserInputRequest / McpElicitationRequest / CodexAppRequest** — structured interaction requests that need an explicit user response
 
 Long conversations (80+ messages) use **windowed rendering** — only messages near the viewport are mounted.
 

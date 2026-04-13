@@ -261,11 +261,16 @@ Examples:
 
 ## Current Status
 
-As of March 15, 2026, TermAl is still in Phase 1.
+As of April 13, 2026, TermAl is still primarily a Phase 1 local control room,
+with meaningful Phase 2 remote-control-plane work already implemented.
 
-The product has moved beyond the earliest local plumbing. The current app already has the local
-Rust server plus React UI, streaming session updates, prompt queueing, diff/source/git workspace
-surfaces, and improving pane-management flows for review.
+The current app includes the local Rust server and React UI, streaming session
+updates, prompt queueing, session-scoped model controls, project-scoped SSH
+remotes, server-backed multi-browser workspace layouts, filesystem/git/source
+and diff surfaces, workspace terminal tabs, orchestrator templates and runtime
+instances, file-change awareness, and a Telegram relay for project digests and
+actions.
 
-The remaining Phase 1 work is now concentrated in integration depth, restart safety, saved review
-threads, and the last layer of local UX polish needed to make the app dependable for daily use.
+The remaining Phase 1 work is mostly polish and coverage: deeper integration
+tests around scroll behavior and model controls, clearer test-only type
+surfaces, remote readiness refinement, and continued reliability hardening.

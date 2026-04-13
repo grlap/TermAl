@@ -1,6 +1,10 @@
 # Feature Brief: Concurrent Session Link Cards
 
-Backlog source: proposed feature brief; not yet linked from `docs/bugs.md`.
+## Status
+
+Exploratory. Codex subagent and parallel-agent messages are implemented as
+structured cards, but the explicit linked-session card workflow described here
+is still future design work.
 
 This brief describes a message type that represents another agent session
 linked from the current conversation. The linked sessions remain fully

@@ -18,6 +18,9 @@ palette.
 - `Prompt` settings cards own model selection for Claude, Codex, Cursor, and
   Gemini.
 - `/model` in the composer opens the same session-scoped model controls.
+- Orchestrator template session cards use the same themed model combobox. A
+  template node can keep "Assistant default" or pin a specific model for the
+  sessions created from that template.
 - New sessions automatically request their model list as soon as the session is
   created or opened.
 - Every supported agent exposes a `Refresh models` action in the session card.
@@ -71,6 +74,8 @@ palette.
   UI calls that out explicitly.
 - Refresh failures are rewritten into agent-specific guidance instead of raw
   transport errors.
+- Orchestrator template model choices are design-time defaults. Runtime session
+  model refresh still happens on the actual created session after launch.
 
 ## Remaining gaps
 

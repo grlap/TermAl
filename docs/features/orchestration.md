@@ -2,6 +2,17 @@
 
 Backlog source: [`docs/bugs.md`](../bugs.md)
 
+## Status
+
+Implemented for template authoring, project-scoped launches, runtime instances,
+pause/resume/stop controls, and on-completion transition delivery.
+
+The template editor is a visual canvas. Session cards define agent, optional
+model override, input mode, auto-approval behavior, and instructions.
+Transitions connect card anchors and define trigger, result mode, and prompt
+template. Runtime instances create ordinary sessions and drive follow-up prompts
+when source sessions become prompt-ready.
+
 ## The problem
 
 TermAl can already run many agent sessions in parallel, but the developer still does the routing:
@@ -151,10 +162,8 @@ enum TransitionResultMode {
 
 - `None`: ignore the source result and rely entirely on `promptTemplate`
 - `LastResponse`: use the source session's latest assistant reply
-- `Summary`: create a concise summary of the source session
+- `Summary`: create or use a concise summary of the source session
 - `SummaryAndLastResponse`: include both
-
-Phase 1 may implement `LastResponse` first and add the summary modes afterward.
 
 ### Prompt shaping
 
@@ -192,15 +201,13 @@ The developer designs a reusable session graph on a canvas:
 
 ### 2. Instantiation
 
-The developer instantiates a template with a goal or seed prompt.
+The developer instantiates a template for a selected project.
 
 The backend:
 
 1. creates all sessions from the template
 2. records the template snapshot in the orchestration instance
-3. optionally sends the initial prompt to one or more starting sessions
-
-Phase 1 can stop at template authoring and management. Runtime orchestration comes after that.
+3. starts the runtime instance and drives transition delivery as sessions finish
 
 ### 3. Runtime loop
 

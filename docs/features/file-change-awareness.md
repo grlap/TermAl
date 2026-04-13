@@ -1,16 +1,10 @@
-### Feature Brief: File Change Awareness
-aaa
-bbb
-ccc
-ddd
-eee
+# Feature Reference: File Change Awareness
 
-fff
+## Status
 
-lll
-Backlog source: proposed feature brief; not yet linked from `docs/bugs.md`.
-
-zzzz
+Implemented for active local workspace/session roots, source tabs, diff preview
+tabs, file-tree refresh, git status refresh, stale-save protection, and
+agent-turn changed-file summaries.
 
 ## Problem
 

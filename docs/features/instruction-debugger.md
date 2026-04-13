@@ -1,6 +1,10 @@
 # Feature Brief: Instruction Debugger
 
-Backlog source: proposed feature brief; not yet linked from `docs/bugs.md`.
+## Status
+
+Partially implemented. TermAl ships an instruction search/debugger workspace
+tab backed by `GET /api/instructions/search`. The full provenance graph and
+effective-stack model below remains future design work.
 
 This brief describes a provenance and debugging surface for agent instruction
 documents such as `CLAUDE.md`, `AGENTS.md`, `GEMINI.md`, and related
