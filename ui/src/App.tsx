@@ -880,6 +880,26 @@ export function syncMessageStackScrollPosition(
   };
 }
 
+export function resolveSettledScrollMinimumAttempts(
+  maxAttempts: number,
+  minAttempts?: number,
+) {
+  // Long virtualized conversations can keep moving the bottom while cards
+  // measure, even after scrollHeight looks stable for a frame or two.
+  const defaultMinimumAttempts = maxAttempts > 12 ? 8 : 4;
+  return Math.min(minAttempts ?? defaultMinimumAttempts, maxAttempts);
+}
+
+type AppTestHooks = {
+  onDeleteProjectPostAwaitPath?: (path: "resolve" | "reject") => void;
+};
+
+let appTestHooks: AppTestHooks | null = null;
+
+export function setAppTestHooksForTests(hooks: AppTestHooks | null) {
+  appTestHooks = hooks;
+}
+
 function getDockedControlPanelWidthRatioForWorkspace(
   workspace: WorkspaceState,
 ): number | null {
@@ -4471,6 +4491,35 @@ export default function App() {
 
       return changed ? nextState : current;
     });
+    setWorkspace((current) => {
+      let changed = false;
+      const panes = current.panes.map((pane) => {
+        let paneChanged = false;
+        const tabs = pane.tabs.map((tab): WorkspaceTab => {
+          if ("originProjectId" in tab && tab.originProjectId === projectId) {
+            paneChanged = true;
+            return {
+              ...tab,
+              originProjectId: null,
+            };
+          }
+
+          return tab;
+        });
+
+        if (!paneChanged) {
+          return pane;
+        }
+
+        changed = true;
+        return {
+          ...pane,
+          tabs,
+        };
+      });
+
+      return changed ? { ...current, panes } : current;
+    });
   }
 
   function handleProjectMenuStartSession(
@@ -4490,10 +4539,18 @@ export default function App() {
 
     try {
       const state = await deleteProject(project.id);
+      if (!isMountedRef.current) {
+        return;
+      }
+      appTestHooks?.onDeleteProjectPostAwaitPath?.("resolve");
       adoptState(state);
       resetRemovedProjectSelection(project.id);
       setRequestError(null);
     } catch (error) {
+      if (!isMountedRef.current) {
+        return;
+      }
+      appTestHooks?.onDeleteProjectPostAwaitPath?.("reject");
       reportRequestError(error);
     }
   }
@@ -10317,13 +10374,16 @@ function SessionPaneView({
       return;
     }
 
-    node.scrollTo({
-      top: node.scrollHeight,
-      behavior,
-    });
+    const nextScrollTop = Math.max(node.scrollHeight - node.clientHeight, 0);
+    if (Math.abs(node.scrollTop - nextScrollTop) > 1) {
+      node.scrollTo({
+        top: nextScrollTop,
+        behavior,
+      });
+    }
     setShouldStickToBottom(true);
     paneScrollPositions[scrollStateKey] = {
-      top: node.scrollHeight,
+      top: nextScrollTop,
       shouldStick: true,
     };
     setNewResponseIndicator(scrollStateKey, false);
@@ -10344,7 +10404,9 @@ function SessionPaneView({
 
   function scrollMessageStackToBoundary(boundary: "top" | "bottom") {
     if (boundary === "bottom") {
-      scheduleSettledScrollToBottom("auto", { maxAttempts: 60 });
+      // Expected for long virtualized sessions: jump-to-latest keeps correcting
+      // for a few frames while message measurements settle.
+      scheduleSettledScrollToBottom("auto", { maxAttempts: 60, minAttempts: 8 });
       setShouldStickToBottom(true);
       paneScrollPositions[scrollStateKey] = {
         top: Number.MAX_SAFE_INTEGER,
@@ -10489,13 +10551,20 @@ function SessionPaneView({
     behavior: ScrollBehavior,
     options: {
       maxAttempts?: number;
+      minAttempts?: number;
       onComplete?: () => void;
     } = {},
   ) {
     let frameId = 0;
     let cancelled = false;
     let completed = false;
-    let remainingAttempts = options.maxAttempts ?? 12;
+    const maxAttempts = options.maxAttempts ?? 12;
+    let remainingAttempts = maxAttempts;
+    const minimumAttempts = resolveSettledScrollMinimumAttempts(
+      maxAttempts,
+      options.minAttempts,
+    );
+    let attemptCount = 0;
     let previousScrollHeight = -1;
     let stableFrameCount = 0;
 
@@ -10509,6 +10578,8 @@ function SessionPaneView({
     }
 
     const tick = () => {
+      frameId = 0;
+      attemptCount += 1;
       const node = messageStackRef.current;
       if (!node) {
         remainingAttempts -= 1;
@@ -10535,17 +10606,22 @@ function SessionPaneView({
 
       previousScrollHeight = node.scrollHeight;
       remainingAttempts -= 1;
-      if (remainingAttempts > 0 && stableFrameCount < 2) {
+      if (
+        remainingAttempts > 0 &&
+        (attemptCount < minimumAttempts || stableFrameCount < 2)
+      ) {
         frameId = window.requestAnimationFrame(tick);
       } else {
         complete();
       }
     };
 
-    frameId = window.requestAnimationFrame(tick);
+    tick();
     return () => {
       cancelled = true;
-      window.cancelAnimationFrame(frameId);
+      if (frameId !== 0) {
+        window.cancelAnimationFrame(frameId);
+      }
     };
   }
 
@@ -10571,67 +10647,57 @@ function SessionPaneView({
 
   useLayoutEffect(() => {
     let restoreCleanup: (() => void) | undefined;
-    const frameId = window.requestAnimationFrame(() => {
-      const node = messageStackRef.current;
-      if (!node) {
-        return;
-      }
+    const node = messageStackRef.current;
+    if (!node) {
+      return undefined;
+    }
 
-      const shouldForceBottomAfterWorkspaceRebuild =
-        defaultScrollToBottom &&
-        activeSession &&
-        forceSessionScrollToBottomRef.current[activeSession.id];
-      if (shouldForceBottomAfterWorkspaceRebuild) {
-        delete forceSessionScrollToBottomRef.current[activeSession.id];
-        setShouldStickToBottom(true);
-        paneScrollPositions[scrollStateKey] = {
-          top: Number.MAX_SAFE_INTEGER,
-          shouldStick: true,
-        };
-        restoreCleanup = scheduleSettledScrollToBottom("auto", {
-          maxAttempts: 60,
-        });
-        return;
-      }
-
+    const shouldForceBottomAfterWorkspaceRebuild =
+      defaultScrollToBottom &&
+      activeSession &&
+      forceSessionScrollToBottomRef.current[activeSession.id];
+    if (shouldForceBottomAfterWorkspaceRebuild) {
+      delete forceSessionScrollToBottomRef.current[activeSession.id];
+      setShouldStickToBottom(true);
+      paneScrollPositions[scrollStateKey] = {
+        top: Number.MAX_SAFE_INTEGER,
+        shouldStick: true,
+      };
+      restoreCleanup = scheduleSettledScrollToBottom("auto", {
+        maxAttempts: 60,
+      });
+    } else if (paneScrollPositions[scrollStateKey]) {
       const saved = paneScrollPositions[scrollStateKey];
-      if (saved) {
-        setShouldStickToBottom(saved.shouldStick);
-        if (saved.shouldStick) {
-          restoreCleanup = scheduleSettledScrollToBottom("auto", {
-            maxAttempts: 60,
-          });
-        } else if (!restoreMessageStackScrollTop(saved.top)) {
-          setShouldStickToBottom(true);
-          restoreCleanup = scheduleSettledScrollToBottom("auto", {
-            maxAttempts: 60,
-          });
-        }
-        return;
-      }
-
-      if (defaultScrollToBottom) {
+      setShouldStickToBottom(saved.shouldStick);
+      if (saved.shouldStick) {
         restoreCleanup = scheduleSettledScrollToBottom("auto", {
           maxAttempts: 60,
         });
+      } else if (!restoreMessageStackScrollTop(saved.top)) {
         setShouldStickToBottom(true);
-        paneScrollPositions[scrollStateKey] = {
-          top: Number.MAX_SAFE_INTEGER,
-          shouldStick: true,
-        };
-        return;
+        restoreCleanup = scheduleSettledScrollToBottom("auto", {
+          maxAttempts: 60,
+        });
       }
-
+    } else if (defaultScrollToBottom) {
+      restoreCleanup = scheduleSettledScrollToBottom("auto", {
+        maxAttempts: 60,
+      });
+      setShouldStickToBottom(true);
+      paneScrollPositions[scrollStateKey] = {
+        top: Number.MAX_SAFE_INTEGER,
+        shouldStick: true,
+      };
+    } else {
       node.scrollTop = 0;
       setShouldStickToBottom(false);
       paneScrollPositions[scrollStateKey] = {
         top: 0,
         shouldStick: false,
       };
-    });
+    }
 
     return () => {
-      window.cancelAnimationFrame(frameId);
       restoreCleanup?.();
     };
   }, [activeSession?.id, defaultScrollToBottom, scrollStateKey]);
@@ -12079,7 +12145,7 @@ function SessionPaneView({
           isUpdating={isUpdating}
           showNewResponseIndicator={showNewResponseIndicator}
           footerModeLabel={labelForPaneViewMode(pane.lastSessionViewMode)}
-          onScrollToLatest={() => scrollToLatestMessage("smooth")}
+          onScrollToLatest={() => scrollMessageStackToBoundary("bottom")}
           onDraftCommit={onDraftCommit}
           onDraftAttachmentRemove={onDraftAttachmentRemove}
           isRefreshingModelOptions={isRefreshingModelOptions}

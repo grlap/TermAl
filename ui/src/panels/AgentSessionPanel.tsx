@@ -1551,6 +1551,9 @@ function VirtualizedConversationMessageList({
   onCodexAppRequestSubmit: CodexAppRequestSubmitHandler;
 }) {
   const messageHeightsRef = useRef<Record<string, number>>({});
+  // Expected behavior: when the viewport is already at the latest message,
+  // virtualized height measurements should keep the viewport pinned there.
+  const shouldKeepBottomAfterLayoutRef = useRef(false);
   const [viewport, setViewport] = useState({
     height: DEFAULT_VIRTUALIZED_VIEWPORT_HEIGHT,
     scrollTop: 0,
@@ -1625,6 +1628,38 @@ function VirtualizedConversationMessageList({
   }, [windowedMessages]);
 
   useLayoutEffect(() => {
+    if (!isActive || !shouldKeepBottomAfterLayoutRef.current) {
+      return;
+    }
+
+    const node = scrollContainerRef.current;
+    if (!node) {
+      return;
+    }
+
+    // Re-pin to the new bottom on every commit while the flag is set.
+    // The flag is cleared only in the scroll handler (see `syncViewport`
+    // below) when the user explicitly scrolls away from near-bottom.
+    //
+    // The round 8 pre-fix version cleared this flag here after observing
+    // `isScrollContainerAtBottom(node)`, but that ran in the SAME commit
+    // the flag was set in (via `handleHeightChange` → `setLayoutVersion`).
+    // At that point the DOM reflected the OLD `scrollHeight` — the
+    // wrapper's `style={{ height: layout.totalHeight }}` had not yet
+    // committed the new total height — so `isScrollContainerAtBottom`
+    // reported true against the stale geometry, cleared the flag, and
+    // the *next* commit (the one that actually committed the new
+    // height) found the flag cleared and bailed out of the re-pin. The
+    // net effect was leaving the user ~10-100 px above the new bottom
+    // on the exact measurement-driven growth scenario the round 8 fix
+    // was added to handle. Clearing is delegated to scroll events so
+    // the pin survives across as many commits as the measurement cycle
+    // needs, matching the `TerminalPanel.shouldStickToBottomRef`
+    // sticky-until-user-scrolls-away pattern.
+    node.scrollTop = Math.max(node.scrollHeight - node.clientHeight, 0);
+  }, [isActive, layout.totalHeight, scrollContainerRef]);
+
+  useLayoutEffect(() => {
     if (!isActive) {
       return;
     }
@@ -1645,6 +1680,22 @@ function VirtualizedConversationMessageList({
           ? current
           : nextState,
       );
+
+      // Clear the pin flag once the user has scrolled away from
+      // near-bottom. Mirrors `TerminalPanel.shouldStickToBottomRef`'s
+      // `onScroll` update: sticky stays on until the user explicitly
+      // moves away, then re-arms only when a later `handleHeightChange`
+      // observes the viewport back near the bottom. This is the only
+      // site that clears the flag — the re-pinning `useLayoutEffect`
+      // above intentionally leaves it set so a single measurement
+      // growth can survive the same-commit `setLayoutVersion` →
+      // follow-up-commit re-render without tearing down the pin.
+      if (
+        shouldKeepBottomAfterLayoutRef.current &&
+        !isScrollContainerNearBottom(node)
+      ) {
+        shouldKeepBottomAfterLayoutRef.current = false;
+      }
     };
 
     syncViewport();
@@ -1720,20 +1771,34 @@ function VirtualizedConversationMessageList({
 
     const messageIndex = messageIndexByIdRef.current.get(messageId);
     const node = scrollContainerRef.current;
+    // If the user/app is already at the latest message, measurements that
+    // increase the virtualized height should move the viewport with the bottom.
+    const shouldKeepBottom =
+      isActive && node
+        ? shouldKeepBottomAfterLayoutRef.current ||
+          isScrollContainerNearBottom(node)
+        : false;
+    if (shouldKeepBottom) {
+      shouldKeepBottomAfterLayoutRef.current = true;
+    }
     if (node && messageIndex !== undefined) {
-      const nextScrollTop = getAdjustedVirtualizedScrollTopForHeightChange({
-        currentScrollTop: node.scrollTop,
-        messageTop: layoutTopsRef.current[messageIndex] ?? 0,
-        nextHeight,
-        previousHeight,
-      });
-      if (Math.abs(nextScrollTop - node.scrollTop) >= 0.5) {
-        node.scrollTop = nextScrollTop;
+      if (shouldKeepBottom) {
+        node.scrollTop = Math.max(node.scrollHeight - node.clientHeight, 0);
+      } else {
+        const nextScrollTop = getAdjustedVirtualizedScrollTopForHeightChange({
+          currentScrollTop: node.scrollTop,
+          messageTop: layoutTopsRef.current[messageIndex] ?? 0,
+          nextHeight,
+          previousHeight,
+        });
+        if (Math.abs(nextScrollTop - node.scrollTop) >= 0.5) {
+          node.scrollTop = nextScrollTop;
+        }
       }
     }
 
     setLayoutVersion((current) => current + 1);
-  }, [scrollContainerRef]);
+  }, [isActive, scrollContainerRef]);
 
   const boundApprovalDecision = useCallback(
     (messageId: string, decision: ApprovalDecision) => onApprovalDecision(sessionId, messageId, decision),
@@ -3064,6 +3129,32 @@ function findVirtualizedMessageRange(
     startIndex,
     endIndex: Math.max(startIndex + 1, endIndex),
   };
+}
+
+export function getScrollContainerBottomGap(
+  node: Pick<HTMLElement, "clientHeight" | "scrollHeight" | "scrollTop">,
+) {
+  return Math.max(node.scrollHeight - node.clientHeight - node.scrollTop, 0);
+}
+
+export function isScrollContainerAtBottom(
+  node: Pick<HTMLElement, "clientHeight" | "scrollHeight" | "scrollTop">,
+) {
+  return getScrollContainerBottomGap(node) <= 4;
+}
+
+// Intentionally mirrors `syncMessageStackScrollPosition`'s `< 72`
+// stickiness threshold in `ui/src/App.tsx`. A previous revision used 96 px,
+// which left a 72-96 px band where the parent pane had already recorded
+// `shouldStick: false` (because the user scrolled up past its own
+// threshold) but a later measurement in the virtualized panel would still
+// re-pin the viewport to the latest message — the user would feel
+// "snatched back" when a code block tokenized or an image loaded. Any
+// change here should be made symmetrically in both files.
+export function isScrollContainerNearBottom(
+  node: Pick<HTMLElement, "clientHeight" | "scrollHeight" | "scrollTop">,
+) {
+  return getScrollContainerBottomGap(node) < 72;
 }
 
 export function getAdjustedVirtualizedScrollTopForHeightChange({

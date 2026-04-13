@@ -156,10 +156,18 @@ function appendTerminalOutput(
     };
   }
 
-  return {
-    ...entry,
-    stderr: `${entry.stderr ?? entry.response?.stderr ?? ""}${output.text}`,
-  };
+  if (output.stream === "stderr") {
+    return {
+      ...entry,
+      stderr: `${entry.stderr ?? entry.response?.stderr ?? ""}${output.text}`,
+    };
+  }
+
+  return assertNeverTerminalOutputStream(output.stream);
+}
+
+function assertNeverTerminalOutputStream(stream: never): never {
+  throw new Error(`Unhandled terminal output stream: ${String(stream)}`);
 }
 
 function hasRunningTerminalEntry(history: readonly TerminalHistoryEntry[]) {
@@ -285,8 +293,15 @@ export function TerminalPanel({
     if (!node || !shouldStickToBottomRef.current) {
       return;
     }
-    node.scrollTop = node.scrollHeight;
+    scrollTerminalHistoryToBottom(node);
   }, [history]);
+
+  const setScrollNode = useCallback((node: HTMLDivElement | null) => {
+    scrollRef.current = node;
+    if (node && shouldStickToBottomRef.current) {
+      scrollTerminalHistoryToBottom(node);
+    }
+  }, []);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -414,7 +429,7 @@ export function TerminalPanel({
       ) : null}
 
       <div
-        ref={scrollRef}
+        ref={setScrollNode}
         className="terminal-history"
         role="log"
         aria-live="polite"
@@ -468,7 +483,9 @@ function TerminalHistoryItem({ entry }: { entry: TerminalHistoryEntry }) {
   return (
     <article className={`terminal-history-item is-${entry.status}`}>
       <div className="terminal-io-row terminal-io-row-input">
-        <span className="terminal-io-label">IN</span>
+        <span className="terminal-io-label" aria-hidden="true">
+          IN
+        </span>
         <div className="terminal-io-body">
           <div className="terminal-io-heading">
             <code className="terminal-command-text">{entry.command}</code>
@@ -482,7 +499,9 @@ function TerminalHistoryItem({ entry }: { entry: TerminalHistoryEntry }) {
         </div>
       </div>
       <div className="terminal-io-row terminal-io-row-output">
-        <span className="terminal-io-label">OUT</span>
+        <span className="terminal-io-label" aria-hidden="true">
+          OUT
+        </span>
         <div className="terminal-io-body">
           {entry.error ? (
             <pre className="terminal-output terminal-output-error">{entry.error}</pre>
@@ -537,6 +556,13 @@ function formatDuration(durationMs: number) {
 function isTerminalHistoryScrolledToBottom(node: HTMLElement) {
   const bottomGap = node.scrollHeight - node.clientHeight - node.scrollTop;
   return bottomGap <= 4;
+}
+
+function scrollTerminalHistoryToBottom(node: HTMLElement) {
+  const nextScrollTop = Math.max(node.scrollHeight - node.clientHeight, 0);
+  if (Math.abs(node.scrollTop - nextScrollTop) > 1) {
+    node.scrollTop = nextScrollTop;
+  }
 }
 
 export function formatTerminalWorkdirLabel(workdir: string) {

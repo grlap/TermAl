@@ -1037,6 +1037,7 @@ function FileChangesCard({
   const canExpandFiles = message.files.length > FILE_CHANGES_COLLAPSE_THRESHOLD;
   const isSearchExpanded = searchQuery.trim().length > 0;
   const isFilesExpanded = !canExpandFiles || filesExpanded || isSearchExpanded;
+  const collapseControlLabel = filesExpanded ? "Collapse changed files" : "Expand changed files";
 
   useEffect(() => {
     if (!copiedPath) {
@@ -1083,15 +1084,15 @@ function FileChangesCard({
               {renderHighlightedText(message.title, searchQuery, searchHighlightTone)}
             </p>
           </div>
-          {canExpandFiles ? (
+          {canExpandFiles && !isSearchExpanded ? (
             <div className="command-row-actions">
               <button
                 className="command-icon-button"
                 type="button"
                 onClick={() => setFilesExpanded((open) => !open)}
-                aria-label={isFilesExpanded ? "Collapse changed files" : "Expand changed files"}
-                aria-expanded={isFilesExpanded}
-                title={isFilesExpanded ? "Collapse changed files" : "Expand changed files"}
+                aria-label={collapseControlLabel}
+                aria-expanded={filesExpanded}
+                title={collapseControlLabel}
               >
                 {isFilesExpanded ? <CollapseIcon /> : <ExpandIcon />}
               </button>

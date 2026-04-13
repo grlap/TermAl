@@ -1,7 +1,14 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
-import { AgentSessionPanelFooter, RunningIndicator, getAdjustedVirtualizedScrollTopForHeightChange } from "./AgentSessionPanel";
+import {
+  AgentSessionPanelFooter,
+  RunningIndicator,
+  getAdjustedVirtualizedScrollTopForHeightChange,
+  getScrollContainerBottomGap,
+  isScrollContainerAtBottom,
+  isScrollContainerNearBottom,
+} from "./AgentSessionPanel";
 import type { Session } from "../types";
 
 function makeSession(id: string, overrides?: Partial<Session>): Session {
@@ -163,6 +170,100 @@ describe("getAdjustedVirtualizedScrollTopForHeightChange", () => {
     ).toBe(0);
   });
 });
+
+describe("getScrollContainerBottomGap", () => {
+  // Small helper that accepts a plain object rather than a real DOM
+  // element — the production signature is `Pick<HTMLElement,
+  // "clientHeight" | "scrollHeight" | "scrollTop">` for exactly this
+  // reason, so the boundary tests can pin behavior without touching
+  // jsdom geometry.
+  function node(
+    scrollHeight: number,
+    clientHeight: number,
+    scrollTop: number,
+  ) {
+    return { scrollHeight, clientHeight, scrollTop };
+  }
+
+  it("returns the raw distance from scrollTop to the bottom when positive", () => {
+    expect(getScrollContainerBottomGap(node(1000, 200, 0))).toBe(800);
+    expect(getScrollContainerBottomGap(node(1000, 200, 100))).toBe(700);
+    expect(getScrollContainerBottomGap(node(1000, 200, 799))).toBe(1);
+  });
+
+  it("floors negative gaps at zero when content is shorter than the viewport", () => {
+    // Content shorter than viewport: `scrollHeight - clientHeight -
+    // scrollTop` is negative. The helper must clamp to `0` so downstream
+    // `<= N` / `< N` checks treat the viewport as "at bottom" without
+    // special-casing the short-content layout.
+    expect(getScrollContainerBottomGap(node(300, 400, 0))).toBe(0);
+    expect(getScrollContainerBottomGap(node(200, 200, 0))).toBe(0);
+  });
+});
+
+describe("isScrollContainerAtBottom", () => {
+  function node(
+    scrollHeight: number,
+    clientHeight: number,
+    scrollTop: number,
+  ) {
+    return { scrollHeight, clientHeight, scrollTop };
+  }
+
+  // The at-bottom threshold is `<= 4 px`. These boundary tests pin the
+  // exact value so a future refactor that swapped the constant with
+  // `isScrollContainerNearBottom` would flip both tests and fail
+  // loudly instead of silently drifting.
+  it("returns true at gap 0 (exactly at bottom)", () => {
+    expect(isScrollContainerAtBottom(node(1000, 200, 800))).toBe(true);
+  });
+  it("returns true at gap 4 (boundary inclusive)", () => {
+    expect(isScrollContainerAtBottom(node(1000, 200, 796))).toBe(true);
+  });
+  it("returns false at gap 5 (just past the at-bottom boundary)", () => {
+    expect(isScrollContainerAtBottom(node(1000, 200, 795))).toBe(false);
+  });
+  it("returns true for short content whose gap clamps to 0", () => {
+    expect(isScrollContainerAtBottom(node(300, 400, 0))).toBe(true);
+  });
+});
+
+describe("isScrollContainerNearBottom", () => {
+  function node(
+    scrollHeight: number,
+    clientHeight: number,
+    scrollTop: number,
+  ) {
+    return { scrollHeight, clientHeight, scrollTop };
+  }
+
+  // The near-bottom threshold is `< 72 px`, intentionally chosen to
+  // match the parent pane's sticky threshold in
+  // `syncMessageStackScrollPosition`. A previous revision used
+  // `<= 96 px` which created a 72-96 px "dead band" where the parent
+  // had recorded `shouldStick: false` (the user scrolled up past the
+  // 72 threshold) but a later virtualized measurement would still
+  // re-pin the viewport to the latest message — the user felt
+  // "snatched back" on code-block tokenization or image loads. These
+  // boundary tests lock in the 72 value so anyone changing it in only
+  // one file has to change it here too.
+  it("returns true at gap 0 (exactly at bottom)", () => {
+    expect(isScrollContainerNearBottom(node(1000, 200, 800))).toBe(true);
+  });
+  it("returns true at gap 71 (1 px inside the near-bottom boundary)", () => {
+    expect(isScrollContainerNearBottom(node(1000, 200, 729))).toBe(true);
+  });
+  it("returns false at gap 72 (matches App.tsx strict-less-than sticky boundary)", () => {
+    expect(isScrollContainerNearBottom(node(1000, 200, 728))).toBe(false);
+  });
+  it("returns false at gap 96 (proves the 96-px band is no longer near-bottom)", () => {
+    expect(isScrollContainerNearBottom(node(1000, 200, 704))).toBe(false);
+  });
+  it("returns true for short content whose gap clamps to 0", () => {
+    expect(isScrollContainerNearBottom(node(300, 400, 0))).toBe(true);
+  });
+});
+
 describe("AgentSessionPanelFooter", () => {
   it("shows a command badge in the live turn card for slash commands", () => {
     render(<RunningIndicator agent="Codex" lastPrompt="/review-local" />);

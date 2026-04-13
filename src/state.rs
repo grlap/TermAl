@@ -1184,7 +1184,10 @@ impl AppState {
         })
     }
 
-    /// Deletes project and keeps its sessions visible outside project scope.
+    /// Deletes the local project reference and keeps its sessions visible
+    /// outside project scope. Remote-backed projects are intentionally removed
+    /// only from this local state; TermAl does not delete remote project data
+    /// from a local project-list action.
     fn delete_project(&self, project_id: &str) -> Result<StateResponse, ApiError> {
         let project_id = normalize_optional_identifier(Some(project_id))
             .ok_or_else(|| ApiError::bad_request("project id is required"))?;
@@ -1201,6 +1204,11 @@ impl AppState {
         for record in &mut inner.sessions {
             if record.session.project_id.as_deref() == Some(project_id) {
                 record.session.project_id = None;
+            }
+        }
+        for instance in &mut inner.orchestrator_instances {
+            if instance.project_id == project_id {
+                instance.project_id.clear();
             }
         }
 

@@ -118,6 +118,22 @@ function renderTerminal(
   return { ...view, onOpenWorkdir };
 }
 
+async function expectTerminalStdout(container: HTMLElement, expected: string) {
+  await waitFor(() => {
+    expect(container.querySelector("pre.terminal-output-stdout")?.textContent).toBe(
+      expected,
+    );
+  });
+}
+
+async function expectTerminalStderr(container: HTMLElement, expected: string) {
+  await waitFor(() => {
+    expect(container.querySelector("pre.terminal-output-stderr")?.textContent).toBe(
+      expected,
+    );
+  });
+}
+
 describe("TerminalPanel", () => {
   beforeEach(() => {
     runTerminalCommandStreamMock.mockReset();
@@ -158,7 +174,7 @@ describe("TerminalPanel", () => {
         workdir: "/repo",
       }),
     );
-    const { onOpenWorkdir } = renderTerminal();
+    const { container, onOpenWorkdir } = renderTerminal();
 
     const workdirInput = screen.getByLabelText("Working directory");
     fireEvent.change(workdirInput, { target: { value: "  /repo/packages/app  " } });
@@ -181,8 +197,13 @@ describe("TerminalPanel", () => {
       );
     });
     expect(commandInput).toHaveValue("");
-    expect(await screen.findByText("passed")).toBeInTheDocument();
+    await expectTerminalStdout(container, "passed\n");
     expect(screen.getByText(/Exit 0 in 42ms/)).toBeInTheDocument();
+    expect(
+      Array.from(container.querySelectorAll(".terminal-io-label")).map((label) =>
+        label.getAttribute("aria-hidden"),
+      ),
+    ).toEqual(["true", "true"]);
 
     fireEvent.click(screen.getByRole("button", { name: "Clear" }));
     expect(screen.getByText("Run a command in this workspace.")).toBeInTheDocument();
@@ -192,12 +213,12 @@ describe("TerminalPanel", () => {
     runTerminalCommandStreamMock
       .mockResolvedValueOnce(makeTerminalResponse({ stdout: "first\n" }))
       .mockResolvedValueOnce(makeTerminalResponse({ stdout: "second\n" }));
-    renderTerminal({ terminalId: "terminal-clear-subscription" });
+    const { container } = renderTerminal({ terminalId: "terminal-clear-subscription" });
 
     const commandInput = screen.getByLabelText("Terminal command");
     fireEvent.change(commandInput, { target: { value: "echo first" } });
     fireEvent.click(screen.getByRole("button", { name: "Run" }));
-    expect(await screen.findByText("first")).toBeInTheDocument();
+    await expectTerminalStdout(container, "first\n");
 
     fireEvent.click(screen.getByRole("button", { name: "Clear" }));
     expect(screen.getByText("Run a command in this workspace.")).toBeInTheDocument();
@@ -205,7 +226,7 @@ describe("TerminalPanel", () => {
     fireEvent.change(commandInput, { target: { value: "echo second" } });
     fireEvent.click(screen.getByRole("button", { name: "Run" }));
 
-    expect(await screen.findByText("second")).toBeInTheDocument();
+    await expectTerminalStdout(container, "second\n");
     expect(runTerminalCommandStreamMock).toHaveBeenCalledTimes(2);
   });
 
@@ -215,14 +236,14 @@ describe("TerminalPanel", () => {
       options?.onOutput?.({ stream: "stdout", text: "building...\n" });
       return deferred.promise;
     });
-    renderTerminal({ terminalId: "terminal-streaming-output" });
+    const { container } = renderTerminal({ terminalId: "terminal-streaming-output" });
 
     fireEvent.change(screen.getByLabelText("Terminal command"), {
       target: { value: "npm test" },
     });
     fireEvent.click(screen.getByRole("button", { name: "Run" }));
 
-    expect(await screen.findByText("building...")).toBeInTheDocument();
+    await expectTerminalStdout(container, "building...\n");
     expect(screen.getByRole("button", { name: "Running" })).toBeDisabled();
     expect(screen.queryByText("Waiting for command output...")).not.toBeInTheDocument();
 
@@ -233,8 +254,42 @@ describe("TerminalPanel", () => {
       await deferred.promise;
     });
 
-    expect(await screen.findByText(/done/)).toBeInTheDocument();
+    await expectTerminalStdout(container, "building...\ndone\n");
+    expect(
+      container.querySelector("pre.terminal-output-stderr")?.textContent ?? "",
+    ).toBe("");
     expect(screen.getByText(/Exit 0 in 42ms/)).toBeInTheDocument();
+  });
+
+  it("appends multiple streamed stdout and stderr callbacks before completion", async () => {
+    const deferred = createDeferred<TerminalCommandResponse>();
+    runTerminalCommandStreamMock.mockImplementation((_payload, options) => {
+      options?.onOutput?.({ stream: "stdout", text: "one\n" });
+      options?.onOutput?.({ stream: "stdout", text: "two\n" });
+      options?.onOutput?.({ stream: "stderr", text: "warn\n" });
+      return deferred.promise;
+    });
+    const { container } = renderTerminal({
+      terminalId: "terminal-streaming-multiple-output",
+    });
+
+    fireEvent.change(screen.getByLabelText("Terminal command"), {
+      target: { value: "npm test" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Run" }));
+
+    await expectTerminalStdout(container, "one\ntwo\n");
+    await expectTerminalStderr(container, "warn\n");
+
+    await act(async () => {
+      deferred.resolve(
+        makeTerminalResponse({ stderr: "warn\n", stdout: "one\ntwo\nthree\n" }),
+      );
+      await deferred.promise;
+    });
+
+    await expectTerminalStdout(container, "one\ntwo\nthree\n");
+    await expectTerminalStderr(container, "warn\n");
   });
 
   it("records command errors", async () => {
@@ -344,7 +399,10 @@ describe("TerminalPanel", () => {
         stdout: "",
       }),
     );
-    renderTerminal({ showPathControls: false, terminalId: "terminal-docked" });
+    const { container } = renderTerminal({
+      showPathControls: false,
+      terminalId: "terminal-docked",
+    });
 
     expect(screen.queryByLabelText("Working directory")).not.toBeInTheDocument();
 
@@ -353,7 +411,7 @@ describe("TerminalPanel", () => {
     });
     fireEvent.click(screen.getByRole("button", { name: "Run" }));
 
-    expect(await screen.findByText("warn")).toBeInTheDocument();
+    await expectTerminalStderr(container, "warn\n");
     expect(screen.getByText("Output was truncated.")).toBeInTheDocument();
     expect(runTerminalCommandStreamMock).toHaveBeenCalledWith(
       {
@@ -379,7 +437,7 @@ describe("TerminalPanel", () => {
     await screen.findByText("Waiting for command output...");
     view.unmount();
 
-    renderTerminal({ terminalId: "terminal-remount" });
+    const remounted = renderTerminal({ terminalId: "terminal-remount" });
     expect(screen.getByText("Waiting for command output...")).toBeInTheDocument();
 
     await act(async () => {
@@ -387,7 +445,7 @@ describe("TerminalPanel", () => {
       await deferred.promise;
     });
 
-    expect(await screen.findByText("after remount")).toBeInTheDocument();
+    await expectTerminalStdout(remounted.container, "after remount\n");
     expect(screen.getByText(/Exit 0 in 42ms/)).toBeInTheDocument();
     expect(runTerminalCommandStreamMock).toHaveBeenCalledTimes(1);
   });
@@ -453,7 +511,7 @@ describe("TerminalPanel", () => {
         stdout: "mounted\n",
       }),
     );
-    renderTerminal({ terminalId: "terminal-mounted" });
+    const { container } = renderTerminal({ terminalId: "terminal-mounted" });
 
     // The mounted TerminalPanel should have exactly one live subscriber
     // (its own `useSyncExternalStore` subscription) attached to the store.
@@ -477,7 +535,7 @@ describe("TerminalPanel", () => {
     });
     fireEvent.click(screen.getByRole("button", { name: "Run" }));
 
-    expect(await screen.findByText("mounted")).toBeInTheDocument();
+    await expectTerminalStdout(container, "mounted\n");
     expect(runTerminalCommandStreamMock).toHaveBeenCalledTimes(1);
   });
 
@@ -506,7 +564,7 @@ describe("TerminalPanel", () => {
   it("does not force terminal history to the bottom after the user scrolls up", async () => {
     const deferred = createDeferred<TerminalCommandResponse>();
     runTerminalCommandStreamMock.mockReturnValue(deferred.promise);
-    renderTerminal({ terminalId: "terminal-scroll" });
+    const { container } = renderTerminal({ terminalId: "terminal-scroll" });
 
     fireEvent.change(screen.getByLabelText("Terminal command"), {
       target: { value: "npm test" },
@@ -521,8 +579,92 @@ describe("TerminalPanel", () => {
       await deferred.promise;
     });
 
-    expect(await screen.findByText("new output")).toBeInTheDocument();
+    await expectTerminalStdout(container, "new output\n");
     expect(log.scrollTop).toBe(100);
+  });
+
+  it("never writes a negative scrollTop when content is shorter than the viewport", async () => {
+    // Regression for the `Math.max(scrollHeight - clientHeight, 0)` clamp in
+    // `scrollTerminalHistoryToBottom`. When the terminal history is shorter
+    // than its viewport (e.g. empty command, narrow terminal window that
+    // shrank after a completed command), `scrollHeight - clientHeight` is
+    // negative. Without the clamp, `scrollTerminalHistoryToBottom` would
+    // write that negative value to `node.scrollTop`, which is harmless in
+    // real browsers (they silently clamp) but violates the invariant
+    // "never write a value the DOM would reject." Pin the invariant so a
+    // future edit that drops `Math.max` fails this test.
+    const deferred = createDeferred<TerminalCommandResponse>();
+    runTerminalCommandStreamMock.mockReturnValue(deferred.promise);
+    const { container } = renderTerminal({ terminalId: "terminal-clamp" });
+
+    fireEvent.change(screen.getByLabelText("Terminal command"), {
+      target: { value: "npm test" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Run" }));
+
+    const log = await screen.findByRole("log");
+    // Content is shorter than the viewport: `scrollHeight - clientHeight`
+    // is `-100`, which the clamp must rewrite to `0`. `scrollTop` starts
+    // at `0` and the caller is already at bottom (bottomGap = -100 <= 4),
+    // so `shouldStickToBottomRef` stays `true` and the next history
+    // update triggers a new `scrollTerminalHistoryToBottom` call.
+    stubScrollGeometry(log, {
+      scrollHeight: 300,
+      clientHeight: 400,
+      scrollTop: 0,
+    });
+    fireEvent.scroll(log);
+
+    await act(async () => {
+      deferred.resolve(makeTerminalResponse({ stdout: "tiny\n" }));
+      await deferred.promise;
+    });
+
+    await expectTerminalStdout(container, "tiny\n");
+    expect(log.scrollTop).toBe(0);
+  });
+
+  it("skips the scrollTop write when already within 1 px of the bottom", async () => {
+    // Regression for the `Math.abs(node.scrollTop - nextScrollTop) > 1`
+    // steady-state tolerance inside `scrollTerminalHistoryToBottom`.
+    // jsdom's `Object.defineProperty`-backed `scrollTop` is a live mutable
+    // value: every assignment shows up verbatim. So if the tolerance
+    // regressed to a strict `!==`, a node whose current `scrollTop` is
+    // `799` (exactly 1 px above the computed target `800`) would get its
+    // `scrollTop` overwritten to `800`, producing a pointless DOM write
+    // on every layout pass. The check must leave `scrollTop === 799`
+    // untouched.
+    const deferred = createDeferred<TerminalCommandResponse>();
+    runTerminalCommandStreamMock.mockReturnValue(deferred.promise);
+    const { container } = renderTerminal({ terminalId: "terminal-tolerance" });
+
+    fireEvent.change(screen.getByLabelText("Terminal command"), {
+      target: { value: "npm test" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Run" }));
+
+    const log = await screen.findByRole("log");
+    // `scrollHeight - clientHeight = 800`, `scrollTop = 799`, so
+    // `bottomGap = 1 <= 4` → `isTerminalHistoryScrolledToBottom` returns
+    // `true` and `shouldStickToBottomRef` stays `true`. When the next
+    // history update fires the `useLayoutEffect`, the helper computes
+    // `nextScrollTop = max(800, 0) = 800` and `|799 - 800| = 1`, which
+    // is NOT strictly greater than `1`, so the helper must short-circuit
+    // without touching `scrollTop`.
+    stubScrollGeometry(log, {
+      scrollHeight: 1000,
+      clientHeight: 200,
+      scrollTop: 799,
+    });
+    fireEvent.scroll(log);
+
+    await act(async () => {
+      deferred.resolve(makeTerminalResponse({ stdout: "steady\n" }));
+      await deferred.promise;
+    });
+
+    await expectTerminalStdout(container, "steady\n");
+    expect(log.scrollTop).toBe(799);
   });
 
   it("does not clobber dirty workdir edits when the prop changes", () => {

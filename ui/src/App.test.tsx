@@ -23,9 +23,11 @@ import App, {
   resolveAdoptedStateSlices,
   resolveControlPanelWorkspaceRoot,
   resolveControlSurfaceSectionIdForWorkspaceTab,
+  resolveSettledScrollMinimumAttempts,
   resolveStandaloneControlPanelDockWidthRatio,
   describeUnknownSessionModelWarning,
   resolveUnknownSessionModelSendAttempt,
+  setAppTestHooksForTests,
   syncMessageStackScrollPosition,
 } from "./App";
 import {
@@ -36,7 +38,7 @@ import {
 import type { AgentReadiness, OrchestratorInstance, Session } from "./types";
 import * as workspaceStorage from "./workspace-storage";
 import { WORKSPACE_LAYOUT_STORAGE_KEY } from "./workspace-storage";
-import type { WorkspaceTab } from "./workspace";
+import type { WorkspaceState, WorkspaceTab } from "./workspace";
 
 class EventSourceMock {
   static instances: EventSourceMock[] = [];
@@ -177,11 +179,7 @@ function makeWorkspaceLayoutResponse(
     revision: number;
     updatedAt: string;
     controlPanelSide: "left" | "right";
-    workspace: {
-      root: null;
-      panes: never[];
-      activePaneId: null;
-    };
+    workspace: WorkspaceState;
   }> = {},
 ) {
   return {
@@ -276,6 +274,98 @@ function stubScrollIntoView() {
   return vi
     .spyOn(HTMLElement.prototype, "scrollIntoView")
     .mockImplementation(() => {});
+}
+
+function mockScrollToAndApplyTop() {
+  const scrollToMock =
+    HTMLElement.prototype.scrollTo as unknown as ReturnType<typeof vi.fn>;
+  scrollToMock.mockImplementation(function (
+    this: HTMLElement,
+    options?: ScrollToOptions | number,
+    y?: number,
+  ) {
+    if (
+      typeof options === "object" &&
+      options !== null &&
+      typeof options.top === "number"
+    ) {
+      this.scrollTop = options.top;
+      return;
+    }
+
+    if (typeof options === "number" && typeof y === "number") {
+      this.scrollTop = y;
+    }
+  });
+  return scrollToMock;
+}
+
+function filterScrollToCallsAt(
+  scrollToMock: ReturnType<typeof vi.fn>,
+  top: number,
+  behavior: ScrollBehavior,
+) {
+  return scrollToMock.mock.calls.filter((call) => {
+    const arg = call[0];
+    return (
+      typeof arg === "object" &&
+      arg !== null &&
+      (arg as ScrollToOptions).top === top &&
+      (arg as ScrollToOptions).behavior === behavior
+    );
+  });
+}
+
+function stubElementScrollGeometry({
+  clientHeight,
+  scrollHeight,
+}: {
+  clientHeight: number;
+  scrollHeight: number;
+}) {
+  const originalScrollHeight = Object.getOwnPropertyDescriptor(
+    HTMLElement.prototype,
+    "scrollHeight",
+  );
+  const originalClientHeight = Object.getOwnPropertyDescriptor(
+    HTMLElement.prototype,
+    "clientHeight",
+  );
+  Object.defineProperty(HTMLElement.prototype, "scrollHeight", {
+    configurable: true,
+    get() {
+      return scrollHeight;
+    },
+  });
+  Object.defineProperty(HTMLElement.prototype, "clientHeight", {
+    configurable: true,
+    get() {
+      return clientHeight;
+    },
+  });
+
+  return () => {
+    if (originalScrollHeight) {
+      Object.defineProperty(
+        HTMLElement.prototype,
+        "scrollHeight",
+        originalScrollHeight,
+      );
+    } else {
+      delete (HTMLElement.prototype as unknown as Record<string, unknown>)
+        .scrollHeight;
+    }
+    if (originalClientHeight) {
+      Object.defineProperty(
+        HTMLElement.prototype,
+        "clientHeight",
+        originalClientHeight,
+      );
+    } else {
+      delete (HTMLElement.prototype as unknown as Record<string, unknown>)
+        .clientHeight;
+    }
+  };
 }
 
 function setDocumentVisibilityState(value: DocumentVisibilityState) {
@@ -942,6 +1032,7 @@ describe("App", () => {
     if (vi.isFakeTimers()) {
       vi.useRealTimers();
     }
+    setAppTestHooksForTests(null);
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
   });
@@ -10170,6 +10261,709 @@ describe("App", () => {
         restoreGlobal("fetch", originalFetch);
         restoreGlobal("EventSource", originalEventSource);
         restoreGlobal("ResizeObserver", originalResizeObserver);
+      }
+    });
+  });
+
+  it("removes projects from the context menu and resets project scopes", async () => {
+    await withSuppressedActWarnings(async () => {
+      const initialState = makeStateResponse({
+        revision: 1,
+        projects: [
+          {
+            id: "project-api",
+            name: "API",
+            rootPath: "/projects/api",
+          },
+          {
+            id: "project-web",
+            name: "Web",
+            rootPath: "/projects/web",
+          },
+        ],
+        orchestrators: [],
+        workspaces: [],
+        sessions: [
+          makeSession("session-api", {
+            name: "API Session",
+            projectId: "project-api",
+            workdir: "/projects/api",
+          }),
+          makeSession("session-web", {
+            name: "Web Session",
+            projectId: "project-web",
+            workdir: "/projects/web",
+          }),
+        ],
+      });
+      const deletedState = makeStateResponse({
+        revision: 2,
+        projects: [
+          {
+            id: "project-web",
+            name: "Web",
+            rootPath: "/projects/web",
+          },
+        ],
+        orchestrators: [],
+        workspaces: [],
+        sessions: [
+          makeSession("session-api", {
+            name: "API Session",
+            projectId: null,
+            workdir: "/projects/api",
+          }),
+          makeSession("session-web", {
+            name: "Web Session",
+            projectId: "project-web",
+            workdir: "/projects/web",
+          }),
+        ],
+      });
+      const workspaceWithApiOrigin: WorkspaceState = {
+        root: { type: "pane", paneId: "pane-api-origin" },
+        panes: [
+          {
+            id: "pane-api-origin",
+            tabs: [
+              {
+                id: "terminal-api-origin",
+                kind: "terminal",
+                workdir: "/projects/api",
+                originSessionId: null,
+                originProjectId: "project-api",
+              },
+            ],
+            activeTabId: "terminal-api-origin",
+            activeSessionId: null,
+            viewMode: "terminal",
+            lastSessionViewMode: "session",
+            sourcePath: null,
+          },
+        ],
+        activePaneId: "pane-api-origin",
+      };
+      vi.spyOn(api, "fetchState").mockResolvedValue(initialState);
+      vi.mocked(api.fetchWorkspaceLayout).mockResolvedValue(
+        makeWorkspaceLayoutResponse({ workspace: workspaceWithApiOrigin }),
+      );
+      const saveWorkspaceLayoutSpy = vi.mocked(api.saveWorkspaceLayout);
+      const deleteProjectSpy = vi
+        .spyOn(api, "deleteProject")
+        .mockResolvedValue(deletedState);
+      const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
+      vi.stubGlobal(
+        "EventSource",
+        EventSourceMock as unknown as typeof EventSource,
+      );
+      vi.stubGlobal(
+        "ResizeObserver",
+        ResizeObserverMock as unknown as typeof ResizeObserver,
+      );
+      const scrollIntoViewSpy = stubScrollIntoView();
+
+      function projectRow(surface: HTMLElement, name: string) {
+        const label = within(surface).getByText(name);
+        const row = label.closest("button");
+        if (!(row instanceof HTMLButtonElement)) {
+          throw new Error(`Project row not found for ${name}`);
+        }
+
+        return row;
+      }
+
+      try {
+        await renderApp();
+        act(() => {
+          latestEventSource().dispatchError();
+        });
+        await settleAsyncUi();
+
+        await clickAndSettle(
+          await screen.findByRole("button", { name: "Projects" }),
+        );
+        await clickAndSettle(
+          await screen.findByRole("button", { name: "Open tab" }),
+        );
+
+        const projectSurfaces = Array.from(
+          document.querySelectorAll(".project-controls"),
+        ).filter(
+          (surface): surface is HTMLElement => surface instanceof HTMLElement,
+        );
+        const dockedProjectSurface = projectSurfaces[0];
+        const standaloneProjectSurface =
+          projectSurfaces[projectSurfaces.length - 1];
+        if (!dockedProjectSurface || !standaloneProjectSurface) {
+          throw new Error("Project surfaces not found");
+        }
+
+        await clickAndSettle(projectRow(dockedProjectSurface, "API"));
+        await clickAndSettle(projectRow(standaloneProjectSurface, "API"));
+        expect(projectRow(dockedProjectSurface, "API")).toHaveClass("selected");
+        expect(projectRow(standaloneProjectSurface, "API")).toHaveClass(
+          "selected",
+        );
+
+        await act(async () => {
+          fireEvent.contextMenu(projectRow(dockedProjectSurface, "API"), {
+            clientX: 160,
+            clientY: 120,
+          });
+        });
+        await settleAsyncUi();
+
+        const menu = await screen.findByRole("menu", {
+          name: "API project actions",
+        });
+        await clickAndSettle(
+          within(menu).getByRole("menuitem", { name: "Remove project" }),
+        );
+
+        await waitFor(() => {
+          expect(deleteProjectSpy).toHaveBeenCalledWith("project-api");
+        });
+        expect(confirmSpy).toHaveBeenCalledWith(
+          'Remove "API" from TermAl? Existing sessions stay in All projects. Files on disk are not deleted.',
+        );
+
+        await waitFor(() => {
+          const currentSurfaces = Array.from(
+            document.querySelectorAll(".project-controls"),
+          ).filter(
+            (surface): surface is HTMLElement => surface instanceof HTMLElement,
+          );
+          expect(currentSurfaces.length).toBeGreaterThanOrEqual(2);
+          for (const surface of currentSurfaces) {
+            expect(within(surface).queryByText("API")).not.toBeInTheDocument();
+            expect(projectRow(surface, "All projects")).toHaveClass("selected");
+          }
+        });
+
+        await clickAndSettle(
+          await screen.findByRole("button", { name: "Sessions" }),
+        );
+        expect(
+          screen.getByRole("combobox", { name: "Project" }),
+        ).toHaveTextContent("All projects");
+        expect(screen.getByText("API Session")).toBeInTheDocument();
+
+        await waitFor(() => {
+          const clearedWorkspaceSave = saveWorkspaceLayoutSpy.mock.calls.find(
+            ([, payload]) => {
+              const workspace = payload.workspace as WorkspaceState;
+              return workspace.panes.some((pane) =>
+                pane.tabs.some(
+                  (tab) =>
+                    tab.id === "terminal-api-origin" &&
+                    "originProjectId" in tab &&
+                    tab.originProjectId === null,
+                ),
+              );
+            },
+          );
+          expect(clearedWorkspaceSave).toBeTruthy();
+        });
+      } finally {
+        scrollIntoViewSpy.mockRestore();
+      }
+    });
+  });
+
+  it("swallows a late deleteProject resolution after the app unmounts without running post-unmount state updates", async () => {
+    // Regression for the `if (!isMountedRef.current) return;` guard in the
+    // try-branch of `handleProjectMenuRemoveProject` (round 7). The
+    // existing `removes projects from the context menu...` test resolves
+    // `deleteProject` synchronously while the component is still mounted,
+    // so the guard never fires. This test uses a deferred to drive the
+    // opposite timing: click Remove, unmount mid-request, then resolve.
+    // Without the guard, the unmounted component would run
+    // `adoptState(state)`, `resetRemovedProjectSelection(project.id)`, and
+    // `setRequestError(null)`. In React 18 these setState calls are
+    // silent no-ops. Pin the guard directly with a test-only hook placed
+    // after the `isMountedRef` check but before the post-await state
+    // update path.
+    await withSuppressedActWarnings(async () => {
+      let deleteResolve!: (state: AppTestStateResponse) => void;
+      const deletePromise = new Promise<AppTestStateResponse>((resolve) => {
+        deleteResolve = resolve;
+      });
+      const initialState = makeStateResponse({
+        revision: 1,
+        projects: [
+          {
+            id: "project-api",
+            name: "API",
+            rootPath: "/projects/api",
+          },
+        ],
+        orchestrators: [],
+        workspaces: [],
+        sessions: [],
+      });
+      const deletedState = makeStateResponse({
+        revision: 2,
+        projects: [],
+        orchestrators: [],
+        workspaces: [],
+        sessions: [],
+      });
+      vi.spyOn(api, "fetchState").mockResolvedValue(initialState);
+      const deleteProjectSpy = vi
+        .spyOn(api, "deleteProject")
+        .mockReturnValue(deletePromise);
+      const postAwaitPathSpy = vi.fn();
+      setAppTestHooksForTests({
+        onDeleteProjectPostAwaitPath: postAwaitPathSpy,
+      });
+      const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
+      vi.stubGlobal(
+        "EventSource",
+        EventSourceMock as unknown as typeof EventSource,
+      );
+      vi.stubGlobal(
+        "ResizeObserver",
+        ResizeObserverMock as unknown as typeof ResizeObserver,
+      );
+      const scrollIntoViewSpy = stubScrollIntoView();
+      const consoleErrorMessages: string[] = [];
+      const originalConsoleError = console.error;
+      const consoleErrorSpy = vi
+        .spyOn(console, "error")
+        .mockImplementation((message?: unknown, ...args: unknown[]) => {
+          if (
+            typeof message === "string" &&
+            message.includes("not wrapped in act")
+          ) {
+            return;
+          }
+          if (typeof message === "string") {
+            consoleErrorMessages.push(message);
+          }
+          originalConsoleError.call(console, message, ...args);
+        });
+
+      try {
+        let renderResult!: ReturnType<typeof render>;
+        await act(async () => {
+          renderResult = render(<App />);
+        });
+        await settleAsyncUi();
+        act(() => {
+          latestEventSource().dispatchError();
+        });
+        await settleAsyncUi();
+
+        await clickAndSettle(
+          await screen.findByRole("button", { name: "Projects" }),
+        );
+        const apiRow = (
+          await screen.findByText("API")
+        ).closest("button") as HTMLButtonElement | null;
+        if (!(apiRow instanceof HTMLButtonElement)) {
+          throw new Error("API project row button not found");
+        }
+
+        await act(async () => {
+          fireEvent.contextMenu(apiRow, { clientX: 160, clientY: 120 });
+        });
+        await settleAsyncUi();
+        const menu = await screen.findByRole("menu", {
+          name: "API project actions",
+        });
+        await clickAndSettle(
+          within(menu).getByRole("menuitem", { name: "Remove project" }),
+        );
+
+        // At this point `deleteProject` was called but the deferred is
+        // still pending. Unmount before resolving, then resolve — the
+        // guard must prevent the post-unmount try-branch from running.
+        expect(deleteProjectSpy).toHaveBeenCalledWith("project-api");
+        expect(confirmSpy).toHaveBeenCalledTimes(1);
+
+        await act(async () => {
+          renderResult.unmount();
+          await flushUiWork();
+        });
+
+        await act(async () => {
+          deleteResolve(deletedState);
+          await flushUiWork();
+        });
+
+        // No error messages should have been logged by the post-unmount
+        // resolution. A missing guard would land on `adoptState(...)`
+        // which calls `syncPreferencesFromState`, `adoptSessions`, and
+        // several setState functions — none of which should fire after
+        // unmount.
+        expect(postAwaitPathSpy).not.toHaveBeenCalled();
+        expect(consoleErrorMessages).toEqual([]);
+      } finally {
+        consoleErrorSpy.mockRestore();
+        scrollIntoViewSpy.mockRestore();
+      }
+    });
+  });
+
+  it("swallows a late deleteProject rejection after the app unmounts without running post-unmount reportRequestError", async () => {
+    // Regression for the `if (!isMountedRef.current) return;` guard in
+    // the catch-branch of `handleProjectMenuRemoveProject`. Mirror of the
+    // try-branch test above, but with a rejecting deferred: unmount
+    // before rejection, then reject. Without the catch-branch guard,
+    // `reportRequestError` would call `setRequestError` on the unmounted
+    // component. React 18 makes that a silent no-op, so pin the guard
+    // directly with a test-only hook placed after the mounted check and
+    // before `reportRequestError`.
+    await withSuppressedActWarnings(async () => {
+      let deleteReject!: (error: unknown) => void;
+      const deletePromise = new Promise<AppTestStateResponse>((_, reject) => {
+        deleteReject = reject;
+      });
+      const initialState = makeStateResponse({
+        revision: 1,
+        projects: [
+          {
+            id: "project-api",
+            name: "API",
+            rootPath: "/projects/api",
+          },
+        ],
+        orchestrators: [],
+        workspaces: [],
+        sessions: [],
+      });
+      vi.spyOn(api, "fetchState").mockResolvedValue(initialState);
+      const deleteProjectSpy = vi
+        .spyOn(api, "deleteProject")
+        .mockReturnValue(deletePromise);
+      const postAwaitPathSpy = vi.fn();
+      setAppTestHooksForTests({
+        onDeleteProjectPostAwaitPath: postAwaitPathSpy,
+      });
+      const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
+      vi.stubGlobal(
+        "EventSource",
+        EventSourceMock as unknown as typeof EventSource,
+      );
+      vi.stubGlobal(
+        "ResizeObserver",
+        ResizeObserverMock as unknown as typeof ResizeObserver,
+      );
+      const scrollIntoViewSpy = stubScrollIntoView();
+      const consoleErrorMessages: string[] = [];
+      const originalConsoleError = console.error;
+      const consoleErrorSpy = vi
+        .spyOn(console, "error")
+        .mockImplementation((message?: unknown, ...args: unknown[]) => {
+          if (
+            typeof message === "string" &&
+            message.includes("not wrapped in act")
+          ) {
+            return;
+          }
+          if (typeof message === "string") {
+            consoleErrorMessages.push(message);
+          }
+          originalConsoleError.call(console, message, ...args);
+        });
+
+      try {
+        let renderResult!: ReturnType<typeof render>;
+        await act(async () => {
+          renderResult = render(<App />);
+        });
+        await settleAsyncUi();
+        act(() => {
+          latestEventSource().dispatchError();
+        });
+        await settleAsyncUi();
+
+        await clickAndSettle(
+          await screen.findByRole("button", { name: "Projects" }),
+        );
+        const apiRow = (
+          await screen.findByText("API")
+        ).closest("button") as HTMLButtonElement | null;
+        if (!(apiRow instanceof HTMLButtonElement)) {
+          throw new Error("API project row button not found");
+        }
+
+        await act(async () => {
+          fireEvent.contextMenu(apiRow, { clientX: 160, clientY: 120 });
+        });
+        await settleAsyncUi();
+        const menu = await screen.findByRole("menu", {
+          name: "API project actions",
+        });
+        await clickAndSettle(
+          within(menu).getByRole("menuitem", { name: "Remove project" }),
+        );
+
+        expect(deleteProjectSpy).toHaveBeenCalledWith("project-api");
+        expect(confirmSpy).toHaveBeenCalledTimes(1);
+
+        await act(async () => {
+          renderResult.unmount();
+          await flushUiWork();
+        });
+
+        await act(async () => {
+          deleteReject(new Error("backend rejected the delete"));
+          await flushUiWork();
+        });
+
+        // Same invariant as the resolve test: no console errors from the
+        // post-unmount rejection path. The guard prevents
+        // `reportRequestError` from firing after the unmount.
+        expect(postAwaitPathSpy).not.toHaveBeenCalled();
+        expect(consoleErrorMessages).toEqual([]);
+      } finally {
+        consoleErrorSpy.mockRestore();
+        scrollIntoViewSpy.mockRestore();
+      }
+    });
+  });
+
+  it("resolves settled-scroll minimum attempts from the fallback threshold and explicit clamp", () => {
+    expect(resolveSettledScrollMinimumAttempts(60)).toBe(8);
+    expect(resolveSettledScrollMinimumAttempts(13)).toBe(8);
+    expect(resolveSettledScrollMinimumAttempts(12)).toBe(4);
+    expect(resolveSettledScrollMinimumAttempts(4)).toBe(4);
+    expect(resolveSettledScrollMinimumAttempts(6, 8)).toBe(6);
+    expect(resolveSettledScrollMinimumAttempts(60, 8)).toBe(8);
+  });
+
+  it("keeps the new-response button scroll correction alive for the explicit minAttempts floor", async () => {
+    await withSuppressedActWarnings(async () => {
+      const restoreScrollGeometry = stubElementScrollGeometry({
+        clientHeight: 200,
+        scrollHeight: 1000,
+      });
+      const scrollToMock = mockScrollToAndApplyTop();
+
+      try {
+        const { cleanup: teardown } = await renderAppWithProjectAndSession();
+        try {
+          for (let iteration = 0; iteration < 10; iteration += 1) {
+            await settleAsyncUi();
+          }
+
+          const messageStack = document.querySelector(".message-stack");
+          if (!(messageStack instanceof HTMLElement)) {
+            throw new Error("Message stack not found");
+          }
+
+          scrollToMock.mockClear();
+          messageStack.scrollTop = 0;
+          await act(async () => {
+            fireEvent.scroll(messageStack);
+            await flushUiWork();
+          });
+
+          await dispatchStateEvent(latestEventSource(), {
+            revision: 2,
+            projects: [
+              {
+                id: "project-termal",
+                name: "TermAl",
+                rootPath: "/projects/termal",
+              },
+            ],
+            sessions: [
+              makeSession("session-1", {
+                name: "Session 1",
+                projectId: "project-termal",
+                workdir: "/projects/termal",
+                preview: "Fresh assistant response.",
+                messages: [
+                  {
+                    id: "message-assistant-1",
+                    type: "text",
+                    timestamp: "10:01",
+                    author: "assistant",
+                    text: "Fresh assistant response.",
+                  },
+                ],
+              }),
+            ],
+          });
+
+          const scrollToLatestButton = await screen.findByRole("button", {
+            name: "New response",
+          });
+          scrollToMock.mockClear();
+          await clickAndSettle(scrollToLatestButton);
+          for (let iteration = 0; iteration < 10; iteration += 1) {
+            await settleAsyncUi();
+          }
+
+          const callsAtBottom = filterScrollToCallsAt(
+            scrollToMock,
+            800,
+            "auto",
+          );
+          expect(callsAtBottom.length).toBeGreaterThanOrEqual(8);
+          expect(callsAtBottom.length).toBeLessThan(60);
+        } finally {
+          teardown();
+        }
+      } finally {
+        restoreScrollGeometry();
+      }
+    });
+  });
+
+  it("runs the default-scroll-to-bottom branch of the session scroll useLayoutEffect on mount and lets the cleanup return cleanly", async () => {
+    // Regression for round 7's session-pane scroll restoration
+    // `useLayoutEffect` restructure and the synchronous first `tick()`
+    // inside `scheduleSettledScrollToBottom`. The two changes are
+    // observed together here because the effect runs `tick()`
+    // synchronously via `scheduleSettledScrollToBottom("auto", ...)` as
+    // part of the default-scroll-to-bottom branch on first mount:
+    //
+    //  1. `messageStackRef.current` is the `<section class="message-stack">`
+    //     rendered by `SessionPaneContent`.
+    //  2. The effect hits the `else if (defaultScrollToBottom) { ... }`
+    //     arm (branch 3) because there is no prior saved
+    //     `paneScrollPositions[scrollStateKey]` entry.
+    //  3. `scheduleSettledScrollToBottom("auto", { maxAttempts: 60 })`
+    //     runs `tick()` synchronously inside its own call. `tick()`
+    //     calls `scrollToLatestMessage("auto")`.
+    //  4. `scrollToLatestMessage` computes
+    //     `nextScrollTop = Math.max(scrollHeight - clientHeight, 0)`
+    //     and invokes `node.scrollTo({ top, behavior })` when the
+    //     current `scrollTop` is farther than 1 px from the target.
+    //
+    // jsdom reports `scrollHeight` and `clientHeight` as 0 on every
+    // element, which would collapse `nextScrollTop` to 0 and skip the
+    // `scrollTo` call via the 1-px tolerance. To observe the scroll the
+    // test overrides the prototype getters for the duration of the test
+    // so `scrollHeight - clientHeight = 800`, matches the sibling
+    // `TerminalPanel.test.tsx` `stubScrollGeometry` helper's spirit
+    // while staying scoped to a single test via a finally-block
+    // restore. The test then checks `HTMLElement.prototype.scrollTo`
+    // (which `beforeEach` already stubs with `vi.fn()`) to prove the
+    // effect reached the `scrollTo({ top: 800, ... })` branch, which
+    // simultaneously pins:
+    //
+    //  - Branch 3 of the restored `useLayoutEffect` if-else chain,
+    //  - The synchronous first `tick()` in `scheduleSettledScrollToBottom`,
+    //  - The `Math.max(scrollHeight - clientHeight, 0)` / 1-px tolerance
+    //    pattern shared between `scrollToLatestMessage` and
+    //    `scrollTerminalHistoryToBottom`,
+    //  - And finally the cleanup branch: after `cleanup()` fires in
+    //    `afterEach`, the returned cleanup function from
+    //    `scheduleSettledScrollToBottom` runs `if (frameId !== 0)
+    //    cancelAnimationFrame(frameId)`. A regression that dropped the
+    //    `frameId !== 0` guard after the synchronous complete would
+    //    still produce a noisy `cancelAnimationFrame(0)` call that
+    //    would surface via `cancelAnimationFrameMock`'s tracking map
+    //    (verified implicitly — the test's own afterEach would throw
+    //    under the unhandled error if the cleanup propagated one).
+    await withSuppressedActWarnings(async () => {
+      const originalScrollHeight = Object.getOwnPropertyDescriptor(
+        HTMLElement.prototype,
+        "scrollHeight",
+      );
+      const originalClientHeight = Object.getOwnPropertyDescriptor(
+        HTMLElement.prototype,
+        "clientHeight",
+      );
+      Object.defineProperty(HTMLElement.prototype, "scrollHeight", {
+        configurable: true,
+        get() {
+          return 1000;
+        },
+      });
+      Object.defineProperty(HTMLElement.prototype, "clientHeight", {
+        configurable: true,
+        get() {
+          return 200;
+        },
+      });
+
+      // Wrap `cancelAnimationFrame` with a spy so the cleanup-guard
+      // assertion below can prove the `frameId !== 0` guard fired.
+      // `beforeEach` already installs `cancelAnimationFrameMock` via
+      // `vi.stubGlobal`; spying on `globalThis.cancelAnimationFrame`
+      // layers a `vi.fn` wrapper on top without dropping the underlying
+      // map-tracking behavior.
+      const cancelAnimationFrameSpy = vi.spyOn(
+        globalThis,
+        "cancelAnimationFrame",
+      );
+
+      try {
+        const scrollToMock =
+          HTMLElement.prototype.scrollTo as unknown as ReturnType<typeof vi.fn>;
+        scrollToMock.mockClear?.();
+
+        const { cleanup: teardown } = await renderAppWithProjectAndSession();
+        try {
+          await settleAsyncUi();
+
+          const messageStack = document.querySelector(".message-stack");
+          expect(messageStack).not.toBeNull();
+
+          // The synchronous first `tick()` in `scheduleSettledScrollToBottom`
+          // must have scrolled to `top: 800` (Math.max(1000 - 200, 0) =
+          // 800) on the message stack. We do not pin a single call
+          // index because the scheduler's rAF follow-ups also run
+          // (`requestAnimationFrameMock` queues them as microtasks),
+          // so the mock may observe several scroll-to-bottom calls as
+          // the stability loop settles — all of them should target
+          // 800.
+          const callsAtBottom = scrollToMock.mock.calls.filter((call) => {
+            const arg = call[0];
+            return (
+              typeof arg === "object" &&
+              arg !== null &&
+              (arg as ScrollToOptions).top === 800 &&
+              (arg as ScrollToOptions).behavior === "auto"
+            );
+          });
+          expect(callsAtBottom.length).toBeGreaterThan(0);
+        } finally {
+          teardown();
+        }
+
+        // Explicit cleanup assertion: the scheduler's returned cleanup
+        // closure checks `if (frameId !== 0) cancelAnimationFrame(frameId)`
+        // to avoid a wasted `cancelAnimationFrame(0)` call after the
+        // synchronous first `tick()` sets `frameId = 0` before scheduling
+        // the next rAF. A regression that dropped the `frameId !== 0`
+        // guard would be observable here because the cleanup would call
+        // `cancelAnimationFrame(0)` at least once. Running this check
+        // AFTER `teardown()` ensures the scheduler's cleanup has
+        // definitely executed (SessionPaneContent unmounts on workspace
+        // teardown) — the cleanup is otherwise only triggered by
+        // effect-dep churn or `afterEach`'s global `cleanup()`.
+        const zeroCancels = cancelAnimationFrameSpy.mock.calls.filter(
+          ([frameId]) => frameId === 0,
+        );
+        expect(zeroCancels).toEqual([]);
+      } finally {
+        cancelAnimationFrameSpy.mockRestore();
+        if (originalScrollHeight) {
+          Object.defineProperty(
+            HTMLElement.prototype,
+            "scrollHeight",
+            originalScrollHeight,
+          );
+        } else {
+          delete (HTMLElement.prototype as unknown as Record<string, unknown>)
+            .scrollHeight;
+        }
+        if (originalClientHeight) {
+          Object.defineProperty(
+            HTMLElement.prototype,
+            "clientHeight",
+            originalClientHeight,
+          );
+        } else {
+          delete (HTMLElement.prototype as unknown as Record<string, unknown>)
+            .clientHeight;
+        }
       }
     });
   });

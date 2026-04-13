@@ -159,10 +159,89 @@ describe("MessageCard", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Expand changed files" }));
 
-    expect(screen.getByText("src/file-1.ts")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Open src/file-1.ts" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Copy src/file-1.ts" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Collapse changed files" })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Collapse changed files" }));
+
+    expect(screen.queryByText("src/file-1.ts")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Expand changed files" })).toBeInTheDocument();
+  });
+
+  it("renders six changed files expanded without a collapse control", () => {
+    const message: FileChangesMessage = {
+      id: "message-files-threshold",
+      type: "fileChanges",
+      author: "assistant",
+      timestamp: "10:04",
+      title: "Agent changed 6 files",
+      files: Array.from({ length: 6 }, (_, index) => ({
+        path: `/repo/src/file-${index + 1}.ts`,
+        kind: "modified" as const,
+      })),
+    };
+
+    render(
+      <MessageCard
+        message={message}
+        onApprovalDecision={vi.fn()}
+        onOpenSourceLink={vi.fn()}
+        onUserInputSubmit={vi.fn()}
+        workspaceRoot="/repo"
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: "Open src/file-1.ts" })).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Expand changed files" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Collapse changed files" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("auto-expands long changed file lists during search without mutating collapse state", () => {
+    const message: FileChangesMessage = {
+      id: "message-files-search",
+      type: "fileChanges",
+      author: "assistant",
+      timestamp: "10:04",
+      title: "Agent changed 7 files",
+      files: Array.from({ length: 7 }, (_, index) => ({
+        path: `/repo/src/file-${index + 1}.ts`,
+        kind: "modified" as const,
+      })),
+    };
+    const { rerender } = render(
+      <MessageCard
+        message={message}
+        onApprovalDecision={vi.fn()}
+        onOpenSourceLink={vi.fn()}
+        onUserInputSubmit={vi.fn()}
+        searchQuery="file"
+        workspaceRoot="/repo"
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: "Open src/file-1.ts" })).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /changed files/i }),
+    ).not.toBeInTheDocument();
+
+    rerender(
+      <MessageCard
+        message={message}
+        onApprovalDecision={vi.fn()}
+        onOpenSourceLink={vi.fn()}
+        onUserInputSubmit={vi.fn()}
+        searchQuery=""
+        workspaceRoot="/repo"
+      />,
+    );
+
+    expect(screen.queryByText("src/file-1.ts")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Expand changed files" })).toBeInTheDocument();
   });
 
   it("shows canceled approvals as a resolved decision", () => {
