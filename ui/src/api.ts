@@ -178,6 +178,18 @@ export type TerminalCommandResponse = {
   workdir: string;
 };
 
+export type TerminalOutputStream = "stdout" | "stderr";
+
+export type TerminalCommandOutputEvent = {
+  stream: TerminalOutputStream;
+  text: string;
+};
+
+type TerminalCommandStreamErrorEvent = {
+  error?: string;
+  status?: number;
+};
+
 export type ReviewCommentAuthor = "user" | "agent";
 export type ReviewThreadStatus = "open" | "resolved" | "applied" | "dismissed";
 
@@ -906,6 +918,171 @@ export function runTerminalCommand(payload: {
     method: "POST",
     body: JSON.stringify(payload),
   });
+}
+
+export async function runTerminalCommandStream(
+  payload: {
+    command: string;
+    sessionId?: string | null;
+    projectId?: string | null;
+    workdir: string;
+  },
+  options: {
+    onOutput?: (event: TerminalCommandOutputEvent) => void;
+    signal?: AbortSignal;
+  } = {},
+) {
+  const endpoint = "/api/terminal/run/stream";
+  const response = await performRequest(endpoint, {
+    method: "POST",
+    body: JSON.stringify(payload),
+    signal: options.signal,
+  });
+
+  const contentType = response.headers.get("content-type") ?? "";
+  if (looksLikeHtmlResponse("", contentType)) {
+    await response.text().catch(() => "");
+    throw createBackendUnavailableError(
+      formatUnavailableApiMessage(endpoint, response.status),
+      response.status,
+      { restartRequired: true },
+    );
+  }
+
+  if (!response.ok) {
+    const raw = await response.text();
+    throw createResponseError(raw, response.status);
+  }
+
+  if (!response.body) {
+    throw createBackendUnavailableError(
+      "The TermAl backend did not return a terminal stream.",
+      response.status,
+    );
+  }
+
+  return readTerminalCommandEventStream(response.body, options.onOutput);
+}
+
+async function readTerminalCommandEventStream(
+  body: ReadableStream<Uint8Array>,
+  onOutput: ((event: TerminalCommandOutputEvent) => void) | undefined,
+) {
+  const reader = body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) {
+        break;
+      }
+      buffer = normalizeSseBuffer(buffer + decoder.decode(value, { stream: true }));
+      const result = processTerminalSseBuffer(buffer, onOutput);
+      buffer = result.buffer;
+      if (result.response) {
+        return result.response;
+      }
+    }
+  } finally {
+    reader.releaseLock();
+  }
+
+  buffer = normalizeSseBuffer(buffer + decoder.decode());
+  const result = processTerminalSseBuffer(buffer, onOutput, true);
+  if (result.response) {
+    return result.response;
+  }
+
+  throw new ApiRequestError(
+    "request-failed",
+    "Terminal stream ended before the command completed.",
+    { status: 500 },
+  );
+}
+
+function processTerminalSseBuffer(
+  buffer: string,
+  onOutput: ((event: TerminalCommandOutputEvent) => void) | undefined,
+  flush = false,
+) {
+  let remaining = buffer;
+  let response: TerminalCommandResponse | null = null;
+
+  while (true) {
+    const frameEnd = remaining.indexOf("\n\n");
+    if (frameEnd < 0) {
+      if (!flush || remaining.trim() === "") {
+        break;
+      }
+    }
+    const frame = frameEnd >= 0 ? remaining.slice(0, frameEnd) : remaining;
+    remaining = frameEnd >= 0 ? remaining.slice(frameEnd + 2) : "";
+    if (!frame.trim()) {
+      if (frameEnd < 0) {
+        break;
+      }
+      continue;
+    }
+
+    const parsed = parseSseFrame(frame);
+    if (parsed.event === "output") {
+      onOutput?.(JSON.parse(parsed.data) as TerminalCommandOutputEvent);
+    } else if (parsed.event === "complete") {
+      response = JSON.parse(parsed.data) as TerminalCommandResponse;
+      break;
+    } else if (parsed.event === "error") {
+      throw createTerminalStreamEventError(parsed.data);
+    }
+
+    if (frameEnd < 0) {
+      break;
+    }
+  }
+
+  return { buffer: remaining, response };
+}
+
+function normalizeSseBuffer(value: string) {
+  return value.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+}
+
+function parseSseFrame(frame: string) {
+  let event = "message";
+  const data: string[] = [];
+
+  for (const line of frame.split("\n")) {
+    if (line.startsWith(":")) {
+      continue;
+    }
+    const separator = line.indexOf(":");
+    const field = separator >= 0 ? line.slice(0, separator) : line;
+    let value = separator >= 0 ? line.slice(separator + 1) : "";
+    if (value.startsWith(" ")) {
+      value = value.slice(1);
+    }
+    if (field === "event") {
+      event = value;
+    } else if (field === "data") {
+      data.push(value);
+    }
+  }
+
+  return { data: data.join("\n"), event };
+}
+
+function createTerminalStreamEventError(raw: string) {
+  try {
+    const parsed = JSON.parse(raw) as TerminalCommandStreamErrorEvent;
+    const status = parsed.status ?? 500;
+    return createResponseError(
+      JSON.stringify({ error: parsed.error ?? `Request failed with status ${status}.` }),
+      status,
+    );
+  } catch {
+    return createResponseError(raw, 500);
+  }
 }
 
 async function performRequest(path: string, init?: RequestInit) {

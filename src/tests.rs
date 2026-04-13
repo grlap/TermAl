@@ -22031,6 +22031,64 @@ async fn terminal_run_route_validates_remote_scoped_requests_before_proxying() {
     );
 }
 
+#[tokio::test]
+async fn terminal_run_stream_route_emits_output_before_complete() {
+    let state = test_app_state();
+    let root = std::env::temp_dir().join(format!("termal-terminal-stream-{}", Uuid::new_v4()));
+    fs::create_dir_all(&root).unwrap();
+    let project = state
+        .create_project(CreateProjectRequest {
+            name: Some("Terminal Stream".to_owned()),
+            root_path: root.to_string_lossy().into_owned(),
+            remote_id: default_local_remote_id(),
+        })
+        .unwrap();
+    let app = app_router(state);
+    let response = request_response(
+        &app,
+        Request::builder()
+            .method("POST")
+            .uri("/api/terminal/run/stream")
+            .header(axum::http::header::CONTENT_TYPE, "application/json")
+            .body(Body::from(
+                json!({
+                    "command": "echo stream-ok",
+                    "projectId": project.project_id,
+                    "workdir": root.to_string_lossy(),
+                })
+                .to_string(),
+            ))
+            .unwrap(),
+    )
+    .await;
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let mut body = Box::pin(response.into_body().into_data_stream());
+    let mut saw_stdout = false;
+    let complete = loop {
+        let event = next_sse_event(&mut body).await;
+        let (event_name, event_data) = parse_sse_event(&event);
+        if event_name == "output" {
+            let output: Value =
+                serde_json::from_str(&event_data).expect("output event should decode");
+            if output["stream"] == Value::String("stdout".to_owned()) {
+                saw_stdout |= output["text"].as_str().unwrap().contains("stream-ok");
+            }
+            continue;
+        }
+
+        assert_eq!(event_name, "complete");
+        break serde_json::from_str::<TerminalCommandResponse>(&event_data)
+            .expect("complete event should decode");
+    };
+    assert!(saw_stdout, "stream should emit stdout before completion");
+    assert_eq!(complete.command, "echo stream-ok");
+    assert!(complete.stdout.contains("stream-ok"));
+    assert!(complete.success);
+
+    fs::remove_dir_all(root).unwrap();
+}
+
 #[test]
 fn annotate_remote_terminal_429_prefixes_only_throttled_remote_errors() {
     let throttled = annotate_remote_terminal_429(

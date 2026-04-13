@@ -8,6 +8,7 @@ import {
   fetchState,
   isBackendUnavailableError,
   runTerminalCommand,
+  runTerminalCommandStream,
   saveFile,
 } from "./api";
 
@@ -272,6 +273,92 @@ describe("runTerminalCommand", () => {
       );
       expect((error as Error).message).toContain("limit is 4");
     }
+  });
+});
+
+describe("runTerminalCommandStream", () => {
+  const originalFetch = globalThis.fetch;
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    if (originalFetch === undefined) {
+      delete (globalThis as Partial<typeof globalThis>).fetch;
+      return;
+    }
+    globalThis.fetch = originalFetch;
+  });
+
+  it("streams output events and resolves with the final terminal response", async () => {
+    const responseBody = {
+      command: "npm test",
+      durationMs: 42,
+      exitCode: 0,
+      outputTruncated: false,
+      shell: "PowerShell",
+      stderr: "",
+      stdout: "building...\ndone\n",
+      success: true,
+      timedOut: false,
+      workdir: "C:/repo",
+    };
+    const encoder = new TextEncoder();
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(
+          encoder.encode(
+            'event: output\ndata: {"stream":"stdout","text":"building...\\n"}\n\n',
+          ),
+        );
+        controller.enqueue(
+          encoder.encode(
+            `event: complete\ndata: ${JSON.stringify(responseBody)}\n\n`,
+          ),
+        );
+        controller.close();
+      },
+    });
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(stream, {
+        status: 200,
+        headers: {
+          "Content-Type": "text/event-stream",
+        },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const outputEvents: Array<{ stream: string; text: string }> = [];
+
+    await expect(
+      runTerminalCommandStream(
+        {
+          command: "npm test",
+          projectId: "project-a",
+          sessionId: null,
+          workdir: "C:/repo",
+        },
+        { onOutput: (event) => outputEvents.push(event) },
+      ),
+    ).resolves.toEqual(responseBody);
+
+    expect(outputEvents).toEqual([
+      { stream: "stdout", text: "building...\n" },
+    ]);
+    const init = fetchMock.mock.calls[0]?.[1] as RequestInit | undefined;
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/terminal/run/stream",
+      expect.objectContaining({
+        method: "POST",
+        headers: expect.objectContaining({
+          "Content-Type": "application/json",
+        }),
+      }),
+    );
+    expect(JSON.parse(init?.body as string)).toEqual({
+      command: "npm test",
+      projectId: "project-a",
+      sessionId: null,
+      workdir: "C:/repo",
+    });
   });
 });
 

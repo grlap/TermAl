@@ -65,6 +65,7 @@ const HEAVY_CODE_CHARACTER_THRESHOLD = 1400;
 const HEAVY_CODE_LINE_THRESHOLD = 28;
 const HEAVY_MARKDOWN_CHARACTER_THRESHOLD = 1800;
 const HEAVY_MARKDOWN_LINE_THRESHOLD = 24;
+const FILE_CHANGES_COLLAPSE_THRESHOLD = 6;
 
 export type MarkdownFileLinkTarget = {
   path: string;
@@ -1032,6 +1033,10 @@ function FileChangesCard({
   workspaceRoot?: string | null;
 }) {
   const [copiedPath, setCopiedPath] = useState<string | null>(null);
+  const [filesExpanded, setFilesExpanded] = useState(false);
+  const canExpandFiles = message.files.length > FILE_CHANGES_COLLAPSE_THRESHOLD;
+  const isSearchExpanded = searchQuery.trim().length > 0;
+  const isFilesExpanded = !canExpandFiles || filesExpanded || isSearchExpanded;
 
   useEffect(() => {
     if (!copiedPath) {
@@ -1078,8 +1083,22 @@ function FileChangesCard({
               {renderHighlightedText(message.title, searchQuery, searchHighlightTone)}
             </p>
           </div>
+          {canExpandFiles ? (
+            <div className="command-row-actions">
+              <button
+                className="command-icon-button"
+                type="button"
+                onClick={() => setFilesExpanded((open) => !open)}
+                aria-label={isFilesExpanded ? "Collapse changed files" : "Expand changed files"}
+                aria-expanded={isFilesExpanded}
+                title={isFilesExpanded ? "Collapse changed files" : "Expand changed files"}
+              >
+                {isFilesExpanded ? <CollapseIcon /> : <ExpandIcon />}
+              </button>
+            </div>
+          ) : null}
         </div>
-        {message.files.map((file) => {
+        {isFilesExpanded ? message.files.map((file) => {
           const displayPath = relativizePathToWorkspace(file.path, workspaceRoot);
           const copied = copiedPath === file.path;
 
@@ -1121,7 +1140,7 @@ function FileChangesCard({
               </div>
             </div>
           );
-        })}
+        }) : null}
       </div>
     </article>
   );

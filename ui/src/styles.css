@@ -4806,37 +4806,54 @@ textarea {
 
 .terminal-history-item {
   display: grid;
-  gap: 0.45rem;
-  padding: 0.75rem 0;
+  padding: 0;
 }
 
 .terminal-history-item + .terminal-history-item {
   border-top: 1px solid color-mix(in srgb, var(--line) 78%, transparent);
 }
 
-.terminal-history-header {
+.terminal-io-row {
+  display: grid;
+  grid-template-columns: 3rem minmax(0, 1fr);
+  column-gap: 0.55rem;
+  padding: 0.48rem 0;
+}
+
+.terminal-io-row + .terminal-io-row {
+  padding-top: 0;
+}
+
+.terminal-io-label {
+  color: var(--signal-green);
+  font-family: var(--code-font);
+  font-size: 0.78rem;
+  font-weight: 900;
+  letter-spacing: 0;
+  line-height: 1.45;
+  text-transform: uppercase;
+}
+
+.terminal-io-body {
+  display: grid;
+  min-width: 0;
+  gap: 0.22rem;
+}
+
+.terminal-io-heading {
   display: flex;
   align-items: baseline;
+  flex-wrap: wrap;
   justify-content: space-between;
+  min-width: 0;
   gap: 0.75rem;
 }
 
-.terminal-command-line {
-  display: inline-flex;
-  align-items: baseline;
+.terminal-command-text {
   min-width: 0;
-  gap: 0.45rem;
-}
-
-.terminal-command-line code {
+  color: var(--ink);
+  font-family: var(--code-font);
   overflow-wrap: anywhere;
-  font-family: var(--code-font);
-}
-
-.terminal-prompt {
-  color: var(--signal-green);
-  font-family: var(--code-font);
-  font-weight: 800;
 }
 
 .terminal-history-meta,
@@ -4845,6 +4862,10 @@ textarea {
   color: var(--muted);
   font-family: var(--code-font);
   font-size: 0.78rem;
+}
+
+.terminal-history-meta {
+  white-space: nowrap;
 }
 
 .terminal-history-workdir {
@@ -4856,10 +4877,10 @@ textarea {
 .terminal-output {
   margin: 0;
   overflow-x: auto;
-  border-radius: var(--control-radius-button);
-  padding: 0.65rem 0.75rem;
-  background: color-mix(in srgb, #000 82%, var(--command-panel-bg));
-  color: #e7f2ea;
+  border-radius: 0;
+  padding: 0;
+  background: transparent;
+  color: var(--ink);
   font-family: var(--code-font);
   font-size: 0.83rem;
   line-height: 1.45;
@@ -4867,19 +4888,38 @@ textarea {
   overflow-wrap: anywhere;
 }
 
+.terminal-output + .terminal-output,
+.terminal-output + .terminal-output-note,
+.terminal-output-note + .terminal-output {
+  margin-top: 0.35rem;
+}
+
 .terminal-output-stderr,
 .terminal-output-error {
   color: #ffd9d9;
 }
 
+.terminal-prompt {
+  color: var(--signal-green);
+  font-family: var(--code-font);
+  font-weight: 800;
+}
+
 .terminal-command-row {
   border-top: 1px solid var(--line);
   border-bottom: 0;
+  background: transparent;
 }
 
 .terminal-command-input {
   flex: 1 1 auto;
-  padding: 0.62rem 0.7rem;
+  border: 0;
+  background: transparent;
+  padding: 0.62rem 0;
+}
+
+.terminal-command-input:focus {
+  outline: none;
 }
 
 .terminal-run-button,

@@ -151,14 +151,52 @@ impl RemoteRegistry {
         body: Option<Value>,
         timeout: Duration,
     ) -> Result<T, ApiError> {
+        let response = self.request_with_timeout(remote, method, path, query, body, timeout)?;
+        decode_remote_json(response)
+    }
+
+    /// Handles request without a response read timeout.
+    fn request_without_timeout(
+        &self,
+        remote: &RemoteConfig,
+        method: Method,
+        path: &str,
+        query: &[(String, String)],
+        body: Option<Value>,
+    ) -> Result<BlockingHttpResponse, ApiError> {
+        self.request_with_optional_timeout(remote, method, path, query, body, None)
+    }
+
+    /// Handles request with an explicit timeout.
+    fn request_with_timeout(
+        &self,
+        remote: &RemoteConfig,
+        method: Method,
+        path: &str,
+        query: &[(String, String)],
+        body: Option<Value>,
+        timeout: Duration,
+    ) -> Result<BlockingHttpResponse, ApiError> {
+        self.request_with_optional_timeout(remote, method, path, query, body, Some(timeout))
+    }
+
+    /// Handles request with an optional response read timeout.
+    fn request_with_optional_timeout(
+        &self,
+        remote: &RemoteConfig,
+        method: Method,
+        path: &str,
+        query: &[(String, String)],
+        body: Option<Value>,
+        timeout: Option<Duration>,
+    ) -> Result<BlockingHttpResponse, ApiError> {
         let connection = self.connection(remote);
         let base_url = connection.ensure_available(self.client.client())?;
         let url = format!("{base_url}{path}");
-        let mut request = self
-            .client
-            .client()
-            .request(method, &url)
-            .timeout(timeout);
+        let mut request = self.client.client().request(method, &url);
+        if let Some(timeout) = timeout {
+            request = request.timeout(timeout);
+        }
         if !query.is_empty() {
             request = request.query(query);
         }
@@ -173,7 +211,7 @@ impl RemoteRegistry {
             );
             ApiError::bad_gateway(remote_connection_issue_message(&remote.name))
         })?;
-        decode_remote_json(response)
+        Ok(response)
     }
 
     /// Starts event bridge.
@@ -699,6 +737,22 @@ impl AppState {
             &[],
             Some(apply_remote_scope_to_body(scope, body)),
             timeout,
+        )
+    }
+
+    /// Handles remote post response without a response read timeout.
+    fn remote_post_response_without_timeout(
+        &self,
+        scope: &RemoteScope,
+        path: &str,
+        body: Value,
+    ) -> Result<BlockingHttpResponse, ApiError> {
+        self.remote_registry.request_without_timeout(
+            &scope.remote,
+            Method::POST,
+            path,
+            &[],
+            Some(apply_remote_scope_to_body(scope, body)),
         )
     }
 

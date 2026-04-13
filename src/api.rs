@@ -2257,6 +2257,277 @@ async fn run_terminal_command(
     Ok(Json(response))
 }
 
+/// Streams a terminal command, emitting stdout/stderr chunks before the final result.
+async fn run_terminal_command_stream(
+    State(state): State<AppState>,
+    Json(request): Json<TerminalCommandRequest>,
+) -> Result<Sse<impl futures_core::Stream<Item = std::result::Result<Event, Infallible>>>, ApiError>
+{
+    let command = validate_terminal_command(&request.command)?;
+    let workdir_request = validate_terminal_workdir(&request.workdir)?;
+    let (event_tx, mut event_rx) =
+        tokio::sync::mpsc::unbounded_channel::<TerminalCommandStreamEvent>();
+
+    if state.terminal_request_is_remote(
+        request.session_id.as_deref(),
+        request.project_id.as_deref(),
+    ) {
+        let permit = state
+            .terminal_remote_command_semaphore
+            .clone()
+            .try_acquire_owned()
+            .map_err(|_| {
+                ApiError::from_status(
+                    StatusCode::TOO_MANY_REQUESTS,
+                    format!(
+                        "too many remote terminal commands are already running; limit is {TERMINAL_REMOTE_COMMAND_CONCURRENCY_LIMIT}"
+                    ),
+                )
+            })?;
+        let task_tx = event_tx.clone();
+        tokio::spawn(async move {
+            let remote_stream_tx = task_tx.clone();
+            let result = tokio::task::spawn_blocking(move || {
+                let _permit = permit;
+                let scope = state
+                    .remote_scope_for_request(
+                        request.session_id.as_deref(),
+                        request.project_id.as_deref(),
+                    )?
+                    .ok_or_else(|| {
+                        ApiError::internal(
+                            "remote scope resolution returned none after in-memory peek indicated remote",
+                        )
+                    })?;
+                let remote_name = scope.remote.name.clone();
+                let payload = json!({
+                    "command": command,
+                    "workdir": workdir_request,
+                });
+                let response = state.remote_post_response_without_timeout(
+                    &scope,
+                    "/api/terminal/run/stream",
+                    payload.clone(),
+                )?;
+                if matches!(
+                    response.status(),
+                    StatusCode::NOT_FOUND | StatusCode::METHOD_NOT_ALLOWED
+                ) || response
+                    .headers()
+                    .get("content-type")
+                    .and_then(|value| value.to_str().ok())
+                    .is_some_and(|value| value.to_ascii_lowercase().contains("text/html"))
+                {
+                    return state
+                        .remote_post_json_with_timeout(
+                            &scope,
+                            "/api/terminal/run",
+                            payload,
+                            REMOTE_TERMINAL_COMMAND_TIMEOUT,
+                        )
+                        .map_err(|err| annotate_remote_terminal_429(err, &remote_name));
+                }
+
+                forward_remote_terminal_stream_response(response, &remote_stream_tx)
+                    .map_err(|err| annotate_remote_terminal_429(err, &remote_name))
+            })
+            .await
+            .map_err(|err| ApiError::internal(format!("terminal command task failed: {err}")))
+            .and_then(|result| result);
+            send_terminal_stream_result(&task_tx, result);
+        });
+    } else {
+        let permit = state
+            .terminal_local_command_semaphore
+            .clone()
+            .try_acquire_owned()
+            .map_err(|_| {
+                ApiError::from_status(
+                    StatusCode::TOO_MANY_REQUESTS,
+                    format!(
+                        "too many local terminal commands are already running; limit is {TERMINAL_LOCAL_COMMAND_CONCURRENCY_LIMIT}"
+                    ),
+                )
+            })?;
+        let task_tx = event_tx.clone();
+        tokio::spawn(async move {
+            let command_stream_tx = task_tx.clone();
+            let result = tokio::task::spawn_blocking(move || {
+                let _permit = permit;
+                let workdir = resolve_project_scoped_requested_path(
+                    &state,
+                    request.session_id.as_deref(),
+                    request.project_id.as_deref(),
+                    &workdir_request,
+                    ScopedPathMode::ExistingPath,
+                )?;
+                run_terminal_shell_command_streaming(&command, &workdir, command_stream_tx)
+            })
+            .await
+            .map_err(|err| ApiError::internal(format!("terminal command task failed: {err}")))
+            .and_then(|result| result);
+            send_terminal_stream_result(&task_tx, result);
+        });
+    }
+
+    let stream = async_stream::stream! {
+        while let Some(event) = event_rx.recv().await {
+            yield Ok(terminal_command_sse_event(event));
+        }
+    };
+
+    Ok(Sse::new(stream).keep_alive(KeepAlive::default()))
+}
+
+fn send_terminal_stream_result(
+    event_tx: &TerminalCommandStreamSender,
+    result: Result<TerminalCommandResponse, ApiError>,
+) {
+    let event = match result {
+        Ok(response) => TerminalCommandStreamEvent::Complete(response),
+        Err(err) => TerminalCommandStreamEvent::Error {
+            error: err.message,
+            status: err.status.as_u16(),
+        },
+    };
+    let _ = event_tx.send(event);
+}
+
+fn terminal_command_sse_event(event: TerminalCommandStreamEvent) -> Event {
+    match event {
+        TerminalCommandStreamEvent::Output { stream, text } => Event::default()
+            .event("output")
+            .data(json!({ "stream": stream, "text": text }).to_string()),
+        TerminalCommandStreamEvent::Complete(response) => Event::default()
+            .event("complete")
+            .data(serde_json::to_string(&response).unwrap_or_else(|err| {
+                json!({
+                    "error": format!("failed to serialize terminal command response: {err}"),
+                    "status": StatusCode::INTERNAL_SERVER_ERROR.as_u16(),
+                })
+                .to_string()
+            })),
+        TerminalCommandStreamEvent::Error { error, status } => Event::default()
+            .event("error")
+            .data(json!({ "error": error, "status": status }).to_string()),
+    }
+}
+
+fn forward_remote_terminal_stream_response(
+    mut response: BlockingHttpResponse,
+    event_tx: &TerminalCommandStreamSender,
+) -> Result<TerminalCommandResponse, ApiError> {
+    if !response.status().is_success() {
+        return decode_remote_json(response);
+    }
+
+    let mut pending = Vec::new();
+    let mut scratch = [0u8; 8192];
+    loop {
+        let bytes_read = response
+            .read(&mut scratch)
+            .map_err(|err| ApiError::bad_gateway(format!("failed to read remote stream: {err}")))?;
+        if bytes_read == 0 {
+            break;
+        }
+        pending.extend_from_slice(&scratch[..bytes_read]);
+        while let Some((frame_end, delimiter_len)) = find_sse_frame_delimiter(&pending) {
+            let frame = String::from_utf8_lossy(&pending[..frame_end]).into_owned();
+            pending.drain(..frame_end + delimiter_len);
+            if let Some(response) = handle_remote_terminal_sse_frame(&frame, event_tx)? {
+                return Ok(response);
+            }
+        }
+    }
+
+    if !pending.iter().all(|byte| byte.is_ascii_whitespace()) {
+        let frame = String::from_utf8_lossy(&pending).into_owned();
+        if let Some(response) = handle_remote_terminal_sse_frame(&frame, event_tx)? {
+            return Ok(response);
+        }
+    }
+
+    Err(ApiError::bad_gateway(
+        "remote terminal stream ended before the command completed",
+    ))
+}
+
+fn handle_remote_terminal_sse_frame(
+    frame: &str,
+    event_tx: &TerminalCommandStreamSender,
+) -> Result<Option<TerminalCommandResponse>, ApiError> {
+    let Some((event_name, data)) = parse_terminal_sse_frame(frame) else {
+        return Ok(None);
+    };
+
+    match event_name.as_str() {
+        "output" => {
+            let payload: TerminalOutputStreamPayload = serde_json::from_str(&data)
+                .map_err(|err| ApiError::bad_gateway(format!("failed to decode remote terminal output event: {err}")))?;
+            let _ = event_tx.send(TerminalCommandStreamEvent::Output {
+                stream: payload.stream,
+                text: payload.text,
+            });
+            Ok(None)
+        }
+        "complete" => serde_json::from_str::<TerminalCommandResponse>(&data)
+            .map(Some)
+            .map_err(|err| {
+                ApiError::bad_gateway(format!(
+                    "failed to decode remote terminal completion event: {err}"
+                ))
+            }),
+        "error" => {
+            let payload: TerminalStreamErrorPayload = serde_json::from_str(&data)
+                .map_err(|err| ApiError::bad_gateway(format!("failed to decode remote terminal error event: {err}")))?;
+            Err(ApiError::from_status(
+                StatusCode::from_u16(payload.status.unwrap_or(500))
+                    .unwrap_or(StatusCode::INTERNAL_SERVER_ERROR),
+                payload.error,
+            ))
+        }
+        _ => Ok(None),
+    }
+}
+
+fn parse_terminal_sse_frame(frame: &str) -> Option<(String, String)> {
+    let mut event_name = None;
+    let mut data_lines = Vec::new();
+    for line in frame.lines() {
+        let line = line.trim_end_matches('\r');
+        if line.starts_with(':') {
+            continue;
+        }
+        let (field, value) = line.split_once(':').map_or((line, ""), |(field, value)| {
+            (field, value.strip_prefix(' ').unwrap_or(value))
+        });
+        match field {
+            "event" => event_name = Some(value.to_owned()),
+            "data" => data_lines.push(value.to_owned()),
+            _ => {}
+        }
+    }
+
+    event_name.map(|name| (name, data_lines.join("\n")))
+}
+
+fn find_sse_frame_delimiter(bytes: &[u8]) -> Option<(usize, usize)> {
+    let lf = bytes
+        .windows(2)
+        .position(|window| window == b"\n\n")
+        .map(|index| (index, 2));
+    let crlf = bytes
+        .windows(4)
+        .position(|window| window == b"\r\n\r\n")
+        .map(|index| (index, 4));
+    match (lf, crlf) {
+        (Some(lf), Some(crlf)) => Some(if lf.0 <= crlf.0 { lf } else { crlf }),
+        (Some(lf), None) => Some(lf),
+        (None, Some(crlf)) => Some(crlf),
+        (None, None) => None,
+    }
+}
+
 fn validate_terminal_command(command: &str) -> Result<String, ApiError> {
     let command = command.trim();
     if command.is_empty() {
@@ -2318,13 +2589,31 @@ fn run_terminal_shell_command(
     command: &str,
     workdir: &FsPath,
 ) -> Result<TerminalCommandResponse, ApiError> {
-    run_terminal_shell_command_with_timeout(command, workdir, TERMINAL_COMMAND_TIMEOUT)
+    run_terminal_shell_command_with_timeout_and_stream(command, workdir, None, None)
 }
 
+fn run_terminal_shell_command_streaming(
+    command: &str,
+    workdir: &FsPath,
+    event_tx: TerminalCommandStreamSender,
+) -> Result<TerminalCommandResponse, ApiError> {
+    run_terminal_shell_command_with_timeout_and_stream(command, workdir, None, Some(event_tx))
+}
+
+#[cfg(test)]
 fn run_terminal_shell_command_with_timeout(
     command: &str,
     workdir: &FsPath,
     timeout: Duration,
+) -> Result<TerminalCommandResponse, ApiError> {
+    run_terminal_shell_command_with_timeout_and_stream(command, workdir, Some(timeout), None)
+}
+
+fn run_terminal_shell_command_with_timeout_and_stream(
+    command: &str,
+    workdir: &FsPath,
+    timeout: Option<Duration>,
+    event_tx: Option<TerminalCommandStreamSender>,
 ) -> Result<TerminalCommandResponse, ApiError> {
     let (shell_label, mut child_command) = build_terminal_shell_command(command);
     configure_terminal_process_tree(&mut child_command);
@@ -2367,14 +2656,9 @@ fn run_terminal_shell_command_with_timeout(
     // producing output. Without this ordering, a chatty child that emits
     // a burst of early output (e.g. a tight `for` loop with `echo`) can
     // fill the default ~4KB Windows pipe buffer between `ResumeThread`
-    // and the reader-thread spawn, blocking on pipe write until the
-    // local `TERMINAL_COMMAND_TIMEOUT` (60s) fires and the shell is
-    // killed, so the command appears to hang from the user's perspective.
-    // The 90s `REMOTE_TERMINAL_COMMAND_TIMEOUT` is only the proxy
-    // envelope around `remote_post_json_with_timeout`; it is not the
-    // timeout the local shell path waits on. On Unix `resume_after_attach`
-    // is a no-op (the child is already running since `spawn`), so the
-    // reorder is a no-op there.
+    // and the reader-thread spawn, blocking on pipe write. On Unix
+    // `resume_after_attach` is a no-op (the child is already running
+    // since `spawn`), so the reorder is a no-op there.
     let stdout = match process.take_stdout() {
         Some(stdout) => stdout,
         None => {
@@ -2409,10 +2693,19 @@ fn run_terminal_shell_command_with_timeout(
     let stderr_buffer = new_terminal_output_buffer();
     let stdout_reader_buffer = stdout_buffer.clone();
     let stderr_reader_buffer = stderr_buffer.clone();
+    let stdout_streamer = event_tx
+        .clone()
+        .map(|sender| TerminalOutputStreamer::new(sender, TerminalOutputStream::Stdout));
+    let stderr_streamer =
+        event_tx.map(|sender| TerminalOutputStreamer::new(sender, TerminalOutputStream::Stderr));
     let (stdout_done_tx, stdout_done_rx) = std::sync::mpsc::sync_channel::<()>(1);
     let (stderr_done_tx, stderr_done_rx) = std::sync::mpsc::sync_channel::<()>(1);
     let stdout_reader = std::thread::spawn(move || {
-        let result = read_capped_terminal_output_into(stdout, &stdout_reader_buffer);
+        let result = read_capped_terminal_output_into_with_stream(
+            stdout,
+            &stdout_reader_buffer,
+            stdout_streamer.as_ref(),
+        );
         // Best-effort completion signal: the main thread may have already
         // dropped the receiver on its own timeout, in which case send
         // returns `Err` and the thread simply exits with the result.
@@ -2420,7 +2713,11 @@ fn run_terminal_shell_command_with_timeout(
         result
     });
     let stderr_reader = std::thread::spawn(move || {
-        let result = read_capped_terminal_output_into(stderr, &stderr_reader_buffer);
+        let result = read_capped_terminal_output_into_with_stream(
+            stderr,
+            &stderr_reader_buffer,
+            stderr_streamer.as_ref(),
+        );
         let _ = stderr_done_tx.send(());
         result
     });
@@ -2440,8 +2737,15 @@ fn run_terminal_shell_command_with_timeout(
         )));
     }
 
-    let mut status = wait_for_shared_child_exit_timeout(&process, timeout, "terminal command")
-        .map_err(|err| ApiError::internal(format!("{err:#}")))?;
+    let mut status = match timeout {
+        Some(timeout) => wait_for_shared_child_exit_timeout(&process, timeout, "terminal command")
+            .map_err(|err| ApiError::internal(format!("{err:#}")))?,
+        None => Some(
+            process
+                .wait()
+                .map_err(|err| ApiError::internal(format!("failed waiting for terminal command process: {err}")))?,
+        ),
+    };
     let timed_out = status.is_none();
     if timed_out {
         process_tree
@@ -2917,10 +3221,33 @@ fn build_terminal_shell_command(command: &str) -> (&'static str, Command) {
 #[derive(Default)]
 struct TerminalOutputBuffer {
     bytes: Vec<u8>,
+    emitted_bytes: usize,
     truncated: bool,
 }
 
 type SharedTerminalOutputBuffer = Arc<Mutex<TerminalOutputBuffer>>;
+
+#[derive(Clone)]
+struct TerminalOutputStreamer {
+    sender: TerminalCommandStreamSender,
+    stream: TerminalOutputStream,
+}
+
+impl TerminalOutputStreamer {
+    fn new(sender: TerminalCommandStreamSender, stream: TerminalOutputStream) -> Self {
+        Self { sender, stream }
+    }
+
+    fn send(&self, text: String) {
+        if text.is_empty() {
+            return;
+        }
+        let _ = self.sender.send(TerminalCommandStreamEvent::Output {
+            stream: self.stream,
+            text,
+        });
+    }
+}
 
 fn new_terminal_output_buffer() -> SharedTerminalOutputBuffer {
     Arc::new(Mutex::new(TerminalOutputBuffer::default()))
@@ -2934,14 +3261,23 @@ fn snapshot_terminal_output_buffer(buffer: &SharedTerminalOutputBuffer) -> (Stri
     )
 }
 
+#[cfg(test)]
+fn read_capped_terminal_output_into(
+    reader: impl std::io::Read,
+    buffer: &SharedTerminalOutputBuffer,
+) -> io::Result<()> {
+    read_capped_terminal_output_into_with_stream(reader, buffer, None)
+}
+
 /// Reads command output into `buffer` while storing only a bounded prefix.
 /// Runs on a dedicated reader thread; the shared buffer lets the main
 /// thread recover the accumulated prefix if the reader-join deadline hits
 /// before the pipe closes (see `join_terminal_output_reader` for why
 /// this matters on Unix).
-fn read_capped_terminal_output_into(
+fn read_capped_terminal_output_into_with_stream(
     mut reader: impl std::io::Read,
     buffer: &SharedTerminalOutputBuffer,
+    streamer: Option<&TerminalOutputStreamer>,
 ) -> io::Result<()> {
     let mut scratch = [0u8; 8192];
 
@@ -2965,9 +3301,49 @@ fn read_capped_terminal_output_into(
         if take < bytes_read {
             guard.truncated = true;
         }
+        let chunk = terminal_output_delta_locked(&mut guard, false);
+        drop(guard);
+        if let (Some(streamer), Some(chunk)) = (streamer, chunk) {
+            streamer.send(chunk);
+        }
+    }
+
+    if let Some(streamer) = streamer {
+        if let Some(chunk) = {
+            let mut guard = buffer
+                .lock()
+                .expect("terminal output buffer mutex poisoned");
+            terminal_output_delta_locked(&mut guard, true)
+        } {
+            streamer.send(chunk);
+        }
     }
 
     Ok(())
+}
+
+fn terminal_output_delta_locked(
+    buffer: &mut TerminalOutputBuffer,
+    flush_incomplete_utf8: bool,
+) -> Option<String> {
+    let streamable_len =
+        terminal_streamable_utf8_prefix_len(&buffer.bytes, flush_incomplete_utf8);
+    if streamable_len <= buffer.emitted_bytes {
+        return None;
+    }
+
+    let chunk = String::from_utf8_lossy(&buffer.bytes[buffer.emitted_bytes..streamable_len])
+        .into_owned();
+    buffer.emitted_bytes = streamable_len;
+    Some(chunk)
+}
+
+fn terminal_streamable_utf8_prefix_len(bytes: &[u8], flush_incomplete_utf8: bool) -> usize {
+    match std::str::from_utf8(bytes) {
+        Ok(_) => bytes.len(),
+        Err(err) if err.error_len().is_none() && !flush_incomplete_utf8 => err.valid_up_to(),
+        Err(_) => bytes.len(),
+    }
 }
 
 /// Reads command output while storing only a bounded prefix. Test-only
@@ -2977,7 +3353,7 @@ fn read_capped_terminal_output_into(
 #[cfg(test)]
 fn read_capped_terminal_output(reader: impl std::io::Read) -> io::Result<(String, bool)> {
     let buffer = new_terminal_output_buffer();
-    read_capped_terminal_output_into(reader, &buffer)?;
+    read_capped_terminal_output_into_with_stream(reader, &buffer, None)?;
     Ok(snapshot_terminal_output_buffer(&buffer))
 }
 
@@ -5462,7 +5838,6 @@ const TERMINAL_COMMAND_MAX_CHARS: usize = 20_000;
 /// the wire to the remote proxy. Paired with explicit NUL-byte rejection
 /// in `validate_terminal_workdir`.
 const TERMINAL_WORKDIR_MAX_CHARS: usize = 4_096;
-const TERMINAL_COMMAND_TIMEOUT: Duration = Duration::from_secs(60);
 const TERMINAL_OUTPUT_MAX_BYTES: usize = 512 * 1024;
 
 /// Remote proxy timeout for terminal commands. This must cover the remote child
@@ -5502,6 +5877,42 @@ struct TerminalCommandResponse {
     success: bool,
     timed_out: bool,
     workdir: String,
+}
+
+type TerminalCommandStreamSender = tokio::sync::mpsc::UnboundedSender<TerminalCommandStreamEvent>;
+
+enum TerminalCommandStreamEvent {
+    Output {
+        stream: TerminalOutputStream,
+        text: String,
+    },
+    Complete(TerminalCommandResponse),
+    Error {
+        error: String,
+        status: u16,
+    },
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+enum TerminalOutputStream {
+    Stdout,
+    Stderr,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct TerminalOutputStreamPayload {
+    stream: TerminalOutputStream,
+    text: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct TerminalStreamErrorPayload {
+    error: String,
+    #[serde(default)]
+    status: Option<u16>,
 }
 
 const REVIEW_DOCUMENT_VERSION: u32 = 1;

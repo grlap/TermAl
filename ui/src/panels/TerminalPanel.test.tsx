@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   ApiRequestError,
-  runTerminalCommand,
+  runTerminalCommandStream,
   type TerminalCommandResponse,
 } from "../api";
 import {
@@ -22,11 +22,11 @@ vi.mock("../api", async () => {
   const actual = await vi.importActual<typeof import("../api")>("../api");
   return {
     ...actual,
-    runTerminalCommand: vi.fn(),
+    runTerminalCommandStream: vi.fn(),
   };
 });
 
-const runTerminalCommandMock = vi.mocked(runTerminalCommand);
+const runTerminalCommandStreamMock = vi.mocked(runTerminalCommandStream);
 
 let terminalCounter = 0;
 
@@ -120,7 +120,7 @@ function renderTerminal(
 
 describe("TerminalPanel", () => {
   beforeEach(() => {
-    runTerminalCommandMock.mockReset();
+    runTerminalCommandStreamMock.mockReset();
   });
 
   afterEach(() => {
@@ -150,7 +150,7 @@ describe("TerminalPanel", () => {
   });
 
   it("runs commands, renders output, clears history, and edits workdir", async () => {
-    runTerminalCommandMock.mockResolvedValue(
+    runTerminalCommandStreamMock.mockResolvedValue(
       makeTerminalResponse({
         command: "npm test",
         durationMs: 42,
@@ -170,12 +170,15 @@ describe("TerminalPanel", () => {
     fireEvent.click(screen.getByRole("button", { name: "Run" }));
 
     await waitFor(() => {
-      expect(runTerminalCommandMock).toHaveBeenCalledWith({
-        command: "npm test",
-        projectId: "project-a",
-        sessionId: null,
-        workdir: "/repo",
-      });
+      expect(runTerminalCommandStreamMock).toHaveBeenCalledWith(
+        {
+          command: "npm test",
+          projectId: "project-a",
+          sessionId: null,
+          workdir: "/repo",
+        },
+        expect.objectContaining({ onOutput: expect.any(Function) }),
+      );
     });
     expect(commandInput).toHaveValue("");
     expect(await screen.findByText("passed")).toBeInTheDocument();
@@ -186,7 +189,7 @@ describe("TerminalPanel", () => {
   });
 
   it("keeps the live terminal subscription after clearing history", async () => {
-    runTerminalCommandMock
+    runTerminalCommandStreamMock
       .mockResolvedValueOnce(makeTerminalResponse({ stdout: "first\n" }))
       .mockResolvedValueOnce(makeTerminalResponse({ stdout: "second\n" }));
     renderTerminal({ terminalId: "terminal-clear-subscription" });
@@ -203,11 +206,39 @@ describe("TerminalPanel", () => {
     fireEvent.click(screen.getByRole("button", { name: "Run" }));
 
     expect(await screen.findByText("second")).toBeInTheDocument();
-    expect(runTerminalCommandMock).toHaveBeenCalledTimes(2);
+    expect(runTerminalCommandStreamMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("renders streamed output before the command completes", async () => {
+    const deferred = createDeferred<TerminalCommandResponse>();
+    runTerminalCommandStreamMock.mockImplementation((_payload, options) => {
+      options?.onOutput?.({ stream: "stdout", text: "building...\n" });
+      return deferred.promise;
+    });
+    renderTerminal({ terminalId: "terminal-streaming-output" });
+
+    fireEvent.change(screen.getByLabelText("Terminal command"), {
+      target: { value: "npm test" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Run" }));
+
+    expect(await screen.findByText("building...")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Running" })).toBeDisabled();
+    expect(screen.queryByText("Waiting for command output...")).not.toBeInTheDocument();
+
+    await act(async () => {
+      deferred.resolve(
+        makeTerminalResponse({ stdout: "building...\ndone\n" }),
+      );
+      await deferred.promise;
+    });
+
+    expect(await screen.findByText(/done/)).toBeInTheDocument();
+    expect(screen.getByText(/Exit 0 in 42ms/)).toBeInTheDocument();
   });
 
   it("records command errors", async () => {
-    runTerminalCommandMock.mockRejectedValue(new Error("Permission denied"));
+    runTerminalCommandStreamMock.mockRejectedValue(new Error("Permission denied"));
     renderTerminal({ terminalId: "terminal-error" });
 
     fireEvent.change(screen.getByLabelText("Terminal command"), {
@@ -220,7 +251,7 @@ describe("TerminalPanel", () => {
   });
 
   it("adds retry guidance for terminal rate limits", async () => {
-    runTerminalCommandMock.mockRejectedValue(
+    runTerminalCommandStreamMock.mockRejectedValue(
       new ApiRequestError(
         "request-failed",
         "too many local terminal commands are already running; limit is 4",
@@ -242,7 +273,7 @@ describe("TerminalPanel", () => {
   });
 
   it("does not add rate-limit guidance to non-rate-limit errors", async () => {
-    runTerminalCommandMock.mockRejectedValue(
+    runTerminalCommandStreamMock.mockRejectedValue(
       new ApiRequestError("request-failed", "server error", { status: 500 }),
     );
     renderTerminal({ terminalId: "terminal-server-error" });
@@ -280,7 +311,7 @@ describe("TerminalPanel", () => {
     missingScope.unmount();
 
     const deferred = createDeferred<TerminalCommandResponse>();
-    runTerminalCommandMock.mockReturnValue(deferred.promise);
+    runTerminalCommandStreamMock.mockReturnValue(deferred.promise);
     renderTerminal({ terminalId: "terminal-running" });
 
     expect(screen.getByRole("button", { name: "Run" })).toBeDisabled();
@@ -297,7 +328,7 @@ describe("TerminalPanel", () => {
     expect(screen.getByRole("button", { name: "Clear" })).toBeDisabled();
 
     fireEvent.click(screen.getByRole("button", { name: "Running" }));
-    expect(runTerminalCommandMock).toHaveBeenCalledTimes(1);
+    expect(runTerminalCommandStreamMock).toHaveBeenCalledTimes(1);
 
     await act(async () => {
       deferred.resolve(makeTerminalResponse());
@@ -306,7 +337,7 @@ describe("TerminalPanel", () => {
   });
 
   it("renders stderr, truncation notices, and docked path controls", async () => {
-    runTerminalCommandMock.mockResolvedValue(
+    runTerminalCommandStreamMock.mockResolvedValue(
       makeTerminalResponse({
         outputTruncated: true,
         stderr: "warn\n",
@@ -324,17 +355,20 @@ describe("TerminalPanel", () => {
 
     expect(await screen.findByText("warn")).toBeInTheDocument();
     expect(screen.getByText("Output was truncated.")).toBeInTheDocument();
-    expect(runTerminalCommandMock).toHaveBeenCalledWith({
-      command: "npm test",
-      projectId: "project-a",
-      sessionId: null,
-      workdir: "/repo",
-    });
+    expect(runTerminalCommandStreamMock).toHaveBeenCalledWith(
+      {
+        command: "npm test",
+        projectId: "project-a",
+        sessionId: null,
+        workdir: "/repo",
+      },
+      expect.objectContaining({ onOutput: expect.any(Function) }),
+    );
   });
 
   it("preserves in-flight command results across remounts", async () => {
     const deferred = createDeferred<TerminalCommandResponse>();
-    runTerminalCommandMock.mockReturnValue(deferred.promise);
+    runTerminalCommandStreamMock.mockReturnValue(deferred.promise);
     const view = renderTerminal({ terminalId: "terminal-remount" });
 
     fireEvent.change(screen.getByLabelText("Terminal command"), {
@@ -355,7 +389,7 @@ describe("TerminalPanel", () => {
 
     expect(await screen.findByText("after remount")).toBeInTheDocument();
     expect(screen.getByText(/Exit 0 in 42ms/)).toBeInTheDocument();
-    expect(runTerminalCommandMock).toHaveBeenCalledTimes(1);
+    expect(runTerminalCommandStreamMock).toHaveBeenCalledTimes(1);
   });
 
   it("marks stale running history as interrupted when no command is in flight", async () => {
@@ -413,7 +447,7 @@ describe("TerminalPanel", () => {
   });
 
   it("does not prune a mounted terminal store even when the tab id is absent", async () => {
-    runTerminalCommandMock.mockResolvedValueOnce(
+    runTerminalCommandStreamMock.mockResolvedValueOnce(
       makeTerminalResponse({
         command: "echo mounted",
         stdout: "mounted\n",
@@ -444,12 +478,12 @@ describe("TerminalPanel", () => {
     fireEvent.click(screen.getByRole("button", { name: "Run" }));
 
     expect(await screen.findByText("mounted")).toBeInTheDocument();
-    expect(runTerminalCommandMock).toHaveBeenCalledTimes(1);
+    expect(runTerminalCommandStreamMock).toHaveBeenCalledTimes(1);
   });
 
   it("does not start two commands from same-tick submit events", async () => {
     const deferred = createDeferred<TerminalCommandResponse>();
-    runTerminalCommandMock.mockReturnValue(deferred.promise);
+    runTerminalCommandStreamMock.mockReturnValue(deferred.promise);
     renderTerminal({ terminalId: "terminal-double-submit" });
 
     const commandInput = screen.getByLabelText("Terminal command");
@@ -462,7 +496,7 @@ describe("TerminalPanel", () => {
       form!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
     });
 
-    expect(runTerminalCommandMock).toHaveBeenCalledTimes(1);
+    expect(runTerminalCommandStreamMock).toHaveBeenCalledTimes(1);
     await act(async () => {
       deferred.resolve(makeTerminalResponse());
       await deferred.promise;
@@ -471,7 +505,7 @@ describe("TerminalPanel", () => {
 
   it("does not force terminal history to the bottom after the user scrolls up", async () => {
     const deferred = createDeferred<TerminalCommandResponse>();
-    runTerminalCommandMock.mockReturnValue(deferred.promise);
+    runTerminalCommandStreamMock.mockReturnValue(deferred.promise);
     renderTerminal({ terminalId: "terminal-scroll" });
 
     fireEvent.change(screen.getByLabelText("Terminal command"), {

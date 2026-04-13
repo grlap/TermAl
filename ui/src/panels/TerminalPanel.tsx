@@ -11,7 +11,8 @@ import {
 
 import {
   ApiRequestError,
-  runTerminalCommand,
+  runTerminalCommandStream,
+  type TerminalCommandOutputEvent,
   type TerminalCommandResponse,
 } from "../api";
 import { getErrorMessage } from "../app-utils";
@@ -23,6 +24,8 @@ export type TerminalHistoryEntry = {
   response: TerminalCommandResponse | null;
   startedAt: string;
   status: "running" | "done" | "error";
+  stderr?: string;
+  stdout?: string;
   workdir: string;
 };
 
@@ -140,6 +143,23 @@ function updateTerminalHistoryEntry(
   setTerminalHistory(terminalId, (history) =>
     history.map((entry) => (entry.id === entryId ? updater(entry) : entry)),
   );
+}
+
+function appendTerminalOutput(
+  entry: TerminalHistoryEntry,
+  output: TerminalCommandOutputEvent,
+) {
+  if (output.stream === "stdout") {
+    return {
+      ...entry,
+      stdout: `${entry.stdout ?? entry.response?.stdout ?? ""}${output.text}`,
+    };
+  }
+
+  return {
+    ...entry,
+    stderr: `${entry.stderr ?? entry.response?.stderr ?? ""}${output.text}`,
+  };
 }
 
 function hasRunningTerminalEntry(history: readonly TerminalHistoryEntry[]) {
@@ -285,6 +305,8 @@ export function TerminalPanel({
       response: null,
       startedAt,
       status: "running",
+      stderr: "",
+      stdout: "",
       workdir: normalizedWorkdir,
     };
     inFlightTerminalEntries.add(entryId);
@@ -292,15 +314,26 @@ export function TerminalPanel({
     setCommandDraft("");
 
     try {
-      const response = await runTerminalCommand({
-        command,
-        projectId: normalizedProjectId || null,
-        sessionId: normalizedSessionId || null,
-        workdir: normalizedWorkdir,
-      });
+      const response = await runTerminalCommandStream(
+        {
+          command,
+          projectId: normalizedProjectId || null,
+          sessionId: normalizedSessionId || null,
+          workdir: normalizedWorkdir,
+        },
+        {
+          onOutput: (output) => {
+            updateTerminalHistoryEntry(terminalId, entryId, (item) =>
+              appendTerminalOutput(item, output),
+            );
+          },
+        },
+      );
       updateTerminalHistoryEntry(terminalId, entryId, (item) => ({
         ...item,
         response,
+        stderr: response.stderr,
+        stdout: response.stdout,
         status: "done" as const,
         workdir: response.workdir,
       }));
@@ -423,6 +456,8 @@ export function TerminalPanel({
 
 function TerminalHistoryItem({ entry }: { entry: TerminalHistoryEntry }) {
   const response = entry.response;
+  const stdout = entry.stdout ?? response?.stdout ?? "";
+  const stderr = entry.stderr ?? response?.stderr ?? "";
   const statusLabel =
     entry.status === "running"
       ? "Running"
@@ -432,35 +467,40 @@ function TerminalHistoryItem({ entry }: { entry: TerminalHistoryEntry }) {
 
   return (
     <article className={`terminal-history-item is-${entry.status}`}>
-      <header className="terminal-history-header">
-        <span className="terminal-command-line">
-          <span className="terminal-prompt" aria-hidden="true">
-            $
-          </span>
-          <code>{entry.command}</code>
-        </span>
-        <span className="terminal-history-meta">
-          {entry.startedAt} - {statusLabel}
-        </span>
-      </header>
-      <div className="terminal-history-workdir" title={entry.workdir}>
-        {entry.workdir}
+      <div className="terminal-io-row terminal-io-row-input">
+        <span className="terminal-io-label">IN</span>
+        <div className="terminal-io-body">
+          <div className="terminal-io-heading">
+            <code className="terminal-command-text">{entry.command}</code>
+            <span className="terminal-history-meta">
+              {entry.startedAt} - {statusLabel}
+            </span>
+          </div>
+          <div className="terminal-history-workdir" title={entry.workdir}>
+            {entry.workdir}
+          </div>
+        </div>
       </div>
-      {entry.error ? (
-        <pre className="terminal-output terminal-output-error">{entry.error}</pre>
-      ) : null}
-      {response?.stdout ? (
-        <pre className="terminal-output terminal-output-stdout">{response.stdout}</pre>
-      ) : null}
-      {response?.stderr ? (
-        <pre className="terminal-output terminal-output-stderr">{response.stderr}</pre>
-      ) : null}
-      {response?.outputTruncated ? (
-        <div className="terminal-output-note">Output was truncated.</div>
-      ) : null}
-      {entry.status === "running" ? (
-        <div className="terminal-output-note">Waiting for command output...</div>
-      ) : null}
+      <div className="terminal-io-row terminal-io-row-output">
+        <span className="terminal-io-label">OUT</span>
+        <div className="terminal-io-body">
+          {entry.error ? (
+            <pre className="terminal-output terminal-output-error">{entry.error}</pre>
+          ) : null}
+          {stdout ? (
+            <pre className="terminal-output terminal-output-stdout">{stdout}</pre>
+          ) : null}
+          {stderr ? (
+            <pre className="terminal-output terminal-output-stderr">{stderr}</pre>
+          ) : null}
+          {response?.outputTruncated ? (
+            <div className="terminal-output-note">Output was truncated.</div>
+          ) : null}
+          {entry.status === "running" && !stdout && !stderr ? (
+            <div className="terminal-output-note">Waiting for command output...</div>
+          ) : null}
+        </div>
+      </div>
     </article>
   );
 }

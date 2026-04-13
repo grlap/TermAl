@@ -131,6 +131,40 @@ describe("MessageCard", () => {
     });
   });
 
+  it("collapses long agent changed file lists until expanded", () => {
+    const message: FileChangesMessage = {
+      id: "message-files-long",
+      type: "fileChanges",
+      author: "assistant",
+      timestamp: "10:04",
+      title: "Agent changed 7 files",
+      files: Array.from({ length: 7 }, (_, index) => ({
+        path: `/repo/src/file-${index + 1}.ts`,
+        kind: "modified" as const,
+      })),
+    };
+
+    render(
+      <MessageCard
+        message={message}
+        onApprovalDecision={vi.fn()}
+        onOpenSourceLink={vi.fn()}
+        onUserInputSubmit={vi.fn()}
+        workspaceRoot="/repo"
+      />,
+    );
+
+    expect(screen.getByText("Agent changed 7 files")).toBeInTheDocument();
+    expect(screen.queryByText("src/file-1.ts")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Expand changed files" }));
+
+    expect(screen.getByText("src/file-1.ts")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Open src/file-1.ts" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Copy src/file-1.ts" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Collapse changed files" })).toBeInTheDocument();
+  });
+
   it("shows canceled approvals as a resolved decision", () => {
     const message: ApprovalMessage = {
       id: "message-4",
