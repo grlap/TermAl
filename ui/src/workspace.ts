@@ -1,4 +1,4 @@
-import type { GitDiffRequestPayload, GitDiffSection } from "./api";
+import type { GitDiffDocumentContent, GitDiffRequestPayload, GitDiffSection } from "./api";
 import type { DiffMessage, Session } from "./types";
 
 export type SessionPaneViewMode = "session" | "prompt" | "commands" | "diffs";
@@ -124,6 +124,7 @@ export type WorkspaceDiffPreviewTab = {
   changeType: DiffMessage["changeType"];
   changeSetId?: string | null;
   diff: string;
+  documentContent?: GitDiffDocumentContent | null;
   diffMessageId: string;
   filePath: string | null;
   gitSectionId?: GitDiffSection | null;
@@ -396,6 +397,7 @@ export function createDiffPreviewTab({
   changeType,
   changeSetId = null,
   diff,
+  documentContent = null,
   diffMessageId,
   filePath = null,
   gitSectionId = null,
@@ -411,6 +413,7 @@ export function createDiffPreviewTab({
   changeType: DiffMessage["changeType"];
   changeSetId?: string | null;
   diff: string;
+  documentContent?: GitDiffDocumentContent | null;
   diffMessageId: string;
   filePath?: string | null;
   gitSectionId?: GitDiffSection | null;
@@ -434,6 +437,7 @@ export function createDiffPreviewTab({
     changeType,
     ...(normalizedChangeSetId ? { changeSetId: normalizedChangeSetId } : {}),
     diff,
+    ...(documentContent ? { documentContent } : {}),
     diffMessageId,
     filePath: normalizeWorkspacePath(filePath),
     ...(gitSectionId ? { gitSectionId } : {}),

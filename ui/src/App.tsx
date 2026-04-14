@@ -3857,6 +3857,7 @@ export default function App() {
                   changeType: diffPreview.changeType,
                   changeSetId: diffPreview.changeSetId ?? null,
                   diff: diffPreview.diff,
+                  documentContent: diffPreview.documentContent ?? null,
                   filePath: diffPreview.filePath ?? tab.filePath,
                   gitSectionId: refresh.sectionId,
                   language: diffPreview.language ?? null,
@@ -3885,6 +3886,7 @@ export default function App() {
                 (tab) => ({
                   ...tab,
                   diff: "",
+                  documentContent: null,
                   summary: `Failed to refresh ${refresh.sectionId} changes in ${refresh.request.path}`,
                   isLoading: false,
                   loadError: errorMessage,
@@ -6185,6 +6187,7 @@ export default function App() {
       changeType: pendingGitDiffPreviewChangeType(request.statusCode),
       changeSetId: null,
       diff: "",
+      documentContent: null,
       diffMessageId: requestKey,
       filePath: request.path,
       gitSectionId,
@@ -6232,6 +6235,7 @@ export default function App() {
               changeType: diffPreview.changeType,
               changeSetId: diffPreview.changeSetId ?? null,
               diff: diffPreview.diff,
+              documentContent: diffPreview.documentContent ?? null,
               filePath: diffPreview.filePath ?? tab.filePath,
               gitSectionId,
               language: diffPreview.language ?? null,
@@ -6252,6 +6256,7 @@ export default function App() {
             (tab) => ({
               ...tab,
               diff: "",
+              documentContent: null,
               summary: `Failed to load ${gitSectionId} changes in ${request.path}`,
               isLoading: false,
               loadError: errorMessage,
@@ -11594,6 +11599,7 @@ function SessionPaneView({
                 : null
             }
             sourcePath={activeSourceTab.path}
+            workspaceRoot={activeSourceWorkspaceRoot}
             onOpenInstructionDebugger={
               activeSourceOriginSessionId
                 ? () =>
@@ -11631,6 +11637,19 @@ function SessionPaneView({
                 options,
               );
             }}
+            onOpenSourceLink={(target) =>
+              onOpenSourceTab(
+                pane.id,
+                target.path,
+                activeSourceOriginSessionId,
+                activeSourceOriginProjectId,
+                {
+                  line: target.line,
+                  column: target.column,
+                  openInNewTab: target.openInNewTab,
+                },
+              )
+            }
           />
         ) : activeFilesystemTab ? (
           shouldRenderFilesystemProjectScope ? (
@@ -11902,6 +11921,7 @@ function SessionPaneView({
               changeSetId={activeDiffPreviewTab.changeSetId ?? null}
               fontSizePx={editorFontSizePx}
               diff={activeDiffPreviewTab.diff}
+              documentContent={activeDiffPreviewTab.documentContent ?? null}
               diffMessageId={activeDiffPreviewTab.diffMessageId}
               filePath={activeDiffPreviewTab.filePath}
               gitSectionId={activeDiffPreviewTab.gitSectionId ?? null}

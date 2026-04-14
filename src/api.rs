@@ -3511,6 +3511,18 @@ fn load_git_diff_for_request(
     .join("\n");
 
     let diff_hash = stable_text_hash(&diff_identity);
+    let language = infer_language_from_path(FsPath::new(&current_path)).map(str::to_owned);
+    let document_content = if language.as_deref() == Some("markdown") {
+        Some(load_git_diff_document_content(
+            &repo_root,
+            &current_path,
+            original_path.as_deref(),
+            status_code.as_deref(),
+            request.section_id,
+        )?)
+    } else {
+        None
+    };
 
     Ok(GitDiffResponse {
         change_type: if matches!(status_code.as_deref(), Some("A" | "?")) {
@@ -3524,7 +3536,8 @@ fn load_git_diff_for_request(
         file_path: file_path
             .exists()
             .then(|| file_path.to_string_lossy().into_owned()),
-        language: infer_language_from_path(FsPath::new(&current_path)).map(str::to_owned),
+        language,
+        document_content,
         summary: format!(
             "{} changes in {}",
             request.section_id.summary_label(),
@@ -3736,6 +3749,161 @@ fn build_untracked_git_diff(repo_root: &FsPath, current_path: &str) -> Result<St
     }
 
     Ok(diff_lines.join("\n"))
+}
+
+/// Loads full document sides for a Git diff.
+fn load_git_diff_document_content(
+    repo_root: &FsPath,
+    current_path: &str,
+    original_path: Option<&str>,
+    status_code: Option<&str>,
+    section_id: GitDiffSection,
+) -> Result<GitDiffDocumentContent, ApiError> {
+    let before_path = original_path.unwrap_or(current_path);
+    let normalized_status = status_code.unwrap_or("M");
+    let before = match section_id {
+        GitDiffSection::Staged => {
+            if normalized_status == "A" {
+                read_git_diff_document_side(repo_root, GitDiffDocumentSideSpec::Empty)
+            } else {
+                read_git_diff_document_side(repo_root, GitDiffDocumentSideSpec::Head(before_path))
+            }
+        }
+        GitDiffSection::Unstaged => {
+            if normalized_status == "?" {
+                read_git_diff_document_side(repo_root, GitDiffDocumentSideSpec::Empty)
+            } else {
+                read_git_diff_document_side(repo_root, GitDiffDocumentSideSpec::Index(before_path))
+            }
+        }
+    }?;
+
+    let after = match section_id {
+        GitDiffSection::Staged => {
+            if normalized_status == "D" {
+                read_git_diff_document_side(repo_root, GitDiffDocumentSideSpec::Empty)
+            } else {
+                read_git_diff_document_side(repo_root, GitDiffDocumentSideSpec::Index(current_path))
+            }
+        }
+        GitDiffSection::Unstaged => {
+            if normalized_status == "D" {
+                read_git_diff_document_side(repo_root, GitDiffDocumentSideSpec::Empty)
+            } else {
+                read_git_diff_document_side(repo_root, GitDiffDocumentSideSpec::Worktree(current_path))
+            }
+        }
+    }?;
+
+    Ok(GitDiffDocumentContent {
+        before,
+        after,
+        is_complete_document: true,
+        note: None,
+    })
+}
+
+/// Represents the side of a Git document diff to read.
+enum GitDiffDocumentSideSpec<'a> {
+    Empty,
+    Head(&'a str),
+    Index(&'a str),
+    Worktree(&'a str),
+}
+
+/// Reads one full document side for a Git diff.
+fn read_git_diff_document_side(
+    repo_root: &FsPath,
+    spec: GitDiffDocumentSideSpec<'_>,
+) -> Result<GitDiffDocumentSide, ApiError> {
+    match spec {
+        GitDiffDocumentSideSpec::Empty => Ok(GitDiffDocumentSide {
+            content: String::new(),
+            source: GitDiffDocumentSideSource::Empty,
+        }),
+        GitDiffDocumentSideSpec::Head(path) => Ok(GitDiffDocumentSide {
+            content: read_git_object_text(repo_root, "HEAD", path)?,
+            source: GitDiffDocumentSideSource::Head,
+        }),
+        GitDiffDocumentSideSpec::Index(path) => Ok(GitDiffDocumentSide {
+            content: read_git_index_text(repo_root, path)?,
+            source: GitDiffDocumentSideSource::Index,
+        }),
+        GitDiffDocumentSideSpec::Worktree(path) => Ok(GitDiffDocumentSide {
+            content: read_git_worktree_text(repo_root, path)?,
+            source: GitDiffDocumentSideSource::Worktree,
+        }),
+    }
+}
+
+/// Reads a UTF-8-ish Git object as text.
+fn read_git_object_text(repo_root: &FsPath, revision: &str, path: &str) -> Result<String, ApiError> {
+    let object_path = normalize_git_object_path(path);
+    let spec = format!("{revision}:{object_path}");
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(repo_root)
+        .arg("show")
+        .arg(spec)
+        .output()
+        .map_err(|err| ApiError::internal(format!("failed to read git object: {err}")))?;
+
+    if output.status.success() {
+        return Ok(String::from_utf8_lossy(&output.stdout).into_owned());
+    }
+
+    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_owned();
+    if stderr.is_empty() {
+        Err(ApiError::internal("failed to read git object"))
+    } else {
+        Err(ApiError::internal(format!(
+            "failed to read git object: {stderr}"
+        )))
+    }
+}
+
+/// Reads a UTF-8-ish Git index blob as text.
+fn read_git_index_text(repo_root: &FsPath, path: &str) -> Result<String, ApiError> {
+    let object_path = normalize_git_object_path(path);
+    let spec = format!(":{object_path}");
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(repo_root)
+        .arg("show")
+        .arg(spec)
+        .output()
+        .map_err(|err| ApiError::internal(format!("failed to read git index object: {err}")))?;
+
+    if output.status.success() {
+        return Ok(String::from_utf8_lossy(&output.stdout).into_owned());
+    }
+
+    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_owned();
+    if stderr.is_empty() {
+        Err(ApiError::internal("failed to read git index object"))
+    } else {
+        Err(ApiError::internal(format!(
+            "failed to read git index object: {stderr}"
+        )))
+    }
+}
+
+/// Reads a worktree file as text.
+fn read_git_worktree_text(repo_root: &FsPath, path: &str) -> Result<String, ApiError> {
+    let file_path = repo_root.join(path);
+    let content = fs::read(&file_path).map_err(|err| {
+        ApiError::internal(format!(
+            "failed to read worktree file {}: {err}",
+            file_path.display()
+        ))
+    })?;
+
+    Ok(String::from_utf8_lossy(&content).into_owned())
+}
+
+/// Normalizes a repository-relative path for Git object lookups.
+fn normalize_git_object_path(path: &str) -> String {
+    path.replace('\\', "/")
 }
 
 /// Reverts Git file action.
@@ -5840,7 +6008,38 @@ struct GitDiffResponse {
     file_path: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     language: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    document_content: Option<GitDiffDocumentContent>,
     summary: String,
+}
+
+/// Represents full document sides for a Git diff.
+#[derive(Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct GitDiffDocumentContent {
+    before: GitDiffDocumentSide,
+    after: GitDiffDocumentSide,
+    is_complete_document: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    note: Option<String>,
+}
+
+/// Represents one full document side for a Git diff.
+#[derive(Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct GitDiffDocumentSide {
+    content: String,
+    source: GitDiffDocumentSideSource,
+}
+
+/// Defines where a full document side came from.
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+enum GitDiffDocumentSideSource {
+    Head,
+    Index,
+    Worktree,
+    Empty,
 }
 
 /// Represents the Git commit response payload.

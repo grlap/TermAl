@@ -1,6 +1,8 @@
 import {
+  createContext,
   isValidElement,
   memo,
+  useContext,
   useEffect,
   useLayoutEffect,
   useMemo,
@@ -518,12 +520,14 @@ function DeferredHighlightedCodeBlock({
 }
 
 function DeferredMarkdownContent({
+  documentPath = null,
   markdown,
   onOpenSourceLink,
   searchQuery = "",
   searchHighlightTone = "match",
   workspaceRoot = null,
 }: {
+  documentPath?: string | null;
   markdown: string;
   onOpenSourceLink?: (target: MarkdownFileLinkTarget) => void;
   searchQuery?: string;
@@ -540,6 +544,7 @@ function DeferredMarkdownContent({
   if (!shouldDefer) {
     return (
       <MarkdownContent
+        documentPath={documentPath}
         markdown={markdown}
         onOpenSourceLink={onOpenSourceLink}
         searchQuery={searchQuery}
@@ -559,6 +564,7 @@ function DeferredMarkdownContent({
       }
     >
       <MarkdownContent
+        documentPath={documentPath}
         markdown={markdown}
         onOpenSourceLink={onOpenSourceLink}
         searchQuery={searchQuery}
@@ -2296,6 +2302,7 @@ const MARKDOWN_BARE_FILE_REFERENCE_IGNORED_NODE_TYPES = new Set([
   "linkReference",
 ]);
 const MARKDOWN_REMARK_PLUGINS = [remarkGfm, remarkAutolinkBareFileReferences];
+const MarkdownLinkContext = createContext(false);
 
 function remarkAutolinkBareFileReferences() {
   return (tree: MarkdownAstNode) => {
@@ -2374,12 +2381,14 @@ function createMarkdownTextNode(value: string): MarkdownAstNode {
 }
 
 export function MarkdownContent({
+  documentPath = null,
   markdown,
   onOpenSourceLink,
   searchQuery = "",
   searchHighlightTone = "match",
   workspaceRoot = null,
 }: {
+  documentPath?: string | null;
   markdown: string;
   onOpenSourceLink?: (target: MarkdownFileLinkTarget) => void;
   searchQuery?: string;
@@ -2407,8 +2416,8 @@ export function MarkdownContent({
         components={{
           a: ({ href, children, ...props }) => {
             const isExternalLink = isExternalMarkdownHref(href ?? "");
-            const fileLinkTarget = resolveMarkdownFileLinkTarget(href, workspaceRoot);
-            const displayLabel = buildMarkdownHrefDisplayLabel(href, children, workspaceRoot);
+            const fileLinkTarget = resolveMarkdownFileLinkTarget(href, workspaceRoot, documentPath);
+            const displayLabel = buildMarkdownHrefDisplayLabel(href, children, workspaceRoot, documentPath);
             const handleClick = (event: ReactMouseEvent<HTMLAnchorElement>) => {
               props.onClick?.(event);
               if (event.defaultPrevented || !fileLinkTarget || !onOpenSourceLinkRef.current) {
@@ -2431,19 +2440,22 @@ export function MarkdownContent({
                 rel={isExternalLink ? "noreferrer" : undefined}
                 onClick={handleClick}
               >
-                {highlightChildren(displayLabel ?? children)}
+                <MarkdownLinkContext.Provider value>
+                  {highlightChildren(displayLabel ?? children)}
+                </MarkdownLinkContext.Provider>
               </a>
             );
           },
           code: ({ children, className, inline, ...props }) => {
+            const isInsideMarkdownLink = useContext(MarkdownLinkContext);
             const language = className?.match(/language-([\w-]+)/)?.[1] ?? null;
             const code = String(children).replace(/\n$/, "");
             const inlineFileLinkTarget = inline
-              ? resolveMarkdownFileLinkTarget(code, workspaceRoot)
+              ? resolveMarkdownFileLinkTarget(code, workspaceRoot, documentPath)
               : null;
 
             if (inline) {
-              if (inlineFileLinkTarget && hasOpenSourceLink) {
+              if (inlineFileLinkTarget && hasOpenSourceLink && !isInsideMarkdownLink) {
                 const handleInlineCodeClick = (event: ReactMouseEvent<HTMLAnchorElement>) => {
                   event.preventDefault();
                   onOpenSourceLinkRef.current?.({
@@ -2514,7 +2526,7 @@ export function MarkdownContent({
         {markdown}
       </ReactMarkdown>
     );
-  }, [markdown, searchQuery, searchHighlightTone, workspaceRoot, hasOpenSourceLink]);
+  }, [documentPath, markdown, searchQuery, searchHighlightTone, workspaceRoot, hasOpenSourceLink]);
 
   return <div className="markdown-copy">{rendered}</div>;
 }
@@ -2522,6 +2534,7 @@ export function MarkdownContent({
 function resolveMarkdownFileLinkTarget(
   href: string | undefined,
   workspaceRoot: string | null,
+  documentPath: string | null = null,
 ): Omit<MarkdownFileLinkTarget, "openInNewTab"> | null {
   const normalizedHref = normalizeMarkdownLocalFileHref(href);
   if (!normalizedHref || isExternalMarkdownHref(normalizedHref) || normalizedHref.startsWith("#")) {
@@ -2566,7 +2579,7 @@ function resolveMarkdownFileLinkTarget(
     ? normalizeMarkdownFileLinkAbsolutePath(trimmedCandidate)
     : !workspaceRoot || !looksLikeRelativeMarkdownFilePath(trimmedCandidate)
       ? null
-      : joinWorkspacePath(workspaceRoot, trimmedCandidate);
+      : joinWorkspacePath(resolveMarkdownRelativeBasePath(workspaceRoot, documentPath), trimmedCandidate);
   if (!resolvedPath) {
     return null;
   }
@@ -2672,6 +2685,7 @@ function buildMarkdownHrefDisplayLabel(
   href: string | undefined,
   children: ReactNode,
   workspaceRoot: string | null,
+  documentPath: string | null = null,
 ) {
   const trimmedHref = href?.trim();
   const renderedText = extractMarkdownTextContent(children).trim();
@@ -2684,7 +2698,7 @@ function buildMarkdownHrefDisplayLabel(
     return null;
   }
 
-  const fileLinkTarget = resolveMarkdownFileLinkTarget(normalizedHref, workspaceRoot);
+  const fileLinkTarget = resolveMarkdownFileLinkTarget(normalizedHref, workspaceRoot, documentPath);
   if (!fileLinkTarget) {
     return null;
   }
@@ -2754,6 +2768,34 @@ function looksLikeFilePathReference(path: string) {
   const segments = path.trim().split(/[\\/]+/).filter(Boolean);
   const fileName = segments[segments.length - 1] ?? "";
   return fileName.startsWith(".") || fileName.includes(".");
+}
+
+function resolveMarkdownRelativeBasePath(workspaceRoot: string, documentPath: string | null) {
+  const trimmedDocumentPath = documentPath?.trim();
+  if (!trimmedDocumentPath) {
+    return workspaceRoot;
+  }
+
+  if (looksLikeAbsoluteMarkdownFilePath(trimmedDocumentPath, workspaceRoot)) {
+    return getMarkdownParentPath(trimmedDocumentPath) ?? workspaceRoot;
+  }
+
+  const relativeParent = getMarkdownParentPath(trimmedDocumentPath);
+  return relativeParent ? joinWorkspacePath(workspaceRoot, relativeParent) : workspaceRoot;
+}
+
+function getMarkdownParentPath(path: string) {
+  const trimmedPath = path.trim().replace(/[\\/]+$/, "");
+  if (!trimmedPath) {
+    return null;
+  }
+
+  const slashIndex = Math.max(trimmedPath.lastIndexOf("/"), trimmedPath.lastIndexOf("\\"));
+  if (slashIndex <= 0) {
+    return null;
+  }
+
+  return trimmedPath.slice(0, slashIndex);
 }
 
 function joinWorkspacePath(rootPath: string, relativePath: string) {

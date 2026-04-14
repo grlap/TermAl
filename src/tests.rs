@@ -21847,6 +21847,85 @@ fn git_status_file_actions_support_paths_with_spaces() {
     fs::remove_dir_all(repo_root).unwrap();
 }
 
+// Tests that Markdown Git diff document sides follow staged/unstaged semantics.
+#[test]
+fn git_diff_document_content_uses_selected_git_side_for_markdown() {
+    let repo_root = std::env::temp_dir().join(format!("termal-git-diff-doc-{}", Uuid::new_v4()));
+    let markdown_file = repo_root.join("README.md");
+
+    fs::create_dir_all(&repo_root).unwrap();
+    fs::write(&markdown_file, "# Base\n\nInitial text.\n").unwrap();
+
+    run_git_test_command(&repo_root, &["init"]);
+    run_git_test_command(&repo_root, &["config", "user.email", "termal@example.com"]);
+    run_git_test_command(&repo_root, &["config", "user.name", "TermAl"]);
+    run_git_test_command(&repo_root, &["add", "README.md"]);
+    run_git_test_command(&repo_root, &["commit", "-m", "init"]);
+
+    fs::write(&markdown_file, "# Staged\n\nReady to commit.\n").unwrap();
+    run_git_test_command(&repo_root, &["add", "README.md"]);
+    fs::write(&markdown_file, "# Worktree\n\nNot staged yet.\n").unwrap();
+
+    let staged = load_git_diff_for_request(
+        &repo_root,
+        &GitDiffRequest {
+            original_path: None,
+            path: "README.md".to_owned(),
+            section_id: GitDiffSection::Staged,
+            status_code: Some("M".to_owned()),
+            workdir: repo_root.to_string_lossy().into_owned(),
+            project_id: None,
+            session_id: None,
+        },
+    )
+    .unwrap();
+    let staged_document = staged
+        .document_content
+        .expect("staged Markdown diff should include document content");
+    assert_eq!(staged_document.before.source, GitDiffDocumentSideSource::Head);
+    assert_eq!(staged_document.after.source, GitDiffDocumentSideSource::Index);
+    assert_eq!(staged_document.before.content, "# Base\n\nInitial text.\n");
+    assert_eq!(
+        staged_document.after.content,
+        "# Staged\n\nReady to commit.\n"
+    );
+
+    let unstaged = load_git_diff_for_request(
+        &repo_root,
+        &GitDiffRequest {
+            original_path: None,
+            path: "README.md".to_owned(),
+            section_id: GitDiffSection::Unstaged,
+            status_code: Some("M".to_owned()),
+            workdir: repo_root.to_string_lossy().into_owned(),
+            project_id: None,
+            session_id: None,
+        },
+    )
+    .unwrap();
+    let unstaged_document = unstaged
+        .document_content
+        .expect("unstaged Markdown diff should include document content");
+    assert_eq!(
+        unstaged_document.before.source,
+        GitDiffDocumentSideSource::Index
+    );
+    assert_eq!(
+        unstaged_document.after.source,
+        GitDiffDocumentSideSource::Worktree
+    );
+    assert_eq!(
+        unstaged_document.before.content,
+        "# Staged\n\nReady to commit.\n"
+    );
+    assert_eq!(
+        unstaged_document.after.content,
+        "# Worktree\n\nNot staged yet.\n"
+    );
+
+    fs::remove_dir_all(repo_root).unwrap();
+}
+
 // Tests that push Git repo updates tracking branch.
 #[test]
 fn push_git_repo_updates_tracking_branch() {

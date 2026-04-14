@@ -174,6 +174,35 @@ describe("SourcePanel", () => {
     });
   });
 
+  it("renders Markdown preview from the unsaved editor buffer", async () => {
+    render(
+      <SourcePanel
+        editorAppearance={editorAppearance}
+        editorFontSizePx={14}
+        fileState={{
+          ...readyFileState,
+          path: "/repo/docs/readme.md",
+          content: "# Original\n",
+          language: "markdown",
+        }}
+        sourcePath="/repo/docs/readme.md"
+        workspaceRoot="/repo"
+        onSaveFile={vi.fn()}
+      />,
+    );
+
+    fireEvent.change(
+      await screen.findByLabelText("Source editor for /repo/docs/readme.md"),
+      {
+        target: { value: "# Changed Title\n\n- [x] Done\n" },
+      },
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Preview" }));
+
+    expect(await screen.findByRole("heading", { name: "Changed Title" })).toBeInTheDocument();
+    expect(screen.getByText("Done")).toBeInTheDocument();
+  });
+
   it("auto-rebases the latest editor buffer after a disk refresh returns", async () => {
     const latestFile = createDeferred<SourceFileState>();
     const onFetchLatestFile = vi.fn(() => latestFile.promise);

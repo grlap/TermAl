@@ -1,5 +1,7 @@
 import { Suspense, lazy, useEffect, useRef, useState } from "react";
 import { copyTextToClipboard } from "../clipboard";
+import { MarkdownDocumentView } from "../MarkdownDocumentView";
+import type { MarkdownFileLinkTarget } from "../message-cards";
 import type { MonacoCodeEditorStatus } from "../MonacoCodeEditor";
 import { resolveMonacoLanguage, type MonacoAppearance } from "../monaco";
 import type { WorkspaceFileChangeKind } from "../types";
@@ -42,6 +44,8 @@ const LANGUAGE_LABELS: Record<string, string> = {
 
 const MAX_REBASE_DIFF_CELLS = 4_000_000;
 
+type SourceDocumentMode = "code" | "preview" | "split";
+
 export type SourceFileState = {
   status: "idle" | "loading" | "ready" | "error";
   path: string;
@@ -83,8 +87,10 @@ export function SourcePanel({
   onDirtyChange,
   onFetchLatestFile,
   onAdoptFileState,
+  onOpenSourceLink,
   onReloadFile,
   onSaveFile,
+  workspaceRoot = null,
 }: {
   editorAppearance: MonacoAppearance;
   editorFontSizePx: number;
@@ -95,12 +101,14 @@ export function SourcePanel({
   onDirtyChange?: (isDirty: boolean) => void;
   onFetchLatestFile?: (path: string) => Promise<SourceFileState>;
   onAdoptFileState?: (fileState: SourceFileState) => void;
+  onOpenSourceLink?: (target: MarkdownFileLinkTarget) => void;
   onReloadFile?: (path: string) => Promise<void>;
   onSaveFile: (
     path: string,
     content: string,
     options?: SourceSaveOptions,
   ) => Promise<void>;
+  workspaceRoot?: string | null;
 }) {
   const [editorValue, setEditorValue] = useState("");
   const [actionError, setActionError] = useState<string | null>(null);
@@ -110,6 +118,7 @@ export function SourcePanel({
   const [isRebasing, setIsRebasing] = useState(false);
   const [isLoadingCompare, setIsLoadingCompare] = useState(false);
   const [compareDiskContent, setCompareDiskContent] = useState<string | null>(null);
+  const [documentMode, setDocumentMode] = useState<SourceDocumentMode>("code");
   const [editorStatus, setEditorStatus] = useState<MonacoCodeEditorStatus>(DEFAULT_EDITOR_STATUS);
   const [copiedPath, setCopiedPath] = useState(false);
   const pendingEditorValueRef = useRef<string | null>(null);
@@ -119,6 +128,8 @@ export function SourcePanel({
   const fileStateRef = useRef(fileState);
   const editorValueRef = useRef(editorValue);
   const isDirty = fileState.status === "ready" && editorValue !== fileState.content;
+  const isMarkdownSource =
+    fileState.status === "ready" && isMarkdownDocument(fileState.language, fileState.path);
   const setEditorValueState = (nextValue: string) => {
     editorValueRef.current = nextValue;
     setEditorValue(nextValue);
@@ -167,6 +178,12 @@ export function SourcePanel({
   useEffect(() => {
     onDirtyChange?.(isDirty);
   }, [isDirty, onDirtyChange]);
+
+  useEffect(() => {
+    if (!isMarkdownSource && documentMode !== "code") {
+      setDocumentMode("code");
+    }
+  }, [documentMode, isMarkdownSource]);
 
   useEffect(() => {
     if (!copiedPath) {
@@ -434,6 +451,30 @@ export function SourcePanel({
             </div>
           ) : null}
         </div>
+        {isMarkdownSource && compareDiskContent === null ? (
+          <div className="source-editor-toolbar source-document-mode-toolbar" aria-label="Markdown view mode">
+            <div className="source-editor-status">
+              <span className="chip">Markdown</span>
+            </div>
+            <div className="source-editor-actions">
+              <SourceDocumentModeButton
+                label="Code"
+                selected={documentMode === "code"}
+                onClick={() => setDocumentMode("code")}
+              />
+              <SourceDocumentModeButton
+                label="Preview"
+                selected={documentMode === "preview"}
+                onClick={() => setDocumentMode("preview")}
+              />
+              <SourceDocumentModeButton
+                label="Split"
+                selected={documentMode === "split"}
+                onClick={() => setDocumentMode("split")}
+              />
+            </div>
+          </div>
+        ) : null}
       </div>
 
       {fileState.status === "idle" ? (
@@ -552,6 +593,42 @@ export function SourcePanel({
                   />
                 </Suspense>
               </>
+            ) : isMarkdownSource && documentMode === "preview" ? (
+              <MarkdownDocumentView
+                documentPath={fileState.path}
+                markdown={editorValue}
+                onOpenSourceLink={onOpenSourceLink}
+                workspaceRoot={workspaceRoot}
+              />
+            ) : isMarkdownSource && documentMode === "split" ? (
+              <div className="source-markdown-split">
+                <div className="source-markdown-split-pane source-markdown-editor-pane">
+                  <Suspense fallback={<div className="source-editor-loading">Loading editor...</div>}>
+                    <MonacoCodeEditor
+                      appearance={editorAppearance}
+                      ariaLabel={`Source editor for ${fileState.path}`}
+                      fontSizePx={editorFontSizePx}
+                      highlightedColumnNumber={sourceFocus?.column ?? null}
+                      highlightedLineNumber={sourceFocus?.line ?? null}
+                      highlightToken={sourceFocus?.token ?? null}
+                      language={fileState.language}
+                      path={fileState.path}
+                      value={editorValue}
+                      onChange={handleEditorChange}
+                      onSave={() => void handleSave()}
+                      onStatusChange={setEditorStatus}
+                    />
+                  </Suspense>
+                </div>
+                <div className="source-markdown-split-pane">
+                  <MarkdownDocumentView
+                    documentPath={fileState.path}
+                    markdown={editorValue}
+                    onOpenSourceLink={onOpenSourceLink}
+                    workspaceRoot={workspaceRoot}
+                  />
+                </div>
+              </div>
             ) : (
               <Suspense fallback={<div className="source-editor-loading">Loading editor...</div>}>
                 <MonacoCodeEditor
@@ -795,6 +872,27 @@ function isStaleFileSaveError(message: string) {
   return message.toLowerCase().includes("file changed on disk before save");
 }
 
+function SourceDocumentModeButton({
+  label,
+  onClick,
+  selected,
+}: {
+  label: string;
+  onClick: () => void;
+  selected: boolean;
+}) {
+  return (
+    <button
+      className={`ghost-button source-document-mode-button${selected ? " selected" : ""}`}
+      type="button"
+      aria-pressed={selected}
+      onClick={onClick}
+    >
+      {label}
+    </button>
+  );
+}
+
 function EmptyState({ title, body }: { title: string; body: string }) {
   return (
     <article className="empty-state-card">
@@ -827,6 +925,10 @@ function formatLanguageLabel(language: string | null, path: string) {
   }
 
   return LANGUAGE_LABELS[resolved] ?? resolved.replace(/[-_]+/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+function isMarkdownDocument(language: string | null | undefined, path: string | null | undefined) {
+  return resolveMonacoLanguage(language ?? null, path ?? null) === "markdown";
 }
 
 function isInstructionLikePath(path: string) {

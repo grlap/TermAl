@@ -161,11 +161,26 @@ export type GitStatusResponse = {
 export type GitFileAction = "revert" | "stage" | "unstage";
 export type GitDiffSection = "staged" | "unstaged";
 
+export type GitDiffDocumentSideSource = "head" | "index" | "worktree" | "empty" | "patch";
+
+export type GitDiffDocumentSide = {
+  content: string;
+  source: GitDiffDocumentSideSource;
+};
+
+export type GitDiffDocumentContent = {
+  before: GitDiffDocumentSide;
+  after: GitDiffDocumentSide;
+  isCompleteDocument: boolean;
+  note?: string | null;
+};
+
 export type GitDiffResponse = {
   changeType: "edit" | "create";
   changeSetId?: string | null;
   diff: string;
   diffId: string;
+  documentContent?: GitDiffDocumentContent | null;
   filePath?: string | null;
   language?: string | null;
   summary: string;

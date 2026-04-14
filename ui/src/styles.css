@@ -5107,6 +5107,198 @@ textarea {
   display: none;
 }
 
+.source-document-mode-toolbar {
+  align-items: center;
+  padding-bottom: 0.1rem;
+}
+
+.source-document-mode-button.selected {
+  border-color: var(--accent-blue-border);
+  background: color-mix(in srgb, var(--surface-white) 82%, var(--accent-blue-bg));
+  color: var(--signal-blue);
+}
+
+.source-markdown-split {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.source-markdown-split-pane {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  border-left: 1px solid var(--line);
+}
+
+.source-markdown-split-pane:first-child {
+  border-left: 0;
+}
+
+.source-markdown-editor-pane .monaco-code-editor {
+  min-height: 0;
+}
+
+.markdown-document-view {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  background: var(--surface-white);
+}
+
+.markdown-document-header,
+.markdown-diff-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.45rem 0.65rem;
+  flex: none;
+  padding: 0.55rem 0.7rem;
+  border-bottom: 1px solid var(--line);
+  background: color-mix(in srgb, var(--surface-white) 92%, var(--accent-blue-bg) 8%);
+}
+
+.markdown-document-header {
+  justify-content: flex-start;
+}
+
+.markdown-document-note {
+  flex: none;
+  margin: 0;
+  padding: 0.5rem 0.7rem;
+  border-bottom: 1px solid var(--line);
+}
+
+.markdown-document-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  padding: 1rem;
+}
+
+.markdown-document-scroll .markdown-copy {
+  max-width: min(58rem, 100%);
+}
+
+.markdown-document-empty {
+  margin: 0;
+}
+
+.markdown-diff-shell {
+  background: var(--surface-white);
+}
+
+.markdown-diff-change-view {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+
+.markdown-diff-change-scroll {
+  display: grid;
+  align-content: start;
+  gap: 0.85rem;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  padding: 1rem;
+}
+
+.markdown-diff-change-block {
+  display: grid;
+  gap: 0.55rem;
+  min-width: 0;
+}
+
+.markdown-diff-normal-section {
+  min-width: 0;
+}
+
+.markdown-diff-change-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.65rem;
+  color: var(--muted);
+  font-family: var(--code-font);
+  font-size: 0.78rem;
+}
+
+.markdown-diff-rendered-section {
+  display: grid;
+  gap: 0.55rem;
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 0.45rem;
+  padding: 0.7rem;
+}
+
+.markdown-diff-rendered-section-added {
+  --markdown-diff-added-color: var(--signal-green);
+
+  border-color: color-mix(in srgb, var(--markdown-diff-added-color) 74%, var(--line));
+  background: color-mix(in srgb, var(--markdown-diff-added-color) 26%, var(--surface-white));
+  box-shadow: inset 5px 0 0 var(--markdown-diff-added-color);
+}
+
+.markdown-diff-rendered-section-removed {
+  --markdown-diff-removed-color: #ef4444;
+
+  border-color: color-mix(in srgb, var(--markdown-diff-removed-color) 82%, var(--line));
+  background: color-mix(in srgb, var(--markdown-diff-removed-color) 26%, var(--surface-white));
+  box-shadow: inset 5px 0 0 var(--markdown-diff-removed-color);
+}
+
+.markdown-diff-rendered-section-added .markdown-copy {
+  color: color-mix(in srgb, var(--copy) 82%, var(--markdown-diff-added-color));
+}
+
+.markdown-diff-rendered-section-removed .markdown-copy {
+  color: color-mix(in srgb, var(--copy) 72%, var(--markdown-diff-removed-color));
+}
+
+.markdown-diff-rendered-section-body {
+  min-width: 0;
+}
+
+.markdown-diff-edit-actions {
+  align-items: center;
+}
+
+.markdown-diff-save-state {
+  align-self: center;
+  margin: 0;
+}
+
+.markdown-diff-editable-section {
+  min-width: 0;
+  border-radius: 0.35rem;
+  outline: 1px solid transparent;
+  outline-offset: 0.2rem;
+  cursor: text;
+}
+
+.markdown-diff-editable-section:focus {
+  outline-color: var(--focus-ring);
+}
+
+.markdown-diff-editable-section .syntax-copy-button {
+  display: none;
+}
+
+.markdown-diff-toolbar {
+  flex-wrap: wrap;
+}
+
+.markdown-diff-side-actions {
+  justify-content: flex-end;
+}
+
 .diff-preview-actions {
   justify-content: flex-end;
 }

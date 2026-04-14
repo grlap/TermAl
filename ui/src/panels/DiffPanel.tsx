@@ -1,10 +1,12 @@
 import { Suspense, lazy, useEffect, useMemo, useRef, useState } from "react";
-import type { ReactNode } from "react";
+import type { FormEvent, KeyboardEvent, ReactNode } from "react";
 import {
   fetchFile,
   fetchReviewDocument,
   saveReviewDocument,
   type FileResponse,
+  type GitDiffDocumentContent,
+  type GitDiffDocumentSide,
   type GitDiffSection,
   type ReviewAnchor,
   type ReviewComment,
@@ -13,6 +15,7 @@ import {
 } from "../api";
 import { copyTextToClipboard } from "../clipboard";
 import { FileTabIcon } from "../file-tab-icon";
+import { MarkdownContent, type MarkdownFileLinkTarget } from "../message-cards";
 import type { MonacoCodeEditorStatus } from "../MonacoCodeEditor";
 import type { MonacoDiffEditorHandle, MonacoDiffEditorStatus } from "../MonacoDiffEditor";
 import { buildDiffPreviewModel } from "../diff-preview";
@@ -30,7 +33,9 @@ const MonacoDiffEditor = lazy(() =>
   import("../MonacoDiffEditor").then(({ MonacoDiffEditor }) => ({ default: MonacoDiffEditor })),
 );
 
-type DiffViewMode = "all" | "changes" | "edit" | "raw";
+type DiffViewMode = "all" | "changes" | "markdown" | "edit" | "raw";
+type MarkdownDocumentCompleteness = "full" | "patch";
+const MAX_RENDERED_MARKDOWN_UNDO_DEPTH = 100;
 
 type LatestFileState = {
   status: "idle" | "loading" | "ready" | "error";
@@ -96,6 +101,7 @@ export function DiffPanel({
   changeSetId = null,
   fontSizePx,
   diff,
+  documentContent = null,
   diffMessageId,
   filePath,
   gitSectionId = null,
@@ -116,6 +122,7 @@ export function DiffPanel({
   changeSetId?: string | null;
   fontSizePx: number;
   diff: string;
+  documentContent?: GitDiffDocumentContent | null;
   diffMessageId: string;
   filePath: string | null;
   gitSectionId?: GitDiffSection | null;
@@ -143,6 +150,8 @@ export function DiffPanel({
   const normalizedChangeSetId = changeSetId?.trim() ?? "";
   const hasScope = Boolean(normalizedSessionId || normalizedProjectId);
   const [editValue, setEditValue] = useState("");
+  const [markdownEditContent, setMarkdownEditContent] = useState<string | null>(null);
+  const [markdownEditRevision, setMarkdownEditRevision] = useState(0);
   const [visualBaseContent, setVisualBaseContent] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
@@ -160,6 +169,9 @@ export function DiffPanel({
   const pendingEditValueRef = useRef<string | null>(null);
   const latestFileRef = useRef(latestFile);
   const editValueRef = useRef(editValue);
+  const markdownEditContentRef = useRef<string | null>(markdownEditContent);
+  const markdownUndoStackRef = useRef<string[]>([]);
+  const markdownRedoStackRef = useRef<string[]>([]);
   const setLatestFileState = (
     next:
       | LatestFileState
@@ -175,6 +187,17 @@ export function DiffPanel({
     editValueRef.current = nextValue;
     setEditValue(nextValue);
   };
+  const setMarkdownEditContentState = (nextValue: string | null) => {
+    markdownEditContentRef.current = nextValue;
+    setMarkdownEditContent(nextValue);
+  };
+  const clearRenderedMarkdownEditHistory = () => {
+    markdownUndoStackRef.current = [];
+    markdownRedoStackRef.current = [];
+  };
+  const bumpRenderedMarkdownEditRevision = () => {
+    setMarkdownEditRevision((current) => current + 1);
+  };
 
   useEffect(() => {
     latestFileRef.current = latestFile;
@@ -184,17 +207,47 @@ export function DiffPanel({
     editValueRef.current = editValue;
   }, [editValue]);
 
-  const previewSourceContent = visualBaseContent ?? (latestFile.status === "ready" ? latestFile.content : null);
+  useEffect(() => {
+    markdownEditContentRef.current = markdownEditContent;
+  }, [markdownEditContent]);
+
+  const isMarkdownTarget = isMarkdownDocument(language, filePath);
+  const previewSourceContent =
+    documentContent?.after.content ?? visualBaseContent ?? (latestFile.status === "ready" ? latestFile.content : null);
   const preview = useMemo(
     () => buildDiffPreviewModel(diff, changeType, previewSourceContent),
     [changeType, diff, previewSourceContent],
   );
+  const markdownPreview = useMemo(
+    () => buildMarkdownDiffPreview(documentContent, preview, changeType),
+    [changeType, documentContent, preview],
+  );
+  const canShowMarkdownView = isMarkdownTarget && markdownPreview !== null;
+  const markdownDisplayPreview = useMemo<MarkdownDiffPreviewModel | null>(() => {
+    if (!markdownPreview) {
+      return null;
+    }
+
+    return {
+      ...markdownPreview,
+      after: {
+        ...markdownPreview.after,
+        content: markdownEditContent ?? markdownPreview.after.content,
+      },
+    };
+  }, [markdownEditContent, markdownPreview]);
+  const preferMarkdownView =
+    canShowMarkdownView && Boolean(gitSectionId && documentContent?.isCompleteDocument);
   const [viewMode, setViewMode] = useState<DiffViewMode>(() =>
-    defaultDiffViewMode(buildDiffPreviewModel(diff, changeType).hasStructuredPreview, Boolean(filePath)),
+    defaultDiffViewMode(
+      buildDiffPreviewModel(diff, changeType).hasStructuredPreview,
+      Boolean(filePath),
+      preferMarkdownView,
+    ),
   );
 
   useEffect(() => {
-    setViewMode(defaultDiffViewMode(preview.hasStructuredPreview, Boolean(filePath)));
+    setViewMode(defaultDiffViewMode(preview.hasStructuredPreview, Boolean(filePath), preferMarkdownView));
     setEditEditorStatus(DEFAULT_EDITOR_STATUS);
     setVisualEditorStatus(DEFAULT_DIFF_EDITOR_STATUS);
     setSaveError(null);
@@ -205,7 +258,10 @@ export function DiffPanel({
     setIsRebasingFile(false);
     setIsReloadingFile(false);
     setIsSavingReview(false);
-  }, [diffMessageId, filePath, preview.hasStructuredPreview]);
+    setMarkdownEditContentState(null);
+    clearRenderedMarkdownEditHistory();
+    bumpRenderedMarkdownEditRevision();
+  }, [diffMessageId, filePath, preferMarkdownView, preview.hasStructuredPreview]);
 
   useEffect(() => {
     let cancelled = false;
@@ -362,7 +418,11 @@ export function DiffPanel({
     ? formatLanguageLabel(latestFile.language ?? language ?? null, latestFile.path)
     : formatLanguageLabel(language, filePath);
   const canEditVisualDiff =
-    preview.hasStructuredPreview && latestFile.status === "ready" && Boolean(filePath);
+    !documentContent && preview.hasStructuredPreview && latestFile.status === "ready" && Boolean(filePath);
+  const canEditRenderedMarkdown =
+    Boolean(filePath) &&
+    latestFile.status === "ready" &&
+    markdownDisplayPreview?.after.completeness === "full";
   const hasVisualNavigation = viewMode === "all" && visualEditorStatus.changeCount > 0;
   const isDirty = latestFile.status === "ready" && editValue !== latestFile.content;
   const saveStateLabel = saveError ? "Save failed" : isSaving ? "Saving..." : isDirty ? "Unsaved changes" : null;
@@ -548,6 +608,7 @@ export function DiffPanel({
         baseHash: currentFile.contentHash ?? null,
         overwrite: options?.overwrite,
       });
+      const savedContent = response?.content ?? currentEditValue;
       if (response) {
         setVisualBaseContent(response.content);
         setLatestFileState(toLatestFileState(response));
@@ -564,6 +625,11 @@ export function DiffPanel({
           };
         });
       }
+      if (markdownEditContent !== null || viewMode === "markdown") {
+        setMarkdownEditContentState(savedContent);
+        clearRenderedMarkdownEditHistory();
+        bumpRenderedMarkdownEditRevision();
+      }
       setExternalFileNotice(null);
       setDiffEditConflictOnDisk(false);
     } catch (error) {
@@ -578,6 +644,95 @@ export function DiffPanel({
     } finally {
       setIsSaving(false);
     }
+  }
+
+  function handleRenderedMarkdownSectionChange(
+    segment: MarkdownDiffDocumentSegment,
+    nextMarkdown: string,
+  ) {
+    if (!markdownPreview || latestFileRef.current.status !== "ready") {
+      return;
+    }
+
+    const displayContent = markdownEditContentRef.current ?? markdownPreview.after.content;
+    const nextDocumentContent = replaceMarkdownDocumentRange(
+      displayContent,
+      segment.afterStartOffset,
+      segment.afterEndOffset,
+      normalizeEditedMarkdownSection(nextMarkdown, segment.markdown),
+    );
+    if (nextDocumentContent === displayContent) {
+      return;
+    }
+
+    pushRenderedMarkdownUndoSnapshot(displayContent);
+    markdownRedoStackRef.current = [];
+    setMarkdownEditContentState(nextDocumentContent);
+    setEditValueState(nextDocumentContent);
+    setSaveError(null);
+    setDiffEditConflictOnDisk(false);
+    if (markdownPreview.after.source !== "worktree") {
+      setExternalFileNotice("Rendered Markdown edits will save this document to the worktree file.");
+    } else {
+      setExternalFileNotice(null);
+    }
+  }
+
+  function pushRenderedMarkdownUndoSnapshot(content: string) {
+    const stack = markdownUndoStackRef.current;
+    if (stack[stack.length - 1] === content) {
+      return;
+    }
+
+    stack.push(content);
+    if (stack.length > MAX_RENDERED_MARKDOWN_UNDO_DEPTH) {
+      stack.splice(0, stack.length - MAX_RENDERED_MARKDOWN_UNDO_DEPTH);
+    }
+  }
+
+  function applyRenderedMarkdownContentFromHistory(content: string) {
+    setMarkdownEditContentState(content);
+    bumpRenderedMarkdownEditRevision();
+    setEditValueState(content);
+    setSaveError(null);
+    setDiffEditConflictOnDisk(false);
+    if (markdownPreview?.after.source && markdownPreview.after.source !== "worktree") {
+      setExternalFileNotice("Rendered Markdown edits will save this document to the worktree file.");
+    } else {
+      setExternalFileNotice(null);
+    }
+  }
+
+  function handleRenderedMarkdownUndo() {
+    if (!markdownPreview || latestFileRef.current.status !== "ready") {
+      return false;
+    }
+
+    const previousContent = markdownUndoStackRef.current.pop();
+    if (previousContent == null) {
+      return false;
+    }
+
+    const currentContent = markdownEditContentRef.current ?? markdownPreview.after.content;
+    markdownRedoStackRef.current.push(currentContent);
+    applyRenderedMarkdownContentFromHistory(previousContent);
+    return true;
+  }
+
+  function handleRenderedMarkdownRedo() {
+    if (!markdownPreview || latestFileRef.current.status !== "ready") {
+      return false;
+    }
+
+    const nextContent = markdownRedoStackRef.current.pop();
+    if (nextContent == null) {
+      return false;
+    }
+
+    const currentContent = markdownEditContentRef.current ?? markdownPreview.after.content;
+    pushRenderedMarkdownUndoSnapshot(currentContent);
+    applyRenderedMarkdownContentFromHistory(nextContent);
+    return true;
   }
 
   async function handleApplyDiffEditsToDiskVersion() {
@@ -782,6 +937,10 @@ export function DiffPanel({
     );
   }
 
+  function handleOpenMarkdownSourceLink(target: MarkdownFileLinkTarget) {
+    onOpenPath(target.path);
+  }
+
   return (
     <div className="source-pane diff-preview-panel has-editor">
       <div className="source-toolbar">
@@ -855,6 +1014,15 @@ export function DiffPanel({
                 onClick={() => setViewMode("changes")}
               >
                 <ChangedOnlyIcon />
+              </DiffPreviewToggleButton>
+            ) : null}
+            {canShowMarkdownView ? (
+              <DiffPreviewToggleButton
+                selected={viewMode === "markdown"}
+                label="Rendered Markdown"
+                onClick={() => setViewMode("markdown")}
+              >
+                <MarkdownModeIcon />
               </DiffPreviewToggleButton>
             ) : null}
             {filePath ? (
@@ -1067,6 +1235,26 @@ export function DiffPanel({
           />
         ) : null}
 
+        {viewMode === "markdown" && markdownDisplayPreview ? (
+          <MarkdownDiffView
+            canEdit={canEditRenderedMarkdown}
+            documentPath={filePath}
+            gitSectionId={gitSectionId}
+            isDirty={isDirty}
+            isSaving={isSaving}
+            markdownPreview={markdownDisplayPreview}
+            markdownEditRevision={markdownEditRevision}
+            onOpenSourceLink={handleOpenMarkdownSourceLink}
+            onRedo={handleRenderedMarkdownRedo}
+            onRenderedMarkdownSectionChange={handleRenderedMarkdownSectionChange}
+            onSave={() => void handleSave()}
+            onUndo={handleRenderedMarkdownUndo}
+            preview={preview}
+            saveStateLabel={saveStateLabel}
+            workspaceRoot={workspaceRoot}
+          />
+        ) : null}
+
         {viewMode === "raw" || (viewMode === "all" && !preview.hasStructuredPreview) ? (
           <RawPatchView diff={diff} />
         ) : null}
@@ -1084,7 +1272,7 @@ export function DiffPanel({
           </footer>
         ) : null}
 
-        {viewMode !== "edit" && (preview.note || (reviewThreads.length > 0 && viewMode !== "changes")) ? (
+        {viewMode !== "edit" && viewMode !== "markdown" && (preview.note || (reviewThreads.length > 0 && viewMode !== "changes")) ? (
           <p className="support-copy diff-preview-note">
             {preview.note ?? ""}
             {preview.note && reviewThreads.length > 0 && viewMode !== "changes" ? " " : ""}
@@ -1135,6 +1323,17 @@ function ChangedOnlyIcon() {
     <svg viewBox="0 0 16 16" aria-hidden="true" focusable="false">
       <path d="M2.25 3.25H6.5V5H2.25Zm7.25 0h4.25V5H9.5ZM2.25 11h4.25v1.75H2.25ZM9.5 11h4.25v1.75H9.5Z" fill="currentColor" />
       <path d="m6.45 8 1.6-1.6 1.48 1.48L8 9.41 6.47 7.88Z" fill="currentColor" />
+    </svg>
+  );
+}
+
+function MarkdownModeIcon() {
+  return (
+    <svg viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+      <path
+        d="M2.5 2.25h11A1.5 1.5 0 0 1 15 3.75v8.5a1.5 1.5 0 0 1-1.5 1.5h-11A1.5 1.5 0 0 1 1 12.25v-8.5a1.5 1.5 0 0 1 1.5-1.5Zm0 1.5v8.5h11v-8.5Zm1.15 6.8V5.45h1.52l1.18 1.72 1.18-1.72h1.52v5.1H7.72V7.42L6.35 9.35 4.98 7.42v3.13Zm7.65 0L9.35 8.6h1.2V5.45h1.5V8.6h1.2Z"
+        fill="currentColor"
+      />
     </svg>
   );
 }
@@ -1308,7 +1507,1058 @@ function rawDiffLineClassName(line: string) {
   return "diff-preview-raw-line-context";
 }
 
-function defaultDiffViewMode(hasStructuredPreview: boolean, hasFilePath: boolean): DiffViewMode {
+type MarkdownDiffPreviewSide = GitDiffDocumentSide & {
+  completeness: MarkdownDocumentCompleteness;
+  note: string | null;
+};
+
+type MarkdownDiffPreviewModel = {
+  after: MarkdownDiffPreviewSide;
+  before: MarkdownDiffPreviewSide;
+};
+
+function buildMarkdownDiffPreview(
+  documentContent: GitDiffDocumentContent | null | undefined,
+  preview: ReturnType<typeof buildDiffPreviewModel>,
+  changeType: DiffMessage["changeType"],
+): MarkdownDiffPreviewModel | null {
+  if (documentContent) {
+    const completeness: MarkdownDocumentCompleteness = documentContent.isCompleteDocument ? "full" : "patch";
+    return {
+      before: {
+        ...documentContent.before,
+        completeness,
+        note: documentContent.note ?? null,
+      },
+      after: {
+        ...documentContent.after,
+        completeness,
+        note: documentContent.note ?? null,
+      },
+    };
+  }
+
+  if (!preview.hasStructuredPreview) {
+    return null;
+  }
+
+  const completeness: MarkdownDocumentCompleteness = preview.note ? "patch" : "full";
+  return {
+    before: {
+      content: changeType === "create" ? "" : preview.originalText,
+      source: "patch",
+      completeness,
+      note: preview.note ?? null,
+    },
+    after: {
+      content: preview.modifiedText,
+      source: "patch",
+      completeness,
+      note: preview.note ?? null,
+    },
+  };
+}
+
+function MarkdownDiffView({
+  canEdit,
+  documentPath,
+  gitSectionId,
+  isDirty,
+  isSaving,
+  markdownEditRevision,
+  markdownPreview,
+  onRenderedMarkdownSectionChange,
+  onOpenSourceLink,
+  onRedo,
+  onSave,
+  onUndo,
+  preview,
+  saveStateLabel,
+  workspaceRoot,
+}: {
+  canEdit: boolean;
+  documentPath: string | null;
+  gitSectionId: GitDiffSection | null;
+  isDirty: boolean;
+  isSaving: boolean;
+  markdownEditRevision: number;
+  markdownPreview: MarkdownDiffPreviewModel;
+  onRenderedMarkdownSectionChange: (segment: MarkdownDiffDocumentSegment, nextMarkdown: string) => void;
+  onOpenSourceLink: (target: MarkdownFileLinkTarget) => void;
+  onRedo: () => boolean;
+  onSave: () => void;
+  onUndo: () => boolean;
+  preview: ReturnType<typeof buildDiffPreviewModel>;
+  saveStateLabel: string | null;
+  workspaceRoot: string | null;
+}) {
+  const segments = useMemo(
+    () => buildMarkdownDiffDocumentSegments(markdownPreview, preview),
+    [markdownPreview, preview],
+  );
+  const gitSectionLabel =
+    gitSectionId === "staged" ? "Staged" : gitSectionId === "unstaged" ? "Unstaged" : null;
+
+  return (
+    <div className="source-editor-shell source-editor-shell-with-statusbar markdown-diff-shell">
+      <div className="markdown-diff-toolbar">
+        <div className="source-editor-status">
+          <span className="chip">Rendered Markdown</span>
+          {gitSectionLabel ? <span className="chip">{gitSectionLabel}</span> : null}
+          <span className="chip">One document</span>
+          {canEdit ? <span className="chip">Editable</span> : null}
+          <span className="chip">{formatMarkdownSideSource(markdownPreview.after.source)}</span>
+        </div>
+        {canEdit ? (
+          <div className="source-editor-actions markdown-diff-edit-actions">
+            {saveStateLabel ? <span className="support-copy markdown-diff-save-state">{saveStateLabel}</span> : null}
+            <button className="ghost-button" type="button" disabled={!isDirty || isSaving} onClick={onSave}>
+              {isSaving ? "Saving..." : isDirty ? "Save Markdown" : "Saved"}
+            </button>
+          </div>
+        ) : null}
+      </div>
+      <MarkdownDiffDocument
+        canEdit={canEdit}
+        completeness={markdownPreview.after.completeness}
+        documentPath={documentPath}
+        editorRevision={markdownEditRevision}
+        note={markdownPreview.after.note}
+        onRenderedMarkdownSectionChange={onRenderedMarkdownSectionChange}
+        onOpenSourceLink={onOpenSourceLink}
+        onRedo={onRedo}
+        onSave={onSave}
+        onUndo={onUndo}
+        segments={segments}
+        workspaceRoot={workspaceRoot}
+      />
+      <footer className="source-editor-statusbar diff-preview-statusbar" aria-label="Markdown diff status">
+        <div className="source-editor-statusbar-group">
+          <span className="source-editor-statusbar-item source-editor-statusbar-state">
+            {canEdit ? "Rendered Markdown edits update the file buffer" : "Rendered changes"}
+          </span>
+        </div>
+        <div className="source-editor-statusbar-group source-editor-statusbar-group-meta">
+          <span className="source-editor-statusbar-item">{`${segments.length} section${segments.length === 1 ? "" : "s"}`}</span>
+          <span className="source-editor-statusbar-item">
+            {markdownPreview.after.completeness === "full" ? "Full document" : "Patch preview"}
+          </span>
+        </div>
+      </footer>
+    </div>
+  );
+}
+
+type MarkdownDiffDocumentSegment = {
+  afterEndOffset: number;
+  afterStartOffset: number;
+  id: string;
+  isInAfterDocument: boolean;
+  kind: "added" | "normal" | "removed";
+  markdown: string;
+  newStart: number | null;
+  oldStart: number | null;
+};
+
+function MarkdownDiffDocument({
+  canEdit,
+  completeness,
+  documentPath,
+  editorRevision,
+  note,
+  onRenderedMarkdownSectionChange,
+  onOpenSourceLink,
+  onRedo,
+  onSave,
+  onUndo,
+  segments,
+  workspaceRoot,
+}: {
+  canEdit: boolean;
+  completeness: MarkdownDocumentCompleteness;
+  documentPath: string | null;
+  editorRevision: number;
+  note: string | null;
+  onRenderedMarkdownSectionChange: (segment: MarkdownDiffDocumentSegment, nextMarkdown: string) => void;
+  onOpenSourceLink: (target: MarkdownFileLinkTarget) => void;
+  onRedo: () => boolean;
+  onSave: () => void;
+  onUndo: () => boolean;
+  segments: MarkdownDiffDocumentSegment[];
+  workspaceRoot: string | null;
+}) {
+  const visibleNote =
+    note ??
+    (completeness === "patch"
+      ? "Rendered from patch context only. Unchanged document sections outside the diff are omitted."
+      : null);
+
+  return (
+    <div className="markdown-diff-change-view">
+      <div className="markdown-document-header">
+        <span className="chip">Rendered document</span>
+        <span className="chip">{completeness === "full" ? "Full document" : "Patch preview"}</span>
+      </div>
+      {visibleNote ? <p className="support-copy markdown-document-note">{visibleNote}</p> : null}
+      <div className="markdown-diff-change-scroll">
+        {segments.length === 0 ? (
+          <p className="support-copy markdown-document-empty">No rendered Markdown changes were found.</p>
+        ) : (
+          segments.map((segment) =>
+            segment.kind === "normal" ? (
+              <EditableRenderedMarkdownSection
+                canEdit={canEdit && segment.isInAfterDocument}
+                className="markdown-diff-normal-section"
+                documentPath={documentPath}
+                key={`${segment.id}:${editorRevision}`}
+                onChange={(nextMarkdown) => onRenderedMarkdownSectionChange(segment, nextMarkdown)}
+                onOpenSourceLink={onOpenSourceLink}
+                onRedo={onRedo}
+                onSave={onSave}
+                onUndo={onUndo}
+                segment={segment}
+                workspaceRoot={workspaceRoot}
+              />
+            ) : (
+              <section className="markdown-diff-change-block" key={`${segment.id}:${editorRevision}`}>
+                <RenderedMarkdownChangeSection
+                  canEdit={canEdit && segment.kind === "added" && segment.isInAfterDocument}
+                  documentPath={documentPath}
+                  onChange={(nextMarkdown) => onRenderedMarkdownSectionChange(segment, nextMarkdown)}
+                  onOpenSourceLink={onOpenSourceLink}
+                  onRedo={onRedo}
+                  onSave={onSave}
+                  onUndo={onUndo}
+                  segment={segment}
+                  tone={segment.kind}
+                  workspaceRoot={workspaceRoot}
+                />
+              </section>
+            ),
+          )
+        )}
+      </div>
+    </div>
+  );
+}
+
+function RenderedMarkdownChangeSection({
+  canEdit,
+  documentPath,
+  onChange,
+  onOpenSourceLink,
+  onRedo,
+  onSave,
+  onUndo,
+  segment,
+  tone,
+  workspaceRoot,
+}: {
+  canEdit: boolean;
+  documentPath: string | null;
+  onChange: (nextMarkdown: string) => void;
+  onOpenSourceLink: (target: MarkdownFileLinkTarget) => void;
+  onRedo: () => boolean;
+  onSave: () => void;
+  onUndo: () => boolean;
+  segment: MarkdownDiffDocumentSegment;
+  tone: "added" | "removed";
+  workspaceRoot: string | null;
+}) {
+  return (
+    <section className={`markdown-diff-rendered-section markdown-diff-rendered-section-${tone}`}>
+      <EditableRenderedMarkdownSection
+        canEdit={canEdit}
+        className="markdown-diff-rendered-section-body"
+        documentPath={documentPath}
+        onChange={onChange}
+        onOpenSourceLink={onOpenSourceLink}
+        onRedo={onRedo}
+        onSave={onSave}
+        onUndo={onUndo}
+        segment={segment}
+        workspaceRoot={workspaceRoot}
+      />
+    </section>
+  );
+}
+
+function EditableRenderedMarkdownSection({
+  canEdit,
+  className,
+  documentPath,
+  onChange,
+  onOpenSourceLink,
+  onRedo,
+  onSave,
+  onUndo,
+  segment,
+  workspaceRoot,
+}: {
+  canEdit: boolean;
+  className: string;
+  documentPath: string | null;
+  onChange: (nextMarkdown: string) => void;
+  onOpenSourceLink: (target: MarkdownFileLinkTarget) => void;
+  onRedo: () => boolean;
+  onSave: () => void;
+  onUndo: () => boolean;
+  segment: MarkdownDiffDocumentSegment;
+  workspaceRoot: string | null;
+}) {
+  const classNames = `${className}${canEdit ? " markdown-diff-editable-section" : ""}`;
+
+  function handleInput(event: FormEvent<HTMLElement>) {
+    if (!canEdit) {
+      return;
+    }
+
+    onChange(serializeEditableMarkdownSection(event.currentTarget));
+  }
+
+  function handleKeyDown(event: KeyboardEvent<HTMLElement>) {
+    if (!canEdit) {
+      return;
+    }
+
+    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s") {
+      event.preventDefault();
+      onSave();
+      return;
+    }
+
+    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "z") {
+      event.preventDefault();
+      if (event.shiftKey) {
+        onRedo();
+      } else {
+        onUndo();
+      }
+      return;
+    }
+
+    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "y") {
+      event.preventDefault();
+      onRedo();
+      return;
+    }
+
+    if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) {
+      return;
+    }
+
+    if (
+      event.key === "ArrowDown" &&
+      isSelectionAtEditableSectionVisualBoundary(event.currentTarget, "end")
+    ) {
+      if (focusAdjacentEditableMarkdownSection(event.currentTarget, 1)) {
+        event.preventDefault();
+      }
+      return;
+    }
+
+    if (
+      event.key === "ArrowRight" &&
+      isSelectionAtEditableSectionBoundary(event.currentTarget, "end")
+    ) {
+      if (focusAdjacentEditableMarkdownSection(event.currentTarget, 1)) {
+        event.preventDefault();
+      }
+      return;
+    }
+
+    if (
+      event.key === "ArrowUp" &&
+      isSelectionAtEditableSectionVisualBoundary(event.currentTarget, "start")
+    ) {
+      if (focusAdjacentEditableMarkdownSection(event.currentTarget, -1)) {
+        event.preventDefault();
+      }
+      return;
+    }
+
+    if (
+      event.key === "ArrowLeft" &&
+      isSelectionAtEditableSectionBoundary(event.currentTarget, "start")
+    ) {
+      if (focusAdjacentEditableMarkdownSection(event.currentTarget, -1)) {
+        event.preventDefault();
+      }
+    }
+  }
+
+  return (
+    <section
+      className={classNames}
+      contentEditable={canEdit}
+      data-markdown-editable={canEdit ? "true" : undefined}
+      onInput={handleInput}
+      onKeyDown={handleKeyDown}
+      suppressContentEditableWarning
+      tabIndex={canEdit ? 0 : undefined}
+    >
+      <MarkdownContent
+        documentPath={documentPath}
+        markdown={segment.markdown}
+        onOpenSourceLink={onOpenSourceLink}
+        workspaceRoot={workspaceRoot}
+      />
+    </section>
+  );
+}
+
+function buildMarkdownDiffDocumentSegments(
+  markdownPreview: MarkdownDiffPreviewModel,
+  preview: ReturnType<typeof buildDiffPreviewModel>,
+): MarkdownDiffDocumentSegment[] {
+  if (markdownPreview.after.completeness === "full") {
+    return buildFullMarkdownDiffDocumentSegments(
+      markdownPreview.before.content,
+      markdownPreview.after.content,
+    );
+  }
+
+  return buildPatchMarkdownDiffDocumentSegments(preview);
+}
+
+function buildFullMarkdownDiffDocumentSegments(
+  beforeContent: string,
+  afterContent: string,
+): MarkdownDiffDocumentSegment[] {
+  const beforeLines = splitMarkdownDocumentLinesWithOffsets(beforeContent);
+  const afterLines = splitMarkdownDocumentLinesWithOffsets(afterContent);
+  const anchors = buildMarkdownLineDiffAnchors(beforeLines, afterLines);
+  const segments: MarkdownDiffDocumentSegment[] = [];
+  let beforeCursor = 0;
+  let afterCursor = 0;
+
+  const pushChangedRange = (beforeEnd: number, afterEnd: number) => {
+    if (beforeCursor < beforeEnd) {
+      const insertionOffset = afterLines[afterCursor]?.start ?? afterContent.length;
+      pushMarkdownDiffSegment(segments, {
+        afterEndOffset: insertionOffset,
+        afterStartOffset: insertionOffset,
+        id: `removed:${segments.length}:${beforeCursor}:${beforeEnd}:${afterCursor}`,
+        isInAfterDocument: false,
+        kind: "removed",
+        markdown: beforeLines.slice(beforeCursor, beforeEnd).map((line) => line.text).join(""),
+        newStart: afterCursor + 1,
+        oldStart: beforeCursor + 1,
+      });
+    }
+
+    if (afterCursor < afterEnd) {
+      const startOffset = afterLines[afterCursor]?.start ?? afterContent.length;
+      const endOffset = afterLines[afterEnd - 1]?.end ?? startOffset;
+      pushMarkdownDiffSegment(segments, {
+        afterEndOffset: endOffset,
+        afterStartOffset: startOffset,
+        id: `added:${segments.length}:${beforeCursor}:${afterCursor}:${afterEnd}`,
+        isInAfterDocument: true,
+        kind: "added",
+        markdown: afterLines.slice(afterCursor, afterEnd).map((line) => line.text).join(""),
+        newStart: afterCursor + 1,
+        oldStart: beforeCursor + 1,
+      });
+    }
+  };
+
+  for (const anchor of anchors) {
+    pushChangedRange(anchor.beforeIndex, anchor.afterIndex);
+
+    const line = afterLines[anchor.afterIndex];
+    if (line) {
+      pushMarkdownDiffSegment(segments, {
+        afterEndOffset: line.end,
+        afterStartOffset: line.start,
+        id: `normal:${segments.length}:${anchor.beforeIndex}:${anchor.afterIndex}`,
+        isInAfterDocument: true,
+        kind: "normal",
+        markdown: line.text,
+        newStart: anchor.afterIndex + 1,
+        oldStart: anchor.beforeIndex + 1,
+      });
+    }
+
+    beforeCursor = anchor.beforeIndex + 1;
+    afterCursor = anchor.afterIndex + 1;
+  }
+
+  pushChangedRange(beforeLines.length, afterLines.length);
+
+  return segments;
+}
+
+function buildPatchMarkdownDiffDocumentSegments(
+  preview: ReturnType<typeof buildDiffPreviewModel>,
+): MarkdownDiffDocumentSegment[] {
+  const segments: MarkdownDiffDocumentSegment[] = [];
+
+  for (const hunk of preview.hunks) {
+    let removedLines: string[] = [];
+    let addedLines: string[] = [];
+    let oldStart: number | null = null;
+    let newStart: number | null = null;
+
+    const flush = () => {
+      if (removedLines.length > 0) {
+        pushMarkdownDiffSegment(segments, {
+          afterEndOffset: 0,
+          afterStartOffset: 0,
+          id: `removed:${segments.length}:${oldStart ?? "none"}:${newStart ?? "none"}`,
+          isInAfterDocument: false,
+          kind: "removed",
+          markdown: joinMarkdownDiffLines(removedLines),
+          newStart,
+          oldStart,
+        });
+      }
+
+      if (addedLines.length > 0) {
+        pushMarkdownDiffSegment(segments, {
+          afterEndOffset: 0,
+          afterStartOffset: 0,
+          id: `added:${segments.length}:${oldStart ?? "none"}:${newStart ?? "none"}`,
+          isInAfterDocument: true,
+          kind: "added",
+          markdown: joinMarkdownDiffLines(addedLines),
+          newStart,
+          oldStart,
+        });
+      }
+
+      removedLines = [];
+      addedLines = [];
+      oldStart = null;
+      newStart = null;
+    };
+
+    for (const row of hunk.rows) {
+      if (row.kind === "context") {
+        flush();
+        pushMarkdownDiffSegment(segments, {
+          afterEndOffset: 0,
+          afterStartOffset: 0,
+          id: `normal:${segments.length}:${row.right.lineNumber ?? "none"}`,
+          isInAfterDocument: true,
+          kind: "normal",
+          markdown: joinMarkdownDiffLines([row.right.text]),
+          newStart: row.right.lineNumber,
+          oldStart: row.left.lineNumber,
+        });
+        continue;
+      }
+
+      if (row.kind === "omitted") {
+        flush();
+        pushMarkdownDiffSegment(segments, {
+          afterEndOffset: 0,
+          afterStartOffset: 0,
+          id: `normal:${segments.length}:omitted`,
+          isInAfterDocument: false,
+          kind: "normal",
+          markdown: "...\n",
+          newStart: null,
+          oldStart: null,
+        });
+        continue;
+      }
+
+      if (row.kind === "removed" || row.kind === "changed") {
+        if (oldStart == null) {
+          oldStart = row.left.lineNumber;
+        }
+        removedLines.push(row.left.text);
+      }
+
+      if (row.kind === "added" || row.kind === "changed") {
+        if (newStart == null) {
+          newStart = row.right.lineNumber;
+        }
+        addedLines.push(row.right.text);
+      }
+    }
+
+    flush();
+  }
+
+  return segments;
+}
+
+function pushMarkdownDiffSegment(
+  segments: MarkdownDiffDocumentSegment[],
+  segment: MarkdownDiffDocumentSegment,
+) {
+  if (segment.markdown.trim().length === 0 && segment.kind !== "normal") {
+    return;
+  }
+
+  const previous = segments[segments.length - 1];
+  if (previous && previous.kind === segment.kind && previous.isInAfterDocument === segment.isInAfterDocument) {
+    previous.markdown += segment.markdown;
+    if (previous.isInAfterDocument) {
+      previous.afterEndOffset = segment.afterEndOffset;
+    }
+    return;
+  }
+
+  segments.push(segment);
+}
+
+function serializeEditableMarkdownSection(section: HTMLElement) {
+  const markdownRoot = section.querySelector<HTMLElement>(".markdown-copy") ?? section;
+  const blocks = Array.from(markdownRoot.childNodes)
+    .map((node) => serializeMarkdownBlockNode(node))
+    .filter((markdown) => markdown.trim().length > 0);
+
+  return blocks.join("\n\n");
+}
+
+function serializeMarkdownBlockNode(node: Node): string {
+  if (node.nodeType === Node.TEXT_NODE) {
+    return node.textContent?.trim() ?? "";
+  }
+
+  if (!(node instanceof HTMLElement) || shouldSkipMarkdownEditableNode(node)) {
+    return "";
+  }
+
+  const tagName = node.tagName.toLowerCase();
+  if (/^h[1-6]$/.test(tagName)) {
+    const level = Number(tagName.slice(1));
+    return `${"#".repeat(level)} ${serializeMarkdownInlineChildren(node).trim()}`;
+  }
+  if (tagName === "p") {
+    return serializeMarkdownInlineChildren(node).trim();
+  }
+  if (tagName === "ul" || tagName === "ol") {
+    return serializeMarkdownList(node, tagName === "ol");
+  }
+  if (tagName === "blockquote") {
+    return serializeMarkdownBlockChildren(node)
+      .split("\n")
+      .map((line) => (line.length > 0 ? `> ${line}` : ">"))
+      .join("\n");
+  }
+  if (tagName === "pre") {
+    const codeElement = node.querySelector("code");
+    const language = codeElement?.className.match(/language-([\w-]+)/)?.[1] ?? "";
+    const code = codeElement?.textContent ?? node.textContent ?? "";
+    return `\`\`\`${language}\n${code.replace(/\n$/, "")}\n\`\`\``;
+  }
+  if (tagName === "table") {
+    return serializeMarkdownTable(node);
+  }
+  if (tagName === "div" && node.classList.contains("markdown-table-scroll")) {
+    const table = node.querySelector("table");
+    return table ? serializeMarkdownTable(table) : "";
+  }
+  if (tagName === "hr") {
+    return "---";
+  }
+  if (tagName === "br") {
+    return "\n";
+  }
+
+  return serializeMarkdownBlockChildren(node);
+}
+
+function serializeMarkdownBlockChildren(element: HTMLElement) {
+  return Array.from(element.childNodes)
+    .map((node) => serializeMarkdownBlockNode(node))
+    .filter((markdown) => markdown.trim().length > 0)
+    .join("\n\n");
+}
+
+function serializeMarkdownInlineChildren(element: HTMLElement) {
+  return Array.from(element.childNodes).map((node) => serializeMarkdownInlineNode(node)).join("");
+}
+
+function serializeMarkdownInlineNode(node: Node): string {
+  if (node.nodeType === Node.TEXT_NODE) {
+    return node.textContent ?? "";
+  }
+
+  if (!(node instanceof HTMLElement) || shouldSkipMarkdownEditableNode(node)) {
+    return "";
+  }
+
+  const tagName = node.tagName.toLowerCase();
+  if (tagName === "ul" || tagName === "ol") {
+    return "";
+  }
+  if (tagName === "br") {
+    return "\n";
+  }
+
+  const content = serializeMarkdownInlineChildren(node);
+  if (!content) {
+    return "";
+  }
+
+  if (tagName === "strong" || tagName === "b") {
+    return `**${content}**`;
+  }
+  if (tagName === "em" || tagName === "i") {
+    return `*${content}*`;
+  }
+  if (tagName === "del" || tagName === "s") {
+    return `~~${content}~~`;
+  }
+  if (tagName === "code") {
+    return wrapInlineMarkdownCode(content);
+  }
+  if (tagName === "a") {
+    if (node.classList.contains("inline-code-link")) {
+      const code = node.querySelector("code")?.textContent ?? content;
+      return wrapInlineMarkdownCode(code);
+    }
+
+    const href = node.getAttribute("href");
+    return href ? `[${content}](${href})` : content;
+  }
+
+  return content;
+}
+
+function serializeMarkdownList(list: HTMLElement, ordered: boolean) {
+  return Array.from(list.children)
+    .filter((child): child is HTMLElement => child instanceof HTMLElement && child.tagName.toLowerCase() === "li")
+    .map((item, index) => {
+      const marker = ordered ? `${index + 1}.` : "-";
+      const itemText = serializeMarkdownInlineChildren(item).trim();
+      const nestedBlocks = Array.from(item.children)
+        .filter((child) => child instanceof HTMLElement && ["ul", "ol"].includes(child.tagName.toLowerCase()))
+        .map((child) =>
+          serializeMarkdownBlockNode(child).split("\n").map((line) => `  ${line}`).join("\n"),
+        )
+        .filter((markdown) => markdown.trim().length > 0);
+      return [`${marker} ${itemText}`, ...nestedBlocks].join("\n");
+    })
+    .join("\n");
+}
+
+function serializeMarkdownTable(table: HTMLElement) {
+  const rows = Array.from(table.querySelectorAll("tr")).map((row) =>
+    Array.from(row.children).map((cell) => serializeMarkdownInlineChildren(cell as HTMLElement).trim()),
+  );
+  if (rows.length === 0) {
+    return "";
+  }
+
+  const header = rows[0];
+  const separator = header.map(() => "---");
+  const bodyRows = rows.slice(1);
+  return [header, separator, ...bodyRows]
+    .map((row) => `| ${row.join(" | ")} |`)
+    .join("\n");
+}
+
+function wrapInlineMarkdownCode(content: string) {
+  const fence = content.includes("`") ? "``" : "`";
+  return `${fence}${content}${fence}`;
+}
+
+function shouldSkipMarkdownEditableNode(node: HTMLElement) {
+  return node.tagName.toLowerCase() === "button" || node.getAttribute("aria-hidden") === "true";
+}
+
+function normalizeEditedMarkdownSection(nextMarkdown: string, originalMarkdown: string) {
+  let normalized = nextMarkdown.replace(/\u00a0/g, " ");
+  if (originalMarkdown.endsWith("\n") && !normalized.endsWith("\n")) {
+    normalized += "\n";
+  }
+  if (!originalMarkdown.endsWith("\n")) {
+    normalized = normalized.replace(/\n+$/g, "");
+  }
+  return normalized;
+}
+
+function isSelectionAtEditableSectionBoundary(
+  section: HTMLElement,
+  boundary: "end" | "start",
+) {
+  const selection = window.getSelection();
+  if (!selection || selection.rangeCount === 0 || !selection.isCollapsed) {
+    return false;
+  }
+
+  const range = selection.getRangeAt(0);
+  if (!section.contains(range.startContainer)) {
+    return false;
+  }
+
+  const probe = range.cloneRange();
+  probe.selectNodeContents(section);
+  if (boundary === "start") {
+    probe.setEnd(range.startContainer, range.startOffset);
+  } else {
+    probe.setStart(range.startContainer, range.startOffset);
+  }
+
+  return probe.toString().length === 0;
+}
+
+function isSelectionAtEditableSectionVisualBoundary(
+  section: HTMLElement,
+  boundary: "end" | "start",
+) {
+  if (isSelectionAtEditableSectionBoundary(section, boundary)) {
+    return true;
+  }
+
+  const selection = window.getSelection();
+  if (!selection || selection.rangeCount === 0 || !selection.isCollapsed) {
+    return false;
+  }
+
+  const range = selection.getRangeAt(0);
+  if (!section.contains(range.startContainer)) {
+    return false;
+  }
+
+  const caretRect = getSelectionCaretRect(range);
+  if (!caretRect) {
+    return false;
+  }
+
+  const sectionRect = section.getBoundingClientRect();
+  const computedStyle = window.getComputedStyle(section);
+  const lineHeight = Number.parseFloat(computedStyle.lineHeight);
+  const threshold = Number.isFinite(lineHeight) ? lineHeight * 1.6 : 32;
+
+  return boundary === "start"
+    ? caretRect.top - sectionRect.top <= threshold
+    : sectionRect.bottom - caretRect.bottom <= threshold;
+}
+
+function getSelectionCaretRect(range: Range) {
+  const rects = range.getClientRects();
+  if (rects.length > 0) {
+    return rects[rects.length - 1] ?? null;
+  }
+
+  const container =
+    range.startContainer instanceof HTMLElement
+      ? range.startContainer
+      : range.startContainer.parentElement;
+  return container?.getBoundingClientRect() ?? null;
+}
+
+function focusAdjacentEditableMarkdownSection(currentSection: HTMLElement, direction: -1 | 1) {
+  const scrollRegion = currentSection.closest(".markdown-diff-change-scroll");
+  if (!scrollRegion) {
+    return false;
+  }
+
+  const editableSections = Array.from(
+    scrollRegion.querySelectorAll<HTMLElement>("[data-markdown-editable='true']"),
+  );
+  const currentIndex = editableSections.indexOf(currentSection);
+  if (currentIndex < 0) {
+    return false;
+  }
+
+  const nextSection = editableSections[currentIndex + direction];
+  if (!nextSection) {
+    return false;
+  }
+
+  placeCaretInEditableMarkdownSection(nextSection, direction > 0 ? "start" : "end");
+  return true;
+}
+
+function placeCaretInEditableMarkdownSection(section: HTMLElement, boundary: "end" | "start") {
+  section.focus();
+
+  const selection = window.getSelection();
+  if (!selection) {
+    return;
+  }
+
+  const range = document.createRange();
+  const textNode =
+    boundary === "start"
+      ? findEditableMarkdownTextNode(section, "first")
+      : findEditableMarkdownTextNode(section, "last");
+  if (textNode) {
+    range.setStart(textNode, boundary === "start" ? 0 : textNode.textContent?.length ?? 0);
+  } else {
+    range.selectNodeContents(section);
+    range.collapse(boundary === "start");
+  }
+  range.collapse(true);
+  selection.removeAllRanges();
+  selection.addRange(range);
+}
+
+function findEditableMarkdownTextNode(root: Node, position: "first" | "last"): Text | null {
+  if (root.nodeType === Node.TEXT_NODE) {
+    return root as Text;
+  }
+
+  const children = Array.from(root.childNodes);
+  if (position === "last") {
+    children.reverse();
+  }
+
+  for (const child of children) {
+    const textNode = findEditableMarkdownTextNode(child, position);
+    if (textNode) {
+      return textNode;
+    }
+  }
+
+  return null;
+}
+
+type MarkdownDocumentLine = {
+  compareText: string;
+  end: number;
+  start: number;
+  text: string;
+};
+
+function replaceMarkdownDocumentRange(
+  content: string,
+  startOffset: number,
+  endOffset: number,
+  replacement: string,
+) {
+  const start = Math.max(0, Math.min(startOffset, content.length));
+  const end = Math.max(start, Math.min(endOffset, content.length));
+  return `${content.slice(0, start)}${replacement}${content.slice(end)}`;
+}
+
+function splitMarkdownDocumentLinesWithOffsets(content: string): MarkdownDocumentLine[] {
+  const matches = content.matchAll(/[^\n]*\n|[^\n]+/g);
+  return Array.from(matches, (match) => {
+    const start = match.index ?? 0;
+    const text = match[0];
+    return {
+      compareText: normalizeMarkdownLineForDiff(text),
+      end: start + text.length,
+      start,
+      text,
+    };
+  });
+}
+
+function buildMarkdownLineDiffAnchors(
+  beforeLines: MarkdownDocumentLine[],
+  afterLines: MarkdownDocumentLine[],
+) {
+  const rowCount = beforeLines.length + 1;
+  const columnCount = afterLines.length + 1;
+  if (rowCount * columnCount > 1_000_000) {
+    return buildGreedyMarkdownLineAnchors(beforeLines, afterLines);
+  }
+
+  const lengths = new Uint32Array(rowCount * columnCount);
+  const offset = (row: number, column: number) => row * columnCount + column;
+  for (let row = beforeLines.length - 1; row >= 0; row -= 1) {
+    for (let column = afterLines.length - 1; column >= 0; column -= 1) {
+      lengths[offset(row, column)] =
+        beforeLines[row]?.compareText === afterLines[column]?.compareText
+          ? lengths[offset(row + 1, column + 1)] + 1
+          : Math.max(lengths[offset(row + 1, column)], lengths[offset(row, column + 1)]);
+    }
+  }
+
+  const anchors: Array<{ afterIndex: number; beforeIndex: number }> = [];
+  let beforeIndex = 0;
+  let afterIndex = 0;
+  while (beforeIndex < beforeLines.length && afterIndex < afterLines.length) {
+    if (beforeLines[beforeIndex]?.compareText === afterLines[afterIndex]?.compareText) {
+      anchors.push({ beforeIndex, afterIndex });
+      beforeIndex += 1;
+      afterIndex += 1;
+      continue;
+    }
+
+    if (lengths[offset(beforeIndex + 1, afterIndex)] >= lengths[offset(beforeIndex, afterIndex + 1)]) {
+      beforeIndex += 1;
+    } else {
+      afterIndex += 1;
+    }
+  }
+
+  return anchors;
+}
+
+function buildGreedyMarkdownLineAnchors(
+  beforeLines: MarkdownDocumentLine[],
+  afterLines: MarkdownDocumentLine[],
+) {
+  const anchors: Array<{ afterIndex: number; beforeIndex: number }> = [];
+  let beforeCursor = 0;
+  for (let afterIndex = 0; afterIndex < afterLines.length; afterIndex += 1) {
+    const compareText = afterLines[afterIndex]?.compareText;
+    if (compareText == null) {
+      continue;
+    }
+
+    const beforeIndex = beforeLines.findIndex(
+      (line, index) => index >= beforeCursor && line.compareText === compareText,
+    );
+    if (beforeIndex < 0) {
+      continue;
+    }
+
+    anchors.push({ beforeIndex, afterIndex });
+    beforeCursor = beforeIndex + 1;
+  }
+
+  return anchors;
+}
+
+function normalizeMarkdownLineForDiff(line: string) {
+  const normalizedLineEndings = line.replace(/\r\n/g, "\n").replace(/\r$/g, "");
+  const normalizedLinks = normalizedLineEndings
+    .replace(/\[`([^`]+)`\]\([^)]+\)/g, "`$1`")
+    .replace(/(?<!!)\[([^\]]+)\]\([^)]+\)/g, "$1");
+  if (isMarkdownTableSeparatorLine(normalizedLinks)) {
+    return normalizedLinks.replace(/:?-{3,}:?/g, "---").replace(/\s+/g, "");
+  }
+  return normalizedLinks;
+}
+
+function isMarkdownTableSeparatorLine(line: string) {
+  return /^\s*\|?\s*:?-{3,}:?\s*(?:\|\s*:?-{3,}:?\s*)+\|?\s*$/.test(line);
+}
+
+function joinMarkdownDiffLines(lines: string[]) {
+  if (lines.length === 0) {
+    return "";
+  }
+
+  return `${lines.join("\n")}\n`;
+}
+
+function formatMarkdownSideSource(source: GitDiffDocumentSide["source"]) {
+  switch (source) {
+    case "head":
+      return "HEAD";
+    case "index":
+      return "Index";
+    case "worktree":
+      return "Worktree";
+    case "empty":
+      return "Empty";
+    case "patch":
+      return "Patch";
+  }
+}
+
+function defaultDiffViewMode(
+  hasStructuredPreview: boolean,
+  hasFilePath: boolean,
+  preferMarkdownView = false,
+): DiffViewMode {
+  if (preferMarkdownView) {
+    return "markdown";
+  }
+
   if (hasStructuredPreview) {
     return "all";
   }
@@ -1449,6 +2699,10 @@ function formatLanguageLabel(language: string | null | undefined, path: string |
   }
 
   return LANGUAGE_LABELS[resolved] ?? resolved.replace(/[-_]+/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+function isMarkdownDocument(language: string | null | undefined, path: string | null | undefined) {
+  return resolveMonacoLanguage(language ?? null, path ?? null) === "markdown";
 }
 
 function getErrorMessage(error: unknown) {
