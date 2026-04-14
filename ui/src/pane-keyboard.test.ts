@@ -83,6 +83,72 @@ describe("resolvePaneScrollCommand", () => {
     ).toEqual({ kind: "boundary", direction: "up" });
   });
 
+  it("keeps Home and End inside textareas even when the caret starts at the boundary", () => {
+    const textarea = document.createElement("textarea");
+    textarea.value = "first\nsecond";
+    textarea.setSelectionRange(0, 0);
+
+    expect(
+      resolvePaneScrollCommand(
+        {
+          altKey: false,
+          ctrlKey: false,
+          key: "Home",
+          metaKey: false,
+          shiftKey: false,
+        },
+        textarea,
+        "Win32",
+      ),
+    ).toBeNull();
+    expect(
+      resolvePaneScrollCommand(
+        {
+          altKey: false,
+          ctrlKey: false,
+          key: "End",
+          metaKey: false,
+          shiftKey: false,
+        },
+        textarea,
+        "Win32",
+      ),
+    ).toBeNull();
+  });
+
+  it("maps Ctrl+Home and Ctrl+End from textareas to conversation boundaries", () => {
+    const textarea = document.createElement("textarea");
+    textarea.value = "first\nsecond";
+    textarea.setSelectionRange(0, 0);
+
+    expect(
+      resolvePaneScrollCommand(
+        {
+          altKey: false,
+          ctrlKey: true,
+          key: "Home",
+          metaKey: false,
+          shiftKey: false,
+        },
+        textarea,
+        "Win32",
+      ),
+    ).toEqual({ kind: "boundary", direction: "up" });
+    expect(
+      resolvePaneScrollCommand(
+        {
+          altKey: false,
+          ctrlKey: true,
+          key: "End",
+          metaKey: false,
+          shiftKey: false,
+        },
+        textarea,
+        "Win32",
+      ),
+    ).toEqual({ kind: "boundary", direction: "down" });
+  });
+
   it("does not map Ctrl+ArrowUp on Apple platforms", () => {
     expect(
       resolvePaneScrollCommand(

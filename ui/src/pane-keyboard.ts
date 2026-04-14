@@ -43,6 +43,23 @@ export function resolvePaneScrollCommand(
   target: EventTarget | null,
   platform = detectPlatform(),
 ): PaneScrollCommand | null {
+  if (event.key === "Home" || event.key === "End") {
+    if (!event.ctrlKey && !event.metaKey && shouldKeepPlainHomeEndInTarget(target)) {
+      return null;
+    }
+
+    if (event.ctrlKey || event.metaKey) {
+      return { kind: "boundary", direction: event.key === "Home" ? "up" : "down" };
+    }
+
+    // Plain Home/End when not in text entry still jumps to the pane boundary.
+    if (!event.altKey && !event.shiftKey) {
+      return { kind: "boundary", direction: event.key === "Home" ? "up" : "down" };
+    }
+
+    return null;
+  }
+
   if (!shouldHandlePanePageKey(target)) {
     return null;
   }
@@ -53,21 +70,6 @@ export function resolvePaneScrollCommand(
     }
 
     return makePaneScrollCommand(event.key === "PageUp" ? "up" : "down", event.shiftKey);
-  }
-
-  // Ctrl+Home / Ctrl+End — standard Windows/Linux jump to boundary.
-  // Cmd+Home / Cmd+End on macOS.
-  if (event.key === "Home" || event.key === "End") {
-    if (event.ctrlKey || event.metaKey) {
-      return { kind: "boundary", direction: event.key === "Home" ? "up" : "down" };
-    }
-
-    // Plain Home/End when not in a text input — jump to boundary.
-    if (!event.altKey && !event.shiftKey) {
-      return { kind: "boundary", direction: event.key === "Home" ? "up" : "down" };
-    }
-
-    return null;
   }
 
   if (event.key !== "ArrowUp" && event.key !== "ArrowDown") {
@@ -83,6 +85,22 @@ export function resolvePaneScrollCommand(
 
 function hasCaretAtStart(element: HTMLInputElement | HTMLTextAreaElement): boolean {
   return element.selectionStart === 0 && element.selectionEnd === 0;
+}
+
+function shouldKeepPlainHomeEndInTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) {
+    return false;
+  }
+
+  if (target instanceof HTMLTextAreaElement) {
+    return true;
+  }
+
+  if (target instanceof HTMLInputElement) {
+    return TEXT_ENTRY_INPUT_TYPES.has(target.type);
+  }
+
+  return target instanceof HTMLSelectElement || isEditableContainer(target);
 }
 
 function isEditableContainer(target: HTMLElement): boolean {

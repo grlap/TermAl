@@ -1420,6 +1420,146 @@ describe("DiffPanel", () => {
     expect(window.getSelection()?.anchorNode).toBe(textNode);
   });
 
+  it("moves the rendered Markdown caret with PageUp and PageDown", async () => {
+    fetchFileMock.mockResolvedValue({
+      content: "Shared intro.\n# Draft document\nShared middle.\nReady to commit.\nShared outro.\n",
+      language: "markdown",
+      path: "/repo/README.md",
+    });
+
+    await act(async () => {
+      render(
+        <DiffPanel
+          appearance="dark"
+          fontSizePx={13}
+          changeType="edit"
+          diff={[
+            "@@ -1,5 +1,5 @@",
+            " Shared intro.",
+            "-# Base document",
+            "+# Draft document",
+            " Shared middle.",
+            "-Committed text.",
+            "+Ready to commit.",
+            " Shared outro.",
+          ].join("\n")}
+          documentContent={{
+            before: {
+              content: "Shared intro.\n# Base document\nShared middle.\nCommitted text.\nShared outro.\n",
+              source: "index",
+            },
+            after: {
+              content: "Shared intro.\n# Draft document\nShared middle.\nReady to commit.\nShared outro.\n",
+              source: "worktree",
+            },
+            canEdit: true,
+            isCompleteDocument: true,
+          }}
+          diffMessageId="diff-markdown-page-caret"
+          filePath="/repo/README.md"
+          gitSectionId="unstaged"
+          language="markdown"
+          sessionId="session-1"
+          workspaceRoot="/repo"
+          onOpenPath={() => {}}
+          onSaveFile={async () => {}}
+          summary="Updated README"
+        />,
+      );
+    });
+
+    const editableSections = await waitFor(() => {
+      const sections = document.querySelectorAll<HTMLElement>("[data-markdown-editable='true']");
+      expect(sections.length).toBeGreaterThan(2);
+      return sections;
+    });
+
+    setCaretInText(editableSections[1], "Draft document", 3);
+    fireEvent.keyDown(editableSections[1], { key: "PageDown" });
+
+    expect(document.activeElement).toBe(editableSections[2]);
+    expect(window.getSelection()?.anchorNode?.nodeType).toBe(Node.TEXT_NODE);
+    expect(editableSections[2].contains(window.getSelection()?.anchorNode ?? null)).toBe(true);
+
+    fireEvent.keyDown(editableSections[2], { key: "PageUp" });
+
+    expect(document.activeElement).toBe(editableSections[1]);
+    expect(window.getSelection()?.anchorNode?.nodeType).toBe(Node.TEXT_NODE);
+    expect(editableSections[1].contains(window.getSelection()?.anchorNode ?? null)).toBe(true);
+  });
+
+  it("keeps a visible caret when leaving a dirty rendered Markdown section", async () => {
+    fetchFileMock.mockResolvedValue({
+      content: "Shared intro.\n# Draft document\nShared middle.\nReady to commit.\nShared outro.\n",
+      language: "markdown",
+      path: "/repo/README.md",
+    });
+
+    await act(async () => {
+      render(
+        <DiffPanel
+          appearance="dark"
+          fontSizePx={13}
+          changeType="edit"
+          diff={[
+            "@@ -1,5 +1,5 @@",
+            " Shared intro.",
+            "-# Base document",
+            "+# Draft document",
+            " Shared middle.",
+            "-Committed text.",
+            "+Ready to commit.",
+            " Shared outro.",
+          ].join("\n")}
+          documentContent={{
+            before: {
+              content: "Shared intro.\n# Base document\nShared middle.\nCommitted text.\nShared outro.\n",
+              source: "index",
+            },
+            after: {
+              content: "Shared intro.\n# Draft document\nShared middle.\nReady to commit.\nShared outro.\n",
+              source: "worktree",
+            },
+            canEdit: true,
+            isCompleteDocument: true,
+          }}
+          diffMessageId="diff-markdown-dirty-caret-crossing"
+          filePath="/repo/README.md"
+          gitSectionId="unstaged"
+          language="markdown"
+          sessionId="session-1"
+          workspaceRoot="/repo"
+          onOpenPath={() => {}}
+          onSaveFile={async () => {}}
+          summary="Updated README"
+        />,
+      );
+    });
+
+    const addedSections = await waitFor(() => {
+      const sections = document.querySelectorAll<HTMLElement>(
+        ".markdown-diff-rendered-section-added [data-markdown-editable='true']",
+      );
+      expect(sections.length).toBeGreaterThanOrEqual(2);
+      return sections;
+    });
+    const section = Array.from(addedSections).find((candidate) =>
+      candidate.textContent?.includes("Ready to commit."),
+    );
+    expect(section).toBeTruthy();
+
+    editRenderedMarkdownSection(section!, "<p>Ready to ship.</p>");
+    setCaret(section!, "end");
+    fireEvent.keyDown(section!, { key: "ArrowDown" });
+
+    const activeElement = document.activeElement;
+    expect(activeElement).toBeInstanceOf(HTMLElement);
+    expect((activeElement as HTMLElement).dataset.markdownEditable).toBe("true");
+    expect(activeElement).toHaveTextContent("Shared outro.");
+    expect(window.getSelection()?.anchorNode?.nodeType).toBe(Node.TEXT_NODE);
+    expect((activeElement as HTMLElement).contains(window.getSelection()?.anchorNode ?? null)).toBe(true);
+  });
+
   // Regression: the previous freeze pattern captured a single
   // `frozenSegmentSourceContentRef` that was only thawed when the
   // `activeEditingCount` read 0 during render. When the user committed

@@ -1,5 +1,6 @@
 import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { FormEvent, KeyboardEvent, ReactNode } from "react";
+import { flushSync } from "react-dom";
 import {
   fetchFile,
   fetchReviewDocument,
@@ -1904,11 +1905,30 @@ function EditableRenderedMarkdownSection({
       return;
     }
 
+    if (event.key === "PageDown" || event.key === "PageUp") {
+      if (
+        moveEditableMarkdownCaretByPage(
+          event.currentTarget,
+          event.key === "PageDown" ? 1 : -1,
+          () => {
+            flushSync(() => commitSectionEdit(event.currentTarget));
+          },
+        )
+      ) {
+        event.preventDefault();
+      }
+      return;
+    }
+
     if (
       event.key === "ArrowDown" &&
       isSelectionAtEditableSectionBoundary(event.currentTarget, "end")
     ) {
-      if (focusAdjacentEditableMarkdownSection(event.currentTarget, 1)) {
+      if (
+        focusAdjacentEditableMarkdownSection(event.currentTarget, 1, () => {
+          flushSync(() => commitSectionEdit(event.currentTarget));
+        })
+      ) {
         event.preventDefault();
       }
       return;
@@ -1918,7 +1938,11 @@ function EditableRenderedMarkdownSection({
       event.key === "ArrowRight" &&
       isSelectionAtEditableSectionBoundary(event.currentTarget, "end")
     ) {
-      if (focusAdjacentEditableMarkdownSection(event.currentTarget, 1)) {
+      if (
+        focusAdjacentEditableMarkdownSection(event.currentTarget, 1, () => {
+          flushSync(() => commitSectionEdit(event.currentTarget));
+        })
+      ) {
         event.preventDefault();
       }
       return;
@@ -1928,7 +1952,11 @@ function EditableRenderedMarkdownSection({
       event.key === "ArrowUp" &&
       isSelectionAtEditableSectionBoundary(event.currentTarget, "start")
     ) {
-      if (focusAdjacentEditableMarkdownSection(event.currentTarget, -1)) {
+      if (
+        focusAdjacentEditableMarkdownSection(event.currentTarget, -1, () => {
+          flushSync(() => commitSectionEdit(event.currentTarget));
+        })
+      ) {
         event.preventDefault();
       }
       return;
@@ -1938,7 +1966,11 @@ function EditableRenderedMarkdownSection({
       event.key === "ArrowLeft" &&
       isSelectionAtEditableSectionBoundary(event.currentTarget, "start")
     ) {
-      if (focusAdjacentEditableMarkdownSection(event.currentTarget, -1)) {
+      if (
+        focusAdjacentEditableMarkdownSection(event.currentTarget, -1, () => {
+          flushSync(() => commitSectionEdit(event.currentTarget));
+        })
+      ) {
         event.preventDefault();
       }
     }
@@ -2157,8 +2189,12 @@ function isSelectionAtEditableSectionBoundary(
   return caretRange.compareBoundaryPoints(Range.START_TO_START, boundaryRange) >= 0;
 }
 
-function focusAdjacentEditableMarkdownSection(currentSection: HTMLElement, direction: -1 | 1) {
-  const scrollRegion = currentSection.closest(".markdown-diff-change-scroll");
+function focusAdjacentEditableMarkdownSection(
+  currentSection: HTMLElement,
+  direction: -1 | 1,
+  beforeFocus?: () => void,
+) {
+  const scrollRegion = currentSection.closest<HTMLElement>(".markdown-diff-change-scroll");
   if (!scrollRegion) {
     return false;
   }
@@ -2171,13 +2207,140 @@ function focusAdjacentEditableMarkdownSection(currentSection: HTMLElement, direc
     return false;
   }
 
-  const nextSection = editableSections[currentIndex + direction];
+  const targetIndex = currentIndex + direction;
+  if (targetIndex < 0 || targetIndex >= editableSections.length) {
+    return false;
+  }
+
+  beforeFocus?.();
+
+  const latestEditableSections = Array.from(
+    scrollRegion.querySelectorAll<HTMLElement>("[data-markdown-editable='true']"),
+  );
+  const latestCurrentIndex = latestEditableSections.indexOf(currentSection);
+  const resolvedTargetIndex = latestCurrentIndex >= 0 ? latestCurrentIndex + direction : targetIndex;
+  const nextSection = latestEditableSections[resolvedTargetIndex];
+  if (!nextSection) {
+    return false;
+  }
+
+  const shouldPreserveScroll = isElementVisibleWithinScrollRegion(nextSection, scrollRegion);
+  const previousScrollTop = scrollRegion.scrollTop;
+  placeCaretInEditableMarkdownSection(nextSection, direction > 0 ? "start" : "end");
+  if (shouldPreserveScroll) {
+    scrollRegion.scrollTop = previousScrollTop;
+    window.requestAnimationFrame(() => {
+      scrollRegion.scrollTop = previousScrollTop;
+    });
+  }
+  return true;
+}
+
+function moveEditableMarkdownCaretByPage(
+  currentSection: HTMLElement,
+  direction: -1 | 1,
+  beforeMove?: () => void,
+) {
+  const scrollRegion = currentSection.closest<HTMLElement>(".markdown-diff-change-scroll");
+  if (!scrollRegion) {
+    return false;
+  }
+
+  const editableSections = Array.from(
+    scrollRegion.querySelectorAll<HTMLElement>("[data-markdown-editable='true']"),
+  );
+  const currentIndex = editableSections.indexOf(currentSection);
+  if (currentIndex < 0) {
+    return false;
+  }
+
+  const targetIndex = resolveEditableMarkdownPageTargetIndex(
+    editableSections,
+    currentSection,
+    scrollRegion,
+    currentIndex,
+    direction,
+  );
+  if (targetIndex === currentIndex) {
+    return false;
+  }
+  const targetIndexDelta = targetIndex - currentIndex;
+
+  beforeMove?.();
+
+  const latestEditableSections = Array.from(
+    scrollRegion.querySelectorAll<HTMLElement>("[data-markdown-editable='true']"),
+  );
+  const latestCurrentIndex = latestEditableSections.indexOf(currentSection);
+  const resolvedTargetIndex =
+    latestCurrentIndex >= 0
+      ? latestCurrentIndex + targetIndexDelta
+      : targetIndex;
+  const nextSection = latestEditableSections[
+    clampNumber(resolvedTargetIndex, 0, latestEditableSections.length - 1)
+  ];
   if (!nextSection) {
     return false;
   }
 
   placeCaretInEditableMarkdownSection(nextSection, direction > 0 ? "start" : "end");
+  nextSection.scrollIntoView?.({ block: "nearest" });
   return true;
+}
+
+function resolveEditableMarkdownPageTargetIndex(
+  editableSections: HTMLElement[],
+  currentSection: HTMLElement,
+  scrollRegion: HTMLElement,
+  currentIndex: number,
+  direction: -1 | 1,
+) {
+  const fallbackIndex = clampNumber(currentIndex + direction, 0, editableSections.length - 1);
+  const scrollRegionRect = scrollRegion.getBoundingClientRect();
+  const currentRect = currentSection.getBoundingClientRect();
+  if (
+    scrollRegion.clientHeight <= 0 ||
+    scrollRegionRect.height <= 0 ||
+    currentRect.height <= 0
+  ) {
+    return fallbackIndex;
+  }
+
+  const pageDistance = Math.max(scrollRegion.clientHeight * 0.85, 160);
+  const currentBoundaryY =
+    direction > 0
+      ? currentRect.bottom + scrollRegion.scrollTop - scrollRegionRect.top
+      : currentRect.top + scrollRegion.scrollTop - scrollRegionRect.top;
+  const targetY = currentBoundaryY + direction * pageDistance;
+
+  if (direction > 0) {
+    const targetIndex = editableSections.findIndex((section, index) => {
+      if (index <= currentIndex) {
+        return false;
+      }
+
+      const sectionTop = section.getBoundingClientRect().top + scrollRegion.scrollTop - scrollRegionRect.top;
+      return sectionTop >= targetY;
+    });
+    return targetIndex >= 0 ? targetIndex : editableSections.length - 1;
+  }
+
+  for (let index = currentIndex - 1; index >= 0; index -= 1) {
+    const sectionBottom =
+      editableSections[index].getBoundingClientRect().bottom +
+      scrollRegion.scrollTop -
+      scrollRegionRect.top;
+    if (sectionBottom <= targetY) {
+      return index;
+    }
+  }
+  return 0;
+}
+
+function isElementVisibleWithinScrollRegion(element: HTMLElement, scrollRegion: HTMLElement) {
+  const elementRect = element.getBoundingClientRect();
+  const scrollRegionRect = scrollRegion.getBoundingClientRect();
+  return elementRect.bottom >= scrollRegionRect.top && elementRect.top <= scrollRegionRect.bottom;
 }
 
 function placeCaretInEditableMarkdownSection(section: HTMLElement, boundary: "end" | "start") {
@@ -2241,6 +2404,10 @@ function isNodeInsideSkippedMarkdownEditableNode(node: Node, root: HTMLElement) 
     current = current.parentElement;
   }
   return false;
+}
+
+function clampNumber(value: number, min: number, max: number) {
+  return Math.min(Math.max(value, min), max);
 }
 
 function formatMarkdownSideSource(source: MarkdownDiffPreviewSideSource) {
