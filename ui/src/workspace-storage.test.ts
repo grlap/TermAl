@@ -160,6 +160,73 @@ describe("workspace storage", () => {
     expect(getStoredWorkspaceLayout(workspaceViewId)).toEqual(layout);
   });
 
+  it("strips full Markdown diff document content before persisting layout", () => {
+    const layout: StoredWorkspaceLayout = {
+      controlPanelSide: "right",
+      workspace: {
+        root: {
+          type: "pane",
+          paneId: "pane-diff",
+        },
+        panes: [
+          {
+            id: "pane-diff",
+            tabs: [
+              {
+                id: "tab-diff",
+                kind: "diffPreview",
+                changeType: "edit",
+                diff: "-before\n+after",
+                documentContent: {
+                  before: {
+                    content: "secret before",
+                    source: "head",
+                  },
+                  after: {
+                    content: "secret after",
+                    source: "worktree",
+                  },
+                  canEdit: true,
+                  isCompleteDocument: true,
+                },
+                diffMessageId: "diff-1",
+                filePath: "/repo/README.md",
+                gitDiffRequest: {
+                  path: "README.md",
+                  sectionId: "unstaged",
+                  workdir: "/repo",
+                },
+                gitDiffRequestKey: "git-preview:pane-diff:/repo:unstaged::README.md",
+                language: "markdown",
+                originSessionId: "session-1",
+                summary: "Updated README",
+              },
+            ],
+            activeTabId: "tab-diff",
+            activeSessionId: "session-1",
+            viewMode: "diffPreview",
+            lastSessionViewMode: "session",
+            sourcePath: null,
+          },
+        ],
+        activePaneId: "pane-diff",
+      },
+    };
+
+    persistWorkspaceLayout(workspaceViewId, layout);
+
+    const stored = window.localStorage.getItem(`${WORKSPACE_LAYOUT_STORAGE_KEY}:${workspaceViewId}`);
+    expect(stored).not.toContain("secret before");
+    expect(stored).not.toContain("secret after");
+    const parsedTab = getStoredWorkspaceLayout(workspaceViewId)?.workspace.panes[0]?.tabs[0];
+    expect(parsedTab?.id).toBe("tab-diff");
+    expect(parsedTab).toEqual(
+      expect.not.objectContaining({
+        documentContent: expect.anything(),
+      }),
+    );
+  });
+
   it("removes a stored workspace layout by workspace id", () => {
     const layout: StoredWorkspaceLayout = {
       controlPanelSide: "left",

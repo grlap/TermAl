@@ -1818,10 +1818,6 @@ function VirtualizedConversationMessageList({
     [sessionId, onCodexAppRequestSubmit],
   );
 
-  if (!isActive) {
-    return null;
-  }
-
   return (
     <div className="virtualized-message-list" style={{ height: layout.totalHeight }}>
       {hasOlderMessages && visibleRange.startIndex === 0 && (
@@ -1850,9 +1846,10 @@ function VirtualizedConversationMessageList({
           return (
             <MeasuredMessageCard
               key={message.id}
+              isActive={isActive}
               renderMessageCard={renderMessageCard}
               message={message}
-              preferImmediateHeavyRender={messageIndex >= windowedMessages.length - 2}
+              preferImmediateHeavyRender={isActive && messageIndex >= windowedMessages.length - 2}
               top={layout.tops[messageIndex] ?? 0}
               onApprovalDecision={boundApprovalDecision}
               onUserInputSubmit={boundUserInputSubmit}
@@ -1867,6 +1864,7 @@ function VirtualizedConversationMessageList({
 }
 
 const MeasuredMessageCard = memo(function MeasuredMessageCard({
+  isActive,
   renderMessageCard,
   message,
   preferImmediateHeavyRender,
@@ -1877,6 +1875,7 @@ const MeasuredMessageCard = memo(function MeasuredMessageCard({
   onHeightChange,
   top,
 }: {
+  isActive: boolean;
   renderMessageCard: RenderMessageCard;
   message: Message;
   preferImmediateHeavyRender: boolean;
@@ -1890,6 +1889,10 @@ const MeasuredMessageCard = memo(function MeasuredMessageCard({
   const slotRef = useRef<HTMLDivElement | null>(null);
 
   useLayoutEffect(() => {
+    if (!isActive) {
+      return;
+    }
+
     const node = slotRef.current;
     if (!node) {
       return;
@@ -1917,7 +1920,7 @@ const MeasuredMessageCard = memo(function MeasuredMessageCard({
         window.cancelAnimationFrame(frameId);
       }
     };
-  }, [message, onHeightChange]);
+  }, [isActive, message, onHeightChange]);
 
   return (
     <div ref={slotRef} className="virtualized-message-slot" style={{ top }}>

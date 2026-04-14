@@ -268,6 +268,7 @@ import {
   type PaneViewMode,
   type SessionPaneViewMode,
   type TabDropPlacement,
+  type WorkspaceDiffPreviewTab,
   type WorkspaceNode,
   type WorkspacePane,
   type WorkspaceState,
@@ -3819,6 +3820,118 @@ export default function App() {
   useEffect(() => {
     draftAttachmentsRef.current = draftAttachmentsBySessionId;
   }, [draftAttachmentsBySessionId]);
+
+  // Re-fetch Git diff preview tabs that were restored from the persisted
+  // workspace layout without their `documentContent`. The persist path
+  // strips `documentContent` via
+  // `stripDiffPreviewDocumentContentFromWorkspaceState` so we do not leak
+  // worktree bytes into localStorage, but that leaves restored full-document
+  // Markdown diffs reopening as read-only patch previews. This mount-only
+  // effect walks the workspace once, identifies the restored tabs with a
+  // live `gitDiffRequest` but no `documentContent`, and triggers a
+  // `fetchGitDiff` for each so the rendered Markdown mode becomes
+  // available as soon as the fetch completes.
+  useEffect(() => {
+    type Restore = {
+      tab: WorkspaceDiffPreviewTab;
+      paneId: string;
+      requestKey: string;
+      request: GitDiffRequestPayload;
+      sectionId: GitDiffSection;
+    };
+    const restores: Restore[] = [];
+    for (const pane of workspaceRef.current.panes) {
+      for (const tab of pane.tabs) {
+        if (tab.kind !== "diffPreview") {
+          continue;
+        }
+        if (
+          tab.documentContent ||
+          !tab.gitDiffRequestKey ||
+          !tab.gitDiffRequest
+        ) {
+          continue;
+        }
+        restores.push({
+          tab,
+          paneId: pane.id,
+          requestKey: tab.gitDiffRequestKey,
+          request: tab.gitDiffRequest,
+          sectionId: tab.gitSectionId ?? tab.gitDiffRequest.sectionId,
+        });
+      }
+    }
+    if (restores.length === 0) {
+      return;
+    }
+
+    for (const restore of restores) {
+      const currentVersion =
+        (gitDiffPreviewRefreshVersionsRef.current.get(restore.requestKey) ?? 0) + 1;
+      gitDiffPreviewRefreshVersionsRef.current.set(restore.requestKey, currentVersion);
+
+      void fetchGitDiff(restore.request)
+        .then((diffPreview) => {
+          if (
+            gitDiffPreviewRefreshVersionsRef.current.get(restore.requestKey) !==
+            currentVersion
+          ) {
+            return;
+          }
+          setWorkspace((current) =>
+            applyControlPanelLayout(
+              updateGitDiffPreviewTabInWorkspaceState(
+                current,
+                restore.requestKey,
+                (tab) => ({
+                  ...tab,
+                  changeType: diffPreview.changeType,
+                  changeSetId: diffPreview.changeSetId ?? null,
+                  diff: diffPreview.diff,
+                  documentContent: diffPreview.documentContent ?? null,
+                  filePath: diffPreview.filePath ?? tab.filePath,
+                  gitSectionId: restore.sectionId,
+                  language: diffPreview.language ?? null,
+                  summary: diffPreview.summary,
+                  isLoading: false,
+                  loadError: null,
+                }),
+              ),
+            ),
+          );
+        })
+        .catch((error) => {
+          if (
+            gitDiffPreviewRefreshVersionsRef.current.get(restore.requestKey) !==
+            currentVersion
+          ) {
+            return;
+          }
+          // Leave the tab visible but note the failure so the user can
+          // reopen it manually. We deliberately do NOT close the tab — the
+          // persisted stub still has a valid filePath + diff for raw
+          // inspection.
+          const errorMessage = getErrorMessage(error);
+          setWorkspace((current) =>
+            applyControlPanelLayout(
+              updateGitDiffPreviewTabInWorkspaceState(
+                current,
+                restore.requestKey,
+                (tab) => ({
+                  ...tab,
+                  isLoading: false,
+                  loadError: errorMessage,
+                }),
+              ),
+            ),
+          );
+        });
+    }
+    // Run once on mount. `workspaceRef` is a ref, not a reactive dep, so this
+    // effect does not re-run on workspace state updates — subsequent refreshes
+    // flow through the file-change watcher path below.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     if (!workspaceFilesChangedEvent) {
@@ -11936,12 +12049,13 @@ function SessionPaneView({
               }
               workspaceRoot={activeDiffWorkspaceRoot}
               workspaceFilesChangedEvent={workspaceFilesChangedEvent}
-              onOpenPath={(path) =>
+              onOpenPath={(path, options) =>
                 onOpenSourceTab(
                   pane.id,
                   path,
                   activeDiffOriginSessionId,
                   activeDiffOriginProjectId,
+                  options,
                 )
               }
               onInsertReviewIntoPrompt={

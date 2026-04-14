@@ -161,7 +161,7 @@ export type GitStatusResponse = {
 export type GitFileAction = "revert" | "stage" | "unstage";
 export type GitDiffSection = "staged" | "unstaged";
 
-export type GitDiffDocumentSideSource = "head" | "index" | "worktree" | "empty" | "patch";
+export type GitDiffDocumentSideSource = "head" | "index" | "worktree" | "empty";
 
 export type GitDiffDocumentSide = {
   content: string;
@@ -196,6 +196,12 @@ export type GitCommitResponse = {
 export type GitRepoActionResponse = {
   status: GitStatusResponse;
   summary: string;
+};
+
+export type OpenPathOptions = {
+  line?: number;
+  column?: number;
+  openInNewTab?: boolean;
 };
 
 export type TerminalCommandResponse = {

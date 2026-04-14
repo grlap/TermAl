@@ -5,450 +5,139 @@ and cleanup notes do not belong here.
 
 ## Active Repo Bugs
 
-## Normalize_git_repo_relative_path accepts Unix-rooted paths on Windows
+## Rendered Markdown section draft is silently dropped when save starts mid-edit
 
-**Severity:** High - a crafted Git diff request can read files outside the repository on Windows.
+**Severity:** High - typing into a rendered Markdown section while a save is in progress produces a user edit that looks committed but is never persisted.
 
-`normalize_git_repo_relative_path` rejects paths where `Path::is_absolute()` is true, but on Windows that predicate returns `false` for Unix-rooted paths like `/etc/passwd` or `\etc\passwd` (Windows considers only drive-prefixed or UNC paths "absolute"). `PathBuf::join` then rebinds a rooted-but-not-absolute path to the root of the current drive, so `repo_root.join("/etc/passwd")` becomes `C:\etc\passwd`. `read_git_worktree_text` then reads that file. The `language == "markdown"` extension gate is trivially bypassed by naming any file `.md`. Windows is a P0 platform.
+`EditableRenderedMarkdownSection` in `ui/src/panels/DiffPanel.tsx` renders the textarea based solely on its local `isEditing` state, not on `canEdit`. Meanwhile, the parent's `canEditRenderedMarkdown` gate includes `!isSaving`. When a save kicks off (`isSaving` flips true), the parent gate closes, but the child's textarea stays visible because local `isEditing` is still true. The user can keep typing. On blur, `commitDraft` calls `onChange`, which calls `handleRenderedMarkdownSectionChange`, which guards on `!canEditRenderedMarkdown || !markdownPreview || latestFileRef.current.status !== "ready"` and returns early without updating `editValue` or `markdownEditContent`. The draft is silently dropped and the Save button shows "Saved" even though the user's edit was discarded.
 
-**Current behavior:**
-- `is_absolute()` does not catch `/foo` or `\foo` on Windows.
-- The `..` split check passes rooted paths.
-- `fs::read(repo_root.join(path))` reads arbitrary files on the same drive as the repo.
-
-**Proposal:**
-- Also reject `Path::has_root()` (or `trimmed.starts_with('/') || trimmed.starts_with('\\')`) in `normalize_git_repo_relative_path`.
-- Add regression tests for `/etc/passwd`, `\etc\passwd`, and `./foo` on both Windows and Unix.
-
-## Rendered Markdown serializer has no escaping for prose special characters
-
-**Severity:** High - editing rendered Markdown can silently corrupt unchanged prose, tables, and code blocks.
-
-`serializeEditableMarkdownSection` and its block/inline helpers emit Markdown without escaping `*`, `_`, `` ` ``, `#`, `[`, `]`, `(`, `)`, `|`, `\`, `>`, `!`, or hard line breaks. Round-tripping a section containing literal `*not italic*`, `# not heading`, a code block whose content contains ``` ``` ```, a table cell with `|`, or `<br>` inside `<p>` silently rewrites the source. Additional gaps: `.trim()` at the block level drops significant whitespace between inline elements (collapsing `<strong>a</strong> <em>b</em>` to `**a***b*`), `<img>` has no case so all images are stripped, nested non-list blocks inside `<li>` are dropped, and workspace file-link hrefs round-trip as absolute paths even for unchanged links.
+In the Ctrl+S-from-textarea path this is impossible because the textarea's `handleTextareaKeyDown` explicitly calls `commitDraft(event.currentTarget.value)` BEFORE `onSave()`. But the same protection doesn't cover any other flow that flips `canEdit` mid-edit: watcher-driven conflict rebase, `documentContent` flipping off, an external click on the Save button while the textarea still has focus, or a concurrent save triggered from another pane.
 
 **Current behavior:**
-- Block and inline serializers emit text verbatim with no escaping.
-- Code-block fences collide with matching backticks inside the code.
-- Table cells with `|` silently create extra columns on re-render.
-- Images disappear on edit.
-- `.trim()` collapses whitespace text nodes between inline elements.
-- Nested list block children (`<p>` inside `<li>`) are dropped.
-- File-link canonicalization mutates untouched relative links to absolute paths.
+- `EditableRenderedMarkdownSection` renders a textarea based on local `isEditing` alone.
+- The parent's `canEditRenderedMarkdown` is not consulted by the child while editing.
+- A mid-edit `isSaving` flip leaves the textarea visible but its commit handler rejects the draft.
+- The Save button resolves to "Saved" before the user's edit is persisted.
 
 **Proposal:**
-- Introduce `escapeMarkdownInline`, `escapeMarkdownTableCell`, and `escapeMarkdownBlock` helpers and apply them in the serializer.
-- Preserve significant whitespace text nodes in inline serialization.
-- Add `<img>` and nested-block handling, and disable edit for sections containing unsupported constructs (`<table>`, `<pre>`, `<img>`, task lists) until round-trip tests cover them.
-- Add round-trip tests for every v1-required Markdown feature.
+- Have `EditableRenderedMarkdownSection` react to `canEdit` flips via a `useEffect([canEdit])` that calls `commitDraft` before forcing `isEditing = false` when the draft is still accepted.
+- Alternatively, surface a visible notice when the commit handler drops a draft (e.g., re-raise `isEditing` and show an "Unable to save — save in progress" chip).
+- Alternatively, gate the commit handler so that an in-flight commit always completes regardless of `isSaving`, by latching `canEditRenderedMarkdown` at the moment `commitDraft` is called rather than re-reading it in the parent.
+- Add a regression test that starts editing, triggers a save (flipping `isSaving` via a deferred mock), then blurs and verifies the draft is persisted.
 
-## Rendered Markdown reset effect wipes undo state on successful saves
+## Line-count-shifting commits can unmount an editing Markdown section elsewhere
 
-**Severity:** High - mid-edit state can be lost when the diff panel refreshes for unrelated reasons.
+**Severity:** High - committing an edit in one Markdown section can silently drop an in-progress edit in another section.
 
-The `useEffect` that resets `viewMode`, editor statuses, `markdownEditContent`, and the undo/redo stacks depends on `[diffMessageId, filePath, preferMarkdownView, preview.hasStructuredPreview]`. Both `preferMarkdownView` and `preview.hasStructuredPreview` are derived values that flip whenever `latestFile.content` changes, `previewSourceContent` changes, or `documentContent.isCompleteDocument` toggles. A successful save updates `latestFile.content`, which flows into `previewSourceContent`, which flips `preview.hasStructuredPreview` for certain diffs — the reset effect then clears `markdownEditContent` and undo history mid-flow.
+`buildFullMarkdownDiffDocumentSegments` in `ui/src/panels/markdown-diff-segments.ts` generates segment React keys that encode positional indices: `added:${segments.length}:${beforeCursor}:${afterCursor}:${afterEnd}`, `normal:${segments.length}:${anchor.beforeIndex}:${anchor.afterIndex}`, etc. When a user commits an edit in section A that adds or removes LINES (e.g., replaces a single-line paragraph with a two-line paragraph), every downstream segment's positional indices shift. Section B's segment id changes, React unmounts the old `EditableRenderedMarkdownSection` for B, and any in-progress local `draftMarkdown` held by B's `useState` is lost. The Plan D comment block explicitly claims "Segments no longer churn during typing ... textarea DOM identity stays stable" — which is true for keystrokes — but the guarantee does NOT extend to line-count-shifting commits in other sections.
+
+The new multi-section commit regression test uses single-line fixtures (`"Section one original." → "Section one revised."`) that preserve the diff's overall shape, so the test passes trivially and does not exercise this scenario.
 
 **Current behavior:**
-- Reset deps include two derived values plus `preferMarkdownView`.
-- A save cycle can trigger the reset and wipe in-progress rendered edits and undo stacks.
-- Users lose undo history after every successful save even if no tab identity change occurred.
+- Segment React keys use positional indices that shift when line counts change.
+- A commit in section A that changes the line count unmounts B's section component.
+- B's local `draftMarkdown` state is lost; the textarea remounts with `isEditing=false`.
+- The user's B-draft is silently discarded without any save or user notice.
 
 **Proposal:**
-- Split tab-identity reset from derived-flag defaulting: only clear `markdownEditContent` and undo/redo stacks on `[diffMessageId, filePath]` change.
-- Thread `preferMarkdownView` only into the initial `useState()` for `viewMode`.
-- Add a regression test that saves mid-edit and asserts undo history survives.
+- Derive segment React keys from a stable hash of the anchor's `compareText` (or a content hash of the line) rather than positional indices. Stable anchors should have stable keys across structural shifts.
+- Alternatively, when a section is `isEditing`, memoize that section's React key on a content-stable identity so line-count shifts upstream don't cause it to unmount.
+- Add a regression test that starts editing section A, commits a multi-line edit that shifts line counts, clicks into section B, types, blurs, saves, and asserts B's edit survived.
 
-## Rendered Markdown diff recomputes LCS on every keystroke
+## Rendered Markdown draft-active flag can leak across documentContent rebases
 
-**Severity:** High - typing inside a rendered Markdown diff scales poorly with document size.
+**Severity:** Medium - `isDirty` can remain true with no corresponding editable buffer after a git refresh invalidates the current rendered segments.
 
-`handleInput` calls `serializeEditableMarkdownSection` on every `input` event, which feeds `handleRenderedMarkdownSectionChange` → `replaceMarkdownDocumentRange` → `setMarkdownEditContentState` → new `markdownDisplayPreview` memo → `buildFullMarkdownDiffDocumentSegments`. That function runs a full LCS scan over the whole document (O(N*M), up to 1,000,000 cells before the greedy fallback) and re-renders N `ReactMarkdown` subtrees. Typing in a mid-size README becomes laggy; large documents are unusable.
+The new dual signal `isDirty = (editValue !== latestFile.content) || hasRenderedDraftActive` in `DiffPanel.tsx` depends on both signals staying correlated. When `documentContent` flips (watcher rebase, git refresh, tab refresh), the effect at `DiffPanel.tsx:281-288` clears `markdownEditContent` if the user has no committed dirty edits (`editValueRef.current === currentFile.content`). But `hasRenderedDraftActive` is NEVER cleared by that effect. If the user had an uncommitted draft in a textarea when the refresh arrived, the segments rebuild, the textarea unmounts (losing the draft), but the flag stays true. `isDirty` reports "unsaved changes" with nothing to save; "Save Markdown" would then write `editValue` — which doesn't reflect the lost draft.
 
 **Current behavior:**
-- Every `input` event triggers a full-document serialize + LCS + N ReactMarkdown re-renders.
-- No debounce or deferred value splits the edit path from the segmentation path.
-- The greedy LCS fallback is still O(N*M) in time (only the memory footprint is bounded).
+- `hasRenderedDraftActive` is only cleared by `handleRenderedMarkdownSectionChange` (commit path) and `setMarkdownEditContentState` on tab swap.
+- The `[documentContent]` reset effect clears `markdownEditContent` but not the flag.
+- A watcher rebase mid-edit leaves `isDirty=true` with no real backing buffer.
+- Save uses whatever `editValue` happens to be, which may not include the dropped draft.
 
 **Proposal:**
-- Debounce the serialize + LCS path with `useDeferredValue`, `startTransition`, or explicit `setTimeout` scheduling.
-- Separate "edit the local section's buffer" from "recompute the full diff view"; only re-run segmentation on blur or save.
-- Replace the greedy LCS fallback with a `Map<compareText, number[]>` index to achieve amortized `O(N + M)`.
+- Include `setHasRenderedDraftActive(false)` in the `[documentContent]` reset effect whenever segments rebuild.
+- Alternatively, propagate draft state up from the child section keyed by segment identity so the parent can reconcile dropped drafts with the flag deterministically.
+- Add a regression test that types a draft, dispatches a watcher event that rebases `documentContent`, and asserts `isDirty` is false or the draft is preserved via some other mechanism.
 
-## Rendered Markdown custom undo/redo fights contentEditable and loses caret state
+## App mount-only diff restore lacks loading indicator and leaks version entries
 
-**Severity:** High - undo/redo inside a rendered Markdown section destroys focus, selection, and scroll position.
+**Severity:** Medium - restored diff preview tabs show stale content with no refresh indicator, and the refresh-version ref grows unbounded over a session.
 
-The custom `Ctrl/Cmd-Z` / `Ctrl/Cmd-Y` path calls `preventDefault()` and replaces document content via `applyRenderedMarkdownContentFromHistory`, which calls `bumpRenderedMarkdownEditRevision`. The revision is a React `key` component, so every undo force-remounts all sections. Browser-native contentEditable undo is destroyed on every keystroke (because React re-renders the subtree), so the custom stack is the only source of truth. After each undo step the caret, focus, and scroll position are lost, and further keystrokes start from the top of the section. Worse, the stack retains full-document snapshots capped at 100, so a 1 MB Markdown document can pin ~100 MB.
+The new mount-only effect at `ui/src/App.tsx:3834-3934` re-fetches Git diff preview tabs whose `documentContent` was stripped during persist. Two gaps: (1) the effect does not set `isLoading: true` on the restored tab before issuing `fetchGitDiff`, so the user sees the persisted patch with no "refreshing" indicator for the duration of the round trip; and (2) `gitDiffPreviewRefreshVersionsRef.current` is added-to here and in the watcher-refresh effect, but never purged when a diff tab is closed. Over a long session with many open/close cycles, the ref map grows monotonically.
 
 **Current behavior:**
-- Every undo/redo bumps `editorRevision`, forcing a full remount of all sections.
-- Browser-native contentEditable undo history is destroyed on every React re-render.
-- Caret position is lost after every undo step.
-- Undo stack stores full-document string snapshots, uncapped by total bytes.
+- The restore effect fires `fetchGitDiff` without touching `isLoading`.
+- Users see the stale persisted patch for the round-trip duration with no visible refresh state.
+- `gitDiffPreviewRefreshVersionsRef` is never purged for closed tabs.
 
 **Proposal:**
-- Stop remounting sections on undo; apply edits imperatively (e.g. `innerHTML` or a stable integer key) so React does not own the subtree during edit.
-- Store operations (offset, removed text, inserted text) instead of full snapshots, or cap by total bytes.
-- Coalesce snapshots by time/identity before pushing.
-- Add a regression test that performs several edits, undoes them one at a time, and asserts the caret position and section state are preserved.
+- Wrap the fetch in an optimistic workspace state update that sets `isLoading: true` on the restored tab, then clears it on success/failure.
+- Purge version entries from `gitDiffPreviewRefreshVersionsRef` in the diff-tab-close path (which already tracks `gitDiffRequestKey`).
+- Optionally abort in-flight mount-time fetches when a tab is closed via `AbortController` to also address the stale-reopen race.
 
-## MarkdownContent components prop identity churns, remounting subtree per keystroke
+## Git diff enrichment size-limit rejections are invisible to the user
 
-**Severity:** High - typing inside a rendered Markdown section loses focus because the entire `ReactMarkdown` subtree unmounts and remounts on every render.
+**Severity:** Medium - Markdown files that exceed the 10 MB enrichment cap silently fall back to patch preview with no indication of why rendered Markdown mode is unavailable.
 
-Inside the `MarkdownContent` memoized `rendered` tree, the `components` object passed to `ReactMarkdown` is recreated as an object literal on every memo re-run. React treats each new object identity as a different component type, so `ReactMarkdown` unmounts the DOM subtree and recreates it. For rendered Markdown editing, `segment.markdown` changes on every keystroke, which re-runs the memo, which creates a new `components` object, which remounts the rendered subtree — losing focus, selection, and caret position inside the contentEditable section.
+`load_git_diff_for_request` in `src/api.rs` silently swallows both `BAD_REQUEST` and `NOT_FOUND` errors from `load_git_diff_document_content`, logging them via `eprintln!` and degrading `document_content` to `None`. That's correct for path-escape and non-UTF-8 (which represent "this file is not enrichable for safety reasons"), but the same fallback also swallows **legitimate** size-limit rejections (`"exceeds the 10 MB read limit"`) and the `O_NOFOLLOW` `ELOOP` `"changed to a symlink"` error. The diff endpoint returns a raw patch; the user sees "Patch preview" with no idea why rendered Markdown view is unavailable; and the diagnostic only hits stderr, which is rarely visible on Windows.
 
 **Current behavior:**
-- `components={{ ... }}` is declared inline inside `useMemo` in `MarkdownContent`.
-- Every memo re-run produces new identity for every sub-component function.
-- Rendered edit sections lose focus on every input event.
+- `BAD_REQUEST` and `NOT_FOUND` from enrichment are uniformly silently degraded.
+- Size-limit rejections produce `eprintln!` warnings only.
+- Users of oversized Markdown files have no UI indication of why rendered mode is off.
 
 **Proposal:**
-- Hoist `components` to a module-level constant, or memoize it via `useMemo(() => ({...}), [stable deps])`.
-- Access callbacks via refs so they do not force memo invalidation.
-- Add a regression test: type a character into a rendered Markdown diff section and assert the caret is still inside the section.
+- Add an optional `documentEnrichmentNote: string | null` field to `GitDiffResponse` that the frontend displays as a footnote on the Markdown diff status bar when `documentContent` is absent but the diff is Markdown.
+- Alternatively, split internal error types (`GitDocumentLoadError::SizeLimit`, `::NotEnrichable`, `::PathEscape`) and only silently drop the ones that are policy-correct; propagate size-limit as a user-visible note.
+- Add a test that creates an oversized Markdown file and asserts the user-facing note is present.
 
-## Rendered Markdown diff editing can save stale content
+## stripLoadingGitDiffPreviewTabsFromWorkspaceState does double duty under a misleading name
 
-**Severity:** High - rendered Markdown edits can diverge from the buffer that
-is actually saved.
+**Severity:** Medium - the function now strips both loading tabs AND documentContent, coupling two unrelated concerns under a name that only advertises the first.
 
-Rendered Markdown diff mode keeps its own `markdownEditContent` state while
-the existing diff editor lifecycle still updates and saves `editValue`.
-Code-mode edits, reloads, disk-change rebases, and post-save sync can leave
-the rendered view showing stale content or can overwrite newer rendered edits
-with an older saved snapshot.
+`ui/src/workspace.ts:1852-1891` — `stripLoadingGitDiffPreviewTabsFromWorkspaceState` was originally a scoped cleanup for in-flight loading tabs. It now also calls `stripDiffPreviewDocumentContentFromWorkspaceState` as a side effect, handling the persistence PII scrub. Both `persistWorkspaceLayout` and `parseStoredWorkspaceLayout` rely on this undocumented extra behavior. Any future caller using the function for its original purpose (closing loading tabs) will silently mutate persistable state it had no intention of touching.
 
 **Current behavior:**
-- Rendered Markdown displays `markdownEditContent` when present.
-- Normal edit, reload, and rebase paths update `editValue` without always
-  adopting or clearing the rendered Markdown buffer and undo/redo history.
-- Saving can write a buffer that is not the document the user is currently
-  seeing in rendered mode.
+- One function handles two unrelated concerns.
+- The function name advertises only the loading-tab cleanup.
+- Callers depend on the side effect without documentation.
 
 **Proposal:**
-- Make one editable document buffer authoritative for rendered and code edit
-  modes.
-- Centralize buffer adoption so `editValue`, `markdownEditContent`, refs,
-  dirty state, undo/redo history, and editor revision move together.
-- Guard post-save sync with a freshness check or disable rendered editing
-  while a save is in flight.
+- Extract `stripDiffPreviewDocumentContentFromWorkspaceState` as an exported function.
+- Have `persistWorkspaceLayout` compose the two explicitly: `stripDiffPreviewDocumentContentFromWorkspaceState(stripLoadingGitDiffPreviewTabsFromWorkspaceState(layout.workspace))`.
+- `parseStoredWorkspaceLayout` can skip the loading-tab strip entirely since persisted layouts never contain loading tabs.
 
-## Markdown diff worktree reads follow symlinks
+## AgentSessionPanel inactive cache flashes wrong content on tab activation
 
-**Severity:** High - symlinked Markdown paths can expose or render the wrong
-worktree content.
+**Severity:** Low - switching back to a cached session briefly paints top-of-window messages before the scroll sync catches up.
 
-The Markdown document diff loader reads the worktree side with
-`fs::read(repo_root.join(path))`. On symlink paths this follows the target
-instead of matching Git's symlink blob semantics, and a symlink can point
-outside the repository.
+`VirtualizedConversationMessageList` in `ui/src/panels/AgentSessionPanel.tsx` no longer returns `null` when inactive, so the conversation DOM stays cached across tab switches. But the scroll-listener `useLayoutEffect` is gated on `isActive`, leaving `viewport` at the default `{height: 600, scrollTop: 0}` while inactive. `visibleRange` therefore picks the FIRST few cards in `windowedMessages`. When the session becomes active, the layout effect fires AFTER the parent's scroll-position restore, so the first paint shows those top-of-window cards before the next frame re-syncs `viewport` to the actual scrollTop. A brief flash is visible.
 
 **Current behavior:**
-- Worktree document-content reads follow symlinks.
-- A Markdown diff for a symlinked path can show target file contents rather
-  than the symlink target text Git stores.
-- A symlink can escape the intended repository containment boundary.
+- Inactive sessions render the first few cards via the default viewport.
+- On activation, the first paint shows stale cards before the scroll sync.
+- One frame of visual flash is visible.
 
 **Proposal:**
-- Use `symlink_metadata` before reading worktree document sides.
-- For symlinks, return the symlink target text to match Git blob semantics.
-- For regular files, canonicalize the repo root and target path and reject
-  targets outside the canonical repo root.
+- When inactive, skip the `windowedMessages.slice(...)` render and emit only the wrapper `<div style={{ height: layout.totalHeight }}>`.
+- This keeps the height cache for parent scroll-position math, preserves the measured heights cache, avoids the flash, and still passes the existing test asserting `.virtualized-message-list` exists in the inactive page.
 
-## Markdown document diff sides are loaded without size limits
+## Rendered Markdown preview keyboard handler ignores Space
 
-**Severity:** Medium - large Markdown blobs or files can produce unbounded
-memory use and oversized JSON responses.
+**Severity:** Low - keyboard-only users pressing Space on a focused Markdown section scroll the document instead of entering edit mode.
 
-The new full-document Markdown diff enrichment buffers entire Git blobs with
-`git show ... .output()` and reads whole worktree files with `fs::read`.
-Unlike `/api/file`, this path does not enforce the existing
-`MAX_FILE_CONTENT_BYTES` ceiling.
+`handlePreviewKeyDown` in `EditableRenderedMarkdownSection` handles `Enter` and `F2` but not `Space`. The section has `tabIndex={0}` and is intentionally NOT given `role="button"` (to avoid ARIA issues with interactive descendants), so users can't rely on the role's Space-activation contract. The result is a small accessibility asymmetry: mouse users click to edit; keyboard users press Enter to edit; but Space does nothing useful (it scrolls the page).
 
 **Current behavior:**
-- HEAD and index document sides are loaded through unbounded `git show`
-  output buffering.
-- Worktree document sides are read fully into memory.
-- Large Markdown files can make `/api/git/diff` allocate and return far more
-  data than other file-reading paths allow.
+- Only `Enter` and `F2` enter edit mode via keyboard.
+- Space scrolls the document.
+- Keyboard-only users have no Space-activation path.
 
 **Proposal:**
-- Enforce the same content-size ceiling used by source file reads.
-- Check Git object size with `git cat-file -s` or stream Git output through a
-  capped reader.
-- Check worktree metadata before reading and reject over-limit files.
-
-## Markdown document enrichment can fail the whole diff response
-
-**Severity:** Medium - optional rendered-document enrichment can hide an
-otherwise valid raw diff.
-
-The backend loads the raw Git diff first, then enriches Markdown diffs with
-before/after document content. If enrichment fails for a status it cannot
-model, such as an unmerged Markdown file without a stage-0 index entry, the
-entire `/api/git/diff` request fails instead of falling back to raw or patch
-preview.
-
-**Current behavior:**
-- Enrichment errors from `load_git_diff_document_content` propagate as endpoint
-  failures.
-- Conflict or unmerged Markdown diffs can return an API error even when
-  `git diff -- <path>` has usable output.
-
-**Proposal:**
-- Treat Markdown document-content enrichment as best-effort.
-- Skip `documentContent` for unsupported statuses such as unmerged files.
-- Fall back to the existing raw/structured diff response when enrichment
-  fails after the core diff has loaded.
-
-## Unstaged Markdown previews can read the wrong index path after a staged rename
-
-**Severity:** Medium - staged rename plus unstaged edit can break Markdown
-diff preview loading.
-
-For an unstaged comparison after a staged rename, the index side should be the
-new path. The current document-content path can use `originalPath` for the
-unstaged index side, which tries to read the old path from the index.
-
-**Current behavior:**
-- A state like `RM old.md -> new.md` plus an unstaged edit to `new.md` can
-  request `git show :old.md`.
-- That index entry no longer exists, so Markdown document preview loading can
-  fail.
-
-**Proposal:**
-- Make document-side path selection section/status aware.
-- Use `currentPath` for unstaged index sides unless the unstaged change itself
-  is a rename or copy.
-- Keep `originalPath` tied to the diff section where it is actually valid.
-
-## Markdown document content can be persisted in workspace layout
-
-**Severity:** Medium - opening a Markdown diff can persist full file contents
-into layout state.
-
-`WorkspaceDiffPreviewTab` now carries `documentContent`, which includes full
-before/after Markdown documents. Workspace layout persistence can therefore
-write unchanged document sections, including possible secrets, into the
-TermAl session state file.
-
-**Current behavior:**
-- Diff preview tabs can hold full Markdown document contents.
-- Workspace layout autosave serializes tab data.
-- Restored layout state can contain more than view metadata and patch content.
-
-**Proposal:**
-- Keep `documentContent` ephemeral.
-- Strip full document content before workspace layout persistence.
-- Re-fetch document content when restoring or reopening a diff preview tab.
-
-## Patch-based Markdown previews can be mislabeled as complete documents
-
-**Severity:** Medium - rendered editing can be enabled for incomplete
-patch-reconstructed Markdown.
-
-When backend `documentContent` is absent, the frontend infers completeness from
-`preview.note`. That field is presentation text, not provenance. A
-patch-reconstructed preview can be mislabeled as a full document and become
-editable even though unchanged sections may be missing.
-
-**Current behavior:**
-- `preview.note` is used to choose between `patch` and `full` completeness for
-  fallback Markdown preview data.
-- Generic preview data without a note can be treated as a complete document.
-- Rendered Markdown editing can be enabled for incomplete content.
-
-**Proposal:**
-- Add explicit completeness/provenance to the diff preview model.
-- Treat patch reconstruction as `patch` unless full-document content was
-  loaded from an authoritative file, index, or Git object source.
-
-## Rendered Markdown task-list serialization drops checkbox state
-
-**Severity:** Medium - editing task lists in rendered Markdown can corrupt GFM
-task-list syntax.
-
-ReactMarkdown renders GFM task-list markers as checkbox inputs. The rendered
-Markdown serializer currently serializes list items from inline child text, so
-checkbox inputs contribute no `[x]` or `[ ]` marker.
-
-**Current behavior:**
-- Editing `- [x] Done` through rendered Markdown can save as `- Done`.
-- Checked and unchecked task-list state is lost during serialization.
-
-**Proposal:**
-- Detect task-list checkbox inputs while serializing list items.
-- Prefix serialized list item text with `[x]` or `[ ]` based on checkbox state.
-- Cover checked and unchecked task-list saves with tests.
-
-## canEditVisualDiff gate disables Monaco inline edit for any Markdown diff
-
-**Severity:** Medium - opening a Monaco Markdown diff in `all` view no longer allows inline edits when the backend supplies `documentContent`.
-
-`canEditVisualDiff` is gated on `!documentContent && preview.hasStructuredPreview && ...` in `DiffPanel.tsx`. The gate mixes two concerns — rendered-Markdown-edit safety vs. Monaco inline edit capability — so any Git-backed Markdown diff (including unstaged) silently loses the `all`-mode inline editing affordance that used to work.
-
-**Current behavior:**
-- Opening a Markdown Git diff in `all` view shows Monaco but the inline edit affordance is disabled.
-- The disable is triggered by the mere presence of `documentContent`, not by the selected view mode.
-- Non-Markdown diffs are unaffected.
-
-**Proposal:**
-- Gate rendered-edit safety on `viewMode === "markdown"` rather than the presence of `documentContent`.
-- Keep `canEditVisualDiff` independent of the new document-content path.
-- Add a test that opens a Markdown diff, selects `all`, and asserts the Monaco inline edit affordance is available.
-
-## Rendered Markdown diff view mode default overrides user selection on refresh
-
-**Severity:** Medium - users lose their chosen diff view mode when the diff panel refreshes.
-
-`preferMarkdownView` is included in the reset-effect dependency array. Any refresh that flips `documentContent` between `null` and present (e.g. auto-refresh after a Git status change) resets `viewMode` back to `markdown` even if the user had explicitly selected `Raw` or `Changes`. A user mid-review can be yanked out of their chosen mode without any interaction.
-
-**Current behavior:**
-- `preferMarkdownView` is in the reset-effect deps.
-- Auto-refresh after Git status change resets `viewMode` to the default.
-- User's explicit view selection is lost.
-
-**Proposal:**
-- Use `preferMarkdownView` only in the initial `useState(...)`, not in the reset effect.
-- Keep the user's selection sticky across refreshes.
-- Add a regression test that switches to `Raw`, triggers a refresh, and asserts the mode stays `Raw`.
-
-## Markdown diff anchor normalization silently hides real line changes
-
-**Severity:** Medium - link-only and table-separator line changes can render as unchanged in rendered Markdown diff.
-
-`normalizeMarkdownLineForDiff` strips link syntax (`[foo](bar)` → `foo`) and collapses table separators to compute the `compareText` used for LCS anchor matching. But `splitMarkdownDocumentLinesWithOffsets` stores the raw `text` too, and the segment builder renders segments from `text`, not `compareText`. A line matched via normalization renders only the after side, so a link-only style change on that line is silently hidden from rendered Markdown review even though the `Raw` and `Changes` views still show it.
-
-**Current behavior:**
-- Anchors match on normalized text; segments render raw text.
-- Link-only changes inside an anchored line disappear from the rendered Markdown view.
-- `Raw` and `Changes` views still show the change, so the views disagree.
-
-**Proposal:**
-- When an anchor is matched via non-identity normalization, mark the segment `changed` and render both sides inline.
-- Or document the tradeoff explicitly in the feature spec and surface a hint in the UI.
-- Add a test that exercises a link-only change and asserts both the before and after sides render.
-
-## Markdown document sides corrupt non-UTF-8 content on save
-
-**Severity:** Medium - Markdown files with BOM or Latin-1 content lose their original bytes when edited through rendered Markdown.
-
-`read_git_object_text`, `read_git_index_text`, and `read_git_worktree_text` decode via `String::from_utf8_lossy`. For a Markdown file with a UTF-16 BOM or Windows-1252 bytes (legitimate on Windows — P0 platform), invalid UTF-8 bytes become U+FFFD replacement characters. If the user then edits the rendered view and saves, the lossy string is written back through `onSaveFile`, permanently losing the original bytes.
-
-**Current behavior:**
-- All three readers call `.from_utf8_lossy(...).into_owned()`.
-- Non-UTF-8 bytes are silently replaced with U+FFFD.
-- Saving from rendered mode persists the lossy content to disk.
-
-**Proposal:**
-- Detect non-UTF-8 with `std::str::from_utf8` before constructing `documentContent`.
-- On failure, return `None` for `documentContent` or set `note: "binary or non-UTF-8 document"` and disable `canEditRenderedMarkdown` on the frontend.
-- Add a test that stages a file with Latin-1 bytes and asserts `document_content.is_none()` (or the note is set).
-
-## Rendered Markdown contentEditable lacks ARIA role and label
-
-**Severity:** Medium - screen reader users cannot tell that a rendered Markdown section is editable.
-
-`EditableRenderedMarkdownSection` renders `<section contentEditable={canEdit} tabIndex={...}>` without `role="textbox"`, `aria-multiline="true"`, or `aria-label`. Assistive technology announces a plain block with no signal that it accepts input — a regression from the Monaco editor the user would have been using in `Edit` mode.
-
-**Current behavior:**
-- No ARIA attributes on the editable section.
-- Screen readers describe the region as a generic landmark.
-- Keyboard-only users get no affordance hint beyond the focus ring.
-
-**Proposal:**
-- Add `role="textbox"`, `aria-multiline="true"`, and `aria-label={`Markdown section, ${segment.kind}`}` to every editable section.
-- Add an a11y regression test that asserts these attributes are present when `canEdit` is true.
-
-## Rendered Markdown line-height fallback teleports the caret
-
-**Severity:** Medium - arrow-down can teleport the caret to the next section mid-paragraph at small font sizes.
-
-`isSelectionAtEditableSectionVisualBoundary` reads `Number.parseFloat(computedStyle.lineHeight)` and falls back to a hardcoded `32` pixels when `lineHeight` is `"normal"` or non-numeric. At a 12px UI font with a ~16px line height, the 32px threshold falsely reports "at boundary" on line 2 of a 3-line paragraph, so the caret jumps to the next section mid-paragraph.
-
-**Current behavior:**
-- `Number.parseFloat("normal") === NaN`, triggering the 32-pixel fallback.
-- Small font sizes trip the false positive for all but the last line of multi-line paragraphs.
-- Caret jumps to the next section before the user has finished the current one.
-
-**Proposal:**
-- Read `computedStyle.fontSize` (always numeric) and scale it (`fontSize * 1.6`) as the fallback.
-- Add a test that exercises a multi-line paragraph with a small font size and asserts arrow-down stays within the section until the last line.
-
-## DiffPanel.tsx holds 1500 lines of orthogonal utility logic
-
-**Severity:** Medium - the line-diff engine, HTML-to-Markdown serializer, and caret-navigation controller live inside the panel and cannot be tested or reused independently.
-
-`DiffPanel.tsx` now contains ~1,500 lines of three distinct concerns: (a) a Markdown line-diff engine (LCS, anchor rebuilding, greedy fallback, compare-text normalization), (b) an HTML→Markdown serializer (block+inline node walk, table/list/code serialization, whitespace normalization), and (c) a contenteditable caret-navigation micro-controller (selection boundary detection via Range, adjacent-section focus). None of these are panel concerns, and keeping them co-located makes each untestable in isolation and discourages reuse from, e.g., `MarkdownDocumentView.tsx`.
-
-**Current behavior:**
-- `DiffPanel.tsx` is responsible for panel rendering AND diff segmentation AND HTML serialization AND caret navigation.
-- Unit-testing the serializer requires importing the whole diff panel.
-- The single-large-file project exception covers `App.tsx` and `main.rs`, not every new panel.
-
-**Proposal:**
-- Extract `ui/src/panels/markdown-diff-segments.ts` for LCS/anchor/segment building.
-- Extract `ui/src/markdown-html-to-markdown.ts` for block/inline serialization.
-- Optionally extract caret-navigation helpers to `ui/src/panels/editable-markdown-caret.ts`.
-- Add dedicated unit tests for each extracted module.
-
-## Diff Markdown links drop source-target metadata
-
-**Severity:** Low - links from rendered Markdown diffs open less precisely than
-the same links elsewhere.
-
-`MarkdownContent` can resolve links with line, column, and open-in-new-tab
-metadata. The DiffPanel link handler currently passes only the path to
-`onOpenPath`, so source anchors like `file.ts#L20C4` lose their target
-position.
-
-**Current behavior:**
-- Rendered Markdown links in diff view discard line and column metadata.
-- Diff links also ignore open-in-new-tab intent.
-- Source preview and message cards preserve richer link targets, so behavior is
-  inconsistent.
-
-**Proposal:**
-- Widen the DiffPanel open callback to accept the full Markdown link target.
-- Pass line, column, and open-in-new-tab metadata through App to source-tab
-  opening.
-
-## Git diff document API type includes a client-only patch source
-
-**Severity:** Low - the frontend API type is broader than the backend wire
-contract.
-
-`GitDiffDocumentSideSource` in `ui/src/api.ts` includes `"patch"`, but the
-backend serializes only `head`, `index`, `worktree`, or `empty`. Patch is a
-client-side fallback provenance, not a backend API response value.
-
-**Current behavior:**
-- The exported API response type accepts a source value the backend does not
-  send.
-- Exhaustiveness checks against the wire contract are weaker than necessary.
-
-**Proposal:**
-- Keep the API response union exact: `head`, `index`, `worktree`, and `empty`.
-- Introduce a separate view-model source union that adds `patch` for fallback
-  previews.
-
-## Markdown images remain draggable in selectable rendered content
-
-**Severity:** Low - dragging across rendered Markdown containing images can
-start native image drag instead of text selection.
-
-Markdown anchors were made non-draggable for selectable document views, but
-images still use ReactMarkdown's default draggable `<img>` behavior. This can
-interfere with selecting or editing text around images.
-
-**Current behavior:**
-- Rendered Markdown images are draggable by default.
-- Dragging through selectable or editable Markdown near an image can start a
-  native image drag.
-
-**Proposal:**
-- Add an `img` component override in `MarkdownContent`.
-- Render Markdown images with `draggable={false}`.
+- Add a `Space` branch to `handlePreviewKeyDown` mirroring the `Enter` branch (with `event.preventDefault()` first to suppress the scroll).
+- Update the keyboard-activation tests to cover Space.
 
 ## Implementation Tasks
 
@@ -463,39 +152,54 @@ interfere with selecting or editing text around images.
 - [ ] P2: Add MarkdownContent document-relative link tests:
   cover `documentPath` resolution for `./`, `../`, anchors such as
   `api.md#L10`, and Windows-style workspace roots.
-- [ ] P2: Add rendered Markdown diff save serialization coverage:
-  edit and save sections containing tables, task/list items, fenced code,
-  headings, links, and inline code, then assert the exact Markdown payload.
-- [ ] P2: Tighten the rendered Markdown undo/redo test assertion:
-  replace the `toBeTruthy()` plus non-null assertion with a concrete
-  `HTMLElement` assertion or a user-visible query after editable sections have
-  accessible labels.
-- [ ] P2: Add backend integration tests for Git diff document content across statuses:
-  cover Added, Deleted, Untracked, and Renamed Markdown files in both staged
-  and unstaged sections, plus a non-Markdown negative case asserting
-  `document_content.is_none()`. Disable `core.autocrlf` in the fixture setup
-  so Windows CI is reliable.
-- [ ] P2: Add error-path coverage for the Git document-content readers:
-  exercise `read_git_object_text`, `read_git_index_text`, and
-  `read_git_worktree_text` on missing objects, unknown revisions, and
-  disappeared worktree files, and assert the returned error strings mention
-  git and are non-empty.
-- [ ] P2: Replace innerHTML-based rendered Markdown edit tests with real typing:
-  use `userEvent.type` or `fireEvent.beforeInput`+`input` sequences so the
-  serializer runs over DOM produced by the real editing pipeline.
-- [ ] P2: Stub Range geometry for caret visual-boundary tests:
-  spy on `Element.prototype.getBoundingClientRect` and
-  `Range.prototype.getClientRects` to return realistic values so
-  `isSelectionAtEditableSectionVisualBoundary` actually exercises the
-  visual-line math instead of the 32-pixel fallback.
-- [ ] P2: Extend undo/redo coverage:
-  add multi-edit then multi-undo then re-edit flows, assert the redo stack is
-  cleared after new input, and rerender with a new `diffMessageId` to assert
-  undo history is cleared on tab identity change.
-- [ ] P2: Add tests for the rendered Markdown diff patch-only fallback:
-  render without `documentContent` but with a structured Markdown diff and
-  assert the "Patch preview" chip and the patch-only note are visible and
-  edit buttons are disabled.
+- [ ] P2: Extend backend integration tests for Git diff document content across statuses:
+  the current tree covers Renamed (staged rename + unstaged edit) and a
+  non-Markdown UTF-8 negative case. Still missing: Added, Deleted, and
+  Untracked Markdown files in both staged and unstaged sections, plus a
+  non-Markdown negative case asserting `document_content.is_none()`. Disable
+  `core.autocrlf` in the fixture setup so Windows CI is reliable.
+- [ ] P2: Extend the DiffPanel textarea identity test with a focus
+  assertion. After each `fireEvent.change` call, assert
+  `expect(document.activeElement).toBe(firstTextarea)` so a regression that
+  preserves DOM identity but resets focus/selection fails the test. (Plan D
+  keeps the textarea mounted without a freeze, but the focus/caret/IME
+  preservation itself is still only pinned by DOM identity; add the
+  activeElement assertion to harden it further.)
+- [ ] P2: Add DiffPanel test coverage for rendered Markdown edits against
+  added/removed sections in addition to normal sections: the existing
+  "click completes a text selection" test only exercises the normal
+  section path, and a maintainer fork of the click handler for a
+  rendered-change section would not be caught.
+- [ ] P2: Add a DiffPanel regression test for the Escape cancel path in
+  `EditableRenderedMarkdownSection`. Enter edit mode, type into the
+  textarea, press Escape, and assert `isDirty` is false and the rendered
+  preview matches `segment.markdown`. None of the current tests exercise
+  the Escape branch.
+- [ ] P2: Rewrite or delete the "preserves the edited textarea DOM identity
+  across multiple keystrokes" DiffPanel test. Under Plan D the local-draft
+  design structurally guarantees the property (drafts never propagate to
+  `editValue`, so segments never churn during typing). The test currently
+  passes trivially. Either rewrite it to drive segment churn from the
+  parent (watcher rebase mid-edit) so it exercises a real regression path,
+  or delete it since the property is now guaranteed by construction.
+- [ ] P2: Strengthen the AgentSessionPanel inactive-DOM-cached test with a
+  reference-identity assertion across activation. The current test
+  ("keeps inactive virtualized conversation DOM mounted ...") only asserts
+  presence on initial render. Capture the `.virtualized-message-list`
+  reference, rerender swapping `activeSession` to the cached session, and
+  assert `.toBe()` against the captured node. Alternatively, rename the
+  test to match what's actually asserted.
+- [ ] P2: Route `src/tests.rs` git test helpers through the `git_command()`
+  locale-forcing pattern. `run_git_test_command*` and any other test
+  helpers currently call `Command::new("git")` directly without
+  `LC_ALL=C`/`LANG=C`, which could flake the new missing-object and
+  error-message assertions on CI runners with non-English locales.
+- [ ] P2: Finish centralizing `OpenPathOptions` in `ui/src/App.tsx`. The
+  `onOpenSourceTab` prop type declarations at two sites plus the
+  `handleOpenSourceTab` implementation still inline the
+  `{ line?, column?, openInNewTab? }` shape instead of importing
+  `OpenPathOptions` from `ui/src/api.ts`. They're structurally identical
+  today, but the centralization isn't fully threaded through App.tsx.
 - [ ] P2: Add a negative test for Markdown mode visibility:
   render a non-Markdown diff (`.ts`/`.rs`) and assert
   `screen.queryByRole('button', { name: /Markdown/ })` is null.
@@ -506,10 +210,6 @@ interfere with selecting or editing text around images.
   render `` [prefix `lib/models/foo.rs` suffix](https://example.com) `` and
   assert `document.querySelectorAll('a a').length === 0` while inline code
   still renders.
-- [ ] P2: Add unit tests for the Markdown line-diff anchor builders:
-  exercise `buildMarkdownLineDiffAnchors` and
-  `buildGreedyMarkdownLineAnchors` with empty docs, single lines, and
-  inputs near the 1,000,000-cell threshold to cover the greedy fallback.
 - [ ] P2: Strengthen CRLF rendered Markdown test assertions:
   assert that CR characters are absent from the rendered output and that
   matched lines render exactly once, and add a test where both sides use
@@ -587,6 +287,17 @@ interfere with selecting or editing text around images.
 These are deliberate design tradeoffs, not bugs, but are recorded here so
 they stay visible to future contributors and can be revisited if the
 tradeoff space changes.
+
+### Untracked Git diff previews have a 10 MB read cap
+
+Untracked file diffs use the same `MAX_FILE_CONTENT_BYTES` ceiling as rendered
+Markdown document reads. Files above that cap return a read-limit error instead
+of building an unbounded synthetic `+` diff in memory.
+
+**Accepted tradeoff.** This is a deliberate defense against large accidental
+untracked files such as logs or generated artifacts. The UI records the backend
+error on the pending diff tab instead of crashing, and normal staged/tracked Git
+diffs still come from Git itself.
 
 ### Terminal commands have no production watchdog
 

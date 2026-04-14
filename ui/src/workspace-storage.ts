@@ -2,6 +2,7 @@ import type { StyleId, ThemeId } from "./themes";
 import { isStyleId, isThemeId } from "./themes";
 import {
   normalizeWorkspaceStatePaths,
+  stripLoadingGitDiffPreviewTabsFromWorkspaceState,
   type WorkspaceNode,
   type WorkspacePane,
   type WorkspaceState,
@@ -62,9 +63,14 @@ export function persistWorkspaceLayout(workspaceViewId: string, layout: StoredWo
     return;
   }
 
+  const persistedLayout = {
+    ...layout,
+    workspace: stripLoadingGitDiffPreviewTabsFromWorkspaceState(layout.workspace),
+  };
+
   window.localStorage.setItem(
     getWorkspaceLayoutStorageKey(workspaceViewId),
-    JSON.stringify(layout),
+    JSON.stringify(persistedLayout),
   );
 }
 
@@ -89,7 +95,9 @@ export function parseStoredWorkspaceLayout(raw: string | null | undefined): Stor
 
     return {
       ...parsed,
-      workspace: normalizeWorkspaceStatePaths(parsed.workspace),
+      workspace: stripLoadingGitDiffPreviewTabsFromWorkspaceState(
+        normalizeWorkspaceStatePaths(parsed.workspace),
+      ),
     };
   } catch {
     return null;

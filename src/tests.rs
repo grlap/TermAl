@@ -21325,6 +21325,48 @@ fn normalize_git_repo_relative_path_rejects_parent_traversal_components() {
     );
 }
 
+// Tests that normalize Git repo relative path rejects rooted paths.
+#[test]
+fn normalize_git_repo_relative_path_rejects_rooted_paths() {
+    for path in ["/etc/passwd.md", r"\etc\passwd.md"] {
+        let error =
+            normalize_git_repo_relative_path(path).expect_err("rooted paths should be rejected");
+
+        assert_eq!(error.status, StatusCode::BAD_REQUEST);
+        assert_eq!(
+            error.message,
+            "git file actions require repository-relative paths"
+        );
+    }
+
+    assert_eq!(
+        normalize_git_repo_relative_path("./foo.md").unwrap(),
+        "./foo.md"
+    );
+}
+
+// Tests that normalize Git repo relative path rejects drive-prefixed Windows paths.
+#[cfg(windows)]
+#[test]
+fn normalize_git_repo_relative_path_rejects_windows_prefix_paths() {
+    for path in [
+        r"C:\Windows\System32\drivers\etc\hosts",
+        r"C:foo.md",
+        r"\\server\share\file.md",
+        r"\\?\C:\Windows\System32\drivers\etc\hosts",
+        r"\\.\COM1",
+    ] {
+        let error = normalize_git_repo_relative_path(path)
+            .expect_err("drive-prefixed paths should be rejected");
+
+        assert_eq!(error.status, StatusCode::BAD_REQUEST);
+        assert_eq!(
+            error.message,
+            "git file actions require repository-relative paths"
+        );
+    }
+}
+
 // Tests that rejects projects with unknown remote.
 #[test]
 fn rejects_projects_with_unknown_remote() {
@@ -21956,6 +21998,417 @@ fn git_diff_document_content_uses_selected_git_side_for_markdown() {
         unstaged_document.after.content,
         "# Worktree\n\nNot staged yet.\n"
     );
+
+    fs::remove_dir_all(repo_root).unwrap();
+}
+
+// Tests that an unstaged edit after a staged rename reads the new index path.
+#[test]
+fn git_diff_document_content_uses_current_index_path_for_unstaged_staged_rename() {
+    let repo_root =
+        std::env::temp_dir().join(format!("termal-git-diff-doc-rename-{}", Uuid::new_v4()));
+    let old_file = repo_root.join("old.md");
+    let new_file = repo_root.join("new.md");
+
+    fs::create_dir_all(&repo_root).unwrap();
+    fs::write(&old_file, "# Old\n\nBase text.\n").unwrap();
+
+    run_git_test_command(&repo_root, &["init"]);
+    run_git_test_command(&repo_root, &["config", "user.email", "termal@example.com"]);
+    run_git_test_command(&repo_root, &["config", "user.name", "TermAl"]);
+    run_git_test_command(&repo_root, &["add", "old.md"]);
+    run_git_test_command(&repo_root, &["commit", "-m", "init"]);
+
+    fs::rename(&old_file, &new_file).unwrap();
+    fs::write(&new_file, "# New\n\nStaged rename text.\n").unwrap();
+    run_git_test_command(&repo_root, &["add", "-A"]);
+    fs::write(&new_file, "# New\n\nWorktree edit text.\n").unwrap();
+
+    let response = load_git_diff_for_request(
+        &repo_root,
+        &GitDiffRequest {
+            original_path: Some("old.md".to_owned()),
+            path: "new.md".to_owned(),
+            section_id: GitDiffSection::Unstaged,
+            status_code: Some("M".to_owned()),
+            workdir: repo_root.to_string_lossy().into_owned(),
+            project_id: None,
+            session_id: None,
+        },
+    )
+    .unwrap();
+    let document = response
+        .document_content
+        .expect("unstaged Markdown edit should include document content");
+
+    assert_eq!(document.before.source, GitDiffDocumentSideSource::Index);
+    assert_eq!(document.before.content, "# New\n\nStaged rename text.\n");
+    assert_eq!(document.after.source, GitDiffDocumentSideSource::Worktree);
+    assert_eq!(document.after.content, "# New\n\nWorktree edit text.\n");
+
+    fs::remove_dir_all(repo_root).unwrap();
+}
+
+// Tests that Markdown document enrichment is skipped for non-UTF-8 bytes.
+#[test]
+fn git_diff_document_content_skips_non_utf8_markdown() {
+    let repo_root =
+        std::env::temp_dir().join(format!("termal-git-diff-doc-non-utf8-{}", Uuid::new_v4()));
+    let markdown_file = repo_root.join("README.md");
+
+    fs::create_dir_all(&repo_root).unwrap();
+    fs::write(&markdown_file, "# Base\n\nPlain text.\n").unwrap();
+
+    run_git_test_command(&repo_root, &["init"]);
+    run_git_test_command(&repo_root, &["config", "user.email", "termal@example.com"]);
+    run_git_test_command(&repo_root, &["config", "user.name", "TermAl"]);
+    run_git_test_command(&repo_root, &["add", "README.md"]);
+    run_git_test_command(&repo_root, &["commit", "-m", "init"]);
+
+    fs::write(&markdown_file, b"# Base\n\nLatin-1: \xE9\n").unwrap();
+
+    let response = load_git_diff_for_request(
+        &repo_root,
+        &GitDiffRequest {
+            original_path: None,
+            path: "README.md".to_owned(),
+            section_id: GitDiffSection::Unstaged,
+            status_code: Some("M".to_owned()),
+            workdir: repo_root.to_string_lossy().into_owned(),
+            project_id: None,
+            session_id: None,
+        },
+    )
+    .unwrap();
+
+    assert!(response.document_content.is_none());
+
+    fs::remove_dir_all(repo_root).unwrap();
+}
+
+// Tests that Git document readers enforce the shared file size ceiling.
+#[test]
+fn git_diff_document_readers_reject_oversized_worktree_files() {
+    let repo_root =
+        std::env::temp_dir().join(format!("termal-git-diff-doc-large-{}", Uuid::new_v4()));
+    let markdown_file = repo_root.join("README.md");
+
+    fs::create_dir_all(&repo_root).unwrap();
+    fs::write(&markdown_file, "a".repeat(MAX_FILE_CONTENT_BYTES + 1)).unwrap();
+
+    let error = read_git_worktree_text(&repo_root, "README.md")
+        .expect_err("oversized worktree document should be rejected");
+
+    assert_eq!(error.status, StatusCode::BAD_REQUEST);
+    assert!(error.message.contains("read limit"));
+
+    fs::remove_dir_all(repo_root).unwrap();
+}
+
+// Tests that Git document reader errors stay non-empty and actionable.
+#[test]
+fn git_diff_document_reader_errors_are_non_empty() {
+    let repo_root =
+        std::env::temp_dir().join(format!("termal-git-diff-doc-errors-{}", Uuid::new_v4()));
+
+    fs::create_dir_all(&repo_root).unwrap();
+    run_git_test_command(&repo_root, &["init"]);
+
+    for error in [
+        read_git_object_text(&repo_root, "HEAD", "missing.md").unwrap_err(),
+        read_git_index_text(&repo_root, "missing.md").unwrap_err(),
+        read_git_worktree_text(&repo_root, "missing.md").unwrap_err(),
+    ] {
+        assert!(!error.message.trim().is_empty());
+        assert!(
+            error.message.to_lowercase().contains("git"),
+            "error should mention git: {}",
+            error.message
+        );
+    }
+
+    fs::remove_dir_all(repo_root).unwrap();
+}
+
+// Tests that missing Git document objects are reported as not found.
+#[test]
+fn git_diff_document_reader_reports_missing_git_objects_as_not_found() {
+    let repo_root = std::env::temp_dir().join(format!(
+        "termal-git-diff-doc-missing-object-{}",
+        Uuid::new_v4()
+    ));
+    let markdown_file = repo_root.join("README.md");
+
+    fs::create_dir_all(&repo_root).unwrap();
+    fs::write(&markdown_file, "# Base\n").unwrap();
+    run_git_test_command(&repo_root, &["init"]);
+    run_git_test_command(&repo_root, &["config", "user.email", "termal@example.com"]);
+    run_git_test_command(&repo_root, &["config", "user.name", "TermAl"]);
+    run_git_test_command(&repo_root, &["add", "README.md"]);
+    run_git_test_command(&repo_root, &["commit", "-m", "init"]);
+
+    let error = read_git_object_text(&repo_root, "HEAD", "missing.md")
+        .expect_err("missing git object should fail");
+
+    assert_eq!(error.status, StatusCode::NOT_FOUND);
+    assert!(error.message.contains("git object not found"));
+
+    fs::remove_dir_all(repo_root).unwrap();
+}
+
+// Tests that unborn HEAD missing-object wording is treated as not found.
+#[test]
+fn git_diff_document_reader_reports_unborn_head_objects_as_not_found() {
+    let repo_root = std::env::temp_dir().join(format!(
+        "termal-git-diff-doc-unborn-head-{}",
+        Uuid::new_v4()
+    ));
+
+    fs::create_dir_all(&repo_root).unwrap();
+    run_git_test_command(&repo_root, &["init"]);
+
+    let error = read_git_object_text(&repo_root, "HEAD", "missing.md")
+        .expect_err("unborn HEAD git object should fail");
+
+    assert_eq!(error.status, StatusCode::NOT_FOUND);
+    assert!(error.message.contains("git object not found"));
+
+    fs::remove_dir_all(repo_root).unwrap();
+}
+
+// Tests that oversized committed Git objects are rejected without buffering the full object.
+#[test]
+fn git_diff_document_reader_rejects_oversized_git_objects() {
+    let repo_root = std::env::temp_dir().join(format!(
+        "termal-git-diff-doc-large-object-{}",
+        Uuid::new_v4()
+    ));
+    let markdown_file = repo_root.join("README.md");
+
+    fs::create_dir_all(&repo_root).unwrap();
+    fs::write(&markdown_file, "a".repeat(MAX_FILE_CONTENT_BYTES + 1)).unwrap();
+    run_git_test_command(&repo_root, &["init"]);
+    run_git_test_command(&repo_root, &["config", "user.email", "termal@example.com"]);
+    run_git_test_command(&repo_root, &["config", "user.name", "TermAl"]);
+    run_git_test_command(&repo_root, &["add", "README.md"]);
+    run_git_test_command(&repo_root, &["commit", "-m", "large"]);
+
+    let error = read_git_object_text(&repo_root, "HEAD", "README.md")
+        .expect_err("oversized git object should fail");
+
+    assert_eq!(error.status, StatusCode::BAD_REQUEST);
+    assert!(error.message.contains("read limit"));
+
+    fs::remove_dir_all(repo_root).unwrap();
+}
+
+// Tests that unexpected worktree entries are not classified as bad requests.
+#[test]
+fn git_diff_worktree_reader_reports_directories_as_not_found() {
+    let repo_root =
+        std::env::temp_dir().join(format!("termal-git-diff-doc-directory-{}", Uuid::new_v4()));
+    let docs_dir = repo_root.join("docs");
+
+    fs::create_dir_all(&docs_dir).unwrap();
+
+    let error = read_git_worktree_text(&repo_root, "docs")
+        .expect_err("directory worktree entry should not be read as a file");
+
+    assert_eq!(error.status, StatusCode::NOT_FOUND);
+    assert!(error.message.contains("git worktree path is not a file"));
+
+    fs::remove_dir_all(repo_root).unwrap();
+}
+
+// Tests that missing worktree files are reported as not found.
+#[test]
+fn git_diff_worktree_reader_reports_missing_files_as_not_found() {
+    let repo_root = std::env::temp_dir().join(format!(
+        "termal-git-diff-doc-missing-worktree-{}",
+        Uuid::new_v4()
+    ));
+
+    fs::create_dir_all(&repo_root).unwrap();
+
+    let error = read_git_worktree_text(&repo_root, "missing.md")
+        .expect_err("missing worktree file should fail");
+
+    assert_eq!(error.status, StatusCode::NOT_FOUND);
+    assert!(
+        error
+            .message
+            .contains("git worktree path not found: missing.md")
+    );
+    assert!(
+        !error.message.contains(repo_root.to_string_lossy().as_ref()),
+        "error should not expose absolute repo path: {}",
+        error.message
+    );
+
+    fs::remove_dir_all(repo_root).unwrap();
+}
+
+// Tests that oversized untracked diffs return the documented read-limit envelope.
+#[test]
+fn git_diff_untracked_reader_rejects_oversized_files() {
+    let repo_root = std::env::temp_dir().join(format!(
+        "termal-git-diff-untracked-large-{}",
+        Uuid::new_v4()
+    ));
+    let markdown_file = repo_root.join("README.md");
+
+    fs::create_dir_all(&repo_root).unwrap();
+    fs::write(&markdown_file, "a".repeat(MAX_FILE_CONTENT_BYTES + 1)).unwrap();
+
+    let error = build_untracked_git_diff(&repo_root, "README.md")
+        .expect_err("oversized untracked diff should fail");
+
+    assert_eq!(error.status, StatusCode::BAD_REQUEST);
+    assert!(error.message.contains("read limit"));
+
+    fs::remove_dir_all(repo_root).unwrap();
+}
+
+// Tests that worktree Markdown symlinks render target file contents.
+#[cfg(unix)]
+#[test]
+fn git_diff_worktree_reader_returns_symlink_target_file_contents() {
+    let repo_root =
+        std::env::temp_dir().join(format!("termal-git-diff-doc-symlink-{}", Uuid::new_v4()));
+    let target_file = repo_root.join("target.md");
+    let symlink_path = repo_root.join("link.md");
+
+    fs::create_dir_all(&repo_root).unwrap();
+    fs::write(&target_file, "# Target\n").unwrap();
+    std::os::unix::fs::symlink(&target_file, &symlink_path).unwrap();
+
+    let content = read_git_worktree_text(&repo_root, "link.md").unwrap();
+
+    assert_eq!(content, "# Target\n");
+
+    fs::remove_dir_all(repo_root).unwrap();
+}
+
+// Tests that worktree symlinks pointing outside the repository are rejected.
+#[cfg(unix)]
+#[test]
+fn git_diff_worktree_reader_rejects_symlink_target_escape() {
+    let repo_root = std::env::temp_dir().join(format!(
+        "termal-git-diff-doc-symlink-escape-{}",
+        Uuid::new_v4()
+    ));
+    let outside_root = std::env::temp_dir().join(format!(
+        "termal-git-diff-doc-symlink-outside-{}",
+        Uuid::new_v4()
+    ));
+    let outside_file = outside_root.join("secret.md");
+    let symlink_path = repo_root.join("link.md");
+
+    fs::create_dir_all(&repo_root).unwrap();
+    fs::create_dir_all(&outside_root).unwrap();
+    fs::write(&outside_file, "# Secret\n").unwrap();
+    std::os::unix::fs::symlink(&outside_file, &symlink_path).unwrap();
+
+    let error = read_git_worktree_text(&repo_root, "link.md")
+        .expect_err("symlink target outside repo should fail");
+
+    assert_eq!(error.status, StatusCode::BAD_REQUEST);
+    assert!(error.message.contains("escapes repository root"));
+    assert!(
+        !error.message.contains(repo_root.to_string_lossy().as_ref()),
+        "error should not expose absolute repo path: {}",
+        error.message
+    );
+
+    fs::remove_dir_all(repo_root).unwrap();
+    fs::remove_dir_all(outside_root).unwrap();
+}
+
+// Tests that regular worktree reads reject paths that escape through a symlinked parent.
+#[cfg(unix)]
+#[test]
+fn git_diff_worktree_reader_rejects_symlinked_parent_escape() {
+    let repo_root = std::env::temp_dir().join(format!(
+        "termal-git-diff-doc-parent-symlink-{}",
+        Uuid::new_v4()
+    ));
+    let outside_root = std::env::temp_dir().join(format!(
+        "termal-git-diff-doc-parent-target-{}",
+        Uuid::new_v4()
+    ));
+    let outside_file = outside_root.join("secret.md");
+    let symlink_dir = repo_root.join("linked");
+
+    fs::create_dir_all(&repo_root).unwrap();
+    fs::create_dir_all(&outside_root).unwrap();
+    fs::write(&outside_file, "# Secret\n").unwrap();
+    std::os::unix::fs::symlink(&outside_root, &symlink_dir).unwrap();
+
+    let error = read_git_worktree_text(&repo_root, "linked/secret.md")
+        .expect_err("symlinked parent should not escape the repo");
+
+    assert_eq!(error.status, StatusCode::BAD_REQUEST);
+    assert!(error.message.contains("escapes repository root"));
+
+    fs::remove_dir_all(repo_root).unwrap();
+    fs::remove_dir_all(outside_root).unwrap();
+}
+
+// Tests that symlink leaves reached through symlinked parents are rejected.
+#[cfg(unix)]
+#[test]
+fn git_diff_worktree_reader_rejects_symlinked_parent_symlink_leaf_escape() {
+    let repo_root = std::env::temp_dir().join(format!(
+        "termal-git-diff-doc-parent-leaf-symlink-{}",
+        Uuid::new_v4()
+    ));
+    let outside_root = std::env::temp_dir().join(format!(
+        "termal-git-diff-doc-parent-leaf-target-{}",
+        Uuid::new_v4()
+    ));
+    let outside_target = outside_root.join("target.md");
+    let outside_link = outside_root.join("linked-leaf.md");
+    let symlink_dir = repo_root.join("linked");
+
+    fs::create_dir_all(&repo_root).unwrap();
+    fs::create_dir_all(&outside_root).unwrap();
+    fs::write(&outside_target, "# Secret\n").unwrap();
+    std::os::unix::fs::symlink(&outside_target, &outside_link).unwrap();
+    std::os::unix::fs::symlink(&outside_root, &symlink_dir).unwrap();
+
+    let error = read_git_worktree_text(&repo_root, "linked/linked-leaf.md")
+        .expect_err("symlinked parent should be rejected before reading symlink leaf");
+
+    assert_eq!(error.status, StatusCode::BAD_REQUEST);
+    assert!(error.message.contains("escapes repository root"));
+
+    fs::remove_dir_all(repo_root).unwrap();
+    fs::remove_dir_all(outside_root).unwrap();
+}
+
+// Tests that symlink target paths do not need to be valid UTF-8 when the target contents are valid.
+#[cfg(unix)]
+#[test]
+fn git_diff_worktree_reader_allows_non_utf8_symlink_targets() {
+    use std::os::unix::ffi::OsStringExt as _;
+
+    let repo_root = std::env::temp_dir().join(format!(
+        "termal-git-diff-doc-non-utf8-symlink-{}",
+        Uuid::new_v4()
+    ));
+    let target_name = std::ffi::OsString::from_vec(vec![
+        b't', b'a', 0xFF, b'r', b'g', b'e', b't', b'.', b'm', b'd',
+    ]);
+    let target_path = repo_root.join(FsPath::new(&target_name));
+    let symlink_path = repo_root.join("link.md");
+
+    fs::create_dir_all(&repo_root).unwrap();
+    fs::write(&target_path, "# Target\n").unwrap();
+    std::os::unix::fs::symlink(&target_path, &symlink_path).unwrap();
+
+    let content = read_git_worktree_text(&repo_root, "link.md").unwrap();
+
+    assert_eq!(content, "# Target\n");
 
     fs::remove_dir_all(repo_root).unwrap();
 }

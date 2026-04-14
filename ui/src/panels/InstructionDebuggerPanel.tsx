@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { fetchInstructionSearch } from "../api";
+import { fetchInstructionSearch, type OpenPathOptions } from "../api";
 import {
   normalizeDisplayPath,
   relativizePathToWorkspace,
@@ -15,7 +15,7 @@ import type {
 type InstructionDebuggerPanelProps = {
   session: Session | null;
   workdir: string | null;
-  onOpenPath: (path: string, options?: { line?: number; openInNewTab?: boolean }) => void;
+  onOpenPath: (path: string, options?: OpenPathOptions) => void;
 };
 
 type InstructionDebuggerCacheEntry = {
@@ -226,7 +226,7 @@ function InstructionRootPathCard({
   matchText: string;
   rootPath: InstructionRootPath;
   workdir: string | null;
-  onOpenPath: (path: string, options?: { line?: number; openInNewTab?: boolean }) => void;
+  onOpenPath: (path: string, options?: OpenPathOptions) => void;
 }) {
   const steps = rootPath.steps;
   const lastStep = steps[steps.length - 1] ?? null;
@@ -365,7 +365,7 @@ function InstructionTraceHopCard({
   hopIndex: number;
   step: InstructionPathStep;
   workdir: string | null;
-  onOpenPath: (path: string, options?: { line?: number; openInNewTab?: boolean }) => void;
+  onOpenPath: (path: string, options?: OpenPathOptions) => void;
 }) {
   return (
     <article className="instruction-trace-card instruction-trace-card-hop">
@@ -428,7 +428,7 @@ function InstructionTraceDocumentCard({
   title: string;
   tone: "root" | "referenced" | "match";
   workdir: string | null;
-  onOpenPath: (path: string, options?: { line?: number; openInNewTab?: boolean }) => void;
+  onOpenPath: (path: string, options?: OpenPathOptions) => void;
 }) {
   return (
     <article className={`instruction-trace-card instruction-trace-card-${tone}`}>

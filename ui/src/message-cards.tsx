@@ -2514,6 +2514,7 @@ export function MarkdownContent({
               <table {...props}>{children}</table>
             </div>
           ),
+          img: ({ alt, ...props }) => <img {...props} alt={alt ?? ""} draggable={false} />,
           td: ({ children, isHeader: _isHeader, ...props }) => (
             <td {...props}>{highlightChildren(children)}</td>
           ),

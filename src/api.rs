@@ -2051,7 +2051,7 @@ async fn commit_git_changes(
             return Err(ApiError::bad_request("no staged changes to commit"));
         }
 
-        let output = Command::new("git")
+        let output = git_command()
             .arg("-C")
             .arg(&repo_root)
             .args(["commit", "-m"])
@@ -3513,13 +3513,23 @@ fn load_git_diff_for_request(
     let diff_hash = stable_text_hash(&diff_identity);
     let language = infer_language_from_path(FsPath::new(&current_path)).map(str::to_owned);
     let document_content = if language.as_deref() == Some("markdown") {
-        Some(load_git_diff_document_content(
+        match load_git_diff_document_content(
             &repo_root,
             &current_path,
             original_path.as_deref(),
             status_code.as_deref(),
             request.section_id,
-        )?)
+        ) {
+            Ok(content) => Some(content),
+            Err(error) if matches!(error.status, StatusCode::BAD_REQUEST | StatusCode::NOT_FOUND) => {
+                eprintln!(
+                    "backend warning> git diff Markdown enrichment skipped for {}: {}",
+                    current_path, error.message
+                );
+                None
+            }
+            Err(error) => return Err(error),
+        }
     } else {
         None
     };
@@ -3562,7 +3572,7 @@ fn load_git_status_for_path(path: &FsPath) -> Result<GitStatusResponse, ApiError
         });
     };
 
-    let output = Command::new("git")
+    let output = git_command()
         .arg("-C")
         .arg(&repo_root)
         .args(["status", "--porcelain=v1", "--branch", "-uall"])
@@ -3643,7 +3653,15 @@ fn normalize_git_repo_relative_path(path: &str) -> Result<String, ApiError> {
         return Err(ApiError::bad_request("git file path cannot be empty"));
     }
 
-    if FsPath::new(trimmed).is_absolute() {
+    let is_rooted_or_prefixed = FsPath::new(trimmed).components().any(|component| {
+        matches!(
+            component,
+            std::path::Component::Prefix(_) | std::path::Component::RootDir
+        )
+    });
+    // `\foo` is a rooted Windows path. On Unix hosts `Path::components`
+    // treats it as a normal component, so keep this explicit API-level guard.
+    if is_rooted_or_prefixed || trimmed.starts_with('\\') {
         return Err(ApiError::bad_request(
             "git file actions require repository-relative paths",
         ));
@@ -3690,7 +3708,7 @@ fn load_git_file_diff_text(
     }
 
     let pathspecs = collect_git_pathspecs(current_path, original_path);
-    let mut command = Command::new("git");
+    let mut command = git_command();
     command
         .arg("-C")
         .arg(repo_root)
@@ -3723,13 +3741,9 @@ fn load_git_file_diff_text(
 
 /// Builds untracked Git diff.
 fn build_untracked_git_diff(repo_root: &FsPath, current_path: &str) -> Result<String, ApiError> {
-    let file_path = repo_root.join(current_path);
-    let content = fs::read(&file_path).map_err(|err| {
-        ApiError::internal(format!(
-            "failed to read untracked file {}: {err}",
-            file_path.display()
-        ))
-    })?;
+    // Untracked diffs share the document read cap. This keeps a new large file
+    // from turning the diff endpoint into an unbounded in-memory patch builder.
+    let content = read_git_worktree_bytes(repo_root, current_path)?;
     let content = String::from_utf8_lossy(&content);
     let lines: Vec<&str> = content.lines().collect();
     let mut diff_lines = vec![
@@ -3759,13 +3773,13 @@ fn load_git_diff_document_content(
     status_code: Option<&str>,
     section_id: GitDiffSection,
 ) -> Result<GitDiffDocumentContent, ApiError> {
-    let before_path = original_path.unwrap_or(current_path);
     let normalized_status = status_code.unwrap_or("M");
     let before = match section_id {
         GitDiffSection::Staged => {
             if normalized_status == "A" {
                 read_git_diff_document_side(repo_root, GitDiffDocumentSideSpec::Empty)
             } else {
+                let before_path = original_path.unwrap_or(current_path);
                 read_git_diff_document_side(repo_root, GitDiffDocumentSideSpec::Head(before_path))
             }
         }
@@ -3773,7 +3787,7 @@ fn load_git_diff_document_content(
             if normalized_status == "?" {
                 read_git_diff_document_side(repo_root, GitDiffDocumentSideSpec::Empty)
             } else {
-                read_git_diff_document_side(repo_root, GitDiffDocumentSideSpec::Index(before_path))
+                read_git_diff_document_side(repo_root, GitDiffDocumentSideSpec::Index(current_path))
             }
         }
     }?;
@@ -3839,7 +3853,7 @@ fn git_path_has_unstaged_worktree_changes(
     original_path: Option<&str>,
 ) -> Result<bool, ApiError> {
     let pathspecs = collect_git_pathspecs(current_path, original_path);
-    let output = Command::new("git")
+    let output = git_command()
         .arg("-C")
         .arg(repo_root)
         .arg("diff")
@@ -3900,69 +3914,334 @@ fn read_git_diff_document_side(
     }
 }
 
-/// Reads a UTF-8-ish Git object as text.
+/// Reads a UTF-8 Git object as text.
 fn read_git_object_text(repo_root: &FsPath, revision: &str, path: &str) -> Result<String, ApiError> {
     let object_path = normalize_git_object_path(path);
     let spec = format!("{revision}:{object_path}");
-    let output = Command::new("git")
-        .arg("-C")
-        .arg(repo_root)
-        .arg("show")
-        .arg(spec)
-        .output()
-        .map_err(|err| ApiError::internal(format!("failed to read git object: {err}")))?;
-
-    if output.status.success() {
-        return Ok(String::from_utf8_lossy(&output.stdout).into_owned());
-    }
-
-    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_owned();
-    if stderr.is_empty() {
-        Err(ApiError::internal("failed to read git object"))
-    } else {
-        Err(ApiError::internal(format!(
-            "failed to read git object: {stderr}"
-        )))
-    }
+    read_git_spec_text(repo_root, &spec, "git object")
 }
 
-/// Reads a UTF-8-ish Git index blob as text.
+/// Reads a UTF-8 Git index blob as text.
 fn read_git_index_text(repo_root: &FsPath, path: &str) -> Result<String, ApiError> {
     let object_path = normalize_git_object_path(path);
     let spec = format!(":{object_path}");
-    let output = Command::new("git")
+    read_git_spec_text(repo_root, &spec, "git index object")
+}
+
+const GIT_STDERR_CAPTURE_MAX_BYTES: usize = 64 * 1024;
+
+/// Reads a UTF-8 Git spec through a capped pipe.
+fn read_git_spec_text(repo_root: &FsPath, spec: &str, label: &str) -> Result<String, ApiError> {
+    use std::io::Read as _;
+
+    let mut child = git_command()
         .arg("-C")
         .arg(repo_root)
         .arg("show")
         .arg(spec)
-        .output()
-        .map_err(|err| ApiError::internal(format!("failed to read git index object: {err}")))?;
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|err| ApiError::internal(format!("failed to read {label}: {err}")))?;
 
-    if output.status.success() {
-        return Ok(String::from_utf8_lossy(&output.stdout).into_owned());
+    let mut stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| ApiError::internal(format!("failed to capture {label} output")))?;
+    let mut stderr = child
+        .stderr
+        .take()
+        .ok_or_else(|| ApiError::internal(format!("failed to capture {label} errors")))?;
+    let stderr_thread = std::thread::spawn(move || {
+        let mut content = Vec::new();
+        let result = stderr
+            .by_ref()
+            .take(GIT_STDERR_CAPTURE_MAX_BYTES as u64 + 1)
+            .read_to_end(&mut content);
+        let truncated = content.len() > GIT_STDERR_CAPTURE_MAX_BYTES;
+        if truncated {
+            content.truncate(GIT_STDERR_CAPTURE_MAX_BYTES);
+        }
+        (content, truncated, result.err())
+    });
+
+    let mut content = Vec::new();
+    let read_result = stdout
+        .by_ref()
+        .take(MAX_FILE_CONTENT_BYTES as u64 + 1)
+        .read_to_end(&mut content);
+    if let Err(err) = read_result {
+        let _ = child.kill();
+        let _ = child.wait();
+        let _ = stderr_thread.join();
+        return Err(ApiError::internal(format!("failed to read {label}: {err}")));
     }
 
-    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_owned();
+    if content.len() > MAX_FILE_CONTENT_BYTES {
+        let _ = child.kill();
+        let _ = child.wait();
+        let _ = stderr_thread.join();
+        return Err(ApiError::bad_request(format!(
+            "{label} exceeds the {} MB read limit",
+            MAX_FILE_CONTENT_BYTES / (1024 * 1024)
+        )));
+    }
+
+    drop(stdout);
+    let wait_result = child.wait();
+    let (stderr, stderr_truncated, stderr_error) = stderr_thread
+        .join()
+        .map_err(|_| ApiError::internal(format!("failed to read {label}: stderr reader panicked")))?;
+    let status =
+        wait_result.map_err(|err| ApiError::internal(format!("failed to read {label}: {err}")))?;
+
+    if status.success() {
+        return decode_git_document_text(&content, label);
+    }
+
+    let stderr = String::from_utf8_lossy(&stderr).trim().to_owned();
+    if is_missing_git_object_error(&stderr) {
+        // Git document readers use NOT_FOUND as an internal "drop Markdown
+        // enrichment" signal. The diff itself may still exist and should be
+        // returned by the API boundary without document_content.
+        return Err(ApiError::not_found(format!("{label} not found: {spec}")));
+    }
+    if let Some(err) = stderr_error {
+        return Err(ApiError::internal(format!(
+            "failed to read {label}: failed to drain git stderr: {err}"
+        )));
+    }
     if stderr.is_empty() {
-        Err(ApiError::internal("failed to read git index object"))
-    } else {
+        Err(ApiError::internal(format!("failed to read {label}")))
+    } else if stderr_truncated {
         Err(ApiError::internal(format!(
-            "failed to read git index object: {stderr}"
+            "failed to read {label}: {stderr}... [stderr truncated]"
         )))
+    } else {
+        Err(ApiError::internal(format!("failed to read {label}: {stderr}")))
     }
 }
 
 /// Reads a worktree file as text.
 fn read_git_worktree_text(repo_root: &FsPath, path: &str) -> Result<String, ApiError> {
+    let content = read_git_worktree_bytes(repo_root, path)?;
+    decode_git_document_text(&content, "git worktree file")
+}
+
+/// Reads a worktree file or symlink without escaping the repository root.
+fn read_git_worktree_bytes(repo_root: &FsPath, path: &str) -> Result<Vec<u8>, ApiError> {
+    use std::io::Read as _;
+
     let file_path = repo_root.join(path);
-    let content = fs::read(&file_path).map_err(|err| {
+    let canonical_repo_root = fs::canonicalize(repo_root).map_err(|err| {
         ApiError::internal(format!(
-            "failed to read worktree file {}: {err}",
-            file_path.display()
+            "failed to canonicalize git repo root {}: {err}",
+            repo_root.display()
         ))
     })?;
+    ensure_worktree_parent_stays_in_repo(&canonical_repo_root, &file_path, path)?;
+    let metadata = fs::symlink_metadata(&file_path)
+        .map_err(|err| git_worktree_io_error("inspect", path, err))?;
 
-    Ok(String::from_utf8_lossy(&content).into_owned())
+    if metadata.file_type().is_symlink() {
+        let canonical_target =
+            canonicalize_worktree_path(&file_path, "worktree symlink target", path)?;
+        ensure_canonical_path_starts_in_repo(
+            &canonical_repo_root,
+            &canonical_target,
+            "worktree symlink target",
+            path,
+        )?;
+        let target_metadata = fs::metadata(&canonical_target)
+            .map_err(|err| git_worktree_io_error("inspect symlink target", path, err))?;
+        if !target_metadata.is_file() {
+            return Err(ApiError::not_found(format!(
+                "git worktree symlink target is not a file: {path}"
+            )));
+        }
+        ensure_git_document_bytes_within_limit(target_metadata.len(), "git worktree symlink target")?;
+        return read_capped_worktree_file(
+            &canonical_target,
+            path,
+            "git worktree symlink target",
+        );
+    }
+
+    if !metadata.is_file() {
+        // NOT_FOUND here means "this path is not an enrichable worktree
+        // document"; load_git_diff_for_request maps that to document_content
+        // fallback instead of treating the whole diff as missing.
+        return Err(ApiError::not_found(format!(
+            "git worktree path is not a file: {path}"
+        )));
+    }
+
+    ensure_git_document_bytes_within_limit(metadata.len(), "git worktree file")?;
+    ensure_worktree_path_stays_in_repo(&canonical_repo_root, &file_path, path)?;
+    // Unix opens reject symlink swaps with O_NOFOLLOW. On Windows the remaining
+    // swap window is accepted under the local single-user threat model.
+    let file = open_worktree_file(&file_path, path, "git worktree file")?;
+    let mut content = Vec::new();
+    file.take(MAX_FILE_CONTENT_BYTES as u64 + 1)
+        .read_to_end(&mut content)
+        .map_err(|err| git_worktree_io_error("read", path, err))?;
+    ensure_git_document_bytes_within_limit(content.len() as u64, "git worktree file")?;
+    Ok(content)
+}
+
+/// Ensures the worktree entry's parent resolves inside the Git repository root.
+fn ensure_worktree_parent_stays_in_repo(
+    canonical_repo_root: &FsPath,
+    file_path: &FsPath,
+    relative_path: &str,
+) -> Result<(), ApiError> {
+    let Some(parent_path) = file_path.parent() else {
+        return Err(ApiError::internal(format!(
+            "failed to resolve parent for git worktree file {relative_path}"
+        )));
+    };
+    let canonical_parent = canonicalize_worktree_path(parent_path, "worktree parent", relative_path)?;
+    ensure_canonical_path_starts_in_repo(
+        canonical_repo_root,
+        &canonical_parent,
+        "worktree parent",
+        relative_path,
+    )
+}
+
+/// Ensures a regular worktree path resolves inside the Git repository root.
+fn ensure_worktree_path_stays_in_repo(
+    canonical_repo_root: &FsPath,
+    file_path: &FsPath,
+    relative_path: &str,
+) -> Result<(), ApiError> {
+    let canonical_file = canonicalize_worktree_path(file_path, "worktree file", relative_path)?;
+    ensure_canonical_path_starts_in_repo(
+        canonical_repo_root,
+        &canonical_file,
+        "worktree file",
+        relative_path,
+    )
+}
+
+/// Canonicalizes a worktree path for repository containment checks.
+fn canonicalize_worktree_path(
+    path: &FsPath,
+    label: &str,
+    relative_path: &str,
+) -> Result<PathBuf, ApiError> {
+    fs::canonicalize(path).map_err(|err| {
+        if err.kind() == std::io::ErrorKind::NotFound {
+            ApiError::not_found(format!("git {label} not found: {relative_path}"))
+        } else {
+            ApiError::internal(format!(
+                "failed to canonicalize git {label} {relative_path}: {err}"
+            ))
+        }
+    })
+}
+
+/// Ensures a canonicalized path starts inside the canonical Git repository root.
+fn ensure_canonical_path_starts_in_repo(
+    canonical_repo_root: &FsPath,
+    canonical_path: &FsPath,
+    label: &str,
+    relative_path: &str,
+) -> Result<(), ApiError> {
+    if !canonical_path.starts_with(&canonical_repo_root) {
+        return Err(ApiError::bad_request(format!(
+            "git {label} escapes repository root: {relative_path}"
+        )));
+    }
+
+    Ok(())
+}
+
+/// Opens a regular worktree file for reading.
+#[cfg(unix)]
+fn open_worktree_file(file_path: &FsPath, relative_path: &str, label: &str) -> Result<fs::File, ApiError> {
+    use std::os::unix::fs::OpenOptionsExt as _;
+
+    match fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_NOFOLLOW)
+        .open(file_path)
+    {
+        Ok(file) => Ok(file),
+        Err(err) if err.raw_os_error() == Some(libc::ELOOP) => {
+            Err(ApiError::bad_request(format!("{label} changed to a symlink: {relative_path}")))
+        }
+        Err(err) => Err(git_worktree_io_error("open", relative_path, err)),
+    }
+}
+
+/// Opens a regular worktree file for reading.
+#[cfg(not(unix))]
+fn open_worktree_file(file_path: &FsPath, relative_path: &str, _label: &str) -> Result<fs::File, ApiError> {
+    fs::File::open(file_path).map_err(|err| git_worktree_io_error("open", relative_path, err))
+}
+
+/// Reads a worktree file through the shared document byte cap.
+fn read_capped_worktree_file(file_path: &FsPath, relative_path: &str, label: &str) -> Result<Vec<u8>, ApiError> {
+    use std::io::Read as _;
+
+    let file = open_worktree_file(file_path, relative_path, label)?;
+    let mut content = Vec::new();
+    file.take(MAX_FILE_CONTENT_BYTES as u64 + 1)
+        .read_to_end(&mut content)
+        .map_err(|err| git_worktree_io_error("read", relative_path, err))?;
+    ensure_git_document_bytes_within_limit(content.len() as u64, label)?;
+    Ok(content)
+}
+
+/// Maps worktree I/O errors to API-safe, repo-relative messages.
+fn git_worktree_io_error(action: &str, relative_path: &str, err: std::io::Error) -> ApiError {
+    if err.kind() == std::io::ErrorKind::NotFound {
+        ApiError::not_found(format!("git worktree path not found: {relative_path}"))
+    } else {
+        ApiError::internal(format!(
+            "failed to {action} git worktree file {relative_path}: {err}"
+        ))
+    }
+}
+
+/// Enforces the file read ceiling on Git document enrichment.
+fn ensure_git_document_bytes_within_limit(size: u64, label: &str) -> Result<(), ApiError> {
+    if size > MAX_FILE_CONTENT_BYTES as u64 {
+        return Err(ApiError::bad_request(format!(
+            "{label} exceeds the {} MB read limit",
+            MAX_FILE_CONTENT_BYTES / (1024 * 1024)
+        )));
+    }
+
+    Ok(())
+}
+
+/// Decodes Git document bytes only when they are valid UTF-8.
+fn decode_git_document_text(content: &[u8], label: &str) -> Result<String, ApiError> {
+    std::str::from_utf8(content)
+        .map(|text| text.to_owned())
+        .map_err(|_| ApiError::bad_request(format!("{label} is not valid UTF-8")))
+}
+
+/// Checks whether git reported a missing object/path.
+fn is_missing_git_object_error(stderr: &str) -> bool {
+    let normalized = stderr.to_ascii_lowercase();
+    normalized.contains("not a valid object name")
+        || normalized.contains("invalid object name")
+        || normalized.contains("unknown revision")
+        || normalized.contains("does not exist (neither on disk nor in the index)")
+        || normalized.contains("does not exist in")
+        || normalized.contains("path")
+            && normalized.contains("exists on disk")
+            && normalized.contains("but not in")
+}
+
+/// Builds a Git command with stable stderr wording for parsed error paths.
+fn git_command() -> Command {
+    let mut command = Command::new("git");
+    command.env("LC_ALL", "C").env("LANG", "C");
+    command
 }
 
 /// Normalizes a repository-relative path for Git object lookups.
@@ -4012,7 +4291,7 @@ fn run_git_pathspec_command(
     pathspecs: &[String],
     error_context: &str,
 ) -> Result<(), ApiError> {
-    let output = Command::new("git")
+    let output = git_command()
         .arg("-C")
         .arg(repo_root)
         .args(args)
@@ -4108,7 +4387,7 @@ fn run_git_repo_command(
     args: &[&str],
     error_context: &str,
 ) -> Result<(), ApiError> {
-    let output = Command::new("git")
+    let output = git_command()
         .arg("-C")
         .arg(repo_root)
         .args(args)
@@ -7754,7 +8033,7 @@ struct ParsedGitBranchStatus {
 
 /// Resolves Git repo root.
 fn resolve_git_repo_root(workdir: &FsPath) -> Result<Option<PathBuf>, ApiError> {
-    let output = Command::new("git")
+    let output = git_command()
         .arg("-C")
         .arg(workdir)
         .args(["rev-parse", "--show-toplevel"])

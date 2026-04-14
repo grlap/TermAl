@@ -2,6 +2,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  AgentSessionPanel,
   AgentSessionPanelFooter,
   RunningIndicator,
   getAdjustedVirtualizedScrollTopForHeightChange,
@@ -9,7 +10,7 @@ import {
   isScrollContainerAtBottom,
   isScrollContainerNearBottom,
 } from "./AgentSessionPanel";
-import type { Session } from "../types";
+import type { Message, Session } from "../types";
 
 function makeSession(id: string, overrides?: Partial<Session>): Session {
   return {
@@ -25,6 +26,78 @@ function makeSession(id: string, overrides?: Partial<Session>): Session {
     ...overrides,
   };
 }
+
+function makeTextMessages(count: number): Message[] {
+  return Array.from({ length: count }, (_, index) => ({
+    id: `message-${index + 1}`,
+    type: "text",
+    timestamp: `10:${String(index).padStart(2, "0")}`,
+    author: index % 2 === 0 ? "you" : "assistant",
+    text: `Message ${index + 1}`,
+  }));
+}
+
+function renderSessionPanelWithDefaults(
+  props: Partial<Parameters<typeof AgentSessionPanel>[0]>,
+) {
+  const activeSession = props.activeSession ?? null;
+  return render(
+    <AgentSessionPanel
+      paneId="pane-1"
+      viewMode="session"
+      activeSession={activeSession}
+      isLoading={false}
+      isUpdating={false}
+      showWaitingIndicator={false}
+      waitingIndicatorPrompt={null}
+      mountedSessions={activeSession ? [activeSession] : []}
+      commandMessages={[]}
+      diffMessages={[]}
+      scrollContainerRef={{ current: document.createElement("section") }}
+      onApprovalDecision={() => {}}
+      onUserInputSubmit={() => {}}
+      onMcpElicitationSubmit={() => {}}
+      onCodexAppRequestSubmit={() => {}}
+      onCancelQueuedPrompt={() => {}}
+      onSessionSettingsChange={() => {}}
+      conversationSearchQuery=""
+      conversationSearchMatchedItemKeys={new Set()}
+      conversationSearchActiveItemKey={null}
+      onConversationSearchItemMount={() => {}}
+      renderCommandCard={() => null}
+      renderDiffCard={() => null}
+      renderMessageCard={(message) => (
+        <article className="message-card">{message.id}</article>
+      )}
+      renderPromptSettings={() => null}
+      {...props}
+    />,
+  );
+}
+
+describe("AgentSessionPanel conversation caching", () => {
+  it("keeps inactive virtualized conversation DOM mounted so tab activation does not rebuild it", () => {
+    const cachedSession = makeSession("cached-session", {
+      messages: makeTextMessages(85),
+    });
+    const activeSession = makeSession("active-session", {
+      messages: makeTextMessages(1),
+    });
+
+    const { container } = renderSessionPanelWithDefaults({
+      activeSession,
+      mountedSessions: [cachedSession, activeSession],
+    });
+
+    const hiddenCachedPage = container.querySelector(
+      '.session-conversation-page[hidden]',
+    );
+    expect(hiddenCachedPage).not.toBeNull();
+    expect(
+      hiddenCachedPage?.querySelector(".virtualized-message-list"),
+    ).not.toBeNull();
+  });
+});
 
 function renderFooter({
   isPaneActive = true,

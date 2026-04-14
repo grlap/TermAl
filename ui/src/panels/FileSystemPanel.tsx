@@ -6,6 +6,7 @@ import {
   type DirectoryResponse,
   type GitStatusFile,
   type GitStatusResponse,
+  type OpenPathOptions,
 } from "../api";
 import type { WorkspaceFilesChangedEvent } from "../types";
 import { workspaceFilesChangedEventTouchesRoot } from "../workspace-file-events";
@@ -23,11 +24,6 @@ type FileSystemGitDecorations = {
   directoriesByPath: Record<string, GitDecorationTone | undefined>;
   filesByPath: Record<string, FileDecoration | undefined>;
 };
-type FileSystemOpenOptions = {
-  openInNewTab?: boolean;
-};
-
-
 const GIT_STATUS_LABELS: Record<string, string> = {
   "?": "Untracked",
   A: "Added",
@@ -56,7 +52,7 @@ export function FileSystemPanel({
   workspaceFilesChangedEvent = null,
   showPathControls = true,
 }: {
-  onOpenPath: (path: string, options?: FileSystemOpenOptions) => void;
+  onOpenPath: (path: string, options?: OpenPathOptions) => void;
   onOpenRootPath: (path: string) => void;
   rootPath: string | null;
   sessionId: string | null;
@@ -429,7 +425,7 @@ function DirectoryTree({
   gitDecorations: FileSystemGitDecorations;
   loadingPaths: Record<string, true | undefined>;
   onDirectoryToggle: (path: string) => void;
-  onOpenPath: (path: string, options?: FileSystemOpenOptions) => void;
+  onOpenPath: (path: string, options?: OpenPathOptions) => void;
 }) {
   return (
     <div className="filesystem-tree">

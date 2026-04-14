@@ -80,4 +80,10 @@ describe("MarkdownContent inline file links", () => {
       openInNewTab: false,
     });
   });
+
+  it("renders Markdown images as non-draggable", () => {
+    render(<MarkdownContent markdown="![Diagram](./diagram.png)" workspaceRoot="/repo" />);
+
+    expect(screen.getByRole("img", { name: "Diagram" })).toHaveAttribute("draggable", "false");
+  });
 });

@@ -1850,7 +1850,7 @@ export function updateGitDiffPreviewTabInWorkspaceState(
 }
 
 export function stripLoadingGitDiffPreviewTabsFromWorkspaceState(workspace: WorkspaceState): WorkspaceState {
-  let nextWorkspace = workspace;
+  let nextWorkspace = stripDiffPreviewDocumentContentFromWorkspaceState(workspace);
   const loadingTabs = workspace.panes.flatMap((pane) =>
     pane.tabs
       .filter(
@@ -1868,6 +1868,27 @@ export function stripLoadingGitDiffPreviewTabsFromWorkspaceState(workspace: Work
   }
 
   return nextWorkspace;
+}
+
+function stripDiffPreviewDocumentContentFromWorkspaceState(workspace: WorkspaceState): WorkspaceState {
+  let changed = false;
+  const panes = workspace.panes.map((pane) => {
+    let paneChanged = false;
+    const tabs = pane.tabs.map((tab) => {
+      if (tab.kind !== "diffPreview" || !tab.documentContent) {
+        return tab;
+      }
+
+      const { documentContent: _documentContent, ...tabWithoutDocumentContent } = tab;
+      changed = true;
+      paneChanged = true;
+      return tabWithoutDocumentContent;
+    });
+
+    return paneChanged ? syncPaneState({ ...pane, tabs }) : pane;
+  });
+
+  return changed ? { ...workspace, panes } : workspace;
 }
 
 function replaceWorkspaceTabInPane<T extends WorkspaceTab>(
