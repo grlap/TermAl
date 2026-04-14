@@ -21864,6 +21864,25 @@ fn git_diff_document_content_uses_selected_git_side_for_markdown() {
 
     fs::write(&markdown_file, "# Staged\n\nReady to commit.\n").unwrap();
     run_git_test_command(&repo_root, &["add", "README.md"]);
+    let clean_staged = load_git_diff_for_request(
+        &repo_root,
+        &GitDiffRequest {
+            original_path: None,
+            path: "README.md".to_owned(),
+            section_id: GitDiffSection::Staged,
+            status_code: Some("M".to_owned()),
+            workdir: repo_root.to_string_lossy().into_owned(),
+            project_id: None,
+            session_id: None,
+        },
+    )
+    .unwrap();
+    let clean_staged_document = clean_staged
+        .document_content
+        .expect("clean staged Markdown diff should include document content");
+    assert!(clean_staged_document.can_edit);
+    assert_eq!(clean_staged_document.edit_blocked_reason, None);
+
     fs::write(&markdown_file, "# Worktree\n\nNot staged yet.\n").unwrap();
 
     let staged = load_git_diff_for_request(
@@ -21882,8 +21901,21 @@ fn git_diff_document_content_uses_selected_git_side_for_markdown() {
     let staged_document = staged
         .document_content
         .expect("staged Markdown diff should include document content");
-    assert_eq!(staged_document.before.source, GitDiffDocumentSideSource::Head);
-    assert_eq!(staged_document.after.source, GitDiffDocumentSideSource::Index);
+    assert_eq!(
+        staged_document.before.source,
+        GitDiffDocumentSideSource::Head
+    );
+    assert_eq!(
+        staged_document.after.source,
+        GitDiffDocumentSideSource::Index
+    );
+    assert!(!staged_document.can_edit);
+    assert_eq!(
+        staged_document.edit_blocked_reason.as_deref(),
+        Some(
+            "This staged Markdown diff is read-only because the worktree has unstaged changes for this file."
+        )
+    );
     assert_eq!(staged_document.before.content, "# Base\n\nInitial text.\n");
     assert_eq!(
         staged_document.after.content,
@@ -21914,6 +21946,8 @@ fn git_diff_document_content_uses_selected_git_side_for_markdown() {
         unstaged_document.after.source,
         GitDiffDocumentSideSource::Worktree
     );
+    assert!(unstaged_document.can_edit);
+    assert_eq!(unstaged_document.edit_blocked_reason, None);
     assert_eq!(
         unstaged_document.before.content,
         "# Staged\n\nReady to commit.\n"

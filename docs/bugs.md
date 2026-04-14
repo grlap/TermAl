@@ -20,22 +20,6 @@ and cleanup notes do not belong here.
 - Also reject `Path::has_root()` (or `trimmed.starts_with('/') || trimmed.starts_with('\\')`) in `normalize_git_repo_relative_path`.
 - Add regression tests for `/etc/passwd`, `\etc\passwd`, and `./foo` on both Windows and Unix.
 
-## Rendered staged Markdown edits can silently overwrite unstaged worktree changes
-
-**Severity:** High - editing a staged Markdown diff can clobber unstaged edits in the same file.
-
-When the user edits a rendered staged Markdown diff, segment offsets in `handleRenderedMarkdownSectionChange` index into `markdownPreview.after.content` (the **index** blob), but `handleSave` writes the resulting buffer to the worktree file via `onSaveFile`. If the worktree diverged from the index — which is the exact scenario where staged diffs most matter — the save overwrites unstaged worktree edits with an index-derived document. `latestFile.contentHash` only catches changes since the tab opened, not divergence between index and worktree at that time. The existing notice "Rendered Markdown edits will save this document to the worktree file" does not warn that unstaged changes will be lost.
-
-**Current behavior:**
-- Rendered edit is enabled whenever `markdownDisplayPreview.after.completeness === "full"`, including for staged diffs.
-- Section offsets are computed against the index blob.
-- Save writes the edited index-derived content to the worktree, clobbering unstaged edits.
-
-**Proposal:**
-- Make rendered edit read-only when `markdownPreview.after.source === "index"` (staged review is pure review).
-- Or for staged diffs, base edits on `latestFile.content` (worktree) and compute segment offsets against the worktree content rather than the index.
-- Add a regression test that covers a staged edit with a divergent worktree.
-
 ## Rendered Markdown serializer has no escaping for prose special characters
 
 **Severity:** High - editing rendered Markdown can silently corrupt unchanged prose, tables, and code blocks.

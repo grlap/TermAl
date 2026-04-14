@@ -171,6 +171,8 @@ export type GitDiffDocumentSide = {
 export type GitDiffDocumentContent = {
   before: GitDiffDocumentSide;
   after: GitDiffDocumentSide;
+  canEdit: boolean;
+  editBlockedReason?: string | null;
   isCompleteDocument: boolean;
   note?: string | null;
 };

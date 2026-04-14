@@ -256,6 +256,7 @@ describe("DiffPanel", () => {
               content: "Shared intro.\n# Staged document\nShared middle.\nReady to commit.\nShared outro.\n",
               source: "index",
             },
+            canEdit: true,
             isCompleteDocument: true,
           }}
           diffMessageId="diff-markdown-staged"
@@ -327,6 +328,7 @@ describe("DiffPanel", () => {
               content: "Shared intro.\n# Draft document\nShared middle.\nReady to commit.\nShared outro.\n",
               source: "worktree",
             },
+            canEdit: true,
             isCompleteDocument: true,
           }}
           diffMessageId="diff-markdown-editable"
@@ -374,9 +376,9 @@ describe("DiffPanel", () => {
     });
   });
 
-  it("saves rendered Markdown edits from a staged diff to the worktree file", async () => {
+  it("saves rendered Markdown edits from a clean staged diff to the worktree file", async () => {
     fetchFileMock.mockResolvedValue({
-      content: "Worktree content that is not staged.\n",
+      content: "Shared intro.\n# Staged document\nShared middle.\nReady to commit.\nShared outro.\n",
       language: "markdown",
       path: "/repo/README.md",
     });
@@ -412,6 +414,7 @@ describe("DiffPanel", () => {
               content: "Shared intro.\n# Staged document\nShared middle.\nReady to commit.\nShared outro.\n",
               source: "index",
             },
+            canEdit: true,
             isCompleteDocument: true,
           }}
           diffMessageId="diff-markdown-staged-editable"
@@ -443,6 +446,70 @@ describe("DiffPanel", () => {
       baseHash: null,
       overwrite: undefined,
     });
+  });
+
+  it("keeps rendered staged Markdown read-only when the worktree has unstaged changes", async () => {
+    fetchFileMock.mockResolvedValue({
+      content: "Worktree content that is not staged.\n",
+      language: "markdown",
+      path: "/repo/README.md",
+    });
+    const onSaveFile = vi.fn();
+
+    await act(async () => {
+      render(
+        <DiffPanel
+          appearance="dark"
+          fontSizePx={13}
+          changeType="edit"
+          diff={[
+            "@@ -1,5 +1,5 @@",
+            " Shared intro.",
+            "-# Base document",
+            "+# Staged document",
+            " Shared middle.",
+            "-Committed text.",
+            "+Ready to commit.",
+            " Shared outro.",
+          ].join("\n")}
+          documentContent={{
+            before: {
+              content: "Shared intro.\n# Base document\nShared middle.\nCommitted text.\nShared outro.\n",
+              source: "head",
+            },
+            after: {
+              content: "Shared intro.\n# Staged document\nShared middle.\nReady to commit.\nShared outro.\n",
+              source: "index",
+            },
+            canEdit: false,
+            editBlockedReason:
+              "This staged Markdown diff is read-only because the worktree has unstaged changes for this file.",
+            isCompleteDocument: true,
+          }}
+          diffMessageId="diff-markdown-staged-readonly"
+          filePath="/repo/README.md"
+          gitSectionId="staged"
+          language="markdown"
+          sessionId="session-1"
+          workspaceRoot="/repo"
+          onOpenPath={() => {}}
+          onSaveFile={onSaveFile}
+          summary="Updated README"
+        />,
+      );
+    });
+
+    await waitFor(() => {
+      expect(screen.getByRole("heading", { name: "Staged document" })).toBeInTheDocument();
+    });
+
+    expect(
+      screen.getAllByText("This staged Markdown diff is read-only because the worktree has unstaged changes for this file.")
+        .length,
+    ).toBeGreaterThan(0);
+    expect(document.querySelector("[data-markdown-editable='true']")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Save Markdown" })).not.toBeInTheDocument();
+    expect(onSaveFile).not.toHaveBeenCalled();
   });
 
   it("recomputes rendered Markdown diff sections after editing unchanged content", async () => {
@@ -477,6 +544,7 @@ describe("DiffPanel", () => {
               content: "Shared intro.\n# Draft document\nShared middle.\nReady to commit.\nShared outro.\n",
               source: "worktree",
             },
+            canEdit: true,
             isCompleteDocument: true,
           }}
           diffMessageId="diff-markdown-live-rediff"
@@ -540,6 +608,7 @@ describe("DiffPanel", () => {
               content: "# Task Management\n\nShared intro.\nInserted detail.\nShared outro.\n",
               source: "worktree",
             },
+            canEdit: true,
             isCompleteDocument: true,
           }}
           diffMessageId="diff-markdown-newline-normalized"
@@ -599,6 +668,7 @@ describe("DiffPanel", () => {
               content: "# Task Management2\n\n- [`lib/models/task_definition.dart`](lib/models/task_definition.dart) - TaskDefinition model\n\n## Overview\n",
               source: "worktree",
             },
+            canEdit: true,
             isCompleteDocument: true,
           }}
           diffMessageId="diff-markdown-render-equivalent-links"
@@ -660,6 +730,7 @@ describe("DiffPanel", () => {
               content: "Shared intro.\n# Draft document\nShared middle.\nReady to commit.\nShared outro.\n",
               source: "worktree",
             },
+            canEdit: true,
             isCompleteDocument: true,
           }}
           diffMessageId="diff-markdown-caret"

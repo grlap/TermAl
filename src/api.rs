@@ -3794,13 +3794,77 @@ fn load_git_diff_document_content(
             }
         }
     }?;
+    let edit_blocked_reason = git_diff_document_edit_blocked_reason(
+        repo_root,
+        current_path,
+        original_path,
+        section_id,
+    )?;
 
     Ok(GitDiffDocumentContent {
         before,
         after,
+        can_edit: edit_blocked_reason.is_none(),
+        edit_blocked_reason,
         is_complete_document: true,
         note: None,
     })
+}
+
+/// Explains why a rendered Git document diff cannot be edited.
+fn git_diff_document_edit_blocked_reason(
+    repo_root: &FsPath,
+    current_path: &str,
+    original_path: Option<&str>,
+    section_id: GitDiffSection,
+) -> Result<Option<String>, ApiError> {
+    if !matches!(section_id, GitDiffSection::Staged) {
+        return Ok(None);
+    }
+
+    if git_path_has_unstaged_worktree_changes(repo_root, current_path, original_path)? {
+        return Ok(Some(
+            "This staged Markdown diff is read-only because the worktree has unstaged changes for this file."
+                .to_owned(),
+        ));
+    }
+
+    Ok(None)
+}
+
+/// Checks whether the worktree differs from the index for a Git path.
+fn git_path_has_unstaged_worktree_changes(
+    repo_root: &FsPath,
+    current_path: &str,
+    original_path: Option<&str>,
+) -> Result<bool, ApiError> {
+    let pathspecs = collect_git_pathspecs(current_path, original_path);
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(repo_root)
+        .arg("diff")
+        .arg("--quiet")
+        .arg("--")
+        .args(&pathspecs)
+        .output()
+        .map_err(|err| ApiError::internal(format!("failed to inspect unstaged git changes: {err}")))?;
+
+    if output.status.success() {
+        return Ok(false);
+    }
+
+    if output.status.code() == Some(1) {
+        return Ok(true);
+    }
+
+    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_owned();
+    if stderr.is_empty() {
+        Err(ApiError::internal("failed to inspect unstaged git changes"))
+    } else {
+        Err(ApiError::internal(format!(
+            "failed to inspect unstaged git changes: {stderr}"
+        )))
+    }
 }
 
 /// Represents the side of a Git document diff to read.
@@ -6019,6 +6083,9 @@ struct GitDiffResponse {
 struct GitDiffDocumentContent {
     before: GitDiffDocumentSide,
     after: GitDiffDocumentSide,
+    can_edit: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    edit_blocked_reason: Option<String>,
     is_complete_document: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     note: Option<String>,

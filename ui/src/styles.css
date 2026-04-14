@@ -4958,6 +4958,10 @@ textarea {
   height: 100%;
 }
 
+.diff-editor-shell {
+  background: var(--code-bg);
+}
+
 .source-editor-loading {
   display: grid;
   flex: 1 1 auto;
@@ -5077,6 +5081,15 @@ textarea {
 .monaco-diff-editor .monaco-editor,
 .monaco-diff-editor .monaco-editor .overflow-guard {
   border-radius: 0.45rem;
+}
+
+.diff-editor-shell .monaco-diff-editor,
+.diff-editor-shell .monaco-diff-editor .monaco-editor,
+.diff-editor-shell .monaco-diff-editor .monaco-editor .overflow-guard,
+.diff-editor-shell .monaco-diff-editor .monaco-editor-background,
+.diff-editor-shell .monaco-diff-editor .margin,
+.diff-editor-shell .monaco-diff-editor .glyph-margin {
+  background-color: var(--code-bg) !important;
 }
 
 .source-editor-shell-with-statusbar .monaco-code-editor .monaco-editor,

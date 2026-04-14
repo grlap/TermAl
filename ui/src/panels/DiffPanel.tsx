@@ -419,10 +419,12 @@ export function DiffPanel({
     : formatLanguageLabel(language, filePath);
   const canEditVisualDiff =
     !documentContent && preview.hasStructuredPreview && latestFile.status === "ready" && Boolean(filePath);
+  const renderedMarkdownEditBlockedReason = documentContent?.editBlockedReason ?? null;
   const canEditRenderedMarkdown =
     Boolean(filePath) &&
     latestFile.status === "ready" &&
-    markdownDisplayPreview?.after.completeness === "full";
+    markdownDisplayPreview?.after.completeness === "full" &&
+    (documentContent?.canEdit ?? true);
   const hasVisualNavigation = viewMode === "all" && visualEditorStatus.changeCount > 0;
   const isDirty = latestFile.status === "ready" && editValue !== latestFile.content;
   const saveStateLabel = saveError ? "Save failed" : isSaving ? "Saving..." : isDirty ? "Unsaved changes" : null;
@@ -650,7 +652,7 @@ export function DiffPanel({
     segment: MarkdownDiffDocumentSegment,
     nextMarkdown: string,
   ) {
-    if (!markdownPreview || latestFileRef.current.status !== "ready") {
+    if (!canEditRenderedMarkdown || !markdownPreview || latestFileRef.current.status !== "ready") {
       return;
     }
 
@@ -704,7 +706,7 @@ export function DiffPanel({
   }
 
   function handleRenderedMarkdownUndo() {
-    if (!markdownPreview || latestFileRef.current.status !== "ready") {
+    if (!canEditRenderedMarkdown || !markdownPreview || latestFileRef.current.status !== "ready") {
       return false;
     }
 
@@ -720,7 +722,7 @@ export function DiffPanel({
   }
 
   function handleRenderedMarkdownRedo() {
-    if (!markdownPreview || latestFileRef.current.status !== "ready") {
+    if (!canEditRenderedMarkdown || !markdownPreview || latestFileRef.current.status !== "ready") {
       return false;
     }
 
@@ -1239,6 +1241,7 @@ export function DiffPanel({
           <MarkdownDiffView
             canEdit={canEditRenderedMarkdown}
             documentPath={filePath}
+            editBlockedReason={renderedMarkdownEditBlockedReason}
             gitSectionId={gitSectionId}
             isDirty={isDirty}
             isSaving={isSaving}
@@ -1562,6 +1565,7 @@ function buildMarkdownDiffPreview(
 function MarkdownDiffView({
   canEdit,
   documentPath,
+  editBlockedReason,
   gitSectionId,
   isDirty,
   isSaving,
@@ -1578,6 +1582,7 @@ function MarkdownDiffView({
 }: {
   canEdit: boolean;
   documentPath: string | null;
+  editBlockedReason: string | null;
   gitSectionId: GitDiffSection | null;
   isDirty: boolean;
   isSaving: boolean;
@@ -1618,6 +1623,9 @@ function MarkdownDiffView({
           </div>
         ) : null}
       </div>
+      {!canEdit && editBlockedReason ? (
+        <p className="support-copy markdown-document-note">{editBlockedReason}</p>
+      ) : null}
       <MarkdownDiffDocument
         canEdit={canEdit}
         completeness={markdownPreview.after.completeness}
@@ -1635,7 +1643,9 @@ function MarkdownDiffView({
       <footer className="source-editor-statusbar diff-preview-statusbar" aria-label="Markdown diff status">
         <div className="source-editor-statusbar-group">
           <span className="source-editor-statusbar-item source-editor-statusbar-state">
-            {canEdit ? "Rendered Markdown edits update the file buffer" : "Rendered changes"}
+            {canEdit
+              ? "Rendered Markdown edits update the file buffer"
+              : editBlockedReason ?? "Rendered changes"}
           </span>
         </div>
         <div className="source-editor-statusbar-group source-editor-statusbar-group-meta">
