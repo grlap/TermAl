@@ -76,6 +76,27 @@ export type MarkdownFileLinkTarget = {
   openInNewTab?: boolean;
 };
 
+type MarkdownSourcePosition = {
+  start?: {
+    line?: number | null;
+  } | null;
+  end?: {
+    line?: number | null;
+  } | null;
+} | null;
+
+type MarkdownLineAttributes = {
+  "data-markdown-line-start": number;
+  "data-markdown-line-range": string;
+  title: string;
+};
+
+type MarkdownLineMarker = {
+  line: number;
+  range: string;
+  top: number;
+};
+
 export const MessageCard = memo(function MessageCard({
   message,
   onOpenDiffPreview,
@@ -579,6 +600,7 @@ function HighlightedCodeBlock({
   className,
   code,
   commandHint,
+  lineAttributes,
   language,
   pathHint,
   showCopyButton = false,
@@ -588,6 +610,7 @@ function HighlightedCodeBlock({
   className: string;
   code: string;
   commandHint?: string | null;
+  lineAttributes?: MarkdownLineAttributes | null;
   language?: string | null;
   pathHint?: string | null;
   showCopyButton?: boolean;
@@ -630,7 +653,10 @@ function HighlightedCodeBlock({
   }
 
   return (
-    <pre className={`${className} syntax-block${showCopyButton ? " copyable" : ""}`}>
+    <pre
+      {...(lineAttributes ?? {})}
+      className={`${className} syntax-block${showCopyButton ? " copyable" : ""}`}
+    >
       {showCopyButton ? (
         <button
           className={`command-icon-button syntax-copy-button${copied ? " copied" : ""}`}
@@ -2303,6 +2329,7 @@ const MARKDOWN_BARE_FILE_REFERENCE_IGNORED_NODE_TYPES = new Set([
 ]);
 const MARKDOWN_REMARK_PLUGINS = [remarkGfm, remarkAutolinkBareFileReferences];
 const MarkdownLinkContext = createContext(false);
+const MarkdownLineNumberSuppressedContext = createContext(false);
 
 function remarkAutolinkBareFileReferences() {
   return (tree: MarkdownAstNode) => {
@@ -2386,6 +2413,8 @@ export function MarkdownContent({
   onOpenSourceLink,
   searchQuery = "",
   searchHighlightTone = "match",
+  showLineNumbers = false,
+  startLineNumber = 1,
   workspaceRoot = null,
 }: {
   documentPath?: string | null;
@@ -2393,6 +2422,8 @@ export function MarkdownContent({
   onOpenSourceLink?: (target: MarkdownFileLinkTarget) => void;
   searchQuery?: string;
   searchHighlightTone?: SearchHighlightTone;
+  showLineNumbers?: boolean;
+  startLineNumber?: number;
   workspaceRoot?: string | null;
 }) {
   // Keep callback in a ref so the memoized ReactMarkdown output stays stable
@@ -2405,16 +2436,88 @@ export function MarkdownContent({
   // rendered tree changes structurally when the prop goes from absent to present
   // or vice versa.  The ref handles identity-only changes without rememoizing.
   const hasOpenSourceLink = onOpenSourceLink != null;
+  const normalizedStartLineNumber = normalizeMarkdownStartLineNumber(startLineNumber);
+  const markdownRootRef = useRef<HTMLDivElement | null>(null);
+  const [lineMarkers, setLineMarkers] = useState<MarkdownLineMarker[]>([]);
+
+  useLayoutEffect(() => {
+    if (!showLineNumbers) {
+      setLineMarkers([]);
+      return;
+    }
+
+    const root = markdownRootRef.current;
+    if (!root) {
+      setLineMarkers([]);
+      return;
+    }
+
+    let animationFrameId = 0;
+    const updateLineMarkers = () => {
+      const rootRect = root.getBoundingClientRect();
+      const nextMarkers = Array.from(
+        root.querySelectorAll<HTMLElement>("[data-markdown-line-start]"),
+      )
+        .map((element) => {
+          const line = Number(element.dataset.markdownLineStart);
+          if (!Number.isFinite(line)) {
+            return null;
+          }
+
+          return {
+            line,
+            range: element.dataset.markdownLineRange ?? String(line),
+            top: Math.round(element.getBoundingClientRect().top - rootRect.top),
+          };
+        })
+        .filter((marker): marker is MarkdownLineMarker => marker != null);
+
+      setLineMarkers((currentMarkers) =>
+        areMarkdownLineMarkersEqual(currentMarkers, nextMarkers) ? currentMarkers : nextMarkers,
+      );
+    };
+    const scheduleLineMarkerUpdate = () => {
+      window.cancelAnimationFrame(animationFrameId);
+      animationFrameId = window.requestAnimationFrame(updateLineMarkers);
+    };
+
+    updateLineMarkers();
+
+    const ResizeObserverConstructor = window.ResizeObserver;
+    const resizeObserver = ResizeObserverConstructor
+      ? new ResizeObserverConstructor(scheduleLineMarkerUpdate)
+      : null;
+    resizeObserver?.observe(root);
+    window.addEventListener("resize", scheduleLineMarkerUpdate);
+
+    return () => {
+      window.cancelAnimationFrame(animationFrameId);
+      resizeObserver?.disconnect();
+      window.removeEventListener("resize", scheduleLineMarkerUpdate);
+    };
+  }, [
+    documentPath,
+    hasOpenSourceLink,
+    markdown,
+    normalizedStartLineNumber,
+    searchQuery,
+    searchHighlightTone,
+    showLineNumbers,
+    workspaceRoot,
+  ]);
 
   const rendered = useMemo(() => {
     const highlightChildren = (children: ReactNode) =>
       highlightReactNodeText(children, searchQuery, searchHighlightTone);
+    const getLineAttributes = (sourcePosition: MarkdownSourcePosition | undefined) =>
+      getMarkdownLineAttributes(sourcePosition, normalizedStartLineNumber, showLineNumbers);
 
     return (
       <ReactMarkdown
+        rawSourcePos={showLineNumbers}
         transformLinkUri={transformMarkdownLinkUri}
         components={{
-          a: ({ href, children, ...props }) => {
+          a: ({ href, children, sourcePosition: _sourcePosition, ...props }) => {
             const isExternalLink = isExternalMarkdownHref(href ?? "");
             const fileLinkTarget = resolveMarkdownFileLinkTarget(href, workspaceRoot, documentPath);
             const displayLabel = buildMarkdownHrefDisplayLabel(href, children, workspaceRoot, documentPath);
@@ -2446,8 +2549,9 @@ export function MarkdownContent({
               </a>
             );
           },
-          code: ({ children, className, inline, ...props }) => {
+          code: ({ children, className, inline, sourcePosition, ...props }) => {
             const isInsideMarkdownLink = useContext(MarkdownLinkContext);
+            const suppressLineNumber = useContext(MarkdownLineNumberSuppressedContext);
             const language = className?.match(/language-([\w-]+)/)?.[1] ?? null;
             const code = String(children).replace(/\n$/, "");
             const inlineFileLinkTarget = inline
@@ -2484,6 +2588,7 @@ export function MarkdownContent({
               <HighlightedCodeBlock
                 className="code-block"
                 code={code}
+                lineAttributes={suppressLineNumber ? null : getLineAttributes(sourcePosition)}
                 language={language}
                 showCopyButton
                 searchQuery={searchQuery}
@@ -2491,34 +2596,86 @@ export function MarkdownContent({
               />
             );
           },
-          p: ({ children, ...props }) => <p {...props}>{highlightChildren(children)}</p>,
-          li: ({ children, ordered: _ordered, index: _index, checked: _checked, ...props }) => (
-            <li {...props}>{highlightChildren(children)}</li>
+          p: ({ children, sourcePosition, ...props }) => {
+            const suppressLineNumber = useContext(MarkdownLineNumberSuppressedContext);
+            return (
+              <p {...props} {...(suppressLineNumber ? {} : getLineAttributes(sourcePosition) ?? {})}>
+                {highlightChildren(children)}
+              </p>
+            );
+          },
+          li: ({
+            children,
+            ordered: _ordered,
+            index: _index,
+            checked: _checked,
+            sourcePosition,
+            ...props
+          }) => {
+            const suppressLineNumber = useContext(MarkdownLineNumberSuppressedContext);
+            return (
+              <li {...props} {...(suppressLineNumber ? {} : getLineAttributes(sourcePosition) ?? {})}>
+                <MarkdownLineNumberSuppressedContext.Provider value>
+                  {highlightChildren(children)}
+                </MarkdownLineNumberSuppressedContext.Provider>
+              </li>
+            );
+          },
+          ul: ({ children, ordered: _ordered, depth: _depth, sourcePosition: _sourcePosition, ...props }) => (
+            <ul {...props}>{children}</ul>
           ),
-          blockquote: ({ children, ...props }) => (
-            <blockquote {...props}>{highlightChildren(children)}</blockquote>
+          ol: ({ children, ordered: _ordered, depth: _depth, sourcePosition: _sourcePosition, ...props }) => (
+            <ol {...props}>{children}</ol>
           ),
-          h1: ({ children, ...props }) => <h1 {...props}>{highlightChildren(children)}</h1>,
-          h2: ({ children, ...props }) => <h2 {...props}>{highlightChildren(children)}</h2>,
-          h3: ({ children, ...props }) => <h3 {...props}>{highlightChildren(children)}</h3>,
-          h4: ({ children, ...props }) => <h4 {...props}>{highlightChildren(children)}</h4>,
-          h5: ({ children, ...props }) => <h5 {...props}>{highlightChildren(children)}</h5>,
-          h6: ({ children, ...props }) => <h6 {...props}>{highlightChildren(children)}</h6>,
-          strong: ({ children, ...props }) => (
+          blockquote: ({ children, sourcePosition, ...props }) => (
+            <blockquote {...props} {...(getLineAttributes(sourcePosition) ?? {})}>
+              <MarkdownLineNumberSuppressedContext.Provider value>
+                {highlightChildren(children)}
+              </MarkdownLineNumberSuppressedContext.Provider>
+            </blockquote>
+          ),
+          h1: ({ children, sourcePosition, ...props }) => (
+            <h1 {...props} {...(getLineAttributes(sourcePosition) ?? {})}>{highlightChildren(children)}</h1>
+          ),
+          h2: ({ children, sourcePosition, ...props }) => (
+            <h2 {...props} {...(getLineAttributes(sourcePosition) ?? {})}>{highlightChildren(children)}</h2>
+          ),
+          h3: ({ children, sourcePosition, ...props }) => (
+            <h3 {...props} {...(getLineAttributes(sourcePosition) ?? {})}>{highlightChildren(children)}</h3>
+          ),
+          h4: ({ children, sourcePosition, ...props }) => (
+            <h4 {...props} {...(getLineAttributes(sourcePosition) ?? {})}>{highlightChildren(children)}</h4>
+          ),
+          h5: ({ children, sourcePosition, ...props }) => (
+            <h5 {...props} {...(getLineAttributes(sourcePosition) ?? {})}>{highlightChildren(children)}</h5>
+          ),
+          h6: ({ children, sourcePosition, ...props }) => (
+            <h6 {...props} {...(getLineAttributes(sourcePosition) ?? {})}>{highlightChildren(children)}</h6>
+          ),
+          strong: ({ children, sourcePosition: _sourcePosition, ...props }) => (
             <strong {...props}>{highlightChildren(children)}</strong>
           ),
-          em: ({ children, ...props }) => <em {...props}>{highlightChildren(children)}</em>,
-          del: ({ children, ...props }) => <del {...props}>{highlightChildren(children)}</del>,
-          table: ({ children, ...props }) => (
-            <div className="markdown-table-scroll">
+          em: ({ children, sourcePosition: _sourcePosition, ...props }) => (
+            <em {...props}>{highlightChildren(children)}</em>
+          ),
+          del: ({ children, sourcePosition: _sourcePosition, ...props }) => (
+            <del {...props}>{highlightChildren(children)}</del>
+          ),
+          table: ({ children, sourcePosition, ...props }) => (
+            <div className="markdown-table-scroll" {...(getLineAttributes(sourcePosition) ?? {})}>
               <table {...props}>{children}</table>
             </div>
           ),
-          img: ({ alt, ...props }) => <img {...props} alt={alt ?? ""} draggable={false} />,
-          td: ({ children, isHeader: _isHeader, ...props }) => (
+          hr: ({ sourcePosition, ...props }) => (
+            <hr {...props} {...(getLineAttributes(sourcePosition) ?? {})} />
+          ),
+          img: ({ alt, sourcePosition: _sourcePosition, ...props }) => (
+            <img {...props} alt={alt ?? ""} draggable={false} />
+          ),
+          td: ({ children, isHeader: _isHeader, sourcePosition: _sourcePosition, ...props }) => (
             <td {...props}>{highlightChildren(children)}</td>
           ),
-          th: ({ children, isHeader: _isHeader, ...props }) => (
+          th: ({ children, isHeader: _isHeader, sourcePosition: _sourcePosition, ...props }) => (
             <th {...props}>{highlightChildren(children)}</th>
           ),
         }}
@@ -2527,9 +2684,122 @@ export function MarkdownContent({
         {markdown}
       </ReactMarkdown>
     );
-  }, [documentPath, markdown, searchQuery, searchHighlightTone, workspaceRoot, hasOpenSourceLink]);
+  }, [
+    documentPath,
+    markdown,
+    normalizedStartLineNumber,
+    searchQuery,
+    searchHighlightTone,
+    showLineNumbers,
+    workspaceRoot,
+    hasOpenSourceLink,
+  ]);
 
-  return <div className="markdown-copy">{rendered}</div>;
+  return (
+    <div className={`markdown-copy-shell${showLineNumbers ? " markdown-copy-shell-with-line-numbers" : ""}`}>
+      {showLineNumbers ? (
+        <div className="markdown-line-gutter" aria-hidden="true" contentEditable={false}>
+          {lineMarkers.map((marker) => (
+            <span
+              className="markdown-line-number"
+              data-markdown-gutter-line={marker.line}
+              key={`${marker.line}:${marker.top}`}
+              style={{ top: `${marker.top}px` }}
+              title={marker.range === String(marker.line) ? `Line ${marker.line}` : `Lines ${marker.range}`}
+            >
+              {marker.line}
+            </span>
+          ))}
+        </div>
+      ) : null}
+      <div
+        className={`markdown-copy${showLineNumbers ? " markdown-copy-with-line-numbers" : ""}`}
+        ref={markdownRootRef}
+      >
+        {rendered}
+      </div>
+    </div>
+  );
+}
+
+function normalizeMarkdownStartLineNumber(startLineNumber: number) {
+  if (!Number.isFinite(startLineNumber) || startLineNumber < 1) {
+    return 1;
+  }
+
+  return Math.floor(startLineNumber);
+}
+
+function getMarkdownLineAttributes(
+  sourcePosition: MarkdownSourcePosition | undefined,
+  startLineNumber: number,
+  showLineNumbers: boolean,
+): MarkdownLineAttributes | null {
+  if (!showLineNumbers) {
+    return null;
+  }
+
+  const lineNumber = getMarkdownRenderedLineNumber(sourcePosition, startLineNumber);
+  if (lineNumber == null) {
+    return null;
+  }
+
+  const rangeLabel = getMarkdownRenderedLineRangeLabel(sourcePosition, startLineNumber);
+  const title = rangeLabel === String(lineNumber) ? `Line ${lineNumber}` : `Lines ${rangeLabel}`;
+
+  return {
+    "data-markdown-line-start": lineNumber,
+    "data-markdown-line-range": rangeLabel,
+    title,
+  };
+}
+
+function getMarkdownRenderedLineNumber(
+  sourcePosition: MarkdownSourcePosition | undefined,
+  startLineNumber: number,
+) {
+  const sourceLine = sourcePosition?.start?.line;
+  if (typeof sourceLine !== "number" || !Number.isFinite(sourceLine) || sourceLine < 1) {
+    return null;
+  }
+
+  return startLineNumber + sourceLine - 1;
+}
+
+function getMarkdownRenderedLineRangeLabel(
+  sourcePosition: MarkdownSourcePosition | undefined,
+  startLineNumber: number,
+) {
+  const start = getMarkdownRenderedLineNumber(sourcePosition, startLineNumber);
+  if (start == null) {
+    return "";
+  }
+
+  const endLine = sourcePosition?.end?.line;
+  if (typeof endLine !== "number" || !Number.isFinite(endLine) || endLine < 1) {
+    return String(start);
+  }
+
+  const end = startLineNumber + endLine - 1;
+  return end > start ? `${start}-${end}` : String(start);
+}
+
+function areMarkdownLineMarkersEqual(
+  currentMarkers: MarkdownLineMarker[],
+  nextMarkers: MarkdownLineMarker[],
+) {
+  if (currentMarkers.length !== nextMarkers.length) {
+    return false;
+  }
+
+  return currentMarkers.every((marker, index) => {
+    const nextMarker = nextMarkers[index];
+    return (
+      marker.line === nextMarker?.line &&
+      marker.range === nextMarker.range &&
+      marker.top === nextMarker.top
+    );
+  });
 }
 
 function resolveMarkdownFileLinkTarget(

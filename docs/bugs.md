@@ -44,6 +44,25 @@ The new multi-section commit regression test uses single-line fixtures (`"Sectio
 - Alternatively, when a section is `isEditing`, memoize that section's React key on a content-stable identity so line-count shifts upstream don't cause it to unmount.
 - Add a regression test that starts editing section A, commits a multi-line edit that shifts line counts, clicks into section B, types, blurs, saves, and asserts B's edit survived.
 
+## Rendered Markdown edit focus affordance is missing
+
+**Severity:** Medium - keyboard users cannot tell which rendered Markdown diff section currently has focus.
+
+The rendered Markdown diff editor removed the old blue focus frame from `.markdown-diff-editable-section` because it looked like a confusing selection box around the document. The replacement currently removes the focus outline entirely, so a keyboard user tabbing or arrowing between editable `contentEditable` sections gets no visible active-section cue.
+
+The blue frame should stay gone, but the editor still needs a subtle focus affordance that reads as an editor caret/focus state rather than a selected diff section.
+
+**Current behavior:**
+- `.markdown-diff-editable-section` sets `outline: none`.
+- `.markdown-diff-editable-section:focus` also sets `outline: none`.
+- No replacement `:focus-visible` styling exists on the inner `.markdown-copy`, gutter shell, or content column.
+- Multiple editable sections can be keyboard-focused with no visible active-section indicator.
+
+**Proposal:**
+- Add a subtle `:focus-visible` treatment that does not recreate the prominent blue frame, such as a thin left accent, faint inner shadow on the content column, or caret-adjacent background cue.
+- Keep the line-number gutter visually separate from the focus cue so diff colors and gutter numbers remain unambiguous.
+- Add a focused rendered-Markdown accessibility regression test that verifies the focus class/style hook is present.
+
 ## Rendered Markdown draft-active flag can leak across documentContent rebases
 
 **Severity:** Medium - `isDirty` can remain true with no corresponding editable buffer after a git refresh invalidates the current rendered segments.
@@ -123,6 +142,94 @@ The new mount-only effect at `ui/src/App.tsx:3834-3934` re-fetches Git diff prev
 **Proposal:**
 - When inactive, skip the `windowedMessages.slice(...)` render and emit only the wrapper `<div style={{ height: layout.totalHeight }}>`.
 - This keeps the height cache for parent scroll-position math, preserves the measured heights cache, avoids the flash, and still passes the existing test asserting `.virtualized-message-list` exists in the inactive page.
+
+## Markdown diff gutter shows a misleading "Line 1" label for omitted patch segments
+
+**Severity:** Medium - the rendered Markdown gutter reports a false source line for segments that have no known source location.
+
+`getMarkdownDiffSegmentLineNumber` in `ui/src/panels/DiffPanel.tsx` falls back to `1` when both `oldStart` and `newStart` are nullish. In patch-mode rendering, `buildPatchMarkdownDiffDocumentSegments` emits "omitted" segments carrying `oldStart: null, newStart: null, markdown: "...\n"` to mark hunk collapses. Those segments are rendered through `EditableRenderedMarkdownSection` with `showLineNumbers` on, so the gutter displays `Line 1` next to the `...` placeholder regardless of where the hunk actually sits in the file. The load-bearing gutter UX then lies about source positions in exactly the patch-mode view where truth matters most.
+
+**Current behavior:**
+- `getMarkdownDiffSegmentLineNumber` returns `1` when both segment line numbers are nullish.
+- Omitted patch segments get a `"Line 1"` gutter label even in the middle of long files.
+- The gutter silently violates the "every marker points to a real source line" invariant.
+
+**Proposal:**
+- Have the helper return `null`/`undefined` instead of `1` when both line numbers are nullish.
+- Skip `showLineNumbers` (or suppress the gutter) inside `EditableRenderedMarkdownSection` when the derived start line is unknown.
+- Add a regression test covering patch-mode omitted segments that asserts no gutter marker is rendered.
+
+## hasUncommittedUserEditRef can reset mid-edit when upstream segments shift
+
+**Severity:** Medium - the new guard against cursor-only serialization can un-arm itself during unrelated multi-segment edits, dropping a user's in-progress draft.
+
+`EditableRenderedMarkdownSection` now tracks `hasUncommittedUserEditRef` and resets it on `[segment.id, segment.markdown]` change. But `segment.id` is positional — `buildFullMarkdownDiffDocumentSegments` and `buildPatchMarkdownDiffDocumentSegments` encode indices like `${kind}:${segments.length}:${beforeCursor}:${afterCursor}` into the id. When the user commits an edit in section A that shifts line counts downstream, every later section's id changes, the ref reset effect fires for section B, and section B's pending uncommitted draft is forgotten. The next blur in section B hits the new early-return (`if (!hasUncommittedUserEditRef.current) return;`) and the user's typed characters are silently dropped at commit time. This compounds the already-tracked "Line-count-shifting commits can unmount an editing Markdown section elsewhere" bug with a second failure mode on the same root cause.
+
+**Current behavior:**
+- `hasUncommittedUserEditRef` resets whenever `segment.id` changes.
+- Positional `segment.id` values shift after any multi-line commit elsewhere in the diff.
+- Section B's pending draft is un-armed even though the contentEditable DOM still contains the user's typed content.
+- `commitSectionEdit` then early-returns without serializing, silently dropping the draft.
+
+**Proposal:**
+- Make `segment.id` content-derived (hash of `kind + markdown + line range`) so only the actually-modified segment changes id.
+- Or gate the ref reset on `segment.markdown` alone, so upstream id shifts do not disarm the guard.
+- Or compare the live serialized markdown to `segment.markdown` in the reset effect and re-arm the ref when they differ.
+- Add a regression test that starts typing in section B, commits a line-count-shifting edit in section A, blurs section B, and asserts the typed draft is preserved.
+
+## MarkdownContent measurement effect re-runs on unrelated prop changes
+
+**Severity:** Medium - search keystrokes and callback identity changes flap the ResizeObserver on every visible rendered Markdown document.
+
+The new `useLayoutEffect` in `MarkdownContent` lists `documentPath, hasOpenSourceLink, markdown, normalizedStartLineNumber, searchQuery, searchHighlightTone, showLineNumbers, workspaceRoot` as dependencies. Only `markdown`, `normalizedStartLineNumber`, and `showLineNumbers` change the position of `[data-markdown-line-start]` elements. `searchQuery` wraps matched text in `<mark>` spans without moving block boundaries; `documentPath`, `hasOpenSourceLink`, and `workspaceRoot` affect link rendering, not layout. On every search keystroke with `MarkdownDocumentView` active, the effect tears down the `ResizeObserver` and `resize` listener, re-walks the DOM for line-number attributes, and calls `setLineMarkers`. For large documents or multiple visible panels this is pure observer thrash.
+
+**Current behavior:**
+- Measurement effect re-runs on every search keystroke.
+- `ResizeObserver` and `resize` listener are reconstructed each time.
+- `setLineMarkers` is called once per run with the `areMarkdownLineMarkersEqual` short-circuit, but the walk and rerender still happen.
+
+**Proposal:**
+- Trim the effect's dep array to `[markdown, normalizedStartLineNumber, showLineNumbers]`.
+- Rely on the already-installed `ResizeObserver` to catch post-render layout shifts caused by search highlighting.
+- Add a regression test confirming the gutter markers stay stable across search-query changes.
+
+## MarkdownContent line-number effect causes a double commit on every mount
+
+**Severity:** Medium - rendering Markdown with `showLineNumbers` doubles the initial paint cost because the measurement effect fires synchronously on mount.
+
+`useLayoutEffect` calls `updateLineMarkers()` immediately, which calls `setLineMarkers(nonEmpty)`, triggering a second commit before paint. The initial render cannot have measurements (the ref is null or the marker list is still empty), so the gutter is invisible for the first commit regardless. The double commit buys nothing and adds cost on every `MarkdownDocumentView` mount, including large files opened in the source panel's Preview and Split modes.
+
+**Current behavior:**
+- First commit renders `.markdown-copy-shell` with an empty gutter.
+- `useLayoutEffect` synchronously measures and calls `setLineMarkers`.
+- Second commit renders the gutter markers.
+- Both commits happen before paint, doubling the initial paint cost.
+
+**Proposal:**
+- Switch the measurement effect to `useEffect`, allowing a one-frame flash of an empty gutter.
+- Or wrap the initial `updateLineMarkers()` call in `requestAnimationFrame` so the measurement and state update land on the next frame.
+- Set `visibility: hidden` on `.markdown-line-gutter` until `lineMarkers.length > 0` to avoid FOUC during the transition.
+
+## MarkdownContent line-number suppression context only covers three block types
+
+**Severity:** Medium - nested block elements inside list items and blockquotes emit duplicate `data-markdown-line-start` attributes, producing duplicate gutter markers.
+
+`MarkdownLineNumberSuppressedContext` was introduced to prevent nested block elements from double-emitting line numbers. It is read by the `p`, `li`, and `code` renderers but NOT by `blockquote`, `h1`-`h6`, `table`, or `hr`. As a result:
+- A `<blockquote>` nested inside an `<li>` emits its own `data-markdown-line-start` even though the `<li>` already carries one.
+- An `<h3>` inside a `<blockquote>` does the same.
+- A `<table>` inside a `<li>` is similarly duplicated.
+
+The measurement effect collects both attributes and positions two gutter markers for the same visual line, confusing the user and breaking the single-marker-per-line invariant.
+
+**Current behavior:**
+- `p`, `li`, and `code` check `useContext(MarkdownLineNumberSuppressedContext)` and skip attribute emission when the context is true.
+- `blockquote`, `h1`-`h6`, `table`, and `hr` unconditionally emit `data-markdown-line-start`.
+- Nested block elements inside list items or blockquotes produce duplicate gutter markers.
+
+**Proposal:**
+- Add `useContext(MarkdownLineNumberSuppressedContext)` to every block-level renderer (`blockquote`, `h1`-`h6`, `table`, `hr`) and gate `getLineAttributes(sourcePosition)` on `suppressLineNumber`, mirroring the `p`/`li` pattern.
+- Add a regression test that exercises a blockquote inside a list item and asserts only the `<li>` carries a gutter marker.
+- Document the invariant near the `MarkdownLineNumberSuppressedContext` declaration so future block renderer additions honor it.
 
 ## Rendered Markdown preview keyboard handler ignores Space
 
@@ -214,6 +321,49 @@ The new mount-only effect at `ui/src/App.tsx:3834-3934` re-fetches Git diff prev
   assert that CR characters are absent from the rendered output and that
   matched lines render exactly once, and add a test where both sides use
   CRLF line endings.
+- [ ] P2: Add MarkdownLineNumberSuppressedContext coverage:
+  render a loose list where the `<li>` body is wrapped in `<p>` and assert
+  that only the `<li>` carries `data-markdown-line-start`, not the inner
+  `<p>` / `<code>`. Extend to blockquotes inside list items and headings
+  inside blockquotes once those renderers also check the context.
+- [ ] P2: Pin the `<ul>`/`<li>` annotation split:
+  use `container.querySelector('li[data-markdown-line-start="44"]')` and
+  assert `container.querySelector('ul[data-markdown-line-start]')` is
+  `null`, so a regression that re-enables `<ul>` annotations cannot pass.
+- [ ] P2: Extend the cursor-only commit-path regression test:
+  the existing "does not rewrite rendered Markdown sections when only
+  moving the caret" test only covers `ArrowDown + blur`. Add parametrized
+  cases for `PageDown`, `PageUp`, and `Ctrl+S` that also call
+  `commitSectionEdit`; assert that no draft/change callback fires or that
+  the underlying Markdown source is byte-for-byte unchanged; and replace
+  truthiness DOM assertions with concrete `HTMLElement` / `not.toBeNull()`
+  checks so the `hasUncommittedUserEditRef` guard is pinned across every
+  entry point.
+- [ ] P2: Add direct coverage for `getMarkdownDiffSegmentLineNumber`:
+  exercise the fallback branches for removed-vs-non-removed segments
+  with missing `oldStart`/`newStart`, and assert the helper returns a
+  sentinel that suppresses the gutter instead of defaulting to `1`.
+- [ ] P2: Cover the multi-line `data-markdown-line-range` label:
+  render a fenced code block spanning multiple source lines with
+  `showLineNumbers` on, and assert both `data-markdown-line-start="N"`
+  and `data-markdown-line-range="N-M"` exist on the `<pre>`.
+- [ ] P2: Assert the gutter wrapper is absent when line numbers are off:
+  the first-render branch of the MarkdownContent line-number test should
+  check that `.markdown-line-gutter` is not present and the
+  `markdown-copy-shell-with-line-numbers` modifier class is not applied.
+- [ ] P2: Mock `ResizeObserver` and element geometry for Markdown
+  line-number gutter coverage:
+  stub `getBoundingClientRect` for rendered Markdown blocks, assert gutter
+  spans receive the expected `top` positions, then trigger the mocked
+  observer and assert marker positions refresh when layout changes.
+- [ ] P2: Unit-test `areMarkdownLineMarkersEqual`:
+  either export it for direct tests or stub `getBoundingClientRect` with
+  distinct rect values so a regression flipping `&&` to `||` in the
+  equality check cannot pass.
+- [ ] P2: Move the Markdown line-number test into its own describe block:
+  extract from `describe("MarkdownContent inline file links", ...)` into
+  a sibling `describe("MarkdownContent line numbers", ...)` so future
+  maintenance has a discoverable home for new cases.
 - [ ] P2: Add a render-level test for the round 9 multi-commit pin
   survival in `ui/src/panels/AgentSessionPanel.tsx`. The 11 boundary
   unit tests pin the constants `4` and `72`, but the actual round 8

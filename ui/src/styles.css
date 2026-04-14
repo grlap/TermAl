@@ -5192,8 +5192,13 @@ textarea {
   padding: 1rem;
 }
 
+.markdown-document-scroll .markdown-copy-shell,
 .markdown-document-scroll .markdown-copy {
   max-width: min(58rem, 100%);
+}
+
+.markdown-document-scroll .markdown-copy-shell .markdown-copy {
+  max-width: none;
 }
 
 .markdown-document-empty {
@@ -5267,6 +5272,32 @@ textarea {
   box-shadow: inset 5px 0 0 var(--markdown-diff-removed-color);
 }
 
+.markdown-diff-rendered-section-with-line-gutter {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  padding: 0;
+}
+
+.markdown-diff-rendered-section-with-line-gutter .markdown-copy {
+  border: 1px solid var(--line);
+  border-radius: 0.45rem;
+  padding: 0.7rem;
+}
+
+.markdown-diff-rendered-section-added.markdown-diff-rendered-section-with-line-gutter .markdown-copy {
+  border-color: color-mix(in srgb, var(--markdown-diff-added-color) 74%, var(--line));
+  background: color-mix(in srgb, var(--markdown-diff-added-color) 26%, var(--surface-white));
+  box-shadow: inset 5px 0 0 var(--markdown-diff-added-color);
+}
+
+.markdown-diff-rendered-section-removed.markdown-diff-rendered-section-with-line-gutter .markdown-copy {
+  border-color: color-mix(in srgb, var(--markdown-diff-removed-color) 82%, var(--line));
+  background: color-mix(in srgb, var(--markdown-diff-removed-color) 26%, var(--surface-white));
+  box-shadow: inset 5px 0 0 var(--markdown-diff-removed-color);
+}
+
 .markdown-diff-rendered-section-added .markdown-copy {
   color: color-mix(in srgb, var(--copy) 82%, var(--markdown-diff-added-color));
 }
@@ -5291,13 +5322,12 @@ textarea {
 .markdown-diff-editable-section {
   min-width: 0;
   border-radius: 0.35rem;
-  outline: 1px solid transparent;
-  outline-offset: 0.2rem;
+  outline: none;
   cursor: text;
 }
 
 .markdown-diff-editable-section:focus {
-  outline-color: var(--focus-ring);
+  outline: none;
 }
 
 .markdown-diff-editable-section .syntax-copy-button {
@@ -6765,6 +6795,38 @@ textarea {
 .markdown-copy {
   display: grid;
   gap: 0.75rem;
+}
+
+.markdown-copy-shell {
+  min-width: 0;
+}
+
+.markdown-copy-shell-with-line-numbers {
+  display: grid;
+  grid-template-columns: minmax(2.75rem, max-content) minmax(0, 1fr);
+  gap: 0.75rem;
+  align-items: start;
+}
+
+.markdown-line-gutter {
+  position: relative;
+  align-self: stretch;
+  min-width: 2.75rem;
+  pointer-events: none;
+  user-select: none;
+}
+
+.markdown-line-number {
+  position: absolute;
+  right: 0;
+  color: color-mix(in srgb, var(--muted) 82%, var(--surface-black));
+  font-family: var(--code-font);
+  font-size: 0.72rem;
+  font-weight: 400;
+  line-height: 1.55;
+  letter-spacing: 0;
+  text-align: right;
+  white-space: nowrap;
 }
 
 .deferred-markdown-placeholder {

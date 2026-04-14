@@ -308,6 +308,21 @@ describe("DiffPanel", () => {
     expect(screen.getByText("Shared middle.")).toBeInTheDocument();
     expect(screen.getByText("Shared outro.")).toBeInTheDocument();
     expect(screen.getByText("Ready to commit.")).toBeInTheDocument();
+    expect(
+      document.querySelector(".markdown-diff-normal-section [data-markdown-line-start='1']"),
+    ).not.toBeNull();
+    expect(
+      document.querySelector(".markdown-diff-rendered-section-added [data-markdown-line-start='2']"),
+    ).not.toBeNull();
+    expect(
+      document.querySelector(".markdown-diff-rendered-section-removed [data-markdown-line-start='2']"),
+    ).not.toBeNull();
+    expect(
+      document.querySelector(".markdown-diff-rendered-section-added [data-markdown-line-start='4']"),
+    ).not.toBeNull();
+    expect(
+      document.querySelector(".markdown-diff-rendered-section-removed [data-markdown-line-start='4']"),
+    ).not.toBeNull();
     expect(screen.queryByRole("heading", { name: "Worktree document" })).not.toBeInTheDocument();
     expect(screen.getAllByText("Index").length).toBeGreaterThan(0);
     expect(screen.queryByRole("button", { name: "After" })).not.toBeInTheDocument();
@@ -1558,6 +1573,77 @@ describe("DiffPanel", () => {
     expect(activeElement).toHaveTextContent("Shared outro.");
     expect(window.getSelection()?.anchorNode?.nodeType).toBe(Node.TEXT_NODE);
     expect((activeElement as HTMLElement).contains(window.getSelection()?.anchorNode ?? null)).toBe(true);
+  });
+
+  it("does not rewrite rendered Markdown sections when only moving the caret", async () => {
+    fetchFileMock.mockResolvedValue({
+      content: "# Title\n\n* First item\n* Second item\n\nTail updated.\n",
+      language: "markdown",
+      path: "/repo/README.md",
+    });
+
+    await act(async () => {
+      render(
+        <DiffPanel
+          appearance="dark"
+          fontSizePx={13}
+          changeType="edit"
+          diff={[
+            "@@ -1,7 +1,7 @@",
+            " # Title",
+            " ",
+            "-Old list.",
+            "+* First item",
+            "+* Second item",
+            " ",
+            "-Old tail.",
+            "+Tail updated.",
+          ].join("\n")}
+          documentContent={{
+            before: {
+              content: "# Title\n\nOld list.\n\nOld tail.\n",
+              source: "index",
+            },
+            after: {
+              content: "# Title\n\n* First item\n* Second item\n\nTail updated.\n",
+              source: "worktree",
+            },
+            canEdit: true,
+            isCompleteDocument: true,
+          }}
+          diffMessageId="diff-markdown-caret-only-navigation"
+          filePath="/repo/README.md"
+          gitSectionId="unstaged"
+          language="markdown"
+          sessionId="session-1"
+          workspaceRoot="/repo"
+          onOpenPath={() => {}}
+          onSaveFile={async () => {}}
+          summary="Updated README"
+        />,
+      );
+    });
+
+    const addedSections = await waitFor(() => {
+      const sections = document.querySelectorAll<HTMLElement>(
+        ".markdown-diff-rendered-section-added [data-markdown-editable='true']",
+      );
+      expect(sections.length).toBeGreaterThanOrEqual(2);
+      return sections;
+    });
+    const listSection = Array.from(addedSections).find((section) =>
+      section.textContent?.includes("First item"),
+    );
+    expect(listSection).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Saved" })).toBeDisabled();
+
+    setCaret(listSection!, "end");
+    fireEvent.keyDown(listSection!, { key: "ArrowDown" });
+    fireEvent.blur(listSection!);
+
+    expect(screen.getByRole("button", { name: "Saved" })).toBeDisabled();
+    expect(screen.queryByRole("button", { name: "Save Markdown" })).toBeNull();
+    expect(document.querySelectorAll(".markdown-diff-rendered-section-added").length).toBe(2);
   });
 
   // Regression: the previous freeze pattern captured a single

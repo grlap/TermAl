@@ -5740,9 +5740,6 @@ export default function App() {
   function handlePaneTabSelect(paneId: string, tabId: string) {
     const pane = paneLookup.get(paneId);
     const tab = pane?.tabs.find((candidate) => candidate.id === tabId);
-    if (tab?.kind === "session") {
-      requestScrollToBottom(tab.sessionId);
-    }
 
     if (tab?.kind === "controlPanel") {
       const nearestSessionPaneId = findNearestSessionPaneId(workspace, paneId);

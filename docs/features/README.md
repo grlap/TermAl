@@ -17,6 +17,7 @@ design decisions, and future plans.
 - [Gemini CLI Integration](./gemini-cli-integration.md)
 - [Diff Review Workflow](./diff-review-workflow.md)
 - [File Change Awareness](./file-change-awareness.md)
+- [Markdown Document View](./markdown-document-view.md)
 - [Agent Integration Comparison](./agent-integration-comparison.md)
 - [Orchestration](./orchestration.md)
 - [Multi-Browser Workspaces](./multi-browser-workspaces.md)
@@ -26,6 +27,5 @@ design decisions, and future plans.
 
 - [Concurrent Session Link Cards](./concurrent-session-link-cards.md)
 - [Instruction Debugger](./instruction-debugger.md)
-- [Markdown Document View](./markdown-document-view.md)
 - [Territory Visualization](./territory-visualization.md)
 - [WhatsApp Integration](./whatsapp-integration.md)

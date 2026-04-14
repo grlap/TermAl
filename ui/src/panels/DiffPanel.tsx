@@ -1821,7 +1821,9 @@ function RenderedMarkdownChangeSection({
   workspaceRoot: string | null;
 }) {
   return (
-    <section className={`markdown-diff-rendered-section markdown-diff-rendered-section-${tone}`}>
+    <section
+      className={`markdown-diff-rendered-section markdown-diff-rendered-section-with-line-gutter markdown-diff-rendered-section-${tone}`}
+    >
       <EditableRenderedMarkdownSection
         canEdit={canEdit}
         className="markdown-diff-rendered-section-body"
@@ -1859,6 +1861,11 @@ function EditableRenderedMarkdownSection({
   workspaceRoot: string | null;
 }) {
   const classNames = `${className}${canEdit ? " markdown-diff-editable-section" : ""}`;
+  const hasUncommittedUserEditRef = useRef(false);
+
+  useEffect(() => {
+    hasUncommittedUserEditRef.current = false;
+  }, [segment.id, segment.markdown]);
 
   function readEditedMarkdown(section: HTMLElement) {
     return normalizeEditedMarkdownSection(
@@ -1872,7 +1879,9 @@ function EditableRenderedMarkdownSection({
       return;
     }
 
-    onDraftChange(segment, readEditedMarkdown(event.currentTarget));
+    const nextMarkdown = readEditedMarkdown(event.currentTarget);
+    hasUncommittedUserEditRef.current = nextMarkdown !== segment.markdown;
+    onDraftChange(segment, nextMarkdown);
   }
 
   function commitSectionEdit(section: HTMLElement) {
@@ -1880,7 +1889,16 @@ function EditableRenderedMarkdownSection({
       return;
     }
 
+    // Cursor-only focus changes must not serialize rendered Markdown. The
+    // renderer is intentionally richer than the source text, so a no-input
+    // serialize pass can rewrite harmless source formatting (for example
+    // `*` bullets to `-` bullets) and create new diff sections.
+    if (!hasUncommittedUserEditRef.current) {
+      return;
+    }
+
     const nextMarkdown = readEditedMarkdown(section);
+    hasUncommittedUserEditRef.current = false;
     if (nextMarkdown !== segment.markdown) {
       onChange(segment, nextMarkdown);
       return;
@@ -1991,10 +2009,18 @@ function EditableRenderedMarkdownSection({
         documentPath={documentPath}
         markdown={segment.markdown}
         onOpenSourceLink={onOpenSourceLink}
+        showLineNumbers
+        startLineNumber={getMarkdownDiffSegmentLineNumber(segment)}
         workspaceRoot={workspaceRoot}
       />
     </section>
   );
+}
+
+function getMarkdownDiffSegmentLineNumber(segment: MarkdownDiffDocumentSegment) {
+  return segment.kind === "removed"
+    ? segment.oldStart ?? segment.newStart ?? 1
+    : segment.newStart ?? segment.oldStart ?? 1;
 }
 
 function serializeEditableMarkdownSection(section: HTMLElement) {

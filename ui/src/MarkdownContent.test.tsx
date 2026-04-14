@@ -86,4 +86,26 @@ describe("MarkdownContent inline file links", () => {
 
     expect(screen.getByRole("img", { name: "Diagram" })).toHaveAttribute("draggable", "false");
   });
+
+  it("renders source line numbers only when requested", () => {
+    const markdown = ["# Title", "", "Body text.", "", "- First item"].join("\n");
+
+    const { container, rerender } = render(
+      <MarkdownContent markdown={markdown} startLineNumber={40} />,
+    );
+
+    expect(container.querySelector("[data-markdown-line-start]")).toBeNull();
+
+    rerender(
+      <MarkdownContent markdown={markdown} showLineNumbers startLineNumber={40} />,
+    );
+
+    expect(container.querySelector('[data-markdown-line-start="40"]')).not.toBeNull();
+    expect(container.querySelector('[data-markdown-line-start="42"]')).not.toBeNull();
+    expect(container.querySelector('[data-markdown-line-start="44"]')).not.toBeNull();
+    expect(
+      container.querySelector(".markdown-line-gutter [data-markdown-gutter-line='40']"),
+    ).toHaveTextContent("40");
+    expect(container.querySelector(".markdown-copy")).not.toHaveTextContent("40");
+  });
 });

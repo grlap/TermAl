@@ -42,6 +42,7 @@ export function MarkdownDocumentView({
             documentPath={documentPath}
             markdown={markdown}
             onOpenSourceLink={onOpenSourceLink}
+            showLineNumbers
             workspaceRoot={workspaceRoot}
           />
         )}
