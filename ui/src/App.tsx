@@ -62,6 +62,7 @@ import {
   type FileResponse,
   type GitDiffRequestPayload,
   type GitDiffSection,
+  type OpenPathOptions,
   type StateResponse,
   type WorkspaceLayoutSummary,
   unarchiveCodexThread,
@@ -261,6 +262,7 @@ import {
   setPaneSourcePath,
   setPaneViewMode,
   splitPane,
+  stripDiffPreviewDocumentContentFromWorkspaceState,
   stripLoadingGitDiffPreviewTabsFromWorkspaceState,
   updateGitDiffPreviewTabInWorkspaceState,
   updateSplitRatio,
@@ -891,12 +893,14 @@ export function resolveSettledScrollMinimumAttempts(
   return Math.min(minAttempts ?? defaultMinimumAttempts, maxAttempts);
 }
 
-type AppTestHooks = {
+export type AppTestHooks = {
   onDeleteProjectPostAwaitPath?: (path: "resolve" | "reject") => void;
 };
 
 let appTestHooks: AppTestHooks | null = null;
 
+// Keep App test hooks observer-only. Hook fields must use non-sensitive label
+// arguments so the production export cannot expose user content if imported.
 export function setAppTestHooksForTests(hooks: AppTestHooks | null) {
   appTestHooks = hooks;
 }
@@ -3678,8 +3682,10 @@ export default function App() {
       return;
     }
 
-    const persistedWorkspace = stripLoadingGitDiffPreviewTabsFromWorkspaceState(
-      applyControlPanelLayout(workspace, controlPanelSide),
+    const persistedWorkspace = stripDiffPreviewDocumentContentFromWorkspaceState(
+      stripLoadingGitDiffPreviewTabsFromWorkspaceState(
+        applyControlPanelLayout(workspace, controlPanelSide),
+      ),
     );
     const layout: WorkspaceLayoutPersistencePayload = {
       controlPanelSide,
@@ -3804,6 +3810,24 @@ export default function App() {
   }, [terminalTabIdsKey]);
 
   useEffect(() => {
+    const activeGitDiffRequestKeys = new Set(
+      workspace.panes.flatMap((pane) =>
+        pane.tabs.flatMap((tab) =>
+          tab.kind === "diffPreview" && tab.gitDiffRequestKey
+            ? [tab.gitDiffRequestKey]
+            : [],
+        ),
+      ),
+    );
+
+    for (const requestKey of Array.from(gitDiffPreviewRefreshVersionsRef.current.keys())) {
+      if (!activeGitDiffRequestKeys.has(requestKey)) {
+        gitDiffPreviewRefreshVersionsRef.current.delete(requestKey);
+      }
+    }
+  }, [workspace.panes]);
+
+  useEffect(() => {
     codexStateRef.current = codexState;
     agentReadinessRef.current = agentReadiness;
     projectsRef.current = projects;
@@ -3870,6 +3894,20 @@ export default function App() {
         (gitDiffPreviewRefreshVersionsRef.current.get(restore.requestKey) ?? 0) + 1;
       gitDiffPreviewRefreshVersionsRef.current.set(restore.requestKey, currentVersion);
 
+      setWorkspace((current) =>
+        applyControlPanelLayout(
+          updateGitDiffPreviewTabInWorkspaceState(
+            current,
+            restore.requestKey,
+            (tab) => ({
+              ...tab,
+              isLoading: true,
+              loadError: null,
+            }),
+          ),
+        ),
+      );
+
       void fetchGitDiff(restore.request)
         .then((diffPreview) => {
           if (
@@ -3888,6 +3926,7 @@ export default function App() {
                   changeType: diffPreview.changeType,
                   changeSetId: diffPreview.changeSetId ?? null,
                   diff: diffPreview.diff,
+                  documentEnrichmentNote: diffPreview.documentEnrichmentNote ?? null,
                   documentContent: diffPreview.documentContent ?? null,
                   filePath: diffPreview.filePath ?? tab.filePath,
                   gitSectionId: restore.sectionId,
@@ -3970,6 +4009,7 @@ export default function App() {
                   changeType: diffPreview.changeType,
                   changeSetId: diffPreview.changeSetId ?? null,
                   diff: diffPreview.diff,
+                  documentEnrichmentNote: diffPreview.documentEnrichmentNote ?? null,
                   documentContent: diffPreview.documentContent ?? null,
                   filePath: diffPreview.filePath ?? tab.filePath,
                   gitSectionId: refresh.sectionId,
@@ -3999,6 +4039,7 @@ export default function App() {
                 (tab) => ({
                   ...tab,
                   diff: "",
+                  documentEnrichmentNote: null,
                   documentContent: null,
                   summary: `Failed to refresh ${refresh.sectionId} changes in ${refresh.request.path}`,
                   isLoading: false,
@@ -6226,11 +6267,7 @@ export default function App() {
     path: string | null,
     originSessionId: string | null,
     originProjectId: string | null,
-    options?: {
-      line?: number;
-      column?: number;
-      openInNewTab?: boolean;
-    },
+    options?: OpenPathOptions,
   ) {
     setWorkspace((current) =>
       applyControlPanelLayout(
@@ -6297,6 +6334,7 @@ export default function App() {
       changeType: pendingGitDiffPreviewChangeType(request.statusCode),
       changeSetId: null,
       diff: "",
+      documentEnrichmentNote: null,
       documentContent: null,
       diffMessageId: requestKey,
       filePath: request.path,
@@ -6345,6 +6383,7 @@ export default function App() {
               changeType: diffPreview.changeType,
               changeSetId: diffPreview.changeSetId ?? null,
               diff: diffPreview.diff,
+              documentEnrichmentNote: diffPreview.documentEnrichmentNote ?? null,
               documentContent: diffPreview.documentContent ?? null,
               filePath: diffPreview.filePath ?? tab.filePath,
               gitSectionId,
@@ -6366,6 +6405,7 @@ export default function App() {
             (tab) => ({
               ...tab,
               diff: "",
+              documentEnrichmentNote: null,
               documentContent: null,
               summary: `Failed to load ${gitSectionId} changes in ${request.path}`,
               isLoading: false,
@@ -9081,7 +9121,7 @@ function WorkspaceNodeView({
     path: string | null,
     originSessionId: string | null,
     originProjectId: string | null,
-    options?: { line?: number; column?: number; openInNewTab?: boolean },
+    options?: OpenPathOptions,
   ) => void;
   onOpenDiffPreviewTab: (
     paneId: string,
@@ -9726,7 +9766,7 @@ function SessionPaneView({
     path: string | null,
     originSessionId: string | null,
     originProjectId: string | null,
-    options?: { line?: number; column?: number; openInNewTab?: boolean },
+    options?: OpenPathOptions,
   ) => void;
   onOpenDiffPreviewTab: (
     paneId: string,
@@ -10483,14 +10523,14 @@ function SessionPaneView({
     });
   }
 
-  function scrollToLatestMessage(behavior: ScrollBehavior) {
+  function scrollToLatestMessage(behavior: ScrollBehavior, force = false) {
     const node = messageStackRef.current;
     if (!node) {
       return;
     }
 
     const nextScrollTop = Math.max(node.scrollHeight - node.clientHeight, 0);
-    if (Math.abs(node.scrollTop - nextScrollTop) > 1) {
+    if (force || Math.abs(node.scrollTop - nextScrollTop) > 1) {
       node.scrollTo({
         top: nextScrollTop,
         behavior,
@@ -10706,13 +10746,15 @@ function SessionPaneView({
         return;
       }
 
-      scrollToLatestMessage(behavior);
+      scrollToLatestMessage(behavior, attemptCount <= minimumAttempts);
 
       const bottomGap = Math.max(
         node.scrollHeight - node.clientHeight - node.scrollTop,
         0,
       );
-      const heightStable = node.scrollHeight === previousScrollHeight;
+      const heightStable =
+        previousScrollHeight >= 0 &&
+        Math.abs(node.scrollHeight - previousScrollHeight) <= 16;
       if (bottomGap <= 4 && heightStable) {
         stableFrameCount += 1;
       } else {
@@ -12031,6 +12073,7 @@ function SessionPaneView({
               changeSetId={activeDiffPreviewTab.changeSetId ?? null}
               fontSizePx={editorFontSizePx}
               diff={activeDiffPreviewTab.diff}
+              documentEnrichmentNote={activeDiffPreviewTab.documentEnrichmentNote ?? null}
               documentContent={activeDiffPreviewTab.documentContent ?? null}
               diffMessageId={activeDiffPreviewTab.diffMessageId}
               filePath={activeDiffPreviewTab.filePath}
@@ -12136,6 +12179,7 @@ function SessionPaneView({
               handleCodexAppRequest,
             ) => (
               <MessageCard
+                appearance={editorAppearance}
                 message={message}
                 onOpenDiffPreview={(diffMessage) =>
                   onOpenDiffPreviewTab(

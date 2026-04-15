@@ -1,5 +1,6 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { forwardRef, useEffect, useImperativeHandle, type ForwardedRef } from "react";
+import mermaid from "mermaid";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { fetchFile, fetchReviewDocument, saveReviewDocument } from "../api";
@@ -19,6 +20,21 @@ vi.mock("../api", async () => {
 vi.mock("../clipboard", () => ({
   copyTextToClipboard: vi.fn(() => Promise.resolve()),
 }));
+
+vi.mock("mermaid", () => ({
+  default: {
+    initialize: vi.fn(),
+    render: vi.fn((id: string) =>
+      Promise.resolve({
+        diagramType: "flowchart",
+        svg: `<svg data-testid="mermaid-svg" id="${id}"><text>diagram</text></svg>`,
+      }),
+    ),
+  },
+}));
+
+const mermaidInitializeMock = vi.mocked(mermaid.initialize);
+const mermaidRenderMock = vi.mocked(mermaid.render);
 
 vi.mock("../MonacoDiffEditor", () => ({
   MonacoDiffEditor: forwardRef(function MonacoDiffEditorMock(
@@ -45,11 +61,20 @@ vi.mock("../MonacoDiffEditor", () => ({
       originalValue: string;
       readOnly?: boolean;
     },
-    ref: ForwardedRef<{ goToNextChange: () => void; goToPreviousChange: () => void }>,
+    ref: ForwardedRef<{
+      getScrollTop: () => number;
+      goToNextChange: () => void;
+      goToPreviousChange: () => void;
+      setScrollTop: (scrollTop: number) => void;
+    }>,
   ) {
     useImperativeHandle(ref, () => ({
+      getScrollTop: () => Number((globalThis as { __termalMockDiffScrollTop?: number }).__termalMockDiffScrollTop ?? 0),
       goToNextChange: () => {},
       goToPreviousChange: () => {},
+      setScrollTop: (scrollTop: number) => {
+        (globalThis as { __termalMockDiffRestoredScrollTop?: number }).__termalMockDiffRestoredScrollTop = scrollTop;
+      },
     }));
 
     useEffect(() => {
@@ -169,7 +194,13 @@ function setCaretInText(target: HTMLElement, text: string, offset: number) {
 }
 
 function editRenderedMarkdownSection(section: HTMLElement, html: string) {
-  section.innerHTML = `<div class="markdown-copy">${html}</div>`;
+  section.focus();
+  const markdownRoot = section.querySelector<HTMLElement>(".markdown-copy");
+  if (markdownRoot) {
+    markdownRoot.innerHTML = html;
+  } else {
+    section.innerHTML = `<div class="markdown-copy">${html}</div>`;
+  }
   fireEvent.input(section);
 }
 
@@ -188,6 +219,30 @@ describe("DiffPanel", () => {
     saveReviewDocumentMock.mockReset();
     copyTextToClipboardMock.mockReset();
     copyTextToClipboardMock.mockResolvedValue(undefined);
+    mermaidInitializeMock.mockClear();
+    mermaidRenderMock.mockClear();
+    mermaidRenderMock.mockResolvedValue({
+      diagramType: "flowchart",
+      svg: '<svg data-testid="mermaid-svg"><text>diagram</text></svg>',
+    });
+    const svgElementPrototype = SVGElement.prototype as SVGElement & {
+      getBBox?: () => { height: number; width: number; x: number; y: number };
+      getComputedTextLength?: () => number;
+    };
+    if (!svgElementPrototype.getBBox) {
+      Object.defineProperty(svgElementPrototype, "getBBox", {
+        configurable: true,
+        value: () => ({ height: 20, width: 100, x: 0, y: 0 }),
+      });
+    }
+    if (!svgElementPrototype.getComputedTextLength) {
+      Object.defineProperty(svgElementPrototype, "getComputedTextLength", {
+        configurable: true,
+        value: () => 100,
+      });
+    }
+    delete (globalThis as { __termalMockDiffRestoredScrollTop?: number }).__termalMockDiffRestoredScrollTop;
+    delete (globalThis as { __termalMockDiffScrollTop?: number }).__termalMockDiffScrollTop;
   });
 
   it("defaults to the full diff view and supports changed-only and edit modes", async () => {
@@ -246,6 +301,36 @@ describe("DiffPanel", () => {
     });
 
     expect(await screen.findByTestId("monaco-code-editor")).toHaveValue("const latest = true;\n");
+  });
+
+  it("does not show rendered Markdown mode for non-Markdown diffs", async () => {
+    fetchFileMock.mockResolvedValue({
+      content: "export const latest = true;\n",
+      language: "typescript",
+      path: "/repo/src/example.ts",
+    });
+
+    await act(async () => {
+      render(
+        <DiffPanel
+          appearance="dark"
+          fontSizePx={13}
+          changeType="edit"
+          diff={["@@ -1 +1 @@", "-export const old = false;", "+export const latest = true;"].join("\n")}
+          diffMessageId="diff-no-markdown-mode"
+          filePath="/repo/src/example.ts"
+          gitSectionId="unstaged"
+          language="typescript"
+          sessionId="session-1"
+          workspaceRoot="/repo"
+          onOpenPath={() => {}}
+          onSaveFile={async () => {}}
+          summary="Updated example file"
+        />,
+      );
+    });
+
+    expect(screen.queryByRole("button", { name: "Rendered Markdown" })).toBeNull();
   });
 
   it("renders staged Markdown from the index document side instead of the worktree file", async () => {
@@ -329,6 +414,77 @@ describe("DiffPanel", () => {
     expect(screen.queryByRole("button", { name: "Before" })).not.toBeInTheDocument();
   });
 
+  it("preserves scroll offsets when switching between file and rendered Markdown diff views", async () => {
+    fetchFileMock.mockResolvedValue({
+      content: "# Worktree document\n\nThis is not staged.\n",
+      language: "markdown",
+      path: "/repo/README.md",
+    });
+
+    await act(async () => {
+      render(
+        <DiffPanel
+          appearance="dark"
+          fontSizePx={13}
+          changeType="edit"
+          diff={[
+            "@@ -1,6 +1,6 @@",
+            " # Document",
+            " Intro",
+            "-Old section",
+            "+New section",
+            " Middle",
+            " Tail",
+          ].join("\n")}
+          documentContent={{
+            before: {
+              content: "# Document\nIntro\nOld section\nMiddle\nTail\n",
+              source: "head",
+            },
+            after: {
+              content: "# Document\nIntro\nNew section\nMiddle\nTail\n",
+              source: "index",
+            },
+            canEdit: true,
+            isCompleteDocument: true,
+          }}
+          diffMessageId="diff-markdown-scroll-memory"
+          filePath="/repo/README.md"
+          gitSectionId="staged"
+          language="markdown"
+          sessionId="session-1"
+          workspaceRoot="/repo"
+          onOpenPath={() => {}}
+          onSaveFile={async () => {}}
+          summary="Updated README"
+        />,
+      );
+    });
+
+    const markdownScroll = await waitFor(() => {
+      const scrollRegion = document.querySelector<HTMLElement>(".markdown-diff-change-scroll");
+      expect(scrollRegion).not.toBeNull();
+      return scrollRegion!;
+    });
+    markdownScroll.scrollTop = 420;
+
+    await clickAndSettle(screen.getByRole("button", { name: "All lines" }));
+    expect(await screen.findByTestId("monaco-diff-editor")).toBeInTheDocument();
+    (globalThis as { __termalMockDiffScrollTop?: number }).__termalMockDiffScrollTop = 180;
+
+    await clickAndSettle(screen.getByRole("button", { name: "Rendered Markdown" }));
+
+    await waitFor(() => {
+      expect(document.querySelector<HTMLElement>(".markdown-diff-change-scroll")?.scrollTop).toBe(420);
+    });
+
+    await clickAndSettle(screen.getByRole("button", { name: "All lines" }));
+
+    await waitFor(() => {
+      expect((globalThis as { __termalMockDiffRestoredScrollTop?: number }).__termalMockDiffRestoredScrollTop).toBe(180);
+    });
+  });
+
   it("edits rendered Markdown diff sections and saves the worktree file", async () => {
     fetchFileMock.mockResolvedValue({
       content: "Shared intro.\n# Draft document\nShared middle.\nReady to commit.\nShared outro.\n",
@@ -403,18 +559,237 @@ describe("DiffPanel", () => {
     });
   });
 
-  it("saves rendered Markdown edits from a clean staged diff to the worktree file", async () => {
+  it("commits an active rendered Markdown draft before saving from the toolbar", async () => {
     fetchFileMock.mockResolvedValue({
-      content: "Shared intro.\n# Staged document\nShared middle.\nReady to commit.\nShared outro.\n",
+      content: "Shared intro.\n# Draft document\nShared middle.\nReady to commit.\nShared outro.\n",
       language: "markdown",
       path: "/repo/README.md",
     });
-    const savedContent = "Shared intro.\n# Staged document\nShared middle.\nReady to save.\nShared outro.\n";
+    const savedContent = "Shared intro.\n# Draft document\nShared middle.\nReady to ship.\nShared outro.\n";
     const onSaveFile = vi.fn().mockResolvedValue({
       content: savedContent,
       language: "markdown",
       path: "/repo/README.md",
     });
+
+    await act(async () => {
+      render(
+        <DiffPanel
+          appearance="dark"
+          fontSizePx={13}
+          changeType="edit"
+          diff={[
+            "@@ -1,5 +1,5 @@",
+            " Shared intro.",
+            "-# Base document",
+            "+# Draft document",
+            " Shared middle.",
+            "-Committed text.",
+            "+Ready to commit.",
+            " Shared outro.",
+          ].join("\n")}
+          documentContent={{
+            before: {
+              content: "Shared intro.\n# Base document\nShared middle.\nCommitted text.\nShared outro.\n",
+              source: "index",
+            },
+            after: {
+              content: "Shared intro.\n# Draft document\nShared middle.\nReady to commit.\nShared outro.\n",
+              source: "worktree",
+            },
+            canEdit: true,
+            isCompleteDocument: true,
+          }}
+          diffMessageId="diff-markdown-save-active-draft"
+          filePath="/repo/README.md"
+          gitSectionId="unstaged"
+          language="markdown"
+          sessionId="session-1"
+          workspaceRoot="/repo"
+          onOpenPath={() => {}}
+          onSaveFile={onSaveFile}
+          summary="Updated README"
+        />,
+      );
+    });
+
+    const addedSections = await waitFor(() => {
+      const sections = document.querySelectorAll<HTMLElement>(
+        ".markdown-diff-rendered-section-added [data-markdown-editable='true']",
+      );
+      expect(sections.length).toBeGreaterThanOrEqual(2);
+      return sections;
+    });
+
+    editRenderedMarkdownSection(addedSections[1], "<p>Ready to ship.</p>");
+    await clickAndSettle(screen.getByRole("button", { name: "Save Markdown" }));
+
+    expect(onSaveFile).toHaveBeenCalledWith("/repo/README.md", savedContent, {
+      baseHash: null,
+      overwrite: undefined,
+    });
+  });
+
+  it("keeps rendered Markdown focus and caret when saving with Ctrl+S", async () => {
+    fetchFileMock.mockResolvedValue({
+      content: "Shared intro.\n# Draft document\nShared middle.\nReady to commit.\nShared outro.\n",
+      language: "markdown",
+      path: "/repo/README.md",
+    });
+    const savedContent = "Shared intro.\n# Draft document\nShared middle.\nReady to ship.\nShared outro.\n";
+    const onSaveFile = vi.fn().mockResolvedValue({
+      content: savedContent,
+      language: "markdown",
+      path: "/repo/README.md",
+    });
+
+    await act(async () => {
+      render(
+        <DiffPanel
+          appearance="dark"
+          fontSizePx={13}
+          changeType="edit"
+          diff={[
+            "@@ -1,5 +1,5 @@",
+            " Shared intro.",
+            "-# Base document",
+            "+# Draft document",
+            " Shared middle.",
+            "-Committed text.",
+            "+Ready to commit.",
+            " Shared outro.",
+          ].join("\n")}
+          documentContent={{
+            before: {
+              content: "Shared intro.\n# Base document\nShared middle.\nCommitted text.\nShared outro.\n",
+              source: "index",
+            },
+            after: {
+              content: "Shared intro.\n# Draft document\nShared middle.\nReady to commit.\nShared outro.\n",
+              source: "worktree",
+            },
+            canEdit: true,
+            isCompleteDocument: true,
+          }}
+          diffMessageId="diff-markdown-ctrl-s-focus"
+          filePath="/repo/README.md"
+          gitSectionId="unstaged"
+          language="markdown"
+          sessionId="session-1"
+          workspaceRoot="/repo"
+          onOpenPath={() => {}}
+          onSaveFile={onSaveFile}
+          summary="Updated README"
+        />,
+      );
+    });
+
+    const addedSections = await waitFor(() => {
+      const sections = document.querySelectorAll<HTMLElement>(
+        ".markdown-diff-rendered-section-added [data-markdown-editable='true']",
+      );
+      expect(sections.length).toBeGreaterThanOrEqual(2);
+      return sections;
+    });
+
+    const section = addedSections[1];
+    editRenderedMarkdownSection(section, "<p>Ready to ship.</p>");
+    setCaretInText(section, "Ready to ship.", "Ready".length);
+
+    await act(async () => {
+      fireEvent.keyDown(section, { key: "s", ctrlKey: true });
+      await Promise.resolve();
+    });
+
+    await waitFor(() => {
+      expect(onSaveFile).toHaveBeenCalledWith("/repo/README.md", savedContent, {
+        baseHash: null,
+        overwrite: undefined,
+      });
+    });
+
+    await waitFor(() => {
+      const activeElement = document.activeElement;
+      expect(activeElement).toBeInstanceOf(HTMLElement);
+      expect((activeElement as HTMLElement).dataset.markdownEditable).toBe("true");
+      expect(activeElement).toHaveTextContent("Ready to ship.");
+      const selection = window.getSelection();
+      expect(selection?.isCollapsed).toBe(true);
+      expect((activeElement as HTMLElement).contains(selection?.anchorNode ?? null)).toBe(true);
+      expect(selection?.anchorNode?.textContent).toContain("Ready to ship.");
+      expect(selection?.anchorOffset).toBe("Ready".length);
+    });
+  });
+
+  it("renders Mermaid diagrams while keeping blocks as editable source in rendered Markdown diffs", async () => {
+    fetchFileMock.mockResolvedValue({
+      content: ["# Diagram", "", "```mermaid", "flowchart TD", "  A --> B", "```", ""].join("\n"),
+      language: "markdown",
+      path: "/repo/README.md",
+    });
+
+    await act(async () => {
+      render(
+        <DiffPanel
+          appearance="dark"
+          fontSizePx={13}
+          changeType="edit"
+          diff={[
+            "@@ -1,2 +1,6 @@",
+            " # Diagram",
+            " ",
+            "+```mermaid",
+            "+flowchart TD",
+            "+  A --> B",
+            "+```",
+          ].join("\n")}
+          documentContent={{
+            before: {
+              content: "# Diagram\n\n",
+              source: "index",
+            },
+            after: {
+              content: ["# Diagram", "", "```mermaid", "flowchart TD", "  A --> B", "```", ""].join("\n"),
+              source: "worktree",
+            },
+            canEdit: true,
+            isCompleteDocument: true,
+          }}
+          diffMessageId="diff-markdown-mermaid-source"
+          filePath="/repo/README.md"
+          gitSectionId="unstaged"
+          language="markdown"
+          sessionId="session-1"
+          workspaceRoot="/repo"
+          onOpenPath={() => {}}
+          onSaveFile={async () => {}}
+          summary="Updated README"
+        />,
+      );
+    });
+
+    await waitFor(() => {
+      expect(
+        document.querySelector(
+          ".markdown-diff-rendered-section-added [data-markdown-editable='true'] code.language-mermaid",
+        )?.textContent,
+      ).toBe("flowchart TD\n  A --> B");
+    });
+    await waitFor(() => {
+      expect(
+        screen.queryByTestId("mermaid-svg") ??
+          document.querySelector(".markdown-diff-rendered-section-added .mermaid-diagram-svg svg"),
+      ).toBeInTheDocument();
+    });
+  });
+
+  it("keeps rendered staged Markdown read-only while preserving caret navigation", async () => {
+    fetchFileMock.mockResolvedValue({
+      content: "Shared intro.\n# Staged document\nShared middle.\nReady to commit.\nShared outro.\n",
+      language: "markdown",
+      path: "/repo/README.md",
+    });
+    const onSaveFile = vi.fn();
 
     await act(async () => {
       render(
@@ -462,18 +837,46 @@ describe("DiffPanel", () => {
     });
 
     const addedSections = document.querySelectorAll<HTMLElement>(
-      ".markdown-diff-rendered-section-added [data-markdown-editable='true']",
+      ".markdown-diff-rendered-section-added [data-markdown-caret='true']",
     );
+    const removedSections = document.querySelectorAll<HTMLElement>(
+      ".markdown-diff-rendered-section-removed [data-markdown-caret='true']",
+    );
+    expect(removedSections).toHaveLength(0);
     expect(addedSections[1]).toHaveTextContent("Ready to commit.");
-    editRenderedMarkdownSection(addedSections[1], "<p>Ready to save.</p>");
-    fireEvent.blur(addedSections[1]);
+    expect(addedSections[1]).toHaveAttribute("contenteditable", "true");
+    expect(addedSections[1]).toHaveAttribute("aria-readonly", "true");
+    expect(addedSections[1]).toHaveAttribute("data-markdown-readonly", "true");
+    expect(addedSections[1]).not.toHaveAttribute("data-markdown-editable");
+    expect(
+      screen.getAllByText("Staged Markdown diffs are read-only. Use the unstaged worktree diff to edit this file.")
+        .length,
+    ).toBeGreaterThan(0);
+    expect(screen.queryByRole("button", { name: "Save Markdown" })).not.toBeInTheDocument();
 
-    await clickAndSettle(screen.getByRole("button", { name: "Save Markdown" }));
+    const removedBody = document.querySelector<HTMLElement>(
+      ".markdown-diff-rendered-section-removed .markdown-diff-rendered-section-body",
+    );
+    const removedTextNode = document.createTreeWalker(removedBody!, NodeFilter.SHOW_TEXT).nextNode();
+    const range = document.createRange();
+    range.setStart(removedTextNode!, 0);
+    range.collapse(true);
+    window.getSelection()?.removeAllRanges();
+    window.getSelection()?.addRange(range);
+    fireEvent.keyDown(document.querySelector<HTMLElement>(".markdown-diff-change-scroll")!, { key: "ArrowDown" });
+    expect(addedSections[0].contains(window.getSelection()?.anchorNode ?? null)).toBe(true);
 
-    expect(onSaveFile).toHaveBeenCalledWith("/repo/README.md", savedContent, {
-      baseHash: null,
-      overwrite: undefined,
+    addedSections[1].innerHTML = "<p>Ready to save.</p>";
+    fireEvent.input(addedSections[1]);
+
+    await waitFor(() => {
+      expect(addedSections[1]).toHaveTextContent("Ready to commit.");
     });
+    expect(onSaveFile).not.toHaveBeenCalled();
+
+    await clickAndSettle(screen.getByRole("button", { name: "All lines" }));
+    const editor = await screen.findByTestId("monaco-diff-editor-modified");
+    expect(editor).toHaveAttribute("readonly");
   });
 
   it("keeps rendered staged Markdown read-only when the worktree has unstaged changes", async () => {
@@ -679,6 +1082,61 @@ describe("DiffPanel", () => {
     ).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Save Markdown" })).not.toBeInTheDocument();
     expect(document.querySelector("[data-markdown-editable='true']")).toBeNull();
+  });
+
+  it("shows Markdown enrichment notes and suppresses false line numbers for omitted patch context", async () => {
+    fetchFileMock.mockResolvedValue({
+      content: [
+        "# Draft document",
+        "Ready to commit.",
+        "Middle context.",
+        "Second draft section.",
+        "",
+      ].join("\n"),
+      language: "markdown",
+      path: "/repo/README.md",
+    });
+
+    await act(async () => {
+      render(
+        <DiffPanel
+          appearance="dark"
+          fontSizePx={13}
+          changeType="edit"
+          diff={[
+            "@@ -10,2 +10,2 @@",
+            "-# Base document",
+            "+# Draft document",
+            " Ready to commit.",
+            "@@ -40,2 +40,2 @@",
+            "-Second base section.",
+            "+Second draft section.",
+            " Tail context.",
+          ].join("\n")}
+          documentEnrichmentNote="Rendered Markdown is unavailable because the document exceeds the 10 MB read limit."
+          diffMessageId="diff-markdown-patch-omitted-lines"
+          filePath="/repo/README.md"
+          gitSectionId="unstaged"
+          language="markdown"
+          sessionId="session-1"
+          workspaceRoot="/repo"
+          onOpenPath={() => {}}
+          onSaveFile={async () => {}}
+          summary="Updated README"
+        />,
+      );
+    });
+
+    await clickAndSettle(screen.getByRole("button", { name: "Rendered Markdown" }));
+
+    expect(
+      screen.getByText("Rendered Markdown is unavailable because the document exceeds the 10 MB read limit."),
+    ).toBeInTheDocument();
+    expect(screen.getByText("...")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(document.querySelector(".markdown-line-gutter [data-markdown-gutter-line='10']")).not.toBeNull();
+    });
+    expect(document.querySelector(".markdown-line-gutter [data-markdown-gutter-line='1']")).toBeNull();
   });
 
   it("passes rendered Markdown diff link metadata to the open-path callback", async () => {
@@ -1043,6 +1501,9 @@ describe("DiffPanel", () => {
       expect(sections.length).toBeGreaterThan(0);
       return sections;
     });
+    expect(
+      document.querySelector(".markdown-diff-rendered-section-removed [data-markdown-editable='true']"),
+    ).toBeNull();
 
     expect(screen.queryByRole("textbox", { name: /Edit Markdown/ })).not.toBeInTheDocument();
     editRenderedMarkdownSection(
@@ -1061,7 +1522,7 @@ describe("DiffPanel", () => {
   // focused rendered section mid-edit. Drafts stay local to the live
   // contentEditable DOM while typing, so the editor keeps focus/caret/IME
   // state until the section commits.
-  it("preserves the edited rendered section DOM identity across multiple keystrokes", async () => {
+  it("preserves rendered section DOM identity and focus across multiple keystrokes", async () => {
     fetchFileMock.mockResolvedValue({
       content: "Shared intro.\n# Draft document\nShared middle.\nReady to commit.\nShared outro.\n",
       language: "markdown",
@@ -1127,6 +1588,7 @@ describe("DiffPanel", () => {
       ".markdown-diff-rendered-section-added [data-markdown-editable='true']",
     )[1];
     expect(afterFirstEdit).toBe(editedSection);
+    expect(document.activeElement).toBe(editedSection);
     expect(afterFirstEdit).toHaveTextContent("Ready to commit.More details.");
 
     editRenderedMarkdownSection(
@@ -1137,6 +1599,7 @@ describe("DiffPanel", () => {
       ".markdown-diff-rendered-section-added [data-markdown-editable='true']",
     )[1];
     expect(afterSecondEdit).toBe(editedSection);
+    expect(document.activeElement).toBe(editedSection);
     expect(afterSecondEdit).toHaveTextContent("Ready to commit.More details.Even more.");
 
     // Shrink the buffer back below the original line count — segment offsets
@@ -1147,6 +1610,7 @@ describe("DiffPanel", () => {
       ".markdown-diff-rendered-section-added [data-markdown-editable='true']",
     )[1];
     expect(afterThirdEdit).toBe(editedSection);
+    expect(document.activeElement).toBe(editedSection);
     expect(afterThirdEdit).toHaveTextContent("Shipped.");
 
     fireEvent.blur(afterThirdEdit);
@@ -1156,6 +1620,76 @@ describe("DiffPanel", () => {
     expect(document.body.textContent).toContain("Shipped.");
     expect(document.body.textContent).not.toContain("Ready to commit.");
     expect(document.body.textContent).not.toContain("More details.");
+  });
+
+  it("cancels an uncommitted rendered Markdown section edit with Escape", async () => {
+    fetchFileMock.mockResolvedValue({
+      content: "Shared intro.\n# Draft document\nShared middle.\nReady to commit.\nShared outro.\n",
+      language: "markdown",
+      path: "/repo/README.md",
+    });
+
+    await act(async () => {
+      render(
+        <DiffPanel
+          appearance="dark"
+          fontSizePx={13}
+          changeType="edit"
+          diff={[
+            "@@ -1,5 +1,5 @@",
+            " Shared intro.",
+            "-# Base document",
+            "+# Draft document",
+            " Shared middle.",
+            "-Committed text.",
+            "+Ready to commit.",
+            " Shared outro.",
+          ].join("\n")}
+          documentContent={{
+            before: {
+              content: "Shared intro.\n# Base document\nShared middle.\nCommitted text.\nShared outro.\n",
+              source: "index",
+            },
+            after: {
+              content: "Shared intro.\n# Draft document\nShared middle.\nReady to commit.\nShared outro.\n",
+              source: "worktree",
+            },
+            canEdit: true,
+            isCompleteDocument: true,
+          }}
+          diffMessageId="diff-markdown-contenteditable-escape"
+          filePath="/repo/README.md"
+          gitSectionId="unstaged"
+          language="markdown"
+          sessionId="session-1"
+          workspaceRoot="/repo"
+          onOpenPath={() => {}}
+          onSaveFile={async () => {}}
+          summary="Updated README"
+        />,
+      );
+    });
+
+    const section = await waitFor(() => {
+      const candidate = Array.from(
+        document.querySelectorAll<HTMLElement>(
+          ".markdown-diff-rendered-section-added [data-markdown-editable='true']",
+        ),
+      ).find((element) => element.textContent?.includes("Ready to commit."));
+      expect(candidate).not.toBeNull();
+      return candidate!;
+    });
+
+    editRenderedMarkdownSection(section, "<p>Temporary draft.</p>");
+    expect(screen.getByRole("button", { name: "Save Markdown" })).toBeEnabled();
+
+    fireEvent.keyDown(section, { key: "Escape" });
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Saved" })).toBeDisabled();
+      expect(section).toHaveTextContent("Ready to commit.");
+    });
+    expect(document.body).not.toHaveTextContent("Temporary draft.");
   });
 
   // Regression: clicking anywhere inside a rendered Markdown section used to
@@ -1581,6 +2115,7 @@ describe("DiffPanel", () => {
       language: "markdown",
       path: "/repo/README.md",
     });
+    const onSaveFile = vi.fn().mockResolvedValue(undefined);
 
     await act(async () => {
       render(
@@ -1618,7 +2153,7 @@ describe("DiffPanel", () => {
           sessionId="session-1"
           workspaceRoot="/repo"
           onOpenPath={() => {}}
-          onSaveFile={async () => {}}
+          onSaveFile={onSaveFile}
           summary="Updated README"
         />,
       );
@@ -1634,16 +2169,123 @@ describe("DiffPanel", () => {
     const listSection = Array.from(addedSections).find((section) =>
       section.textContent?.includes("First item"),
     );
-    expect(listSection).toBeTruthy();
+    expect(listSection).not.toBeNull();
+    const editableListSection = listSection as HTMLElement;
     expect(screen.getByRole("button", { name: "Saved" })).toBeDisabled();
 
-    setCaret(listSection!, "end");
-    fireEvent.keyDown(listSection!, { key: "ArrowDown" });
-    fireEvent.blur(listSection!);
+    for (const eventInit of [
+      { key: "ArrowDown", boundary: "end" as const },
+      { key: "PageDown", boundary: "end" as const },
+      { key: "PageUp", boundary: "start" as const },
+      { key: "s", ctrlKey: true, boundary: "end" as const },
+    ]) {
+      setCaret(editableListSection, eventInit.boundary);
+      fireEvent.keyDown(editableListSection, eventInit);
+      fireEvent.blur(editableListSection);
 
-    expect(screen.getByRole("button", { name: "Saved" })).toBeDisabled();
-    expect(screen.queryByRole("button", { name: "Save Markdown" })).toBeNull();
-    expect(document.querySelectorAll(".markdown-diff-rendered-section-added").length).toBe(2);
+      expect(screen.getByRole("button", { name: "Saved" })).toBeDisabled();
+      expect(screen.queryByRole("button", { name: "Save Markdown" })).toBeNull();
+      expect(document.querySelectorAll(".markdown-diff-rendered-section-added")).toHaveLength(2);
+    }
+
+    expect(onSaveFile).not.toHaveBeenCalled();
+  });
+
+  it("preserves an uncommitted downstream rendered draft when another section shifts line counts", async () => {
+    fetchFileMock.mockResolvedValue({
+      content: "# Title\n\nSection one original.\n\nSection two original.\n",
+      language: "markdown",
+      path: "/repo/notes.md",
+    });
+    const savedCapture: Array<{ path: string; content: string }> = [];
+    const onSaveFile = vi
+      .fn()
+      .mockImplementation(async (path: string, content: string) => {
+        savedCapture.push({ path, content });
+        return { content, language: "markdown", path };
+      });
+
+    await act(async () => {
+      render(
+        <DiffPanel
+          appearance="dark"
+          fontSizePx={13}
+          changeType="edit"
+          diff={[
+            "@@ -1,5 +1,5 @@",
+            " # Title",
+            " ",
+            "-Section one base.",
+            "+Section one original.",
+            " ",
+            "-Section two base.",
+            "+Section two original.",
+          ].join("\n")}
+          documentContent={{
+            before: {
+              content: "# Title\n\nSection one base.\n\nSection two base.\n",
+              source: "index",
+            },
+            after: {
+              content: "# Title\n\nSection one original.\n\nSection two original.\n",
+              source: "worktree",
+            },
+            canEdit: true,
+            isCompleteDocument: true,
+          }}
+          diffMessageId="diff-markdown-line-shift-draft"
+          filePath="/repo/notes.md"
+          gitSectionId="unstaged"
+          language="markdown"
+          sessionId="session-1"
+          workspaceRoot="/repo"
+          onOpenPath={() => {}}
+          onSaveFile={onSaveFile}
+          summary="Updated notes"
+        />,
+      );
+    });
+
+    const sections = await waitFor(() => {
+      const added = Array.from(
+        document.querySelectorAll<HTMLElement>(
+          ".markdown-diff-rendered-section-added [data-markdown-editable='true']",
+        ),
+      );
+      expect(added.length).toBeGreaterThanOrEqual(2);
+      return added;
+    });
+    const sectionOne = sections.find((section) =>
+      section.textContent?.includes("Section one original."),
+    );
+    const sectionTwo = sections.find((section) =>
+      section.textContent?.includes("Section two original."),
+    );
+    expect(sectionOne).toBeTruthy();
+    expect(sectionTwo).toBeTruthy();
+
+    editRenderedMarkdownSection(sectionTwo!, "<p>Section two in progress.</p>");
+    editRenderedMarkdownSection(
+      sectionOne!,
+      "<p>Section one revised.</p><p>Extra line shifts offsets.</p>",
+    );
+    fireEvent.blur(sectionOne!);
+
+    const sectionTwoAfterShift = await waitFor(() => {
+      const candidate = Array.from(
+        document.querySelectorAll<HTMLElement>("[data-markdown-editable='true']"),
+      ).find((section) => section.textContent?.includes("Section two in progress."));
+      expect(candidate).toBeTruthy();
+      return candidate!;
+    });
+
+    fireEvent.blur(sectionTwoAfterShift);
+    await clickAndSettle(screen.getByRole("button", { name: "Save Markdown" }));
+
+    expect(savedCapture.length).toBeGreaterThan(0);
+    expect(savedCapture[savedCapture.length - 1].content).toBe(
+      "# Title\n\nSection one revised.\n\nExtra line shifts offsets.\n\nSection two in progress.\n",
+    );
   });
 
   // Regression: the previous freeze pattern captured a single

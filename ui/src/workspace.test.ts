@@ -2679,6 +2679,63 @@ describe("workspace helpers", () => {
       activeSessionId: "session-a",
     });
   });
+
+  it("openDiffPreviewInWorkspaceState preserves Markdown document content metadata", () => {
+    const documentContent = {
+      before: {
+        content: "# Before\n",
+        source: "index" as const,
+      },
+      after: {
+        content: "# After\n",
+        source: "worktree" as const,
+      },
+      canEdit: true,
+      isCompleteDocument: true,
+    };
+    const next = openDiffPreviewInWorkspaceState(
+      makeSinglePaneWorkspace(
+        makePane("pane-a", [makeSessionTab("tab-a", "session-a")]),
+      ),
+      {
+        changeType: "edit",
+        diff: "-# Before\n+# After",
+        documentEnrichmentNote: "Rendered from full document sides.",
+        documentContent,
+        diffMessageId: "git-preview:pane-a:/repo:unstaged::README.md",
+        filePath: "/repo/README.md",
+        gitDiffRequest: {
+          path: "README.md",
+          sectionId: "unstaged",
+          workdir: "/repo",
+        },
+        gitDiffRequestKey: "git-preview:pane-a:/repo:unstaged::README.md",
+        gitSectionId: "unstaged",
+        language: "markdown",
+        originSessionId: "session-a",
+        summary: "Updated README",
+      },
+      "pane-a",
+    );
+
+    const diffTab = next.panes
+      .flatMap((pane) => pane.tabs)
+      .find((tab) => tab.kind === "diffPreview");
+
+    expect(diffTab).toMatchObject({
+      kind: "diffPreview",
+      documentEnrichmentNote: "Rendered from full document sides.",
+      documentContent,
+      gitDiffRequest: {
+        path: "README.md",
+        sectionId: "unstaged",
+        workdir: "/repo",
+      },
+      gitDiffRequestKey: "git-preview:pane-a:/repo:unstaged::README.md",
+      language: "markdown",
+    });
+  });
+
   it("openDiffPreviewInWorkspaceState opens a control-panel diff beside the session pane", () => {
     const next = openDiffPreviewInWorkspaceState(
       makeSplitWorkspace(

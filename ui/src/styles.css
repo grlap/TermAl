@@ -49,6 +49,7 @@
   --command-input-fg: var(--ink);
   --command-output-bg: var(--surface-white);
   --command-output-fg: var(--ink);
+  --diff-removed-color: #ef4444;
   --cursor-grab: url("./assets/cursors/grab.svg") 12 9, grab;
   --cursor-grabbing: url("./assets/cursors/grabbing.svg") 12 9, grabbing;
   --cursor-resize-col: url("./assets/cursors/resize-col.svg") 16 16, col-resize;
@@ -3847,6 +3848,15 @@ textarea {
   min-height: 1px;
 }
 
+/* Hide the wrapper (but keep its children in the DOM so ResizeObserver
+   can measure them) during the brief post-activation measurement phase.
+   `visibility: hidden` is deliberate: `display: none` would prevent
+   child layout/measurement, and `opacity: 0` would still let the
+   browser paint the intermediate wrong-position state. */
+.virtualized-message-list.is-measuring-post-activation {
+  visibility: hidden;
+}
+
 .load-earlier-messages {
   display: flex;
   justify-content: center;
@@ -5229,7 +5239,7 @@ textarea {
 
 .markdown-diff-change-block {
   display: grid;
-  gap: 0.55rem;
+  gap: 0;
   min-width: 0;
 }
 
@@ -5251,25 +5261,26 @@ textarea {
   display: grid;
   gap: 0.55rem;
   min-width: 0;
-  border: 1px solid var(--line);
-  border-radius: 0.45rem;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  border-radius: 0;
   padding: 0.7rem;
 }
 
 .markdown-diff-rendered-section-added {
   --markdown-diff-added-color: var(--signal-green);
 
-  border-color: color-mix(in srgb, var(--markdown-diff-added-color) 74%, var(--line));
+  border-color: color-mix(in srgb, var(--markdown-diff-added-color) 55%, transparent);
   background: color-mix(in srgb, var(--markdown-diff-added-color) 26%, var(--surface-white));
-  box-shadow: inset 5px 0 0 var(--markdown-diff-added-color);
+  box-shadow: none;
 }
 
 .markdown-diff-rendered-section-removed {
   --markdown-diff-removed-color: #ef4444;
 
-  border-color: color-mix(in srgb, var(--markdown-diff-removed-color) 82%, var(--line));
-  background: color-mix(in srgb, var(--markdown-diff-removed-color) 26%, var(--surface-white));
-  box-shadow: inset 5px 0 0 var(--markdown-diff-removed-color);
+  border-color: color-mix(in srgb, var(--markdown-diff-removed-color) 38%, transparent);
+  background: color-mix(in srgb, var(--markdown-diff-removed-color) 16%, var(--surface-white));
+  box-shadow: inset 1px 0 0 var(--markdown-diff-removed-color);
 }
 
 .markdown-diff-rendered-section-with-line-gutter {
@@ -5281,21 +5292,30 @@ textarea {
 }
 
 .markdown-diff-rendered-section-with-line-gutter .markdown-copy {
-  border: 1px solid var(--line);
-  border-radius: 0.45rem;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  border-radius: 0;
   padding: 0.7rem;
 }
 
 .markdown-diff-rendered-section-added.markdown-diff-rendered-section-with-line-gutter .markdown-copy {
-  border-color: color-mix(in srgb, var(--markdown-diff-added-color) 74%, var(--line));
+  border-color: color-mix(in srgb, var(--markdown-diff-added-color) 55%, transparent);
   background: color-mix(in srgb, var(--markdown-diff-added-color) 26%, var(--surface-white));
-  box-shadow: inset 5px 0 0 var(--markdown-diff-added-color);
+  box-shadow: none;
 }
 
 .markdown-diff-rendered-section-removed.markdown-diff-rendered-section-with-line-gutter .markdown-copy {
-  border-color: color-mix(in srgb, var(--markdown-diff-removed-color) 82%, var(--line));
-  background: color-mix(in srgb, var(--markdown-diff-removed-color) 26%, var(--surface-white));
-  box-shadow: inset 5px 0 0 var(--markdown-diff-removed-color);
+  border-color: color-mix(in srgb, var(--markdown-diff-removed-color) 38%, transparent);
+  background: color-mix(in srgb, var(--markdown-diff-removed-color) 16%, var(--surface-white));
+  box-shadow: inset 1px 0 0 var(--markdown-diff-removed-color);
+}
+
+.markdown-diff-rendered-section-added .markdown-line-number {
+  color: color-mix(in srgb, var(--markdown-diff-added-color) 82%, var(--copy));
+}
+
+.markdown-diff-rendered-section-removed .markdown-line-number {
+  color: color-mix(in srgb, var(--markdown-diff-removed-color) 84%, var(--copy));
 }
 
 .markdown-diff-rendered-section-added .markdown-copy {
@@ -5324,10 +5344,22 @@ textarea {
   border-radius: 0.35rem;
   outline: none;
   cursor: text;
+  position: relative;
 }
 
 .markdown-diff-editable-section:focus {
   outline: none;
+}
+
+.markdown-diff-editable-section:focus-visible::before {
+  content: "";
+  position: absolute;
+  top: 0.25rem;
+  bottom: 0.25rem;
+  left: -0.45rem;
+  width: 2px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 68%, transparent);
 }
 
 .markdown-diff-editable-section .syntax-copy-button {
@@ -5695,7 +5727,7 @@ textarea {
 }
 
 .structured-diff-row-removed .structured-diff-cell-left {
-  background: color-mix(in srgb, var(--accent-rose-bg) 70%, var(--surface-white));
+  background: color-mix(in srgb, var(--diff-removed-color) 24%, var(--surface-white));
 }
 
 .structured-diff-row-removed .structured-diff-cell-right {
@@ -5704,11 +5736,11 @@ textarea {
 
 .structured-diff-row-removed .structured-diff-cell-left .structured-diff-line-sign,
 .structured-diff-row-removed .structured-diff-cell-left .structured-diff-line-number {
-  color: color-mix(in srgb, var(--signal-rose) 72%, var(--copy));
+  color: color-mix(in srgb, var(--diff-removed-color) 82%, var(--copy));
 }
 
 .structured-diff-row-changed .structured-diff-cell-left {
-  background: color-mix(in srgb, var(--accent-rose-bg) 62%, var(--surface-white));
+  background: color-mix(in srgb, var(--diff-removed-color) 20%, var(--surface-white));
 }
 
 .structured-diff-row-changed .structured-diff-cell-right {
@@ -5717,7 +5749,7 @@ textarea {
 
 .structured-diff-row-changed .structured-diff-cell-left .structured-diff-line-sign,
 .structured-diff-row-changed .structured-diff-cell-left .structured-diff-line-number {
-  color: color-mix(in srgb, var(--signal-rose) 76%, var(--copy));
+  color: color-mix(in srgb, var(--diff-removed-color) 84%, var(--copy));
 }
 
 .structured-diff-row-changed .structured-diff-cell-right .structured-diff-line-sign,
@@ -5732,7 +5764,7 @@ textarea {
 }
 
 .structured-diff-row-changed .structured-diff-cell-left .structured-diff-inline-change {
-  background: color-mix(in srgb, var(--accent-rose-border) 30%, #ffffff);
+  background: color-mix(in srgb, var(--diff-removed-color) 30%, #ffffff);
 }
 
 .structured-diff-row-changed .structured-diff-cell-right .structured-diff-inline-change {
@@ -5986,12 +6018,12 @@ textarea {
 }
 
 .diff-preview-raw-line-removed {
-  background: color-mix(in srgb, var(--accent-rose-bg) 58%, var(--code-bg));
+  background: color-mix(in srgb, var(--diff-removed-color) 24%, var(--code-bg));
 }
 
 .diff-preview-raw-line-removed .diff-preview-raw-line-number,
 .diff-preview-raw-line-removed .diff-preview-raw-line-content {
-  color: color-mix(in srgb, var(--code-fg) 72%, var(--signal-rose));
+  color: color-mix(in srgb, var(--code-fg) 72%, var(--diff-removed-color));
 }
 
 .diff-preview-raw-line-hunk {
@@ -6803,22 +6835,27 @@ textarea {
 
 .markdown-copy-shell-with-line-numbers {
   display: grid;
-  grid-template-columns: minmax(2.75rem, max-content) minmax(0, 1fr);
-  gap: 0.75rem;
+  grid-template-columns: minmax(4rem, max-content) minmax(0, 1fr);
+  gap: 1.25rem;
   align-items: start;
 }
 
 .markdown-line-gutter {
   position: relative;
   align-self: stretch;
-  min-width: 2.75rem;
+  min-width: 4rem;
   pointer-events: none;
   user-select: none;
+}
+
+.markdown-line-gutter:empty {
+  visibility: hidden;
 }
 
 .markdown-line-number {
   position: absolute;
   right: 0;
+  transform: translateY(-50%);
   color: color-mix(in srgb, var(--muted) 82%, var(--surface-black));
   font-family: var(--code-font);
   font-size: 0.72rem;
@@ -6941,6 +6978,10 @@ textarea {
   padding-left: 1.25rem;
 }
 
+.markdown-copy ol {
+  padding-left: 1.55rem;
+}
+
 .markdown-copy blockquote {
   margin: 0;
   padding-left: 1rem;
@@ -6978,6 +7019,77 @@ textarea {
   background: transparent;
   padding: 0;
   color: inherit;
+}
+
+.mermaid-diagram-block {
+  display: block;
+  max-width: 100%;
+  min-height: 7rem;
+  margin: 0;
+  padding: 1rem;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--code-surface-radius);
+  background: var(--code-bg);
+  color: var(--code-fg);
+}
+
+.mermaid-diagram-loading {
+  display: grid;
+  align-items: center;
+}
+
+.mermaid-diagram-fallback {
+  display: grid;
+  gap: 0.6rem;
+}
+
+.mermaid-diagram-svg {
+  min-width: max-content;
+}
+
+.mermaid-diagram-svg svg {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  margin: 0 auto;
+}
+
+.mermaid-diagram-svg svg .nodeLabel,
+.mermaid-diagram-svg svg .edgeLabel,
+.mermaid-diagram-svg svg .label {
+  line-height: 1.2 !important;
+}
+
+.mermaid-diagram-svg svg .edgeLabel,
+.mermaid-diagram-svg svg .edgeLabel .label,
+.mermaid-diagram-svg svg .edgeLabel span,
+.mermaid-diagram-svg svg .edgeLabel p,
+.mermaid-diagram-svg svg .edgeLabel div {
+  border-radius: 24px !important;
+}
+
+.mermaid-diagram-svg svg .nodeLabel *,
+.mermaid-diagram-svg svg .edgeLabel *,
+.mermaid-diagram-svg svg .label * {
+  margin: 0 !important;
+  padding: 0 !important;
+  line-height: 1.2 !important;
+}
+
+.mermaid-diagram-svg svg foreignObject {
+  overflow: visible;
+}
+
+.mermaid-diagram-svg svg foreignObject > div {
+  display: flex !important;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  line-height: 1.2 !important;
+  text-align: center;
 }
 
 .markdown-copy code {

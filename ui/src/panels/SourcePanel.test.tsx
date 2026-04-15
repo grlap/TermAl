@@ -203,6 +203,99 @@ describe("SourcePanel", () => {
     expect(screen.getByText("Done")).toBeInTheDocument();
   });
 
+  it("renders split Markdown preview from the unsaved buffer and opens document links", async () => {
+    const onOpenSourceLink = vi.fn();
+
+    render(
+      <SourcePanel
+        editorAppearance={editorAppearance}
+        editorFontSizePx={14}
+        fileState={{
+          ...readyFileState,
+          path: "/repo/docs/readme.md",
+          content: "# Original\n\n[Guide](./guide.md#L10)\n",
+          language: "markdown",
+        }}
+        sourcePath="/repo/docs/readme.md"
+        workspaceRoot="/repo"
+        onOpenSourceLink={onOpenSourceLink}
+        onSaveFile={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Split" }));
+    fireEvent.change(
+      await screen.findByLabelText("Source editor for /repo/docs/readme.md"),
+      {
+        target: { value: "# Changed Title\n\n[Guide](./guide.md#L10)\n" },
+      },
+    );
+
+    expect(await screen.findByRole("heading", { name: "Changed Title" })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("link", { name: "Guide" }));
+
+    expect(onOpenSourceLink).toHaveBeenCalledWith({
+      path: "/repo/docs/guide.md",
+      line: 10,
+      openInNewTab: false,
+    });
+  });
+
+  it("round-trips Markdown modes and resets to code for non-Markdown files", async () => {
+    const { rerender } = render(
+      <SourcePanel
+        editorAppearance={editorAppearance}
+        editorFontSizePx={14}
+        fileState={{
+          ...readyFileState,
+          path: "/repo/docs/readme.md",
+          content: "# Mode Test\n",
+          language: "markdown",
+        }}
+        sourcePath="/repo/docs/readme.md"
+        workspaceRoot="/repo"
+        onSaveFile={vi.fn()}
+      />,
+    );
+
+    const codeEditor = await screen.findByLabelText("Source editor for /repo/docs/readme.md");
+    expect(codeEditor).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Preview" }));
+    expect(await screen.findByRole("heading", { name: "Mode Test" })).toBeInTheDocument();
+    expect(screen.queryByLabelText("Source editor for /repo/docs/readme.md")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Split" }));
+    expect(await screen.findByLabelText("Source editor for /repo/docs/readme.md")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Mode Test" })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Code" }));
+    expect(await screen.findByLabelText("Source editor for /repo/docs/readme.md")).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Mode Test" })).not.toBeInTheDocument();
+
+    rerender(
+      <SourcePanel
+        editorAppearance={editorAppearance}
+        editorFontSizePx={14}
+        fileState={{
+          ...readyFileState,
+          path: "/repo/src/main.rs",
+          content: "fn main() {}\n",
+          language: "rust",
+        }}
+        sourcePath="/repo/src/main.rs"
+        onSaveFile={vi.fn()}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.queryByRole("button", { name: "Preview" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Split" })).not.toBeInTheDocument();
+      expect(screen.getByLabelText("Source editor for /repo/src/main.rs")).toBeInTheDocument();
+    });
+  });
+
   it("auto-rebases the latest editor buffer after a disk refresh returns", async () => {
     const latestFile = createDeferred<SourceFileState>();
     const onFetchLatestFile = vi.fn(() => latestFile.promise);

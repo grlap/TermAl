@@ -3512,6 +3512,7 @@ fn load_git_diff_for_request(
 
     let diff_hash = stable_text_hash(&diff_identity);
     let language = infer_language_from_path(FsPath::new(&current_path)).map(str::to_owned);
+    let mut document_enrichment_note = None;
     let document_content = if language.as_deref() == Some("markdown") {
         match load_git_diff_document_content(
             &repo_root,
@@ -3522,6 +3523,7 @@ fn load_git_diff_for_request(
         ) {
             Ok(content) => Some(content),
             Err(error) if matches!(error.status, StatusCode::BAD_REQUEST | StatusCode::NOT_FOUND) => {
+                document_enrichment_note = git_diff_document_enrichment_note(&error);
                 eprintln!(
                     "backend warning> git diff Markdown enrichment skipped for {}: {}",
                     current_path, error.message
@@ -3547,6 +3549,7 @@ fn load_git_diff_for_request(
             .exists()
             .then(|| file_path.to_string_lossy().into_owned()),
         language,
+        document_enrichment_note,
         document_content,
         summary: format!(
             "{} changes in {}",
@@ -4139,6 +4142,25 @@ fn canonicalize_worktree_path(
             ))
         }
     })
+}
+
+fn git_diff_document_enrichment_note(error: &ApiError) -> Option<String> {
+    let message = error.message.to_lowercase();
+    if message.contains("exceeds the 10 mb read limit") {
+        return Some(
+            "Rendered Markdown is unavailable because the document exceeds the 10 MB read limit."
+                .to_owned(),
+        );
+    }
+
+    if message.contains("changed to a symlink") {
+        return Some(
+            "Rendered Markdown is unavailable because the file changed to a symlink while loading."
+                .to_owned(),
+        );
+    }
+
+    None
 }
 
 /// Ensures a canonicalized path starts inside the canonical Git repository root.
@@ -6351,6 +6373,8 @@ struct GitDiffResponse {
     file_path: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     language: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    document_enrichment_note: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     document_content: Option<GitDiffDocumentContent>,
     summary: String,

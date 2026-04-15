@@ -2,6 +2,7 @@ import type { StyleId, ThemeId } from "./themes";
 import { isStyleId, isThemeId } from "./themes";
 import {
   normalizeWorkspaceStatePaths,
+  stripDiffPreviewDocumentContentFromWorkspaceState,
   stripLoadingGitDiffPreviewTabsFromWorkspaceState,
   type WorkspaceNode,
   type WorkspacePane,
@@ -65,7 +66,9 @@ export function persistWorkspaceLayout(workspaceViewId: string, layout: StoredWo
 
   const persistedLayout = {
     ...layout,
-    workspace: stripLoadingGitDiffPreviewTabsFromWorkspaceState(layout.workspace),
+    workspace: stripDiffPreviewDocumentContentFromWorkspaceState(
+      stripLoadingGitDiffPreviewTabsFromWorkspaceState(layout.workspace),
+    ),
   };
 
   window.localStorage.setItem(
@@ -95,7 +98,7 @@ export function parseStoredWorkspaceLayout(raw: string | null | undefined): Stor
 
     return {
       ...parsed,
-      workspace: stripLoadingGitDiffPreviewTabsFromWorkspaceState(
+      workspace: stripDiffPreviewDocumentContentFromWorkspaceState(
         normalizeWorkspaceStatePaths(parsed.workspace),
       ),
     };

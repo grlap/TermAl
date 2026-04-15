@@ -54,6 +54,7 @@ import {
   DEFERRED_PREVIEW_CHARACTER_LIMIT,
   DEFERRED_PREVIEW_LINE_LIMIT,
   formatByteSize,
+  getErrorMessage,
   imageAttachmentSummaryLabel,
   mapCommandStatus,
   MAX_DEFERRED_PLACEHOLDER_HEIGHT,
@@ -61,6 +62,7 @@ import {
   renderDecision,
   type ConnectionRetryNotice,
 } from "./app-utils";
+import type { MonacoAppearance } from "./monaco";
 
 const DEFERRED_RENDER_ROOT_MARGIN_PX = 960;
 const HEAVY_CODE_CHARACTER_THRESHOLD = 1400;
@@ -68,6 +70,7 @@ const HEAVY_CODE_LINE_THRESHOLD = 28;
 const HEAVY_MARKDOWN_CHARACTER_THRESHOLD = 1800;
 const HEAVY_MARKDOWN_LINE_THRESHOLD = 24;
 const FILE_CHANGES_COLLAPSE_THRESHOLD = 6;
+let mermaidDiagramIdCounter = 0;
 
 export type MarkdownFileLinkTarget = {
   path: string;
@@ -98,6 +101,7 @@ type MarkdownLineMarker = {
 };
 
 export const MessageCard = memo(function MessageCard({
+  appearance = "dark",
   message,
   onOpenDiffPreview,
   onOpenSourceLink,
@@ -110,6 +114,7 @@ export const MessageCard = memo(function MessageCard({
   searchHighlightTone = "match",
   workspaceRoot = null,
 }: {
+  appearance?: MonacoAppearance;
   message: Message;
   onOpenDiffPreview?: (message: DiffMessage) => void;
   onOpenSourceLink?: (target: MarkdownFileLinkTarget) => void;
@@ -165,6 +170,7 @@ export const MessageCard = memo(function MessageCard({
           {message.author === "assistant" ? (
             preferImmediateHeavyRender ? (
               <MarkdownContent
+                appearance={appearance}
                 markdown={message.text}
                 onOpenSourceLink={onOpenSourceLink}
                 searchQuery={searchQuery}
@@ -173,6 +179,7 @@ export const MessageCard = memo(function MessageCard({
               />
             ) : (
               <DeferredMarkdownContent
+                appearance={appearance}
                 markdown={message.text}
                 onOpenSourceLink={onOpenSourceLink}
                 searchQuery={searchQuery}
@@ -202,6 +209,7 @@ export const MessageCard = memo(function MessageCard({
     case "thinking":
       return (
         <ThinkingCard
+          appearance={appearance}
           message={message}
           onOpenSourceLink={onOpenSourceLink}
           searchQuery={searchQuery}
@@ -230,6 +238,7 @@ export const MessageCard = memo(function MessageCard({
     case "markdown":
       return (
         <MarkdownCard
+          appearance={appearance}
           message={message}
           onOpenSourceLink={onOpenSourceLink}
           searchQuery={searchQuery}
@@ -258,6 +267,7 @@ export const MessageCard = memo(function MessageCard({
     case "subagentResult":
       return (
         <SubagentResultCard
+          appearance={appearance}
           message={message}
           onOpenSourceLink={onOpenSourceLink}
           searchQuery={searchQuery}
@@ -541,6 +551,7 @@ function DeferredHighlightedCodeBlock({
 }
 
 function DeferredMarkdownContent({
+  appearance = "dark",
   documentPath = null,
   markdown,
   onOpenSourceLink,
@@ -548,6 +559,7 @@ function DeferredMarkdownContent({
   searchHighlightTone = "match",
   workspaceRoot = null,
 }: {
+  appearance?: MonacoAppearance;
   documentPath?: string | null;
   markdown: string;
   onOpenSourceLink?: (target: MarkdownFileLinkTarget) => void;
@@ -565,6 +577,7 @@ function DeferredMarkdownContent({
   if (!shouldDefer) {
     return (
       <MarkdownContent
+        appearance={appearance}
         documentPath={documentPath}
         markdown={markdown}
         onOpenSourceLink={onOpenSourceLink}
@@ -585,6 +598,7 @@ function DeferredMarkdownContent({
       }
     >
       <MarkdownContent
+        appearance={appearance}
         documentPath={documentPath}
         markdown={markdown}
         onOpenSourceLink={onOpenSourceLink}
@@ -628,6 +642,7 @@ function HighlightedCodeBlock({
       }),
     [code, commandHint, language, pathHint],
   );
+  const codeLanguage = highlighted.language ?? normalizeCodeLanguageClass(language);
 
   useEffect(() => {
     if (!copied) {
@@ -672,7 +687,7 @@ function HighlightedCodeBlock({
           {copied ? <CheckIcon /> : <CopyIcon />}
         </button>
       ) : null}
-      <code className={`hljs${highlighted.language ? ` language-${highlighted.language}` : ""}`}>
+      <code className={`hljs${codeLanguage ? ` language-${codeLanguage}` : ""}`}>
         {showSearchHighlight
           ? renderHighlightedText(code, searchQuery, searchHighlightTone)
           : (
@@ -683,13 +698,194 @@ function HighlightedCodeBlock({
   );
 }
 
+function MermaidDiagram({
+  appearance,
+  code,
+  lineAttributes,
+  showSourceOnError = true,
+}: {
+  appearance: MonacoAppearance;
+  code: string;
+  lineAttributes?: MarkdownLineAttributes | null;
+  showSourceOnError?: boolean;
+}) {
+  const [renderState, setRenderState] = useState<
+    | { error: null; status: "loading"; svg: null }
+    | { error: null; status: "ready"; svg: string }
+    | { error: string; status: "error"; svg: null }
+  >({ error: null, status: "loading", svg: null });
+
+  useEffect(() => {
+    let cancelled = false;
+    const diagramId = `termal-mermaid-${++mermaidDiagramIdCounter}`;
+
+    setRenderState({ error: null, status: "loading", svg: null });
+    void import("mermaid")
+      .then(async ({ default: mermaid }) => {
+        const { svg } = await renderTermalMermaidDiagram(
+          mermaid,
+          diagramId,
+          code,
+          appearance,
+        );
+        if (!cancelled) {
+          setRenderState({ error: null, status: "ready", svg });
+        }
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          setRenderState({ error: getErrorMessage(error), status: "error", svg: null });
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [appearance, code]);
+
+  if (renderState.status === "error") {
+    return (
+      <div className="mermaid-diagram-fallback" contentEditable={false} data-markdown-serialization="skip">
+        <p className="support-copy">Mermaid render failed: {renderState.error}</p>
+        {showSourceOnError ? (
+          <HighlightedCodeBlock
+            className="code-block"
+            code={code}
+            language="mermaid"
+            lineAttributes={lineAttributes}
+            showCopyButton
+          />
+        ) : null}
+      </div>
+    );
+  }
+
+  return (
+    <div
+      {...(lineAttributes ?? {})}
+      className={`mermaid-diagram-block${renderState.status === "loading" ? " mermaid-diagram-loading" : ""}`}
+      contentEditable={false}
+      data-markdown-serialization="skip"
+      role="img"
+      aria-label="Mermaid diagram"
+    >
+      {renderState.status === "ready" ? (
+        <div
+          className="mermaid-diagram-svg"
+          dangerouslySetInnerHTML={{ __html: renderState.svg }}
+        />
+      ) : (
+        <p className="support-copy">Rendering Mermaid diagram...</p>
+      )}
+    </div>
+  );
+}
+
+type MermaidModule = (typeof import("mermaid"))["default"];
+type MermaidConfigInput = NonNullable<Parameters<MermaidModule["initialize"]>[0]>;
+
+const TERMAL_MERMAID_FLOWCHART_CONFIG = {
+  defaultRenderer: "dagre-wrapper",
+  diagramPadding: 2,
+  nodeSpacing: 24,
+  padding: 4,
+  rankSpacing: 30,
+  useMaxWidth: false,
+  wrappingWidth: 140,
+} as const;
+
+const TERMAL_MERMAID_THEME_CSS = `
+.nodeLabel,
+.edgeLabel,
+.label {
+  line-height: 1.2;
+}
+.edgeLabel,
+.edgeLabel .label,
+.edgeLabel span,
+.edgeLabel p,
+.edgeLabel div {
+  border-radius: 24px;
+}
+.nodeLabel p,
+.edgeLabel p,
+.label p,
+.nodeLabel div,
+.edgeLabel div,
+.label div {
+  margin: 0;
+  padding: 0;
+  line-height: 1.2;
+}
+foreignObject {
+  overflow: visible;
+}
+`;
+
+const TERMAL_MERMAID_BASE_CONFIG = {
+  flowchart: {
+    ...TERMAL_MERMAID_FLOWCHART_CONFIG,
+  },
+  htmlLabels: true,
+  securityLevel: "strict",
+  startOnLoad: false,
+  themeCSS: TERMAL_MERMAID_THEME_CSS,
+} satisfies MermaidConfigInput;
+
+let mermaidRenderQueue: Promise<unknown> = Promise.resolve();
+
+function renderTermalMermaidDiagram(
+  mermaid: MermaidModule,
+  diagramId: string,
+  code: string,
+  appearance: MonacoAppearance,
+) {
+  const config = buildTermalMermaidConfig(appearance);
+  const renderJob = mermaidRenderQueue.then(async () => {
+    // Mermaid keeps config in a module-level singleton. Serialize
+    // initialize/render/reset so light and dark diagrams do not leak config
+    // into each other or into future Mermaid consumers in this tab.
+    mermaid.initialize(config);
+    try {
+      return await mermaid.render(diagramId, code);
+    } finally {
+      mermaid.initialize(TERMAL_MERMAID_BASE_CONFIG);
+    }
+  });
+  mermaidRenderQueue = renderJob.then(
+    () => undefined,
+    () => undefined,
+  );
+  return renderJob;
+}
+
+function buildTermalMermaidConfig(appearance: MonacoAppearance): MermaidConfigInput {
+  const isDark = appearance === "dark";
+  return {
+    ...TERMAL_MERMAID_BASE_CONFIG,
+    darkMode: isDark,
+    theme: isDark ? "dark" : "default",
+  };
+}
+
+function isMermaidMarkdownLanguage(language: string | null) {
+  return language?.trim().toLowerCase() === "mermaid";
+}
+
+function normalizeCodeLanguageClass(language: string | null | undefined) {
+  const normalized = language?.trim().toLowerCase().replace(/^language-/, "") ?? "";
+  return /^[a-z0-9_-]+$/.test(normalized) ? normalized : null;
+}
+
 function ThinkingCard({
+  appearance = "dark",
   message,
   onOpenSourceLink,
   searchQuery = "",
   searchHighlightTone = "match",
   workspaceRoot = null,
 }: {
+  appearance?: MonacoAppearance;
   message: ThinkingMessage;
   onOpenSourceLink?: (target: MarkdownFileLinkTarget) => void;
   searchQuery?: string;
@@ -704,6 +900,7 @@ function ThinkingCard({
       <div className="card-label">Thinking</div>
       <h3>{renderHighlightedText(message.title, searchQuery, searchHighlightTone)}</h3>
       <DeferredMarkdownContent
+        appearance={appearance}
         markdown={markdown}
         onOpenSourceLink={onOpenSourceLink}
         searchQuery={searchQuery}
@@ -1218,12 +1415,14 @@ function PreviewIcon() {
 }
 
 function MarkdownCard({
+  appearance = "dark",
   message,
   onOpenSourceLink,
   searchQuery = "",
   searchHighlightTone = "match",
   workspaceRoot = null,
 }: {
+  appearance?: MonacoAppearance;
   message: MarkdownMessage;
   onOpenSourceLink?: (target: MarkdownFileLinkTarget) => void;
   searchQuery?: string;
@@ -1236,6 +1435,7 @@ function MarkdownCard({
       <div className="card-label">Markdown</div>
       <h3>{renderHighlightedText(message.title, searchQuery, searchHighlightTone)}</h3>
       <DeferredMarkdownContent
+        appearance={appearance}
         markdown={message.markdown}
         onOpenSourceLink={onOpenSourceLink}
         searchQuery={searchQuery}
@@ -1420,12 +1620,14 @@ function ParallelAgentsCard({
   );
 }
 function SubagentResultCard({
+  appearance = "dark",
   message,
   onOpenSourceLink,
   searchQuery = "",
   searchHighlightTone = "match",
   workspaceRoot = null,
 }: {
+  appearance?: MonacoAppearance;
   message: SubagentResultMessage;
   onOpenSourceLink?: (target: MarkdownFileLinkTarget) => void;
   searchQuery?: string;
@@ -1459,6 +1661,7 @@ function SubagentResultCard({
             <h3>{renderHighlightedText(message.title, searchQuery, searchHighlightTone)}</h3>
           </div>
           <DeferredMarkdownContent
+            appearance={appearance}
             markdown={message.summary}
             onOpenSourceLink={onOpenSourceLink}
             searchQuery={searchQuery}
@@ -2329,6 +2532,10 @@ const MARKDOWN_BARE_FILE_REFERENCE_IGNORED_NODE_TYPES = new Set([
 ]);
 const MARKDOWN_REMARK_PLUGINS = [remarkGfm, remarkAutolinkBareFileReferences];
 const MarkdownLinkContext = createContext(false);
+// Block-level renderers must read this before emitting
+// `data-markdown-line-start`. Nested blocks inside list items or blockquotes
+// should inherit the outer block's gutter marker instead of adding a second
+// marker for the same rendered line.
 const MarkdownLineNumberSuppressedContext = createContext(false);
 
 function remarkAutolinkBareFileReferences() {
@@ -2408,22 +2615,28 @@ function createMarkdownTextNode(value: string): MarkdownAstNode {
 }
 
 export function MarkdownContent({
+  appearance = "dark",
   documentPath = null,
   markdown,
   onOpenSourceLink,
+  preserveMermaidSource = false,
+  renderMermaidDiagrams = true,
   searchQuery = "",
   searchHighlightTone = "match",
   showLineNumbers = false,
   startLineNumber = 1,
   workspaceRoot = null,
 }: {
+  appearance?: MonacoAppearance;
   documentPath?: string | null;
   markdown: string;
   onOpenSourceLink?: (target: MarkdownFileLinkTarget) => void;
+  preserveMermaidSource?: boolean;
+  renderMermaidDiagrams?: boolean;
   searchQuery?: string;
   searchHighlightTone?: SearchHighlightTone;
   showLineNumbers?: boolean;
-  startLineNumber?: number;
+  startLineNumber?: number | null;
   workspaceRoot?: string | null;
 }) {
   // Keep callback in a ref so the memoized ReactMarkdown output stays stable
@@ -2440,7 +2653,7 @@ export function MarkdownContent({
   const markdownRootRef = useRef<HTMLDivElement | null>(null);
   const [lineMarkers, setLineMarkers] = useState<MarkdownLineMarker[]>([]);
 
-  useLayoutEffect(() => {
+  useEffect(() => {
     if (!showLineNumbers) {
       setLineMarkers([]);
       return;
@@ -2464,10 +2677,11 @@ export function MarkdownContent({
             return null;
           }
 
+          const elementRect = element.getBoundingClientRect();
           return {
             line,
             range: element.dataset.markdownLineRange ?? String(line),
-            top: Math.round(element.getBoundingClientRect().top - rootRect.top),
+            top: Math.round(elementRect.top + elementRect.height / 2 - rootRect.top),
           };
         })
         .filter((marker): marker is MarkdownLineMarker => marker != null);
@@ -2481,7 +2695,7 @@ export function MarkdownContent({
       animationFrameId = window.requestAnimationFrame(updateLineMarkers);
     };
 
-    updateLineMarkers();
+    scheduleLineMarkerUpdate();
 
     const ResizeObserverConstructor = window.ResizeObserver;
     const resizeObserver = ResizeObserverConstructor
@@ -2495,16 +2709,7 @@ export function MarkdownContent({
       resizeObserver?.disconnect();
       window.removeEventListener("resize", scheduleLineMarkerUpdate);
     };
-  }, [
-    documentPath,
-    hasOpenSourceLink,
-    markdown,
-    normalizedStartLineNumber,
-    searchQuery,
-    searchHighlightTone,
-    showLineNumbers,
-    workspaceRoot,
-  ]);
+  }, [markdown, normalizedStartLineNumber, showLineNumbers]);
 
   const rendered = useMemo(() => {
     const highlightChildren = (children: ReactNode) =>
@@ -2584,6 +2789,39 @@ export function MarkdownContent({
               );
             }
 
+            if (renderMermaidDiagrams && isMermaidMarkdownLanguage(language)) {
+              const lineAttributes = suppressLineNumber ? null : getLineAttributes(sourcePosition);
+              if (preserveMermaidSource) {
+                return (
+                  <>
+                    <MermaidDiagram
+                      appearance={appearance}
+                      code={code}
+                      lineAttributes={null}
+                      showSourceOnError={false}
+                    />
+                    <HighlightedCodeBlock
+                      className="code-block mermaid-source-block"
+                      code={code}
+                      lineAttributes={lineAttributes}
+                      language={language}
+                      showCopyButton
+                      searchQuery={searchQuery}
+                      searchHighlightTone={searchHighlightTone}
+                    />
+                  </>
+                );
+              }
+
+              return (
+                <MermaidDiagram
+                  appearance={appearance}
+                  code={code}
+                  lineAttributes={lineAttributes}
+                />
+              );
+            }
+
             return (
               <HighlightedCodeBlock
                 className="code-block"
@@ -2627,31 +2865,64 @@ export function MarkdownContent({
           ol: ({ children, ordered: _ordered, depth: _depth, sourcePosition: _sourcePosition, ...props }) => (
             <ol {...props}>{children}</ol>
           ),
-          blockquote: ({ children, sourcePosition, ...props }) => (
-            <blockquote {...props} {...(getLineAttributes(sourcePosition) ?? {})}>
-              <MarkdownLineNumberSuppressedContext.Provider value>
+          blockquote: ({ children, sourcePosition, ...props }) => {
+            const suppressLineNumber = useContext(MarkdownLineNumberSuppressedContext);
+            return (
+              <blockquote {...props} {...(suppressLineNumber ? {} : getLineAttributes(sourcePosition) ?? {})}>
+                <MarkdownLineNumberSuppressedContext.Provider value>
+                  {highlightChildren(children)}
+                </MarkdownLineNumberSuppressedContext.Provider>
+              </blockquote>
+            );
+          },
+          h1: ({ children, sourcePosition, ...props }) => {
+            const suppressLineNumber = useContext(MarkdownLineNumberSuppressedContext);
+            return (
+              <h1 {...props} {...(suppressLineNumber ? {} : getLineAttributes(sourcePosition) ?? {})}>
                 {highlightChildren(children)}
-              </MarkdownLineNumberSuppressedContext.Provider>
-            </blockquote>
-          ),
-          h1: ({ children, sourcePosition, ...props }) => (
-            <h1 {...props} {...(getLineAttributes(sourcePosition) ?? {})}>{highlightChildren(children)}</h1>
-          ),
-          h2: ({ children, sourcePosition, ...props }) => (
-            <h2 {...props} {...(getLineAttributes(sourcePosition) ?? {})}>{highlightChildren(children)}</h2>
-          ),
-          h3: ({ children, sourcePosition, ...props }) => (
-            <h3 {...props} {...(getLineAttributes(sourcePosition) ?? {})}>{highlightChildren(children)}</h3>
-          ),
-          h4: ({ children, sourcePosition, ...props }) => (
-            <h4 {...props} {...(getLineAttributes(sourcePosition) ?? {})}>{highlightChildren(children)}</h4>
-          ),
-          h5: ({ children, sourcePosition, ...props }) => (
-            <h5 {...props} {...(getLineAttributes(sourcePosition) ?? {})}>{highlightChildren(children)}</h5>
-          ),
-          h6: ({ children, sourcePosition, ...props }) => (
-            <h6 {...props} {...(getLineAttributes(sourcePosition) ?? {})}>{highlightChildren(children)}</h6>
-          ),
+              </h1>
+            );
+          },
+          h2: ({ children, sourcePosition, ...props }) => {
+            const suppressLineNumber = useContext(MarkdownLineNumberSuppressedContext);
+            return (
+              <h2 {...props} {...(suppressLineNumber ? {} : getLineAttributes(sourcePosition) ?? {})}>
+                {highlightChildren(children)}
+              </h2>
+            );
+          },
+          h3: ({ children, sourcePosition, ...props }) => {
+            const suppressLineNumber = useContext(MarkdownLineNumberSuppressedContext);
+            return (
+              <h3 {...props} {...(suppressLineNumber ? {} : getLineAttributes(sourcePosition) ?? {})}>
+                {highlightChildren(children)}
+              </h3>
+            );
+          },
+          h4: ({ children, sourcePosition, ...props }) => {
+            const suppressLineNumber = useContext(MarkdownLineNumberSuppressedContext);
+            return (
+              <h4 {...props} {...(suppressLineNumber ? {} : getLineAttributes(sourcePosition) ?? {})}>
+                {highlightChildren(children)}
+              </h4>
+            );
+          },
+          h5: ({ children, sourcePosition, ...props }) => {
+            const suppressLineNumber = useContext(MarkdownLineNumberSuppressedContext);
+            return (
+              <h5 {...props} {...(suppressLineNumber ? {} : getLineAttributes(sourcePosition) ?? {})}>
+                {highlightChildren(children)}
+              </h5>
+            );
+          },
+          h6: ({ children, sourcePosition, ...props }) => {
+            const suppressLineNumber = useContext(MarkdownLineNumberSuppressedContext);
+            return (
+              <h6 {...props} {...(suppressLineNumber ? {} : getLineAttributes(sourcePosition) ?? {})}>
+                {highlightChildren(children)}
+              </h6>
+            );
+          },
           strong: ({ children, sourcePosition: _sourcePosition, ...props }) => (
             <strong {...props}>{highlightChildren(children)}</strong>
           ),
@@ -2661,14 +2932,23 @@ export function MarkdownContent({
           del: ({ children, sourcePosition: _sourcePosition, ...props }) => (
             <del {...props}>{highlightChildren(children)}</del>
           ),
-          table: ({ children, sourcePosition, ...props }) => (
-            <div className="markdown-table-scroll" {...(getLineAttributes(sourcePosition) ?? {})}>
-              <table {...props}>{children}</table>
-            </div>
-          ),
-          hr: ({ sourcePosition, ...props }) => (
-            <hr {...props} {...(getLineAttributes(sourcePosition) ?? {})} />
-          ),
+          table: ({ children, sourcePosition, ...props }) => {
+            const suppressLineNumber = useContext(MarkdownLineNumberSuppressedContext);
+            return (
+              <div
+                className="markdown-table-scroll"
+                {...(suppressLineNumber ? {} : getLineAttributes(sourcePosition) ?? {})}
+              >
+                <table {...props}>{children}</table>
+              </div>
+            );
+          },
+          hr: ({ sourcePosition, ...props }) => {
+            const suppressLineNumber = useContext(MarkdownLineNumberSuppressedContext);
+            return (
+              <hr {...props} {...(suppressLineNumber ? {} : getLineAttributes(sourcePosition) ?? {})} />
+            );
+          },
           img: ({ alt, sourcePosition: _sourcePosition, ...props }) => (
             <img {...props} alt={alt ?? ""} draggable={false} />
           ),
@@ -2686,8 +2966,11 @@ export function MarkdownContent({
     );
   }, [
     documentPath,
+    appearance,
     markdown,
     normalizedStartLineNumber,
+    preserveMermaidSource,
+    renderMermaidDiagrams,
     searchQuery,
     searchHighlightTone,
     showLineNumbers,
@@ -2722,9 +3005,9 @@ export function MarkdownContent({
   );
 }
 
-function normalizeMarkdownStartLineNumber(startLineNumber: number) {
-  if (!Number.isFinite(startLineNumber) || startLineNumber < 1) {
-    return 1;
+function normalizeMarkdownStartLineNumber(startLineNumber: number | null) {
+  if (startLineNumber == null || !Number.isFinite(startLineNumber) || startLineNumber < 1) {
+    return null;
   }
 
   return Math.floor(startLineNumber);
@@ -2732,10 +3015,10 @@ function normalizeMarkdownStartLineNumber(startLineNumber: number) {
 
 function getMarkdownLineAttributes(
   sourcePosition: MarkdownSourcePosition | undefined,
-  startLineNumber: number,
+  startLineNumber: number | null,
   showLineNumbers: boolean,
 ): MarkdownLineAttributes | null {
-  if (!showLineNumbers) {
+  if (!showLineNumbers || startLineNumber == null) {
     return null;
   }
 
@@ -2784,7 +3067,7 @@ function getMarkdownRenderedLineRangeLabel(
   return end > start ? `${start}-${end}` : String(start);
 }
 
-function areMarkdownLineMarkersEqual(
+export function areMarkdownLineMarkersEqual(
   currentMarkers: MarkdownLineMarker[],
   nextMarkers: MarkdownLineMarker[],
 ) {
@@ -3084,7 +3367,44 @@ function joinWorkspacePath(rootPath: string, relativePath: string) {
   const normalizedRelative = useBackslashSeparator
     ? trimmedRelative.replace(/\//g, "\\")
     : trimmedRelative.replace(/\\/g, "/");
-  return `${trimmedRoot}${useBackslashSeparator ? "\\" : "/"}${normalizedRelative}`;
+  return normalizeJoinedMarkdownPath(
+    `${trimmedRoot}${useBackslashSeparator ? "\\" : "/"}${normalizedRelative}`,
+    useBackslashSeparator ? "\\" : "/",
+  );
+}
+
+function normalizeJoinedMarkdownPath(path: string, separator: "\\" | "/") {
+  const isWindowsPath = separator === "\\";
+  const normalizedPath = isWindowsPath ? path.replace(/\//g, "\\") : path.replace(/\\/g, "/");
+  let prefix = "";
+  let rest = normalizedPath;
+  const driveMatch = isWindowsPath ? normalizedPath.match(/^([A-Za-z]:)\\?(.*)$/) : null;
+
+  if (driveMatch) {
+    prefix = `${driveMatch[1]}\\`;
+    rest = driveMatch[2] ?? "";
+  } else if (!isWindowsPath && normalizedPath.startsWith("/")) {
+    prefix = "/";
+    rest = normalizedPath.slice(1);
+  }
+
+  const segments: string[] = [];
+  for (const segment of rest.split(separator)) {
+    if (!segment || segment === ".") {
+      continue;
+    }
+    if (segment === "..") {
+      if (segments.length > 0 && segments[segments.length - 1] !== "..") {
+        segments.pop();
+      } else if (!prefix) {
+        segments.push(segment);
+      }
+      continue;
+    }
+    segments.push(segment);
+  }
+
+  return `${prefix}${segments.join(separator)}`;
 }
 
 function resolveDeferredRenderRoot(node: Element) {

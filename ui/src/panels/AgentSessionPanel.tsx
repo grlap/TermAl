@@ -112,6 +112,7 @@ const CONVERSATION_VIRTUALIZATION_MIN_MESSAGES = 80;
 const VIRTUALIZED_MESSAGE_OVERSCAN_PX = 960;
 const VIRTUALIZED_MESSAGE_GAP_PX = 12;
 const DEFAULT_VIRTUALIZED_VIEWPORT_HEIGHT = 720;
+const DEFAULT_ESTIMATED_MESSAGE_HEIGHT = 180;
 /** Maximum number of messages to render initially. Older messages load on scroll-up. */
 const RENDER_WINDOW_INITIAL_SIZE = 200;
 /** Number of additional messages to prepend when the user scrolls near the top. */
@@ -1529,7 +1530,7 @@ function ConversationMessageList({
   );
 }
 
-function VirtualizedConversationMessageList({
+export function VirtualizedConversationMessageList({
   isActive,
   renderMessageCard,
   sessionId,
@@ -1559,6 +1560,22 @@ function VirtualizedConversationMessageList({
     scrollTop: 0,
   });
   const [layoutVersion, setLayoutVersion] = useState(0);
+  // Post-activation measurement phase: when the list transitions from
+  // inactive to active (or mounts directly in the active state with
+  // messages already present), the first render uses estimated heights
+  // for any messages that were added while the list was inactive. Those
+  // estimates drive `layout.tops` and `layout.totalHeight`, so the first
+  // paint positions cards at the wrong absolute offsets. We mark the
+  // list as "measuring", hide the wrapper via CSS (`visibility: hidden`)
+  // so slots still mount and `ResizeObserver` can fire, and clear the
+  // flag once the currently-visible slots have real measurements in
+  // `messageHeightsRef` — then reveal with the correct scrollTop. A
+  // 150 ms timeout guarantees the wrapper is revealed even if some
+  // slots take longer than expected to report their first measurement.
+  const [isMeasuringPostActivation, setIsMeasuringPostActivation] = useState(
+    () => isActive && messages.length > 0,
+  );
+  const wasActiveRef = useRef(isActive);
 
   // Render window: only keep the last N messages in the layout to avoid
   // computing positions for thousands of off-screen items. Older messages
@@ -1627,6 +1644,95 @@ function VirtualizedConversationMessageList({
     );
   }, [windowedMessages]);
 
+  // Enter the measuring phase on inactive → active transitions while
+  // mounted. The initial mount case is handled by the `useState`
+  // initializer above; this effect covers the case where the same
+  // instance is flipped inactive → active as the user switches tabs.
+  useLayoutEffect(() => {
+    if (!wasActiveRef.current && isActive && messages.length > 0) {
+      setIsMeasuringPostActivation(true);
+    }
+    wasActiveRef.current = isActive;
+  }, [isActive, messages.length]);
+
+  // Arm the bottom-pin flag while measuring so the existing re-pin
+  // `useLayoutEffect` (declared below) writes the correct scrollTop
+  // after each measurement commit. Declared BEFORE the re-pin effect so
+  // that it runs first in the commit phase and the flag is set by the
+  // time the re-pin reads it.
+  useLayoutEffect(() => {
+    if (isMeasuringPostActivation) {
+      shouldKeepBottomAfterLayoutRef.current = true;
+    }
+  }, [isMeasuringPostActivation]);
+
+  // Completion check: runs on every commit while measuring is active.
+  // When all currently-visible slots have real measurements, write a
+  // final scrollTop and reveal by clearing the flag. Reading from
+  // `messageHeightsRef.current` is safe because `handleHeightChange`
+  // mutates it synchronously before bumping `layoutVersion`, so by the
+  // time this effect runs after a measurement-driven commit, the ref
+  // already reflects the latest data.
+  useLayoutEffect(() => {
+    if (!isMeasuringPostActivation) {
+      return;
+    }
+    if (!isActive) {
+      setIsMeasuringPostActivation(false);
+      return;
+    }
+
+    const visibleMessages = windowedMessages.slice(
+      visibleRange.startIndex,
+      visibleRange.endIndex,
+    );
+    if (visibleMessages.length === 0) {
+      setIsMeasuringPostActivation(false);
+      return;
+    }
+
+    const allMeasured = visibleMessages.every(
+      (message) => messageHeightsRef.current[message.id] !== undefined,
+    );
+    if (!allMeasured) {
+      return;
+    }
+
+    const node = scrollContainerRef.current;
+    if (node) {
+      const target = Math.max(node.scrollHeight - node.clientHeight, 0);
+      if (Math.abs(node.scrollTop - target) >= 1) {
+        node.scrollTop = target;
+      }
+    }
+    setIsMeasuringPostActivation(false);
+  });
+
+  // Timeout fallback: if the visible slots take longer than 150 ms to
+  // report their first measurement (e.g., a heavy syntax-highlighted
+  // code block or a deferred markdown renderer), reveal the wrapper
+  // anyway so the user sees something rather than a blank region.
+  useEffect(() => {
+    if (!isMeasuringPostActivation) {
+      return;
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      const node = scrollContainerRef.current;
+      if (node) {
+        const target = Math.max(node.scrollHeight - node.clientHeight, 0);
+        if (Math.abs(node.scrollTop - target) >= 1) {
+          node.scrollTop = target;
+        }
+      }
+      setIsMeasuringPostActivation(false);
+    }, 150);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+  }, [isMeasuringPostActivation, scrollContainerRef]);
+
   useLayoutEffect(() => {
     if (!isActive || !shouldKeepBottomAfterLayoutRef.current) {
       return;
@@ -1656,7 +1762,17 @@ function VirtualizedConversationMessageList({
     // the pin survives across as many commits as the measurement cycle
     // needs, matching the `TerminalPanel.shouldStickToBottomRef`
     // sticky-until-user-scrolls-away pattern.
-    node.scrollTop = Math.max(node.scrollHeight - node.clientHeight, 0);
+    //
+    // The `>= 1` guard prevents no-op writes from triggering a scroll
+    // event + reflow + ResizeObserver tick cascade. When the layout
+    // commit only moved `scrollHeight` by the subpixel rounding delta,
+    // the computed target matches the current scrollTop and we do
+    // nothing instead of writing a value the browser would round to the
+    // same integer anyway.
+    const target = Math.max(node.scrollHeight - node.clientHeight, 0);
+    if (Math.abs(node.scrollTop - target) >= 1) {
+      node.scrollTop = target;
+    }
   }, [isActive, layout.totalHeight, scrollContainerRef]);
 
   useLayoutEffect(() => {
@@ -1760,14 +1876,22 @@ function VirtualizedConversationMessageList({
       return;
     }
 
+    // Round to integer pixels so subpixel drift from `getBoundingClientRect`
+    // cannot repeatedly cross the 1-pixel commit threshold below. Storing
+    // fractional heights caused a cascading shake: each float-level
+    // measurement committed, bumped `layoutVersion`, re-pinned `scrollTop`,
+    // reflowed, and then reported a slightly different fractional height on
+    // the next ResizeObserver tick. Integer storage eliminates the drift at
+    // the source so the re-pin loop cannot be re-entered by noise alone.
+    const roundedHeight = Math.round(nextHeight);
     const previousHeight =
       messageHeightsRef.current[messageId] ??
       estimateConversationMessageHeight(messagesRef.current[messageIndexByIdRef.current.get(messageId) ?? 0]);
-    if (Math.abs(previousHeight - nextHeight) < 1) {
+    if (Math.abs(previousHeight - roundedHeight) < 1) {
       return;
     }
 
-    messageHeightsRef.current[messageId] = nextHeight;
+    messageHeightsRef.current[messageId] = roundedHeight;
 
     const messageIndex = messageIndexByIdRef.current.get(messageId);
     const node = scrollContainerRef.current;
@@ -1783,15 +1907,21 @@ function VirtualizedConversationMessageList({
     }
     if (node && messageIndex !== undefined) {
       if (shouldKeepBottom) {
-        node.scrollTop = Math.max(node.scrollHeight - node.clientHeight, 0);
+        // Skip no-op writes so a measurement whose rounded height matches
+        // the previous pin target cannot trigger an extra scroll event +
+        // reflow + ResizeObserver re-fire cycle.
+        const target = Math.max(node.scrollHeight - node.clientHeight, 0);
+        if (Math.abs(node.scrollTop - target) >= 1) {
+          node.scrollTop = target;
+        }
       } else {
         const nextScrollTop = getAdjustedVirtualizedScrollTopForHeightChange({
           currentScrollTop: node.scrollTop,
           messageTop: layoutTopsRef.current[messageIndex] ?? 0,
-          nextHeight,
+          nextHeight: roundedHeight,
           previousHeight,
         });
-        if (Math.abs(nextScrollTop - node.scrollTop) >= 0.5) {
+        if (Math.abs(nextScrollTop - node.scrollTop) >= 1) {
           node.scrollTop = nextScrollTop;
         }
       }
@@ -1818,8 +1948,15 @@ function VirtualizedConversationMessageList({
     [sessionId, onCodexAppRequestSubmit],
   );
 
+  if (!isActive) {
+    return <div className="virtualized-message-list" style={{ height: layout.totalHeight }} />;
+  }
+
   return (
-    <div className="virtualized-message-list" style={{ height: layout.totalHeight }}>
+    <div
+      className={`virtualized-message-list${isMeasuringPostActivation ? " is-measuring-post-activation" : ""}`}
+      style={{ height: layout.totalHeight }}
+    >
       {hasOlderMessages && visibleRange.startIndex === 0 && (
         <div
           className="load-earlier-messages"
@@ -3087,8 +3224,12 @@ function buildVirtualizedMessageLayout(itemHeights: number[]) {
   let offset = 0;
 
   for (let index = 0; index < itemHeights.length; index += 1) {
+    const itemHeight =
+      Number.isFinite(itemHeights[index]) && itemHeights[index] > 0
+        ? itemHeights[index]
+        : DEFAULT_ESTIMATED_MESSAGE_HEIGHT;
     tops[index] = offset;
-    offset += itemHeights[index] + VIRTUALIZED_MESSAGE_GAP_PX;
+    offset += itemHeight + VIRTUALIZED_MESSAGE_GAP_PX;
   }
 
   return {
@@ -3140,12 +3281,6 @@ export function getScrollContainerBottomGap(
   return Math.max(node.scrollHeight - node.clientHeight - node.scrollTop, 0);
 }
 
-export function isScrollContainerAtBottom(
-  node: Pick<HTMLElement, "clientHeight" | "scrollHeight" | "scrollTop">,
-) {
-  return getScrollContainerBottomGap(node) <= 4;
-}
-
 // Intentionally mirrors `syncMessageStackScrollPosition`'s `< 72`
 // stickiness threshold in `ui/src/App.tsx`. A previous revision used 96 px,
 // which left a 72-96 px band where the parent pane had already recorded
@@ -3187,7 +3322,7 @@ export function getAdjustedVirtualizedScrollTopForHeightChange({
   return Math.max(currentScrollTop + heightDelta, 0);
 }
 
-function estimateConversationMessageHeight(message: Message) {
+function estimateConversationMessageHeight(message: Message): number {
   switch (message.type) {
     case "text": {
       const lineCount = message.text.length === 0 ? 1 : message.text.split("\n").length;
@@ -3219,10 +3354,34 @@ function estimateConversationMessageHeight(message: Message) {
       }, 0);
       return Math.min(900, Math.max(168, 136 + message.agents.length * 52 + detailLineCount * 18));
     }
+    case "fileChanges":
+      return Math.min(900, Math.max(160, 136 + message.files.length * 44));
     case "subagentResult":
       return Math.min(720, Math.max(132, 128 + Math.min(message.summary.split("\n").length, 4) * 24));
     case "approval":
       return Math.max(220, 188 + (message.detail.length === 0 ? 1 : message.detail.split("\n").length) * 22);
+    case "userInputRequest":
+      return Math.min(
+        1200,
+        Math.max(
+          220,
+          188 +
+            message.questions.length * 76 +
+            (message.detail.length === 0 ? 1 : message.detail.split("\n").length) * 20,
+        ),
+      );
+    case "mcpElicitationRequest": {
+      const detailLineCount = message.detail.length === 0 ? 1 : message.detail.split("\n").length;
+      const fieldCount =
+        message.request.mode === "form"
+          ? Object.keys(message.request.requestedSchema.properties).length
+          : 1;
+      return Math.min(1200, Math.max(220, 192 + detailLineCount * 20 + fieldCount * 64));
+    }
+    case "codexAppRequest": {
+      const detailLineCount = message.detail.length === 0 ? 1 : message.detail.split("\n").length;
+      return Math.min(900, Math.max(220, 188 + detailLineCount * 20));
+    }
   }
 }
 

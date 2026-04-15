@@ -1,8 +1,10 @@
 import { MarkdownContent, type MarkdownFileLinkTarget } from "./message-cards";
+import type { MonacoAppearance } from "./monaco";
 
 export type MarkdownDocumentCompleteness = "full" | "patch";
 
 export function MarkdownDocumentView({
+  appearance = "dark",
   completeness = "full",
   documentPath = null,
   markdown,
@@ -11,6 +13,7 @@ export function MarkdownDocumentView({
   title = "Rendered Markdown",
   workspaceRoot = null,
 }: {
+  appearance?: MonacoAppearance;
   completeness?: MarkdownDocumentCompleteness;
   documentPath?: string | null;
   markdown: string;
@@ -39,6 +42,7 @@ export function MarkdownDocumentView({
           <p className="support-copy markdown-document-empty">This Markdown document is empty.</p>
         ) : (
           <MarkdownContent
+            appearance={appearance}
             documentPath={documentPath}
             markdown={markdown}
             onOpenSourceLink={onOpenSourceLink}

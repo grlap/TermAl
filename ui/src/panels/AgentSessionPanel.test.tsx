@@ -1,13 +1,14 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import type { RefObject } from "react";
 import { describe, expect, it, vi } from "vitest";
 
 import {
   AgentSessionPanel,
   AgentSessionPanelFooter,
   RunningIndicator,
+  VirtualizedConversationMessageList,
   getAdjustedVirtualizedScrollTopForHeightChange,
   getScrollContainerBottomGap,
-  isScrollContainerAtBottom,
   isScrollContainerNearBottom,
 } from "./AgentSessionPanel";
 import type { Message, Session } from "../types";
@@ -76,7 +77,7 @@ function renderSessionPanelWithDefaults(
 }
 
 describe("AgentSessionPanel conversation caching", () => {
-  it("keeps inactive virtualized conversation DOM mounted so tab activation does not rebuild it", () => {
+  it("keeps the inactive virtualized container mounted without rendering stale cards", () => {
     const cachedSession = makeSession("cached-session", {
       messages: makeTextMessages(85),
     });
@@ -93,9 +94,141 @@ describe("AgentSessionPanel conversation caching", () => {
       '.session-conversation-page[hidden]',
     );
     expect(hiddenCachedPage).not.toBeNull();
+    const inactiveVirtualizedList = hiddenCachedPage?.querySelector(
+      ".virtualized-message-list",
+    );
+    expect(inactiveVirtualizedList).not.toBeNull();
     expect(
-      hiddenCachedPage?.querySelector(".virtualized-message-list"),
-    ).not.toBeNull();
+      hiddenCachedPage?.querySelector(".message-card"),
+    ).toBeNull();
+  });
+
+  it("keeps the bottom pin across successive virtualized height commits", async () => {
+    const OriginalResizeObserver = window.ResizeObserver;
+    const originalRequestAnimationFrame = window.requestAnimationFrame;
+    const originalCancelAnimationFrame = window.cancelAnimationFrame;
+    const originalGetBoundingClientRect = Element.prototype.getBoundingClientRect;
+    const resizeCallbacks = new Map<Element, ResizeObserverCallback>();
+    let measuredSlotHeight = 180;
+    let scrollTop = 400;
+    let scrollHeightQueue = [500];
+    const scrollWrites: number[] = [];
+
+    class ResizeObserverMock {
+      constructor(private readonly callback: ResizeObserverCallback) {}
+      observe(target: Element) {
+        resizeCallbacks.set(target, this.callback);
+      }
+      disconnect() {}
+    }
+
+    const scrollNode = document.createElement("div");
+    Object.defineProperty(scrollNode, "clientHeight", {
+      configurable: true,
+      get: () => 100,
+    });
+    Object.defineProperty(scrollNode, "scrollHeight", {
+      configurable: true,
+      get: () =>
+        scrollHeightQueue.length > 1
+          ? scrollHeightQueue.shift()!
+          : (scrollHeightQueue[0] ?? 500),
+    });
+    Object.defineProperty(scrollNode, "scrollTop", {
+      configurable: true,
+      get: () => scrollTop,
+      set: (nextValue: number) => {
+        scrollTop = nextValue;
+        scrollWrites.push(nextValue);
+      },
+    });
+
+    window.ResizeObserver = ResizeObserverMock as unknown as typeof ResizeObserver;
+    let nextFrameId = 1;
+    window.requestAnimationFrame = ((callback: FrameRequestCallback) => {
+      const frameId = nextFrameId;
+      nextFrameId += 1;
+      queueMicrotask(() => callback(0));
+      return frameId;
+    }) as typeof requestAnimationFrame;
+    window.cancelAnimationFrame = vi.fn() as unknown as typeof cancelAnimationFrame;
+    Element.prototype.getBoundingClientRect = function getBoundingClientRectMock() {
+      const element = this as HTMLElement;
+      const height = element.classList.contains("virtualized-message-slot")
+        ? measuredSlotHeight
+        : 100;
+      return {
+        bottom: height,
+        height,
+        left: 0,
+        right: 100,
+        top: 0,
+        width: 100,
+        x: 0,
+        y: 0,
+        toJSON: () => ({}),
+      } as DOMRect;
+    };
+
+    try {
+      const scrollContainerRef = {
+        current: scrollNode,
+      } as RefObject<HTMLElement | null>;
+      const { container } = render(
+        <VirtualizedConversationMessageList
+          isActive
+          renderMessageCard={(message) => (
+            <article className="message-card">{message.id}</article>
+          )}
+          sessionId="session-a"
+          messages={makeTextMessages(3)}
+          scrollContainerRef={scrollContainerRef}
+          onApprovalDecision={() => {}}
+          onUserInputSubmit={() => {}}
+          onMcpElicitationSubmit={() => {}}
+          onCodexAppRequestSubmit={() => {}}
+        />,
+      );
+
+      const slot = await waitFor(() => {
+        const candidate = container.querySelector(".virtualized-message-slot");
+        expect(candidate).not.toBeNull();
+        return candidate!;
+      });
+
+      scrollWrites.length = 0;
+      scrollTop = 400;
+      measuredSlotHeight = 260;
+      scrollHeightQueue = [500, 580, 580];
+      await act(async () => {
+        resizeCallbacks.get(slot)?.([] as unknown as ResizeObserverEntry[], {} as ResizeObserver);
+        await Promise.resolve();
+      });
+
+      expect(scrollWrites).toContain(480);
+
+      const secondSlot = await waitFor(() => {
+        const candidate = container.querySelector(".virtualized-message-slot");
+        expect(candidate).not.toBeNull();
+        expect(resizeCallbacks.has(candidate!)).toBe(true);
+        return candidate!;
+      });
+      scrollWrites.length = 0;
+      scrollTop = 480;
+      measuredSlotHeight = 340;
+      scrollHeightQueue = [580, 660, 660];
+      await act(async () => {
+        resizeCallbacks.get(secondSlot)?.([] as unknown as ResizeObserverEntry[], {} as ResizeObserver);
+        await Promise.resolve();
+      });
+
+      expect(scrollWrites).toContain(560);
+    } finally {
+      window.ResizeObserver = OriginalResizeObserver;
+      window.requestAnimationFrame = originalRequestAnimationFrame;
+      window.cancelAnimationFrame = originalCancelAnimationFrame;
+      Element.prototype.getBoundingClientRect = originalGetBoundingClientRect;
+    }
   });
 });
 
@@ -271,33 +404,6 @@ describe("getScrollContainerBottomGap", () => {
     // special-casing the short-content layout.
     expect(getScrollContainerBottomGap(node(300, 400, 0))).toBe(0);
     expect(getScrollContainerBottomGap(node(200, 200, 0))).toBe(0);
-  });
-});
-
-describe("isScrollContainerAtBottom", () => {
-  function node(
-    scrollHeight: number,
-    clientHeight: number,
-    scrollTop: number,
-  ) {
-    return { scrollHeight, clientHeight, scrollTop };
-  }
-
-  // The at-bottom threshold is `<= 4 px`. These boundary tests pin the
-  // exact value so a future refactor that swapped the constant with
-  // `isScrollContainerNearBottom` would flip both tests and fail
-  // loudly instead of silently drifting.
-  it("returns true at gap 0 (exactly at bottom)", () => {
-    expect(isScrollContainerAtBottom(node(1000, 200, 800))).toBe(true);
-  });
-  it("returns true at gap 4 (boundary inclusive)", () => {
-    expect(isScrollContainerAtBottom(node(1000, 200, 796))).toBe(true);
-  });
-  it("returns false at gap 5 (just past the at-bottom boundary)", () => {
-    expect(isScrollContainerAtBottom(node(1000, 200, 795))).toBe(false);
-  });
-  it("returns true for short content whose gap clamps to 0", () => {
-    expect(isScrollContainerAtBottom(node(300, 400, 0))).toBe(true);
   });
 });
 

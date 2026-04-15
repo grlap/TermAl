@@ -124,6 +124,7 @@ export type WorkspaceDiffPreviewTab = {
   changeType: DiffMessage["changeType"];
   changeSetId?: string | null;
   diff: string;
+  documentEnrichmentNote?: string | null;
   documentContent?: GitDiffDocumentContent | null;
   diffMessageId: string;
   filePath: string | null;
@@ -397,6 +398,7 @@ export function createDiffPreviewTab({
   changeType,
   changeSetId = null,
   diff,
+  documentEnrichmentNote = null,
   documentContent = null,
   diffMessageId,
   filePath = null,
@@ -413,6 +415,7 @@ export function createDiffPreviewTab({
   changeType: DiffMessage["changeType"];
   changeSetId?: string | null;
   diff: string;
+  documentEnrichmentNote?: string | null;
   documentContent?: GitDiffDocumentContent | null;
   diffMessageId: string;
   filePath?: string | null;
@@ -427,6 +430,7 @@ export function createDiffPreviewTab({
   loadError?: string | null;
 }): WorkspaceDiffPreviewTab {
   const normalizedChangeSetId = normalizeWorkspaceIdentifier(changeSetId);
+  const normalizedDocumentEnrichmentNote = normalizeWorkspaceIdentifier(documentEnrichmentNote);
   const normalizedOriginProjectId = normalizeWorkspaceIdentifier(originProjectId);
   const normalizedGitDiffRequestKey = normalizeWorkspaceIdentifier(gitDiffRequestKey);
   const normalizedLoadError = normalizeWorkspaceIdentifier(loadError);
@@ -437,6 +441,7 @@ export function createDiffPreviewTab({
     changeType,
     ...(normalizedChangeSetId ? { changeSetId: normalizedChangeSetId } : {}),
     diff,
+    ...(normalizedDocumentEnrichmentNote ? { documentEnrichmentNote: normalizedDocumentEnrichmentNote } : {}),
     ...(documentContent ? { documentContent } : {}),
     diffMessageId,
     filePath: normalizeWorkspacePath(filePath),
@@ -1257,6 +1262,8 @@ export function openDiffPreviewInWorkspaceState(
     changeType: DiffMessage["changeType"];
     changeSetId?: string | null;
     diff: string;
+    documentEnrichmentNote?: string | null;
+    documentContent?: GitDiffDocumentContent | null;
     diffMessageId: string;
     filePath: string | null;
     gitSectionId?: GitDiffSection | null;
@@ -1850,7 +1857,7 @@ export function updateGitDiffPreviewTabInWorkspaceState(
 }
 
 export function stripLoadingGitDiffPreviewTabsFromWorkspaceState(workspace: WorkspaceState): WorkspaceState {
-  let nextWorkspace = stripDiffPreviewDocumentContentFromWorkspaceState(workspace);
+  let nextWorkspace = workspace;
   const loadingTabs = workspace.panes.flatMap((pane) =>
     pane.tabs
       .filter(
@@ -1870,7 +1877,7 @@ export function stripLoadingGitDiffPreviewTabsFromWorkspaceState(workspace: Work
   return nextWorkspace;
 }
 
-function stripDiffPreviewDocumentContentFromWorkspaceState(workspace: WorkspaceState): WorkspaceState {
+export function stripDiffPreviewDocumentContentFromWorkspaceState(workspace: WorkspaceState): WorkspaceState {
   let changed = false;
   const panes = workspace.panes.map((pane) => {
     let paneChanged = false;

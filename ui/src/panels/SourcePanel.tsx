@@ -595,6 +595,7 @@ export function SourcePanel({
               </>
             ) : isMarkdownSource && documentMode === "preview" ? (
               <MarkdownDocumentView
+                appearance={editorAppearance}
                 documentPath={fileState.path}
                 markdown={editorValue}
                 onOpenSourceLink={onOpenSourceLink}
@@ -622,6 +623,7 @@ export function SourcePanel({
                 </div>
                 <div className="source-markdown-split-pane">
                   <MarkdownDocumentView
+                    appearance={editorAppearance}
                     documentPath={fileState.path}
                     markdown={editorValue}
                     onOpenSourceLink={onOpenSourceLink}

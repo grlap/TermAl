@@ -108,6 +108,7 @@ export function isWorkspaceTab(value: unknown): value is WorkspaceTab {
       return (
         isString(value.diff) &&
         isOptionalNullableString(value.changeSetId) &&
+        isOptionalNullableString(value.documentEnrichmentNote) &&
         isString(value.diffMessageId) &&
         isNullableString(value.filePath) &&
         isOptionalNullableString(value.gitDiffRequestKey) &&

@@ -1409,7 +1409,7 @@ fn sample_remote_orchestrator_state(
 }
 
 fn run_git_test_command(repo_root: &FsPath, args: &[&str]) {
-    let output = Command::new("git")
+    let output = git_command()
         .arg("-C")
         .arg(repo_root)
         .args(args)
@@ -1427,7 +1427,7 @@ fn run_git_test_command(repo_root: &FsPath, args: &[&str]) {
 }
 
 fn run_git_test_command_output(repo_root: &FsPath, args: &[&str]) -> String {
-    let output = Command::new("git")
+    let output = git_command()
         .arg("-C")
         .arg(repo_root)
         .args(args)
@@ -1444,6 +1444,13 @@ fn run_git_test_command_output(repo_root: &FsPath, args: &[&str]) -> String {
     }
 
     String::from_utf8_lossy(&output.stdout).trim().to_owned()
+}
+
+fn init_git_document_test_repo(repo_root: &FsPath) {
+    run_git_test_command(repo_root, &["init"]);
+    run_git_test_command(repo_root, &["config", "core.autocrlf", "false"]);
+    run_git_test_command(repo_root, &["config", "user.email", "termal@example.com"]);
+    run_git_test_command(repo_root, &["config", "user.name", "TermAl"]);
 }
 
 fn test_exit_success_child() -> Child {
@@ -22002,6 +22009,142 @@ fn git_diff_document_content_uses_selected_git_side_for_markdown() {
     fs::remove_dir_all(repo_root).unwrap();
 }
 
+// Tests that Markdown document enrichment follows Git status-specific sides.
+#[test]
+fn git_diff_document_content_covers_added_deleted_untracked_and_non_markdown() {
+    let repo_root =
+        std::env::temp_dir().join(format!("termal-git-diff-doc-status-{}", Uuid::new_v4()));
+    let tracked_file = repo_root.join("tracked.md");
+    let deleted_staged_file = repo_root.join("deleted-staged.md");
+    let deleted_unstaged_file = repo_root.join("deleted-unstaged.md");
+    let added_staged_file = repo_root.join("added-staged.md");
+    let untracked_file = repo_root.join("untracked.md");
+    let text_file = repo_root.join("notes.txt");
+
+    fs::create_dir_all(&repo_root).unwrap();
+    fs::write(&tracked_file, "# Tracked\n").unwrap();
+    fs::write(&deleted_staged_file, "# Delete staged\n").unwrap();
+    fs::write(&deleted_unstaged_file, "# Delete unstaged\n").unwrap();
+    fs::write(&text_file, "plain text\n").unwrap();
+    init_git_document_test_repo(&repo_root);
+    run_git_test_command(&repo_root, &["add", "."]);
+    run_git_test_command(&repo_root, &["commit", "-m", "init"]);
+
+    fs::write(&added_staged_file, "# Added staged\n").unwrap();
+    run_git_test_command(&repo_root, &["add", "added-staged.md"]);
+    run_git_test_command(&repo_root, &["rm", "deleted-staged.md"]);
+    fs::remove_file(&deleted_unstaged_file).unwrap();
+    fs::write(&untracked_file, "# Untracked\n").unwrap();
+    fs::write(&text_file, "plain text changed\n").unwrap();
+
+    let staged_added = load_git_diff_for_request(
+        &repo_root,
+        &GitDiffRequest {
+            original_path: None,
+            path: "added-staged.md".to_owned(),
+            section_id: GitDiffSection::Staged,
+            status_code: Some("A".to_owned()),
+            workdir: repo_root.to_string_lossy().into_owned(),
+            project_id: None,
+            session_id: None,
+        },
+    )
+    .unwrap()
+    .document_content
+    .expect("staged added Markdown should include document content");
+    assert_eq!(staged_added.before.source, GitDiffDocumentSideSource::Empty);
+    assert_eq!(staged_added.before.content, "");
+    assert_eq!(staged_added.after.source, GitDiffDocumentSideSource::Index);
+    assert_eq!(staged_added.after.content, "# Added staged\n");
+
+    let unstaged_untracked = load_git_diff_for_request(
+        &repo_root,
+        &GitDiffRequest {
+            original_path: None,
+            path: "untracked.md".to_owned(),
+            section_id: GitDiffSection::Unstaged,
+            status_code: Some("?".to_owned()),
+            workdir: repo_root.to_string_lossy().into_owned(),
+            project_id: None,
+            session_id: None,
+        },
+    )
+    .unwrap()
+    .document_content
+    .expect("unstaged untracked Markdown should include document content");
+    assert_eq!(
+        unstaged_untracked.before.source,
+        GitDiffDocumentSideSource::Empty
+    );
+    assert_eq!(unstaged_untracked.before.content, "");
+    assert_eq!(
+        unstaged_untracked.after.source,
+        GitDiffDocumentSideSource::Worktree
+    );
+    assert_eq!(unstaged_untracked.after.content, "# Untracked\n");
+
+    let staged_deleted = load_git_diff_for_request(
+        &repo_root,
+        &GitDiffRequest {
+            original_path: None,
+            path: "deleted-staged.md".to_owned(),
+            section_id: GitDiffSection::Staged,
+            status_code: Some("D".to_owned()),
+            workdir: repo_root.to_string_lossy().into_owned(),
+            project_id: None,
+            session_id: None,
+        },
+    )
+    .unwrap()
+    .document_content
+    .expect("staged deleted Markdown should include document content");
+    assert_eq!(staged_deleted.before.source, GitDiffDocumentSideSource::Head);
+    assert_eq!(staged_deleted.before.content, "# Delete staged\n");
+    assert_eq!(staged_deleted.after.source, GitDiffDocumentSideSource::Empty);
+    assert_eq!(staged_deleted.after.content, "");
+
+    let unstaged_deleted = load_git_diff_for_request(
+        &repo_root,
+        &GitDiffRequest {
+            original_path: None,
+            path: "deleted-unstaged.md".to_owned(),
+            section_id: GitDiffSection::Unstaged,
+            status_code: Some("D".to_owned()),
+            workdir: repo_root.to_string_lossy().into_owned(),
+            project_id: None,
+            session_id: None,
+        },
+    )
+    .unwrap()
+    .document_content
+    .expect("unstaged deleted Markdown should include document content");
+    assert_eq!(
+        unstaged_deleted.before.source,
+        GitDiffDocumentSideSource::Index
+    );
+    assert_eq!(unstaged_deleted.before.content, "# Delete unstaged\n");
+    assert_eq!(unstaged_deleted.after.source, GitDiffDocumentSideSource::Empty);
+    assert_eq!(unstaged_deleted.after.content, "");
+
+    let non_markdown = load_git_diff_for_request(
+        &repo_root,
+        &GitDiffRequest {
+            original_path: None,
+            path: "notes.txt".to_owned(),
+            section_id: GitDiffSection::Unstaged,
+            status_code: Some("M".to_owned()),
+            workdir: repo_root.to_string_lossy().into_owned(),
+            project_id: None,
+            session_id: None,
+        },
+    )
+    .unwrap();
+    assert!(non_markdown.document_content.is_none());
+    assert_eq!(non_markdown.document_enrichment_note, None);
+
+    fs::remove_dir_all(repo_root).unwrap();
+}
+
 // Tests that an unstaged edit after a staged rename reads the new index path.
 #[test]
 fn git_diff_document_content_uses_current_index_path_for_unstaged_staged_rename() {
@@ -22082,6 +22225,7 @@ fn git_diff_document_content_skips_non_utf8_markdown() {
     .unwrap();
 
     assert!(response.document_content.is_none());
+    assert_eq!(response.document_enrichment_note, None);
 
     fs::remove_dir_all(repo_root).unwrap();
 }
@@ -22101,6 +22245,10 @@ fn git_diff_document_readers_reject_oversized_worktree_files() {
 
     assert_eq!(error.status, StatusCode::BAD_REQUEST);
     assert!(error.message.contains("read limit"));
+    assert_eq!(
+        git_diff_document_enrichment_note(&error).as_deref(),
+        Some("Rendered Markdown is unavailable because the document exceeds the 10 MB read limit.")
+    );
 
     fs::remove_dir_all(repo_root).unwrap();
 }

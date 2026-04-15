@@ -182,6 +182,7 @@ export type GitDiffResponse = {
   changeSetId?: string | null;
   diff: string;
   diffId: string;
+  documentEnrichmentNote?: string | null;
   documentContent?: GitDiffDocumentContent | null;
   filePath?: string | null;
   language?: string | null;

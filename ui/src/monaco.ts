@@ -179,10 +179,10 @@ function buildMonacoTheme(appearance: MonacoAppearance): MonacoThemeData {
       "diffEditor.diagonalFill": toColorHex(withAlpha(palette.line, 0.48)),
       "diffEditor.insertedLineBackground": toColorHex(withAlpha(palette.signalGreen, appearance === "dark" ? 0.17 : 0.1)),
       "diffEditor.insertedTextBackground": toColorHex(withAlpha(palette.signalGreen, appearance === "dark" ? 0.3 : 0.18)),
-      "diffEditor.removedLineBackground": toColorHex(withAlpha(palette.signalRed, appearance === "dark" ? 0.17 : 0.1)),
-      "diffEditor.removedTextBackground": toColorHex(withAlpha(palette.signalRed, appearance === "dark" ? 0.3 : 0.18)),
+      "diffEditor.removedLineBackground": toColorHex(withAlpha(palette.diffRemoved, appearance === "dark" ? 0.3 : 0.16)),
+      "diffEditor.removedTextBackground": toColorHex(withAlpha(palette.diffRemoved, appearance === "dark" ? 0.46 : 0.28)),
       "diffEditorGutter.insertedLineBackground": toColorHex(withAlpha(palette.signalGreen, appearance === "dark" ? 0.55 : 0.36)),
-      "diffEditorGutter.removedLineBackground": toColorHex(withAlpha(palette.signalRed, appearance === "dark" ? 0.55 : 0.36)),
+      "diffEditorGutter.removedLineBackground": toColorHex(withAlpha(palette.diffRemoved, appearance === "dark" ? 0.72 : 0.42)),
     },
   };
 }
@@ -199,6 +199,7 @@ function readMonacoPalette(appearance: MonacoAppearance) {
     signalGreen: readCssColor("--signal-green", appearance === "dark" ? "#59c97b" : "#368873"),
     signalRed: readCssColor("--signal-red", appearance === "dark" ? "#e07050" : "#cf6a52"),
     signalRose: readCssColor("--signal-rose", appearance === "dark" ? "#c18cff" : "#8f5a7a"),
+    diffRemoved: readCssColor("--diff-removed-color", "#ef4444"),
     accentBlueBg: readCssColor("--accent-blue-bg", appearance === "dark" ? "rgba(121, 212, 255, 0.16)" : "rgba(102, 127, 187, 0.14)"),
   };
 }

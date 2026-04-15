@@ -36,8 +36,10 @@ export type MonacoDiffEditorStatus = MonacoCodeEditorStatus & {
 };
 
 export type MonacoDiffEditorHandle = {
+  getScrollTop: () => number;
   goToNextChange: () => void;
   goToPreviousChange: () => void;
+  setScrollTop: (scrollTop: number) => void;
 };
 
 export const MonacoDiffEditor = forwardRef<MonacoDiffEditorHandle, MonacoDiffEditorProps>(function MonacoDiffEditor({
@@ -76,6 +78,9 @@ export const MonacoDiffEditor = forwardRef<MonacoDiffEditorHandle, MonacoDiffEdi
   readOnlyRef.current = readOnly;
 
   useImperativeHandle(ref, () => ({
+    getScrollTop() {
+      return diffEditorRef.current?.getModifiedEditor().getScrollTop() ?? 0;
+    },
     goToNextChange() {
       diffEditorRef.current?.goToDiff("next");
       emitStatus();
@@ -83,6 +88,14 @@ export const MonacoDiffEditor = forwardRef<MonacoDiffEditorHandle, MonacoDiffEdi
     goToPreviousChange() {
       diffEditorRef.current?.goToDiff("previous");
       emitStatus();
+    },
+    setScrollTop(scrollTop) {
+      const editor = diffEditorRef.current;
+      if (!editor) {
+        return;
+      }
+      editor.getOriginalEditor().setScrollTop(scrollTop);
+      editor.getModifiedEditor().setScrollTop(scrollTop);
     },
   }), []);
 

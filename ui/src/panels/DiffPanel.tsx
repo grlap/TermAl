@@ -44,6 +44,7 @@ const MonacoDiffEditor = lazy(() =>
 );
 
 type DiffViewMode = "all" | "changes" | "markdown" | "edit" | "raw";
+type DiffViewScrollPositions = Record<DiffViewMode, number>;
 
 type LatestFileState = {
   status: "idle" | "loading" | "ready" | "error";
@@ -68,6 +69,22 @@ type ReviewOriginContext = {
   workdir: string | null;
 };
 
+type RenderedMarkdownSectionCommit = {
+  segment: MarkdownDiffDocumentSegment;
+  nextMarkdown: string;
+};
+
+type MarkdownDiffSaveHandler = () => Promise<void> | void;
+
+type EditableMarkdownFocusSnapshot = {
+  caretTextOffset: number | null;
+  scrollRegion: HTMLElement | null;
+  scrollTop: number | null;
+  section: HTMLElement;
+  segmentAfterEndOffset: number | null;
+  segmentAfterStartOffset: number | null;
+};
+
 const DEFAULT_EDITOR_STATUS: MonacoCodeEditorStatus = {
   line: 1,
   column: 1,
@@ -81,6 +98,16 @@ const DEFAULT_DIFF_EDITOR_STATUS: MonacoDiffEditorStatus = {
   changeCount: 0,
   currentChange: 0,
 };
+
+function createInitialDiffViewScrollPositions(): DiffViewScrollPositions {
+  return {
+    all: 0,
+    changes: 0,
+    edit: 0,
+    markdown: 0,
+    raw: 0,
+  };
+}
 
 const LANGUAGE_LABELS: Record<string, string> = {
   bash: "Shell Script",
@@ -109,6 +136,7 @@ export function DiffPanel({
   changeSetId = null,
   fontSizePx,
   diff,
+  documentEnrichmentNote = null,
   documentContent = null,
   diffMessageId,
   filePath,
@@ -130,6 +158,7 @@ export function DiffPanel({
   changeSetId?: string | null;
   fontSizePx: number;
   diff: string;
+  documentEnrichmentNote?: string | null;
   documentContent?: GitDiffDocumentContent | null;
   diffMessageId: string;
   filePath: string | null;
@@ -166,7 +195,7 @@ export function DiffPanel({
   // editor remounts + stale-baseline commit overwrites. Without a
   // separate signal, `isDirty` would stay false until blur and the "Save
   // Markdown" button would refuse clicks. `handleRenderedMarkdownSectionDraftChange`
-  // toggles this flag, and both commit (`handleRenderedMarkdownSectionChange`)
+  // toggles this flag, and both commit (`handleRenderedMarkdownSectionCommits`)
   // and save (`handleSave`) clear it.
   const [hasRenderedDraftActive, setHasRenderedDraftActive] = useState(false);
   const [visualBaseContent, setVisualBaseContent] = useState<string | null>(null);
@@ -183,6 +212,13 @@ export function DiffPanel({
   const [copiedPath, setCopiedPath] = useState(false);
   const [copiedReviewPath, setCopiedReviewPath] = useState(false);
   const diffEditorRef = useRef<MonacoDiffEditorHandle | null>(null);
+  const markdownDiffScrollRef = useRef<HTMLDivElement | null>(null);
+  const diffViewScrollPositionsRef = useRef<DiffViewScrollPositions>(
+    createInitialDiffViewScrollPositions(),
+  );
+  const renderedMarkdownCommittersRef = useRef(
+    new Set<() => RenderedMarkdownSectionCommit | null>(),
+  );
   const pendingEditValueRef = useRef<string | null>(null);
   const latestFileRef = useRef(latestFile);
   const editValueRef = useRef(editValue);
@@ -206,6 +242,22 @@ export function DiffPanel({
     markdownEditContentRef.current = nextValue;
     setMarkdownEditContent(nextValue);
   };
+  const registerRenderedMarkdownCommitter = useCallback((committer: () => RenderedMarkdownSectionCommit | null) => {
+    renderedMarkdownCommittersRef.current.add(committer);
+    return () => {
+      renderedMarkdownCommittersRef.current.delete(committer);
+    };
+  }, []);
+  function commitRenderedMarkdownDrafts() {
+    const commits = Array.from(renderedMarkdownCommittersRef.current)
+      .map((committer) => committer())
+      .filter((commit): commit is RenderedMarkdownSectionCommit => commit != null);
+    if (commits.length === 0) {
+      setHasRenderedDraftActive(false);
+      return;
+    }
+    handleRenderedMarkdownSectionCommits(commits);
+  }
 
   useEffect(() => {
     latestFileRef.current = latestFile;
@@ -227,8 +279,8 @@ export function DiffPanel({
     [changeType, diff, previewSourceContent],
   );
   const markdownPreview = useMemo(
-    () => buildMarkdownDiffPreview(documentContent, preview, changeType),
-    [changeType, documentContent, preview],
+    () => buildMarkdownDiffPreview(documentContent, documentEnrichmentNote, preview, changeType),
+    [changeType, documentContent, documentEnrichmentNote, preview],
   );
   const canShowMarkdownView = isMarkdownTarget && markdownPreview !== null;
   const markdownDisplayPreview = useMemo<MarkdownDiffPreviewModel | null>(() => {
@@ -260,10 +312,71 @@ export function DiffPanel({
     ),
   );
 
+  function readDiffViewScrollTop(mode: DiffViewMode) {
+    if (mode === "all") {
+      return diffEditorRef.current?.getScrollTop() ?? diffViewScrollPositionsRef.current.all;
+    }
+    if (mode === "markdown") {
+      return markdownDiffScrollRef.current?.scrollTop ?? diffViewScrollPositionsRef.current.markdown;
+    }
+    return diffViewScrollPositionsRef.current[mode] ?? 0;
+  }
+
+  function restoreDiffViewScrollTop(mode: DiffViewMode) {
+    const scrollTop = diffViewScrollPositionsRef.current[mode] ?? 0;
+    if (mode === "all") {
+      const editor = diffEditorRef.current;
+      if (!editor) {
+        return false;
+      }
+      editor.setScrollTop(scrollTop);
+      return true;
+    }
+    if (mode === "markdown") {
+      const scrollRegion = markdownDiffScrollRef.current;
+      if (!scrollRegion) {
+        return false;
+      }
+      scrollRegion.scrollTop = scrollTop;
+      return true;
+    }
+    return true;
+  }
+
+  function rememberDiffViewScrollTop(mode: DiffViewMode = viewMode) {
+    diffViewScrollPositionsRef.current = {
+      ...diffViewScrollPositionsRef.current,
+      [mode]: readDiffViewScrollTop(mode),
+    };
+  }
+
+  function handleSelectViewMode(nextViewMode: DiffViewMode) {
+    rememberDiffViewScrollTop();
+    setViewMode(nextViewMode);
+  }
+
+  useEffect(() => {
+    let animationFrameId = 0;
+    let attempts = 0;
+    const restore = () => {
+      attempts += 1;
+      const restored = restoreDiffViewScrollTop(viewMode);
+      if (!restored && attempts < 8) {
+        animationFrameId = window.requestAnimationFrame(restore);
+      }
+    };
+
+    animationFrameId = window.requestAnimationFrame(restore);
+    return () => {
+      window.cancelAnimationFrame(animationFrameId);
+    };
+  }, [viewMode]);
+
   // This reset is intentionally tied to tab identity only. Derived preview
   // values can change during git refreshes, but user-selected view mode should
   // stay sticky while the same diff tab remains open.
   useEffect(() => {
+    diffViewScrollPositionsRef.current = createInitialDiffViewScrollPositions();
     setViewMode(defaultDiffViewMode(preview.hasStructuredPreview, Boolean(filePath), preferMarkdownView));
     setEditEditorStatus(DEFAULT_EDITOR_STATUS);
     setVisualEditorStatus(DEFAULT_DIFF_EDITOR_STATUS);
@@ -286,6 +399,7 @@ export function DiffPanel({
     }
 
     setMarkdownEditContentState(null);
+    setHasRenderedDraftActive(false);
   }, [documentContent]);
 
   useEffect(() => {
@@ -442,12 +556,18 @@ export function DiffPanel({
   const editLanguage = latestFile.status === "ready"
     ? formatLanguageLabel(latestFile.language ?? language ?? null, latestFile.path)
     : formatLanguageLabel(language, filePath);
+  // Staged Markdown diffs are index snapshots, not the mutable worktree file.
+  // Keep them navigable in rendered mode, but route edits through unstaged
+  // worktree diffs where saving can write to an actual file buffer.
+  const isStagedMarkdownDiff = gitSectionId === "staged" && canShowMarkdownView;
   const canEditVisualDiff =
-    preview.hasStructuredPreview && latestFile.status === "ready" && Boolean(filePath);
-  const renderedMarkdownEditBlockedReason = documentContent?.editBlockedReason ?? null;
+    preview.hasStructuredPreview && latestFile.status === "ready" && Boolean(filePath) && !isStagedMarkdownDiff;
+  const renderedMarkdownEditBlockedReason = isStagedMarkdownDiff
+    ? documentContent?.editBlockedReason ?? "Staged Markdown diffs are read-only. Use the unstaged worktree diff to edit this file."
+    : documentContent?.editBlockedReason ?? null;
   const canEditRenderedMarkdown =
     Boolean(filePath) &&
-    !isSaving &&
+    !isStagedMarkdownDiff &&
     latestFile.status === "ready" &&
     markdownDisplayPreview?.after.completeness === "full" &&
     (documentContent?.canEdit ?? true);
@@ -625,6 +745,8 @@ export function DiffPanel({
   }, [copiedReviewPath]);
 
   async function handleSave(options?: SourceSaveOptions) {
+    commitRenderedMarkdownDrafts();
+
     const currentFile = latestFileRef.current;
     const currentEditValue = editValueRef.current;
     const isCurrentDirty =
@@ -641,6 +763,11 @@ export function DiffPanel({
         overwrite: options?.overwrite,
       });
       const savedContent = response?.content ?? currentEditValue;
+      const latestEditValue = editValueRef.current;
+      const hasLocalEditsAfterSaveStarted = latestEditValue !== currentEditValue;
+      if (hasLocalEditsAfterSaveStarted) {
+        pendingEditValueRef.current = latestEditValue;
+      }
       if (response) {
         setVisualBaseContent(response.content);
         setLatestFileState(toLatestFileState(response));
@@ -658,7 +785,7 @@ export function DiffPanel({
         });
       }
       if (markdownEditContent !== null || viewMode === "markdown") {
-        setMarkdownEditContentState(savedContent);
+        setMarkdownEditContentState(hasLocalEditsAfterSaveStarted ? latestEditValue : savedContent);
       }
       setExternalFileNotice(null);
       setDiffEditConflictOnDisk(false);
@@ -676,24 +803,12 @@ export function DiffPanel({
     }
   }
 
-  // Rendered Markdown commit handler.
-  //
-  // Applies the edit against `segmentSourceContent` — which is the LIVE
-  // `markdownPreview.after.content` at the moment of the call (the parent
-  // `MarkdownDiffView` keeps a ref in sync with the current render). Because
-  // drafts do not propagate to `editValue` per keystroke (see the draft
-  // handler below), `segmentSourceContent` is always the last COMMITTED
-  // content, not a mid-typing drift.
-  //
-  // This makes multi-section commits safe: after section A commits,
-  // `editValue` and `markdownEditContent` reflect A's change, the live
-  // `sourceContentRef` is updated on the next render, and the next commit
-  // (e.g. on section B) applies to A's post-commit content. No freeze is
-  // required.
-  function handleRenderedMarkdownSectionChange(
-    segment: MarkdownDiffDocumentSegment,
-    nextMarkdown: string,
-    segmentSourceContent: string,
+  // Rendered Markdown commits are batched so Save/blur/caret navigation can
+  // flush every active contentEditable draft against one common baseline.
+  // Applying bottom-to-top preserves downstream offsets when an earlier
+  // section changes line counts.
+  function handleRenderedMarkdownSectionCommits(
+    commits: RenderedMarkdownSectionCommit[],
   ) {
     if (!canEditRenderedMarkdown || !markdownPreview || latestFileRef.current.status !== "ready") {
       return;
@@ -704,13 +819,26 @@ export function DiffPanel({
     // still flips `isDirty` back on via `editValue !== latestFile.content`.
     setHasRenderedDraftActive(false);
 
-    const nextDocumentContent = replaceMarkdownDocumentRange(
-      segmentSourceContent,
-      segment.afterStartOffset,
-      segment.afterEndOffset,
-      normalizeEditedMarkdownSection(nextMarkdown, segment.markdown),
-    );
-    if (nextDocumentContent === segmentSourceContent) {
+    const sourceContent =
+      markdownEditContentRef.current ??
+      (latestFileRef.current.status === "ready" &&
+      editValueRef.current !== latestFileRef.current.content
+        ? editValueRef.current
+        : markdownPreview.after.content);
+    const nextDocumentContent = commits
+      .slice()
+      .sort((left, right) => right.segment.afterStartOffset - left.segment.afterStartOffset)
+      .reduce(
+        (currentContent, commit) =>
+          replaceMarkdownDocumentRange(
+            currentContent,
+            commit.segment.afterStartOffset,
+            commit.segment.afterEndOffset,
+            normalizeEditedMarkdownSection(commit.nextMarkdown, commit.segment.markdown),
+          ),
+        sourceContent,
+      );
+    if (nextDocumentContent === sourceContent) {
       return;
     }
 
@@ -750,7 +878,6 @@ export function DiffPanel({
   function handleRenderedMarkdownSectionDraftChange(
     segment: MarkdownDiffDocumentSegment,
     nextMarkdown: string,
-    _segmentSourceContent: string,
   ) {
     if (!canEditRenderedMarkdown || !markdownPreview || latestFileRef.current.status !== "ready") {
       return;
@@ -1038,7 +1165,7 @@ export function DiffPanel({
               <DiffPreviewToggleButton
                 selected={viewMode === "all"}
                 label="All lines"
-                onClick={() => setViewMode("all")}
+                onClick={() => handleSelectViewMode("all")}
               >
                 <AllLinesIcon />
               </DiffPreviewToggleButton>
@@ -1047,7 +1174,7 @@ export function DiffPanel({
               <DiffPreviewToggleButton
                 selected={viewMode === "changes"}
                 label="Changed only"
-                onClick={() => setViewMode("changes")}
+                onClick={() => handleSelectViewMode("changes")}
               >
                 <ChangedOnlyIcon />
               </DiffPreviewToggleButton>
@@ -1056,7 +1183,7 @@ export function DiffPanel({
               <DiffPreviewToggleButton
                 selected={viewMode === "markdown"}
                 label="Rendered Markdown"
-                onClick={() => setViewMode("markdown")}
+                onClick={() => handleSelectViewMode("markdown")}
               >
                 <MarkdownModeIcon />
               </DiffPreviewToggleButton>
@@ -1065,7 +1192,7 @@ export function DiffPanel({
               <DiffPreviewToggleButton
                 selected={viewMode === "edit"}
                 label="Edit mode"
-                onClick={() => setViewMode("edit")}
+                onClick={() => handleSelectViewMode("edit")}
               >
                 <EditModeIcon />
               </DiffPreviewToggleButton>
@@ -1073,7 +1200,7 @@ export function DiffPanel({
             <DiffPreviewToggleButton
               selected={viewMode === "raw"}
               label="Raw patch"
-              onClick={() => setViewMode("raw")}
+              onClick={() => handleSelectViewMode("raw")}
             >
               <RawPatchIcon />
             </DiffPreviewToggleButton>
@@ -1273,6 +1400,7 @@ export function DiffPanel({
 
         {viewMode === "markdown" && markdownDisplayPreview ? (
           <MarkdownDiffView
+            appearance={appearance}
             canEdit={canEditRenderedMarkdown}
             documentPath={filePath}
             editBlockedReason={renderedMarkdownEditBlockedReason}
@@ -1280,12 +1408,14 @@ export function DiffPanel({
             isDirty={isDirty}
             isSaving={isSaving}
             markdownPreview={markdownDisplayPreview}
+            onCommitRenderedMarkdownDrafts={commitRenderedMarkdownDrafts}
             onOpenSourceLink={handleOpenMarkdownSourceLink}
+            onRegisterRenderedMarkdownCommitter={registerRenderedMarkdownCommitter}
             onRenderedMarkdownSectionDraftChange={handleRenderedMarkdownSectionDraftChange}
-            onRenderedMarkdownSectionChange={handleRenderedMarkdownSectionChange}
-            onSave={() => void handleSave()}
+            onSave={handleSave}
             preview={preview}
             saveStateLabel={saveStateLabel}
+            scrollRef={markdownDiffScrollRef}
             workspaceRoot={workspaceRoot}
           />
         ) : null}
@@ -1544,6 +1674,7 @@ function rawDiffLineClassName(line: string) {
 
 function buildMarkdownDiffPreview(
   documentContent: GitDiffDocumentContent | null | undefined,
+  documentEnrichmentNote: string | null | undefined,
   preview: ReturnType<typeof buildDiffPreviewModel>,
   changeType: DiffMessage["changeType"],
 ): MarkdownDiffPreviewModel | null {
@@ -1568,23 +1699,25 @@ function buildMarkdownDiffPreview(
   }
 
   const completeness: MarkdownDocumentCompleteness = "patch";
+  const note = documentEnrichmentNote ?? preview.note ?? null;
   return {
     before: {
       content: changeType === "create" ? "" : preview.originalText,
       source: "patch",
       completeness,
-      note: preview.note ?? null,
+      note,
     },
     after: {
       content: preview.modifiedText,
       source: "patch",
       completeness,
-      note: preview.note ?? null,
+      note,
     },
   };
 }
 
 function MarkdownDiffView({
+  appearance,
   canEdit,
   documentPath,
   editBlockedReason,
@@ -1592,14 +1725,17 @@ function MarkdownDiffView({
   isDirty,
   isSaving,
   markdownPreview,
-  onRenderedMarkdownSectionChange,
   onRenderedMarkdownSectionDraftChange,
   onOpenSourceLink,
+  onCommitRenderedMarkdownDrafts,
+  onRegisterRenderedMarkdownCommitter,
   onSave,
   preview,
   saveStateLabel,
+  scrollRef,
   workspaceRoot,
 }: {
+  appearance: MonacoAppearance;
   canEdit: boolean;
   documentPath: string | null;
   editBlockedReason: string | null;
@@ -1610,17 +1746,14 @@ function MarkdownDiffView({
   onRenderedMarkdownSectionDraftChange: (
     segment: MarkdownDiffDocumentSegment,
     nextMarkdown: string,
-    segmentSourceContent: string,
-  ) => void;
-  onRenderedMarkdownSectionChange: (
-    segment: MarkdownDiffDocumentSegment,
-    nextMarkdown: string,
-    segmentSourceContent: string,
   ) => void;
   onOpenSourceLink: (target: MarkdownFileLinkTarget) => void;
-  onSave: () => void;
+  onCommitRenderedMarkdownDrafts: () => void;
+  onRegisterRenderedMarkdownCommitter: (committer: () => RenderedMarkdownSectionCommit | null) => () => void;
+  onSave: MarkdownDiffSaveHandler;
   preview: ReturnType<typeof buildDiffPreviewModel>;
   saveStateLabel: string | null;
+  scrollRef: { current: HTMLDivElement | null };
   workspaceRoot: string | null;
 }) {
   const segments = useMemo(
@@ -1645,27 +1778,14 @@ function MarkdownDiffView({
   // keystroke. Segments therefore do not churn during typing, which keeps the
   // editor DOM identity stable without requiring a freeze at all. The draft handler
   // still emits a signal so `isDirty` flips immediately for the Save button.
-  const sourceContentRef = useRef(markdownPreview.after.content);
-  sourceContentRef.current = markdownPreview.after.content;
   const handleRenderedMarkdownSectionDraftChange = useCallback(
     (segment: MarkdownDiffDocumentSegment, nextMarkdown: string) => {
       onRenderedMarkdownSectionDraftChange(
         segment,
         nextMarkdown,
-        sourceContentRef.current,
       );
     },
     [onRenderedMarkdownSectionDraftChange],
-  );
-  const handleRenderedMarkdownSectionChange = useCallback(
-    (segment: MarkdownDiffDocumentSegment, nextMarkdown: string) => {
-      onRenderedMarkdownSectionChange(
-        segment,
-        nextMarkdown,
-        sourceContentRef.current,
-      );
-    },
-    [onRenderedMarkdownSectionChange],
   );
   const gitSectionLabel =
     gitSectionId === "staged" ? "Staged" : gitSectionId === "unstaged" ? "Unstaged" : null;
@@ -1683,7 +1803,7 @@ function MarkdownDiffView({
         {canEdit ? (
           <div className="source-editor-actions markdown-diff-edit-actions">
             {saveStateLabel ? <span className="support-copy markdown-diff-save-state">{saveStateLabel}</span> : null}
-            <button className="ghost-button" type="button" disabled={!isDirty || isSaving} onClick={onSave}>
+            <button className="ghost-button" type="button" disabled={!isDirty || isSaving} onClick={() => void onSave()}>
               {isSaving ? "Saving..." : isDirty ? "Save Markdown" : "Saved"}
             </button>
           </div>
@@ -1693,14 +1813,18 @@ function MarkdownDiffView({
         <p className="support-copy markdown-document-note">{editBlockedReason}</p>
       ) : null}
       <MarkdownDiffDocument
+        allowReadOnlyCaret={!canEdit && gitSectionId === "staged"}
+        appearance={appearance}
         canEdit={canEdit}
         completeness={markdownPreview.after.completeness}
         documentPath={documentPath}
         note={markdownPreview.after.note}
-        onRenderedMarkdownSectionChange={handleRenderedMarkdownSectionChange}
         onRenderedMarkdownSectionDraftChange={handleRenderedMarkdownSectionDraftChange}
         onOpenSourceLink={onOpenSourceLink}
+        onCommitRenderedMarkdownDrafts={onCommitRenderedMarkdownDrafts}
+        onRegisterRenderedMarkdownCommitter={onRegisterRenderedMarkdownCommitter}
         onSave={onSave}
+        scrollRef={scrollRef}
         segments={segments}
         workspaceRoot={workspaceRoot}
       />
@@ -1724,25 +1848,33 @@ function MarkdownDiffView({
 }
 
 function MarkdownDiffDocument({
+  allowReadOnlyCaret,
+  appearance,
   canEdit,
   completeness,
   documentPath,
   note,
-  onRenderedMarkdownSectionChange,
   onRenderedMarkdownSectionDraftChange,
   onOpenSourceLink,
+  onCommitRenderedMarkdownDrafts,
+  onRegisterRenderedMarkdownCommitter,
   onSave,
+  scrollRef,
   segments,
   workspaceRoot,
 }: {
+  allowReadOnlyCaret: boolean;
+  appearance: MonacoAppearance;
   canEdit: boolean;
   completeness: MarkdownDocumentCompleteness;
   documentPath: string | null;
   note: string | null;
   onRenderedMarkdownSectionDraftChange: (segment: MarkdownDiffDocumentSegment, nextMarkdown: string) => void;
-  onRenderedMarkdownSectionChange: (segment: MarkdownDiffDocumentSegment, nextMarkdown: string) => void;
   onOpenSourceLink: (target: MarkdownFileLinkTarget) => void;
-  onSave: () => void;
+  onCommitRenderedMarkdownDrafts: () => void;
+  onRegisterRenderedMarkdownCommitter: (committer: () => RenderedMarkdownSectionCommit | null) => () => void;
+  onSave: MarkdownDiffSaveHandler;
+  scrollRef: { current: HTMLDivElement | null };
   segments: MarkdownDiffDocumentSegment[];
   workspaceRoot: string | null;
 }) {
@@ -1752,6 +1884,19 @@ function MarkdownDiffDocument({
       ? "Rendered from patch context only. Unchanged document sections outside the diff are omitted."
       : null);
 
+  function handleScrollKeyDown(event: KeyboardEvent<HTMLDivElement>) {
+    if (!allowReadOnlyCaret) {
+      return;
+    }
+
+    const direction = getMarkdownCaretNavigationDirection(event);
+    if (direction == null) {
+      return;
+    }
+
+    redirectCaretOutOfRemovedMarkdownSection(event, event.currentTarget, direction);
+  }
+
   return (
     <div className="markdown-diff-change-view">
       <div className="markdown-document-header">
@@ -1759,63 +1904,146 @@ function MarkdownDiffDocument({
         <span className="chip">{completeness === "full" ? "Full document" : "Patch preview"}</span>
       </div>
       {visibleNote ? <p className="support-copy markdown-document-note">{visibleNote}</p> : null}
-      <div className="markdown-diff-change-scroll">
+      <div
+        className="markdown-diff-change-scroll"
+        onKeyDown={handleScrollKeyDown}
+        ref={(node) => {
+          scrollRef.current = node;
+        }}
+      >
         {segments.length === 0 ? (
           <p className="support-copy markdown-document-empty">No rendered Markdown changes were found.</p>
         ) : (
-          segments.map((segment) =>
-            segment.kind === "normal" ? (
-              <EditableRenderedMarkdownSection
-                canEdit={canEdit && segment.isInAfterDocument}
-                className="markdown-diff-normal-section"
-                documentPath={documentPath}
-                key={segment.id}
-                onChange={onRenderedMarkdownSectionChange}
-                onDraftChange={onRenderedMarkdownSectionDraftChange}
-                onOpenSourceLink={onOpenSourceLink}
-                onSave={onSave}
-                segment={segment}
-                workspaceRoot={workspaceRoot}
-              />
-            ) : (
-              <section className="markdown-diff-change-block" key={segment.id}>
-                <RenderedMarkdownChangeSection
-                  canEdit={canEdit && segment.kind === "added" && segment.isInAfterDocument}
-                  documentPath={documentPath}
-                  onChange={onRenderedMarkdownSectionChange}
-                  onDraftChange={onRenderedMarkdownSectionDraftChange}
-                  onOpenSourceLink={onOpenSourceLink}
-                  onSave={onSave}
-                  segment={segment}
-                  tone={segment.kind}
-                  workspaceRoot={workspaceRoot}
-                />
-              </section>
-            ),
-          )
+          renderMarkdownDiffSegments({
+            allowReadOnlyCaret,
+            appearance,
+            canEdit,
+            documentPath,
+            onCommitRenderedMarkdownDrafts,
+            onOpenSourceLink,
+            onRegisterRenderedMarkdownCommitter,
+            onRenderedMarkdownSectionDraftChange,
+            onSave,
+            segments,
+            workspaceRoot,
+          })
         )}
       </div>
     </div>
   );
 }
 
-function RenderedMarkdownChangeSection({
+function renderMarkdownDiffSegments({
+  allowReadOnlyCaret,
+  appearance,
   canEdit,
   documentPath,
-  onChange,
+  onCommitRenderedMarkdownDrafts,
+  onOpenSourceLink,
+  onRegisterRenderedMarkdownCommitter,
+  onRenderedMarkdownSectionDraftChange,
+  onSave,
+  segments,
+  workspaceRoot,
+}: {
+  allowReadOnlyCaret: boolean;
+  appearance: MonacoAppearance;
+  canEdit: boolean;
+  documentPath: string | null;
+  onCommitRenderedMarkdownDrafts: () => void;
+  onOpenSourceLink: (target: MarkdownFileLinkTarget) => void;
+  onRegisterRenderedMarkdownCommitter: (committer: () => RenderedMarkdownSectionCommit | null) => () => void;
+  onRenderedMarkdownSectionDraftChange: (segment: MarkdownDiffDocumentSegment, nextMarkdown: string) => void;
+  onSave: MarkdownDiffSaveHandler;
+  segments: MarkdownDiffDocumentSegment[];
+  workspaceRoot: string | null;
+}) {
+  const rendered: ReactNode[] = [];
+  for (let index = 0; index < segments.length; index += 1) {
+    const segment = segments[index];
+    if (!segment) {
+      continue;
+    }
+
+    if (segment.kind === "normal") {
+      rendered.push(
+        <EditableRenderedMarkdownSection
+          allowReadOnlyCaret={allowReadOnlyCaret && segment.isInAfterDocument}
+          appearance={appearance}
+          canEdit={canEdit && segment.isInAfterDocument}
+          className="markdown-diff-normal-section"
+          documentPath={documentPath}
+          key={segment.id}
+          onDraftChange={onRenderedMarkdownSectionDraftChange}
+          onOpenSourceLink={onOpenSourceLink}
+          onCommitDrafts={onCommitRenderedMarkdownDrafts}
+          onRegisterCommitter={onRegisterRenderedMarkdownCommitter}
+          onSave={onSave}
+          segment={segment}
+          workspaceRoot={workspaceRoot}
+        />,
+      );
+      continue;
+    }
+
+    const changedSegments = [segment];
+    while (segments[index + 1]?.kind !== "normal" && segments[index + 1] != null) {
+      changedSegments.push(segments[index + 1]!);
+      index += 1;
+    }
+
+    rendered.push(
+      <section className="markdown-diff-change-block" key={changedSegments.map((changed) => changed.id).join(":")}>
+        {changedSegments.map((changedSegment) => {
+          const tone = changedSegment.kind === "removed" ? "removed" : "added";
+          return (
+            <RenderedMarkdownChangeSection
+              allowReadOnlyCaret={allowReadOnlyCaret && tone === "added" && changedSegment.isInAfterDocument}
+              appearance={appearance}
+              canEdit={canEdit && tone === "added" && changedSegment.isInAfterDocument}
+              documentPath={documentPath}
+              key={changedSegment.id}
+              onDraftChange={onRenderedMarkdownSectionDraftChange}
+              onOpenSourceLink={onOpenSourceLink}
+              onCommitDrafts={onCommitRenderedMarkdownDrafts}
+              onRegisterCommitter={onRegisterRenderedMarkdownCommitter}
+              onSave={onSave}
+              segment={changedSegment}
+              tone={tone}
+              workspaceRoot={workspaceRoot}
+            />
+          );
+        })}
+      </section>,
+    );
+  }
+
+  return rendered;
+}
+
+function RenderedMarkdownChangeSection({
+  allowReadOnlyCaret,
+  appearance,
+  canEdit,
+  documentPath,
+  onCommitDrafts,
   onDraftChange,
   onOpenSourceLink,
+  onRegisterCommitter,
   onSave,
   segment,
   tone,
   workspaceRoot,
 }: {
+  allowReadOnlyCaret: boolean;
+  appearance: MonacoAppearance;
   canEdit: boolean;
   documentPath: string | null;
-  onChange: (segment: MarkdownDiffDocumentSegment, nextMarkdown: string) => void;
+  onCommitDrafts: () => void;
   onDraftChange: (segment: MarkdownDiffDocumentSegment, nextMarkdown: string) => void;
   onOpenSourceLink: (target: MarkdownFileLinkTarget) => void;
-  onSave: () => void;
+  onRegisterCommitter: (committer: () => RenderedMarkdownSectionCommit | null) => () => void;
+  onSave: MarkdownDiffSaveHandler;
   segment: MarkdownDiffDocumentSegment;
   tone: "added" | "removed";
   workspaceRoot: string | null;
@@ -1825,12 +2053,15 @@ function RenderedMarkdownChangeSection({
       className={`markdown-diff-rendered-section markdown-diff-rendered-section-with-line-gutter markdown-diff-rendered-section-${tone}`}
     >
       <EditableRenderedMarkdownSection
+        allowReadOnlyCaret={allowReadOnlyCaret}
+        appearance={appearance}
         canEdit={canEdit}
         className="markdown-diff-rendered-section-body"
         documentPath={documentPath}
-        onChange={onChange}
+        onCommitDrafts={onCommitDrafts}
         onDraftChange={onDraftChange}
         onOpenSourceLink={onOpenSourceLink}
+        onRegisterCommitter={onRegisterCommitter}
         onSave={onSave}
         segment={segment}
         workspaceRoot={workspaceRoot}
@@ -1840,32 +2071,42 @@ function RenderedMarkdownChangeSection({
 }
 
 function EditableRenderedMarkdownSection({
+  allowReadOnlyCaret,
+  appearance,
   canEdit,
   className,
   documentPath,
-  onChange,
+  onCommitDrafts,
   onDraftChange,
   onOpenSourceLink,
+  onRegisterCommitter,
   onSave,
   segment,
   workspaceRoot,
 }: {
+  allowReadOnlyCaret: boolean;
+  appearance: MonacoAppearance;
   canEdit: boolean;
   className: string;
   documentPath: string | null;
-  onChange: (segment: MarkdownDiffDocumentSegment, nextMarkdown: string) => void;
+  onCommitDrafts: () => void;
   onDraftChange: (segment: MarkdownDiffDocumentSegment, nextMarkdown: string) => void;
   onOpenSourceLink: (target: MarkdownFileLinkTarget) => void;
-  onSave: () => void;
+  onRegisterCommitter: (committer: () => RenderedMarkdownSectionCommit | null) => () => void;
+  onSave: MarkdownDiffSaveHandler;
   segment: MarkdownDiffDocumentSegment;
   workspaceRoot: string | null;
 }) {
-  const classNames = `${className}${canEdit ? " markdown-diff-editable-section" : ""}`;
+  const canUseCaret = canEdit || allowReadOnlyCaret;
+  const classNames = `${className}${canUseCaret ? " markdown-diff-editable-section" : ""}${allowReadOnlyCaret && !canEdit ? " markdown-diff-readonly-caret-section" : ""}`;
   const hasUncommittedUserEditRef = useRef(false);
+  const sectionRef = useRef<HTMLElement | null>(null);
+  const [renderResetVersion, setRenderResetVersion] = useState(0);
 
   useEffect(() => {
     hasUncommittedUserEditRef.current = false;
-  }, [segment.id, segment.markdown]);
+    setRenderResetVersion((current) => current + 1);
+  }, [segment.markdown]);
 
   function readEditedMarkdown(section: HTMLElement) {
     return normalizeEditedMarkdownSection(
@@ -1876,6 +2117,9 @@ function EditableRenderedMarkdownSection({
 
   function handleInput(event: FormEvent<HTMLElement>) {
     if (!canEdit) {
+      if (allowReadOnlyCaret) {
+        setRenderResetVersion((current) => current + 1);
+      }
       return;
     }
 
@@ -1884,9 +2128,9 @@ function EditableRenderedMarkdownSection({
     onDraftChange(segment, nextMarkdown);
   }
 
-  function commitSectionEdit(section: HTMLElement) {
+  const collectSectionEdit = useCallback((section: HTMLElement): RenderedMarkdownSectionCommit | null => {
     if (!canEdit) {
-      return;
+      return null;
     }
 
     // Cursor-only focus changes must not serialize rendered Markdown. The
@@ -1894,28 +2138,90 @@ function EditableRenderedMarkdownSection({
     // serialize pass can rewrite harmless source formatting (for example
     // `*` bullets to `-` bullets) and create new diff sections.
     if (!hasUncommittedUserEditRef.current) {
-      return;
+      return null;
     }
 
     const nextMarkdown = readEditedMarkdown(section);
     hasUncommittedUserEditRef.current = false;
     if (nextMarkdown !== segment.markdown) {
-      onChange(segment, nextMarkdown);
-      return;
+      return { segment, nextMarkdown };
     }
 
     onDraftChange(segment, segment.markdown);
+    return null;
+  }, [canEdit, onDraftChange, segment]);
+
+  function handleBeforeInput(event: FormEvent<HTMLElement>) {
+    if (allowReadOnlyCaret && !canEdit) {
+      event.preventDefault();
+    }
   }
 
+  function handleReadOnlyMutationEvent(event: FormEvent<HTMLElement>) {
+    if (allowReadOnlyCaret && !canEdit) {
+      event.preventDefault();
+    }
+  }
+
+  function isReadOnlyMutationKey(event: KeyboardEvent<HTMLElement>) {
+    if (event.altKey || event.ctrlKey || event.metaKey) {
+      return false;
+    }
+
+    return event.key === "Backspace" || event.key === "Delete" || event.key === "Enter" || event.key.length === 1;
+  }
+
+  useEffect(
+    () =>
+      onRegisterCommitter(() => {
+        const section = sectionRef.current;
+        return section ? collectSectionEdit(section) : null;
+      }),
+    [collectSectionEdit, onRegisterCommitter],
+  );
+
   function handleKeyDown(event: KeyboardEvent<HTMLElement>) {
-    if (!canEdit) {
+    if (!canUseCaret) {
       return;
     }
 
-    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s") {
+    const direction = getMarkdownCaretNavigationDirection(event);
+    const scrollRegion = event.currentTarget.closest<HTMLElement>(".markdown-diff-change-scroll");
+    if (
+      allowReadOnlyCaret &&
+      !canEdit &&
+      direction != null &&
+      redirectCaretOutOfRemovedMarkdownSection(event, scrollRegion, direction)
+    ) {
+      return;
+    }
+
+    if (allowReadOnlyCaret && !canEdit && isReadOnlyMutationKey(event)) {
       event.preventDefault();
-      commitSectionEdit(event.currentTarget);
-      onSave();
+      return;
+    }
+
+    if (canEdit && (event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s") {
+      event.preventDefault();
+      const focusSnapshot = captureEditableMarkdownFocusSnapshot(event.currentTarget);
+      onCommitDrafts();
+      scheduleEditableMarkdownFocusRestore(focusSnapshot);
+      const saveResult = onSave();
+      if (saveResult && typeof saveResult.then === "function") {
+        void saveResult.finally(() => {
+          scheduleEditableMarkdownFocusRestore(focusSnapshot);
+        });
+      }
+      return;
+    }
+
+    if (canEdit && event.key === "Escape") {
+      if (hasUncommittedUserEditRef.current) {
+        event.preventDefault();
+        hasUncommittedUserEditRef.current = false;
+        onDraftChange(segment, segment.markdown);
+        setRenderResetVersion((current) => current + 1);
+      }
       return;
     }
 
@@ -1923,14 +2229,18 @@ function EditableRenderedMarkdownSection({
       return;
     }
 
-    if (event.key === "PageDown" || event.key === "PageUp") {
+    const flushDraftsBeforeNavigation = canEdit
+      ? () => {
+          flushSync(() => onCommitDrafts());
+        }
+      : undefined;
+
+    if (direction != null && (event.key === "PageDown" || event.key === "PageUp")) {
       if (
         moveEditableMarkdownCaretByPage(
           event.currentTarget,
-          event.key === "PageDown" ? 1 : -1,
-          () => {
-            flushSync(() => commitSectionEdit(event.currentTarget));
-          },
+          direction,
+          flushDraftsBeforeNavigation,
         )
       ) {
         event.preventDefault();
@@ -1943,9 +2253,7 @@ function EditableRenderedMarkdownSection({
       isSelectionAtEditableSectionBoundary(event.currentTarget, "end")
     ) {
       if (
-        focusAdjacentEditableMarkdownSection(event.currentTarget, 1, () => {
-          flushSync(() => commitSectionEdit(event.currentTarget));
-        })
+        focusAdjacentEditableMarkdownSection(event.currentTarget, 1, flushDraftsBeforeNavigation)
       ) {
         event.preventDefault();
       }
@@ -1957,9 +2265,7 @@ function EditableRenderedMarkdownSection({
       isSelectionAtEditableSectionBoundary(event.currentTarget, "end")
     ) {
       if (
-        focusAdjacentEditableMarkdownSection(event.currentTarget, 1, () => {
-          flushSync(() => commitSectionEdit(event.currentTarget));
-        })
+        focusAdjacentEditableMarkdownSection(event.currentTarget, 1, flushDraftsBeforeNavigation)
       ) {
         event.preventDefault();
       }
@@ -1971,9 +2277,7 @@ function EditableRenderedMarkdownSection({
       isSelectionAtEditableSectionBoundary(event.currentTarget, "start")
     ) {
       if (
-        focusAdjacentEditableMarkdownSection(event.currentTarget, -1, () => {
-          flushSync(() => commitSectionEdit(event.currentTarget));
-        })
+        focusAdjacentEditableMarkdownSection(event.currentTarget, -1, flushDraftsBeforeNavigation)
       ) {
         event.preventDefault();
       }
@@ -1985,9 +2289,7 @@ function EditableRenderedMarkdownSection({
       isSelectionAtEditableSectionBoundary(event.currentTarget, "start")
     ) {
       if (
-        focusAdjacentEditableMarkdownSection(event.currentTarget, -1, () => {
-          flushSync(() => commitSectionEdit(event.currentTarget));
-        })
+        focusAdjacentEditableMarkdownSection(event.currentTarget, -1, flushDraftsBeforeNavigation)
       ) {
         event.preventDefault();
       }
@@ -1997,19 +2299,37 @@ function EditableRenderedMarkdownSection({
   return (
     <section
       className={classNames}
-      contentEditable={canEdit}
+      aria-readonly={allowReadOnlyCaret && !canEdit ? true : undefined}
+      contentEditable={canUseCaret}
+      data-markdown-caret={canUseCaret ? "true" : undefined}
       data-markdown-editable={canEdit ? "true" : undefined}
-      onBlur={(event) => commitSectionEdit(event.currentTarget)}
+      data-markdown-readonly={allowReadOnlyCaret && !canEdit ? "true" : undefined}
+      data-markdown-segment-after-end={segment.afterEndOffset}
+      data-markdown-segment-after-start={segment.afterStartOffset}
+      onBeforeInput={handleBeforeInput}
+      onBlur={() => {
+        if (canEdit) {
+          onCommitDrafts();
+        }
+      }}
+      onCut={handleReadOnlyMutationEvent}
+      onDrop={handleReadOnlyMutationEvent}
       onInput={handleInput}
       onKeyDown={handleKeyDown}
+      onPaste={handleReadOnlyMutationEvent}
+      ref={sectionRef}
       suppressContentEditableWarning
-      tabIndex={canEdit ? 0 : undefined}
+      tabIndex={canUseCaret ? 0 : undefined}
     >
       <MarkdownContent
+        appearance={appearance}
         documentPath={documentPath}
+        key={renderResetVersion}
         markdown={segment.markdown}
         onOpenSourceLink={onOpenSourceLink}
-        showLineNumbers
+        preserveMermaidSource={canEdit}
+        renderMermaidDiagrams
+        showLineNumbers={getMarkdownDiffSegmentLineNumber(segment) != null}
         startLineNumber={getMarkdownDiffSegmentLineNumber(segment)}
         workspaceRoot={workspaceRoot}
       />
@@ -2017,10 +2337,92 @@ function EditableRenderedMarkdownSection({
   );
 }
 
+function getMarkdownCaretNavigationDirection(event: KeyboardEvent<HTMLElement>) {
+  if (event.altKey || event.ctrlKey || event.metaKey) {
+    return null;
+  }
+
+  if (event.key === "ArrowDown" || event.key === "ArrowRight" || event.key === "PageDown") {
+    return 1;
+  }
+
+  if (event.key === "ArrowUp" || event.key === "ArrowLeft" || event.key === "PageUp") {
+    return -1;
+  }
+
+  return null;
+}
+
+function redirectCaretOutOfRemovedMarkdownSection(
+  event: KeyboardEvent<HTMLElement>,
+  scrollRegion: HTMLElement | null,
+  direction: -1 | 1,
+) {
+  if (!scrollRegion) {
+    return false;
+  }
+
+  const selection = window.getSelection();
+  if (!selection || selection.rangeCount === 0 || !selection.isCollapsed) {
+    return false;
+  }
+
+  const range = selection.getRangeAt(0);
+  const removedSection = closestElementFromNode(
+    range.startContainer,
+    ".markdown-diff-rendered-section-removed",
+  );
+  if (!removedSection || !scrollRegion.contains(removedSection)) {
+    return false;
+  }
+
+  const targetSection = findAdjacentMarkdownCaretSection(scrollRegion, removedSection, direction)
+    ?? findAdjacentMarkdownCaretSection(scrollRegion, removedSection, direction > 0 ? -1 : 1);
+  if (!targetSection) {
+    return false;
+  }
+
+  event.preventDefault();
+  event.stopPropagation();
+  placeCaretInEditableMarkdownSection(targetSection, direction > 0 ? "start" : "end");
+  targetSection.scrollIntoView?.({ block: "nearest" });
+  return true;
+}
+
+function findAdjacentMarkdownCaretSection(
+  scrollRegion: HTMLElement,
+  origin: HTMLElement,
+  direction: -1 | 1,
+) {
+  const caretSections = Array.from(
+    scrollRegion.querySelectorAll<HTMLElement>("[data-markdown-caret='true']"),
+  );
+
+  if (direction > 0) {
+    return caretSections.find((section) =>
+      Boolean(origin.compareDocumentPosition(section) & Node.DOCUMENT_POSITION_FOLLOWING),
+    ) ?? null;
+  }
+
+  for (let index = caretSections.length - 1; index >= 0; index -= 1) {
+    const section = caretSections[index];
+    if (section && Boolean(origin.compareDocumentPosition(section) & Node.DOCUMENT_POSITION_PRECEDING)) {
+      return section;
+    }
+  }
+
+  return null;
+}
+
+function closestElementFromNode(node: Node, selector: string) {
+  const element = node instanceof Element ? node : node.parentElement;
+  return element?.closest<HTMLElement>(selector) ?? null;
+}
+
 function getMarkdownDiffSegmentLineNumber(segment: MarkdownDiffDocumentSegment) {
   return segment.kind === "removed"
-    ? segment.oldStart ?? segment.newStart ?? 1
-    : segment.newStart ?? segment.oldStart ?? 1;
+    ? segment.oldStart ?? segment.newStart ?? null
+    : segment.newStart ?? segment.oldStart ?? null;
 }
 
 function serializeEditableMarkdownSection(section: HTMLElement) {
@@ -2178,7 +2580,149 @@ function wrapInlineMarkdownCode(content: string) {
 }
 
 function shouldSkipMarkdownEditableNode(node: HTMLElement) {
-  return node.tagName.toLowerCase() === "button" || node.getAttribute("aria-hidden") === "true";
+  return (
+    node.tagName.toLowerCase() === "button" ||
+    node.getAttribute("aria-hidden") === "true" ||
+    node.dataset.markdownSerialization === "skip"
+  );
+}
+
+function captureEditableMarkdownFocusSnapshot(section: HTMLElement): EditableMarkdownFocusSnapshot {
+  const scrollRegion = section.closest<HTMLElement>(".markdown-diff-change-scroll");
+  return {
+    caretTextOffset: readEditableMarkdownCaretTextOffset(section),
+    scrollRegion,
+    scrollTop: scrollRegion?.scrollTop ?? null,
+    section,
+    segmentAfterEndOffset: readNumberDataAttribute(section, "markdownSegmentAfterEnd"),
+    segmentAfterStartOffset: readNumberDataAttribute(section, "markdownSegmentAfterStart"),
+  };
+}
+
+function scheduleEditableMarkdownFocusRestore(snapshot: EditableMarkdownFocusSnapshot) {
+  window.requestAnimationFrame(() => {
+    if (restoreEditableMarkdownFocus(snapshot)) {
+      return;
+    }
+
+    window.setTimeout(() => {
+      restoreEditableMarkdownFocus(snapshot);
+    }, 0);
+  });
+}
+
+function restoreEditableMarkdownFocus(snapshot: EditableMarkdownFocusSnapshot) {
+  if (!shouldRestoreEditableMarkdownFocus(snapshot)) {
+    return true;
+  }
+
+  const section = findEditableMarkdownFocusTarget(snapshot);
+  if (!section) {
+    return false;
+  }
+
+  if (snapshot.caretTextOffset == null) {
+    placeCaretInEditableMarkdownSection(section, "end");
+  } else {
+    placeCaretInEditableMarkdownSectionAtTextOffset(section, snapshot.caretTextOffset);
+  }
+
+  if (snapshot.scrollRegion?.isConnected && snapshot.scrollTop != null) {
+    snapshot.scrollRegion.scrollTop = snapshot.scrollTop;
+  }
+
+  return true;
+}
+
+function shouldRestoreEditableMarkdownFocus(snapshot: EditableMarkdownFocusSnapshot) {
+  const activeElement = document.activeElement;
+  if (!activeElement || activeElement === document.body) {
+    return true;
+  }
+
+  if (snapshot.section.isConnected && activeElement === snapshot.section) {
+    return true;
+  }
+
+  return false;
+}
+
+function findEditableMarkdownFocusTarget(snapshot: EditableMarkdownFocusSnapshot) {
+  if (snapshot.section.isConnected && snapshot.section.dataset.markdownEditable === "true") {
+    return snapshot.section;
+  }
+
+  const scrollRegion =
+    snapshot.scrollRegion?.isConnected === true
+      ? snapshot.scrollRegion
+      : document.querySelector<HTMLElement>(".markdown-diff-change-scroll");
+  if (!scrollRegion) {
+    return null;
+  }
+
+  const editableSections = Array.from(
+    scrollRegion.querySelectorAll<HTMLElement>("[data-markdown-editable='true']"),
+  );
+  if (editableSections.length === 0) {
+    return null;
+  }
+
+  const exactMatch = editableSections.find(
+    (section) =>
+      readNumberDataAttribute(section, "markdownSegmentAfterStart") === snapshot.segmentAfterStartOffset,
+  );
+  if (exactMatch) {
+    return exactMatch;
+  }
+
+  const containingMatch = editableSections.find((section) => {
+    const start = readNumberDataAttribute(section, "markdownSegmentAfterStart");
+    const end = readNumberDataAttribute(section, "markdownSegmentAfterEnd");
+    return (
+      snapshot.segmentAfterStartOffset != null &&
+      start != null &&
+      end != null &&
+      start <= snapshot.segmentAfterStartOffset &&
+      snapshot.segmentAfterStartOffset <= end
+    );
+  });
+  if (containingMatch) {
+    return containingMatch;
+  }
+
+  return editableSections[0] ?? null;
+}
+
+function readEditableMarkdownCaretTextOffset(section: HTMLElement) {
+  const selection = window.getSelection();
+  if (!selection || selection.rangeCount === 0 || !selection.isCollapsed) {
+    return null;
+  }
+
+  const range = selection.getRangeAt(0);
+  if (!section.contains(range.startContainer)) {
+    return null;
+  }
+
+  const root = section.querySelector<HTMLElement>(".markdown-copy") ?? section;
+  const prefixRange = document.createRange();
+  prefixRange.selectNodeContents(root);
+  try {
+    prefixRange.setEnd(range.startContainer, range.startOffset);
+  } catch {
+    return null;
+  }
+  return prefixRange.toString().length;
+}
+
+function readNumberDataAttribute(element: HTMLElement, key: string) {
+  const value = element.dataset[key];
+  if (value == null || value.length === 0) {
+    return null;
+  }
+
+  const numberValue = Number(value);
+  return Number.isFinite(numberValue) ? numberValue : null;
 }
 
 function isSelectionAtEditableSectionBoundary(
@@ -2226,7 +2770,7 @@ function focusAdjacentEditableMarkdownSection(
   }
 
   const editableSections = Array.from(
-    scrollRegion.querySelectorAll<HTMLElement>("[data-markdown-editable='true']"),
+    scrollRegion.querySelectorAll<HTMLElement>("[data-markdown-caret='true']"),
   );
   const currentIndex = editableSections.indexOf(currentSection);
   if (currentIndex < 0) {
@@ -2241,7 +2785,7 @@ function focusAdjacentEditableMarkdownSection(
   beforeFocus?.();
 
   const latestEditableSections = Array.from(
-    scrollRegion.querySelectorAll<HTMLElement>("[data-markdown-editable='true']"),
+    scrollRegion.querySelectorAll<HTMLElement>("[data-markdown-caret='true']"),
   );
   const latestCurrentIndex = latestEditableSections.indexOf(currentSection);
   const resolvedTargetIndex = latestCurrentIndex >= 0 ? latestCurrentIndex + direction : targetIndex;
@@ -2273,7 +2817,7 @@ function moveEditableMarkdownCaretByPage(
   }
 
   const editableSections = Array.from(
-    scrollRegion.querySelectorAll<HTMLElement>("[data-markdown-editable='true']"),
+    scrollRegion.querySelectorAll<HTMLElement>("[data-markdown-caret='true']"),
   );
   const currentIndex = editableSections.indexOf(currentSection);
   if (currentIndex < 0) {
@@ -2295,7 +2839,7 @@ function moveEditableMarkdownCaretByPage(
   beforeMove?.();
 
   const latestEditableSections = Array.from(
-    scrollRegion.querySelectorAll<HTMLElement>("[data-markdown-editable='true']"),
+    scrollRegion.querySelectorAll<HTMLElement>("[data-markdown-caret='true']"),
   );
   const latestCurrentIndex = latestEditableSections.indexOf(currentSection);
   const resolvedTargetIndex =
@@ -2391,6 +2935,32 @@ function placeCaretInEditableMarkdownSection(section: HTMLElement, boundary: "en
   range.collapse(true);
   selection.removeAllRanges();
   selection.addRange(range);
+}
+
+function placeCaretInEditableMarkdownSectionAtTextOffset(section: HTMLElement, caretTextOffset: number) {
+  section.focus({ preventScroll: true });
+
+  const selection = window.getSelection();
+  if (!selection) {
+    return;
+  }
+
+  const range = document.createRange();
+  const textNodes = collectEditableMarkdownTextNodes(section);
+  let remainingOffset = Math.max(0, caretTextOffset);
+  for (const textNode of textNodes) {
+    const textLength = textNode.textContent?.length ?? 0;
+    if (remainingOffset <= textLength) {
+      range.setStart(textNode, remainingOffset);
+      range.collapse(true);
+      selection.removeAllRanges();
+      selection.addRange(range);
+      return;
+    }
+    remainingOffset -= textLength;
+  }
+
+  placeCaretInEditableMarkdownSection(section, "end");
 }
 
 function findEditableMarkdownTextNode(root: Node, position: "first" | "last"): Text | null {

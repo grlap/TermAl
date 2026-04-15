@@ -10729,8 +10729,10 @@ describe("App", () => {
     expect(resolveSettledScrollMinimumAttempts(13)).toBe(8);
     expect(resolveSettledScrollMinimumAttempts(12)).toBe(4);
     expect(resolveSettledScrollMinimumAttempts(4)).toBe(4);
+    expect(resolveSettledScrollMinimumAttempts(12, 8)).toBe(8);
     expect(resolveSettledScrollMinimumAttempts(6, 8)).toBe(6);
     expect(resolveSettledScrollMinimumAttempts(60, 8)).toBe(8);
+    expect(resolveSettledScrollMinimumAttempts(0)).toBe(0);
   });
 
   it("keeps the new-response button scroll correction alive for the explicit minAttempts floor", async () => {
@@ -10748,7 +10750,9 @@ describe("App", () => {
             await settleAsyncUi();
           }
 
-          const messageStack = document.querySelector(".message-stack");
+          const messageStack = document.querySelector(
+            ".workspace-pane.active .message-stack",
+          );
           if (!(messageStack instanceof HTMLElement)) {
             throw new Error("Message stack not found");
           }
@@ -10902,7 +10906,9 @@ describe("App", () => {
         try {
           await settleAsyncUi();
 
-          const messageStack = document.querySelector(".message-stack");
+          const messageStack = document.querySelector(
+            ".workspace-pane.active .message-stack",
+          );
           expect(messageStack).not.toBeNull();
 
           // The synchronous first `tick()` in `scheduleSettledScrollToBottom`

@@ -30,9 +30,23 @@ export type MarkdownDiffDocumentSegment = {
 export type MarkdownDocumentLine = {
   compareText: string;
   end: number;
+  fenceBlock: MarkdownFenceBlock | null;
   identityText: string;
+  renderedText: string;
   start: number;
   text: string;
+};
+
+type MarkdownFenceBlock = {
+  end: number;
+  language: string | null;
+  start: number;
+};
+
+type MarkdownFenceLine = {
+  language: string | null;
+  length: number;
+  marker: "`" | "~";
 };
 
 type DiffPreviewModel = ReturnType<typeof buildDiffPreviewModel>;
@@ -65,42 +79,76 @@ export function buildFullMarkdownDiffDocumentSegments(
   let afterCursor = 0;
 
   const pushChangedRange = (beforeEnd: number, afterEnd: number) => {
-    if (beforeCursor < beforeEnd) {
+    const expandedRange = expandChangedRangeToMarkdownFenceBlocks(
+      beforeLines,
+      afterLines,
+      beforeCursor,
+      beforeEnd,
+      afterCursor,
+      afterEnd,
+    );
+    const expandedBeforeEnd = expandedRange.beforeEnd;
+    const expandedAfterEnd = expandedRange.afterEnd;
+
+    if (beforeCursor < expandedBeforeEnd) {
       const insertionOffset = afterLines[afterCursor]?.start ?? afterContent.length;
-      pushMarkdownDiffSegment(segments, {
+      pushMarkdownDiffLineRangeSegments({
         afterEndOffset: insertionOffset,
         afterStartOffset: insertionOffset,
-        id: `removed:${segments.length}:${beforeCursor}:${beforeEnd}:${afterCursor}`,
         isInAfterDocument: false,
         kind: "removed",
-        markdown: beforeLines.slice(beforeCursor, beforeEnd).map((line) => line.text).join(""),
-        newStart: afterCursor + 1,
-        oldStart: beforeCursor + 1,
+        lines: beforeLines,
+        newStartForChunk: () => afterCursor + 1,
+        oldStartForChunk: (chunkStart) => chunkStart + 1,
+        rangeEnd: expandedBeforeEnd,
+        rangeStart: beforeCursor,
+        segments,
       });
     }
 
-    if (afterCursor < afterEnd) {
-      const startOffset = afterLines[afterCursor]?.start ?? afterContent.length;
-      const endOffset = afterLines[afterEnd - 1]?.end ?? startOffset;
-      pushMarkdownDiffSegment(segments, {
-        afterEndOffset: endOffset,
-        afterStartOffset: startOffset,
-        id: `added:${segments.length}:${beforeCursor}:${afterCursor}:${afterEnd}`,
+    if (afterCursor < expandedAfterEnd) {
+      pushMarkdownDiffLineRangeSegments({
         isInAfterDocument: true,
         kind: "added",
-        markdown: afterLines.slice(afterCursor, afterEnd).map((line) => line.text).join(""),
-        newStart: afterCursor + 1,
-        oldStart: beforeCursor + 1,
+        lines: afterLines,
+        newStartForChunk: (chunkStart) => chunkStart + 1,
+        oldStartForChunk: () => beforeCursor + 1,
+        rangeEnd: expandedAfterEnd,
+        rangeStart: afterCursor,
+        segments,
+        afterOffsetsForChunk: (chunkStart, chunkEnd) => {
+          const startOffset = afterLines[chunkStart]?.start ?? afterContent.length;
+          return {
+            afterEndOffset: afterLines[chunkEnd - 1]?.end ?? startOffset,
+            afterStartOffset: startOffset,
+          };
+        },
       });
     }
+
+    beforeCursor = expandedBeforeEnd;
+    afterCursor = expandedAfterEnd;
   };
 
   for (const anchor of anchors) {
+    if (anchor.beforeIndex < beforeCursor || anchor.afterIndex < afterCursor) {
+      continue;
+    }
+
     pushChangedRange(anchor.beforeIndex, anchor.afterIndex);
+
+    if (anchor.beforeIndex < beforeCursor || anchor.afterIndex < afterCursor) {
+      continue;
+    }
 
     const beforeLine = beforeLines[anchor.beforeIndex];
     const afterLine = afterLines[anchor.afterIndex];
-    if (beforeLine && afterLine && beforeLine.identityText !== afterLine.identityText) {
+    if (
+      beforeLine &&
+      afterLine &&
+      beforeLine.identityText !== afterLine.identityText &&
+      !isEquivalentRenderedMarkdownMatch(beforeLine, afterLine)
+    ) {
       pushChangedRange(anchor.beforeIndex + 1, anchor.afterIndex + 1);
     } else if (afterLine) {
       pushMarkdownDiffSegment(segments, {
@@ -109,19 +157,19 @@ export function buildFullMarkdownDiffDocumentSegments(
         id: `normal:${segments.length}:${anchor.beforeIndex}:${anchor.afterIndex}`,
         isInAfterDocument: true,
         kind: "normal",
-        markdown: afterLine.text,
+        markdown: normalizeMarkdownLineEndingsForDiff(afterLine.text),
         newStart: anchor.afterIndex + 1,
         oldStart: anchor.beforeIndex + 1,
       });
     }
 
-    beforeCursor = anchor.beforeIndex + 1;
-    afterCursor = anchor.afterIndex + 1;
+    beforeCursor = Math.max(beforeCursor, anchor.beforeIndex + 1);
+    afterCursor = Math.max(afterCursor, anchor.afterIndex + 1);
   }
 
   pushChangedRange(beforeLines.length, afterLines.length);
 
-  return segments;
+  return assignMarkdownDiffSegmentIds(segments);
 }
 
 export function buildPatchMarkdownDiffDocumentSegments(
@@ -217,7 +265,7 @@ export function buildPatchMarkdownDiffDocumentSegments(
     flush();
   }
 
-  return segments;
+  return assignMarkdownDiffSegmentIds(segments);
 }
 
 export function replaceMarkdownDocumentRange(
@@ -244,24 +292,68 @@ export function normalizeEditedMarkdownSection(nextMarkdown: string, originalMar
 
 export function splitMarkdownDocumentLinesWithOffsets(content: string): MarkdownDocumentLine[] {
   const matches = content.matchAll(/[^\n]*\n|[^\n]+/g);
-  return Array.from(matches, (match) => {
+  const lines: MarkdownDocumentLine[] = [];
+  let activeFence: (MarkdownFenceLine & { start: number }) | null = null;
+
+  for (const match of matches) {
     const start = match.index ?? 0;
     const text = match[0];
-    return {
-      compareText: normalizeMarkdownLineForDiff(text),
+    const lineText = stripMarkdownLineEnding(text);
+    const lineIndex = lines.length;
+    const currentFence: (MarkdownFenceLine & { start: number }) | null = activeFence;
+    const isInFence: boolean = currentFence != null;
+    const openingFence: MarkdownFenceLine | null = !isInFence
+      ? parseOpeningMarkdownFenceLine(lineText)
+      : null;
+    const closingFence =
+      currentFence != null && isClosingMarkdownFenceLine(lineText, currentFence);
+    const compareText = normalizeMarkdownLineForDiff(text, { isInFence });
+    const renderedText = normalizeRenderedMarkdownLineForDiff(text, { isInFence });
+    lines.push({
+      compareText,
       end: start + text.length,
+      fenceBlock: null,
       identityText: normalizeMarkdownLineEndingsForDiff(text),
+      renderedText,
       start,
       text,
-    };
-  });
+    });
+
+    if (openingFence) {
+      activeFence = { ...openingFence, start: lineIndex };
+    } else if (closingFence && currentFence) {
+      assignMarkdownFenceBlock(lines, currentFence.start, lineIndex + 1, currentFence.language);
+      activeFence = null;
+    }
+  }
+
+  if (activeFence) {
+    assignMarkdownFenceBlock(lines, activeFence.start, lines.length, activeFence.language);
+  }
+
+  return lines;
+}
+
+function assignMarkdownFenceBlock(
+  lines: MarkdownDocumentLine[],
+  start: number,
+  end: number,
+  language: string | null,
+) {
+  const fenceBlock = { end, language, start };
+  for (let index = start; index < end; index += 1) {
+    const line = lines[index];
+    if (line) {
+      line.fenceBlock = fenceBlock;
+    }
+  }
 }
 
 export function buildMarkdownLineDiffAnchors(
   beforeLines: MarkdownDocumentLine[],
   afterLines: MarkdownDocumentLine[],
 ) {
-  return buildMarkdownLineDiffAnchorsInRange(
+  const anchors = buildMarkdownLineDiffAnchorsInRange(
     beforeLines,
     afterLines,
     0,
@@ -269,6 +361,34 @@ export function buildMarkdownLineDiffAnchors(
     0,
     afterLines.length,
   );
+  return filterMarkdownLineDiffAnchorsForChangedMermaidBlocks(
+    anchors,
+    beforeLines,
+    afterLines,
+  );
+}
+
+function filterMarkdownLineDiffAnchorsForChangedMermaidBlocks(
+  anchors: Array<{ afterIndex: number; beforeIndex: number }>,
+  beforeLines: MarkdownDocumentLine[],
+  afterLines: MarkdownDocumentLine[],
+) {
+  return anchors.filter((anchor) => {
+    const beforeBlock = getMermaidFenceBlockForLine(beforeLines[anchor.beforeIndex]);
+    const afterBlock = getMermaidFenceBlockForLine(afterLines[anchor.afterIndex]);
+
+    if (!beforeBlock && !afterBlock) {
+      return true;
+    }
+    if (!beforeBlock || !afterBlock) {
+      return false;
+    }
+
+    return (
+      getMarkdownFenceBlockText(beforeLines, beforeBlock) ===
+      getMarkdownFenceBlockText(afterLines, afterBlock)
+    );
+  });
 }
 
 function buildMarkdownLineDiffAnchorsInRange(
@@ -552,16 +672,121 @@ export function buildGreedyMarkdownLineAnchors(
   return anchors;
 }
 
+function expandChangedRangeToMarkdownFenceBlocks(
+  beforeLines: MarkdownDocumentLine[],
+  afterLines: MarkdownDocumentLine[],
+  beforeStart: number,
+  beforeEnd: number,
+  afterStart: number,
+  afterEnd: number,
+) {
+  return {
+    afterEnd: expandRangeEndToTouchedMarkdownFenceBlock(afterLines, afterStart, afterEnd),
+    beforeEnd: expandRangeEndToTouchedMarkdownFenceBlock(beforeLines, beforeStart, beforeEnd),
+  };
+}
+
+function expandRangeEndToTouchedMarkdownFenceBlock(
+  lines: MarkdownDocumentLine[],
+  rangeStart: number,
+  rangeEnd: number,
+) {
+  let expandedEnd = rangeEnd;
+  for (let index = rangeStart; index < rangeEnd; index += 1) {
+    const blockRange = findMarkdownFenceBlockRangeContainingLine(lines, index);
+    if (blockRange) {
+      expandedEnd = Math.max(expandedEnd, blockRange.end);
+    }
+  }
+  return expandedEnd;
+}
+
+function findMarkdownFenceBlockRangeContainingLine(
+  lines: MarkdownDocumentLine[],
+  targetIndex: number,
+) {
+  return lines[targetIndex]?.fenceBlock ?? null;
+}
+
+function getMermaidFenceBlockForLine(line: MarkdownDocumentLine | undefined) {
+  const fenceBlock = line?.fenceBlock ?? null;
+  if (!fenceBlock || !isMermaidMarkdownFenceLanguage(fenceBlock.language)) {
+    return null;
+  }
+
+  return fenceBlock;
+}
+
+function isMermaidMarkdownFenceLanguage(language: string | null) {
+  return language?.toLowerCase() === "mermaid";
+}
+
+function getMarkdownFenceBlockText(
+  lines: MarkdownDocumentLine[],
+  fenceBlock: MarkdownFenceBlock,
+) {
+  return normalizeMarkdownLineEndingsForDiff(
+    lines.slice(fenceBlock.start, fenceBlock.end).map((line) => line.text).join(""),
+  );
+}
+
+function parseOpeningMarkdownFenceLine(line: string): MarkdownFenceLine | null {
+  const match = /^( {0,3})(`{3,}|~{3,})(.*)$/.exec(line);
+  if (!match) {
+    return null;
+  }
+
+  const markerText = match[2] ?? "";
+  const marker = markerText[0];
+  const info = match[3] ?? "";
+  if (marker !== "`" && marker !== "~") {
+    return null;
+  }
+  if (marker === "`" && info.includes("`")) {
+    return null;
+  }
+
+  return {
+    language: parseMarkdownFenceLanguage(info),
+    length: markerText.length,
+    marker,
+  };
+}
+
+function parseMarkdownFenceLanguage(info: string) {
+  const token = info.trim().split(/\s+/)[0] ?? "";
+  const language = token.replace(/^\{?\.?/, "").replace(/\}?$/, "").toLowerCase();
+  return language.length > 0 ? language : null;
+}
+
+function isClosingMarkdownFenceLine(
+  line: string,
+  openingFence: Pick<MarkdownFenceLine, "length" | "marker">,
+) {
+  const match = /^( {0,3})(`{3,}|~{3,})\s*$/.exec(line);
+  if (!match) {
+    return false;
+  }
+
+  const markerText = match[2] ?? "";
+  return markerText[0] === openingFence.marker && markerText.length >= openingFence.length;
+}
+
+function stripMarkdownLineEnding(line: string) {
+  return line.replace(/\r?\n$/, "").replace(/\r$/, "");
+}
+
 function pushMarkdownDiffSegment(
   segments: MarkdownDiffDocumentSegment[],
   segment: MarkdownDiffDocumentSegment,
+  allowMerge = true,
 ) {
   if (segment.markdown.trim().length === 0 && segment.kind !== "normal") {
     return;
   }
 
   const previous = segments[segments.length - 1];
-  if (previous && previous.kind === segment.kind && previous.isInAfterDocument === segment.isInAfterDocument) {
+  if (allowMerge && previous && previous.kind === segment.kind && previous.isInAfterDocument === segment.isInAfterDocument) {
     previous.markdown += segment.markdown;
     if (previous.isInAfterDocument) {
       previous.afterEndOffset = segment.afterEndOffset;
@@ -572,15 +797,154 @@ function pushMarkdownDiffSegment(
   segments.push(segment);
 }
 
-function normalizeMarkdownLineForDiff(line: string) {
+function pushMarkdownDiffLineRangeSegments({
+  afterEndOffset,
+  afterOffsetsForChunk,
+  afterStartOffset,
+  isInAfterDocument,
+  kind,
+  lines,
+  newStartForChunk,
+  oldStartForChunk,
+  rangeEnd,
+  rangeStart,
+  segments,
+}: {
+  afterEndOffset?: number;
+  afterOffsetsForChunk?: (chunkStart: number, chunkEnd: number) => {
+    afterEndOffset: number;
+    afterStartOffset: number;
+  };
+  afterStartOffset?: number;
+  isInAfterDocument: boolean;
+  kind: "added" | "removed";
+  lines: MarkdownDocumentLine[];
+  newStartForChunk: (chunkStart: number) => number;
+  oldStartForChunk: (chunkStart: number) => number;
+  rangeEnd: number;
+  rangeStart: number;
+  segments: MarkdownDiffDocumentSegment[];
+}) {
+  const chunks = buildMarkdownLineRangeChunks(lines, rangeStart, rangeEnd);
+  for (const [chunkStart, chunkEnd] of chunks) {
+    const afterOffsets = afterOffsetsForChunk?.(chunkStart, chunkEnd) ?? {
+      afterEndOffset: afterEndOffset ?? 0,
+      afterStartOffset: afterStartOffset ?? 0,
+    };
+    pushMarkdownDiffSegment(
+      segments,
+      {
+        ...afterOffsets,
+        id: `${kind}:${segments.length}:${chunkStart}:${chunkEnd}`,
+        isInAfterDocument,
+        kind,
+        markdown: normalizeMarkdownLineEndingsForDiff(
+          lines.slice(chunkStart, chunkEnd).map((line) => line.text).join(""),
+        ),
+        newStart: newStartForChunk(chunkStart),
+        oldStart: oldStartForChunk(chunkStart),
+      },
+      false,
+    );
+  }
+}
+
+function buildMarkdownLineRangeChunks(
+  lines: MarkdownDocumentLine[],
+  rangeStart: number,
+  rangeEnd: number,
+) {
+  const chunks: Array<[number, number]> = [];
+  let chunkStart = rangeStart;
+  let hasContent = false;
+  let activeFence: { length: number; marker: "`" | "~" } | null = null;
+
+  for (let index = rangeStart; index < rangeEnd; index += 1) {
+    const line = lines[index];
+    if (!line) {
+      continue;
+    }
+
+    const lineText = stripMarkdownLineEnding(line.text);
+    if (activeFence) {
+      hasContent = true;
+      if (isClosingMarkdownFenceLine(lineText, activeFence)) {
+        activeFence = null;
+      }
+      continue;
+    }
+
+    const openingFence = parseOpeningMarkdownFenceLine(lineText);
+    if (openingFence) {
+      activeFence = openingFence;
+      hasContent = true;
+      continue;
+    }
+
+    if (line.text.trim().length > 0) {
+      hasContent = true;
+      continue;
+    }
+
+    if (hasContent) {
+      chunks.push([chunkStart, index + 1]);
+      chunkStart = index + 1;
+      hasContent = false;
+    }
+  }
+
+  if (chunkStart < rangeEnd) {
+    chunks.push([chunkStart, rangeEnd]);
+  }
+
+  return chunks;
+}
+
+function assignMarkdownDiffSegmentIds(
+  segments: MarkdownDiffDocumentSegment[],
+): MarkdownDiffDocumentSegment[] {
+  const seen = new Map<string, number>();
+
+  return segments.map((segment) => {
+    const identity = [
+      segment.kind,
+      segment.isInAfterDocument ? "after" : "before",
+      stableMarkdownSegmentHash(segment.markdown),
+    ].join(":");
+    const occurrence = seen.get(identity) ?? 0;
+    seen.set(identity, occurrence + 1);
+    return {
+      ...segment,
+      id: `${identity}:${occurrence}`,
+    };
+  });
+}
+
+function stableMarkdownSegmentHash(text: string) {
+  let hash = 0x811c9dc5;
+  for (let index = 0; index < text.length; index += 1) {
+    hash ^= text.charCodeAt(index);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return (hash >>> 0).toString(36);
+}
+
+function normalizeMarkdownLineForDiff(
+  line: string,
+  { isInFence = false }: { isInFence?: boolean } = {},
+) {
   const normalizedLineEndings = normalizeMarkdownLineEndingsForDiff(line);
+  if (isInFence || isMarkdownIndentedCodeLine(normalizedLineEndings)) {
+    return normalizedLineEndings;
+  }
+
   const normalizedLinks = normalizedLineEndings
     .replace(/\[`([^`]+)`\]\([^)]+\)/g, "`$1`")
     .replace(/(?<!!)\[([^\]]+)\]\([^)]+\)/g, "$1");
   if (isMarkdownTableSeparatorLine(normalizedLinks)) {
     return normalizedLinks.replace(/:?-{3,}:?/g, "---").replace(/\s+/g, "");
   }
-  return normalizedLinks;
+  return normalizeRenderedMarkdownLineForDiff(normalizedLinks, { isInFence });
 }
 
 function normalizeMarkdownLineEndingsForDiff(line: string) {
@@ -589,6 +953,62 @@ function normalizeMarkdownLineEndingsForDiff(line: string) {
 
 function isMarkdownTableSeparatorLine(line: string) {
   return /^\s*\|?\s*:?-{3,}:?\s*(?:\|\s*:?-{3,}:?\s*)+\|?\s*$/.test(line);
+}
+
+function isEquivalentMarkdownTableSeparatorMatch(
+  beforeLine: MarkdownDocumentLine,
+  afterLine: MarkdownDocumentLine,
+) {
+  return (
+    beforeLine.compareText === afterLine.compareText &&
+    isMarkdownTableSeparatorLine(beforeLine.identityText) &&
+    isMarkdownTableSeparatorLine(afterLine.identityText)
+  );
+}
+
+function isEquivalentRenderedMarkdownMatch(
+  beforeLine: MarkdownDocumentLine,
+  afterLine: MarkdownDocumentLine,
+) {
+  if (isEquivalentMarkdownTableSeparatorMatch(beforeLine, afterLine)) {
+    return true;
+  }
+
+  return (
+    beforeLine.compareText === afterLine.compareText &&
+    beforeLine.renderedText === afterLine.renderedText
+  );
+}
+
+function normalizeRenderedMarkdownLineForDiff(
+  line: string,
+  { isInFence = false }: { isInFence?: boolean } = {},
+) {
+  const normalized = normalizeMarkdownLineEndingsForDiff(line);
+  if (isInFence || isMarkdownIndentedCodeLine(normalized)) {
+    return normalized;
+  }
+
+  const lineWithoutEnding = stripMarkdownLineEnding(normalized);
+  const hardBreakSuffix = /(?: {2,}|\\)$/.test(lineWithoutEnding) ? " <hard-break>" : "";
+  const unorderedListMatch = /^ {0,3}[-*+]\s+(.*)$/.exec(lineWithoutEnding);
+  if (unorderedListMatch) {
+    return `- ${collapseMarkdownRenderedWhitespace(unorderedListMatch[1] ?? "")}${hardBreakSuffix}`;
+  }
+
+  return `${collapseMarkdownRenderedWhitespace(lineWithoutEnding.trim())}${hardBreakSuffix}`;
+}
+
+function isMarkdownIndentedCodeLine(line: string) {
+  return /^(?: {4,}|\t)/.test(line);
+}
+
+function collapseMarkdownRenderedWhitespace(text: string) {
+  const parts = text.split(/(`+[^`]*`+)/g);
+  return parts
+    .map((part, index) => (index % 2 === 0 ? part.replace(/\s+/g, " ") : part))
+    .join("")
+    .trim();
 }
 
 function joinMarkdownDiffLines(lines: string[]) {
