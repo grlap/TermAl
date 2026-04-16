@@ -58,6 +58,38 @@ Also fixed in the current tree, not re-listed below:
 - **SQLite import cleanup visibility** — if JSON-to-SQLite import succeeds but renaming the legacy JSON file fails, cleanup failure for the incomplete SQLite file is now logged instead of silently discarded.
 - **SQLite connection busy/WAL settings** — production SQLite connections now share an opener that sets a 5-second busy timeout plus `journal_mode = WAL` and `synchronous = NORMAL` before schema or persistence work.
 
+## State snapshots still serialize full session transcripts
+
+**Severity:** High - large conversation histories make `/api/state`, SSE state snapshots, and reconnect/restore paths spend CPU serializing messages that the list view usually does not need.
+
+`snapshot_from_inner_with_agent_readiness` still clones every visible `Session` with its full `messages` vector into `StateResponse`. The HTTP `/api/state` handler and full-state SSE publisher then serialize those full transcripts even when the frontend only needs session metadata. With long Codex/Claude conversations this pushes hot CPU into `serde_json` and makes reconnects, tab restore, and any full-state publish scale with total transcript size.
+
+**Current behavior:**
+- `/api/state` returns all visible sessions with all historical messages.
+- `publish_state_locked` builds the same full transcript snapshot for full-state SSE events.
+- The dedicated `GET /api/sessions/{id}` route exists, but state snapshots do not defer to it.
+
+**Proposal:**
+- Make state snapshots metadata-first: include session shell fields and mark transcript-bearing sessions as `messagesLoaded: false` with an empty `messages` array.
+- Keep `GET /api/sessions/{id}` as the authoritative full-transcript route, and keep session-create/prompt flows returning enough data that the active prompt UI remains reliable.
+- Add backend and App-level regression coverage proving `/api/state` omits transcripts, session hydration restores the full transcript, and metadata snapshots do not clear an already-hydrated active session.
+
+## Workspace layout saves rewrite every persisted session
+
+**Severity:** Medium - frequent layout autosaves can keep the persistence thread busy serializing all visible session transcripts even though only workspace metadata changed.
+
+`put_workspace_layout` calls `commit_locked`, which calls `persist_internal_locked`. That path builds a full `PersistedState::from_inner`, including every visible `PersistedSessionRecord`, and sends it to the persistence worker. In production SQLite this eventually serializes and upserts every session row. Dragging tabs, changing panes, or other layout churn should update only workspace metadata, but currently scales with total transcript size.
+
+**Current behavior:**
+- `put_workspace_layout` stores one `WorkspaceLayoutDocument` and then commits through the full-state persistence path.
+- `PersistedState::from_inner` includes all visible sessions, so unchanged transcripts are serialized again.
+- The SQLite storage layer has split session rows, but layout-only commits do not use a metadata-only persistence path.
+
+**Proposal:**
+- Add a layout/metadata-only persistence request that updates app metadata without serializing or upserting unchanged session rows.
+- Consider moving workspace layouts into their own SQLite table so layout writes never touch session records.
+- Add a regression or instrumentation test that a workspace layout save does not serialize session messages.
+
 ## `commit_session_created_locked` performs synchronous SQLite I/O under the state mutex
 
 **Severity:** High - session creation now holds the `Arc<Mutex<StateInner>>` across a full SQLite transaction, blocking every concurrent request behind disk I/O.
@@ -258,21 +290,6 @@ The new hydration effect's error path calls `reportRequestError(error)` on any `
 - Treat zero-length ranges that share a position as overlapping, or reject any case where the resolved ranges are not strictly disjoint (`current.start <= previous.end` when at least one is zero-length).
 - Add direct regression coverage for two rendered Markdown sections resolving to the same zero-length insertion point and assert the batch is rejected with the existing save-error banner.
 
-## `attemptedGitDiffDocumentContentRestoreKeysRef` never cleared on workspace view change
-
-**Severity:** Low - a transient restored-document fetch failure permanently blocks retry for the rest of the browser session.
-
-The Git diff preview restore effect previously gated on `restoredGitDiffDocumentContentScanWorkspaceViewIdRef`; removing that one-shot gate (the current change) correctly fixes the late-hydration bug. However, `attemptedGitDiffDocumentContentRestoreKeysRef` is still a process-lifetime `Set<string>` that only grows. Once a restore for a given `requestKey` fails, the key is added to that set and the restore is never retried, even if the user switches workspace views and returns. The pending set is cleared on each resolution, but the attempted set is not.
-
-**Current behavior:**
-- `attemptedGitDiffDocumentContentRestoreKeysRef` accumulates request keys across the session.
-- Workspace view transitions do not clear the attempted set.
-- A transient restore failure is treated as permanent for that browser process.
-
-**Proposal:**
-- Scope `attemptedGitDiffDocumentContentRestoreKeysRef` (and the pending set) by `workspaceViewId`, or clear both on `workspaceViewId` change.
-- Add App-level coverage that a failed restore followed by a workspace view switch and return retries the restore.
-
 ## `git_diff_document_enrichment_note` duplicates the untagged-degradation status list
 
 **Severity:** Low - the list of degradable untagged status codes is now maintained independently in two helpers and can drift.
@@ -289,6 +306,18 @@ The Git diff preview restore effect previously gated on `restoredGitDiffDocument
 
 ## Implementation Tasks
 
+- [ ] P2: Add metadata-only state snapshot coverage:
+  backend tests should assert `/api/state` omits transcript payloads while
+  `GET /api/sessions/{id}` still returns the full transcript. App tests should
+  assert a metadata snapshot preserves an already-hydrated active session and
+  does not disrupt prompt input or focus.
+- [ ] P2: Add workspace-layout persistence hot-path coverage:
+  exercise a `put_workspace_layout` update with a large visible session and
+  assert the layout save path does not serialize or upsert unchanged session
+  rows/messages.
+- [ ] P2: Add session-create persistence contention coverage:
+  prove visible session creation does not hold the state mutex while opening
+  SQLite, ensuring schema, or committing a transaction.
 - [ ] P2: Add rendered Markdown mixed-batch conflict coverage:
   commit two rendered Markdown sections where one range still maps and the
   other conflicts after a document change, then assert no partial apply clears
