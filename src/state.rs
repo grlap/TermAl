@@ -648,6 +648,18 @@ impl AppState {
             .clone()
     }
 
+    /// Returns one visible session with its state revision.
+    fn get_session(&self, session_id: &str) -> Result<SessionResponse, ApiError> {
+        let inner = self.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_visible_session_index(session_id)
+            .ok_or_else(|| ApiError::not_found("session not found"))?;
+        Ok(SessionResponse {
+            revision: inner.revision,
+            session: inner.sessions[index].session.clone(),
+        })
+    }
+
     fn invalidate_agent_readiness_cache(&self) {
         let _refresh_lock = self
             .agent_readiness_refresh_lock
@@ -1044,16 +1056,23 @@ impl AppState {
         {
             *slot = record.clone();
         }
-        self.commit_locked(&mut inner)
+        let revision = self.commit_session_created_locked(&mut inner, &record)
             .map_err(|err| ApiError::internal(format!("failed to persist session: {err:#}")))?;
-        let snapshot = self.snapshot_from_inner(&inner);
+        let session = record.session.clone();
         drop(inner);
+        self.publish_delta(&DeltaEvent::SessionCreated {
+            revision,
+            session_id: session.id.clone(),
+            session: session.clone(),
+        });
         if let Some(session_id) = hidden_claude_spare_to_spawn {
             self.try_start_hidden_claude_spare(&session_id);
         }
         Ok(CreateSessionResponse {
-            session_id: record.session.id,
-            state: snapshot,
+            session_id: session.id.clone(),
+            session: Some(session),
+            revision,
+            state: None,
         })
     }
 
@@ -1222,6 +1241,20 @@ impl AppState {
         let revision = self.bump_revision_and_persist_locked(inner)?;
         self.publish_state_locked(inner);
         Ok(revision)
+    }
+
+    /// Commits a newly visible session without cloning every historical
+    /// message. SQLite production persistence can update global counters plus
+    /// the created session row; test JSON persistence keeps the legacy full
+    /// snapshot path so existing persistence tests stay representative.
+    fn commit_session_created_locked(
+        &self,
+        inner: &mut StateInner,
+        record: &SessionRecord,
+    ) -> Result<u64> {
+        inner.revision += 1;
+        persist_created_session(&self.persistence_path, inner, record)?;
+        Ok(inner.revision)
     }
 
     // Internal bookkeeping changes should be persisted without advancing the client-visible revision.
@@ -2900,13 +2933,22 @@ impl AppState {
         {
             *slot = record.clone();
         }
-        self.commit_locked(&mut inner).map_err(|err| {
+        let revision = self.commit_session_created_locked(&mut inner, &record).map_err(|err| {
             ApiError::internal(format!("failed to persist forked Codex session: {err:#}"))
         })?;
+        let session = record.session.clone();
+        drop(inner);
+        self.publish_delta(&DeltaEvent::SessionCreated {
+            revision,
+            session_id: session.id.clone(),
+            session: session.clone(),
+        });
 
         Ok(CreateSessionResponse {
-            session_id: record.session.id,
-            state: self.snapshot_from_inner(&inner),
+            session_id: session.id.clone(),
+            session: Some(session),
+            revision,
+            state: None,
         })
     }
 
@@ -6440,8 +6482,8 @@ struct PersistedState {
 }
 
 impl PersistedState {
-    /// Builds the value from inner.
-    fn from_inner(inner: &StateInner) -> Self {
+    /// Builds the metadata-only value from inner.
+    fn metadata_from_inner(inner: &StateInner) -> Self {
         Self {
             codex: inner.codex.clone(),
             preferences: inner.preferences.clone(),
@@ -6453,13 +6495,20 @@ impl PersistedState {
             ignored_discovered_codex_thread_ids: inner.ignored_discovered_codex_thread_ids.clone(),
             orchestrator_instances: inner.orchestrator_instances.clone(),
             workspace_layouts: inner.workspace_layouts.clone(),
-            sessions: inner
-                .sessions
-                .iter()
-                .filter(|record| !record.hidden)
-                .map(PersistedSessionRecord::from_record)
-                .collect(),
+            sessions: Vec::new(),
         }
+    }
+
+    /// Builds the value from inner.
+    fn from_inner(inner: &StateInner) -> Self {
+        let mut persisted = Self::metadata_from_inner(inner);
+        persisted.sessions = inner
+            .sessions
+            .iter()
+            .filter(|record| !record.hidden)
+            .map(PersistedSessionRecord::from_record)
+            .collect();
+        persisted
     }
 
     /// Converts the value into inner.

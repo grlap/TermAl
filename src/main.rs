@@ -212,6 +212,7 @@ fn app_router(state: AppState) -> Router {
         )
         .route("/api/projects/pick", post(pick_project_root))
         .route("/api/sessions", post(create_session))
+        .route("/api/sessions/{id}", get(get_session))
         .route("/api/sessions/{id}/settings", post(update_session_settings))
         .route(
             "/api/sessions/{id}/model-options/refresh",

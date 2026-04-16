@@ -54,7 +54,14 @@ export type StateResponse = {
 
 export type CreateSessionResponse = {
   sessionId: string;
-  state: StateResponse;
+  session?: Session | null;
+  revision?: number;
+  state?: StateResponse | null;
+};
+
+export type SessionResponse = {
+  revision: number;
+  session: Session;
 };
 
 export type CreateProjectResponse = {
@@ -392,6 +399,12 @@ export function fetchState() {
   return request<StateResponse>("/api/state");
 }
 
+export function fetchSession(sessionId: string) {
+  return request<SessionResponse>(
+    `/api/sessions/${encodeURIComponent(sessionId)}`,
+  );
+}
+
 export async function fetchWorkspaceLayout(workspaceId: string) {
   const endpoint = `/api/workspaces/${encodeURIComponent(workspaceId)}`;
   const response = await performRequest(endpoint);
@@ -442,11 +455,14 @@ export function saveWorkspaceLayout(
     keepalive?: boolean;
   },
 ) {
-  return request<WorkspaceLayoutResponse>(`/api/workspaces/${encodeURIComponent(workspaceId)}`, {
-    method: "PUT",
-    body: JSON.stringify(payload),
-    keepalive: options?.keepalive,
-  });
+  return request<WorkspaceLayoutResponse>(
+    `/api/workspaces/${encodeURIComponent(workspaceId)}`,
+    {
+      method: "PUT",
+      body: JSON.stringify(payload),
+      keepalive: options?.keepalive,
+    },
+  );
 }
 
 /**
@@ -490,9 +506,12 @@ export function createProject(payload: CreateProjectRequest) {
 }
 
 export function deleteProject(projectId: string) {
-  return request<StateResponse>(`/api/projects/${encodeURIComponent(projectId)}`, {
-    method: "DELETE",
-  });
+  return request<StateResponse>(
+    `/api/projects/${encodeURIComponent(projectId)}`,
+    {
+      method: "DELETE",
+    },
+  );
 }
 
 export function fetchOrchestratorTemplates() {
@@ -557,21 +576,30 @@ export function createOrchestratorInstance(
 }
 
 export function pauseOrchestratorInstance(instanceId: string) {
-  return request<StateResponse>(`/api/orchestrators/${encodeURIComponent(instanceId)}/pause`, {
-    method: "POST",
-  });
+  return request<StateResponse>(
+    `/api/orchestrators/${encodeURIComponent(instanceId)}/pause`,
+    {
+      method: "POST",
+    },
+  );
 }
 
 export function resumeOrchestratorInstance(instanceId: string) {
-  return request<StateResponse>(`/api/orchestrators/${encodeURIComponent(instanceId)}/resume`, {
-    method: "POST",
-  });
+  return request<StateResponse>(
+    `/api/orchestrators/${encodeURIComponent(instanceId)}/resume`,
+    {
+      method: "POST",
+    },
+  );
 }
 
 export function stopOrchestratorInstance(instanceId: string) {
-  return request<StateResponse>(`/api/orchestrators/${encodeURIComponent(instanceId)}/stop`, {
-    method: "POST",
-  });
+  return request<StateResponse>(
+    `/api/orchestrators/${encodeURIComponent(instanceId)}/stop`,
+    {
+      method: "POST",
+    },
+  );
 }
 export function pickProjectRoot() {
   return request<PickProjectRootResponse>("/api/projects/pick", {
@@ -579,7 +607,10 @@ export function pickProjectRoot() {
   });
 }
 
-type SendMessageAttachmentInput = Pick<ImageAttachment, "fileName" | "mediaType"> & {
+type SendMessageAttachmentInput = Pick<
+  ImageAttachment,
+  "fileName" | "mediaType"
+> & {
   data: string;
 };
 
@@ -589,10 +620,13 @@ export function sendMessage(
   attachments: SendMessageAttachmentInput[],
   expandedText?: string | null,
 ) {
-  return request<StateResponse>(`/api/sessions/${encodeURIComponent(sessionId)}/messages`, {
-    method: "POST",
-    body: JSON.stringify({ text, attachments, expandedText }),
-  });
+  return request<StateResponse>(
+    `/api/sessions/${encodeURIComponent(sessionId)}/messages`,
+    {
+      method: "POST",
+      body: JSON.stringify({ text, attachments, expandedText }),
+    },
+  );
 }
 
 export function cancelQueuedPrompt(sessionId: string, promptId: string) {
@@ -604,7 +638,11 @@ export function cancelQueuedPrompt(sessionId: string, promptId: string) {
   );
 }
 
-export function submitApproval(sessionId: string, messageId: string, decision: ApprovalDecision) {
+export function submitApproval(
+  sessionId: string,
+  messageId: string,
+  decision: ApprovalDecision,
+) {
   return request<StateResponse>(
     `/api/sessions/${encodeURIComponent(sessionId)}/approvals/${encodeURIComponent(messageId)}`,
     {
@@ -670,10 +708,13 @@ export function updateSessionSettings(
     geminiApprovalMode?: GeminiApprovalMode;
   },
 ) {
-  return request<StateResponse>(`/api/sessions/${encodeURIComponent(sessionId)}/settings`, {
-    method: "POST",
-    body: JSON.stringify(payload),
-  });
+  return request<StateResponse>(
+    `/api/sessions/${encodeURIComponent(sessionId)}/settings`,
+    {
+      method: "POST",
+      body: JSON.stringify(payload),
+    },
+  );
 }
 
 export function refreshSessionModelOptions(sessionId: string) {
@@ -743,26 +784,37 @@ export function fetchInstructionSearch(sessionId: string, queryText: string) {
     sessionId,
   });
 
-  return request<InstructionSearchResponse>(`/api/instructions/search?${query.toString()}`);
+  return request<InstructionSearchResponse>(
+    `/api/instructions/search?${query.toString()}`,
+  );
 }
 
 export function renameSession(sessionId: string, name: string) {
-  return request<StateResponse>(`/api/sessions/${encodeURIComponent(sessionId)}/settings`, {
-    method: "POST",
-    body: JSON.stringify({ name }),
-  });
+  return request<StateResponse>(
+    `/api/sessions/${encodeURIComponent(sessionId)}/settings`,
+    {
+      method: "POST",
+      body: JSON.stringify({ name }),
+    },
+  );
 }
 
 export function killSession(sessionId: string) {
-  return request<StateResponse>(`/api/sessions/${encodeURIComponent(sessionId)}/kill`, {
-    method: "POST",
-  });
+  return request<StateResponse>(
+    `/api/sessions/${encodeURIComponent(sessionId)}/kill`,
+    {
+      method: "POST",
+    },
+  );
 }
 
 export function stopSession(sessionId: string) {
-  return request<StateResponse>(`/api/sessions/${encodeURIComponent(sessionId)}/stop`, {
-    method: "POST",
-  });
+  return request<StateResponse>(
+    `/api/sessions/${encodeURIComponent(sessionId)}/stop`,
+    {
+      method: "POST",
+    },
+  );
 }
 
 export function fetchReviewDocument(changeSetId: string, scope?: RequestScope) {
@@ -771,16 +823,26 @@ export function fetchReviewDocument(changeSetId: string, scope?: RequestScope) {
   );
 }
 
-export function saveReviewDocument(changeSetId: string, review: ReviewDocument, scope?: RequestScope) {
-  return request<ReviewDocumentResponse>(buildScopedPath(`/api/reviews/${encodeURIComponent(changeSetId)}`, scope), {
-    method: "PUT",
-    body: JSON.stringify(review),
-  });
+export function saveReviewDocument(
+  changeSetId: string,
+  review: ReviewDocument,
+  scope?: RequestScope,
+) {
+  return request<ReviewDocumentResponse>(
+    buildScopedPath(`/api/reviews/${encodeURIComponent(changeSetId)}`, scope),
+    {
+      method: "PUT",
+      body: JSON.stringify(review),
+    },
+  );
 }
 
 export function fetchReviewSummary(changeSetId: string, scope?: RequestScope) {
   return request<ReviewSummaryResponse>(
-    buildScopedPath(`/api/reviews/${encodeURIComponent(changeSetId)}/summary`, scope),
+    buildScopedPath(
+      `/api/reviews/${encodeURIComponent(changeSetId)}/summary`,
+      scope,
+    ),
   );
 }
 
@@ -823,7 +885,11 @@ export type SaveFileOptions = RequestScope & {
   overwrite?: boolean;
 };
 
-export function saveFile(path: string, content: string, options?: SaveFileOptions) {
+export function saveFile(
+  path: string,
+  content: string,
+  options?: SaveFileOptions,
+) {
   const sessionId = options?.sessionId?.trim();
   const projectId = options?.projectId?.trim();
   const baseHash = options?.baseHash?.trim();
@@ -834,7 +900,9 @@ export function saveFile(path: string, content: string, options?: SaveFileOption
       path,
       content,
       ...(baseHash ? { baseHash } : {}),
-      ...(options?.overwrite !== undefined ? { overwrite: options.overwrite } : {}),
+      ...(options?.overwrite !== undefined
+        ? { overwrite: options.overwrite }
+        : {}),
       ...(sessionId ? { sessionId } : {}),
       ...(projectId ? { projectId } : {}),
     }),
@@ -1019,7 +1087,9 @@ async function readTerminalCommandEventStream(
       if (done) {
         break;
       }
-      buffer = normalizeSseBuffer(buffer + decoder.decode(value, { stream: true }));
+      buffer = normalizeSseBuffer(
+        buffer + decoder.decode(value, { stream: true }),
+      );
       // Drain every complete frame first so that coalesced valid frames
       // whose accumulated text exceeds `TERMINAL_SSE_BUFFER_MAX_CHARS` are
       // not rejected before parsing. `processTerminalSseBuffer` enforces
@@ -1231,7 +1301,8 @@ function parseTerminalCommandResponse(raw: string): TerminalCommandResponse {
     // non-standard JSON extensions or a misbehaving proxy) would slip
     // through the validator and corrupt downstream exit-code checks.
     !(
-      (typeof parsed.exitCode === "number" && Number.isFinite(parsed.exitCode)) ||
+      (typeof parsed.exitCode === "number" &&
+        Number.isFinite(parsed.exitCode)) ||
       parsed.exitCode === null ||
       parsed.exitCode === undefined
     ) ||

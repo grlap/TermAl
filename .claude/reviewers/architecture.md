@@ -1,6 +1,6 @@
 # Architecture Review
 
-Focus: State management, layer boundaries, agent-agnostic patterns, design consistency.
+Focus: State management, layer boundaries, agent-agnostic patterns, design consistency, maintainability boundaries.
 ## Development-Phase Compatibility Policy
 - Legacy compatibility means supporting older persisted schema or older local/internal API shapes from previous development builds, such as obsolete orchestrator fields.
 - Do NOT flag missing schema upgrades, migrations, or backward compatibility for ~/.termal/*.json, browser localStorage state, or local/internal API contracts from previous local-only development builds.
@@ -55,10 +55,24 @@ Focus: State management, layer boundaries, agent-agnostic patterns, design consi
    - Flag new session fields that aren't persisted but should survive a restart
    - Flag persisted fields that include runtime-only data (handles, channels)
 
+8. **Source-level documentation for architectural contracts**:
+   - Flag new shared/public API surfaces that lack a short contract comment when their behavior is not obvious from the type name alone
+   - Flag complex invariants without nearby comments, especially around state persistence, SSE revision ordering, workspace tree structure, rendered Markdown editing, terminal process lifetime, remote routing, and agent protocol translation
+   - Flag large new subsystems without a module/file header explaining ownership, inputs/outputs, and the key invariants future maintainers must preserve
+   - Do not ask for comments that merely restate simple code; prefer comments that explain "why", ordering constraints, failure modes, and cross-module contracts
+
+9. **File size and module boundaries**:
+   - Flag new files that start out oversized or existing large files that grow substantially without a clear reason to keep the new behavior in the same module
+   - Treat these as architecture findings when the size increase mixes unrelated concerns, makes tests/fixtures harder to locate, or hides a reusable domain boundary
+   - Use pragmatic thresholds: React/TSX component files above ~2,000 lines, TypeScript utility modules above ~1,500 lines, Rust modules above ~3,000 lines, and test files above ~5,000 lines deserve scrutiny when a change makes them larger
+   - Suggested fixes should name the likely extraction boundary, not just say "split the file"
+   - Do not require a refactor just because a file is already large; flag only meaningful new growth, new coupling, or missed low-risk extraction points introduced by the reviewed change
+
 ## What NOT to flag
 
 - The fact that `main.rs` is a single large file (this is a known intentional tradeoff)
 - The fact that `App.tsx` is a single large file (same reason — iteration speed)
+- Exception to the large-file carveout: flag reviewed changes that materially worsen size, coupling, or documentation gaps in historical large files, or that miss an obvious low-risk extraction boundary
 - Performance micro-optimizations unless architecturally significant
 - Code style preferences (formatting, naming) — leave to linters
 

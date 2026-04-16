@@ -1,4 +1,4 @@
-import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, lazy, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { ClipboardEvent, FormEvent, KeyboardEvent, ReactNode } from "react";
 import { flushSync } from "react-dom";
 import {
@@ -40,7 +40,9 @@ function useStableEvent<TArgs extends unknown[], TResult>(
   callback: (...args: TArgs) => TResult,
 ) {
   const callbackRef = useRef(callback);
-  useEffect(() => {
+  // Some callers invoke the stable wrapper from flushSync-driven event paths,
+  // so publish the latest callback before layout-phase work can run.
+  useLayoutEffect(() => {
     callbackRef.current = callback;
   });
 
@@ -179,6 +181,24 @@ function markdownRangeMatches(
     range.end <= content.length &&
     content.slice(range.start, range.end) === expected
   );
+}
+
+function hasOverlappingMarkdownCommitRanges(
+  commits: Array<{
+    commit: RenderedMarkdownSectionCommit;
+    range: MarkdownDocumentRange;
+  }>,
+) {
+  const sortedRanges = [...commits].sort((left, right) => left.range.start - right.range.start);
+  for (let index = 1; index < sortedRanges.length; index += 1) {
+    const previous = sortedRanges[index - 1];
+    const current = sortedRanges[index];
+    if (previous && current && current.range.start < previous.range.end) {
+      return true;
+    }
+  }
+
+  return false;
 }
 
 function mapMarkdownRangeAcrossContentChange(
@@ -442,8 +462,9 @@ export function DiffPanel({
       clearRenderedMarkdownDraftSegments();
       return;
     }
-    handleRenderedMarkdownSectionCommits(commits);
-    clearRenderedMarkdownDraftSegments();
+    if (handleRenderedMarkdownSectionCommits(commits)) {
+      clearRenderedMarkdownDraftSegments();
+    }
   }
 
   function commitRenderedMarkdownSectionDraft(commit: RenderedMarkdownSectionCommit) {
@@ -1081,11 +1102,7 @@ export function DiffPanel({
     commits: RenderedMarkdownSectionCommit[],
   ) {
     if (!canEditRenderedMarkdown || !markdownPreview || latestFileRef.current.status !== "ready") {
-      return;
-    }
-
-    for (const commit of commits) {
-      setRenderedMarkdownDraftSegmentActive(commit.segment.id, false);
+      return false;
     }
 
     const sourceContent =
@@ -1102,13 +1119,21 @@ export function DiffPanel({
     const unresolvedCommitCount = resolvedCommits.filter(
       (entry) => entry.range === null,
     ).length;
-    const nextDocumentContent = resolvedCommits
-      .filter(
+    const validResolvedCommits = resolvedCommits.filter(
         (entry): entry is {
           commit: RenderedMarkdownSectionCommit;
           range: MarkdownDocumentRange;
         } => entry.range !== null,
-      )
+      );
+    const hasOverlappingRange = hasOverlappingMarkdownCommitRanges(validResolvedCommits);
+    if (unresolvedCommitCount > 0 || hasOverlappingRange) {
+      setSaveError(
+        "Rendered Markdown edit could not be applied because the document changed under that section. Review the latest diff and edit again.",
+      );
+      return false;
+    }
+
+    const nextDocumentContent = validResolvedCommits
       .sort((left, right) => right.range.start - left.range.start)
       .reduce(
         (currentContent, { commit, range }) =>
@@ -1117,18 +1142,19 @@ export function DiffPanel({
             range.start,
             range.end,
             normalizeEditedMarkdownSection(commit.nextMarkdown, commit.segment.markdown),
-          ),
+        ),
         sourceContent,
       );
-    if (unresolvedCommitCount > 0) {
-      setSaveError(
-        "Rendered Markdown edit could not be applied because the document changed under that section. Review the latest diff and edit again.",
-      );
-    }
     if (nextDocumentContent === sourceContent) {
-      return;
+      for (const commit of commits) {
+        setRenderedMarkdownDraftSegmentActive(commit.segment.id, false);
+      }
+      return true;
     }
 
+    for (const commit of commits) {
+      setRenderedMarkdownDraftSegmentActive(commit.segment.id, false);
+    }
     setMarkdownEditContentState(nextDocumentContent);
     setEditValueState(nextDocumentContent);
     setSaveError(null);
@@ -1138,6 +1164,7 @@ export function DiffPanel({
     } else {
       setExternalFileNotice(null);
     }
+    return true;
   }
 
   // Rendered Markdown draft handler.
@@ -1182,6 +1209,7 @@ export function DiffPanel({
   }
 
   async function handleApplyDiffEditsToDiskVersion() {
+    flushSync(() => commitRenderedMarkdownDrafts());
     const currentFile = latestFileRef.current;
     const currentEditValue = editValueRef.current;
     if (
@@ -2697,7 +2725,16 @@ function EditableRenderedMarkdownSection({
     }
 
     if (hasUncommittedUserEditRef.current) {
-      return;
+      const section = sectionRef.current;
+      const editedMarkdown = section
+        ? normalizeEditedMarkdownSection(
+            serializeEditableMarkdownSection(section),
+            previousSegmentMarkdownRef.current,
+          )
+        : null;
+      if (editedMarkdown !== segment.markdown) {
+        return;
+      }
     }
 
     previousSegmentMarkdownRef.current = segment.markdown;
@@ -2761,10 +2798,7 @@ function EditableRenderedMarkdownSection({
 
     const commitSegment = draftSegmentRef.current ?? segment;
     const nextMarkdown = readEditedMarkdown(section, commitSegment.markdown);
-    hasUncommittedUserEditRef.current = false;
     const sourceAtDraftStart = draftSourceContentRef.current ?? sourceContent;
-    draftSegmentRef.current = null;
-    draftSourceContentRef.current = null;
     if (nextMarkdown !== commitSegment.markdown) {
       return {
         currentSegment: segment,
@@ -2774,6 +2808,9 @@ function EditableRenderedMarkdownSection({
       };
     }
 
+    hasUncommittedUserEditRef.current = false;
+    draftSegmentRef.current = null;
+    draftSourceContentRef.current = null;
     onDraftChange(commitSegment, commitSegment.markdown);
     return null;
   }, [canEdit, onDraftChange, segment, sourceContent]);
@@ -2809,7 +2846,8 @@ function EditableRenderedMarkdownSection({
     }
 
     const html = event.clipboardData.getData("text/html");
-    if (!html || !html.includes("data-markdown-serialization")) {
+    const fallbackText = event.clipboardData.getData("text/plain");
+    if (!html && !fallbackText) {
       return;
     }
 
@@ -2817,7 +2855,7 @@ function EditableRenderedMarkdownSection({
     insertSanitizedMarkdownPaste(
       event.currentTarget,
       html,
-      event.clipboardData.getData("text/plain"),
+      fallbackText,
     );
     const baseSegment = draftSegmentRef.current ?? segment;
     const nextMarkdown = readEditedMarkdown(event.currentTarget, baseSegment.markdown);
@@ -3152,23 +3190,142 @@ function insertSanitizedMarkdownPaste(
   }
 }
 
+const PASTED_MARKDOWN_HTML_NAMESPACE = "http://www.w3.org/1999/xhtml";
+
+const PASTED_MARKDOWN_ALLOWED_ELEMENTS = new Set([
+  "a",
+  "b",
+  "blockquote",
+  "br",
+  "code",
+  "del",
+  "div",
+  "em",
+  "h1",
+  "h2",
+  "h3",
+  "h4",
+  "h5",
+  "h6",
+  "hr",
+  "i",
+  "li",
+  "ol",
+  "p",
+  "pre",
+  "s",
+  "span",
+  "strong",
+  "table",
+  "tbody",
+  "td",
+  "tfoot",
+  "th",
+  "thead",
+  "tr",
+  "ul",
+]);
+
+const PASTED_MARKDOWN_DROPPED_ELEMENTS = new Set([
+  "area",
+  "audio",
+  "base",
+  "button",
+  "canvas",
+  "embed",
+  "form",
+  "iframe",
+  "img",
+  "input",
+  "link",
+  "map",
+  "math",
+  "meta",
+  "object",
+  "option",
+  "picture",
+  "script",
+  "select",
+  "source",
+  "style",
+  "svg",
+  "textarea",
+  "video",
+]);
+
 function sanitizePastedMarkdownFragment(root: ParentNode) {
+  const rootNode = root as Node;
   const elements =
     root instanceof Element
-      ? [root, ...Array.from(root.querySelectorAll<HTMLElement>("*"))]
-      : Array.from(root.querySelectorAll<HTMLElement>("*"));
+      ? [root, ...Array.from(root.querySelectorAll<Element>("*"))]
+      : Array.from(root.querySelectorAll<Element>("*"));
 
   for (const element of elements) {
+    if (!rootNode.contains(element)) {
+      continue;
+    }
+
+    const tagName = element.tagName.toLowerCase();
+    if (
+      element.namespaceURI !== PASTED_MARKDOWN_HTML_NAMESPACE ||
+      PASTED_MARKDOWN_DROPPED_ELEMENTS.has(tagName)
+    ) {
+      element.remove();
+      continue;
+    }
+
+    if (!PASTED_MARKDOWN_ALLOWED_ELEMENTS.has(tagName)) {
+      element.replaceWith(...Array.from(element.childNodes));
+      continue;
+    }
+
     for (const attributeName of element.getAttributeNames()) {
-      if (
-        attributeName === "contenteditable" ||
-        attributeName === "aria-hidden" ||
-        attributeName.startsWith("data-markdown-")
-      ) {
+      const normalizedAttributeName = attributeName.toLowerCase();
+      if (tagName === "a" && normalizedAttributeName === "href") {
+        const href = element.getAttribute(attributeName);
+        if (href && isSafePastedMarkdownHref(href)) {
+          continue;
+        }
+      } else if (tagName === "code" && normalizedAttributeName === "class") {
+        const languageClass = normalizePastedMarkdownCodeClass(
+          element.getAttribute(attributeName) ?? "",
+        );
+        if (languageClass) {
+          element.setAttribute("class", languageClass);
+          continue;
+        }
+      }
+
+      if (element.hasAttribute(attributeName)) {
         element.removeAttribute(attributeName);
       }
     }
   }
+}
+
+function normalizePastedMarkdownCodeClass(className: string) {
+  const languageMatch = className.match(/(?:^|\s)language-([\w-]+)(?:\s|$)/);
+  return languageMatch ? `language-${languageMatch[1]}` : "";
+}
+
+function isSafePastedMarkdownHref(href: string) {
+  const trimmed = href.trim();
+  if (!trimmed) {
+    return false;
+  }
+
+  if (/^[a-zA-Z]:[\\/]/.test(trimmed)) {
+    return true;
+  }
+
+  const normalized = trimmed.replace(/[\u0000-\u001F\u007F\s]+/g, "");
+  const colonIndex = normalized.indexOf(":");
+  if (colonIndex === -1) {
+    return true;
+  }
+
+  const protocol = normalized.slice(0, colonIndex).toLowerCase();
+  return protocol === "http" || protocol === "https" || protocol === "mailto";
 }
 
 function serializeEditableMarkdownSection(section: HTMLElement) {

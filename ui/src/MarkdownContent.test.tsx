@@ -3,6 +3,11 @@ import mermaid from "mermaid";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { MarkdownContent, MessageCard, areMarkdownLineMarkersEqual } from "./message-cards";
+import type {
+  CodexAppRequestMessage,
+  McpElicitationRequestMessage,
+  UserInputRequestMessage,
+} from "./types";
 
 vi.mock("mermaid", () => ({
   default: {
@@ -164,7 +169,7 @@ describe("MarkdownContent Mermaid diagrams", () => {
       />,
     );
 
-    expect(await screen.findByTestId("mermaid-svg")).toBeInTheDocument();
+    expect(await screen.findByTestId("mermaid-frame")).toBeInTheDocument();
     expect(mermaidInitializeMock).toHaveBeenNthCalledWith(1, {
       darkMode: true,
       flowchart: {
@@ -211,7 +216,7 @@ describe("MarkdownContent Mermaid diagrams", () => {
       />,
     );
 
-    expect(await screen.findByTestId("mermaid-svg")).toBeInTheDocument();
+    expect(await screen.findByTestId("mermaid-frame")).toBeInTheDocument();
     expect(mermaidInitializeMock).toHaveBeenNthCalledWith(1, expect.objectContaining({
       darkMode: false,
       theme: "default",
@@ -230,11 +235,29 @@ describe("MarkdownContent Mermaid diagrams", () => {
       />,
     );
 
-    expect(await screen.findByTestId("mermaid-svg")).toBeInTheDocument();
+    expect(await screen.findByTestId("mermaid-frame")).toBeInTheDocument();
     expect(mermaidRenderMock).toHaveBeenCalledWith(
       expect.stringMatching(/^termal-mermaid-\d+$/),
       "flowchart TD\n  Start --> Detect{Contains Mermaid fence?}",
     );
+  });
+
+  it("isolates Mermaid SVG output in a sandboxed frame", async () => {
+    mermaidRenderMock.mockResolvedValueOnce({
+      diagramType: "flowchart",
+      svg: '<svg data-testid="mermaid-svg" onload="alert(1)"><script>alert(2)</script><text>diagram</text></svg>',
+    });
+
+    render(
+      <MarkdownContent
+        markdown={["```mermaid", "flowchart TD", "  A --> B", "```"].join("\n")}
+      />,
+    );
+
+    const frame = await screen.findByTestId("mermaid-frame");
+    expect(screen.queryByTestId("mermaid-svg")).not.toBeInTheDocument();
+    expect(frame).toHaveAttribute("sandbox", "");
+    expect(frame).toHaveAttribute("srcdoc", expect.stringContaining("onload"));
   });
 
   it("keeps Mermaid fenced blocks as source when diagram rendering is disabled", () => {
@@ -330,6 +353,161 @@ describe("MessageCard memoization", () => {
 
     expect(firstHandler).not.toHaveBeenCalled();
     expect(secondHandler).toHaveBeenCalledWith("approval-1", "accepted");
+  });
+
+  it("uses the latest user-input handler after handler-only rerenders", () => {
+    const firstHandler = vi.fn();
+    const secondHandler = vi.fn();
+    const noop = () => {};
+    const message: UserInputRequestMessage = {
+      author: "assistant",
+      detail: "Codex requested additional input.",
+      id: "user-input-1",
+      questions: [
+        {
+          header: "Ticket",
+          id: "ticket",
+          question: "Which ticket should I use?",
+        },
+      ],
+      state: "pending",
+      timestamp: "2026-04-15T00:00:00.000Z",
+      title: "Codex needs input",
+      type: "userInputRequest",
+    };
+    const { rerender } = render(
+      <MessageCard
+        message={message}
+        onApprovalDecision={noop}
+        onUserInputSubmit={firstHandler}
+      />,
+    );
+
+    rerender(
+      <MessageCard
+        message={message}
+        onApprovalDecision={noop}
+        onUserInputSubmit={secondHandler}
+      />,
+    );
+
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "TERM-42" } });
+    fireEvent.click(screen.getByRole("button", { name: "Submit answers" }));
+
+    expect(firstHandler).not.toHaveBeenCalled();
+    expect(secondHandler).toHaveBeenCalledWith("user-input-1", {
+      ticket: ["TERM-42"],
+    });
+  });
+
+  it("uses the latest MCP elicitation handler after handler-only rerenders", () => {
+    const firstHandler = vi.fn();
+    const secondHandler = vi.fn();
+    const noop = () => {};
+    const message: McpElicitationRequestMessage = {
+      author: "assistant",
+      detail: "deployment-helper requested structured input.",
+      id: "mcp-elicitation-1",
+      request: {
+        message: "Confirm the deployment settings.",
+        mode: "form",
+        requestedSchema: {
+          properties: {
+            environment: {
+              oneOf: [
+                { const: "production", title: "Production" },
+                { const: "staging", title: "Staging" },
+              ],
+              title: "Environment",
+              type: "string",
+            },
+          },
+          required: ["environment"],
+          type: "object",
+        },
+        serverName: "deployment-helper",
+        threadId: "thread-1",
+        turnId: "turn-1",
+      },
+      state: "pending",
+      timestamp: "2026-04-15T00:00:00.000Z",
+      title: "Codex needs MCP input",
+      type: "mcpElicitationRequest",
+    };
+    const { rerender } = render(
+      <MessageCard
+        message={message}
+        onApprovalDecision={noop}
+        onMcpElicitationSubmit={firstHandler}
+        onUserInputSubmit={noop}
+      />,
+    );
+
+    rerender(
+      <MessageCard
+        message={message}
+        onApprovalDecision={noop}
+        onMcpElicitationSubmit={secondHandler}
+        onUserInputSubmit={noop}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("radio", { name: "Production" }));
+    fireEvent.click(screen.getByRole("button", { name: "Accept" }));
+
+    expect(firstHandler).not.toHaveBeenCalled();
+    expect(secondHandler).toHaveBeenCalledWith("mcp-elicitation-1", "accept", {
+      environment: "production",
+    });
+  });
+
+  it("uses the latest Codex app-request handler after handler-only rerenders", () => {
+    const firstHandler = vi.fn();
+    const secondHandler = vi.fn();
+    const noop = () => {};
+    const message: CodexAppRequestMessage = {
+      author: "assistant",
+      detail: "Codex requested a result for `search_workspace`.",
+      id: "codex-request-1",
+      method: "item/tool/call",
+      params: {
+        arguments: {
+          pattern: "Codex",
+        },
+        toolName: "search_workspace",
+      },
+      state: "pending",
+      timestamp: "2026-04-15T00:00:00.000Z",
+      title: "Codex needs a tool result",
+      type: "codexAppRequest",
+    };
+    const { rerender } = render(
+      <MessageCard
+        message={message}
+        onApprovalDecision={noop}
+        onCodexAppRequestSubmit={firstHandler}
+        onUserInputSubmit={noop}
+      />,
+    );
+
+    rerender(
+      <MessageCard
+        message={message}
+        onApprovalDecision={noop}
+        onCodexAppRequestSubmit={secondHandler}
+        onUserInputSubmit={noop}
+      />,
+    );
+
+    fireEvent.change(screen.getByRole("textbox"), {
+      target: { value: '{\n  "matches": ["docs/bugs.md"]\n}' },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Submit JSON result" }));
+
+    expect(firstHandler).not.toHaveBeenCalled();
+    expect(secondHandler).toHaveBeenCalledWith("codex-request-1", {
+      matches: ["docs/bugs.md"],
+    });
   });
 });
 

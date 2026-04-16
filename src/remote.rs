@@ -1360,22 +1360,28 @@ impl AppState {
         self.remote_registry
             .start_event_bridge(self.clone(), &binding.remote);
         let remote_session = remote_response
-            .state
-            .sessions
-            .iter()
-            .find(|session| session.id == remote_response.session_id)
-            .cloned()
-            .ok_or_else(|| {
-                ApiError::bad_gateway("remote session was not returned by remote state")
-            })?;
-        let (state, local_session_id) = {
+            .session
+            .clone()
+            .or_else(|| {
+                remote_response.state.as_ref().and_then(|state| {
+                    state
+                        .sessions
+                        .iter()
+                        .find(|session| session.id == remote_response.session_id)
+                        .cloned()
+                })
+            })
+            .ok_or_else(|| ApiError::bad_gateway("remote session was not returned"))?;
+        let (revision, local_session_id, local_session) = {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
-            let applied_remote_revision = apply_remote_state_if_newer_locked(
-                &mut inner,
-                &binding.remote.id,
-                &remote_response.state,
-                Some(remote_response.session_id.as_str()),
-            );
+            let applied_remote_revision = remote_response.state.as_ref().is_some_and(|state| {
+                apply_remote_state_if_newer_locked(
+                    &mut inner,
+                    &binding.remote.id,
+                    state,
+                    Some(remote_response.session_id.as_str()),
+                )
+            });
             let (local_session_id, changed) = ensure_remote_proxy_session_record(
                 &mut inner,
                 &binding.remote.id,
@@ -1386,20 +1392,46 @@ impl AppState {
             if applied_remote_revision {
                 inner.note_remote_applied_revision(
                     &binding.remote.id,
-                    remote_response.state.revision,
+                    remote_response
+                        .state
+                        .as_ref()
+                        .map(|state| state.revision)
+                        .unwrap_or(remote_response.revision),
                 );
             }
-            if applied_remote_revision || changed {
-                self.commit_locked(&mut inner).map_err(|err| {
+            let local_record = inner
+                .find_session_index(&local_session_id)
+                .and_then(|index| inner.sessions.get(index))
+                .cloned()
+                .ok_or_else(|| ApiError::not_found("session not found"))?;
+            let local_session = local_record.session.clone();
+            let revision = if applied_remote_revision {
+                self.bump_revision_and_persist_locked(&mut inner).map_err(|err| {
                     ApiError::internal(format!("failed to persist remote session proxy: {err:#}"))
-                })?;
-            }
-            (self.snapshot_from_inner(&inner), local_session_id)
+                })?
+            } else if changed {
+                self.commit_session_created_locked(&mut inner, &local_record)
+                    .map_err(|err| {
+                        ApiError::internal(format!(
+                            "failed to persist remote session proxy: {err:#}"
+                        ))
+                    })?
+            } else {
+                inner.revision
+            };
+            (revision, local_session_id, local_session)
         };
+        self.publish_delta(&DeltaEvent::SessionCreated {
+            revision,
+            session_id: local_session.id.clone(),
+            session: local_session.clone(),
+        });
 
         Ok(CreateSessionResponse {
             session_id: local_session_id,
-            state,
+            session: Some(local_session),
+            revision,
+            state: None,
         })
     }
 
@@ -1518,11 +1550,17 @@ impl AppState {
             None,
         )?;
         let remote_session = remote_response
-            .state
-            .sessions
-            .iter()
-            .find(|session| session.id == remote_response.session_id)
-            .cloned()
+            .session
+            .clone()
+            .or_else(|| {
+                remote_response.state.as_ref().and_then(|state| {
+                    state
+                        .sessions
+                        .iter()
+                        .find(|session| session.id == remote_response.session_id)
+                        .cloned()
+                })
+            })
             .ok_or_else(|| ApiError::bad_gateway("remote forked session was not returned"))?;
         let local_project_id = {
             let inner = self.inner.lock().expect("state mutex poisoned");
@@ -1531,14 +1569,16 @@ impl AppState {
                 .ok_or_else(|| ApiError::not_found("session not found"))?;
             inner.sessions[index].session.project_id.clone()
         };
-        let (state, local_session_id) = {
+        let (revision, local_session_id, local_session) = {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
-            let applied_remote_revision = apply_remote_state_if_newer_locked(
-                &mut inner,
-                &target.remote.id,
-                &remote_response.state,
-                Some(&target.remote_session_id),
-            );
+            let applied_remote_revision = remote_response.state.as_ref().is_some_and(|state| {
+                apply_remote_state_if_newer_locked(
+                    &mut inner,
+                    &target.remote.id,
+                    state,
+                    Some(&target.remote_session_id),
+                )
+            });
             let (local_session_id, changed) = ensure_remote_proxy_session_record(
                 &mut inner,
                 &target.remote.id,
@@ -1549,22 +1589,48 @@ impl AppState {
             if applied_remote_revision {
                 inner.note_remote_applied_revision(
                     &target.remote.id,
-                    remote_response.state.revision,
+                    remote_response
+                        .state
+                        .as_ref()
+                        .map(|state| state.revision)
+                        .unwrap_or(remote_response.revision),
                 );
             }
-            if applied_remote_revision || changed {
-                self.commit_locked(&mut inner).map_err(|err| {
+            let local_record = inner
+                .find_session_index(&local_session_id)
+                .and_then(|index| inner.sessions.get(index))
+                .cloned()
+                .ok_or_else(|| ApiError::not_found("session not found"))?;
+            let local_session = local_record.session.clone();
+            let revision = if applied_remote_revision {
+                self.bump_revision_and_persist_locked(&mut inner).map_err(|err| {
                     ApiError::internal(format!(
                         "failed to persist remote forked session proxy: {err:#}"
                     ))
-                })?;
-            }
-            (self.snapshot_from_inner(&inner), local_session_id)
+                })?
+            } else if changed {
+                self.commit_session_created_locked(&mut inner, &local_record)
+                    .map_err(|err| {
+                        ApiError::internal(format!(
+                            "failed to persist remote forked session proxy: {err:#}"
+                        ))
+                    })?
+            } else {
+                inner.revision
+            };
+            (revision, local_session_id, local_session)
         };
+        self.publish_delta(&DeltaEvent::SessionCreated {
+            revision,
+            session_id: local_session.id.clone(),
+            session: local_session.clone(),
+        });
 
         Ok(CreateSessionResponse {
             session_id: local_session_id,
-            state,
+            session: Some(local_session),
+            revision,
+            state: None,
         })
     }
 
@@ -2067,6 +2133,57 @@ impl AppState {
     ) -> Result<(), anyhow::Error> {
         let remote_revision = delta_event_revision(&event);
         match event {
+            DeltaEvent::SessionCreated {
+                session,
+                session_id,
+                ..
+            } => {
+                if session.id != session_id {
+                    return Err(anyhow!(
+                        "remote created session payload id `{}` did not match event id `{session_id}`",
+                        session.id
+                    ));
+                }
+                let (local_session, revision) = {
+                    let mut inner = self.inner.lock().expect("state mutex poisoned");
+                    if inner.should_skip_remote_applied_delta_revision(remote_id, remote_revision) {
+                        return Ok(());
+                    }
+                    let local_project_ids_by_remote_project_id =
+                        remote_project_id_map(&inner, remote_id);
+                    let local_project_id = local_project_id_for_remote_project(
+                        &local_project_ids_by_remote_project_id,
+                        session.project_id.as_deref(),
+                    );
+                    let (local_session_id, changed) = ensure_remote_proxy_session_record(
+                        &mut inner,
+                        remote_id,
+                        &session,
+                        local_project_id,
+                        true,
+                    );
+                    let local_record = inner
+                        .find_session_index(&local_session_id)
+                        .and_then(|index| inner.sessions.get(index))
+                        .cloned()
+                        .ok_or_else(|| {
+                            anyhow!("local proxy session `{local_session_id}` not found")
+                        })?;
+                    let local_session = local_record.session.clone();
+                    let revision = if changed {
+                        self.commit_session_created_locked(&mut inner, &local_record)?
+                    } else {
+                        inner.revision
+                    };
+                    inner.note_remote_applied_revision(remote_id, remote_revision);
+                    (local_session, revision)
+                };
+                self.publish_delta(&DeltaEvent::SessionCreated {
+                    revision,
+                    session_id: local_session.id.clone(),
+                    session: local_session,
+                });
+            }
             DeltaEvent::MessageCreated {
                 message,
                 message_id,
@@ -2437,7 +2554,8 @@ impl AppState {
 /// Returns the originating remote revision for a delta event.
 fn delta_event_revision(event: &DeltaEvent) -> u64 {
     match event {
-        DeltaEvent::MessageCreated { revision, .. }
+        DeltaEvent::SessionCreated { revision, .. }
+        | DeltaEvent::MessageCreated { revision, .. }
         | DeltaEvent::TextDelta { revision, .. }
         | DeltaEvent::TextReplace { revision, .. }
         | DeltaEvent::CommandUpdate { revision, .. }

@@ -266,11 +266,7 @@ export function StructuredDiffView({
   }
 
   return (
-    <div
-      className="diff-editor-shell structured-diff-shell"
-      data-testid="structured-diff-view"
-      ref={scrollRef}
-    >
+    <div className="diff-editor-shell structured-diff-shell">
       <div className="structured-diff">
         <div className="structured-diff-column-headings" aria-hidden="true">
           <div className="structured-diff-column-heading">
@@ -283,7 +279,11 @@ export function StructuredDiffView({
           </div>
         </div>
 
-        <div className="structured-diff-body">
+        <div
+          className="structured-diff-body"
+          data-testid="structured-diff-view"
+          ref={scrollRef}
+        >
           {renderAnchorSection({
             anchor: { kind: "changeSet" },
             buttonLabel: "Comment on change set",

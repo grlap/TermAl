@@ -17,23 +17,316 @@ fn resolve_persistence_path(default_workdir: &str) -> PathBuf {
     resolve_termal_data_dir(default_workdir).join("sessions.json")
 }
 
+#[cfg(not(test))]
+const SQLITE_SCHEMA_VERSION: &str = "1";
+#[cfg(not(test))]
+const SQLITE_LEGACY_STATE_KEY: &str = "persistedState";
+#[cfg(not(test))]
+const SQLITE_METADATA_KEY: &str = "metadataState";
+#[cfg(not(test))]
+const SQLITE_BUSY_TIMEOUT: Duration = Duration::from_secs(5);
+
+#[cfg(not(test))]
+fn sqlite_persistence_path_for_json_path(path: &FsPath) -> PathBuf {
+    path.with_file_name("termal.sqlite")
+}
+
+#[cfg(not(test))]
+fn open_sqlite_state_connection(path: &FsPath) -> Result<rusqlite::Connection> {
+    let connection = rusqlite::Connection::open(path)
+        .with_context(|| format!("failed to open `{}`", path.display()))?;
+    connection
+        .busy_timeout(SQLITE_BUSY_TIMEOUT)
+        .with_context(|| format!("failed to set SQLite busy timeout for `{}`", path.display()))?;
+    // WAL lets readers coexist with the background persistence writer. NORMAL
+    // sync is the common local-app tradeoff: durable enough for TermAl state,
+    // with much lower fsync cost than FULL on every small create-session write.
+    connection
+        .execute_batch(
+            "
+            PRAGMA journal_mode = WAL;
+            PRAGMA synchronous = NORMAL;
+            ",
+        )
+        .with_context(|| format!("failed to configure SQLite pragmas for `{}`", path.display()))?;
+    Ok(connection)
+}
+
+fn read_json_persisted_state(path: &FsPath) -> Result<PersistedState> {
+    let raw = fs::read(path).with_context(|| format!("failed to read `{}`", path.display()))?;
+    let encoded: Value = serde_json::from_slice(&raw)
+        .with_context(|| format!("failed to parse `{}`", path.display()))?;
+    serde_json::from_value(encoded)
+        .with_context(|| format!("failed to deserialize state from `{}`", path.display()))
+}
+
 /// Loads state.
+#[cfg(test)]
 fn load_state(path: &FsPath) -> Result<Option<StateInner>> {
     if !path.exists() {
         return Ok(None);
     }
 
-    let raw = fs::read(path).with_context(|| format!("failed to read `{}`", path.display()))?;
-    let encoded: Value = serde_json::from_slice(&raw)
-        .with_context(|| format!("failed to parse `{}`", path.display()))?;
-    let persisted: PersistedState = serde_json::from_value(encoded)
-        .with_context(|| format!("failed to deserialize state from `{}`", path.display()))?;
+    let persisted = read_json_persisted_state(path)?;
     Ok(Some(persisted.into_inner().with_context(|| {
         format!("failed to validate state from `{}`", path.display())
     })?))
 }
 
+/// Loads state from SQLite in production, importing the legacy JSON file once.
+#[cfg(not(test))]
+fn load_state(path: &FsPath) -> Result<Option<StateInner>> {
+    let sqlite_path = sqlite_persistence_path_for_json_path(path);
+    if sqlite_path.exists() {
+        return load_state_from_sqlite(&sqlite_path);
+    }
+    if !path.exists() {
+        return Ok(None);
+    }
+
+    let persisted = read_json_persisted_state(path)?;
+    let inner = persisted.clone().into_inner().with_context(|| {
+        format!("failed to validate state from `{}`", path.display())
+    })?;
+    persist_persisted_state_to_sqlite(&sqlite_path, &persisted)?;
+
+    let backup_path = imported_json_backup_path(path)?;
+    if let Err(err) = fs::rename(path, &backup_path) {
+        if let Err(cleanup_err) = fs::remove_file(&sqlite_path) {
+            eprintln!(
+                "[termal] failed to remove incomplete SQLite import `{}` after rename failure: {cleanup_err}",
+                sqlite_path.display()
+            );
+        }
+        return Err(err).with_context(|| {
+            format!(
+                "failed to rename imported state `{}` to `{}`",
+                path.display(),
+                backup_path.display()
+            )
+        });
+    }
+
+    eprintln!(
+        "[termal] imported `{}` into `{}`; legacy backup renamed to `{}`",
+        path.display(),
+        sqlite_path.display(),
+        backup_path.display()
+    );
+    Ok(Some(inner))
+}
+
+#[cfg(not(test))]
+fn imported_json_backup_path(path: &FsPath) -> Result<PathBuf> {
+    let parent = path.parent().unwrap_or_else(|| FsPath::new(""));
+    let stem = path
+        .file_stem()
+        .and_then(|value| value.to_str())
+        .filter(|value| !value.is_empty())
+        .unwrap_or("sessions");
+    let extension = path
+        .extension()
+        .and_then(|value| value.to_str())
+        .filter(|value| !value.is_empty())
+        .unwrap_or("json");
+    let timestamp = Local::now().format("%Y-%m-%d-%H%M%S");
+
+    for attempt in 0..1000 {
+        let suffix = if attempt == 0 {
+            String::new()
+        } else {
+            format!("-{attempt}")
+        };
+        let candidate = parent.join(format!(
+            "{stem}.imported-{timestamp}{suffix}.{extension}"
+        ));
+        if !candidate.exists() {
+            return Ok(candidate);
+        }
+    }
+
+    Err(anyhow!(
+        "failed to choose an unused imported backup path for `{}`",
+        path.display()
+    ))
+}
+
+#[cfg(not(test))]
+fn ensure_sqlite_state_schema(connection: &rusqlite::Connection) -> Result<()> {
+    connection
+        .execute_batch(
+            "
+            CREATE TABLE IF NOT EXISTS meta (
+              key TEXT PRIMARY KEY,
+              value TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS app_state (
+              key TEXT PRIMARY KEY,
+              value_json TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS sessions (
+              id TEXT PRIMARY KEY,
+              value_json TEXT NOT NULL
+            );
+            ",
+        )
+        .context("failed to initialize SQLite state schema")?;
+    connection
+        .execute(
+            "INSERT INTO meta(key, value) VALUES('schema_version', ?1)
+             ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            rusqlite::params![SQLITE_SCHEMA_VERSION],
+        )
+        .context("failed to record SQLite state schema version")?;
+    Ok(())
+}
+
+#[cfg(not(test))]
+fn load_state_from_sqlite(path: &FsPath) -> Result<Option<StateInner>> {
+    let connection = open_sqlite_state_connection(path)?;
+    ensure_sqlite_state_schema(&connection)?;
+    let session_records = load_session_records_from_sqlite(&connection, path)?;
+    let Some(encoded) = sqlite_app_state_value(&connection, SQLITE_METADATA_KEY, path)?
+        .or(sqlite_app_state_value(
+            &connection,
+            SQLITE_LEGACY_STATE_KEY,
+            path,
+        )?)
+    else {
+        return Ok(None);
+    };
+    let mut persisted: PersistedState = serde_json::from_str(&encoded)
+        .with_context(|| format!("failed to parse persisted state from `{}`", path.display()))?;
+    if !session_records.is_empty() {
+        persisted.sessions = session_records;
+    }
+    Ok(Some(persisted.into_inner().with_context(|| {
+        format!("failed to validate state from `{}`", path.display())
+    })?))
+}
+
+#[cfg(not(test))]
+fn sqlite_app_state_value(
+    connection: &rusqlite::Connection,
+    key: &str,
+    path: &FsPath,
+) -> Result<Option<String>> {
+    match connection.query_row(
+        "SELECT value_json FROM app_state WHERE key = ?1",
+        rusqlite::params![key],
+        |row| row.get::<_, String>(0),
+    ) {
+        Ok(encoded) => Ok(Some(encoded)),
+        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+        Err(err) => Err(err)
+            .with_context(|| format!("failed to read persisted state from `{}`", path.display())),
+    }
+}
+
+#[cfg(not(test))]
+fn load_session_records_from_sqlite(
+    connection: &rusqlite::Connection,
+    path: &FsPath,
+) -> Result<Vec<PersistedSessionRecord>> {
+    let mut statement = connection
+        .prepare("SELECT value_json FROM sessions ORDER BY rowid")
+        .with_context(|| format!("failed to prepare session load from `{}`", path.display()))?;
+    let rows = statement
+        .query_map([], |row| row.get::<_, String>(0))
+        .with_context(|| format!("failed to query persisted sessions from `{}`", path.display()))?;
+    let mut records = Vec::new();
+    for row in rows {
+        let encoded =
+            row.with_context(|| format!("failed to read session row from `{}`", path.display()))?;
+        let record = serde_json::from_str(&encoded).with_context(|| {
+            format!(
+                "failed to parse persisted session row from `{}`",
+                path.display()
+            )
+        })?;
+        records.push(record);
+    }
+    Ok(records)
+}
+
+#[cfg(not(test))]
+fn persist_persisted_state_to_sqlite(path: &FsPath, persisted: &PersistedState) -> Result<()> {
+    let mut metadata = persisted.clone();
+    metadata.sessions.clear();
+    persist_state_parts_to_sqlite(path, &metadata, &persisted.sessions, true)
+}
+
+#[cfg(not(test))]
+fn persist_created_session(path: &FsPath, inner: &StateInner, record: &SessionRecord) -> Result<()> {
+    let metadata = PersistedState::metadata_from_inner(inner);
+    let session = PersistedSessionRecord::from_record(record);
+    persist_state_parts_to_sqlite(
+        &sqlite_persistence_path_for_json_path(path),
+        &metadata,
+        std::slice::from_ref(&session),
+        false,
+    )
+}
+
+#[cfg(test)]
+fn persist_created_session(path: &FsPath, inner: &StateInner, _record: &SessionRecord) -> Result<()> {
+    let persisted = PersistedState::from_inner(inner);
+    persist_state_from_persisted(path, &persisted)
+}
+
+#[cfg(not(test))]
+fn persist_state_parts_to_sqlite(
+    path: &FsPath,
+    metadata: &PersistedState,
+    sessions: &[PersistedSessionRecord],
+    replace_sessions: bool,
+) -> Result<()> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)
+            .with_context(|| format!("failed to create `{}`", parent.display()))?;
+    }
+
+    let metadata_json =
+        serde_json::to_string(metadata).context("failed to serialize persisted state metadata")?;
+    let mut connection = open_sqlite_state_connection(path)?;
+    ensure_sqlite_state_schema(&connection)?;
+    let tx = connection
+        .transaction()
+        .with_context(|| format!("failed to start SQLite transaction for `{}`", path.display()))?;
+    tx.execute(
+        "INSERT INTO app_state(key, value_json) VALUES(?1, ?2)
+         ON CONFLICT(key) DO UPDATE SET value_json = excluded.value_json",
+        rusqlite::params![SQLITE_METADATA_KEY, metadata_json],
+    )
+    .with_context(|| format!("failed to write state metadata to `{}`", path.display()))?;
+    if replace_sessions {
+        tx.execute("DELETE FROM sessions", [])
+            .with_context(|| format!("failed to replace sessions in `{}`", path.display()))?;
+    }
+    for session in sessions {
+        let session_json =
+            serde_json::to_string(session).context("failed to serialize persisted session")?;
+        tx.execute(
+            "INSERT INTO sessions(id, value_json) VALUES(?1, ?2)
+             ON CONFLICT(id) DO UPDATE SET value_json = excluded.value_json",
+            rusqlite::params![&session.session.id, session_json],
+        )
+        .with_context(|| format!("failed to write persisted session to `{}`", path.display()))?;
+    }
+    tx.commit()
+        .with_context(|| format!("failed to commit persisted state to `{}`", path.display()))?;
+    Ok(())
+}
+
 /// Persists state from a pre-built `PersistedState` snapshot.
+#[cfg(not(test))]
+fn persist_state_from_persisted(path: &FsPath, persisted: &PersistedState) -> Result<()> {
+    persist_persisted_state_to_sqlite(&sqlite_persistence_path_for_json_path(path), persisted)
+}
+
+#[cfg(test)]
 fn persist_state_from_persisted(path: &FsPath, persisted: &PersistedState) -> Result<()> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)
@@ -140,6 +433,15 @@ async fn health() -> Json<HealthResponse> {
 /// Gets state.
 async fn get_state(State(state): State<AppState>) -> Result<Json<StateResponse>, ApiError> {
     let response = run_blocking_api(move || Ok(state.snapshot())).await?;
+    Ok(Json(response))
+}
+
+/// Gets one full session.
+async fn get_session(
+    State(state): State<AppState>,
+    AxumPath(session_id): AxumPath<String>,
+) -> Result<Json<SessionResponse>, ApiError> {
+    let response = run_blocking_api(move || state.get_session(&session_id)).await?;
     Ok(Json(response))
 }
 
@@ -4195,6 +4497,9 @@ fn git_diff_document_enrichment_note(error: &ApiError) -> Option<String> {
             "Rendered Markdown is unavailable due to a read error."
                 .to_owned(),
         ),
+        None if matches!(error.status, StatusCode::BAD_REQUEST | StatusCode::NOT_FOUND) => {
+            Some("Rendered Markdown is unavailable.".to_owned())
+        }
         None => None,
     }
 }
@@ -7017,6 +7322,14 @@ struct StateResponse {
     sessions: Vec<Session>,
 }
 
+/// Represents one full session response payload.
+#[derive(Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SessionResponse {
+    revision: u64,
+    session: Session,
+}
+
 /// Defines the workspace control panel side variants.
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -7103,7 +7416,12 @@ struct PutWorkspaceLayoutRequest {
 #[serde(rename_all = "camelCase")]
 struct CreateSessionResponse {
     session_id: String,
-    state: StateResponse,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    session: Option<Session>,
+    #[serde(default)]
+    revision: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    state: Option<StateResponse>,
 }
 
 /// Represents the create project response payload.
@@ -7596,6 +7914,12 @@ fn find_latest_project_pending_nonapproval_interaction<'a>(
 #[derive(Deserialize, Serialize)]
 #[serde(tag = "type", rename_all = "camelCase")]
 enum DeltaEvent {
+    SessionCreated {
+        revision: u64,
+        #[serde(rename = "sessionId")]
+        session_id: String,
+        session: Session,
+    },
     MessageCreated {
         revision: u64,
         #[serde(rename = "sessionId")]

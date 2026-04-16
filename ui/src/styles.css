@@ -7060,6 +7060,14 @@ textarea {
   gap: 0.6rem;
 }
 
+.mermaid-diagram-frame {
+  display: block;
+  max-width: none;
+  min-width: 100%;
+  border: 0;
+  background: transparent;
+}
+
 .mermaid-diagram-svg {
   min-width: max-content;
 }

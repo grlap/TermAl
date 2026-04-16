@@ -38,6 +38,7 @@ import {
   fetchFile,
   fetchGitDiff,
   fetchGitStatus,
+  fetchSession,
   fetchState,
   fetchWorkspaceLayout,
   fetchWorkspaceLayouts,
@@ -59,6 +60,7 @@ import {
   submitCodexAppRequest,
   submitMcpElicitation,
   submitUserInput,
+  type CreateSessionResponse,
   type FileResponse,
   type GitDiffRequestPayload,
   type GitDiffSection,
@@ -675,13 +677,16 @@ export function resolveAdoptedStateSlices(
       nextState.agentReadiness !== undefined
         ? nextState.agentReadiness
         : current.agentReadiness,
-    projects: nextState.projects !== undefined ? nextState.projects : current.projects,
+    projects:
+      nextState.projects !== undefined ? nextState.projects : current.projects,
     orchestrators:
       nextState.orchestrators !== undefined
         ? nextState.orchestrators
         : current.orchestrators,
     workspaces:
-      nextState.workspaces !== undefined ? nextState.workspaces : current.workspaces,
+      nextState.workspaces !== undefined
+        ? nextState.workspaces
+        : current.workspaces,
   };
 }
 
@@ -861,7 +866,9 @@ export function buildControlSurfaceSessionListEntries(
       continue;
     }
 
-    const groupedSessions = groupedSessionsByOrchestratorId.get(orchestrator.id);
+    const groupedSessions = groupedSessionsByOrchestratorId.get(
+      orchestrator.id,
+    );
     if (groupedSessions) {
       groupedSessions.push(session);
       continue;
@@ -909,7 +916,8 @@ export function syncMessageStackScrollPosition(
   scrollStateKey: string,
   paneScrollPositions: Record<string, { top: number; shouldStick: boolean }>,
 ) {
-  const shouldStick = node.scrollHeight - node.scrollTop - node.clientHeight < 72;
+  const shouldStick =
+    node.scrollHeight - node.scrollTop - node.clientHeight < 72;
   paneScrollPositions[scrollStateKey] = {
     top: node.scrollTop,
     shouldStick,
@@ -933,7 +941,9 @@ export function resolveSettledScrollMinimumAttempts(
 
 export type AppTestHooks = {
   onDeleteProjectPostAwaitPath?: (path: "resolve" | "reject") => void;
-  onRestoredGitDiffDocumentContentUpdate?: (status: "success" | "error") => void;
+  onRestoredGitDiffDocumentContentUpdate?: (
+    status: "success" | "error",
+  ) => void;
 };
 
 let appTestHooks: AppTestHooks | null = null;
@@ -983,9 +993,8 @@ function resolvePreferredControlPanelWidthRatio(
   const minimumWidthRatio = resolveStandaloneControlPanelDockWidthRatio(
     DEFAULT_CONTROL_PANEL_DOCK_WIDTH_RATIO,
   );
-  const currentWidthRatio = getDockedControlPanelWidthRatioForWorkspace(
-    workspace,
-  );
+  const currentWidthRatio =
+    getDockedControlPanelWidthRatioForWorkspace(workspace);
 
   return currentWidthRatio === null
     ? minimumWidthRatio
@@ -996,9 +1005,8 @@ function hydrateControlPanelLayout(
   workspace: WorkspaceState,
   side: ControlPanelSide,
 ): WorkspaceState {
-  const workspaceWithControlPanel = ensureControlPanelInWorkspaceState(
-    workspace,
-  );
+  const workspaceWithControlPanel =
+    ensureControlPanelInWorkspaceState(workspace);
 
   return dockControlPanelAtWorkspaceEdge(
     workspaceWithControlPanel,
@@ -1071,7 +1079,9 @@ export default function App() {
   const [workspaceSwitcherError, setWorkspaceSwitcherError] = useState<
     string | null
   >(null);
-  const [deletingWorkspaceIds, setDeletingWorkspaceIds] = useState<string[]>([]);
+  const [deletingWorkspaceIds, setDeletingWorkspaceIds] = useState<string[]>(
+    [],
+  );
   const [draftsBySessionId, setDraftsBySessionId] = useState<
     Record<string, string>
   >({});
@@ -1094,10 +1104,8 @@ export default function App() {
   const [stoppingSessionIds, setStoppingSessionIds] = useState<SessionFlagMap>(
     {},
   );
-  const [
-    pendingOrchestratorActionById,
-    setPendingOrchestratorActionById,
-  ] = useState<Record<string, OrchestratorRuntimeAction | undefined>>({});
+  const [pendingOrchestratorActionById, setPendingOrchestratorActionById] =
+    useState<Record<string, OrchestratorRuntimeAction | undefined>>({});
   const [killingSessionIds, setKillingSessionIds] = useState<SessionFlagMap>(
     {},
   );
@@ -1126,8 +1134,10 @@ export default function App() {
   const [sessionSettingNotices, setSessionSettingNotices] =
     useState<SessionNoticeMap>({});
   const [requestError, setRequestError] = useState<string | null>(null);
-  const [backendInlineRequestErrorMessage, setBackendInlineRequestErrorMessage] =
-    useState<string | null>(null);
+  const [
+    backendInlineRequestErrorMessage,
+    setBackendInlineRequestErrorMessage,
+  ] = useState<string | null>(null);
   const [backendConnectionIssueDetail, setBackendConnectionIssueDetail] =
     useState<string | null>(null);
   const initialBackendConnectionState: BackendConnectionState =
@@ -1235,16 +1245,15 @@ export default function App() {
     useRef<WorkspaceFilesChangedEvent | null>(null);
   const workspaceFilesChangedEventFlushTimeoutRef = useRef<number | null>(null);
   const lastWorkspaceFilesChangedRevisionRef = useRef<number | null>(null);
-  const gitDiffPreviewRefreshVersionsRef = useRef<Map<string, number>>(new Map());
+  const gitDiffPreviewRefreshVersionsRef = useRef<Map<string, number>>(
+    new Map(),
+  );
   const pendingGitDiffDocumentContentRestoreKeysRef = useRef<Set<string>>(
     new Set(),
   );
   const attemptedGitDiffDocumentContentRestoreKeysRef = useRef<Set<string>>(
     new Set(),
   );
-  const restoredGitDiffDocumentContentScanWorkspaceViewIdRef = useRef<
-    string | null
-  >(null);
   const [launcherDraggedTab, setLauncherDraggedTab] =
     useState<WorkspaceTabDrag | null>(null);
   const [externalDraggedTab, setExternalDraggedTab] =
@@ -1333,6 +1342,8 @@ export default function App() {
   const forceSessionScrollToBottomRef = useRef<
     Record<string, true | undefined>
   >({});
+  const hydratingSessionIdsRef = useRef<Set<string>>(new Set());
+  const hydratedSessionIdsRef = useRef<Set<string>>(new Set());
 
   const projectLookup = useMemo(
     () => new Map(projects.map((project) => [project.id, project])),
@@ -1419,7 +1430,8 @@ export default function App() {
     },
   ) {
     const message =
-      options?.message ?? (typeof error === "string" ? error : getErrorMessage(error));
+      options?.message ??
+      (typeof error === "string" ? error : getErrorMessage(error));
     setRequestError(message);
     if (typeof error === "string" || !isBackendUnavailableError(error)) {
       setBackendInlineRequestError(null);
@@ -1465,7 +1477,8 @@ export default function App() {
   }
 
   const clearRecoveredBackendRequestError = useCallback(() => {
-    const inlineRequestErrorMessage = backendInlineRequestErrorMessageRef.current;
+    const inlineRequestErrorMessage =
+      backendInlineRequestErrorMessageRef.current;
     if (inlineRequestErrorMessage === null) {
       return;
     }
@@ -2032,6 +2045,16 @@ export default function App() {
         availableUnknownModelKeys.has(key),
       ),
     );
+    hydratingSessionIdsRef.current = new Set(
+      [...hydratingSessionIdsRef.current].filter((sessionId) =>
+        availableSessionIds.has(sessionId),
+      ),
+    );
+    hydratedSessionIdsRef.current = new Set(
+      [...hydratedSessionIdsRef.current].filter((sessionId) =>
+        availableSessionIds.has(sessionId),
+      ),
+    );
   }
 
   function updateSessionLocally(
@@ -2058,6 +2081,124 @@ export default function App() {
       applyControlPanelLayout(reconcileWorkspaceState(current, nextSessions)),
     );
   }
+
+  function adoptCreatedSessionResponse(
+    created: CreateSessionResponse,
+    options?: { openSessionId?: string; paneId?: string | null },
+  ) {
+    if (created.session && created.session.id === created.sessionId) {
+      const previousSessions = sessionsRef.current;
+      const existingIndex = previousSessions.findIndex(
+        (session) => session.id === created.sessionId,
+      );
+      const nextSessions =
+        existingIndex === -1
+          ? [...previousSessions, created.session]
+          : previousSessions.map((session, index) =>
+              index === existingIndex ? created.session! : session,
+            );
+      const revision = created.revision ?? 0;
+      if (
+        latestStateRevisionRef.current === null ||
+        revision > latestStateRevisionRef.current
+      ) {
+        latestStateRevisionRef.current = revision;
+      }
+      sessionsRef.current = nextSessions;
+      setSessions(nextSessions);
+      setWorkspace((current) =>
+        applyControlPanelLayout(
+          openSessionInWorkspaceState(
+            reconcileWorkspaceState(current, nextSessions),
+            options?.openSessionId ?? created.sessionId,
+            options?.paneId ?? null,
+          ),
+        ),
+      );
+      return true;
+    }
+
+    if (created.state) {
+      return adoptState(created.state, options);
+    }
+
+    return false;
+  }
+
+  function adoptFetchedSession(session: Session, revision: number) {
+    const previousRevision = latestStateRevisionRef.current;
+    const previousSessions = sessionsRef.current;
+    const existingIndex = previousSessions.findIndex(
+      (entry) => entry.id === session.id,
+    );
+    if (existingIndex === -1) {
+      return false;
+    }
+
+    const currentSession = previousSessions[existingIndex];
+    if (
+      previousRevision !== null &&
+      revision < previousRevision &&
+      currentSession.messages.length > 0
+    ) {
+      return false;
+    }
+
+    const hydratedSession = { ...session, messagesLoaded: true };
+    const nextSessions = previousSessions.map((entry, index) =>
+      index === existingIndex ? hydratedSession : entry,
+    );
+    if (previousRevision === null || revision > previousRevision) {
+      latestStateRevisionRef.current = revision;
+    }
+    sessionsRef.current = nextSessions;
+    setSessions(nextSessions);
+    return true;
+  }
+
+  useEffect(() => {
+    if (
+      !activeSession ||
+      activeSession.messagesLoaded !== false
+    ) {
+      return;
+    }
+
+    const sessionId = activeSession.id;
+    if (
+      hydratedSessionIdsRef.current.has(sessionId) ||
+      hydratingSessionIdsRef.current.has(sessionId)
+    ) {
+      return;
+    }
+
+    hydratingSessionIdsRef.current.add(sessionId);
+    void (async () => {
+      try {
+        const response = await fetchSession(sessionId);
+        if (!isMountedRef.current) {
+          return;
+        }
+        if (response.session.id !== sessionId) {
+          requestActionRecoveryResyncRef.current();
+          return;
+        }
+        if (adoptFetchedSession(response.session, response.revision)) {
+          hydratedSessionIdsRef.current.add(sessionId);
+        }
+      } catch (error) {
+        if (isMountedRef.current) {
+          reportRequestError(error);
+        }
+      } finally {
+        hydratingSessionIdsRef.current.delete(sessionId);
+      }
+    })();
+  }, [
+    activeSession?.id,
+    activeSession?.messages.length,
+    activeSession?.messagesLoaded,
+  ]);
 
   function beginWorkspaceSummariesRequest() {
     workspaceSummariesRequestTokenRef.current += 1;
@@ -2851,11 +2992,9 @@ export default function App() {
             const preserveWatchdogCooldown =
               stateResyncPreserveWatchdogCooldownRef.current;
             stateResyncPreserveWatchdogCooldownRef.current = false;
-            const rearmOnSuccess =
-              stateResyncRearmOnSuccessRef.current;
+            const rearmOnSuccess = stateResyncRearmOnSuccessRef.current;
             stateResyncRearmOnSuccessRef.current = false;
-            const rearmOnFailure =
-              stateResyncRearmOnFailureRef.current;
+            const rearmOnFailure = stateResyncRearmOnFailureRef.current;
             stateResyncRearmOnFailureRef.current = false;
             const requestedRevision = latestStateRevisionRef.current;
 
@@ -3366,7 +3505,9 @@ export default function App() {
       }
 
       try {
-        const filesChanged = JSON.parse(event.data) as WorkspaceFilesChangedEvent;
+        const filesChanged = JSON.parse(
+          event.data,
+        ) as WorkspaceFilesChangedEvent;
         confirmReconnectRecoveryFromLiveEvent();
         clearReconnectStateResyncTimeoutAfterConfirmedReopen();
         setBackendConnectionIssueDetail(null);
@@ -3730,11 +3871,12 @@ export default function App() {
       return;
     }
 
-    const persistedWorkspace = stripDiffPreviewDocumentContentFromWorkspaceState(
-      stripLoadingGitDiffPreviewTabsFromWorkspaceState(
-        applyControlPanelLayout(workspace, controlPanelSide),
-      ),
-    );
+    const persistedWorkspace =
+      stripDiffPreviewDocumentContentFromWorkspaceState(
+        stripLoadingGitDiffPreviewTabsFromWorkspaceState(
+          applyControlPanelLayout(workspace, controlPanelSide),
+        ),
+      );
     const layout: WorkspaceLayoutPersistencePayload = {
       controlPanelSide,
       themeId,
@@ -3883,7 +4025,9 @@ export default function App() {
       attemptedGitDiffDocumentContentRestoreKeysRef.current,
     )) {
       if (!activeGitDiffRequestKeys.has(requestKey)) {
-        attemptedGitDiffDocumentContentRestoreKeysRef.current.delete(requestKey);
+        attemptedGitDiffDocumentContentRestoreKeysRef.current.delete(
+          requestKey,
+        );
       }
     }
   }, [workspace.panes]);
@@ -3894,34 +4038,20 @@ export default function App() {
     projectsRef.current = projects;
     orchestratorsRef.current = orchestrators;
     workspaceSummariesRef.current = workspaceSummaries;
-  }, [
-    agentReadiness,
-    codexState,
-    orchestrators,
-    projects,
-    workspaceSummaries,
-  ]);
+  }, [agentReadiness, codexState, orchestrators, projects, workspaceSummaries]);
 
   useEffect(() => {
     draftAttachmentsRef.current = draftAttachmentsBySessionId;
   }, [draftAttachmentsBySessionId]);
 
   // Re-fetch Git diff preview tabs restored from persisted workspace layout
-  // without `documentContent`. Layout hydration can arrive after mount, so
-  // this scans once per workspace view after readiness and dedupes request
-  // keys instead of being a one-shot mount pass.
+  // without `documentContent`. Layout hydration can arrive after mount, so this
+  // scans every ready pane-tree change; pending/attempted request-key sets
+  // dedupe actual fetches while still catching late restored tabs.
   useEffect(() => {
     if (!isWorkspaceLayoutReady) {
       return;
     }
-    if (
-      restoredGitDiffDocumentContentScanWorkspaceViewIdRef.current ===
-      workspaceViewId
-    ) {
-      return;
-    }
-    restoredGitDiffDocumentContentScanWorkspaceViewIdRef.current =
-      workspaceViewId;
 
     const restores = collectRestoredGitDiffDocumentContentRefreshes(
       workspace,
@@ -3933,13 +4063,19 @@ export default function App() {
     }
 
     for (const restore of restores) {
-      pendingGitDiffDocumentContentRestoreKeysRef.current.add(restore.requestKey);
+      pendingGitDiffDocumentContentRestoreKeysRef.current.add(
+        restore.requestKey,
+      );
       attemptedGitDiffDocumentContentRestoreKeysRef.current.add(
         restore.requestKey,
       );
       const currentVersion =
-        (gitDiffPreviewRefreshVersionsRef.current.get(restore.requestKey) ?? 0) + 1;
-      gitDiffPreviewRefreshVersionsRef.current.set(restore.requestKey, currentVersion);
+        (gitDiffPreviewRefreshVersionsRef.current.get(restore.requestKey) ??
+          0) + 1;
+      gitDiffPreviewRefreshVersionsRef.current.set(
+        restore.requestKey,
+        currentVersion,
+      );
 
       setWorkspace((current) =>
         applyControlPanelLayout(
@@ -3963,7 +4099,7 @@ export default function App() {
           if (
             !isMountedRef.current ||
             gitDiffPreviewRefreshVersionsRef.current.get(restore.requestKey) !==
-            currentVersion
+              currentVersion
           ) {
             return;
           }
@@ -3978,7 +4114,8 @@ export default function App() {
                   changeType: diffPreview.changeType,
                   changeSetId: diffPreview.changeSetId ?? null,
                   diff: diffPreview.diff,
-                  documentEnrichmentNote: diffPreview.documentEnrichmentNote ?? null,
+                  documentEnrichmentNote:
+                    diffPreview.documentEnrichmentNote ?? null,
                   documentContent: diffPreview.documentContent ?? null,
                   filePath: diffPreview.filePath ?? tab.filePath,
                   gitSectionId: restore.sectionId,
@@ -3998,7 +4135,7 @@ export default function App() {
           if (
             !isMountedRef.current ||
             gitDiffPreviewRefreshVersionsRef.current.get(restore.requestKey) !==
-            currentVersion
+              currentVersion
           ) {
             return;
           }
@@ -4040,8 +4177,12 @@ export default function App() {
 
     for (const refresh of refreshes) {
       const currentVersion =
-        (gitDiffPreviewRefreshVersionsRef.current.get(refresh.requestKey) ?? 0) + 1;
-      gitDiffPreviewRefreshVersionsRef.current.set(refresh.requestKey, currentVersion);
+        (gitDiffPreviewRefreshVersionsRef.current.get(refresh.requestKey) ??
+          0) + 1;
+      gitDiffPreviewRefreshVersionsRef.current.set(
+        refresh.requestKey,
+        currentVersion,
+      );
 
       void fetchGitDiff(refresh.request)
         .then((diffPreview) => {
@@ -4062,7 +4203,8 @@ export default function App() {
                   changeType: diffPreview.changeType,
                   changeSetId: diffPreview.changeSetId ?? null,
                   diff: diffPreview.diff,
-                  documentEnrichmentNote: diffPreview.documentEnrichmentNote ?? null,
+                  documentEnrichmentNote:
+                    diffPreview.documentEnrichmentNote ?? null,
                   documentContent: diffPreview.documentContent ?? null,
                   filePath: diffPreview.filePath ?? tab.filePath,
                   gitSectionId: refresh.sectionId,
@@ -4383,7 +4525,6 @@ export default function App() {
     };
   }, [isSettingsOpen, pendingKillSessionId]);
 
-
   useEffect(() => {
     function handlePointerMove(event: PointerEvent) {
       const resizeState = resizeStateRef.current;
@@ -4557,12 +4698,15 @@ export default function App() {
           }
         }, 3000);
         // Hard cap: stop polling after 5 minutes regardless.
-        activePromptPollTimeoutRef.current = setTimeout(() => {
-          if (activePromptPollIntervalRef.current !== null) {
-            clearInterval(activePromptPollIntervalRef.current);
-            activePromptPollIntervalRef.current = null;
-          }
-        }, 5 * 60 * 1000);
+        activePromptPollTimeoutRef.current = setTimeout(
+          () => {
+            if (activePromptPollIntervalRef.current !== null) {
+              clearInterval(activePromptPollIntervalRef.current);
+              activePromptPollIntervalRef.current = null;
+            }
+          },
+          5 * 60 * 1000,
+        );
       } catch (error) {
         let restoredDraft = false;
         let restoredAttachments = false;
@@ -4842,7 +4986,7 @@ export default function App() {
       if (!isMountedRef.current) {
         return false;
       }
-      const adopted = adoptState(created.state, {
+      const adopted = adoptCreatedSessionResponse(created, {
         openSessionId: created.sessionId,
         paneId: targetPaneId,
       });
@@ -4863,10 +5007,9 @@ export default function App() {
         agent === "Cursor" ||
         agent === "Gemini"
       ) {
-        await handleRefreshSessionModelOptions(created.sessionId);
-        if (!isMountedRef.current) {
-          return false;
-        }
+        void handleRefreshSessionModelOptions(created.sessionId, {
+          reportGlobalError: false,
+        });
       }
       setRequestError(null);
       return true;
@@ -5317,7 +5460,7 @@ export default function App() {
         return;
       }
 
-      const adopted = adoptState(created.state, {
+      const adopted = adoptCreatedSessionResponse(created, {
         openSessionId: created.sessionId,
         paneId: targetPaneId,
       });
@@ -5338,7 +5481,9 @@ export default function App() {
         session.agent === "Cursor" ||
         session.agent === "Gemini"
       ) {
-        await handleRefreshSessionModelOptions(created.sessionId);
+        void handleRefreshSessionModelOptions(created.sessionId, {
+          reportGlobalError: false,
+        });
       }
       setRequestError(null);
       closePendingSessionRename();
@@ -5504,7 +5649,13 @@ export default function App() {
     }
   }
 
-  async function handleRefreshSessionModelOptions(sessionId: string) {
+  async function handleRefreshSessionModelOptions(
+    sessionId: string,
+    options?: { reportGlobalError?: boolean },
+  ) {
+    if (!isMountedRef.current) {
+      return;
+    }
     const previousSession =
       sessionsRef.current.find((entry) => entry.id === sessionId) ?? null;
     if (refreshingSessionModelOptionIdsRef.current[sessionId]) {
@@ -5569,7 +5720,9 @@ export default function App() {
         ...current,
         [sessionId]: message,
       }));
-      reportRequestError(error, { message });
+      if (options?.reportGlobalError !== false) {
+        reportRequestError(error, { message });
+      }
     } finally {
       if (!isMountedRef.current) {
         return;
@@ -5630,7 +5783,7 @@ export default function App() {
       if (!isMountedRef.current) {
         return;
       }
-      const adopted = adoptState(created.state, {
+      const adopted = adoptCreatedSessionResponse(created, {
         openSessionId: created.sessionId,
         paneId: preferredPaneId,
       });
@@ -6382,6 +6535,9 @@ export default function App() {
       request,
       Boolean(options?.openInNewTab),
     );
+    const currentVersion =
+      (gitDiffPreviewRefreshVersionsRef.current.get(requestKey) ?? 0) + 1;
+    gitDiffPreviewRefreshVersionsRef.current.set(requestKey, currentVersion);
     const gitSectionId = options?.sectionId ?? request.sectionId;
     const pendingTab = {
       changeType: pendingGitDiffPreviewChangeType(request.statusCode),
@@ -6426,6 +6582,13 @@ export default function App() {
 
     try {
       const diffPreview = await fetchGitDiff(request);
+      if (
+        !isMountedRef.current ||
+        gitDiffPreviewRefreshVersionsRef.current.get(requestKey) !==
+          currentVersion
+      ) {
+        return;
+      }
       setWorkspace((current) =>
         applyControlPanelLayout(
           updateGitDiffPreviewTabInWorkspaceState(
@@ -6436,7 +6599,8 @@ export default function App() {
               changeType: diffPreview.changeType,
               changeSetId: diffPreview.changeSetId ?? null,
               diff: diffPreview.diff,
-              documentEnrichmentNote: diffPreview.documentEnrichmentNote ?? null,
+              documentEnrichmentNote:
+                diffPreview.documentEnrichmentNote ?? null,
               documentContent: diffPreview.documentContent ?? null,
               filePath: diffPreview.filePath ?? tab.filePath,
               gitSectionId,
@@ -6449,6 +6613,13 @@ export default function App() {
         ),
       );
     } catch (error) {
+      if (
+        !isMountedRef.current ||
+        gitDiffPreviewRefreshVersionsRef.current.get(requestKey) !==
+          currentVersion
+      ) {
+        return;
+      }
       const errorMessage = getErrorMessage(error);
       setWorkspace((current) =>
         applyControlPanelLayout(
@@ -6863,7 +7034,9 @@ export default function App() {
         isKilling ||
         isKillConfirmationOpen ||
         killRevealSessionId === session.id;
-      const searchResult = controlSurfaceSessionListSearchResults.get(session.id);
+      const searchResult = controlSurfaceSessionListSearchResults.get(
+        session.id,
+      );
 
       return (
         <div
@@ -6895,11 +7068,7 @@ export default function App() {
             type="button"
             draggable
             onClick={() =>
-              handleSidebarSessionClick(
-                session.id,
-                paneId,
-                !fixedSection,
-              )
+              handleSidebarSessionClick(session.id, paneId, !fixedSection)
             }
             title={`${session.agent} / ${session.workdir}`}
             onDragStart={(event) => {
@@ -6949,9 +7118,7 @@ export default function App() {
             type="button"
             onClick={() =>
               setKillRevealSessionId((current) =>
-                current === session.id && !isKilling
-                  ? null
-                  : session.id,
+                current === session.id && !isKilling ? null : session.id,
               )
             }
             aria-label={`Show session actions for ${session.name}`}
@@ -6970,10 +7137,7 @@ export default function App() {
             className="ghost-button session-row-kill"
             type="button"
             onClick={(event) => {
-              handleKillSession(
-                session.id,
-                event.currentTarget,
-              );
+              handleKillSession(session.id, event.currentTarget);
             }}
             disabled={isKilling}
             aria-expanded={isKillConfirmationOpen}
@@ -7621,12 +7785,12 @@ export default function App() {
                         controlSurfaceCollapsedOrchestratorIds.includes(
                           entry.orchestrator.id,
                         );
-                      const groupListId =
-                        `${surfaceId}-orchestrator-group-list-${entry.orchestrator.id}`;
+                      const groupListId = `${surfaceId}-orchestrator-group-list-${entry.orchestrator.id}`;
                       const pendingOrchestratorAction =
                         pendingOrchestratorActionById[entry.orchestrator.id];
-                      const hasPendingOrchestratorAction =
-                        Boolean(pendingOrchestratorAction);
+                      const hasPendingOrchestratorAction = Boolean(
+                        pendingOrchestratorAction,
+                      );
 
                       return (
                         <section
@@ -7650,7 +7814,11 @@ export default function App() {
                                 !isGroupCollapsed ? groupListId : undefined
                               }
                               aria-label={`${isGroupCollapsed ? "Expand" : "Collapse"} ${groupName} sessions`}
-                              title={isGroupCollapsed ? "Expand sessions" : "Collapse sessions"}
+                              title={
+                                isGroupCollapsed
+                                  ? "Expand sessions"
+                                  : "Collapse sessions"
+                              }
                             >
                               <svg
                                 className={`session-orchestrator-group-chevron${!isGroupCollapsed ? " expanded" : ""}`}
@@ -8019,9 +8187,7 @@ export default function App() {
               onUnarchiveCodexThread={handleUnarchiveCodexThread}
               onOrchestratorStateUpdated={handleOrchestratorStateUpdated}
               renderControlPanel={renderWorkspaceControlSurface}
-              renderControlPanelPaneBarStatus={
-                renderControlPanelPaneBarStatus
-              }
+              renderControlPanelPaneBarStatus={renderControlPanelPaneBarStatus}
               renderControlPanelPaneBarActions={
                 renderControlPanelPaneBarActions
               }
@@ -8882,10 +9048,7 @@ function ProjectListSection({
 
     function handlePointerDown(event: PointerEvent) {
       const target = event.target;
-      if (
-        target instanceof Node &&
-        contextMenuRef.current?.contains(target)
-      ) {
+      if (target instanceof Node && contextMenuRef.current?.contains(target)) {
         return;
       }
 
@@ -10614,7 +10777,10 @@ function SessionPaneView({
     if (boundary === "bottom") {
       // Expected for long virtualized sessions: jump-to-latest keeps correcting
       // for a few frames while message measurements settle.
-      scheduleSettledScrollToBottom("auto", { maxAttempts: 60, minAttempts: 8 });
+      scheduleSettledScrollToBottom("auto", {
+        maxAttempts: 60,
+        minAttempts: 8,
+      });
       setShouldStickToBottom(true);
       paneScrollPositions[scrollStateKey] = {
         top: Number.MAX_SAFE_INTEGER,
@@ -11587,9 +11753,7 @@ function SessionPaneView({
               onTabDrop={onTabDrop}
               onRenameSessionRequest={onRenameSessionRequest}
             />
-            {activeControlSurfaceTab
-              ? renderControlPanelPaneBarStatus()
-              : null}
+            {activeControlSurfaceTab ? renderControlPanelPaneBarStatus() : null}
           </div>
           {activeTab?.kind === "controlPanel" ? (
             <div className="pane-bar-right">
@@ -12022,7 +12186,8 @@ function SessionPaneView({
                   `workspace-project-scope-${pane.id}-terminal`,
                   activeTerminalScopeProjectId,
                   (nextProjectId) => {
-                    const nextProject = projectLookup.get(nextProjectId) ?? null;
+                    const nextProject =
+                      projectLookup.get(nextProjectId) ?? null;
                     if (!nextProject) {
                       return;
                     }
@@ -12126,7 +12291,9 @@ function SessionPaneView({
               changeSetId={activeDiffPreviewTab.changeSetId ?? null}
               fontSizePx={editorFontSizePx}
               diff={activeDiffPreviewTab.diff}
-              documentEnrichmentNote={activeDiffPreviewTab.documentEnrichmentNote ?? null}
+              documentEnrichmentNote={
+                activeDiffPreviewTab.documentEnrichmentNote ?? null
+              }
               documentContent={activeDiffPreviewTab.documentContent ?? null}
               diffMessageId={activeDiffPreviewTab.diffMessageId}
               filePath={activeDiffPreviewTab.filePath}
@@ -12170,12 +12337,13 @@ function SessionPaneView({
                       )
                   : undefined
               }
-              onSaveFile={(path, content) =>
+              onSaveFile={(path, content, options) =>
                 handleSourceFileSave(
                   path,
                   content,
                   activeDiffOriginSessionId,
                   activeDiffOriginProjectId,
+                  options,
                 )
               }
               summary={activeDiffPreviewTab.summary}
@@ -12424,9 +12592,7 @@ function workspaceNodeContainsControlPanel(
 
 function getActiveWorkspacePaneTab(pane: WorkspacePane): WorkspaceTab | null {
   return (
-    pane.tabs.find((tab) => tab.id === pane.activeTabId) ??
-    pane.tabs[0] ??
-    null
+    pane.tabs.find((tab) => tab.id === pane.activeTabId) ?? pane.tabs[0] ?? null
   );
 }
 
@@ -12434,8 +12600,8 @@ function paneHasActiveStandaloneControlSurface(pane: WorkspacePane): boolean {
   const activeTab = getActiveWorkspacePaneTab(pane);
   return Boolean(
     activeTab &&
-      activeTab.kind !== "controlPanel" &&
-      CONTROL_SURFACE_KINDS.has(activeTab.kind),
+    activeTab.kind !== "controlPanel" &&
+    CONTROL_SURFACE_KINDS.has(activeTab.kind),
   );
 }
 
@@ -12522,7 +12688,7 @@ export function resolveStandaloneControlPanelDockWidthRatio(
     workspaceStage instanceof HTMLElement && workspaceStage.clientWidth > 0
       ? workspaceStage.clientWidth
       : (document.documentElement?.clientWidth ??
-          (typeof window !== "undefined" ? window.innerWidth : 0));
+        (typeof window !== "undefined" ? window.innerWidth : 0));
   if (stageWidth <= 0) {
     return fallbackRatio;
   }

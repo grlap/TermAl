@@ -3331,13 +3331,11 @@ fn sync_session_agent_commands_bumps_visible_session_command_revision() {
             gemini_approval_mode: None,
         })
         .unwrap();
-    let starting_revision = created.state.revision;
+    let starting_revision = created.revision;
     let starting_session_revision = created
-        .state
-        .sessions
-        .iter()
-        .find(|session| session.id == created.session_id)
-        .expect("created Claude session should exist")
+        .session
+        .as_ref()
+        .expect("created Claude session should be returned")
         .agent_commands_revision;
 
     state
@@ -3818,11 +3816,9 @@ fn creates_claude_sessions_with_requested_plan_mode() {
         })
         .unwrap();
     let session = response
-        .state
-        .sessions
-        .iter()
-        .find(|session| session.id == response.session_id)
-        .expect("created session should be present");
+        .session
+        .as_ref()
+        .expect("created session should be returned");
 
     assert_eq!(session.claude_approval_mode, Some(ClaudeApprovalMode::Plan));
     assert_eq!(session.claude_effort, Some(ClaudeEffortLevel::High));
@@ -3907,11 +3903,10 @@ fn create_session_promotes_matching_hidden_claude_spare_and_replenishes_pool() {
 
     assert_eq!(response.session_id, hidden_session_id);
     let session = response
-        .state
-        .sessions
-        .iter()
-        .find(|session| session.id == hidden_session_id)
-        .expect("promoted hidden session should be visible");
+        .session
+        .as_ref()
+        .expect("promoted hidden session should be returned");
+    assert_eq!(session.id, hidden_session_id);
     assert_eq!(session.name, "Visible Claude");
 
     let inner = state.inner.lock().expect("state mutex poisoned");
@@ -4614,11 +4609,9 @@ fn persists_app_settings_and_applies_them_to_new_sessions() {
         })
         .unwrap();
     let codex_session = codex_created
-        .state
-        .sessions
-        .iter()
-        .find(|session| session.id == codex_created.session_id)
-        .expect("created Codex session should be present");
+        .session
+        .as_ref()
+        .expect("created Codex session should be returned");
     assert_eq!(
         codex_session.reasoning_effort,
         Some(CodexReasoningEffort::High)
@@ -4641,11 +4634,9 @@ fn persists_app_settings_and_applies_them_to_new_sessions() {
         })
         .unwrap();
     let claude_session = claude_created
-        .state
-        .sessions
-        .iter()
-        .find(|session| session.id == claude_created.session_id)
-        .expect("created Claude session should be present");
+        .session
+        .as_ref()
+        .expect("created Claude session should be returned");
     assert_eq!(
         claude_session.claude_approval_mode,
         Some(ClaudeApprovalMode::AutoApprove)
@@ -4677,11 +4668,9 @@ fn creates_codex_sessions_with_requested_prompt_defaults() {
         })
         .unwrap();
     let session = response
-        .state
-        .sessions
-        .iter()
-        .find(|session| session.id == response.session_id)
-        .expect("created session should be present");
+        .session
+        .as_ref()
+        .expect("created session should be returned");
 
     assert_eq!(
         session.approval_policy,
@@ -5583,11 +5572,9 @@ fn fork_codex_thread_creates_a_new_local_session() {
     assert_ne!(forked.session_id, created.session_id);
 
     let forked_session = forked
-        .state
-        .sessions
-        .iter()
-        .find(|session| session.id == forked.session_id)
-        .expect("forked session should be present");
+        .session
+        .as_ref()
+        .expect("forked session should be returned");
     assert_eq!(forked_session.name, "Forked Review Fork");
     assert_eq!(forked_session.model, "gpt-5.5");
     assert_eq!(
@@ -5625,7 +5612,7 @@ fn fork_codex_thread_creates_a_new_local_session() {
         forked_session.messages.get(1),
         Some(Message::Thinking { title, lines, .. })
             if title == "Codex reasoning"
-                && lines == &vec![
+                && lines == &[
                     "Inspect session state.".to_owned(),
                     "Watch archive transitions.".to_owned(),
                 ]
@@ -5727,11 +5714,9 @@ fn fork_codex_thread_falls_back_to_note_when_history_is_unavailable() {
 
     let forked = state.fork_codex_thread(&created.session_id).unwrap();
     let forked_session = forked
-        .state
-        .sessions
-        .iter()
-        .find(|session| session.id == forked.session_id)
-        .expect("forked session should be present");
+        .session
+        .as_ref()
+        .expect("forked session should be returned");
     assert!(matches!(
         forked_session.messages.last(),
         Some(Message::Markdown { title, markdown, .. })
@@ -7007,6 +6992,7 @@ fn create_session_refreshes_agent_readiness_cache() {
     }
 
     let mut state_events = state.subscribe_events();
+    let mut delta_events = state.subscribe_delta_events();
     let created = state
         .create_session(CreateSessionRequest {
             agent: Some(Agent::Codex),
@@ -7024,18 +7010,30 @@ fn create_session_refreshes_agent_readiness_cache() {
         })
         .expect("session should be created");
 
-    // The API response should carry freshly-computed readiness, not the sentinel.
-    assert_ne!(created.state.agent_readiness, sentinel);
+    // The create path pre-refreshes readiness before mutating state so the next
+    // full snapshot is fresh even though create itself now publishes a small
+    // session-created delta instead of a full state event.
+    assert_ne!(state.cached_agent_readiness(), sentinel);
 
-    // The SSE event should match the API response exactly.
-    let published: StateResponse = serde_json::from_str(
-        &state_events
+    assert!(state_events.try_recv().is_err());
+    let published: DeltaEvent = serde_json::from_str(
+        &delta_events
             .try_recv()
-            .expect("create_session should publish a state snapshot"),
+            .expect("create_session should publish a delta"),
     )
-    .expect("SSE state event should decode");
-    assert_eq!(published.revision, created.state.revision);
-    assert_eq!(published.agent_readiness, created.state.agent_readiness);
+    .expect("SSE delta event should decode");
+    match published {
+        DeltaEvent::SessionCreated {
+            revision,
+            session_id,
+            session,
+        } => {
+            assert_eq!(revision, created.revision);
+            assert_eq!(session_id, created.session_id);
+            assert_eq!(session.id, created.session_id);
+        }
+        _ => panic!("expected sessionCreated delta"),
+    }
 }
 
 // Tests that AgentReadiness serializes warning_detail as warningDetail.
@@ -7950,17 +7948,57 @@ async fn create_session_route_returns_created_response() {
     )
     .await;
     assert_eq!(status, StatusCode::CREATED);
-    assert_eq!(response.state.sessions.len(), initial_session_count + 1);
     let created_session = response
-        .state
-        .sessions
-        .iter()
-        .find(|session| session.id == response.session_id)
-        .expect("created session should be present");
+        .session
+        .as_ref()
+        .expect("created session should be returned");
+    assert!(response.state.is_none());
+    assert_eq!(state.snapshot().sessions.len(), initial_session_count + 1);
     assert_eq!(created_session.name, "Route Created Session");
     let expected_workdir = resolve_session_workdir("/tmp").expect("route workdir should normalize");
     assert_eq!(created_session.workdir, expected_workdir);
     assert_eq!(created_session.agent, Agent::Codex);
+    let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
+// Tests that the full-session route returns one visible session without
+// requiring a full state snapshot.
+#[tokio::test]
+async fn get_session_route_returns_full_session() {
+    let state = test_app_state();
+    let app = app_router(state.clone());
+    let created = state
+        .create_session(CreateSessionRequest {
+            name: Some("Route Session Detail".to_owned()),
+            agent: None,
+            workdir: Some("/tmp".to_owned()),
+            project_id: None,
+            model: None,
+            approval_policy: None,
+            reasoning_effort: None,
+            sandbox_mode: None,
+            cursor_mode: None,
+            claude_approval_mode: None,
+            claude_effort: None,
+            gemini_approval_mode: None,
+        })
+        .expect("session should be created");
+    let session_id = created.session_id;
+
+    let (status, response): (StatusCode, SessionResponse) = request_json(
+        &app,
+        Request::builder()
+            .method("GET")
+            .uri(format!("/api/sessions/{session_id}"))
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(response.session.id, session_id);
+    assert_eq!(response.session.name, "Route Session Detail");
+    assert_eq!(response.revision, state.snapshot().revision);
     let _ = fs::remove_file(state.persistence_path.as_path());
 }
 
@@ -9619,11 +9657,10 @@ async fn codex_thread_fork_route_returns_created_response() {
 
     assert_eq!(status, StatusCode::CREATED);
     let forked_session = response
-        .state
-        .sessions
-        .iter()
-        .find(|session| session.id == response.session_id)
-        .expect("forked session should be present");
+        .session
+        .as_ref()
+        .expect("forked session should be returned");
+    assert!(response.state.is_none());
     assert_eq!(
         forked_session.codex_thread_state,
         Some(CodexThreadState::Active)
@@ -17471,7 +17508,7 @@ fn revisions_increase_for_visible_state_changes() {
             gemini_approval_mode: None,
         })
         .unwrap();
-    assert_eq!(created.state.revision, 1);
+    assert_eq!(created.revision, 1);
 
     let updated = state
         .update_session_settings(
@@ -21495,11 +21532,9 @@ fn creates_projects_and_assigns_sessions_to_them() {
         })
         .unwrap();
     let session = created
-        .state
-        .sessions
-        .iter()
-        .find(|session| session.id == created.session_id)
-        .expect("created session should be present");
+        .session
+        .as_ref()
+        .expect("created session should be returned");
 
     assert_eq!(
         session.project_id.as_deref(),
@@ -22269,7 +22304,15 @@ fn git_diff_document_readers_reject_oversized_worktree_files() {
 #[test]
 fn git_diff_document_enrichment_note_uses_structured_error_kind() {
     let untagged_error = ApiError::bad_request("git worktree file exceeds the 10 MB read limit");
-    assert_eq!(git_diff_document_enrichment_note(&untagged_error), None);
+    assert_eq!(
+        git_diff_document_enrichment_note(&untagged_error).as_deref(),
+        Some("Rendered Markdown is unavailable.")
+    );
+    let untagged_not_found_error = ApiError::not_found("git worktree file not found");
+    assert_eq!(
+        git_diff_document_enrichment_note(&untagged_not_found_error).as_deref(),
+        Some("Rendered Markdown is unavailable.")
+    );
 
     let tagged_error = ApiError::bad_request("read ceiling wording changed")
         .with_kind(ApiErrorKind::GitDocumentTooLarge);

@@ -1,4 +1,11 @@
-import type { CommandMessage, DeltaEvent, Message, ParallelAgentsMessage, Session, TextMessage } from "./types";
+import type {
+  CommandMessage,
+  DeltaEvent,
+  Message,
+  ParallelAgentsMessage,
+  Session,
+  TextMessage,
+} from "./types";
 
 export const LIVE_SESSION_TRANSPORT_STALE_RESYNC_DELAY_MS = 15000;
 export const LIVE_SESSION_RESUME_WATCHDOG_DRIFT_MS = 5000;
@@ -47,7 +54,8 @@ export function sessionHasPotentiallyStaleTransport(
     session.status === "active" &&
     hasAssistantActivitySinceCurrentTurnBoundary(session) &&
     lastLiveTransportActivityAt !== undefined &&
-    now - lastLiveTransportActivityAt >= LIVE_SESSION_TRANSPORT_STALE_RESYNC_DELAY_MS
+    now - lastLiveTransportActivityAt >=
+      LIVE_SESSION_TRANSPORT_STALE_RESYNC_DELAY_MS
   );
 }
 
@@ -74,21 +82,44 @@ export function applyDeltaToSessions(
   sessions: Session[],
   delta: SessionDeltaEvent,
 ): DeltaApplyResult {
-  const sessionIndex = sessions.findIndex((session) => session.id === delta.sessionId);
-  if (sessionIndex === -1) {
-    return { kind: "needsResync" };
-  }
-
-  const session = sessions[sessionIndex];
+  const sessionIndex = sessions.findIndex(
+    (session) => session.id === delta.sessionId,
+  );
 
   switch (delta.type) {
+    case "sessionCreated": {
+      if (delta.session.id !== delta.sessionId) {
+        return { kind: "needsResync" };
+      }
+
+      if (sessionIndex === -1) {
+        return {
+          kind: "applied",
+          sessions: [...sessions, delta.session],
+        };
+      }
+
+      return {
+        kind: "applied",
+        sessions: replaceSession(sessions, sessionIndex, delta.session),
+      };
+    }
+
     case "messageCreated": {
+      if (sessionIndex === -1) {
+        return { kind: "needsResync" };
+      }
+      const session = sessions[sessionIndex];
       if (delta.message.id !== delta.messageId || delta.messageIndex < 0) {
         return { kind: "needsResync" };
       }
 
       const updatedMessages = session.messages.slice();
-      const existingMessageIndex = findMessageIndex(updatedMessages, delta.messageId, delta.messageIndex);
+      const existingMessageIndex = findMessageIndex(
+        updatedMessages,
+        delta.messageId,
+        delta.messageIndex,
+      );
       if (existingMessageIndex === -1) {
         if (delta.messageIndex > updatedMessages.length) {
           return { kind: "needsResync" };
@@ -100,7 +131,9 @@ export function applyDeltaToSessions(
       } else {
         updatedMessages.splice(existingMessageIndex, 1);
         const nextMessageIndex =
-          existingMessageIndex < delta.messageIndex ? delta.messageIndex - 1 : delta.messageIndex;
+          existingMessageIndex < delta.messageIndex
+            ? delta.messageIndex - 1
+            : delta.messageIndex;
         updatedMessages.splice(nextMessageIndex, 0, delta.message);
       }
 
@@ -116,7 +149,15 @@ export function applyDeltaToSessions(
     }
 
     case "textDelta": {
-      const messageIndex = findMessageIndex(session.messages, delta.messageId, delta.messageIndex);
+      if (sessionIndex === -1) {
+        return { kind: "needsResync" };
+      }
+      const session = sessions[sessionIndex];
+      const messageIndex = findMessageIndex(
+        session.messages,
+        delta.messageId,
+        delta.messageIndex,
+      );
       if (messageIndex === -1) {
         return { kind: "needsResync" };
       }
@@ -147,7 +188,15 @@ export function applyDeltaToSessions(
     }
 
     case "textReplace": {
-      const messageIndex = findMessageIndex(session.messages, delta.messageId, delta.messageIndex);
+      if (sessionIndex === -1) {
+        return { kind: "needsResync" };
+      }
+      const session = sessions[sessionIndex];
+      const messageIndex = findMessageIndex(
+        session.messages,
+        delta.messageId,
+        delta.messageIndex,
+      );
       if (messageIndex === -1) {
         return { kind: "needsResync" };
       }
@@ -178,7 +227,15 @@ export function applyDeltaToSessions(
     }
 
     case "commandUpdate": {
-      const messageIndex = findMessageIndex(session.messages, delta.messageId, delta.messageIndex);
+      if (sessionIndex === -1) {
+        return { kind: "needsResync" };
+      }
+      const session = sessions[sessionIndex];
+      const messageIndex = findMessageIndex(
+        session.messages,
+        delta.messageId,
+        delta.messageIndex,
+      );
       if (messageIndex === -1) {
         return { kind: "needsResync" };
       }
@@ -213,7 +270,15 @@ export function applyDeltaToSessions(
     }
 
     case "parallelAgentsUpdate": {
-      const messageIndex = findMessageIndex(session.messages, delta.messageId, delta.messageIndex);
+      if (sessionIndex === -1) {
+        return { kind: "needsResync" };
+      }
+      const session = sessions[sessionIndex];
+      const messageIndex = findMessageIndex(
+        session.messages,
+        delta.messageId,
+        delta.messageIndex,
+      );
       if (messageIndex === -1) {
         return { kind: "needsResync" };
       }
@@ -256,7 +321,11 @@ function replaceSession(sessions: Session[], index: number, session: Session) {
   return updatedSessions;
 }
 
-function findMessageIndex(messages: Session["messages"], messageId: string, preferredIndex: number) {
+function findMessageIndex(
+  messages: Session["messages"],
+  messageId: string,
+  preferredIndex: number,
+) {
   const preferredMessage = messages[preferredIndex];
   if (preferredMessage?.id === messageId) {
     return preferredIndex;

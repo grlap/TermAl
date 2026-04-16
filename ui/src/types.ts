@@ -4,11 +4,24 @@ export type ExhaustiveValueCoverage<
   Options extends ReadonlyArray<{ value: Union }>,
 > = Exclude<Union, Options[number]["value"]> extends never ? true : never;
 export type SessionStatus = "active" | "idle" | "approval" | "error";
-export type SandboxMode = "read-only" | "workspace-write" | "danger-full-access";
-export type ApprovalPolicy = "untrusted" | "on-failure" | "on-request" | "never";
+export type SandboxMode =
+  | "read-only"
+  | "workspace-write"
+  | "danger-full-access";
+export type ApprovalPolicy =
+  | "untrusted"
+  | "on-failure"
+  | "on-request"
+  | "never";
 export type ClaudeApprovalMode = "ask" | "auto-approve" | "plan";
 export type ClaudeEffortLevel = "default" | "low" | "medium" | "high" | "max";
-export type CodexReasoningEffort = "none" | "minimal" | "low" | "medium" | "high" | "xhigh";
+export type CodexReasoningEffort =
+  | "none"
+  | "minimal"
+  | "low"
+  | "medium"
+  | "high"
+  | "xhigh";
 export type CursorMode = "agent" | "plan" | "ask";
 export type GeminiApprovalMode = "default" | "auto_edit" | "yolo" | "plan";
 export type AgentReadinessStatus = "ready" | "missing" | "needsSetup";
@@ -98,7 +111,10 @@ export type CodexRateLimits = {
   secondary?: CodexRateLimitWindow | null;
 };
 
-export type CodexNoticeKind = "configWarning" | "deprecationNotice" | "runtimeNotice";
+export type CodexNoticeKind =
+  | "configWarning"
+  | "deprecationNotice"
+  | "runtimeNotice";
 export type CodexNoticeLevel = "info" | "warning";
 
 export type CodexNotice = {
@@ -166,7 +182,15 @@ export type OrchestratorTransitionResultMode =
   | "summary"
   | "summaryAndLastResponse";
 
-export type OrchestratorTransitionAnchor = "top" | "top-right" | "right" | "bottom-right" | "bottom" | "bottom-left" | "left" | "top-left";
+export type OrchestratorTransitionAnchor =
+  | "top"
+  | "top-right"
+  | "right"
+  | "bottom-right"
+  | "bottom"
+  | "bottom-left"
+  | "left"
+  | "top-left";
 
 export type OrchestratorTemplateTransition = {
   id: string;
@@ -247,6 +271,7 @@ export type Session = {
   status: SessionStatus;
   preview: string;
   messages: Message[];
+  messagesLoaded?: boolean | null;
   pendingPrompts?: PendingPrompt[];
 };
 
@@ -324,7 +349,11 @@ export type MarkdownMessage = BaseMessage & {
   markdown: string;
 };
 
-export type ParallelAgentStatus = "initializing" | "running" | "completed" | "error";
+export type ParallelAgentStatus =
+  | "initializing"
+  | "running"
+  | "completed"
+  | "error";
 
 export type ParallelAgentProgress = {
   detail?: string | null;
@@ -388,7 +417,11 @@ export type UserInputQuestion = {
   question: string;
 };
 
-export type InteractionRequestState = "pending" | "submitted" | "interrupted" | "canceled";
+export type InteractionRequestState =
+  | "pending"
+  | "submitted"
+  | "interrupted"
+  | "canceled";
 
 export type JsonValue =
   | null
@@ -542,6 +575,13 @@ export type MessageCreatedEvent = {
   status: SessionStatus;
 };
 
+export type SessionCreatedEvent = {
+  type: "sessionCreated";
+  revision: number;
+  sessionId: string;
+  session: Session;
+};
+
 export type CommandUpdateEvent = {
   type: "commandUpdate";
   revision: number;
@@ -594,6 +634,7 @@ export type WorkspaceFilesChangedEvent = {
 };
 
 export type DeltaEvent =
+  | SessionCreatedEvent
   | MessageCreatedEvent
   | TextDeltaEvent
   | TextReplaceEvent

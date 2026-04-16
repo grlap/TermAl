@@ -777,15 +777,61 @@ function MermaidDiagram({
       aria-label="Mermaid diagram"
     >
       {renderState.status === "ready" ? (
-        <div
-          className="mermaid-diagram-svg"
-          dangerouslySetInnerHTML={{ __html: renderState.svg }}
+        <iframe
+          className="mermaid-diagram-frame"
+          data-testid="mermaid-frame"
+          sandbox=""
+          srcDoc={buildMermaidDiagramFrameSrcDoc(renderState.svg)}
+          style={getMermaidDiagramFrameStyle(renderState.svg)}
+          title="Mermaid diagram preview"
         />
       ) : (
         <p className="support-copy">Rendering Mermaid diagram...</p>
       )}
     </div>
   );
+}
+
+function buildMermaidDiagramFrameSrcDoc(svg: string) {
+  return [
+    "<!doctype html>",
+    '<html><head><meta charset="utf-8">',
+    "<style>",
+    "html,body{margin:0;padding:0;background:transparent;color:inherit;}",
+    "body{display:inline-block;min-width:100%;}",
+    "svg{display:block;max-width:none;height:auto;margin:0 auto;}",
+    TERMAL_MERMAID_THEME_CSS,
+    "</style></head><body>",
+    svg,
+    "</body></html>",
+  ].join("");
+}
+
+function getMermaidDiagramFrameStyle(svg: string): CSSProperties {
+  const dimensions = readMermaidSvgDimensions(svg);
+  if (!dimensions) {
+    return {};
+  }
+
+  return {
+    height: `${Math.max(120, Math.ceil(dimensions.height) + 2)}px`,
+    width: `${Math.max(320, Math.ceil(dimensions.width) + 2)}px`,
+  };
+}
+
+function readMermaidSvgDimensions(svg: string) {
+  const viewBoxMatch = svg.match(
+    /\bviewBox=["']\s*[-+]?\d*\.?\d+\s+[-+]?\d*\.?\d+\s+([-+]?\d*\.?\d+)\s+([-+]?\d*\.?\d+)\s*["']/i,
+  );
+  if (!viewBoxMatch) {
+    return null;
+  }
+
+  const width = Number(viewBoxMatch[1]);
+  const height = Number(viewBoxMatch[2]);
+  return Number.isFinite(width) && Number.isFinite(height)
+    ? { height, width }
+    : null;
 }
 
 function MermaidRenderBudgetFallback({
