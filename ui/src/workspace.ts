@@ -430,7 +430,7 @@ export function createDiffPreviewTab({
   loadError?: string | null;
 }): WorkspaceDiffPreviewTab {
   const normalizedChangeSetId = normalizeWorkspaceIdentifier(changeSetId);
-  const normalizedDocumentEnrichmentNote = normalizeWorkspaceIdentifier(documentEnrichmentNote);
+  const normalizedDocumentEnrichmentNote = normalizeWorkspaceText(documentEnrichmentNote);
   const normalizedOriginProjectId = normalizeWorkspaceIdentifier(originProjectId);
   const normalizedGitDiffRequestKey = normalizeWorkspaceIdentifier(gitDiffRequestKey);
   const normalizedLoadError = normalizeWorkspaceIdentifier(loadError);
@@ -1858,11 +1858,18 @@ export function updateGitDiffPreviewTabInWorkspaceState(
 
 export function stripLoadingGitDiffPreviewTabsFromWorkspaceState(workspace: WorkspaceState): WorkspaceState {
   let nextWorkspace = workspace;
+  // Git-status preview tabs start as empty loading placeholders. Restored
+  // diff tabs can also be loading while documentContent is re-fetched, but
+  // they keep durable diff text and must survive persistence during that
+  // restore window.
   const loadingTabs = workspace.panes.flatMap((pane) =>
     pane.tabs
       .filter(
         (tab): tab is WorkspaceDiffPreviewTab =>
-          tab.kind === "diffPreview" && tab.isLoading === true && Boolean(tab.gitDiffRequestKey),
+          tab.kind === "diffPreview" &&
+          tab.isLoading === true &&
+          Boolean(tab.gitDiffRequestKey) &&
+          tab.diff.trim().length === 0,
       )
       .map((tab) => ({ paneId: pane.id, tabId: tab.id })),
   );
@@ -3230,6 +3237,14 @@ function normalizeWorkspaceIdentifier(value: string | null | undefined) {
 
   const trimmed = value.trim();
   return trimmed ? trimmed : null;
+}
+
+function normalizeWorkspaceText(value: string | null | undefined) {
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  return value.trim() ? value : null;
 }
 
 function projectOriginProps(originProjectId: string | null) {

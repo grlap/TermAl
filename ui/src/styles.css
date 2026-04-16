@@ -5278,9 +5278,9 @@ textarea {
 .markdown-diff-rendered-section-removed {
   --markdown-diff-removed-color: #ef4444;
 
-  border-color: color-mix(in srgb, var(--markdown-diff-removed-color) 38%, transparent);
+  border-color: transparent;
   background: color-mix(in srgb, var(--markdown-diff-removed-color) 16%, var(--surface-white));
-  box-shadow: inset 1px 0 0 var(--markdown-diff-removed-color);
+  box-shadow: none;
 }
 
 .markdown-diff-rendered-section-with-line-gutter {
@@ -5298,16 +5298,24 @@ textarea {
   padding: 0.7rem;
 }
 
-.markdown-diff-rendered-section-added.markdown-diff-rendered-section-with-line-gutter .markdown-copy {
-  border-color: color-mix(in srgb, var(--markdown-diff-added-color) 55%, transparent);
+.markdown-diff-rendered-section-added.markdown-diff-rendered-section-with-line-gutter .markdown-copy-shell-with-line-numbers {
   background: color-mix(in srgb, var(--markdown-diff-added-color) 26%, var(--surface-white));
+}
+
+.markdown-diff-rendered-section-removed.markdown-diff-rendered-section-with-line-gutter .markdown-copy-shell-with-line-numbers {
+  background: color-mix(in srgb, var(--markdown-diff-removed-color) 16%, var(--surface-white));
+}
+
+.markdown-diff-rendered-section-added.markdown-diff-rendered-section-with-line-gutter .markdown-copy {
+  border-color: transparent;
+  background: transparent;
   box-shadow: none;
 }
 
 .markdown-diff-rendered-section-removed.markdown-diff-rendered-section-with-line-gutter .markdown-copy {
-  border-color: color-mix(in srgb, var(--markdown-diff-removed-color) 38%, transparent);
-  background: color-mix(in srgb, var(--markdown-diff-removed-color) 16%, var(--surface-white));
-  box-shadow: inset 1px 0 0 var(--markdown-diff-removed-color);
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
 }
 
 .markdown-diff-rendered-section-added .markdown-line-number {
@@ -5316,6 +5324,14 @@ textarea {
 
 .markdown-diff-rendered-section-removed .markdown-line-number {
   color: color-mix(in srgb, var(--markdown-diff-removed-color) 84%, var(--copy));
+}
+
+.markdown-diff-rendered-section-added .markdown-line-number::after {
+  content: "+";
+}
+
+.markdown-diff-rendered-section-removed .markdown-line-number::after {
+  content: "-";
 }
 
 .markdown-diff-rendered-section-added .markdown-copy {

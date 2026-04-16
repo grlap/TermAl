@@ -270,7 +270,6 @@ import {
   type PaneViewMode,
   type SessionPaneViewMode,
   type TabDropPlacement,
-  type WorkspaceDiffPreviewTab,
   type WorkspaceNode,
   type WorkspacePane,
   type WorkspaceState,
@@ -503,6 +502,45 @@ type GitDiffPreviewRefresh = {
   requestKey: string;
   sectionId: GitDiffSection;
 };
+
+export function collectRestoredGitDiffDocumentContentRefreshes(
+  workspace: WorkspaceState,
+  pendingRequestKeys: ReadonlySet<string>,
+  attemptedRequestKeys: ReadonlySet<string>,
+): GitDiffPreviewRefresh[] {
+  const refreshes = new Map<string, GitDiffPreviewRefresh>();
+
+  for (const pane of workspace.panes) {
+    for (const tab of pane.tabs) {
+      if (tab.kind !== "diffPreview") {
+        continue;
+      }
+      if (
+        tab.documentContent ||
+        !tab.gitDiffRequestKey ||
+        !tab.gitDiffRequest
+      ) {
+        continue;
+      }
+      if (tab.isLoading === true && tab.diff.trim().length === 0) {
+        continue;
+      }
+      if (
+        pendingRequestKeys.has(tab.gitDiffRequestKey) ||
+        attemptedRequestKeys.has(tab.gitDiffRequestKey)
+      ) {
+        continue;
+      }
+      refreshes.set(tab.gitDiffRequestKey, {
+        request: tab.gitDiffRequest,
+        requestKey: tab.gitDiffRequestKey,
+        sectionId: tab.gitSectionId ?? tab.gitDiffRequest.sectionId,
+      });
+    }
+  }
+
+  return Array.from(refreshes.values());
+}
 
 function collectGitDiffPreviewRefreshes(
   workspace: WorkspaceState,
@@ -895,6 +933,7 @@ export function resolveSettledScrollMinimumAttempts(
 
 export type AppTestHooks = {
   onDeleteProjectPostAwaitPath?: (path: "resolve" | "reject") => void;
+  onRestoredGitDiffDocumentContentUpdate?: (status: "success" | "error") => void;
 };
 
 let appTestHooks: AppTestHooks | null = null;
@@ -1197,6 +1236,15 @@ export default function App() {
   const workspaceFilesChangedEventFlushTimeoutRef = useRef<number | null>(null);
   const lastWorkspaceFilesChangedRevisionRef = useRef<number | null>(null);
   const gitDiffPreviewRefreshVersionsRef = useRef<Map<string, number>>(new Map());
+  const pendingGitDiffDocumentContentRestoreKeysRef = useRef<Set<string>>(
+    new Set(),
+  );
+  const attemptedGitDiffDocumentContentRestoreKeysRef = useRef<Set<string>>(
+    new Set(),
+  );
+  const restoredGitDiffDocumentContentScanWorkspaceViewIdRef = useRef<
+    string | null
+  >(null);
   const [launcherDraggedTab, setLauncherDraggedTab] =
     useState<WorkspaceTabDrag | null>(null);
   const [externalDraggedTab, setExternalDraggedTab] =
@@ -3820,9 +3868,22 @@ export default function App() {
       ),
     );
 
-    for (const requestKey of Array.from(gitDiffPreviewRefreshVersionsRef.current.keys())) {
+    // Keep refresh versions monotonic for the browser process lifetime. A
+    // closed diff tab can be reopened with the same request key before an old
+    // fetch resolves; deleting the version here would let that stale response
+    // look current.
+    for (const requestKey of Array.from(
+      pendingGitDiffDocumentContentRestoreKeysRef.current,
+    )) {
       if (!activeGitDiffRequestKeys.has(requestKey)) {
-        gitDiffPreviewRefreshVersionsRef.current.delete(requestKey);
+        pendingGitDiffDocumentContentRestoreKeysRef.current.delete(requestKey);
+      }
+    }
+    for (const requestKey of Array.from(
+      attemptedGitDiffDocumentContentRestoreKeysRef.current,
+    )) {
+      if (!activeGitDiffRequestKeys.has(requestKey)) {
+        attemptedGitDiffDocumentContentRestoreKeysRef.current.delete(requestKey);
       }
     }
   }, [workspace.panes]);
@@ -3845,51 +3906,37 @@ export default function App() {
     draftAttachmentsRef.current = draftAttachmentsBySessionId;
   }, [draftAttachmentsBySessionId]);
 
-  // Re-fetch Git diff preview tabs that were restored from the persisted
-  // workspace layout without their `documentContent`. The persist path
-  // strips `documentContent` via
-  // `stripDiffPreviewDocumentContentFromWorkspaceState` so we do not leak
-  // worktree bytes into localStorage, but that leaves restored full-document
-  // Markdown diffs reopening as read-only patch previews. This mount-only
-  // effect walks the workspace once, identifies the restored tabs with a
-  // live `gitDiffRequest` but no `documentContent`, and triggers a
-  // `fetchGitDiff` for each so the rendered Markdown mode becomes
-  // available as soon as the fetch completes.
+  // Re-fetch Git diff preview tabs restored from persisted workspace layout
+  // without `documentContent`. Layout hydration can arrive after mount, so
+  // this scans once per workspace view after readiness and dedupes request
+  // keys instead of being a one-shot mount pass.
   useEffect(() => {
-    type Restore = {
-      tab: WorkspaceDiffPreviewTab;
-      paneId: string;
-      requestKey: string;
-      request: GitDiffRequestPayload;
-      sectionId: GitDiffSection;
-    };
-    const restores: Restore[] = [];
-    for (const pane of workspaceRef.current.panes) {
-      for (const tab of pane.tabs) {
-        if (tab.kind !== "diffPreview") {
-          continue;
-        }
-        if (
-          tab.documentContent ||
-          !tab.gitDiffRequestKey ||
-          !tab.gitDiffRequest
-        ) {
-          continue;
-        }
-        restores.push({
-          tab,
-          paneId: pane.id,
-          requestKey: tab.gitDiffRequestKey,
-          request: tab.gitDiffRequest,
-          sectionId: tab.gitSectionId ?? tab.gitDiffRequest.sectionId,
-        });
-      }
+    if (!isWorkspaceLayoutReady) {
+      return;
     }
+    if (
+      restoredGitDiffDocumentContentScanWorkspaceViewIdRef.current ===
+      workspaceViewId
+    ) {
+      return;
+    }
+    restoredGitDiffDocumentContentScanWorkspaceViewIdRef.current =
+      workspaceViewId;
+
+    const restores = collectRestoredGitDiffDocumentContentRefreshes(
+      workspace,
+      pendingGitDiffDocumentContentRestoreKeysRef.current,
+      attemptedGitDiffDocumentContentRestoreKeysRef.current,
+    );
     if (restores.length === 0) {
       return;
     }
 
     for (const restore of restores) {
+      pendingGitDiffDocumentContentRestoreKeysRef.current.add(restore.requestKey);
+      attemptedGitDiffDocumentContentRestoreKeysRef.current.add(
+        restore.requestKey,
+      );
       const currentVersion =
         (gitDiffPreviewRefreshVersionsRef.current.get(restore.requestKey) ?? 0) + 1;
       gitDiffPreviewRefreshVersionsRef.current.set(restore.requestKey, currentVersion);
@@ -3910,12 +3957,17 @@ export default function App() {
 
       void fetchGitDiff(restore.request)
         .then((diffPreview) => {
+          pendingGitDiffDocumentContentRestoreKeysRef.current.delete(
+            restore.requestKey,
+          );
           if (
+            !isMountedRef.current ||
             gitDiffPreviewRefreshVersionsRef.current.get(restore.requestKey) !==
             currentVersion
           ) {
             return;
           }
+          appTestHooks?.onRestoredGitDiffDocumentContentUpdate?.("success");
           setWorkspace((current) =>
             applyControlPanelLayout(
               updateGitDiffPreviewTabInWorkspaceState(
@@ -3940,17 +3992,22 @@ export default function App() {
           );
         })
         .catch((error) => {
+          pendingGitDiffDocumentContentRestoreKeysRef.current.delete(
+            restore.requestKey,
+          );
           if (
+            !isMountedRef.current ||
             gitDiffPreviewRefreshVersionsRef.current.get(restore.requestKey) !==
             currentVersion
           ) {
             return;
           }
           // Leave the tab visible but note the failure so the user can
-          // reopen it manually. We deliberately do NOT close the tab — the
+          // reopen it manually. We deliberately do not close the tab: the
           // persisted stub still has a valid filePath + diff for raw
           // inspection.
           const errorMessage = getErrorMessage(error);
+          appTestHooks?.onRestoredGitDiffDocumentContentUpdate?.("error");
           setWorkspace((current) =>
             applyControlPanelLayout(
               updateGitDiffPreviewTabInWorkspaceState(
@@ -3966,11 +4023,7 @@ export default function App() {
           );
         });
     }
-    // Run once on mount. `workspaceRef` is a ref, not a reactive dep, so this
-    // effect does not re-run on workspace state updates — subsequent refreshes
-    // flow through the file-change watcher path below.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [isWorkspaceLayoutReady, workspace.panes, workspaceViewId]);
 
   useEffect(() => {
     if (!workspaceFilesChangedEvent) {

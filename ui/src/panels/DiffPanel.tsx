@@ -1,5 +1,5 @@
 import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { FormEvent, KeyboardEvent, ReactNode } from "react";
+import type { ClipboardEvent, FormEvent, KeyboardEvent, ReactNode } from "react";
 import { flushSync } from "react-dom";
 import {
   fetchFile,
@@ -17,7 +17,7 @@ import {
 import { copyTextToClipboard } from "../clipboard";
 import { FileTabIcon } from "../file-tab-icon";
 import { MarkdownContent, type MarkdownFileLinkTarget } from "../message-cards";
-import type { MonacoCodeEditorStatus } from "../MonacoCodeEditor";
+import type { MonacoCodeEditorHandle, MonacoCodeEditorStatus } from "../MonacoCodeEditor";
 import type { MonacoDiffEditorHandle, MonacoDiffEditorStatus } from "../MonacoDiffEditor";
 import { buildDiffPreviewModel } from "../diff-preview";
 import { resolveMonacoLanguage, type MonacoAppearance } from "../monaco";
@@ -35,6 +35,17 @@ import {
 } from "./markdown-diff-segments";
 import { rebaseContentOntoDisk, type SourceSaveOptions } from "./SourcePanel";
 import { StructuredDiffView } from "./StructuredDiffView";
+
+function useStableEvent<TArgs extends unknown[], TResult>(
+  callback: (...args: TArgs) => TResult,
+) {
+  const callbackRef = useRef(callback);
+  useEffect(() => {
+    callbackRef.current = callback;
+  });
+
+  return useCallback((...args: TArgs) => callbackRef.current(...args), []);
+}
 
 const MonacoCodeEditor = lazy(() =>
   import("../MonacoCodeEditor").then(({ MonacoCodeEditor }) => ({ default: MonacoCodeEditor })),
@@ -70,8 +81,15 @@ type ReviewOriginContext = {
 };
 
 type RenderedMarkdownSectionCommit = {
+  currentSegment: MarkdownDiffDocumentSegment;
   segment: MarkdownDiffDocumentSegment;
   nextMarkdown: string;
+  sourceContent: string;
+};
+
+type MarkdownDocumentRange = {
+  end: number;
+  start: number;
 };
 
 type MarkdownDiffSaveHandler = () => Promise<void> | void;
@@ -107,6 +125,139 @@ function createInitialDiffViewScrollPositions(): DiffViewScrollPositions {
     markdown: 0,
     raw: 0,
   };
+}
+
+function resolveRenderedMarkdownCommitRange(
+  currentContent: string,
+  commit: RenderedMarkdownSectionCommit,
+): MarkdownDocumentRange | null {
+  const originalRange = {
+    start: commit.segment.afterStartOffset,
+    end: commit.segment.afterEndOffset,
+  };
+  if (markdownRangeMatches(currentContent, originalRange, commit.segment.markdown)) {
+    return originalRange;
+  }
+
+  const mappedRange = mapMarkdownRangeAcrossContentChange(
+    commit.sourceContent,
+    currentContent,
+    originalRange,
+  );
+  if (mappedRange && markdownRangeMatches(currentContent, mappedRange, commit.segment.markdown)) {
+    return mappedRange;
+  }
+
+  const searchedRange = findClosestMarkdownRange(
+    currentContent,
+    commit.segment.markdown,
+    mappedRange?.start ?? originalRange.start,
+  );
+  if (searchedRange) {
+    return searchedRange;
+  }
+
+  const currentRange = {
+    start: commit.currentSegment.afterStartOffset,
+    end: commit.currentSegment.afterEndOffset,
+  };
+  if (markdownRangeMatches(currentContent, currentRange, commit.currentSegment.markdown)) {
+    return currentRange;
+  }
+
+  return null;
+}
+
+function markdownRangeMatches(
+  content: string,
+  range: MarkdownDocumentRange,
+  expected: string,
+) {
+  return (
+    range.start >= 0 &&
+    range.end >= range.start &&
+    range.end <= content.length &&
+    content.slice(range.start, range.end) === expected
+  );
+}
+
+function mapMarkdownRangeAcrossContentChange(
+  sourceContent: string,
+  currentContent: string,
+  range: MarkdownDocumentRange,
+): MarkdownDocumentRange | null {
+  if (sourceContent === currentContent) {
+    return range;
+  }
+
+  let prefixLength = 0;
+  const sharedLength = Math.min(sourceContent.length, currentContent.length);
+  while (
+    prefixLength < sharedLength &&
+    sourceContent.charCodeAt(prefixLength) === currentContent.charCodeAt(prefixLength)
+  ) {
+    prefixLength += 1;
+  }
+
+  let sourceSuffixStart = sourceContent.length;
+  let currentSuffixStart = currentContent.length;
+  while (
+    sourceSuffixStart > prefixLength &&
+    currentSuffixStart > prefixLength &&
+    sourceContent.charCodeAt(sourceSuffixStart - 1) ===
+      currentContent.charCodeAt(currentSuffixStart - 1)
+  ) {
+    sourceSuffixStart -= 1;
+    currentSuffixStart -= 1;
+  }
+
+  if (range.end <= prefixLength) {
+    return range;
+  }
+
+  if (range.start >= sourceSuffixStart) {
+    const delta = currentSuffixStart - sourceSuffixStart;
+    return {
+      start: range.start + delta,
+      end: range.end + delta,
+    };
+  }
+
+  return null;
+}
+
+function findClosestMarkdownRange(
+  content: string,
+  markdown: string,
+  preferredStart: number,
+): MarkdownDocumentRange | null {
+  if (markdown.length === 0) {
+    return null;
+  }
+
+  let bestStart: number | null = null;
+  let searchStart = 0;
+  while (searchStart <= content.length) {
+    const foundStart = content.indexOf(markdown, searchStart);
+    if (foundStart === -1) {
+      break;
+    }
+
+    if (
+      bestStart === null ||
+      Math.abs(foundStart - preferredStart) < Math.abs(bestStart - preferredStart)
+    ) {
+      bestStart = foundStart;
+    }
+    searchStart = foundStart + Math.max(markdown.length, 1);
+  }
+
+  return bestStart === null
+    ? null
+    : {
+        start: bestStart,
+        end: bestStart + markdown.length,
+      };
 }
 
 const LANGUAGE_LABELS: Record<string, string> = {
@@ -188,16 +339,14 @@ export function DiffPanel({
   const hasScope = Boolean(normalizedSessionId || normalizedProjectId);
   const [editValue, setEditValue] = useState("");
   const [markdownEditContent, setMarkdownEditContent] = useState<string | null>(null);
-  // Tracks whether an `EditableRenderedMarkdownSection` currently holds an
-  // uncommitted contentEditable draft that differs from its segment. We need
-  // this because per-keystroke drafts no longer propagate to `editValue`; that
-  // propagation used to churn `markdownDisplayPreview` and cause mid-edit
-  // editor remounts + stale-baseline commit overwrites. Without a
-  // separate signal, `isDirty` would stay false until blur and the "Save
-  // Markdown" button would refuse clicks. `handleRenderedMarkdownSectionDraftChange`
-  // toggles this flag, and both commit (`handleRenderedMarkdownSectionCommits`)
-  // and save (`handleSave`) clear it.
-  const [hasRenderedDraftActive, setHasRenderedDraftActive] = useState(false);
+  // Tracks which rendered Markdown sections currently hold uncommitted
+  // contentEditable drafts. Per-keystroke drafts intentionally stay local to
+  // the section DOM so the rendered diff does not remount while the user is
+  // typing; this set is the synchronous dirty signal for Save/reload paths.
+  const [renderedMarkdownDraftSegmentIds, setRenderedMarkdownDraftSegmentIds] =
+    useState<Set<string>>(() => new Set());
+  const renderedMarkdownDraftSegmentIdsRef = useRef(renderedMarkdownDraftSegmentIds);
+  const hasRenderedDraftActive = renderedMarkdownDraftSegmentIds.size > 0;
   const [visualBaseContent, setVisualBaseContent] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
@@ -211,8 +360,12 @@ export function DiffPanel({
   const [visualEditorStatus, setVisualEditorStatus] = useState<MonacoDiffEditorStatus>(DEFAULT_DIFF_EDITOR_STATUS);
   const [copiedPath, setCopiedPath] = useState(false);
   const [copiedReviewPath, setCopiedReviewPath] = useState(false);
+  const editEditorRef = useRef<MonacoCodeEditorHandle | null>(null);
   const diffEditorRef = useRef<MonacoDiffEditorHandle | null>(null);
+  const structuredDiffScrollRef = useRef<HTMLDivElement | null>(null);
   const markdownDiffScrollRef = useRef<HTMLDivElement | null>(null);
+  const rawPatchScrollRef = useRef<HTMLDivElement | null>(null);
+  const diffViewRestoreTokenRef = useRef(0);
   const diffViewScrollPositionsRef = useRef<DiffViewScrollPositions>(
     createInitialDiffViewScrollPositions(),
   );
@@ -242,22 +395,85 @@ export function DiffPanel({
     markdownEditContentRef.current = nextValue;
     setMarkdownEditContent(nextValue);
   };
+  const setRenderedMarkdownDraftSegmentActive = (segmentId: string, isActive: boolean) => {
+    setRenderedMarkdownDraftSegmentIds((current) => {
+      if (current.has(segmentId) === isActive) {
+        renderedMarkdownDraftSegmentIdsRef.current = current;
+        return current;
+      }
+
+      const next = new Set(current);
+      if (isActive) {
+        next.add(segmentId);
+      } else {
+        next.delete(segmentId);
+      }
+      renderedMarkdownDraftSegmentIdsRef.current = next;
+      return next;
+    });
+  };
+  const clearRenderedMarkdownDraftSegments = () => {
+    setRenderedMarkdownDraftSegmentIds((current) => {
+      if (current.size === 0) {
+        renderedMarkdownDraftSegmentIdsRef.current = current;
+        return current;
+      }
+
+      const next = new Set<string>();
+      renderedMarkdownDraftSegmentIdsRef.current = next;
+      return next;
+    });
+  };
   const registerRenderedMarkdownCommitter = useCallback((committer: () => RenderedMarkdownSectionCommit | null) => {
     renderedMarkdownCommittersRef.current.add(committer);
     return () => {
       renderedMarkdownCommittersRef.current.delete(committer);
     };
   }, []);
-  function commitRenderedMarkdownDrafts() {
-    const commits = Array.from(renderedMarkdownCommittersRef.current)
+  function collectRenderedMarkdownCommits() {
+    return Array.from(renderedMarkdownCommittersRef.current)
       .map((committer) => committer())
       .filter((commit): commit is RenderedMarkdownSectionCommit => commit != null);
+  }
+
+  function commitRenderedMarkdownDrafts() {
+    const commits = collectRenderedMarkdownCommits();
     if (commits.length === 0) {
-      setHasRenderedDraftActive(false);
+      clearRenderedMarkdownDraftSegments();
       return;
     }
     handleRenderedMarkdownSectionCommits(commits);
+    clearRenderedMarkdownDraftSegments();
   }
+
+  function commitRenderedMarkdownSectionDraft(commit: RenderedMarkdownSectionCommit) {
+    const hasOtherActiveRenderedDraft = Array.from(renderedMarkdownDraftSegmentIdsRef.current)
+      .some((segmentId) => segmentId !== commit.segment.id);
+    if (hasOtherActiveRenderedDraft) {
+      // A section commit can rebuild the rendered diff. Flush the other active
+      // DOM drafts first so their source survives any segment remount.
+      const commitsBySegmentId = new Map<string, RenderedMarkdownSectionCommit>([
+        [commit.segment.id, commit],
+      ]);
+      for (const activeCommit of collectRenderedMarkdownCommits()) {
+        commitsBySegmentId.set(activeCommit.segment.id, activeCommit);
+      }
+      const commits = Array.from(commitsBySegmentId.values());
+      if (commits.length > 0) {
+        handleRenderedMarkdownSectionCommits(commits);
+        return;
+      }
+    }
+
+    handleRenderedMarkdownSectionCommits([commit]);
+  }
+
+  const stableCommitRenderedMarkdownDrafts = useStableEvent(commitRenderedMarkdownDrafts);
+  const stableCommitRenderedMarkdownSectionDraft = useStableEvent(commitRenderedMarkdownSectionDraft);
+  const stableHandleRenderedMarkdownSectionDraftChange = useStableEvent(
+    handleRenderedMarkdownSectionDraftChange,
+  );
+  const stableHandleOpenMarkdownSourceLink = useStableEvent(handleOpenMarkdownSourceLink);
 
   useEffect(() => {
     latestFileRef.current = latestFile;
@@ -319,6 +535,15 @@ export function DiffPanel({
     if (mode === "markdown") {
       return markdownDiffScrollRef.current?.scrollTop ?? diffViewScrollPositionsRef.current.markdown;
     }
+    if (mode === "changes") {
+      return structuredDiffScrollRef.current?.scrollTop ?? diffViewScrollPositionsRef.current.changes;
+    }
+    if (mode === "raw") {
+      return rawPatchScrollRef.current?.scrollTop ?? diffViewScrollPositionsRef.current.raw;
+    }
+    if (mode === "edit") {
+      return editEditorRef.current?.getScrollTop() ?? diffViewScrollPositionsRef.current.edit;
+    }
     return diffViewScrollPositionsRef.current[mode] ?? 0;
   }
 
@@ -340,6 +565,30 @@ export function DiffPanel({
       scrollRegion.scrollTop = scrollTop;
       return true;
     }
+    if (mode === "changes") {
+      const scrollRegion = structuredDiffScrollRef.current;
+      if (!scrollRegion) {
+        return false;
+      }
+      scrollRegion.scrollTop = scrollTop;
+      return true;
+    }
+    if (mode === "raw") {
+      const scrollRegion = rawPatchScrollRef.current;
+      if (!scrollRegion) {
+        return false;
+      }
+      scrollRegion.scrollTop = scrollTop;
+      return true;
+    }
+    if (mode === "edit") {
+      const editor = editEditorRef.current;
+      if (!editor) {
+        return false;
+      }
+      editor.setScrollTop(scrollTop);
+      return true;
+    }
     return true;
   }
 
@@ -354,23 +603,6 @@ export function DiffPanel({
     rememberDiffViewScrollTop();
     setViewMode(nextViewMode);
   }
-
-  useEffect(() => {
-    let animationFrameId = 0;
-    let attempts = 0;
-    const restore = () => {
-      attempts += 1;
-      const restored = restoreDiffViewScrollTop(viewMode);
-      if (!restored && attempts < 8) {
-        animationFrameId = window.requestAnimationFrame(restore);
-      }
-    };
-
-    animationFrameId = window.requestAnimationFrame(restore);
-    return () => {
-      window.cancelAnimationFrame(animationFrameId);
-    };
-  }, [viewMode]);
 
   // This reset is intentionally tied to tab identity only. Derived preview
   // values can change during git refreshes, but user-selected view mode should
@@ -389,17 +621,45 @@ export function DiffPanel({
     setIsReloadingFile(false);
     setIsSavingReview(false);
     setMarkdownEditContentState(null);
-    setHasRenderedDraftActive(false);
+    clearRenderedMarkdownDraftSegments();
   }, [diffMessageId, filePath]);
 
   useEffect(() => {
+    const restoreToken = diffViewRestoreTokenRef.current + 1;
+    diffViewRestoreTokenRef.current = restoreToken;
+    let animationFrameId = 0;
+    let attempts = 0;
+    let cancelled = false;
+    const restore = () => {
+      if (cancelled || diffViewRestoreTokenRef.current !== restoreToken) {
+        return;
+      }
+      attempts += 1;
+      const restored = restoreDiffViewScrollTop(viewMode);
+      if (!restored && attempts < 8) {
+        animationFrameId = window.requestAnimationFrame(restore);
+      }
+    };
+
+    animationFrameId = window.requestAnimationFrame(restore);
+    return () => {
+      cancelled = true;
+      window.cancelAnimationFrame(animationFrameId);
+    };
+  }, [diffMessageId, filePath, viewMode]);
+
+  useEffect(() => {
+    if (renderedMarkdownDraftSegmentIdsRef.current.size > 0) {
+      commitRenderedMarkdownDrafts();
+    }
+
     const currentFile = latestFileRef.current;
     if (currentFile.status === "ready" && editValueRef.current !== currentFile.content) {
       return;
     }
 
     setMarkdownEditContentState(null);
-    setHasRenderedDraftActive(false);
+    clearRenderedMarkdownDraftSegments();
   }, [documentContent]);
 
   useEffect(() => {
@@ -574,9 +834,10 @@ export function DiffPanel({
   const hasVisualNavigation = viewMode === "all" && visualEditorStatus.changeCount > 0;
   // `isDirty` reflects both committed draft state (editValue ≠ disk content)
   // and any uncommitted rendered-Markdown section draft that has not yet been
-  // flushed to editValue. See `hasRenderedDraftActive` for the rationale.
+  // flushed to editValue.
   const isDirty =
     (latestFile.status === "ready" && editValue !== latestFile.content) || hasRenderedDraftActive;
+  const diffPreviewNote = documentEnrichmentNote ?? preview.note ?? null;
   const saveStateLabel = saveError ? "Save failed" : isSaving ? "Saving..." : isDirty ? "Unsaved changes" : null;
   const gitSectionLabel =
     gitSectionId === "staged" ? "Staged" : gitSectionId === "unstaged" ? "Unstaged" : null;
@@ -627,6 +888,10 @@ export function DiffPanel({
       return;
     }
 
+    if (renderedMarkdownDraftSegmentIdsRef.current.size > 0) {
+      commitRenderedMarkdownDrafts();
+    }
+
     const currentFile = latestFileRef.current;
     const currentEditValue = editValueRef.current;
     const wasDirty =
@@ -660,6 +925,10 @@ export function DiffPanel({
       .then((response) => {
         if (cancelled) {
           return;
+        }
+
+        if (renderedMarkdownDraftSegmentIdsRef.current.size > 0) {
+          commitRenderedMarkdownDrafts();
         }
 
         const latestSnapshot = latestFileRef.current;
@@ -762,6 +1031,7 @@ export function DiffPanel({
         baseHash: currentFile.contentHash ?? null,
         overwrite: options?.overwrite,
       });
+      commitRenderedMarkdownDrafts();
       const savedContent = response?.content ?? currentEditValue;
       const latestEditValue = editValueRef.current;
       const hasLocalEditsAfterSaveStarted = latestEditValue !== currentEditValue;
@@ -814,10 +1084,9 @@ export function DiffPanel({
       return;
     }
 
-    // Clear the draft-active flag on any commit, even a no-op, so the Save
-    // button's dirty state resolves consistently. A genuine content change
-    // still flips `isDirty` back on via `editValue !== latestFile.content`.
-    setHasRenderedDraftActive(false);
+    for (const commit of commits) {
+      setRenderedMarkdownDraftSegmentActive(commit.segment.id, false);
+    }
 
     const sourceContent =
       markdownEditContentRef.current ??
@@ -825,19 +1094,37 @@ export function DiffPanel({
       editValueRef.current !== latestFileRef.current.content
         ? editValueRef.current
         : markdownPreview.after.content);
-    const nextDocumentContent = commits
-      .slice()
-      .sort((left, right) => right.segment.afterStartOffset - left.segment.afterStartOffset)
+    const resolvedCommits = commits
+      .map((commit) => ({
+        commit,
+        range: resolveRenderedMarkdownCommitRange(sourceContent, commit),
+      }));
+    const unresolvedCommitCount = resolvedCommits.filter(
+      (entry) => entry.range === null,
+    ).length;
+    const nextDocumentContent = resolvedCommits
+      .filter(
+        (entry): entry is {
+          commit: RenderedMarkdownSectionCommit;
+          range: MarkdownDocumentRange;
+        } => entry.range !== null,
+      )
+      .sort((left, right) => right.range.start - left.range.start)
       .reduce(
-        (currentContent, commit) =>
+        (currentContent, { commit, range }) =>
           replaceMarkdownDocumentRange(
             currentContent,
-            commit.segment.afterStartOffset,
-            commit.segment.afterEndOffset,
+            range.start,
+            range.end,
             normalizeEditedMarkdownSection(commit.nextMarkdown, commit.segment.markdown),
           ),
         sourceContent,
       );
+    if (unresolvedCommitCount > 0) {
+      setSaveError(
+        "Rendered Markdown edit could not be applied because the document changed under that section. Review the latest diff and edit again.",
+      );
+    }
     if (nextDocumentContent === sourceContent) {
       return;
     }
@@ -884,7 +1171,7 @@ export function DiffPanel({
     }
 
     const normalizedDraft = normalizeEditedMarkdownSection(nextMarkdown, segment.markdown);
-    setHasRenderedDraftActive(normalizedDraft !== segment.markdown);
+    setRenderedMarkdownDraftSegmentActive(segment.id, normalizedDraft !== segment.markdown);
     setSaveError(null);
     setDiffEditConflictOnDisk(false);
     if (markdownPreview.after.source !== "worktree") {
@@ -1299,6 +1586,7 @@ export function DiffPanel({
               filePath,
               language,
               latestFile,
+              editorRef: editEditorRef,
               onChange: setEditValueState,
               onSave: handleSave,
               onStatusChange: setEditEditorStatus,
@@ -1386,6 +1674,7 @@ export function DiffPanel({
           <StructuredDiffView
             filePath={filePath}
             preview={preview}
+            scrollRef={structuredDiffScrollRef}
             threads={reviewThreads}
             isSavingReview={isSavingReview || reviewState.status === "loading"}
             onCreateThread={canEditReview ? (anchor, body) => handleCreateThread(anchor, body) : undefined}
@@ -1408,10 +1697,11 @@ export function DiffPanel({
             isDirty={isDirty}
             isSaving={isSaving}
             markdownPreview={markdownDisplayPreview}
-            onCommitRenderedMarkdownDrafts={commitRenderedMarkdownDrafts}
-            onOpenSourceLink={handleOpenMarkdownSourceLink}
+            onCommitRenderedMarkdownDrafts={stableCommitRenderedMarkdownDrafts}
+            onCommitRenderedMarkdownSectionDraft={stableCommitRenderedMarkdownSectionDraft}
+            onOpenSourceLink={stableHandleOpenMarkdownSourceLink}
             onRegisterRenderedMarkdownCommitter={registerRenderedMarkdownCommitter}
-            onRenderedMarkdownSectionDraftChange={handleRenderedMarkdownSectionDraftChange}
+            onRenderedMarkdownSectionDraftChange={stableHandleRenderedMarkdownSectionDraftChange}
             onSave={handleSave}
             preview={preview}
             saveStateLabel={saveStateLabel}
@@ -1421,7 +1711,7 @@ export function DiffPanel({
         ) : null}
 
         {viewMode === "raw" || (viewMode === "all" && !preview.hasStructuredPreview) ? (
-          <RawPatchView diff={diff} />
+          <RawPatchView diff={diff} scrollRef={rawPatchScrollRef} />
         ) : null}
 
         {viewMode === "raw" ? (
@@ -1437,10 +1727,10 @@ export function DiffPanel({
           </footer>
         ) : null}
 
-        {viewMode !== "edit" && viewMode !== "markdown" && (preview.note || (reviewThreads.length > 0 && viewMode !== "changes")) ? (
+        {viewMode !== "edit" && viewMode !== "markdown" && (diffPreviewNote || (reviewThreads.length > 0 && viewMode !== "changes")) ? (
           <p className="support-copy diff-preview-note">
-            {preview.note ?? ""}
-            {preview.note && reviewThreads.length > 0 && viewMode !== "changes" ? " " : ""}
+            {diffPreviewNote ?? ""}
+            {diffPreviewNote && reviewThreads.length > 0 && viewMode !== "changes" ? " " : ""}
             {reviewThreads.length > 0 && viewMode !== "changes"
               ? "Review threads render inline in Changed only view."
               : ""}
@@ -1548,6 +1838,7 @@ function CheckIcon() {
 function renderEditFileView({
   appearance,
   editValue,
+  editorRef,
   fontSizePx,
   filePath,
   language,
@@ -1558,6 +1849,7 @@ function renderEditFileView({
 }: {
   appearance: MonacoAppearance;
   editValue: string;
+  editorRef: { current: MonacoCodeEditorHandle | null };
   fontSizePx: number;
   filePath: string | null;
   language?: string | null;
@@ -1592,6 +1884,7 @@ function renderEditFileView({
     <div className="source-editor-shell source-editor-shell-with-statusbar">
       <Suspense fallback={<div className="source-editor-loading">Loading editor...</div>}>
         <MonacoCodeEditor
+          ref={editorRef}
           appearance={appearance}
           ariaLabel={`Edit mode for ${latestFile.path}`}
           fontSizePx={fontSizePx}
@@ -1618,11 +1911,17 @@ function DiffNavArrow({ direction }: { direction: "up" | "down" }) {
   );
 }
 
-function RawPatchView({ diff }: { diff: string }) {
+function RawPatchView({
+  diff,
+  scrollRef,
+}: {
+  diff: string;
+  scrollRef?: { current: HTMLDivElement | null };
+}) {
   const lines = diff.split("\n");
 
   return (
-    <div className="diff-editor-shell diff-preview-raw-shell">
+    <div className="diff-editor-shell diff-preview-raw-shell" ref={scrollRef}>
       <div className="diff-preview-raw" role="table" aria-label="Raw patch preview">
         {lines.map((line, index) => (
           <div
@@ -1726,6 +2025,7 @@ function MarkdownDiffView({
   isSaving,
   markdownPreview,
   onRenderedMarkdownSectionDraftChange,
+  onCommitRenderedMarkdownSectionDraft,
   onOpenSourceLink,
   onCommitRenderedMarkdownDrafts,
   onRegisterRenderedMarkdownCommitter,
@@ -1747,6 +2047,7 @@ function MarkdownDiffView({
     segment: MarkdownDiffDocumentSegment,
     nextMarkdown: string,
   ) => void;
+  onCommitRenderedMarkdownSectionDraft: (commit: RenderedMarkdownSectionCommit) => void;
   onOpenSourceLink: (target: MarkdownFileLinkTarget) => void;
   onCommitRenderedMarkdownDrafts: () => void;
   onRegisterRenderedMarkdownCommitter: (committer: () => RenderedMarkdownSectionCommit | null) => () => void;
@@ -1756,9 +2057,19 @@ function MarkdownDiffView({
   scrollRef: { current: HTMLDivElement | null };
   workspaceRoot: string | null;
 }) {
-  const segments = useMemo(
+  const builtSegments = useMemo(
     () => buildMarkdownDiffDocumentSegments(markdownPreview, preview),
     [markdownPreview, preview],
+  );
+  const stableSegmentIdentityKey = [
+    documentPath ?? "",
+    gitSectionId ?? "",
+    markdownPreview.before.source,
+    markdownPreview.after.source,
+  ].join("\0");
+  const segments = useStableMarkdownDiffDocumentSegments(
+    builtSegments,
+    stableSegmentIdentityKey,
   );
   // Previous implementations here froze `segments` and the source content
   // they were computed from while any section was editing, in order to keep
@@ -1789,6 +2100,7 @@ function MarkdownDiffView({
   );
   const gitSectionLabel =
     gitSectionId === "staged" ? "Staged" : gitSectionId === "unstaged" ? "Unstaged" : null;
+  const [readOnlyResetVersion, setReadOnlyResetVersion] = useState(0);
 
   return (
     <div className="source-editor-shell source-editor-shell-with-statusbar markdown-diff-shell">
@@ -1818,14 +2130,18 @@ function MarkdownDiffView({
         canEdit={canEdit}
         completeness={markdownPreview.after.completeness}
         documentPath={documentPath}
+        key={readOnlyResetVersion}
         note={markdownPreview.after.note}
+        onCommitRenderedMarkdownSectionDraft={onCommitRenderedMarkdownSectionDraft}
         onRenderedMarkdownSectionDraftChange={handleRenderedMarkdownSectionDraftChange}
         onOpenSourceLink={onOpenSourceLink}
         onCommitRenderedMarkdownDrafts={onCommitRenderedMarkdownDrafts}
         onRegisterRenderedMarkdownCommitter={onRegisterRenderedMarkdownCommitter}
+        onReadOnlyRenderedMarkdownMutation={() => setReadOnlyResetVersion((current) => current + 1)}
         onSave={onSave}
         scrollRef={scrollRef}
         segments={segments}
+        sourceContent={markdownPreview.after.content}
         workspaceRoot={workspaceRoot}
       />
       <footer className="source-editor-statusbar diff-preview-statusbar" aria-label="Markdown diff status">
@@ -1847,6 +2163,241 @@ function MarkdownDiffView({
   );
 }
 
+function useStableMarkdownDiffDocumentSegments(
+  segments: MarkdownDiffDocumentSegment[],
+  identityKey: string,
+) {
+  const previousRef = useRef<{
+    identityKey: string;
+    segments: MarkdownDiffDocumentSegment[];
+  } | null>(null);
+  const stableSegments = useMemo(() => {
+    const previous =
+      previousRef.current?.identityKey === identityKey
+        ? previousRef.current.segments
+        : [];
+    return stabilizeMarkdownDiffSegmentIds(previous, segments);
+  }, [identityKey, segments]);
+
+  useEffect(() => {
+    previousRef.current = { identityKey, segments: stableSegments };
+  }, [identityKey, stableSegments]);
+
+  return stableSegments;
+}
+
+type IndexedMarkdownDiffSegment = {
+  context: MarkdownDiffSegmentContext;
+  identity: string;
+  index: number;
+  segment: MarkdownDiffDocumentSegment;
+};
+
+type MarkdownDiffSegmentContext = {
+  next: string | null;
+  nextNext: string | null;
+  previous: string | null;
+  previousPrevious: string | null;
+};
+
+function stabilizeMarkdownDiffSegmentIds(
+  previousSegments: MarkdownDiffDocumentSegment[],
+  nextSegments: MarkdownDiffDocumentSegment[],
+) {
+  if (previousSegments.length === 0 || nextSegments.length === 0) {
+    return nextSegments;
+  }
+
+  const previousEntries = indexMarkdownDiffSegments(previousSegments);
+  const nextEntries = indexMarkdownDiffSegments(nextSegments);
+  const previousByIdentity = new Map<string, IndexedMarkdownDiffSegment[]>();
+  for (const entry of previousEntries) {
+    const entries = previousByIdentity.get(entry.identity) ?? [];
+    entries.push(entry);
+    previousByIdentity.set(entry.identity, entries);
+  }
+
+  const candidatePairs: Array<{
+    contextScore: number;
+    distance: number;
+    nextIndex: number;
+    previousIndex: number;
+  }> = [];
+  for (const nextEntry of nextEntries) {
+    const matchingPreviousEntries = previousByIdentity.get(nextEntry.identity) ?? [];
+    for (const previousEntry of matchingPreviousEntries) {
+      candidatePairs.push({
+        contextScore: scoreMarkdownDiffSegmentContext(
+          previousEntry.context,
+          nextEntry.context,
+        ),
+        distance: getMarkdownDiffSegmentDistance(
+          previousEntry.segment,
+          nextEntry.segment,
+          previousEntry.index,
+          nextEntry.index,
+        ),
+        nextIndex: nextEntry.index,
+        previousIndex: previousEntry.index,
+      });
+    }
+  }
+
+  candidatePairs.sort(
+    (left, right) =>
+      right.contextScore - left.contextScore ||
+      left.distance - right.distance ||
+      left.nextIndex - right.nextIndex ||
+      left.previousIndex - right.previousIndex,
+  );
+
+  const matchedPreviousIndexes = new Set<number>();
+  const previousIdByNextIndex = new Map<number, string>();
+  // Reuse ids from the previous committed render before trusting the new
+  // occurrence-based ids. This keeps repeated equal Markdown chunks mounted
+  // when an earlier duplicate is inserted or removed.
+  for (const pair of candidatePairs) {
+    if (
+      matchedPreviousIndexes.has(pair.previousIndex) ||
+      previousIdByNextIndex.has(pair.nextIndex)
+    ) {
+      continue;
+    }
+
+    const previousSegment = previousSegments[pair.previousIndex];
+    if (!previousSegment) {
+      continue;
+    }
+
+    matchedPreviousIndexes.add(pair.previousIndex);
+    previousIdByNextIndex.set(pair.nextIndex, previousSegment.id);
+  }
+
+  const usedIds = new Set<string>();
+  const reservedMatchedIds = new Set(previousIdByNextIndex.values());
+  return nextSegments.map((segment, index) => {
+    const matchedPreviousId = previousIdByNextIndex.get(index);
+    const preferredId =
+      matchedPreviousId ??
+      (reservedMatchedIds.has(segment.id) ? `${segment.id}:new` : segment.id);
+    const id = getAvailableMarkdownDiffSegmentId(preferredId, usedIds);
+    usedIds.add(id);
+    return id === segment.id ? segment : { ...segment, id };
+  });
+}
+
+function indexMarkdownDiffSegments(segments: MarkdownDiffDocumentSegment[]) {
+  return segments.map((segment, index) => ({
+    context: getMarkdownDiffSegmentContext(segments, index),
+    identity: getMarkdownDiffSegmentIdentity(segment),
+    index,
+    segment,
+  }));
+}
+
+function getMarkdownDiffSegmentContext(
+  segments: MarkdownDiffDocumentSegment[],
+  index: number,
+): MarkdownDiffSegmentContext {
+  return {
+    next: getMarkdownDiffSegmentIdentityOrNull(segments[index + 1]),
+    nextNext: getMarkdownDiffSegmentIdentityOrNull(segments[index + 2]),
+    previous: getMarkdownDiffSegmentIdentityOrNull(segments[index - 1]),
+    previousPrevious: getMarkdownDiffSegmentIdentityOrNull(segments[index - 2]),
+  };
+}
+
+function getMarkdownDiffSegmentIdentityOrNull(
+  segment: MarkdownDiffDocumentSegment | undefined,
+) {
+  return segment ? getMarkdownDiffSegmentIdentity(segment) : null;
+}
+
+function getMarkdownDiffSegmentIdentity(segment: MarkdownDiffDocumentSegment) {
+  return [
+    segment.kind,
+    segment.isInAfterDocument ? "after" : "before",
+    segment.markdown.length,
+    getStableMarkdownDiffSegmentHash(segment.markdown),
+  ].join("\0");
+}
+
+function getStableMarkdownDiffSegmentHash(text: string) {
+  let hash = 0x811c9dc5;
+  for (let index = 0; index < text.length; index += 1) {
+    hash ^= text.charCodeAt(index);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return (hash >>> 0).toString(36);
+}
+
+function scoreMarkdownDiffSegmentContext(
+  previousContext: MarkdownDiffSegmentContext,
+  nextContext: MarkdownDiffSegmentContext,
+) {
+  return (
+    scoreMarkdownDiffSegmentContextValue(previousContext.previous, nextContext.previous, 8) +
+    scoreMarkdownDiffSegmentContextValue(previousContext.next, nextContext.next, 8) +
+    scoreMarkdownDiffSegmentContextValue(
+      previousContext.previousPrevious,
+      nextContext.previousPrevious,
+      2,
+    ) +
+    scoreMarkdownDiffSegmentContextValue(previousContext.nextNext, nextContext.nextNext, 2)
+  );
+}
+
+function scoreMarkdownDiffSegmentContextValue(
+  previousValue: string | null,
+  nextValue: string | null,
+  score: number,
+) {
+  return previousValue != null && previousValue === nextValue ? score : 0;
+}
+
+function getMarkdownDiffSegmentDistance(
+  previousSegment: MarkdownDiffDocumentSegment,
+  nextSegment: MarkdownDiffDocumentSegment,
+  previousIndex: number,
+  nextIndex: number,
+) {
+  const distances = [
+    Math.abs(previousIndex - nextIndex) * 1_000_000,
+  ];
+  if (previousSegment.newStart != null && nextSegment.newStart != null) {
+    distances.push(Math.abs(previousSegment.newStart - nextSegment.newStart) * 10_000);
+  }
+  if (previousSegment.oldStart != null && nextSegment.oldStart != null) {
+    distances.push(Math.abs(previousSegment.oldStart - nextSegment.oldStart) * 10_000);
+  }
+  if (
+    previousSegment.afterStartOffset !== 0 ||
+    previousSegment.afterEndOffset !== 0 ||
+    nextSegment.afterStartOffset !== 0 ||
+    nextSegment.afterEndOffset !== 0
+  ) {
+    distances.push(
+      Math.abs(previousSegment.afterStartOffset - nextSegment.afterStartOffset),
+    );
+  }
+  return Math.min(...distances);
+}
+
+function getAvailableMarkdownDiffSegmentId(
+  preferredId: string,
+  usedIds: Set<string>,
+) {
+  if (!usedIds.has(preferredId)) {
+    return preferredId;
+  }
+
+  let suffix = 1;
+  while (usedIds.has(`${preferredId}:stable-${suffix}`)) {
+    suffix += 1;
+  }
+  return `${preferredId}:stable-${suffix}`;
+}
+
 function MarkdownDiffDocument({
   allowReadOnlyCaret,
   appearance,
@@ -1854,13 +2405,16 @@ function MarkdownDiffDocument({
   completeness,
   documentPath,
   note,
+  onCommitRenderedMarkdownSectionDraft,
   onRenderedMarkdownSectionDraftChange,
   onOpenSourceLink,
   onCommitRenderedMarkdownDrafts,
   onRegisterRenderedMarkdownCommitter,
+  onReadOnlyRenderedMarkdownMutation,
   onSave,
   scrollRef,
   segments,
+  sourceContent,
   workspaceRoot,
 }: {
   allowReadOnlyCaret: boolean;
@@ -1869,13 +2423,16 @@ function MarkdownDiffDocument({
   completeness: MarkdownDocumentCompleteness;
   documentPath: string | null;
   note: string | null;
+  onCommitRenderedMarkdownSectionDraft: (commit: RenderedMarkdownSectionCommit) => void;
   onRenderedMarkdownSectionDraftChange: (segment: MarkdownDiffDocumentSegment, nextMarkdown: string) => void;
   onOpenSourceLink: (target: MarkdownFileLinkTarget) => void;
   onCommitRenderedMarkdownDrafts: () => void;
   onRegisterRenderedMarkdownCommitter: (committer: () => RenderedMarkdownSectionCommit | null) => () => void;
+  onReadOnlyRenderedMarkdownMutation: () => void;
   onSave: MarkdownDiffSaveHandler;
   scrollRef: { current: HTMLDivElement | null };
   segments: MarkdownDiffDocumentSegment[];
+  sourceContent: string;
   workspaceRoot: string | null;
 }) {
   const visibleNote =
@@ -1907,9 +2464,7 @@ function MarkdownDiffDocument({
       <div
         className="markdown-diff-change-scroll"
         onKeyDown={handleScrollKeyDown}
-        ref={(node) => {
-          scrollRef.current = node;
-        }}
+        ref={scrollRef}
       >
         {segments.length === 0 ? (
           <p className="support-copy markdown-document-empty">No rendered Markdown changes were found.</p>
@@ -1920,11 +2475,14 @@ function MarkdownDiffDocument({
             canEdit,
             documentPath,
             onCommitRenderedMarkdownDrafts,
+            onCommitRenderedMarkdownSectionDraft,
             onOpenSourceLink,
             onRegisterRenderedMarkdownCommitter,
+            onReadOnlyRenderedMarkdownMutation,
             onRenderedMarkdownSectionDraftChange,
             onSave,
             segments,
+            sourceContent,
             workspaceRoot,
           })
         )}
@@ -1939,11 +2497,14 @@ function renderMarkdownDiffSegments({
   canEdit,
   documentPath,
   onCommitRenderedMarkdownDrafts,
+  onCommitRenderedMarkdownSectionDraft,
   onOpenSourceLink,
   onRegisterRenderedMarkdownCommitter,
+  onReadOnlyRenderedMarkdownMutation,
   onRenderedMarkdownSectionDraftChange,
   onSave,
   segments,
+  sourceContent,
   workspaceRoot,
 }: {
   allowReadOnlyCaret: boolean;
@@ -1951,11 +2512,14 @@ function renderMarkdownDiffSegments({
   canEdit: boolean;
   documentPath: string | null;
   onCommitRenderedMarkdownDrafts: () => void;
+  onCommitRenderedMarkdownSectionDraft: (commit: RenderedMarkdownSectionCommit) => void;
   onOpenSourceLink: (target: MarkdownFileLinkTarget) => void;
   onRegisterRenderedMarkdownCommitter: (committer: () => RenderedMarkdownSectionCommit | null) => () => void;
+  onReadOnlyRenderedMarkdownMutation: () => void;
   onRenderedMarkdownSectionDraftChange: (segment: MarkdownDiffDocumentSegment, nextMarkdown: string) => void;
   onSave: MarkdownDiffSaveHandler;
   segments: MarkdownDiffDocumentSegment[];
+  sourceContent: string;
   workspaceRoot: string | null;
 }) {
   const rendered: ReactNode[] = [];
@@ -1977,9 +2541,12 @@ function renderMarkdownDiffSegments({
           onDraftChange={onRenderedMarkdownSectionDraftChange}
           onOpenSourceLink={onOpenSourceLink}
           onCommitDrafts={onCommitRenderedMarkdownDrafts}
+          onCommitSectionDraft={onCommitRenderedMarkdownSectionDraft}
+          onReadOnlyMutation={onReadOnlyRenderedMarkdownMutation}
           onRegisterCommitter={onRegisterRenderedMarkdownCommitter}
           onSave={onSave}
           segment={segment}
+          sourceContent={sourceContent}
           workspaceRoot={workspaceRoot}
         />,
       );
@@ -2006,9 +2573,12 @@ function renderMarkdownDiffSegments({
               onDraftChange={onRenderedMarkdownSectionDraftChange}
               onOpenSourceLink={onOpenSourceLink}
               onCommitDrafts={onCommitRenderedMarkdownDrafts}
+              onCommitSectionDraft={onCommitRenderedMarkdownSectionDraft}
+              onReadOnlyMutation={onReadOnlyRenderedMarkdownMutation}
               onRegisterCommitter={onRegisterRenderedMarkdownCommitter}
               onSave={onSave}
               segment={changedSegment}
+              sourceContent={sourceContent}
               tone={tone}
               workspaceRoot={workspaceRoot}
             />
@@ -2027,11 +2597,14 @@ function RenderedMarkdownChangeSection({
   canEdit,
   documentPath,
   onCommitDrafts,
+  onCommitSectionDraft,
   onDraftChange,
   onOpenSourceLink,
+  onReadOnlyMutation,
   onRegisterCommitter,
   onSave,
   segment,
+  sourceContent,
   tone,
   workspaceRoot,
 }: {
@@ -2040,11 +2613,14 @@ function RenderedMarkdownChangeSection({
   canEdit: boolean;
   documentPath: string | null;
   onCommitDrafts: () => void;
+  onCommitSectionDraft: (commit: RenderedMarkdownSectionCommit) => void;
   onDraftChange: (segment: MarkdownDiffDocumentSegment, nextMarkdown: string) => void;
   onOpenSourceLink: (target: MarkdownFileLinkTarget) => void;
+  onReadOnlyMutation: () => void;
   onRegisterCommitter: (committer: () => RenderedMarkdownSectionCommit | null) => () => void;
   onSave: MarkdownDiffSaveHandler;
   segment: MarkdownDiffDocumentSegment;
+  sourceContent: string;
   tone: "added" | "removed";
   workspaceRoot: string | null;
 }) {
@@ -2059,11 +2635,14 @@ function RenderedMarkdownChangeSection({
         className="markdown-diff-rendered-section-body"
         documentPath={documentPath}
         onCommitDrafts={onCommitDrafts}
+        onCommitSectionDraft={onCommitSectionDraft}
         onDraftChange={onDraftChange}
         onOpenSourceLink={onOpenSourceLink}
+        onReadOnlyMutation={onReadOnlyMutation}
         onRegisterCommitter={onRegisterCommitter}
         onSave={onSave}
         segment={segment}
+        sourceContent={sourceContent}
         workspaceRoot={workspaceRoot}
       />
     </section>
@@ -2077,11 +2656,14 @@ function EditableRenderedMarkdownSection({
   className,
   documentPath,
   onCommitDrafts,
+  onCommitSectionDraft,
   onDraftChange,
   onOpenSourceLink,
+  onReadOnlyMutation,
   onRegisterCommitter,
   onSave,
   segment,
+  sourceContent,
   workspaceRoot,
 }: {
   allowReadOnlyCaret: boolean;
@@ -2090,42 +2672,78 @@ function EditableRenderedMarkdownSection({
   className: string;
   documentPath: string | null;
   onCommitDrafts: () => void;
+  onCommitSectionDraft: (commit: RenderedMarkdownSectionCommit) => void;
   onDraftChange: (segment: MarkdownDiffDocumentSegment, nextMarkdown: string) => void;
   onOpenSourceLink: (target: MarkdownFileLinkTarget) => void;
+  onReadOnlyMutation: () => void;
   onRegisterCommitter: (committer: () => RenderedMarkdownSectionCommit | null) => () => void;
   onSave: MarkdownDiffSaveHandler;
   segment: MarkdownDiffDocumentSegment;
+  sourceContent: string;
   workspaceRoot: string | null;
 }) {
   const canUseCaret = canEdit || allowReadOnlyCaret;
   const classNames = `${className}${canUseCaret ? " markdown-diff-editable-section" : ""}${allowReadOnlyCaret && !canEdit ? " markdown-diff-readonly-caret-section" : ""}`;
   const hasUncommittedUserEditRef = useRef(false);
+  const draftSegmentRef = useRef<MarkdownDiffDocumentSegment | null>(null);
+  const draftSourceContentRef = useRef<string | null>(null);
+  const previousSegmentMarkdownRef = useRef(segment.markdown);
   const sectionRef = useRef<HTMLElement | null>(null);
   const [renderResetVersion, setRenderResetVersion] = useState(0);
 
   useEffect(() => {
+    if (previousSegmentMarkdownRef.current === segment.markdown) {
+      return;
+    }
+
+    if (hasUncommittedUserEditRef.current) {
+      return;
+    }
+
+    previousSegmentMarkdownRef.current = segment.markdown;
     hasUncommittedUserEditRef.current = false;
+    draftSegmentRef.current = null;
+    draftSourceContentRef.current = null;
     setRenderResetVersion((current) => current + 1);
   }, [segment.markdown]);
 
-  function readEditedMarkdown(section: HTMLElement) {
+  function readEditedMarkdown(section: HTMLElement, baselineMarkdown = segment.markdown) {
     return normalizeEditedMarkdownSection(
       serializeEditableMarkdownSection(section),
-      segment.markdown,
+      baselineMarkdown,
     );
+  }
+
+  function updateLocalDraftState(nextMarkdown: string) {
+    const baseSegment = draftSegmentRef.current ?? segment;
+    const normalizedDraft = normalizeEditedMarkdownSection(
+      nextMarkdown,
+      baseSegment.markdown,
+    );
+    const isDirty = normalizedDraft !== baseSegment.markdown;
+    hasUncommittedUserEditRef.current = isDirty;
+    if (isDirty) {
+      draftSegmentRef.current = baseSegment;
+      draftSourceContentRef.current = draftSourceContentRef.current ?? sourceContent;
+    } else {
+      draftSegmentRef.current = null;
+      draftSourceContentRef.current = null;
+    }
+    onDraftChange(baseSegment, normalizedDraft);
   }
 
   function handleInput(event: FormEvent<HTMLElement>) {
     if (!canEdit) {
       if (allowReadOnlyCaret) {
-        setRenderResetVersion((current) => current + 1);
+        event.currentTarget.textContent = segment.markdown;
+        onReadOnlyMutation();
       }
       return;
     }
 
-    const nextMarkdown = readEditedMarkdown(event.currentTarget);
-    hasUncommittedUserEditRef.current = nextMarkdown !== segment.markdown;
-    onDraftChange(segment, nextMarkdown);
+    const baseSegment = draftSegmentRef.current ?? segment;
+    const nextMarkdown = readEditedMarkdown(event.currentTarget, baseSegment.markdown);
+    updateLocalDraftState(nextMarkdown);
   }
 
   const collectSectionEdit = useCallback((section: HTMLElement): RenderedMarkdownSectionCommit | null => {
@@ -2141,15 +2759,36 @@ function EditableRenderedMarkdownSection({
       return null;
     }
 
-    const nextMarkdown = readEditedMarkdown(section);
+    const commitSegment = draftSegmentRef.current ?? segment;
+    const nextMarkdown = readEditedMarkdown(section, commitSegment.markdown);
     hasUncommittedUserEditRef.current = false;
-    if (nextMarkdown !== segment.markdown) {
-      return { segment, nextMarkdown };
+    const sourceAtDraftStart = draftSourceContentRef.current ?? sourceContent;
+    draftSegmentRef.current = null;
+    draftSourceContentRef.current = null;
+    if (nextMarkdown !== commitSegment.markdown) {
+      return {
+        currentSegment: segment,
+        nextMarkdown,
+        segment: commitSegment,
+        sourceContent: sourceAtDraftStart,
+      };
     }
 
-    onDraftChange(segment, segment.markdown);
+    onDraftChange(commitSegment, commitSegment.markdown);
     return null;
-  }, [canEdit, onDraftChange, segment]);
+  }, [canEdit, onDraftChange, segment, sourceContent]);
+
+  function commitOwnDraft() {
+    const section = sectionRef.current;
+    if (!section) {
+      return;
+    }
+
+    const commit = collectSectionEdit(section);
+    if (commit) {
+      onCommitSectionDraft(commit);
+    }
+  }
 
   function handleBeforeInput(event: FormEvent<HTMLElement>) {
     if (allowReadOnlyCaret && !canEdit) {
@@ -2161,6 +2800,28 @@ function EditableRenderedMarkdownSection({
     if (allowReadOnlyCaret && !canEdit) {
       event.preventDefault();
     }
+  }
+
+  function handlePaste(event: ClipboardEvent<HTMLElement>) {
+    if (!canEdit) {
+      handleReadOnlyMutationEvent(event);
+      return;
+    }
+
+    const html = event.clipboardData.getData("text/html");
+    if (!html || !html.includes("data-markdown-serialization")) {
+      return;
+    }
+
+    event.preventDefault();
+    insertSanitizedMarkdownPaste(
+      event.currentTarget,
+      html,
+      event.clipboardData.getData("text/plain"),
+    );
+    const baseSegment = draftSegmentRef.current ?? segment;
+    const nextMarkdown = readEditedMarkdown(event.currentTarget, baseSegment.markdown);
+    updateLocalDraftState(nextMarkdown);
   }
 
   function isReadOnlyMutationKey(event: KeyboardEvent<HTMLElement>) {
@@ -2219,7 +2880,10 @@ function EditableRenderedMarkdownSection({
       if (hasUncommittedUserEditRef.current) {
         event.preventDefault();
         hasUncommittedUserEditRef.current = false;
-        onDraftChange(segment, segment.markdown);
+        const baseSegment = draftSegmentRef.current ?? segment;
+        draftSegmentRef.current = null;
+        draftSourceContentRef.current = null;
+        onDraftChange(baseSegment, baseSegment.markdown);
         setRenderResetVersion((current) => current + 1);
       }
       return;
@@ -2296,6 +2960,35 @@ function EditableRenderedMarkdownSection({
     }
   }
 
+  const renderedSegment = hasUncommittedUserEditRef.current
+    ? draftSegmentRef.current ?? segment
+    : segment;
+  const renderedSegmentLineNumber = getMarkdownDiffSegmentLineNumber(renderedSegment);
+  const renderedMarkdownContent = useMemo(
+    () => (
+      <MarkdownContent
+        appearance={appearance}
+        documentPath={documentPath}
+        markdown={renderedSegment.markdown}
+        onOpenSourceLink={onOpenSourceLink}
+        preserveMermaidSource={canEdit}
+        renderMermaidDiagrams
+        showLineNumbers={renderedSegmentLineNumber != null}
+        startLineNumber={renderedSegmentLineNumber}
+        workspaceRoot={workspaceRoot}
+      />
+    ),
+    [
+      appearance,
+      canEdit,
+      documentPath,
+      onOpenSourceLink,
+      renderedSegment.markdown,
+      renderedSegmentLineNumber,
+      workspaceRoot,
+    ],
+  );
+
   return (
     <section
       className={classNames}
@@ -2304,35 +2997,26 @@ function EditableRenderedMarkdownSection({
       data-markdown-caret={canUseCaret ? "true" : undefined}
       data-markdown-editable={canEdit ? "true" : undefined}
       data-markdown-readonly={allowReadOnlyCaret && !canEdit ? "true" : undefined}
-      data-markdown-segment-after-end={segment.afterEndOffset}
-      data-markdown-segment-after-start={segment.afterStartOffset}
+      data-markdown-segment-after-end={renderedSegment.afterEndOffset}
+      data-markdown-segment-after-start={renderedSegment.afterStartOffset}
       onBeforeInput={handleBeforeInput}
       onBlur={() => {
         if (canEdit) {
-          onCommitDrafts();
+          commitOwnDraft();
         }
       }}
       onCut={handleReadOnlyMutationEvent}
       onDrop={handleReadOnlyMutationEvent}
       onInput={handleInput}
       onKeyDown={handleKeyDown}
-      onPaste={handleReadOnlyMutationEvent}
+      onPaste={handlePaste}
       ref={sectionRef}
       suppressContentEditableWarning
       tabIndex={canUseCaret ? 0 : undefined}
     >
-      <MarkdownContent
-        appearance={appearance}
-        documentPath={documentPath}
-        key={renderResetVersion}
-        markdown={segment.markdown}
-        onOpenSourceLink={onOpenSourceLink}
-        preserveMermaidSource={canEdit}
-        renderMermaidDiagrams
-        showLineNumbers={getMarkdownDiffSegmentLineNumber(segment) != null}
-        startLineNumber={getMarkdownDiffSegmentLineNumber(segment)}
-        workspaceRoot={workspaceRoot}
-      />
+      <div key={renderResetVersion} className="markdown-diff-rendered-section-content">
+        {renderedMarkdownContent}
+      </div>
     </section>
   );
 }
@@ -2423,6 +3107,68 @@ function getMarkdownDiffSegmentLineNumber(segment: MarkdownDiffDocumentSegment) 
   return segment.kind === "removed"
     ? segment.oldStart ?? segment.newStart ?? null
     : segment.newStart ?? segment.oldStart ?? null;
+}
+
+function insertSanitizedMarkdownPaste(
+  section: HTMLElement,
+  html: string,
+  fallbackText: string,
+) {
+  const template = document.createElement("template");
+  template.innerHTML = html;
+  sanitizePastedMarkdownFragment(template.content);
+
+  let fragment = template.content;
+  if (fragment.childNodes.length === 0 && fallbackText.length > 0) {
+    fragment = document.createDocumentFragment();
+    fragment.append(document.createTextNode(fallbackText));
+  }
+
+  const insertedNodes = Array.from(fragment.childNodes);
+  if (insertedNodes.length === 0) {
+    return;
+  }
+
+  const selection = window.getSelection();
+  const range =
+    selection && selection.rangeCount > 0 && section.contains(selection.anchorNode)
+      ? selection.getRangeAt(0)
+      : document.createRange();
+  if (!selection || selection.rangeCount === 0 || !section.contains(selection.anchorNode)) {
+    range.selectNodeContents(section);
+    range.collapse(false);
+  }
+
+  range.deleteContents();
+  range.insertNode(fragment);
+
+  const lastInsertedNode = insertedNodes[insertedNodes.length - 1];
+  if (lastInsertedNode?.parentNode) {
+    const afterInsertRange = document.createRange();
+    afterInsertRange.setStartAfter(lastInsertedNode);
+    afterInsertRange.collapse(true);
+    selection?.removeAllRanges();
+    selection?.addRange(afterInsertRange);
+  }
+}
+
+function sanitizePastedMarkdownFragment(root: ParentNode) {
+  const elements =
+    root instanceof Element
+      ? [root, ...Array.from(root.querySelectorAll<HTMLElement>("*"))]
+      : Array.from(root.querySelectorAll<HTMLElement>("*"));
+
+  for (const element of elements) {
+    for (const attributeName of element.getAttributeNames()) {
+      if (
+        attributeName === "contenteditable" ||
+        attributeName === "aria-hidden" ||
+        attributeName.startsWith("data-markdown-")
+      ) {
+        element.removeAttribute(attributeName);
+      }
+    }
+  }
 }
 
 function serializeEditableMarkdownSection(section: HTMLElement) {

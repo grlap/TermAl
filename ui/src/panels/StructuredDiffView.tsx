@@ -11,6 +11,7 @@ import {
 export function StructuredDiffView({
   filePath,
   preview,
+  scrollRef,
   threads = [],
   isSavingReview = false,
   onCreateThread,
@@ -19,6 +20,7 @@ export function StructuredDiffView({
 }: {
   filePath: string | null;
   preview: DiffPreviewModel;
+  scrollRef?: { current: HTMLDivElement | null };
   threads?: ReviewThread[];
   isSavingReview?: boolean;
   onCreateThread?: (anchor: ReviewAnchor, body: string) => Promise<void>;
@@ -267,6 +269,7 @@ export function StructuredDiffView({
     <div
       className="diff-editor-shell structured-diff-shell"
       data-testid="structured-diff-view"
+      ref={scrollRef}
     >
       <div className="structured-diff">
         <div className="structured-diff-column-headings" aria-hidden="true">

@@ -361,21 +361,21 @@ export function buildMarkdownLineDiffAnchors(
     0,
     afterLines.length,
   );
-  return filterMarkdownLineDiffAnchorsForChangedMermaidBlocks(
+  return filterMarkdownLineDiffAnchorsForChangedFenceBlocks(
     anchors,
     beforeLines,
     afterLines,
   );
 }
 
-function filterMarkdownLineDiffAnchorsForChangedMermaidBlocks(
+function filterMarkdownLineDiffAnchorsForChangedFenceBlocks(
   anchors: Array<{ afterIndex: number; beforeIndex: number }>,
   beforeLines: MarkdownDocumentLine[],
   afterLines: MarkdownDocumentLine[],
 ) {
   return anchors.filter((anchor) => {
-    const beforeBlock = getMermaidFenceBlockForLine(beforeLines[anchor.beforeIndex]);
-    const afterBlock = getMermaidFenceBlockForLine(afterLines[anchor.afterIndex]);
+    const beforeBlock = beforeLines[anchor.beforeIndex]?.fenceBlock ?? null;
+    const afterBlock = afterLines[anchor.afterIndex]?.fenceBlock ?? null;
 
     if (!beforeBlock && !afterBlock) {
       return true;
@@ -708,19 +708,6 @@ function findMarkdownFenceBlockRangeContainingLine(
   return lines[targetIndex]?.fenceBlock ?? null;
 }
 
-function getMermaidFenceBlockForLine(line: MarkdownDocumentLine | undefined) {
-  const fenceBlock = line?.fenceBlock ?? null;
-  if (!fenceBlock || !isMermaidMarkdownFenceLanguage(fenceBlock.language)) {
-    return null;
-  }
-
-  return fenceBlock;
-}
-
-function isMermaidMarkdownFenceLanguage(language: string | null) {
-  return language?.toLowerCase() === "mermaid";
-}
-
 function getMarkdownFenceBlockText(
   lines: MarkdownDocumentLine[],
   fenceBlock: MarkdownFenceBlock,
@@ -991,9 +978,11 @@ function normalizeRenderedMarkdownLineForDiff(
 
   const lineWithoutEnding = stripMarkdownLineEnding(normalized);
   const hardBreakSuffix = /(?: {2,}|\\)$/.test(lineWithoutEnding) ? " <hard-break>" : "";
-  const unorderedListMatch = /^ {0,3}[-*+]\s+(.*)$/.exec(lineWithoutEnding);
+  const unorderedListMatch = /^( {0,3})[-*+]\s+(.*)$/.exec(lineWithoutEnding);
   if (unorderedListMatch) {
-    return `- ${collapseMarkdownRenderedWhitespace(unorderedListMatch[1] ?? "")}${hardBreakSuffix}`;
+    const indent = unorderedListMatch[1] ?? "";
+    const nestingPrefix = indent.length > 0 ? `indent:${indent.length}:` : "";
+    return `${nestingPrefix}- ${collapseMarkdownRenderedWhitespace(unorderedListMatch[2] ?? "")}${hardBreakSuffix}`;
   }
 
   return `${collapseMarkdownRenderedWhitespace(lineWithoutEnding.trim())}${hardBreakSuffix}`;

@@ -230,6 +230,82 @@ describe("AgentSessionPanel conversation caching", () => {
       Element.prototype.getBoundingClientRect = originalGetBoundingClientRect;
     }
   });
+
+  it("completes post-activation measuring when the first real height matches the estimate", async () => {
+    const OriginalResizeObserver = window.ResizeObserver;
+    const originalGetBoundingClientRect = Element.prototype.getBoundingClientRect;
+    const resizeCallbacks = new Map<Element, ResizeObserverCallback>();
+
+    class ResizeObserverMock {
+      constructor(private readonly callback: ResizeObserverCallback) {}
+      observe(target: Element) {
+        resizeCallbacks.set(target, this.callback);
+      }
+      disconnect() {}
+    }
+
+    const scrollNode = document.createElement("div");
+    Object.defineProperty(scrollNode, "clientHeight", {
+      configurable: true,
+      get: () => 500,
+    });
+    Object.defineProperty(scrollNode, "scrollHeight", {
+      configurable: true,
+      get: () => 102,
+    });
+    Object.defineProperty(scrollNode, "scrollTop", {
+      configurable: true,
+      get: () => 0,
+      set: () => {},
+    });
+
+    window.ResizeObserver = ResizeObserverMock as unknown as typeof ResizeObserver;
+    Element.prototype.getBoundingClientRect = function getBoundingClientRectMock() {
+      const element = this as HTMLElement;
+      const height = element.classList.contains("virtualized-message-slot")
+        ? 102
+        : 500;
+      return {
+        bottom: height,
+        height,
+        left: 0,
+        right: 100,
+        top: 0,
+        width: 100,
+        x: 0,
+        y: 0,
+        toJSON: () => ({}),
+      } as DOMRect;
+    };
+
+    try {
+      const scrollContainerRef = {
+        current: scrollNode,
+      } as RefObject<HTMLElement | null>;
+      const { container } = render(
+        <VirtualizedConversationMessageList
+          isActive
+          renderMessageCard={(message) => (
+            <article className="message-card">{message.id}</article>
+          )}
+          sessionId="session-a"
+          messages={makeTextMessages(1)}
+          scrollContainerRef={scrollContainerRef}
+          onApprovalDecision={() => {}}
+          onUserInputSubmit={() => {}}
+          onMcpElicitationSubmit={() => {}}
+          onCodexAppRequestSubmit={() => {}}
+        />,
+      );
+
+      const list = container.querySelector(".virtualized-message-list");
+      expect(list).not.toBeNull();
+      expect(list).not.toHaveClass("is-measuring-post-activation");
+    } finally {
+      window.ResizeObserver = OriginalResizeObserver;
+      Element.prototype.getBoundingClientRect = originalGetBoundingClientRect;
+    }
+  });
 });
 
 function renderFooter({

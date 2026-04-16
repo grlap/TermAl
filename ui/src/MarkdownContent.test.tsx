@@ -2,7 +2,7 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import mermaid from "mermaid";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { MarkdownContent, areMarkdownLineMarkersEqual } from "./message-cards";
+import { MarkdownContent, MessageCard, areMarkdownLineMarkersEqual } from "./message-cards";
 
 vi.mock("mermaid", () => ({
   default: {
@@ -112,6 +112,51 @@ describe("MarkdownContent inline file links", () => {
 });
 
 describe("MarkdownContent Mermaid diagrams", () => {
+  it("rerenders memoized message cards when appearance changes", async () => {
+    const message = {
+      author: "assistant",
+      id: "message-mermaid-theme",
+      text: ["```mermaid", "flowchart TD", "  A --> B", "```"].join("\n"),
+      timestamp: "2026-04-15T00:00:00.000Z",
+      type: "text",
+    } as const;
+    const noop = () => {};
+    const { rerender } = render(
+      <MessageCard
+        appearance="dark"
+        message={message}
+        onApprovalDecision={noop}
+        onUserInputSubmit={noop}
+        preferImmediateHeavyRender
+      />,
+    );
+
+    await waitFor(() => {
+      expect(
+        mermaidInitializeMock.mock.calls.some(([config]) => config.theme === "dark"),
+      ).toBe(true);
+    });
+    const callCountAfterDarkRender = mermaidInitializeMock.mock.calls.length;
+
+    rerender(
+      <MessageCard
+        appearance="light"
+        message={message}
+        onApprovalDecision={noop}
+        onUserInputSubmit={noop}
+        preferImmediateHeavyRender
+      />,
+    );
+
+    await waitFor(() => {
+      expect(
+        mermaidInitializeMock.mock.calls
+          .slice(callCountAfterDarkRender)
+          .some(([config]) => config.theme === "default"),
+      ).toBe(true);
+    });
+  });
+
   it("renders Mermaid fenced blocks as diagrams", async () => {
     render(
       <MarkdownContent
@@ -207,6 +252,35 @@ describe("MarkdownContent Mermaid diagrams", () => {
     expect(mermaidRenderMock).not.toHaveBeenCalled();
   });
 
+  it("skips Mermaid rendering when a diagram exceeds the source budget", () => {
+    const oversizedSource = `flowchart TD\n  A --> ${"B".repeat(50_001)}`;
+
+    const { container } = render(
+      <MarkdownContent
+        markdown={["```mermaid", oversizedSource, "```"].join("\n")}
+      />,
+    );
+
+    expect(
+      screen.getByText("Mermaid render skipped: diagram exceeds the 50,000 character render budget."),
+    ).toBeInTheDocument();
+    expect(container.querySelector("code.language-mermaid")?.textContent).toBe(oversizedSource);
+    expect(mermaidRenderMock).not.toHaveBeenCalled();
+  });
+
+  it("skips Mermaid rendering when a document has too many diagrams", () => {
+    const markdown = Array.from({ length: 21 }, (_value, index) =>
+      ["```mermaid", "flowchart TD", `  A${index} --> B${index}`, "```"].join("\n"),
+    ).join("\n\n");
+
+    render(<MarkdownContent markdown={markdown} />);
+
+    expect(
+      screen.getAllByText("Mermaid render skipped: document has 21 diagrams; the render budget is 20."),
+    ).toHaveLength(21);
+    expect(mermaidRenderMock).not.toHaveBeenCalled();
+  });
+
   it("falls back to the Mermaid source when rendering fails", async () => {
     mermaidRenderMock.mockRejectedValueOnce(new Error("syntax error"));
 
@@ -218,6 +292,44 @@ describe("MarkdownContent Mermaid diagrams", () => {
 
     expect(await screen.findByText("Mermaid render failed: syntax error")).toBeInTheDocument();
     expect(container.querySelector("code.language-mermaid")?.textContent).toBe("flowchart TD\n  A -->");
+  });
+});
+
+describe("MessageCard memoization", () => {
+  it("uses the latest approval handler after handler-only rerenders", () => {
+    const firstHandler = vi.fn();
+    const secondHandler = vi.fn();
+    const noop = () => {};
+    const message = {
+      author: "assistant",
+      command: "git status",
+      decision: "pending",
+      detail: "Approve this command.",
+      id: "approval-1",
+      timestamp: "2026-04-15T00:00:00.000Z",
+      title: "Run command",
+      type: "approval",
+    } as const;
+    const { rerender } = render(
+      <MessageCard
+        message={message}
+        onApprovalDecision={firstHandler}
+        onUserInputSubmit={noop}
+      />,
+    );
+
+    rerender(
+      <MessageCard
+        message={message}
+        onApprovalDecision={secondHandler}
+        onUserInputSubmit={noop}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Approve" }));
+
+    expect(firstHandler).not.toHaveBeenCalled();
+    expect(secondHandler).toHaveBeenCalledWith("approval-1", "accepted");
   });
 });
 
@@ -256,6 +368,27 @@ describe("MarkdownContent document links", () => {
     expect(onOpenSourceLink).toHaveBeenNthCalledWith(3, {
       path: "C:/repo/docs/api.md",
       line: 7,
+      openInNewTab: false,
+    });
+  });
+
+  it("keeps document-relative links inside a Windows UNC workspace share", () => {
+    const onOpenSourceLink = vi.fn();
+
+    render(
+      <MarkdownContent
+        documentPath={String.raw`\\server\share\docs\features\intro.md`}
+        markdown="[Sibling](../guide.md#L5)"
+        onOpenSourceLink={onOpenSourceLink}
+        workspaceRoot={String.raw`\\server\share`}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("link", { name: "Sibling" }));
+
+    expect(onOpenSourceLink).toHaveBeenCalledWith({
+      path: String.raw`\\server\share\docs\guide.md`,
+      line: 5,
       openInNewTab: false,
     });
   });

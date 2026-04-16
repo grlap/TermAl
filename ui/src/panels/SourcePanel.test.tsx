@@ -270,10 +270,6 @@ describe("SourcePanel", () => {
     expect(await screen.findByLabelText("Source editor for /repo/docs/readme.md")).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Mode Test" })).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "Code" }));
-    expect(await screen.findByLabelText("Source editor for /repo/docs/readme.md")).toBeInTheDocument();
-    expect(screen.queryByRole("heading", { name: "Mode Test" })).not.toBeInTheDocument();
-
     rerender(
       <SourcePanel
         editorAppearance={editorAppearance}
@@ -294,6 +290,25 @@ describe("SourcePanel", () => {
       expect(screen.queryByRole("button", { name: "Split" })).not.toBeInTheDocument();
       expect(screen.getByLabelText("Source editor for /repo/src/main.rs")).toBeInTheDocument();
     });
+
+    rerender(
+      <SourcePanel
+        editorAppearance={editorAppearance}
+        editorFontSizePx={14}
+        fileState={{
+          ...readyFileState,
+          path: "/repo/docs/readme.md",
+          content: "# Mode Test\n",
+          language: "markdown",
+        }}
+        sourcePath="/repo/docs/readme.md"
+        workspaceRoot="/repo"
+        onSaveFile={vi.fn()}
+      />,
+    );
+
+    expect(await screen.findByLabelText("Source editor for /repo/docs/readme.md")).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Mode Test" })).not.toBeInTheDocument();
   });
 
   it("auto-rebases the latest editor buffer after a disk refresh returns", async () => {

@@ -13,6 +13,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as api from "./api";
 import App, {
   buildControlSurfaceSessionListEntries,
+  collectRestoredGitDiffDocumentContentRefreshes,
   MarkdownContent,
   ThemedCombobox,
   formatSessionOrchestratorGroupName,
@@ -1319,6 +1320,407 @@ describe("App", () => {
         originSessionId: null,
       } satisfies WorkspaceTab),
     ).toBeNull();
+  });
+
+  it("collects restored Git diff document refreshes without duplicating transient loading placeholders", () => {
+    const durableRequest = {
+      path: "docs/README.md",
+      sectionId: "unstaged" as const,
+      workdir: "/repo",
+    };
+    const workspace: WorkspaceState = {
+      root: {
+        type: "pane",
+        paneId: "pane-a",
+      },
+      panes: [
+        {
+          id: "pane-a",
+          activeTabId: "restored",
+          activeSessionId: null,
+          viewMode: "diffPreview",
+          lastSessionViewMode: "session",
+          sourcePath: null,
+          tabs: [
+            {
+              id: "transient",
+              kind: "diffPreview",
+              changeType: "edit",
+              diff: "",
+              diffMessageId: "git-preview:/repo:unstaged::loading.md",
+              filePath: "/repo/loading.md",
+              gitDiffRequest: {
+                path: "loading.md",
+                sectionId: "unstaged",
+                workdir: "/repo",
+              },
+              gitDiffRequestKey: "git-preview:/repo:unstaged::loading.md",
+              gitSectionId: "unstaged",
+              isLoading: true,
+              language: "markdown",
+              originSessionId: null,
+              summary: "Loading",
+            },
+            {
+              id: "restored",
+              kind: "diffPreview",
+              changeType: "edit",
+              diff: "-before\n+after",
+              diffMessageId: "git-preview:/repo:unstaged::docs/README.md",
+              filePath: "/repo/docs/README.md",
+              gitDiffRequest: durableRequest,
+              gitDiffRequestKey: "git-preview:/repo:unstaged::docs/README.md",
+              gitSectionId: "unstaged",
+              isLoading: true,
+              language: "markdown",
+              originSessionId: null,
+              summary: "Updated README",
+            },
+            {
+              id: "attempted",
+              kind: "diffPreview",
+              changeType: "edit",
+              diff: "-old\n+new",
+              diffMessageId: "git-preview:/repo:unstaged::attempted.md",
+              filePath: "/repo/attempted.md",
+              gitDiffRequest: {
+                path: "attempted.md",
+                sectionId: "unstaged",
+                workdir: "/repo",
+              },
+              gitDiffRequestKey: "git-preview:/repo:unstaged::attempted.md",
+              gitSectionId: "unstaged",
+              language: "markdown",
+              originSessionId: null,
+              summary: "Attempted",
+            },
+          ],
+        },
+      ],
+      activePaneId: "pane-a",
+    };
+
+    expect(
+      collectRestoredGitDiffDocumentContentRefreshes(
+        workspace,
+        new Set(),
+        new Set(["git-preview:/repo:unstaged::attempted.md"]),
+      ),
+    ).toEqual([
+      {
+        request: durableRequest,
+        requestKey: "git-preview:/repo:unstaged::docs/README.md",
+        sectionId: "unstaged",
+      },
+    ]);
+  });
+
+  type DiffPreviewWorkspaceTab = Extract<
+    WorkspaceTab,
+    { kind: "diffPreview" }
+  >;
+
+  const restoredGitDiffRequest = {
+    path: "docs/README.md",
+    sectionId: "unstaged",
+    workdir: "/repo",
+  } satisfies api.GitDiffRequestPayload;
+  const restoredGitDiffRequestKey =
+    "git-preview:/repo:unstaged::docs/README.md";
+
+  function makeRestoredGitDiffWorkspace(
+    tabOverrides: Partial<DiffPreviewWorkspaceTab> = {},
+  ): WorkspaceState {
+    const restoredTab: DiffPreviewWorkspaceTab = {
+      id: restoredGitDiffRequestKey,
+      kind: "diffPreview",
+      changeType: "edit",
+      diff: "-# Before restored\n+# After restored\n",
+      diffMessageId: restoredGitDiffRequestKey,
+      filePath: "/repo/docs/README.md",
+      gitDiffRequest: restoredGitDiffRequest,
+      gitDiffRequestKey: restoredGitDiffRequestKey,
+      gitSectionId: "unstaged",
+      isLoading: true,
+      language: "markdown",
+      originSessionId: null,
+      originProjectId: null,
+      summary: "Updated README",
+      ...tabOverrides,
+    };
+
+    return {
+      root: {
+        type: "pane",
+        paneId: "pane-restored",
+      },
+      panes: [
+        {
+          id: "pane-restored",
+          activeTabId: restoredGitDiffRequestKey,
+          activeSessionId: null,
+          viewMode: "diffPreview",
+          lastSessionViewMode: "session",
+          sourcePath: null,
+          tabs: [restoredTab],
+        },
+      ],
+      activePaneId: "pane-restored",
+    };
+  }
+
+  function makeRestoredGitDiffResponse(
+    overrides: Partial<api.GitDiffResponse> = {},
+  ): api.GitDiffResponse {
+    return {
+      changeType: "edit",
+      changeSetId: "restored-change-set",
+      diff: "-# Before restored\n+# After restored\n",
+      diffId: restoredGitDiffRequestKey,
+      documentEnrichmentNote: "Loaded full Markdown document.",
+      documentContent: {
+        before: {
+          content: "# Before restored\n\nBefore body.\n",
+          source: "index",
+        },
+        after: {
+          content: "# After restored\n\nAfter restored body.\n",
+          source: "worktree",
+        },
+        canEdit: true,
+        isCompleteDocument: true,
+      },
+      filePath: "/repo/docs/README.md",
+      language: "markdown",
+      summary: "Restored README",
+      ...overrides,
+    };
+  }
+
+  it("hydrates stripped restored Git diff tabs after workspace layout readiness", async () => {
+    await withSuppressedActWarnings(async () => {
+      const originalEventSource = globalThis.EventSource;
+      const originalResizeObserver = globalThis.ResizeObserver;
+      const originalUrl = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+      const fetchStateSpy = vi.spyOn(api, "fetchState").mockResolvedValue(makeStateResponse({
+        revision: 1,
+        projects: [],
+        orchestrators: [],
+        workspaces: [
+          {
+            id: "workspace-test",
+            revision: 1,
+            updatedAt: "2026-04-15 09:00:00",
+            controlPanelSide: "left",
+          },
+        ],
+        sessions: [],
+      }));
+      const fetchWorkspaceLayoutSpy = vi
+        .mocked(api.fetchWorkspaceLayout)
+        .mockResolvedValue(
+          makeWorkspaceLayoutResponse({
+            id: "workspace-test",
+            workspace: makeRestoredGitDiffWorkspace(),
+          }),
+        );
+      const fetchGitDiffSpy = vi
+        .spyOn(api, "fetchGitDiff")
+        .mockResolvedValue(makeRestoredGitDiffResponse());
+      vi.stubGlobal(
+        "EventSource",
+        EventSourceMock as unknown as typeof EventSource,
+      );
+      vi.stubGlobal(
+        "ResizeObserver",
+        ResizeObserverMock as unknown as typeof ResizeObserver,
+      );
+      const scrollIntoViewSpy = stubScrollIntoView();
+
+      window.history.replaceState(
+        window.history.state,
+        "",
+        "/?workspace=workspace-test",
+      );
+
+      try {
+        await renderApp();
+
+        await waitFor(() => {
+          expect(fetchWorkspaceLayoutSpy).toHaveBeenCalledWith(
+            "workspace-test",
+          );
+          expect(fetchGitDiffSpy).toHaveBeenCalledTimes(1);
+        });
+        expect(fetchGitDiffSpy).toHaveBeenCalledWith(restoredGitDiffRequest);
+
+        expect(
+          await screen.findByText("After restored body."),
+        ).toBeInTheDocument();
+        await clickAndSettle(screen.getByRole("button", { name: "Raw patch" }));
+        expect(
+          await screen.findByText("Loaded full Markdown document."),
+        ).toBeInTheDocument();
+
+        await settleAsyncUi();
+        expect(fetchGitDiffSpy).toHaveBeenCalledTimes(1);
+      } finally {
+        window.history.replaceState(window.history.state, "", originalUrl);
+        scrollIntoViewSpy.mockRestore();
+        fetchStateSpy.mockRestore();
+        fetchWorkspaceLayoutSpy.mockRestore();
+        fetchGitDiffSpy.mockRestore();
+        restoreGlobal("EventSource", originalEventSource);
+        restoreGlobal("ResizeObserver", originalResizeObserver);
+      }
+    });
+  });
+
+  it("shows a restore error on stripped Git diff tabs when document refresh fails", async () => {
+    await withSuppressedActWarnings(async () => {
+      const originalEventSource = globalThis.EventSource;
+      const originalResizeObserver = globalThis.ResizeObserver;
+      const originalUrl = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+      const fetchStateSpy = vi.spyOn(api, "fetchState").mockResolvedValue(makeStateResponse({
+        revision: 1,
+        projects: [],
+        orchestrators: [],
+        workspaces: [
+          {
+            id: "workspace-test",
+            revision: 1,
+            updatedAt: "2026-04-15 09:00:00",
+            controlPanelSide: "left",
+          },
+        ],
+        sessions: [],
+      }));
+      const fetchWorkspaceLayoutSpy = vi
+        .mocked(api.fetchWorkspaceLayout)
+        .mockResolvedValue(
+          makeWorkspaceLayoutResponse({
+            id: "workspace-test",
+            workspace: makeRestoredGitDiffWorkspace(),
+          }),
+        );
+      const fetchGitDiffSpy = vi
+        .spyOn(api, "fetchGitDiff")
+        .mockRejectedValue(new Error("restore failed"));
+      vi.stubGlobal(
+        "EventSource",
+        EventSourceMock as unknown as typeof EventSource,
+      );
+      vi.stubGlobal(
+        "ResizeObserver",
+        ResizeObserverMock as unknown as typeof ResizeObserver,
+      );
+      const scrollIntoViewSpy = stubScrollIntoView();
+
+      window.history.replaceState(
+        window.history.state,
+        "",
+        "/?workspace=workspace-test",
+      );
+
+      try {
+        await renderApp();
+
+        await waitFor(() => {
+          expect(fetchGitDiffSpy).toHaveBeenCalledTimes(1);
+        });
+        const alert = await screen.findByRole("alert");
+        expect(within(alert).getByText("Unable to load diff")).toBeInTheDocument();
+        expect(within(alert).getByText("restore failed")).toBeInTheDocument();
+      } finally {
+        window.history.replaceState(window.history.state, "", originalUrl);
+        scrollIntoViewSpy.mockRestore();
+        fetchStateSpy.mockRestore();
+        fetchWorkspaceLayoutSpy.mockRestore();
+        fetchGitDiffSpy.mockRestore();
+        restoreGlobal("EventSource", originalEventSource);
+        restoreGlobal("ResizeObserver", originalResizeObserver);
+      }
+    });
+  });
+
+  it("ignores late restored Git diff document responses after App unmount", async () => {
+    await withSuppressedActWarnings(async () => {
+      const originalEventSource = globalThis.EventSource;
+      const originalResizeObserver = globalThis.ResizeObserver;
+      const originalUrl = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+      const restoreUpdateSpy = vi.fn();
+      const restoreDeferred = createDeferred<api.GitDiffResponse>();
+      const fetchStateSpy = vi.spyOn(api, "fetchState").mockResolvedValue(makeStateResponse({
+        revision: 1,
+        projects: [],
+        orchestrators: [],
+        workspaces: [
+          {
+            id: "workspace-test",
+            revision: 1,
+            updatedAt: "2026-04-15 09:00:00",
+            controlPanelSide: "left",
+          },
+        ],
+        sessions: [],
+      }));
+      const fetchWorkspaceLayoutSpy = vi
+        .mocked(api.fetchWorkspaceLayout)
+        .mockResolvedValue(
+          makeWorkspaceLayoutResponse({
+            id: "workspace-test",
+            workspace: makeRestoredGitDiffWorkspace(),
+          }),
+        );
+      const fetchGitDiffSpy = vi
+        .spyOn(api, "fetchGitDiff")
+        .mockImplementation(() => restoreDeferred.promise);
+      setAppTestHooksForTests({
+        onRestoredGitDiffDocumentContentUpdate: restoreUpdateSpy,
+      });
+      vi.stubGlobal(
+        "EventSource",
+        EventSourceMock as unknown as typeof EventSource,
+      );
+      vi.stubGlobal(
+        "ResizeObserver",
+        ResizeObserverMock as unknown as typeof ResizeObserver,
+      );
+      const scrollIntoViewSpy = stubScrollIntoView();
+
+      window.history.replaceState(
+        window.history.state,
+        "",
+        "/?workspace=workspace-test",
+      );
+
+      try {
+        await renderApp();
+        await waitFor(() => {
+          expect(fetchGitDiffSpy).toHaveBeenCalledTimes(1);
+        });
+
+        await act(async () => {
+          cleanup();
+          await flushUiWork();
+        });
+        await act(async () => {
+          restoreDeferred.resolve(makeRestoredGitDiffResponse());
+          await flushUiWork();
+        });
+
+        expect(restoreUpdateSpy).not.toHaveBeenCalled();
+      } finally {
+        window.history.replaceState(window.history.state, "", originalUrl);
+        scrollIntoViewSpy.mockRestore();
+        fetchStateSpy.mockRestore();
+        fetchWorkspaceLayoutSpy.mockRestore();
+        fetchGitDiffSpy.mockRestore();
+        setAppTestHooksForTests(null);
+        restoreGlobal("EventSource", originalEventSource);
+        restoreGlobal("ResizeObserver", originalResizeObserver);
+      }
+    });
   });
 
   it("keeps omitted adoptState slices unchanged", () => {

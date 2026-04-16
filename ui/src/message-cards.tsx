@@ -71,6 +71,8 @@ const HEAVY_MARKDOWN_CHARACTER_THRESHOLD = 1800;
 const HEAVY_MARKDOWN_LINE_THRESHOLD = 24;
 const FILE_CHANGES_COLLAPSE_THRESHOLD = 6;
 let mermaidDiagramIdCounter = 0;
+const MAX_MERMAID_SOURCE_CHARS = 50_000;
+const MAX_MERMAID_DIAGRAMS_PER_DOCUMENT = 20;
 
 export type MarkdownFileLinkTarget = {
   path: string;
@@ -315,10 +317,15 @@ export const MessageCard = memo(function MessageCard({
       return null;
   }
 }, (previous, next) =>
+  previous.appearance === next.appearance &&
   previous.message === next.message &&
   previous.onOpenDiffPreview === next.onOpenDiffPreview &&
   previous.onOpenSourceLink === next.onOpenSourceLink &&
   previous.preferImmediateHeavyRender === next.preferImmediateHeavyRender &&
+  previous.onApprovalDecision === next.onApprovalDecision &&
+  previous.onUserInputSubmit === next.onUserInputSubmit &&
+  previous.onMcpElicitationSubmit === next.onMcpElicitationSubmit &&
+  previous.onCodexAppRequestSubmit === next.onCodexAppRequestSubmit &&
   previous.searchQuery === next.searchQuery &&
   previous.searchHighlightTone === next.searchHighlightTone &&
   previous.workspaceRoot === next.workspaceRoot
@@ -781,6 +788,33 @@ function MermaidDiagram({
   );
 }
 
+function MermaidRenderBudgetFallback({
+  code,
+  lineAttributes,
+  message,
+  showSource = true,
+}: {
+  code: string;
+  lineAttributes?: MarkdownLineAttributes | null;
+  message: string;
+  showSource?: boolean;
+}) {
+  return (
+    <div className="mermaid-diagram-fallback" contentEditable={false} data-markdown-serialization="skip">
+      <p className="support-copy">{message}</p>
+      {showSource ? (
+        <HighlightedCodeBlock
+          className="code-block"
+          code={code}
+          language="mermaid"
+          lineAttributes={lineAttributes}
+          showCopyButton
+        />
+      ) : null}
+    </div>
+  );
+}
+
 type MermaidModule = (typeof import("mermaid"))["default"];
 type MermaidConfigInput = NonNullable<Parameters<MermaidModule["initialize"]>[0]>;
 
@@ -870,6 +904,41 @@ function buildTermalMermaidConfig(appearance: MonacoAppearance): MermaidConfigIn
 
 function isMermaidMarkdownLanguage(language: string | null) {
   return language?.trim().toLowerCase() === "mermaid";
+}
+
+function countMermaidMarkdownFences(markdown: string) {
+  const lines = markdown.split(/\r?\n/);
+  let count = 0;
+  let activeFence: { length: number; marker: "`" | "~" } | null = null;
+
+  for (const line of lines) {
+    if (activeFence) {
+      const closeMatch = line.match(/^ {0,3}([`~]{3,})\s*$/);
+      if (
+        closeMatch?.[1]?.startsWith(activeFence.marker) &&
+        closeMatch[1].length >= activeFence.length
+      ) {
+        activeFence = null;
+      }
+      continue;
+    }
+
+    const openMatch = line.match(/^ {0,3}([`~]{3,})\s*([^\s`~]*)/);
+    if (!openMatch) {
+      continue;
+    }
+
+    const markerText = openMatch[1] ?? "";
+    activeFence = {
+      length: markerText.length,
+      marker: markerText[0] === "~" ? "~" : "`",
+    };
+    if (isMermaidMarkdownLanguage(openMatch[2] ?? "")) {
+      count += 1;
+    }
+  }
+
+  return count;
 }
 
 function normalizeCodeLanguageClass(language: string | null | undefined) {
@@ -2650,6 +2719,12 @@ export function MarkdownContent({
   // or vice versa.  The ref handles identity-only changes without rememoizing.
   const hasOpenSourceLink = onOpenSourceLink != null;
   const normalizedStartLineNumber = normalizeMarkdownStartLineNumber(startLineNumber);
+  const mermaidDiagramCount = useMemo(
+    () => (renderMermaidDiagrams ? countMermaidMarkdownFences(markdown) : 0),
+    [markdown, renderMermaidDiagrams],
+  );
+  const hasTooManyMermaidDiagrams =
+    mermaidDiagramCount > MAX_MERMAID_DIAGRAMS_PER_DOCUMENT;
   const markdownRootRef = useRef<HTMLDivElement | null>(null);
   const [lineMarkers, setLineMarkers] = useState<MarkdownLineMarker[]>([]);
 
@@ -2709,7 +2784,7 @@ export function MarkdownContent({
       resizeObserver?.disconnect();
       window.removeEventListener("resize", scheduleLineMarkerUpdate);
     };
-  }, [markdown, normalizedStartLineNumber, showLineNumbers]);
+  }, [documentPath, hasOpenSourceLink, markdown, normalizedStartLineNumber, showLineNumbers, workspaceRoot]);
 
   const rendered = useMemo(() => {
     const highlightChildren = (children: ReactNode) =>
@@ -2791,6 +2866,44 @@ export function MarkdownContent({
 
             if (renderMermaidDiagrams && isMermaidMarkdownLanguage(language)) {
               const lineAttributes = suppressLineNumber ? null : getLineAttributes(sourcePosition);
+              const budgetMessage =
+                code.length > MAX_MERMAID_SOURCE_CHARS
+                  ? `Mermaid render skipped: diagram exceeds the ${MAX_MERMAID_SOURCE_CHARS.toLocaleString()} character render budget.`
+                  : hasTooManyMermaidDiagrams
+                    ? `Mermaid render skipped: document has ${mermaidDiagramCount} diagrams; the render budget is ${MAX_MERMAID_DIAGRAMS_PER_DOCUMENT}.`
+                    : null;
+              if (budgetMessage) {
+                if (preserveMermaidSource) {
+                  return (
+                    <>
+                      <MermaidRenderBudgetFallback
+                        code={code}
+                        lineAttributes={null}
+                        message={budgetMessage}
+                        showSource={false}
+                      />
+                      <HighlightedCodeBlock
+                        className="code-block mermaid-source-block"
+                        code={code}
+                        lineAttributes={lineAttributes}
+                        language={language}
+                        showCopyButton
+                        searchQuery={searchQuery}
+                        searchHighlightTone={searchHighlightTone}
+                      />
+                    </>
+                  );
+                }
+
+                return (
+                  <MermaidRenderBudgetFallback
+                    code={code}
+                    lineAttributes={lineAttributes}
+                    message={budgetMessage}
+                  />
+                );
+              }
+
               if (preserveMermaidSource) {
                 return (
                   <>
@@ -2967,7 +3080,9 @@ export function MarkdownContent({
   }, [
     documentPath,
     appearance,
+    hasTooManyMermaidDiagrams,
     markdown,
+    mermaidDiagramCount,
     normalizedStartLineNumber,
     preserveMermaidSource,
     renderMermaidDiagrams,
@@ -3139,10 +3254,23 @@ function resolveMarkdownFileLinkTarget(
   }
 
   return {
-    path: resolvedPath,
+    path: restoreMarkdownUncRootPrefix(resolvedPath, workspaceRoot),
     ...(line ? { line } : {}),
     ...(column ? { column } : {}),
   };
+}
+
+function restoreMarkdownUncRootPrefix(path: string, workspaceRoot: string | null) {
+  const trimmedRoot = workspaceRoot?.trim() ?? "";
+  if (!/^\\\\/.test(trimmedRoot) || /^\\\\/.test(path)) {
+    return path;
+  }
+
+  const uncShare = trimmedRoot.replace(/^\\\\/, "").split(/[\\/]+/).slice(0, 2).join("\\");
+  const trimmedPath = path.replace(/^[\\/]+/, "");
+  return uncShare && trimmedPath.toLowerCase().startsWith(`${uncShare.toLowerCase()}\\`)
+    ? `\\\\${trimmedPath}`
+    : path;
 }
 
 function parseMarkdownFileLinkFragment(fragment: string) {
@@ -3379,8 +3507,12 @@ function normalizeJoinedMarkdownPath(path: string, separator: "\\" | "/") {
   let prefix = "";
   let rest = normalizedPath;
   const driveMatch = isWindowsPath ? normalizedPath.match(/^([A-Za-z]:)\\?(.*)$/) : null;
+  const uncMatch = isWindowsPath ? normalizedPath.match(/^\\\\([^\\]+)\\([^\\]+)\\?(.*)$/) : null;
 
-  if (driveMatch) {
+  if (uncMatch) {
+    prefix = `\\\\${uncMatch[1]}\\${uncMatch[2]}\\`;
+    rest = uncMatch[3] ?? "";
+  } else if (driveMatch) {
     prefix = `${driveMatch[1]}\\`;
     rest = driveMatch[2] ?? "";
   } else if (!isWindowsPath && normalizedPath.startsWith("/")) {

@@ -94,7 +94,6 @@ export const MonacoDiffEditor = forwardRef<MonacoDiffEditorHandle, MonacoDiffEdi
       if (!editor) {
         return;
       }
-      editor.getOriginalEditor().setScrollTop(scrollTop);
       editor.getModifiedEditor().setScrollTop(scrollTop);
     },
   }), []);

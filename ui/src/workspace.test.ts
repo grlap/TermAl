@@ -31,6 +31,7 @@ import {
   setCanvasZoom,
   setPaneSourcePath,
   splitPane,
+  stripLoadingGitDiffPreviewTabsFromWorkspaceState,
   updateGitDiffPreviewTabInWorkspaceState,
   updateSplitRatio,
   upsertCanvasSessionCard,
@@ -2700,7 +2701,7 @@ describe("workspace helpers", () => {
       {
         changeType: "edit",
         diff: "-# Before\n+# After",
-        documentEnrichmentNote: "Rendered from full document sides.",
+        documentEnrichmentNote: "  Rendered from full document sides.  ",
         documentContent,
         diffMessageId: "git-preview:pane-a:/repo:unstaged::README.md",
         filePath: "/repo/README.md",
@@ -2724,7 +2725,7 @@ describe("workspace helpers", () => {
 
     expect(diffTab).toMatchObject({
       kind: "diffPreview",
-      documentEnrichmentNote: "Rendered from full document sides.",
+      documentEnrichmentNote: "  Rendered from full document sides.  ",
       documentContent,
       gitDiffRequest: {
         path: "README.md",
@@ -2734,6 +2735,77 @@ describe("workspace helpers", () => {
       gitDiffRequestKey: "git-preview:pane-a:/repo:unstaged::README.md",
       language: "markdown",
     });
+  });
+
+  it("stripLoadingGitDiffPreviewTabsFromWorkspaceState removes empty transient Git diff previews", () => {
+    const sessionTab = makeSessionTab("tab-a", "session-a");
+    const loadingTab: WorkspaceTab = {
+      id: "diff-tab-a",
+      kind: "diffPreview",
+      changeType: "edit",
+      diff: "",
+      diffMessageId: "git-preview:pane-a:/repo:unstaged::README.md",
+      filePath: "/repo/README.md",
+      gitDiffRequest: {
+        path: "README.md",
+        sectionId: "unstaged",
+        workdir: "/repo",
+      },
+      gitDiffRequestKey: "git-preview:pane-a:/repo:unstaged::README.md",
+      gitSectionId: "unstaged",
+      isLoading: true,
+      language: "markdown",
+      originSessionId: "session-a",
+      summary: "Updated file",
+    };
+    const next = stripLoadingGitDiffPreviewTabsFromWorkspaceState(
+      makeSinglePaneWorkspace(
+        makePane("pane-a", [loadingTab, sessionTab], {
+          activeTabId: loadingTab.id,
+          activeSessionId: "session-a",
+          viewMode: "diffPreview",
+        }),
+      ),
+    );
+
+    expect(next.panes[0]?.tabs).toEqual([sessionTab]);
+    expect(next.panes[0]).toMatchObject({
+      activeTabId: sessionTab.id,
+      viewMode: "session",
+    });
+  });
+
+  it("stripLoadingGitDiffPreviewTabsFromWorkspaceState keeps restored Git diff previews with durable diff text", () => {
+    const loadingRestoredTab: WorkspaceTab = {
+      id: "diff-tab-a",
+      kind: "diffPreview",
+      changeType: "edit",
+      diff: "-before\n+after",
+      diffMessageId: "git-preview:pane-a:/repo:unstaged::README.md",
+      filePath: "/repo/README.md",
+      gitDiffRequest: {
+        path: "README.md",
+        sectionId: "unstaged",
+        workdir: "/repo",
+      },
+      gitDiffRequestKey: "git-preview:pane-a:/repo:unstaged::README.md",
+      gitSectionId: "unstaged",
+      isLoading: true,
+      language: "markdown",
+      originSessionId: "session-a",
+      summary: "Updated file",
+    };
+    const workspace = makeSinglePaneWorkspace(
+      makePane("pane-a", [loadingRestoredTab], {
+        activeTabId: loadingRestoredTab.id,
+        activeSessionId: "session-a",
+        viewMode: "diffPreview",
+      }),
+    );
+
+    expect(stripLoadingGitDiffPreviewTabsFromWorkspaceState(workspace)).toBe(
+      workspace,
+    );
   });
 
   it("openDiffPreviewInWorkspaceState opens a control-panel diff beside the session pane", () => {

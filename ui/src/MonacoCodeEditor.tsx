@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef } from "react";
+import { forwardRef, useEffect, useImperativeHandle, useLayoutEffect, useRef } from "react";
 import type {
   IDisposable,
   editor as MonacoEditor,
@@ -20,6 +20,11 @@ export type MonacoCodeEditorStatus = {
   endOfLine: "LF" | "CRLF";
 };
 
+export type MonacoCodeEditorHandle = {
+  getScrollTop: () => number;
+  setScrollTop: (scrollTop: number) => void;
+};
+
 type MonacoCodeEditorProps = {
   appearance: MonacoAppearance;
   ariaLabel: string;
@@ -36,7 +41,7 @@ type MonacoCodeEditorProps = {
   onStatusChange?: (status: MonacoCodeEditorStatus) => void;
 };
 
-export function MonacoCodeEditor({
+export const MonacoCodeEditor = forwardRef<MonacoCodeEditorHandle, MonacoCodeEditorProps>(function MonacoCodeEditor({
   appearance,
   ariaLabel,
   fontSizePx,
@@ -50,7 +55,7 @@ export function MonacoCodeEditor({
   onChange,
   onSave,
   onStatusChange,
-}: MonacoCodeEditorProps) {
+}, ref) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const editorRef = useRef<MonacoEditor.IStandaloneCodeEditor | null>(null);
   const modelRef = useRef<MonacoEditor.ITextModel | null>(null);
@@ -70,6 +75,13 @@ export function MonacoCodeEditor({
   changeHandlerRef.current = onChange;
   saveHandlerRef.current = onSave;
   statusHandlerRef.current = onStatusChange;
+
+  useImperativeHandle(ref, () => ({
+    getScrollTop: () => editorRef.current?.getScrollTop() ?? 0,
+    setScrollTop: (scrollTop: number) => {
+      editorRef.current?.setScrollTop(scrollTop);
+    },
+  }), []);
 
   useLayoutEffect(() => {
     const container = containerRef.current;
@@ -374,7 +386,7 @@ export function MonacoCodeEditor({
   }
 
   return <div ref={containerRef} className="monaco-code-editor" />;
-}
+});
 
 function buildModelUri(monaco: MonacoModule, path: string | null | undefined, baseUri: string) {
   const normalizedPath = path?.trim();

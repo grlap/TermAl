@@ -122,7 +122,7 @@ describe("markdown diff segments", () => {
     );
   });
 
-  it("treats Markdown bullet indentation that renders the same as unchanged", () => {
+  it("keeps Markdown bullet indentation depth changes visible", () => {
     const segments = buildFullMarkdownDiffDocumentSegments(
       [
         "- `validate-receipt`",
@@ -136,8 +136,11 @@ describe("markdown diff segments", () => {
       ].join("\n"),
     );
 
-    expect(segments.map((segment) => segment.kind)).toEqual(["normal"]);
-    expect(segments[0]?.markdown).toContain(
+    expect(segments.map((segment) => segment.kind)).toEqual(["normal", "removed", "added"]);
+    expect(segments.find((segment) => segment.kind === "removed")?.markdown).toContain(
+      "  - server-side Apple / Google purchase validation and subscription upsert",
+    );
+    expect(segments.find((segment) => segment.kind === "added")?.markdown).toContain(
       "- server-side Apple / Google purchase validation and subscription upsert",
     );
   });
@@ -246,6 +249,26 @@ describe("markdown diff segments", () => {
     ).toBe(false);
   });
 
+  it("keeps an interior changed fenced code line with its whole block", () => {
+    const segments = buildFullMarkdownDiffDocumentSegments(
+      "# Sync\n\n```text\nFlutter UI\nold path\n```\n\nAfter\n",
+      "# Sync\n\n```text\nFlutter UI\nnew path\n```\n\nAfter\n",
+    );
+
+    const removedBlock = segments.find((segment) => segment.kind === "removed");
+    const addedBlock = segments.find((segment) => segment.kind === "added");
+
+    expect(removedBlock?.markdown).toBe("```text\nFlutter UI\nold path\n```\n");
+    expect(addedBlock?.markdown).toBe("```text\nFlutter UI\nnew path\n```\n");
+    expect(
+      segments.some(
+        (segment) =>
+          segment.kind === "normal" &&
+          (segment.markdown.includes("```text") || segment.markdown.includes("Flutter UI")),
+      ),
+    ).toBe(false);
+  });
+
   it("treats Markdown table separator formatting as unchanged", () => {
     const segments = buildFullMarkdownDiffDocumentSegments(
       [
@@ -296,13 +319,103 @@ describe("markdown diff segments", () => {
       "# Title\n\nSection one revised.\n\nExtra line.\n\nSection two original.\n",
     );
 
-    const beforeSectionTwo = beforeShift.find((segment) =>
-      segment.markdown.includes("Section two original."),
+    const beforeSectionTwo = beforeShift.filter(
+      (segment) =>
+        segment.kind === "added" &&
+        segment.isInAfterDocument &&
+        segment.markdown === "Section two original.\n",
     );
-    const afterSectionTwo = afterShift.find((segment) =>
-      segment.markdown.includes("Section two original."),
+    const afterSectionTwo = afterShift.filter(
+      (segment) =>
+        segment.kind === "added" &&
+        segment.isInAfterDocument &&
+        segment.markdown === "Section two original.\n",
     );
 
-    expect(beforeSectionTwo?.id).toBe(afterSectionTwo?.id);
+    expect(beforeSectionTwo).toHaveLength(1);
+    expect(afterSectionTwo).toHaveLength(1);
+    expect(beforeSectionTwo[0]?.id).toBe(afterSectionTwo[0]?.id);
+  });
+
+  it("keeps repeated downstream segment ids stable when upstream line counts shift", () => {
+    const beforeShift = buildFullMarkdownDiffDocumentSegments(
+      [
+        "# Title",
+        "",
+        "Section one base.",
+        "",
+        "Bridge context.",
+        "",
+        "Repeated base.",
+        "",
+        "Middle context.",
+        "",
+        "Repeated base.",
+        "",
+      ].join("\n"),
+      [
+        "# Title",
+        "",
+        "Section one original.",
+        "",
+        "Bridge context.",
+        "",
+        "Repeated original.",
+        "",
+        "Middle context.",
+        "",
+        "Repeated original.",
+        "",
+      ].join("\n"),
+    );
+    const afterShift = buildFullMarkdownDiffDocumentSegments(
+      [
+        "# Title",
+        "",
+        "Section one base.",
+        "",
+        "Bridge context.",
+        "",
+        "Repeated base.",
+        "",
+        "Middle context.",
+        "",
+        "Repeated base.",
+        "",
+      ].join("\n"),
+      [
+        "# Title",
+        "",
+        "Section one revised.",
+        "",
+        "Extra line.",
+        "",
+        "Bridge context.",
+        "",
+        "Repeated original.",
+        "",
+        "Middle context.",
+        "",
+        "Repeated original.",
+        "",
+      ].join("\n"),
+    );
+
+    const beforeRepeatedSegments = beforeShift.filter(
+      (segment) =>
+        segment.kind === "added" &&
+        segment.isInAfterDocument &&
+        segment.markdown === "Repeated original.\n",
+    );
+    const afterRepeatedSegments = afterShift.filter(
+      (segment) =>
+        segment.kind === "added" &&
+        segment.isInAfterDocument &&
+        segment.markdown === "Repeated original.\n",
+    );
+
+    expect(beforeRepeatedSegments).toHaveLength(2);
+    expect(afterRepeatedSegments).toHaveLength(2);
+    expect(beforeRepeatedSegments[1]?.id).toBe(afterRepeatedSegments[1]?.id);
   });
 });

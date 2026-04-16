@@ -1666,7 +1666,10 @@ export function VirtualizedConversationMessageList({
     }
   }, [isMeasuringPostActivation]);
 
-  // Completion check: runs on every commit while measuring is active.
+  // Completion check: intentionally runs on every commit while measuring is
+  // active. Measurements mutate `messageHeightsRef` synchronously and then
+  // trigger ordinary React commits, so an explicit dependency list is more
+  // likely to miss a ref-only measurement than to make this safer.
   // When all currently-visible slots have real measurements, write a
   // final scrollTop and reveal by clearing the flag. Reading from
   // `messageHeightsRef.current` is safe because `handleHeightChange`
@@ -1725,6 +1728,7 @@ export function VirtualizedConversationMessageList({
           node.scrollTop = target;
         }
       }
+      shouldKeepBottomAfterLayoutRef.current = true;
       setIsMeasuringPostActivation(false);
     }, 150);
 
@@ -1884,10 +1888,11 @@ export function VirtualizedConversationMessageList({
     // the next ResizeObserver tick. Integer storage eliminates the drift at
     // the source so the re-pin loop cannot be re-entered by noise alone.
     const roundedHeight = Math.round(nextHeight);
+    const hadPreviousMeasurement = messageHeightsRef.current[messageId] !== undefined;
     const previousHeight =
       messageHeightsRef.current[messageId] ??
       estimateConversationMessageHeight(messagesRef.current[messageIndexByIdRef.current.get(messageId) ?? 0]);
-    if (Math.abs(previousHeight - roundedHeight) < 1) {
+    if (hadPreviousMeasurement && Math.abs(previousHeight - roundedHeight) < 1) {
       return;
     }
 

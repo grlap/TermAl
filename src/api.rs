@@ -2529,6 +2529,7 @@ fn annotate_remote_terminal_429(err: ApiError, remote_name: &str) -> ApiError {
     ApiError {
         status: err.status,
         message: format!("remote {remote_name}: {}", err.message),
+        kind: err.kind,
     }
 }
 
@@ -3469,6 +3470,27 @@ fn load_git_diff_for_request(
     workdir: &FsPath,
     request: &GitDiffRequest,
 ) -> Result<GitDiffResponse, ApiError> {
+    load_git_diff_for_request_with_document_loader(
+        workdir,
+        request,
+        load_git_diff_document_content,
+    )
+}
+
+fn load_git_diff_for_request_with_document_loader<F>(
+    workdir: &FsPath,
+    request: &GitDiffRequest,
+    load_document_content: F,
+) -> Result<GitDiffResponse, ApiError>
+where
+    F: Fn(
+        &FsPath,
+        &str,
+        Option<&str>,
+        Option<&str>,
+        GitDiffSection,
+    ) -> Result<GitDiffDocumentContent, ApiError>,
+{
     let workdir = normalize_git_workdir_path(workdir)?;
     let Some(repo_root) = resolve_git_repo_root(&workdir)? else {
         return Err(ApiError::bad_request("no git repository found"));
@@ -3514,7 +3536,7 @@ fn load_git_diff_for_request(
     let language = infer_language_from_path(FsPath::new(&current_path)).map(str::to_owned);
     let mut document_enrichment_note = None;
     let document_content = if language.as_deref() == Some("markdown") {
-        match load_git_diff_document_content(
+        match load_document_content(
             &repo_root,
             &current_path,
             original_path.as_deref(),
@@ -3522,7 +3544,7 @@ fn load_git_diff_for_request(
             request.section_id,
         ) {
             Ok(content) => Some(content),
-            Err(error) if matches!(error.status, StatusCode::BAD_REQUEST | StatusCode::NOT_FOUND) => {
+            Err(error) if should_degrade_git_diff_document_enrichment_error(&error) => {
                 document_enrichment_note = git_diff_document_enrichment_note(&error);
                 eprintln!(
                     "backend warning> git diff Markdown enrichment skipped for {}: {}",
@@ -3987,7 +4009,8 @@ fn read_git_spec_text(repo_root: &FsPath, spec: &str, label: &str) -> Result<Str
         return Err(ApiError::bad_request(format!(
             "{label} exceeds the {} MB read limit",
             MAX_FILE_CONTENT_BYTES / (1024 * 1024)
-        )));
+        ))
+        .with_kind(ApiErrorKind::GitDocumentTooLarge));
     }
 
     drop(stdout);
@@ -4007,7 +4030,8 @@ fn read_git_spec_text(repo_root: &FsPath, spec: &str, label: &str) -> Result<Str
         // Git document readers use NOT_FOUND as an internal "drop Markdown
         // enrichment" signal. The diff itself may still exist and should be
         // returned by the API boundary without document_content.
-        return Err(ApiError::not_found(format!("{label} not found: {spec}")));
+        return Err(ApiError::not_found(format!("{label} not found: {spec}"))
+            .with_kind(ApiErrorKind::GitDocumentNotFound));
     }
     if let Some(err) = stderr_error {
         return Err(ApiError::internal(format!(
@@ -4060,7 +4084,8 @@ fn read_git_worktree_bytes(repo_root: &FsPath, path: &str) -> Result<Vec<u8>, Ap
         if !target_metadata.is_file() {
             return Err(ApiError::not_found(format!(
                 "git worktree symlink target is not a file: {path}"
-            )));
+            ))
+            .with_kind(ApiErrorKind::GitDocumentNotFile));
         }
         ensure_git_document_bytes_within_limit(target_metadata.len(), "git worktree symlink target")?;
         return read_capped_worktree_file(
@@ -4076,7 +4101,8 @@ fn read_git_worktree_bytes(repo_root: &FsPath, path: &str) -> Result<Vec<u8>, Ap
         // fallback instead of treating the whole diff as missing.
         return Err(ApiError::not_found(format!(
             "git worktree path is not a file: {path}"
-        )));
+        ))
+        .with_kind(ApiErrorKind::GitDocumentNotFile));
     }
 
     ensure_git_document_bytes_within_limit(metadata.len(), "git worktree file")?;
@@ -4136,6 +4162,7 @@ fn canonicalize_worktree_path(
     fs::canonicalize(path).map_err(|err| {
         if err.kind() == std::io::ErrorKind::NotFound {
             ApiError::not_found(format!("git {label} not found: {relative_path}"))
+                .with_kind(ApiErrorKind::GitDocumentNotFound)
         } else {
             ApiError::internal(format!(
                 "failed to canonicalize git {label} {relative_path}: {err}"
@@ -4145,22 +4172,36 @@ fn canonicalize_worktree_path(
 }
 
 fn git_diff_document_enrichment_note(error: &ApiError) -> Option<String> {
-    let message = error.message.to_lowercase();
-    if message.contains("exceeds the 10 mb read limit") {
-        return Some(
+    match error.kind {
+        Some(ApiErrorKind::GitDocumentTooLarge) => Some(
             "Rendered Markdown is unavailable because the document exceeds the 10 MB read limit."
                 .to_owned(),
-        );
-    }
-
-    if message.contains("changed to a symlink") {
-        return Some(
+        ),
+        Some(ApiErrorKind::GitDocumentBecameSymlink) => Some(
             "Rendered Markdown is unavailable because the file changed to a symlink while loading."
                 .to_owned(),
-        );
+        ),
+        Some(ApiErrorKind::GitDocumentInvalidUtf8) => Some(
+            "Rendered Markdown is unavailable because the document is not valid UTF-8."
+                .to_owned(),
+        ),
+        Some(ApiErrorKind::GitDocumentNotFile) => Some(
+            "Rendered Markdown is unavailable because the path is not a regular file.".to_owned(),
+        ),
+        Some(ApiErrorKind::GitDocumentNotFound) => Some(
+            "Rendered Markdown is unavailable because the document could not be found.".to_owned(),
+        ),
+        None if error.status.is_server_error() => Some(
+            "Rendered Markdown is unavailable due to a read error."
+                .to_owned(),
+        ),
+        None => None,
     }
+}
 
-    None
+fn should_degrade_git_diff_document_enrichment_error(error: &ApiError) -> bool {
+    matches!(error.status, StatusCode::BAD_REQUEST | StatusCode::NOT_FOUND)
+        || error.status.is_server_error()
 }
 
 /// Ensures a canonicalized path starts inside the canonical Git repository root.
@@ -4191,7 +4232,8 @@ fn open_worktree_file(file_path: &FsPath, relative_path: &str, label: &str) -> R
     {
         Ok(file) => Ok(file),
         Err(err) if err.raw_os_error() == Some(libc::ELOOP) => {
-            Err(ApiError::bad_request(format!("{label} changed to a symlink: {relative_path}")))
+            Err(ApiError::bad_request(format!("{label} changed to a symlink: {relative_path}"))
+                .with_kind(ApiErrorKind::GitDocumentBecameSymlink))
         }
         Err(err) => Err(git_worktree_io_error("open", relative_path, err)),
     }
@@ -4220,6 +4262,7 @@ fn read_capped_worktree_file(file_path: &FsPath, relative_path: &str, label: &st
 fn git_worktree_io_error(action: &str, relative_path: &str, err: std::io::Error) -> ApiError {
     if err.kind() == std::io::ErrorKind::NotFound {
         ApiError::not_found(format!("git worktree path not found: {relative_path}"))
+            .with_kind(ApiErrorKind::GitDocumentNotFound)
     } else {
         ApiError::internal(format!(
             "failed to {action} git worktree file {relative_path}: {err}"
@@ -4233,7 +4276,8 @@ fn ensure_git_document_bytes_within_limit(size: u64, label: &str) -> Result<(), 
         return Err(ApiError::bad_request(format!(
             "{label} exceeds the {} MB read limit",
             MAX_FILE_CONTENT_BYTES / (1024 * 1024)
-        )));
+        ))
+        .with_kind(ApiErrorKind::GitDocumentTooLarge));
     }
 
     Ok(())
@@ -4243,7 +4287,10 @@ fn ensure_git_document_bytes_within_limit(size: u64, label: &str) -> Result<(), 
 fn decode_git_document_text(content: &[u8], label: &str) -> Result<String, ApiError> {
     std::str::from_utf8(content)
         .map(|text| text.to_owned())
-        .map_err(|_| ApiError::bad_request(format!("{label} is not valid UTF-8")))
+        .map_err(|_| {
+            ApiError::bad_request(format!("{label} is not valid UTF-8"))
+                .with_kind(ApiErrorKind::GitDocumentInvalidUtf8)
+        })
 }
 
 /// Checks whether git reported a missing object/path.
@@ -4899,10 +4946,21 @@ async fn submit_codex_app_request(
 }
 
 /// Represents the API error.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ApiErrorKind {
+    #[cfg_attr(not(unix), allow(dead_code))]
+    GitDocumentBecameSymlink,
+    GitDocumentInvalidUtf8,
+    GitDocumentNotFile,
+    GitDocumentNotFound,
+    GitDocumentTooLarge,
+}
+
 #[derive(Debug)]
 struct ApiError {
     message: String,
     status: StatusCode,
+    kind: Option<ApiErrorKind>,
 }
 
 impl ApiError {
@@ -4911,6 +4969,7 @@ impl ApiError {
         Self {
             message: message.into(),
             status: StatusCode::BAD_REQUEST,
+            kind: None,
         }
     }
 
@@ -4919,6 +4978,7 @@ impl ApiError {
         Self {
             message: message.into(),
             status: StatusCode::CONFLICT,
+            kind: None,
         }
     }
 
@@ -4927,6 +4987,7 @@ impl ApiError {
         Self {
             message: message.into(),
             status: StatusCode::NOT_FOUND,
+            kind: None,
         }
     }
 
@@ -4935,6 +4996,7 @@ impl ApiError {
         Self {
             message: message.into(),
             status: StatusCode::INTERNAL_SERVER_ERROR,
+            kind: None,
         }
     }
 
@@ -4943,6 +5005,7 @@ impl ApiError {
         Self {
             message: message.into(),
             status: StatusCode::BAD_GATEWAY,
+            kind: None,
         }
     }
 
@@ -4951,7 +5014,14 @@ impl ApiError {
         Self {
             message: message.into(),
             status,
+            kind: None,
         }
+    }
+
+    /// Tags internal error handling without changing the wire response.
+    fn with_kind(mut self, kind: ApiErrorKind) -> Self {
+        self.kind = Some(kind);
+        self
     }
 }
 

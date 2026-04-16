@@ -22098,9 +22098,15 @@ fn git_diff_document_content_covers_added_deleted_untracked_and_non_markdown() {
     .unwrap()
     .document_content
     .expect("staged deleted Markdown should include document content");
-    assert_eq!(staged_deleted.before.source, GitDiffDocumentSideSource::Head);
+    assert_eq!(
+        staged_deleted.before.source,
+        GitDiffDocumentSideSource::Head
+    );
     assert_eq!(staged_deleted.before.content, "# Delete staged\n");
-    assert_eq!(staged_deleted.after.source, GitDiffDocumentSideSource::Empty);
+    assert_eq!(
+        staged_deleted.after.source,
+        GitDiffDocumentSideSource::Empty
+    );
     assert_eq!(staged_deleted.after.content, "");
 
     let unstaged_deleted = load_git_diff_for_request(
@@ -22123,7 +22129,10 @@ fn git_diff_document_content_covers_added_deleted_untracked_and_non_markdown() {
         GitDiffDocumentSideSource::Index
     );
     assert_eq!(unstaged_deleted.before.content, "# Delete unstaged\n");
-    assert_eq!(unstaged_deleted.after.source, GitDiffDocumentSideSource::Empty);
+    assert_eq!(
+        unstaged_deleted.after.source,
+        GitDiffDocumentSideSource::Empty
+    );
     assert_eq!(unstaged_deleted.after.content, "");
 
     let non_markdown = load_git_diff_for_request(
@@ -22225,7 +22234,10 @@ fn git_diff_document_content_skips_non_utf8_markdown() {
     .unwrap();
 
     assert!(response.document_content.is_none());
-    assert_eq!(response.document_enrichment_note, None);
+    assert_eq!(
+        response.document_enrichment_note.as_deref(),
+        Some("Rendered Markdown is unavailable because the document is not valid UTF-8.")
+    );
 
     fs::remove_dir_all(repo_root).unwrap();
 }
@@ -22251,6 +22263,206 @@ fn git_diff_document_readers_reject_oversized_worktree_files() {
     );
 
     fs::remove_dir_all(repo_root).unwrap();
+}
+
+// Tests that Markdown enrichment notes are based on structured error kinds, not message text.
+#[test]
+fn git_diff_document_enrichment_note_uses_structured_error_kind() {
+    let untagged_error = ApiError::bad_request("git worktree file exceeds the 10 MB read limit");
+    assert_eq!(git_diff_document_enrichment_note(&untagged_error), None);
+
+    let tagged_error = ApiError::bad_request("read ceiling wording changed")
+        .with_kind(ApiErrorKind::GitDocumentTooLarge);
+    assert_eq!(
+        git_diff_document_enrichment_note(&tagged_error).as_deref(),
+        Some("Rendered Markdown is unavailable because the document exceeds the 10 MB read limit.")
+    );
+}
+
+// Tests that oversized Markdown enrichment degrades through the response path.
+#[test]
+fn git_diff_response_reports_oversized_markdown_enrichment_note() {
+    let repo_root = std::env::temp_dir().join(format!(
+        "termal-git-diff-doc-large-response-{}",
+        Uuid::new_v4()
+    ));
+    let markdown_file = repo_root.join("README.md");
+
+    fs::create_dir_all(&repo_root).unwrap();
+    fs::write(&markdown_file, "# Base\n").unwrap();
+    init_git_document_test_repo(&repo_root);
+    run_git_test_command(&repo_root, &["add", "README.md"]);
+    run_git_test_command(&repo_root, &["commit", "-m", "init"]);
+    fs::write(
+        &markdown_file,
+        format!("{}\n", "a".repeat(MAX_FILE_CONTENT_BYTES + 1)),
+    )
+    .unwrap();
+
+    let response = load_git_diff_for_request(
+        &repo_root,
+        &GitDiffRequest {
+            original_path: None,
+            path: "README.md".to_owned(),
+            section_id: GitDiffSection::Unstaged,
+            status_code: Some("M".to_owned()),
+            workdir: repo_root.to_string_lossy().into_owned(),
+            project_id: None,
+            session_id: None,
+        },
+    )
+    .expect("oversized Markdown enrichment should return the raw diff");
+
+    assert!(response.diff.contains("-# Base"));
+    assert!(response.diff.contains("+"));
+    assert!(response.document_content.is_none());
+    assert_eq!(
+        response.document_enrichment_note.as_deref(),
+        Some("Rendered Markdown is unavailable because the document exceeds the 10 MB read limit.")
+    );
+
+    fs::remove_dir_all(repo_root).unwrap();
+}
+
+// Tests that unexpected Markdown enrichment failures keep the already-loaded raw diff.
+#[test]
+fn git_diff_response_degrades_internal_markdown_enrichment_errors_to_raw_diff() {
+    let repo_root = std::env::temp_dir().join(format!(
+        "termal-git-diff-doc-internal-response-{}",
+        Uuid::new_v4()
+    ));
+    let markdown_file = repo_root.join("README.md");
+
+    fs::create_dir_all(&repo_root).unwrap();
+    fs::write(&markdown_file, "# Base\n").unwrap();
+    init_git_document_test_repo(&repo_root);
+    run_git_test_command(&repo_root, &["add", "README.md"]);
+    run_git_test_command(&repo_root, &["commit", "-m", "init"]);
+    fs::write(&markdown_file, "# Changed\n").unwrap();
+
+    let response = load_git_diff_for_request_with_document_loader(
+        &repo_root,
+        &GitDiffRequest {
+            original_path: None,
+            path: "README.md".to_owned(),
+            section_id: GitDiffSection::Unstaged,
+            status_code: Some("M".to_owned()),
+            workdir: repo_root.to_string_lossy().into_owned(),
+            project_id: None,
+            session_id: None,
+        },
+        |_repo_root, _current_path, _original_path, _status_code, _section_id| {
+            Err(ApiError::internal(
+                "failed to read git worktree file: disk error",
+            ))
+        },
+    )
+    .expect("internal Markdown enrichment errors should return the raw diff");
+
+    assert!(response.diff.contains("-# Base"));
+    assert!(response.diff.contains("+# Changed"));
+    assert!(response.document_content.is_none());
+    assert_eq!(
+        response.document_enrichment_note.as_deref(),
+        Some("Rendered Markdown is unavailable due to a read error.")
+    );
+
+    fs::remove_dir_all(repo_root).unwrap();
+}
+
+// Tests that expected Markdown enrichment failures return a visible degraded-preview note.
+#[test]
+fn git_diff_response_reports_expected_document_enrichment_notes() {
+    let repo_root = std::env::temp_dir().join(format!(
+        "termal-git-diff-doc-notes-response-{}",
+        Uuid::new_v4()
+    ));
+    let markdown_file = repo_root.join("README.md");
+
+    fs::create_dir_all(&repo_root).unwrap();
+    fs::write(&markdown_file, "# Base\n").unwrap();
+    init_git_document_test_repo(&repo_root);
+    run_git_test_command(&repo_root, &["add", "README.md"]);
+    run_git_test_command(&repo_root, &["commit", "-m", "init"]);
+    fs::write(&markdown_file, "# Changed\n").unwrap();
+
+    for (kind, expected_note) in [
+        (
+            ApiErrorKind::GitDocumentBecameSymlink,
+            "Rendered Markdown is unavailable because the file changed to a symlink while loading.",
+        ),
+        (
+            ApiErrorKind::GitDocumentInvalidUtf8,
+            "Rendered Markdown is unavailable because the document is not valid UTF-8.",
+        ),
+        (
+            ApiErrorKind::GitDocumentNotFile,
+            "Rendered Markdown is unavailable because the path is not a regular file.",
+        ),
+        (
+            ApiErrorKind::GitDocumentNotFound,
+            "Rendered Markdown is unavailable because the document could not be found.",
+        ),
+        (
+            ApiErrorKind::GitDocumentTooLarge,
+            "Rendered Markdown is unavailable because the document exceeds the 10 MB read limit.",
+        ),
+    ] {
+        let response = load_git_diff_for_request_with_document_loader(
+            &repo_root,
+            &GitDiffRequest {
+                original_path: None,
+                path: "README.md".to_owned(),
+                section_id: GitDiffSection::Unstaged,
+                status_code: Some("M".to_owned()),
+                workdir: repo_root.to_string_lossy().into_owned(),
+                project_id: None,
+                session_id: None,
+            },
+            move |_repo_root, _current_path, _original_path, _status_code, _section_id| {
+                Err(ApiError::bad_request("document enrichment unavailable").with_kind(kind))
+            },
+        )
+        .expect("expected Markdown enrichment errors should return the raw diff");
+
+        assert!(response.diff.contains("-# Base"));
+        assert!(response.diff.contains("+# Changed"));
+        assert!(response.document_content.is_none());
+        assert_eq!(
+            response.document_enrichment_note.as_deref(),
+            Some(expected_note)
+        );
+    }
+
+    fs::remove_dir_all(repo_root).unwrap();
+}
+
+// Tests that degraded Markdown enrichment keeps the frontend-facing JSON contract.
+#[test]
+fn git_diff_response_degraded_markdown_serializes_frontend_contract() {
+    let response = GitDiffResponse {
+        change_type: GitDiffChangeType::Edit,
+        change_set_id: "git-diff-test".to_owned(),
+        diff: "-# Base\n+# Changed\n".to_owned(),
+        diff_id: "git:test".to_owned(),
+        file_path: Some("/repo/README.md".to_owned()),
+        language: Some("markdown".to_owned()),
+        document_enrichment_note: Some(
+            "Rendered Markdown is unavailable because the document is not valid UTF-8.".to_owned(),
+        ),
+        document_content: None,
+        summary: "Unstaged changes in README.md".to_owned(),
+    };
+
+    let value = serde_json::to_value(response).unwrap();
+
+    assert_eq!(
+        value.get("documentEnrichmentNote").and_then(Value::as_str),
+        Some("Rendered Markdown is unavailable because the document is not valid UTF-8.")
+    );
+    assert!(value.get("documentContent").is_none());
+    assert!(value.get("document_enrichment_note").is_none());
+    assert!(value.get("document_content").is_none());
 }
 
 // Tests that Git document reader errors stay non-empty and actionable.
@@ -22300,6 +22512,10 @@ fn git_diff_document_reader_reports_missing_git_objects_as_not_found() {
 
     assert_eq!(error.status, StatusCode::NOT_FOUND);
     assert!(error.message.contains("git object not found"));
+    assert_eq!(
+        git_diff_document_enrichment_note(&error).as_deref(),
+        Some("Rendered Markdown is unavailable because the document could not be found.")
+    );
 
     fs::remove_dir_all(repo_root).unwrap();
 }
@@ -22320,6 +22536,10 @@ fn git_diff_document_reader_reports_unborn_head_objects_as_not_found() {
 
     assert_eq!(error.status, StatusCode::NOT_FOUND);
     assert!(error.message.contains("git object not found"));
+    assert_eq!(
+        git_diff_document_enrichment_note(&error).as_deref(),
+        Some("Rendered Markdown is unavailable because the document could not be found.")
+    );
 
     fs::remove_dir_all(repo_root).unwrap();
 }
@@ -22364,6 +22584,10 @@ fn git_diff_worktree_reader_reports_directories_as_not_found() {
 
     assert_eq!(error.status, StatusCode::NOT_FOUND);
     assert!(error.message.contains("git worktree path is not a file"));
+    assert_eq!(
+        git_diff_document_enrichment_note(&error).as_deref(),
+        Some("Rendered Markdown is unavailable because the path is not a regular file.")
+    );
 
     fs::remove_dir_all(repo_root).unwrap();
 }
@@ -22391,6 +22615,10 @@ fn git_diff_worktree_reader_reports_missing_files_as_not_found() {
         !error.message.contains(repo_root.to_string_lossy().as_ref()),
         "error should not expose absolute repo path: {}",
         error.message
+    );
+    assert_eq!(
+        git_diff_document_enrichment_note(&error).as_deref(),
+        Some("Rendered Markdown is unavailable because the document could not be found.")
     );
 
     fs::remove_dir_all(repo_root).unwrap();
