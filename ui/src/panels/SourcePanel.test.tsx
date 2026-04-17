@@ -311,6 +311,109 @@ describe("SourcePanel", () => {
     expect(screen.queryByRole("heading", { name: "Mode Test" })).not.toBeInTheDocument();
   });
 
+  // Phase 3 of `docs/features/source-renderers.md`: non-Markdown
+  // files with renderable regions expose Preview/Split too.
+  // Dedicated Mermaid files (`.mmd`, `.mermaid`) surface a whole-file
+  // region, so the mode toolbar appears and the chip reports the
+  // renderer kind instead of just "Markdown".
+  it("exposes Preview/Split for dedicated `.mmd` files and labels the chip as Mermaid", async () => {
+    render(
+      <SourcePanel
+        editorAppearance={editorAppearance}
+        editorFontSizePx={14}
+        fileState={{
+          ...readyFileState,
+          path: "/repo/diagrams/flow.mmd",
+          content: "flowchart TD\n  A --> B\n",
+          language: null,
+        }}
+        sourcePath="/repo/diagrams/flow.mmd"
+        onSaveFile={vi.fn()}
+      />,
+    );
+
+    // Code button is present by default.
+    expect(await screen.findByRole("button", { name: "Code" })).toBeInTheDocument();
+    // Preview + Split surfaces because the registry detects a
+    // whole-file Mermaid region.
+    expect(screen.getByRole("button", { name: "Preview" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Split" })).toBeInTheDocument();
+    // Chip says "Mermaid", not "Markdown".
+    const chip = screen.getByText("Mermaid");
+    expect(chip).toHaveClass("chip");
+  });
+
+  // A plain Rust file with no doc comments and no recognized content
+  // has zero renderable regions (Phase 5 will change this for files
+  // with doc-comment fenced blocks). Confirm Phase 3 does NOT
+  // over-expose Preview/Split for such files.
+  it("does not expose Preview/Split for plain Rust files with no renderable regions", async () => {
+    render(
+      <SourcePanel
+        editorAppearance={editorAppearance}
+        editorFontSizePx={14}
+        fileState={{
+          ...readyFileState,
+          path: "/repo/src/plain.rs",
+          content: "fn add(a: i32, b: i32) -> i32 { a + b }\n",
+          language: "rust",
+        }}
+        sourcePath="/repo/src/plain.rs"
+        onSaveFile={vi.fn()}
+      />,
+    );
+
+    await screen.findByLabelText("Source editor for /repo/src/plain.rs");
+    expect(screen.queryByRole("button", { name: "Preview" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Split" })).not.toBeInTheDocument();
+  });
+
+  // Edits that ADD renderable content (e.g., user types a Mermaid
+  // fence into a previously-empty `.md` file) should expose
+  // Preview/Split once the registry picks up the new region. The
+  // existing Markdown file test already covers the static path; this
+  // test exercises the re-detection on editor changes for a
+  // non-Markdown file context where the preview would otherwise not
+  // appear at all.
+  it("re-detects renderable regions from the current editor buffer (not the saved content)", async () => {
+    const { rerender } = render(
+      <SourcePanel
+        editorAppearance={editorAppearance}
+        editorFontSizePx={14}
+        fileState={{
+          ...readyFileState,
+          path: "/repo/notes.mmd",
+          content: "",
+          language: null,
+        }}
+        sourcePath="/repo/notes.mmd"
+        onSaveFile={vi.fn()}
+      />,
+    );
+
+    // Empty `.mmd` file has no renderable region, so no Preview.
+    expect(screen.queryByRole("button", { name: "Preview" })).not.toBeInTheDocument();
+
+    // Saved-content update that introduces a Mermaid diagram should
+    // expose the mode switcher.
+    rerender(
+      <SourcePanel
+        editorAppearance={editorAppearance}
+        editorFontSizePx={14}
+        fileState={{
+          ...readyFileState,
+          path: "/repo/notes.mmd",
+          content: "flowchart TD\n  A --> B\n",
+          language: null,
+        }}
+        sourcePath="/repo/notes.mmd"
+        onSaveFile={vi.fn()}
+      />,
+    );
+
+    expect(await screen.findByRole("button", { name: "Preview" })).toBeInTheDocument();
+  });
+
   it("auto-rebases the latest editor buffer after a disk refresh returns", async () => {
     const latestFile = createDeferred<SourceFileState>();
     const onFetchLatestFile = vi.fn(() => latestFile.promise);

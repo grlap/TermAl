@@ -1,9 +1,15 @@
-import { Suspense, lazy, useEffect, useRef, useState } from "react";
+import { Suspense, lazy, useEffect, useMemo, useRef, useState } from "react";
 import { copyTextToClipboard } from "../clipboard";
 import { MarkdownDocumentView } from "../MarkdownDocumentView";
-import type { MarkdownFileLinkTarget } from "../message-cards";
+import { MarkdownContent, type MarkdownFileLinkTarget } from "../message-cards";
 import type { MonacoCodeEditorStatus } from "../MonacoCodeEditor";
 import { resolveMonacoLanguage, type MonacoAppearance } from "../monaco";
+import {
+  detectRenderableRegions,
+  isMermaidFenceLanguage,
+  isMathFenceLanguage,
+  type SourceRenderableRegion,
+} from "../source-renderers";
 import type { WorkspaceFileChangeKind } from "../types";
 
 const MonacoCodeEditor = lazy(() =>
@@ -130,6 +136,31 @@ export function SourcePanel({
   const isDirty = fileState.status === "ready" && editorValue !== fileState.content;
   const isMarkdownSource =
     fileState.status === "ready" && isMarkdownDocument(fileState.language, fileState.path);
+  // Phase 3 of `docs/features/source-renderers.md`: expose
+  // Preview/Split for non-Markdown files too when the renderer
+  // registry detects at least one renderable region. Detection runs
+  // against the CURRENT edit buffer (not the saved file content) so
+  // the preview reflects unsaved edits, matching the Markdown
+  // pane's existing behavior. Kept in a useMemo so the expensive
+  // scan only reruns when editorValue / path / language change.
+  const renderableRegions = useMemo<SourceRenderableRegion[]>(() => {
+    if (fileState.status !== "ready") {
+      return [];
+    }
+    return detectRenderableRegions({
+      path: fileState.path,
+      language: fileState.language,
+      content: editorValue,
+      mode: "source",
+    });
+  }, [editorValue, fileState.language, fileState.path, fileState.status]);
+  // Show the mode switcher for Markdown files unconditionally (they
+  // have Markdown chrome even without renderable regions — headings,
+  // tables, etc.) AND for non-Markdown files when at least one
+  // renderable region was detected. Dedicated Mermaid files
+  // (`.mmd`) surface a whole-file region, so they get the switcher.
+  const canShowRendererPreview =
+    fileState.status === "ready" && (isMarkdownSource || renderableRegions.length > 0);
   const setEditorValueState = (nextValue: string) => {
     editorValueRef.current = nextValue;
     setEditorValue(nextValue);
@@ -180,10 +211,13 @@ export function SourcePanel({
   }, [isDirty, onDirtyChange]);
 
   useEffect(() => {
-    if (!isMarkdownSource && documentMode !== "code") {
+    // Force back to code view when the renderer-preview gate closes
+    // (file was renderable but user's edits removed all regions, or
+    // a tab switched to a plain-prose non-Markdown file).
+    if (!canShowRendererPreview && documentMode !== "code") {
       setDocumentMode("code");
     }
-  }, [documentMode, isMarkdownSource]);
+  }, [canShowRendererPreview, documentMode]);
 
   useEffect(() => {
     if (!copiedPath) {
@@ -451,10 +485,17 @@ export function SourcePanel({
             </div>
           ) : null}
         </div>
-        {isMarkdownSource && compareDiskContent === null ? (
-          <div className="source-editor-toolbar source-document-mode-toolbar" aria-label="Markdown view mode">
+        {canShowRendererPreview && compareDiskContent === null ? (
+          <div
+            className="source-editor-toolbar source-document-mode-toolbar"
+            aria-label="Document view mode"
+          >
             <div className="source-editor-status">
-              <span className="chip">Markdown</span>
+              <span className="chip">
+                {isMarkdownSource
+                  ? "Markdown"
+                  : describeRenderableKinds(renderableRegions)}
+              </span>
             </div>
             <div className="source-editor-actions">
               <SourceDocumentModeButton
@@ -593,15 +634,17 @@ export function SourcePanel({
                   />
                 </Suspense>
               </>
-            ) : isMarkdownSource && documentMode === "preview" ? (
-              <MarkdownDocumentView
+            ) : canShowRendererPreview && documentMode === "preview" ? (
+              <RendererPreviewPane
                 appearance={editorAppearance}
+                content={editorValue}
                 documentPath={fileState.path}
-                markdown={editorValue}
+                isMarkdownSource={isMarkdownSource}
                 onOpenSourceLink={onOpenSourceLink}
+                renderableRegions={renderableRegions}
                 workspaceRoot={workspaceRoot}
               />
-            ) : isMarkdownSource && documentMode === "split" ? (
+            ) : canShowRendererPreview && documentMode === "split" ? (
               <div className="source-markdown-split">
                 <div className="source-markdown-split-pane source-markdown-editor-pane">
                   <Suspense fallback={<div className="source-editor-loading">Loading editor...</div>}>
@@ -622,11 +665,13 @@ export function SourcePanel({
                   </Suspense>
                 </div>
                 <div className="source-markdown-split-pane">
-                  <MarkdownDocumentView
+                  <RendererPreviewPane
                     appearance={editorAppearance}
+                    content={editorValue}
                     documentPath={fileState.path}
-                    markdown={editorValue}
+                    isMarkdownSource={isMarkdownSource}
                     onOpenSourceLink={onOpenSourceLink}
+                    renderableRegions={renderableRegions}
                     workspaceRoot={workspaceRoot}
                   />
                 </div>
@@ -872,6 +917,125 @@ function lineArraysEqual(left: string[], right: string[]) {
 
 function isStaleFileSaveError(message: string) {
   return message.toLowerCase().includes("file changed on disk before save");
+}
+
+// Preview pane for source files that have at least one renderable
+// region (Phase 3 of `docs/features/source-renderers.md`). For
+// Markdown files, delegates to `MarkdownDocumentView` so all the
+// existing Markdown chrome (headings, table-of-contents, link
+// handling) stays intact. For non-Markdown files the detected
+// regions are composed into a synthetic Markdown fragment that
+// `MarkdownContent` already knows how to render — reuses the
+// Mermaid / KaTeX paths already wired in Phase 1 without a second
+// renderer implementation.
+//
+// Layout rules:
+//
+// - Dedicated whole-file renderers (e.g. `.mmd` files) compose to a
+//   single fence spanning the whole file; `MarkdownContent` picks it
+//   up via the Mermaid code-block branch.
+// - Mixed-content files (hypothetical — Rust in Phase 5) interleave
+//   recognized regions with plain text showing the intervening
+//   source; this Phase 3 implementation keeps it simple and shows
+//   only the recognized regions with small source line headers so
+//   the user can cross-reference them against the Monaco editor in
+//   Split mode.
+function RendererPreviewPane({
+  appearance,
+  content,
+  documentPath,
+  isMarkdownSource,
+  onOpenSourceLink,
+  renderableRegions,
+  workspaceRoot,
+}: {
+  appearance: MonacoAppearance;
+  content: string;
+  documentPath: string;
+  isMarkdownSource: boolean;
+  onOpenSourceLink?: (target: MarkdownFileLinkTarget) => void;
+  renderableRegions: SourceRenderableRegion[];
+  workspaceRoot: string | null;
+}) {
+  if (isMarkdownSource) {
+    return (
+      <MarkdownDocumentView
+        appearance={appearance}
+        documentPath={documentPath}
+        markdown={content}
+        onOpenSourceLink={onOpenSourceLink}
+        workspaceRoot={workspaceRoot}
+      />
+    );
+  }
+  // Non-Markdown files: compose the renderable regions into a
+  // synthetic Markdown fragment. Each region becomes either a fenced
+  // block (Mermaid / math fence) or an `$$...$$` math block,
+  // prefaced by a subtle "Lines X-Y" label so the user can navigate
+  // back to Monaco. `MarkdownContent` handles the rendering safely
+  // (sandboxed Mermaid iframe, KaTeX output with
+  // contentEditable={false} + data-markdown-serialization="skip").
+  const synthetic = composeRendererPreviewMarkdown(renderableRegions);
+  return (
+    <div className="source-renderer-preview" aria-label="Rendered preview">
+      <MarkdownContent
+        appearance={appearance}
+        documentPath={documentPath}
+        markdown={synthetic}
+        onOpenSourceLink={onOpenSourceLink}
+        workspaceRoot={workspaceRoot}
+      />
+    </div>
+  );
+}
+
+function composeRendererPreviewMarkdown(
+  regions: SourceRenderableRegion[],
+): string {
+  if (regions.length === 0) {
+    return "";
+  }
+  return regions
+    .map((region) => {
+      const header = `**Lines ${region.sourceStartLine}–${region.sourceEndLine}**`;
+      const body = composeRendererPreviewRegion(region);
+      return `${header}\n\n${body}`;
+    })
+    .join("\n\n");
+}
+
+function composeRendererPreviewRegion(region: SourceRenderableRegion): string {
+  if (region.renderer === "mermaid") {
+    return ["```mermaid", region.displayText.replace(/\s+$/, ""), "```"].join("\n");
+  }
+  if (region.renderer === "math") {
+    const trimmed = region.displayText.replace(/\s+$/, "");
+    // Block math rendered via `$$...$$` so `remark-math` tokenizes it
+    // without the code-block path. Inline math would be awkward in a
+    // preview pane, so we promote inline regions to block form too.
+    return `$$\n${trimmed}\n$$`;
+  }
+  // Markdown-renderer region (Phase 5 Rust doc comments) lands here
+  // as prose — emit the body directly so `MarkdownContent` parses it.
+  return region.displayText;
+}
+
+function describeRenderableKinds(regions: SourceRenderableRegion[]): string {
+  if (regions.length === 0) {
+    return "Document";
+  }
+  const kinds = new Set<string>();
+  for (const region of regions) {
+    if (region.renderer === "mermaid") {
+      kinds.add("Mermaid");
+    } else if (region.renderer === "math") {
+      kinds.add("Math");
+    } else if (region.renderer === "markdown") {
+      kinds.add("Markdown");
+    }
+  }
+  const ordered = Array.from(kinds).sort();
+  return ordered.join(" + ");
 }
 
 function SourceDocumentModeButton({
