@@ -25,6 +25,18 @@ import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
 import "katex/dist/katex.min.css";
+// Renderer registry (Phase 2 of `docs/features/source-renderers.md`).
+// We import DETECTION helpers + budget constants from here so the
+// Source / Diff panels can reuse the same definitions without
+// pulling `message-cards.tsx` into their dependency graph.
+import {
+  MAX_MATH_EXPRESSIONS_PER_DOCUMENT,
+  MAX_MERMAID_DIAGRAMS_PER_DOCUMENT,
+  MAX_MERMAID_SOURCE_CHARS,
+  countMathExpressions,
+  countMermaidFences,
+  isMermaidFenceLanguage,
+} from "./source-renderers";
 import { ExpandedPromptPanel } from "./ExpandedPromptPanel";
 import { copyTextToClipboard } from "./clipboard";
 import { buildDiffPreviewModel } from "./diff-preview";
@@ -82,16 +94,6 @@ const HEAVY_MARKDOWN_CHARACTER_THRESHOLD = 1800;
 const HEAVY_MARKDOWN_LINE_THRESHOLD = 24;
 const FILE_CHANGES_COLLAPSE_THRESHOLD = 6;
 let mermaidDiagramIdCounter = 0;
-const MAX_MERMAID_SOURCE_CHARS = 50_000;
-const MAX_MERMAID_DIAGRAMS_PER_DOCUMENT = 20;
-// Math budget mirrors Mermaid's per-document pattern (see
-// `docs/features/source-renderers.md` §Math Rules). Per-expression
-// size is bounded by KaTeX's own `maxExpand` and recursion guards, so
-// the per-document cap is the primary defense against a file with
-// thousands of short equations locking up the renderer. Over-budget
-// documents fall back to displaying KaTeX output with a `title`
-// annotation explaining the skip, via `MathRenderBudgetFallback`.
-const MAX_MATH_EXPRESSIONS_PER_DOCUMENT = 100;
 
 export type MarkdownFileLinkTarget = {
   path: string;
@@ -1070,84 +1072,12 @@ function buildTermalMermaidConfig(appearance: MonacoAppearance): MermaidConfigIn
   };
 }
 
-function isMermaidMarkdownLanguage(language: string | null) {
-  return language?.trim().toLowerCase() === "mermaid";
-}
-
-// Lexical approximation of `remark-math`'s tokenization: counts
-// `$...$` inline-math pairs (that aren't `$$`) and `$$...$$` block-math
-// pairs. Uses the same line-by-line scan pattern as
-// `countMermaidMarkdownFences` so budgets are consistent. Not a
-// full parser — `remark-math` has the real rules — but close enough
-// for an O(n) pre-render budget check. Fenced ` ```math ` blocks are
-// NOT counted here because they are handled by the code-block renderer
-// (same path as Mermaid); those fall under the Mermaid-style
-// per-block budget via the existing code-block inspection.
-function countMathExpressions(markdown: string) {
-  let count = 0;
-  let inFence = false;
-  for (const line of markdown.split(/\r?\n/)) {
-    // Skip content inside fenced code blocks — `remark-math` does the
-    // same (`$` inside fences is literal).
-    const fenceMatch = line.match(/^ {0,3}([`~]{3,})/);
-    if (fenceMatch) {
-      inFence = !inFence;
-      continue;
-    }
-    if (inFence) {
-      continue;
-    }
-    // Block math: a `$$` that opens or a `$$...$$` on one line.
-    const blockDollars = (line.match(/\$\$/g) ?? []).length;
-    count += Math.floor(blockDollars / 2);
-    // Remove block-math pairs before counting inline-math pairs so
-    // `$$x$$` doesn't double-count as both block and two inline.
-    const inlineScan = line.replace(/\$\$[^\n]*?\$\$/g, "").replace(/\$\$/g, "");
-    // Inline math: `$...$` pairs with no space immediately after the
-    // opening `$`. This matches `remark-math`'s "not preceded by
-    // whitespace" heuristic loosely — good enough for budget counting.
-    const inlinePairs = inlineScan.match(/\$[^\s$][^$\n]*?\$/g);
-    if (inlinePairs) {
-      count += inlinePairs.length;
-    }
-  }
-  return count;
-}
-
-function countMermaidMarkdownFences(markdown: string) {
-  const lines = markdown.split(/\r?\n/);
-  let count = 0;
-  let activeFence: { length: number; marker: "`" | "~" } | null = null;
-
-  for (const line of lines) {
-    if (activeFence) {
-      const closeMatch = line.match(/^ {0,3}([`~]{3,})\s*$/);
-      if (
-        closeMatch?.[1]?.startsWith(activeFence.marker) &&
-        closeMatch[1].length >= activeFence.length
-      ) {
-        activeFence = null;
-      }
-      continue;
-    }
-
-    const openMatch = line.match(/^ {0,3}([`~]{3,})\s*([^\s`~]*)/);
-    if (!openMatch) {
-      continue;
-    }
-
-    const markerText = openMatch[1] ?? "";
-    activeFence = {
-      length: markerText.length,
-      marker: markerText[0] === "~" ? "~" : "`",
-    };
-    if (isMermaidMarkdownLanguage(openMatch[2] ?? "")) {
-      count += 1;
-    }
-  }
-
-  return count;
-}
+// Mermaid fence detection, math expression counting, and render-
+// budget constants now live in `./source-renderers` (Phase 2 of
+// `docs/features/source-renderers.md`). This file consumes them
+// through the top-of-file import so new callers — Source panel,
+// Diff panel for non-Markdown — get the same answers without having
+// to re-import through `message-cards.tsx`.
 
 function normalizeCodeLanguageClass(language: string | null | undefined) {
   const normalized = language?.trim().toLowerCase().replace(/^language-/, "") ?? "";
@@ -2952,7 +2882,7 @@ export function MarkdownContent({
   const hasOpenSourceLink = onOpenSourceLink != null;
   const normalizedStartLineNumber = normalizeMarkdownStartLineNumber(startLineNumber);
   const mermaidDiagramCount = useMemo(
-    () => (renderMermaidDiagrams ? countMermaidMarkdownFences(markdown) : 0),
+    () => (renderMermaidDiagrams ? countMermaidFences(markdown) : 0),
     [markdown, renderMermaidDiagrams],
   );
   const hasTooManyMermaidDiagrams =
@@ -3109,7 +3039,7 @@ export function MarkdownContent({
               );
             }
 
-            if (renderMermaidDiagrams && isMermaidMarkdownLanguage(language)) {
+            if (renderMermaidDiagrams && isMermaidFenceLanguage(language)) {
               const lineAttributes = suppressLineNumber ? null : getLineAttributes(sourcePosition);
               const budgetMessage =
                 code.length > MAX_MERMAID_SOURCE_CHARS
