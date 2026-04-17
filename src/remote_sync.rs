@@ -30,7 +30,52 @@ fn delta_event_revision(event: &DeltaEvent) -> u64 {
     }
 }
 
-/// Syncs remote state inner.
+/// Folds an inbound remote `StateResponse` into local state.
+///
+/// This is the single under-lock entry point for snapshot-shaped
+/// updates from a remote backend. It runs two kinds of sync depending
+/// on `focus_remote_session_id`:
+///
+/// - **Broad snapshot sync** (`focus = None`): the remote's entire
+///   state replaces the mirrored projection for this remote id. The
+///   function first captures a rollback shape of orchestrators +
+///   remote-project bindings so a mid-apply failure can restore the
+///   pre-sync view; then it upserts every remote project, every
+///   remote session (via `localize_remote_session` +
+///   `upsert_remote_proxy_session_record`), and every remote
+///   orchestrator instance, each translated from remote ids to their
+///   local proxy ids. Sessions that exist locally but no longer
+///   appear in the remote snapshot are tombstoned via
+///   `record_removed_session` so the delta persist path deletes them.
+/// - **Focused sync** (`focus = Some(remote_session_id)`): only the
+///   single session is updated. No orchestrator state is touched and
+///   no tombstones are issued — other local sessions for this remote
+///   stay as-is even if they were dropped from this response.
+///
+/// **Revision gate.** This function does not check revisions itself;
+/// callers should first test via
+/// `StateInner::should_skip_remote_applied_revision`
+/// (see [`apply_remote_state_if_newer_locked`]) so stale responses
+/// from out-of-order delivery don't clobber a newer mirrored state.
+/// The one exception is the focused path where the caller has
+/// already chosen to force an apply (e.g. after a 404 from a
+/// targeted fetch).
+///
+/// **ID localization.** Every `remote_*_id` on the wire is remapped
+/// to the local proxy id via `remote_project_id_map` / `localize_*`
+/// before it lands on any `SessionRecord`, `OrchestratorInstance`,
+/// or `Project`, so downstream code never has to disambiguate "whose
+/// id is this".
+///
+/// **Mutation stamps.** Every updated session lands through
+/// `session_mut_by_index`, so the delta-persist path picks up the
+/// remote-sourced changes the same way a local mutation would.
+///
+/// **Called from:** the SSE bridge (`process_remote_event_stream`),
+/// the periodic resync path (`resync_remote_state_snapshot`), the
+/// remote-proxy session-creation helpers in
+/// `remote_create_proxies.rs`, and
+/// `sync_remote_state_for_target` in `remote_routes.rs`.
 fn sync_remote_state_inner(
     inner: &mut StateInner,
     remote_id: &str,
@@ -149,8 +194,18 @@ fn sync_remote_state_inner(
     }
 }
 
-/// Applies a remote state snapshot when its revision is newer than the latest
-/// mirrored revision seen for the remote.
+/// Revision-gated wrapper around [`sync_remote_state_inner`]. Returns
+/// `true` if the snapshot was applied, `false` if skipped as stale.
+///
+/// Checks the stored `applied_remote_revision` for the remote via
+/// `StateInner::should_skip_remote_applied_revision`. Remote events
+/// can arrive out of order (especially after a reconnect where the
+/// full snapshot races the buffered event stream), so any revision
+/// not strictly greater than what was already applied for this remote
+/// is dropped. Broad-snapshot callers should always use this; focused
+/// per-session applies from the forced-resync path
+/// (`resync_remote_state_snapshot` → 404 retry) bypass the gate and
+/// call `sync_remote_state_inner` directly.
 fn apply_remote_state_if_newer_locked(
     inner: &mut StateInner,
     remote_id: &str,
@@ -288,7 +343,6 @@ fn ensure_remote_proxy_session_record(
     )
 }
 
-/// Handles localize remote session.
 fn localize_remote_session(
     local_session_id: &str,
     local_project_id: Option<String>,

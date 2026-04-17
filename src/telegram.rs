@@ -213,7 +213,6 @@ impl TelegramApiClient {
         self.request_json("getUpdates", Some(Value::Object(body)))
     }
 
-    /// Handles send message.
     fn send_message(
         &self,
         chat_id: i64,
@@ -231,7 +230,6 @@ impl TelegramApiClient {
         )
     }
 
-    /// Handles edit message.
     fn edit_message(
         &self,
         chat_id: i64,
@@ -256,7 +254,6 @@ impl TelegramApiClient {
             .unwrap_or(message_id))
     }
 
-    /// Handles answer callback query.
     fn answer_callback_query(&self, callback_query_id: &str, text: &str) -> Result<()> {
         let _: bool = self.request_json(
             "answerCallbackQuery",
@@ -269,7 +266,6 @@ impl TelegramApiClient {
         Ok(())
     }
 
-    /// Handles request JSON.
     fn request_json<T: DeserializeOwned>(&self, method: &str, body: Option<Value>) -> Result<T> {
         let url = format!("{}/{}", self.api_base_url, method);
         let request = match body {
@@ -349,7 +345,6 @@ impl TermalApiClient {
         )
     }
 
-    /// Handles send session message.
     fn send_session_message(&self, session_id: &str, text: &str) -> Result<StateResponse> {
         self.request_json(
             Method::POST,
@@ -361,7 +356,6 @@ impl TermalApiClient {
         )
     }
 
-    /// Handles request JSON.
     fn request_json<T: DeserializeOwned>(
         &self,
         method: Method,
@@ -865,7 +859,6 @@ fn parse_telegram_command(text: &str) -> Option<TelegramParsedCommand<'_>> {
     Some(TelegramParsedCommand { args, command })
 }
 
-/// Handles required environment var.
 fn required_env_var(key: &str) -> Result<String> {
     std::env::var(key)
         .ok()

@@ -175,14 +175,21 @@ async fn delete_workspace_layout(
 }
 
 impl AppState {
-    /// Handles project digest.
+    /// Returns the project digest payload rendered for the Telegram
+    /// bot and mobile-dashboard surfaces. Thin wrapper around
+    /// [`Self::build_project_digest_summary`] that converts into
+    /// the wire response shape.
     fn project_digest(&self, project_id: &str) -> Result<ProjectDigestResponse, ApiError> {
         Ok(self
             .build_project_digest_summary(project_id)?
             .into_response())
     }
 
-    /// Handles execute project action.
+    /// Runs a digest action (approve / reject / fix-it / continue / stop)
+    /// for a project. Validates the action is still in the current
+    /// `proposed_actions` set before dispatching — rejects with 409
+    /// if the project state has advanced and the requested action is
+    /// no longer valid.
     fn execute_project_action(
         &self,
         project_id: &str,
@@ -450,7 +457,10 @@ impl AppState {
         })
     }
 
-    /// Handles project digest inputs.
+    /// Collects the `ProjectDigestInputs` bundle (project metadata
+    /// + visible sessions + orchestrator instances) under a single
+    /// state-mutex acquisition so the caller can compute the digest
+    /// without re-locking per field.
     fn project_digest_inputs(&self, project_id: &str) -> Result<ProjectDigestInputs, ApiError> {
         let inner = self.inner.lock().expect("state mutex poisoned");
         let project = inner
@@ -638,7 +648,6 @@ async fn rollback_codex_thread(
     Ok(Json(response))
 }
 
-/// Handles send message.
 async fn send_message(
     AxumPath(session_id): AxumPath<String>,
     State(state): State<AppState>,

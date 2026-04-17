@@ -23,16 +23,16 @@ StateInner is the durable model plus counters and indexes protected by one
 mutex.
 */
 
-/// Tracks app state.
-/// Signals a pending persist.
+/// Wake signal sent to the background persist thread.
 ///
-/// The background persist thread owns an `Arc<Mutex<StateInner>>` and
-/// collects the diff itself on each tick — it locks briefly, filters
-/// sessions by `mutation_stamp > watermark`, clones only that subset
-/// plus app metadata, drains `removed_session_ids`, then releases the
-/// lock and writes to SQLite. `PersistRequest` therefore carries only
-/// the wake signal; the full `PersistedState` snapshot that earlier
-/// versions cloned under the state mutex is no longer needed.
+/// The persist thread owns an `Arc<Mutex<StateInner>>` and collects
+/// the diff itself on each tick — it locks briefly, filters sessions
+/// by `mutation_stamp > watermark`, clones only that subset plus app
+/// metadata, drains `removed_session_ids`, then releases the lock and
+/// writes to SQLite via `persist_delta_via_cache` (see `persist.rs`).
+/// `PersistRequest` therefore carries only the wake signal; the full
+/// `PersistedState` snapshot that earlier versions cloned under the
+/// state mutex is no longer needed.
 ///
 /// Kept as a unit-only enum (rather than `()`) so a future reset /
 /// restore flow can add variants without touching every call site.

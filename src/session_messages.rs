@@ -105,7 +105,11 @@ impl AppState {
             .map(|message| message.id().to_owned()))
     }
 
-    /// Handles insert message before.
+    /// Inserts a message immediately before the message with
+    /// `anchor_message_id`, preserving the existing message indices
+    /// up to the anchor. Used by the Codex path that buffers subagent
+    /// results and must flush them ahead of the final assistant
+    /// reply. Errors if the anchor is not found in the session.
     pub(crate) fn insert_message_before(
         &self,
         session_id: &str,

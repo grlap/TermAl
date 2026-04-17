@@ -11,6 +11,64 @@
 // Extracted from runtime.rs into its own `include!()` fragment so the ACP
 // subsystem lives in one place. The crate still compiles as one flat module,
 // so no visibility changes are required.
+//
+// Protocol flow contract
+// ----------------------
+//
+// Every ACP session goes through a strictly ordered handshake before it
+// can dispatch a prompt. `spawn_acp_runtime` launches the agent
+// subprocess and then drives the handshake through these phases in
+// sequence, failing the runtime (and the session) if any phase errors:
+//
+// 1. **initialize** — send `initialize` with our protocol version and
+//    capability declaration; receive the agent's capabilities +
+//    supported auth methods.
+// 2. **authenticate** (optional) — if the agent advertises an auth
+//    method, send `authenticate` and wait for success before
+//    proceeding. Gemini is the typical caller; Claude Code usually
+//    skips this phase.
+// 3. **session/load or session/new** — first try `session/load` if we
+//    have a persisted `external_session_id` (ACP's conversation id)
+//    from an earlier run; on load failure (session not found,
+//    version mismatch, etc.) fall back to `session/new` so the user
+//    gets a fresh conversation rather than a dead end.
+// 4. **session/set_mode** + **session/set_model** — apply the user's
+//    saved approval-mode / model preferences before the first prompt
+//    so the agent doesn't default to something the user didn't pick.
+// 5. **normal operation** — `session/prompt`, `session/request_permission`
+//    (from agent → TermAl), `session/update` notifications, etc.
+//
+// Pending JSON-RPC request ownership
+// ----------------------------------
+//
+// Every outbound request is registered in `PendingAcpJsonRpcRequest`
+// before the write hits the wire; the reader thread matches responses
+// by `id` and removes the entry. If the subprocess exits before a
+// response arrives, the reader thread drains the pending map and
+// cancels each entry with a runtime-exit error. Callers that await
+// those channels therefore always wake up — no response can be lost
+// in the dead-process path.
+//
+// Timeouts
+// --------
+//
+// The initialize + session/load handshake uses a short timeout
+// (`ACP_HANDSHAKE_TIMEOUT`) because a misbehaving agent would
+// otherwise keep the session stuck in spawn-pending forever.
+// `session/prompt` runs without a hard timeout — agents may
+// legitimately take minutes for a single turn — but the writer
+// enforces a stdin-write watchdog so a hung pipe fails fast.
+//
+// Fallback rules for session load
+// -------------------------------
+//
+// `session/load` can fail for several reasons (agent was upgraded
+// and conversation format changed, session id was revoked, agent
+// keeps only recent sessions). Rather than surfacing the error to
+// the user we fall back to `session/new` and clear the stored
+// `external_session_id`, so the next turn starts on a fresh
+// conversation transparently. This mirrors the behaviour in
+// `claude.rs` for the Claude-specific resume path.
 
 /// Spawns ACP runtime.
 fn spawn_acp_runtime(
@@ -1458,7 +1516,6 @@ fn acp_reason_indicates_invalid_session_identifier(reason: &str) -> bool {
     )
 }
 
-/// Handles log unhandled ACP event.
 fn log_unhandled_acp_event(agent: AcpAgent, context: &str, message: &Value) {
     eprintln!(
         "{} acp diagnostic> {context}: {message}",

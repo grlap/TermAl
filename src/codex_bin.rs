@@ -78,7 +78,6 @@ fn find_command_on_path(command: &str) -> Option<PathBuf> {
 
 
 
-/// Handles home dir.
 fn home_dir() -> Option<PathBuf> {
     #[cfg(windows)]
     {
@@ -90,7 +89,6 @@ fn home_dir() -> Option<PathBuf> {
     }
 }
 
-/// Handles display path for user.
 fn display_path_for_user(path: &FsPath) -> String {
     if let Some(home) = home_dir() {
         if let Ok(relative) = path.strip_prefix(&home) {

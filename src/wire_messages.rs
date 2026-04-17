@@ -341,7 +341,14 @@ impl Message {
         }
     }
 
-    /// Handles preview text.
+    /// Returns a short single-line preview of the message for
+    /// sidebar/header rendering. Different variants distill down
+    /// differently: user/agent text falls back to a truncated
+    /// excerpt, command/diff cards surface their command or file
+    /// path, and parallel-agent messages call through to
+    /// `parallel_agents_preview_text`. `None` means the variant
+    /// has no meaningful preview text (placeholders, internal
+    /// sync markers).
     fn preview_text(&self) -> Option<String> {
         match self {
             Self::Text {
@@ -362,7 +369,6 @@ impl Message {
     }
 }
 
-/// Handles parallel agents preview text.
 fn parallel_agents_preview_text(agents: &[ParallelAgentProgress]) -> String {
     let count = agents.len();
     let label = if count == 1 { "agent" } else { "agents" };

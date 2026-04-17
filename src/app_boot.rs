@@ -92,21 +92,19 @@ impl AppState {
         let persist_path_for_persist = Arc::new(persistence_path.clone());
         let persist_path_for_state = Arc::clone(&persist_path_for_persist);
 
-        // Background persist thread: drains `PersistRequest` signals and
-        // writes the delta or full snapshot.
+        // Background persist thread: drains `PersistRequest::Delta`
+        // wake signals and writes the accumulated diff to SQLite.
         //
-        // Normal operation: `Delta` signals. The thread locks
-        // `inner_for_persist` briefly, collects the diff of sessions
-        // whose `mutation_stamp` advanced past its own watermark plus
-        // the drained `removed_session_ids`, releases the lock, writes
-        // with targeted `INSERT OR UPDATE` / `DELETE WHERE id = ?`, and
-        // advances its watermark.
-        //
-        // `Full` signals (startup and reset paths) ship a pre-built
-        // `PersistedState` payload that replaces the entire sessions
-        // table — necessary for initial disk layout and for the
-        // JSON→SQLite import path where the thread cannot diff against
-        // a previous state.
+        // On each signal the thread locks `inner_for_persist` briefly,
+        // calls `StateInner::collect_persist_delta(watermark)` to build
+        // the diff of sessions whose `mutation_stamp` advanced past
+        // its own watermark plus the drained `removed_session_ids`,
+        // releases the lock, and writes the delta with targeted
+        // `INSERT OR UPDATE` per changed session and
+        // `DELETE WHERE id = ?` per removed id. No `DELETE FROM sessions`
+        // sweep is issued — unchanged rows stay untouched. See
+        // `state.rs::PersistDelta` + `StateInner::collect_persist_delta`
+        // for the delta contract.
         //
         // The thread owns a `SqlitePersistConnectionCache` so the SQLite
         // connection and schema-validation cost are amortized across

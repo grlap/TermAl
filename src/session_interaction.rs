@@ -371,7 +371,6 @@ fn latest_pending_interaction_preview(record: &SessionRecord) -> Option<String> 
     None
 }
 
-/// Handles approval preview text.
 fn approval_preview_text(agent_name: &str, decision: ApprovalDecision) -> String {
     match decision {
         ApprovalDecision::Pending => "Approval pending.".to_owned(),
@@ -391,7 +390,6 @@ fn approval_preview_text(agent_name: &str, decision: ApprovalDecision) -> String
     }
 }
 
-/// Handles user input request preview text.
 fn user_input_request_preview_text(agent_name: &str, state: InteractionRequestState) -> String {
     match state {
         InteractionRequestState::Pending => "Input requested.".to_owned(),

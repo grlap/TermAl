@@ -96,7 +96,8 @@ enum ProjectActionId {
 }
 
 impl ProjectActionId {
-    /// Handles parse.
+    /// Parses a digest-action id from the URL path. Returns `None`
+    /// for unknown ids so the route can 404 instead of panicking.
     fn parse(value: &str) -> Result<Self, ApiError> {
         match value.trim() {
             "approve" => Ok(Self::Approve),
@@ -127,7 +128,6 @@ impl ProjectActionId {
         }
     }
 
-    /// Handles label.
     fn label(self) -> &'static str {
         match self {
             Self::Approve => "Approve",
@@ -141,7 +141,9 @@ impl ProjectActionId {
         }
     }
 
-    /// Handles prompt.
+    /// Returns the prompt text that should be sent to the agent
+    /// when the user triggers this digest action (or `None` for
+    /// actions like Reject that don't send a prompt).
     fn prompt(self) -> Option<&'static str> {
         match self {
             Self::FixIt => Some(
@@ -160,7 +162,6 @@ impl ProjectActionId {
         }
     }
 
-    /// Handles requires confirmation.
     fn requires_confirmation(self) -> bool {
         matches!(self, Self::Stop)
     }

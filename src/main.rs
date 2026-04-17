@@ -353,7 +353,11 @@ enum Mode {
 }
 
 impl Mode {
-    /// Handles parse.
+    /// Parses CLI arguments into an entry-point `Mode`. First arg
+    /// selects between the HTTP server (`server`, default), the
+    /// Telegram bot (`telegram` / `telegram-bot`), or a REPL
+    /// session (`repl` / `cli` + agent name, or a bare agent name
+    /// like `claude` / `codex`).
     fn parse(args: Vec<String>) -> Result<Self> {
         match args.first().map(String::as_str) {
             None | Some("server") => Ok(Self::Server),

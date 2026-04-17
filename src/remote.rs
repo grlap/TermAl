@@ -51,7 +51,6 @@ impl BlockingHttpClientHandle {
         }
     }
 
-    /// Handles client.
     fn client(&self) -> &BlockingHttpClient {
         self.client
             .as_ref()
@@ -116,7 +115,6 @@ impl RemoteRegistry {
         changed_ids
     }
 
-    /// Handles connection.
     fn connection(&self, remote: &RemoteConfig) -> Arc<RemoteConnection> {
         let mut connections = self
             .connections
@@ -130,7 +128,6 @@ impl RemoteRegistry {
         connection
     }
 
-    /// Handles request JSON.
     fn request_json<T: DeserializeOwned>(
         &self,
         remote: &RemoteConfig,
@@ -142,7 +139,6 @@ impl RemoteRegistry {
         self.request_json_with_timeout(remote, method, path, query, body, REMOTE_REQUEST_TIMEOUT)
     }
 
-    /// Handles request JSON with an explicit timeout.
     fn request_json_with_timeout<T: DeserializeOwned>(
         &self,
         remote: &RemoteConfig,
@@ -156,7 +152,6 @@ impl RemoteRegistry {
         decode_remote_json(response)
     }
 
-    /// Handles request without a response read timeout.
     fn request_without_timeout(
         &self,
         remote: &RemoteConfig,
@@ -168,7 +163,6 @@ impl RemoteRegistry {
         self.request_with_optional_timeout(remote, method, path, query, body, None)
     }
 
-    /// Handles request with an explicit timeout.
     fn request_with_timeout(
         &self,
         remote: &RemoteConfig,
@@ -181,7 +175,6 @@ impl RemoteRegistry {
         self.request_with_optional_timeout(remote, method, path, query, body, Some(timeout))
     }
 
-    /// Handles request with an optional response read timeout.
     fn request_with_optional_timeout(
         &self,
         remote: &RemoteConfig,
@@ -254,7 +247,6 @@ impl RemoteConnection {
         }
     }
 
-    /// Handles config.
     fn config(&self) -> RemoteConfig {
         self.config
             .lock()
@@ -276,7 +268,6 @@ impl RemoteConnection {
         }
     }
 
-    /// Handles disconnect.
     fn disconnect(&self) {
         let mut process = self.process.lock().expect("remote process mutex poisoned");
         if let Some(mut handle) = process.take() {
@@ -295,7 +286,6 @@ impl RemoteConnection {
         self.disconnect();
     }
 
-    /// Handles wait for bridge retry or shutdown.
     fn wait_for_bridge_retry_or_shutdown(&self, duration: Duration) -> bool {
         let deadline = Instant::now() + duration;
         loop {
@@ -313,7 +303,6 @@ impl RemoteConnection {
         }
     }
 
-    /// Handles base URL.
     fn base_url(&self) -> String {
         format!("http://127.0.0.1:{}", self.forwarded_port)
     }

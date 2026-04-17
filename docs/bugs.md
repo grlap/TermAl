@@ -7,6 +7,10 @@ and cleanup notes do not belong here.
 
 Also fixed in the current tree, not re-listed below:
 
+- **Stale `PersistRequest::Full` documentation** — `src/app_boot.rs` persist-thread inline comment and `src/persist.rs::persist_delta_via_cache` doc-comment no longer reference the removed `Full` variant or the deleted `persist_state_via_cache` helper. Both now describe the current delta-only signal shape directly and cross-reference `StateInner::collect_persist_delta` as the authoritative description of what gets written. `src/state.rs::PersistRequest` lost its stray "Tracks app state." stub preamble while keeping the substantive doc.
+- **New GET `/api/sessions/{id}` endpoint and `DeltaEvent::SessionCreated`/`MessageCreated` variants undocumented in architecture.md** — the REST endpoint table at `docs/architecture.md` lists `GET /api/sessions/{id} -> SessionResponse { revision, session }` and the documented `DeltaEvent` list covers `SessionCreated` and `MessageCreated` alongside the streaming deltas.
+- **High-risk backend subsystems lack invariant-level documentation** — added contract docs to the previously under-documented hot spots: `sync_remote_state_inner` / `apply_remote_state_if_newer_locked` (snapshot vs focused sync, revision gate, id localization, rollback scope, mutation stamps, callers), the `orchestrators.rs` file-level block (template vs instance storage, full lifecycle, file boundary with `orchestrator_lifecycle.rs` / `orchestrator_transitions.rs`), `acp.rs` (strict initialize → authenticate → session/load-or-new → set_mode/model → prompt handshake, pending JSON-RPC request ownership, timeouts, session-load fallback), and `build_instruction_search_graph` (seed discovery, path canonicalization, reference sanitization, transitive-edge BFS with cycle guard, skipped directories, document classification). Dozens of low-value `/// Handles ...` stubs on trait-impl forwarders and enum accessors were removed or replaced with substantive docs; the remaining `/// Handles ...` in `turn_lifecycle.rs` is a real description rather than a stub.
+- **Architecture.md project structure + state-mutation pattern stale after refactor** — the `## Backend` state dump now lists SQLite storage + the `file_events` broadcaster + the `persist_tx` channel; the state-mutation pattern block documents the background `termal-persist` thread draining `PersistRequest::Delta` signals, `StateInner::collect_persist_delta` as the under-lock diff builder, the mutation-stamp invariant routed through `session_mut*` / `push_session` / `remove_session_at` / `retain_sessions`, and `commit_delta_locked` as the delta-only commit; the project structure listing now reflects the full post-refactor file layout (state/boot, sessions/turns, agents, HTTP API, wire DTOs, remote proxies, orchestrators).
 - **Stale height estimate on tab switch causing blank area** — `VirtualizedConversationMessageList` now enters a post-activation measuring phase when it transitions inactive → active (or mounts directly in the active state with messages). The wrapper is hidden via `visibility: hidden` while currently-visible slots report their first `ResizeObserver` measurements, then the completion check writes a final scrollTop and reveals. A 150 ms timeout fallback guarantees the wrapper is never stuck hidden. Scroll-restore on activation now lands in the correct place even when messages arrived while the tab was inactive.
 - **Steady-state 1-2 px shake in active session panels** — `handleHeightChange` now rounds `getBoundingClientRect().height` to integer pixels before storage, and all three scrollTop-to-bottom writes (re-pin `useLayoutEffect`, `handleHeightChange` shouldKeepBottom branch, `getAdjustedVirtualizedScrollTopForHeightChange` branch) are wrapped in `Math.abs(current - target) >= 1` no-op guards. Subpixel drift in successive `getBoundingClientRect` reads no longer crosses the 1-pixel commit threshold, and no-op scrollTop writes no longer trigger scroll-event → reflow → ResizeObserver cascades.
 - **Mermaid diagram rendering hardcoded a dark theme** — `MermaidDiagram` now receives the active `appearance`, builds the Mermaid config from that value, and serializes initialize/render/reset through `mermaidRenderQueue` so light diagrams can render without leaving Mermaid's global singleton in a stale theme.
@@ -184,24 +188,6 @@ The message is not hidden; it is genuinely gone from SQLite. No amount of fronte
 - Accept the cost of the reopen on error; the happy path still reuses one connection per process lifetime.
 - Add a regression test: seed an error that the cache should recover from (e.g., unlink the backing file after a successful write) and assert the next persist tick creates a new connection and writes successfully.
 
-## Stale persist-thread documentation after `PersistRequest::Full` removal
-
-**Severity:** Medium - three doc-comment blocks still describe the removed `PersistRequest::Full` variant and the deleted `persist_state_via_cache` helper, so future readers will look for behavior that no longer exists in the tree.
-
-Commit `6615403` removed the `Full` variant in favor of a `Delta`-only signal channel and deleted `persist_state_via_cache`, but three comment blocks still reference the old shape:
-
-- `src/state.rs:583-601` — the persist-thread inline comment describes "`Full` signals (startup and reset paths)" and JSON→SQLite import semantics that no longer exist.
-- `src/state.rs:30-43` — the `PersistRequest` doc-comment still names the removed variant.
-- `src/api.rs:389-397` — `persist_delta_via_cache`'s doc-comment starts with "Unlike `persist_state_via_cache` this does NOT issue `DELETE FROM sessions`", referring to a helper that was deleted in the same commit.
-
-**Current behavior:**
-- Readers encountering these comments will search for `Full` / `persist_state_via_cache` in the source and find neither.
-- The comments imply a two-variant API surface (`Full` vs `Delta`) that no longer exists.
-
-**Proposal:**
-- Rewrite the three comment blocks to describe the current `Delta`-only shape directly, without comparative phrasing to a deleted variant.
-- Consider adding a short "see also" line pointing to `collect_persist_delta` as the authoritative description of the delta contract.
-
 ## `session_mut_by_index` leaks a mutation stamp on out-of-bounds miss
 
 **Severity:** Medium - `next_mutation_stamp()` runs *before* `self.sessions.get_mut(index)` can fail. An out-of-bounds call silently advances `last_mutation_stamp` with no mutation to show for it. Divergent from `session_mut` (by id), which short-circuits correctly on the `find_session_index` miss.
@@ -229,20 +215,6 @@ Callers that guard with `find_session_index` are safe, but the helper's own inva
 - Or explicitly document the leak as intentional (it isn't) and pin it with a test.
 - Extend `state_inner_session_mut_helpers_stamp_the_record` with a miss case.
 
-## New GET endpoint and delta variant undocumented in architecture.md
-
-**Severity:** Medium - `docs/architecture.md` is the canonical REST/delta reference. The new `GET /api/sessions/{id}` route and the new `DeltaEvent::SessionCreated` variant are not listed there.
-
-- `GET /api/sessions/{id}` was added at `src/main.rs:215`, handled by `get_session` in `src/api.rs:598`. It returns `SessionResponse { revision, session }`. Not in the REST endpoint table at `docs/architecture.md:167`.
-- `DeltaEvent::SessionCreated` was added in `src/api.rs:8086-8091` and forwarded by the remote-proxy path at `src/remote.rs:2133-2173`. Not in the documented `DeltaEvent` list at `docs/architecture.md:213-217`. `DeltaEvent::MessageCreated` is similarly missing (pre-existing).
-
-**Current behavior:**
-- External readers of `docs/architecture.md` will not know these exist.
-- Future refactors that try to enumerate every endpoint / delta variant from the doc will miss them.
-
-**Proposal:**
-- Add a `| GET | /api/sessions/{id} | Fetch one session (full transcript hydration) |` row and describe `SessionResponse { revision, session }` in the response section.
-- Add `DeltaEvent::SessionCreated { revision, session_id, session }` and `DeltaEvent::MessageCreated` to the documented variant list.
 
 ## Unix terminal shell spawn dropped the login-shell flag
 
@@ -661,6 +633,22 @@ The new hydration effect's error path calls `reportRequestError(error)` on any `
   contains the expected ids while kept sessions' stamps are unchanged.
   The raw `record_removed_session` accumulator is tested; the wrappers
   that production deletion paths actually call are not.
+- [ ] P2: Document remote-sync revision, rollback, and tombstone invariants:
+  add contract comments around `sync_remote_state_inner`,
+  `apply_remote_state_if_newer_locked`, and the remote-orchestrator sync
+  handoff so future delta-persistence fixes preserve rollback safety.
+- [ ] P2: Document orchestrator lifecycle invariants:
+  add a lifecycle block to `orchestrators.rs` covering template normalization,
+  instance creation, backing sessions, pause/resume/stop, persistence, and
+  where transition scheduling is delegated.
+- [ ] P2: Document ACP runtime protocol flow:
+  add comments for initialize/auth/session load-or-new/config refresh/prompt
+  ordering, pending JSON-RPC request ownership, timeout behavior, and
+  Gemini/Cursor fallback differences.
+- [ ] P2: Document instruction graph traversal semantics:
+  describe seed discovery, path normalization, reference sanitization,
+  transitive edge policy, skipped directories, and cycle behavior near
+  `build_instruction_search_graph`.
 - [ ] P2: Add a frontend test proving the self-chained `/api/state`
   safety-net poll does not stack overlapping requests:
   `vi.useFakeTimers()` + a mocked `fetchState` that takes longer than

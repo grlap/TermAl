@@ -942,7 +942,6 @@ impl TurnRecorder for SessionRecorder {
         recorder_push_subagent_result(self, title, summary, conversation_id, turn_id)
     }
 
-    /// Handles text delta.
     fn text_delta(&mut self, delta: &str) -> Result<()> {
         recorder_text_delta(self, delta)
     }
@@ -978,12 +977,10 @@ impl TurnRecorder for SessionRecorder {
         recorder_reset_turn_state(self)
     }
 
-    /// Handles command started.
     fn command_started(&mut self, key: &str, command: &str) -> Result<()> {
         recorder_command_started(self, key, command)
     }
 
-    /// Handles command completed.
     fn command_completed(
         &mut self,
         key: &str,
@@ -1003,7 +1000,6 @@ impl TurnRecorder for SessionRecorder {
         recorder_upsert_parallel_agents(self, key, agents)
     }
 
-    /// Handles error.
     fn error(&mut self, detail: &str) -> Result<()> {
         recorder_error(self, detail)
     }
@@ -1038,7 +1034,6 @@ impl TurnRecorder for BorrowedSessionRecorder<'_> {
         recorder_push_subagent_result(self, title, summary, conversation_id, turn_id)
     }
 
-    /// Handles text delta.
     fn text_delta(&mut self, delta: &str) -> Result<()> {
         recorder_text_delta(self, delta)
     }
@@ -1074,12 +1069,10 @@ impl TurnRecorder for BorrowedSessionRecorder<'_> {
         recorder_reset_turn_state(self)
     }
 
-    /// Handles command started.
     fn command_started(&mut self, key: &str, command: &str) -> Result<()> {
         recorder_command_started(self, key, command)
     }
 
-    /// Handles command completed.
     fn command_completed(
         &mut self,
         key: &str,
@@ -1099,7 +1092,6 @@ impl TurnRecorder for BorrowedSessionRecorder<'_> {
         recorder_upsert_parallel_agents(self, key, agents)
     }
 
-    /// Handles error.
     fn error(&mut self, detail: &str) -> Result<()> {
         recorder_error(self, detail)
     }
@@ -1174,7 +1166,6 @@ impl TurnRecorder for ReplPrinter {
         Ok(())
     }
 
-    /// Handles text delta.
     fn text_delta(&mut self, delta: &str) -> Result<()> {
         if delta.is_empty() {
             return Ok(());
@@ -1231,13 +1222,11 @@ impl TurnRecorder for ReplPrinter {
         Ok(())
     }
 
-    /// Handles command started.
     fn command_started(&mut self, _key: &str, command: &str) -> Result<()> {
         println!("cmd> {command}");
         Ok(())
     }
 
-    /// Handles command completed.
     fn command_completed(
         &mut self,
         _key: &str,
@@ -1252,7 +1241,6 @@ impl TurnRecorder for ReplPrinter {
         Ok(())
     }
 
-    /// Handles error.
     fn error(&mut self, detail: &str) -> Result<()> {
         println!("error> {detail}");
         Ok(())

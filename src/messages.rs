@@ -137,7 +137,6 @@ fn build_message_positions(messages: &[Message]) -> HashMap<String, usize> {
         .collect()
 }
 
-/// Handles message index on record.
 fn message_index_on_record(record: &mut SessionRecord, message_id: &str) -> Option<usize> {
     if let Some(index) = record.message_positions.get(message_id).copied() {
         if record
@@ -154,7 +153,6 @@ fn message_index_on_record(record: &mut SessionRecord, message_id: &str) -> Opti
     record.message_positions.get(message_id).copied()
 }
 
-/// Handles insert message on record.
 fn insert_message_on_record(record: &mut SessionRecord, index: usize, message: Message) -> usize {
     let index = index.min(record.session.messages.len());
     record.session.messages.insert(index, message);

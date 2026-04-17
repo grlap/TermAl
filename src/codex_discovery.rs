@@ -49,7 +49,6 @@ fn collect_codex_discovery_scopes(default_workdir: &str, projects: &[Project]) -
     scopes
 }
 
-/// Handles discover Codex threads.
 fn discover_codex_threads(
     default_workdir: &str,
     discovery_scopes: &[PathBuf],
@@ -71,7 +70,6 @@ fn discover_codex_threads(
     )
 }
 
-/// Handles discover Codex threads from sources.
 fn discover_codex_threads_from_sources(
     source_codex_home: Option<&FsPath>,
     termal_codex_root: &FsPath,
@@ -81,7 +79,6 @@ fn discover_codex_threads_from_sources(
     discover_codex_threads_from_homes(&codex_homes, discovery_scopes)
 }
 
-/// Handles discover Codex home candidates.
 fn discover_codex_home_candidates(
     source_codex_home: Option<&FsPath>,
     termal_codex_root: &FsPath,
@@ -146,7 +143,6 @@ fn resolve_termal_codex_discovery_root(default_workdir: &str) -> PathBuf {
         .join("codex-home")
 }
 
-/// Handles discover Codex threads from homes.
 fn discover_codex_threads_from_homes(
     codex_homes: &[PathBuf],
     discovery_scopes: &[PathBuf],
@@ -165,7 +161,6 @@ fn discover_codex_threads_from_homes(
     Ok(threads)
 }
 
-/// Handles discover Codex threads from home.
 fn discover_codex_threads_from_home(
     codex_home: &FsPath,
     discovery_scopes: &[PathBuf],

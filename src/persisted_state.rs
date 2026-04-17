@@ -118,7 +118,6 @@ impl PersistedState {
     }
 }
 
-/// Handles session flag is false.
 fn session_flag_is_false(value: &bool) -> bool {
     !*value
 }

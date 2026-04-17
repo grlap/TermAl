@@ -48,7 +48,6 @@ struct ClaudeRuntimeHandle {
 }
 
 impl ClaudeRuntimeHandle {
-    /// Handles kill.
     fn kill(&self) -> Result<()> {
         kill_child_process(&self.process, "Claude")
     }
@@ -64,7 +63,6 @@ struct CodexRuntimeHandle {
 }
 
 impl CodexRuntimeHandle {
-    /// Handles kill.
     fn kill(&self) -> Result<()> {
         kill_child_process(&self.process, "Codex")
     }
@@ -116,7 +114,10 @@ struct SharedCodexSessionHandle {
 }
 
 impl SharedCodexSessionHandle {
-    /// Handles detach.
+    /// Releases this session's slot in the shared Codex runtime
+    /// (`runtime.sessions`) and its `thread_id` → session mapping
+    /// (`runtime.thread_sessions`) if one is bound. The underlying
+    /// runtime subprocess keeps running for other sessions.
     fn detach(&self) {
         let removed_thread_id = {
             let mut sessions = self
@@ -138,7 +139,12 @@ impl SharedCodexSessionHandle {
         }
     }
 
-    /// Handles interrupt turn.
+    /// Sends an `interrupt` request to the shared Codex runtime for
+    /// this session's currently active `(thread_id, turn_id)` pair,
+    /// waits up to 10 s for the runtime's acknowledgement, and
+    /// returns on success. No-ops when the session has no active
+    /// thread or turn (a rare race where the turn finished just
+    /// before the user hit stop).
     fn interrupt_turn(&self) -> Result<()> {
         let (thread_id, turn_id) = {
             let sessions = self
@@ -180,7 +186,10 @@ impl SharedCodexSessionHandle {
         }
     }
 
-    /// Handles interrupt and detach.
+    /// Convenience: interrupts the in-flight turn (if any), then
+    /// detaches the session from the shared runtime regardless of
+    /// whether the interrupt succeeded. Used on session kill paths
+    /// where both steps are wanted atomically.
     fn interrupt_and_detach(&self) -> Result<()> {
         let result = self.interrupt_turn();
         self.detach();
@@ -196,7 +205,6 @@ enum AcpAgent {
 }
 
 impl AcpAgent {
-    /// Handles agent.
     fn agent(self) -> Agent {
         match self {
             Self::Cursor => Agent::Cursor,
@@ -204,7 +212,11 @@ impl AcpAgent {
         }
     }
 
-    /// Handles command.
+    /// Builds the `std::process::Command` used to spawn this ACP
+    /// agent. Cursor is invoked as `cursor-agent acp`; Gemini is
+    /// invoked as `gemini --acp [--approval-mode ...]`. The binary
+    /// must be on `PATH` — absent binary returns a friendly error
+    /// rather than a cryptic "No such file" from the OS.
     fn command(self, launch_options: AcpLaunchOptions) -> Result<Command> {
         match self {
             Self::Cursor => {
@@ -227,7 +239,6 @@ impl AcpAgent {
         }
     }
 
-    /// Handles label.
     fn label(self) -> &'static str {
         self.agent().name()
     }
@@ -243,7 +254,6 @@ struct AcpRuntimeHandle {
 }
 
 impl AcpRuntimeHandle {
-    /// Handles kill.
     fn kill(&self) -> Result<()> {
         kill_child_process(&self.process, self.agent.label())
     }
@@ -323,7 +333,11 @@ enum RuntimeToken {
 }
 
 impl SessionRuntime {
-    /// Handles runtime token.
+    /// Returns a `RuntimeToken` identifying the current runtime, or
+    /// `None` when `SessionRuntime::None`. Used by the
+    /// `_if_runtime_matches` guard wrappers in `turn_lifecycle.rs`
+    /// to drop stray events from torn-down runtimes — see that file
+    /// for the staleness pattern.
     fn runtime_token(&self) -> Option<RuntimeToken> {
         match self {
             Self::Claude(handle) => Some(RuntimeToken::Claude(handle.runtime_id.clone())),
@@ -414,7 +428,6 @@ fn kill_child_process(process: &Arc<SharedChild>, label: &str) -> Result<()> {
     }
 }
 
-/// Handles shared child has exited.
 fn shared_child_has_exited(process: &Arc<SharedChild>, label: &str) -> Result<bool> {
     match process.try_wait() {
         Ok(Some(_)) => Ok(true),

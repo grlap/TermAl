@@ -435,7 +435,6 @@ fn dedupe_project_name(existing: &[Project], base_name: &str) -> String {
     }
 }
 
-/// Handles path contains.
 fn path_contains(root_path: &str, candidate_path: &FsPath) -> bool {
     let root = normalize_path_best_effort(FsPath::new(root_path));
     let candidate = normalize_path_best_effort(candidate_path);

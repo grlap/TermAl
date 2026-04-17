@@ -27,7 +27,6 @@
 // `empty_state_events_response` is the minimal skeleton.
 
 
-/// Handles stable text hash.
 fn stable_text_hash(value: &str) -> String {
     let mut hash = 0xcbf29ce484222325_u64;
     for byte in value.as_bytes() {

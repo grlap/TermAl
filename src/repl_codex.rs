@@ -84,7 +84,6 @@ impl TurnRecorder for DynTurnRecorderRef<'_> {
         self.inner.push_diff(file_path, summary, diff, change_type)
     }
 
-    /// Handles text delta.
     fn text_delta(&mut self, delta: &str) -> Result<()> {
         self.inner.text_delta(delta)
     }
@@ -104,12 +103,10 @@ impl TurnRecorder for DynTurnRecorderRef<'_> {
         self.inner.reset_turn_state()
     }
 
-    /// Handles command started.
     fn command_started(&mut self, key: &str, command: &str) -> Result<()> {
         self.inner.command_started(key, command)
     }
 
-    /// Handles command completed.
     fn command_completed(
         &mut self,
         key: &str,
@@ -129,7 +126,6 @@ impl TurnRecorder for DynTurnRecorderRef<'_> {
         self.inner.upsert_parallel_agents(key, agents)
     }
 
-    /// Handles error.
     fn error(&mut self, detail: &str) -> Result<()> {
         self.inner.error(detail)
     }

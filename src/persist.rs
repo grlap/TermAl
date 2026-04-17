@@ -391,11 +391,12 @@ impl SqlitePersistConnectionCache {
 /// row `INSERT OR UPDATE`s and `DELETE`s — via the shared connection
 /// cache.
 ///
-/// Unlike [`persist_state_via_cache`] this does NOT issue
-/// `DELETE FROM sessions`; it writes only the rows in
-/// `delta.changed_sessions` and removes only `delta.removed_session_ids`.
-/// Unchanged session rows are left untouched so a mutation on one
+/// This is the sole production write path. It writes only the rows in
+/// `delta.changed_sessions` and removes only `delta.removed_session_ids`;
+/// unchanged session rows are left untouched so a mutation on one
 /// session no longer rewrites every other session row every commit.
+/// See `state.rs::PersistDelta` and `StateInner::collect_persist_delta`
+/// for the authoritative description of how the delta is assembled.
 #[cfg(not(test))]
 fn persist_delta_via_cache(
     cache: &mut SqlitePersistConnectionCache,

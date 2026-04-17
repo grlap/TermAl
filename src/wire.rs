@@ -104,7 +104,8 @@ struct ApiError {
 }
 
 impl ApiError {
-    /// Handles bad request.
+    // Status-specific constructors — mirror the HTTP status codes they
+    // wrap. Nothing interesting to document; the method name says it.
     fn bad_request(message: impl Into<String>) -> Self {
         Self {
             message: message.into(),
@@ -113,7 +114,6 @@ impl ApiError {
         }
     }
 
-    /// Handles conflict.
     fn conflict(message: impl Into<String>) -> Self {
         Self {
             message: message.into(),
@@ -122,7 +122,6 @@ impl ApiError {
         }
     }
 
-    /// Handles not found.
     fn not_found(message: impl Into<String>) -> Self {
         Self {
             message: message.into(),
@@ -131,7 +130,6 @@ impl ApiError {
         }
     }
 
-    /// Handles internal.
     fn internal(message: impl Into<String>) -> Self {
         Self {
             message: message.into(),
@@ -140,7 +138,6 @@ impl ApiError {
         }
     }
 
-    /// Handles bad gateway.
     fn bad_gateway(message: impl Into<String>) -> Self {
         Self {
             message: message.into(),
@@ -186,7 +183,10 @@ enum Agent {
 }
 
 impl Agent {
-    /// Handles parse.
+    /// Parses the CLI-arg iterator into an `Agent`. Accepts an
+    /// `--agent <value>` pair or a standalone agent name; unknown
+    /// arguments fail fast. Defaults to `Agent::Codex` if no arg
+    /// is given.
     fn parse(args: impl Iterator<Item = String>) -> Result<Self> {
         let mut args = args;
         while let Some(arg) = args.next() {
@@ -219,7 +219,6 @@ impl Agent {
         }
     }
 
-    /// Handles name.
     fn name(self) -> &'static str {
         match self {
             Self::Codex => "Codex",
@@ -229,7 +228,6 @@ impl Agent {
         }
     }
 
-    /// Handles avatar.
     fn avatar(self) -> &'static str {
         match self {
             Self::Codex => "CX",
@@ -440,7 +438,10 @@ impl ClaudeEffortLevel {
 }
 
 impl ClaudeApprovalMode {
-    /// Handles initial cli permission mode.
+    /// Returns the `--permission-mode` flag value to pass to the
+    /// Claude CLI at spawn time, or `None` to let the CLI choose its
+    /// default. `Plan` is the only mode that must be requested
+    /// explicitly at launch.
     fn initial_cli_permission_mode(self) -> Option<&'static str> {
         match self {
             Self::Plan => Some("plan"),
@@ -448,7 +449,11 @@ impl ClaudeApprovalMode {
         }
     }
 
-    /// Handles session cli permission mode.
+    /// Returns the `permission_mode` value sent over the Claude
+    /// session's NDJSON control channel when the user flips modes
+    /// at runtime (vs. at launch). Differs from
+    /// `initial_cli_permission_mode` because the runtime channel
+    /// uses the string "default" in place of `None`.
     fn session_cli_permission_mode(self) -> &'static str {
         match self {
             Self::Plan => "plan",
@@ -528,7 +533,6 @@ enum CommandStatus {
 }
 
 impl CommandStatus {
-    /// Handles label.
     fn label(self) -> &'static str {
         match self {
             Self::Running => "running",

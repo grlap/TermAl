@@ -386,13 +386,11 @@ fn default_gemini_approval_mode() -> GeminiApprovalMode {
     GeminiApprovalMode::Default
 }
 
-/// Handles log unhandled Codex event.
 fn log_unhandled_codex_event(context: &str, message: &Value) {
     eprintln!("codex diagnostic> {context}: {message}");
 }
 
 
-/// Handles flatten structured patch.
 fn flatten_structured_patch(patches: &[Value]) -> String {
     patches
         .iter()
@@ -404,7 +402,6 @@ fn flatten_structured_patch(patches: &[Value]) -> String {
         .join("\n")
 }
 
-/// Handles fallback file diff.
 fn fallback_file_diff(original: &str, updated: &str) -> String {
     let mut lines = Vec::new();
     for line in original.lines() {
@@ -416,7 +413,6 @@ fn fallback_file_diff(original: &str, updated: &str) -> String {
     lines.join("\n")
 }
 
-/// Handles short file name.
 fn short_file_name(file_path: &str) -> &str {
     file_path
         .rsplit('/')
@@ -551,7 +547,6 @@ fn summarize_retry_status(value: &Value) -> Option<String> {
     ))
 }
 
-/// Handles trimmed string field.
 fn trimmed_string_field<'a>(value: &'a Value, key: &str) -> Option<&'a str> {
     value
         .get(key)
@@ -594,7 +589,6 @@ fn make_preview(text: &str) -> String {
     preview
 }
 
-/// Handles image attachment summary.
 fn image_attachment_summary(count: usize) -> String {
     match count {
         0 => "Waiting for activity.".to_owned(),
@@ -603,7 +597,6 @@ fn image_attachment_summary(count: usize) -> String {
     }
 }
 
-/// Handles prompt preview text.
 fn prompt_preview_text(text: &str, attachments: &[MessageImageAttachment]) -> String {
     let trimmed = text.trim();
     if !trimmed.is_empty() {
@@ -613,7 +606,6 @@ fn prompt_preview_text(text: &str, attachments: &[MessageImageAttachment]) -> St
     make_preview(&image_attachment_summary(attachments.len()))
 }
 
-/// Handles shell language.
 fn shell_language() -> &'static str {
     "bash"
 }
@@ -672,7 +664,6 @@ fn infer_command_output_language(command: &str) -> Option<&'static str> {
         .find_map(|candidate| infer_language_from_path(FsPath::new(candidate)))
 }
 
-/// Handles command token separator.
 fn command_token_separator(character: char) -> bool {
     character.is_whitespace() || matches!(character, '"' | '\'' | '`' | '|' | '&' | ';')
 }

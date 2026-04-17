@@ -936,7 +936,6 @@ fn describe_claude_permission_detail(
     }
 }
 
-/// Handles split thinking lines.
 fn split_thinking_lines(thinking: &str) -> Vec<String> {
     let lines = thinking
         .lines()

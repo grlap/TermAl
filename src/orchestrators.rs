@@ -1,15 +1,58 @@
 /*
-Orchestrator templates and runtime instances
-orchestrators.json
-  -> template CRUD
-  -> normalized graph draft
-  -> launch instance
-       -> create backing sessions
-       -> watch completion signals
-       -> evaluate transitions
-       -> dispatch downstream prompts
-Template definitions are file-backed. Live instances are stored in StateInner so
-they advance together with ordinary session lifecycle updates.
+Orchestrator templates and runtime instances.
+
+Two persistence surfaces + one lifecycle state machine:
+
+- Templates live in `~/.termal/orchestrators.json` (an
+  `OrchestratorTemplateStore`) and describe a graph of session
+  templates connected by transitions. Creation, update, and delete
+  go through the `list/get/create/update/delete_orchestrator_template`
+  CRUD impl on `AppState`; drafts normalize through
+  `normalize_orchestrator_template_draft` before persist so bad
+  position data or orphan transitions are rejected at the API
+  boundary.
+- Instances live inside `StateInner.orchestrator_instances` and
+  travel with the ordinary session state (same commit_locked + SSE
+  broadcast + SQLite delta persist). An instance is created from a
+  template at a specific revision; once launched, the template can
+  evolve without affecting running instances.
+
+Lifecycle per instance:
+
+  create_orchestrator_instance
+    -> create backing sessions from the template's starting node
+    -> mark instance `running`
+    -> publish_orchestrators_updated (SSE fan-out)
+    [session completion arrives]
+    -> accept_next_pending_orchestrator_transition
+    -> orchestrator_transitions::evaluate_*_transition
+       -> dispatch downstream prompts on a new / existing session
+    [user pause]
+    -> pause_orchestrator_instance freezes auto-dispatch but keeps
+       children alive
+    [user resume]
+    -> resume_orchestrator_instance re-fires pending transitions
+    [user stop]
+    -> begin_orchestrator_stop + session kills
+    -> note_stopped_orchestrator_session tracks children
+    -> finish_orchestrator_stop flips the instance to `stopped`
+
+Boundary between files:
+
+- `orchestrators.rs` — template CRUD, instance creation, and the
+  normalizers that validate drafts.
+- `orchestrator_lifecycle.rs` — the running-instance state machine
+  (pause/resume/stop + pending-transition drain + stopping-session
+  snapshot helpers).
+- `orchestrator_transitions.rs` — the per-transition engine that
+  decides what a transition does (prompt injection, model switch,
+  branching) based on the template's declaration.
+
+Persistence semantics: the template store is rewritten on every
+CRUD mutation via `persist_orchestrator_template_store`. Instance
+mutations flow through `session_mut_by_index`-adjacent calls on
+`StateInner` so they land in the SQLite delta persist alongside the
+affected sessions.
 */
 
 /// Resolves orchestrator templates path.
@@ -91,7 +134,10 @@ impl Default for OrchestratorTemplateStore {
 }
 
 impl OrchestratorTemplateStore {
-    /// Handles normalize.
+    /// Ensures `next_template_number` is greater than every existing
+    /// template's number, even if the on-disk file was edited out of
+    /// band. Prevents a name collision if a user hand-edits
+    /// `orchestrators.json` to insert a template with a high number.
     fn normalize(&mut self) {
         let max_number = self
             .templates

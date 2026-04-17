@@ -93,7 +93,6 @@ impl GitDiffSection {
         }
     }
 
-    /// Handles summary label.
     fn summary_label(self) -> &'static str {
         match self {
             Self::Staged => "Staged",

@@ -22,7 +22,7 @@ Optional sidecar:
 
 **Frontend:** React 18 + TypeScript, served on `:4173` in dev with a Vite proxy to the backend.
 **Backend:** Rust + axum + tokio, bound to `127.0.0.1:8787` by default, overridable with `TERMAL_PORT`.
-**Persistence:** `~/.termal/sessions.json` stores sessions, projects, preferences, remote config, workspace layouts, and orchestrator instances. `~/.termal/orchestrators.json` stores orchestrator templates.
+**Persistence:** `~/.termal/termal.sqlite` is the primary store for sessions, projects, preferences, remote config, workspace layouts, and orchestrator instances. `~/.termal/sessions.json` is the legacy import path used to derive the SQLite file, and successful imports are backed up as `sessions.imported-<timestamp>.json`. `~/.termal/orchestrators.json` stores reusable orchestrator templates.
 **Real-time:** Server-Sent Events with a monotonic revision counter for ordering.
 
 **Current status:** The current implementation includes server-backed workspace layouts, project-scoped SSH remotes, orchestrator templates and runtime instances, session-scoped model controls, workspace terminal tabs, file-change awareness, and the Telegram relay.
@@ -48,12 +48,15 @@ The binary has three modes:
 ```rust
 AppState {
     default_workdir: String,
-    persistence_path: Arc<PathBuf>,            // ~/.termal/sessions.json
+    persistence_path: Arc<PathBuf>,            // ~/.termal/termal.sqlite (the legacy sessions.json path
+                                               //  anchors the filename; actual storage is SQLite)
     orchestrator_templates_path: Arc<PathBuf>, // ~/.termal/orchestrators.json
     state_events: broadcast::Sender<String>,
     delta_events: broadcast::Sender<String>,
+    file_events: broadcast::Sender<String>,    // workspace file-watcher fan-out
     shared_codex_runtime: Arc<Mutex<Option<SharedCodexRuntime>>>,
     remote_registry: Arc<RemoteRegistry>,
+    persist_tx: mpsc::Sender<PersistRequest>,  // wake the background persist thread
     inner: Arc<Mutex<StateInner>>,
 }
 
@@ -102,14 +105,34 @@ All client-visible state changes go through `commit_locked()`:
 ```
 commit_locked(&mut inner)
   → inner.revision += 1
-  → persist_state(path, inner)        // write ~/.termal/sessions.json
-  → publish_state_locked(inner)       // broadcast full StateResponse on SSE
+  → persist_tx.send(PersistRequest::Delta) // wake the background persist thread
+  → publish_state_locked(inner)            // broadcast full StateResponse on SSE
   → Ok(revision)
 ```
 
-Streaming paths (`append_text_delta`, `update_command_message`) bump revision and publish a `DeltaEvent` instead of a full snapshot, avoiding the cost of serializing all sessions on every token.
+The background `termal-persist` thread owns an `Arc<Mutex<StateInner>>`
+and a `SqlitePersistConnectionCache`. On each `Delta` wake it briefly
+locks `inner`, collects the diff via
+`StateInner::collect_persist_delta(watermark)` (only sessions whose
+`mutation_stamp` advanced past the thread's watermark, plus drained
+`removed_session_ids`), releases the lock, and writes with targeted
+`INSERT OR UPDATE` per changed session and `DELETE WHERE id = ?` per
+removed id. Unchanged session rows stay untouched — a mutation on one
+session no longer rewrites every other session row every commit. See
+`src/state.rs` for `PersistRequest` / `PersistDelta` and `src/persist.rs`
+for `persist_delta_via_cache`.
 
-Internal bookkeeping that the frontend doesn't need (e.g. recording Codex sandbox mode after runtime config) uses `persist_state()` directly without bumping revision.
+Mutation stamping is load-bearing: every session mutation must land
+through `StateInner::session_mut` / `session_mut_by_index` /
+`stamp_session_at_index` / `push_session` / `remove_session_at` /
+`retain_sessions` so the record's `mutation_stamp` gets bumped. A
+raw `&mut inner.sessions[idx]` would skip the stamp and the delta
+persist would drop the update. See `src/state_inner.rs` for the
+helpers.
+
+Streaming paths (`append_text_delta`, `update_command_message`) bump revision and publish a `DeltaEvent` instead of a full snapshot, avoiding the cost of serializing all sessions on every token. They use `commit_delta_locked()` which bumps revision + wakes the persist thread but skips the full-state broadcast; callers emit the matching `DeltaEvent` explicitly via `publish_delta()` under the same lock.
+
+Internal bookkeeping that the frontend doesn't need (e.g. recording Codex sandbox mode after runtime config) uses `persist_internal_locked()` directly without bumping revision.
 
 ### HTTP API
 
@@ -783,21 +806,102 @@ When a session is busy (Active or Approval), new messages are queued in a `VecDe
 ```text
 termal/
 |-- src/
-|   |-- main.rs              # process mode selection + router assembly; assembles the
-|   |                        # other *.rs files via include!() into a single flat crate
-|   |-- api.rs               # axum HTTP handlers (routes + request/response glue)
-|   |-- state.rs             # AppState, StateInner, sessions, commit_locked, SSE broadcast
-|   |-- persist.rs           # SQLite schema + load/save + persist-thread connection cache
-|   |-- runtime.rs           # Claude/Codex/ACP process management
-|   |-- turns.rs             # recorder pipeline and blocking REPL turns
-|   |-- remote.rs            # SSH tunnels, remote proxying, SSE bridge
+|   |-- main.rs              # process mode selection + router assembly;
+|   |                        # assembles the other *.rs files via include!()
+|   |                        # into a single flat crate
+|   |
+|   |-- # State: core types + sessions + persist + broadcast
+|   |-- state.rs             # AppState, StateInner, PersistRequest/Delta, core types
+|   |-- state_inner.rs       # StateInner CRUD + session-array primitives + finders
+|   |-- state_accessors.rs   # snapshot / readiness cache / session-state readers
+|   |-- state_boot.rs        # boot-time: discovered Codex threads + recovery + normalize
+|   |-- app_boot.rs          # AppState::new_with_paths — the heavy startup wiring
+|   |-- sse_broadcast.rs     # commit_locked + persist-wake + state/delta/file broadcast
+|   |-- persist.rs           # SQLite schema + persist_delta_via_cache + connection cache
+|   |-- persisted_state.rs   # disk-projection types (PersistedState / PersistedSessionRecord)
+|   |-- paths.rs             # path resolution, canonicalization, project-scoped guards
+|   |
+|   |-- # Sessions + turns + messages
+|   |-- session_crud.rs       # create_session, create/delete_project, update_app_settings
+|   |-- session_lifecycle.rs  # kill/stop/cancel session
+|   |-- session_messages.rs   # push_message / append_text_delta / upsert_command_message
+|   |-- session_config.rs     # update_session_settings + refresh_session_model_options
+|   |-- session_identity.rs   # message IDs + external_session_id bindings + Codex thread state
+|   |-- session_sync.rs       # runtime-driven syncs (model options, agent commands, cursor mode)
+|   |-- session_interaction.rs # pending-approval registers + preview-text projections
+|   |-- session_runtime.rs    # runtime handle types + kill utilities
+|   |-- messages.rs           # low-level SessionRecord message helpers
+|   |
+|   |-- # Turn engine
+|   |-- turns.rs             # canonical turn runner + blocking REPL turn
+|   |-- turn_dispatch.rs     # start_turn + dispatch_* queue draining
+|   |-- turn_lifecycle.rs    # Idle↔Active↔Approval state machine + RuntimeToken guards
+|   |-- recorders.rs         # TurnRecorder / CodexTurnRecorder ecosystem
+|   |
+|   |-- # Agents
+|   |-- agent_readiness.rs   # CLI availability probing cache
+|   |-- claude.rs            # Claude NDJSON message handling
+|   |-- claude_spawn.rs      # Claude CLI subprocess spawn + wire writers
+|   |-- claude_args.rs       # Claude CLI argv construction + message parsing
+|   |-- claude_spares.rs     # hidden Claude spare pre-warming
+|   |-- codex.rs             # Codex shared-runtime spawn + session state
+|   |-- codex_home.rs        # Codex home directory setup + stderr formatters
+|   |-- codex_bin.rs         # Codex executable discovery + web-search formatters
+|   |-- codex_rpc.rs         # Codex JSON-RPC transport (send + wait for response)
+|   |-- codex_events.rs      # inbound Codex event dispatcher
+|   |-- codex_notices.rs     # shared-runtime global notice handling
+|   |-- codex_text_stream.rs # agent-message delta dedup + subagent buffering
+|   |-- codex_app_requests.rs # approval/user-input/MCP request + item-event handlers
+|   |-- codex_turn_cleanup.rs # per-turn reset + completed-turn cleanup worker
+|   |-- codex_submissions.rs # user-driven approvals / replies back into Codex
+|   |-- codex_thread_actions.rs # fork/archive/unarchive/compact/rollback Codex thread
+|   |-- codex_discovery.rs   # scan Codex home for pre-existing threads
+|   |-- codex_validation.rs  # validation helpers for Codex payloads
+|   |-- shared_codex_mgr.rs  # shared Codex app-server lifecycle + exit cascade
+|   |-- repl_codex.rs        # REPL-mode Codex driver
+|   |-- acp.rs               # ACP (Claude / Cursor / Gemini) protocol driver
+|   |-- gemini.rs            # Gemini-specific dotenv + GEMINI_CLI_SYSTEM_SETTINGS setup
+|   |
+|   |-- # HTTP API
+|   |-- api.rs               # thin Axum handlers + shared helpers (router is in main.rs)
+|   |-- api_git.rs           # git workflow routes (status/diff/file/commit/push/sync)
+|   |-- api_files.rs         # file read/write + directory list + agent command discovery
+|   |-- api_sse.rs           # state SSE stream + initial-snapshot + fallback payloads
+|   |-- api_review.rs        # review-document CRUD routes
+|   |-- runtime.rs           # shared runtime types + Claude/Codex/ACP command enums
+|   |
+|   |-- # Wire (DTOs)
+|   |-- wire.rs              # shared wire vocabulary: ApiError, Agent, enums, core types
+|   |-- wire_messages.rs     # Message enum + interaction request DTOs + parallel-agent types
+|   |-- wire_git.rs          # every Git DTO (request + response + GitDiff types)
+|   |-- wire_terminal.rs     # TerminalCommand DTOs + streaming types + tuning constants
+|   |-- wire_review.rs       # ReviewDocument + threaded-comment shapes
+|   |-- wire_project_digest.rs # project digest DTOs + status/progress text formatters
+|   |
+|   |-- # Remote
+|   |-- remote.rs            # SSH tunnels + HTTP transport + terminal stream bridge
+|   |-- remote_ssh.rs        # SSH connection setup + validation + health checks
+|   |-- remote_routes.rs     # remote HTTP plumbing (get/post/put_json) + state sync
+|   |-- remote_create_proxies.rs   # create_remote_{project,session,orchestrator}_proxy
+|   |-- remote_codex_proxies.rs    # fork/archive/unarchive/compact/rollback thread proxies
+|   |-- remote_session_proxies.rs  # uniform "resolve-forward-sync" session action proxies
+|   |-- remote_sync.rs       # ID localization + apply_remote_state + delta event fan-out
+|   |-- remote_terminal.rs   # remote terminal stream proxy
+|   |
+|   |-- # Orchestrators
+|   |-- orchestrators.rs     # template CRUD + instance creation + draft normalizers
+|   |-- orchestrator_lifecycle.rs    # running-instance state machine (pause/resume/stop)
+|   |-- orchestrator_transitions.rs  # per-transition engine (prompt injection, branching)
+|   |
+|   |-- # Misc subsystems
 |   |-- instructions.rs      # instruction search graph traversal + document classification
 |   |-- git.rs               # git diff loading, status parsing, worktree readers, repo sync
 |   |-- terminal.rs          # terminal run/stream, process-tree lifecycle, output buffer
 |   |-- review.rs            # review-document persistence + change-set-id validation
-|   |-- paths.rs             # path resolution, canonicalization, project-scoped guards
-|   |-- orchestrators.rs     # template CRUD and runtime instance engine
+|   |-- workspace_queries.rs # workspace layout CRUD + agent command listing
+|   |-- workspace_watch.rs   # workspace file watcher threads
 |   |-- telegram.rs          # Telegram digest/action relay mode
+|   |
 |   `-- tests/               # backend regression tests, split by domain
 |       |-- mod.rs           # shared fixtures: TestRecorder, HTTP test server, handle factories
 |       |-- acp_gemini.rs    # ACP + Gemini runtime configuration
@@ -840,7 +944,7 @@ The backend is still compiled as one crate-level module through `include!`, but 
 
 **Shared Codex app-server.** Codex threads already carry their own cwd and thread identity, so one shared app-server process can service many Codex sessions. That reduces process churn while keeping session state logically separate.
 
-**Include-split backend.** The backend still shares one crate namespace, but responsibility is separated into `api.rs`, `state.rs`, `runtime.rs`, `turns.rs`, `remote.rs`, `orchestrators.rs`, and `telegram.rs`. That keeps cross-cutting types easy to share without claiming the backend is still one giant `main.rs`.
+**Include-split backend.** The backend still shares one crate namespace but is split across many focused files (see the Project Structure listing above) assembled via `include!()` in `main.rs`. Each file owns a specific concern — agent protocol driver, HTTP route group, wire DTO cluster, state sub-area, remote proxy family — so day-to-day edits touch one or two files instead of navigating a monolith. Rust's multiple-impl-blocks rule lets `AppState` / `StateInner` method clusters live in whichever file matches their domain, and the flat namespace means types and helpers are visible across every file without any `pub use` boilerplate.
 
 **Agent-agnostic UI message model.** Claude, Codex, Cursor, and Gemini are normalized into the same `Message` enum. Adding a new agent is mostly a runtime and normalization task rather than a frontend rewrite.
 

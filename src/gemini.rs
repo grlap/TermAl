@@ -325,7 +325,6 @@ fn dotenv_var_value(key: &str) -> Option<String> {
         .find_map(|path| dotenv_file_var_value(path, key))
 }
 
-/// Handles dotenv file var value.
 fn dotenv_file_var_value(path: &FsPath, key: &str) -> Option<String> {
     let Ok(raw) = fs::read_to_string(path) else {
         return None;
@@ -348,12 +347,10 @@ fn dotenv_file_var_value(path: &FsPath, key: &str) -> Option<String> {
     })
 }
 
-/// Handles environment var source.
 fn env_var_source(key: &str) -> Option<String> {
     env_var_present(key).then(|| format!("the `{key}` environment variable"))
 }
 
-/// Handles environment var present.
 fn env_var_present(key: &str) -> bool {
     std::env::var(key)
         .map(|value| !value.trim().is_empty())

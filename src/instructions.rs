@@ -69,7 +69,47 @@ fn search_instruction_phrase(
     })
 }
 
-/// Builds instruction search graph.
+/// Traverses `workdir` to build an `InstructionSearchGraph` of
+/// instruction documents reachable from the session's seed files.
+///
+/// Traversal contract:
+///
+/// - **Seed discovery** (`discover_instruction_seed_paths`) — collects
+///   the agent-agnostic top-level files that anchor the graph:
+///   `AGENTS.md`, `CLAUDE.md`, `.cursorrules`, `.cursor/rules.md`,
+///   `.gemini/GEMINI.md`, etc. Nonexistent seeds are silently
+///   skipped so a workdir with only one agent's config still
+///   produces a valid (smaller) graph.
+/// - **Path normalization** — every path is canonicalized via
+///   `normalize_path_best_effort` before it enters the graph so two
+///   references to the same file through different casings or
+///   separators land on one node.
+/// - **Reference sanitization** — references parsed from Markdown
+///   (`extract_instruction_references`) are rejected when they point
+///   outside the workdir, use unsupported schemes, or contain
+///   traversal patterns. Only same-repo relative paths and
+///   `file://` URLs resolving back into the workdir are traced.
+/// - **Transitive edges** — a breadth-first walk follows references
+///   from each document to new candidates. Visited paths are kept
+///   in a `HashSet` keyed by canonical string so cycles terminate
+///   at the first re-visit; the revisit is recorded as a graph
+///   edge but does not re-enqueue the document.
+/// - **Skipped directories** — the traversal does not descend into
+///   `.git/`, `node_modules/`, `target/`, or similarly expensive
+///   subtrees. Direct references to files inside them are still
+///   resolved, but the walker never enumerates these directories.
+/// - **Document classification** — each visited file is typed via
+///   `classify_instruction_document` (Agents vs Cursor vs Gemini vs
+///   generic Markdown) so the frontend can render per-agent badges;
+///   unknown extensions produce an `InstructionDocumentKind::Other`
+///   node.
+///
+/// The returned graph contains one `InstructionDocumentInternal` per
+/// unique canonical path plus the outgoing-reference adjacency list.
+/// Phrase search (`search_instruction_phrase`) then opens each
+/// document's content, scans for the query, and emits a
+/// `InstructionSearchMatch` with the shortest path from a seed to
+/// that document.
 fn build_instruction_search_graph(workdir: &FsPath) -> Result<InstructionSearchGraph, ApiError> {
     let normalized_workdir = normalize_path_best_effort(workdir);
     let seed_paths = discover_instruction_seed_paths(&normalized_workdir)?;

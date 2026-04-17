@@ -156,7 +156,6 @@ async fn apply_git_file_action(
     Ok(Json(response))
 }
 
-/// Handles commit Git changes.
 async fn commit_git_changes(
     State(state): State<AppState>,
     Json(request): Json<GitCommitRequest>,
