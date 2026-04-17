@@ -4,6 +4,7 @@ import {
   buildFullMarkdownDiffDocumentSegments,
   buildGreedyMarkdownLineAnchors,
   buildMarkdownLineDiffAnchors,
+  normalizeMarkdownDocumentLineEndings,
   splitMarkdownDocumentLinesWithOffsets,
 } from "./markdown-diff-segments";
 
@@ -417,5 +418,116 @@ describe("markdown diff segments", () => {
     expect(beforeRepeatedSegments).toHaveLength(2);
     expect(afterRepeatedSegments).toHaveLength(2);
     expect(beforeRepeatedSegments[1]?.id).toBe(afterRepeatedSegments[1]?.id);
+  });
+
+  // Reproduces the mermaid-demo.md save-failure scenario: heading unchanged,
+  // one line inside a code fence changed. The user edits the heading; the
+  // commit resolver must be able to find the unchanged heading segment in
+  // the current source content. If the heading gets merged into a bigger
+  // segment that also spans the fence, the serializer -> resolver round
+  // trip breaks.
+  it("keeps an unchanged heading as its own segment when a fenced-block line is changed", () => {
+    const before = [
+      "# Mermaid Demo\n",
+      "\n",
+      "```mermaid\n",
+      "flowchart TD\n",
+      "  Start --> Edit\n",
+      "  Edit --> Stop\n",
+      "```\n",
+    ].join("");
+    const after = [
+      "# Mermaid Demo\n",
+      "\n",
+      "```mermaid\n",
+      "flowchart TD\n",
+      "  Start --> Edit\n",
+      "  Edit --> End\n",
+      "```\n",
+    ].join("");
+
+    const segments = buildFullMarkdownDiffDocumentSegments(before, after);
+
+    const headingSegment = segments.find(
+      (segment) => segment.kind === "normal" && segment.markdown.includes("# Mermaid Demo"),
+    );
+    expect(headingSegment).toBeDefined();
+    if (!headingSegment) {
+      return;
+    }
+
+    // The heading segment must exactly match the leading content of the
+    // after document at its recorded offsets. If the range does, the
+    // first check in `resolveRenderedMarkdownCommitRange` (equivalent to
+    // `markdownRangeMatches`) succeeds and the edit is applied.
+    expect(after.slice(headingSegment.afterStartOffset, headingSegment.afterEndOffset)).toBe(
+      headingSegment.markdown,
+    );
+
+    // The heading segment must NOT swallow the opening fence line,
+    // because the user edits the heading in isolation; if the fence is
+    // merged in, the DOM serializer produces a different structure than
+    // the original markdown and the commit's nextMarkdown can no longer
+    // be range-mapped back to the source.
+    expect(headingSegment.markdown).not.toContain("```mermaid");
+  });
+
+  // Regression for the Windows CRLF save-failure scenario for rendered-
+  // Markdown diff edits. When the on-disk file uses CRLF line endings
+  // (common on Windows checkouts with `core.autocrlf=true`), the builder
+  // used to record offsets into the raw CRLF content while
+  // `segment.markdown` was LF-normalized. The commit resolver then
+  // compared `sliceRaw(start, end)` against `segment.markdown` and they
+  // differed by every `\r` character, all three resolver fallbacks failed,
+  // and the user saw "Rendered Markdown edit could not be applied because
+  // the document changed under that section" with no network request and
+  // (before the saveError-text UX fix) no explanation of why.
+  //
+  // The builder now normalizes CRLF → LF at entry, so segment offsets and
+  // `segment.markdown` live in the same representation. Callers that pass
+  // raw CRLF content must slice against the normalized form — which is
+  // what `handleRenderedMarkdownSectionCommits` now does via
+  // `normalizeMarkdownDocumentLineEndings(sourceContent)` before resolving.
+  it("records LF-normalized offsets even when inputs contain CRLF line endings", () => {
+    const beforeCrlf = [
+      "# Mermaid Demo\r\n",
+      "\r\n",
+      "```mermaid\r\n",
+      "flowchart TD\r\n",
+      "  Start --> Edit\r\n",
+      "  Edit --> Stop\r\n",
+      "```\r\n",
+    ].join("");
+    const afterCrlf = [
+      "# Mermaid Demo\r\n",
+      "\r\n",
+      "```mermaid\r\n",
+      "flowchart TD\r\n",
+      "  Start --> Edit\r\n",
+      "  Edit --> End\r\n",
+      "```\r\n",
+    ].join("");
+
+    const segments = buildFullMarkdownDiffDocumentSegments(beforeCrlf, afterCrlf);
+    const headingSegment = segments.find(
+      (segment) => segment.kind === "normal" && segment.markdown.includes("# Mermaid Demo"),
+    );
+    expect(headingSegment).toBeDefined();
+    if (!headingSegment) {
+      return;
+    }
+
+    // Under the fix, segment offsets point into the LF-normalized form of
+    // the after document. A caller that normalizes its sourceContent the
+    // same way can slice at those offsets and match segment.markdown
+    // exactly — which is what the commit resolver needs.
+    const normalizedAfter = normalizeMarkdownDocumentLineEndings(afterCrlf);
+    const sliced = normalizedAfter.slice(
+      headingSegment.afterStartOffset,
+      headingSegment.afterEndOffset,
+    );
+    expect(sliced).toBe(headingSegment.markdown);
+    // And segment.markdown itself must be LF, not raw CRLF.
+    expect(headingSegment.markdown).not.toContain("\r");
   });
 });

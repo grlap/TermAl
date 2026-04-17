@@ -93,23 +93,9 @@ Also fixed in the current tree, not re-listed below:
 - **`create_session` + `create_session_from_fork` re-stamp after slot replace** — both code paths now call `inner.session_mut_by_index(index)` after `*slot = record.clone()` so the whole-struct replace no longer erases the stamp that `push_session` applied. Without this, the row was invisible to `collect_persist_delta` until something else re-stamped it.
 - **`orchestrators.rs` queued-prompt clear routes through `session_mut_by_index`** — `normalize_orchestrator_instances_with_persisted_non_running` now stamps the record before calling `clear_stopped_orchestrator_queued_prompts`, so the delete-session call path persists the cleared queued prompts to SQLite. The load-path caller re-persists identical rows on startup, which is a tiny waste but correct.
 - **Imported discovered Codex threads stamp after whole-struct replace** — `import_discovered_codex_threads` in `src/state_boot.rs` now calls `session_mut_by_index(index)` after `*slot = record`, re-stamping the slot so `create_session`'s stamp is not erased by the owned-record replace. The pattern mirrors `create_session` / `create_session_from_fork` in `src/session_crud.rs`. Regression `import_discovered_codex_threads_stamps_newly_discovered_sessions` in `src/tests/codex_discovery.rs` captures `last_mutation_stamp` before import and asserts the imported record's stamp exceeds the watermark, so `collect_persist_delta` will pick it up on the next tick.
-- **Safety-net poll hard-cap deadline guard** — `ui/src/App.tsx`'s self-chained `/api/state` watchdog now records a `pollDeadlineMs = Date.now() + ACTIVE_PROMPT_POLL_MAX_DURATION_MS` at start and checks it both at the top of `scheduleNextActivePromptPoll` and after the in-flight `fetchState()` resolves. Previously, the 5-minute `setTimeout(clearActivePromptPoll, MAX_DURATION_MS)` cap could fire in the window between "callback cleared `activePromptPollTimeoutIdRef.current` to null" and "next schedule queued a fresh id," turning the clear into a no-op and letting the chained poll outlive its hard-cap. The existing `setTimeout` cap is kept as belt-and-suspenders with a comment explaining it cannot stop an in-flight `fetchState()` but the post-await deadline check covers that path.
+- **Safety-net poll hard-cap deadline guard** — `ui/src/App.tsx`'s self-chained `/api/state` watchdog was extracted into `ui/src/active-prompt-poll.ts::startActivePromptPoll`, a pure scheduler with injectable `fetchState`/`onState`/`isMounted` handlers and an injectable `now()`/`intervalMs`/`maxDurationMs`. The scheduler captures an absolute `deadlineMs = now() + maxDurationMs` at start and checks it both before arming the next timer and after `fetchState()` resolves. A shared `stopped` flag set by the belt-and-suspenders `setTimeout(cancel, maxDurationMs)` is checked at the await-resume site so a cap firing mid-fetch forcibly stops the chain (closing the previous ref-aliasing race). The App now stores a single cancel function in `activePromptPollCancelRef` — `handleSend` calls the prior cancel before starting a new chain, and unmount cleanup calls it to tear down. Twelve Vitest cases in `ui/src/active-prompt-poll.test.ts` pin the deadline guard end-to-end (fetch held past cap → no re-arm), the injectable-now path (proves the deadline check reads `now()` not `Date.now()` directly — catches regressions where the belt-and-suspenders defense would still mask the bug), belt-and-suspenders cancel, custom options, error-swallow-and-chain, unmount during await, onState-returning-true stops the chain, and cancel idempotency.
 - **Local/Remote ID newtypes (Node 3 of `docs/rust-type-safety-plan.md`)** — added `src/ids.rs` defining `LocalSessionId`, `RemoteSessionId`, `LocalProjectId`, `RemoteProjectId`, `RemoteId` as `#[serde(transparent)]` newtypes wrapping `String`. The remote-sync layer internals now thread typed ids through `remote_project_id_map` (`HashMap<RemoteProjectId, LocalProjectId>`), `local_project_id_for_remote_project`, `local_session_id_for_remote_session` (takes `&RemoteSessionId`, returns `Option<LocalSessionId>`), `localize_remote_orchestrator_instance`, and `sync_remote_orchestrators_inner`. Wire types in `src/wire.rs` stay on `String` (downstream consumers and inbound remote payloads are calibrated to strings). `RemoteSessionId` and `RemoteId` are retained as a named-type menu for future migration waves, with `#[allow(dead_code)]` documented at the macro.
-
-## Untracked typed-id module is required for the build
-
-**Severity:** High - the reviewed diff is not self-contained; `src/main.rs` now includes `ids.rs`, but `src/ids.rs` is untracked and therefore absent from `git diff`.
-
-The current working tree compiles because the local file exists. A clean checkout with only the tracked changes applied will fail before Rust compilation can proceed because `include!("ids.rs")` cannot find the required module.
-
-**Current behavior:**
-- `src/main.rs` contains `include!("ids.rs")`.
-- `git status --short` shows `?? src/ids.rs`.
-- `git diff` / `git diff --name-only` do not include the required source file.
-
-**Proposal:**
-- Add `src/ids.rs` to the tracked changes before commit.
-- Alternatively, remove the typed-id include and dependent references from this change.
+- **Untracked typed-id module required for the build** — `src/ids.rs` is now tracked alongside `src/main.rs`'s `include!("ids.rs")`, so the typed-id refactor is self-contained in a clean checkout rather than relying on an untracked local file.
 
 ## Stale send responses skip the active-prompt recovery poll
 
@@ -773,16 +759,6 @@ The new hydration effect's error path calls `reportRequestError(error)` on any `
   the chain boundary, advance time past the next interval, and assert
   `fetchState` was called exactly once per chain hop rather than
   accumulating parallel fires.
-- [ ] P1: Add a regression test for the safety-net poll hard-cap
-  deadline guard (`pollDeadlineMs`) in `ui/src/App.tsx`:
-  `vi.useFakeTimers()` + a deferred `fetchState` promise held in flight,
-  advance fake time past `ACTIVE_PROMPT_POLL_MAX_DURATION_MS` while the
-  promise is unresolved, resolve it, and assert
-  `activePromptPollTimeoutIdRef.current` stays `null` (no further
-  scheduling). Pair with a negative case advancing only 4 minutes that
-  keeps polling. Without this, the fix can silently regress — the
-  belt-and-suspenders `setTimeout` cap alone passed the old buggy path
-  too.
 - [ ] P2: Add serde/Display round-trip tests for `src/ids.rs` newtypes:
   `serde_json::to_string(&RemoteSessionId::from("abc")) == "\"abc\""`
   and reverse, `format!` via `Display`, `From<String>`, `From<&str>`,
@@ -808,14 +784,6 @@ The new hydration effect's error path calls `reportRequestError(error)` on any `
   publish several large snapshots while the broadcaster is delayed and
   assert superseded snapshots are dropped or overwritten before they can
   accumulate in the queue.
-- [ ] P2: Extend `state_inner_session_mut_helpers_stamp_the_record` with
-  a negative case: assert `inner.session_mut("does-not-exist")` returns
-  `None` and that `inner.last_mutation_stamp` either advances (and is
-  documented as such) or stays unchanged on the miss. The two helpers
-  currently diverge — `session_mut` (by id) short-circuits on
-  `find_session_index`, while `session_mut_by_index` increments the
-  counter before `get_mut` can fail. Pin whichever semantics the tree
-  commits to.
 - [ ] P2: Pin `next_mutation_stamp` saturation semantics: the counter
   uses `saturating_add(1)`, but the existing
   `state_inner_next_mutation_stamp_is_strictly_monotonic` only covers

@@ -27,6 +27,7 @@ import { workspaceFilesChangedEventChangeForPath } from "../workspace-file-event
 import {
   buildMarkdownDiffDocumentSegments,
   normalizeEditedMarkdownSection,
+  normalizeMarkdownDocumentLineEndings,
   replaceMarkdownDocumentRange,
   type MarkdownDiffDocumentSegment,
   type MarkdownDiffPreviewModel,
@@ -1118,12 +1119,20 @@ export function DiffPanel({
       return false;
     }
 
-    const sourceContent =
+    // Normalize to LF so segment offsets (also LF-normalized in
+    // `buildFullMarkdownDiffDocumentSegments`) line up with slices of
+    // `sourceContent`. Without this, CRLF-on-disk documents (common on
+    // Windows with `core.autocrlf=true`) made the resolver's
+    // `sourceContent.slice(start, end) === segment.markdown` check fail by
+    // every `\r` character, surfacing as an unresolvable commit and the
+    // "Rendered Markdown edit could not be applied" error.
+    const sourceContent = normalizeMarkdownDocumentLineEndings(
       markdownEditContentRef.current ??
-      (latestFileRef.current.status === "ready" &&
-      editValueRef.current !== latestFileRef.current.content
-        ? editValueRef.current
-        : markdownPreview.after.content);
+        (latestFileRef.current.status === "ready" &&
+        editValueRef.current !== latestFileRef.current.content
+          ? editValueRef.current
+          : markdownPreview.after.content),
+    );
     const resolvedCommits = commits
       .map((commit) => ({
         commit,
@@ -1578,6 +1587,20 @@ export function DiffPanel({
         ) : null}
         {reviewSaveError ? (
           <p className="support-copy diff-preview-note">{`Review update failed: ${reviewSaveError}`}</p>
+        ) : null}
+        {/*
+         * Surface the full save-error message alongside the "Save failed"
+         * pill. Previously `saveError` was only used to compute the pill
+         * label, so stale-hash conflicts surfaced via `externalFileNotice`
+         * but rendered-Markdown-commit failures (thrown from the frontend
+         * before any network call) produced "Save failed" with no
+         * explanation. Rendering the raw message here keeps both paths
+         * diagnosable without changing the stale-disk recovery flow
+         * (those cases also set `externalFileNotice` / `diffEditConflictOnDisk`
+         * which render their own UI below).
+         */}
+        {saveError && !externalFileNotice && !diffEditConflictOnDisk ? (
+          <p className="support-copy diff-preview-note">{`Save failed: ${saveError}`}</p>
         ) : null}
         {externalFileNotice ? (
           <p className="support-copy diff-preview-note">{externalFileNotice}</p>

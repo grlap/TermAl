@@ -27,5 +27,6 @@ design decisions, and future plans.
 
 - [Concurrent Session Link Cards](./concurrent-session-link-cards.md)
 - [Instruction Debugger](./instruction-debugger.md)
+- [Source Renderers](./source-renderers.md)
 - [Territory Visualization](./territory-visualization.md)
 - [WhatsApp Integration](./whatsapp-integration.md)

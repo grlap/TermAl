@@ -23,7 +23,7 @@ The highest-value workflow is Git diff:
 - unstaged documentation changes should render as the current working tree document
 - reviewers need a readable document preview while still being able to inspect exact changed lines
 - patch-only previews must be clearly labeled so users do not confuse partial context for the full
-  document
+document
 
 ## Existing Behavior To Preserve
 
@@ -43,18 +43,18 @@ edits.
 - Add a rendered Markdown view for normal source files.
 - Add a rendered Markdown view for Git diff previews.
 - Allow practical editing directly in the rendered Markdown diff view when the selected Git side has
-  an unambiguous live worktree save target.
+an unambiguous live worktree save target.
 - Make staged and unstaged Markdown previews match the existing Git section semantics exactly.
 - Support live preview while editing normal Markdown files.
 - Support preview while editing Markdown diff targets.
 - Reuse the current save, stale-file, conflict, and rebase protections.
 - Reuse the current Markdown renderer so agent messages, file previews, and diff previews do not
-  drift.
+drift.
 
 ## Non-goals For V1
 
 - No full WYSIWYG authoring environment. The rendered diff editor is a pragmatic content-editable
-  surface for document review fixes, backed by Markdown source serialization.
+surface for document review fixes, backed by Markdown source serialization.
 - No side-by-side rendered visual diff engine.
 - No notebook-style executable code blocks.
 - No broad Markdown dialect work beyond GitHub-flavored Markdown already used by messages.
@@ -87,10 +87,10 @@ Rules:
 - Dirty state is still based on the source buffer.
 - Save still writes Markdown source text.
 - Disk-change, stale-save, conflict, compare, and rebase protections continue to use the existing
-  source-file pipeline.
+source-file pipeline.
 - Preview uses the unsaved editor value, not the last-loaded file content.
 - The last selected Markdown source mode can be remembered per tab or pane, but `Code` is an
-  acceptable first default.
+acceptable first default.
 
 ## Git Markdown Diffs
 
@@ -110,7 +110,7 @@ Rules:
 - `All` continues to show the code diff editor.
 - `Edit` continues to edit the applicable live file buffer.
 - `Markdown` renders document sides for review; it does not replace `Changes` for exact line-level
-  inspection.
+inspection.
 
 ### Git Side Semantics
 
@@ -137,7 +137,7 @@ should consume that pipeline directly.
 If only unified diff text is available at the diff panel boundary, add a narrow document-side data
 contract to the existing Git diff response or a companion endpoint:
 
-```ts
+```typescript
 type GitDiffDocumentSide = {
   content: string;
   source: "head" | "index" | "worktree" | "empty" | "patch";
@@ -174,16 +174,16 @@ Rules:
 - Deleted Markdown renders inline in a red section at the point where it was removed.
 - Added Markdown renders inline in a green section at the point where it lands.
 - When a changed block has both deleted and added content, render the red deleted section first and
-  the green added section second.
+the green added section second.
 - The result should read top-to-bottom like one document, not like a side-by-side comparison.
 - Do not label changed sections with visible `Deleted` or `Added` text. Color and position carry the
-  change meaning.
+change meaning.
 - Red deleted sections are never editable. They are historical content from the before side.
 - Green added sections and unchanged after-side sections may be editable when `canEdit` is true.
 - The line-number gutter is separate UI chrome. It must not become part of the Markdown document, be
-  copied as document content, or be serialized when saving.
+copied as document content, or be serialized when saving.
 - Omitted patch context should not pretend to have a source line. It should render as omitted
-  context, not as `Line 1`.
+context, not as `Line 1`.
 
 Optional follow-up:
 
@@ -199,7 +199,7 @@ Status labels:
 - Show `One document` when the rendered red/green change view is active.
 - Show `Editable` only when rendered sections can currently write back to the live file buffer.
 - Show the read-only reason when editing is blocked by staged-plus-unstaged state, patch-only
-  content, save state, or missing live file content.
+content, save state, or missing live file content.
 
 Patch-only fallback text:
 
@@ -225,15 +225,15 @@ Git-specific rules:
 
 - Unstaged Markdown diffs are editable because the after side is the worktree.
 - Staged Markdown diffs are editable only when the same file has no unstaged worktree changes. Edits
-  save to the worktree file and create a new unstaged change on top of the staged baseline.
+save to the worktree file and create a new unstaged change on top of the staged baseline.
 - Staged Markdown diffs with additional unstaged worktree changes are read-only. Showing the staged
-  index content while saving into a different worktree content would be misleading and can overwrite
-  user work.
+index content while saving into a different worktree content would be misleading and can overwrite
+user work.
 - Added or untracked files are editable when their after side is a live worktree file and the file is
-  loadable.
+loadable.
 - Deleted files and removed-only sections are read-only.
 - Agent patch-only Markdown previews are read-only unless they are backed by complete side content
-  and a live file target.
+and a live file target.
 
 When editing is blocked, the UI must show the backend-provided reason near the rendered document.
 
@@ -241,25 +241,25 @@ When editing is blocked, the UI must show the backend-provided reason near the r
 
 - The rendered section uses `contentEditable` for the after-side Markdown segment.
 - Typing updates only the active section draft. It must not rebuild the entire segment list on every
-  keystroke.
+keystroke.
 - A section draft commits on blur, section-to-section cursor movement, or `Ctrl+S`/`Cmd+S`.
 - After commit, the full rendered document may re-render from the updated Markdown source.
 - Cursor-only movement must not serialize the rendered DOM back to Markdown. Serialization is allowed
-  only after real user input in that section.
+only after real user input in that section.
 - Source serialization is intentionally pragmatic: headings, paragraphs, lists, blockquotes, code
-  blocks, tables, links, emphasis, inline code, horizontal rules, and line breaks should round-trip
-  well enough for documentation edits. Exact original source formatting, such as bullet marker style
-  or table whitespace, is not guaranteed.
+blocks, tables, links, emphasis, inline code, horizontal rules, and line breaks should round-trip
+well enough for documentation edits. Exact original source formatting, such as bullet marker style
+or table whitespace, is not guaranteed.
 
 ### Save Semantics
 
 - `Ctrl+S`/`Cmd+S` in an editable rendered Markdown section commits the active section draft first,
-  then runs the normal file save path.
+then runs the normal file save path.
 - The `Save Markdown` button saves the same live file buffer as the source editor.
 - Saves use the existing stale-file and rebase protections.
 - A successful save refreshes the rendered preview from the saved content.
 - A failed stale save must keep the user's buffer and surface the same recovery choices as source
-  editing.
+editing.
 
 ### Keyboard And Cursor Behavior
 
@@ -267,17 +267,17 @@ Keyboard movement must feel like a document editor, not like page scrolling:
 
 - Arrow keys move inside the focused editable section using browser-native caret behavior.
 - At the end of an editable section, `ArrowDown` and `ArrowRight` move the caret to the next editable
-  section.
+section.
 - At the start of an editable section, `ArrowUp` and `ArrowLeft` move the caret to the previous
-  editable section.
+editable section.
 - Red deleted sections are skipped during caret movement.
 - `PageDown` and `PageUp` move the caret by approximately one viewport of editable sections. They
-  should not only scroll the view while leaving the caret behind.
+should not only scroll the view while leaving the caret behind.
 - `Home` and `End` keep their normal in-section editing behavior.
 - `Ctrl+Home`/`Cmd+Home` and `Ctrl+End`/`Cmd+End` may jump to the beginning/end of the rendered
-  document when focus is inside the diff editor.
+document when focus is inside the diff editor.
 - Focus should remain visible, but the affordance should be subtle. Do not use a prominent blue frame
-  that looks like an unrelated selection rectangle.
+that looks like an unrelated selection rectangle.
 
 ### Line Numbers
 
@@ -288,9 +288,9 @@ Rendered Markdown line numbers are document chrome:
 - They must not affect Markdown layout, wrapping, formatting, selection text, or saved source.
 - They must update when the rendered block geometry changes.
 - For full-document previews, numbers come from the after side for normal/added sections and the
-  before side for removed sections.
+before side for removed sections.
 - For patch-only previews, line numbers are best-effort and omitted context must stay explicitly
-  omitted.
+omitted.
 
 ## Agent Markdown Diffs
 
@@ -298,7 +298,7 @@ Agent diff cards often provide only `filePath`, `summary`, `diff`, and `changeTy
 
 - If a live file path is available and patch expansion succeeds, render a full post-patch document.
 - If expansion fails or no live file is available, render a patch-only Markdown preview with the
-  fallback label.
+fallback label.
 - Do not claim staged/unstaged semantics for agent diffs unless the diff came from Git status.
 - Keep `Raw` available for exact patch inspection.
 
@@ -324,7 +324,7 @@ Agent diff cards often provide only `filePath`, `summary`, `diff`, and `changeTy
 Important distinction:
 
 - `Markdown` mode is for reviewing before/after diff sides and making small rendered edits when
-  the save target is safe.
+the save target is safe.
 - `Edit` mode is for full source editing of the current live file.
 
 For staged Git diffs, editing the live file can include unstaged content. The UI must keep the
@@ -363,7 +363,8 @@ If local image loading needs a backend endpoint, it can be delivered after the t
 workflow. The viewer must still behave correctly when images cannot be loaded.
 
 Advanced follow-up:
-
+- Additional renderer support across Markdown, source edit, diff edit, and non-Markdown languages is
+  tracked in [Source Renderers](./source-renderers.md).
 - Frontmatter rendering or metadata panel for YAML/TOML frontmatter.
 - Footnotes.
 - Definition lists if supported cleanly.

@@ -71,8 +71,22 @@ export function buildFullMarkdownDiffDocumentSegments(
   beforeContent: string,
   afterContent: string,
 ): MarkdownDiffDocumentSegment[] {
-  const beforeLines = splitMarkdownDocumentLinesWithOffsets(beforeContent);
-  const afterLines = splitMarkdownDocumentLinesWithOffsets(afterContent);
+  // Normalize to LF so segment offsets and `segment.markdown` live in the
+  // same representation. Each line's `markdown` field is LF-normalized via
+  // `normalizeMarkdownLineEndingsForDiff` (see the `pushMarkdownDiffSegment`
+  // call sites), but `afterStartOffset` / `afterEndOffset` used to point
+  // into the raw input (with `\r\n` preserved). The rendered-Markdown
+  // commit resolver then compared `sliceRaw(start, end)` against
+  // `segment.markdown` (LF) and they differed by every `\r`, failing all
+  // three fallback strategies and surfacing as "Rendered Markdown edit
+  // could not be applied because the document changed under that section".
+  // Normalizing inputs keeps both sides in LF; callers that feed raw CRLF
+  // content (e.g. Windows worktree files with `core.autocrlf=true`) no
+  // longer break the commit pipeline.
+  const normalizedBefore = normalizeMarkdownDocumentLineEndings(beforeContent);
+  const normalizedAfter = normalizeMarkdownDocumentLineEndings(afterContent);
+  const beforeLines = splitMarkdownDocumentLinesWithOffsets(normalizedBefore);
+  const afterLines = splitMarkdownDocumentLinesWithOffsets(normalizedAfter);
   const anchors = buildMarkdownLineDiffAnchors(beforeLines, afterLines);
   const segments: MarkdownDiffDocumentSegment[] = [];
   let beforeCursor = 0;
@@ -936,6 +950,19 @@ function normalizeMarkdownLineForDiff(
 
 function normalizeMarkdownLineEndingsForDiff(line: string) {
   return line.replace(/\r\n/g, "\n").replace(/\r$/g, "");
+}
+
+/**
+ * Normalizes whole-document line endings to LF for the rendered-Markdown
+ * edit pipeline. Kept in sync with `normalizeMarkdownLineEndingsForDiff`
+ * (which is per-line and strips a trailing `\r` only); the document-level
+ * form strips every `\r` so offsets recorded against the normalized form
+ * match segment-level LF markdown. Exported so the commit handler in
+ * `DiffPanel.tsx` can apply the same normalization to `sourceContent`
+ * before resolving commit ranges.
+ */
+export function normalizeMarkdownDocumentLineEndings(content: string) {
+  return content.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
 }
 
 function isMarkdownTableSeparatorLine(line: string) {

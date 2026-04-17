@@ -332,6 +332,7 @@ import {
   filterSessionsByListFilter,
   type SessionListFilter,
 } from "./session-list-filter";
+import { startActivePromptPoll } from "./active-prompt-poll";
 import {
   decideDeltaRevisionAction,
   shouldAdoptSnapshotRevision,
@@ -1283,14 +1284,13 @@ export default function App() {
   // implementation used `setInterval`, which stacks overlapping fires when
   // a slow `/api/state` response exceeds the interval — on large transcripts
   // that caused the backend to be hit by multiple concurrent full-state
-  // serializations. The current implementation chains `setTimeout` so the
-  // next poll is only scheduled after the previous one completes.
-  const activePromptPollTimeoutIdRef = useRef<ReturnType<
-    typeof setTimeout
-  > | null>(null);
-  const activePromptPollTimeoutRef = useRef<ReturnType<
-    typeof setTimeout
-  > | null>(null);
+  // serializations. The current implementation delegates to
+  // `startActivePromptPoll`, which chains `setTimeout` so the next poll is
+  // only scheduled after the previous one completes and enforces a
+  // deadline-based hard cap. The ref holds the cancel function so both
+  // unmount cleanup and the "new prompt replaces prior poll" path in
+  // `handleSend` can stop an in-progress chain.
+  const activePromptPollCancelRef = useRef<(() => void) | null>(null);
   const sessionListSearchInputRef = useRef<HTMLInputElement>(null);
   const pendingSessionRenameTriggerRef = useRef<HTMLElement | null>(null);
   const pendingSessionRenamePopoverRef = useRef<HTMLFormElement | null>(null);
@@ -4351,14 +4351,8 @@ export default function App() {
     isMountedRef.current = true;
     return () => {
       isMountedRef.current = false;
-      if (activePromptPollTimeoutIdRef.current !== null) {
-        clearTimeout(activePromptPollTimeoutIdRef.current);
-        activePromptPollTimeoutIdRef.current = null;
-      }
-      if (activePromptPollTimeoutRef.current !== null) {
-        clearTimeout(activePromptPollTimeoutRef.current);
-        activePromptPollTimeoutRef.current = null;
-      }
+      activePromptPollCancelRef.current?.();
+      activePromptPollCancelRef.current = null;
     };
   }, []);
 
@@ -4717,117 +4711,35 @@ export default function App() {
         // agent's response would never arrive via deltas. Chain a
         // `setTimeout` poll of the authoritative snapshot until the
         // session is no longer active. If SSE is healthy, the polls are
-        // no-ops (same revision) and stop once the turn completes.
+        // no-ops (same revision) and stop once the turn completes. See
+        // `startActivePromptPoll` in `active-prompt-poll.ts` for the
+        // chain + deadline contract.
         //
-        // Implementation notes:
-        // - Self-chaining `setTimeout` rather than `setInterval`, so the
-        //   next poll is only scheduled after the previous one returns.
-        //   `setInterval` stacks overlapping fires when `/api/state`
-        //   responses exceed the interval (which happens on large
-        //   transcripts where serialization alone takes multiple
-        //   seconds), producing concurrent full-state serializations on
-        //   the backend.
-        // - The interval is generous (30 s) because this is a last-
-        //   resort fallback; the SSE watchdog already handles a genuinely
-        //   dead connection far faster than this poll ever would.
         // Clear any previous safety-net poll so rapid prompts don't
         // stack independent timers.
-        if (activePromptPollTimeoutIdRef.current !== null) {
-          clearTimeout(activePromptPollTimeoutIdRef.current);
-          activePromptPollTimeoutIdRef.current = null;
-        }
-        if (activePromptPollTimeoutRef.current !== null) {
-          clearTimeout(activePromptPollTimeoutRef.current);
-          activePromptPollTimeoutRef.current = null;
-        }
-
-        const ACTIVE_PROMPT_POLL_INTERVAL_MS = 30_000;
-        const ACTIVE_PROMPT_POLL_MAX_DURATION_MS = 5 * 60 * 1000;
-        // Deadline-based hard cap instead of a companion setTimeout
-        // that clears the timer-id ref. The previous design had a
-        // race: when the chained callback is awaiting `fetchState()`,
-        // it has already cleared `activePromptPollTimeoutIdRef.current`
-        // at entry. If the hard-cap setTimeout fires during that
-        // await window, it reads `null` and no-ops — so the chain
-        // continues past the 5-minute cap. Capturing an absolute
-        // deadline and checking it at every schedule + resume point
-        // bails out cleanly regardless of when the cap is breached.
-        const pollDeadlineMs = Date.now() + ACTIVE_PROMPT_POLL_MAX_DURATION_MS;
-
-        function clearActivePromptPoll() {
-          if (activePromptPollTimeoutIdRef.current !== null) {
-            clearTimeout(activePromptPollTimeoutIdRef.current);
-            activePromptPollTimeoutIdRef.current = null;
-          }
-        }
-
-        const scheduleNextActivePromptPoll = () => {
-          if (!isMountedRef.current) {
-            clearActivePromptPoll();
-            return;
-          }
-          if (Date.now() >= pollDeadlineMs) {
-            clearActivePromptPoll();
-            return;
-          }
-          activePromptPollTimeoutIdRef.current = setTimeout(async () => {
-            activePromptPollTimeoutIdRef.current = null;
-            if (!isMountedRef.current) {
-              return;
-            }
-            try {
-              const freshState = await fetchState();
-              if (!isMountedRef.current) {
-                return;
-              }
-              // Post-await deadline re-check: `fetchState` on large
-              // transcripts can take multiple seconds, and the cap
-              // may have lapsed while we were awaiting. Bail out
-              // without adopting so we never produce work past the
-              // hard cap.
-              if (Date.now() >= pollDeadlineMs) {
-                return;
-              }
-              // The server-instance-id check inside `adoptState` now
-              // detects server restarts deterministically via
-              // `nextState.serverInstanceId`, so the poll no longer
-              // needs `force + allowRevisionDowngrade` to recover from
-              // a restart. Adopt with default flags: a stale poll
-              // response (server still running, SSE already delivered
-              // a newer revision) becomes a silent no-op, and a
-              // genuine restart is still accepted because the instance
-              // id changed.
-              adoptState(freshState);
-              // Stop once the session is no longer active.
-              if (
-                !freshState.sessions?.some(
-                  (session) =>
-                    session.id === sessionId && session.status === "active",
-                )
-              ) {
-                return;
-              }
-            } catch {
-              // Best-effort; fall through to the next schedule below.
-            }
-            // Chain the next poll only after this one finishes, so a slow
-            // `/api/state` response never produces overlapping inflight
-            // requests. `scheduleNextActivePromptPoll` itself re-checks
-            // the deadline before arming the next timeout.
-            scheduleNextActivePromptPoll();
-          }, ACTIVE_PROMPT_POLL_INTERVAL_MS);
-        };
-
-        scheduleNextActivePromptPoll();
-        // Belt-and-suspenders hard cap: even if the deadline check
-        // above misses a tick somehow, this dedicated timer force-
-        // clears any armed timeout. It will NOT stop an in-flight
-        // `fetchState()` awaited callback — that path is guarded by
-        // the `Date.now() >= pollDeadlineMs` check above.
-        activePromptPollTimeoutRef.current = setTimeout(
-          clearActivePromptPoll,
-          ACTIVE_PROMPT_POLL_MAX_DURATION_MS,
-        );
+        activePromptPollCancelRef.current?.();
+        activePromptPollCancelRef.current = startActivePromptPoll({
+          fetchState,
+          isMounted: () => isMountedRef.current,
+          onState: (freshState) => {
+            // The server-instance-id check inside `adoptState` now
+            // detects server restarts deterministically via
+            // `nextState.serverInstanceId`, so the poll no longer
+            // needs `force + allowRevisionDowngrade` to recover from
+            // a restart. Adopt with default flags: a stale poll
+            // response (server still running, SSE already delivered
+            // a newer revision) becomes a silent no-op, and a genuine
+            // restart is still accepted because the instance id
+            // changed.
+            adoptState(freshState);
+            // Return `true` to stop the chain once the session is no
+            // longer active.
+            return !freshState.sessions?.some(
+              (session) =>
+                session.id === sessionId && session.status === "active",
+            );
+          },
+        });
       } catch (error) {
         let restoredDraft = false;
         let restoredAttachments = false;
