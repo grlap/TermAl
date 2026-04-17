@@ -390,6 +390,7 @@ include!("turns.rs");
 include!("claude.rs");
 include!("repl_codex.rs");
 include!("api.rs");
+include!("wire.rs");
 include!("instructions.rs");
 include!("git.rs");
 include!("terminal.rs");
