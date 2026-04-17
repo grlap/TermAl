@@ -381,6 +381,7 @@ include!("codex.rs");
 include!("agent_readiness.rs");
 include!("gemini.rs");
 include!("turns.rs");
+include!("repl_codex.rs");
 include!("api.rs");
 include!("instructions.rs");
 include!("git.rs");
