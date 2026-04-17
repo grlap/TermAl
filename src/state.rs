@@ -6662,6 +6662,12 @@ impl StateInner {
     ///
     /// Returns the new watermark (`last_mutation_stamp` at collection
     /// time) that the caller should install after a successful write.
+    ///
+    /// The only call site is the background persist thread, which is
+    /// `#[cfg(not(test))]`-gated — so under `cargo test` this looks
+    /// unused. The `allow(dead_code)` silences that warning without
+    /// hiding real dead code in release builds.
+    #[cfg_attr(test, allow(dead_code))]
     fn collect_persist_delta(&mut self, watermark: u64) -> PersistDelta {
         let mut changed_sessions: Vec<PersistedSessionRecord> = Vec::new();
         let mut removed_ids = std::mem::take(&mut self.removed_session_ids);

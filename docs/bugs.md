@@ -71,6 +71,34 @@ Also fixed in the current tree, not re-listed below:
 - **`create_session` + `create_session_from_fork` re-stamp after slot replace** — both code paths now call `inner.session_mut_by_index(index)` after `*slot = record.clone()` so the whole-struct replace no longer erases the stamp that `push_session` applied. Without this, the row was invisible to `collect_persist_delta` until something else re-stamped it.
 - **`orchestrators.rs` queued-prompt clear routes through `session_mut_by_index`** — `normalize_orchestrator_instances_with_persisted_non_running` now stamps the record before calling `clear_stopped_orchestrator_queued_prompts`, so the delete-session call path persists the cleared queued prompts to SQLite. The load-path caller re-persists identical rows on startup, which is a tiny waste but correct.
 
+## Test-suite parallel execution flakiness: shared global env + temp paths
+
+**Severity:** Medium - two tests were observed to fail intermittently during batched `cargo test --bin termal` runs in the April 16 session: `tests::acp_gemini::select_acp_auth_method_ignores_workspace_dotenv_credentials` (sometimes `::gemini_dotenv_env_pairs_ignore_workspace_env_files`) and `tests::shared_codex::shared_codex_thread_setup_persist_failure_does_not_tear_down_runtime`. Both passed when re-run in isolation. The pattern (pass-in-isolation, fail-in-batch) strongly suggests shared global state contamination — most likely process-wide env vars (`GEMINI_API_KEY`, `HOME`) and temp-dir paths that collide between parallel test threads.
+
+**Current behavior:**
+- Full-suite runs occasionally fail with one or two of the tests above; a re-run typically succeeds.
+- The failures do not correspond to any real regression — the production code paths are correct.
+- Undocumented flakes erode trust in the test suite and cost time whenever they surface in CI.
+
+**Proposal:**
+- Audit the flaky tests for process-wide state: look for `env::set_var` / `env::remove_var` / `TEST_HOME_ENV_MUTEX` usage that isn't serialized against other tests touching the same variables.
+- Serialize the offending tests via a shared `Mutex` guard (either a hand-rolled `TEST_HOME_ENV_MUTEX` like the Gemini tests use, or `serial_test::serial`) if the root cause is env-var contention.
+- For `shared_codex_thread_setup_persist_failure_does_not_tear_down_runtime` specifically: if the flake is temp-file path collision, switch to `tempfile::tempdir()` with unique per-test directories.
+- Add a regression test harness that runs each flagged test 20 times back-to-back in the batch context to confirm the fix.
+
+## Stale `src/tests.rs` can reappear in the working tree alongside `src/tests/mod.rs`
+
+**Severity:** Low - during the April 16 session split of `src/tests.rs` into the `src/tests/` directory, a copy of the original pre-split file was observed reappearing in the working tree as a staged "new file" after later commits. The cause is not fully understood (possibly an IDE cache, a tool operation that restored an earlier snapshot, or accidental `git add` glob behavior). Rustc errors out with `E0761: file for module 'tests' found at both "src\tests.rs" and "src\tests\mod.rs"` under `cargo check --tests`, though `cargo test --bin termal` can sometimes still resolve the module to `src/tests/mod.rs` and pass, masking the problem.
+
+**Current behavior:**
+- The stale file reappeared at least once after the directory form was already committed; it was staged as `new file: src/tests.rs`.
+- `cargo check --tests` fails immediately; `cargo test --bin termal` may or may not, depending on invocation path.
+
+**Proposal:**
+- Add a `.gitignore` or `.gitattributes` guard against a literal `src/tests.rs` path while the directory form is in use.
+- Prefer running `cargo check --tests` (not just `cargo test`) in local verification, since the bin-only invocation can miss the ambiguity.
+- If the reappearance was an IDE-side artifact, consider documenting the offending tool so future contributors avoid the same mistake.
+
 ## Server restart without browser refresh can lose the last streamed message
 
 **Severity:** Medium - restarting the backend process while the browser tab is still open can make the most recent assistant message disappear from the UI, because the persist thread has a small window between "commit fires" and "row is durably in SQLite" during which an un-drained mutation is lost on kill.
