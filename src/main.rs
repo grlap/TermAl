@@ -372,6 +372,7 @@ include!("remote.rs");
 include!("state.rs");
 include!("workspace_watch.rs");
 include!("codex_discovery.rs");
+include!("codex_validation.rs");
 include!("persist.rs");
 include!("runtime.rs");
 include!("acp.rs");
