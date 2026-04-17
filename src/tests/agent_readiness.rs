@@ -1,16 +1,25 @@
-// Agent readiness cache behavior — TTL expiry, stale-cache fallback,
-// invalidation via app-settings updates, refresh on session create, SSE
-// vs API response matching, and the `warningDetail` camelCase
-// serialization contract.
+// Agent readiness cache behavior.
 //
-// Extracted from tests.rs — cohesive cluster (previously lines
-// 4255-4587) covering the agent readiness snapshot/refresh surface
-// and its interaction with `update_app_settings` and `create_session`.
+// "Agent readiness" is TermAl's per-agent availability snapshot: for each
+// supported agent (Claude, Codex, Gemini, Cursor) it reports whether the
+// local CLI is installed, reachable on PATH, and correctly versioned, plus
+// any soft warnings (e.g. Codex on Windows asking the user to route shell
+// commands through WSL). Determining readiness requires spawning `which
+// claude` / `which codex` / etc. to probe the filesystem, which is
+// measurably slow on Windows — so the result is cached on `AppState` and
+// reused across hot-path snapshots rather than recomputed on every
+// `/api/state` call. The cache is refreshed lazily via TTL expiry and
+// eagerly via explicit invalidation whenever app settings change or a new
+// session is created. The wire contract requires `AgentReadiness` to
+// serialize `warning_detail` as camelCase `warningDetail`, omitting the
+// field entirely when `None`.
 
 use super::*;
 
 
-// Tests that Codex Windows warnings point users toward WSL when shell parsing fails upstream.
+// Pins codex_windows_shell_warning() to the current platform: Some(_) mentioning
+// "WSL" on Windows, None elsewhere. Guards against accidentally surfacing the
+// warning on non-Windows builds or dropping the WSL hint on Windows.
 #[test]
 fn codex_windows_shell_warning_matches_platform() {
     if cfg!(windows) {
@@ -22,7 +31,10 @@ fn codex_windows_shell_warning_matches_platform() {
     }
 }
 
-// Tests that Codex readiness reflects runtime CLI detection and warning wiring.
+// Pins codex_agent_readiness() to stay in sync with runtime CLI resolution:
+// when a command_path is resolved, status is Ready and non-blocking with the
+// Windows warning attached; when missing, status is Missing/blocking with
+// install guidance. Guards against the two halves drifting apart.
 #[test]
 fn codex_agent_readiness_matches_runtime_resolution() {
     let readiness = codex_agent_readiness();
@@ -73,9 +85,10 @@ fn sentinel_agent_readiness_snapshot() -> Vec<AgentReadiness> {
     ]
 }
 
-// Tests that hot-path snapshots use the cached readiness value even when the
-// cache TTL has expired.  `snapshot_from_inner` deliberately skips refresh
-// because it runs under the `inner` mutex where filesystem I/O is unsafe.
+// Pins snapshot_from_inner() to always return the cached readiness even when
+// the TTL has expired, because it runs under the `inner` mutex where blocking
+// filesystem probes are unsafe. Guards against someone adding a refresh call
+// that would deadlock or stall every `/api/state` request.
 #[test]
 fn snapshot_from_inner_uses_cached_agent_readiness_when_cache_is_stale() {
     let state = test_app_state();
@@ -101,7 +114,10 @@ fn snapshot_from_inner_uses_cached_agent_readiness_when_cache_is_stale() {
     assert_eq!(snapshot.agent_readiness, sentinel);
 }
 
-// Tests that app-settings invalidation refreshes readiness before returning a full snapshot.
+// Pins update_app_settings() to refresh the readiness cache and return a
+// fresh (non-sentinel) snapshot, and to clear the `invalidated` flag once
+// refreshed. Guards against app-settings responses leaking stale readiness
+// to the client after preferences change.
 #[test]
 fn update_app_settings_refreshes_invalidated_agent_readiness_cache() {
     let state = test_app_state();
@@ -147,8 +163,10 @@ fn update_app_settings_refreshes_invalidated_agent_readiness_cache() {
     assert!(!cache.invalidated);
 }
 
-// Tests that `snapshot()` refreshes agent readiness when the TTL has expired
-// but the cache was not explicitly invalidated.
+// Pins snapshot() (the outer, non-locked variant) to refresh readiness on
+// TTL expiry even without explicit invalidation, replacing the sentinel with
+// a real collect_agent_readiness() result. Guards against the TTL becoming
+// purely cosmetic while the cache is served forever.
 #[test]
 fn snapshot_refreshes_agent_readiness_when_ttl_expires() {
     let state = test_app_state();
@@ -179,9 +197,10 @@ fn snapshot_refreshes_agent_readiness_when_ttl_expires() {
     assert!(!cache.invalidated);
 }
 
-// Tests that hot-path snapshots use the cached readiness value even when the
-// cache has been explicitly invalidated.  Together with the TTL-stale variant
-// above, this confirms `snapshot_from_inner` never refreshes under any conditions.
+// Pins snapshot_from_inner() to return the cached readiness even when the
+// cache is explicitly invalidated but still within TTL. Together with the
+// TTL-stale variant above, guards the invariant that snapshot_from_inner
+// never refreshes under any staleness signal.
 #[test]
 fn snapshot_from_inner_uses_cached_agent_readiness_when_cache_is_invalidated() {
     let state = test_app_state();
@@ -206,9 +225,10 @@ fn snapshot_from_inner_uses_cached_agent_readiness_when_cache_is_invalidated() {
     assert_eq!(snapshot.agent_readiness, sentinel);
 }
 
-// Tests that `update_app_settings` publishes an SSE event whose revision and
-// agent readiness match the returned API response, eliminating the stale-SSE /
-// duplicate-revision race.
+// Pins update_app_settings() so the state event it publishes shares the same
+// revision and agent_readiness as the returned API response. Guards against
+// the stale-SSE / duplicate-revision race where subscribers would see a
+// different readiness snapshot than the HTTP caller.
 #[test]
 fn update_app_settings_sse_matches_api_response() {
     let state = test_app_state();
@@ -255,8 +275,10 @@ fn update_app_settings_sse_matches_api_response() {
     assert_eq!(published.agent_readiness, api_response.agent_readiness);
 }
 
-// Tests that `create_session` refreshes the agent readiness cache so the SSE
-// event and API response carry fresh (non-sentinel) readiness.
+// Pins create_session() to pre-refresh the readiness cache before mutating
+// state, so the next full snapshot is fresh. Also confirms the create path
+// publishes a SessionCreated delta (not a full state event) and that the
+// delta's revision and session_id match the API response.
 #[test]
 fn create_session_refreshes_agent_readiness_cache() {
     let state = test_app_state();
@@ -314,7 +336,10 @@ fn create_session_refreshes_agent_readiness_cache() {
     }
 }
 
-// Tests that AgentReadiness serializes warning_detail as warningDetail.
+// Pins the AgentReadiness serde contract: `warning_detail` must serialize as
+// camelCase `warningDetail` when set, and must be omitted entirely when None.
+// Guards against a rename or serde-attribute change breaking the TypeScript
+// client that consumes `/api/state`.
 #[test]
 fn agent_readiness_serialization_emits_warning_detail_camel_case() {
     let readiness = AgentReadiness {

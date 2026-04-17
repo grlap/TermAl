@@ -1,15 +1,34 @@
-// Instruction search traversal tests — phrase search returning all roots,
-// directory discovery edge expansion, stopping at generic docs, transitive
-// walks through instructionish docs, ignoring internal-only termal roots
-// for Claude reviewer sessions, 404 for missing sessions, and the small
-// `read_instruction_document` not-found check.
+// Tests for TermAl's "instruction search" surface. When the user searches
+// for a phrase, the backend walks a graph rooted at the workdir's well-known
+// instruction docs (CLAUDE.md, AGENTS.md, GEMINI.md, .claude/commands/*.md,
+// .claude/reviewers/*.md, .cursorrules, skill SKILL.md files, etc.) and
+// returns every root that transitively references a document containing
+// the phrase, with the edge path that reached it.
 //
-// Extracted from tests.rs — main cluster plus one scattered document
-// helper test.
+// Traversal is kind-sensitive. "Instructionish" docs (roots, commands,
+// reviewers, skills, rules files) are followed transitively so a phrase
+// buried in a chained instruction doc still surfaces its real entry point.
+// "Generic" docs (README, plain docs/*.md) are classified as
+// ReferencedInstruction and are NOT walked further — otherwise a single
+// README link would drag every doc in the repo into the graph.
+//
+// Claude reviewer sessions additionally drop roots under TermAl's own
+// `.termal/` tree (internal skill-creator SKILL.md, etc.) so the product's
+// own scaffolding is never exposed as user-authored instruction context.
+//
+// Production surfaces under test: `search_instruction_phrase`,
+// `build_instruction_search_graph`, `read_instruction_document`, and
+// `classify_instruction_document_kind`. All traversal helpers live in
+// `src/instructions.rs` (extracted earlier this session); the HTTP surface
+// is `src/api.rs::search_instructions`.
 
 use super::*;
 
-// Tests that instruction search returns all roots for a phrase.
+// Pins the fan-in shape: when two top-level roots (AGENTS.md and CLAUDE.md)
+// both reference the same doc, a match in that doc reports BOTH roots in
+// sorted order, each with a one-step edge path landing on the matched path.
+// Guards against regressions that would silently drop duplicate roots or
+// collapse the graph to a single arbitrary entry point.
 #[test]
 fn instruction_search_returns_all_roots_for_a_phrase() {
     let root = std::env::temp_dir().join(format!("termal-instruction-search-{}", Uuid::new_v4()));
@@ -69,7 +88,11 @@ fn instruction_search_returns_all_roots_for_a_phrase() {
     fs::remove_dir_all(root).unwrap();
 }
 
-// Tests that instruction search expands directory discovery edges.
+// Pins the `DirectoryDiscovery` edge: a command file that textually
+// references a directory like `.claude/reviewers` should cause every `.md`
+// in that directory to become reachable, even without an explicit per-file
+// link. Guards against losing the directory-scan step that lets reviewers
+// be discovered via shell globs embedded in command prose.
 #[test]
 fn instruction_search_expands_directory_discovery_edges() {
     let root = std::env::temp_dir().join(format!(
@@ -122,7 +145,11 @@ fn instruction_search_expands_directory_discovery_edges() {
     fs::remove_dir_all(root).unwrap();
 }
 
-// Tests that instruction search stops at generic referenced docs.
+// Pins the "stop at generic" rule: AGENTS.md -> README.md -> docs/bugs.md
+// -> docs/features/instruction-debugger.md. README is generic, so traversal
+// halts there and the phrase buried two hops past it is NOT reported.
+// Guards against broadening `supports_transitive_instruction_edges` to
+// follow ReferencedInstruction docs, which would pull the whole repo in.
 #[test]
 fn instruction_search_stops_at_generic_referenced_docs() {
     let root = std::env::temp_dir().join(format!(
@@ -160,7 +187,11 @@ fn instruction_search_stops_at_generic_referenced_docs() {
     fs::remove_dir_all(root).unwrap();
 }
 
-// Tests that instruction search walks instructionish docs transitively.
+// Pins transitive walks through instructionish docs: AGENTS.md ->
+// docs/instructions/backend.md -> docs/instructions/shared.md. Files under
+// `docs/instructions/` classify as RulesInstruction, so both hops are
+// traversed and the two-step edge path is preserved in order. Guards
+// against regressing the transitive branch for non-root instruction docs.
 #[test]
 fn instruction_search_walks_instructionish_docs_transitively() {
     let root =
@@ -216,7 +247,11 @@ fn instruction_search_walks_instructionish_docs_transitively() {
     fs::remove_dir_all(root).unwrap();
 }
 
-// Tests that instruction search ignores internal TermAl roots for Claude reviewers.
+// Pins the internal-root suppression for Claude reviewer sessions:
+// a SKILL.md under `.termal/codex-home/.../skills/.system/` must NOT show
+// up as a root, and its outgoing references (here, README.md) must not
+// re-enter the graph through that back door. Guards against leaking
+// TermAl's own scaffolding as user-visible instruction context.
 #[test]
 fn instruction_search_ignores_internal_termal_roots_for_claude_reviewers() {
     let root = std::env::temp_dir().join(format!(
@@ -305,7 +340,10 @@ fn instruction_search_ignores_internal_termal_roots_for_claude_reviewers() {
     fs::remove_dir_all(root).unwrap();
 }
 
-// Tests that instruction search returns not found for missing session.
+// Pins the HTTP shape for an unknown session id: `search_instructions` on
+// `AppState` returns a 404 ApiError with the literal "session not found"
+// message, not a 500 or silent empty response. Guards the session lookup
+// branch that the `/api/instructions` handler relies on for clean 404s.
 #[test]
 fn instruction_search_returns_not_found_for_missing_session() {
     let state = test_app_state();
@@ -317,7 +355,10 @@ fn instruction_search_returns_not_found_for_missing_session() {
     assert_eq!(error.message, "session not found");
 }
 
-// Tests that read instruction document returns not found for missing file.
+// Pins `read_instruction_document`'s missing-file behaviour: a path that
+// does not exist on disk yields a 404 ApiError whose message contains
+// "instruction file not found", rather than an IO-error 500. Guards the
+// not-found branch used when the frontend opens a stale instruction path.
 #[test]
 fn read_instruction_document_returns_not_found_for_missing_file() {
     let workdir =

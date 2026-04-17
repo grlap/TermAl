@@ -1,15 +1,22 @@
-// Agent command discovery tests — reading `.claude/commands/*.md` templates,
-// extracting Claude native slash commands from the `initialize` response,
-// caching fallbacks, session command revision bumps, and 404 for missing
-// sessions.
+// Claude Code exposes slash commands from two sources: project
+// `.claude/commands/*.md` template files in the session workdir, and
+// "native" slash commands that Claude advertises inline in its `initialize`
+// control response (bundled, project, and user-scoped entries). TermAl
+// merges both into one sorted list served to the frontend command palette.
 //
-// Extracted from tests.rs as a contiguous nine-test block covering
-// `read_claude_agent_commands`, `extract_claude_native_agent_commands`,
-// and `sync_session_agent_commands`.
+// Surfaces exercised: `read_claude_agent_commands` in `api.rs` (filesystem
+// scan), `claude_agent_commands` in `runtime.rs` (initialize-response
+// parser for native slash commands), and `sync_session_agent_commands` on
+// `AppState` (cache merge + revision bump). The revision counter matters
+// because the web UI polls session `agent_commands_revision` to invalidate
+// its palette cache; a missed bump leaves stale commands on screen.
 
 use super::*;
 
-// Tests that reads Claude agent commands from markdown files.
+// Pins `read_claude_agent_commands` to the top level of `.claude/commands/`,
+// `*.md` only, first non-empty line as description, sorted by name.
+// Guards against recursing into subdirectories, picking up non-markdown
+// siblings, or scrambling the ordering the palette relies on.
 #[test]
 fn reads_claude_agent_commands_from_markdown_files() {
     let root = std::env::temp_dir().join(format!("termal-agent-commands-{}", Uuid::new_v4()));
@@ -74,7 +81,10 @@ Inspect diffs.
     fs::remove_dir_all(root).unwrap();
 }
 
-// Tests that returns empty agent commands when commands directory is missing.
+// Pins `read_claude_agent_commands` to returning an empty vector (not an
+// error) when the project has no `.claude/commands/` directory at all.
+// Guards against a missing directory becoming a hard failure that blocks
+// the command palette for every project without template commands.
 #[test]
 fn returns_empty_agent_commands_when_commands_directory_is_missing() {
     let root =
@@ -87,7 +97,10 @@ fn returns_empty_agent_commands_when_commands_directory_is_missing() {
     fs::remove_dir_all(root).unwrap();
 }
 
-// Tests that returns agent commands for non Claude sessions.
+// Pins `AppState::list_agent_commands` to still returning
+// `.claude/commands/*.md` templates when the session's agent is Codex;
+// template files are project-owned, not agent-owned.
+// Guards against hiding project prompt templates behind an agent-kind gate.
 #[test]
 fn returns_agent_commands_for_non_claude_sessions() {
     let root = std::env::temp_dir().join(format!("termal-agent-commands-codex-{}", Uuid::new_v4()));
@@ -129,7 +142,10 @@ Use the active agent's tools.
     fs::remove_dir_all(root).unwrap();
 }
 
-// Tests that extracts Claude native agent commands from initialize response.
+// Pins `claude_agent_commands` to parsing the `response.response.commands`
+// array into `NativeSlash` entries, stamping `content = "/<name>"` and
+// preserving `argumentHint`, and tagging sources as bundled vs. project.
+// Guards palette scope grouping that depends on those source labels.
 #[test]
 fn extracts_claude_native_agent_commands_from_initialize_response() {
     let message = json!({
@@ -176,7 +192,11 @@ fn extracts_claude_native_agent_commands_from_initialize_response() {
     );
 }
 
-// Tests that extracts Claude native agent commands filters empty names and normalizes user suffix.
+// Pins `claude_agent_commands` to dropping entries with blank/whitespace
+// names and recognizing the `(user)` description suffix as a
+// `Claude user command` source tag.
+// Guards against whitespace entries polluting the palette and scope
+// labels leaking into visible description text.
 #[test]
 fn extracts_claude_native_agent_commands_filters_empty_names_and_normalizes_user_suffix() {
     let message = json!({
@@ -211,7 +231,10 @@ fn extracts_claude_native_agent_commands_filters_empty_names_and_normalizes_user
     );
 }
 
-// Tests that extracts Claude native agent commands returns none for empty command list.
+// Pins `claude_agent_commands` to returning `None` (not `Some(vec![])`)
+// when Claude's initialize response carries an empty commands array.
+// Guards the "no update" signal that callers use to skip bumping the
+// session command revision on no-op init payloads.
 #[test]
 fn extracts_claude_native_agent_commands_returns_none_for_empty_command_list() {
     let message = json!({
@@ -227,7 +250,11 @@ fn extracts_claude_native_agent_commands_returns_none_for_empty_command_list() {
     assert_eq!(claude_agent_commands(&message), None);
 }
 
-// Tests that returns cached Claude native commands alongside template fallbacks.
+// Pins the `sync_session_agent_commands` + `list_agent_commands` round-trip
+// to merging cached native slash commands with filesystem templates, sorted
+// by name and preserving per-entry `kind`, `source`, and `argument_hint`.
+// Guards against native entries shadowing templates (or vice versa) when
+// the same name appears in both sources.
 #[test]
 fn returns_cached_claude_native_commands_alongside_template_fallbacks() {
     let root = std::env::temp_dir().join(format!(
@@ -314,7 +341,11 @@ fn returns_cached_claude_native_commands_alongside_template_fallbacks() {
     let _ = fs::remove_dir_all(&root);
 }
 
-// Tests that sync session agent commands bumps visible session command revision.
+// Pins `AppState::sync_session_agent_commands` to bumping both the global
+// state `revision` and the session's `agent_commands_revision` by exactly
+// one, visible in the next `snapshot()`.
+// Guards the frontend polling contract: stale palette caches only refresh
+// when `agent_commands_revision` increases.
 #[test]
 fn sync_session_agent_commands_bumps_visible_session_command_revision() {
     let state = test_app_state();
@@ -368,7 +399,10 @@ fn sync_session_agent_commands_bumps_visible_session_command_revision() {
     );
 }
 
-// Tests that returns not found for missing agent command session.
+// Pins `AppState::list_agent_commands` to returning a 404 `ApiError` with
+// the message "session not found" when the session id is unknown.
+// Guards the HTTP status contract that `GET /api/sessions/:id/commands`
+// relies on to distinguish missing sessions from empty command lists.
 #[test]
 fn returns_not_found_for_missing_agent_command_session() {
     let state = test_app_state();

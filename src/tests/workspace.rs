@@ -1,10 +1,35 @@
 //! Workspace layout HTTP routes and workspace file-watch scope tests.
-//! Extracted from `tests.rs` so each domain lives in its own sibling
-//! module under `tests/`.
+//!
+//! A "workspace layout" is the UI's pane tree plus presentation knobs
+//! (control-panel side, theme, font sizes, density) and the ids of the
+//! sessions/projects pinned into each pane. The frontend PUTs the full
+//! document to `/api/workspaces/{id}` on every edit, GETs it on reload,
+//! and lists all saved layouts via `/api/workspaces`; persistence is what
+//! lets a browser refresh restore the exact pane arrangement.
+//!
+//! A `WorkspaceFileWatchScope` is a `(root_path, Option<session_id>)` pair
+//! the backend hands to `notify`: project roots watch with no session, and
+//! each local session workdir watches with its own session id. The minimum
+//! scope set is "one scope per distinct (root, session) tuple" so we never
+//! register duplicate watchers or emit duplicate change events.
+//!
+//! `merge_workspace_file_change_kind` coalesces bursts within the debounce
+//! window: a delete immediately followed by a create (or vice versa) is
+//! folded into a single Modified event so editors that save via rename
+//! look like a normal edit. `prune_nested_workspace_file_watch_roots`
+//! drops any root that lives under another already-watched root, because
+//! `notify` runs recursively and a nested root would double-emit every
+//! change. Session-scoped hints get attached when a path falls under a
+//! session workdir so the event routes to the right session transcript
+//! instead of firing as a generic project-root fallback.
 
 use super::*;
 
-// Tests that workspace layout routes round-trip put, get, and list calls.
+// Pins the PUT/GET/list contract for a workspace layout: create stamps
+// revision=1, update stamps revision=2 with the new body echoed back,
+// subsequent GET and list entries must agree on revision and updated_at.
+// Guards against regressions in round-trip fidelity of the full document
+// (panes, side, theme, style, font sizes, density).
 #[tokio::test]
 async fn workspace_layout_routes_round_trip_put_get_and_list() {
     let state = test_app_state();
@@ -164,7 +189,10 @@ async fn workspace_layout_routes_round_trip_put_get_and_list() {
     let _ = fs::remove_file(state.persistence_path.as_path());
 }
 
-// Tests that workspace layout list route orders newer documents first.
+// Pins ordering of `/api/workspaces`: newest `updated_at` first, with
+// ties broken by ascending workspace id so the list is deterministic.
+// Guards against regressions where the frontend's "recent workspaces"
+// surface would shuffle or lose its tie-break rule.
 #[tokio::test]
 async fn workspace_layout_list_route_orders_workspaces_by_updated_at_desc() {
     let state = test_app_state();
@@ -234,7 +262,10 @@ async fn workspace_layout_list_route_orders_workspaces_by_updated_at_desc() {
     let _ = fs::remove_file(state.persistence_path.as_path());
 }
 
-// Tests that delete workspace layout route removes a saved workspace and returns the remaining summaries.
+// Pins DELETE semantics: removing one layout returns the remaining
+// summaries in the response body, and a follow-up GET on the deleted id
+// returns 404 with the canonical "workspace layout not found" error.
+// Guards against leaving stale documents in memory after deletion.
 #[tokio::test]
 async fn delete_workspace_layout_route_removes_saved_workspace() {
     let state = test_app_state();
@@ -288,7 +319,9 @@ async fn delete_workspace_layout_route_removes_saved_workspace() {
     let _ = fs::remove_file(state.persistence_path.as_path());
 }
 
-// Tests that delete workspace layout route returns not found for missing IDs.
+// Pins that DELETE on an unknown workspace id returns 404 with the
+// standard error payload rather than silently succeeding.
+// Guards against accidental idempotent deletes masking client bugs.
 #[tokio::test]
 async fn delete_workspace_layout_route_returns_not_found_for_missing_id() {
     let state = test_app_state();
@@ -308,7 +341,10 @@ async fn delete_workspace_layout_route_returns_not_found_for_missing_id() {
     let _ = fs::remove_file(state.persistence_path.as_path());
 }
 
-// Tests that get workspace layout route returns not found for missing IDs.
+// Pins that GET on an unknown workspace id returns 404 with the same
+// error payload shape as DELETE, so the frontend reload path can
+// distinguish "never saved" from other failures.
+// Guards against falling back to empty defaults or 500 responses.
 #[tokio::test]
 async fn get_workspace_layout_route_returns_not_found_for_missing_id() {
     let state = test_app_state();
@@ -328,7 +364,10 @@ async fn get_workspace_layout_route_returns_not_found_for_missing_id() {
     let _ = fs::remove_file(state.persistence_path.as_path());
 }
 
-// Tests that put workspace layout route rejects malformed payloads.
+// Pins 422 rejection for three failure modes: missing controlPanelSide,
+// missing workspace, and an invalid controlPanelSide enum variant. Each
+// rejection must name the offending field so clients can surface it.
+// Guards against silently storing partial or malformed layouts.
 #[tokio::test]
 async fn put_workspace_layout_route_rejects_malformed_payloads() {
     let state = test_app_state();
@@ -413,7 +452,11 @@ async fn put_workspace_layout_route_rejects_malformed_payloads() {
     let _ = fs::remove_file(state.persistence_path.as_path());
 }
 
-// Tests that updating an existing workspace layout advances the global revision and publishes state.
+// Pins that a second PUT on the same workspace bumps both the layout's
+// own revision and the global state revision, and publishes a fresh
+// StateResponse snapshot on the event stream so subscribed clients
+// observe the update.
+// Guards against stale caches or lost-update races on workspace edits.
 #[test]
 fn updating_existing_workspace_layout_advances_global_revision_and_publishes_state() {
     let state = test_app_state();
@@ -487,6 +530,11 @@ fn updating_existing_workspace_layout_advances_global_revision_and_publishes_sta
 }
 
 
+// Pins that a Delete+Create pair in either order folds into Modified
+// when coalesced inside the debounce window.
+// Guards against misreporting atomic-rename saves (common on editors
+// that write to a tempfile and rename over the target) as delete/create
+// churn instead of a single modification.
 #[test]
 fn merge_workspace_file_change_kind_treats_delete_create_as_modified() {
     assert_eq!(
@@ -509,6 +557,11 @@ fn canonical_test_watch_path(path: &FsPath) -> PathBuf {
     normalize_user_facing_path(&fs::canonicalize(path).expect("test path should canonicalize"))
 }
 
+// Pins that collect_workspace_file_watch_scopes emits an unscoped
+// entry for every local project root and a session-scoped entry for
+// every local session workdir.
+// Guards against losing watch coverage for either projects or sessions,
+// which would make the frontend miss file-change notifications.
 #[test]
 fn workspace_file_watch_scopes_include_project_and_session_roots() {
     let state = test_app_state();
@@ -542,6 +595,10 @@ fn workspace_file_watch_scopes_include_project_and_session_roots() {
     fs::remove_dir_all(root).unwrap();
 }
 
+// Pins that a root contained inside another root gets dropped
+// regardless of input order, leaving only the outermost root.
+// Guards against registering two recursive `notify` watchers on
+// overlapping trees, which would double-emit every change event.
 #[test]
 fn workspace_file_watch_roots_prune_nested_roots() {
     let root = std::env::temp_dir().join(format!("termal-watch-nested-{}", Uuid::new_v4()));
@@ -561,6 +618,11 @@ fn workspace_file_watch_roots_prune_nested_roots() {
     fs::remove_dir_all(root).unwrap();
 }
 
+// Pins that a changed path under overlapping scopes emits one event per
+// unique (root, session) pair, favoring the deepest matching root and
+// deduping exact-duplicate scopes.
+// Guards against duplicate session notifications and against routing a
+// session-scoped change to the wrong session transcript.
 #[test]
 fn workspace_file_changes_from_path_uses_specific_unique_scopes() {
     let root = std::env::temp_dir().join(format!("termal-watch-change-{}", Uuid::new_v4()));
@@ -615,6 +677,10 @@ fn workspace_file_changes_from_path_uses_specific_unique_scopes() {
     fs::remove_dir_all(root).unwrap();
 }
 
+// Pins that when no watch scope matches a path the event still fires
+// once with `root_path = None` and `session_id = None`.
+// Guards against silently dropping changes for files that briefly fall
+// outside known roots (e.g. generated files, mid-reconcile scopes).
 #[test]
 fn workspace_file_changes_from_path_emits_unscoped_fallback() {
     let root = std::env::temp_dir().join(format!("termal-watch-fallback-{}", Uuid::new_v4()));
