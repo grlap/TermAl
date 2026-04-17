@@ -362,6 +362,109 @@ describe("DiffPanel", () => {
     expect(screen.queryByRole("button", { name: "Rendered Markdown" })).toBeNull();
   });
 
+  // Phase 4 of `docs/features/source-renderers.md`: non-Markdown
+  // files with renderable regions (e.g., `.mmd` Mermaid files) get
+  // a read-only "Rendered" diff view that composes the detected
+  // regions via MarkdownContent's existing safe Mermaid/KaTeX
+  // rendering path.
+  it("exposes a Rendered mode for `.mmd` diffs with a complete-document after side", async () => {
+    fetchFileMock.mockResolvedValue({
+      content: "flowchart TD\n  A --> B\n",
+      language: null,
+      path: "/repo/diagrams/flow.mmd",
+    });
+
+    await act(async () => {
+      render(
+        <DiffPanel
+          appearance="dark"
+          fontSizePx={13}
+          changeType="edit"
+          diff={["@@ -1 +1 @@", "-flowchart TD", "+flowchart TD", "  A --> B"].join("\n")}
+          diffMessageId="diff-mmd"
+          filePath="/repo/diagrams/flow.mmd"
+          documentContent={{
+            before: {
+              content: "flowchart TD\n",
+              source: "worktree",
+            },
+            after: {
+              content: "flowchart TD\n  A --> B\n",
+              source: "worktree",
+            },
+            isCompleteDocument: true,
+            can_edit: true,
+            edit_blocked_reason: null,
+            note: null,
+          }}
+          gitSectionId="unstaged"
+          language={null}
+          sessionId="session-1"
+          workspaceRoot="/repo"
+          onOpenPath={() => {}}
+          onSaveFile={async () => {}}
+          summary="Updated diagram"
+        />,
+      );
+    });
+
+    // The "Rendered" toggle is present because the registry detected
+    // a whole-file Mermaid region on the after side.
+    const renderedButton = screen.getByRole("button", { name: "Rendered" });
+    expect(renderedButton).toBeInTheDocument();
+    // "Rendered Markdown" is NOT shown because `.mmd` is not a
+    // Markdown target — the two modes are mutually exclusive.
+    expect(screen.queryByRole("button", { name: "Rendered Markdown" })).toBeNull();
+
+    await clickAndSettle(renderedButton);
+
+    // The view renders a synthetic Markdown fragment; the regions'
+    // line-range header should appear.
+    expect(screen.getByText(/Lines 1[–-]3/)).toBeInTheDocument();
+    // The underlying Mermaid renderer was invoked for the fence.
+    await waitFor(() => {
+      expect(mermaidRenderMock).toHaveBeenCalled();
+    });
+  });
+
+  it("labels the Rendered diff preview as Patch-only when documentContent is missing", async () => {
+    fetchFileMock.mockResolvedValue({
+      content: "flowchart TD\n  A --> B\n",
+      language: null,
+      path: "/repo/diagrams/flow.mmd",
+    });
+
+    await act(async () => {
+      render(
+        <DiffPanel
+          appearance="dark"
+          fontSizePx={13}
+          changeType="edit"
+          diff={["@@ -1 +1 @@", "-flowchart TD", "+flowchart TD", "  A --> B"].join("\n")}
+          diffMessageId="diff-mmd-patch-only"
+          filePath="/repo/diagrams/flow.mmd"
+          // No documentContent prop at all — the backend did not
+          // enrich the diff with the full before/after sides.
+          gitSectionId="unstaged"
+          language={null}
+          sessionId="session-1"
+          workspaceRoot="/repo"
+          onOpenPath={() => {}}
+          onSaveFile={async () => {}}
+          summary="Updated diagram"
+        />,
+      );
+    });
+
+    // With `fetchFileMock` supplying the worktree content, the
+    // registry still finds the Mermaid region, so the Rendered
+    // button surfaces. But the preview labels itself Patch-only
+    // because `documentContent.isCompleteDocument` was not set.
+    const renderedButton = await screen.findByRole("button", { name: "Rendered" });
+    await clickAndSettle(renderedButton);
+    expect(screen.getByText(/Patch-only rendering/i)).toBeInTheDocument();
+  });
+
   it("renders staged Markdown from the index document side instead of the worktree file", async () => {
     fetchFileMock.mockResolvedValue({
       content: "# Worktree document\n\nThis is not staged.\n",
