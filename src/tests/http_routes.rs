@@ -1,15 +1,27 @@
-// HTTP route integration tests — `POST /api/sessions`, `GET /api/sessions/{id}`,
-// `GET /api/state` SSE streaming (initial state + deltas, workspace
-// layout summaries, orchestrator creation), and Codex thread action
-// routes (update-state, rollback history fallback, fork creation).
+// End-to-end HTTP route integration tests. Every case spins up the real
+// `axum::Router` returned by `app_router(state)`, fires an actual HTTP
+// request through `tower::ServiceExt`, and parses the real JSON or SSE
+// response bytes — no handler is called directly.
 //
-// Extracted from tests.rs — contiguous cluster (previously lines
-// 1653-2404) of `async fn` route tests that exercise the HTTP layer
-// end-to-end via `axum::Router`.
+// Contrast with the domain-specific submodules (sessions, orchestrators,
+// workspaces, ...), which test production logic via direct `AppState`
+// method calls. This module instead confirms the router wires request
+// shapes, extractors, and response types (`StatusCode`,
+// `CreateSessionResponse`, `SessionResponse`, `StateResponse`) correctly.
+// SSE cases use `collect_sse_events` to drain the event stream and verify
+// initial-state + delta ordering. The Codex thread action routes proxy to
+// real `SharedCodex` runtime calls; tests stub those via fake JSON-RPC
+// responses on a test TCP server driven by `test_shared_codex_runtime`.
+// Production surfaces: `app_router` plus the `create_session`,
+// `get_session`, `state_events`, `archive_codex_thread`, `unarchive_codex_thread`,
+// `rollback_codex_thread`, `fork_codex_thread` handlers in src/api.rs.
 
 use super::*;
 
-// Tests that create session route returns created response.
+// Pins `POST /api/sessions` — asserts 201 Created with a
+// `CreateSessionResponse` whose `session` field carries the normalized
+// workdir and default `Agent::Codex`. Guards against handler regressions
+// that drop the session payload or return the wrong status code.
 #[tokio::test]
 async fn create_session_route_returns_created_response() {
     let state = test_app_state();
@@ -44,8 +56,10 @@ async fn create_session_route_returns_created_response() {
     let _ = fs::remove_file(state.persistence_path.as_path());
 }
 
-// Tests that the full-session route returns one visible session without
-// requiring a full state snapshot.
+// Pins `GET /api/sessions/{id}` — asserts 200 OK with a `SessionResponse`
+// carrying the full `Session` and the current `revision`, without the
+// caller needing a full `StateResponse` snapshot. Guards against the
+// single-session handler drifting from the state snapshot revision.
 #[tokio::test]
 async fn get_session_route_returns_full_session() {
     let state = test_app_state();
@@ -112,7 +126,11 @@ fn fallback_state_events_payload_uses_supplied_revision() {
     assert_eq!(decoded.state.revision, 42);
 }
 
-// Tests that state events route streams initial state and live deltas.
+// Pins `GET /api/events` (SSE) — asserts the `text/event-stream`
+// content-type, that the first frame is a `state` event carrying a
+// `StateResponse`, and that a subsequent `push_message` produces a
+// live `delta` event with `type: "messageCreated"`. Guards against SSE
+// frame ordering or naming regressions.
 #[tokio::test]
 async fn state_events_route_streams_initial_state_and_live_deltas() {
     let state = test_app_state();
@@ -172,7 +190,11 @@ async fn state_events_route_streams_initial_state_and_live_deltas() {
     let _ = fs::remove_file(state.persistence_path.as_path());
 }
 
-// Tests that workspace layout mutations publish live SSE state updates with saved summaries.
+// Pins `GET /api/events` + `PUT/DELETE /api/workspaces/{id}` — asserts
+// every workspace-layout mutation (create, update, delete) republishes
+// a fresh `state` SSE frame whose `workspaces` summaries reflect the
+// new revision and control-panel side. Guards against layout mutations
+// that persist but fail to refresh the SSE stream.
 #[tokio::test]
 async fn state_events_route_streams_workspace_layout_summary_updates() {
     let state = test_app_state();
@@ -283,7 +305,12 @@ async fn state_events_route_streams_workspace_layout_summary_updates() {
     let _ = fs::remove_file(state.persistence_path.as_path());
 }
 
-// Tests that state events route streams orchestrator creation state and live orchestrator deltas.
+// Pins `GET /api/events` — asserts that creating an orchestrator
+// instance republishes the full `state` frame (including the new
+// instance and its session fan-out), and that pausing it emits a
+// `delta` frame with `type: "orchestratorsUpdated"` listing the
+// referenced sessions. Guards against orchestrator SSE routing
+// that drops status transitions or session references.
 #[tokio::test]
 async fn state_events_route_streams_orchestrator_creation_state_and_live_orchestrator_deltas() {
     let state = test_app_state();
@@ -393,7 +420,12 @@ async fn state_events_route_streams_orchestrator_creation_state_and_live_orchest
     let _ = fs::remove_file(state.persistence_path.as_path());
 }
 
-// Tests that Codex thread action routes update session state.
+// Pins `POST /api/sessions/{id}/codex/thread/{archive,unarchive,rollback}`
+// — asserts each action returns 200 OK with a `StateResponse` whose
+// session reflects the new `codex_thread_state`, and that rollback
+// replaces stale local messages with the freshly-returned thread
+// history. Guards against handler drift in the JSON-RPC thread action
+// routes and their session-state synchronisation.
 #[tokio::test]
 async fn codex_thread_action_routes_update_session_state() {
     let state = test_app_state();
@@ -549,7 +581,11 @@ async fn codex_thread_action_routes_update_session_state() {
     ));
 }
 
-// Tests that Codex thread rollback route falls back when history is unavailable.
+// Pins `POST /api/sessions/{id}/codex/thread/rollback` — asserts that
+// when Codex returns no `turns`, the handler still replies 200 OK with
+// a `StateResponse`, preserves the existing local history, and appends
+// a `Markdown` notice explaining the missing thread payload. Guards
+// against the fallback branch regressing into a 500 or silent data loss.
 #[tokio::test]
 async fn codex_thread_rollback_route_falls_back_when_history_is_unavailable() {
     let state = test_app_state();
@@ -631,7 +667,12 @@ async fn codex_thread_rollback_route_falls_back_when_history_is_unavailable() {
     ));
 }
 
-// Tests that Codex thread fork route returns created response.
+// Pins `POST /api/sessions/{id}/codex/thread/fork` — asserts 201 Created
+// with a `CreateSessionResponse` whose `session` carries the forked
+// `external_session_id`, `CodexThreadState::Active`, and the hydrated
+// user/agent messages rebuilt from the fake `thread/fork` JSON-RPC
+// response. Guards against fork regressions that drop thread metadata
+// or return the wrong status code.
 #[tokio::test]
 async fn codex_thread_fork_route_returns_created_response() {
     let state = test_app_state();

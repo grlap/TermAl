@@ -1,18 +1,26 @@
-// ACP + Gemini runtime configuration tests — `loadSession` capability
-// detection, session resume with/without load support, invalid-identifier
-// handling, interactive-shell setting defaults, dotenv path handling,
-// auth-method selection, and override-file writing.
-//
-// Extracted from tests.rs as a cohesive cluster covering
-// `acp_supports_session_load`, `acp_session_resume_*`, Gemini settings,
-// and `gemini_interactive_shell_warning` surfaces. A later
-// `gemini_invalid_session_load_falls_back_to_session_new` test is not
-// included here because it sits beyond the agent-readiness cluster in
-// mod.rs.
+// ACP (Agent Client Protocol) is the JSON-RPC dialect spoken by Claude Code,
+// Gemini CLI, and Cursor; TermAl implements the client side and drives each
+// agent through `initialize`, `session/new`, `session/load`, and prompt turns.
+// Resuming a session is optional: agents advertise support by setting
+// `agentCapabilities.loadSession` in their `initialize` response (with a legacy
+// top-level `capabilities` fallback). When the flag is absent — older or
+// partially-compliant agents — TermAl optimistically issues `session/load`
+// first and falls back to `session/new` only on a specific invalid-session
+// error shape, walking anyhow wrapper chains and nested `details` JSON up to a
+// bounded depth so deeply-wrapped errors still trigger the right branch.
+// Gemini CLI adds its own quirks: it reads `~/.gemini/settings.json` and
+// `.env` files from the home directory only, so workspace-local `.env` files
+// must be ignored for credentials (they can be committed to a repo and leak
+// keys). TermAl also writes an override settings file on Windows to force
+// `enableInteractiveShell=false` for headless ACP runs. Production surfaces
+// live in `src/runtime.rs`: `acp_supports_session_load`, `acp_session_resume`
+// via `ensure_acp_session_ready`, and the Gemini settings/env helpers.
 
 use super::*;
 
-// Tests that ACP initialize reads load-session support from agent capabilities.
+// Pins `acp_supports_session_load` reading the modern `agentCapabilities.loadSession`
+// boolean from an `initialize` response. Guards against drift in the JSON pointer
+// path or boolean polarity, which would silently break resume support detection.
 #[test]
 fn acp_supports_session_load_reads_agent_capabilities() {
     assert_eq!(
@@ -33,7 +41,10 @@ fn acp_supports_session_load_reads_agent_capabilities() {
     );
 }
 
-// Tests that ACP initialize also reads legacy capability envelopes.
+// Pins the legacy top-level `capabilities.loadSession` fallback and confirms an
+// empty initialize response returns `None` (unknown). Guards against dropping
+// the legacy envelope, which older agents still emit, or collapsing absent
+// to `Some(false)` and skipping the speculative `session/load` branch.
 #[test]
 fn acp_supports_session_load_reads_legacy_capabilities() {
     assert_eq!(
@@ -47,13 +58,18 @@ fn acp_supports_session_load_reads_legacy_capabilities() {
     assert_eq!(acp_supports_session_load(&json!({})), None);
 }
 
-// Tests that ACP runtimes do not assume session/load support before initialize reports it.
+// Pins `AcpRuntimeState::default().supports_session_load == None`. Guards
+// against a default of `Some(true)` or `Some(false)`, which would bias resume
+// behavior before `initialize` has actually been processed.
 #[test]
 fn acp_runtime_state_defaults_session_load_support_to_unknown() {
     assert_eq!(AcpRuntimeState::default().supports_session_load, None);
 }
 
-// Tests that ACP resumes still attempt session/load when initialize omitted the capability bit.
+// Pins the optimistic path: with `supports_session_load = None`, `ensure_acp_session_ready`
+// writes `session/load`, not `session/new`, and promotes the capability to
+// `Some(true)` on success. Guards against older agents being forced into fresh
+// sessions (losing history) when capability advertisement is missing.
 #[test]
 fn acp_session_resume_attempts_load_when_session_load_support_is_unknown() {
     let state = test_app_state();
@@ -166,7 +182,10 @@ fn acp_session_resume_attempts_load_when_session_load_support_is_unknown() {
     assert_eq!(runtime_state.supports_session_load, Some(true));
 }
 
-// Tests that ACP skips session/load when initialize explicitly reports it unsupported.
+// Pins the short-circuit: with `supports_session_load = Some(false)`,
+// `ensure_acp_session_ready` writes `session/new` and never `session/load`,
+// and the capability stays `Some(false)`. Guards against wasting a round-trip
+// (and surfacing a spurious error) against agents that explicitly opted out.
 #[test]
 fn acp_session_resume_skips_load_when_session_load_is_explicitly_unsupported() {
     let state = test_app_state();
@@ -283,14 +302,20 @@ fn acp_session_resume_skips_load_when_session_load_is_explicitly_unsupported() {
     );
     assert_eq!(runtime_state.supports_session_load, Some(false));
 }
-// Tests that Gemini invalid-session detection searches wrapped anyhow error chains.
+// Pins `is_gemini_invalid_session_load_error` matching "Invalid session identifier"
+// when it appears as an inner anyhow source, not just the outermost message.
+// Guards against a `.to_string()`-only check that would miss the substring once
+// a context like "session/load failed" is layered on top.
 #[test]
 fn gemini_invalid_session_load_error_matches_wrapped_chain_messages() {
     let err = anyhow::anyhow!("Invalid session identifier").context("session/load failed");
     assert!(is_gemini_invalid_session_load_error(&err));
 }
 
-// Tests that ACP invalid-session data inspection handles wrapper fields and depth limits.
+// Pins `acp_error_data_indicates_invalid_session_identifier` descending through
+// `details` wrapper fields and arrays while honoring the depth cap — 10 levels
+// match, 11 do not. Guards against unbounded recursion on hostile payloads and
+// against false negatives when agents wrap the marker in their own envelopes.
 #[test]
 fn acp_invalid_session_identifier_detection_handles_wrappers_and_depth_limits() {
     assert!(acp_error_data_indicates_invalid_session_identifier(
@@ -318,7 +343,10 @@ fn acp_invalid_session_identifier_detection_handles_wrappers_and_depth_limits() 
     ));
 }
 
-// Tests that Gemini settings overrides preserve existing fields while disabling interactive shell.
+// Pins `disable_gemini_interactive_shell_in_settings` flipping
+// `tools.shell.enableInteractiveShell` to `false` while leaving sibling keys
+// (`pager`, `security.auth.selectedType`) intact. Guards against a rewrite
+// that clobbers the user's auth selection or other shell preferences.
 #[test]
 fn disable_gemini_interactive_shell_in_settings_preserves_other_values() {
     let mut settings = json!({
@@ -351,7 +379,9 @@ fn disable_gemini_interactive_shell_in_settings_preserves_other_values() {
     );
 }
 
-// Tests that Gemini settings overrides create the full shell path from an empty object.
+// Pins the override helper creating the full `/tools/shell/enableInteractiveShell`
+// pointer path when the input is `{}`. Guards against a missing-key early return
+// that would leave headless runs with Gemini's interactive shell still on.
 #[test]
 fn disable_gemini_interactive_shell_in_settings_builds_shell_path_from_empty_object() {
     let mut settings = json!({});
@@ -364,7 +394,10 @@ fn disable_gemini_interactive_shell_in_settings_builds_shell_path_from_empty_obj
     );
 }
 
-// Tests that malformed Gemini settings do not block the Windows override path.
+// Pins `load_gemini_settings_json` returning `{}` (not panicking or propagating
+// the parse error) when the file contains broken JSON, and `gemini_selected_auth_type_from_settings_file`
+// returning `None`. Guards against a malformed user settings file bricking
+// TermAl's own override-file write or auth inspection on Windows.
 #[test]
 fn load_gemini_settings_json_ignores_malformed_input() {
     let settings_path =
@@ -385,7 +418,10 @@ fn load_gemini_settings_json_ignores_malformed_input() {
     let _ = fs::remove_file(settings_path);
 }
 
-// Tests that Gemini ACP launch ignores repository dotenv files for child env injection.
+// Pins `gemini_dotenv_env_pairs` returning empty even when a workspace `.env`
+// with plausible Gemini/Google keys is present in the current project root.
+// Guards against a credential-leak regression where a committed repo `.env`
+// would be silently injected into the Gemini ACP child process.
 #[test]
 fn gemini_dotenv_env_pairs_ignore_workspace_env_files() {
     let project_root =
@@ -406,7 +442,10 @@ fn gemini_dotenv_env_pairs_ignore_workspace_env_files() {
     let _ = fs::remove_dir_all(project_root);
 }
 
-// Tests that Gemini dotenv lookup resolves home-directory files without walking the workdir.
+// Pins `find_gemini_env_file` preferring `~/.gemini/.env` and falling back to
+// `~/.env`, resolved via the `HOME`/`USERPROFILE` indirection so tests can
+// redirect. Guards against workspace-walking behavior re-entering and against
+// the fallback order flipping, which would change which key file wins.
 #[test]
 fn find_gemini_env_file_reads_home_directory_env_files() {
     let _env_lock = TEST_HOME_ENV_MUTEX
@@ -434,7 +473,10 @@ fn find_gemini_env_file_reads_home_directory_env_files() {
     let _ = fs::remove_dir_all(home_dir);
 }
 
-// Tests that Gemini ACP auth selection ignores workspace dotenv credentials.
+// Pins `select_acp_auth_method` returning `None` for Gemini when the only
+// source of a `GEMINI_API_KEY` is a workspace `.env` (and no home env or
+// selected-auth setting is configured). Guards against auto-selecting
+// `gemini-api-key` from a repo-committed credential file.
 #[test]
 fn select_acp_auth_method_ignores_workspace_dotenv_credentials() {
     let project_root = std::env::temp_dir().join(format!(
@@ -468,7 +510,10 @@ fn select_acp_auth_method_ignores_workspace_dotenv_credentials() {
     let _ = fs::remove_dir_all(project_root);
 }
 
-// Tests that TermAl prepares a Windows Gemini system-settings override file.
+// Pins `prepare_termal_gemini_system_settings` (Windows only) writing a settings
+// file whose `/tools/shell/enableInteractiveShell` is `false`. Guards against
+// the override being skipped, written to the wrong path, or emitting content
+// that lets Gemini re-enable the interactive shell during headless ACP runs.
 #[test]
 fn prepare_termal_gemini_system_settings_writes_override_file() {
     if !cfg!(windows) {
@@ -498,7 +543,11 @@ fn prepare_termal_gemini_system_settings_writes_override_file() {
     let _ = fs::remove_dir_all(project_root);
 }
 
-// Tests that Gemini interactive-shell warnings explain the TermAl override on Windows.
+// Pins `gemini_interactive_shell_warning` (Windows only) producing a TermAl-forces
+// warning that names the offending settings file when the workspace
+// `.gemini/settings.json` enables the interactive shell, and returning `None`
+// once that setting is flipped to `false`. Guards against the warning firing
+// even after the user complied, or going silent when they haven't.
 #[test]
 fn gemini_interactive_shell_warning_respects_workspace_settings() {
     if !cfg!(windows) {

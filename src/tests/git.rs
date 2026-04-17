@@ -1,14 +1,42 @@
-//! Git status parsing, git diff document content/reader tests, and Git
-//! repo sync/push tests. Extracted from `tests.rs` so each domain lives
-//! in its own sibling module under `tests/`.
+//! Tests for TermAl's git diff feature, which powers `/api/git/diff`: a
+//! request names a file under a session's workdir and gets back a
+//! structured response with the raw patch text (`diff`), the change
+//! classification, and — for Markdown files — optional
+//! `document_content` holding the before/after sides as full UTF-8
+//! strings so the UI can render a rendered-Markdown diff view instead
+//! of a raw unified patch.
 //!
-//! Shared `run_git_test_command`, `run_git_test_command_output`, and
-//! `init_git_document_test_repo` helpers remain in `mod.rs` because they
-//! are also used by workspace file-watch and grace-window fixtures.
+//! Document enrichment is best-effort: when a side cannot be loaded
+//! (oversized worktree file, committed object above the read ceiling,
+//! non-UTF-8 bytes, directory or missing entry, symlink pointing
+//! outside the repo), the response degrades to the raw patch plus a
+//! user-facing `document_enrichment_note` explaining why the rendered
+//! view is unavailable. Notes are keyed off structured `ApiErrorKind`
+//! tags with a small whitelist of legacy status-only fallbacks.
+//!
+//! Security invariants pinned here: `read_git_worktree_text` must
+//! canonicalize through symlinks without letting either a symlinked
+//! leaf or a symlinked parent escape the repo root (five unix-only
+//! tests), and every document reader caps at `MAX_FILE_CONTENT_BYTES`
+//! so a large committed blob or worktree file cannot blow up the
+//! process. `parse_git_status_paths` decodes git's C-escaped quoted
+//! paths (`"folder/file with spaces.txt"`, `"caf\303\251.txt"`, and
+//! `"old" -> "new"` rename arrows) so non-ASCII and space-containing
+//! paths survive the status pipeline.
+//!
+//! All production surfaces live in `src/git.rs` (extracted earlier
+//! this session): `load_git_diff_for_request`,
+//! `load_git_diff_document_content`, `read_git_diff_document_side`,
+//! `read_git_worktree_text`, `git_diff_document_enrichment_note`,
+//! `should_degrade_git_diff_document_enrichment_error`,
+//! `parse_git_status_paths`, `push_git_repo`, and `sync_git_repo`.
 
 use super::*;
 
-// Tests that parses quoted Git status paths.
+// Pins git's C-escaped quoted status paths to decoded owned strings.
+// Guards against losing spaces, non-ASCII octals (`\303\251` → é), or
+// rename arrows when the status pipeline hands paths to pathspec and
+// diff callers.
 #[test]
 fn parses_quoted_git_status_paths() {
     assert_eq!(
@@ -25,7 +53,10 @@ fn parses_quoted_git_status_paths() {
     );
 }
 
-// Tests that Git status file actions support paths with spaces.
+// Pins the end-to-end status → add → restore flow for paths containing
+// spaces. Guards against regressions where a space-containing path
+// round-trips through git status but fails to stage/unstage because
+// pathspec quoting was dropped on the way back out.
 #[test]
 fn git_status_file_actions_support_paths_with_spaces() {
     let repo_root = std::env::temp_dir().join(format!("termal-git-status-{}", Uuid::new_v4()));
@@ -94,7 +125,11 @@ fn git_status_file_actions_support_paths_with_spaces() {
     fs::remove_dir_all(repo_root).unwrap();
 }
 
-// Tests that Markdown Git diff document sides follow staged/unstaged semantics.
+// Pins the staged/unstaged side mapping for Markdown enrichment:
+// staged reads HEAD → index, unstaged reads index → worktree, and a
+// staged view is marked read-only when the worktree has unstaged
+// changes. Guards against the UI editing stale staged content or
+// conflating the two sides.
 #[test]
 fn git_diff_document_content_uses_selected_git_side_for_markdown() {
     let repo_root = std::env::temp_dir().join(format!("termal-git-diff-doc-{}", Uuid::new_v4()));
@@ -207,7 +242,10 @@ fn git_diff_document_content_uses_selected_git_side_for_markdown() {
     fs::remove_dir_all(repo_root).unwrap();
 }
 
-// Tests that Markdown document enrichment follows Git status-specific sides.
+// Pins enrichment sides for added/deleted/untracked Markdown paths and
+// confirms non-Markdown files skip enrichment entirely without a note.
+// Guards against empty-source misclassification (e.g. showing HEAD
+// content on an added file) and against silently enriching `.txt`.
 #[test]
 fn git_diff_document_content_covers_added_deleted_untracked_and_non_markdown() {
     let repo_root =
@@ -352,7 +390,10 @@ fn git_diff_document_content_covers_added_deleted_untracked_and_non_markdown() {
     fs::remove_dir_all(repo_root).unwrap();
 }
 
-// Tests that an unstaged edit after a staged rename reads the new index path.
+// Pins that an unstaged edit on top of a staged rename reads the
+// index side at the new path, not the old pre-rename path. Guards
+// against a regression where `original_path` would override the index
+// lookup and surface stale HEAD text as the "before" side.
 #[test]
 fn git_diff_document_content_uses_current_index_path_for_unstaged_staged_rename() {
     let repo_root =
@@ -399,7 +440,10 @@ fn git_diff_document_content_uses_current_index_path_for_unstaged_staged_rename(
     fs::remove_dir_all(repo_root).unwrap();
 }
 
-// Tests that Markdown document enrichment is skipped for non-UTF-8 bytes.
+// Pins that non-UTF-8 bytes in a Markdown worktree file degrade the
+// response to raw patch plus the UTF-8 enrichment note rather than
+// surfacing an error to the user. Guards against byte-string panics
+// and keeps the rendered preview gracefully unavailable.
 #[test]
 fn git_diff_document_content_skips_non_utf8_markdown() {
     let repo_root =
@@ -440,7 +484,11 @@ fn git_diff_document_content_skips_non_utf8_markdown() {
     fs::remove_dir_all(repo_root).unwrap();
 }
 
-// Tests that Git document readers enforce the shared file size ceiling.
+// Pins that `read_git_worktree_text` rejects files past
+// `MAX_FILE_CONTENT_BYTES` with a BAD_REQUEST and a
+// `GitDocumentTooLarge`-keyed note. Guards against OOM when a user
+// opens a diff on a multi-gigabyte file and ensures the 10 MB limit
+// is surfaced verbatim to the UI.
 #[test]
 fn git_diff_document_readers_reject_oversized_worktree_files() {
     let repo_root =
@@ -463,7 +511,11 @@ fn git_diff_document_readers_reject_oversized_worktree_files() {
     fs::remove_dir_all(repo_root).unwrap();
 }
 
-// Tests that Markdown enrichment notes are based on structured error kinds, not message text.
+// Pins that `git_diff_document_enrichment_note` dispatches on
+// `ApiErrorKind`, not error message substrings. Guards against a
+// future contributor rewording "10 MB read limit" and silently
+// breaking the user-visible note, and preserves the legacy
+// untagged-status fallback for errors without a kind.
 #[test]
 fn git_diff_document_enrichment_note_uses_structured_error_kind() {
     let untagged_error = ApiError::bad_request("git worktree file exceeds the 10 MB read limit");
@@ -485,11 +537,11 @@ fn git_diff_document_enrichment_note_uses_structured_error_kind() {
     );
 }
 
-// Tests that every untagged-degradable status flagged by
-// `should_degrade_git_diff_document_enrichment_error` also produces a
-// user-visible note from `git_diff_document_enrichment_note`, so a future
-// contributor adding a new status to the shared list cannot accidentally
-// split the two helpers and silently drop the note.
+// Pins that every status in `DEGRADED_UNTAGGED_STATUSES` both
+// triggers degradation and produces a user-visible note, keeping the
+// two helpers in lockstep. Guards against adding a status to the
+// degrade list while forgetting to also teach the note helper, which
+// would ship a blank-explanation raw diff.
 #[test]
 fn git_diff_degraded_untagged_statuses_always_produce_a_note() {
     for status in DEGRADED_UNTAGGED_STATUSES {
@@ -509,7 +561,11 @@ fn git_diff_degraded_untagged_statuses_always_produce_a_note() {
     }
 }
 
-// Tests that oversized Markdown enrichment degrades through the response path.
+// Pins end-to-end degradation: an oversized worktree Markdown file
+// returns the raw patch, drops `document_content`, and attaches the
+// 10 MB enrichment note. Guards against the response path swallowing
+// the oversize error into an opaque 500 or returning partial document
+// content.
 #[test]
 fn git_diff_response_reports_oversized_markdown_enrichment_note() {
     let repo_root = std::env::temp_dir().join(format!(
@@ -554,7 +610,11 @@ fn git_diff_response_reports_oversized_markdown_enrichment_note() {
     fs::remove_dir_all(repo_root).unwrap();
 }
 
-// Tests that unexpected Markdown enrichment failures keep the already-loaded raw diff.
+// Pins that an unexpected `ApiError::internal` from the document
+// loader still returns the already-loaded raw patch with a generic
+// "read error" note rather than failing the whole request. Guards
+// against a transient disk error hiding the available diff from the
+// user.
 #[test]
 fn git_diff_response_degrades_internal_markdown_enrichment_errors_to_raw_diff() {
     let repo_root = std::env::temp_dir().join(format!(
@@ -600,7 +660,11 @@ fn git_diff_response_degrades_internal_markdown_enrichment_errors_to_raw_diff() 
     fs::remove_dir_all(repo_root).unwrap();
 }
 
-// Tests that expected Markdown enrichment failures return a visible degraded-preview note.
+// Pins the exact user-facing note for each expected enrichment
+// failure kind (became-symlink, invalid-utf8, not-file, not-found,
+// too-large). Guards against rewording drift between the production
+// note text and the UI contract, keeping the five message templates
+// stable.
 #[test]
 fn git_diff_response_reports_expected_document_enrichment_notes() {
     let repo_root = std::env::temp_dir().join(format!(
@@ -667,7 +731,11 @@ fn git_diff_response_reports_expected_document_enrichment_notes() {
     fs::remove_dir_all(repo_root).unwrap();
 }
 
-// Tests that degraded Markdown enrichment keeps the frontend-facing JSON contract.
+// Pins the camelCase JSON wire names (`documentEnrichmentNote`,
+// `documentContent`) and their absence-behaviour when enrichment
+// degrades. Guards against serde rename drift leaking
+// `document_enrichment_note` snake_case or serializing a null
+// `documentContent` that the frontend does not expect.
 #[test]
 fn git_diff_response_degraded_markdown_serializes_frontend_contract() {
     let response = GitDiffResponse {
@@ -695,7 +763,10 @@ fn git_diff_response_degraded_markdown_serializes_frontend_contract() {
     assert!(value.get("document_content").is_none());
 }
 
-// Tests that Git document reader errors stay non-empty and actionable.
+// Pins that HEAD/index/worktree reader errors always carry non-empty
+// messages mentioning "git". Guards against blank or generic errors
+// that would leave the UI with no diagnostic context when a document
+// side fails to load.
 #[test]
 fn git_diff_document_reader_errors_are_non_empty() {
     let repo_root =
@@ -720,7 +791,10 @@ fn git_diff_document_reader_errors_are_non_empty() {
     fs::remove_dir_all(repo_root).unwrap();
 }
 
-// Tests that missing Git document objects are reported as not found.
+// Pins a missing blob at `HEAD:missing.md` mapping to
+// `StatusCode::NOT_FOUND` with the "could not be found" enrichment
+// note. Guards against misreporting a clean repo lookup failure as a
+// 500 or a bad-request.
 #[test]
 fn git_diff_document_reader_reports_missing_git_objects_as_not_found() {
     let repo_root = std::env::temp_dir().join(format!(
@@ -750,7 +824,10 @@ fn git_diff_document_reader_reports_missing_git_objects_as_not_found() {
     fs::remove_dir_all(repo_root).unwrap();
 }
 
-// Tests that unborn HEAD missing-object wording is treated as not found.
+// Pins that a freshly-initialised repo (unborn HEAD) returns
+// `NOT_FOUND` instead of the more exotic "ambiguous argument" wording
+// git emits. Guards against the UI surfacing confusing low-level git
+// diagnostics when diffing in a repo that has no commits yet.
 #[test]
 fn git_diff_document_reader_reports_unborn_head_objects_as_not_found() {
     let repo_root = std::env::temp_dir().join(format!(
@@ -774,7 +851,11 @@ fn git_diff_document_reader_reports_unborn_head_objects_as_not_found() {
     fs::remove_dir_all(repo_root).unwrap();
 }
 
-// Tests that oversized committed Git objects are rejected without buffering the full object.
+// Pins that `read_git_object_text` streams the `git cat-file` output
+// and aborts at the read ceiling instead of buffering the full blob.
+// Guards against memory blow-up when HEAD contains a very large
+// committed file and keeps the bad-request envelope consistent with
+// worktree oversize.
 #[test]
 fn git_diff_document_reader_rejects_oversized_git_objects() {
     let repo_root = std::env::temp_dir().join(format!(
@@ -800,7 +881,10 @@ fn git_diff_document_reader_rejects_oversized_git_objects() {
     fs::remove_dir_all(repo_root).unwrap();
 }
 
-// Tests that unexpected worktree entries are not classified as bad requests.
+// Pins that a directory at a worktree path maps to `NOT_FOUND` with
+// the "not a regular file" enrichment note. Guards against reading a
+// directory handle as bytes and classifies a stale diff request
+// against a now-directory entry the same way as a missing file.
 #[test]
 fn git_diff_worktree_reader_reports_directories_as_not_found() {
     let repo_root =
@@ -822,7 +906,10 @@ fn git_diff_worktree_reader_reports_directories_as_not_found() {
     fs::remove_dir_all(repo_root).unwrap();
 }
 
-// Tests that missing worktree files are reported as not found.
+// Pins that a missing worktree path returns `NOT_FOUND` with the
+// relative name but without leaking the absolute repo root.
+// Guards against path-disclosure in error messages and keeps the
+// enrichment note stable at "could not be found".
 #[test]
 fn git_diff_worktree_reader_reports_missing_files_as_not_found() {
     let repo_root = std::env::temp_dir().join(format!(
@@ -854,7 +941,11 @@ fn git_diff_worktree_reader_reports_missing_files_as_not_found() {
     fs::remove_dir_all(repo_root).unwrap();
 }
 
-// Tests that oversized untracked diffs return the documented read-limit envelope.
+// Pins that the untracked-file diff builder enforces
+// `MAX_FILE_CONTENT_BYTES` before synthesising a full-add patch.
+// Guards against building a multi-megabyte patch string for a huge
+// new file that would never render usefully and keeps the bad-request
+// wording consistent with the other readers.
 #[test]
 fn git_diff_untracked_reader_rejects_oversized_files() {
     let repo_root = std::env::temp_dir().join(format!(
@@ -875,7 +966,17 @@ fn git_diff_untracked_reader_rejects_oversized_files() {
     fs::remove_dir_all(repo_root).unwrap();
 }
 
-// Tests that worktree Markdown symlinks render target file contents.
+// --- Unix-only symlink safety: five tests pinning the invariant that
+// worktree reads must canonicalize through symlinks without letting
+// either a symlink leaf or a symlinked parent escape the repo root.
+// Skipped on Windows because the platform's symlink semantics and
+// permission requirements differ; the security contract only applies
+// where TermAl may encounter POSIX-style symlinks on disk.
+
+// Pins that a symlink pointing at a target file inside the same repo
+// is followed and the target contents are returned. Guards against an
+// over-aggressive symlink rejection that would break legitimate
+// in-repo symlinked Markdown.
 #[cfg(unix)]
 #[test]
 fn git_diff_worktree_reader_returns_symlink_target_file_contents() {
@@ -895,7 +996,10 @@ fn git_diff_worktree_reader_returns_symlink_target_file_contents() {
     fs::remove_dir_all(repo_root).unwrap();
 }
 
-// Tests that worktree symlinks pointing outside the repository are rejected.
+// Pins that a symlink whose target resolves outside the repo root
+// returns `BAD_REQUEST` with "escapes repository root" and does not
+// leak the absolute repo path. Guards against the classic
+// read-arbitrary-file attack via a crafted in-repo symlink.
 #[cfg(unix)]
 #[test]
 fn git_diff_worktree_reader_rejects_symlink_target_escape() {
@@ -930,7 +1034,10 @@ fn git_diff_worktree_reader_rejects_symlink_target_escape() {
     fs::remove_dir_all(outside_root).unwrap();
 }
 
-// Tests that regular worktree reads reject paths that escape through a symlinked parent.
+// Pins that a symlinked directory in a path component also blocks
+// escape, even when the leaf is a plain file outside the repo.
+// Guards against walking through a symlinked parent without
+// re-checking containment at each level.
 #[cfg(unix)]
 #[test]
 fn git_diff_worktree_reader_rejects_symlinked_parent_escape() {
@@ -960,7 +1067,11 @@ fn git_diff_worktree_reader_rejects_symlinked_parent_escape() {
     fs::remove_dir_all(outside_root).unwrap();
 }
 
-// Tests that symlink leaves reached through symlinked parents are rejected.
+// Pins that a symlinked leaf inside a symlinked parent is rejected
+// at the parent check, not accidentally allowed because the leaf
+// itself resolves "somewhere inside `outside_root`". Guards against
+// TOCTOU-adjacent mistakes where two independent symlinks combine to
+// defeat containment.
 #[cfg(unix)]
 #[test]
 fn git_diff_worktree_reader_rejects_symlinked_parent_symlink_leaf_escape() {
@@ -992,7 +1103,10 @@ fn git_diff_worktree_reader_rejects_symlinked_parent_symlink_leaf_escape() {
     fs::remove_dir_all(outside_root).unwrap();
 }
 
-// Tests that symlink target paths do not need to be valid UTF-8 when the target contents are valid.
+// Pins that a non-UTF-8 symlink target path is still followed when
+// the target's bytes are valid UTF-8 text. Guards against an
+// over-strict OsStr → str conversion on the intermediate target path
+// refusing legitimate POSIX filesystems with non-UTF-8 filenames.
 #[cfg(unix)]
 #[test]
 fn git_diff_worktree_reader_allows_non_utf8_symlink_targets() {
@@ -1019,7 +1133,10 @@ fn git_diff_worktree_reader_allows_non_utf8_symlink_targets() {
     fs::remove_dir_all(repo_root).unwrap();
 }
 
-// Tests that push Git repo updates tracking branch.
+// Pins that `push_git_repo` advances the tracking branch so the
+// remote HEAD matches the local HEAD and the response reports
+// ahead=0/behind=0 with a "Pushed " summary. Guards against reporting
+// success while the remote is still behind.
 #[test]
 fn push_git_repo_updates_tracking_branch() {
     let root = std::env::temp_dir().join(format!("termal-git-push-{}", Uuid::new_v4()));
@@ -1063,7 +1180,11 @@ fn push_git_repo_updates_tracking_branch() {
     fs::remove_dir_all(root).unwrap();
 }
 
-// Tests that sync Git repo pulls remote changes.
+// Pins that `sync_git_repo` fast-forwards the local branch to match
+// a peer's pushed commit, updating both HEAD and the README content,
+// and reports ahead=0/behind=0 with a "Synced " summary. Guards
+// against a pull that reports success while leaving the worktree
+// unchanged.
 #[test]
 fn sync_git_repo_pulls_remote_changes() {
     let root = std::env::temp_dir().join(format!("termal-git-sync-{}", Uuid::new_v4()));

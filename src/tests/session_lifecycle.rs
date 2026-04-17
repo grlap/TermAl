@@ -1,16 +1,34 @@
-// Claude and Codex session lifecycle tests — creation with default/plan
-// modes, hidden Claude spare-pool filtering and promotion, killing with
-// hidden-spare reaping, kill-session persist-on-failure semantics,
-// the `kill_session` HTTP route, shared-Codex vs local-Codex kill paths,
-// and rediscovery-prevention on restart.
+// claude and codex session lifecycle: creation, hidden spare-pool, and
+// kill semantics.
 //
-// Extracted from tests.rs — contiguous cluster (previously lines
-// 1391-2160) covering session creation, spare-pool management, and the
-// kill-session workflow across Claude + Codex.
+// claude code has a noticeable cold-start cost, so termal pre-spawns
+// "hidden claude spares" keyed by (workdir, model, approval_mode,
+// effort). when the user creates a real session whose dimensions match
+// a spare, `StateInner::create_session` promotes the spare in place
+// instead of cold-starting, then `ensure_hidden_claude_spare`
+// replenishes the pool. hidden spares carry `hidden = true` and are
+// filtered out of `/api/state` snapshots and `PersistedState` so the
+// user never sees them.
+//
+// kill-session semantics diverge by agent. killing the LAST visible
+// claude session for a workdir also reaps the matching hidden spare,
+// since there is no reason to keep a warm session for a workdir the
+// user abandoned; if another visible session remains, the spare stays
+// warm. codex sessions can share a single runtime: killing one must
+// not tear down siblings even when the `turn/interrupt` jsonrpc call
+// fails, and local codex sessions are added to a rediscovery ignore
+// list so they cannot silently return after restart.
+//
+// production surfaces under test: `StateInner::create_session`,
+// `AppState::kill_session`, the axum `kill_session` route in
+// `src/api.rs`, and `StateInner::ensure_hidden_claude_spare`.
 
 use super::*;
 
-// Tests that creates Claude sessions with default ask mode.
+// pins the claude session defaults applied by
+// `StateInner::create_session`: model `"default"`, approval mode
+// `Ask`, effort `Default`, and no codex-flavoured policy fields.
+// guards against accidental drift in the claude starter profile.
 #[test]
 fn creates_claude_sessions_with_default_ask_mode() {
     let mut inner = StateInner::new();
@@ -30,7 +48,11 @@ fn creates_claude_sessions_with_default_ask_mode() {
     assert_eq!(record.session.sandbox_mode, None);
 }
 
-// Tests that Claude's default model delegates to Claude Code instead of forcing Sonnet.
+// pins that the sentinel `"default"` model tells the cli layer to
+// omit `--model` entirely so claude code picks its own default,
+// while explicit models are forwarded and claude-specific flags
+// (plan mode, effort, resume) serialize correctly. guards against
+// regressions that would hard-code sonnet or drop cli args.
 #[test]
 fn claude_default_model_delegates_to_claude_cli_default() {
     assert_eq!(Agent::Claude.default_model(), "default");
@@ -121,7 +143,11 @@ fn claude_default_model_delegates_to_claude_cli_default() {
     );
 }
 
-// Tests that creates Claude sessions with requested plan mode.
+// pins that `AppState::create_session` honours non-default claude
+// knobs from the request: `claude_approval_mode = Plan` and
+// `claude_effort = High` land on the returned record.
+// guards against the dispatcher silently falling back to the
+// default ask profile.
 #[test]
 fn creates_claude_sessions_with_requested_plan_mode() {
     let state = test_app_state();
@@ -151,7 +177,11 @@ fn creates_claude_sessions_with_requested_plan_mode() {
     assert_eq!(session.claude_effort, Some(ClaudeEffortLevel::High));
 }
 
-// Tests that hidden Claude spares are filtered from snapshots and persistence.
+// pins the invisibility contract for hidden claude spares: a spare
+// created via `ensure_hidden_claude_spare` lives in `inner.sessions`
+// with `hidden = true`, but is filtered out of both
+// `AppState::snapshot` and `PersistedState::from_inner`.
+// guards against the warm pool leaking into the ui or on-disk state.
 #[test]
 fn hidden_claude_spares_are_filtered_from_snapshots_and_persistence() {
     let state = test_app_state();
@@ -193,7 +223,11 @@ fn hidden_claude_spares_are_filtered_from_snapshots_and_persistence() {
     );
 }
 
-// Tests that create session promotes matching hidden Claude spare and replenishes pool.
+// pins spare promotion on the default-profile path: creating a
+// visible claude session whose (workdir, model, approval, effort)
+// matches a hidden spare returns that spare's id, flips
+// `hidden = false`, and leaves exactly one fresh spare behind.
+// guards against losing the warm pool or double-promoting.
 #[test]
 fn create_session_promotes_matching_hidden_claude_spare_and_replenishes_pool() {
     let state = test_app_state();
@@ -258,7 +292,12 @@ fn create_session_promotes_matching_hidden_claude_spare_and_replenishes_pool() {
     assert_ne!(hidden_spares[0].session.id, hidden_session_id);
 }
 
-// Tests that create session promotes matching non default hidden Claude spare.
+// pins that spare matching keys on all four dimensions, not just
+// workdir: a `(claude-custom, Plan, High)` spare is promoted by a
+// request with the same model/approval/effort, and a new spare is
+// respawned for the same non-default profile.
+// guards against over-broad matching that would hand out a spare
+// with the wrong flags.
 #[test]
 fn create_session_promotes_matching_non_default_hidden_claude_spare() {
     let state = test_app_state();
@@ -311,7 +350,11 @@ fn create_session_promotes_matching_non_default_hidden_claude_spare() {
     assert_ne!(hidden_spares[0].session.id, hidden_session_id);
 }
 
-// Tests that killing last visible Claude session reaps hidden spare for context.
+// pins the "last visible session" reap rule: once the final
+// visible claude session for a workdir is killed, every claude
+// record for that workdir (hidden spares included) is removed.
+// guards against stranded warm processes tied to a workdir the
+// user has walked away from.
 #[test]
 fn killing_last_visible_claude_session_reaps_hidden_spare_for_context() {
     let state = test_app_state();
@@ -356,7 +399,11 @@ fn killing_last_visible_claude_session_reaps_hidden_spare_for_context() {
     }));
 }
 
-// Tests that killing one visible Claude session keeps hidden spares when another visible session remains.
+// pins the complement of the reap rule: with two visible claude
+// sessions sharing a workdir, killing one preserves both the
+// surviving visible session and the matching hidden spare.
+// guards against over-eager reaping that would force the next
+// session to cold-start.
 #[test]
 fn killing_one_visible_claude_session_keeps_hidden_spares_when_another_visible_session_remains() {
     let state = test_app_state();
@@ -411,7 +458,11 @@ fn killing_one_visible_claude_session_keeps_hidden_spares_when_another_visible_s
     }));
 }
 
-// Tests that killing session persists removal even when shared Codex interrupt fails.
+// pins that a kill still commits to disk when the shared codex
+// `turn/interrupt` jsonrpc send fails (input channel dropped):
+// the session is removed from the live snapshot, from the reloaded
+// persisted state, and from the shared runtime's session and
+// thread maps. guards against zombies surviving a failed rpc.
 #[test]
 fn killing_session_persists_removal_even_when_shared_codex_interrupt_fails() {
     let state = test_app_state();
@@ -508,7 +559,10 @@ fn killing_session_persists_removal_even_when_shared_codex_interrupt_fails() {
     let _ = fs::remove_file(state.persistence_path.as_path());
 }
 
-// Tests that kill session route returns ok when shared Codex interrupt fails.
+// pins the http contract: `POST /api/sessions/{id}/kill` returns
+// 200 OK with a session-free `StateResponse` even when the shared
+// codex interrupt rpc fails. guards against surfacing a spurious
+// 5xx to the client over a best-effort interrupt.
 #[tokio::test]
 async fn kill_session_route_returns_ok_when_shared_codex_interrupt_fails() {
     let state = test_app_state();
@@ -592,7 +646,12 @@ async fn kill_session_route_returns_ok_when_shared_codex_interrupt_fails() {
     let _ = fs::remove_file(state.persistence_path.as_path());
 }
 
-// Tests that killing shared Codex session does not reset other shared sessions when interrupt fails.
+// pins multi-tenant isolation for a shared codex runtime: killing
+// one session with a failing interrupt leaves siblings on the same
+// runtime intact — their runtime handle, status, shared session
+// entry, and thread mapping all survive, and the shared process
+// is not torn down. guards against a failed rpc cascading into
+// collateral resets.
 #[test]
 fn killing_shared_codex_session_does_not_reset_other_shared_sessions_when_interrupt_fails() {
     let state = test_app_state();
@@ -731,7 +790,12 @@ fn killing_shared_codex_session_does_not_reset_other_shared_sessions_when_interr
     let _ = fs::remove_file(state.persistence_path.as_path());
 }
 
-// Tests that killing local Codex session prevents rediscovery after restart.
+// pins the rediscovery ignore list for local codex sessions:
+// killing a session with an external thread id adds that id to
+// `ignored_discovered_codex_thread_ids`, and a subsequent
+// `import_discovered_codex_threads` with the same thread will not
+// resurrect it. guards against killed sessions silently returning
+// after a restart.
 #[test]
 fn killing_local_codex_session_prevents_rediscovery_after_restart() {
     let state = test_app_state();

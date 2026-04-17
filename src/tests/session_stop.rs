@@ -1,16 +1,27 @@
-// Session stop / dedicated stop / deferred-callback replay tests —
-// stdin watchdog timeout + runtime clear, suppression of runtime-exit
-// signals while stop is in progress, successful-stop callback discard,
-// failed dedicated-stop replay semantics (turn completion, runtime exit,
-// multiple deferred callbacks in order, runtime-exit-last even when it
-// arrives first).
-//
-// Extracted from tests.rs — contiguous cluster (previously lines
-// 3657-4242) covering the SharedCodexRuntime stop lifecycle and the
-// deferred-callback replay invariants.
+// sharedcodexruntime stop lifecycle + deferred-callback replay. one codex
+// process hosts many sessions, so stopping a single session cannot kill the
+// process — instead the per-session stop-in-progress guard on
+// sharedcodexsessionstate serializes shutdown while the other sessions keep
+// streaming. while that guard is set, incoming runtime signals for the
+// stopping session (turn_completed, runtime_exit, ...) arriving through
+// handle_shared_codex_turn_completed / handle_shared_codex_runtime_exit are
+// deferred — buffered onto deferred_stop_callbacks — rather than applied
+// immediately, because applying them mid-stop would race the stop machinery
+// finalizing session state. on a clean stop the buffer is discarded (the
+// session is gone, nothing left to do). on a FAILED dedicated stop the buffer
+// is replayed in arrival order, with one fixup: runtimeexited is always
+// replayed LAST even if it arrived first, otherwise it would tear down the
+// runtime handle before a still-buffered turncompleted could use it. the
+// shared stdin watchdog is cruder — a stalled writer wedges the whole codex
+// process, so the watchdog clears the entire runtime, not just one session.
 
 use super::*;
 
+// pins the coarse scope of the stdin watchdog: a stall on the shared codex
+// writer clears the whole runtime (not just the stalled session) and marks
+// the affected session as error with the generic "agent communication timed
+// out" preview. guards against a future narrower fix that leaves the wedged
+// process alive while only failing one session.
 #[test]
 fn shared_codex_stdin_watchdog_times_out_stalled_writer_and_clears_runtime() {
     let state = test_app_state();
@@ -110,7 +121,11 @@ fn shared_codex_stdin_watchdog_times_out_stalled_writer_and_clears_runtime() {
     let _ = fs::remove_file(state.persistence_path.as_path());
 }
 
-// Tests that runtime exit is suppressed while stop is in progress.
+// pins the deferral side of the stop-in-progress guard: a runtime-exit
+// arriving while runtime_stop_in_progress is set must not mutate the session,
+// must not bump state revision, must not emit a broadcast event, and must be
+// buffered onto deferred_stop_callbacks. guards against a regression where
+// runtime-exit races the stop path and prematurely flips status to error.
 #[test]
 fn runtime_exit_is_suppressed_while_stop_is_in_progress() {
     let state = test_app_state();
@@ -164,7 +179,11 @@ fn runtime_exit_is_suppressed_while_stop_is_in_progress() {
     let _ = fs::remove_file(state.persistence_path.as_path());
 }
 
-// Tests that successful stop discards deferred callbacks.
+// pins the successful-stop path: when stop_session drives the dedicated kill
+// to completion, any buffered deferred_stop_callbacks are dropped, the
+// runtime detaches, and the session settles to idle with "turn stopped by
+// user." guards against a replay-on-success bug that would double-apply
+// turncompleted or runtimeexited after the stop already finalized state.
 #[test]
 fn successful_stop_discards_deferred_callbacks() {
     let state = test_app_state();
@@ -216,7 +235,11 @@ fn successful_stop_discards_deferred_callbacks() {
     let _ = fs::remove_file(state.persistence_path.as_path());
 }
 
-// Tests that failed dedicated stop replays deferred turn completion.
+// pins failed-stop replay for turncompleted: when the dedicated kill fails
+// and a turncompleted was buffered, replaying it must transition the session
+// to idle and detach the runtime exactly as finish_turn_ok_if_runtime_matches
+// would on the happy path. guards against silently swallowing the buffered
+// callback when stop returns an error to the caller.
 #[test]
 fn failed_dedicated_stop_replays_deferred_turn_completion() {
     let state = test_app_state();
@@ -276,7 +299,11 @@ fn failed_dedicated_stop_replays_deferred_turn_completion() {
     let _ = fs::remove_file(state.persistence_path.as_path());
 }
 
-// Tests that failed dedicated stop replays deferred runtime exit.
+// pins failed-stop replay for runtimeexited with an error detail: the
+// buffered exit callback must drive the session to status error with the
+// original detail surfaced in the preview, clear the guard, and detach the
+// runtime. guards against losing the recorded failure cause when stop itself
+// fails and the exit signal was deferred behind the guard.
 #[test]
 fn failed_dedicated_stop_replays_deferred_runtime_exit() {
     let state = test_app_state();
@@ -336,7 +363,11 @@ fn failed_dedicated_stop_replays_deferred_runtime_exit() {
     let _ = fs::remove_file(state.persistence_path.as_path());
 }
 
-// Tests that failed dedicated stop replays multiple deferred callbacks in order.
+// pins the in-order replay invariant by building an "expected" reference
+// state from a normal finish-then-exit sequence and requiring the
+// failed-stop replay of [turncompleted, runtimeexited] to reach byte-for-byte
+// the same status, preview, and message tail. guards against the replay path
+// diverging from the canonical callback-order semantics over time.
 #[test]
 fn failed_dedicated_stop_replays_multiple_deferred_callbacks_in_order() {
     let expected_state = test_app_state();
@@ -467,7 +498,11 @@ fn failed_dedicated_stop_replays_multiple_deferred_callbacks_in_order() {
     let _ = fs::remove_file(state.persistence_path.as_path());
 }
 
-// Tests that failed dedicated stop replays runtime exit last even when it arrives first.
+// pins the runtime-exit-last reordering rule: even when the buffer is
+// [runtimeexited, turncompleted] (exit arrived first), the replay must defer
+// the exit to the end so turncompleted still has a live runtime handle to
+// resolve against. compares against the same finish-then-exit expected state
+// to catch any eager reordering that tears down the handle too early.
 #[test]
 fn failed_dedicated_stop_replays_runtime_exit_last_even_when_it_arrives_first() {
     let expected_state = test_app_state();
