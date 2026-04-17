@@ -20,6 +20,13 @@ describe("startActivePromptPoll", () => {
   });
 
   afterEach(() => {
+    // Defensive: `useRealTimers()` in current Vitest versions drops
+    // pending fake timers, so cross-test bleed is not a bug today.
+    // Clearing explicitly first anchors the independence invariant so
+    // a future refactor (e.g., switching to `{ shouldAdvanceTime: true }`
+    // or replacing `useRealTimers` with a noop) surfaces any timer
+    // leak as a test-authoring error rather than silent pollution.
+    vi.clearAllTimers();
     vi.useRealTimers();
   });
 
@@ -184,6 +191,85 @@ describe("startActivePromptPoll", () => {
       // And the next poll should have been chained.
       await vi.advanceTimersByTimeAsync(ACTIVE_PROMPT_POLL_INTERVAL_MS);
       expect(fetchState).toHaveBeenCalledTimes(2);
+    } finally {
+      cancel();
+    }
+  });
+
+  it("accepts a fetch that resolves just inside the hard-cap deadline via injected now()", async () => {
+    // Boundary case: injected `now()` advances to `maxDurationMs - 1`
+    // while the fetch is still in flight (still strictly BEFORE the
+    // deadline). The post-await deadline check must evaluate AND
+    // return `false` (i.e., not bail) — this pins the difference
+    // between "check executed and decided to continue" and "check
+    // did not execute at all", which the happy-path 60s-in-5min test
+    // does not distinguish. An off-by-one bug in the check (`>` vs
+    // `>=`) would trip here and silently pass the happy-path test.
+    //
+    // The fake-timer clock stays below `maxDurationMs` throughout, so
+    // the belt-and-suspenders `setTimeout(cancel, maxDurationMs)`
+    // never fires — this isolates the `now() >= deadlineMs` branch
+    // from the `stopped`-flag defense. A companion assertion at the
+    // end advances the injected clock past the deadline and confirms
+    // `onState` is NOT called a second time (the post-await deadline
+    // check prevents it even though the chained timer did fire and
+    // `fetchState` was invoked again).
+    let currentNow = 0;
+    const now = () => currentNow;
+    const deferred = createDeferred<{ ok: true }>();
+    let fetchStateCallCount = 0;
+    const fetchState = vi.fn(async () => {
+      fetchStateCallCount += 1;
+      if (fetchStateCallCount === 1) {
+        return deferred.promise;
+      }
+      return { ok: true as const };
+    });
+    const onState = vi.fn(() => false);
+
+    const cancel = startActivePromptPoll(
+      {
+        fetchState,
+        onState,
+        isMounted: () => true,
+      },
+      { intervalMs: 100, maxDurationMs: 1_000, now },
+    );
+
+    try {
+      currentNow = 100;
+      await vi.advanceTimersByTimeAsync(100);
+      expect(fetchState).toHaveBeenCalledTimes(1);
+
+      // Advance the injected clock to ONE ms before the deadline. The
+      // post-await check at `now() >= deadlineMs` (deadlineMs = 1000)
+      // evaluates `999 >= 1000` → false → continues to onState.
+      currentNow = 999;
+      await vi.advanceTimersByTimeAsync(100); // fake-time stays well below 1000
+      deferred.resolve({ ok: true });
+      await vi.advanceTimersByTimeAsync(0);
+
+      // onState WAS called (deadline not yet reached via `now()`).
+      expect(onState).toHaveBeenCalledTimes(1);
+      expect(onState).toHaveBeenCalledWith({ ok: true });
+
+      // Now advance the injected clock past the deadline and let the
+      // next chained timer fire. `fetchState` will be called again
+      // (the timer was armed before the deadline), but the post-await
+      // `now() >= deadlineMs` check must prevent onState from being
+      // called a second time. This is the bail-branch the flagship
+      // "hard-cap `stopped` flag bails an in-flight await" test does
+      // not cover under an injected clock — the `stopped` flag only
+      // fires when the FAKE-timer clock crosses `maxDurationMs`, not
+      // when the injected `now()` does.
+      currentNow = 1_100;
+      await vi.advanceTimersByTimeAsync(100);
+      // fetchState was called again because the timer was armed while
+      // `now() < deadline`; the post-await guard is what saves us.
+      expect(fetchState).toHaveBeenCalledTimes(2);
+      // But onState was NOT called a second time — the deadline check
+      // after the await bailed.
+      expect(onState).toHaveBeenCalledTimes(1);
     } finally {
       cancel();
     }

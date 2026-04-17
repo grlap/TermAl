@@ -103,6 +103,10 @@ Also fixed in the current tree, not re-listed below:
 - **`local_session_id_for_remote_session` avoids the double-allocation on the hot path** — `upsert_remote_proxy_session_record` already returns an owned `String`; the old code called `.as_str()` on it and then `LocalSessionId::from(&str)` which re-allocated via `to_owned`. Now uses `LocalSessionId::from(String)` directly via the `From<String>` impl, consuming the owned string. The sibling "record already exists" branch clones `session.id` once instead of round-tripping through `.as_str()` + `to_owned`. Saves one allocation per call on a function invoked per session instance, per pending transition, and per active/stopped session id during an orchestrator localization pass.
 - **Cross-invocation poll-ref aliasing closed via scheduler extraction** — the inline safety-net poll refs that could alias across successive `handleSend` invocations no longer exist. The poll is now encapsulated in `startActivePromptPoll` (see `ui/src/active-prompt-poll.ts`), which returns an owning cancel function whose captured `stopped` / `chainedTimerId` / `hardCapTimerId` / `deadlineMs` live in closure state — one scheduler instance per invocation, with no shared mutable refs across calls. `handleSend` cancels the prior invocation's scheduler (via `activePromptPollCancelRef.current?.()`) before starting a new one, and unmount cleanup tears down whichever chain is currently owned. An old scheduler's closures cannot set/clear a new scheduler's state because they hold references to distinct ref cells.
 - **Gemini-auth tests no longer race HOME-mutating siblings** — `select_acp_auth_method_ignores_workspace_dotenv_credentials` and `gemini_dotenv_env_pairs_ignore_workspace_env_files` in `src/tests/acp_gemini.rs` now acquire `TEST_HOME_ENV_MUTEX` and redirect HOME/USERPROFILE to a fresh empty tempdir. The auth-method test additionally `ScopedEnvVar::remove`s the six Gemini/Google env vars that `gemini_api_key_source` / `gemini_vertex_auth_source` inspect, isolating from any process-env value (test or developer shell). `ScopedEnvVar::remove(key)` added as an RAII companion to `set` / `set_path`. Previously these tests raced `gemini_invalid_session_load_falls_back_to_session_new` (which sets `GEMINI_API_KEY=test-key-not-real`) and `find_gemini_env_file_reads_home_directory_env_files` (which writes `GEMINI_API_KEY=...` into its tempdir HOME). Verified with 5 consecutive `cargo test --bin termal` runs, all 435 passing.
+- **`serverInstanceId` contract documented in architecture.md** — the "SSE Event Stream" section now has a paragraph explaining the field: emitted on every `StateResponse` / `HealthResponse` / `CreateSessionResponse` / `SessionResponse` (and `state` SSE events), set once per process via `Uuid::new_v4()` at `AppState::new_with_paths`, empty-string sentinel means "unknown instance" (`#[serde(default)]`), non-empty change signals a restart and unlocks revision rewind via `isServerInstanceMismatch` → `shouldAdoptSnapshotRevision`. The "Real-time Updates" section describes the adoption-side enforcement: `latestStateRevisionRef` and `lastSeenServerInstanceIdRef` advance in lockstep, and a restart produces a new UUID that fires the mismatch branch regardless of revision ordering. Cross-references name the client-side helpers (`shouldAdoptSnapshotRevision`, `isServerInstanceMismatch`) and the backend construction point (`AppState::new_with_paths`).
+- **Typed-id newtypes have serde/Display/Borrow round-trip coverage** — `src/ids.rs` now has 14 inline `#[cfg(test)] mod ids_tests` cases covering all five newtypes: `#[serde(transparent)]` wire shape (bare string, not `{"0":"..."}`), `Display` producing the inner string without decoration, `AsRef<str>` and `Borrow<str>` both yielding the inner slice, `From<String>` consuming and `From<&str>` copying, `into_inner()` returning the owned string, `HashMap<$name, V>::get(&str)` succeeding via the `Borrow<str>` impl, `Hash`/`Eq` agreement between borrow and owned forms (the formal `Borrow` contract), and `Clone`/`Debug` derives. A future refactor that drops `#[serde(transparent)]` or swaps to a custom `Hash` baking in the type name would fail the explicit wire-shape and borrow-hash-equality assertions rather than silently breaking TypeScript / remote-sync consumers.
+- **Imported-Codex-thread stamp test now exercises the delta-persist pickup** — `import_discovered_codex_threads_stamps_newly_discovered_sessions` in `src/tests/codex_discovery.rs` additionally calls `inner.collect_persist_delta(watermark_before_import)` and asserts the imported session appears in `changed_sessions`, the returned `watermark >= imported_mutation_stamp`, and the session is NOT in `removed_session_ids`. A second collection at the returned watermark confirms idempotency (no re-emission at the same stamp). The narrow `mutation_stamp > watermark` assertion pinned the specific "whole-struct slot replace erases the stamp" bug; the new round-trip assertion also catches a regression that stamps correctly but breaks the watermark gate inside `collect_persist_delta` (e.g., flipping `<=` to `<` on the comparison, or reading the wrong watermark source).
+- **Scheduler test hygiene + boundary case** — `ui/src/active-prompt-poll.test.ts` `afterEach` now calls `vi.clearAllTimers()` before `vi.useRealTimers()` so a test that leaks a pending timer surfaces as a test-authoring error rather than silent cross-test bleed. Added a new boundary case "accepts a fetch that resolves just inside the hard-cap deadline via injected now()" that uses a custom `now()` to advance the injected clock to `maxDurationMs - 1` while the fetch is in flight, resolves the fetch, asserts `onState` is called exactly once, then advances past the deadline and asserts `onState` is still called only once (the post-await deadline check prevents the second invocation). The flagship "hard-cap stopped flag" test had already been renamed to reflect that it covers the `stopped`-flag defense rather than the `now() >= deadlineMs` post-await check — the new boundary case is what actually pins the deadline branch with an off-by-one sensitive assertion.
 
 ## Stale send responses skip the active-prompt recovery poll
 
@@ -224,20 +228,6 @@ Works fine under git `core.autocrlf=true` (git re-applies CRLF on commit), but b
 **Proposal:**
 - When `onState` returns `true`, clear `hardCapTimerId` as well — either call the internal cancel body inline, or extract a `stopAndClear()` helper shared by the natural-stop path and the returned `cancel` function.
 - Add a Vitest case that exercises the natural-stop path and asserts `vi.getTimerCount()` drops to zero after `onState` returns `true`.
-
-## `serverInstanceId` contract not documented in architecture.md
-
-**Severity:** Medium - the new `serverInstanceId` field on `StateResponse`, `HealthResponse`, and `CreateSessionResponse` materially changes the client state-adoption contract (a non-empty-and-changed id now unconditionally overrides the monotonic revision gate, enabling restart-driven revision rewinds). `docs/architecture.md` documents only `revision: u64` as the ordering discriminator.
-
-A future implementer reading architecture.md would miss that they need to populate/emit `serverInstanceId` on any new `StateResponse`-shaped endpoint, and that the client's restart detection depends on the empty-string-as-unknown sentinel convention.
-
-**Current behavior:**
-- The SSE Event Stream / Frontend State Adoption sections in architecture.md describe revision ordering but not the `serverInstanceId` mismatch branch.
-- The sentinel convention (empty string means "unknown", non-empty-and-changed means "restart") is implicit in code and comments only.
-
-**Proposal:**
-- Add a paragraph under "SSE Event Stream" / "Frontend State Adoption" in `docs/architecture.md` explaining the field: emitted on every `StateResponse`/`HealthResponse`/`CreateSessionResponse`, set once per process via `Uuid::new_v4()` at `AppState::new_with_paths`, empty string is a forward-compat sentinel the frontend treats as unknown, any non-empty change between snapshots signals a restart and unlocks revision rewind.
-- Cross-reference `shouldAdoptSnapshotRevision` and `isServerInstanceMismatch` as the client-side enforcement points.
 
 ## `shared_codex_thread_setup_persist_failure_does_not_tear_down_runtime` test flake
 
@@ -751,22 +741,6 @@ The new hydration effect's error path calls `reportRequestError(error)` on any `
   the chain boundary, advance time past the next interval, and assert
   `fetchState` was called exactly once per chain hop rather than
   accumulating parallel fires.
-- [ ] P2: Add serde/Display round-trip tests for `src/ids.rs` newtypes:
-  `serde_json::to_string(&RemoteSessionId::from("abc")) == "\"abc\""`
-  and reverse, `format!` via `Display`, `From<String>`, `From<&str>`,
-  `AsRef<str>`, `.into_inner()` for all five newtypes. The whole
-  point of `#[serde(transparent)]` is wire-indistinguishability from
-  `String`; if someone drops the attribute, wire-compat breaks
-  silently. Currently-unused newtypes (`RemoteSessionId`, `RemoteId`)
-  have zero exercise path in production code today.
-- [ ] P2: Extend the imported-Codex-thread stamp test with a
-  delta-persist round-trip. `import_discovered_codex_threads_stamps_newly_discovered_sessions`
-  currently asserts `record.mutation_stamp > watermark_before_import`,
-  which pins the stamp invariant but not the watermark/persist
-  pickup. Seed `last_persisted_mutation_stamp`, call
-  `collect_persist_delta`, and assert the imported session appears in
-  `changed_sessions`. A future refactor that stamps but breaks the
-  watermark wiring would not regress the current narrower test.
 - [ ] P2: Add a `publish_snapshot` delivery test: subscribe to
   `state.subscribe_events()` before a mutation and assert the expected
   payload arrives on `state_events` after `commit_locked` through the

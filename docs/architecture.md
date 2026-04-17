@@ -233,6 +233,8 @@ Design constraints:
 
 All three carry a `revision: u64` field. `state` and `delta` share the main state revision counter, which the frontend uses to reject stale snapshots and detect gaps in the delta sequence. `workspaceFilesChanged` uses a separate file-event revision counter; the frontend batches same-tick file events and ignores file-event revisions strictly older than the last seen revision (same-revision events are merged while buffered).
 
+`state` events and every snapshot-bearing response (`StateResponse`, `HealthResponse`, `CreateSessionResponse`, `SessionResponse`) additionally carry a `serverInstanceId: string` — a per-process UUID generated once via `Uuid::new_v4()` at `AppState::new_with_paths`. The id is not a secret and not a protocol boundary; it exists so the frontend can detect a server restart deterministically. After a restart, the revision counter rewinds to whatever SQLite held (usually lower than the browser's last-seen revision), which would otherwise cause every monotonic check in `shouldAdoptStateRevision` to reject the fresh state. `isServerInstanceMismatch` in `ui/src/state-revision.ts` returns `true` only when both the last-seen and incoming ids are non-empty AND differ; `shouldAdoptSnapshotRevision` routes that branch unconditionally, overriding both the monotonic check and any `allowRevisionDowngrade` gate. The empty-string sentinel (`#[serde(default)]` on Rust, `""` fallback on older servers or fallback SSE payloads) means "unknown instance" and cannot trigger a restart branch — this is what lets `empty_state_events_response()` send a fallback payload without masquerading as a restart. New endpoints that return state-shaped responses must emit a non-empty `serverInstanceId` sourced from `AppState::server_instance_id`; otherwise a session hydration in flight across a restart gets silently rejected by the revision guard until the safety-net pollers re-fetch.
+
 ```
 DeltaEvent::TextDelta            { revision, session_id, message_id, delta, preview }
 DeltaEvent::TextReplace          { revision, session_id, message_id, message_index, text, preview }
@@ -701,12 +703,14 @@ No external state library. State lives in `App.tsx` via `useState` and `useRef`:
 
 On mount, the frontend opens an `EventSource` to `/api/events`:
 
-1. **`state` events** — full state snapshot. Accepted only if `revision > latestRevision` (via `shouldAdoptStateRevision`).
+1. **`state` events** — full state snapshot. Accepted only if `revision > latestRevision` (via `shouldAdoptStateRevision`), OR if the carried `serverInstanceId` differs from the last-seen id (via `isServerInstanceMismatch`) — the restart branch accepts a revision downgrade because the monotonic check is meaningless across a counter rewind.
 2. **`delta` events** — incremental updates. Accepted only if `revision === latestRevision + 1` (via `decideDeltaRevisionAction`). Session-scoped deltas use the session reducer; `orchestratorsUpdated` is handled separately because it carries orchestrator state without a `sessionId`, and remote forwarding must translate the embedded server-scoped IDs before re-publishing it locally. If a gap is detected, triggers a full state resync.
 
 Applied deltas update the specific session/message in-place via `applyDeltaToSessions()`, avoiding full reconciliation.
 
-Session creation returns `CreateSessionResponse { sessionId, session, revision }`; the frontend adopts the concrete created session immediately and records the response revision without requiring a full state snapshot.
+Session creation returns `CreateSessionResponse { sessionId, session, revision, serverInstanceId }`; the frontend adopts the concrete created session immediately and records the response revision without requiring a full state snapshot.
+
+**Server-restart detection** is keyed off `serverInstanceId`. `latestStateRevisionRef` and `lastSeenServerInstanceIdRef` are updated in lockstep on every accepted adoption (state events, `adoptCreatedSessionResponse`, `adoptFetchedSession`). A restart produces a new UUID at `AppState::new_with_paths`; the next snapshot from the restarted server carries that new id, `isServerInstanceMismatch` fires, `shouldAdoptSnapshotRevision` returns `true` regardless of revision ordering, and the client resyncs. This closes the "prompt invisible after server restart" class of bug: without it, a stale browser tab against a freshly started server would reject every snapshot the server sent (because the revision rewound) until the user forced a refresh.
 
 ### Session Reconciliation
 

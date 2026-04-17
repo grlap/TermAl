@@ -702,18 +702,79 @@ fn import_discovered_codex_threads_stamps_newly_discovered_sessions() {
         }],
     );
 
-    let record = inner
-        .sessions
-        .iter()
-        .find(|entry| entry.external_session_id.as_deref() == Some("thread-fresh"))
-        .expect("freshly discovered thread should be imported");
-    assert_eq!(record.session.project_id.as_deref(), Some(project.id.as_str()));
+    // Capture the imported session's id and stamp into locals so we
+    // can drop the immutable borrow of `inner.sessions` before calling
+    // `inner.collect_persist_delta(...)` below (which needs `&mut inner`).
+    let (imported_session_id, imported_mutation_stamp) = {
+        let record = inner
+            .sessions
+            .iter()
+            .find(|entry| entry.external_session_id.as_deref() == Some("thread-fresh"))
+            .expect("freshly discovered thread should be imported");
+        assert_eq!(record.session.project_id.as_deref(), Some(project.id.as_str()));
+        (record.session.id.clone(), record.mutation_stamp)
+    };
     assert!(
-        record.mutation_stamp > watermark_before_import,
+        imported_mutation_stamp > watermark_before_import,
         "newly imported discovered thread must have mutation_stamp > \
          pre-import watermark so collect_persist_delta picks it up on \
-         the next tick; got stamp {} vs watermark {}",
-        record.mutation_stamp,
-        watermark_before_import
+         the next tick; got stamp {imported_mutation_stamp} vs \
+         watermark {watermark_before_import}"
+    );
+
+    // Beyond the stamp-invariant check above, pin the delta-persist
+    // end-to-end pickup. The stamp assertion catches the specific
+    // "whole-struct slot replace erases the stamp" bug that lived in
+    // `import_discovered_codex_threads` before the re-stamp fix, but
+    // it would still pass if a future refactor stamped the record
+    // correctly yet broke the watermark wiring inside
+    // `collect_persist_delta` (e.g., flipping `<=` to `<` on the
+    // gate, or switching the comparison to the old `last_persisted`
+    // instead of the `watermark` argument). Calling the real
+    // `collect_persist_delta` with the pre-import watermark and
+    // asserting the imported session shows up in `changed_sessions`
+    // is what catches those regressions.
+    let delta = inner.collect_persist_delta(watermark_before_import);
+    assert!(
+        delta
+            .changed_sessions
+            .iter()
+            .any(|persisted| persisted.session.id == imported_session_id),
+        "collect_persist_delta(pre-import watermark) must include the \
+         imported Codex thread in `changed_sessions`; got {} changed \
+         sessions: {:?}",
+        delta.changed_sessions.len(),
+        delta
+            .changed_sessions
+            .iter()
+            .map(|persisted| &persisted.session.id)
+            .collect::<Vec<_>>()
+    );
+    assert!(
+        delta.watermark >= imported_mutation_stamp,
+        "returned watermark must be >= the imported session's \
+         mutation stamp so the persist thread advances past it on \
+         the next tick; got watermark {} vs stamp {imported_mutation_stamp}",
+        delta.watermark
+    );
+    assert!(
+        !delta.removed_session_ids.contains(&imported_session_id),
+        "a freshly imported thread is not hidden and must not appear \
+         in `removed_session_ids`"
+    );
+
+    // Idempotency: a second collection at the freshly-advanced
+    // watermark returns no changes (no session was re-stamped). This
+    // pins that the watermark contract is "strictly past this stamp"
+    // and catches a regression that double-counts imported rows.
+    let next_watermark = delta.watermark;
+    let second_delta = inner.collect_persist_delta(next_watermark);
+    assert!(
+        !second_delta
+            .changed_sessions
+            .iter()
+            .any(|persisted| persisted.session.id == imported_session_id),
+        "second collection at the returned watermark must not re-emit \
+         the same imported session"
     );
 }
