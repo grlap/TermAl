@@ -11,6 +11,7 @@ Also fixed in the current tree, not re-listed below:
 - **New GET `/api/sessions/{id}` endpoint and `DeltaEvent::SessionCreated`/`MessageCreated` variants undocumented in architecture.md** — the REST endpoint table at `docs/architecture.md` lists `GET /api/sessions/{id} -> SessionResponse { revision, session }` and the documented `DeltaEvent` list covers `SessionCreated` and `MessageCreated` alongside the streaming deltas.
 - **High-risk backend subsystems lack invariant-level documentation** — added contract docs to the previously under-documented hot spots: `sync_remote_state_inner` / `apply_remote_state_if_newer_locked` (snapshot vs focused sync, revision gate, id localization, rollback scope, mutation stamps, callers), the `orchestrators.rs` file-level block (template vs instance storage, full lifecycle, file boundary with `orchestrator_lifecycle.rs` / `orchestrator_transitions.rs`), `acp.rs` (strict initialize → authenticate → session/load-or-new → set_mode/model → prompt handshake, pending JSON-RPC request ownership, timeouts, session-load fallback), and `build_instruction_search_graph` (seed discovery, path canonicalization, reference sanitization, transitive-edge BFS with cycle guard, skipped directories, document classification). Dozens of low-value `/// Handles ...` stubs on trait-impl forwarders and enum accessors were removed or replaced with substantive docs; the remaining `/// Handles ...` in `turn_lifecycle.rs` is a real description rather than a stub.
 - **Architecture.md project structure + state-mutation pattern stale after refactor** — the `## Backend` state dump now lists SQLite storage + the `file_events` broadcaster + the `persist_tx` channel; the state-mutation pattern block documents the background `termal-persist` thread draining `PersistRequest::Delta` signals, `StateInner::collect_persist_delta` as the under-lock diff builder, the mutation-stamp invariant routed through `session_mut*` / `push_session` / `remove_session_at` / `retain_sessions`, and `commit_delta_locked` as the delta-only commit; the project structure listing now reflects the full post-refactor file layout (state/boot, sessions/turns, agents, HTTP API, wire DTOs, remote proxies, orchestrators).
+- **Remote sync rollback stale tombstones** — remote snapshot rollback now uses a named `RemoteSyncRollback` snapshot that restores `removed_session_ids` alongside sessions, orchestrator instances, and `next_session_number`. A regression omits a referenced remote session from a newer snapshot, forces orchestrator localization to fail after retention queues a tombstone, and verifies the restored session no longer has a queued delete.
 - **Stale height estimate on tab switch causing blank area** — `VirtualizedConversationMessageList` now enters a post-activation measuring phase when it transitions inactive → active (or mounts directly in the active state with messages). The wrapper is hidden via `visibility: hidden` while currently-visible slots report their first `ResizeObserver` measurements, then the completion check writes a final scrollTop and reveals. A 150 ms timeout fallback guarantees the wrapper is never stuck hidden. Scroll-restore on activation now lands in the correct place even when messages arrived while the tab was inactive.
 - **Steady-state 1-2 px shake in active session panels** — `handleHeightChange` now rounds `getBoundingClientRect().height` to integer pixels before storage, and all three scrollTop-to-bottom writes (re-pin `useLayoutEffect`, `handleHeightChange` shouldKeepBottom branch, `getAdjustedVirtualizedScrollTopForHeightChange` branch) are wrapped in `Math.abs(current - target) >= 1` no-op guards. Subpixel drift in successive `getBoundingClientRect` reads no longer crosses the 1-pixel commit threshold, and no-op scrollTop writes no longer trigger scroll-event → reflow → ResizeObserver cascades.
 - **Mermaid diagram rendering hardcoded a dark theme** — `MermaidDiagram` now receives the active `appearance`, builds the Mermaid config from that value, and serializes initialize/render/reset through `mermaidRenderQueue` so light diagrams can render without leaving Mermaid's global singleton in a stale theme.
@@ -134,14 +135,32 @@ The user reports "send a prompt, prompt does not show immediately; I have to ref
 - POST responses after backend restart are dropped when `nextState.revision < latestStateRevisionRef.current`.
 - Recovery is bounded by the 30-second safety-net poll or by SSE reconnecting and delivering an initial state event.
 - The UI gives no visual feedback that the send was rejected locally; the draft clears anyway (`ui/src/App.tsx:4618-4636` runs before the POST).
-- The counter-concern — `force + allowRevisionDowngrade` unconditionally could roll back a newer SSE delta — is real (see the existing entry "Safety-net poll uses `force + allowRevisionDowngrade` unconditionally"), so the fix is not just "always force".
+- Related: the existing entry "Safety-net poll uses `force + allowRevisionDowngrade` unconditionally" describes the *opposite* imbalance on the same mechanism — the safety-net poll forces downgrade every tick, including when SSE is healthy. Both bugs share the root cause that the client cannot tell "server restarted" apart from "my view is stale", and the unified fix below closes both.
 
-**Proposal:**
+**Unified proposal (preferred): add a `serverInstanceId` to `StateResponse`.**
 
-- The POST response to a *mutation* the frontend itself just issued is authoritative for the mutation's data: the server just processed the request, so the returned session shape is guaranteed to include the just-sent prompt. The right fix is to adopt the POST response's *session slice* (messages, pending prompts, status) without gating on revision, even when the overall revision counter would gate it out. The revision counter stays governed by SSE / `/api/state` / safety-net poll; only the mutated session's contents get a free pass.
-- Narrower alternative that preserves the current adoption API: when `adoptState` rejects a snapshot whose revision is lower than the in-memory value *and* the client is currently in `reconnecting` (i.e., SSE is not healthy), treat the response as a restart-rewind candidate and re-adopt with `{ force: true, allowRevisionDowngrade: true }`. This couples the decision to the known reconnect state instead of forcing universally.
-- Defensively, keep the draft text populated until `adoptState` returns `true`. Today lines 4618-4636 clear it unconditionally, so a rejected POST response silently swallows the user's input. Restoring the draft (and a toast) would make the silent drop much less confusing — the catch block at 4742-4765 already restores the draft on thrown errors, but a rejected-by-revision-guard path is not an error and does not trigger the catch.
-- A regression test that (a) seeds `latestStateRevisionRef` at a high value, (b) processes a `sendMessage` response at a lower revision, and (c) asserts the new message IS visible, would pin whichever fix is chosen.
+Generate a UUID in `AppState::new_with_paths` at startup and include it on every `StateResponse` (and `HealthResponse`). Client rule: when a snapshot arrives with `revision < latestStateRevisionRef.current`, accept it iff `nextState.server_instance_id !== lastSeenServerInstanceId`. This:
+
+- Fixes the prompt-invisible bug here: the POST response carries the new server's instance id, the client detects the rewind deterministically, and the state is adopted on the first send after restart.
+- Fixes the safety-net poll bug at line ~425: the poll stops forcing downgrade every tick and only does so when the server actually restarted.
+- Does not introduce the concurrent-delta race that a naive always-force fix would: a POST response from the *same* server instance that emitted a newer SSE delta will have `server_instance_id` unchanged, so the client sticks with the existing revision-ordered guard and correctly ignores the stale response.
+
+Implementation surface: one new field on `StateResponse` / `HealthResponse` serialized as `serverInstanceId`, one per-process UUID created at boot, one client-side ref `lastSeenServerInstanceIdRef` updated on every accepted adoption, one new branch in `shouldAdoptSnapshotRevision` that checks the instance id before returning `false` on a decrease.
+
+**Workaround proposals (less preferred):**
+
+- Gate `force + allowRevisionDowngrade` on `backendConnectionState === "reconnecting" || "connecting"` in the `sendMessage` success handler. Closes the common case (SSE has flipped to reconnecting by the time the user hits Send after restart) but leaves a small window where the browser has not yet noticed the disconnect — the state is still `"connected"` even though the server is down, and the guard rejects.
+- Adopt the mutation response's *session slice* unconditionally while keeping the revision counter governed by SSE. This looks safe at first but `state.snapshot()` runs *after* `dispatch_turn` at `src/api.rs:667-671`, so the snapshot can reflect concurrent streaming deltas from *other* sessions committed in between. Force-merging the mutated session's slice can clobber newer streaming text already applied via an SSE delta from the same session. Would need a narrow "prompt-fields-only" merge (new message id, `pendingPrompts` entry) rather than the full session — significantly more surgery than the `serverInstanceId` fix for less correctness.
+
+**Independent UX fix (land regardless of which revision fix is chosen):**
+
+- Do not clear the draft at `ui/src/App.tsx:4618-4636` until `adoptState` returns `true`. The current unconditional clear turns a rejected-by-revision-guard POST into a silent drop; the catch block at lines 4742-4765 only restores the draft on thrown errors, and a revision-guard rejection is not an error. Preserving the draft (plus a "retry" toast) would make the failure mode far less confusing while the root fix is being built.
+
+**Coverage:**
+
+- Regression test that (a) seeds `latestStateRevisionRef` at a high value, (b) processes a `sendMessage` response at a lower revision carrying a different `serverInstanceId`, and (c) asserts the new message is visible.
+- Regression test for the negative case: same setup but with the *same* `serverInstanceId` (not a restart) should still reject the downgrade.
+- Regression test that the safety-net poll's no-op behavior is preserved when SSE is healthy (no instance id change) and the adopt call at `ui/src/App.tsx:4707-4712` becomes a no-op instead of rolling state back.
 
 ## Server restart without browser refresh can lose the last streamed message
 
@@ -179,22 +198,6 @@ The message is not hidden; it is genuinely gone from SQLite. No amount of fronte
 - On `persist_delta_via_cache` error, push the removed ids back into `inner.removed_session_ids` so the next tick retries them. Hold the lock again briefly to do it.
 - Or: move the `mem::take` out of `collect_persist_delta` into the persist-thread caller, pass the ids by reference, and have the thread clear them from `inner` only on success.
 - Add a regression test that injects an error into `persist_delta_via_cache` and asserts the tombstone survives across a retry.
-
-## Remote sync rollback leaves stale session tombstones queued
-
-**Severity:** High - a transient remote orchestrator-sync failure can persist deletes for sessions that were restored by rollback.
-
-`sync_remote_state_inner` now uses `retain_sessions`, which records deleted session ids in `removed_session_ids` for delta persistence. If the later `sync_remote_orchestrators_inner` call fails, the rollback restores `sessions`, `next_session_number`, and `orchestrator_instances`, but it does not restore the previous tombstone accumulator. The next persist tick can therefore delete SQLite rows for sessions that are back in memory.
-
-**Current behavior:**
-- Remote session retention can queue tombstones in `inner.removed_session_ids`.
-- The fallible orchestrator sync rollback restores session records but leaves the tombstones queued.
-- A later delta persist can apply stale deletes to SQLite, making restored sessions disappear after restart.
-
-**Proposal:**
-- Include `removed_session_ids` in the rollback snapshot and restore it on failure.
-- Or defer the retention/delete pass until after the fallible orchestrator sync has succeeded.
-- Add a regression that forces orchestrator sync failure after remote session retention and asserts no stale tombstones remain queued.
 
 ## Imported discovered Codex threads lose their delta-persist stamp
 
@@ -452,6 +455,8 @@ The chained poll calls `adoptState(freshState, { force: true, allowRevisionDowng
 - Gate `allowRevisionDowngrade: true` behind an explicit "server restart detected" signal (e.g., the state carries a freshly reset instance id).
 - For the steady-state poll, use `force: false` and trust SSE.
 
+**Cross-reference:** this bug shares its root cause with "Prompt sent during SSE reconnect window is invisible until safety-net poll (after server restart)" near the top of this file — the client has no deterministic way to tell "server restarted" from "my view is stale" on a revision decrease. The `serverInstanceId` unified fix proposed in that entry closes both issues with a single `StateResponse` field and one client-side ref.
+
 ## State snapshots still include full session transcripts on the wire
 
 **Severity:** Medium - `/api/state` response bodies and SSE state broadcasts still include every session's full `messages` vector. The serialization CPU cost is now off the mutex and off the tokio workers (broadcaster thread + `spawn_blocking`), but the payload size itself is unchanged.
@@ -663,10 +668,6 @@ The new hydration effect's error path calls `reportRequestError(error)` on any `
   unit-test `persist_delta_via_cache` directly against a
   `rusqlite::Connection::open_in_memory` using
   `ensure_sqlite_state_schema` and hand-crafted `PersistDelta`s.
-- [ ] P1: Add remote-sync rollback tombstone coverage:
-  force `sync_remote_orchestrators_inner` to fail after remote-session
-  retention records deletes, then assert the rollback restores
-  `removed_session_ids` along with sessions and orchestrator instances.
 - [ ] P2: Add coverage for `StateInner::remove_session_at` and
   `StateInner::retain_sessions`: build a `StateInner`, push sessions via
   `push_session`, run the helper, and assert `removed_session_ids`
