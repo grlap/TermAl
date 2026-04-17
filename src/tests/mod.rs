@@ -615,6 +615,22 @@ impl ScopedEnvVar {
         }
         Self { key, original }
     }
+
+    /// Unsets `key` for the scope of the returned guard, saving any
+    /// current value so it is restored on drop. Used by tests that assert
+    /// "function X returns None when this env var is not set" to isolate
+    /// from sibling tests that may have set the same var in the process
+    /// env (or from the developer's own shell env). Must be called while
+    /// holding `TEST_HOME_ENV_MUTEX` when the var affects any path read
+    /// via `HOME` / `USERPROFILE` — otherwise the remove races against
+    /// other env-mutating tests.
+    fn remove(key: &'static str) -> Self {
+        let original = std::env::var_os(key);
+        unsafe {
+            std::env::remove_var(key);
+        }
+        Self { key, original }
+    }
 }
 
 impl Drop for ScopedEnvVar {

@@ -443,8 +443,21 @@ fn load_gemini_settings_json_ignores_malformed_input() {
 // with plausible Gemini/Google keys is present in the current project root.
 // Guards against a credential-leak regression where a committed repo `.env`
 // would be silently injected into the Gemini ACP child process.
+//
+// Serialized via `TEST_HOME_ENV_MUTEX` and redirects HOME to an empty
+// tempdir so `gemini_env_file_paths` (which reads HOME/USERPROFILE)
+// cannot pick up the developer's real `~/.gemini/.env` or race against
+// sibling tests that redirect HOME. Without the mutex this raced
+// `find_gemini_env_file_reads_home_directory_env_files`, which writes
+// a `~/.env` containing `GEMINI_API_KEY` into its own tempdir; if that
+// test's HOME redirect overlapped this assertion, `overrides` came back
+// non-empty.
 #[test]
 fn gemini_dotenv_env_pairs_ignore_workspace_env_files() {
+    let _env_lock = TEST_HOME_ENV_MUTEX
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+
     let project_root =
         std::env::temp_dir().join(format!("termal-gemini-dotenv-env-{}", Uuid::new_v4()));
     fs::create_dir_all(&project_root).expect("project root should be created");
@@ -454,6 +467,11 @@ fn gemini_dotenv_env_pairs_ignore_workspace_env_files() {
     )
     .expect("Gemini dotenv file should be written");
 
+    let empty_home =
+        std::env::temp_dir().join(format!("termal-gemini-dotenv-home-{}", Uuid::new_v4()));
+    fs::create_dir_all(&empty_home).expect("empty home dir should be created");
+    let _home_env = ScopedEnvVar::set_path(TEST_HOME_ENV_KEY, &empty_home);
+
     let overrides = gemini_dotenv_env_pairs()
         .into_iter()
         .collect::<HashMap<_, _>>();
@@ -461,6 +479,7 @@ fn gemini_dotenv_env_pairs_ignore_workspace_env_files() {
     assert!(overrides.is_empty());
 
     let _ = fs::remove_dir_all(project_root);
+    let _ = fs::remove_dir_all(empty_home);
 }
 
 // Pins `find_gemini_env_file` preferring `~/.gemini/.env` and falling back to
@@ -498,8 +517,20 @@ fn find_gemini_env_file_reads_home_directory_env_files() {
 // source of a `GEMINI_API_KEY` is a workspace `.env` (and no home env or
 // selected-auth setting is configured). Guards against auto-selecting
 // `gemini-api-key` from a repo-committed credential file.
+//
+// Serialized via `TEST_HOME_ENV_MUTEX` and explicitly isolates HOME plus
+// every Gemini/Google env var that `select_acp_auth_method` reads. Without
+// isolation this test raced `gemini_invalid_session_load_falls_back_to_session_new`
+// in `src/tests/mod.rs` (which sets `GEMINI_API_KEY=test-key-not-real`) —
+// `env_var_source("GEMINI_API_KEY")` would see the sibling test's process-
+// env value, `gemini_api_key_source()` would return `Some(...)`, and this
+// assertion would flip from `None` to `Some("gemini-api-key")`.
 #[test]
 fn select_acp_auth_method_ignores_workspace_dotenv_credentials() {
+    let _env_lock = TEST_HOME_ENV_MUTEX
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+
     let project_root = std::env::temp_dir().join(format!(
         "termal-gemini-auth-method-dotenv-{}",
         Uuid::new_v4()
@@ -510,6 +541,23 @@ fn select_acp_auth_method_ignores_workspace_dotenv_credentials() {
         "GEMINI_API_KEY=dotenv-gemini-key\n",
     )
     .expect("Gemini dotenv file should be written");
+
+    // Point HOME at an empty tempdir so `dotenv_var_source` cannot walk
+    // into the developer's real `~/.gemini/.env` or `~/.env`.
+    let empty_home =
+        std::env::temp_dir().join(format!("termal-gemini-auth-home-{}", Uuid::new_v4()));
+    fs::create_dir_all(&empty_home).expect("empty home dir should be created");
+    let _home_env = ScopedEnvVar::set_path(TEST_HOME_ENV_KEY, &empty_home);
+
+    // Unset every env var `gemini_api_key_source` / `gemini_vertex_auth_source`
+    // inspect. Each `_unset_X` is an RAII guard that restores the original
+    // value on drop, so the developer's real shell env is unaffected.
+    let _unset_api_key = ScopedEnvVar::remove("GEMINI_API_KEY");
+    let _unset_google_api_key = ScopedEnvVar::remove("GOOGLE_API_KEY");
+    let _unset_google_project = ScopedEnvVar::remove("GOOGLE_CLOUD_PROJECT");
+    let _unset_google_location = ScopedEnvVar::remove("GOOGLE_CLOUD_LOCATION");
+    let _unset_use_vertex = ScopedEnvVar::remove("GOOGLE_GENAI_USE_VERTEXAI");
+    let _unset_use_gca = ScopedEnvVar::remove("GOOGLE_GENAI_USE_GCA");
 
     let initialize_result = json!({
         "authMethods": [
@@ -529,6 +577,7 @@ fn select_acp_auth_method_ignores_workspace_dotenv_credentials() {
     );
 
     let _ = fs::remove_dir_all(project_root);
+    let _ = fs::remove_dir_all(empty_home);
 }
 
 // Pins `prepare_termal_gemini_system_settings` (Windows only) writing a settings
