@@ -372,6 +372,7 @@ include!("remote.rs");
 include!("remote_terminal.rs");
 include!("remote_sync.rs");
 include!("state.rs");
+include!("session_runtime.rs");
 include!("workspace_watch.rs");
 include!("codex_discovery.rs");
 include!("codex_validation.rs");
