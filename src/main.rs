@@ -395,6 +395,7 @@ include!("terminal.rs");
 include!("review.rs");
 include!("paths.rs");
 include!("orchestrators.rs");
+include!("orchestrator_transitions.rs");
 include!("telegram.rs");
 
 /// Marks the listening socket as non-inheritable so child processes (agent
