@@ -371,6 +371,7 @@ impl Mode {
 include!("remote.rs");
 include!("remote_ssh.rs");
 include!("remote_terminal.rs");
+include!("remote_routes.rs");
 include!("remote_sync.rs");
 include!("state.rs");
 include!("session_runtime.rs");
