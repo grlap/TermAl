@@ -157,6 +157,7 @@ All routes are under `/api`. The backend serves JSON, and the frontend proxies r
 | POST | `/api/projects/{id}/actions/{action_id}` | Dispatch a digest action such as approve, continue, or stop |
 | POST | `/api/projects/pick` | Pick a local project root |
 | POST | `/api/sessions` | Create session |
+| GET | `/api/sessions/{id}` | Fetch one session (full transcript hydration) -> `SessionResponse { revision, session }` |
 | POST | `/api/sessions/{id}/settings` | Update session config |
 | POST | `/api/sessions/{id}/model-options/refresh` | Refresh live model list/options |
 | POST | `/api/sessions/{id}/codex/thread/fork` | Fork the live Codex thread into a new session |
@@ -214,6 +215,8 @@ DeltaEvent::TextDelta            { revision, session_id, message_id, delta, prev
 DeltaEvent::TextReplace          { revision, session_id, message_id, message_index, text, preview }
 DeltaEvent::CommandUpdate        { revision, session_id, message_id, command, output, status, preview, ... }
 DeltaEvent::ParallelAgentsUpdate { revision, session_id, message_id, message_index, agents, preview }
+DeltaEvent::MessageCreated       { revision, session_id, message } // replaces a streaming placeholder with the authoritative finalized message
+DeltaEvent::SessionCreated       { revision, session_id, session } // local + remote-proxied session creation; forwarded by remote backends after id localization
 DeltaEvent::OrchestratorsUpdated { revision, orchestrators[] } // IDs inside each instance are scoped to the originating server; translate via sync_remote_state_inner before forwarding remotely.
 ```
 
@@ -238,18 +241,29 @@ On broadcast channel lag, the backend falls back to sending a full state snapsho
 
 ```
 ~/.termal/
-|-- sessions.json          # PersistedState (sessions, projects, preferences, remotes, workspaces, instances)
+|-- termal.sqlite          # primary store: app_state + sessions tables (+ WAL/-shm sidecars)
+|-- sessions.json          # legacy JSON snapshot path; kept as the identifier that
+|                          # termal.sqlite is derived from (see sqlite_persistence_path_for_json_path)
 |-- orchestrators.json     # reusable orchestrator templates
+|-- termal.sqlite.imported-<timestamp>.json  # one-shot backup of a migrated legacy JSON
 `-- telegram-bot.json      # optional Telegram relay chat binding
 ```
 
-`PersistedState` is a projection of `StateInner` that excludes runtime handles,
-pending approval maps, and empty collections. It stores the revision counter,
-session configs, message history, Codex state, projects, remote preferences,
-orchestrator instances, and persisted workspace layout documents keyed by
-workspace ID. On startup, the backend loads this file and reconstructs
-`StateInner`. Template definitions live in `orchestrators.json` so reusable
-workflow designs can be managed separately from running instances.
+`PersistedState` is the logical projection of `StateInner` that excludes
+runtime handles, pending approval maps, and empty collections. On disk it
+splits across two SQLite tables: `app_state` (one row per schema version +
+one metadata row carrying preferences, projects, remotes, workspaces, and
+bookkeeping counters) and `sessions` (one row per session keyed by id,
+value_json carrying the serialized `PersistedSessionRecord`). This two-table
+split lets the background persist thread write only the **changed** session
+rows on each commit — see `collect_persist_delta`, `persist_delta_via_cache`,
+and `SqlitePersistConnectionCache` in `src/persist.rs`.
+
+On startup, the backend loads state from SQLite if `termal.sqlite` exists;
+otherwise it falls back to the legacy `sessions.json` and one-shot-imports
+it into SQLite, renaming the JSON aside to preserve it as a backup. Template
+definitions live in `orchestrators.json` so reusable workflow designs can
+be managed separately from running instances.
 
 ---
 
@@ -769,15 +783,31 @@ When a session is busy (Active or Approval), new messages are queued in a `VecDe
 ```text
 termal/
 |-- src/
-|   |-- main.rs              # process mode selection + router assembly
-|   |-- api.rs               # axum handlers and transport glue
-|   |-- state.rs             # AppState, sessions, persistence, shared state
+|   |-- main.rs              # process mode selection + router assembly; assembles the
+|   |                        # other *.rs files via include!() into a single flat crate
+|   |-- api.rs               # axum HTTP handlers (routes + request/response glue)
+|   |-- state.rs             # AppState, StateInner, sessions, commit_locked, SSE broadcast
+|   |-- persist.rs           # SQLite schema + load/save + persist-thread connection cache
 |   |-- runtime.rs           # Claude/Codex/ACP process management
 |   |-- turns.rs             # recorder pipeline and blocking REPL turns
 |   |-- remote.rs            # SSH tunnels, remote proxying, SSE bridge
+|   |-- instructions.rs      # instruction search graph traversal + document classification
+|   |-- git.rs               # git diff loading, status parsing, worktree readers, repo sync
+|   |-- terminal.rs          # terminal run/stream, process-tree lifecycle, output buffer
+|   |-- review.rs            # review-document persistence + change-set-id validation
+|   |-- paths.rs             # path resolution, canonicalization, project-scoped guards
 |   |-- orchestrators.rs     # template CRUD and runtime instance engine
 |   |-- telegram.rs          # Telegram digest/action relay mode
-|   `-- tests.rs             # backend regression tests
+|   `-- tests/               # backend regression tests, split by domain
+|       |-- mod.rs           # shared fixtures: TestRecorder, HTTP test server, handle factories
+|       |-- acp_gemini.rs    # ACP + Gemini runtime configuration
+|       |-- agent_commands.rs, agent_readiness.rs, claude.rs, codex_discovery.rs,
+|       |-- codex_protocol.rs, codex_threads.rs, cursor.rs, file_changes.rs,
+|       |-- git.rs, http_routes.rs, instruction_search.rs, json_rpc.rs,
+|       |-- orchestrator.rs, persist.rs, project_digest.rs, projects.rs,
+|       |-- remote.rs, review.rs, runtime_rpc.rs, session_lifecycle.rs,
+|       |-- session_settings.rs, session_stop.rs, session_stop_runtime.rs,
+|       |-- shared_codex.rs, telegram.rs, terminal.rs, workspace.rs
 |-- ui/
 |   |-- src/
 |   |   |-- App.tsx
