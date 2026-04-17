@@ -102,6 +102,25 @@ impl RemoteSyncRollback {
 /// remote-proxy session-creation helpers in
 /// `remote_create_proxies.rs`, and
 /// `sync_remote_state_for_target` in `remote_routes.rs`.
+///
+/// Broad-sync with rollback:
+///
+/// ```mermaid
+/// flowchart TD
+///   Start([sync_remote_state_inner]) --> Focus{focus_remote_session_id?}
+///   Focus -- Some --> FocusedSync[update one session;<br/>no orchestrators, no tombstones]
+///   FocusedSync --> End([return])
+///   Focus -- None --> Capture[RemoteSyncRollback::capture<br/>sessions + orchestrators +<br/>next_session_number + removed_session_ids]
+///   Capture --> Projects[upsert remote projects]
+///   Projects --> Sessions[upsert remote sessions<br/>via localize_remote_session]
+///   Sessions --> Orchestrators[upsert remote orchestrator instances]
+///   Orchestrators --> LocalizeError{localization failure?}
+///   LocalizeError -- yes --> Restore[rollback.restore:<br/>restore all captured fields]
+///   Restore --> End
+///   LocalizeError -- no --> Retain[retain_sessions: drop local proxies<br/>not in snapshot, queue tombstones]
+///   Retain --> NoteRevision[note_remote_applied_revision]
+///   NoteRevision --> End
+/// ```
 fn sync_remote_state_inner(
     inner: &mut StateInner,
     remote_id: &str,

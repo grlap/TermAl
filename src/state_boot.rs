@@ -40,6 +40,30 @@ impl StateInner {
     /// previously ignored (via `ignore_discovered_codex_thread`) are
     /// skipped. `default_workdir` is the fallback cwd for imported
     /// threads that have no recorded workdir in Codex's state file.
+    ///
+    /// Per-thread flow:
+    ///
+    /// ```mermaid
+    /// flowchart TD
+    ///   Start([thread from Codex state dir]) --> Normalize[normalize workdir path]
+    ///   Normalize --> ScopeCheck{within default_workdir<br/>or any local project?}
+    ///   ScopeCheck -- no --> Skip([skip])
+    ///   ScopeCheck -- yes --> Project[find or create local project]
+    ///   Project --> Existing{already imported<br/>for this threadId?}
+    ///   Existing -- yes --> Refresh[refresh workdir and project,<br/>apply latest thread metadata]
+    ///   Refresh --> Done([done])
+    ///   Existing -- no --> Ignored{in ignored list?}
+    ///   Ignored -- yes --> Skip
+    ///   Ignored -- no --> Create[create_session + apply thread state]
+    ///   Create --> Restamp[re-stamp slot via stamp_session_at_index<br/>so SQLite delta persist picks it up]
+    ///   Restamp --> Done
+    /// ```
+    ///
+    /// The re-stamp step is load-bearing: `create_session` returns an
+    /// owned `SessionRecord` whose whole-struct slot replace would
+    /// otherwise erase the stamp that `push_session` applied (see
+    /// `stamp_session_at_index` in `state_inner.rs` for the
+    /// mutation-stamp invariant).
     fn import_discovered_codex_threads(
         &mut self,
         default_workdir: &str,

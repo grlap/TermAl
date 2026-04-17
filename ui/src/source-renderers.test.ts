@@ -539,6 +539,42 @@ describe("detectRenderableRegions: Rust doc comments (Phase 5)", () => {
     ).toEqual([]);
   });
 
+  it("finds Mermaid fences in the real `import_discovered_codex_threads` doc comment shape", () => {
+    // End-to-end sanity check using a doc-comment shape that matches
+    // the one we added to `src/state_boot.rs` — proves the parser
+    // handles the common "prose before + blank `///` separator +
+    // Mermaid fence + blank `///` + prose after" pattern without
+    // accidentally splitting the block or losing the fence.
+    const src = [
+      "/// Merges Codex threads discovered on disk into self.sessions.", // 1
+      "///", // 2
+      "/// Per-thread flow:", // 3
+      "///", // 4
+      "/// ```mermaid", // 5
+      "/// flowchart TD", // 6
+      "///   Start([thread]) --> Check{within scope?}", // 7
+      "///   Check -- no --> Skip([skip])", // 8
+      "///   Check -- yes --> Import[import as session]", // 9
+      "/// ```", // 10
+      "///", // 11
+      "/// The re-stamp step is load-bearing.", // 12
+      "fn import_discovered_codex_threads(&mut self) {}", // 13
+    ].join("\n");
+    const regions = detectRenderableRegions({
+      path: "src/state_boot.rs",
+      language: "rust",
+      content: src,
+      mode: "source",
+    });
+    expect(regions).toHaveLength(1);
+    const region = regions[0] as SourceRenderableRegion;
+    expect(region.renderer).toBe("mermaid");
+    expect(region.sourceStartLine).toBe(5);
+    expect(region.sourceEndLine).toBe(10);
+    expect(region.displayText).toContain("flowchart TD");
+    expect(region.displayText).toContain("Check -- yes --> Import");
+  });
+
   it("marks Rust-derived regions read-only in diff/markdown-diff mode", () => {
     const src = [
       "/// ```mermaid",
