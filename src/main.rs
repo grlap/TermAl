@@ -431,6 +431,7 @@ include!("terminal.rs");
 include!("review.rs");
 include!("paths.rs");
 include!("orchestrators.rs");
+include!("orchestrator_lifecycle.rs");
 include!("orchestrator_transitions.rs");
 include!("telegram.rs");
 
