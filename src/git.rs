@@ -1077,3 +1077,216 @@ fn build_git_repo_action_summary(
         _ => format!("{verb} git repository."),
     }
 }
+
+/// Enumerates parsed Git branch states.
+struct ParsedGitBranchStatus {
+    ahead: usize,
+    behind: usize,
+    branch: Option<String>,
+    upstream: Option<String>,
+}
+
+/// Resolves Git repo root.
+fn resolve_git_repo_root(workdir: &FsPath) -> Result<Option<PathBuf>, ApiError> {
+    let output = git_command()
+        .arg("-C")
+        .arg(workdir)
+        .args(["rev-parse", "--show-toplevel"])
+        .output()
+        .map_err(|err| ApiError::internal(format!("failed to run git rev-parse: {err}")))?;
+
+    if output.status.success() {
+        let repo_root = String::from_utf8_lossy(&output.stdout).trim().to_owned();
+        return Ok((!repo_root.is_empty()).then(|| PathBuf::from(repo_root)));
+    }
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let trimmed = stderr.trim();
+    if trimmed.contains("not a git repository") {
+        return Ok(None);
+    }
+
+    Err(ApiError::internal(format!(
+        "git rev-parse failed: {trimmed}"
+    )))
+}
+
+/// Parses Git branch status.
+fn parse_git_branch_status(line: &str) -> ParsedGitBranchStatus {
+    let mut branch = None;
+    let mut upstream = None;
+    let mut ahead = 0;
+    let mut behind = 0;
+
+    let (head_segment, counts_segment) = match line.split_once(" [") {
+        Some((head, counts)) => (head, Some(counts.trim_end_matches(']'))),
+        None => (line, None),
+    };
+
+    if let Some((local_branch, upstream_branch)) = head_segment.split_once("...") {
+        branch = Some(local_branch.trim().to_owned());
+        let upstream_name = upstream_branch.trim();
+        if !upstream_name.is_empty() {
+            upstream = Some(upstream_name.to_owned());
+        }
+    } else {
+        let trimmed = head_segment.trim();
+        if !trimmed.is_empty() {
+            branch = Some(trimmed.to_owned());
+        }
+    }
+
+    if let Some(counts_segment) = counts_segment {
+        for item in counts_segment.split(',') {
+            let trimmed = item.trim();
+            if let Some(value) = trimmed.strip_prefix("ahead ") {
+                ahead = value.parse::<usize>().unwrap_or(0);
+            } else if let Some(value) = trimmed.strip_prefix("behind ") {
+                behind = value.parse::<usize>().unwrap_or(0);
+            }
+        }
+    }
+
+    ParsedGitBranchStatus {
+        ahead,
+        behind,
+        branch,
+        upstream,
+    }
+}
+
+/// Parses Git status paths.
+fn parse_git_status_paths(path_payload: &str) -> (Option<String>, String) {
+    if let Some(separator_index) = find_git_status_rename_separator(path_payload) {
+        let original_path = decode_git_status_path(&path_payload[..separator_index]);
+        let path = decode_git_status_path(&path_payload[separator_index + 4..]);
+        return (Some(original_path), path);
+    }
+
+    (None, decode_git_status_path(path_payload))
+}
+
+/// Finds Git status rename separator.
+fn find_git_status_rename_separator(path_payload: &str) -> Option<usize> {
+    let bytes = path_payload.as_bytes();
+    let mut index = 0;
+    let mut in_quotes = false;
+
+    while index < bytes.len() {
+        match bytes[index] {
+            b'\\' if in_quotes => {
+                index += 2;
+            }
+            b'"' => {
+                in_quotes = !in_quotes;
+                index += 1;
+            }
+            b' ' if !in_quotes && bytes[index..].starts_with(b" -> ") => {
+                return Some(index);
+            }
+            _ => {
+                index += 1;
+            }
+        }
+    }
+
+    None
+}
+
+/// Decodes Git status path.
+fn decode_git_status_path(path: &str) -> String {
+    let trimmed = path.trim();
+    decode_git_status_quoted_path(trimmed).unwrap_or_else(|| trimmed.to_owned())
+}
+
+/// Decodes Git status quoted path.
+fn decode_git_status_quoted_path(path: &str) -> Option<String> {
+    if !path.starts_with('"') || !path.ends_with('"') || path.len() < 2 {
+        return None;
+    }
+
+    let inner = &path[1..path.len() - 1];
+    let bytes = inner.as_bytes();
+    let mut decoded = Vec::with_capacity(bytes.len());
+    let mut index = 0;
+
+    while index < bytes.len() {
+        if bytes[index] != b'\\' {
+            decoded.push(bytes[index]);
+            index += 1;
+            continue;
+        }
+
+        index += 1;
+        if index >= bytes.len() {
+            return None;
+        }
+
+        match bytes[index] {
+            b'"' | b'\\' => {
+                decoded.push(bytes[index]);
+                index += 1;
+            }
+            b'a' => {
+                decoded.push(0x07);
+                index += 1;
+            }
+            b'b' => {
+                decoded.push(0x08);
+                index += 1;
+            }
+            b'f' => {
+                decoded.push(0x0c);
+                index += 1;
+            }
+            b'n' => {
+                decoded.push(b'\n');
+                index += 1;
+            }
+            b'r' => {
+                decoded.push(b'\r');
+                index += 1;
+            }
+            b't' => {
+                decoded.push(b'\t');
+                index += 1;
+            }
+            b'v' => {
+                decoded.push(0x0b);
+                index += 1;
+            }
+            b'0'..=b'7' => {
+                let mut value = bytes[index] - b'0';
+                index += 1;
+
+                for _ in 0..2 {
+                    if index >= bytes.len() {
+                        break;
+                    }
+                    let next = bytes[index];
+                    if !matches!(next, b'0'..=b'7') {
+                        break;
+                    }
+                    value = value.saturating_mul(8).saturating_add(next - b'0');
+                    index += 1;
+                }
+
+                decoded.push(value);
+            }
+            other => {
+                decoded.push(other);
+                index += 1;
+            }
+        }
+    }
+
+    Some(String::from_utf8_lossy(&decoded).into_owned())
+}
+
+/// Normalizes Git status code.
+fn normalize_git_status_code(code: char) -> Option<String> {
+    match code {
+        ' ' => None,
+        other => Some(other.to_string()),
+    }
+}
