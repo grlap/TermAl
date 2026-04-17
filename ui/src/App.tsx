@@ -1279,8 +1279,14 @@ export default function App() {
   const draggedTabRef = useRef<WorkspaceTabDrag | null>(null);
   const launcherDraggedTabRef = useRef<WorkspaceTabDrag | null>(null);
   const isMountedRef = useRef(true);
-  const activePromptPollIntervalRef = useRef<ReturnType<
-    typeof setInterval
+  // Self-chained safety-net poll (see the sendMessage path). A previous
+  // implementation used `setInterval`, which stacks overlapping fires when
+  // a slow `/api/state` response exceeds the interval — on large transcripts
+  // that caused the backend to be hit by multiple concurrent full-state
+  // serializations. The current implementation chains `setTimeout` so the
+  // next poll is only scheduled after the previous one completes.
+  const activePromptPollTimeoutIdRef = useRef<ReturnType<
+    typeof setTimeout
   > | null>(null);
   const activePromptPollTimeoutRef = useRef<ReturnType<
     typeof setTimeout
@@ -4303,9 +4309,9 @@ export default function App() {
     isMountedRef.current = true;
     return () => {
       isMountedRef.current = false;
-      if (activePromptPollIntervalRef.current !== null) {
-        clearInterval(activePromptPollIntervalRef.current);
-        activePromptPollIntervalRef.current = null;
+      if (activePromptPollTimeoutIdRef.current !== null) {
+        clearTimeout(activePromptPollTimeoutIdRef.current);
+        activePromptPollTimeoutIdRef.current = null;
       }
       if (activePromptPollTimeoutRef.current !== null) {
         clearTimeout(activePromptPollTimeoutRef.current);
@@ -4646,66 +4652,88 @@ export default function App() {
         setRequestError(null);
         // Safety net: if the SSE stream is dead (e.g. after a server
         // restart the proxy may not forward the connection close), the
-        // agent's response would never arrive via deltas. Poll the
-        // authoritative snapshot every few seconds until the session is
-        // no longer active. If SSE is healthy, the polls are no-ops
-        // (same revision) and stop once the turn completes.
+        // agent's response would never arrive via deltas. Chain a
+        // `setTimeout` poll of the authoritative snapshot until the
+        // session is no longer active. If SSE is healthy, the polls are
+        // no-ops (same revision) and stop once the turn completes.
+        //
+        // Implementation notes:
+        // - Self-chaining `setTimeout` rather than `setInterval`, so the
+        //   next poll is only scheduled after the previous one returns.
+        //   `setInterval` stacks overlapping fires when `/api/state`
+        //   responses exceed the interval (which happens on large
+        //   transcripts where serialization alone takes multiple
+        //   seconds), producing concurrent full-state serializations on
+        //   the backend.
+        // - The interval is generous (30 s) because this is a last-
+        //   resort fallback; the SSE watchdog already handles a genuinely
+        //   dead connection far faster than this poll ever would.
         // Clear any previous safety-net poll so rapid prompts don't
-        // stack independent intervals.
-        if (activePromptPollIntervalRef.current !== null) {
-          clearInterval(activePromptPollIntervalRef.current);
+        // stack independent timers.
+        if (activePromptPollTimeoutIdRef.current !== null) {
+          clearTimeout(activePromptPollTimeoutIdRef.current);
+          activePromptPollTimeoutIdRef.current = null;
         }
         if (activePromptPollTimeoutRef.current !== null) {
           clearTimeout(activePromptPollTimeoutRef.current);
+          activePromptPollTimeoutRef.current = null;
         }
-        activePromptPollIntervalRef.current = setInterval(async () => {
+
+        const ACTIVE_PROMPT_POLL_INTERVAL_MS = 30_000;
+        const ACTIVE_PROMPT_POLL_MAX_DURATION_MS = 5 * 60 * 1000;
+
+        function clearActivePromptPoll() {
+          if (activePromptPollTimeoutIdRef.current !== null) {
+            clearTimeout(activePromptPollTimeoutIdRef.current);
+            activePromptPollTimeoutIdRef.current = null;
+          }
+        }
+
+        const scheduleNextActivePromptPoll = () => {
           if (!isMountedRef.current) {
-            if (activePromptPollIntervalRef.current !== null) {
-              clearInterval(activePromptPollIntervalRef.current);
-              activePromptPollIntervalRef.current = null;
-            }
+            clearActivePromptPoll();
             return;
           }
-          try {
-            const freshState = await fetchState();
+          activePromptPollTimeoutIdRef.current = setTimeout(async () => {
+            activePromptPollTimeoutIdRef.current = null;
             if (!isMountedRef.current) {
-              if (activePromptPollIntervalRef.current !== null) {
-                clearInterval(activePromptPollIntervalRef.current);
-                activePromptPollIntervalRef.current = null;
-              }
               return;
             }
-            // Allow revision downgrade so a restarted server (whose
-            // persisted revision may be lower) is adopted.
-            adoptState(freshState, {
-              force: true,
-              allowRevisionDowngrade: true,
-            });
-            // Stop once the session is no longer active.
-            if (
-              !freshState.sessions?.some(
-                (session) =>
-                  session.id === sessionId && session.status === "active",
-              )
-            ) {
-              if (activePromptPollIntervalRef.current !== null) {
-                clearInterval(activePromptPollIntervalRef.current);
-                activePromptPollIntervalRef.current = null;
+            try {
+              const freshState = await fetchState();
+              if (!isMountedRef.current) {
+                return;
               }
+              // Allow revision downgrade so a restarted server (whose
+              // persisted revision may be lower) is adopted.
+              adoptState(freshState, {
+                force: true,
+                allowRevisionDowngrade: true,
+              });
+              // Stop once the session is no longer active.
+              if (
+                !freshState.sessions?.some(
+                  (session) =>
+                    session.id === sessionId && session.status === "active",
+                )
+              ) {
+                return;
+              }
+            } catch {
+              // Best-effort; fall through to the next schedule below.
             }
-          } catch {
-            // Best-effort; next interval will retry.
-          }
-        }, 3000);
+            // Chain the next poll only after this one finishes, so a slow
+            // `/api/state` response never produces overlapping inflight
+            // requests.
+            scheduleNextActivePromptPoll();
+          }, ACTIVE_PROMPT_POLL_INTERVAL_MS);
+        };
+
+        scheduleNextActivePromptPoll();
         // Hard cap: stop polling after 5 minutes regardless.
         activePromptPollTimeoutRef.current = setTimeout(
-          () => {
-            if (activePromptPollIntervalRef.current !== null) {
-              clearInterval(activePromptPollIntervalRef.current);
-              activePromptPollIntervalRef.current = null;
-            }
-          },
-          5 * 60 * 1000,
+          clearActivePromptPoll,
+          ACTIVE_PROMPT_POLL_MAX_DURATION_MS,
         );
       } catch (error) {
         let restoredDraft = false;

@@ -288,10 +288,27 @@ fn persist_state_parts_to_sqlite(
             .with_context(|| format!("failed to create `{}`", parent.display()))?;
     }
 
-    let metadata_json =
-        serde_json::to_string(metadata).context("failed to serialize persisted state metadata")?;
     let mut connection = open_sqlite_state_connection(path)?;
     ensure_sqlite_state_schema(&connection)?;
+    persist_state_parts_via_connection(&mut connection, path, metadata, sessions, replace_sessions)
+}
+
+/// Applies one persist transaction to an already-open SQLite connection.
+///
+/// Assumes the caller has run [`ensure_sqlite_state_schema`] at least once
+/// for this connection. Used by the background persist thread so the
+/// per-persist hot path does not pay for opening a fresh connection or
+/// re-running the schema-version upsert on every commit.
+#[cfg(not(test))]
+fn persist_state_parts_via_connection(
+    connection: &mut rusqlite::Connection,
+    path: &FsPath,
+    metadata: &PersistedState,
+    sessions: &[PersistedSessionRecord],
+    replace_sessions: bool,
+) -> Result<()> {
+    let metadata_json =
+        serde_json::to_string(metadata).context("failed to serialize persisted state metadata")?;
     let tx = connection
         .transaction()
         .with_context(|| format!("failed to start SQLite transaction for `{}`", path.display()))?;
@@ -318,6 +335,77 @@ fn persist_state_parts_to_sqlite(
     tx.commit()
         .with_context(|| format!("failed to commit persisted state to `{}`", path.display()))?;
     Ok(())
+}
+
+/// Thread-local SQLite connection cache for the background persist thread.
+///
+/// Every queued persist previously opened a fresh SQLite connection and
+/// re-ran `ensure_sqlite_state_schema`, which writes `schema_version`
+/// every call. The persist thread writes many times during an active
+/// session, so amortizing that fixed cost to one open-and-validate per
+/// thread lifetime removes the biggest per-persist overhead.
+#[cfg(not(test))]
+struct SqlitePersistConnectionCache {
+    path: Option<PathBuf>,
+    connection: Option<rusqlite::Connection>,
+}
+
+#[cfg(not(test))]
+impl SqlitePersistConnectionCache {
+    fn new() -> Self {
+        Self {
+            path: None,
+            connection: None,
+        }
+    }
+
+    /// Returns a mutable reference to a SQLite connection opened for
+    /// `path`, reusing the cached connection when the path matches.
+    /// Runs schema validation only when a fresh connection is opened.
+    fn connection_for(&mut self, path: &FsPath) -> Result<&mut rusqlite::Connection> {
+        let matches_cache = self.path.as_deref() == Some(path);
+        if !matches_cache {
+            // Path changed (or first open): drop any stale connection and
+            // open+validate fresh. Dropping the stale connection first
+            // lets rusqlite flush any pending state before we rebind.
+            self.connection = None;
+            self.path = None;
+            if let Some(parent) = path.parent() {
+                fs::create_dir_all(parent)
+                    .with_context(|| format!("failed to create `{}`", parent.display()))?;
+            }
+            let connection = open_sqlite_state_connection(path)?;
+            ensure_sqlite_state_schema(&connection)?;
+            self.path = Some(path.to_path_buf());
+            self.connection = Some(connection);
+        }
+        Ok(self
+            .connection
+            .as_mut()
+            .expect("connection was just cached for the requested path"))
+    }
+}
+
+/// Persists one `PersistedState` snapshot via the shared connection cache.
+/// Intended for the background persist thread hot loop; the cache removes
+/// per-request connection open + schema-validate overhead.
+#[cfg(not(test))]
+fn persist_state_via_cache(
+    cache: &mut SqlitePersistConnectionCache,
+    path: &FsPath,
+    persisted: &PersistedState,
+) -> Result<()> {
+    let sqlite_path = sqlite_persistence_path_for_json_path(path);
+    let connection = cache.connection_for(&sqlite_path)?;
+    let mut metadata = persisted.clone();
+    metadata.sessions.clear();
+    persist_state_parts_via_connection(
+        connection,
+        &sqlite_path,
+        &metadata,
+        &persisted.sessions,
+        true,
+    )
 }
 
 /// Persists state from a pre-built `PersistedState` snapshot.
@@ -431,9 +519,27 @@ async fn health() -> Json<HealthResponse> {
 }
 
 /// Gets state.
-async fn get_state(State(state): State<AppState>) -> Result<Json<StateResponse>, ApiError> {
-    let response = run_blocking_api(move || Ok(state.snapshot())).await?;
-    Ok(Json(response))
+///
+/// Builds AND serializes the snapshot inside `spawn_blocking` so the tokio
+/// worker does not spend milliseconds-to-seconds of CPU running
+/// `serde_json::to_writer` on a `Vec<Session>` that contains every session's
+/// full `Vec<Message>`. The worker thread only handles the pre-serialized
+/// `Vec<u8>` body, which is a fixed-cost hand-off to hyper.
+async fn get_state(State(state): State<AppState>) -> Result<Response, ApiError> {
+    let body = run_blocking_api(move || {
+        let snapshot = state.snapshot();
+        serde_json::to_vec(&snapshot)
+            .map_err(|err| ApiError::internal(format!("failed to serialize state: {err}")))
+    })
+    .await?;
+    Ok((
+        [(
+            axum::http::header::CONTENT_TYPE,
+            HeaderValue::from_static("application/json"),
+        )],
+        body,
+    )
+        .into_response())
 }
 
 /// Gets one full session.
@@ -4473,6 +4579,18 @@ fn canonicalize_worktree_path(
     })
 }
 
+/// Status codes that qualify for Markdown-enrichment degradation even when
+/// the originating `ApiError` carries no `ApiErrorKind`. Both
+/// [`should_degrade_git_diff_document_enrichment_error`] and
+/// [`git_diff_document_enrichment_note`] consult this list, so adding a new
+/// degraded status updates both sites in lockstep. Server errors (`5xx`)
+/// are handled separately by `StatusCode::is_server_error`.
+const DEGRADED_UNTAGGED_STATUSES: &[StatusCode] = &[StatusCode::BAD_REQUEST, StatusCode::NOT_FOUND];
+
+fn is_untagged_degradable_status(status: StatusCode) -> bool {
+    DEGRADED_UNTAGGED_STATUSES.contains(&status)
+}
+
 fn git_diff_document_enrichment_note(error: &ApiError) -> Option<String> {
     match error.kind {
         Some(ApiErrorKind::GitDocumentTooLarge) => Some(
@@ -4497,7 +4615,7 @@ fn git_diff_document_enrichment_note(error: &ApiError) -> Option<String> {
             "Rendered Markdown is unavailable due to a read error."
                 .to_owned(),
         ),
-        None if matches!(error.status, StatusCode::BAD_REQUEST | StatusCode::NOT_FOUND) => {
+        None if is_untagged_degradable_status(error.status) => {
             Some("Rendered Markdown is unavailable.".to_owned())
         }
         None => None,
@@ -4505,8 +4623,7 @@ fn git_diff_document_enrichment_note(error: &ApiError) -> Option<String> {
 }
 
 fn should_degrade_git_diff_document_enrichment_error(error: &ApiError) -> bool {
-    matches!(error.status, StatusCode::BAD_REQUEST | StatusCode::NOT_FOUND)
-        || error.status.is_server_error()
+    is_untagged_degradable_status(error.status) || error.status.is_server_error()
 }
 
 /// Ensures a canonicalized path starts inside the canonical Git repository root.

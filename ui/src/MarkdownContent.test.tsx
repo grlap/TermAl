@@ -316,6 +316,35 @@ describe("MarkdownContent Mermaid diagrams", () => {
     expect(await screen.findByText("Mermaid render failed: syntax error")).toBeInTheDocument();
     expect(container.querySelector("code.language-mermaid")?.textContent).toBe("flowchart TD\n  A -->");
   });
+
+  it("caps Mermaid iframe dimensions when the SVG viewBox is pathologically large", async () => {
+    // A huge `viewBox` — could be hostile Markdown, agent output with a very
+    // large flowchart, or a bug in the renderer. The iframe is sandboxed so
+    // this is a layout-DoS concern, not an XSS one. The rendered frame must
+    // stay bounded so it cannot overflow its parent column.
+    mermaidRenderMock.mockResolvedValueOnce({
+      diagramType: "flowchart",
+      svg: '<svg data-testid="mermaid-svg" viewBox="0 0 99999 99999"><text>huge</text></svg>',
+    });
+
+    const { container } = render(
+      <MarkdownContent
+        markdown={["```mermaid", "flowchart TD", "  A --> B", "```"].join("\n")}
+      />,
+    );
+
+    const frame = await screen.findByTestId("mermaid-frame");
+    const widthPx = Number.parseInt(frame.style.width, 10);
+    const heightPx = Number.parseInt(frame.style.height, 10);
+    expect(widthPx).toBeGreaterThan(0);
+    expect(heightPx).toBeGreaterThan(0);
+    expect(widthPx).toBeLessThanOrEqual(4096);
+    expect(heightPx).toBeLessThanOrEqual(4096);
+    expect(frame.style.maxWidth).toBe("100%");
+    // The inline width/height cap is the primary guard; also confirm the
+    // container did not propagate the runaway SVG dimensions.
+    expect(container.querySelector(".mermaid-diagram-frame")).toBe(frame);
+  });
 });
 
 describe("MessageCard memoization", () => {

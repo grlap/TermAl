@@ -134,7 +134,11 @@ export function buildPrototypeReply(sessionName: string, prompt: string): Messag
 
 function nowStamp(): string {
   const now = new Date();
-  return now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  return now.toLocaleTimeString([], {
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  });
 }
 
 function cryptoId(): string {

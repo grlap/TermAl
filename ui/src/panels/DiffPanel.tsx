@@ -183,7 +183,7 @@ function markdownRangeMatches(
   );
 }
 
-function hasOverlappingMarkdownCommitRanges(
+export function hasOverlappingMarkdownCommitRanges(
   commits: Array<{
     commit: RenderedMarkdownSectionCommit;
     range: MarkdownDocumentRange;
@@ -193,7 +193,20 @@ function hasOverlappingMarkdownCommitRanges(
   for (let index = 1; index < sortedRanges.length; index += 1) {
     const previous = sortedRanges[index - 1];
     const current = sortedRanges[index];
-    if (previous && current && current.range.start < previous.range.end) {
+    if (!previous || !current) {
+      continue;
+    }
+    // Strict `<` flags non-adjacent overlap for non-empty ranges. The
+    // additional `<=` branch rejects two zero-length ranges that share
+    // an insertion point (e.g., both resolve to `[10, 10)`), and
+    // rejects a zero-length range that touches a non-empty sibling —
+    // in both cases the subsequent descending-by-start splice would
+    // apply both writes at the same offset in unspecified order and
+    // silently garble the document.
+    const isZeroLengthTouch =
+      current.range.start === previous.range.end &&
+      (current.range.start === current.range.end || previous.range.start === previous.range.end);
+    if (current.range.start < previous.range.end || isZeroLengthTouch) {
       return true;
     }
   }

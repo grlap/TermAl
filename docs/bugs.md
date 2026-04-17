@@ -57,6 +57,10 @@ Also fixed in the current tree, not re-listed below:
 - **Lazy session hydration cleanup guards** — `adoptSessions` now prunes `hydratingSessionIdsRef` and `hydratedSessionIdsRef` when sessions disappear, and `handleRefreshSessionModelOptions` returns before synchronous state mutations if `App` is already unmounted.
 - **SQLite import cleanup visibility** — if JSON-to-SQLite import succeeds but renaming the legacy JSON file fails, cleanup failure for the incomplete SQLite file is now logged instead of silently discarded.
 - **SQLite connection busy/WAL settings** — production SQLite connections now share an opener that sets a 5-second busy timeout plus `journal_mode = WAL` and `synchronous = NORMAL` before schema or persistence work.
+- **SQLite persistence connection reuse** — the background persist thread now owns a `SqlitePersistConnectionCache`, reusing one SQLite connection and running `ensure_sqlite_state_schema` only on the first open for the process lifetime. The per-persist hot path no longer pays for opening a fresh connection or upserting `schema_version` on every commit.
+- **Mermaid iframe dimension cap** — `getMermaidDiagramFrameStyle` now clamps the derived `viewBox` width and height to 4096 px and the iframe CSS uses `max-width: 100%`, so a pathologically large Mermaid diagram (agent output or hostile Markdown) cannot produce a thousand-pixel iframe that overflows its parent column.
+- **Zero-length rendered Markdown commit overlap detection** — `hasOverlappingMarkdownCommitRanges` now rejects two zero-length ranges that share an insertion point, and a zero-length range touching a non-empty sibling, while still allowing strictly adjacent non-empty ranges. Two rendered Markdown sections resolving to the same position no longer silently garble the saved document.
+- **Shared untagged-degradation status list** — `should_degrade_git_diff_document_enrichment_error` and `git_diff_document_enrichment_note` now share a single `DEGRADED_UNTAGGED_STATUSES` constant, with a regression that iterates every listed status and asserts both helpers agree (the degradable set flips to note-producing and vice versa).
 
 ## State snapshots still serialize full session transcripts
 
@@ -122,21 +126,19 @@ The new SQLite persistence path opens `~/.termal/termal.sqlite` via `rusqlite::C
 - On Windows, document the reliance on `%USERPROFILE%\.termal\` ACL inheritance; optionally tighten via `SetNamedSecurityInfo`.
 - Either delete the imported backup after a successful cold start confirms the SQLite file is usable, or emit a one-shot UI notice with the backup path and an explicit delete affordance.
 
-## SQLite storage still opens a fresh connection per operation
+## SQLite load path still opens a fresh connection and double-queries app state
 
-**Severity:** Low - the first SQLite slice is restart-safe, but it leaves avoidable connection churn and small repeated schema writes in the hot path.
+**Severity:** Low - the first SQLite slice is restart-safe, but `load_state_from_sqlite` still opens a fresh connection and eagerly evaluates a fallback app-state key on the happy path.
 
-Production SQLite connections now set `busy_timeout`, `journal_mode = WAL`, and `synchronous = NORMAL`, so ordinary lock contention and fsync cost are bounded better than the initial implementation. The storage helpers still open a fresh connection for each load/full persist/create persist, and `ensure_sqlite_state_schema` still writes `schema_version` on every open.
+The background persist thread now caches a single SQLite connection for its lifetime (`SqlitePersistConnectionCache`), and `ensure_sqlite_state_schema` runs only on the first open. The load path remains unchanged: each startup still opens a fresh connection (acceptable — it's a one-shot) and uses `.or(...)` where `if let Some(..) else { .. }` would avoid a redundant query on the happy path.
 
 **Current behavior:**
-- `load_state_from_sqlite` and `persist_state_parts_to_sqlite` each open a fresh SQLite connection.
-- `ensure_sqlite_state_schema` still runs the schema-version upsert on every connection open.
-- Eager `.or(...)` in `load_state_from_sqlite` double-queries app state on the happy path.
+- `load_state_from_sqlite` opens a fresh connection on every startup.
+- Eager `.or(...)` in `load_state_from_sqlite` evaluates the legacy app-state lookup even when the primary key is present.
 
 **Proposal:**
-- Share a single `Arc<Mutex<Connection>>` on `AppState` for prepared-statement caching and reduced connection churn.
-- Check `schema_version` before upserting so ordinary opens avoid a metadata write.
-- Convert `.or(...)` to lazy `if let Some(..) else { .. }`.
+- Convert `.or(...)` to a lazy `if let Some(..) else { .. }`.
+- Optionally share the cached connection across load/persist if any post-startup load path emerges.
 
 ## Remote proxy `applied_remote_revision` path skips broadcast of non-session state changes
 
@@ -258,51 +260,6 @@ The new hydration effect's error path calls `reportRequestError(error)` on any `
 **Proposal:**
 - Capture the `flushSync`'d commit result and, when drafts were not applied cleanly, short-circuit with an explicit notice (e.g., `setExternalFileNotice("Resolve rendered Markdown conflicts before applying edits to the disk version.")`) before touching `fetchFile` / rebase.
 - Add coverage where a rendered Markdown section cannot be mapped and the user clicks apply-to-disk-version, asserting the specific notice is shown and `fetchFile` is not called.
-
-## Mermaid sandbox iframe has no maximum dimensions
-
-**Severity:** Medium - a Mermaid diagram from agent output or repository Markdown can force a multi-thousand-pixel iframe in the app layout.
-
-`getMermaidDiagramFrameStyle` derives the iframe's `width` and `height` from the SVG `viewBox` with only lower bounds (`Math.max(120, …)` / `Math.max(320, …)`). `Number.isFinite` rejects NaN/Infinity, but a legitimately large flowchart (or an attacker-crafted SVG with a pathologically large `viewBox`) produces tens of thousands of pixels of iframe. The `.mermaid-diagram-frame` CSS rule sets `max-width: none`, so the iframe overflows its parent column and disrupts scrolling and layout. The iframe is sandboxed (no XSS risk), but the UI is still a layout DoS target.
-
-**Current behavior:**
-- `readMermaidSvgDimensions` parses the `viewBox` width/height verbatim from the SVG source.
-- `getMermaidDiagramFrameStyle` returns `{ width: Math.max(320, Math.ceil(w) + 2)px, height: Math.max(120, Math.ceil(h) + 2)px }` with no upper cap.
-- `.mermaid-diagram-frame` CSS uses `max-width: none`, amplifying overflow.
-
-**Proposal:**
-- Cap the computed `width` and `height` at a sane maximum (e.g., `Math.min(4096, …)` or a container-sized cap via `100%` + `aspect-ratio`).
-- Tighten `.mermaid-diagram-frame` to `max-width: 100%` so the iframe scales with its parent.
-- Add a regression fixture with a huge `viewBox` that proves the iframe's rendered dimensions stay bounded.
-
-## `hasOverlappingMarkdownCommitRanges` misses zero-length and touching ranges
-
-**Severity:** Low - two rendered Markdown commits that resolve to the same zero-length insertion point pass the overlap check and apply in non-deterministic order.
-
-`hasOverlappingMarkdownCommitRanges` checks `current.range.start < previous.range.end` against ranges sorted ascending by start. For two commits resolving to identical zero-length ranges `[10, 10)`, `current.start === previous.end === 10`, so `10 < 10` is false and both pass. The subsequent reduce sorts descending by start with a stable sort, so both inserts at position 10 apply in input order, with the second insert ending up before the first in the resulting string. For strictly adjacent ranges like `[5, 20)` and `[20, 25)` the descending-by-start sort keeps non-overlapping splices independent, but the zero-length degenerate case can silently garble content.
-
-**Current behavior:**
-- `hasOverlappingMarkdownCommitRanges` uses strict `<` comparison on start/end.
-- Two zero-length resolved ranges at the same position pass.
-- The reduce applies both at the same insertion point; result depends on input ordering.
-
-**Proposal:**
-- Treat zero-length ranges that share a position as overlapping, or reject any case where the resolved ranges are not strictly disjoint (`current.start <= previous.end` when at least one is zero-length).
-- Add direct regression coverage for two rendered Markdown sections resolving to the same zero-length insertion point and assert the batch is rejected with the existing save-error banner.
-
-## `git_diff_document_enrichment_note` duplicates the untagged-degradation status list
-
-**Severity:** Low - the list of degradable untagged status codes is now maintained independently in two helpers and can drift.
-
-`should_degrade_git_diff_document_enrichment_error` and the new fallback arm in `git_diff_document_enrichment_note` both encode the `BAD_REQUEST | NOT_FOUND` untagged-degradation set. A future contributor adding a new degradation status (e.g., `UNPROCESSABLE_ENTITY`) can update only one and break the invariant that every degraded response carries a visible note.
-
-**Current behavior:**
-- Both helpers match untagged errors against `BAD_REQUEST | NOT_FOUND` using local literal patterns.
-- No shared constant or single source of truth for the status list.
-
-**Proposal:**
-- Share a `const DEGRADED_UNTAGGED_STATUSES: &[StatusCode]` slice (or a helper) and use it in both functions.
-- Add a regression that iterates the shared list and asserts `should_degrade_git_diff_document_enrichment_error` and `git_diff_document_enrichment_note` agree on every status in it.
 
 ## Implementation Tasks
 

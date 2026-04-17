@@ -5,7 +5,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { fetchFile, fetchReviewDocument, saveReviewDocument } from "../api";
 import { copyTextToClipboard } from "../clipboard";
-import { DiffPanel } from "./DiffPanel";
+import { DiffPanel, hasOverlappingMarkdownCommitRanges } from "./DiffPanel";
 
 vi.mock("../api", async () => {
   const actual = await vi.importActual<typeof import("../api")>("../api");
@@ -4689,5 +4689,59 @@ describe("DiffPanel", () => {
     expect(await screen.findByText("Review threads unavailable: failed to parse review file")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Comment on change set" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Comment on line 1" })).not.toBeInTheDocument();
+  });
+});
+
+describe("hasOverlappingMarkdownCommitRanges", () => {
+  // The real `RenderedMarkdownSectionCommit` carries segment objects that the
+  // overlap helper never inspects. These tests only exercise the helper's
+  // range arithmetic, so we cast a minimal stub instead of constructing a
+  // full segment fixture.
+  type OverlapCommit = Parameters<typeof hasOverlappingMarkdownCommitRanges>[0][number];
+  const stubCommit = { commit: {} as OverlapCommit["commit"] };
+
+  function rangeEntry(start: number, end: number): OverlapCommit {
+    return { ...stubCommit, range: { start, end } };
+  }
+
+  it("returns false for strictly disjoint non-empty ranges", () => {
+    expect(
+      hasOverlappingMarkdownCommitRanges([rangeEntry(0, 5), rangeEntry(10, 20)]),
+    ).toBe(false);
+  });
+
+  it("returns false for strictly adjacent non-empty ranges", () => {
+    // `[5, 20)` and `[20, 25)` are both non-empty and share only the
+    // boundary — the descending-by-start splice applies them
+    // independently, so they must not be flagged as overlapping.
+    expect(
+      hasOverlappingMarkdownCommitRanges([rangeEntry(5, 20), rangeEntry(20, 25)]),
+    ).toBe(false);
+  });
+
+  it("returns true when non-empty ranges overlap", () => {
+    expect(
+      hasOverlappingMarkdownCommitRanges([rangeEntry(0, 15), rangeEntry(10, 20)]),
+    ).toBe(true);
+  });
+
+  it("returns true for two zero-length ranges sharing the same insertion point", () => {
+    // Two rendered Markdown sections that both resolve to `[10, 10)`
+    // would apply at the same offset in unspecified order and silently
+    // garble the document. The overlap helper must reject the batch so
+    // the user sees the save-error banner.
+    expect(
+      hasOverlappingMarkdownCommitRanges([rangeEntry(10, 10), rangeEntry(10, 10)]),
+    ).toBe(true);
+  });
+
+  it("returns true when a zero-length range touches a non-empty sibling", () => {
+    // `[5, 10)` ends at the same offset where a zero-length `[10, 10)`
+    // sits. The descending splice would insert the zero-length write
+    // into the replacement result of the first, not the original
+    // source. Reject to avoid that surprise.
+    expect(
+      hasOverlappingMarkdownCommitRanges([rangeEntry(5, 10), rangeEntry(10, 10)]),
+    ).toBe(true);
   });
 });

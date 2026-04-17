@@ -53,6 +53,16 @@ struct AppState {
     /// dedicated thread serializes it to JSON and writes the file so the
     /// state mutex is never held during I/O.
     persist_tx: mpsc::Sender<PersistRequest>,
+    /// Background SSE state-broadcast channel. `publish_snapshot` sends a
+    /// pre-built `StateResponse` through this channel; a dedicated thread
+    /// serializes it to JSON and forwards the payload to `state_events`,
+    /// so the state mutex is never held during the O(sessions × messages)
+    /// serialization pass. The broadcaster coalesces queued snapshots to
+    /// the newest, which is safe because state events are idempotent
+    /// full-state snapshots — subscribers always converge on the latest
+    /// revision either way, and delta events (`publish_delta`) still fire
+    /// in order for every revision via a separate channel.
+    state_broadcast_tx: mpsc::Sender<StateResponse>,
     /// Lazily created shared Codex app-server reused across Codex sessions.
     shared_codex_runtime: Arc<Mutex<Option<SharedCodexRuntime>>>,
     /// Cached app-level agent readiness lives outside `self.inner` so full
@@ -534,22 +544,66 @@ impl AppState {
         // Background persist thread: drains queued snapshots and writes
         // the latest one. Intermediate snapshots are skipped (only the
         // last queued state matters for durability).
+        //
+        // The thread owns a `SqlitePersistConnectionCache` so the SQLite
+        // connection and schema-validation cost are amortized across
+        // every queued write — previously every persist opened a fresh
+        // connection and re-ran `ensure_sqlite_state_schema`, which
+        // writes `schema_version` on every call.
         std::thread::Builder::new()
             .name("termal-persist".to_owned())
             .spawn(move || {
+                #[cfg(not(test))]
+                let mut cache = SqlitePersistConnectionCache::new();
                 while let Ok(mut request) = persist_rx.recv() {
                     // Drain any queued snapshots — only the newest matters.
                     while let Ok(newer) = persist_rx.try_recv() {
                         request = newer;
                     }
-                    if let Err(err) =
-                        persist_state_from_persisted(&request.path, &request.state)
-                    {
+                    #[cfg(not(test))]
+                    let result =
+                        persist_state_via_cache(&mut cache, &request.path, &request.state);
+                    #[cfg(test)]
+                    let result = persist_state_from_persisted(&request.path, &request.state);
+                    if let Err(err) = result {
                         eprintln!("[termal] background persist failed: {err:#}");
                     }
                 }
             })
             .expect("failed to spawn persist thread");
+
+        let state_events_sender = broadcast::channel::<String>(128).0;
+        let (state_broadcast_tx, state_broadcast_rx) = mpsc::channel::<StateResponse>();
+
+        // Background state-broadcast thread: drains queued state snapshots,
+        // serializes each to JSON, and forwards the payload to the SSE
+        // state-events broadcast channel. Coalesces queued snapshots to the
+        // newest — intermediate revisions are safe to skip because a state
+        // event is a full-state snapshot, not a delta. Subscribers converge
+        // on the latest revision either way, and delta events fire in order
+        // for every revision on a separate channel.
+        let state_events_for_broadcast = state_events_sender.clone();
+        std::thread::Builder::new()
+            .name("termal-state-broadcast".to_owned())
+            .spawn(move || {
+                while let Ok(mut snapshot) = state_broadcast_rx.recv() {
+                    while let Ok(newer) = state_broadcast_rx.try_recv() {
+                        snapshot = newer;
+                    }
+                    match serde_json::to_string(&snapshot) {
+                        Ok(payload) => {
+                            let _ = state_events_for_broadcast.send(payload);
+                        }
+                        Err(err) => {
+                            eprintln!(
+                                "warning: failed to serialize SSE state snapshot at revision {}: {err}",
+                                snapshot.revision,
+                            );
+                        }
+                    }
+                }
+            })
+            .expect("failed to spawn state broadcast thread");
 
         let state = Self {
             default_workdir,
@@ -557,11 +611,12 @@ impl AppState {
             orchestrator_templates_path: Arc::new(orchestrator_templates_path),
             orchestrator_templates_lock: Arc::new(Mutex::new(())),
             review_documents_lock: Arc::new(Mutex::new(())),
-            state_events: broadcast::channel(128).0,
+            state_events: state_events_sender,
             delta_events: broadcast::channel(256).0,
             file_events: broadcast::channel(256).0,
             file_events_revision: Arc::new(AtomicU64::new(0)),
             persist_tx,
+            state_broadcast_tx,
             shared_codex_runtime: Arc::new(Mutex::new(None)),
             agent_readiness_cache,
             agent_readiness_refresh_lock: Arc::new(Mutex::new(())),
@@ -1258,23 +1313,30 @@ impl AppState {
     }
 
     // Internal bookkeeping changes should be persisted without advancing the client-visible revision.
-    /// Persists internal locked. Clones the persisted projection while
-    /// holding the lock (fast — just Arc bumps and shallow copies), then
-    /// sends the snapshot to a background thread for serialization and file
-    /// I/O so other requests are not blocked behind the state mutex.
+    /// Persists internal locked. Builds the persisted projection while
+    /// holding the lock (necessary — `inner` fields are read here), then
+    /// sends it through the persistence channel to a background thread
+    /// that serializes to JSON and writes the file so other requests are
+    /// not blocked behind the state mutex.
+    ///
+    /// Hot-path detail: the payload is built once via
+    /// `PersistedState::from_inner` and moved into the `mpsc::SendError`
+    /// on channel-disconnect (test builds that construct `AppState`
+    /// manually without a persist thread). The previous implementation
+    /// cloned the payload a second time before sending so the original
+    /// could be reused in the fallback branch; for a visible-session list
+    /// with long transcripts that redundant clone dominated the
+    /// `commit_locked` hot path under the state mutex.
     fn persist_internal_locked(&self, inner: &StateInner) -> Result<()> {
         let persisted = PersistedState::from_inner(inner);
-        if self
-            .persist_tx
-            .send(PersistRequest {
-                path: self.persistence_path.clone(),
-                state: persisted.clone(),
-            })
-            .is_err()
-        {
+        if let Err(mpsc::SendError(request)) = self.persist_tx.send(PersistRequest {
+            path: self.persistence_path.clone(),
+            state: persisted,
+        }) {
             // Channel disconnected (no background thread, e.g. in tests).
-            // Fall back to synchronous persistence.
-            persist_state_from_persisted(&self.persistence_path, &persisted)?;
+            // `SendError::0` hands the unsent payload back so the fallback
+            // synchronous persist does not need a second clone.
+            persist_state_from_persisted(&request.path, &request.state)?;
         }
         Ok(())
     }
@@ -1417,22 +1479,37 @@ impl AppState {
 
     /// Publishes state locked.  Fire-and-forget like [`publish_delta`](Self::publish_delta);
     /// serialization errors are logged but do not propagate.
+    ///
+    /// The snapshot is built from `inner` while the caller still holds the
+    /// state mutex (required — `inner` fields are read here), but JSON
+    /// serialization is offloaded to a dedicated broadcaster thread via
+    /// [`publish_snapshot`](Self::publish_snapshot). This keeps the state
+    /// mutex off the serialization critical path for requests (e.g.,
+    /// `put_workspace_layout`) that commit under the lock.
     fn publish_state_locked(&self, inner: &StateInner) {
         let snapshot = self.snapshot_from_inner(inner);
-        self.publish_snapshot(&snapshot);
+        self.publish_snapshot(snapshot);
     }
 
     /// Publishes a pre-built snapshot as an SSE state event.
-    fn publish_snapshot(&self, snapshot: &StateResponse) {
-        match serde_json::to_string(snapshot) {
-            Ok(payload) => {
-                let _ = self.state_events.send(payload);
-            }
-            Err(err) => {
-                eprintln!(
-                    "warning: failed to serialize SSE state snapshot at revision {}: {err}",
-                    snapshot.revision,
-                );
+    ///
+    /// Sends the owned snapshot to the background broadcaster thread, which
+    /// serializes to JSON and forwards to `state_events` off the critical
+    /// path. Falls back to synchronous serialize + broadcast if the channel
+    /// is disconnected (test builds that construct `AppState` manually
+    /// without a broadcaster thread).
+    fn publish_snapshot(&self, snapshot: StateResponse) {
+        if let Err(mpsc::SendError(snapshot)) = self.state_broadcast_tx.send(snapshot) {
+            match serde_json::to_string(&snapshot) {
+                Ok(payload) => {
+                    let _ = self.state_events.send(payload);
+                }
+                Err(err) => {
+                    eprintln!(
+                        "warning: failed to serialize SSE state snapshot at revision {}: {err}",
+                        snapshot.revision,
+                    );
+                }
             }
         }
     }

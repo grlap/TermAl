@@ -7062,7 +7062,7 @@ textarea {
 
 .mermaid-diagram-frame {
   display: block;
-  max-width: none;
+  max-width: 100%;
   min-width: 100%;
   border: 0;
   background: transparent;

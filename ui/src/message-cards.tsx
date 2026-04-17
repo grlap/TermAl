@@ -807,6 +807,14 @@ function buildMermaidDiagramFrameSrcDoc(svg: string) {
   ].join("");
 }
 
+// Upper caps protect the layout from a pathologically large Mermaid
+// `viewBox` (agent output or hostile Markdown). The iframe is sandboxed,
+// so this is a layout-DoS guard rather than an XSS guard. The values are
+// generous enough for real flowcharts but bounded so the iframe cannot
+// overflow its parent column by thousands of pixels.
+const MERMAID_DIAGRAM_FRAME_MAX_WIDTH = 4096;
+const MERMAID_DIAGRAM_FRAME_MAX_HEIGHT = 4096;
+
 function getMermaidDiagramFrameStyle(svg: string): CSSProperties {
   const dimensions = readMermaidSvgDimensions(svg);
   if (!dimensions) {
@@ -814,9 +822,22 @@ function getMermaidDiagramFrameStyle(svg: string): CSSProperties {
   }
 
   return {
-    height: `${Math.max(120, Math.ceil(dimensions.height) + 2)}px`,
-    width: `${Math.max(320, Math.ceil(dimensions.width) + 2)}px`,
+    height: `${clampMermaidDiagramExtent(
+      Math.ceil(dimensions.height) + 2,
+      120,
+      MERMAID_DIAGRAM_FRAME_MAX_HEIGHT,
+    )}px`,
+    width: `${clampMermaidDiagramExtent(
+      Math.ceil(dimensions.width) + 2,
+      320,
+      MERMAID_DIAGRAM_FRAME_MAX_WIDTH,
+    )}px`,
+    maxWidth: "100%",
   };
+}
+
+function clampMermaidDiagramExtent(value: number, lowerBound: number, upperBound: number) {
+  return Math.min(Math.max(lowerBound, value), upperBound);
 }
 
 function readMermaidSvgDimensions(svg: string) {

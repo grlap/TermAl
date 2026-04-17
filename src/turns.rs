@@ -4048,5 +4048,5 @@ fn sanitize_attachment_file_name(value: &str) -> String {
 
 /// Stamps now.
 fn stamp_now() -> String {
-    Local::now().format("%H:%M").to_string()
+    Local::now().format("%H:%M:%S").to_string()
 }

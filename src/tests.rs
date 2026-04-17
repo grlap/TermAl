@@ -62,6 +62,22 @@ fn format_runtime_stderr_prefix_includes_timestamp_and_label() {
 }
 
 #[test]
+fn stamp_now_includes_seconds() {
+    let timestamp = stamp_now();
+    let parts: Vec<&str> = timestamp.split(':').collect();
+
+    assert_eq!(parts.len(), 3);
+    assert_eq!(parts[0].len(), 2);
+    assert_eq!(parts[1].len(), 2);
+    assert_eq!(parts[2].len(), 2);
+    assert!(
+        parts
+            .iter()
+            .all(|part| part.chars().all(|ch| ch.is_ascii_digit()))
+    );
+}
+
+#[test]
 fn read_capped_child_stdout_line_reads_newline_delimited_and_eof_lines() {
     let mut reader = std::io::Cursor::new(
         br#"{"ok":true}
@@ -1053,6 +1069,7 @@ fn test_app_state() -> AppState {
         file_events: broadcast::channel(16).0,
         file_events_revision: Arc::new(AtomicU64::new(0)),
         persist_tx: mpsc::channel().0,
+        state_broadcast_tx: mpsc::channel().0,
         shared_codex_runtime: Arc::new(Mutex::new(None)),
         agent_readiness_cache: Arc::new(RwLock::new(fresh_agent_readiness_cache("/tmp"))),
         agent_readiness_refresh_lock: Arc::new(Mutex::new(())),
@@ -4576,6 +4593,7 @@ fn persists_app_settings_and_applies_them_to_new_sessions() {
         file_events: broadcast::channel(16).0,
         file_events_revision: Arc::new(AtomicU64::new(0)),
         persist_tx: mpsc::channel().0,
+        state_broadcast_tx: mpsc::channel().0,
         shared_codex_runtime: Arc::new(Mutex::new(None)),
         agent_readiness_cache: Arc::new(RwLock::new(fresh_agent_readiness_cache("/tmp"))),
         agent_readiness_refresh_lock: Arc::new(Mutex::new(())),
@@ -22320,6 +22338,30 @@ fn git_diff_document_enrichment_note_uses_structured_error_kind() {
         git_diff_document_enrichment_note(&tagged_error).as_deref(),
         Some("Rendered Markdown is unavailable because the document exceeds the 10 MB read limit.")
     );
+}
+
+// Tests that every untagged-degradable status flagged by
+// `should_degrade_git_diff_document_enrichment_error` also produces a
+// user-visible note from `git_diff_document_enrichment_note`, so a future
+// contributor adding a new status to the shared list cannot accidentally
+// split the two helpers and silently drop the note.
+#[test]
+fn git_diff_degraded_untagged_statuses_always_produce_a_note() {
+    for status in DEGRADED_UNTAGGED_STATUSES {
+        let error = ApiError {
+            status: *status,
+            message: format!("untagged {status} error"),
+            kind: None,
+        };
+        assert!(
+            should_degrade_git_diff_document_enrichment_error(&error),
+            "status {status} must be treated as degradable",
+        );
+        assert!(
+            git_diff_document_enrichment_note(&error).is_some(),
+            "status {status} must produce a user-visible enrichment note",
+        );
+    }
 }
 
 // Tests that oversized Markdown enrichment degrades through the response path.
