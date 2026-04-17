@@ -59,7 +59,7 @@ impl AppState {
                 .ok_or_else(|| ApiError::not_found("session not found"))?;
             inner.sessions[index].session.project_id.clone()
         };
-        let (revision, local_session_id, local_session) = {
+        let (revision, local_session_id, local_session, changed) = {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
             // Gate `update_existing` on the remote's applied-revision
             // tracking — see `create_remote_session_proxy` in
@@ -102,13 +102,19 @@ impl AppState {
             } else {
                 inner.revision
             };
-            (revision, local_session_id, local_session)
+            (revision, local_session_id, local_session, changed)
         };
-        self.publish_delta(&DeltaEvent::SessionCreated {
-            revision,
-            session_id: local_session.id.clone(),
-            session: local_session.clone(),
-        });
+        // Skip the SSE announcement on the no-change branch. See the
+        // identical comment in `remote_create_proxies.rs` for the
+        // rationale — emitting a same-revision `SessionCreated` is
+        // protocol-smell and the client silently drops it anyway.
+        if changed {
+            self.publish_delta(&DeltaEvent::SessionCreated {
+                revision,
+                session_id: local_session.id.clone(),
+                session: local_session.clone(),
+            });
+        }
 
         Ok(CreateSessionResponse {
             session_id: local_session_id,

@@ -141,7 +141,7 @@ impl AppState {
             ));
         }
         let remote_session = remote_response.session.clone();
-        let (revision, local_session_id, local_session) = {
+        let (revision, local_session_id, local_session, changed) = {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
             // Gate `update_existing` on the remote's applied-revision
             // tracking. If the SSE bridge already applied a later
@@ -191,13 +191,23 @@ impl AppState {
             } else {
                 inner.revision
             };
-            (revision, local_session_id, local_session)
+            (revision, local_session_id, local_session, changed)
         };
-        self.publish_delta(&DeltaEvent::SessionCreated {
-            revision,
-            session_id: local_session.id.clone(),
-            session: local_session.clone(),
-        });
+        // Skip the SSE announcement on the no-change branch. The client
+        // would silently drop it anyway (`decideDeltaRevisionAction`
+        // ignores deltas whose revision `<= currentRevision`), but
+        // emitting a same-revision `SessionCreated` is protocol-smell:
+        // it advertises a mutation that did not happen. The returned
+        // `session` + `revision` already reflect the bridge-mirrored
+        // state the caller needs; peer clients are already in sync via
+        // the earlier SSE delta that advanced `inner.revision`.
+        if changed {
+            self.publish_delta(&DeltaEvent::SessionCreated {
+                revision,
+                session_id: local_session.id.clone(),
+                session: local_session.clone(),
+            });
+        }
 
         Ok(CreateSessionResponse {
             session_id: local_session_id,
