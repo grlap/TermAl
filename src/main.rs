@@ -375,6 +375,7 @@ include!("runtime.rs");
 include!("turns.rs");
 include!("api.rs");
 include!("instructions.rs");
+include!("git.rs");
 include!("orchestrators.rs");
 include!("telegram.rs");
 
