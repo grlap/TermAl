@@ -372,6 +372,7 @@ include!("remote.rs");
 include!("state.rs");
 include!("persist.rs");
 include!("runtime.rs");
+include!("acp.rs");
 include!("turns.rs");
 include!("api.rs");
 include!("instructions.rs");
