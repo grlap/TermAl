@@ -370,6 +370,7 @@ impl Mode {
 
 include!("remote.rs");
 include!("state.rs");
+include!("workspace_watch.rs");
 include!("persist.rs");
 include!("runtime.rs");
 include!("acp.rs");
