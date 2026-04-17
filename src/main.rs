@@ -383,6 +383,7 @@ include!("persist.rs");
 include!("runtime.rs");
 include!("acp.rs");
 include!("codex.rs");
+include!("codex_rpc.rs");
 include!("agent_readiness.rs");
 include!("gemini.rs");
 include!("turns.rs");
