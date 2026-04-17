@@ -1034,7 +1034,9 @@ impl AppState {
                 final_approval_mode,
                 final_effort,
             ) {
-                let record = &mut inner.sessions[index];
+                let record = inner
+            .session_mut_by_index(index)
+            .expect("session index should be valid");
                 // Hidden Claude spares intentionally keep their warmed runtime alive when claimed.
                 // Only the visible conversation state is reset here before the session is unhidden.
                 reset_hidden_claude_spare_record(record);
@@ -1418,7 +1420,9 @@ impl AppState {
         let now = std::time::Instant::now();
         let mut late_summary_session_indexes = Vec::<usize>::new();
         for index in 0..inner.sessions.len() {
-            let record = &mut inner.sessions[index];
+            let record = inner
+            .session_mut_by_index(index)
+            .expect("session index should be valid");
             if record.is_remote_proxy() || record.hidden {
                 continue;
             }
@@ -1467,8 +1471,11 @@ impl AppState {
 
         for index in late_summary_session_indexes {
             let message_id = inner.next_message_id();
-            push_active_turn_file_changes_on_record(&mut inner.sessions[index], message_id);
-            inner.sessions[index].active_turn_file_change_grace_deadline = None;
+            let record = inner
+                .session_mut_by_index(index)
+                .expect("session index should be valid");
+            push_active_turn_file_changes_on_record(record, message_id);
+            record.active_turn_file_change_grace_deadline = None;
         }
         if let Err(err) = self.commit_locked(&mut inner) {
             eprintln!(
@@ -1791,7 +1798,9 @@ impl AppState {
             let Some(index) = inner.find_session_index(session_id) else {
                 return;
             };
-            let record = &mut inner.sessions[index];
+            let record = inner
+            .session_mut_by_index(index)
+            .expect("session index should be valid");
             if !record.hidden
                 || record.is_remote_proxy()
                 || record.session.agent != Agent::Claude
@@ -1845,7 +1854,9 @@ impl AppState {
             let _ = handle.kill();
             return;
         };
-        let record = &mut inner.sessions[index];
+        let record = inner
+            .session_mut_by_index(index)
+            .expect("session index should be valid");
         if record.session.agent != Agent::Claude || !matches!(record.runtime, SessionRuntime::None)
         {
             let _ = handle.kill();
@@ -2166,15 +2177,23 @@ impl AppState {
 
         let dispatch = self
             .start_turn_on_record(
-                &mut inner.sessions[index],
+                inner
+            .session_mut_by_index(index)
+            .expect("session index should be valid"),
                 queued.pending_prompt.id.clone(),
                 queued.pending_prompt.text.clone(),
                 queued.attachments.clone(),
                 queued.pending_prompt.expanded_text.clone(),
             )
             .map_err(|err| anyhow!("failed to dispatch queued prompt: {}", err.message))?;
-        inner.sessions[index].queued_prompts.pop_front();
-        sync_pending_prompts(&mut inner.sessions[index]);
+        inner
+            .session_mut_by_index(index)
+            .expect("session index should be valid")
+            .queued_prompts
+            .pop_front();
+        sync_pending_prompts(inner
+            .session_mut_by_index(index)
+            .expect("session index should be valid"));
         self.commit_locked(&mut inner)?;
         Ok(Some(dispatch))
     }
@@ -2247,7 +2266,9 @@ impl AppState {
         if recover_blocked_queue_with_existing_user_prompt {
             let message_id = inner.next_message_id();
             queue_prompt_on_record(
-                &mut inner.sessions[index],
+                inner
+            .session_mut_by_index(index)
+            .expect("session index should be valid"),
                 PendingPrompt {
                     attachments: attachments
                         .iter()
@@ -2260,7 +2281,9 @@ impl AppState {
                 },
                 attachments,
             );
-            prioritize_user_queued_prompts(&mut inner.sessions[index]);
+            prioritize_user_queued_prompts(inner
+            .session_mut_by_index(index)
+            .expect("session index should be valid"));
             self.commit_locked(&mut inner).map_err(|err| {
                 ApiError::internal(format!("failed to persist session state: {err:#}"))
             })?;
@@ -2278,7 +2301,9 @@ impl AppState {
         if prioritize_manual_dispatch_over_blocked_queue {
             let message_id = inner.next_message_id();
             let dispatch = self.start_turn_on_record(
-                &mut inner.sessions[index],
+                inner
+            .session_mut_by_index(index)
+            .expect("session index should be valid"),
                 message_id,
                 prompt,
                 attachments,
@@ -2294,7 +2319,9 @@ impl AppState {
         if session_is_busy || has_queued_prompts {
             let message_id = inner.next_message_id();
             queue_prompt_on_record(
-                &mut inner.sessions[index],
+                inner
+            .session_mut_by_index(index)
+            .expect("session index should be valid"),
                 PendingPrompt {
                     attachments: attachments
                         .iter()
@@ -2326,7 +2353,9 @@ impl AppState {
 
         let message_id = inner.next_message_id();
         let dispatch = self.start_turn_on_record(
-            &mut inner.sessions[index],
+            inner
+            .session_mut_by_index(index)
+            .expect("session index should be valid"),
             message_id,
             prompt,
             attachments,
@@ -2353,7 +2382,9 @@ impl AppState {
         let index = inner
             .find_visible_session_index(session_id)
             .ok_or_else(|| ApiError::not_found("session not found"))?;
-        let record = &mut inner.sessions[index];
+        let record = inner
+            .session_mut_by_index(index)
+            .expect("session index should be valid");
         let mut claude_model_update: Option<(ClaudeRuntimeHandle, String)> = None;
         let mut claude_permission_mode_update: Option<(ClaudeRuntimeHandle, String)> = None;
         let mut acp_config_updates: Vec<(AcpRuntimeHandle, Value)> = Vec::new();
@@ -2635,7 +2666,9 @@ impl AppState {
         let index = inner
             .find_visible_session_index(session_id)
             .ok_or_else(|| ApiError::not_found("session not found"))?;
-        let record = &mut inner.sessions[index];
+        let record = inner
+            .session_mut_by_index(index)
+            .expect("session index should be valid");
         let agent = record.session.agent;
         if agent == Agent::Claude {
             if record.runtime_reset_required {
@@ -3057,9 +3090,13 @@ impl AppState {
             .find_session_index(session_id)
             .ok_or_else(|| ApiError::not_found("session not found"))?;
         let note_message_id = inner.next_message_id();
-        set_record_codex_thread_state(&mut inner.sessions[index], CodexThreadState::Archived);
+        set_record_codex_thread_state(inner
+            .session_mut_by_index(index)
+            .expect("session index should be valid"), CodexThreadState::Archived);
         push_session_markdown_note_on_record(
-            &mut inner.sessions[index],
+            inner
+            .session_mut_by_index(index)
+            .expect("session index should be valid"),
             note_message_id,
             "Archived Codex thread",
             format!(
@@ -3103,9 +3140,13 @@ impl AppState {
             .find_session_index(session_id)
             .ok_or_else(|| ApiError::not_found("session not found"))?;
         let note_message_id = inner.next_message_id();
-        set_record_codex_thread_state(&mut inner.sessions[index], CodexThreadState::Active);
+        set_record_codex_thread_state(inner
+            .session_mut_by_index(index)
+            .expect("session index should be valid"), CodexThreadState::Active);
         push_session_markdown_note_on_record(
-            &mut inner.sessions[index],
+            inner
+            .session_mut_by_index(index)
+            .expect("session index should be valid"),
             note_message_id,
             "Restored Codex thread",
             format!(
@@ -3145,7 +3186,9 @@ impl AppState {
             .ok_or_else(|| ApiError::not_found("session not found"))?;
         let note_message_id = inner.next_message_id();
         push_session_markdown_note_on_record(
-            &mut inner.sessions[index],
+            inner
+            .session_mut_by_index(index)
+            .expect("session index should be valid"),
             note_message_id,
             "Started Codex compaction",
             format!(
@@ -3198,7 +3241,9 @@ impl AppState {
             .ok_or_else(|| ApiError::not_found("session not found"))?;
         if let Some(rollback_messages) = rollback_messages {
             replace_session_messages_on_record(
-                &mut inner.sessions[index],
+                inner
+            .session_mut_by_index(index)
+            .expect("session index should be valid"),
                 rollback_messages,
                 rollback_preview,
             );
@@ -3206,7 +3251,9 @@ impl AppState {
             let turn_label = if num_turns == 1 { "turn" } else { "turns" };
             let note_message_id = inner.next_message_id();
             push_session_markdown_note_on_record(
-                &mut inner.sessions[index],
+                inner
+            .session_mut_by_index(index)
+            .expect("session index should be valid"),
                 note_message_id,
                 "Rolled back Codex thread",
                 format!(
@@ -3215,7 +3262,11 @@ impl AppState {
                 ),
             );
         }
-        inner.sessions[index].session.status = SessionStatus::Idle;
+        inner
+            .session_mut_by_index(index)
+            .expect("session index should be valid")
+            .session
+            .status = SessionStatus::Idle;
         self.commit_locked(&mut inner).map_err(|err| {
             ApiError::internal(format!("failed to persist Codex rollback state: {err:#}"))
         })?;
@@ -3234,7 +3285,9 @@ impl AppState {
         let index = inner
             .find_session_index(session_id)
             .ok_or_else(|| anyhow!("session `{session_id}` not found"))?;
-        set_record_external_session_id(&mut inner.sessions[index], Some(external_session_id));
+        set_record_external_session_id(inner
+            .session_mut_by_index(index)
+            .expect("session index should be valid"), Some(external_session_id));
         if inner.sessions[index]
             .session
             .agent
@@ -3262,7 +3315,9 @@ impl AppState {
         let Some(index) = inner.find_session_index(session_id) else {
             return Ok(RuntimeMatchOutcome::SessionMissing);
         };
-        let record = &mut inner.sessions[index];
+        let record = inner
+            .session_mut_by_index(index)
+            .expect("session index should be valid");
         if !record.runtime.matches_runtime_token(token) {
             return Ok(RuntimeMatchOutcome::RuntimeMismatch);
         }
@@ -3298,7 +3353,9 @@ impl AppState {
         let index = inner
             .find_session_index(session_id)
             .ok_or_else(|| anyhow!("session `{session_id}` not found"))?;
-        let record = &mut inner.sessions[index];
+        let record = inner
+            .session_mut_by_index(index)
+            .expect("session index should be valid");
         if !record.runtime.matches_runtime_token(token) {
             return Ok(());
         }
@@ -3327,7 +3384,9 @@ impl AppState {
         let index = inner
             .find_session_index(session_id)
             .ok_or_else(|| anyhow!("session `{session_id}` not found"))?;
-        let record = &mut inner.sessions[index];
+        let record = inner
+            .session_mut_by_index(index)
+            .expect("session index should be valid");
         if !record.runtime.matches_runtime_token(token) {
             return Ok(());
         }
@@ -3360,7 +3419,9 @@ impl AppState {
         let index = inner
             .find_session_index(session_id)
             .ok_or_else(|| anyhow!("session `{session_id}` not found"))?;
-        let record = &mut inner.sessions[index];
+        let record = inner
+            .session_mut_by_index(index)
+            .expect("session index should be valid");
 
         let mut changed = false;
         if let Some(current_model) = current_model
@@ -3408,7 +3469,9 @@ impl AppState {
             .ok_or_else(|| anyhow!("session `{session_id}` not found"))?;
         let next_commands = dedupe_agent_commands(agent_commands);
         let should_publish = {
-            let record = &mut inner.sessions[index];
+            let record = inner
+            .session_mut_by_index(index)
+            .expect("session index should be valid");
             if record.agent_commands == next_commands {
                 return Ok(());
             }
@@ -3441,7 +3504,9 @@ impl AppState {
         let index = inner
             .find_session_index(session_id)
             .ok_or_else(|| anyhow!("session `{session_id}` not found"))?;
-        let record = &mut inner.sessions[index];
+        let record = inner
+            .session_mut_by_index(index)
+            .expect("session index should be valid");
         if !record.session.agent.supports_cursor_mode()
             || record.session.cursor_mode == Some(cursor_mode)
         {
@@ -3505,7 +3570,9 @@ impl AppState {
         let Some(index) = inner.find_session_index(session_id) else {
             return Ok(RuntimeMatchOutcome::SessionMissing);
         };
-        let record = &mut inner.sessions[index];
+        let record = inner
+            .session_mut_by_index(index)
+            .expect("session index should be valid");
         if !record.runtime.matches_runtime_token(token) {
             return Ok(RuntimeMatchOutcome::RuntimeMismatch);
         }
@@ -3555,7 +3622,9 @@ impl AppState {
         let index = inner
             .find_session_index(session_id)
             .ok_or_else(|| anyhow!("session `{session_id}` not found"))?;
-        let record = &mut inner.sessions[index];
+        let record = inner
+            .session_mut_by_index(index)
+            .expect("session index should be valid");
         let had_changes = !matches!(record.runtime, SessionRuntime::None)
             || record.runtime_reset_required
             || record.runtime_stop_in_progress
@@ -3591,7 +3660,9 @@ impl AppState {
             let message_id = (!cleaned.is_empty()).then(|| inner.next_message_id());
             let file_change_message_id = (!inner.sessions[index].active_turn_file_changes.is_empty())
                 .then(|| inner.next_message_id());
-            let record = &mut inner.sessions[index];
+            let record = inner
+            .session_mut_by_index(index)
+            .expect("session index should be valid");
             if !record.runtime.matches_runtime_token(token) {
                 return Ok(());
             }
@@ -3686,7 +3757,9 @@ impl AppState {
         };
 
         let message_id = (!duplicate_last_message).then(|| inner.next_message_id());
-        let record = &mut inner.sessions[index];
+        let record = inner
+            .session_mut_by_index(index)
+            .expect("session index should be valid");
 
         if let Some(message_id) = message_id {
             record.session.messages.push(Message::Text {
@@ -3722,7 +3795,9 @@ impl AppState {
                 .ok_or_else(|| anyhow!("session `{session_id}` not found"))?;
             let file_change_message_id = (!inner.sessions[index].active_turn_file_changes.is_empty())
                 .then(|| inner.next_message_id());
-            let record = &mut inner.sessions[index];
+            let record = inner
+            .session_mut_by_index(index)
+            .expect("session index should be valid");
             if !record.runtime.matches_runtime_token(token) {
                 return Ok(());
             }
@@ -3740,7 +3815,9 @@ impl AppState {
             if let Some(message_id) = file_change_message_id {
                 push_active_turn_file_changes_on_record(record, message_id);
             }
-            finish_active_turn_file_change_tracking(&mut inner.sessions[index]);
+            finish_active_turn_file_change_tracking(inner
+            .session_mut_by_index(index)
+            .expect("session index should be valid"));
             let has_queued_prompts = !inner.sessions[index].queued_prompts.is_empty();
             self.commit_locked(&mut inner)?;
             has_queued_prompts
@@ -3772,7 +3849,9 @@ impl AppState {
                 .ok_or_else(|| anyhow!("session `{session_id}` not found"))?;
             let file_change_message_id = (!inner.sessions[index].active_turn_file_changes.is_empty())
                 .then(|| inner.next_message_id());
-            let record = &mut inner.sessions[index];
+            let record = inner
+            .session_mut_by_index(index)
+            .expect("session index should be valid");
             if !record.runtime.matches_runtime_token(token) {
                 return Ok(());
             }
@@ -3797,9 +3876,13 @@ impl AppState {
                 completion_revision,
             );
             if let Some(message_id) = file_change_message_id {
-                push_active_turn_file_changes_on_record(&mut inner.sessions[index], message_id);
+                push_active_turn_file_changes_on_record(inner
+            .session_mut_by_index(index)
+            .expect("session index should be valid"), message_id);
             }
-            finish_active_turn_file_change_tracking(&mut inner.sessions[index]);
+            finish_active_turn_file_change_tracking(inner
+            .session_mut_by_index(index)
+            .expect("session index should be valid"));
             self.commit_locked(&mut inner)?;
             let orchestrator_delta = orchestrator_changed
                 .then(|| (inner.revision, inner.orchestrator_instances.clone()));
@@ -3839,9 +3922,13 @@ impl AppState {
                 return Ok(());
             }
             if inner.sessions[index].runtime_stop_in_progress {
-                inner.sessions[index].deferred_stop_callbacks.push(
-                    DeferredStopCallback::RuntimeExited(error_message.map(str::to_owned)),
-                );
+                inner
+                    .session_mut_by_index(index)
+                    .expect("session index should be valid")
+                    .deferred_stop_callbacks
+                    .push(DeferredStopCallback::RuntimeExited(
+                        error_message.map(str::to_owned),
+                    ));
                 return Ok(());
             }
             let was_busy = matches!(
@@ -3871,7 +3958,9 @@ impl AppState {
             let file_change_message_id = (!inner.sessions[index].active_turn_file_changes.is_empty())
                 .then(|| inner.next_message_id());
             let has_queued_prompts = {
-                let record = &mut inner.sessions[index];
+                let record = inner
+            .session_mut_by_index(index)
+            .expect("session index should be valid");
                 record.runtime = SessionRuntime::None;
                 record.runtime_reset_required = false;
                 record.orchestrator_auto_dispatch_blocked = false;
@@ -3898,7 +3987,9 @@ impl AppState {
                 }
                 !record.queued_prompts.is_empty()
             };
-            finish_active_turn_file_change_tracking(&mut inner.sessions[index]);
+            finish_active_turn_file_change_tracking(inner
+            .session_mut_by_index(index)
+            .expect("session index should be valid"));
             self.commit_locked(&mut inner)?;
             has_queued_prompts
         };
@@ -4029,7 +4120,9 @@ impl AppState {
         let index = inner
             .find_session_index(session_id)
             .ok_or_else(|| anyhow!("session `{session_id}` not found"))?;
-        let record = &mut inner.sessions[index];
+        let record = inner
+            .session_mut_by_index(index)
+            .expect("session index should be valid");
         let message_ids: Vec<String> = record
             .pending_claude_approvals
             .iter()
@@ -4068,7 +4161,9 @@ impl AppState {
             let project_id = inner.sessions[index].session.project_id.clone();
             let agent = inner.sessions[index].session.agent;
             let external_session_id = inner.sessions[index].external_session_id.clone();
-            let record = &mut inner.sessions[index];
+            let record = inner
+            .session_mut_by_index(index)
+            .expect("session index should be valid");
 
             let runtime = match &record.runtime {
                 SessionRuntime::Claude(handle) => Some(KillableRuntime::Claude(handle.clone())),
@@ -4076,7 +4171,7 @@ impl AppState {
                 SessionRuntime::Acp(handle) => Some(KillableRuntime::Acp(handle.clone())),
                 SessionRuntime::None => None,
             };
-            inner.sessions.remove(index);
+            inner.remove_session_at(index);
 
             let mut hidden_runtimes = Vec::new();
             if agent == Agent::Claude {
@@ -4092,7 +4187,7 @@ impl AppState {
                     })
                     .map(claude_spare_profile)
                     .collect::<Vec<_>>();
-                inner.sessions.retain(|session_record| {
+                inner.retain_sessions(|session_record| {
                     let should_consider = session_record.hidden
                         && !session_record.is_remote_proxy()
                         && session_record.session.agent == Agent::Claude
@@ -4159,7 +4254,9 @@ impl AppState {
         let index = inner
             .find_visible_session_index(session_id)
             .ok_or_else(|| ApiError::not_found("session not found"))?;
-        let record = &mut inner.sessions[index];
+        let record = inner
+            .session_mut_by_index(index)
+            .expect("session index should be valid");
         let original_len = record.queued_prompts.len();
         record
             .queued_prompts
@@ -4201,7 +4298,9 @@ impl AppState {
             let index = inner
                 .find_visible_session_index(session_id)
                 .ok_or_else(|| ApiError::not_found("session not found"))?;
-            let record = &mut inner.sessions[index];
+            let record = inner
+            .session_mut_by_index(index)
+            .expect("session index should be valid");
 
             if record.runtime_stop_in_progress {
                 return Err(ApiError::conflict("session is already stopping"));
@@ -4249,7 +4348,9 @@ impl AppState {
                     let index = inner
                         .find_visible_session_index(session_id)
                         .ok_or_else(|| ApiError::not_found("session not found"))?;
-                    let record = &mut inner.sessions[index];
+                    let record = inner
+            .session_mut_by_index(index)
+            .expect("session index should be valid");
                     record.runtime_stop_in_progress = false;
                     let deferred_callbacks = std::mem::take(&mut record.deferred_stop_callbacks);
                     let token = record.runtime.runtime_token();
@@ -4301,7 +4402,9 @@ impl AppState {
                 .then(|| inner.next_message_id());
             let mut thread_id_to_suppress = None;
             {
-                let record = &mut inner.sessions[index];
+                let record = inner
+            .session_mut_by_index(index)
+            .expect("session index should be valid");
                 record.runtime = SessionRuntime::None;
                 record.runtime_reset_required = false;
                 record.runtime_stop_in_progress = false;
@@ -4341,7 +4444,9 @@ impl AppState {
                 inner.ignore_discovered_codex_thread(Some(thread_id));
             }
 
-            finish_active_turn_file_change_tracking(&mut inner.sessions[index]);
+            finish_active_turn_file_change_tracking(inner
+            .session_mut_by_index(index)
+            .expect("session index should be valid"));
             let mut stopped_orchestrator_instance_index = None;
             let mut added_stopped_session_id = false;
             if let Some(orchestrator_instance_id) = orchestrator_stop_instance_id.as_deref() {
@@ -4373,7 +4478,10 @@ impl AppState {
                             .retain(|candidate| candidate != session_id);
                     }
                 }
-                inner.sessions[index].orchestrator_auto_dispatch_blocked = true;
+                inner
+                    .session_mut_by_index(index)
+                    .expect("session index should be valid")
+                    .orchestrator_auto_dispatch_blocked = true;
                 return Err(ApiError::internal(format!(
                     "failed to persist session state: {err:#}"
                 )));
@@ -4407,7 +4515,9 @@ impl AppState {
                 .find_session_index(session_id)
                 .ok_or_else(|| anyhow!("session `{session_id}` not found"))?;
             let (message_index, preview, status) = {
-                let record = &mut inner.sessions[index];
+                let record = inner
+            .session_mut_by_index(index)
+            .expect("session index should be valid");
                 if let Some(next_preview) = message.preview_text() {
                     record.session.preview = next_preview;
                 }
@@ -4469,7 +4579,9 @@ impl AppState {
                 .find_session_index(session_id)
                 .ok_or_else(|| anyhow!("session `{session_id}` not found"))?;
             let (message_index, preview, status) = {
-                let record = &mut inner.sessions[index];
+                let record = inner
+            .session_mut_by_index(index)
+            .expect("session index should be valid");
                 let anchor_index =
                     message_index_on_record(record, anchor_message_id).ok_or_else(|| {
                         anyhow!(
@@ -4509,7 +4621,9 @@ impl AppState {
             let index = inner
                 .find_session_index(session_id)
                 .ok_or_else(|| anyhow!("session `{session_id}` not found"))?;
-            let record = &mut inner.sessions[index];
+            let record = inner
+            .session_mut_by_index(index)
+            .expect("session index should be valid");
             let message_index = message_index_on_record(record, message_id).ok_or_else(|| {
                 anyhow!("session `{session_id}` message `{message_id}` not found")
             })?;
@@ -4562,7 +4676,9 @@ impl AppState {
             let index = inner
                 .find_session_index(session_id)
                 .ok_or_else(|| anyhow!("session `{session_id}` not found"))?;
-            let record = &mut inner.sessions[index];
+            let record = inner
+            .session_mut_by_index(index)
+            .expect("session index should be valid");
             let message_index = message_index_on_record(record, message_id).ok_or_else(|| {
                 anyhow!("session `{session_id}` message `{message_id}` not found")
             })?;
@@ -4631,7 +4747,9 @@ impl AppState {
                 .find_session_index(session_id)
                 .ok_or_else(|| anyhow!("session `{session_id}` not found"))?;
             let (message_index, created_message, preview, session_status) = {
-                let record = &mut inner.sessions[index];
+                let record = inner
+            .session_mut_by_index(index)
+            .expect("session index should be valid");
                 let (message_index, created_message) = if let Some(message_index) =
                     message_index_on_record(record, message_id)
                 {
@@ -4758,7 +4876,9 @@ impl AppState {
                 .find_session_index(session_id)
                 .ok_or_else(|| anyhow!("session `{session_id}` not found"))?;
             let (message_index, created_message, preview, session_status) = {
-                let record = &mut inner.sessions[index];
+                let record = inner
+            .session_mut_by_index(index)
+            .expect("session index should be valid");
 
                 let (message_index, created_message) = if let Some(message_index) =
                     message_index_on_record(record, message_id)
@@ -4867,7 +4987,9 @@ impl AppState {
         let index = inner
             .find_visible_session_index(session_id)
             .ok_or_else(|| ApiError::not_found("session not found"))?;
-        let record = &mut inner.sessions[index];
+        let record = inner
+            .session_mut_by_index(index)
+            .expect("session index should be valid");
         if record.session.status != SessionStatus::Approval {
             return Err(ApiError::conflict(
                 "session is not currently awaiting approval",
@@ -5058,7 +5180,9 @@ impl AppState {
         let index = inner
             .find_session_index(session_id)
             .ok_or_else(|| ApiError::not_found("session not found"))?;
-        let record = &mut inner.sessions[index];
+        let record = inner
+            .session_mut_by_index(index)
+            .expect("session index should be valid");
         if record.session.status != SessionStatus::Approval && decision == ApprovalDecision::Pending
         {
             return Err(ApiError::conflict(
@@ -5099,7 +5223,9 @@ impl AppState {
             let index = inner
                 .find_visible_session_index(session_id)
                 .ok_or_else(|| ApiError::not_found("session not found"))?;
-            let record = &mut inner.sessions[index];
+            let record = inner
+            .session_mut_by_index(index)
+            .expect("session index should be valid");
             if record.session.status != SessionStatus::Approval {
                 return Err(ApiError::conflict(
                     "session is not currently waiting for input",
@@ -5147,7 +5273,9 @@ impl AppState {
         let index = inner
             .find_session_index(session_id)
             .ok_or_else(|| ApiError::not_found("session not found"))?;
-        let record = &mut inner.sessions[index];
+        let record = inner
+            .session_mut_by_index(index)
+            .expect("session index should be valid");
         set_user_input_request_state_on_record(
             record,
             message_id,
@@ -5188,7 +5316,9 @@ impl AppState {
             let index = inner
                 .find_visible_session_index(session_id)
                 .ok_or_else(|| ApiError::not_found("session not found"))?;
-            let record = &mut inner.sessions[index];
+            let record = inner
+            .session_mut_by_index(index)
+            .expect("session index should be valid");
             if record.session.status != SessionStatus::Approval {
                 return Err(ApiError::conflict(
                     "session is not currently waiting for input",
@@ -5237,7 +5367,9 @@ impl AppState {
         let index = inner
             .find_session_index(session_id)
             .ok_or_else(|| ApiError::not_found("session not found"))?;
-        let record = &mut inner.sessions[index];
+        let record = inner
+            .session_mut_by_index(index)
+            .expect("session index should be valid");
         set_mcp_elicitation_request_state_on_record(
             record,
             message_id,
@@ -5278,7 +5410,9 @@ impl AppState {
             let index = inner
                 .find_visible_session_index(session_id)
                 .ok_or_else(|| ApiError::not_found("session not found"))?;
-            let record = &mut inner.sessions[index];
+            let record = inner
+            .session_mut_by_index(index)
+            .expect("session index should be valid");
             if record.session.status != SessionStatus::Approval {
                 return Err(ApiError::conflict(
                     "session is not currently waiting for a Codex request response",
@@ -5322,7 +5456,9 @@ impl AppState {
         let index = inner
             .find_session_index(session_id)
             .ok_or_else(|| ApiError::not_found("session not found"))?;
-        let record = &mut inner.sessions[index];
+        let record = inner
+            .session_mut_by_index(index)
+            .expect("session index should be valid");
         set_codex_app_request_state_on_record(
             record,
             message_id,
@@ -5368,7 +5504,9 @@ impl AppState {
                 .ok_or_else(|| anyhow!("session `{session_id}` not found"))?;
             let file_change_message_id = (!inner.sessions[index].active_turn_file_changes.is_empty())
                 .then(|| inner.next_message_id());
-            let record = &mut inner.sessions[index];
+            let record = inner
+            .session_mut_by_index(index)
+            .expect("session index should be valid");
             record.session.status = SessionStatus::Error;
             record.session.preview = make_preview(cleaned);
             if let Some(message_id) = file_change_message_id {
@@ -6342,6 +6480,46 @@ impl StateInner {
     fn record_removed_session(&mut self, session_id: String) {
         if !session_id.is_empty() {
             self.removed_session_ids.push(session_id);
+        }
+    }
+
+    /// Inserts a new session record, stamping it so the persist thread
+    /// picks it up on its next tick. Returns the index at which the
+    /// record was inserted (end of the `sessions` vec).
+    fn push_session(&mut self, mut record: SessionRecord) -> usize {
+        let stamp = self.next_mutation_stamp();
+        record.mutation_stamp = stamp;
+        self.sessions.push(record);
+        self.sessions.len() - 1
+    }
+
+    /// Removes the session at `index`, recording its id in
+    /// `removed_session_ids` so the persist thread issues a `DELETE`
+    /// on its next tick. Panics on out-of-bounds access like the
+    /// underlying `Vec::remove` it wraps.
+    fn remove_session_at(&mut self, index: usize) -> SessionRecord {
+        let record = self.sessions.remove(index);
+        let id = record.session.id.clone();
+        self.record_removed_session(id);
+        record
+    }
+
+    /// `Vec::retain`-style filter that records every dropped session id
+    /// as a tombstone. The predicate is called once per record.
+    fn retain_sessions<F>(&mut self, mut keep: F)
+    where
+        F: FnMut(&SessionRecord) -> bool,
+    {
+        let mut removed_ids: Vec<String> = Vec::new();
+        self.sessions.retain(|record| {
+            let retained = keep(record);
+            if !retained {
+                removed_ids.push(record.session.id.clone());
+            }
+            retained
+        });
+        for id in removed_ids {
+            self.record_removed_session(id);
         }
     }
 

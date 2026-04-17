@@ -966,7 +966,9 @@ impl AppState {
                     .find_session_index(&record.session.id)
                     .ok_or_else(|| ApiError::internal("new session disappeared during creation"))?;
                 apply_orchestrator_template_session_settings(
-                    &mut inner.sessions[index],
+                    inner
+                        .session_mut_by_index(index)
+                        .expect("session index should be valid"),
                     template_session,
                 );
                 session_instances.push(OrchestratorSessionInstance {
@@ -1272,7 +1274,11 @@ impl AppState {
                     continue;
                 };
                 let queued_prompt_count = inner.sessions[session_index].queued_prompts.len();
-                clear_stopped_orchestrator_queued_prompts(&mut inner.sessions[session_index]);
+                clear_stopped_orchestrator_queued_prompts(
+                    inner
+                        .session_mut_by_index(session_index)
+                        .expect("session index should be valid"),
+                );
                 if inner.sessions[session_index].queued_prompts.len() != queued_prompt_count {
                     changed = true;
                 }
@@ -1392,7 +1398,11 @@ impl AppState {
                     let Some(session_index) = inner.find_session_index(session_id) else {
                         continue;
                     };
-                    clear_stopped_orchestrator_queued_prompts(&mut inner.sessions[session_index]);
+                    clear_stopped_orchestrator_queued_prompts(
+                    inner
+                        .session_mut_by_index(session_index)
+                        .expect("session index should be valid"),
+                );
                 }
                 self.commit_persisted_delta_locked(&mut inner)
                     .map_err(|err| {
@@ -1538,7 +1548,9 @@ impl AppState {
                         );
                     let message_id = inner.next_message_id();
                     queue_orchestrator_prompt_on_record(
-                        &mut inner.sessions[destination_session_index],
+                        inner
+                            .session_mut_by_index(destination_session_index)
+                            .expect("session index should be valid"),
                         PendingPrompt {
                             attachments: Vec::new(),
                             id: message_id,
@@ -1995,14 +2007,21 @@ fn mark_deadlocked_orchestrator_instances(
             let Some(session_index) = inner.find_session_index(&session_id) else {
                 continue;
             };
-            clear_stopped_orchestrator_queued_prompts(&mut inner.sessions[session_index]);
+            clear_stopped_orchestrator_queued_prompts(
+                    inner
+                        .session_mut_by_index(session_index)
+                        .expect("session index should be valid"),
+                );
         }
 
         for session_id in deadlocked_session_ids {
             let Some(session_index) = inner.find_session_index(&session_id) else {
                 continue;
             };
-            let session = &mut inner.sessions[session_index].session;
+            let session = &mut inner
+                .session_mut_by_index(session_index)
+                .expect("session index should be valid")
+                .session;
             session.status = SessionStatus::Error;
             session.preview = make_preview(&error_message);
         }

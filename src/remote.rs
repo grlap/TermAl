@@ -1871,7 +1871,7 @@ impl AppState {
             Some(&target.remote_session_id),
         );
         let removed = if let Some(index) = inner.find_session_index(&target.local_session_id) {
-            inner.sessions.remove(index);
+            inner.remove_session_at(index);
             true
         } else {
             false
@@ -2201,7 +2201,9 @@ impl AppState {
                     let index = inner
                         .find_remote_session_index(remote_id, &session_id)
                         .ok_or_else(|| anyhow!("remote session `{session_id}` not found"))?;
-                    let record = &mut inner.sessions[index];
+                    let record = inner
+                        .session_mut_by_index(index)
+                        .expect("session index should be valid");
                     if message_index_on_record(record, &message_id).is_none() {
                         insert_message_on_record(record, message_index, message.clone());
                     }
@@ -2237,7 +2239,9 @@ impl AppState {
                     let index = inner
                         .find_remote_session_index(remote_id, &session_id)
                         .ok_or_else(|| anyhow!("remote session `{session_id}` not found"))?;
-                    let record = &mut inner.sessions[index];
+                    let record = inner
+                        .session_mut_by_index(index)
+                        .expect("session index should be valid");
                     let message_index = message_index_on_record(record, &message_id)
                         .ok_or_else(|| anyhow!("remote message `{message_id}` not found"))?;
                     let Some(message) = record.session.messages.get_mut(message_index) else {
@@ -2285,7 +2289,9 @@ impl AppState {
                     let index = inner
                         .find_remote_session_index(remote_id, &session_id)
                         .ok_or_else(|| anyhow!("remote session `{session_id}` not found"))?;
-                    let record = &mut inner.sessions[index];
+                    let record = inner
+                        .session_mut_by_index(index)
+                        .expect("session index should be valid");
                     let message_index = message_index_on_record(record, &message_id)
                         .ok_or_else(|| anyhow!("remote message `{message_id}` not found"))?;
                     let Some(message) = record.session.messages.get_mut(message_index) else {
@@ -2343,7 +2349,9 @@ impl AppState {
                     let index = inner
                         .find_remote_session_index(remote_id, &session_id)
                         .ok_or_else(|| anyhow!("remote session `{session_id}` not found"))?;
-                    let record = &mut inner.sessions[index];
+                    let record = inner
+                        .session_mut_by_index(index)
+                        .expect("session index should be valid");
                     let created_message = if let Some(existing_index) =
                         message_index_on_record(record, &message_id)
                     {
@@ -2440,7 +2448,9 @@ impl AppState {
                     let index = inner
                         .find_remote_session_index(remote_id, &session_id)
                         .ok_or_else(|| anyhow!("remote session `{session_id}` not found"))?;
-                    let record = &mut inner.sessions[index];
+                    let record = inner
+                        .session_mut_by_index(index)
+                        .expect("session index should be valid");
                     let created_message = if let Some(existing_index) =
                         message_index_on_record(record, &message_id)
                     {
@@ -2595,7 +2605,7 @@ fn sync_remote_state_inner(
             .iter()
             .map(|session| session.id.as_str())
             .collect::<HashSet<_>>();
-        inner.sessions.retain(|record| {
+        inner.retain_sessions(|record| {
             if record.remote_id.as_deref() != Some(remote_id) {
                 return true;
             }
@@ -2722,7 +2732,9 @@ fn upsert_remote_proxy_session_record(
 ) -> String {
     if let Some(index) = inner.find_remote_session_index(remote_id, &remote_session.id) {
         apply_remote_session_to_record(
-            &mut inner.sessions[index],
+            inner
+        .session_mut_by_index(index)
+        .expect("session index should be valid"),
             local_project_id,
             remote_session,
         );
@@ -2773,7 +2785,7 @@ fn upsert_remote_proxy_session_record(
         session,
     };
     sync_codex_thread_state(&mut record);
-    inner.sessions.push(record);
+    inner.push_session(record);
     local_session_id
 }
 
@@ -2790,7 +2802,9 @@ fn ensure_remote_proxy_session_record(
         let local_session_id = inner.sessions[index].session.id.clone();
         if update_existing {
             apply_remote_session_to_record(
-                &mut inner.sessions[index],
+                inner
+        .session_mut_by_index(index)
+        .expect("session index should be valid"),
                 local_project_id,
                 remote_session,
             );
