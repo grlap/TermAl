@@ -377,6 +377,7 @@ include!("api.rs");
 include!("instructions.rs");
 include!("git.rs");
 include!("terminal.rs");
+include!("review.rs");
 include!("orchestrators.rs");
 include!("telegram.rs");
 
