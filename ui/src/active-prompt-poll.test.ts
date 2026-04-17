@@ -79,21 +79,20 @@ describe("startActivePromptPoll", () => {
     }
   });
 
-  it("stops re-arming after the hard-cap deadline even when fetchState is in flight", async () => {
-    // Regression for "Self-chained safety-net poll hard-cap can be
-    // missed": under the previous design the cap setTimeout could fire
-    // while the chained callback was awaiting fetchState(). At that
-    // moment the chained ref had already been cleared to null at
-    // callback entry, so the cap's `clearTimeout(ref)` no-op'd. When
-    // fetchState then resolved, the callback continued and armed a
-    // fresh 30s timer that outlived the 5-minute cap.
+  it("hard-cap `stopped` flag bails an in-flight await when the cap setTimeout fires", async () => {
+    // When fake-timer time advances past `maxDurationMs`, the belt-
+    // and-suspenders `setTimeout(cancel, maxDurationMs)` fires and sets
+    // `stopped = true` on the scheduler's closure state. The chained
+    // callback's post-await guard `if (stopped || !isMounted()) return`
+    // then bails without calling `onState` or arming another poll.
     //
-    // The fix captures an absolute `deadlineMs` at scheduler start
-    // and checks it BOTH before arming the next timer AND after
-    // fetchState resolves. This test pins the "fetch in flight past
-    // deadline" path specifically — resolving the deferred fetch
-    // after the cap has lapsed must NOT produce another scheduled
-    // poll.
+    // This test covers the `stopped`-flag defense specifically. The
+    // sibling "uses an injectable now()" test below covers the
+    // `now() >= deadlineMs` post-await check independently — that
+    // check is the second line of defense, load-bearing when the
+    // hard-cap setTimeout has not yet fired (e.g., under a custom
+    // injectable clock that advances past the deadline without
+    // advancing the fake-timer clock).
     const deferred = createDeferred<{ ok: true }>();
     let fetchStateCallCount = 0;
     const fetchState = vi.fn(async () => {
@@ -117,21 +116,19 @@ describe("startActivePromptPoll", () => {
       await vi.advanceTimersByTimeAsync(ACTIVE_PROMPT_POLL_INTERVAL_MS);
       expect(fetchState).toHaveBeenCalledTimes(1);
 
-      // Advance well past the 5-minute hard cap while the fetch is
-      // still pending. The belt-and-suspenders cap timer fires during
-      // this window, but that alone cannot stop an in-flight await —
-      // the real guarantee is the post-await deadline check below.
+      // Advance past the 5-minute hard cap while the fetch is still
+      // pending. The belt-and-suspenders cap timer fires during this
+      // window and sets `stopped = true`.
       const remainingUntilDeadline =
         ACTIVE_PROMPT_POLL_MAX_DURATION_MS - ACTIVE_PROMPT_POLL_INTERVAL_MS;
       await vi.advanceTimersByTimeAsync(remainingUntilDeadline + 60_000);
 
-      // Resolve the stuck fetch AFTER the deadline has lapsed.
+      // Resolve the stuck fetch AFTER the cap has fired.
       deferred.resolve({ ok: true });
       await vi.advanceTimersByTimeAsync(0);
 
-      // Post-await deadline check must have bailed out. onState was
-      // NOT called with the stale response, and no next poll was
-      // armed.
+      // The `stopped`-flag check after the await bails out. onState
+      // is NOT called with the stale response.
       expect(onState).not.toHaveBeenCalled();
 
       // Advance another full interval — still no new fetch.
@@ -143,13 +140,17 @@ describe("startActivePromptPoll", () => {
     }
   });
 
-  it("still delivers the state to onState when fetchState resolves before the deadline", async () => {
-    // Companion test to the in-flight-past-deadline case above: a
-    // prompt-window fetch that takes several seconds but resolves
-    // well inside the 5-minute cap must still call onState and
-    // continue chaining. Otherwise the deadline guard would be
-    // overbroad and the safety-net poll stops working on slow-but-
-    // not-dead backends.
+  it("still delivers the state to onState when fetchState resolves well before the deadline", async () => {
+    // A slow-but-not-dead backend (60s response inside a 5-min cap)
+    // must still call onState and continue chaining. Guards against
+    // the deadline guard being overbroad and killing the poll on
+    // normal slow responses.
+    //
+    // NOTE: this does not pin the "check executes and returns false"
+    // path of the post-await deadline check — at 60s of 5min elapsed,
+    // the check just does not execute the bail branch. The boundary
+    // case (fetch resolves at `maxDurationMs - 1`) is covered by the
+    // injectable-now test below via a custom `now()`.
     const deferred = createDeferred<{ ok: true }>();
     let fetchStateCallCount = 0;
     const fetchState = vi.fn(async () => {
@@ -391,11 +392,24 @@ describe("startActivePromptPoll", () => {
     }
   });
 
-  it("uses an injectable now() so the deadline can be driven from fake time", async () => {
-    // Mirrors the hard-cap case but using a custom `now` function so
-    // the test controls the clock explicitly. Proves the scheduler
-    // reads time via the injected primitive, not directly via
-    // `Date.now()`.
+  it("post-await `now() >= deadlineMs` check bails when the injected clock passes the deadline", async () => {
+    // THIS is the regression gate for the post-await deadline check
+    // at `startActivePromptPoll`'s `if (now() >= deadlineMs) return`
+    // after `await handlers.fetchState()`. The hard-cap `setTimeout`
+    // uses the Vitest fake-timer clock (real ms), while `now()` is
+    // injected independently — by advancing `currentNow` past
+    // `maxDurationMs` while fake-timer time stays far below it, the
+    // belt-and-suspenders cap does NOT fire during the window and the
+    // `stopped`-flag defense is inactive. The only remaining defense
+    // is the `now() >= deadlineMs` check; if that line is deleted or
+    // inverted, this test fails while the sibling "hard-cap `stopped`
+    // flag" test would still pass (because there the fake-timer
+    // advance fires the belt-and-suspenders first).
+    //
+    // Verification: removing the `if (now() >= deadlineMs) return;`
+    // line from `active-prompt-poll.ts` causes only this test to
+    // fail, confirming it is the narrow regression gate for that
+    // code path. Keep both tests: they cover independent defenses.
     let currentNow = 0;
     const now = () => currentNow;
     const deferred = createDeferred<{ ok: true }>();

@@ -96,6 +96,13 @@ Also fixed in the current tree, not re-listed below:
 - **Safety-net poll hard-cap deadline guard** — `ui/src/App.tsx`'s self-chained `/api/state` watchdog was extracted into `ui/src/active-prompt-poll.ts::startActivePromptPoll`, a pure scheduler with injectable `fetchState`/`onState`/`isMounted` handlers and an injectable `now()`/`intervalMs`/`maxDurationMs`. The scheduler captures an absolute `deadlineMs = now() + maxDurationMs` at start and checks it both before arming the next timer and after `fetchState()` resolves. A shared `stopped` flag set by the belt-and-suspenders `setTimeout(cancel, maxDurationMs)` is checked at the await-resume site so a cap firing mid-fetch forcibly stops the chain (closing the previous ref-aliasing race). The App now stores a single cancel function in `activePromptPollCancelRef` — `handleSend` calls the prior cancel before starting a new chain, and unmount cleanup calls it to tear down. Twelve Vitest cases in `ui/src/active-prompt-poll.test.ts` pin the deadline guard end-to-end (fetch held past cap → no re-arm), the injectable-now path (proves the deadline check reads `now()` not `Date.now()` directly — catches regressions where the belt-and-suspenders defense would still mask the bug), belt-and-suspenders cancel, custom options, error-swallow-and-chain, unmount during await, onState-returning-true stops the chain, and cancel idempotency.
 - **Local/Remote ID newtypes (Node 3 of `docs/rust-type-safety-plan.md`)** — added `src/ids.rs` defining `LocalSessionId`, `RemoteSessionId`, `LocalProjectId`, `RemoteProjectId`, `RemoteId` as `#[serde(transparent)]` newtypes wrapping `String`. The remote-sync layer internals now thread typed ids through `remote_project_id_map` (`HashMap<RemoteProjectId, LocalProjectId>`), `local_project_id_for_remote_project`, `local_session_id_for_remote_session` (takes `&RemoteSessionId`, returns `Option<LocalSessionId>`), `localize_remote_orchestrator_instance`, and `sync_remote_orchestrators_inner`. Wire types in `src/wire.rs` stay on `String` (downstream consumers and inbound remote payloads are calibrated to strings). `RemoteSessionId` and `RemoteId` are retained as a named-type menu for future migration waves, with `#[allow(dead_code)]` documented at the macro.
 - **Untracked typed-id module required for the build** — `src/ids.rs` is now tracked alongside `src/main.rs`'s `include!("ids.rs")`, so the typed-id refactor is self-contained in a clean checkout rather than relying on an untracked local file.
+- **Remote project-id map lookups no longer allocate** — `src/ids.rs` now implements `std::borrow::Borrow<str>` on every typed newtype (safe because `String`'s derived `Hash`/`Eq` route through `&str`, so borrow-form equality agrees with owned-form — the `Borrow` contract). Both lookup sites in `src/remote_sync.rs` (`local_project_id_for_remote_project` and the in-place lookup in the session-walk pass) drop the `&RemoteProjectId::from(project_id)` wrapper and pass `&str` directly. Hot remote-sync localization path runs every session + orchestrator instance + transition reference under the state mutex; the avoided per-lookup `String` allocation shortens that critical section.
+- **`session_mut_by_index` doc no longer claims out-of-bounds panics** — the helper bounds-checks and returns `None` before stamping (landed alongside the stamp-leak fix), but the contract comment still described the old panicking behavior. Rewritten to describe the `None` return, keep the guidance to derive indices via `find_session_index` / `find_visible_session_index`, and note that the `None` branch exists to keep the helper sound on stale indices (not to make "guess the index" ergonomic). Production callers still use `.expect("session index should be valid")`, which is acceptable today because indices always come from a sibling `find_session_index` in the same locked section — typed error propagation for stale indices is tracked as Node 2b of the type-safety plan.
+- **`SessionResponse` carries `serverInstanceId`** — `GET /api/sessions/{id}` now returns the same per-process UUID that `/api/state`, `/api/health`, and `CreateSessionResponse` already carry. `src/wire.rs::SessionResponse` gains `server_instance_id: String` (`#[serde(default)]` for forward-compat); `src/state_accessors.rs::get_session` populates it from `self.server_instance_id`; `ui/src/api.ts::SessionResponse` mirrors it; and `ui/src/App.tsx::adoptFetchedSession` routes through `shouldAdoptSnapshotRevision` with `force: true, allowRevisionDowngrade: <messages empty>`. The helper's instance-mismatch branch wins over both, so a restart mid-hydration is always adopted regardless of revision, while same-instance behavior is preserved (first hydration accepts any revision; re-hydration with existing messages still refuses to clobber them with an older snapshot). Updates `lastSeenServerInstanceIdRef` in lockstep with the revision counter. `get_session_route_returns_full_session` asserts the new field equals `state.server_instance_id` and is non-empty.
+- **Remote create/fork skip `SessionCreated` publish on no-change path** — `create_remote_session_proxy` and `proxy_remote_fork_codex_thread` previously emitted `DeltaEvent::SessionCreated { revision: inner.revision, ... }` even when `ensure_remote_proxy_session_record(..., update_existing=false)` returned `changed=false`. The client's `decideDeltaRevisionAction` silently dropped the same-revision delta, but emitting it was protocol-smell: it advertised a mutation that did not happen. The `changed` flag now leaves the mutex-held scope and `publish_delta` is gated on it. Revision and SSE emission are kept in lockstep (both gated on `if changed`), and peer clients remain in sync via the earlier SSE delta that advanced `inner.revision`.
+- **`local_session_id_for_remote_session` avoids the double-allocation on the hot path** — `upsert_remote_proxy_session_record` already returns an owned `String`; the old code called `.as_str()` on it and then `LocalSessionId::from(&str)` which re-allocated via `to_owned`. Now uses `LocalSessionId::from(String)` directly via the `From<String>` impl, consuming the owned string. The sibling "record already exists" branch clones `session.id` once instead of round-tripping through `.as_str()` + `to_owned`. Saves one allocation per call on a function invoked per session instance, per pending transition, and per active/stopped session id during an orchestrator localization pass.
+- **Cross-invocation poll-ref aliasing closed via scheduler extraction** — the inline safety-net poll refs that could alias across successive `handleSend` invocations no longer exist. The poll is now encapsulated in `startActivePromptPoll` (see `ui/src/active-prompt-poll.ts`), which returns an owning cancel function whose captured `stopped` / `chainedTimerId` / `hardCapTimerId` / `deadlineMs` live in closure state — one scheduler instance per invocation, with no shared mutable refs across calls. `handleSend` cancels the prior invocation's scheduler (via `activePromptPollCancelRef.current?.()`) before starting a new one, and unmount cleanup tears down whichever chain is currently owned. An old scheduler's closures cannot set/clear a new scheduler's state because they hold references to distinct ref cells.
+- **Gemini-auth tests no longer race HOME-mutating siblings** — `select_acp_auth_method_ignores_workspace_dotenv_credentials` and `gemini_dotenv_env_pairs_ignore_workspace_env_files` in `src/tests/acp_gemini.rs` now acquire `TEST_HOME_ENV_MUTEX` and redirect HOME/USERPROFILE to a fresh empty tempdir. The auth-method test additionally `ScopedEnvVar::remove`s the six Gemini/Google env vars that `gemini_api_key_source` / `gemini_vertex_auth_source` inspect, isolating from any process-env value (test or developer shell). `ScopedEnvVar::remove(key)` added as an RAII companion to `set` / `set_path`. Previously these tests raced `gemini_invalid_session_load_falls_back_to_session_new` (which sets `GEMINI_API_KEY=test-key-not-real`) and `find_gemini_env_file_reads_home_directory_env_files` (which writes `GEMINI_API_KEY=...` into its tempdir HOME). Verified with 5 consecutive `cargo test --bin termal` runs, all 435 passing.
 
 ## Stale send responses skip the active-prompt recovery poll
 
@@ -144,34 +151,79 @@ If no later state mutation sends another `PersistRequest::Delta`, the restored t
 - Re-arm persistence on failure, preferably with a bounded/backoff retry path inside the persist worker.
 - Keep the watermark unchanged and recollect after restoring tombstones so changed sessions and deletes retry together.
 
-## Remote project-id lookups allocate under the remote-sync state lock
+## Flagship deadline-guard test doesn't isolate the post-await check
 
-**Severity:** Low - the typed `remote_project_id_map` conversion performs lookups with freshly-allocated `RemoteProjectId` wrappers while remote sync holds the state mutex.
+**Severity:** Medium - `ui/src/active-prompt-poll.test.ts::stops re-arming after the hard-cap deadline even when fetchState is in flight` (line ~82) claims to pin the post-await `now() >= deadlineMs` guard at `ui/src/active-prompt-poll.ts:125`, but actually exercises a different code path.
 
-The map now has useful type safety, but hot sync paths can walk many sessions and orchestrator references under lock. Repeated wrapper allocation is avoidable and slightly lengthens the critical section.
+Under real fake-timer advance, the belt-and-suspenders hard-cap setTimeout fires first and sets `stopped = true`. When the deferred fetch resolves, the bail-out fires via `if (stopped || !handlers.isMounted()) return;` at line 118 — well before the deadline line. The test would still pass with the post-await deadline check deleted entirely. I noticed this during the "disable fix and verify test fails" verification and even mentioned it in the commit message, but the test docstring still claims to cover line 125 — that's false confidence for future readers and reviewers.
 
-**Current behavior:**
-- `remote_project_id_map` is keyed by `RemoteProjectId`.
-- Lookup sites build `RemoteProjectId::from(remote_project_id)` just to call `.get(...)`.
-- The temporary wrapper allocates a new `String`.
-
-**Proposal:**
-- Implement borrowed lookup support for typed ids, such as `Borrow<str>` plus matching `Hash`/`Eq` behavior.
-- Or keep hot lookup maps keyed by a borrow-friendly type while preserving typed ids at API boundaries.
-
-## `session_mut_by_index` contract comment still says out-of-bounds panics
-
-**Severity:** Low - `session_mut_by_index` now returns `None` for out-of-bounds indices, but the contract comment still says it panics.
-
-This helper is part of the mutation-stamp boundary that determines which session rows reach SQLite. A stale contract can lead future callers to reason incorrectly about missed mutations and stamp behavior.
+Only the `uses an injectable now()` test at line 394 actually isolates line 125 (its `now()` advance stays independent of the fake timer clock, so the hard-cap setTimeout never fires during the advance window).
 
 **Current behavior:**
-- The implementation bounds-checks and returns `None` before stamping.
-- The doc comment still says "Panics if the index is out of bounds."
+- Main deadline test passes due to the `stopped`-flag belt-and-suspenders, not the post-await deadline check.
+- Docstring + test name both advertise coverage that only the sibling injectable-now test delivers.
+- Regression that drops only `if (now() >= deadlineMs) return;` at line 125 would still pass the main test and only fail the injectable-now test.
 
 **Proposal:**
-- Update the comment to say the helper returns `None` for out-of-bounds indices.
-- Keep the guidance that callers should derive indices from `find_session_index` / `find_visible_session_index` where possible.
+- Rename the main test to `hard-cap \`stopped\` flag bails an in-flight await when setTimeout cap fires` (matches what it really proves).
+- Move the "post-await deadline check" claim from the main docstring to the injectable-now test's docstring (it is the actual regression gate).
+- Optionally: add a third test that uses a large `maxDurationMs` in real time + injected `now()` that advances past the deadline, so the hard-cap setTimeout never fires during the advance and the post-await deadline line is the only defense. Would cover both belt-and-suspenders and deadline-check paths independently.
+
+## Silent CRLF→LF conversion on rendered-Markdown save
+
+**Severity:** Medium - the CRLF save fix (`ui/src/panels/markdown-diff-segments.ts` + `ui/src/panels/DiffPanel.tsx`) normalizes `sourceContent` to LF before the resolver runs, then `setEditValueState(nextDocumentContent)` persists that LF-normalized content back into the edit buffer. On a CRLF-on-disk file (common on Windows with `core.autocrlf=true`), the first rendered-Markdown commit silently converts the entire buffer to LF, which gets written to disk on the next save.
+
+Works fine under git `core.autocrlf=true` (git re-applies CRLF on commit), but breaks for users with explicit CRLF-preserving workflows or for files where git is not involved. The `a68091f` commit message acknowledges the trade-off but the UI gives no indication.
+
+**Current behavior:**
+- `handleRenderedMarkdownSectionCommits` reads `sourceContent`, LF-normalizes it, applies the commit, writes the LF result via `setEditValueState(nextDocumentContent)`.
+- `handleSave` later writes that LF buffer to disk via `onSaveFile`.
+- Monaco's source-mode edit path preserves the original line endings; only the rendered-Markdown path does the silent conversion.
+- EOL pill at `DiffPanel.tsx:4085` flips from CRLF to LF silently on first rendered edit.
+
+**Proposal:**
+- Detect the original EOL style at the sourceContent boundary (CRLF vs LF vs mixed). Keep segment offsets + resolver operations on LF internally, but on save re-apply the original convention via `nextDocumentContent.replace(/\n/g, "\r\n")`.
+- Or: add a diff-preview notice when rendered-Markdown mode is active on a CRLF file, making the conversion visible and opt-in.
+- Add a Vitest case that loads CRLF content, edits a rendered section, saves, and asserts the saved content still has CRLF line endings.
+
+## `saveError` visibility over-gated by informational `externalFileNotice`
+
+**Severity:** Low - the UX fix that landed in `a68091f` renders `saveError` as a diagnostic note, gated by `!externalFileNotice && !diffEditConflictOnDisk`. But `externalFileNotice` is sometimes set to an informational (non-error) string such as `"Rendered Markdown edits will save this document to the worktree file."` (`DiffPanel.tsx:1185`, `1227`). If a save fails while such an informational notice is visible, the user sees the "Save failed" pill with no diagnostic — the exact regression the UX fix was landed to prevent.
+
+**Current behavior:**
+- `saveError` diagnostic note rendered only when `externalFileNotice` AND `diffEditConflictOnDisk` are both falsy.
+- Informational `externalFileNotice` values suppress the diagnostic even though they carry no error semantics.
+
+**Proposal:**
+- Gate only on `diffEditConflictOnDisk` (that branch renders its own recovery UI with "Apply my edits" / "Save anyway" / "Reload from disk" buttons, where the conflict message is obvious from the button labels).
+- Or: render `saveError` unconditionally alongside `externalFileNotice` with a visual distinction (e.g., red border for errors, gray for notices).
+- Add a Vitest case that sets an informational `externalFileNotice`, triggers a save failure, and asserts the saveError text is visible.
+
+## Duplicated `if changed { publish_delta }` block across remote proxy files
+
+**Severity:** Low - `src/remote_create_proxies.rs` and `src/remote_codex_proxies.rs` now have near-identical 40-line blocks with the same `(revision, local_session_id, local_session, changed)` tuple destructure + gated `publish_delta(DeltaEvent::SessionCreated { ... })`. The rationale comment is replicated in both files with "See the identical comment in `remote_create_proxies.rs`". Two sites drifting apart (e.g., one adding a new DeltaEvent variant the other misses) is the kind of subtle inconsistency that's hard to notice during review.
+
+**Current behavior:**
+- Both files duplicate the gated-publish pattern inline.
+- Cross-reference comment is the only guard against drift.
+- No shared helper encapsulating the invariant "announce only when the local record actually changed".
+
+**Proposal:**
+- Extract `AppState::announce_session_created_if_changed(&self, changed: bool, revision: u64, local_session: &Session)` (or a similar signature) that encapsulates the `if changed { publish_delta(&DeltaEvent::SessionCreated { ... }) }` block.
+- Both proxy paths call it. Single source of truth, compile-visible enforcement of the invariant.
+
+## `startActivePromptPoll` leaves hard-cap timer pending after natural onState stop
+
+**Severity:** Low - when the chained poll stops naturally because `onState` returns `true` (session becomes idle), the chained timer is not re-armed but the belt-and-suspenders `hardCapTimerId` setTimeout stays pending for up to 5 minutes until its callback fires harmlessly. Minor timer churn on fast-turn workflows; not a memory leak since the callback eventually clears itself.
+
+**Current behavior:**
+- `onState` returning `true` hits the `if (shouldStop) return;` branch in the chained-setTimeout async callback.
+- That branch does not clear `hardCapTimerId`; the timer stays armed until the cap elapses.
+- Many fast-turn prompt cycles accumulate dangling 5-minute timers in the JS runtime (each firing an empty cancel).
+
+**Proposal:**
+- When `onState` returns `true`, clear `hardCapTimerId` as well — either call the internal cancel body inline, or extract a `stopAndClear()` helper shared by the natural-stop path and the returned `cancel` function.
+- Add a Vitest case that exercises the natural-stop path and asserts `vi.getTimerCount()` drops to zero after `onState` returns `true`.
 
 ## `serverInstanceId` contract not documented in architecture.md
 
@@ -187,80 +239,20 @@ A future implementer reading architecture.md would miss that they need to popula
 - Add a paragraph under "SSE Event Stream" / "Frontend State Adoption" in `docs/architecture.md` explaining the field: emitted on every `StateResponse`/`HealthResponse`/`CreateSessionResponse`, set once per process via `Uuid::new_v4()` at `AppState::new_with_paths`, empty string is a forward-compat sentinel the frontend treats as unknown, any non-empty change between snapshots signals a restart and unlocks revision rewind.
 - Cross-reference `shouldAdoptSnapshotRevision` and `isServerInstanceMismatch` as the client-side enforcement points.
 
-## `SessionResponse` does not carry `serverInstanceId`
+## `shared_codex_thread_setup_persist_failure_does_not_tear_down_runtime` test flake
 
-**Severity:** Low - the `GET /api/sessions/{id}` response (`SessionResponse { revision, session }`) is the only session-adoption wire shape without `serverInstanceId`. `adoptFetchedSession` at `ui/src/App.tsx:2181-2186` still uses the pre-existing `revision < previousRevision && messages.length > 0` heuristic, which a post-restart lower-revision fresh fetch could silently be rejected by.
-
-This is an edge-case consistency gap, not a broken feature: the two primary restart-loss paths (`/api/state` on reconnect, `CreateSessionResponse` after POST) are closed by the main `serverInstanceId` work. A user clicking a session tab at the exact moment of a restart hits this narrow window where the fetched session can be rejected until safety-net pollers re-fetch.
+**Severity:** Low - `tests::shared_codex::shared_codex_thread_setup_persist_failure_does_not_tear_down_runtime` was observed failing intermittently during batched `cargo test --bin termal` runs. Passes when re-run in isolation. The two Gemini-auth siblings (`select_acp_auth_method_ignores_workspace_dotenv_credentials` and `gemini_dotenv_env_pairs_ignore_workspace_env_files`) were fixed by acquiring `TEST_HOME_ENV_MUTEX` and isolating HOME + Gemini/Google env vars; verified via 5 consecutive green `cargo test --bin termal` runs. The shared-codex test did not surface in those 5 runs, so either (a) it is much rarer than the Gemini one, (b) it was indirectly fixed by an unrelated change, or (c) it is still broken but the window is too narrow to hit.
 
 **Current behavior:**
-- `/api/state`, `/api/health`, and session create/fork responses carry `serverInstanceId`.
-- `/api/sessions/{id}` does not; `adoptFetchedSession` has its own monotonic revision check not bypassed by restart.
+- Pass-in-isolation, fail-in-batch pattern when it surfaces.
+- Unlike the Gemini flakes, this test does not obviously share HOME-rooted fixtures — likely a temp-file path collision or a side effect of persist-thread teardown.
+- Has not surfaced in recent multi-run verification, so concrete reproduction is not yet captured.
 
 **Proposal:**
-- Add `server_instance_id: String` to `SessionResponse` in `src/wire.rs` with `#[serde(default)]` for forward-compat.
-- Thread it through `get_session` / `adoptFetchedSession` and route the adoption through `shouldAdoptSnapshotRevision` for symmetry with the other two paths.
-- Vitest coverage: fetch a session after simulated restart with lower revision + different id, assert the response is adopted.
-
-## Remote create/fork `!changed` path publishes `SessionCreated` delta at un-bumped revision
-
-**Severity:** Medium - `create_remote_session_proxy` and `proxy_remote_fork_codex_thread` both publish a `DeltaEvent::SessionCreated { revision: inner.revision, ... }` even when `ensure_remote_proxy_session_record(..., update_existing=false)` returned `changed=false` (i.e., SSE bridge already applied a newer revision so the POST refresh was skipped).
-
-The same-revision delta violates the SSE invariant that each delta corresponds to a newly committed revision. In a bridge/create race, that duplicate delta can be delivered before a full state snapshot for the same revision; the frontend can then advance from the narrow `SessionCreated` delta and reject the authoritative same-revision snapshot, hiding non-session remote state until a later refresh.
-
-**Current behavior:**
-- `!changed` branch still calls `publish_delta(SessionCreated { revision: inner.revision })`.
-- The duplicate same-revision delta can be delivered before an authoritative same-revision full snapshot.
-- Both proxy files duplicate this emission inline.
-
-**Proposal:**
-- Skip `publish_delta` entirely when `!changed` — nothing changed locally, no need to re-broadcast.
-- Consider extracting the create/fork response-return branching into a shared helper so `remote_create_proxies.rs` and `remote_codex_proxies.rs` agree on the contract by construction.
-
-## `local_session_id_for_remote_session` double-allocates on the hot remote-sync path
-
-**Severity:** Low - `src/remote_sync.rs::local_session_id_for_remote_session` returns `Some(LocalSessionId::from(upsert_remote_proxy_session_record(...).as_str()))`. `upsert_remote_proxy_session_record` already returns an owned `String`; calling `.as_str()` on it and then `LocalSessionId::from(&str)` re-allocates via `to_owned()`.
-
-The function is invoked per session instance, per pending transition, and per active/stopped session id during an orchestrator localization pass, so the extra alloc is on a hot path.
-
-**Current behavior:**
-- `upsert_remote_proxy_session_record` returns `String`.
-- `LocalSessionId::from(&str)` allocates a second `String`.
-- The first `String` is dropped immediately after.
-
-**Proposal:**
-- Replace with `Some(LocalSessionId::from(upsert_remote_proxy_session_record(...)))`, consuming the owned `String` directly via `From<String>`.
-- Audit sibling call sites in `remote_sync.rs` that build `LocalSessionId` / `LocalProjectId` from owned strings for the same pattern.
-
-## Cross-invocation poll-ref aliasing between successive `handleSend` calls
-
-**Severity:** Low - a stale `scheduleNextActivePromptPoll` closure from a previous `handleSend` invocation that is awaiting `fetchState()` when the user sends a new prompt can, after its fetch resolves, overwrite the NEW invocation's `activePromptPollTimeoutIdRef.current` with its own `setTimeout` id. Similarly, the previous invocation's hard-cap `setTimeout` (in `activePromptPollTimeoutRef.current`) can clear a live new-invocation timer id when it fires.
-
-Pre-existing behavior, not introduced by the recent `pollDeadlineMs` deadline-guard fix. The deadline guard narrows the window but does not close the cross-invocation ref aliasing.
-
-**Current behavior:**
-- `activePromptPollTimeoutIdRef.current` and `activePromptPollTimeoutRef.current` are shared across `handleSend` invocations.
-- A previous invocation's closure (captured refs, captured `pollDeadlineMs`) can race a fresh invocation.
-- Net effect: an old poll chain can sometimes set/clear timers that belong to a new chain, producing either a missed poll or an unexpected clear.
-
-**Proposal:**
-- Add a per-invocation token ref. Each `handleSend` generates a fresh token; `scheduleNextActivePromptPoll` and `clearActivePromptPoll` short-circuit if the captured token no longer matches `currentPollTokenRef.current`.
-- Alternatively: split the two refs into per-invocation closures, so each `handleSend` owns its own ref chain and the previous chain can't alias.
-
-## Test-suite parallel execution flakiness: shared global env + temp paths
-
-**Severity:** Medium - two tests were observed to fail intermittently during batched `cargo test --bin termal` runs in the April 16 session: `tests::acp_gemini::select_acp_auth_method_ignores_workspace_dotenv_credentials` (sometimes `::gemini_dotenv_env_pairs_ignore_workspace_env_files`) and `tests::shared_codex::shared_codex_thread_setup_persist_failure_does_not_tear_down_runtime`. Both passed when re-run in isolation. The pattern (pass-in-isolation, fail-in-batch) strongly suggests shared global state contamination — most likely process-wide env vars (`GEMINI_API_KEY`, `HOME`) and temp-dir paths that collide between parallel test threads.
-
-**Current behavior:**
-- Full-suite runs occasionally fail with one or two of the tests above; a re-run typically succeeds.
-- The failures do not correspond to any real regression — the production code paths are correct.
-- Undocumented flakes erode trust in the test suite and cost time whenever they surface in CI.
-
-**Proposal:**
-- Audit the flaky tests for process-wide state: look for `env::set_var` / `env::remove_var` / `TEST_HOME_ENV_MUTEX` usage that isn't serialized against other tests touching the same variables.
-- Serialize the offending tests via a shared `Mutex` guard (either a hand-rolled `TEST_HOME_ENV_MUTEX` like the Gemini tests use, or `serial_test::serial`) if the root cause is env-var contention.
-- For `shared_codex_thread_setup_persist_failure_does_not_tear_down_runtime` specifically: if the flake is temp-file path collision, switch to `tempfile::tempdir()` with unique per-test directories.
-- Add a regression test harness that runs each flagged test 20 times back-to-back in the batch context to confirm the fix.
+- Reproduce via a regression harness that runs the test 20 times back-to-back under the full batch context; confirm the flake signature (temp-file collision vs env var vs persist-thread handle leak).
+- If the flake is temp-file path collision: switch to `tempfile::tempdir()` with unique per-test directories.
+- If env: add `TEST_HOME_ENV_MUTEX` acquisition and `ScopedEnvVar::remove` isolation to match the Gemini pattern.
+- Document the root cause in the fix commit message so the "why mutex / why tempdir" is visible at review time.
 
 ## Stale `src/tests.rs` can reappear in the working tree alongside `src/tests/mod.rs`
 
