@@ -369,6 +369,7 @@ impl Mode {
 }
 
 include!("remote.rs");
+include!("remote_ssh.rs");
 include!("remote_terminal.rs");
 include!("remote_sync.rs");
 include!("state.rs");
@@ -383,10 +384,12 @@ include!("persist.rs");
 include!("runtime.rs");
 include!("acp.rs");
 include!("codex.rs");
+include!("codex_events.rs");
 include!("codex_rpc.rs");
 include!("agent_readiness.rs");
 include!("gemini.rs");
 include!("turns.rs");
+include!("recorders.rs");
 include!("claude.rs");
 include!("repl_codex.rs");
 include!("api.rs");
