@@ -740,6 +740,15 @@ struct HealthResponse {
     ok: bool,
     #[serde(default)]
     supports_inline_orchestrator_templates: bool,
+    /// UUID generated at `AppState::new_with_paths` boot. Stable for
+    /// the lifetime of the process, changes on every restart. Clients
+    /// use a mismatch between this and their last-seen id to detect a
+    /// server restart deterministically — see `shouldAdoptSnapshotRevision`
+    /// in the frontend. `#[serde(default)]` so older servers that do
+    /// not emit the field still deserialize to an empty string
+    /// (treated as "unknown — do not trust for restart detection").
+    #[serde(default)]
+    server_instance_id: String,
 }
 
 /// Represents the send message request payload.
@@ -915,6 +924,14 @@ struct AgentReadiness {
 #[serde(rename_all = "camelCase")]
 struct StateResponse {
     revision: u64,
+    /// UUID generated at `AppState::new_with_paths` boot; see
+    /// `HealthResponse::server_instance_id` for semantics. Carried on
+    /// every snapshot so clients can distinguish "revision decreased
+    /// because the server restarted" from "revision decreased because
+    /// this response is stale". `#[serde(default)]` for forward-compat
+    /// with older servers.
+    #[serde(default)]
+    server_instance_id: String,
     #[serde(default)]
     codex: CodexState,
     #[serde(default)]
@@ -1024,12 +1041,17 @@ struct PutWorkspaceLayoutRequest {
 #[serde(rename_all = "camelCase")]
 struct CreateSessionResponse {
     session_id: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    session: Option<Session>,
-    #[serde(default)]
+    session: Session,
     revision: u64,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    state: Option<StateResponse>,
+    /// See `StateResponse::server_instance_id` — same semantics. The
+    /// frontend's `adoptCreatedSessionResponse` uses a mismatch
+    /// against the last-seen id to accept a revision downgrade after
+    /// a server restart, which is the common case for this response
+    /// (POST sent from a stale browser tab against a freshly started
+    /// server). `#[serde(default)]` for forward-compat with older
+    /// servers that do not emit the field.
+    #[serde(default)]
+    server_instance_id: String,
 }
 
 /// Represents the create project response payload.
@@ -1241,5 +1263,4 @@ enum DeltaEvent {
         sessions: Vec<Session>,
     },
 }
-
 

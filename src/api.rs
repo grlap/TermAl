@@ -89,10 +89,11 @@ fn deliver_turn_dispatch(state: &AppState, dispatch: TurnDispatch) -> Result<(),
 }
 
 /// Returns the backend health response.
-async fn health() -> Json<HealthResponse> {
+async fn health(State(state): State<AppState>) -> Json<HealthResponse> {
     Json(HealthResponse {
         ok: true,
         supports_inline_orchestrator_templates: true,
+        server_instance_id: state.server_instance_id.clone(),
     })
 }
 

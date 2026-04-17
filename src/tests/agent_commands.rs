@@ -366,11 +366,7 @@ fn sync_session_agent_commands_bumps_visible_session_command_revision() {
         })
         .unwrap();
     let starting_revision = created.revision;
-    let starting_session_revision = created
-        .session
-        .as_ref()
-        .expect("created Claude session should be returned")
-        .agent_commands_revision;
+    let starting_session_revision = created.session.agent_commands_revision;
 
     state
         .sync_session_agent_commands(

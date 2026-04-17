@@ -336,7 +336,7 @@ type AppTestStateResponseOverrides = Pick<
   "revision" | "projects" | "orchestrators" | "workspaces" | "sessions"
 > &
   Partial<
-    Pick<AppTestStateResponse, "codex" | "agentReadiness"> & {
+    Pick<AppTestStateResponse, "codex" | "agentReadiness" | "serverInstanceId"> & {
       preferences: Partial<AppTestStateResponse["preferences"]>;
     }
   >;
@@ -344,6 +344,7 @@ type AppTestStateResponseOverrides = Pick<
 function makeStateResponse(overrides: AppTestStateResponseOverrides): AppTestStateResponse {
   return {
     revision: overrides.revision,
+    serverInstanceId: overrides.serverInstanceId ?? "test-instance",
     codex: overrides.codex ?? {},
     agentReadiness: overrides.agentReadiness ?? [],
     preferences: {
@@ -9371,10 +9372,8 @@ describe("App", () => {
       const originalUrl = `${window.location.pathname}${window.location.search}${window.location.hash}`;
       const fetchStateDeferred =
         createDeferred<Awaited<ReturnType<typeof api.fetchState>>>();
-      const createSessionDeferred = createDeferred<{
-        sessionId: string;
-        state: Awaited<ReturnType<typeof api.fetchState>>;
-      }>();
+      const createSessionDeferred =
+        createDeferred<Awaited<ReturnType<typeof api.createSession>>>();
       const refreshSessionModelOptionsDeferred =
         createDeferred<Awaited<ReturnType<typeof api.fetchState>>>();
       const fetchStateSpy = vi
@@ -9412,28 +9411,22 @@ describe("App", () => {
         await act(async () => {
           createSessionDeferred.resolve({
             sessionId: "session-1",
-            state: makeStateResponse({
-              revision: 2,
-              projects: [],
-              orchestrators: [],
-              workspaces: [],
-              sessions: [
-                {
-                  id: "session-1",
-                  name: "Codex 1",
-                  emoji: "O",
-                  agent: "Codex",
-                  workdir: "/tmp",
-                  model: "gpt-5.4",
-                  approvalPolicy: "never",
-                  reasoningEffort: "medium",
-                  sandboxMode: "workspace-write",
-                  status: "idle",
-                  preview: "Ready for a prompt.",
-                  messages: [],
-                },
-              ],
-            }),
+            revision: 2,
+            serverInstanceId: "test-instance",
+            session: {
+              id: "session-1",
+              name: "Codex 1",
+              emoji: "O",
+              agent: "Codex",
+              workdir: "/tmp",
+              model: "gpt-5.4",
+              approvalPolicy: "never",
+              reasoningEffort: "medium",
+              sandboxMode: "workspace-write",
+              status: "idle",
+              preview: "Ready for a prompt.",
+              messages: [],
+            },
           });
           await flushUiWork();
         });
@@ -9627,10 +9620,8 @@ describe("App", () => {
       const dateNowSpy = vi
         .spyOn(Date, "now")
         .mockImplementation(() => mockedNow);
-      const createSessionDeferred = createDeferred<{
-        sessionId: string;
-        state: Awaited<ReturnType<typeof api.fetchState>>;
-      }>();
+      const createSessionDeferred =
+        createDeferred<Awaited<ReturnType<typeof api.createSession>>>();
       const refreshSessionModelOptionsDeferred =
         createDeferred<Awaited<ReturnType<typeof api.fetchState>>>();
       let fetchStateCallCount = 0;
@@ -9725,26 +9716,20 @@ describe("App", () => {
         await act(async () => {
           createSessionDeferred.resolve({
             sessionId: "session-1",
-            state: makeStateResponse({
-              revision: 2,
-              projects: [],
-              orchestrators: [],
-              workspaces: [],
-              sessions: [
-                makeSession("session-1", {
-                  name: "Codex 1",
-                  status: "active",
-                  preview: "run the command",
-                  messages: [
-                    {
-                      id: "message-user-1",
-                      type: "text",
-                      timestamp: "10:00",
-                      author: "you",
-                      text: "run the command",
-                    },
-                  ],
-                }),
+            revision: 2,
+            serverInstanceId: "test-instance",
+            session: makeSession("session-1", {
+              name: "Codex 1",
+              status: "active",
+              preview: "run the command",
+              messages: [
+                {
+                  id: "message-user-1",
+                  type: "text",
+                  timestamp: "10:00",
+                  author: "you",
+                  text: "run the command",
+                },
               ],
             }),
           });
@@ -15002,10 +14987,8 @@ describe("App", () => {
       const originalUrl = `${window.location.pathname}${window.location.search}${window.location.hash}`;
       const fetchStateDeferred =
         createDeferred<Awaited<ReturnType<typeof api.fetchState>>>();
-      const createSessionDeferred = createDeferred<{
-        sessionId: string;
-        state: Awaited<ReturnType<typeof api.fetchState>>;
-      }>();
+      const createSessionDeferred =
+        createDeferred<Awaited<ReturnType<typeof api.createSession>>>();
       const refreshSessionModelOptionsDeferred =
         createDeferred<Awaited<ReturnType<typeof api.fetchState>>>();
       const fetchStateSpy = vi
@@ -15051,28 +15034,22 @@ describe("App", () => {
         await act(async () => {
           createSessionDeferred.resolve({
             sessionId: "session-1",
-            state: makeStateResponse({
-              revision: 2,
-              projects: [],
-              orchestrators: [],
-              workspaces: [],
-              sessions: [
-                {
-                  id: "session-1",
-                  name: "Codex 1",
-                  emoji: "O",
-                  agent: "Codex",
-                  workdir: "/tmp",
-                  model: "gpt-5-codex-mini",
-                  approvalPolicy: "never",
-                  reasoningEffort: "minimal",
-                  sandboxMode: "workspace-write",
-                  status: "idle",
-                  preview: "Ready for a prompt.",
-                  messages: [],
-                },
-              ],
-            }),
+            revision: 2,
+            serverInstanceId: "test-instance",
+            session: {
+              id: "session-1",
+              name: "Codex 1",
+              emoji: "O",
+              agent: "Codex",
+              workdir: "/tmp",
+              model: "gpt-5-codex-mini",
+              approvalPolicy: "never",
+              reasoningEffort: "minimal",
+              sandboxMode: "workspace-write",
+              status: "idle",
+              preview: "Ready for a prompt.",
+              messages: [],
+            },
           });
           await flushUiWork();
         });
@@ -15149,10 +15126,8 @@ describe("App", () => {
         createDeferred<Awaited<ReturnType<typeof api.fetchState>>>();
       const updateSettingsDeferred =
         createDeferred<Awaited<ReturnType<typeof api.fetchState>>>();
-      const createSessionDeferred = createDeferred<{
-        sessionId: string;
-        state: Awaited<ReturnType<typeof api.fetchState>>;
-      }>();
+      const createSessionDeferred =
+        createDeferred<Awaited<ReturnType<typeof api.createSession>>>();
       const refreshSessionModelOptionsDeferred =
         createDeferred<Awaited<ReturnType<typeof api.fetchState>>>();
       const fetchStateSpy = vi
@@ -15245,32 +15220,22 @@ describe("App", () => {
         await act(async () => {
           createSessionDeferred.resolve({
             sessionId: "session-1",
-            state: makeStateResponse({
-              revision: 3,
-              preferences: {
-                defaultCodexReasoningEffort: "high",
-                defaultClaudeEffort: "default",
-              },
-              projects: [],
-              orchestrators: [],
-              workspaces: [],
-              sessions: [
-                {
-                  id: "session-1",
-                  name: "Codex 1",
-                  emoji: "O",
-                  agent: "Codex",
-                  workdir: "/tmp",
-                  model: "gpt-5.4",
-                  approvalPolicy: "never",
-                  reasoningEffort: "high",
-                  sandboxMode: "workspace-write",
-                  status: "idle",
-                  preview: "Ready for a prompt.",
-                  messages: [],
-                },
-              ],
-            }),
+            revision: 3,
+            serverInstanceId: "test-instance",
+            session: {
+              id: "session-1",
+              name: "Codex 1",
+              emoji: "O",
+              agent: "Codex",
+              workdir: "/tmp",
+              model: "gpt-5.4",
+              approvalPolicy: "never",
+              reasoningEffort: "high",
+              sandboxMode: "workspace-write",
+              status: "idle",
+              preview: "Ready for a prompt.",
+              messages: [],
+            },
           });
           await flushUiWork();
         });
@@ -15332,10 +15297,8 @@ describe("App", () => {
         createDeferred<Awaited<ReturnType<typeof api.fetchState>>>();
       const updateSettingsDeferred =
         createDeferred<Awaited<ReturnType<typeof api.fetchState>>>();
-      const createSessionDeferred = createDeferred<{
-        sessionId: string;
-        state: Awaited<ReturnType<typeof api.fetchState>>;
-      }>();
+      const createSessionDeferred =
+        createDeferred<Awaited<ReturnType<typeof api.createSession>>>();
       const refreshSessionModelOptionsDeferred =
         createDeferred<Awaited<ReturnType<typeof api.fetchState>>>();
       const fetchStateSpy = vi
@@ -15430,32 +15393,21 @@ describe("App", () => {
         await act(async () => {
           createSessionDeferred.resolve({
             sessionId: "session-1",
-            state: makeStateResponse({
-              revision: 3,
-              preferences: {
-                defaultCodexReasoningEffort: "medium",
-                defaultClaudeApprovalMode: "auto-approve",
-                defaultClaudeEffort: "max",
-              },
-              projects: [],
-              orchestrators: [],
-              workspaces: [],
-              sessions: [
-                {
-                  id: "session-1",
-                  name: "Claude 1",
-                  emoji: "C",
-                  agent: "Claude",
-                  workdir: "/tmp",
-                  model: "claude-sonnet-4-20250514",
-                  claudeApprovalMode: "auto-approve",
-                  claudeEffort: "max",
-                  status: "idle",
-                  preview: "Ready for a prompt.",
-                  messages: [],
-                },
-              ],
-            }),
+            revision: 3,
+            serverInstanceId: "test-instance",
+            session: {
+              id: "session-1",
+              name: "Claude 1",
+              emoji: "C",
+              agent: "Claude",
+              workdir: "/tmp",
+              model: "claude-sonnet-4-20250514",
+              claudeApprovalMode: "auto-approve",
+              claudeEffort: "max",
+              status: "idle",
+              preview: "Ready for a prompt.",
+              messages: [],
+            },
           });
           await flushUiWork();
         });
@@ -15638,10 +15590,8 @@ describe("App", () => {
       const originalEventSource = globalThis.EventSource;
       const originalResizeObserver = globalThis.ResizeObserver;
       const originalUrl = `${window.location.pathname}${window.location.search}${window.location.hash}`;
-      const createSessionDeferred = createDeferred<{
-        sessionId: string;
-        state: Awaited<ReturnType<typeof api.fetchState>>;
-      }>();
+      const createSessionDeferred =
+        createDeferred<Awaited<ReturnType<typeof api.createSession>>>();
       const refreshSessionModelOptionsDeferred =
         createDeferred<Awaited<ReturnType<typeof api.fetchState>>>();
       const createSessionSpy = vi
@@ -15770,28 +15720,12 @@ describe("App", () => {
         await act(async () => {
           createSessionDeferred.resolve({
             sessionId: "session-2",
-            state: makeStateResponse({
-              revision: 2,
-              preferences: {
-                defaultCodexReasoningEffort: "medium",
-                defaultClaudeEffort: "default",
-                remotes,
-              },
-              projects,
-              orchestrators: [],
-              workspaces: [],
-              sessions: [
-                makeSession("session-1", {
-                  name: "Remote Session",
-                  workdir: "/remote/repo/subdir",
-                  projectId: "project-remote",
-                }),
-                makeSession("session-2", {
-                  name: "Codex 2",
-                  workdir: "/remote/repo",
-                  projectId: "project-remote",
-                }),
-              ],
+            revision: 2,
+            serverInstanceId: "test-instance",
+            session: makeSession("session-2", {
+              name: "Codex 2",
+              workdir: "/remote/repo",
+              projectId: "project-remote",
             }),
           });
           await flushUiWork();

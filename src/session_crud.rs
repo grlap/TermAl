@@ -305,9 +305,9 @@ impl AppState {
         }
         Ok(CreateSessionResponse {
             session_id: session.id.clone(),
-            session: Some(session),
+            session,
             revision,
-            state: None,
+            server_instance_id: self.server_instance_id.clone(),
         })
     }
 

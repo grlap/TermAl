@@ -43,11 +43,9 @@ async fn create_session_route_returns_created_response() {
     )
     .await;
     assert_eq!(status, StatusCode::CREATED);
-    let created_session = response
-        .session
-        .as_ref()
-        .expect("created session should be returned");
-    assert!(response.state.is_none());
+    let created_session = &response.session;
+    assert_eq!(response.session_id, created_session.id);
+    assert!(response.revision > 0);
     assert_eq!(state.snapshot().sessions.len(), initial_session_count + 1);
     assert_eq!(created_session.name, "Route Created Session");
     let expected_workdir = resolve_session_workdir("/tmp").expect("route workdir should normalize");
@@ -780,11 +778,9 @@ async fn codex_thread_fork_route_returns_created_response() {
     .await;
 
     assert_eq!(status, StatusCode::CREATED);
-    let forked_session = response
-        .session
-        .as_ref()
-        .expect("forked session should be returned");
-    assert!(response.state.is_none());
+    let forked_session = &response.session;
+    assert_eq!(response.session_id, forked_session.id);
+    assert!(response.revision > 0);
     assert_eq!(
         forked_session.codex_thread_state,
         Some(CodexThreadState::Active)

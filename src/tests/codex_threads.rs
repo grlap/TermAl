@@ -319,10 +319,7 @@ fn fork_codex_thread_creates_a_new_local_session() {
     let forked = state.fork_codex_thread(&created.session_id).unwrap();
     assert_ne!(forked.session_id, created.session_id);
 
-    let forked_session = forked
-        .session
-        .as_ref()
-        .expect("forked session should be returned");
+    let forked_session = &forked.session;
     assert_eq!(forked_session.name, "Forked Review Fork");
     assert_eq!(forked_session.model, "gpt-5.5");
     assert_eq!(
@@ -464,10 +461,7 @@ fn fork_codex_thread_falls_back_to_note_when_history_is_unavailable() {
     });
 
     let forked = state.fork_codex_thread(&created.session_id).unwrap();
-    let forked_session = forked
-        .session
-        .as_ref()
-        .expect("forked session should be returned");
+    let forked_session = &forked.session;
     assert!(matches!(
         forked_session.messages.last(),
         Some(Message::Markdown { title, markdown, .. })

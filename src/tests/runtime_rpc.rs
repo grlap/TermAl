@@ -236,7 +236,9 @@ fn acp_prompt_command_keeps_writer_loop_responsive_while_waiting_for_response() 
     let runtime_state = Arc::new(Mutex::new(AcpRuntimeState {
         current_session_id: Some("cursor-session-1".to_owned()),
         is_loading_history: false,
-        supports_session_load: Some(true),
+        capabilities: Some(AcpCapabilities {
+            supports_session_load: Some(true),
+        }),
     }));
     let writer = SharedBufferWriter::default();
     let thread_writer = writer.clone();

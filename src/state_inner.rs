@@ -286,8 +286,16 @@ impl StateInner {
     /// regression coverage without gating the definition on `#[cfg(test)]`.
     #[cfg_attr(not(test), allow(dead_code))]
     fn stamp_session_at_index(&mut self, index: usize) -> Option<u64> {
+        // Bounds check before the stamp so an OOB miss does not burn a
+        // mutation stamp with no record to attach it to. Advancing
+        // `last_mutation_stamp` without a matching record would grow the
+        // global watermark gap by one per miss and break the invariant
+        // "stamp implies an actual mutation".
+        if index >= self.sessions.len() {
+            return None;
+        }
         let stamp = self.next_mutation_stamp();
-        let record = self.sessions.get_mut(index)?;
+        let record = &mut self.sessions[index];
         record.mutation_stamp = stamp;
         Some(stamp)
     }
@@ -313,8 +321,15 @@ impl StateInner {
     /// the index is out of bounds; callers should obtain the index via
     /// `find_session_index` / `find_visible_session_index` first.
     fn session_mut_by_index(&mut self, index: usize) -> Option<&mut SessionRecord> {
+        // Bounds check before the stamp — see `stamp_session_at_index`
+        // for the rationale. The by-id `session_mut` is already safe
+        // because `find_session_index` short-circuits on miss before
+        // `next_mutation_stamp` runs.
+        if index >= self.sessions.len() {
+            return None;
+        }
         let stamp = self.next_mutation_stamp();
-        let record = self.sessions.get_mut(index)?;
+        let record = &mut self.sessions[index];
         record.mutation_stamp = stamp;
         Some(record)
     }

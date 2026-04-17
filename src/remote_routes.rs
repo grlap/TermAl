@@ -547,7 +547,7 @@ impl AppState {
                         &mut inner,
                         remote_id,
                         &session,
-                        local_project_id,
+                        local_project_id.map(LocalProjectId::into_inner),
                         true,
                     );
                     let local_record = inner

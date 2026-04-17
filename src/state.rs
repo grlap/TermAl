@@ -64,6 +64,14 @@ struct PersistDelta {
 
 #[derive(Clone)]
 struct AppState {
+    /// Per-process UUID generated at `AppState::new_with_paths` boot.
+    /// Carried on every `StateResponse` and `HealthResponse` so clients
+    /// can distinguish "revision decreased because the server just
+    /// restarted" from "revision decreased because this response is
+    /// stale". The frontend's `shouldAdoptSnapshotRevision` uses a
+    /// mismatch between this id and its `lastSeenServerInstanceIdRef`
+    /// as the signal to accept a revision downgrade.
+    server_instance_id: String,
     default_workdir: String,
     persistence_path: Arc<PathBuf>,
     orchestrator_templates_path: Arc<PathBuf>,

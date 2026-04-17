@@ -3791,6 +3791,7 @@ function makeBackendStateResponse({
 }): StateResponse {
   return {
     revision,
+    serverInstanceId: "test-instance",
     codex: {},
     agentReadiness: [],
     preferences: {

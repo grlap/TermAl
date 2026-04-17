@@ -12,6 +12,23 @@ Also fixed in the current tree, not re-listed below:
 - **High-risk backend subsystems lack invariant-level documentation** — added contract docs to the previously under-documented hot spots: `sync_remote_state_inner` / `apply_remote_state_if_newer_locked` (snapshot vs focused sync, revision gate, id localization, rollback scope, mutation stamps, callers), the `orchestrators.rs` file-level block (template vs instance storage, full lifecycle, file boundary with `orchestrator_lifecycle.rs` / `orchestrator_transitions.rs`), `acp.rs` (strict initialize → authenticate → session/load-or-new → set_mode/model → prompt handshake, pending JSON-RPC request ownership, timeouts, session-load fallback), and `build_instruction_search_graph` (seed discovery, path canonicalization, reference sanitization, transitive-edge BFS with cycle guard, skipped directories, document classification). Dozens of low-value `/// Handles ...` stubs on trait-impl forwarders and enum accessors were removed or replaced with substantive docs; the remaining `/// Handles ...` in `turn_lifecycle.rs` is a real description rather than a stub.
 - **Architecture.md project structure + state-mutation pattern stale after refactor** — the `## Backend` state dump now lists SQLite storage + the `file_events` broadcaster + the `persist_tx` channel; the state-mutation pattern block documents the background `termal-persist` thread draining `PersistRequest::Delta` signals, `StateInner::collect_persist_delta` as the under-lock diff builder, the mutation-stamp invariant routed through `session_mut*` / `push_session` / `remove_session_at` / `retain_sessions`, and `commit_delta_locked` as the delta-only commit; the project structure listing now reflects the full post-refactor file layout (state/boot, sessions/turns, agents, HTTP API, wire DTOs, remote proxies, orchestrators).
 - **Remote sync rollback stale tombstones** — remote snapshot rollback now uses a named `RemoteSyncRollback` snapshot that restores `removed_session_ids` alongside sessions, orchestrator instances, and `next_session_number`. A regression omits a referenced remote session from a newer snapshot, forces orchestrator localization to fail after retention queues a tombstone, and verifies the restored session no longer has a queued delete.
+- **Weak `CreateSessionResponse` contract** - `CreateSessionResponse` now requires `sessionId`, `session`, and `revision` in Rust and TypeScript. Backend session-create/fork producers construct the concrete session response directly, remote create/fork proxies deserialize the same required shape, frontend adoption no longer accepts a state-shaped fallback, and route/App coverage exercises the required payload.
+- **`session_mut_by_index` and `stamp_session_at_index` stamp leak on out-of-bounds miss** — both helpers in `src/state_inner.rs` now bounds-check *before* calling `next_mutation_stamp`, so an OOB call no longer advances `last_mutation_stamp` without a matching record. `state_inner_session_mut_helpers_stamp_the_record` in `src/tests/mod.rs` was extended with three explicit miss assertions (by-index, stamp-at-index, by-id) verifying the counter stays put, plus a post-miss success case proving the helpers still stamp correctly afterwards.
+- **`serverInstanceId` primitive for deterministic server-restart detection** — added a per-process UUID generated at `AppState::new_with_paths` and carried on every `StateResponse`, `HealthResponse`, and `CreateSessionResponse`. Client-side `shouldAdoptSnapshotRevision` gained a `lastSeenServerInstanceId`/`nextServerInstanceId` pair plus a new `isServerInstanceMismatch` helper. Any snapshot whose id changed accepts a revision downgrade unconditionally; snapshots from the same instance stay gated on the monotonic revision check. This closes both the "Prompt sent during SSE reconnect window is invisible until safety-net poll" and "Safety-net poll uses `force + allowRevisionDowngrade` unconditionally" bugs as a unified fix: the safety-net poll stops forcing downgrade every tick (now a no-op when SSE is healthy), `adoptCreatedSessionResponse` routes through `shouldAdoptSnapshotRevision` with the new ids so the POST response after a restart is accepted immediately, and empty/unknown ids from older servers or fallback payloads cannot fabricate a restart signal. Coverage: health route test asserts a non-empty id, five new `state-revision` Vitest cases pin the mismatch branch including the "same instance still rejects stale response" and "empty next id preserves monotonic guard" negatives. A residual old-instance late-response edge case is tracked below.
+- **`adoptCreatedSessionResponse` session write now revision-gated** — previously `sessionsRef.current = nextSessions` ran unconditionally, so a stale POST response could overwrite a fresher SSE-driven session entry. The write now goes through `shouldAdoptSnapshotRevision` with the `serverInstanceId` pair, so stale responses on the same instance no-op while restart-driven downgrades are accepted.
+- **Remote create/fork responses now validate duplicated session identity** — `create_remote_session_proxy` in `src/remote_create_proxies.rs` and `proxy_remote_fork_codex_thread` in `src/remote_codex_proxies.rs` now return `ApiError::bad_gateway("remote session id mismatch...")` when `remote_response.session.id != remote_response.session_id`, instead of silently mirroring whichever id is embedded in `session.id` while downstream code refers to the other id. Follow-up regression coverage is tracked as a P2 task item once fake-remote HTTP infrastructure lands.
+- **Remote create/fork POST responses can no longer overwrite newer bridged proxy state** — both `create_remote_session_proxy` and `proxy_remote_fork_codex_thread` now gate their `update_existing` refresh on `StateInner::should_skip_remote_applied_revision`. When the SSE bridge has already applied a later remote revision for the same remote, the POST response's older `session` payload is NOT used to refresh the local proxy; the bridged state wins. On accepted refreshes the proxy also calls `note_remote_applied_revision` so subsequent duplicate SSE deltas at the same revision correctly no-op. Closes a Medium where a fork race against active streaming could regress mirrored state and publish a `SessionCreated` delta carrying stale session content.
+- **Delta persist tombstone-loss on write failure** — if `persist_delta_via_cache` returned an error the drained `removed_session_ids` was silently discarded, leaking an orphan `sessions` row into SQLite that never got cleaned up. The background persist thread at `src/app_boot.rs` now re-acquires the state lock on write failure and extends `inner.removed_session_ids` with the drained tombstones. `changed_sessions` recovers automatically via the mutation-stamp / watermark mechanism; only tombstones needed explicit restoration. A residual retry-scheduling gap is tracked below because the restored tombstones still wait for a later `PersistRequest::Delta`.
+- **ACP runtime capabilities grouped into a typed sub-struct** — `AcpRuntimeState` previously exposed `supports_session_load: Option<bool>` as a flat three-state (confirmed-yes / confirmed-no / unknown-optimistic). Moved into a new `AcpCapabilities { supports_session_load: Option<bool> }` sub-struct with a `session_load_supported_or_unknown()` method that encodes the "try optimistically when capability is absent" rule once. Added `note_acp_session_load_supported` helper so the three upgrade sites (successful load, Gemini invalid-session-id recovery, post-initialize) share one implementation. `AcpRuntimeState.capabilities: Option<AcpCapabilities>` now makes the "initialize has not completed" precondition explicit — future capability fields (model list shape, tool rules, etc.) land inside `AcpCapabilities` rather than growing `AcpRuntimeState` flat. Tests (`acp_gemini.rs`, `runtime_rpc.rs`, `tests/mod.rs`) migrated to the nested shape.
+- **Draft text no longer clobbered when `adoptState` rejects a mutation response** — `handleSend` in `ui/src/App.tsx` now checks `adoptState(state)` return value. When rejected (which post-`serverInstanceId` only happens when SSE has already delivered newer state — the user's prompt is already visible via the delta), the sending flag clears cleanly without restoring the draft into the input. A residual poll-scheduling regression from this early-return path is tracked below.
+- **Remote create/fork attached-state broadcast gap** - Node 1 removed the state-shaped `CreateSessionResponse` path from remote session create/fork. `create_remote_session_proxy` and `proxy_remote_fork_codex_thread` no longer apply an attached `StateResponse` via `apply_remote_state_if_newer_locked`, so that obsolete branch can no longer persist non-session remote changes without broadcasting them; non-session remote state now arrives through the remote event bridge and normal sync paths.
+- **`update_existing: false` dropped fresh remote session payload when a proxy record already existed** — both `create_remote_session_proxy` in `src/remote_create_proxies.rs:137` and `proxy_remote_fork_codex_thread` in `src/remote_codex_proxies.rs:57` now pass `update_existing: true` to `ensure_remote_proxy_session_record` with an explanatory comment at each call site. The remote's post-create `session` payload now refreshes a pre-seeded local proxy record instead of returning the stale local clone to the caller. A follow-up revision-ordering bug for older POST responses overwriting newer bridge state is tracked below.
+- **Stale `create_remote_session_proxy` doc-comment** — the file-level method doc no longer claims to "fold any attached `StateResponse` into local state if it is newer" (that logic was deleted with Node 1). Rewritten to describe the current shape: persists a local proxy `SessionRecord` from the returned `session`, starts the event bridge, and relies on subsequent SSE deltas to carry non-session remote state.
+- **Node 0 rollback test weakness** — `failed_remote_snapshot_sync_restores_session_tombstones` in `src/tests/remote.rs` now seeds a dummy pre-sync tombstone, captures pre-call sessions, orchestrators, session numbering, and tombstones, and asserts rollback restores the expected identities/counts plus the tombstone accumulator after a failing sync. A narrower follow-up to compare full rollback contents is tracked below.
+- **Missing positive-path tombstone test** — new `successful_remote_snapshot_sync_queues_tombstones_for_dropped_proxy_sessions` asserts that a clean broad sync populates `inner.removed_session_ids` when a mirrored remote session is dropped. Catches a regression from `StateInner::retain_sessions` to a plain `sessions.retain(...)` without the `record_removed_session` side effect.
+- **`adoptCreatedSessionResponse` ID mismatch silently returned false** — `ui/src/App.tsx:2095` now calls `requestActionRecoveryResyncRef.current()` on the `created.session.id !== created.sessionId` branch so a wire-contract mismatch triggers a recovery resync instead of silently returning false, matching the sibling behavior in `adoptFetchedSession` at `ui/src/App.tsx:2191`. A follow-up bug for callers still treating `false` as a workspace-open fallback is tracked below.
+- **Rollback variable naming + missing mutation-contract comment** — `src/remote_sync.rs::sync_remote_state_inner` renamed `pre_orchestrator_rollback_state` to `pre_retain_rollback_state` (since the capture now covers more than the orchestrator slice) and gained an inline "mutation contract" comment enumerating every `StateInner` field the function mutates, so a future change that introduces a new mutation without extending `RemoteSyncRollback` is visible at review time.
+- **Mermaid demo `yes_yes_yes` typo** — `docs/mermaid-demo.md` line 6 reverted from `yes_yes_yes` back to `yes`; the accompanying `Edit --> End` fix on line 10 stays (it replaced an undefined `Stop` node).
 - **Stale height estimate on tab switch causing blank area** — `VirtualizedConversationMessageList` now enters a post-activation measuring phase when it transitions inactive → active (or mounts directly in the active state with messages). The wrapper is hidden via `visibility: hidden` while currently-visible slots report their first `ResizeObserver` measurements, then the completion check writes a final scrollTop and reveals. A 150 ms timeout fallback guarantees the wrapper is never stuck hidden. Scroll-restore on activation now lands in the correct place even when messages arrived while the tab was inactive.
 - **Steady-state 1-2 px shake in active session panels** — `handleHeightChange` now rounds `getBoundingClientRect().height` to integer pixels before storage, and all three scrollTop-to-bottom writes (re-pin `useLayoutEffect`, `handleHeightChange` shouldKeepBottom branch, `getAdjustedVirtualizedScrollTopForHeightChange` branch) are wrapped in `Math.abs(current - target) >= 1` no-op guards. Subpixel drift in successive `getBoundingClientRect` reads no longer crosses the 1-pixel commit threshold, and no-op scrollTop writes no longer trigger scroll-event → reflow → ResizeObserver cascades.
 - **Mermaid diagram rendering hardcoded a dark theme** — `MermaidDiagram` now receives the active `appearance`, builds the Mermaid config from that value, and serializes initialize/render/reset through `mermaidRenderQueue` so light diagrams can render without leaving Mermaid's global singleton in a stale theme.
@@ -75,6 +92,174 @@ Also fixed in the current tree, not re-listed below:
 - **`remove_project` stamps the affected sessions** — project deletion now collects the affected session indices first, then clears `session.project_id` through `session_mut_by_index` so the cleared rows land in SQLite on the next persist tick. Previously, the in-memory `project_id = None` never reached disk and deleted projects would reappear attached to those sessions on restart.
 - **`create_session` + `create_session_from_fork` re-stamp after slot replace** — both code paths now call `inner.session_mut_by_index(index)` after `*slot = record.clone()` so the whole-struct replace no longer erases the stamp that `push_session` applied. Without this, the row was invisible to `collect_persist_delta` until something else re-stamped it.
 - **`orchestrators.rs` queued-prompt clear routes through `session_mut_by_index`** — `normalize_orchestrator_instances_with_persisted_non_running` now stamps the record before calling `clear_stopped_orchestrator_queued_prompts`, so the delete-session call path persists the cleared queued prompts to SQLite. The load-path caller re-persists identical rows on startup, which is a tiny waste but correct.
+- **Imported discovered Codex threads stamp after whole-struct replace** — `import_discovered_codex_threads` in `src/state_boot.rs` now calls `session_mut_by_index(index)` after `*slot = record`, re-stamping the slot so `create_session`'s stamp is not erased by the owned-record replace. The pattern mirrors `create_session` / `create_session_from_fork` in `src/session_crud.rs`. Regression `import_discovered_codex_threads_stamps_newly_discovered_sessions` in `src/tests/codex_discovery.rs` captures `last_mutation_stamp` before import and asserts the imported record's stamp exceeds the watermark, so `collect_persist_delta` will pick it up on the next tick.
+- **Safety-net poll hard-cap deadline guard** — `ui/src/App.tsx`'s self-chained `/api/state` watchdog now records a `pollDeadlineMs = Date.now() + ACTIVE_PROMPT_POLL_MAX_DURATION_MS` at start and checks it both at the top of `scheduleNextActivePromptPoll` and after the in-flight `fetchState()` resolves. Previously, the 5-minute `setTimeout(clearActivePromptPoll, MAX_DURATION_MS)` cap could fire in the window between "callback cleared `activePromptPollTimeoutIdRef.current` to null" and "next schedule queued a fresh id," turning the clear into a no-op and letting the chained poll outlive its hard-cap. The existing `setTimeout` cap is kept as belt-and-suspenders with a comment explaining it cannot stop an in-flight `fetchState()` but the post-await deadline check covers that path.
+- **Local/Remote ID newtypes (Node 3 of `docs/rust-type-safety-plan.md`)** — added `src/ids.rs` defining `LocalSessionId`, `RemoteSessionId`, `LocalProjectId`, `RemoteProjectId`, `RemoteId` as `#[serde(transparent)]` newtypes wrapping `String`. The remote-sync layer internals now thread typed ids through `remote_project_id_map` (`HashMap<RemoteProjectId, LocalProjectId>`), `local_project_id_for_remote_project`, `local_session_id_for_remote_session` (takes `&RemoteSessionId`, returns `Option<LocalSessionId>`), `localize_remote_orchestrator_instance`, and `sync_remote_orchestrators_inner`. Wire types in `src/wire.rs` stay on `String` (downstream consumers and inbound remote payloads are calibrated to strings). `RemoteSessionId` and `RemoteId` are retained as a named-type menu for future migration waves, with `#[allow(dead_code)]` documented at the macro.
+
+## Untracked typed-id module is required for the build
+
+**Severity:** High - the reviewed diff is not self-contained; `src/main.rs` now includes `ids.rs`, but `src/ids.rs` is untracked and therefore absent from `git diff`.
+
+The current working tree compiles because the local file exists. A clean checkout with only the tracked changes applied will fail before Rust compilation can proceed because `include!("ids.rs")` cannot find the required module.
+
+**Current behavior:**
+- `src/main.rs` contains `include!("ids.rs")`.
+- `git status --short` shows `?? src/ids.rs`.
+- `git diff` / `git diff --name-only` do not include the required source file.
+
+**Proposal:**
+- Add `src/ids.rs` to the tracked changes before commit.
+- Alternatively, remove the typed-id include and dependent references from this change.
+
+## Stale send responses skip the active-prompt recovery poll
+
+**Severity:** High - a successful `sendMessage` whose returned `StateResponse` is rejected as stale clears the draft and returns before arming the active-prompt safety-net poll.
+
+This happens when SSE has already delivered the user's prompt at a newer same-instance revision before the POST response resolves. The prompt is visible, but if the SSE stream stalls before the first assistant delta, the newly-added early return skips the fallback poll that is supposed to recover missing assistant output.
+
+**Current behavior:**
+- `handleSend` calls `adoptState(state)` after `sendMessage` resolves.
+- If adoption returns `false`, the branch releases attachments, clears the request error, and returns.
+- The active-prompt `/api/state` poll is only scheduled after the adopted branch.
+
+**Proposal:**
+- Treat "POST accepted but response snapshot stale" as a successful send for poll scheduling.
+- Factor the active-prompt poll setup into a helper and call it after every successful `sendMessage` response while the session is still active.
+- Keep the draft-clearing behavior so stale successful responses do not reinsert already-sent text.
+
+## Restart detection accepts late responses from old server instances
+
+**Severity:** Medium - `shouldAdoptSnapshotRevision` treats any non-empty `serverInstanceId` mismatch as a fresh restart, even when the incoming id belongs to a previously-seen old instance.
+
+The intended restart path is "client had instance A, server restarts to unseen instance B, lower revision from B should be accepted." A late response from A after the client already adopted B also differs from the current id, so the helper accepts it before applying revision ordering and can roll the UI back to old-process state.
+
+**Current behavior:**
+- The client stores only `lastSeenServerInstanceId`.
+- `isServerInstanceMismatch(lastSeen, next)` returns true for any two non-empty different ids.
+- The mismatch branch returns true before checking `nextRevision`.
+
+**Proposal:**
+- Track a set of seen server instance ids in `App`.
+- Treat a different non-empty id as a restart only if it has not been seen before.
+- Reject known older ids that differ from the current id, or route them through the normal monotonic revision gate.
+
+## Persist-failure tombstone recovery waits for unrelated mutations to retry
+
+**Severity:** Medium - the persist worker restores drained `removed_session_ids` after `persist_delta_via_cache` fails, but it does not schedule another persist attempt.
+
+If no later state mutation sends another `PersistRequest::Delta`, the restored tombstones remain only in memory. A shutdown before the next unrelated mutation can still leave orphan rows in SQLite, which is the failure mode the tombstone restore was intended to prevent.
+
+**Current behavior:**
+- On write error, the worker extends `inner.removed_session_ids` with the drained tombstones.
+- The worker logs the error and returns to `persist_rx.recv()`.
+- No retry signal or backoff loop is armed for the restored delta.
+
+**Proposal:**
+- Re-arm persistence on failure, preferably with a bounded/backoff retry path inside the persist worker.
+- Keep the watermark unchanged and recollect after restoring tombstones so changed sessions and deletes retry together.
+
+## Remote project-id lookups allocate under the remote-sync state lock
+
+**Severity:** Low - the typed `remote_project_id_map` conversion performs lookups with freshly-allocated `RemoteProjectId` wrappers while remote sync holds the state mutex.
+
+The map now has useful type safety, but hot sync paths can walk many sessions and orchestrator references under lock. Repeated wrapper allocation is avoidable and slightly lengthens the critical section.
+
+**Current behavior:**
+- `remote_project_id_map` is keyed by `RemoteProjectId`.
+- Lookup sites build `RemoteProjectId::from(remote_project_id)` just to call `.get(...)`.
+- The temporary wrapper allocates a new `String`.
+
+**Proposal:**
+- Implement borrowed lookup support for typed ids, such as `Borrow<str>` plus matching `Hash`/`Eq` behavior.
+- Or keep hot lookup maps keyed by a borrow-friendly type while preserving typed ids at API boundaries.
+
+## `session_mut_by_index` contract comment still says out-of-bounds panics
+
+**Severity:** Low - `session_mut_by_index` now returns `None` for out-of-bounds indices, but the contract comment still says it panics.
+
+This helper is part of the mutation-stamp boundary that determines which session rows reach SQLite. A stale contract can lead future callers to reason incorrectly about missed mutations and stamp behavior.
+
+**Current behavior:**
+- The implementation bounds-checks and returns `None` before stamping.
+- The doc comment still says "Panics if the index is out of bounds."
+
+**Proposal:**
+- Update the comment to say the helper returns `None` for out-of-bounds indices.
+- Keep the guidance that callers should derive indices from `find_session_index` / `find_visible_session_index` where possible.
+
+## `serverInstanceId` contract not documented in architecture.md
+
+**Severity:** Medium - the new `serverInstanceId` field on `StateResponse`, `HealthResponse`, and `CreateSessionResponse` materially changes the client state-adoption contract (a non-empty-and-changed id now unconditionally overrides the monotonic revision gate, enabling restart-driven revision rewinds). `docs/architecture.md` documents only `revision: u64` as the ordering discriminator.
+
+A future implementer reading architecture.md would miss that they need to populate/emit `serverInstanceId` on any new `StateResponse`-shaped endpoint, and that the client's restart detection depends on the empty-string-as-unknown sentinel convention.
+
+**Current behavior:**
+- The SSE Event Stream / Frontend State Adoption sections in architecture.md describe revision ordering but not the `serverInstanceId` mismatch branch.
+- The sentinel convention (empty string means "unknown", non-empty-and-changed means "restart") is implicit in code and comments only.
+
+**Proposal:**
+- Add a paragraph under "SSE Event Stream" / "Frontend State Adoption" in `docs/architecture.md` explaining the field: emitted on every `StateResponse`/`HealthResponse`/`CreateSessionResponse`, set once per process via `Uuid::new_v4()` at `AppState::new_with_paths`, empty string is a forward-compat sentinel the frontend treats as unknown, any non-empty change between snapshots signals a restart and unlocks revision rewind.
+- Cross-reference `shouldAdoptSnapshotRevision` and `isServerInstanceMismatch` as the client-side enforcement points.
+
+## `SessionResponse` does not carry `serverInstanceId`
+
+**Severity:** Low - the `GET /api/sessions/{id}` response (`SessionResponse { revision, session }`) is the only session-adoption wire shape without `serverInstanceId`. `adoptFetchedSession` at `ui/src/App.tsx:2181-2186` still uses the pre-existing `revision < previousRevision && messages.length > 0` heuristic, which a post-restart lower-revision fresh fetch could silently be rejected by.
+
+This is an edge-case consistency gap, not a broken feature: the two primary restart-loss paths (`/api/state` on reconnect, `CreateSessionResponse` after POST) are closed by the main `serverInstanceId` work. A user clicking a session tab at the exact moment of a restart hits this narrow window where the fetched session can be rejected until safety-net pollers re-fetch.
+
+**Current behavior:**
+- `/api/state`, `/api/health`, and session create/fork responses carry `serverInstanceId`.
+- `/api/sessions/{id}` does not; `adoptFetchedSession` has its own monotonic revision check not bypassed by restart.
+
+**Proposal:**
+- Add `server_instance_id: String` to `SessionResponse` in `src/wire.rs` with `#[serde(default)]` for forward-compat.
+- Thread it through `get_session` / `adoptFetchedSession` and route the adoption through `shouldAdoptSnapshotRevision` for symmetry with the other two paths.
+- Vitest coverage: fetch a session after simulated restart with lower revision + different id, assert the response is adopted.
+
+## Remote create/fork `!changed` path publishes `SessionCreated` delta at un-bumped revision
+
+**Severity:** Medium - `create_remote_session_proxy` and `proxy_remote_fork_codex_thread` both publish a `DeltaEvent::SessionCreated { revision: inner.revision, ... }` even when `ensure_remote_proxy_session_record(..., update_existing=false)` returned `changed=false` (i.e., SSE bridge already applied a newer revision so the POST refresh was skipped).
+
+The same-revision delta violates the SSE invariant that each delta corresponds to a newly committed revision. In a bridge/create race, that duplicate delta can be delivered before a full state snapshot for the same revision; the frontend can then advance from the narrow `SessionCreated` delta and reject the authoritative same-revision snapshot, hiding non-session remote state until a later refresh.
+
+**Current behavior:**
+- `!changed` branch still calls `publish_delta(SessionCreated { revision: inner.revision })`.
+- The duplicate same-revision delta can be delivered before an authoritative same-revision full snapshot.
+- Both proxy files duplicate this emission inline.
+
+**Proposal:**
+- Skip `publish_delta` entirely when `!changed` — nothing changed locally, no need to re-broadcast.
+- Consider extracting the create/fork response-return branching into a shared helper so `remote_create_proxies.rs` and `remote_codex_proxies.rs` agree on the contract by construction.
+
+## `local_session_id_for_remote_session` double-allocates on the hot remote-sync path
+
+**Severity:** Low - `src/remote_sync.rs::local_session_id_for_remote_session` returns `Some(LocalSessionId::from(upsert_remote_proxy_session_record(...).as_str()))`. `upsert_remote_proxy_session_record` already returns an owned `String`; calling `.as_str()` on it and then `LocalSessionId::from(&str)` re-allocates via `to_owned()`.
+
+The function is invoked per session instance, per pending transition, and per active/stopped session id during an orchestrator localization pass, so the extra alloc is on a hot path.
+
+**Current behavior:**
+- `upsert_remote_proxy_session_record` returns `String`.
+- `LocalSessionId::from(&str)` allocates a second `String`.
+- The first `String` is dropped immediately after.
+
+**Proposal:**
+- Replace with `Some(LocalSessionId::from(upsert_remote_proxy_session_record(...)))`, consuming the owned `String` directly via `From<String>`.
+- Audit sibling call sites in `remote_sync.rs` that build `LocalSessionId` / `LocalProjectId` from owned strings for the same pattern.
+
+## Cross-invocation poll-ref aliasing between successive `handleSend` calls
+
+**Severity:** Low - a stale `scheduleNextActivePromptPoll` closure from a previous `handleSend` invocation that is awaiting `fetchState()` when the user sends a new prompt can, after its fetch resolves, overwrite the NEW invocation's `activePromptPollTimeoutIdRef.current` with its own `setTimeout` id. Similarly, the previous invocation's hard-cap `setTimeout` (in `activePromptPollTimeoutRef.current`) can clear a live new-invocation timer id when it fires.
+
+Pre-existing behavior, not introduced by the recent `pollDeadlineMs` deadline-guard fix. The deadline guard narrows the window but does not close the cross-invocation ref aliasing.
+
+**Current behavior:**
+- `activePromptPollTimeoutIdRef.current` and `activePromptPollTimeoutRef.current` are shared across `handleSend` invocations.
+- A previous invocation's closure (captured refs, captured `pollDeadlineMs`) can race a fresh invocation.
+- Net effect: an old poll chain can sometimes set/clear timers that belong to a new chain, producing either a missed poll or an unexpected clear.
+
+**Proposal:**
+- Add a per-invocation token ref. Each `handleSend` generates a fresh token; `scheduleNextActivePromptPoll` and `clearActivePromptPoll` short-circuit if the captured token no longer matches `currentPollTokenRef.current`.
+- Alternatively: split the two refs into per-invocation closures, so each `handleSend` owns its own ref chain and the previous chain can't alias.
 
 ## Test-suite parallel execution flakiness: shared global env + temp paths
 
@@ -104,63 +289,34 @@ Also fixed in the current tree, not re-listed below:
 - Prefer running `cargo check --tests` (not just `cargo test`) in local verification, since the bin-only invocation can miss the ambiguity.
 - If the reappearance was an IDE-side artifact, consider documenting the offending tool so future contributors avoid the same mistake.
 
-## Prompt sent during SSE reconnect window is invisible until safety-net poll (after server restart)
+## `adoptCreatedSessionResponse` recovery still opens a fallback workspace pane
 
-**Severity:** Medium - after a backend restart, a prompt sent from a stale browser tab disappears from the UI for up to 30 seconds even though the server accepted and committed it. The user sees a dead text box, must refresh or send a second prompt to make the first one appear, and in the meantime is likely to double-send.
+**Severity:** Low - the new `created.session.id !== created.sessionId` branch requests a recovery resync, but it still returns `false`. All current call sites interpret `false` as "adoption failed, open `created.sessionId` in the workspace anyway."
 
-The symptom is independent of the "last streamed message lost" entry below — nothing in SQLite is missing, the server is strictly consistent, and the safety-net poll eventually recovers the view. The bug is a frontend-only adoption path that rejects an authoritative server response because it looks like a revision downgrade.
-
-**The race.**
-
-1. Backend is running. Browser has `latestStateRevisionRef.current = M` from streamed deltas (say `M = 237`).
-2. Backend is restarted. In-memory revision resets to whatever SQLite has (the last persisted value, e.g. `N = 212`). The delta-only persist design means in-flight streaming deltas never reach SQLite, so `N < M` is the normal case.
-3. Browser's `EventSource` disconnects. Retry / reconnect is in progress but `onopen` has not yet fired, so `forceAdoptNextStateEventRef.current` is still `false`.
-4. User sends a prompt. `sendMessage` at `ui/src/App.tsx:4640` POSTs to `/api/sessions/{id}/messages`.
-5. Backend (`src/api.rs:651-673`) accepts the prompt, dispatches the turn, and returns the full `StateResponse` snapshot — now at revision `N + 1 = 213`, with the user's prompt visible in `session.messages`.
-6. Frontend handler at `ui/src/App.tsx:4650` calls `adoptState(state)` with no options.
-7. `shouldAdoptSnapshotRevision(237, 213, undefined)` at `ui/src/state-revision.ts:16` short-circuits to `shouldAdoptStateRevision(237, 213)` which returns `false` because `213 > 237` is false.
-8. `adoptState` early-returns at `ui/src/App.tsx:2627`. The prompt is not applied. No visible error. The draft field has already been cleared at lines 4618-4636 so the UI looks like a silent drop.
-
-The prompt is not lost — it is committed on the server, persisted to SQLite, and carried in the POST response — but the frontend's revision guard refuses to apply that response. Recovery paths:
-
-- The 30-second `ACTIVE_PROMPT_POLL_INTERVAL_MS` safety-net poll at `ui/src/App.tsx:4709` fetches `/api/state` and calls `adoptState(freshState, { force: true, allowRevisionDowngrade: true })`. Eventually works, but 30 seconds is a long time for a user who just pressed Send.
-- `EventSource.onopen` fires after reconnect and sets `forceAdoptNextStateEventRef.current = true` at `ui/src/App.tsx:3541`. The next SSE `state` event is then adopted with `force + allowRevisionDowngrade` via the handler at `ui/src/App.tsx:3359-3367`, bringing `latestStateRevisionRef` down to the server's current revision and surfacing the prompt. This is what "send another prompt" actually exploits: by the time the user types a second prompt, SSE has usually reconnected and `latestStateRevisionRef` is now ≥ the server's revision, so both prompts become visible at once.
-- Page refresh reloads the client from a clean slate.
-
-**Why the bug matches the reported symptom.**
-
-The user reports "send a prompt, prompt does not show immediately; I have to refresh or send a new prompt". The "send a new prompt" workaround is explained by SSE typically reconnecting in a few seconds — between the first send and the second, `EventSource.onopen` fires, `forceAdoptNextStateEventRef` gets set, the next SSE state event is force-adopted, and the revision counter is rewound. The second send's response is then at a revision > the rewound counter, and adoption succeeds for *both* prompts (the first one was already in the force-adopted state snapshot).
+For a malformed create/fork response, the session is not inserted into `sessionsRef`, but the workspace fallback can still create a pane for `created.sessionId`. The resync may later remove or repair it, but until then the UI can show a phantom or blank session pane.
 
 **Current behavior:**
-- POST responses after backend restart are dropped when `nextState.revision < latestStateRevisionRef.current`.
-- Recovery is bounded by the 30-second safety-net poll or by SSE reconnecting and delivering an initial state event.
-- The UI gives no visual feedback that the send was rejected locally; the draft clears anyway (`ui/src/App.tsx:4618-4636` runs before the POST).
-- Related: the existing entry "Safety-net poll uses `force + allowRevisionDowngrade` unconditionally" describes the *opposite* imbalance on the same mechanism — the safety-net poll forces downgrade every tick, including when SSE is healthy. Both bugs share the root cause that the client cannot tell "server restarted" apart from "my view is stale", and the unified fix below closes both.
+- Mismatch branch calls `requestActionRecoveryResyncRef.current()` and returns `false`.
+- Create/fork call sites open `created.sessionId` on `!adopted`.
+- There is no typed distinction between "not adopted yet" and "recovery in progress; do not trust this id."
 
-**Unified proposal (preferred): add a `serverInstanceId` to `StateResponse`.**
+**Proposal:**
+- Return a discriminated result such as `adopted | stale | recovering` from `adoptCreatedSessionResponse`.
+- Suppress workspace fallback opening for protocol mismatch/recovery.
+- Add Vitest coverage that a mismatched create response triggers recovery without inserting or opening the mismatched session.
 
-Generate a UUID in `AppState::new_with_paths` at startup and include it on every `StateResponse` (and `HealthResponse`). Client rule: when a snapshot arrives with `revision < latestStateRevisionRef.current`, accept it iff `nextState.server_instance_id !== lastSeenServerInstanceId`. This:
+## Remote sync rollback test does not compare full rollback contents
 
-- Fixes the prompt-invisible bug here: the POST response carries the new server's instance id, the client detects the rewind deterministically, and the state is adopted on the first send after restart.
-- Fixes the safety-net poll bug at line ~425: the poll stops forcing downgrade every tick and only does so when the server actually restarted.
-- Does not introduce the concurrent-delta race that a naive always-force fix would: a POST response from the *same* server instance that emitted a newer SSE delta will have `server_instance_id` unchanged, so the client sticks with the existing revision-ordered guard and correctly ignores the stale response.
+**Severity:** Low (test robustness) - `failed_remote_snapshot_sync_restores_session_tombstones` now checks that rollback restores session IDs, tombstones, session numbering, and orchestrator count, but it does not compare full session records or full orchestrator instance contents.
 
-Implementation surface: one new field on `StateResponse` / `HealthResponse` serialized as `serverInstanceId`, one per-process UUID created at boot, one client-side ref `lastSeenServerInstanceIdRef` updated on every accepted adoption, one new branch in `shouldAdoptSnapshotRevision` that checks the instance id before returning `false` on a decrease.
+A future regression could restore the right IDs while leaving mutated session fields, remote metadata, project IDs, or orchestrator payloads behind. The test would still pass even though `RemoteSyncRollback` is intended to restore the complete captured state for the fields it owns.
 
-**Workaround proposals (less preferred):**
+**Current behavior:**
+- Test asserts session-id membership/count and orchestrator count.
+- It does not assert full `SessionRecord` or `OrchestratorInstance` equality/content.
 
-- Gate `force + allowRevisionDowngrade` on `backendConnectionState === "reconnecting" || "connecting"` in the `sendMessage` success handler. Closes the common case (SSE has flipped to reconnecting by the time the user hits Send after restart) but leaves a small window where the browser has not yet noticed the disconnect — the state is still `"connected"` even though the server is down, and the guard rejects.
-- Adopt the mutation response's *session slice* unconditionally while keeping the revision counter governed by SSE. This looks safe at first but `state.snapshot()` runs *after* `dispatch_turn` at `src/api.rs:667-671`, so the snapshot can reflect concurrent streaming deltas from *other* sessions committed in between. Force-merging the mutated session's slice can clobber newer streaming text already applied via an SSE delta from the same session. Would need a narrow "prompt-fields-only" merge (new message id, `pendingPrompts` entry) rather than the full session — significantly more surgery than the `serverInstanceId` fix for less correctness.
-
-**Independent UX fix (land regardless of which revision fix is chosen):**
-
-- Do not clear the draft at `ui/src/App.tsx:4618-4636` until `adoptState` returns `true`. The current unconditional clear turns a rejected-by-revision-guard POST into a silent drop; the catch block at lines 4742-4765 only restores the draft on thrown errors, and a revision-guard rejection is not an error. Preserving the draft (plus a "retry" toast) would make the failure mode far less confusing while the root fix is being built.
-
-**Coverage:**
-
-- Regression test that (a) seeds `latestStateRevisionRef` at a high value, (b) processes a `sendMessage` response at a lower revision carrying a different `serverInstanceId`, and (c) asserts the new message is visible.
-- Regression test for the negative case: same setup but with the *same* `serverInstanceId` (not a restart) should still reject the downgrade.
-- Regression test that the safety-net poll's no-op behavior is preserved when SSE is healthy (no instance id change) and the adopt call at `ui/src/App.tsx:4707-4712` becomes a no-op instead of rolling state back.
+**Proposal:**
+- Compare the full captured session records and orchestrator instances after rollback, or at least compare full `Session` values plus remote metadata and complete orchestrator instance contents.
 
 ## Server restart without browser refresh can lose the last streamed message
 
@@ -182,39 +338,6 @@ The message is not hidden; it is genuinely gone from SQLite. No amount of fronte
 - **Accept and document** as a known limitation that hard process kills (SIGKILL, power loss) can lose at most the last un-drained commit. Add a line to `docs/architecture.md` describing the background-persist durability contract.
 - A regression test that exercises "restart backend mid-turn, reconnect browser, assert the final message is visible" would pin whichever fix is chosen; without the fix it is expected to fail.
 
-## Delta persist drops tombstones on write failure
-
-**Severity:** High - a single transient `persist_delta_via_cache` error can silently leak an orphan session row into SQLite. The deleted session's row never gets cleaned up and the session reappears on next restart.
-
-`StateInner::collect_persist_delta` drains `removed_session_ids` via `std::mem::take` while holding the state mutex, before the persist thread calls `persist_delta_via_cache`. If the SQLite write then fails (locked DB, disk full, I/O error), the persist thread does not advance its watermark — so `changed_sessions` correctly retries on the next tick because the mutation stamp is still higher than the watermark. But `removed_session_ids` has already been taken out of `inner` and passed by value to the (now failed) write, and the session has already been removed from `inner.sessions`. There is no mutation stamp to retry from, and the tombstone vec was not pushed back into `inner` on error.
-
-**Current behavior:**
-- `collect_persist_delta` drains `removed_session_ids` into a local.
-- Persist thread calls `persist_delta_via_cache`; on error, it keeps its watermark.
-- On next tick, `collect_persist_delta` sees an empty `removed_session_ids` and no session with that id in `inner.sessions`.
-- The orphan row stays in `sessions` table forever (or until another event coincidentally DELETEs it).
-
-**Proposal:**
-- On `persist_delta_via_cache` error, push the removed ids back into `inner.removed_session_ids` so the next tick retries them. Hold the lock again briefly to do it.
-- Or: move the `mem::take` out of `collect_persist_delta` into the persist-thread caller, pass the ids by reference, and have the thread clear them from `inner` only on success.
-- Add a regression test that injects an error into `persist_delta_via_cache` and asserts the tombstone survives across a retry.
-
-## Imported discovered Codex threads lose their delta-persist stamp
-
-**Severity:** Medium - newly discovered Codex thread sessions can be inserted in memory but skipped by SQLite delta persistence.
-
-`import_discovered_codex_threads` creates a session, then performs a whole-record replacement with a local `record`. That local record still carries the construction-time `mutation_stamp: 0`, so the replacement can overwrite the stamped row that `create_session` inserted. Under the delta persist watermark, the row can then look unchanged and never be written to SQLite.
-
-**Current behavior:**
-- `create_session` pushes a stamped session row.
-- `import_discovered_codex_threads` replaces that row with an unstamped local record.
-- The background delta persist can skip the discovered thread row because its stamp is below the watermark.
-
-**Proposal:**
-- Re-stamp the slot after the whole-record replace, matching the create/fork paths.
-- Prefer mutating the already-stamped inner record in place when practical.
-- Add a production-delta persistence regression for importing a discovered Codex thread and verifying its row is written.
-
 ## `SqlitePersistConnectionCache` has no error-driven invalidation
 
 **Severity:** Medium - once the cached SQLite connection enters a persistent error state, every subsequent persist tick silently logs the same error. No auto-recovery.
@@ -230,34 +353,6 @@ The message is not hidden; it is genuinely gone from SQLite. No amount of fronte
 - On persist error, drop the cached connection (`cache.connection = None; cache.path = None;`) so the next tick reopens and re-runs `ensure_sqlite_state_schema`.
 - Accept the cost of the reopen on error; the happy path still reuses one connection per process lifetime.
 - Add a regression test: seed an error that the cache should recover from (e.g., unlink the backing file after a successful write) and assert the next persist tick creates a new connection and writes successfully.
-
-## `session_mut_by_index` leaks a mutation stamp on out-of-bounds miss
-
-**Severity:** Medium - `next_mutation_stamp()` runs *before* `self.sessions.get_mut(index)` can fail. An out-of-bounds call silently advances `last_mutation_stamp` with no mutation to show for it. Divergent from `session_mut` (by id), which short-circuits correctly on the `find_session_index` miss.
-
-At `src/state.rs:6565-6570`:
-
-```rust
-fn session_mut_by_index(&mut self, index: usize) -> Option<&mut SessionRecord> {
-    let stamp = self.next_mutation_stamp();     // advances unconditionally
-    let record = self.sessions.get_mut(index)?; // fails silently if OOB
-    record.mutation_stamp = stamp;
-    Some(record)
-}
-```
-
-Callers that guard with `find_session_index` are safe, but the helper's own invariant is leaky: a typo or race between `find_session_index` and `session_mut_by_index` burns a stamp value that can never match any stored record.
-
-**Current behavior:**
-- Every OOB call to `session_mut_by_index` increments `last_mutation_stamp`.
-- Nothing ties the burned stamp to any session, so the global watermark gap grows by one per miss.
-- Not a correctness bug today (watermark math still works), but the invariant "stamp implies an actual mutation" is false.
-
-**Proposal:**
-- Invert the order: fetch `get_mut` first, then advance the stamp only inside the `Some` arm.
-- Or explicitly document the leak as intentional (it isn't) and pin it with a test.
-- Extend `state_inner_session_mut_helpers_stamp_the_record` with a miss case.
-
 
 ## Unix terminal shell spawn dropped the login-shell flag
 
@@ -379,37 +474,6 @@ The broadcaster thread coalesces snapshots only after receiving from its unbound
 - Drop or overwrite superseded snapshots before they can accumulate in memory.
 - Add a burst test that publishes multiple large snapshots while the broadcaster is delayed and asserts only the latest snapshot is retained.
 
-## Self-chained safety-net poll hard-cap can be missed
-
-**Severity:** Medium - the 5-minute hard-cap on the post-send `/api/state` poll can fail to fire, letting the poll continue indefinitely under specific timing.
-
-`ui/src/App.tsx`'s self-chained `setTimeout` poll clears `activePromptPollTimeoutIdRef.current` to `null` at the top of each fired callback and only re-populates it inside `scheduleNextActivePromptPoll` after the `await fetchState()` resolves. The hard-cap `setTimeout` calls `clearActivePromptPoll`, which clears whatever is currently in the ref. If the cap fires between "id cleared" (top of callback) and "id re-set" (next schedule queued), `clearActivePromptPoll` no-ops. The next `scheduleNextActivePromptPoll` call then queues a fresh 30 s timer that outlives the cap.
-
-**Current behavior:**
-- The cap timer clears the ref; if the ref is null, it's a no-op.
-- Inside the chained callback, the ref is null while awaiting `fetchState()`.
-- On large transcripts, `fetchState` can take multiple seconds.
-- The cap can fire during that window and fail to stop the chain.
-
-**Proposal:**
-- Add a `capReached` flag (ref or closure-local) and have `scheduleNextActivePromptPoll` short-circuit when it is set.
-- Alternatively record the deadline timestamp at start; the callback bails out when `Date.now() >= deadline`.
-
-## `apply_remote_session_to_record` unconditionally clones the full transcript
-
-**Severity:** Low - every remote-session hydration pays for a full-transcript `.clone()` even though the clone is used only in a rare preserve branch.
-
-`apply_remote_session_to_record` starts with `let previous_messages = record.session.messages.clone();`. That clone is consumed only when `remote_session.messages_loaded == Some(false) && remote_session.messages.is_empty() && !previous_messages.is_empty()`. The common path (a real transcript update) clones and discards.
-
-**Current behavior:**
-- Every remote hydration (`get_remote_session`, create/fork remote proxy) clones the full transcript up front.
-- The clone survives only if the preserve branch activates.
-- Allocations and copy time scale with transcript size for every hydration, including the common case.
-
-**Proposal:**
-- Compute the branch condition first; use `std::mem::take(&mut record.session.messages)` only if the preserve branch will fire.
-- Add a benchmark or log line capturing the avoided allocation on the common path.
-
 ## `persist_state_from_persisted_with_connection` clones the full state then clears sessions
 
 **Severity:** Low - the test-fallback and any synchronous-persist call site deep-clones every session transcript, then discards the clones to produce metadata.
@@ -439,23 +503,6 @@ Common React-flex pitfall: a flex child with an intrinsic width of 4096 px force
 - Add `.mermaid-diagram-frame { min-width: 0; }` explicitly so the iframe can shrink below its intrinsic width.
 - Or: ensure a known ancestor column sets `min-width: 0` / `overflow-x: auto` for Mermaid blocks.
 - Add a regression test with a narrow-column ancestor that asserts the iframe's rendered width does not exceed the column.
-
-## Safety-net poll uses `force + allowRevisionDowngrade` unconditionally
-
-**Severity:** Low - every scheduled `/api/state` poll can overwrite SSE-advanced client state with an older server snapshot if the poll's response arrives after newer SSE events.
-
-The chained poll calls `adoptState(freshState, { force: true, allowRevisionDowngrade: true })` regardless of whether a server restart actually happened. The flag exists to recover from server restarts that reset the persisted revision, but it is active for every poll — so a momentarily stale `/api/state` response landing after a newer SSE delta can roll the client back to the older snapshot. The poll is supposed to be a no-op when SSE is healthy.
-
-**Current behavior:**
-- Every poll adopts with `force + allowRevisionDowngrade`.
-- SSE's revision ordering is overridden on the poll path.
-- In practice the race window is small, but it can cause transient UI rollback.
-
-**Proposal:**
-- Gate `allowRevisionDowngrade: true` behind an explicit "server restart detected" signal (e.g., the state carries a freshly reset instance id).
-- For the steady-state poll, use `force: false` and trust SSE.
-
-**Cross-reference:** this bug shares its root cause with "Prompt sent during SSE reconnect window is invisible until safety-net poll (after server restart)" near the top of this file — the client has no deterministic way to tell "server restarted" from "my view is stale" on a revision decrease. The `serverInstanceId` unified fix proposed in that entry closes both issues with a single `StateResponse` field and one client-side ref.
 
 ## State snapshots still include full session transcripts on the wire
 
@@ -521,35 +568,6 @@ The background persist thread now caches a single SQLite connection for its life
 - Convert `.or(...)` to a lazy `if let Some(..) else { .. }`.
 - Optionally share the cached connection across load/persist if any post-startup load path emerges.
 
-## Remote proxy `applied_remote_revision` path skips broadcast of non-session state changes
-
-**Severity:** Medium - orchestrator, project, and other-session changes pulled from a remote during proxy-session create/fork are persisted but never broadcast via SSE.
-
-When `create_remote_session` or `fork_remote_codex_thread` sees `applied_remote_revision == true`, the path now calls `bump_revision_and_persist_locked` (no state snapshot publish) plus `publish_delta(DeltaEvent::SessionCreated)` for the newly created session only. But `apply_remote_state_if_newer_locked` can mutate projects, orchestrators, and other sessions as part of the remote snapshot application. Those changes get the revision bump but ride along without any SSE notification — previously they were published by `commit_locked` as a full state snapshot. Clients have stale views of non-session slices until the next unrelated commit.
-
-**Current behavior:**
-- `applied_remote_revision` branch calls `bump_revision_and_persist_locked` + publishes `SessionCreated` only.
-- Any non-session slice mutated by `apply_remote_state_if_newer_locked` (projects, orchestrators, other sessions) is silently absent from the SSE stream.
-
-**Proposal:**
-- When `applied_remote_revision` is true, retain a full-snapshot publish path (publishes a state event) in addition to the SessionCreated delta, or issue additional deltas for the non-session slices that changed.
-- Add a regression test: fork a remote Codex thread with an orchestrator change in the snapshot; assert the orchestrator change reaches the local SSE stream.
-
-## `CreateSessionResponse` contract does not guarantee at least one of `session` or `state`
-
-**Severity:** Medium - the TS adapter `adoptCreatedSessionResponse` silently returns `false` when both are absent; a protocol-drift bug in the backend can silently lose a newly created session until the next state resync.
-
-`CreateSessionResponse` now has `session?`, `revision?`, and `state?` all optional with no type-level invariant. Every existing Rust handler populates `session + revision`, but the struct does not enforce the contract. If a future handler ships a `{sessionId}`-only response, the frontend's `adoptCreatedSessionResponse` returns `false`, the session is not added, and the UI silently loses the creation until SSE or a state resync catches up.
-
-**Current behavior:**
-- Rust: `#[serde(default, skip_serializing_if = "Option::is_none")]` on `session` and `state`; `#[serde(default)]` on `revision`.
-- Frontend: `session?: Session | null; revision?: number; state?: StateResponse | null`.
-- `adoptCreatedSessionResponse` has a final `return false` branch when neither is present.
-
-**Proposal:**
-- Model as `#[serde(untagged)]` enum with two variants: `{ sessionId, session, revision }` or `{ sessionId, state }`. Both variants carry an enforced invariant.
-- Or document the "session is always populated by every handler in this tree" contract in the Rust struct doc and add a test parsing a `{sessionId}`-only payload to fail if a handler ever drifts.
-
 ## `persist_created_session` skips hidden Claude spare pool changes
 
 **Severity:** Medium - a crash after session creation but before a full snapshot loses changes to the hidden-spare pool that `create_session` may have triggered.
@@ -599,21 +617,6 @@ Three distinct issues in and around the new `useEffect(... fetchSession ...)` in
 - Drop the drive-letter short-circuit. If local-path Markdown links are a product need, handle them through a constrained opener, not generic `<a href>`.
 - Add a test asserting `<a href="C:\foo">` loses its href through sanitization.
 
-## Remote `SessionCreated` publishes a duplicate revision on the no-op branch
-
-**Severity:** Low - remote proxy session create/fork with `!applied_remote_revision && !changed` publishes a `SessionCreated` delta with a non-advanced revision, weakening the monotonic-revision invariant.
-
-In `create_remote_session` and `fork_remote_codex_thread`, when the remote snapshot is not newer AND the local proxy record already exists, the code still calls `publish_delta(DeltaEvent::SessionCreated { revision: inner.revision, ... })` without bumping the revision. Downstream, `App.tsx` writes `latestStateRevisionRef.current = delta.revision` unconditionally, so the same revision value is written twice. Benign today but violates the "each delta advances revision" contract.
-
-**Current behavior:**
-- `!applied_remote_revision && !changed` branch: `revision = inner.revision` (no bump).
-- `publish_delta` runs anyway.
-- Frontend accepts the duplicate-revision write.
-
-**Proposal:**
-- Skip `publish_delta` when neither `applied_remote_revision` nor `changed` is true.
-- Or always bump the revision before publishing so every delta carries a strictly-increasing value.
-
 ## 404 on `fetchSession` surfaces as a user-visible request error instead of silent resync
 
 **Severity:** Low - a benign race where a session is deleted or hidden between a delta event and the hydration fetch becomes a toast.
@@ -644,6 +647,80 @@ The new hydration effect's error path calls `reportRequestError(error)` on any `
 
 ## Implementation Tasks
 
+- [ ] P2: Add regression coverage for the delta-persist tombstone restore
+  path. The production persist thread lives under `#[cfg(not(test))]` so
+  the error-injection test needs either a `#[cfg(test)]` seam in
+  `persist_delta_via_cache` that can be primed to fail, or a dedicated
+  unit test that exercises a helper extracted from the error branch in
+  `src/app_boot.rs`. Assert that after a simulated write failure,
+  `inner.removed_session_ids` contains the tombstones that were drained
+  into the failed `PersistDelta`, and that the worker re-arms a retry
+  without waiting for an unrelated later mutation.
+- [ ] P2: Add fake-remote coverage for the "POST response older than SSE"
+  gate in `create_remote_session_proxy` + `proxy_remote_fork_codex_thread`.
+  Pre-seed `inner.remote_applied_revisions` with a newer revision, then
+  have the fake remote respond with an older revision and assert the
+  local proxy is NOT refreshed from the POST payload. Pair with an
+  `update_existing: true` positive case where the POST revision is
+  >= the applied remote revision.
+- [ ] P2: Add remote create/fork existing-proxy race coverage:
+  pre-seed a local proxy for the same `(remote_id, remote_session_id)`, have
+  the fake remote return a fresher
+  `CreateSessionResponse { sessionId, session, revision }`, and assert the
+  returned response plus local record reflect the fresh payload instead of the
+  stale proxy mirror.
+- [ ] P2: Add fake-remote regression coverage for the `remote session id
+  mismatch` bad-gateway branch in `create_remote_session_proxy` and
+  `proxy_remote_fork_codex_thread`. Requires a fake-remote HTTP server
+  fixture; today no such fixture exists in `src/tests/`, so the defensive
+  validation ships without a direct test. Once that fixture lands, assert
+  both routes return `ApiError::bad_gateway` with the
+  `remote session id mismatch` message when the fake remote returns a
+  `CreateSessionResponse` whose `session.id !== session_id`.
+- [ ] P2: Add `adoptCreatedSessionResponse` server-instance-id Vitest
+  coverage at the App level: seed `lastSeenServerInstanceIdRef` with one
+  id, feed a POST response carrying a different id at a lower revision,
+  assert the new session appears in the list and the revision counter
+  rewound. The primitive itself is covered by `state-revision.test.ts`,
+  but the full adoption wiring through `sessionsRef`, `setSessions`, and
+  the workspace layout has no positive test for the restart-rewind
+  branch yet. Pair with a same-instance stale response that must preserve
+  newer SSE state, and cover both create and fork callers.
+- [ ] P2: Add App coverage for successful-send stale response recovery:
+  have SSE advance the active session to a newer same-instance revision
+  before `sendMessage` resolves with an older `StateResponse`, then assert
+  the prompt remains visible, the draft/attachments stay cleared, and the
+  active-prompt safety-net poll is armed.
+- [ ] P2: Add stale old-server-instance coverage for snapshot adoption:
+  adopt instance A, then a lower-revision snapshot from new instance B,
+  then resolve a late response from already-seen instance A. Assert the
+  late A response is rejected instead of treated as a fresh restart.
+- [ ] P2: Assert `serverInstanceId` on create/fork route responses:
+  extend `create_session_route_returns_created_response` and
+  `codex_thread_fork_route_returns_created_response` to check
+  `response.server_instance_id == state.server_instance_id` and that the
+  id is non-empty.
+- [ ] P2: Add remote create/fork stale-POST revision coverage:
+  pre-seed a local proxy as if the remote event bridge already applied a newer
+  revision for the same remote session, then have the fake POST response return
+  an older `CreateSessionResponse`. Assert the existing newer proxy state is
+  retained and no stale `SessionCreated` payload is published.
+- [ ] P2: Add remote create/fork response identity validation coverage:
+  have fake remotes return mismatched `sessionId` and `session.id` values for
+  session create and Codex fork, then assert both paths fail with bad-gateway
+  errors instead of localizing the wrong remote session.
+- [ ] P2: Add App coverage for stale create-response ordering:
+  leave `createSession` pending, apply a fresher SSE `sessionCreated` or
+  message delta for the same session, then resolve the create response with a
+  lower revision and assert the fresher session state remains intact.
+- [ ] P2: Add App coverage for create-response mismatch recovery:
+  resolve `api.createSession` with a mismatched `sessionId` and `session.id`,
+  then assert recovery resync is requested and no workspace tab is opened for a
+  session missing from `sessionsRef`.
+- [ ] P2: Strengthen remote rollback content assertions:
+  extend `failed_remote_snapshot_sync_restores_session_tombstones` so rollback
+  compares full session records and orchestrator instance contents, not only
+  restored session-id membership and orchestrator count.
 - [ ] P1: Add a direct unit test for `StateInner::collect_persist_delta`:
   construct a `StateInner` with three sessions at distinct mutation stamps
   and one hidden session; seed `removed_session_ids` with one tombstone.
@@ -696,6 +773,32 @@ The new hydration effect's error path calls `reportRequestError(error)` on any `
   the chain boundary, advance time past the next interval, and assert
   `fetchState` was called exactly once per chain hop rather than
   accumulating parallel fires.
+- [ ] P1: Add a regression test for the safety-net poll hard-cap
+  deadline guard (`pollDeadlineMs`) in `ui/src/App.tsx`:
+  `vi.useFakeTimers()` + a deferred `fetchState` promise held in flight,
+  advance fake time past `ACTIVE_PROMPT_POLL_MAX_DURATION_MS` while the
+  promise is unresolved, resolve it, and assert
+  `activePromptPollTimeoutIdRef.current` stays `null` (no further
+  scheduling). Pair with a negative case advancing only 4 minutes that
+  keeps polling. Without this, the fix can silently regress — the
+  belt-and-suspenders `setTimeout` cap alone passed the old buggy path
+  too.
+- [ ] P2: Add serde/Display round-trip tests for `src/ids.rs` newtypes:
+  `serde_json::to_string(&RemoteSessionId::from("abc")) == "\"abc\""`
+  and reverse, `format!` via `Display`, `From<String>`, `From<&str>`,
+  `AsRef<str>`, `.into_inner()` for all five newtypes. The whole
+  point of `#[serde(transparent)]` is wire-indistinguishability from
+  `String`; if someone drops the attribute, wire-compat breaks
+  silently. Currently-unused newtypes (`RemoteSessionId`, `RemoteId`)
+  have zero exercise path in production code today.
+- [ ] P2: Extend the imported-Codex-thread stamp test with a
+  delta-persist round-trip. `import_discovered_codex_threads_stamps_newly_discovered_sessions`
+  currently asserts `record.mutation_stamp > watermark_before_import`,
+  which pins the stamp invariant but not the watermark/persist
+  pickup. Seed `last_persisted_mutation_stamp`, call
+  `collect_persist_delta`, and assert the imported session appears in
+  `changed_sessions`. A future refactor that stamps but breaks the
+  watermark wiring would not regress the current narrower test.
 - [ ] P2: Add a `publish_snapshot` delivery test: subscribe to
   `state.subscribe_events()` before a mutation and assert the expected
   payload arrives on `state_events` after `commit_locked` through the

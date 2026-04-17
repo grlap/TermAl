@@ -43,6 +43,16 @@ export const TERMINAL_SSE_BUFFER_MAX_CHARS = 16 * 512 * 1024;
 
 export type StateResponse = {
   revision: number;
+  /**
+   * Per-process UUID generated at `AppState::new_with_paths` boot on
+   * the server. Stable for the lifetime of the server process; changes
+   * on every restart. Carried on every snapshot so the client can
+   * distinguish "revision decreased because the server just restarted"
+   * from "revision decreased because this response is stale". Empty
+   * string means "unknown" (older server or fallback payload) — treat
+   * as NOT a restart signal. See `shouldAdoptSnapshotRevision`.
+   */
+  serverInstanceId: string;
   codex: CodexState;
   agentReadiness: AgentReadiness[];
   preferences: AppPreferences;
@@ -54,9 +64,15 @@ export type StateResponse = {
 
 export type CreateSessionResponse = {
   sessionId: string;
-  session?: Session | null;
-  revision?: number;
-  state?: StateResponse | null;
+  session: Session;
+  revision: number;
+  /**
+   * See `StateResponse.serverInstanceId`. Carried on create/fork
+   * responses so the frontend's restart-detection can accept a
+   * revision downgrade when the user hits Send against a freshly
+   * restarted server (the common prompt-invisible case).
+   */
+  serverInstanceId: string;
 };
 
 export type SessionResponse = {

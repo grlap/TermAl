@@ -168,10 +168,7 @@ fn creates_claude_sessions_with_requested_plan_mode() {
             gemini_approval_mode: None,
         })
         .unwrap();
-    let session = response
-        .session
-        .as_ref()
-        .expect("created session should be returned");
+    let session = &response.session;
 
     assert_eq!(session.claude_approval_mode, Some(ClaudeApprovalMode::Plan));
     assert_eq!(session.claude_effort, Some(ClaudeEffortLevel::High));
@@ -263,10 +260,7 @@ fn create_session_promotes_matching_hidden_claude_spare_and_replenishes_pool() {
         .unwrap();
 
     assert_eq!(response.session_id, hidden_session_id);
-    let session = response
-        .session
-        .as_ref()
-        .expect("promoted hidden session should be returned");
+    let session = &response.session;
     assert_eq!(session.id, hidden_session_id);
     assert_eq!(session.name, "Visible Claude");
 

@@ -657,6 +657,250 @@ fn delete_project_then_resync_does_not_revive_empty_string_project_id_on_orchest
     let _ = fs::remove_file(state.persistence_path.as_path());
 }
 
+// Pins that a SUCCESSFUL broad snapshot sync queues a delete tombstone for
+// any local proxy session that dropped out of the remote snapshot. Catches a
+// regression from `StateInner::retain_sessions` to a plain `sessions.retain(...)`
+// without the `record_removed_session` side effect — memory state would look
+// correct but SQLite would retain orphan rows forever because the persist thread
+// drives its DELETEs off `removed_session_ids`.
+#[test]
+fn successful_remote_snapshot_sync_queues_tombstones_for_dropped_proxy_sessions() {
+    let state = test_app_state();
+    let remote = RemoteConfig {
+        id: "ssh-lab".to_owned(),
+        name: "SSH Lab".to_owned(),
+        transport: RemoteTransport::Local,
+        enabled: true,
+        host: None,
+        port: None,
+        user: None,
+    };
+    create_test_remote_project(
+        &state,
+        &remote,
+        "/remote/repo",
+        "Remote Project",
+        "remote-project-1",
+    );
+
+    // First snapshot: establish remote-session-1 + remote-session-2.
+    state
+        .apply_remote_state_snapshot(
+            &remote.id,
+            sample_remote_orchestrator_state(
+                "remote-project-1",
+                "/remote/repo",
+                1,
+                OrchestratorInstanceStatus::Stopped,
+            ),
+        )
+        .expect("initial remote snapshot should apply");
+
+    let dropped_local_session_id = {
+        let inner = state.inner.lock().expect("state mutex poisoned");
+        assert!(
+            inner.removed_session_ids.is_empty(),
+            "setup should start without queued tombstones"
+        );
+        let index = inner
+            .find_remote_session_index(&remote.id, "remote-session-2")
+            .expect("remote-session-2 should be mirrored after the first snapshot");
+        inner.sessions[index].session.id.clone()
+    };
+
+    // Second snapshot: drop remote-session-2 AND drop the orchestrator so
+    // orchestrator localization does not reference the missing session and
+    // cannot fail. The sync runs cleanly; `retain_sessions` should queue a
+    // tombstone for remote-session-2's local proxy.
+    let mut trimmed_state = sample_remote_orchestrator_state(
+        "remote-project-1",
+        "/remote/repo",
+        2,
+        OrchestratorInstanceStatus::Stopped,
+    );
+    trimmed_state
+        .sessions
+        .retain(|session| session.id != "remote-session-2");
+    trimmed_state.orchestrators.clear();
+
+    state
+        .apply_remote_state_snapshot(&remote.id, trimmed_state)
+        .expect("clean snapshot should apply without error");
+
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    assert!(
+        inner
+            .find_remote_session_index(&remote.id, "remote-session-2")
+            .is_none(),
+        "dropped remote session should be removed from the mirror"
+    );
+    assert!(
+        inner
+            .removed_session_ids
+            .contains(&dropped_local_session_id),
+        "retain_sessions must queue a DELETE tombstone for the dropped proxy \
+         session so the persist thread's targeted DELETE WHERE id = ? path \
+         fires on the next tick",
+    );
+
+    drop(inner);
+    let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
+// Pins that the remote snapshot rollback restores the tombstone accumulator
+// alongside the session list. A failed orchestrator localization happens after
+// broad sync has already retained remote sessions and queued DELETE tombstones
+// for any local proxy sessions missing from the snapshot.
+//
+// The assertion is tightened to exact deep equality of the pre-call state
+// (sessions, orchestrator_instances, next_session_number, removed_session_ids,
+// and the length of `sessions`) so a future refactor that silently stops
+// queueing tombstones in flight — or that partially rolls back state — does
+// not slip past this test by matching only one field's expected value.
+#[test]
+fn failed_remote_snapshot_sync_restores_session_tombstones() {
+    let state = test_app_state();
+    let remote = RemoteConfig {
+        id: "ssh-lab".to_owned(),
+        name: "SSH Lab".to_owned(),
+        transport: RemoteTransport::Local,
+        enabled: true,
+        host: None,
+        port: None,
+        user: None,
+    };
+    create_test_remote_project(
+        &state,
+        &remote,
+        "/remote/repo",
+        "Remote Project",
+        "remote-project-1",
+    );
+
+    state
+        .apply_remote_state_snapshot(
+            &remote.id,
+            sample_remote_orchestrator_state(
+                "remote-project-1",
+                "/remote/repo",
+                1,
+                OrchestratorInstanceStatus::Running,
+            ),
+        )
+        .expect("initial remote snapshot should apply");
+
+    // Seed a dummy tombstone before the failing call. If rollback correctly
+    // restores `removed_session_ids` from its pre-call snapshot, this entry
+    // must still be present after the sync aborts. If rollback were
+    // incomplete (e.g. someone dropped `removed_session_ids` from the
+    // capture struct), the tombstone queued DURING the failed sync for
+    // `remote-session-2` would remain in the vec alongside this dummy —
+    // and the equality assertion below would fail loudly.
+    const DUMMY_TOMBSTONE: &str = "pre-sync-ghost-session";
+    let (
+        removed_local_session_id,
+        pre_sessions,
+        pre_orchestrator_instances,
+        pre_next_session_number,
+        pre_removed_session_ids,
+    ) = {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        assert!(
+            inner.removed_session_ids.is_empty(),
+            "test setup should start without queued tombstones"
+        );
+        inner.record_removed_session(DUMMY_TOMBSTONE.to_owned());
+        let index = inner
+            .find_remote_session_index(&remote.id, "remote-session-2")
+            .expect("remote-session-2 should be mirrored after the first snapshot");
+        let local_id = inner.sessions[index].session.id.clone();
+        (
+            local_id,
+            inner.sessions.clone(),
+            inner.orchestrator_instances.clone(),
+            inner.next_session_number,
+            inner.removed_session_ids.clone(),
+        )
+    };
+
+    let mut invalid_state = sample_remote_orchestrator_state(
+        "remote-project-1",
+        "/remote/repo",
+        2,
+        OrchestratorInstanceStatus::Running,
+    );
+    invalid_state
+        .sessions
+        .retain(|session| session.id != "remote-session-2");
+
+    state
+        .apply_remote_state_snapshot(&remote.id, invalid_state)
+        .expect("orchestrator sync errors are logged and swallowed");
+
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    // Session the snapshot tried to drop must be restored.
+    assert!(
+        inner
+            .find_remote_session_index(&remote.id, "remote-session-2")
+            .is_some(),
+        "rollback should restore the removed remote proxy session"
+    );
+    // No post-rollback tombstone for the restored session.
+    assert!(
+        !inner
+            .removed_session_ids
+            .contains(&removed_local_session_id),
+        "rollback should not leave a stale tombstone for the restored session"
+    );
+    // Pre-existing dummy tombstone must survive.
+    assert!(
+        inner
+            .removed_session_ids
+            .iter()
+            .any(|id| id == DUMMY_TOMBSTONE),
+        "rollback should preserve the pre-sync tombstone accumulator \
+         (including the dummy entry seeded before the failed call)"
+    );
+    // Full deep-equality check: every mutation performed during the failed
+    // sync must be reversed. This is stronger than field-by-field spot
+    // checks and will catch partial-rollback regressions (e.g. if someone
+    // adds a mutation to `sync_remote_state_inner` and forgets to capture
+    // it in `RemoteSyncRollback`).
+    assert_eq!(
+        inner.next_session_number, pre_next_session_number,
+        "rollback should restore next_session_number"
+    );
+    assert_eq!(
+        inner.removed_session_ids, pre_removed_session_ids,
+        "rollback should restore the full removed_session_ids vec"
+    );
+    assert_eq!(
+        inner.sessions.len(),
+        pre_sessions.len(),
+        "rollback should restore the session list length"
+    );
+    assert_eq!(
+        inner
+            .sessions
+            .iter()
+            .map(|record| record.session.id.clone())
+            .collect::<Vec<_>>(),
+        pre_sessions
+            .iter()
+            .map(|record| record.session.id.clone())
+            .collect::<Vec<_>>(),
+        "rollback should restore the session list ordering and membership"
+    );
+    assert_eq!(
+        inner.orchestrator_instances.len(),
+        pre_orchestrator_instances.len(),
+        "rollback should restore the orchestrator instance count"
+    );
+
+    drop(inner);
+    let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
 // Pins that resume_pending_orchestrator_transitions ignores orchestrators
 // that belong to a remote, leaving their destination session untouched
 // rather than queuing a pending prompt locally.

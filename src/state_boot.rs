@@ -112,11 +112,23 @@ impl StateInner {
                 thread.model.clone(),
             );
             apply_discovered_codex_thread(&mut record, &thread, true);
-            if let Some(slot) = self
-                .find_session_index(&record.session.id)
-                .and_then(|index| self.sessions.get_mut(index))
-            {
-                *slot = record;
+            // Whole-struct slot replace then re-stamp. `create_session`
+            // stamps the record when `push_session` inserts it, but
+            // returns an owned `SessionRecord` whose `mutation_stamp`
+            // is still the construction-time default — replacing the
+            // stamped slot with that owned value would erase the
+            // stamp and make the import invisible to the SQLite delta
+            // persist (the row's stamp would sit at or below the
+            // watermark, so `collect_persist_delta` would skip it).
+            // `session_mut_by_index` restamps the slot in place after
+            // the replace, mirroring the pattern used by
+            // `create_session` + `create_session_from_fork` in
+            // `src/session_crud.rs`.
+            if let Some(index) = self.find_session_index(&record.session.id) {
+                if let Some(slot) = self.sessions.get_mut(index) {
+                    *slot = record;
+                }
+                let _ = self.session_mut_by_index(index);
             }
         }
     }

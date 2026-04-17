@@ -285,6 +285,7 @@ function makeOrchestrator(
 function makeStateResponse(revision: number): StateResponse {
   return {
     revision,
+    serverInstanceId: "test-instance",
     codex: {},
     agentReadiness: [],
     preferences: {

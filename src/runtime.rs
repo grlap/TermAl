@@ -254,11 +254,49 @@ struct AcpPendingApproval {
 }
 
 /// Tracks ACP runtime state.
+///
+/// Shape mirrors the ACP handshake contract documented in `src/acp.rs`:
+/// - `capabilities` is `None` until the `initialize` handshake completes,
+///   then carries the typed capability bundle learned from the response.
+///   Future capability fields (model list shape, tool rules, etc.) land
+///   inside `AcpCapabilities` rather than growing this struct flat.
+/// - `current_session_id` is `None` during spawn / initialize /
+///   authenticate phases, then carries the ACP conversation id after
+///   `session/new` or `session/load` succeeds.
+/// - `is_loading_history` is true only during an in-flight `session/load`
+///   call. Outside that window it must be false.
 #[derive(Default)]
 struct AcpRuntimeState {
+    capabilities: Option<AcpCapabilities>,
     current_session_id: Option<String>,
     is_loading_history: bool,
+}
+
+/// Capability bundle learned from the `initialize` response. `None`
+/// inside `AcpRuntimeState.capabilities` means "initialize has not
+/// completed yet"; once present, the contract is "the value inside is
+/// authoritative for this runtime's lifetime".
+#[derive(Clone, Default)]
+struct AcpCapabilities {
+    /// `Some(true)` — remote confirmed `session/load` support via the
+    /// initialize response. `Some(false)` — remote confirmed it is
+    /// NOT supported. `None` — initialize response did not carry the
+    /// capability flag at all (older agents), so we probe
+    /// optimistically and upgrade to `Some(true)` on first successful
+    /// load or to `Some(false)` on a definitive not-supported error.
+    /// The tri-state is intentional — see `ensure_acp_session_ready`
+    /// for the "not known to be unsupported; try anyway" rule.
     supports_session_load: Option<bool>,
+}
+
+impl AcpCapabilities {
+    /// Returns true unless `supports_session_load` is explicitly
+    /// known to be false. Encodes the "try optimistically when
+    /// capability flag is absent" rule so call sites don't have to
+    /// repeat the negated Option comparison.
+    fn session_load_supported_or_unknown(&self) -> bool {
+        self.supports_session_load != Some(false)
+    }
 }
 
 /// Tracks ACP turn state.

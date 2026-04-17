@@ -58,12 +58,17 @@ fn acp_supports_session_load_reads_legacy_capabilities() {
     assert_eq!(acp_supports_session_load(&json!({})), None);
 }
 
-// Pins `AcpRuntimeState::default().supports_session_load == None`. Guards
-// against a default of `Some(true)` or `Some(false)`, which would bias resume
-// behavior before `initialize` has actually been processed.
+// Pins `AcpRuntimeState::default().capabilities == None`. Guards against a
+// default with pre-filled capabilities, which would bias resume behavior
+// before `initialize` has actually been processed.
 #[test]
 fn acp_runtime_state_defaults_session_load_support_to_unknown() {
-    assert_eq!(AcpRuntimeState::default().supports_session_load, None);
+    let default_state = AcpRuntimeState::default();
+    assert!(
+        default_state.capabilities.is_none(),
+        "default capabilities must be None so the optimistic \
+         session/load path fires before initialize completes"
+    );
 }
 
 // Pins the optimistic path: with `supports_session_load = None`, `ensure_acp_session_ready`
@@ -179,7 +184,13 @@ fn acp_session_resume_attempts_load_when_session_load_support_is_unknown() {
         runtime_state.current_session_id.as_deref(),
         Some("cursor-session-1")
     );
-    assert_eq!(runtime_state.supports_session_load, Some(true));
+    assert_eq!(
+        runtime_state
+            .capabilities
+            .as_ref()
+            .and_then(|caps| caps.supports_session_load),
+        Some(true)
+    );
 }
 
 // Pins the short-circuit: with `supports_session_load = Some(false)`,
@@ -209,7 +220,9 @@ fn acp_session_resume_skips_load_when_session_load_is_explicitly_unsupported() {
     let runtime_state = Arc::new(Mutex::new(AcpRuntimeState {
         current_session_id: None,
         is_loading_history: false,
-        supports_session_load: Some(false),
+        capabilities: Some(AcpCapabilities {
+            supports_session_load: Some(false),
+        }),
     }));
     let writer = SharedBufferWriter::default();
     let thread_writer = writer.clone();
@@ -300,7 +313,15 @@ fn acp_session_resume_skips_load_when_session_load_is_explicitly_unsupported() {
         runtime_state.current_session_id.as_deref(),
         Some("cursor-session-new")
     );
-    assert_eq!(runtime_state.supports_session_load, Some(false));
+    assert_eq!(
+        runtime_state
+            .capabilities
+            .as_ref()
+            .and_then(|caps| caps.supports_session_load),
+        Some(false),
+        "explicit not-supported capability must persist unchanged \
+         through the session/new fallback"
+    );
 }
 // Pins `is_gemini_invalid_session_load_error` matching "Invalid session identifier"
 // when it appears as an inner anyhow source, not just the outermost message.

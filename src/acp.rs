@@ -391,19 +391,40 @@ fn maybe_authenticate_acp_runtime(
     Ok(())
 }
 
+/// Upgrades `capabilities.supports_session_load` to `Some(true)`
+/// after an observed-working `session/load` (or a
+/// wrong-session-id-but-method-exists error). Safe to call when the
+/// capabilities bundle has not yet been initialized; inserts a
+/// default bundle in that case.
+fn note_acp_session_load_supported(runtime_state: &Arc<Mutex<AcpRuntimeState>>) {
+    let mut state = runtime_state
+        .lock()
+        .expect("ACP runtime state mutex poisoned");
+    state
+        .capabilities
+        .get_or_insert_with(AcpCapabilities::default)
+        .supports_session_load = Some(true);
+}
+
 /// Records ACP runtime capabilities from initialize.
+///
+/// Installs an `AcpCapabilities` bundle on the runtime state the first
+/// time the initialize response arrives. If the response omits the
+/// capability flag entirely (older agents), leaves
+/// `supports_session_load = None` so `ensure_acp_session_ready` can
+/// probe optimistically — see `AcpCapabilities::session_load_supported_or_unknown`.
 fn update_acp_runtime_capabilities(
     runtime_state: &Arc<Mutex<AcpRuntimeState>>,
     initialize_result: &Value,
 ) {
-    let Some(supports_session_load) = acp_supports_session_load(initialize_result) else {
-        return;
-    };
-
-    runtime_state
+    let supports_session_load = acp_supports_session_load(initialize_result);
+    let mut state = runtime_state
         .lock()
-        .expect("ACP runtime state mutex poisoned")
-        .supports_session_load = Some(supports_session_load);
+        .expect("ACP runtime state mutex poisoned");
+    let capabilities = state.capabilities.get_or_insert_with(AcpCapabilities::default);
+    if supports_session_load.is_some() {
+        capabilities.supports_session_load = supports_session_load;
+    }
 }
 
 /// Returns whether ACP initialize reported session/load support.
@@ -561,14 +582,20 @@ fn ensure_acp_session_ready(
     agent: AcpAgent,
     command: &AcpPromptCommand,
 ) -> Result<String> {
-    let (existing_session_id, supports_session_load) = {
+    let (existing_session_id, session_load_allowed) = {
         let state = runtime_state
             .lock()
             .expect("ACP runtime state mutex poisoned");
-        (
-            state.current_session_id.clone(),
-            state.supports_session_load,
-        )
+        let session_load_allowed = state
+            .capabilities
+            .as_ref()
+            .map(AcpCapabilities::session_load_supported_or_unknown)
+            // No capabilities bundle yet means initialize has not
+            // reported either way — fall back to the optimistic
+            // "try anyway" rule, matching the previous
+            // `supports_session_load != Some(false)` semantics.
+            .unwrap_or(true);
+        (state.current_session_id.clone(), session_load_allowed)
     };
     if let Some(existing_session_id) = existing_session_id {
         return Ok(existing_session_id);
@@ -577,7 +604,7 @@ fn ensure_acp_session_ready(
     let session_result = if let Some(resume_session_id) = command
         .resume_session_id
         .as_deref()
-        .filter(|_| supports_session_load != Some(false))
+        .filter(|_| session_load_allowed)
     {
         {
             let mut state = runtime_state
@@ -605,17 +632,15 @@ fn ensure_acp_session_ready(
         }
         match result {
             Ok(value) => {
-                runtime_state
-                    .lock()
-                    .expect("ACP runtime state mutex poisoned")
-                    .supports_session_load = Some(true);
+                note_acp_session_load_supported(runtime_state);
                 (resume_session_id.to_owned(), value)
             }
             Err(err) if agent == AcpAgent::Gemini && is_gemini_invalid_session_load_error(&err) => {
-                runtime_state
-                    .lock()
-                    .expect("ACP runtime state mutex poisoned")
-                    .supports_session_load = Some(true);
+                // Gemini's invalid-session-id error still proves the
+                // agent HAS `session/load` — the id just didn't match
+                // an existing session. Upgrade the capability so
+                // subsequent resumes skip the optimistic fallback.
+                note_acp_session_load_supported(runtime_state);
                 start_acp_session(writer, pending_requests, agent, &command.cwd)?
             }
             Err(err) => return Err(err),

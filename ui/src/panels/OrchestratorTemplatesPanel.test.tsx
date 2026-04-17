@@ -80,6 +80,7 @@ function makeStateResponse(
 ): StateResponse {
   return {
     revision: overrides.revision,
+    serverInstanceId: "test-instance",
     codex: overrides.codex ?? {},
     agentReadiness: overrides.agentReadiness ?? [],
     preferences: overrides.preferences ?? {

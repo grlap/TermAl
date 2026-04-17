@@ -30,6 +30,31 @@ fn delta_event_revision(event: &DeltaEvent) -> u64 {
     }
 }
 
+struct RemoteSyncRollback {
+    next_session_number: usize,
+    sessions: Vec<SessionRecord>,
+    orchestrator_instances: Vec<OrchestratorInstance>,
+    removed_session_ids: Vec<String>,
+}
+
+impl RemoteSyncRollback {
+    fn capture(inner: &StateInner) -> Self {
+        Self {
+            next_session_number: inner.next_session_number,
+            sessions: inner.sessions.clone(),
+            orchestrator_instances: inner.orchestrator_instances.clone(),
+            removed_session_ids: inner.removed_session_ids.clone(),
+        }
+    }
+
+    fn restore(self, inner: &mut StateInner) {
+        inner.next_session_number = self.next_session_number;
+        inner.sessions = self.sessions;
+        inner.orchestrator_instances = self.orchestrator_instances;
+        inner.removed_session_ids = self.removed_session_ids;
+    }
+}
+
 /// Folds an inbound remote `StateResponse` into local state.
 ///
 /// This is the single under-lock entry point for snapshot-shaped
@@ -38,9 +63,10 @@ fn delta_event_revision(event: &DeltaEvent) -> u64 {
 ///
 /// - **Broad snapshot sync** (`focus = None`): the remote's entire
 ///   state replaces the mirrored projection for this remote id. The
-///   function first captures a rollback shape of orchestrators +
-///   remote-project bindings so a mid-apply failure can restore the
-///   pre-sync view; then it upserts every remote project, every
+///   function first captures a rollback shape of sessions,
+///   orchestrators, session numbering, and queued session-delete
+///   tombstones so a mid-apply failure can restore the pre-sync view;
+///   then it upserts every remote project, every
 ///   remote session (via `localize_remote_session` +
 ///   `upsert_remote_proxy_session_record`), and every remote
 ///   orchestrator instance, each translated from remote ids to their
@@ -82,20 +108,37 @@ fn sync_remote_state_inner(
     remote_state: &StateResponse,
     focus_remote_session_id: Option<&str>,
 ) {
-    let pre_orchestrator_rollback_state = focus_remote_session_id.is_none().then(|| {
-        (
-            inner.next_session_number,
-            inner.sessions.clone(),
-            inner.orchestrator_instances.clone(),
-        )
-    });
+    // Mutation contract — this function mutates only these fields of
+    // `StateInner`: `sessions` (via retain_sessions /
+    // upsert_remote_proxy_session_record / session_mut_by_index),
+    // `orchestrator_instances` (via localize_remote_orchestrator_instance),
+    // `next_session_number` (via push_session), `removed_session_ids` (via
+    // retain_sessions → record_removed_session), and `last_mutation_stamp`
+    // (side-effect of session_mut_by_index / push_session). If a future
+    // change adds mutation of any other `StateInner` field here (e.g.
+    // `projects`, `remote_applied_revisions`), extend `RemoteSyncRollback`
+    // to capture that field too or the rollback below will silently
+    // restore a partial view.
+    //
+    // Broad-sync path captures rollback BEFORE `retain_sessions` runs so
+    // the tombstones it queues can be unwound on failure.
+    let pre_retain_rollback_state =
+        focus_remote_session_id.is_none().then(|| RemoteSyncRollback::capture(inner));
 
-    let mut local_project_ids_by_remote_project_id = HashMap::new();
+    // Inline-build the remote→local project id map with the typed
+    // keys/values so it plugs into `localize_remote_*` helpers
+    // without a conversion step. Kept inline (rather than reusing
+    // `remote_project_id_map`) because this hot-path sync runs under
+    // the state mutex and already has `&inner.projects` in scope.
+    let mut local_project_ids_by_remote_project_id: HashMap<RemoteProjectId, LocalProjectId> =
+        HashMap::new();
     for project in &inner.projects {
         if project.remote_id == remote_id {
             if let Some(remote_project_id) = project.remote_project_id.as_deref() {
-                local_project_ids_by_remote_project_id
-                    .insert(remote_project_id.to_owned(), project.id.clone());
+                local_project_ids_by_remote_project_id.insert(
+                    RemoteProjectId::from(remote_project_id),
+                    LocalProjectId::from(project.id.as_str()),
+                );
             }
         }
     }
@@ -129,7 +172,7 @@ fn sync_remote_state_inner(
     // `mutation_stamp`. Iterating `&mut inner.sessions` directly would
     // skip stamping, and the new SQLite delta persist would then drop
     // these remote-proxy updates entirely.
-    let updates: Vec<(usize, String, Option<String>)> = inner
+    let updates: Vec<(usize, String, Option<LocalProjectId>)> = inner
         .sessions
         .iter()
         .enumerate()
@@ -147,10 +190,10 @@ fn sync_remote_state_inner(
                 .as_deref()
                 .and_then(|remote_project_id| {
                     local_project_ids_by_remote_project_id
-                        .get(remote_project_id)
+                        .get(&RemoteProjectId::from(remote_project_id))
                         .cloned()
                 })
-                .or_else(|| record.session.project_id.clone());
+                .or_else(|| record.session.project_id.as_deref().map(LocalProjectId::from));
             Some((idx, remote_session_id.to_string(), local_project_id))
         })
         .collect();
@@ -162,17 +205,17 @@ fn sync_remote_state_inner(
         let Some(record) = inner.session_mut_by_index(idx) else {
             continue;
         };
-        apply_remote_session_to_record(record, local_project_id, remote_session);
+        apply_remote_session_to_record(
+            record,
+            local_project_id.map(LocalProjectId::into_inner),
+            remote_session,
+        );
     }
 
     let rollback_state = if focus_remote_session_id.is_some() {
-        Some((
-            inner.next_session_number,
-            inner.sessions.clone(),
-            inner.orchestrator_instances.clone(),
-        ))
+        Some(RemoteSyncRollback::capture(inner))
     } else {
-        pre_orchestrator_rollback_state
+        pre_retain_rollback_state
     };
 
     if let Err(err) = sync_remote_orchestrators_inner(
@@ -182,10 +225,8 @@ fn sync_remote_state_inner(
         &local_project_ids_by_remote_project_id,
         Some(&remote_sessions_by_id),
     ) {
-        if let Some((next_session_number, sessions, orchestrator_instances)) = rollback_state {
-            inner.next_session_number = next_session_number;
-            inner.sessions = sessions;
-            inner.orchestrator_instances = orchestrator_instances;
+        if let Some(rollback_state) = rollback_state {
+            rollback_state.restore(inner);
         }
         eprintln!(
             "remote state warning> failed to sync remote orchestrators for `{remote_id}` at revision {}: {err:#}",
@@ -354,65 +395,97 @@ fn localize_remote_session(
     session
 }
 
-/// Returns remote project id mapping.
-fn remote_project_id_map(inner: &StateInner, remote_id: &str) -> HashMap<String, String> {
+/// Builds the `RemoteProjectId -> LocalProjectId` map for one remote
+/// host. The typed keys/values make id-kind mixups compile-detectable
+/// at every caller that threads this map into localization helpers.
+fn remote_project_id_map(
+    inner: &StateInner,
+    remote_id: &str,
+) -> HashMap<RemoteProjectId, LocalProjectId> {
     let mut map = HashMap::new();
     for project in &inner.projects {
         if project.remote_id == remote_id {
             if let Some(remote_project_id) = project.remote_project_id.as_deref() {
-                map.insert(remote_project_id.to_owned(), project.id.clone());
+                map.insert(
+                    RemoteProjectId::from(remote_project_id),
+                    LocalProjectId::from(project.id.as_str()),
+                );
             }
         }
     }
     map
 }
 
-/// Returns the localized project id for a remote project.
+/// Returns the localized project id for a remote project. The raw
+/// `&str` input comes from wire payloads (e.g.
+/// `Session.project_id: Option<String>`); the map lookup itself
+/// traffics in typed `RemoteProjectId` / `LocalProjectId` so a
+/// downstream caller cannot accidentally pass the returned local id
+/// where a remote id is expected.
 fn local_project_id_for_remote_project(
-    local_project_ids_by_remote_project_id: &HashMap<String, String>,
+    local_project_ids_by_remote_project_id: &HashMap<RemoteProjectId, LocalProjectId>,
     remote_project_id: Option<&str>,
-) -> Option<String> {
+) -> Option<LocalProjectId> {
     remote_project_id.and_then(|project_id| {
         local_project_ids_by_remote_project_id
-            .get(project_id)
+            .get(&RemoteProjectId::from(project_id))
             .cloned()
     })
 }
 
 /// Returns the local session id for a remote session, creating a proxy record
 /// when a full snapshot provides the missing session payload.
+///
+/// The id arguments mix three identity spaces — `remote_session_id`
+/// is now typed as `&RemoteSessionId` so callers have to explicitly
+/// convert wire strings at the boundary (usually `RemoteSessionId::from(s)`),
+/// preventing accidental reuse of a `LocalSessionId` or bare `&str`
+/// for the wrong space. The returned `LocalSessionId` completes the
+/// round-trip: the caller is guaranteed it has received a local-side
+/// id and cannot feed it back into a remote-id slot without a
+/// compile-visible `.into_inner()` / `.as_str()`.
 fn local_session_id_for_remote_session(
     inner: &mut StateInner,
     remote_id: &str,
-    remote_session_id: &str,
+    remote_session_id: &RemoteSessionId,
     remote_sessions_by_id: Option<&HashMap<&str, &Session>>,
-    local_project_ids_by_remote_project_id: &HashMap<String, String>,
+    local_project_ids_by_remote_project_id: &HashMap<RemoteProjectId, LocalProjectId>,
     fallback_local_project_id: Option<&str>,
-) -> Option<String> {
-    if let Some(index) = inner.find_remote_session_index(remote_id, remote_session_id) {
-        return Some(inner.sessions[index].session.id.clone());
+) -> Option<LocalSessionId> {
+    if let Some(index) = inner.find_remote_session_index(remote_id, remote_session_id.as_str()) {
+        return Some(LocalSessionId::from(
+            inner.sessions[index].session.id.as_str(),
+        ));
     }
 
-    let remote_session = remote_sessions_by_id?.get(remote_session_id)?;
+    let remote_session = remote_sessions_by_id?.get(remote_session_id.as_str())?;
     let local_project_id = local_project_id_for_remote_project(
         local_project_ids_by_remote_project_id,
         remote_session.project_id.as_deref(),
     )
-    .or_else(|| fallback_local_project_id.map(str::to_owned));
-    Some(upsert_remote_proxy_session_record(
-        inner,
-        remote_id,
-        remote_session,
-        local_project_id,
+    .or_else(|| fallback_local_project_id.map(LocalProjectId::from));
+    Some(LocalSessionId::from(
+        upsert_remote_proxy_session_record(
+            inner,
+            remote_id,
+            remote_session,
+            local_project_id.map(LocalProjectId::into_inner),
+        )
+        .as_str(),
     ))
 }
 
-/// Localizes a remote orchestrator instance.
+/// Localizes a remote orchestrator instance. All the `local_*` ids
+/// that emerge here (project, per-session, per-transition) flow as
+/// typed `LocalProjectId` / `LocalSessionId` through the helpers
+/// below, so `remote_orchestrator.id` / `session_id` / `project_id`
+/// cannot be accidentally re-used in a local-id slot without a
+/// compile error.
 fn localize_remote_orchestrator_instance(
     inner: &mut StateInner,
     remote_id: &str,
     remote_orchestrator: &OrchestratorInstance,
-    local_project_ids_by_remote_project_id: &HashMap<String, String>,
+    local_project_ids_by_remote_project_id: &HashMap<RemoteProjectId, LocalProjectId>,
     remote_sessions_by_id: Option<&HashMap<&str, &Session>>,
 ) -> Result<OrchestratorInstance, anyhow::Error> {
     // `delete_project` (`src/state.rs`) clears `OrchestratorInstance.project_id`
@@ -431,7 +504,8 @@ fn localize_remote_orchestrator_instance(
         .and_then(|index| inner.orchestrator_instances.get(index))
         .map(|instance| {
             let project_id = Some(instance.project_id.clone())
-                .filter(|id| !id.trim().is_empty());
+                .filter(|id| !id.trim().is_empty())
+                .map(LocalProjectId::from);
             (Some(instance.id.clone()), project_id)
         })
         .unwrap_or((None, None));
@@ -458,30 +532,33 @@ fn localize_remote_orchestrator_instance(
 
     let mut session_instances = Vec::with_capacity(remote_orchestrator.session_instances.len());
     for session_instance in &remote_orchestrator.session_instances {
+        let remote_session_id = RemoteSessionId::from(session_instance.session_id.as_str());
         let local_session_id = local_session_id_for_remote_session(
             inner,
             remote_id,
-            &session_instance.session_id,
+            &remote_session_id,
             remote_sessions_by_id,
             local_project_ids_by_remote_project_id,
             Some(local_project_id.as_str()),
         )
         .ok_or_else(|| anyhow!("remote session `{}` not found", session_instance.session_id))?;
         session_instances.push(OrchestratorSessionInstance {
-            session_id: local_session_id,
+            session_id: local_session_id.into_inner(),
             ..session_instance.clone()
         });
     }
 
     let mut template_snapshot = remote_orchestrator.template_snapshot.clone();
-    template_snapshot.project_id = Some(local_project_id.clone());
+    template_snapshot.project_id = Some(local_project_id.as_str().to_owned());
 
     let mut pending_transitions = Vec::with_capacity(remote_orchestrator.pending_transitions.len());
     for transition in &remote_orchestrator.pending_transitions {
+        let remote_source_session_id =
+            RemoteSessionId::from(transition.source_session_id.as_str());
         let source_session_id = local_session_id_for_remote_session(
             inner,
             remote_id,
-            &transition.source_session_id,
+            &remote_source_session_id,
             remote_sessions_by_id,
             local_project_ids_by_remote_project_id,
             Some(local_project_id.as_str()),
@@ -492,10 +569,12 @@ fn localize_remote_orchestrator_instance(
                 transition.source_session_id
             )
         })?;
+        let remote_destination_session_id =
+            RemoteSessionId::from(transition.destination_session_id.as_str());
         let destination_session_id = local_session_id_for_remote_session(
             inner,
             remote_id,
-            &transition.destination_session_id,
+            &remote_destination_session_id,
             remote_sessions_by_id,
             local_project_ids_by_remote_project_id,
             Some(local_project_id.as_str()),
@@ -507,8 +586,8 @@ fn localize_remote_orchestrator_instance(
             )
         })?;
         pending_transitions.push(PendingTransition {
-            source_session_id,
-            destination_session_id,
+            source_session_id: source_session_id.into_inner(),
+            destination_session_id: destination_session_id.into_inner(),
             ..transition.clone()
         });
     }
@@ -520,14 +599,16 @@ fn localize_remote_orchestrator_instance(
             session_ids
                 .iter()
                 .map(|session_id| {
+                    let remote_session_id = RemoteSessionId::from(session_id.as_str());
                     local_session_id_for_remote_session(
                         inner,
                         remote_id,
-                        session_id,
+                        &remote_session_id,
                         remote_sessions_by_id,
                         local_project_ids_by_remote_project_id,
                         Some(local_project_id.as_str()),
                     )
+                    .map(LocalSessionId::into_inner)
                     .ok_or_else(|| anyhow!("remote session `{session_id}` not found"))
                 })
                 .collect::<Result<Vec<_>, _>>()
@@ -537,14 +618,16 @@ fn localize_remote_orchestrator_instance(
         .stopped_session_ids_during_stop
         .iter()
         .map(|session_id| {
+            let remote_session_id = RemoteSessionId::from(session_id.as_str());
             local_session_id_for_remote_session(
                 inner,
                 remote_id,
-                session_id,
+                &remote_session_id,
                 remote_sessions_by_id,
                 local_project_ids_by_remote_project_id,
                 Some(local_project_id.as_str()),
             )
+            .map(LocalSessionId::into_inner)
             .ok_or_else(|| anyhow!("remote session `{session_id}` not found"))
         })
         .collect::<Result<Vec<_>, _>>()?;
@@ -555,7 +638,7 @@ fn localize_remote_orchestrator_instance(
         remote_id: Some(remote_id.to_owned()),
         remote_orchestrator_id: Some(remote_orchestrator.id.clone()),
         template_id: remote_orchestrator.template_id.clone(),
-        project_id: local_project_id,
+        project_id: local_project_id.into_inner(),
         template_snapshot,
         status: remote_orchestrator.status,
         session_instances,
@@ -583,11 +666,7 @@ fn ensure_remote_orchestrator_instance(
         }
     }
 
-    let rollback_state = (
-        inner.next_session_number,
-        inner.sessions.clone(),
-        inner.orchestrator_instances.clone(),
-    );
+    let rollback_state = RemoteSyncRollback::capture(inner);
     let local_project_ids_by_remote_project_id = remote_project_id_map(inner, remote_id);
     let localized = match localize_remote_orchestrator_instance(
         inner,
@@ -598,9 +677,7 @@ fn ensure_remote_orchestrator_instance(
     ) {
         Ok(localized) => localized,
         Err(err) => {
-            inner.next_session_number = rollback_state.0;
-            inner.sessions = rollback_state.1;
-            inner.orchestrator_instances = rollback_state.2;
+            rollback_state.restore(inner);
             return Err(err);
         }
     };
@@ -614,12 +691,15 @@ fn ensure_remote_orchestrator_instance(
     Ok((localized, true))
 }
 
-/// Syncs remote orchestrators.
+/// Syncs remote orchestrators. Threads the typed project-id map
+/// through so `localize_remote_orchestrator_instance` keeps its
+/// compile-time guarantees; the caller must build the map via
+/// `remote_project_id_map` to inherit the typed keys/values.
 fn sync_remote_orchestrators_inner(
     inner: &mut StateInner,
     remote_id: &str,
     remote_orchestrators: &[OrchestratorInstance],
-    local_project_ids_by_remote_project_id: &HashMap<String, String>,
+    local_project_ids_by_remote_project_id: &HashMap<RemoteProjectId, LocalProjectId>,
     remote_sessions_by_id: Option<&HashMap<&str, &Session>>,
 ) -> Result<(), anyhow::Error> {
     let mut localized_by_remote_orchestrator_id = HashMap::new();

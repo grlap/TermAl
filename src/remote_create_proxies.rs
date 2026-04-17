@@ -92,9 +92,13 @@ impl AppState {
 
     /// Posts a session create to the remote, upserts a local proxy
     /// `SessionRecord` pointing at the returned `remote_session_id`,
-    /// folds any attached `StateResponse` into local state if it is
-    /// newer, and starts the event bridge so inbound deltas for this
-    /// session begin streaming immediately. Returns the local session id.
+    /// and starts the event bridge so inbound deltas for this session
+    /// begin streaming immediately. Non-session state slices
+    /// (orchestrators, projects, sibling sessions) that changed on
+    /// the remote during the create round-trip arrive via the SSE
+    /// delta bridge rather than this response, since Node 1 of the
+    /// type-safety plan dropped the `CreateSessionResponse.state`
+    /// field. Returns the local session id.
     fn create_remote_session_proxy(
         &self,
         request: CreateSessionRequest,
@@ -125,44 +129,50 @@ impl AppState {
         )?;
         self.remote_registry
             .start_event_bridge(self.clone(), &binding.remote);
-        let remote_session = remote_response
-            .session
-            .clone()
-            .or_else(|| {
-                remote_response.state.as_ref().and_then(|state| {
-                    state
-                        .sessions
-                        .iter()
-                        .find(|session| session.id == remote_response.session_id)
-                        .cloned()
-                })
-            })
-            .ok_or_else(|| ApiError::bad_gateway("remote session was not returned"))?;
+        // Reject mismatched session identity on the wire. The wire
+        // contract says `session.id === session_id`; if a malformed
+        // remote returns otherwise, localizing `remote_session` would
+        // mirror whichever id is embedded in `session.id` while
+        // downstream code refers to the other id, silently opening a
+        // proxy for the wrong remote session. Fail closed instead.
+        if remote_response.session.id != remote_response.session_id {
+            return Err(ApiError::bad_gateway(
+                "remote session id mismatch: `session.id` does not equal `sessionId`",
+            ));
+        }
+        let remote_session = remote_response.session.clone();
         let (revision, local_session_id, local_session) = {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
-            let applied_remote_revision = remote_response.state.as_ref().is_some_and(|state| {
-                apply_remote_state_if_newer_locked(
-                    &mut inner,
+            // Gate `update_existing` on the remote's applied-revision
+            // tracking. If the SSE bridge already applied a later
+            // remote revision for this remote (normal when a fork /
+            // create races against active streaming), the POST
+            // response's `session` payload is older than what we have
+            // mirrored — refreshing would regress the bridged state.
+            // If the POST response is at-or-newer-than the applied
+            // remote revision, its payload is authoritative. New
+            // proxy records (no existing row) still get created
+            // regardless; this flag only controls the refresh branch.
+            let update_existing = !inner
+                .should_skip_remote_applied_revision(
                     &binding.remote.id,
-                    state,
-                    Some(remote_response.session_id.as_str()),
-                )
-            });
+                    remote_response.revision,
+                );
             let (local_session_id, changed) = ensure_remote_proxy_session_record(
                 &mut inner,
                 &binding.remote.id,
                 &remote_session,
                 Some(binding.local_project_id),
-                applied_remote_revision,
+                update_existing,
             );
-            if applied_remote_revision {
+            if update_existing {
+                // When we refreshed from the POST, record its revision
+                // as the most-recent-applied for this remote so a
+                // later delta at the same revision is correctly
+                // recognized as a duplicate and ignored.
                 inner.note_remote_applied_revision(
                     &binding.remote.id,
-                    remote_response
-                        .state
-                        .as_ref()
-                        .map(|state| state.revision)
-                        .unwrap_or(remote_response.revision),
+                    remote_response.revision,
                 );
             }
             let local_record = inner
@@ -171,11 +181,7 @@ impl AppState {
                 .cloned()
                 .ok_or_else(|| ApiError::not_found("session not found"))?;
             let local_session = local_record.session.clone();
-            let revision = if applied_remote_revision {
-                self.bump_revision_and_persist_locked(&mut inner).map_err(|err| {
-                    ApiError::internal(format!("failed to persist remote session proxy: {err:#}"))
-                })?
-            } else if changed {
+            let revision = if changed {
                 self.commit_session_created_locked(&mut inner, &local_record)
                     .map_err(|err| {
                         ApiError::internal(format!(
@@ -195,9 +201,12 @@ impl AppState {
 
         Ok(CreateSessionResponse {
             session_id: local_session_id,
-            session: Some(local_session),
+            session: local_session,
             revision,
-            state: None,
+            // Use THIS server's instance id, not the remote's — the
+            // client's restart-detection ref is keyed to the local
+            // instance it connects to, not the remote backend.
+            server_instance_id: self.server_instance_id.clone(),
         })
     }
 

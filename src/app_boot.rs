@@ -144,11 +144,40 @@ impl AppState {
                         // `changed_sessions` + `removed_session_ids` is
                         // fine; the transaction just upserts one
                         // app_state row.
-                        persist_delta_via_cache(
+                        if let Err(err) = persist_delta_via_cache(
                             &mut cache,
                             &persist_path_for_persist,
                             &delta,
-                        )?;
+                        ) {
+                            // On write failure, restore the drained
+                            // `removed_session_ids` into `inner` so the
+                            // next tick can retry the tombstones.
+                            // Without this, a transient SQLite error
+                            // (locked DB, disk full, I/O error) would
+                            // silently leak an orphan `sessions` row
+                            // into SQLite — `collect_persist_delta`
+                            // drained the vec via `mem::take`, and
+                            // since the watermark wasn't advanced the
+                            // `changed_sessions` side auto-retries on
+                            // the next tick, but the tombstone side
+                            // has no equivalent per-row signal.
+                            // `changed_sessions` recovers via
+                            // mutation-stamp re-collection; only
+                            // tombstones need manual restoration.
+                            if !delta.removed_session_ids.is_empty() {
+                                let mut inner = inner_for_persist
+                                    .lock()
+                                    .expect("state mutex poisoned");
+                                // Append-then-extend preserves any
+                                // tombstones queued between the drain
+                                // and this restore; order does not
+                                // matter for SQLite `DELETE WHERE id = ?`.
+                                inner
+                                    .removed_session_ids
+                                    .extend(delta.removed_session_ids.iter().cloned());
+                            }
+                            return Err(err);
+                        }
                         watermark = next_watermark;
                         Ok(())
                     })();
@@ -211,6 +240,13 @@ impl AppState {
             .expect("failed to spawn state broadcast thread");
 
         let state = Self {
+            // Per-process UUID generated at boot. Every `StateResponse`
+            // and `HealthResponse` carries this value so clients can
+            // distinguish server-restart-driven revision rewinds from
+            // out-of-order stale responses. A fresh UUID on every boot
+            // guarantees the id changes exactly when the client should
+            // accept a revision downgrade.
+            server_instance_id: Uuid::new_v4().to_string(),
             default_workdir,
             persistence_path: persist_path_for_state,
             orchestrator_templates_path: Arc::new(orchestrator_templates_path),

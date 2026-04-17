@@ -706,7 +706,7 @@ On mount, the frontend opens an `EventSource` to `/api/events`:
 
 Applied deltas update the specific session/message in-place via `applyDeltaToSessions()`, avoiding full reconciliation.
 
-Session creation returns `CreateSessionResponse { sessionId, state }` — the full state is embedded in the response, eliminating a separate fetch round-trip.
+Session creation returns `CreateSessionResponse { sessionId, session, revision }`; the frontend adopts the concrete created session immediately and records the response revision without requiring a full state snapshot.
 
 ### Session Reconciliation
 

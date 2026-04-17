@@ -143,10 +143,7 @@ fn creates_projects_and_assigns_sessions_to_them() {
             gemini_approval_mode: None,
         })
         .unwrap();
-    let session = created
-        .session
-        .as_ref()
-        .expect("created session should be returned");
+    let session = &created.session;
 
     assert_eq!(
         session.project_id.as_deref(),
@@ -495,4 +492,3 @@ fn project_scoped_paths_require_a_session_or_project_identifier() {
     assert_eq!(error.status, StatusCode::BAD_REQUEST);
     assert_eq!(error.message, "sessionId or projectId is required");
 }
-

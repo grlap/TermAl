@@ -39,6 +39,11 @@ fn stable_text_hash(value: &str) -> String {
 fn empty_state_events_response() -> StateResponse {
     StateResponse {
         revision: 0,
+        // Empty string signals "unknown instance" — the client's
+        // restart-detection logic only accepts a revision downgrade
+        // when the id is non-empty AND changed, so this fallback
+        // snapshot cannot accidentally masquerade as a restart signal.
+        server_instance_id: String::new(),
         codex: CodexState::default(),
         agent_readiness: Vec::new(),
         preferences: AppPreferences::default(),

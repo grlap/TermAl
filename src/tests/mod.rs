@@ -546,6 +546,7 @@ fn test_app_state() -> AppState {
         std::env::temp_dir().join(format!("termal-test-{}.json", Uuid::new_v4()));
 
     AppState {
+        server_instance_id: Uuid::new_v4().to_string(),
         default_workdir: "/tmp".to_owned(),
         persistence_path: Arc::new(persistence_path),
         orchestrator_templates_path: Arc::new(
@@ -877,6 +878,9 @@ fn sample_remote_orchestrator_state(
     };
     StateResponse {
         revision,
+        // Tests simulate a remote snapshot; a stable stub id is fine
+        // since remote-state sync doesn't consume the field today.
+        server_instance_id: "remote-test-instance".to_owned(),
         codex: CodexState::default(),
         agent_readiness: Vec::new(),
         preferences: AppPreferences::default(),
@@ -1440,7 +1444,9 @@ fn gemini_invalid_session_load_falls_back_to_session_new() {
     let runtime_state = Arc::new(Mutex::new(AcpRuntimeState {
         current_session_id: None,
         is_loading_history: false,
-        supports_session_load: Some(true),
+        capabilities: Some(AcpCapabilities {
+            supports_session_load: Some(true),
+        }),
     }));
     let writer = SharedBufferWriter::default();
     let thread_writer = writer.clone();
@@ -2073,6 +2079,41 @@ fn state_inner_session_mut_helpers_stamp_the_record() {
     assert_eq!(stamped, after_indexed_counter + 1);
     assert_eq!(inner.sessions[index].mutation_stamp, stamped);
     assert_eq!(inner.last_mutation_stamp, stamped);
+
+    // Out-of-bounds misses must NOT advance `last_mutation_stamp`.
+    // Advancing the counter without a matching record would break the
+    // invariant "stamp implies an actual mutation" — the global
+    // watermark gap would grow by one per miss and the persist thread's
+    // watermark math would still work by luck alone. Pin the reorder
+    // fix that guards against the leak.
+    let counter_before_miss = inner.last_mutation_stamp;
+    let oob_index = inner.sessions.len() + 100;
+
+    assert!(inner.session_mut_by_index(oob_index).is_none());
+    assert_eq!(
+        inner.last_mutation_stamp, counter_before_miss,
+        "session_mut_by_index miss must not burn a mutation stamp"
+    );
+
+    assert!(inner.stamp_session_at_index(oob_index).is_none());
+    assert_eq!(
+        inner.last_mutation_stamp, counter_before_miss,
+        "stamp_session_at_index miss must not burn a mutation stamp"
+    );
+
+    assert!(inner.session_mut("nonexistent-session").is_none());
+    assert_eq!(
+        inner.last_mutation_stamp, counter_before_miss,
+        "session_mut miss must not burn a mutation stamp (by-id variant \
+         has always short-circuited via find_session_index)"
+    );
+
+    // Valid mutations must still stamp the record after all three misses.
+    let post_miss_stamped = inner
+        .stamp_session_at_index(index)
+        .expect("post-miss stamp_session_at_index should still succeed");
+    assert_eq!(post_miss_stamped, counter_before_miss + 1);
+    assert_eq!(inner.sessions[index].mutation_stamp, post_miss_stamped);
 }
 
 // Tests that `record_removed_session` collects non-empty session ids for
@@ -2220,11 +2261,16 @@ async fn api_router_sets_local_cors_headers() {
     );
 }
 
-// Tests that health route reports inline orchestrator template compatibility.
+// Tests that health route reports inline orchestrator template compatibility
+// and emits a non-empty `serverInstanceId` that clients use for
+// restart-detection (pairs with the new state-revision server-instance
+// mismatch branch).
 #[tokio::test]
 async fn health_route_reports_inline_orchestrator_template_support() {
+    let state = test_app_state();
+    let expected_server_instance_id = state.server_instance_id.clone();
     let (status, response): (StatusCode, Value) = request_json(
-        &app_router(test_app_state()),
+        &app_router(state),
         Request::builder()
             .method("GET")
             .uri("/api/health")
@@ -2239,7 +2285,20 @@ async fn health_route_reports_inline_orchestrator_template_support() {
         json!({
             "ok": true,
             "supportsInlineOrchestratorTemplates": true,
+            "serverInstanceId": expected_server_instance_id,
         })
+    );
+    // Defensive: the instance id must not be empty, otherwise the
+    // client's restart-detection treats it as "unknown" and the
+    // whole mechanism becomes a no-op.
+    let server_instance_id = response
+        .get("serverInstanceId")
+        .and_then(Value::as_str)
+        .expect("serverInstanceId should be a string");
+    assert!(
+        !server_instance_id.is_empty(),
+        "serverInstanceId must be non-empty so the client can use it \
+         for restart detection"
     );
 }
 

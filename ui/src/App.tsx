@@ -1323,6 +1323,15 @@ export default function App() {
   const orchestratorsRef = useRef(orchestrators);
   const workspaceSummariesRef = useRef(workspaceSummaries);
   const latestStateRevisionRef = useRef<number | null>(null);
+  // The `serverInstanceId` the client last adopted. Paired with
+  // `latestStateRevisionRef` as the server-restart detector: when an
+  // incoming snapshot carries a non-empty `serverInstanceId` that
+  // differs from this ref, the server has just restarted and its
+  // revision counter rewound to whatever SQLite had, so the client
+  // accepts the snapshot regardless of the monotonic revision guard.
+  // Updated in lockstep with `latestStateRevisionRef` inside
+  // `adoptState` / `adoptCreatedSessionResponse` / `adoptFetchedSession`.
+  const lastSeenServerInstanceIdRef = useRef<string | null>(null);
   const forceAdoptNextStateEventRef = useRef(false);
   const stateResyncInFlightRef = useRef(false);
   const stateResyncPendingRef = useRef(false);
@@ -2092,43 +2101,69 @@ export default function App() {
     created: CreateSessionResponse,
     options?: { openSessionId?: string; paneId?: string | null },
   ) {
-    if (created.session && created.session.id === created.sessionId) {
-      const previousSessions = sessionsRef.current;
-      const existingIndex = previousSessions.findIndex(
-        (session) => session.id === created.sessionId,
-      );
-      const nextSessions =
-        existingIndex === -1
-          ? [...previousSessions, created.session]
-          : previousSessions.map((session, index) =>
-              index === existingIndex ? created.session! : session,
-            );
-      const revision = created.revision ?? 0;
-      if (
-        latestStateRevisionRef.current === null ||
-        revision > latestStateRevisionRef.current
-      ) {
-        latestStateRevisionRef.current = revision;
-      }
-      sessionsRef.current = nextSessions;
-      setSessions(nextSessions);
-      setWorkspace((current) =>
-        applyControlPanelLayout(
-          openSessionInWorkspaceState(
-            reconcileWorkspaceState(current, nextSessions),
-            options?.openSessionId ?? created.sessionId,
-            options?.paneId ?? null,
-          ),
+    if (created.session.id !== created.sessionId) {
+      // Wire contract guarantees `session.id === sessionId`; a mismatch
+      // means protocol drift. Trigger a recovery resync so the client
+      // reconciles against authoritative state instead of opening a
+      // workspace pane for a session that was never inserted into
+      // `sessionsRef`. Mirrors the sibling path in `adoptFetchedSession`.
+      requestActionRecoveryResyncRef.current();
+      return false;
+    }
+
+    // Route the session write through the same revision-gate that
+    // governs `adoptState`, BUT pass the response's `serverInstanceId`
+    // so a server-restart-driven revision rewind is accepted. This is
+    // the unified fix for:
+    //   - "Prompt sent during SSE reconnect window is invisible until
+    //     safety-net poll" — after a restart, the POST response's
+    //     instance id differs from `lastSeenServerInstanceIdRef` and
+    //     the gate accepts the lower revision, so the user's prompt
+    //     shows up immediately.
+    //   - "adoptCreatedSessionResponse session write is not
+    //     revision-gated" — a stale POST response (race between SSE
+    //     delta and POST resolution on the same server instance) is
+    //     now rejected instead of unconditionally overwriting
+    //     `sessionsRef`.
+    if (
+      !shouldAdoptSnapshotRevision(
+        latestStateRevisionRef.current,
+        created.revision,
+        {
+          lastSeenServerInstanceId: lastSeenServerInstanceIdRef.current,
+          nextServerInstanceId: created.serverInstanceId,
+        },
+      )
+    ) {
+      return false;
+    }
+
+    const previousSessions = sessionsRef.current;
+    const existingIndex = previousSessions.findIndex(
+      (session) => session.id === created.sessionId,
+    );
+    const nextSessions =
+      existingIndex === -1
+        ? [...previousSessions, created.session]
+        : previousSessions.map((session, index) =>
+            index === existingIndex ? created.session : session,
+          );
+    latestStateRevisionRef.current = created.revision;
+    if (created.serverInstanceId) {
+      lastSeenServerInstanceIdRef.current = created.serverInstanceId;
+    }
+    sessionsRef.current = nextSessions;
+    setSessions(nextSessions);
+    setWorkspace((current) =>
+      applyControlPanelLayout(
+        openSessionInWorkspaceState(
+          reconcileWorkspaceState(current, nextSessions),
+          options?.openSessionId ?? created.sessionId,
+          options?.paneId ?? null,
         ),
-      );
-      return true;
-    }
-
-    if (created.state) {
-      return adoptState(created.state, options);
-    }
-
-    return false;
+      ),
+    );
+    return true;
   }
 
   function adoptFetchedSession(session: Session, revision: number) {
@@ -2622,13 +2657,20 @@ export default function App() {
       !shouldAdoptSnapshotRevision(
         latestStateRevisionRef.current,
         nextState.revision,
-        options,
+        {
+          ...options,
+          lastSeenServerInstanceId: lastSeenServerInstanceIdRef.current,
+          nextServerInstanceId: nextState.serverInstanceId,
+        },
       )
     ) {
       return false;
     }
 
     latestStateRevisionRef.current = nextState.revision;
+    if (nextState.serverInstanceId) {
+      lastSeenServerInstanceIdRef.current = nextState.serverInstanceId;
+    }
     const currentCodexState = codexStateRef.current;
     const currentAgentReadiness = agentReadinessRef.current;
     const currentProjects = projectsRef.current;
@@ -4647,7 +4689,27 @@ export default function App() {
           })),
           normalizedExpandedText,
         );
-        adoptState(state);
+        const adopted = adoptState(state);
+        if (!adopted) {
+          // adoptState returns false when the response is stale
+          // against the current in-memory revision AND the server
+          // instance id did NOT change (so it's not a restart rewind,
+          // just a normal out-of-order race where SSE already
+          // delivered a newer revision for this session — the user's
+          // prompt is already visible via the SSE delta).
+          //
+          // Even though the prompt is already on screen via SSE, the
+          // safety-net poll + error-catch paths both need to know we
+          // are past the POST round-trip — so clear the sending flag
+          // and drop the attachments the same way the success path
+          // would. Do NOT restore the draft: the prompt HAS been
+          // accepted by the server (the POST succeeded with 202),
+          // restoring would re-insert the just-sent text into an
+          // empty box and let the user accidentally send it twice.
+          releaseDraftAttachments(attachments);
+          setRequestError(null);
+          return;
+        }
         releaseDraftAttachments(attachments);
         setRequestError(null);
         // Safety net: if the SSE stream is dead (e.g. after a server
@@ -4681,6 +4743,16 @@ export default function App() {
 
         const ACTIVE_PROMPT_POLL_INTERVAL_MS = 30_000;
         const ACTIVE_PROMPT_POLL_MAX_DURATION_MS = 5 * 60 * 1000;
+        // Deadline-based hard cap instead of a companion setTimeout
+        // that clears the timer-id ref. The previous design had a
+        // race: when the chained callback is awaiting `fetchState()`,
+        // it has already cleared `activePromptPollTimeoutIdRef.current`
+        // at entry. If the hard-cap setTimeout fires during that
+        // await window, it reads `null` and no-ops — so the chain
+        // continues past the 5-minute cap. Capturing an absolute
+        // deadline and checking it at every schedule + resume point
+        // bails out cleanly regardless of when the cap is breached.
+        const pollDeadlineMs = Date.now() + ACTIVE_PROMPT_POLL_MAX_DURATION_MS;
 
         function clearActivePromptPoll() {
           if (activePromptPollTimeoutIdRef.current !== null) {
@@ -4694,6 +4766,10 @@ export default function App() {
             clearActivePromptPoll();
             return;
           }
+          if (Date.now() >= pollDeadlineMs) {
+            clearActivePromptPoll();
+            return;
+          }
           activePromptPollTimeoutIdRef.current = setTimeout(async () => {
             activePromptPollTimeoutIdRef.current = null;
             if (!isMountedRef.current) {
@@ -4704,12 +4780,24 @@ export default function App() {
               if (!isMountedRef.current) {
                 return;
               }
-              // Allow revision downgrade so a restarted server (whose
-              // persisted revision may be lower) is adopted.
-              adoptState(freshState, {
-                force: true,
-                allowRevisionDowngrade: true,
-              });
+              // Post-await deadline re-check: `fetchState` on large
+              // transcripts can take multiple seconds, and the cap
+              // may have lapsed while we were awaiting. Bail out
+              // without adopting so we never produce work past the
+              // hard cap.
+              if (Date.now() >= pollDeadlineMs) {
+                return;
+              }
+              // The server-instance-id check inside `adoptState` now
+              // detects server restarts deterministically via
+              // `nextState.serverInstanceId`, so the poll no longer
+              // needs `force + allowRevisionDowngrade` to recover from
+              // a restart. Adopt with default flags: a stale poll
+              // response (server still running, SSE already delivered
+              // a newer revision) becomes a silent no-op, and a
+              // genuine restart is still accepted because the instance
+              // id changed.
+              adoptState(freshState);
               // Stop once the session is no longer active.
               if (
                 !freshState.sessions?.some(
@@ -4724,13 +4812,18 @@ export default function App() {
             }
             // Chain the next poll only after this one finishes, so a slow
             // `/api/state` response never produces overlapping inflight
-            // requests.
+            // requests. `scheduleNextActivePromptPoll` itself re-checks
+            // the deadline before arming the next timeout.
             scheduleNextActivePromptPoll();
           }, ACTIVE_PROMPT_POLL_INTERVAL_MS);
         };
 
         scheduleNextActivePromptPoll();
-        // Hard cap: stop polling after 5 minutes regardless.
+        // Belt-and-suspenders hard cap: even if the deadline check
+        // above misses a tick somehow, this dedicated timer force-
+        // clears any armed timeout. It will NOT stop an in-flight
+        // `fetchState()` awaited callback — that path is guarded by
+        // the `Date.now() >= pollDeadlineMs` check above.
         activePromptPollTimeoutRef.current = setTimeout(
           clearActivePromptPoll,
           ACTIVE_PROMPT_POLL_MAX_DURATION_MS,

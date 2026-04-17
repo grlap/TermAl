@@ -44,19 +44,14 @@ impl AppState {
             &[],
             None,
         )?;
-        let remote_session = remote_response
-            .session
-            .clone()
-            .or_else(|| {
-                remote_response.state.as_ref().and_then(|state| {
-                    state
-                        .sessions
-                        .iter()
-                        .find(|session| session.id == remote_response.session_id)
-                        .cloned()
-                })
-            })
-            .ok_or_else(|| ApiError::bad_gateway("remote forked session was not returned"))?;
+        // Reject mismatched session identity on the wire — see
+        // `create_remote_session_proxy` for rationale.
+        if remote_response.session.id != remote_response.session_id {
+            return Err(ApiError::bad_gateway(
+                "remote forked session id mismatch: `session.id` does not equal `sessionId`",
+            ));
+        }
+        let remote_session = remote_response.session.clone();
         let local_project_id = {
             let inner = self.inner.lock().expect("state mutex poisoned");
             let index = inner
@@ -66,29 +61,29 @@ impl AppState {
         };
         let (revision, local_session_id, local_session) = {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
-            let applied_remote_revision = remote_response.state.as_ref().is_some_and(|state| {
-                apply_remote_state_if_newer_locked(
-                    &mut inner,
+            // Gate `update_existing` on the remote's applied-revision
+            // tracking — see `create_remote_session_proxy` in
+            // `remote_create_proxies.rs` for the full rationale. A
+            // fork race against active streaming can leave the SSE
+            // bridge at a later revision than this response carries,
+            // in which case refreshing from the POST payload would
+            // regress the mirrored state.
+            let update_existing = !inner
+                .should_skip_remote_applied_revision(
                     &target.remote.id,
-                    state,
-                    Some(&target.remote_session_id),
-                )
-            });
+                    remote_response.revision,
+                );
             let (local_session_id, changed) = ensure_remote_proxy_session_record(
                 &mut inner,
                 &target.remote.id,
                 &remote_session,
                 local_project_id,
-                applied_remote_revision,
+                update_existing,
             );
-            if applied_remote_revision {
+            if update_existing {
                 inner.note_remote_applied_revision(
                     &target.remote.id,
-                    remote_response
-                        .state
-                        .as_ref()
-                        .map(|state| state.revision)
-                        .unwrap_or(remote_response.revision),
+                    remote_response.revision,
                 );
             }
             let local_record = inner
@@ -97,13 +92,7 @@ impl AppState {
                 .cloned()
                 .ok_or_else(|| ApiError::not_found("session not found"))?;
             let local_session = local_record.session.clone();
-            let revision = if applied_remote_revision {
-                self.bump_revision_and_persist_locked(&mut inner).map_err(|err| {
-                    ApiError::internal(format!(
-                        "failed to persist remote forked session proxy: {err:#}"
-                    ))
-                })?
-            } else if changed {
+            let revision = if changed {
                 self.commit_session_created_locked(&mut inner, &local_record)
                     .map_err(|err| {
                         ApiError::internal(format!(
@@ -123,9 +112,12 @@ impl AppState {
 
         Ok(CreateSessionResponse {
             session_id: local_session_id,
-            session: Some(local_session),
+            session: local_session,
             revision,
-            state: None,
+            // Use THIS server's instance id, not the remote's — the
+            // client's restart-detection ref is keyed to the local
+            // instance it connects to, not the remote backend.
+            server_instance_id: self.server_instance_id.clone(),
         })
     }
 

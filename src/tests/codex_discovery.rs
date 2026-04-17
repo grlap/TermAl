@@ -665,3 +665,55 @@ fn import_discovered_codex_threads_preserves_existing_prompt_settings() {
         Some(CodexThreadState::Archived)
     );
 }
+
+// Pins that newly discovered Codex threads land in `inner.sessions`
+// with a `mutation_stamp` > 0, so the SQLite delta-persist watermark
+// actually writes them on its next tick. `import_discovered_codex_threads`
+// calls `create_session` (which stamps via `push_session`) but then
+// replaces the stamped slot with the returned owned record whose stamp
+// is the construction-time default — without a re-stamp after the
+// slot replace, the row is invisible to `collect_persist_delta` until
+// something else happens to re-stamp it (or is never persisted at all
+// on a clean shutdown with no subsequent edits).
+#[test]
+fn import_discovered_codex_threads_stamps_newly_discovered_sessions() {
+    let mut inner = StateInner::new();
+    let project = inner.create_project(
+        Some("TermAl".to_owned()),
+        "/tmp/termal".to_owned(),
+        default_local_remote_id(),
+    );
+
+    // Capture the baseline watermark. The import below must advance
+    // the row's `mutation_stamp` strictly past this value.
+    let watermark_before_import = inner.last_mutation_stamp;
+
+    inner.import_discovered_codex_threads(
+        "/tmp/termal",
+        vec![DiscoveredCodexThread {
+            approval_policy: Some(CodexApprovalPolicy::Never),
+            archived: false,
+            cwd: "/tmp/termal".to_owned(),
+            id: "thread-fresh".to_owned(),
+            model: Some("gpt-5-codex".to_owned()),
+            reasoning_effort: Some(CodexReasoningEffort::Medium),
+            sandbox_mode: Some(CodexSandboxMode::WorkspaceWrite),
+            title: "Freshly discovered thread".to_owned(),
+        }],
+    );
+
+    let record = inner
+        .sessions
+        .iter()
+        .find(|entry| entry.external_session_id.as_deref() == Some("thread-fresh"))
+        .expect("freshly discovered thread should be imported");
+    assert_eq!(record.session.project_id.as_deref(), Some(project.id.as_str()));
+    assert!(
+        record.mutation_stamp > watermark_before_import,
+        "newly imported discovered thread must have mutation_stamp > \
+         pre-import watermark so collect_persist_delta picks it up on \
+         the next tick; got stamp {} vs watermark {}",
+        record.mutation_stamp,
+        watermark_before_import
+    );
+}

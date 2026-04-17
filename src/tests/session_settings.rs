@@ -150,6 +150,7 @@ fn persists_app_settings_and_applies_them_to_new_sessions() {
     assert_eq!(reloaded_inner.preferences.remotes, default_remote_configs());
 
     let reloaded_state = AppState {
+        server_instance_id: state.server_instance_id.clone(),
         default_workdir: "/tmp".to_owned(),
         persistence_path: state.persistence_path.clone(),
         orchestrator_templates_path: state.orchestrator_templates_path.clone(),
@@ -193,10 +194,7 @@ fn persists_app_settings_and_applies_them_to_new_sessions() {
             gemini_approval_mode: None,
         })
         .unwrap();
-    let codex_session = codex_created
-        .session
-        .as_ref()
-        .expect("created Codex session should be returned");
+    let codex_session = &codex_created.session;
     assert_eq!(
         codex_session.reasoning_effort,
         Some(CodexReasoningEffort::High)
@@ -218,10 +216,7 @@ fn persists_app_settings_and_applies_them_to_new_sessions() {
             gemini_approval_mode: None,
         })
         .unwrap();
-    let claude_session = claude_created
-        .session
-        .as_ref()
-        .expect("created Claude session should be returned");
+    let claude_session = &claude_created.session;
     assert_eq!(
         claude_session.claude_approval_mode,
         Some(ClaudeApprovalMode::AutoApprove)
@@ -256,10 +251,7 @@ fn creates_codex_sessions_with_requested_prompt_defaults() {
             gemini_approval_mode: None,
         })
         .unwrap();
-    let session = response
-        .session
-        .as_ref()
-        .expect("created session should be returned");
+    let session = &response.session;
 
     assert_eq!(
         session.approval_policy,
@@ -907,4 +899,3 @@ fn syncs_claude_model_options_into_session_state() {
     assert_eq!(session.model, "default");
     assert_eq!(session.model_options, model_options);
 }
-

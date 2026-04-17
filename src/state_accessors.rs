@@ -193,6 +193,7 @@ impl AppState {
     ) -> StateResponse {
         StateResponse {
             revision: inner.revision,
+            server_instance_id: self.server_instance_id.clone(),
             codex: inner.codex.clone(),
             agent_readiness,
             preferences: inner.preferences.clone(),
