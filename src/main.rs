@@ -369,6 +369,7 @@ impl Mode {
 }
 
 include!("remote.rs");
+include!("remote_terminal.rs");
 include!("remote_sync.rs");
 include!("state.rs");
 include!("workspace_watch.rs");
