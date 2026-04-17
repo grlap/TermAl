@@ -6025,6 +6025,18 @@ struct StateInner {
     orchestrator_instances: Vec<OrchestratorInstance>,
     /// Server-backed workspace documents keyed by workspace id.
     workspace_layouts: BTreeMap<String, WorkspaceLayoutDocument>,
+    /// Monotonic counter used to stamp mutated session records. The persist
+    /// thread uses this plus its own watermark to write only the sessions
+    /// that changed since the last successful persist, so each
+    /// `commit_locked` pays only for the sessions it actually touched
+    /// rather than rewriting every session row. Starts at 0; advanced by
+    /// [`StateInner::next_mutation_stamp`] on every `session_mut*` call.
+    last_mutation_stamp: u64,
+    /// Session ids removed from `sessions` since the last persist tick.
+    /// Drained by the persist thread and applied as targeted `DELETE`
+    /// statements so removed rows do not linger after the move to
+    /// delta persistence.
+    removed_session_ids: Vec<String>,
 }
 
 impl StateInner {
@@ -6043,6 +6055,8 @@ impl StateInner {
             sessions: Vec::new(),
             orchestrator_instances: Vec::new(),
             workspace_layouts: BTreeMap::new(),
+            last_mutation_stamp: 0,
+            removed_session_ids: Vec::new(),
         }
     }
 
@@ -6144,6 +6158,11 @@ impl StateInner {
             runtime_stop_in_progress: false,
             deferred_stop_callbacks: Vec::new(),
             hidden: false,
+            // Freshly created records start unstamped; the call path
+            // immediately inserts this record and then the caller routes
+            // subsequent edits through `session_mut*`, which bumps the
+            // stamp as soon as a mutation happens.
+            mutation_stamp: 0,
             session: Session {
                 id: format!("session-{number}"),
                 name: name.unwrap_or_else(|| format!("{} {}", agent.name(), number)),
@@ -6267,6 +6286,63 @@ impl StateInner {
         let id = format!("message-{}", self.next_message_number);
         self.next_message_number += 1;
         id
+    }
+
+    /// Returns a fresh monotonic mutation stamp.
+    ///
+    /// Every `session_mut*` helper calls this before handing out mutable
+    /// access to a `SessionRecord`. The persist thread compares each
+    /// record's `mutation_stamp` against its watermark to identify the
+    /// exact subset of sessions that changed since the last successful
+    /// persist, so a `commit_locked` on one session no longer re-
+    /// serializes every other session row.
+    fn next_mutation_stamp(&mut self) -> u64 {
+        self.last_mutation_stamp = self.last_mutation_stamp.saturating_add(1);
+        self.last_mutation_stamp
+    }
+
+    /// Stamps the session at `index` with the next mutation stamp.
+    ///
+    /// Use when the caller already has the index (e.g., from a loop or a
+    /// prior `find_session_index`) and intends to mutate that session
+    /// without rebinding through `session_mut_by_index`. Returns the
+    /// assigned stamp, or `None` if the index is out of bounds.
+    fn stamp_session_at_index(&mut self, index: usize) -> Option<u64> {
+        let stamp = self.next_mutation_stamp();
+        let record = self.sessions.get_mut(index)?;
+        record.mutation_stamp = stamp;
+        Some(stamp)
+    }
+
+    /// Finds a session by id and returns mutable access, stamping the
+    /// record so the persist thread picks up the mutation on its next
+    /// tick. Returns `None` if no session matches.
+    fn session_mut(&mut self, session_id: &str) -> Option<&mut SessionRecord> {
+        let index = self.find_session_index(session_id)?;
+        let stamp = self.next_mutation_stamp();
+        let record = self.sessions.get_mut(index)?;
+        record.mutation_stamp = stamp;
+        Some(record)
+    }
+
+    /// Like [`StateInner::session_mut`] but indexed directly. Panics if
+    /// the index is out of bounds; callers should obtain the index via
+    /// `find_session_index` / `find_visible_session_index` first.
+    fn session_mut_by_index(&mut self, index: usize) -> Option<&mut SessionRecord> {
+        let stamp = self.next_mutation_stamp();
+        let record = self.sessions.get_mut(index)?;
+        record.mutation_stamp = stamp;
+        Some(record)
+    }
+
+    /// Records that a session id has been removed from `sessions` since
+    /// the last persist tick. Drained by the persist thread and applied
+    /// as targeted `DELETE` statements so removed rows do not linger in
+    /// SQLite after the move to delta persistence.
+    fn record_removed_session(&mut self, session_id: String) {
+        if !session_id.is_empty() {
+            self.removed_session_ids.push(session_id);
+        }
     }
 
     /// Finds session index.
@@ -6610,6 +6686,11 @@ impl PersistedState {
                 .into_iter()
                 .map(PersistedSessionRecord::into_record)
                 .collect::<Result<Vec<_>>>()?,
+            // Mutation stamps are in-memory only — start at `0` on each
+            // process lifetime. The persist thread's watermark also
+            // starts at `0`, so a fresh load has no pending writes.
+            last_mutation_stamp: 0,
+            removed_session_ids: Vec::new(),
         };
         let persisted_non_running_session_ids = inner
             .sessions
@@ -6733,6 +6814,9 @@ impl PersistedSessionRecord {
             runtime_stop_in_progress: false,
             deferred_stop_callbacks: Vec::new(),
             hidden: false,
+            // Freshly loaded records start unstamped; nothing has changed
+            // since the on-disk snapshot so nothing needs to be persisted.
+            mutation_stamp: 0,
             session,
         };
         sync_codex_thread_state(&mut record);
@@ -6892,6 +6976,14 @@ struct SessionRecord {
     deferred_stop_callbacks: Vec<DeferredStopCallback>,
     hidden: bool,
     session: Session,
+    /// Monotonic mutation stamp assigned by [`StateInner::next_mutation_stamp`]
+    /// every time this record is handed out through one of the
+    /// `session_mut*` helpers. Not persisted — stamps start at `0` on each
+    /// process lifetime and the persist thread's watermark advances
+    /// accordingly. A stamp strictly greater than the persist watermark
+    /// means this record has in-memory changes that have not yet reached
+    /// SQLite.
+    mutation_stamp: u64,
 }
 
 impl SessionRecord {

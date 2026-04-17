@@ -2767,6 +2767,9 @@ fn upsert_remote_proxy_session_record(
         runtime_stop_in_progress: false,
         deferred_stop_callbacks: Vec::new(),
         hidden: false,
+        // Freshly created records start unstamped; subsequent edits
+        // flow through `session_mut*` which stamps them on access.
+        mutation_stamp: 0,
         session,
     };
     sync_codex_thread_state(&mut record);

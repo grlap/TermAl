@@ -20976,6 +20976,95 @@ fn state_inner_remote_applied_revision_methods_cover_monotonic_cases() {
     assert!(!inner.should_skip_remote_applied_delta_revision("ssh-lab-2", 1));
 }
 
+// Tests that the monotonic mutation counter advances exactly once per
+// `next_mutation_stamp` call and never decreases. The persist thread's
+// delta logic depends on stamps being strictly monotonic within a
+// process lifetime; a regression that skipped, repeated, or rolled back
+// a stamp would either re-write sessions needlessly or silently skip
+// writes.
+#[test]
+fn state_inner_next_mutation_stamp_is_strictly_monotonic() {
+    let mut inner = StateInner::new();
+    assert_eq!(inner.last_mutation_stamp, 0);
+
+    let first = inner.next_mutation_stamp();
+    let second = inner.next_mutation_stamp();
+    let third = inner.next_mutation_stamp();
+
+    assert_eq!(first, 1);
+    assert_eq!(second, 2);
+    assert_eq!(third, 3);
+    assert_eq!(inner.last_mutation_stamp, 3);
+}
+
+// Tests that `session_mut` / `session_mut_by_index` / `stamp_session_at_index`
+// all bump the monotonic counter and stamp the targeted session record,
+// so any routing of mutations through these helpers causes the
+// persist thread to see the session as dirty on the next tick.
+#[test]
+fn state_inner_session_mut_helpers_stamp_the_record() {
+    let state = test_app_state();
+    let session_id = test_session_id(&state, Agent::Claude);
+    let mut inner = state.inner.lock().expect("state mutex poisoned");
+    let initial_stamp = inner
+        .find_session_index(&session_id)
+        .map(|index| inner.sessions[index].mutation_stamp)
+        .expect("session should exist");
+    let initial_counter = inner.last_mutation_stamp;
+
+    {
+        let record = inner
+            .session_mut(&session_id)
+            .expect("session_mut should find the session");
+        assert!(record.mutation_stamp > initial_stamp);
+        assert_eq!(record.mutation_stamp, initial_counter + 1);
+    }
+    let after_session_mut_counter = inner.last_mutation_stamp;
+    assert_eq!(after_session_mut_counter, initial_counter + 1);
+
+    let index = inner
+        .find_session_index(&session_id)
+        .expect("session should exist");
+    {
+        let record = inner
+            .session_mut_by_index(index)
+            .expect("session_mut_by_index should succeed");
+        assert_eq!(record.mutation_stamp, after_session_mut_counter + 1);
+    }
+    let after_indexed_counter = inner.last_mutation_stamp;
+    assert_eq!(after_indexed_counter, after_session_mut_counter + 1);
+
+    let stamped = inner
+        .stamp_session_at_index(index)
+        .expect("stamp_session_at_index should succeed");
+    assert_eq!(stamped, after_indexed_counter + 1);
+    assert_eq!(inner.sessions[index].mutation_stamp, stamped);
+    assert_eq!(inner.last_mutation_stamp, stamped);
+}
+
+// Tests that `record_removed_session` collects non-empty session ids for
+// the persist thread to drain, and ignores empty ids so a misuse does
+// not generate useless `DELETE WHERE id = ''` statements.
+#[test]
+fn state_inner_record_removed_session_accumulates_ids() {
+    let mut inner = StateInner::new();
+    assert!(inner.removed_session_ids.is_empty());
+
+    inner.record_removed_session("session-1".to_owned());
+    inner.record_removed_session("session-2".to_owned());
+    inner.record_removed_session(String::new());
+    inner.record_removed_session("session-3".to_owned());
+
+    assert_eq!(
+        inner.removed_session_ids,
+        vec![
+            "session-1".to_owned(),
+            "session-2".to_owned(),
+            "session-3".to_owned(),
+        ],
+    );
+}
+
 // Tests that raw remote error bodies are sanitized and capped before they reach the UI.
 #[test]
 fn decode_remote_json_sanitizes_and_caps_raw_error_bodies() {
