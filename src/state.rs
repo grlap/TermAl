@@ -24,12 +24,48 @@ mutex.
 */
 
 /// Tracks app state.
-/// A queued persist request carrying a pre-cloned state snapshot and the
-/// target path.  The background persist thread drains these sequentially,
-/// serializing and writing outside the state mutex.
-struct PersistRequest {
-    path: Arc<PathBuf>,
-    state: PersistedState,
+/// Signals a pending persist.
+///
+/// The background persist thread owns an `Arc<Mutex<StateInner>>` and
+/// collects the diff itself on each tick — it locks briefly, filters
+/// sessions by `mutation_stamp > watermark`, clones only that subset
+/// plus app metadata, drains `removed_session_ids`, then releases the
+/// lock and writes to SQLite. `PersistRequest` therefore only has to
+/// carry enough information for the thread to know that something
+/// changed; the full `PersistedState` snapshot that earlier versions
+/// cloned under the state mutex is no longer needed.
+///
+/// `Delta` is the normal case; `Full` is used only by the startup path
+/// (and any future reset flow) to guarantee a complete write even when
+/// the mutation counter has not advanced yet.
+enum PersistRequest {
+    /// Full snapshot write — all sessions, full metadata. Carries the
+    /// pre-cloned payload because the startup-dump caller does not
+    /// block on the persist thread to finish before continuing.
+    Full(Box<PersistedState>),
+    /// Incremental persist: the thread looks up the current
+    /// `last_mutation_stamp` and writes only the sessions that
+    /// advanced past the thread's own watermark.
+    Delta,
+}
+
+/// The diff the persist thread writes on each tick.
+///
+/// Built inside `AppState::inner` by
+/// [`StateInner::collect_persist_delta`]. `changed_sessions` is the
+/// subset of sessions whose `mutation_stamp` advanced past the
+/// thread's watermark; `removed_session_ids` is the union of explicit
+/// removals and sessions that flipped to hidden since the last
+/// persist. The persist thread then writes the delta to SQLite with
+/// a targeted `INSERT OR UPDATE` per changed session and a targeted
+/// `DELETE WHERE id = ?` per removed id — no `DELETE FROM sessions`
+/// sweep.
+#[cfg_attr(test, allow(dead_code))]
+struct PersistDelta {
+    metadata: PersistedState,
+    changed_sessions: Vec<PersistedSessionRecord>,
+    removed_session_ids: Vec<String>,
+    watermark: u64,
 }
 
 #[derive(Clone)]
@@ -541,9 +577,30 @@ impl AppState {
             Arc::new(RwLock::new(fresh_agent_readiness_cache(&default_workdir)));
         let (persist_tx, persist_rx) = mpsc::channel::<PersistRequest>();
 
-        // Background persist thread: drains queued snapshots and writes
-        // the latest one. Intermediate snapshots are skipped (only the
-        // last queued state matters for durability).
+        // `AppState::inner` is built here (rather than inside the struct
+        // literal further below) so we can share an `Arc` clone with the
+        // background persist thread. The thread briefly re-locks it on
+        // each tick to collect the diff; see `StateInner::collect_persist_delta`.
+        let inner_arc = Arc::new(Mutex::new(inner));
+        let inner_for_persist = Arc::clone(&inner_arc);
+        let persist_path_for_persist = Arc::new(persistence_path.clone());
+        let persist_path_for_state = Arc::clone(&persist_path_for_persist);
+
+        // Background persist thread: drains `PersistRequest` signals and
+        // writes the delta or full snapshot.
+        //
+        // Normal operation: `Delta` signals. The thread locks
+        // `inner_for_persist` briefly, collects the diff of sessions
+        // whose `mutation_stamp` advanced past its own watermark plus
+        // the drained `removed_session_ids`, releases the lock, writes
+        // with targeted `INSERT OR UPDATE` / `DELETE WHERE id = ?`, and
+        // advances its watermark.
+        //
+        // `Full` signals (startup and reset paths) ship a pre-built
+        // `PersistedState` payload that replaces the entire sessions
+        // table — necessary for initial disk layout and for the
+        // JSON→SQLite import path where the thread cannot diff against
+        // a previous state.
         //
         // The thread owns a `SqlitePersistConnectionCache` so the SQLite
         // connection and schema-validation cost are amortized across
@@ -555,16 +612,90 @@ impl AppState {
             .spawn(move || {
                 #[cfg(not(test))]
                 let mut cache = SqlitePersistConnectionCache::new();
+                let mut watermark: u64 = 0;
                 while let Ok(mut request) = persist_rx.recv() {
-                    // Drain any queued snapshots — only the newest matters.
-                    while let Ok(newer) = persist_rx.try_recv() {
-                        request = newer;
+                    // Coalesce: if multiple signals queued up, take the
+                    // latest. If any was a `Full`, we must honor the
+                    // full snapshot (the caller who sent `Full`
+                    // intentionally ships a consistent payload).
+                    let mut have_full: Option<Box<PersistedState>> = None;
+                    if let PersistRequest::Full(state) = request {
+                        have_full = Some(state);
                     }
+                    while let Ok(newer) = persist_rx.try_recv() {
+                        match newer {
+                            PersistRequest::Full(state) => have_full = Some(state),
+                            PersistRequest::Delta => {
+                                // A Delta after a pending Full is already
+                                // covered by whatever collect_persist_delta
+                                // sees next — don't overwrite a queued Full.
+                            }
+                        }
+                        // Fall through to keep draining.
+                        request = PersistRequest::Delta;
+                    }
+                    let _ = request;
+
                     #[cfg(not(test))]
-                    let result =
-                        persist_state_via_cache(&mut cache, &request.path, &request.state);
+                    let result: Result<()> = (|| {
+                        if let Some(full) = have_full {
+                            persist_state_via_cache(
+                                &mut cache,
+                                &persist_path_for_persist,
+                                &full,
+                            )?;
+                            watermark = {
+                                let inner = inner_for_persist
+                                    .lock()
+                                    .expect("state mutex poisoned");
+                                inner.last_mutation_stamp
+                            };
+                            return Ok(());
+                        }
+                        let delta = {
+                            let mut inner = inner_for_persist
+                                .lock()
+                                .expect("state mutex poisoned");
+                            inner.collect_persist_delta(watermark)
+                        };
+                        let next_watermark = delta.watermark;
+                        // Always upsert metadata (revision, preferences,
+                        // projects, orchestrators, workspace_layouts).
+                        // Mutation stamps only cover per-session changes,
+                        // but commit_locked bumps `inner.revision` which
+                        // must reach SQLite, and non-session fields can
+                        // change without any session stamp moving. Empty
+                        // `changed_sessions` + `removed_session_ids` is
+                        // fine; the transaction just upserts one
+                        // app_state row.
+                        persist_delta_via_cache(
+                            &mut cache,
+                            &persist_path_for_persist,
+                            &delta,
+                        )?;
+                        watermark = next_watermark;
+                        Ok(())
+                    })();
+
                     #[cfg(test)]
-                    let result = persist_state_from_persisted(&request.path, &request.state);
+                    let result: Result<()> = {
+                        // Tests run the old full-state JSON path so
+                        // existing persist-related assertions keep
+                        // working without knowing about stamps.
+                        let persisted = if let Some(full) = have_full {
+                            *full
+                        } else {
+                            let inner = inner_for_persist
+                                .lock()
+                                .expect("state mutex poisoned");
+                            PersistedState::from_inner(&inner)
+                        };
+                        persist_state_from_persisted(
+                            &persist_path_for_persist,
+                            &persisted,
+                        )
+                    };
+
                     if let Err(err) = result {
                         eprintln!("[termal] background persist failed: {err:#}");
                     }
@@ -607,7 +738,7 @@ impl AppState {
 
         let state = Self {
             default_workdir,
-            persistence_path: Arc::new(persistence_path),
+            persistence_path: persist_path_for_state,
             orchestrator_templates_path: Arc::new(orchestrator_templates_path),
             orchestrator_templates_lock: Arc::new(Mutex::new(())),
             review_documents_lock: Arc::new(Mutex::new(())),
@@ -634,7 +765,7 @@ impl AppState {
             )),
             stopping_orchestrator_ids: Arc::new(Mutex::new(HashSet::new())),
             stopping_orchestrator_session_ids: Arc::new(Mutex::new(HashMap::new())),
-            inner: Arc::new(Mutex::new(inner)),
+            inner: inner_arc,
         };
         state.seed_hidden_claude_spares();
         {
@@ -1315,30 +1446,36 @@ impl AppState {
     }
 
     // Internal bookkeeping changes should be persisted without advancing the client-visible revision.
-    /// Persists internal locked. Builds the persisted projection while
-    /// holding the lock (necessary — `inner` fields are read here), then
-    /// sends it through the persistence channel to a background thread
-    /// that serializes to JSON and writes the file so other requests are
-    /// not blocked behind the state mutex.
+    /// Persists internal locked.
     ///
-    /// Hot-path detail: the payload is built once via
-    /// `PersistedState::from_inner` and moved into the `mpsc::SendError`
-    /// on channel-disconnect (test builds that construct `AppState`
-    /// manually without a persist thread). The previous implementation
-    /// cloned the payload a second time before sending so the original
-    /// could be reused in the fallback branch; for a visible-session list
-    /// with long transcripts that redundant clone dominated the
-    /// `commit_locked` hot path under the state mutex.
+    /// Sends a `PersistRequest::Delta` wake signal to the background
+    /// persist thread; the thread then locks `inner` briefly on its
+    /// own to collect the diff of sessions whose `mutation_stamp` is
+    /// past its internal watermark. This means `commit_locked` no
+    /// longer pays to clone `PersistedState::from_inner(inner)` under
+    /// the state mutex on every mutation — for a visible-session list
+    /// with long transcripts, that clone used to dominate the
+    /// mutation hot path.
+    ///
+    /// In `#[cfg(test)]` builds, `AppState` is typically constructed
+    /// manually with a disconnected persist channel; the send fails
+    /// and we fall back to the old synchronous JSON persist so
+    /// existing test infrastructure keeps working.
     fn persist_internal_locked(&self, inner: &StateInner) -> Result<()> {
-        let persisted = PersistedState::from_inner(inner);
-        if let Err(mpsc::SendError(request)) = self.persist_tx.send(PersistRequest {
-            path: self.persistence_path.clone(),
-            state: persisted,
-        }) {
-            // Channel disconnected (no background thread, e.g. in tests).
-            // `SendError::0` hands the unsent payload back so the fallback
-            // synchronous persist does not need a second clone.
-            persist_state_from_persisted(&request.path, &request.state)?;
+        if let Err(mpsc::SendError(request)) = self.persist_tx.send(PersistRequest::Delta) {
+            // Channel disconnected — synchronous fallback for tests
+            // and any shutdown path where the persist thread has
+            // already exited. Build the full persist payload here
+            // because we have no background worker to do it.
+            match request {
+                PersistRequest::Full(state) => {
+                    persist_state_from_persisted(&self.persistence_path, &state)?;
+                }
+                PersistRequest::Delta => {
+                    let persisted = PersistedState::from_inner(inner);
+                    persist_state_from_persisted(&self.persistence_path, &persisted)?;
+                }
+            }
         }
         Ok(())
     }
@@ -6345,7 +6482,7 @@ impl StateInner {
             record.session.claude_effort = Some(self.preferences.default_claude_effort);
         }
 
-        self.sessions.push(record.clone());
+        self.push_session(record.clone());
         record
     }
 
@@ -6401,7 +6538,9 @@ impl StateInner {
             approval_mode,
             effort,
         ) {
-            let record = &mut self.sessions[index];
+            let record = self
+                .session_mut_by_index(index)
+                .expect("session index should be valid");
             reset_hidden_claude_spare_record(record);
             return matches!(record.runtime, SessionRuntime::None)
                 .then(|| record.session.id.clone());
@@ -6523,6 +6662,46 @@ impl StateInner {
         }
     }
 
+    /// Collects the subset of state that advanced past `watermark`.
+    ///
+    /// Called by the background persist thread while it briefly holds
+    /// `AppState::inner`. Clones only:
+    ///
+    /// - App metadata (non-session fields; shallow clones, no transcripts).
+    /// - Sessions whose `mutation_stamp > watermark`, filtered so
+    ///   hidden sessions produce `DELETE`s instead of upserts (visible
+    ///   sessions that have flipped to hidden since the last persist
+    ///   need to disappear from SQLite, and hidden spares are
+    ///   regenerated on startup rather than persisted).
+    /// - The tombstone list of explicitly removed session ids, drained
+    ///   from `removed_session_ids`.
+    ///
+    /// Returns the new watermark (`last_mutation_stamp` at collection
+    /// time) that the caller should install after a successful write.
+    fn collect_persist_delta(&mut self, watermark: u64) -> PersistDelta {
+        let mut changed_sessions: Vec<PersistedSessionRecord> = Vec::new();
+        let mut removed_ids = std::mem::take(&mut self.removed_session_ids);
+        for record in &self.sessions {
+            if record.mutation_stamp <= watermark {
+                continue;
+            }
+            if record.hidden {
+                // A session that changed and is now hidden must not
+                // stay in SQLite — hidden spares are re-seeded on
+                // startup, so ensure the row is removed.
+                removed_ids.push(record.session.id.clone());
+            } else {
+                changed_sessions.push(PersistedSessionRecord::from_record(record));
+            }
+        }
+        PersistDelta {
+            metadata: PersistedState::metadata_from_inner(self),
+            changed_sessions,
+            removed_session_ids: removed_ids,
+            watermark: self.last_mutation_stamp,
+        }
+    }
+
     /// Finds session index.
     fn find_session_index(&self, session_id: &str) -> Option<usize> {
         self.sessions
@@ -6629,7 +6808,9 @@ impl StateInner {
 
             if let Some(index) = existing_index {
                 self.allow_discovered_codex_thread(Some(thread.id.as_str()));
-                let record = &mut self.sessions[index];
+                let record = self
+                    .session_mut_by_index(index)
+                    .expect("session index should be valid");
                 if record.session.workdir != thread.cwd {
                     record.session.workdir = thread.cwd.clone();
                 }
@@ -6758,7 +6939,9 @@ impl StateInner {
                 continue;
             }
             let recovery = {
-                let record = &mut self.sessions[index];
+                let record = self
+                    .session_mut_by_index(index)
+                    .expect("session index should be valid");
                 recover_interrupted_session_record(record)
             };
 
@@ -6767,7 +6950,9 @@ impl StateInner {
             };
 
             let message_id = self.next_message_id();
-            let record = &mut self.sessions[index];
+            let record = self
+                .session_mut_by_index(index)
+                .expect("session index should be valid");
             push_message_on_record(
                 record,
                 Message::Text {

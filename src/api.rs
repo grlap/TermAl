@@ -408,6 +408,80 @@ fn persist_state_via_cache(
     )
 }
 
+/// Applies a `PersistDelta` — metadata upsert plus targeted session
+/// row `INSERT OR UPDATE`s and `DELETE`s — via the shared connection
+/// cache.
+///
+/// Unlike [`persist_state_via_cache`] this does NOT issue
+/// `DELETE FROM sessions`; it writes only the rows in
+/// `delta.changed_sessions` and removes only `delta.removed_session_ids`.
+/// Unchanged session rows are left untouched so a mutation on one
+/// session no longer rewrites every other session row every commit.
+#[cfg(not(test))]
+fn persist_delta_via_cache(
+    cache: &mut SqlitePersistConnectionCache,
+    path: &FsPath,
+    delta: &PersistDelta,
+) -> Result<()> {
+    let sqlite_path = sqlite_persistence_path_for_json_path(path);
+    let metadata_json = serde_json::to_string(&delta.metadata)
+        .context("failed to serialize persisted state metadata")?;
+    let connection = cache.connection_for(&sqlite_path)?;
+    let tx = connection.transaction().with_context(|| {
+        format!(
+            "failed to start SQLite transaction for `{}`",
+            sqlite_path.display()
+        )
+    })?;
+    tx.execute(
+        "INSERT INTO app_state(key, value_json) VALUES(?1, ?2)
+         ON CONFLICT(key) DO UPDATE SET value_json = excluded.value_json",
+        rusqlite::params![SQLITE_METADATA_KEY, metadata_json],
+    )
+    .with_context(|| {
+        format!(
+            "failed to write state metadata to `{}`",
+            sqlite_path.display()
+        )
+    })?;
+    for session_id in &delta.removed_session_ids {
+        tx.execute(
+            "DELETE FROM sessions WHERE id = ?1",
+            rusqlite::params![session_id],
+        )
+        .with_context(|| {
+            format!(
+                "failed to remove session `{}` from `{}`",
+                session_id,
+                sqlite_path.display()
+            )
+        })?;
+    }
+    for session in &delta.changed_sessions {
+        let session_json = serde_json::to_string(session)
+            .context("failed to serialize persisted session")?;
+        tx.execute(
+            "INSERT INTO sessions(id, value_json) VALUES(?1, ?2)
+             ON CONFLICT(id) DO UPDATE SET value_json = excluded.value_json",
+            rusqlite::params![&session.session.id, session_json],
+        )
+        .with_context(|| {
+            format!(
+                "failed to write persisted session `{}` to `{}`",
+                session.session.id,
+                sqlite_path.display()
+            )
+        })?;
+    }
+    tx.commit().with_context(|| {
+        format!(
+            "failed to commit persisted state to `{}`",
+            sqlite_path.display()
+        )
+    })?;
+    Ok(())
+}
+
 /// Persists state from a pre-built `PersistedState` snapshot.
 #[cfg(not(test))]
 fn persist_state_from_persisted(path: &FsPath, persisted: &PersistedState) -> Result<()> {
