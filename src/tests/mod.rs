@@ -40,6 +40,7 @@ mod session_lifecycle;
 mod session_settings;
 mod session_stop;
 mod shared_codex;
+mod telegram;
 mod terminal;
 mod workspace;
 
@@ -4697,60 +4698,4 @@ fn project_action_keep_iterating_dispatches_a_follow_up_prompt() {
     fs::remove_dir_all(repo_root).unwrap();
 }
 
-// Tests that Telegram command parser supports suffixes and aliases.
-#[test]
-fn telegram_command_parser_supports_suffixes_and_aliases() {
-    let parsed =
-        parse_telegram_command("/commit@termal_bot   now please").expect("command should parse");
-    assert_eq!(
-        parsed.command,
-        TelegramIncomingCommand::Action(ProjectActionId::AskAgentToCommit)
-    );
-    assert_eq!(parsed.args, "now please");
-
-    let parsed = parse_telegram_command("/status").expect("status should parse");
-    assert_eq!(parsed.command, TelegramIncomingCommand::Status);
-}
-
-// Tests that Telegram command parser rejects unknown slash commands.
-#[test]
-fn telegram_command_parser_rejects_unknown_slash_commands() {
-    assert!(parse_telegram_command("/unknown").is_none());
-}
-
-// Tests that Telegram digest renderer includes actions and public link.
-#[test]
-fn telegram_digest_renderer_includes_actions_and_public_link() {
-    let digest = ProjectDigestResponse {
-        project_id: "project-1".to_owned(),
-        headline: "termal".to_owned(),
-        done_summary: "Updated the digest API.".to_owned(),
-        current_status: "Changes are ready for review.".to_owned(),
-        primary_session_id: Some("session-1".to_owned()),
-        proposed_actions: vec![
-            ProjectActionId::ReviewInTermal.into_digest_action(),
-            ProjectActionId::AskAgentToCommit.into_digest_action(),
-        ],
-        deep_link: Some("/?projectId=project-1&sessionId=session-1".to_owned()),
-        source_message_ids: vec!["message-1".to_owned()],
-    };
-
-    let rendered = render_telegram_digest(&digest, Some("https://termal.local"));
-    assert!(rendered.contains("Project: termal"));
-    assert!(rendered.contains("Next: Review in TermAl, Ask Agent to Commit"));
-    assert!(
-        rendered.contains("Open: https://termal.local/?projectId=project-1&sessionId=session-1")
-    );
-
-    let keyboard = build_telegram_digest_keyboard(&digest).expect("keyboard should exist");
-    assert_eq!(keyboard.inline_keyboard.len(), 1);
-    assert_eq!(
-        keyboard.inline_keyboard[0][0].callback_data,
-        "review-in-termal"
-    );
-    assert_eq!(
-        keyboard.inline_keyboard[0][1].callback_data,
-        "ask-agent-to-commit"
-    );
-}
 
