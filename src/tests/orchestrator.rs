@@ -1,21 +1,46 @@
-// Orchestrator lifecycle, template, transition, and recovery tests.
+// orchestrator subsystem: lifecycle, transitions, stop recovery, and templates.
 //
-// Covers: HTTP create/list/lifecycle routes, stop-route edge cases, aborted
-// stop cleanup + persist failure recovery (cleanup/resume/restart variants,
-// orphaned child queue handling), blocked session manual recovery FIFO
-// semantics, `begin_orchestrator_stop` guard invariants and persist
-// failure rollback, `load_state` recovery of in-progress stops, template
-// draft round-trips, failed transition dispatch becoming a visible error
-// without blocking other instances, non-scheduling of orchestrator
-// transitions on stop/fail/mark-error/runtime-exit, and killing a session
-// pruning its orchestrator links.
+// an orchestrator template declares N session slots (planner, builder,
+// reviewer, ...) with agent + prompt defaults plus transitions between them
+// (e.g. "when planner idles, dispatch planner's final turn message to
+// implementer"). a template spawns an instance: a live run that holds a
+// template_session_id -> real session_id mapping, a list of
+// `pending_transitions`, and a state machine of Running -> StopInProgress ->
+// Stopped.
 //
-// Extracted from tests.rs — contiguous ~3590-line tail (previously lines
-// 5096-8685) that is the last big cohesive cluster in mod.rs.
+// stop semantics are the hard part. stopping an instance must stop every
+// child session without losing work that arrived mid-stop. aborted stops
+// (a child failed to stop cleanly, usually via a persist failure) must
+// recover gracefully on resume or full restart and must never re-dispatch
+// orchestrator work that already completed during the stop window. blocked
+// sessions (auto-dispatch blocked after a failed stop) require manual
+// recovery that prioritizes the user's recovery prompt over pending
+// orchestrator transitions while preserving FIFO for older queued user
+// prompts and never re-firing stale orchestrator work.
+//
+// `begin_orchestrator_stop` must roll back its StopInProgress guard on
+// persist failure or the instance would be stuck forever. `load_state` on
+// startup reconciles mid-stop instances: completed children let the stop
+// finish; unstopped children keep the instance Running while pending
+// transitions pointing at already-stopped children are pruned. templates
+// round-trip through `orchestrator_template_from_draft` /
+// `orchestrator_template_to_draft`. stop/fail/mark-error/runtime-exit must
+// never schedule orchestrator transitions — those are reactive completion
+// events, not error paths.
+//
+// production surfaces: `AppState::create_orchestrator_instance`,
+// `stop_orchestrator_instance`, `begin_orchestrator_stop`,
+// `schedule_orchestrator_transitions_for_completed_session`,
+// `orchestrator_template_from_draft`, and the `load_state` recovery paths
+// live in `src/orchestrators.rs` and `src/state.rs`.
 
 use super::*;
 
-// Tests that create orchestrator instance route uses template project when request project ID is empty.
+// Pins the /api/orchestrators POST fallback: an empty projectId in the
+// request falls back to the template's own project, and the snapshot echoes
+// that resolved project id on every session instance.
+// Guards against silently dropping a template's default project and
+// against the response forgetting to inline the fallback project id.
 #[tokio::test]
 async fn create_orchestrator_instance_route_uses_template_project_when_request_project_id_is_empty()
 {
@@ -72,7 +97,12 @@ async fn create_orchestrator_instance_route_uses_template_project_when_request_p
     let _ = fs::remove_dir_all(project_root);
 }
 
-// Tests that orchestrator lifecycle routes update state and stop active sessions.
+// Pins /api/orchestrators/{id}/{pause,resume,stop}: status transitions
+// flow through the HTTP layer, and a successful stop idles active child
+// sessions, clears their queued orchestrator follow-ups, and records a
+// completed_at stamp.
+// Guards against the route returning stale orchestrator state, leaking an
+// Active child runtime past stop, or forgetting to drain queued prompts.
 #[tokio::test]
 async fn orchestrator_lifecycle_routes_update_state_and_stop_active_sessions() {
     let state = test_app_state();
@@ -210,7 +240,12 @@ async fn orchestrator_lifecycle_routes_update_state_and_stop_active_sessions() {
     let _ = fs::remove_dir_all(project_root);
     let _ = fs::remove_file(state.persistence_path.as_path());
 }
-// Tests that orchestrator stop route preserves running state when a child stop fails.
+// Pins the stop-route rollback: when one child's kill fails mid-stop the
+// route returns 500 and the instance stays Running (not half-Stopped),
+// while children that did stop cleanly keep their Idle state both in
+// memory and on disk.
+// Guards against leaving the instance wedged in StopInProgress or
+// silently marking it Stopped despite a live child process.
 #[tokio::test]
 async fn orchestrator_stop_route_preserves_running_state_when_a_child_stop_fails() {
     let state = test_app_state();
@@ -355,7 +390,13 @@ async fn orchestrator_stop_route_preserves_running_state_when_a_child_stop_fails
     let _ = fs::remove_file(state.persistence_path.as_path());
 }
 
-// Tests that aborted stop cleanup preserves child work when child stop persist fails.
+// Pins the aborted-stop cleanup path: if child-stop persistence fails,
+// the stop guard tracks zero stopped children and
+// prune_pending_transitions_for_stopped_orchestrator_sessions keeps the
+// builder's queued work and pending transition intact, rolling the
+// instance back to Running both in memory and on reload.
+// Guards against the cleanup path throwing away uncommitted child work
+// or leaving stale stopped-id entries after the persist failure.
 #[test]
 fn aborted_stop_cleanup_preserves_child_work_when_child_stop_persist_fails() {
     let mut state = test_app_state();
@@ -547,7 +588,12 @@ fn aborted_stop_cleanup_preserves_child_work_when_child_stop_persist_fails() {
     let _ = fs::remove_dir_all(failing_persistence_path);
 }
 
-// Tests that aborted stop resume does not redispatch child after child stop persist fails.
+// Pins aborted-stop resume within the same process: after cleanup,
+// resume_pending_orchestrator_transitions leaves the pending transition
+// parked because the child is flagged orchestrator_auto_dispatch_blocked.
+// The block survives a fresh load_state.
+// Guards against the resume path auto-re-firing a transition into a
+// session that was left blocked by a failed stop.
 #[test]
 fn aborted_stop_resume_does_not_redispatch_child_after_child_stop_persist_fails() {
     let mut state = test_app_state();
@@ -708,7 +754,12 @@ fn aborted_stop_resume_does_not_redispatch_child_after_child_stop_persist_fails(
     let _ = fs::remove_dir_all(failing_persistence_path);
 }
 
-// Tests that aborted stop restart does not redispatch child after child stop persist fails.
+// Pins aborted-stop resume across a full process restart: after a new
+// AppState loads from disk the pending transition is still parked, the
+// builder is still auto_dispatch_blocked, and no transition fires during
+// recovery.
+// Guards against reboot re-dispatch — once a blocked child is persisted
+// blocked, load_state must not re-arm its pending transition.
 #[test]
 fn aborted_stop_restart_does_not_redispatch_child_after_child_stop_persist_fails() {
     let project_root = std::env::temp_dir().join(format!(
@@ -863,7 +914,12 @@ fn aborted_stop_restart_does_not_redispatch_child_after_child_stop_persist_fails
     let _ = fs::remove_dir_all(state_root);
 }
 
-// Tests that aborted stop restart does not dispatch orphaned child queue after child stop persist fails.
+// Pins the orphaned-queue variant: when the child had an orchestrator
+// prompt already queued before the failed stop, a restart keeps the
+// queued prompt parked behind the auto_dispatch_blocked flag instead of
+// firing it on boot.
+// Guards against boot-time auto-dispatch of a pre-queued orchestrator
+// prompt that should be gated on manual recovery.
 #[test]
 fn aborted_stop_restart_does_not_dispatch_orphaned_child_queue_after_child_stop_persist_fails() {
     let project_root = std::env::temp_dir().join(format!(
@@ -1007,7 +1063,13 @@ fn aborted_stop_restart_does_not_dispatch_orphaned_child_queue_after_child_stop_
     let _ = fs::remove_dir_all(project_root);
 }
 
-// Tests that blocked session manual recovery dispatch prioritizes user prompt after restart.
+// Pins manual recovery on a blocked orchestrator child: a wrong-agent
+// runtime rejects with 500 without clearing the block, and once the
+// correct Claude runtime is attached the user's recovery prompt
+// dispatches immediately while the older orchestrator queue stays parked
+// behind it.
+// Guards against stale orchestrator work jumping ahead of the recovery
+// prompt or the first failed attempt silently unblocking the session.
 #[test]
 fn blocked_session_manual_recovery_dispatch_prioritizes_user_prompt_after_restart() {
     let project_root = std::env::temp_dir().join(format!(
@@ -1230,7 +1292,13 @@ fn blocked_session_manual_recovery_dispatch_prioritizes_user_prompt_after_restar
     let _ = fs::remove_dir_all(project_root);
 }
 
-// Tests that blocked session manual recovery preserves user prompt fifo after plain stop persist failure.
+// Pins FIFO for queued user prompts on a plain blocked session: after
+// the user queued a prompt, a failed stop persistence flipped the
+// auto_dispatch_blocked flag. Manual recovery then dispatches the
+// *older* user prompt first and requeues the new recovery prompt
+// behind it.
+// Guards against a new user prompt stealing the dispatch slot from an
+// older queued user prompt during block recovery.
 #[test]
 fn blocked_session_manual_recovery_preserves_user_prompt_fifo_after_plain_stop_persist_failure() {
     let mut state = test_app_state();
@@ -1363,7 +1431,13 @@ fn blocked_session_manual_recovery_preserves_user_prompt_fifo_after_plain_stop_p
     let _ = fs::remove_dir_all(failing_persistence_path);
 }
 
-// Tests that blocked session manual recovery prioritizes existing user queue ahead of stale orchestrator work.
+// Pins the mixed-queue recovery ordering: with a stale orchestrator
+// prompt queued ahead of a user prompt, manual recovery dispatches the
+// older user prompt first, leaves the stale orchestrator entry in the
+// queue, and slots the fresh recovery prompt ahead of it as a User
+// entry.
+// Guards against stale orchestrator work winning the dispatch race
+// against older queued user work during manual recovery.
 #[test]
 fn blocked_session_manual_recovery_prioritizes_existing_user_queue_ahead_of_stale_orchestrator_work()
  {
@@ -1525,7 +1599,14 @@ fn blocked_session_manual_recovery_prioritizes_existing_user_queue_ahead_of_stal
     let _ = fs::remove_dir_all(failing_persistence_path);
 }
 
-// Tests that aborted stop does not relaunch child work completed during stop.
+// Pins the completion-during-stop guard: the planner completes its
+// turn while the orchestrator stop is in flight, scheduling two pending
+// transitions. After the builder stops cleanly mid-stop,
+// prune_pending_transitions_for_stopped_orchestrator_sessions drops the
+// planner-to-builder transition but keeps planner-to-reviewer, and
+// finish_orchestrator_stop + resume delivers only the surviving one.
+// Guards against the stop path relaunching a child that just stopped
+// or discarding transitions aimed at still-healthy peers.
 #[test]
 fn aborted_stop_does_not_relaunch_child_work_completed_during_stop() {
     let state = test_app_state();
@@ -1775,7 +1856,12 @@ fn aborted_stop_does_not_relaunch_child_work_completed_during_stop() {
     let _ = fs::remove_file(state.persistence_path.as_path());
 }
 
-// Tests that begin orchestrator stop cleans up guards on missing and stopped errors.
+// Pins the begin_orchestrator_stop pre-flight guards: a missing
+// instance returns 404 and a stopped instance returns 409, and in
+// neither case do the stopping_orchestrator_ids /
+// stopping_orchestrator_session_ids maps retain a lingering entry.
+// Guards against leaking stop guards on the error path, which would
+// wedge future stop attempts against the same instance id.
 #[test]
 fn begin_orchestrator_stop_cleans_up_guards_on_missing_and_stopped_errors() {
     let state = test_app_state();
@@ -1865,7 +1951,13 @@ fn begin_orchestrator_stop_cleans_up_guards_on_missing_and_stopped_errors() {
     let _ = fs::remove_file(state.persistence_path.as_path());
 }
 
-// Tests that begin orchestrator stop rolls back stop in progress after persist failure.
+// Pins the persist-failure rollback in begin_orchestrator_stop: if the
+// StopInProgress checkpoint cannot be persisted, the instance reverts
+// to Running with stop_in_progress cleared, and the stopping_* guard
+// maps are empty.
+// Guards against the instance getting stuck permanently in
+// StopInProgress — exactly the failure mode that motivates the whole
+// rollback dance.
 #[test]
 fn begin_orchestrator_stop_rolls_back_stop_in_progress_after_persist_failure() {
     let mut state = test_app_state();
@@ -1937,7 +2029,13 @@ fn begin_orchestrator_stop_rolls_back_stop_in_progress_after_persist_failure() {
     let _ = fs::remove_dir_all(failing_persistence_path);
 }
 
-// Tests that load state preserves pending transitions when stop in progress has no stopped children.
+// Pins load_state recovery when a StopInProgress had not stopped any
+// child: the recovered instance becomes Running again with cleared
+// stop_in_progress / active_session_ids_during_stop, and pending
+// transitions targeting untouched peers survive the reload.
+// Guards against load_state either completing the stop prematurely
+// (since no children were confirmed stopped) or dropping still-valid
+// pending transitions while unwinding.
 #[test]
 fn load_state_preserves_pending_transitions_when_stop_in_progress_has_no_stopped_children() {
     let project_root = std::env::temp_dir().join(format!(
@@ -2070,7 +2168,13 @@ fn load_state_preserves_pending_transitions_when_stop_in_progress_has_no_stopped
     let _ = fs::remove_dir_all(project_root);
 }
 
-// Tests that load state recovers completed stop when active children finished during stop.
+// Pins load_state recovery when the last active child completed its
+// turn during the stop window: on reload the instance flips to Stopped
+// with completed_at set, all pending transitions are discarded, and
+// the mid-stop snapshot we examined on disk still had stopInProgress =
+// true to prove the recovery logic — not the writer — finished it.
+// Guards against reboot leaving the instance stuck StopInProgress when
+// the only remaining work finished in flight.
 #[test]
 fn load_state_recovers_completed_stop_when_active_children_finished_during_stop() {
     let project_root = std::env::temp_dir().join(format!(
@@ -2237,7 +2341,13 @@ fn load_state_recovers_completed_stop_when_active_children_finished_during_stop(
     let _ = fs::remove_dir_all(project_root);
 }
 
-// Tests that load state prunes only stopped child work when recovering stop in progress.
+// Pins the targeted prune in load_state recovery: with one active
+// child still unstopped and one already stopped, transitions pointing
+// at the stopped child are dropped while the one targeting the
+// surviving child is kept, and only the stopped child's queued prompts
+// are cleared.
+// Guards against an over-aggressive prune that would also wipe the
+// active peer's queued work or surviving transitions.
 #[test]
 fn load_state_prunes_only_stopped_child_work_when_recovering_stop_in_progress() {
     let project_root = std::env::temp_dir().join(format!(
@@ -2402,7 +2512,12 @@ fn load_state_prunes_only_stopped_child_work_when_recovering_stop_in_progress() 
     let _ = fs::remove_dir_all(project_root);
 }
 
-// Tests that load state recovers completed stop when all active children were stopped.
+// Pins load_state recovery when every recorded active child stopped
+// before shutdown: the instance flips to Stopped, completed_at is set,
+// pending transitions targeting stopped children are dropped, and the
+// idle peer's queued orchestrator prompt is cleared.
+// Guards against reboot resurrecting transitions into children that
+// were already stopped or leaving phantom queued work on idle peers.
 #[test]
 fn load_state_recovers_completed_stop_when_all_active_children_were_stopped() {
     let project_root = std::env::temp_dir().join(format!(
@@ -2540,7 +2655,11 @@ fn load_state_recovers_completed_stop_when_all_active_children_were_stopped() {
     let _ = fs::remove_dir_all(project_root);
 }
 
-// Tests that orchestrator templates round-trip through draft conversion helpers.
+// Pins the draft round-trip: a sample draft fed through
+// orchestrator_template_from_draft and back through
+// orchestrator_template_to_draft compares equal to the original.
+// Guards against either helper dropping, reordering, or defaulting
+// away any field in OrchestratorTemplateDraft.
 #[test]
 fn orchestrator_template_draft_round_trips_through_template_helpers() {
     let draft = sample_orchestrator_template_draft();
@@ -2735,7 +2854,12 @@ pub fn sample_deadlocked_orchestrator_template_draft() -> OrchestratorTemplateDr
     }
 }
 
-// Tests that start_turn_on_record rejects remote proxy sessions directly.
+// Pins start_turn_on_record's remote-proxy check: a session with a
+// remote_id + remote_session_id bounces with 500 and a clear error,
+// and the record is untouched (no active_turn_start, no messages, no
+// pending prompts).
+// Guards against the local turn path ever writing state for a session
+// that should only be driven through the remote backend.
 #[test]
 fn start_turn_on_record_rejects_remote_proxy_sessions() {
     let state = test_app_state();
@@ -2774,7 +2898,14 @@ fn start_turn_on_record_rejects_remote_proxy_sessions() {
     let _ = fs::remove_file(state.persistence_path.as_path());
 }
 
-// Tests that failed orchestrator transition dispatch becomes a visible destination error.
+// Pins failed transition delivery: when the destination's runtime
+// can't accept the queued prompt, resume_pending_orchestrator_transitions
+// still marks last_delivered_completion_revision on the source, clears
+// the pending transition, and writes a visible "failed to queue
+// prompt" error message on the destination's transcript.
+// Guards against a stuck pending_transitions list when runtime
+// delivery throws, and against silent failures that never surface in
+// the session UI.
 #[test]
 fn failed_orchestrator_transition_dispatch_becomes_a_visible_destination_error() {
     let state = test_app_state();
@@ -2901,7 +3032,12 @@ fn failed_orchestrator_transition_dispatch_becomes_a_visible_destination_error()
     );
 }
 
-// Tests that failed orchestrator transition dispatch does not block other instances.
+// Pins the cross-instance isolation: with two orchestrator instances
+// waiting on transitions and only instance A's delivery failing, the
+// resume pass still delivers instance B's prompt to its builder and
+// every instance's pending_transitions ends up empty.
+// Guards against one instance's runtime failure short-circuiting the
+// dispatch loop and starving other pending transitions.
 #[test]
 fn failed_orchestrator_transition_dispatch_does_not_block_other_instances() {
     let state = test_app_state();
@@ -3062,7 +3198,11 @@ fn failed_orchestrator_transition_dispatch_does_not_block_other_instances() {
     );
 }
 
-// Tests that stop session does not schedule orchestrator transitions.
+// Pins stop_session's non-scheduling invariant: stopping the planner
+// writes the "Turn stopped by user." message but does not enqueue an
+// orchestrator transition into the builder.
+// Guards against treating a user-initiated stop as a turn completion,
+// which would hand stale planner output to the next session slot.
 #[test]
 fn stop_session_does_not_schedule_orchestrator_transitions() {
     let state = test_app_state();
@@ -3149,7 +3289,11 @@ fn stop_session_does_not_schedule_orchestrator_transitions() {
     );
 }
 
-// Tests that fail turn does not schedule orchestrator transitions.
+// Pins fail_turn_if_runtime_matches: a failed planner turn writes
+// "Turn failed: ..." onto the planner and leaves the builder's
+// pending_prompts and the instance's pending_transitions empty.
+// Guards against propagating partial or failed planner output to
+// downstream sessions as if the turn had completed.
 #[test]
 fn fail_turn_does_not_schedule_orchestrator_transitions() {
     let state = test_app_state();
@@ -3230,7 +3374,11 @@ fn fail_turn_does_not_schedule_orchestrator_transitions() {
     );
 }
 
-// Tests that mark turn error does not schedule orchestrator transitions.
+// Pins mark_turn_error_if_runtime_matches: flipping the planner into
+// Error with a preview message does not enqueue a builder prompt or a
+// pending transition.
+// Guards against the error path accidentally being treated as a
+// completion that should fan out to dependent sessions.
 #[test]
 fn mark_turn_error_does_not_schedule_orchestrator_transitions() {
     let state = test_app_state();
@@ -3312,7 +3460,13 @@ fn mark_turn_error_does_not_schedule_orchestrator_transitions() {
     );
 }
 
-// Tests that orchestrator transition uses only messages from the current turn.
+// Pins the turn-scope slice used by the transition renderer: only
+// messages emitted after active_turn_start_message_count are eligible
+// as {{result}} input, so stale prior-turn planner output never shows
+// up in the builder's rendered prompt.
+// Guards against leaking older turn history into the downstream
+// session's prompt, which would confuse the receiver with obsolete
+// context.
 #[test]
 fn orchestrator_transition_uses_only_messages_from_the_current_turn() {
     let state = test_app_state();
@@ -3429,7 +3583,11 @@ fn orchestrator_transition_uses_only_messages_from_the_current_turn() {
     );
 }
 
-// Tests that runtime exit does not schedule orchestrator transitions.
+// Pins handle_runtime_exit_if_matches: a crashed planner runtime
+// writes "Turn failed: ..." and leaves the builder's pending_prompts
+// empty with no pending transition queued on the instance.
+// Guards against runtime-exit being treated as a normal turn end that
+// would propagate incomplete planner state downstream.
 #[test]
 fn runtime_exit_does_not_schedule_orchestrator_transitions() {
     let state = test_app_state();
@@ -3521,7 +3679,12 @@ fn runtime_exit_does_not_schedule_orchestrator_transitions() {
     );
 }
 
-// Tests that killing a session prunes its orchestrator links.
+// Pins kill_session's orchestrator cleanup: after killing the planner
+// session, no orchestrator instance still references it in
+// session_instances and no pending transition names it as a source or
+// destination.
+// Guards against dangling orchestrator pointers to a deleted session
+// that would later panic or re-dispatch into a missing slot.
 #[test]
 fn killing_a_session_prunes_its_orchestrator_links() {
     let state = test_app_state();

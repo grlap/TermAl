@@ -1,19 +1,37 @@
-//! Remote (SSH-proxied) backend tests: settings validation, event bridge
-//! retry, snapshot/delta sync, orchestrator mirroring/proxying, SSE
-//! fallback resync, applied-revision tracking, error-body sanitization,
-//! and review scope forwarding.
+//! Remote (SSH-proxied) backend tests.
 //!
-//! Remote terminal stream forwarding tests live together below in the
-//! second block extracted from the same region.
+//! TermAl's remote feature lets a user register a `RemoteConfig` pointing at
+//! another machine and then SSH-proxy into a remote TermAl backend running
+//! there. The local UI still talks to a single local origin; the local backend
+//! forwards HTTP calls and bridges SSE events over an SSH-forwarded port.
 //!
-//! Extracted from `tests.rs` so each domain lives in its own sibling
-//! module under `tests/`. Three short `state_inner_*` tests covering
-//! mutation-stamp / session_mut / record_removed_session helpers were
-//! intentionally left in mod.rs because they are not remote-specific.
+//! Remote state is mirrored into local state as a proxy copy: remote projects,
+//! sessions, and orchestrator instances are projected onto local IDs (remote
+//! uses its own project_id namespace, so every sync "localizes" remote IDs to
+//! local ones before applying). Updates arrive either as SSE `state` events
+//! carrying a full snapshot or `delta` events carrying an incremental change.
+//!
+//! If the SSE stream drops, the event bridge reconnects with backoff. Across
+//! reconnects, applied-revision tracking (plus fallback-resync tracking for
+//! SSE-fallback full resyncs) prevents replaying the same revision. Creating,
+//! stopping, and forking orchestrators flows remote -> local-id-translation
+//! -> UI so remote instances show up locally.
+//!
+//! Security matters here: a remote backend might be misbehaving or
+//! compromised, so error bodies are sanitized and size-capped before logging,
+//! terminal stream output is capped before forwarding, 429s are annotated to
+//! surface remote throttling, and SSE framing is preserved (with JSON
+//! fallback for older remotes). Central production helpers in `src/remote.rs`:
+//! `sync_remote_state_inner`, `apply_remote_state_snapshot`,
+//! `apply_remote_delta_event_locked`, `decode_remote_json`,
+//! `forward_remote_terminal_stream_reader`, `cap_terminal_response_output`.
 
 use super::*;
 
-// Tests that persists remote settings.
+// Pins that update_app_settings round-trips a remote config list through
+// the preferences and the persistence layer with the SSH transport and
+// its host/port/user preserved.
+// Guards against silently dropping or corrupting remotes on save/load.
 #[test]
 fn persists_remote_settings() {
     let state = test_app_state();
@@ -54,7 +72,10 @@ fn persists_remote_settings() {
     );
 }
 
-// Tests that rejects remote settings with unsafe remote ID.
+// Pins that remote ids containing path-unsafe characters are rejected
+// with a 400 before anything is persisted.
+// Guards against remote ids being used as filesystem/route components
+// and against shell-metacharacter injection via the id.
 #[test]
 fn rejects_remote_settings_with_unsafe_remote_id() {
     let state = test_app_state();
@@ -87,7 +108,10 @@ fn rejects_remote_settings_with_unsafe_remote_id() {
     );
 }
 
-// Tests that rejects remote settings with invalid SSH host.
+// Pins that an SSH host starting with `-` (i.e. something that parses as
+// an SSH option like `-oProxyCommand=...`) is rejected with a 400.
+// Guards against command-injection through hostnames that would otherwise
+// be expanded into the ssh argv and executed.
 #[test]
 fn rejects_remote_settings_with_invalid_ssh_host() {
     let state = test_app_state();
@@ -117,7 +141,10 @@ fn rejects_remote_settings_with_invalid_ssh_host() {
     assert_eq!(error.message, "remote `SSH Lab` has an invalid SSH host");
 }
 
-// Tests that rejects remote settings with invalid SSH user.
+// Pins that an SSH user containing `@` (which would mangle the final
+// user@host target) is rejected with a 400.
+// Guards against remote-user fields that could redirect the SSH target
+// or otherwise break the argv assembled for ssh.
 #[test]
 fn rejects_remote_settings_with_invalid_ssh_user() {
     let state = test_app_state();
@@ -147,7 +174,10 @@ fn rejects_remote_settings_with_invalid_ssh_user() {
     assert_eq!(error.message, "remote `SSH Lab` has an invalid SSH user");
 }
 
-// Tests that remote connection issue message hides transport details.
+// Pins the exact user-facing error text produced when a remote cannot
+// be reached, referencing only "SSH" and the remote name.
+// Guards against leaking transport internals (exit codes, stderr, ports)
+// into UI error strings.
 #[test]
 fn remote_connection_issue_message_hides_transport_details() {
     assert_eq!(
@@ -156,7 +186,10 @@ fn remote_connection_issue_message_hides_transport_details() {
     );
 }
 
-// Tests that local SSH start issue message hides transport details.
+// Pins the exact user-facing error text when the local ssh binary
+// cannot be spawned, mentioning OpenSSH/PATH without raw OS errors.
+// Guards against the UI surfacing errno/spawn details instead of a
+// sanitized hint.
 #[test]
 fn local_ssh_start_issue_message_hides_transport_details() {
     assert_eq!(
@@ -165,7 +198,10 @@ fn local_ssh_start_issue_message_hides_transport_details() {
     );
 }
 
-// Tests that remote SSH command args insert double dash before target.
+// Pins that the assembled ssh argv places a literal `--` separator
+// before `alice@example.com` and the remote `termal server` command.
+// Guards against user/host strings being mistakenly interpreted as ssh
+// options if the `--` ever disappears.
 #[test]
 fn remote_ssh_command_args_insert_double_dash_before_target() {
     let remote = RemoteConfig {
@@ -189,7 +225,11 @@ fn remote_ssh_command_args_insert_double_dash_before_target() {
     assert_eq!(&args[separator_index + 2..], ["termal", "server"]);
 }
 
-// Tests that removing remote stops event bridge worker and resets started guard.
+// Pins that reconciling a remote out of the config list stops its SSE
+// event-bridge worker, removes it from the registry, and that the
+// `event_bridge_started` atomic flips back to false after shutdown.
+// Guards against orphaned worker threads or a stuck "already started"
+// guard that would block a later start_event_bridge.
 #[test]
 fn removing_remote_stops_event_bridge_worker_and_resets_started_guard() {
     let state = test_app_state();
@@ -261,8 +301,11 @@ fn removing_remote_stops_event_bridge_worker_and_resets_started_guard() {
     }
 }
 
-// Tests that event-bridge retry boundaries clear fallback resync tracking so a
-// restarted remote can recover even if its revision counter drops.
+// Pins that starting the event bridge clears per-remote SSE fallback
+// resync watermarks so that a restarted remote whose revision counter
+// has decreased (e.g. reset) can still produce a recovery resync.
+// Guards against a stale fallback watermark silently suppressing the
+// only resync path after a reconnect.
 #[test]
 fn remote_event_bridge_retry_clears_fallback_resync_tracking() {
     let state = test_app_state();
@@ -324,8 +367,11 @@ fn remote_event_bridge_retry_clears_fallback_resync_tracking() {
     let _ = fs::remove_file(state.persistence_path.as_path());
 }
 
-// Tests that event-bridge retry boundaries also clear stale applied remote
-// revisions so restarted remotes can resume syncing below the old watermark.
+// Pins that starting the event bridge also clears the applied-revision
+// watermark on StateInner, so deltas at or below the old revision from
+// a restarted remote are no longer skipped as duplicates.
+// Guards against permanently-wedged dedupe state after a remote restart
+// causes its revision sequence to reset.
 #[test]
 fn remote_event_bridge_retry_clears_applied_revision_tracking() {
     let state = test_app_state();
@@ -394,7 +440,13 @@ fn remote_event_bridge_retry_clears_applied_revision_tracking() {
     let _ = fs::remove_file(state.persistence_path.as_path());
 }
 
-// Tests that remote snapshot sync localizes orchestrators and creates missing proxy sessions.
+// Pins that apply_remote_state_snapshot rewrites remote orchestrator
+// and session ids to fresh local ids, creates proxy session records for
+// every remote session referenced by the orchestrator, and rewrites
+// pending transitions and the template snapshot project_id to point at
+// local ids.
+// Guards against remote ids leaking into local state and against
+// dangling pending transitions after a snapshot apply.
 #[test]
 fn remote_snapshot_sync_localizes_orchestrators_and_creates_missing_proxy_sessions() {
     let state = test_app_state();
@@ -471,18 +523,13 @@ fn remote_snapshot_sync_localizes_orchestrators_and_creates_missing_proxy_sessio
     let _ = fs::remove_file(state.persistence_path.as_path());
 }
 
-// Regression test for the latent empty-string fallback in
-// `localize_remote_orchestrator_instance`. After `delete_project` clears a
-// detached orchestrator's `project_id` to `""`, a subsequent remote re-sync
-// against the (now unmapped) remote project must NOT revive `Some("")` via
-// the `.or(existing_local_project_id)` fallback and must NOT persist `""`
-// back into `template_snapshot.project_id`. Before the fix, the fallback
-// accepted `Some("")` as a valid existing local project id and
-// `sync_remote_orchestrators_inner` wrote it onto the template snapshot;
-// after the fix, the detached state is filtered at capture time, the
-// localization errors out, and the orchestrator instance is rolled back to
-// its pre-sync (still-detached) state with its stale template snapshot
-// preserved.
+// Pins that after delete_project detaches a remote-mirrored orchestrator
+// (setting its project_id to ""), a fresh remote snapshot resync must
+// not revive Some("") via the existing-local-project-id fallback and
+// must not write "" onto template_snapshot.project_id; the failed
+// localization rolls back cleanly to the detached state.
+// Guards against a latent fallback in localize_remote_orchestrator_instance
+// that could durably persist empty-string project ids into state.
 #[test]
 fn delete_project_then_resync_does_not_revive_empty_string_project_id_on_orchestrator() {
     let state = test_app_state();
@@ -610,7 +657,11 @@ fn delete_project_then_resync_does_not_revive_empty_string_project_id_on_orchest
     let _ = fs::remove_file(state.persistence_path.as_path());
 }
 
-// Tests that mirrored remote orchestrators never enqueue local pending prompts during resume.
+// Pins that resume_pending_orchestrator_transitions ignores orchestrators
+// that belong to a remote, leaving their destination session untouched
+// rather than queuing a pending prompt locally.
+// Guards against double-execution of orchestrator transitions that the
+// remote backend is already driving.
 #[test]
 fn remote_mirrored_orchestrators_do_not_enqueue_local_pending_prompts_on_resume() {
     let state = test_app_state();
@@ -685,7 +736,12 @@ fn remote_mirrored_orchestrators_do_not_enqueue_local_pending_prompts_on_resume(
     let _ = fs::remove_file(state.persistence_path.as_path());
 }
 
-// Tests that remote mirrored orchestrators are skipped by local pending-transition dispatch.
+// Pins that next_pending_transition_action returns None for an
+// orchestrator tagged with a remote_id/remote_orchestrator_id, even when
+// the same state with only the remote fields cleared would produce a
+// Deliver action.
+// Guards against local dispatch driving transitions that the remote
+// backend owns.
 #[test]
 fn remote_mirrored_orchestrators_skip_pending_transition_dispatch() {
     let state = test_app_state();
@@ -759,7 +815,11 @@ fn remote_mirrored_orchestrators_skip_pending_transition_dispatch() {
     let _ = fs::remove_dir_all(project_root);
 }
 
-// Tests that remote mirrored orchestrators are skipped by deadlock detection.
+// Pins that detect_deadlocked_consolidate_session_ids still reports the
+// cycle on a remote-mirrored orchestrator but mark_deadlocked_orchestrator_instances
+// refuses to mutate it, leaving status/error/pending-transitions intact.
+// Guards against local deadlock resolution clobbering an orchestrator
+// whose deadlock state the remote is authoritative about.
 #[test]
 fn remote_mirrored_orchestrators_skip_deadlock_detection() {
     let state = test_app_state();
@@ -875,7 +935,12 @@ fn remote_mirrored_orchestrators_skip_deadlock_detection() {
     let _ = fs::remove_dir_all(project_root);
 }
 
-// Tests that remote OrchestratorsUpdated deltas localize ids and preserve proxy identity.
+// Pins that applying a remote OrchestratorsUpdated delta rewrites
+// remote ids to the already-allocated local ids, preserves the local
+// orchestrator id from the initial snapshot, and updates status without
+// changing identity.
+// Guards against duplicating a remote orchestrator or churning its
+// local id on every delta.
 #[test]
 fn remote_orchestrators_updated_delta_localizes_ids_and_preserves_proxy_identity() {
     let state = test_app_state();
@@ -990,7 +1055,11 @@ fn remote_orchestrators_updated_delta_localizes_ids_and_preserves_proxy_identity
     let _ = fs::remove_file(state.persistence_path.as_path());
 }
 
-// Tests that remote OrchestratorsUpdated deltas can create missing proxy sessions from their payload.
+// Pins that an OrchestratorsUpdated delta carrying sessions which do
+// not yet have proxy records creates those records from the delta's own
+// session payload and localizes their project_id.
+// Guards against dropped orchestrator deltas when the remote pushes
+// session additions out-of-band from any prior snapshot.
 #[test]
 fn remote_orchestrators_updated_delta_creates_missing_proxy_sessions_from_payload_sessions() {
     let state = test_app_state();
@@ -1061,7 +1130,11 @@ fn remote_orchestrators_updated_delta_creates_missing_proxy_sessions_from_payloa
     let _ = fs::remove_file(state.persistence_path.as_path());
 }
 
-// Tests that stale remote snapshots cannot overwrite newer orchestrator bridge deltas.
+// Pins that apply_remote_state_snapshot with a revision older than the
+// last applied delta is a no-op: status and revision stay at the newer
+// delta's values.
+// Guards against a delayed SSE snapshot (retry, reconnect) reverting
+// state the newer delta already landed.
 #[test]
 fn stale_remote_snapshot_does_not_overwrite_newer_orchestrator_delta_state() {
     let state = test_app_state();
@@ -1128,7 +1201,12 @@ fn stale_remote_snapshot_does_not_overwrite_newer_orchestrator_delta_state() {
     let _ = fs::remove_file(state.persistence_path.as_path());
 }
 
-// Tests that failed remote OrchestratorsUpdated deltas roll back eager proxy-session localization.
+// Pins that when an OrchestratorsUpdated delta references a remote
+// session id that localization cannot resolve, the whole delta is
+// rolled back: no new proxy sessions, unchanged next_session_number, no
+// delta event published, and nothing persisted for this remote.
+// Guards against partial state where eager session writes outlive the
+// orchestrator that was supposed to own them.
 #[test]
 fn remote_orchestrators_updated_delta_rolls_back_proxy_sessions_when_localization_fails() {
     let state = test_app_state();
@@ -1235,7 +1313,11 @@ fn remote_orchestrators_updated_delta_rolls_back_proxy_sessions_when_localizatio
     let _ = fs::remove_file(state.persistence_path.as_path());
 }
 
-// Tests that remote deltas sharing a revision still apply sequentially.
+// Pins that two deltas sharing the same remote revision both apply in
+// order when they affect different fields; applied-revision dedupe
+// recognizes only strictly-older revisions as stale.
+// Guards against the dedupe window being too tight (drops valid
+// sibling deltas) or too loose (replays already-applied ones).
 #[test]
 fn remote_same_revision_deltas_apply_in_sequence() {
     let state = test_app_state();
@@ -1370,7 +1452,12 @@ fn remote_same_revision_deltas_apply_in_sequence() {
     let _ = fs::remove_file(state.persistence_path.as_path());
 }
 
-// Tests that remote project orchestrator creation proxies to the remote backend and localizes the result.
+// Pins the end-to-end create-orchestrator flow for remote projects: the
+// request is rewritten with the remote's own project id and forwarded
+// as POST /api/orchestrators, and the response is localized (new local
+// orchestrator id, template_snapshot project_id rewritten to local).
+// Guards against the UI seeing raw remote ids or sending local ids that
+// the remote cannot resolve.
 #[test]
 fn create_orchestrator_instance_proxies_remote_projects_and_localizes_response() {
     let state = test_app_state();
@@ -1588,7 +1675,12 @@ fn create_orchestrator_instance_proxies_remote_projects_and_localizes_response()
     let _ = fs::remove_file(state.persistence_path.as_path());
 }
 
-// Tests that direct remote orchestrator proxy creation localizes the launch and notes the applied revision.
+// Pins that create_remote_orchestrator_proxy localizes the response
+// orchestrator, registers the remote_orchestrator_id, and writes the
+// returned revision into the applied-revision watermark so that later
+// delta/snapshot replays at the same revision are skipped.
+// Guards against creating a remote orchestrator but leaving the local
+// watermark behind, which would cause the same state to re-apply.
 #[test]
 fn create_remote_orchestrator_proxy_localizes_launch_and_notes_revision() {
     let state = test_app_state();
@@ -1741,7 +1833,12 @@ fn create_remote_orchestrator_proxy_localizes_launch_and_notes_revision() {
     let _ = fs::remove_file(state.persistence_path.as_path());
 }
 
-// Tests that direct remote orchestrator proxy creation rolls back mirrored sessions and orchestrators when localization fails.
+// Pins that create_remote_orchestrator_proxy returns BAD_GATEWAY and
+// leaves next_session_number, orchestrator instances, session records,
+// the applied-revision watermark, and the persisted state file all
+// unchanged when the localization step fails.
+// Guards against partial writes on failed proxy creation that would
+// surface as orphaned sessions or a poisoned watermark.
 #[test]
 fn create_remote_orchestrator_proxy_rolls_back_on_localization_failure() {
     let state = test_app_state();
@@ -1907,8 +2004,11 @@ fn create_remote_orchestrator_proxy_rolls_back_on_localization_failure() {
     let _ = fs::remove_file(state.persistence_path.as_path());
 }
 
-// Tests that stale create responses still materialize the launched remote
-// orchestrator when a newer unrelated revision has already been applied.
+// Pins that a stale create-orchestrator response (revision below the
+// already-applied remote revision) still materializes the launched
+// orchestrator locally rather than being dropped as a stale snapshot.
+// Guards against newly-launched remote orchestrators disappearing from
+// the UI when an unrelated delta has bumped the revision in the meantime.
 #[test]
 fn create_orchestrator_instance_materializes_stale_remote_launch_response() {
     let state = test_app_state();
@@ -2089,7 +2189,12 @@ fn create_orchestrator_instance_materializes_stale_remote_launch_response() {
     let _ = fs::remove_file(state.persistence_path.as_path());
 }
 
-// Tests that remote orchestrator launch reports an upgrade requirement when the remote ignores inline templates.
+// Pins that when a remote replies 404 to POST /api/orchestrators with
+// an inline template body, the error is translated to a BAD_GATEWAY
+// "must be upgraded" message and only the expected health + create
+// requests are made (no extra diagnostic probe loop).
+// Guards against silent failure when a remote lacks inline-template
+// support and against accidentally hammering it with retries.
 #[test]
 fn remote_orchestrator_create_requires_upgrade_when_remote_lacks_inline_template_support() {
     let state = test_app_state();
@@ -2255,9 +2360,12 @@ fn remote_orchestrator_create_requires_upgrade_when_remote_lacks_inline_template
     let _ = fs::remove_file(state.persistence_path.as_path());
 }
 
-// Tests that a pre-cached unsupported inline-template capability still yields the upgrade message
-// without issuing a second health probe after the remote returns 404. The initial
-// ensure_available availability check is still expected before the launch attempt.
+// Pins that a pre-cached supports_inline_orchestrator_templates=false
+// still returns the upgrade-required error on a 404, without issuing
+// a second post-404 capability probe, while still performing the
+// normal pre-request availability check.
+// Guards against the capability cache causing either misleading
+// success or an extra round-trip on repeated failures.
 #[test]
 fn remote_orchestrator_create_requires_upgrade_when_inline_template_support_is_precached_false() {
     let state = test_app_state();
@@ -2411,7 +2519,12 @@ fn remote_orchestrator_create_requires_upgrade_when_inline_template_support_is_p
     let _ = fs::remove_file(state.persistence_path.as_path());
 }
 
-// Tests that remote state sync rolls back unmapped orchestrators instead of assigning an empty local project id.
+// Pins that a snapshot whose orchestrator references a remote project
+// with no corresponding local project mapping applies without error
+// but leaves orchestrator_instances and sessions empty.
+// Guards against assigning an empty-string local project id to
+// orchestrators or sessions when the remote/local project pairing is
+// missing.
 #[test]
 fn remote_snapshot_sync_skips_orchestrators_without_a_local_project_mapping() {
     let state = test_app_state();
@@ -2456,7 +2569,12 @@ fn remote_snapshot_sync_skips_orchestrators_without_a_local_project_mapping() {
     let _ = fs::remove_file(state.persistence_path.as_path());
 }
 
-// Tests that remote orchestrator lifecycle actions proxy to the remote backend and resync local state.
+// Pins that pause / resume / stop on a mirrored orchestrator each
+// issue POST /api/orchestrators/{remote_id}/{action} to the remote (with
+// a preceding health check), apply the returned state snapshot locally,
+// and update the UI-visible status accordingly.
+// Guards against lifecycle actions being applied only locally (which
+// would diverge from the remote) or silently swallowing the proxy error.
 #[test]
 fn remote_orchestrator_lifecycle_actions_proxy_to_remote_backend_and_resync_local_state() {
     let state = test_app_state();
@@ -2657,7 +2775,11 @@ fn remote_orchestrator_lifecycle_actions_proxy_to_remote_backend_and_resync_loca
     let _ = fs::remove_file(state.persistence_path.as_path());
 }
 
-// Tests that remote snapshot sync keeps the previous remote orchestrators when localization fails.
+// Pins that when a later snapshot introduces a new orchestrator whose
+// localization fails, existing mirrored orchestrators for that remote
+// survive intact rather than being cleared in the rollback.
+// Guards against an "all or nothing" rollback that wipes healthy
+// mirrored orchestrators on a single bad delta.
 #[test]
 fn remote_snapshot_sync_preserves_existing_orchestrators_when_localization_fails() {
     let state = test_app_state();
@@ -2746,7 +2868,12 @@ fn remote_snapshot_sync_preserves_existing_orchestrators_when_localization_fails
     let _ = fs::remove_file(state.persistence_path.as_path());
 }
 
-// Tests that remote snapshot sync preserves referenced sessions when orchestrator localization fails.
+// Pins that sessions referenced by a surviving mirrored orchestrator
+// are not pruned by session retention logic, even when the incoming
+// snapshot drops those session ids because its orchestrator fails to
+// localize.
+// Guards against the retention pass removing proxy sessions still in
+// active use by a mirrored orchestrator.
 #[test]
 fn remote_snapshot_sync_preserves_sessions_referenced_by_existing_orchestrators_when_localization_fails()
  {
@@ -2831,7 +2958,13 @@ fn remote_snapshot_sync_preserves_sessions_referenced_by_existing_orchestrators_
     let _ = fs::remove_file(state.persistence_path.as_path());
 }
 
-// Tests that focused remote state sync rolls back eager proxy-session side effects when orchestrator localization fails.
+// Pins that sync_remote_state_for_target, given a focused target,
+// updates the single focused session even when orchestrator
+// localization fails, without creating proxy records for other
+// sessions in the payload and without writing any orchestrator entry
+// with this remote's id to persisted state.
+// Guards against a focused resync accidentally doing a full sync's
+// work when its orchestrator leg fails.
 #[test]
 fn focused_remote_state_sync_rolls_back_proxy_sessions_when_orchestrator_localization_fails() {
     let state = test_app_state();
@@ -2963,8 +3096,11 @@ fn focused_remote_state_sync_rolls_back_proxy_sessions_when_orchestrator_localiz
     let _ = fs::remove_file(state.persistence_path.as_path());
 }
 
-// Tests that focused remote sync ignores stale remote revisions instead of
-// rolling an already-mirrored session backward.
+// Pins that sync_remote_state_for_target is a no-op when the payload's
+// revision is older than the applied-revision watermark: the target
+// session's preview stays at the newer value already mirrored locally.
+// Guards against a stale focused fetch from an in-flight request
+// clobbering a fresher update.
 #[test]
 fn focused_remote_state_sync_skips_stale_revision() {
     let state = test_app_state();
@@ -3052,7 +3188,11 @@ fn focused_remote_state_sync_skips_stale_revision() {
     let _ = fs::remove_file(state.persistence_path.as_path());
 }
 
-// Tests that remote snapshot sync removes missing proxy sessions.
+// Pins that a snapshot whose session list omits a previously mirrored
+// remote session drops that local proxy record, while leaving remote
+// sessions still present and purely local sessions alone.
+// Guards against the retention pass being too aggressive (wiping
+// unrelated sessions) or too lenient (leaving zombies behind).
 #[test]
 fn remote_snapshot_sync_removes_missing_proxy_sessions() {
     let state = test_app_state();
@@ -3123,8 +3263,11 @@ fn remote_snapshot_sync_removes_missing_proxy_sessions() {
     let _ = fs::remove_file(state.persistence_path.as_path());
 }
 
-// Tests that marked remote fallback payloads dedupe repeated revisions but still
-// resync immediately when a newer fallback revision arrives.
+// Pins that a marked empty-state SSE "state" event triggers one full
+// /api/state resync per revision, deduplicates repeated sends of the
+// same revision, and still resyncs when the revision bumps.
+// Guards against a chatty remote forcing the local backend into a
+// tight resync loop over identical fallback payloads.
 #[test]
 fn remote_state_event_dedupes_marked_sse_fallback_resyncs_by_revision() {
     let state = test_app_state();
@@ -3318,8 +3461,12 @@ fn remote_state_event_dedupes_marked_sse_fallback_resyncs_by_revision() {
     let _ = fs::remove_file(state.persistence_path.as_path());
 }
 
-// Tests that remote fallback resync tracking is per remote, monotonic within a
-// single event-stream lifetime, and resettable after disconnects.
+// Pins that the fallback-resync watermark is keyed per remote id, is
+// monotonic (older revisions for the same remote stay skipped), treats
+// a different remote id as independent, and is cleared by
+// clear_remote_sse_fallback_resync.
+// Guards against cross-remote contamination or a sticky watermark
+// that blocks resync after a reconnect.
 #[test]
 fn remote_sse_fallback_resync_tracking_is_per_remote_and_monotonic() {
     let state = test_app_state();
@@ -3344,8 +3491,12 @@ fn remote_sse_fallback_resync_tracking_is_per_remote_and_monotonic() {
     let _ = fs::remove_file(state.persistence_path.as_path());
 }
 
-// Tests that StateInner revision tracking handles first insert, same revision,
-// higher revision, and lower revision without regressing monotonic ordering.
+// Pins StateInner::{note,should_skip}_remote_applied_revision and the
+// delta variant: the snapshot watermark skips <= revisions once noted,
+// the delta watermark skips only strictly-older revisions, and a lower
+// note() call is a no-op.
+// Guards against the dedupe predicates letting already-applied state
+// replay or blocking fresh state.
 #[test]
 fn state_inner_remote_applied_revision_methods_cover_monotonic_cases() {
     let mut inner = StateInner::new();
@@ -3379,7 +3530,11 @@ fn state_inner_remote_applied_revision_methods_cover_monotonic_cases() {
 
 
 
-// Tests that raw remote error bodies are sanitized and capped before they reach the UI.
+// Pins that decode_remote_json strips control characters, replaces
+// CRLF with spaces, and truncates raw non-JSON error bodies past the
+// MAX_REMOTE_ERROR_BODY_CHARS limit before surfacing them.
+// Guards against a hostile/broken remote injecting log-splitting or
+// control sequences, or flooding logs with a huge error body.
 #[test]
 fn decode_remote_json_sanitizes_and_caps_raw_error_bodies() {
     let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("test listener should bind");
@@ -3438,7 +3593,11 @@ fn decode_remote_json_sanitizes_and_caps_raw_error_bodies() {
     join_test_server(server);
 }
 
-// Tests that structured remote JSON error messages are sanitized and capped before they reach the UI.
+// Pins that decode_remote_json applies the same sanitization + cap to
+// the "error" field of a structured JSON error body, stripping control
+// chars and appending "..." when truncated.
+// Guards against attackers smuggling log-splitting sequences via the
+// JSON "error" field instead of the raw body.
 #[test]
 fn decode_remote_json_sanitizes_structured_error_bodies() {
     let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("test listener should bind");
@@ -3501,7 +3660,11 @@ fn decode_remote_json_sanitizes_structured_error_bodies() {
     join_test_server(server);
 }
 
-// Tests that oversized remote error bodies are rejected before they are fully decoded into a String.
+// Pins that decode_remote_json rejects response bodies exceeding
+// MAX_REMOTE_ERROR_BODY_BYTES with the fixed message "remote error
+// response too large" rather than reading the full body.
+// Guards against memory exhaustion from a remote replying with a
+// multi-megabyte error body.
 #[test]
 fn decode_remote_json_rejects_oversized_error_bodies() {
     let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("test listener should bind");
@@ -3550,8 +3713,12 @@ fn decode_remote_json_rejects_oversized_error_bodies() {
     join_test_server(server);
 }
 
-// Tests that applied remote revisions are tracked per remote, stay monotonic,
-// and can be reset when an event stream is re-established.
+// Pins that applied-revision tracking on StateInner is keyed per
+// remote id, stays monotonic (a lower note() call does not lower the
+// watermark), and that clear_remote_applied_revision resets it without
+// touching other remotes.
+// Guards against cross-remote dedupe contamination and against a
+// stuck watermark after event-stream teardown.
 #[test]
 fn remote_applied_revision_tracking_is_per_remote_and_monotonic() {
     let state = test_app_state();
@@ -3582,7 +3749,11 @@ fn remote_applied_revision_tracking_is_per_remote_and_monotonic() {
     let _ = fs::remove_file(state.persistence_path.as_path());
 }
 
-// Tests that non-fallback empty remote state payloads still apply directly.
+// Pins that an SSE "state" event carrying an ordinary (non-fallback)
+// empty snapshot is applied directly: remote proxy sessions go away,
+// local-only sessions stay.
+// Guards against mistaking a genuine empty-state resync for a
+// fallback marker and skipping its session retention work.
 #[test]
 fn remote_state_event_applies_non_fallback_empty_snapshot_payload() {
     let state = test_app_state();
@@ -3623,7 +3794,11 @@ fn remote_state_event_applies_non_fallback_empty_snapshot_payload() {
     let _ = fs::remove_file(state.persistence_path.as_path());
 }
 
-// Tests that remote review put sends scope via query params.
+// Pins that proxying PUT /api/reviews/{id} to a remote carries the
+// review scope and any other filter options in the query string of the
+// forwarded request rather than in the body.
+// Guards against silently dropping scope (which would let a review
+// write target the wrong files) when forwarding to the remote.
 #[test]
 fn remote_review_put_sends_scope_via_query_params() {
     let captured = Arc::new(Mutex::new(None::<(String, String)>));
@@ -3778,6 +3953,12 @@ fn remote_review_put_sends_scope_via_query_params() {
 }
 
 
+// Pins that when a remote responds 200 OK to /api/terminal/run/stream
+// with a non-SSE content-type (e.g. text/html), the local proxy emits
+// a BAD_GATEWAY "unexpected content type" error event and does not
+// fall back to the non-stream /api/terminal/run JSON route.
+// Guards against silently accepting malformed stream responses or
+// double-executing the command by falling back after success.
 #[tokio::test]
 async fn remote_terminal_stream_rejects_successful_non_sse_without_json_fallback() {
     let saw_stream_request = Arc::new(AtomicBool::new(false));
@@ -3929,6 +4110,12 @@ async fn remote_terminal_stream_rejects_successful_non_sse_without_json_fallback
     join_test_server(server);
 }
 
+// Pins that a remote SSE response to /api/terminal/run/stream is
+// forwarded frame-for-frame with output events ahead of a single
+// complete event and no error event, and that the non-stream JSON
+// fallback is not invoked.
+// Guards against reordering, duplicated complete frames, or the
+// fallback firing alongside a successful stream.
 #[tokio::test]
 async fn remote_terminal_stream_proxies_successful_sse_output() {
     let request_lines = Arc::new(Mutex::new(Vec::<String>::new()));
@@ -4075,6 +4262,10 @@ async fn remote_terminal_stream_proxies_successful_sse_output() {
     );
 }
 
+// Pins that 404 and 405 on the stream route both trigger the JSON
+// fallback via POST /api/terminal/run (exercising assert_remote_terminal_stream_fallback_for_status).
+// Guards against only one of those statuses being treated as
+// "remote lacks streaming" and the other propagating as an error.
 #[tokio::test]
 async fn remote_terminal_stream_falls_back_to_json_when_stream_route_is_404_or_405() {
     assert_remote_terminal_stream_fallback_for_status(StatusCode::NOT_FOUND).await;
@@ -4225,6 +4416,12 @@ async fn assert_remote_terminal_stream_fallback_for_status(stream_status: Status
     );
 }
 
+// Pins parse_terminal_sse_frame's handling of default `message` event
+// names, `:` comment lines, CRLF line endings, multi-line `data:`
+// concatenation via `\n`, and the mixed-delimiter detection in
+// find_sse_frame_delimiter.
+// Guards against subtle SSE-parser regressions that would drop comment
+// lines or mis-join multi-line data fields.
 #[test]
 fn terminal_sse_parser_handles_default_events_comments_and_multiline_data() {
     assert_eq!(
@@ -4243,6 +4440,11 @@ fn terminal_sse_parser_handles_default_events_comments_and_multiline_data() {
     );
 }
 
+// Pins that a remote `event: error` SSE frame carrying its own status
+// (503 here) is normalized to a local BAD_GATEWAY with a message
+// including "remote terminal stream error (503)".
+// Guards against the remote dictating client-visible status codes
+// (e.g. pretending to be 5xx/4xx from our server).
 #[test]
 fn remote_terminal_stream_error_frames_are_normalized_to_bad_gateway() {
     let (tx, _rx) = tokio::sync::mpsc::channel(TERMINAL_STREAM_EVENT_QUEUE_CAPACITY);
@@ -4266,6 +4468,12 @@ data: {"error":"backend unavailable","status":503}"#,
     );
 }
 
+// Pins that a remote error frame with status 429 is specifically kept
+// as TOO_MANY_REQUESTS (not downgraded to BAD_GATEWAY) and that
+// annotate_remote_terminal_429 adds a "remote <name>:" prefix so the
+// UI can attribute the throttling to the remote.
+// Guards against losing the 429 signal and against unattributed
+// throttling messages.
 #[test]
 fn remote_terminal_stream_error_frames_preserve_429_for_remote_annotation() {
     let (tx, _rx) = tokio::sync::mpsc::channel(TERMINAL_STREAM_EVENT_QUEUE_CAPACITY);
@@ -4299,6 +4507,13 @@ data: {"error":"too many local terminal commands are already running; limit is 4
     );
 }
 
+// Pins that handle_remote_terminal_sse_frame truncates an oversized
+// `output` stdout chunk to TERMINAL_OUTPUT_MAX_BYTES, marks
+// RemoteTerminalForwardState::output_truncated, and then propagates
+// that flag onto the terminal response when the `complete` frame
+// arrives without it.
+// Guards against streaming a remote's oversized chunk straight to the
+// client and against missing the truncation flag at completion.
 #[test]
 fn remote_terminal_stream_output_is_capped_before_forwarding() {
     let (tx, mut rx) = tokio::sync::mpsc::channel(TERMINAL_STREAM_EVENT_QUEUE_CAPACITY);
@@ -4347,6 +4562,12 @@ fn remote_terminal_stream_output_is_capped_before_forwarding() {
     assert!(response.output_truncated);
 }
 
+// Pins that cap_terminal_response_output maintains independent
+// per-stream budgets: when stdout is 500 KiB and stderr 100 KiB (each
+// within its own TERMINAL_OUTPUT_MAX_BYTES budget), both survive
+// unchanged and the function returns false (no truncation).
+// Guards against a shared counter that would truncate stderr just
+// because stdout was large.
 #[test]
 fn cap_terminal_response_output_uses_independent_stdout_and_stderr_budgets() {
     let stdout = "o".repeat(500 * 1024);
@@ -4369,6 +4590,12 @@ fn cap_terminal_response_output_uses_independent_stdout_and_stderr_budgets() {
     assert_eq!(response.stderr, stderr);
 }
 
+// Pins that when both stdout and stderr exceed
+// TERMINAL_OUTPUT_MAX_BYTES, cap_terminal_response_output truncates
+// each independently to the budget (preserving the original bytes up
+// to the cap) and returns true.
+// Guards against only one stream being truncated or the function
+// failing to report truncation when both are capped.
 #[test]
 fn cap_terminal_response_output_truncates_both_streams_above_their_budgets() {
     // Regression guard for the "both streams exceed budget" truncation case.
@@ -4396,6 +4623,13 @@ fn cap_terminal_response_output_truncates_both_streams_above_their_budgets() {
     assert!(response.stderr.bytes().all(|byte| byte == b'b'));
 }
 
+// Pins that a full-budget stdout frame followed by a small stderr
+// frame still forwards both: stdout is allowed through at exactly its
+// per-stream budget without tripping output_truncated, and the later
+// stderr event is delivered rather than silently dropped by a shared
+// byte counter.
+// Guards against a regression to a single shared forward counter
+// across stdout and stderr.
 #[test]
 fn remote_terminal_stream_forwards_stderr_even_when_stdout_filled_its_budget() {
     // Regression for the shared-counter bug: before per-stream tracking,
@@ -4482,6 +4716,13 @@ fn remote_terminal_stream_forwards_stderr_even_when_stdout_filled_its_budget() {
     );
 }
 
+// Pins that forward_remote_terminal_stream_reader accepts a completion
+// frame whose JSON encoding balloons well past
+// 2 * TERMINAL_OUTPUT_MAX_BYTES (newline-heavy stdout produces \n
+// escapes that roughly double the byte count) but stays within
+// TERMINAL_REMOTE_SSE_PENDING_MAX_BYTES.
+// Guards against the pending-frame cap becoming so tight that real,
+// legal completion payloads are rejected.
 #[test]
 fn forward_remote_terminal_stream_reader_accepts_max_sized_completion_frame() {
     // Regression for the rejected-valid-completion-frame bug. A remote that
@@ -4547,6 +4788,12 @@ fn forward_remote_terminal_stream_reader_accepts_max_sized_completion_frame() {
     assert!(rx.try_recv().is_err());
 }
 
+// Pins that InterruptibleRemoteStreamReader::read correctly drains a
+// single buffered chunk across multiple small destination buffers
+// without losing or duplicating bytes (offset tracking + buffered
+// clear).
+// Guards against future callers with smaller scratch buffers silently
+// dropping/repeating bytes through the partial-drain path.
 #[test]
 fn interruptible_remote_stream_reader_drains_partial_chunks_across_small_reads() {
     // Regression guard for `read_buffered`'s partial-chunk drain path.
@@ -4580,6 +4827,12 @@ fn interruptible_remote_stream_reader_drains_partial_chunks_across_small_reads()
     assert_eq!(collected, b"abcdefghij");
 }
 
+// Pins that when the chunk channel is idle and cancellation flips,
+// forward_remote_terminal_stream_reader returns BAD_GATEWAY with
+// "terminal stream client disconnected" from the adapter-level
+// recv_timeout poll.
+// Guards against a cancellation signal being swallowed because the
+// recv_timeout loop is not periodically re-checking it.
 #[test]
 fn interruptible_remote_stream_reader_observes_cancellation_between_recv_timeouts() {
     // Adapter-level contract test: when the internal chunk channel is idle,
@@ -4612,6 +4865,13 @@ fn interruptible_remote_stream_reader_observes_cancellation_between_recv_timeout
     assert_eq!(err.message, "terminal stream client disconnected");
 }
 
+// Pins the production spawn path: when the worker thread is parked
+// inside a blocking source read and cancellation flips,
+// forward_remote_terminal_stream_reader still returns the disconnect
+// error, and the worker thread is confirmed to have entered the real
+// read_remote_stream_response path.
+// Guards against a regression where the spawn adapter silently swallows
+// cancellation while the worker sits inside reqwest's body read.
 #[test]
 fn interruptible_remote_stream_reader_spawn_unblocks_on_cancellation() {
     // Regression covering the real production spawn path: a stalled remote
@@ -4689,6 +4949,12 @@ fn interruptible_remote_stream_reader_spawn_unblocks_on_cancellation() {
     );
 }
 
+// Pins that forward_remote_terminal_stream_reader_capped rejects an
+// unterminated frame once it exceeds the configured pending cap,
+// returning a BAD_GATEWAY "remote terminal stream frame exceeded the
+// allowed size" error rather than buffering forever.
+// Guards against unbounded memory growth from a hostile or broken
+// remote that never emits a frame delimiter.
 #[test]
 fn forward_remote_terminal_stream_reader_rejects_frame_past_new_cap() {
     // The cap still bounds memory: if a malicious or buggy remote sends an
@@ -4720,6 +4986,12 @@ fn forward_remote_terminal_stream_reader_rejects_frame_past_new_cap() {
     );
 }
 
+// Pins that TERMINAL_REMOTE_SSE_PENDING_MAX_BYTES is at least
+// 2 * TERMINAL_OUTPUT_MAX_BYTES + 4 KiB, i.e. large enough to fit a
+// worst-case newline-heavy completion frame plus SSE envelope.
+// Guards against accidentally shrinking the cap below what the
+// acceptance test above needs, which would reintroduce valid-frame
+// rejection.
 #[test]
 fn forward_remote_terminal_stream_reader_uses_production_cap_at_least_as_large_as_max_frame() {
     // Cheap sanity check pinning the constant so a future edit cannot
@@ -4734,6 +5006,11 @@ fn forward_remote_terminal_stream_reader_uses_production_cap_at_least_as_large_a
     );
 }
 
+// Pins that annotate_remote_terminal_429 prefixes "remote <name>: " to
+// 429 messages (so the UI attributes throttling to the remote) but
+// leaves other statuses like INTERNAL_SERVER_ERROR untouched.
+// Guards against mis-annotating non-throttling errors or losing the
+// annotation on legitimate throttling.
 #[test]
 fn annotate_remote_terminal_429_prefixes_only_throttled_remote_errors() {
     let throttled = annotate_remote_terminal_429(
@@ -4757,6 +5034,12 @@ fn annotate_remote_terminal_429_prefixes_only_throttled_remote_errors() {
     assert_eq!(server_error.message, "remote server exploded");
 }
 
+// Pins that /api/terminal/run forwards a command with maximum-length
+// multibyte (combining-character-safe) content to the remote's
+// /api/terminal/run and returns the remote's response, i.e. the
+// proxy's character-length validation does not count bytes.
+// Guards against rejecting legitimate unicode commands at the proxy
+// layer due to byte-vs-char confusion.
 #[tokio::test]
 async fn terminal_run_route_proxies_valid_remote_multibyte_commands() {
     let captured_body = Arc::new(Mutex::new(None::<String>));
