@@ -1,4 +1,41 @@
-// Orchestrator instance lifecycle — pause/resume/stop/pending-transition handling.
+// Running orchestrator instance lifecycle handling.
+//
+// Once an orchestrator instance is created (see `orchestrators.rs`
+// for `create_orchestrator_instance`), it enters a state machine
+// that this file owns the transitions for:
+//
+// - **pause** / **resume** (`pause_orchestrator_instance`,
+//   `resume_orchestrator_instance`) — user-initiated halt/restart
+//   that freezes auto-dispatch without tearing down child sessions.
+// - **stop** — multi-phase teardown: `begin_orchestrator_stop` marks
+//   the instance stopping and kills its child sessions;
+//   `note_stopped_orchestrator_session` tracks completions as they
+//   arrive; `finish_orchestrator_stop` finalizes the instance once
+//   all children have reported stopped; `stop_orchestrator_instance`
+//   is the user-facing API that composes the phases and waits.
+// - **pending transitions** — orchestrators queue transitions
+//   between their child templates asynchronously;
+//   `resume_pending_orchestrator_transitions` re-fires any queued
+//   transitions at boot (see `state_boot.rs`), and
+//   `accept_next_pending_orchestrator_transition` drains one at a
+//   time during normal operation.
+//
+// Supporting snapshots (`stopping_orchestrator_ids_snapshot`,
+// `stopping_orchestrator_session_ids_snapshot`) exist so external
+// subsystems (the turn dispatcher, the session message delta path)
+// can cheaply check "is this session part of a stopping orchestrator?"
+// without relocking state on every event.
+// `prune_pending_transitions_for_stopped_orchestrator_sessions`
+// drops queued transitions whose source session went away during a
+// stop. `is_session_not_running_conflict` is a small predicate used
+// by the stop cascade to distinguish expected vs unexpected errors.
+//
+// The per-template transition machinery that decides *what* happens
+// on each transition (model switches, prompt injection, branching)
+// lives in `src/orchestrator_transitions.rs`. This file owns the
+// instance-level state machine that routes transitions into that
+// machinery.
+
 
 impl AppState {
     /// Pauses orchestrator instance.
