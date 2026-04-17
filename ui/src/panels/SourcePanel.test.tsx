@@ -405,6 +405,83 @@ describe("SourcePanel", () => {
     expect(screen.getByText("Mermaid")).toHaveClass("chip");
   });
 
+  // Inline mode (follow-up to Phase 5): source stays visible as
+  // syntax-highlighted code, detected renderable regions render
+  // in-place at their original line positions. Read-only — this is
+  // a reading view, editing still lives in Code/Split.
+  it("exposes Inline mode when renderable regions are detected and renders source with the diagram inline", async () => {
+    const { container } = render(
+      <SourcePanel
+        editorAppearance={editorAppearance}
+        editorFontSizePx={14}
+        fileState={{
+          ...readyFileState,
+          path: "/repo/src/architecture.rs",
+          content: [
+            "/// Architecture:",
+            "///",
+            "/// ```mermaid",
+            "/// flowchart TD",
+            "///   A --> B",
+            "/// ```",
+            "pub fn example() {}",
+          ].join("\n"),
+          language: "rust",
+        }}
+        sourcePath="/repo/src/architecture.rs"
+        onSaveFile={vi.fn()}
+      />,
+    );
+
+    // Inline button appears because the registry detected a Mermaid
+    // region inside the `///` doc-comment block.
+    const inlineButton = await screen.findByRole("button", { name: "Inline" });
+    fireEvent.click(inlineButton);
+
+    // After switching, the inline view shows the pre-fence Rust
+    // source as a syntax-highlighted code block, the Mermaid
+    // rendered inline (via the registry → MarkdownContent pipeline),
+    // and the post-fence `pub fn example()` source as another code
+    // block.
+    await waitFor(() => {
+      // Check the inline view container is rendered.
+      const inlineView = container.querySelector(".source-inline-view");
+      expect(inlineView).not.toBeNull();
+    });
+    // The source-outside-fence content reaches the DOM (the `pub fn
+    // example()` line). `highlight.js` wraps it in spans, so we
+    // search by text content rather than exact DOM shape.
+    expect(
+      container.textContent?.includes("pub fn example()"),
+    ).toBe(true);
+    // The prose doc-comment lines also stay visible as source
+    // (the `///` prefix is part of the code, not stripped).
+    expect(container.textContent?.includes("/// Architecture:")).toBe(true);
+  });
+
+  it("does not expose Inline mode for files with no renderable regions", async () => {
+    render(
+      <SourcePanel
+        editorAppearance={editorAppearance}
+        editorFontSizePx={14}
+        fileState={{
+          ...readyFileState,
+          path: "/repo/docs/readme.md",
+          content: "# Plain heading\n\nNo diagrams here.\n",
+          language: "markdown",
+        }}
+        sourcePath="/repo/docs/readme.md"
+        onSaveFile={vi.fn()}
+      />,
+    );
+
+    // Markdown files with zero renderable regions get Preview/Split
+    // (Markdown always gets them) but NOT Inline — Inline only
+    // makes sense when there's something to splice inline.
+    await screen.findByRole("button", { name: "Preview" });
+    expect(screen.queryByRole("button", { name: "Inline" })).not.toBeInTheDocument();
+  });
+
   // Edits that ADD renderable content (e.g., user types a Mermaid
   // fence into a previously-empty `.md` file) should expose
   // Preview/Split once the registry picks up the new region. The
