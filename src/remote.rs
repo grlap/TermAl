@@ -2622,32 +2622,45 @@ fn sync_remote_state_inner(
         .map(|session| (session.id.as_str(), session))
         .collect::<HashMap<_, _>>();
 
-    for record in &mut inner.sessions {
-        if record.remote_id.as_deref() != Some(remote_id) {
-            continue;
-        }
-        let Some(remote_session_id) = record.remote_session_id.as_deref() else {
+    // Two-phase update: first scan immutably to collect `(index,
+    // remote_session_id, local_project_id)` tuples, then mutate via
+    // `session_mut_by_index` so each changed record gets a fresh
+    // `mutation_stamp`. Iterating `&mut inner.sessions` directly would
+    // skip stamping, and the new SQLite delta persist would then drop
+    // these remote-proxy updates entirely.
+    let updates: Vec<(usize, String, Option<String>)> = inner
+        .sessions
+        .iter()
+        .enumerate()
+        .filter_map(|(idx, record)| {
+            if record.remote_id.as_deref() != Some(remote_id) {
+                return None;
+            }
+            let remote_session_id = record.remote_session_id.as_deref()?;
+            if focus_remote_session_id.is_some_and(|focus| focus != remote_session_id) {
+                return None;
+            }
+            let remote_session = remote_sessions_by_id.get(remote_session_id)?;
+            let local_project_id = remote_session
+                .project_id
+                .as_deref()
+                .and_then(|remote_project_id| {
+                    local_project_ids_by_remote_project_id
+                        .get(remote_project_id)
+                        .cloned()
+                })
+                .or_else(|| record.session.project_id.clone());
+            Some((idx, remote_session_id.to_string(), local_project_id))
+        })
+        .collect();
+
+    for (idx, remote_session_id, local_project_id) in updates {
+        let Some(remote_session) = remote_sessions_by_id.get(remote_session_id.as_str()) else {
             continue;
         };
-        if focus_remote_session_id.is_some_and(|focus| focus != remote_session_id) {
-            continue;
-        }
-        let Some(remote_session) = remote_state
-            .sessions
-            .iter()
-            .find(|session| session.id == remote_session_id)
-        else {
+        let Some(record) = inner.session_mut_by_index(idx) else {
             continue;
         };
-        let local_project_id = remote_session
-            .project_id
-            .as_deref()
-            .and_then(|remote_project_id| {
-                local_project_ids_by_remote_project_id
-                    .get(remote_project_id)
-                    .cloned()
-            })
-            .or_else(|| record.session.project_id.clone());
         apply_remote_session_to_record(record, local_project_id, remote_session);
     }
 

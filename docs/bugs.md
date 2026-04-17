@@ -61,38 +61,374 @@ Also fixed in the current tree, not re-listed below:
 - **Mermaid iframe dimension cap** — `getMermaidDiagramFrameStyle` now clamps the derived `viewBox` width and height to 4096 px and the iframe CSS uses `max-width: 100%`, so a pathologically large Mermaid diagram (agent output or hostile Markdown) cannot produce a thousand-pixel iframe that overflows its parent column.
 - **Zero-length rendered Markdown commit overlap detection** — `hasOverlappingMarkdownCommitRanges` now rejects two zero-length ranges that share an insertion point, and a zero-length range touching a non-empty sibling, while still allowing strictly adjacent non-empty ranges. Two rendered Markdown sections resolving to the same position no longer silently garble the saved document.
 - **Shared untagged-degradation status list** — `should_degrade_git_diff_document_enrichment_error` and `git_diff_document_enrichment_note` now share a single `DEGRADED_UNTAGGED_STATUSES` constant, with a regression that iterates every listed status and asserts both helpers agree (the degradable set flips to note-producing and vice versa).
+- **Delta persistence** — the background persist thread now writes only the sessions whose monotonic `mutation_stamp` advanced past its watermark. `StateInner` exposes `session_mut` / `session_mut_by_index` / `stamp_session_at_index` / `push_session` / `remove_session_at` / `retain_sessions` helpers that stamp on access, and every production `&mut inner.sessions[..]` / `push` / `remove` / `retain` site in `src/state.rs`, `src/remote.rs`, and `src/orchestrators.rs` is routed through them. `commit_locked` no longer clones `PersistedState::from_inner` under the state mutex; it just sends a `PersistRequest::Delta` signal. The persist thread briefly re-locks `inner`, runs `collect_persist_delta` (clones only changed sessions + drains `removed_session_ids` + metadata-only clone), and writes via `persist_delta_via_cache` with targeted `INSERT OR UPDATE` per changed session and `DELETE WHERE id = ?` per removed id — no `DELETE FROM sessions` sweep. Workspace layout saves, preference updates, and any commit that does not touch sessions now rewrite only the `app_state` metadata row instead of every session row.
+- **Broadcaster thread for SSE state** — `publish_snapshot` now sends an owned `StateResponse` through a dedicated `termal-state-broadcast` thread that serializes and forwards to `state_events`. The state mutex is no longer held during JSON serialization.
+- **`get_state` serializes inside `spawn_blocking`** — `GET /api/state` now builds the snapshot and runs `serde_json::to_vec` in the same `run_blocking_api` closure and returns a prebuilt `axum::response::Response` with `Content-Type: application/json`. No tokio runtime worker sits on synchronous JSON serialization of the full state.
+- **`persist_internal_locked` single-clone path** — the persist channel now carries only a `PersistRequest::Delta` signal; the `PersistedState::from_inner` clone that used to run under the state mutex is gone. The test-build sync fallback rebuilds `PersistedState` only when the broadcaster channel is disconnected (unit tests).
+- **Self-chained safety-net poll** — the post-send `/api/state` watchdog is a chained `setTimeout(30_000)` instead of `setInterval(3000)`, so slow responses can no longer stack overlapping inflight requests when the server is busy.
+- **`sync_remote_state_inner` stamps remote-proxy updates** — the remote-state sync loop now collects `(index, remote_session_id, local_project_id)` in an immutable first pass, then re-borrows via `inner.session_mut_by_index(idx)` for each update so every applied remote change bumps `mutation_stamp`. Remote-proxy rows are now picked up by the SQLite delta persist on every remote-state snapshot instead of being silently skipped at the watermark.
+- **`remove_project` stamps the affected sessions** — project deletion now collects the affected session indices first, then clears `session.project_id` through `session_mut_by_index` so the cleared rows land in SQLite on the next persist tick. Previously, the in-memory `project_id = None` never reached disk and deleted projects would reappear attached to those sessions on restart.
+- **`create_session` + `create_session_from_fork` re-stamp after slot replace** — both code paths now call `inner.session_mut_by_index(index)` after `*slot = record.clone()` so the whole-struct replace no longer erases the stamp that `push_session` applied. Without this, the row was invisible to `collect_persist_delta` until something else re-stamped it.
+- **`orchestrators.rs` queued-prompt clear routes through `session_mut_by_index`** — `normalize_orchestrator_instances_with_persisted_non_running` now stamps the record before calling `clear_stopped_orchestrator_queued_prompts`, so the delete-session call path persists the cleared queued prompts to SQLite. The load-path caller re-persists identical rows on startup, which is a tiny waste but correct.
 
-## State snapshots still serialize full session transcripts
+## Server restart without browser refresh can lose the last streamed message
 
-**Severity:** High - large conversation histories make `/api/state`, SSE state snapshots, and reconnect/restore paths spend CPU serializing messages that the list view usually does not need.
+**Severity:** Medium - restarting the backend process while the browser tab is still open can make the most recent assistant message disappear from the UI, because the persist thread has a small window between "commit fires" and "row is durably in SQLite" during which an un-drained mutation is lost on kill.
 
-`snapshot_from_inner_with_agent_readiness` still clones every visible `Session` with its full `messages` vector into `StateResponse`. The HTTP `/api/state` handler and full-state SSE publisher then serialize those full transcripts even when the frontend only needs session metadata. With long Codex/Claude conversations this pushes hot CPU into `serde_json` and makes reconnects, tab restore, and any full-state publish scale with total transcript size.
+Persistence is intentionally background and best-effort: every `commit_persisted_delta_locked` (and similar delta-producing commit helpers) signals `PersistRequest::Delta` to the persist thread and returns. The thread then locks `inner`, builds the delta, and writes. If the backend process is killed (SIGKILL, laptop sleep wedge, crash, manual restart of the dev process) between the signal fire and the SQLite commit, the mutation is lost. Old pre-delta-persistence behavior had the same window — the persist channel carried a full-state clone — so this is not a regression introduced by the delta refactor, but the symptom is visible now because the reconnect adoption path applies the persisted state with `allowRevisionDowngrade: true`: the browser's in-memory copy of the just-streamed last message is replaced by the freshly loaded (older) backend state, making the message disappear from the UI.
+
+The message is not hidden; it is genuinely gone from SQLite. No amount of frontend re-rendering will bring it back.
 
 **Current behavior:**
-- `/api/state` returns all visible sessions with all historical messages.
-- `publish_state_locked` builds the same full transcript snapshot for full-state SSE events.
+- Active-turn deltas (e.g., streaming assistant text, `MessageCreated` at the end of a turn) commit through `commit_persisted_delta_locked`, which only signals the persist thread.
+- The persist thread acquires `inner` briefly, collects the delta, and writes to SQLite.
+- Between "signal sent" and "row written" there is a small time window (usually sub-millisecond, but can stretch under contention) during which a hard kill of the backend loses the mutation.
+- On backend restart + SSE reconnect, the browser's `allowRevisionDowngrade: true` adoption path applies the persisted state. The persisted state is missing the un-drained mutation, so the in-memory latest message is overwritten and disappears.
+
+**Proposal:**
+- **Graceful-shutdown flush**: install a `SIGTERM` / `Ctrl+C` handler that drains the persist channel before the process exits, so user-initiated restarts (the common case) never lose data.
+- **Opt-in synchronous persistence** for the last message of a turn: the turn-completion commit (`finish_turn_ok_if_runtime_matches`'s `commit_locked`) could flush synchronously before returning, trading a few ms of latency on turn completion for zero-loss durability of the final message.
+- **Accept and document** as a known limitation that hard process kills (SIGKILL, power loss) can lose at most the last un-drained commit. Add a line to `docs/architecture.md` describing the background-persist durability contract.
+- A regression test that exercises "restart backend mid-turn, reconnect browser, assert the final message is visible" would pin whichever fix is chosen; without the fix it is expected to fail.
+
+## Delta persist drops tombstones on write failure
+
+**Severity:** High - a single transient `persist_delta_via_cache` error can silently leak an orphan session row into SQLite. The deleted session's row never gets cleaned up and the session reappears on next restart.
+
+`StateInner::collect_persist_delta` drains `removed_session_ids` via `std::mem::take` while holding the state mutex, before the persist thread calls `persist_delta_via_cache`. If the SQLite write then fails (locked DB, disk full, I/O error), the persist thread does not advance its watermark — so `changed_sessions` correctly retries on the next tick because the mutation stamp is still higher than the watermark. But `removed_session_ids` has already been taken out of `inner` and passed by value to the (now failed) write, and the session has already been removed from `inner.sessions`. There is no mutation stamp to retry from, and the tombstone vec was not pushed back into `inner` on error.
+
+**Current behavior:**
+- `collect_persist_delta` drains `removed_session_ids` into a local.
+- Persist thread calls `persist_delta_via_cache`; on error, it keeps its watermark.
+- On next tick, `collect_persist_delta` sees an empty `removed_session_ids` and no session with that id in `inner.sessions`.
+- The orphan row stays in `sessions` table forever (or until another event coincidentally DELETEs it).
+
+**Proposal:**
+- On `persist_delta_via_cache` error, push the removed ids back into `inner.removed_session_ids` so the next tick retries them. Hold the lock again briefly to do it.
+- Or: move the `mem::take` out of `collect_persist_delta` into the persist-thread caller, pass the ids by reference, and have the thread clear them from `inner` only on success.
+- Add a regression test that injects an error into `persist_delta_via_cache` and asserts the tombstone survives across a retry.
+
+## Remote sync rollback leaves stale session tombstones queued
+
+**Severity:** High - a transient remote orchestrator-sync failure can persist deletes for sessions that were restored by rollback.
+
+`sync_remote_state_inner` now uses `retain_sessions`, which records deleted session ids in `removed_session_ids` for delta persistence. If the later `sync_remote_orchestrators_inner` call fails, the rollback restores `sessions`, `next_session_number`, and `orchestrator_instances`, but it does not restore the previous tombstone accumulator. The next persist tick can therefore delete SQLite rows for sessions that are back in memory.
+
+**Current behavior:**
+- Remote session retention can queue tombstones in `inner.removed_session_ids`.
+- The fallible orchestrator sync rollback restores session records but leaves the tombstones queued.
+- A later delta persist can apply stale deletes to SQLite, making restored sessions disappear after restart.
+
+**Proposal:**
+- Include `removed_session_ids` in the rollback snapshot and restore it on failure.
+- Or defer the retention/delete pass until after the fallible orchestrator sync has succeeded.
+- Add a regression that forces orchestrator sync failure after remote session retention and asserts no stale tombstones remain queued.
+
+## Imported discovered Codex threads lose their delta-persist stamp
+
+**Severity:** Medium - newly discovered Codex thread sessions can be inserted in memory but skipped by SQLite delta persistence.
+
+`import_discovered_codex_threads` creates a session, then performs a whole-record replacement with a local `record`. That local record still carries the construction-time `mutation_stamp: 0`, so the replacement can overwrite the stamped row that `create_session` inserted. Under the delta persist watermark, the row can then look unchanged and never be written to SQLite.
+
+**Current behavior:**
+- `create_session` pushes a stamped session row.
+- `import_discovered_codex_threads` replaces that row with an unstamped local record.
+- The background delta persist can skip the discovered thread row because its stamp is below the watermark.
+
+**Proposal:**
+- Re-stamp the slot after the whole-record replace, matching the create/fork paths.
+- Prefer mutating the already-stamped inner record in place when practical.
+- Add a production-delta persistence regression for importing a discovered Codex thread and verifying its row is written.
+
+## `SqlitePersistConnectionCache` has no error-driven invalidation
+
+**Severity:** Medium - once the cached SQLite connection enters a persistent error state, every subsequent persist tick silently logs the same error. No auto-recovery.
+
+`SqlitePersistConnectionCache::connection_for(path)` at `src/api.rs:353-397` only swaps the connection when `path` changes. On a persistent SQLite error (`SQLITE_READONLY`, `SQLITE_CORRUPT`, `SQLITE_FULL`, the backing file unlinked by a user "reset", a Windows-side handle issue after a crash), every subsequent call reuses the broken handle. Errors land in the persist-thread log, but the cache never reopens, so the process can get stuck in a permanent "persist broken" state that a backend restart would repair.
+
+**Current behavior:**
+- `persist_delta_via_cache` grabs the cached connection, builds a transaction, commits.
+- On transaction or commit failure, the error propagates up and the persist thread logs it.
+- The cache still holds the same broken connection. Next tick: same error, same log, forever.
+
+**Proposal:**
+- On persist error, drop the cached connection (`cache.connection = None; cache.path = None;`) so the next tick reopens and re-runs `ensure_sqlite_state_schema`.
+- Accept the cost of the reopen on error; the happy path still reuses one connection per process lifetime.
+- Add a regression test: seed an error that the cache should recover from (e.g., unlink the backing file after a successful write) and assert the next persist tick creates a new connection and writes successfully.
+
+## Stale persist-thread documentation after `PersistRequest::Full` removal
+
+**Severity:** Medium - three doc-comment blocks still describe the removed `PersistRequest::Full` variant and the deleted `persist_state_via_cache` helper, so future readers will look for behavior that no longer exists in the tree.
+
+Commit `6615403` removed the `Full` variant in favor of a `Delta`-only signal channel and deleted `persist_state_via_cache`, but three comment blocks still reference the old shape:
+
+- `src/state.rs:583-601` — the persist-thread inline comment describes "`Full` signals (startup and reset paths)" and JSON→SQLite import semantics that no longer exist.
+- `src/state.rs:30-43` — the `PersistRequest` doc-comment still names the removed variant.
+- `src/api.rs:389-397` — `persist_delta_via_cache`'s doc-comment starts with "Unlike `persist_state_via_cache` this does NOT issue `DELETE FROM sessions`", referring to a helper that was deleted in the same commit.
+
+**Current behavior:**
+- Readers encountering these comments will search for `Full` / `persist_state_via_cache` in the source and find neither.
+- The comments imply a two-variant API surface (`Full` vs `Delta`) that no longer exists.
+
+**Proposal:**
+- Rewrite the three comment blocks to describe the current `Delta`-only shape directly, without comparative phrasing to a deleted variant.
+- Consider adding a short "see also" line pointing to `collect_persist_delta` as the authoritative description of the delta contract.
+
+## `session_mut_by_index` leaks a mutation stamp on out-of-bounds miss
+
+**Severity:** Medium - `next_mutation_stamp()` runs *before* `self.sessions.get_mut(index)` can fail. An out-of-bounds call silently advances `last_mutation_stamp` with no mutation to show for it. Divergent from `session_mut` (by id), which short-circuits correctly on the `find_session_index` miss.
+
+At `src/state.rs:6565-6570`:
+
+```rust
+fn session_mut_by_index(&mut self, index: usize) -> Option<&mut SessionRecord> {
+    let stamp = self.next_mutation_stamp();     // advances unconditionally
+    let record = self.sessions.get_mut(index)?; // fails silently if OOB
+    record.mutation_stamp = stamp;
+    Some(record)
+}
+```
+
+Callers that guard with `find_session_index` are safe, but the helper's own invariant is leaky: a typo or race between `find_session_index` and `session_mut_by_index` burns a stamp value that can never match any stored record.
+
+**Current behavior:**
+- Every OOB call to `session_mut_by_index` increments `last_mutation_stamp`.
+- Nothing ties the burned stamp to any session, so the global watermark gap grows by one per miss.
+- Not a correctness bug today (watermark math still works), but the invariant "stamp implies an actual mutation" is false.
+
+**Proposal:**
+- Invert the order: fetch `get_mut` first, then advance the stamp only inside the `Some` arm.
+- Or explicitly document the leak as intentional (it isn't) and pin it with a test.
+- Extend `state_inner_session_mut_helpers_stamp_the_record` with a miss case.
+
+## New GET endpoint and delta variant undocumented in architecture.md
+
+**Severity:** Medium - `docs/architecture.md` is the canonical REST/delta reference. The new `GET /api/sessions/{id}` route and the new `DeltaEvent::SessionCreated` variant are not listed there.
+
+- `GET /api/sessions/{id}` was added at `src/main.rs:215`, handled by `get_session` in `src/api.rs:598`. It returns `SessionResponse { revision, session }`. Not in the REST endpoint table at `docs/architecture.md:167`.
+- `DeltaEvent::SessionCreated` was added in `src/api.rs:8086-8091` and forwarded by the remote-proxy path at `src/remote.rs:2133-2173`. Not in the documented `DeltaEvent` list at `docs/architecture.md:213-217`. `DeltaEvent::MessageCreated` is similarly missing (pre-existing).
+
+**Current behavior:**
+- External readers of `docs/architecture.md` will not know these exist.
+- Future refactors that try to enumerate every endpoint / delta variant from the doc will miss them.
+
+**Proposal:**
+- Add a `| GET | /api/sessions/{id} | Fetch one session (full transcript hydration) |` row and describe `SessionResponse { revision, session }` in the response section.
+- Add `DeltaEvent::SessionCreated { revision, session_id, session }` and `DeltaEvent::MessageCreated` to the documented variant list.
+
+## Unix terminal shell spawn dropped the login-shell flag
+
+**Severity:** Medium - the `/api/terminal` Unix spawn path changed from `sh -lc` to `sh -c`, so the terminal no longer sources `.profile`/`.bash_profile`. Users who rely on those for `PATH` additions (`nvm`, `uv`, `poetry`, homebrew prefixes) will find their tools missing from the terminal panel.
+
+At `src/api.rs:2797`, the diff dropped the `-l` flag. `sh -c` runs in non-login mode, which skips profile sourcing on most user configurations.
+
+**Current behavior:**
+- Terminal panel spawns `sh -c <command>` on Unix instead of `sh -lc <command>`.
+- Commands run without the user's login-shell `PATH` adjustments.
+- A user whose `node` / `uv` / `poetry` / `gcloud` is only on PATH via `.profile` gets "command not found" in the terminal panel.
+
+**Proposal:**
+- Restore `sh -lc` unless there is a documented reason (e.g., the login-shell init was measurably slow and intentionally removed).
+- If the removal was intentional, add a comment explaining why and document the expectation that `PATH` must be set at the parent-process level.
+
+## Mermaid dimension cap missing negative/zero test coverage
+
+**Severity:** Medium - `clampMermaidDiagramExtent` regex accepts `[-+]?` signed values, and `readMermaidSvgDimensions` only rejects non-finite numbers. The existing "huge viewBox" test covers the upper clamp; nothing covers the lower clamp.
+
+A hostile or buggy agent output can produce `viewBox="0 0 -50 -50"` or `viewBox="0 0 0 0"`. The current test in `ui/src/MarkdownContent.test.tsx:320-347` asserts only that a 10,000×10,000 viewBox is clamped to the upper bound. A regression that drops `Math.max(lowerBound, …)` from `clampMermaidDiagramExtent` would pass the current tests.
+
+**Current behavior:**
+- Upper bound is tested (10,000 → 4096).
+- Lower bound is untested. Negative or zero input behavior depends on `Math.min(Math.max(lowerBound, value), upperBound)` still being intact in production code.
+
+**Proposal:**
+- Add two tests: `viewBox="0 0 -100 -100"` (negative → clamp to lower bound) and `viewBox="0 0 0 0"` (zero → clamp to lower bound). Assert the rendered widthPx/heightPx stay in `[lowerBound, upperBound]`.
+
+## `MessageCard` default-prop inline arrows defeat memoization
+
+**Severity:** Low - two optional callback props default to fresh inline arrow functions, so the new strict `===` memo comparator will always report them as different when the parent omits them, forcing a re-render on every parent render.
+
+`MessageCard` destructures `onMcpElicitationSubmit = () => {}` and `onCodexAppRequestSubmit = () => {}` at `ui/src/message-cards.tsx:105-117`. Each parent render allocates a new default function. The comparator added at lines 327-328 compares these with `===` and always fails on the optional-and-omitted case.
+
+**Current behavior:**
+- Parent renders a `MessageCard` without the two optional callbacks.
+- Each render, a fresh default arrow is passed.
+- Comparator sees a "changed" prop and re-renders, even when nothing the user sees has changed.
+
+**Proposal:**
+- Hoist the two no-op defaults to module scope for stable identity, or drop them from the comparator when the parent can guarantee they are always passed.
+
+## React dep-array hygiene: stale-or-extraneous deps across three hot effects
+
+**Severity:** Low - three `useEffect` hooks over-list deps that either re-trigger the effect for no behavioral reason (wasting work) or cause observer churn. Minor perf only; no correctness impact.
+
+- `ui/src/App.tsx:2203-2207` — hydration effect lists `activeSession?.messages.length` in deps; body only reads `activeSession?.id` and `activeSession?.messagesLoaded`. Every streamed token reruns the effect and early-returns.
+- `ui/src/message-cards.tsx:2854` — Markdown line-marker `useEffect` was extended to include `documentPath`, `hasOpenSourceLink`, `workspaceRoot` in deps. The body reads none of them; only `showLineNumbers` and the `markdownRootRef` DOM. Triggers `ResizeObserver` tear-down + rebuild on unrelated context changes.
+- `ui/src/App.tsx:4734-4737` — the 5-minute hard-cap `setTimeout` is not cleared when the poll chain exits because the session left "active" status. The handler no-ops, so it is not a leak — just a pending timer slot held for up to 5 minutes per completed prompt.
+
+**Proposal:**
+- Drop `activeSession?.messages.length` from the hydration effect deps.
+- Drop `documentPath`, `hasOpenSourceLink`, `workspaceRoot` from the line-marker effect deps.
+- In the early-return branch of the safety-net poll, clear `activePromptPollTimeoutRef.current` alongside the chain ref.
+
+## Read-only Markdown input flashes plain source for a frame
+
+**Severity:** Low - when the user tries to edit a read-only Markdown segment, the handler imperatively sets `event.currentTarget.textContent = segment.markdown` before triggering the `onReadOnlyMutation` remount. For one paint frame the rendered Markdown subtree is replaced by raw source text.
+
+At `ui/src/panels/DiffPanel.tsx:2785-2790`, the read-only branch of `handleInput` assigns raw text to `textContent` and then bumps `readOnlyResetVersion` to remount. The textContent assignment is unnecessary — `onReadOnlyMutation()` alone triggers the remount and React will reconcile the correct rendered DOM on the next commit.
+
+**Current behavior:**
+- User attempts a disallowed edit.
+- Plain source text flashes for one paint frame.
+- Remount completes, rendered Markdown returns.
+
+**Proposal:**
+- Drop the `event.currentTarget.textContent = segment.markdown` assignment; rely on `onReadOnlyMutation()` to trigger the remount.
+
+## `session_mut` helpers stamp eagerly before the caller decides to mutate
+
+**Severity:** Low - check-then-early-return paths advance the mutation stamp even when no field actually changed, so the persist thread re-serializes the session on the next tick for no reason. Softly undoes the delta-persist benefit.
+
+`session_mut_by_index` and `session_mut` both bump `last_mutation_stamp` and write it to the record before returning `&mut SessionRecord`. Several callers acquire the mut borrow, read a field, decide nothing needs to change, and return. `sync_session_cursor_mode`, `set_agent_commands`, and several `clear_stopped_orchestrator_queued_prompts` sites follow this pattern. The stamp is permanent, so `collect_persist_delta` on the next commit sees the session as dirty and writes its row.
+
+**Current behavior:**
+- `session_mut*` stamps on access, before the caller decides.
+- Check-then-early-return callers spuriously mark sessions dirty.
+- Persist thread writes unchanged session rows on follow-up commits.
+- Cost is small per-instance but compounds across many mutation sites.
+
+**Proposal:**
+- Add a read-only `session_by_index(index) -> Option<&SessionRecord>` helper for read-first callers.
+- Callers that need to mutate after the read switch to `stamp_session_at_index(index)` explicitly before mutating, or re-borrow through `session_mut_by_index` only when certain.
+- Alternatively: change `session_mut*` to return a guard type that stamps on drop only if the caller called a `mark_mutated()` method — more invasive.
+
+## SSE state broadcaster can reorder state events against deltas
+
+**Severity:** Medium - under a burst of mutations, a delta event can arrive at the client before the state event for the same revision, triggering avoidable `/api/state` resync fetches.
+
+Before the broadcaster thread, `commit_locked` published state synchronously (`state_events.send(payload)` under the state mutex), so state N always hit the SSE stream before any follow-up delta N+1. Now `publish_snapshot` enqueues the owned `StateResponse` to an mpsc channel and returns; the broadcaster thread drains and serializes on its own schedule. `publish_delta` remains synchronous. A caller that does `commit_locked(...)?` + `publish_delta(...)` can therefore race: the delta hits `delta_events` before the broadcaster drains state N. The frontend's `decideDeltaRevisionAction` requires `delta.revision === current + 1`; if state N hasn't advanced `latestStateRevisionRef` yet, the delta is treated as a gap and the client fires a full `fetchState`.
+
+**Current behavior:**
+- `publish_snapshot` is async (channel + broadcaster thread).
+- `publish_delta` is sync.
+- Client can observe delta N+1 before state N.
+- Extra `/api/state` resync fetches fire under sustained mutation bursts.
+- Correctness preserved (resync fixes the view), but behavior is chatty and pushes load onto `/api/state` — which is exactly the path we just made cheaper.
+
+**Proposal:**
+- Route deltas through the same broadcaster thread so state and delta events for the same revision stream in order. Coalescing is fine because deltas are idempotent after a state snapshot.
+- Or: have `publish_snapshot` synchronously send a revision-only "marker" into `state_events` immediately and let the broadcaster thread serialize and send the full payload; the client's `latestStateRevisionRef` advances on the marker.
+- Or: document the tradeoff and rely on the existing `/api/state` resync fallback; track the extra traffic.
+
+## SSE state broadcaster queue can grow before coalescing
+
+**Severity:** Low - bursty commits can enqueue multiple full `StateResponse` snapshots before the broadcaster gets a chance to drop superseded ones.
+
+The broadcaster thread coalesces snapshots only after receiving from its unbounded `mpsc::channel`. During a burst of commits, the sender side can enqueue several large snapshots first, so the "newest only" behavior does not actually bound queued memory or provide backpressure.
+
+**Current behavior:**
+- `publish_snapshot` sends owned `StateResponse` values to an unbounded channel.
+- The broadcaster drains and coalesces only after snapshots have already queued.
+- Full-state snapshots can accumulate during bursts even though older snapshots will be superseded.
+
+**Proposal:**
+- Replace the unbounded queue with a single-slot latest mailbox or bounded channel.
+- Drop or overwrite superseded snapshots before they can accumulate in memory.
+- Add a burst test that publishes multiple large snapshots while the broadcaster is delayed and asserts only the latest snapshot is retained.
+
+## Self-chained safety-net poll hard-cap can be missed
+
+**Severity:** Medium - the 5-minute hard-cap on the post-send `/api/state` poll can fail to fire, letting the poll continue indefinitely under specific timing.
+
+`ui/src/App.tsx`'s self-chained `setTimeout` poll clears `activePromptPollTimeoutIdRef.current` to `null` at the top of each fired callback and only re-populates it inside `scheduleNextActivePromptPoll` after the `await fetchState()` resolves. The hard-cap `setTimeout` calls `clearActivePromptPoll`, which clears whatever is currently in the ref. If the cap fires between "id cleared" (top of callback) and "id re-set" (next schedule queued), `clearActivePromptPoll` no-ops. The next `scheduleNextActivePromptPoll` call then queues a fresh 30 s timer that outlives the cap.
+
+**Current behavior:**
+- The cap timer clears the ref; if the ref is null, it's a no-op.
+- Inside the chained callback, the ref is null while awaiting `fetchState()`.
+- On large transcripts, `fetchState` can take multiple seconds.
+- The cap can fire during that window and fail to stop the chain.
+
+**Proposal:**
+- Add a `capReached` flag (ref or closure-local) and have `scheduleNextActivePromptPoll` short-circuit when it is set.
+- Alternatively record the deadline timestamp at start; the callback bails out when `Date.now() >= deadline`.
+
+## `apply_remote_session_to_record` unconditionally clones the full transcript
+
+**Severity:** Low - every remote-session hydration pays for a full-transcript `.clone()` even though the clone is used only in a rare preserve branch.
+
+`apply_remote_session_to_record` starts with `let previous_messages = record.session.messages.clone();`. That clone is consumed only when `remote_session.messages_loaded == Some(false) && remote_session.messages.is_empty() && !previous_messages.is_empty()`. The common path (a real transcript update) clones and discards.
+
+**Current behavior:**
+- Every remote hydration (`get_remote_session`, create/fork remote proxy) clones the full transcript up front.
+- The clone survives only if the preserve branch activates.
+- Allocations and copy time scale with transcript size for every hydration, including the common case.
+
+**Proposal:**
+- Compute the branch condition first; use `std::mem::take(&mut record.session.messages)` only if the preserve branch will fire.
+- Add a benchmark or log line capturing the avoided allocation on the common path.
+
+## `persist_state_from_persisted_with_connection` clones the full state then clears sessions
+
+**Severity:** Low - the test-fallback and any synchronous-persist call site deep-clones every session transcript, then discards the clones to produce metadata.
+
+`let mut metadata = persisted.clone(); metadata.sessions.clear();` — every transcript is deep-copied just to drop it. Pre-existing pattern; the delta work didn't introduce it but also didn't fix it.
+
+**Current behavior:**
+- Every synchronous persist call allocates MBs only to discard them.
+- The same pattern lives in `persist_persisted_state_to_sqlite`.
+
+**Proposal:**
+- Take `PersistedState` by value where possible and `std::mem::take(&mut persisted.sessions)` into a local; reuse the remaining `persisted` as metadata.
+- Or: add a dedicated `PersistedState::split_into_metadata_and_sessions(self) -> (Self, Vec<PersistedSessionRecord>)`.
+
+## Mermaid iframe `max-width: 100%` can be defeated by a flex ancestor
+
+**Severity:** Low - the dimension cap correctly bounds the iframe's intrinsic width at 4096 px, but `max-width: 100%` only binds if no ancestor sizes the child by intrinsic content.
+
+Common React-flex pitfall: a flex child with an intrinsic width of 4096 px forces the parent to that width even with `max-width: 100%`, because flex items default to `min-width: auto` which prevents shrinking below content size. The cap helps layout not break at 10 000+ px, but does not guarantee the iframe scales with the viewport on every ancestor layout.
+
+**Current behavior:**
+- `.mermaid-diagram-frame { max-width: 100% }` is set in CSS.
+- Inline `maxWidth: "100%"` is set in the computed style.
+- If an ancestor column or flex container does not set `min-width: 0`, a 4096 px iframe still forces its container to 4096 px.
+
+**Proposal:**
+- Add `.mermaid-diagram-frame { min-width: 0; }` explicitly so the iframe can shrink below its intrinsic width.
+- Or: ensure a known ancestor column sets `min-width: 0` / `overflow-x: auto` for Mermaid blocks.
+- Add a regression test with a narrow-column ancestor that asserts the iframe's rendered width does not exceed the column.
+
+## Safety-net poll uses `force + allowRevisionDowngrade` unconditionally
+
+**Severity:** Low - every scheduled `/api/state` poll can overwrite SSE-advanced client state with an older server snapshot if the poll's response arrives after newer SSE events.
+
+The chained poll calls `adoptState(freshState, { force: true, allowRevisionDowngrade: true })` regardless of whether a server restart actually happened. The flag exists to recover from server restarts that reset the persisted revision, but it is active for every poll — so a momentarily stale `/api/state` response landing after a newer SSE delta can roll the client back to the older snapshot. The poll is supposed to be a no-op when SSE is healthy.
+
+**Current behavior:**
+- Every poll adopts with `force + allowRevisionDowngrade`.
+- SSE's revision ordering is overridden on the poll path.
+- In practice the race window is small, but it can cause transient UI rollback.
+
+**Proposal:**
+- Gate `allowRevisionDowngrade: true` behind an explicit "server restart detected" signal (e.g., the state carries a freshly reset instance id).
+- For the steady-state poll, use `force: false` and trust SSE.
+
+## State snapshots still include full session transcripts on the wire
+
+**Severity:** Medium - `/api/state` response bodies and SSE state broadcasts still include every session's full `messages` vector. The serialization CPU cost is now off the mutex and off the tokio workers (broadcaster thread + `spawn_blocking`), but the payload size itself is unchanged.
+
+`snapshot_from_inner_with_agent_readiness` continues to clone every visible `Session` with its full `messages` vector into `StateResponse`. The HTTP `/api/state` handler and SSE state publisher then serialize those full transcripts even when the frontend only needs session metadata. Reconnect and tab-restore payloads still scale with total transcript size; individual active-prompt latency is unblocked (per the delta-persist and broadcaster fixes above), but network/client time to apply a full-state snapshot still scales.
+
+**Current behavior:**
+- `/api/state` returns all visible sessions with all historical messages (serialized inside `spawn_blocking`, so no tokio worker stall, but the response body is still O(all messages)).
+- `publish_state_locked` builds the same full transcript snapshot for SSE state events (serialized on the broadcaster thread).
 - The dedicated `GET /api/sessions/{id}` route exists, but state snapshots do not defer to it.
+- The frontend already has `Session.messagesLoaded?: boolean` scaffolding that treats `false` as "needs hydrate" — forward-compat for the planned backend change.
 
 **Proposal:**
 - Make state snapshots metadata-first: include session shell fields and mark transcript-bearing sessions as `messagesLoaded: false` with an empty `messages` array.
 - Keep `GET /api/sessions/{id}` as the authoritative full-transcript route, and keep session-create/prompt flows returning enough data that the active prompt UI remains reliable.
+- **Before landing** (per the earlier revert): audit every `commit_locked` caller and ensure a matching `publish_delta` exists for any state change that adds/edits messages, so stripped state events do not drop the change.
 - Add backend and App-level regression coverage proving `/api/state` omits transcripts, session hydration restores the full transcript, and metadata snapshots do not clear an already-hydrated active session.
-
-## Workspace layout saves rewrite every persisted session
-
-**Severity:** Medium - frequent layout autosaves can keep the persistence thread busy serializing all visible session transcripts even though only workspace metadata changed.
-
-`put_workspace_layout` calls `commit_locked`, which calls `persist_internal_locked`. That path builds a full `PersistedState::from_inner`, including every visible `PersistedSessionRecord`, and sends it to the persistence worker. In production SQLite this eventually serializes and upserts every session row. Dragging tabs, changing panes, or other layout churn should update only workspace metadata, but currently scales with total transcript size.
-
-**Current behavior:**
-- `put_workspace_layout` stores one `WorkspaceLayoutDocument` and then commits through the full-state persistence path.
-- `PersistedState::from_inner` includes all visible sessions, so unchanged transcripts are serialized again.
-- The SQLite storage layer has split session rows, but layout-only commits do not use a metadata-only persistence path.
-
-**Proposal:**
-- Add a layout/metadata-only persistence request that updates app metadata without serializing or upserting unchanged session rows.
-- Consider moving workspace layouts into their own SQLite table so layout writes never touch session records.
-- Add a regression or instrumentation test that a workspace layout save does not serialize session messages.
 
 ## `commit_session_created_locked` performs synchronous SQLite I/O under the state mutex
 
@@ -263,15 +599,85 @@ The new hydration effect's error path calls `reportRequestError(error)` on any `
 
 ## Implementation Tasks
 
+- [ ] P1: Add a direct unit test for `StateInner::collect_persist_delta`:
+  construct a `StateInner` with three sessions at distinct mutation stamps
+  and one hidden session; seed `removed_session_ids` with one tombstone.
+  Call `collect_persist_delta(watermark)` and assert (a) `changed_sessions`
+  contains only the visible sessions with stamp > watermark, (b)
+  `removed_session_ids` in the returned delta includes the seeded
+  tombstone AND any hidden session whose stamp advanced, (c) the returned
+  `watermark` equals `inner.last_mutation_stamp` at collection time, (d)
+  `metadata.sessions` is empty (metadata-only clone), (e) a second call
+  with the returned watermark produces empty `changed_sessions` +
+  `removed_session_ids` (idempotent). This is the core of the
+  delta-persist refactor and currently has zero regression protection —
+  the `#[cfg(test)]` persist path writes full-state JSON so every
+  existing persistence test bypasses the production code path.
+- [ ] P1: Add an integration-style test for the production persist path:
+  open a temp SQLite path, run `AppState::new` with the persist thread,
+  issue two `commit_locked` calls touching different sessions, create/fork
+  a session that relies on the post-replace re-stamp, and import a
+  discovered Codex thread. Wait for the persist thread to drain, read rows
+  directly via `rusqlite`, and assert that touched/created/imported rows
+  were written while untouched rows were not rewritten. Or, at minimum,
+  unit-test `persist_delta_via_cache` directly against a
+  `rusqlite::Connection::open_in_memory` using
+  `ensure_sqlite_state_schema` and hand-crafted `PersistDelta`s.
+- [ ] P1: Add remote-sync rollback tombstone coverage:
+  force `sync_remote_orchestrators_inner` to fail after remote-session
+  retention records deletes, then assert the rollback restores
+  `removed_session_ids` along with sessions and orchestrator instances.
+- [ ] P2: Add coverage for `StateInner::remove_session_at` and
+  `StateInner::retain_sessions`: build a `StateInner`, push sessions via
+  `push_session`, run the helper, and assert `removed_session_ids`
+  contains the expected ids while kept sessions' stamps are unchanged.
+  The raw `record_removed_session` accumulator is tested; the wrappers
+  that production deletion paths actually call are not.
+- [ ] P2: Add a frontend test proving the self-chained `/api/state`
+  safety-net poll does not stack overlapping requests:
+  `vi.useFakeTimers()` + a mocked `fetchState` that takes longer than
+  the chain boundary, advance time past the next interval, and assert
+  `fetchState` was called exactly once per chain hop rather than
+  accumulating parallel fires.
+- [ ] P2: Add a `publish_snapshot` delivery test: subscribe to
+  `state.subscribe_events()` before a mutation and assert the expected
+  payload arrives on `state_events` after `commit_locked` through the
+  real broadcaster thread. Cover the sync fallback separately by
+  disconnecting the broadcaster channel.
+- [ ] P2: Add SSE broadcaster latest-only queue coverage:
+  publish several large snapshots while the broadcaster is delayed and
+  assert superseded snapshots are dropped or overwritten before they can
+  accumulate in the queue.
+- [ ] P2: Extend `state_inner_session_mut_helpers_stamp_the_record` with
+  a negative case: assert `inner.session_mut("does-not-exist")` returns
+  `None` and that `inner.last_mutation_stamp` either advances (and is
+  documented as such) or stays unchanged on the miss. The two helpers
+  currently diverge — `session_mut` (by id) short-circuits on
+  `find_session_index`, while `session_mut_by_index` increments the
+  counter before `get_mut` can fail. Pin whichever semantics the tree
+  commits to.
+- [ ] P2: Pin `next_mutation_stamp` saturation semantics: the counter
+  uses `saturating_add(1)`, but the existing
+  `state_inner_next_mutation_stamp_is_strictly_monotonic` only covers
+  three increments from zero. Add a one-line case
+  (`inner.last_mutation_stamp = u64::MAX; assert_eq!(inner.next_mutation_stamp(), u64::MAX);`)
+  so a regression to `wrapping_add` fails the test.
+- [ ] P2: Extend the Mermaid dimension-clamp tests with lower-bound cases:
+  `ui/src/MarkdownContent.test.tsx` only covers the upper clamp
+  (huge viewBox → 4096). Add `viewBox="0 0 -100 -100"` (negative input)
+  and `viewBox="0 0 0 0"` (zero input) and assert the rendered widthPx
+  and heightPx fall in `[lowerBound, upperBound]`. The regex in
+  `clampMermaidDiagramExtent` accepts `[-+]?` signs, so the lower clamp
+  is the live contract.
+- [ ] P2: Extend `hasOverlappingMarkdownCommitRanges` tests with a
+  three-range unsorted case: e.g., `[[0, 5), [10, 20), [3, 12)]`. The
+  helper relies on the ascending-by-start sort to detect the overlap;
+  a regression that iterated in insertion order would miss it.
 - [ ] P2: Add metadata-only state snapshot coverage:
   backend tests should assert `/api/state` omits transcript payloads while
   `GET /api/sessions/{id}` still returns the full transcript. App tests should
   assert a metadata snapshot preserves an already-hydrated active session and
   does not disrupt prompt input or focus.
-- [ ] P2: Add workspace-layout persistence hot-path coverage:
-  exercise a `put_workspace_layout` update with a large visible session and
-  assert the layout save path does not serialize or upsert unchanged session
-  rows/messages.
 - [ ] P2: Add session-create persistence contention coverage:
   prove visible session creation does not hold the state mutex while opening
   SQLite, ensuring schema, or committing a transaction.

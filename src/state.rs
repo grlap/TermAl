@@ -1202,11 +1202,17 @@ impl AppState {
                     .unwrap_or_else(default_claude_effort),
             );
         }
-        if let Some(slot) = inner
-            .find_session_index(&record.session.id)
-            .and_then(|index| inner.sessions.get_mut(index))
-        {
-            *slot = record.clone();
+        if let Some(index) = inner.find_session_index(&record.session.id) {
+            if let Some(slot) = inner.sessions.get_mut(index) {
+                *slot = record.clone();
+            }
+            // The whole-struct replace above clobbered the stamp that
+            // `push_session` assigned; re-stamp via `session_mut_by_index`
+            // so `collect_persist_delta` picks up this rewrite on the
+            // next persist tick. The local `record` carries
+            // `mutation_stamp: 0` from construction, so skipping this
+            // call would leave the row below the persist watermark.
+            let _ = inner.session_mut_by_index(index);
         }
         let revision = self.commit_session_created_locked(&mut inner, &record)
             .map_err(|err| ApiError::internal(format!("failed to persist session: {err:#}")))?;
@@ -1372,8 +1378,26 @@ impl AppState {
         };
 
         inner.projects.remove(project_index);
-        for record in &mut inner.sessions {
-            if record.session.project_id.as_deref() == Some(project_id) {
+        // Collect affected indices first so the mutating pass can go
+        // through `session_mut_by_index` (which bumps `mutation_stamp`).
+        // Iterating `&mut inner.sessions` directly would clear the
+        // `project_id` in memory but skip the stamp, causing
+        // `collect_persist_delta` to drop these changes — the deleted
+        // project would reappear attached to those sessions on restart.
+        let affected_session_indices: Vec<usize> = inner
+            .sessions
+            .iter()
+            .enumerate()
+            .filter_map(|(idx, record)| {
+                if record.session.project_id.as_deref() == Some(project_id) {
+                    Some(idx)
+                } else {
+                    None
+                }
+            })
+            .collect();
+        for idx in affected_session_indices {
+            if let Some(record) = inner.session_mut_by_index(idx) {
                 record.session.project_id = None;
             }
         }
@@ -3131,11 +3155,14 @@ impl AppState {
             );
         }
 
-        if let Some(slot) = inner
-            .find_session_index(&record.session.id)
-            .and_then(|index| inner.sessions.get_mut(index))
-        {
-            *slot = record.clone();
+        if let Some(index) = inner.find_session_index(&record.session.id) {
+            if let Some(slot) = inner.sessions.get_mut(index) {
+                *slot = record.clone();
+            }
+            // See `create_session`: re-stamp the record after the
+            // whole-struct replace so the persist thread picks up the
+            // rewrite instead of skipping it at the delta watermark.
+            let _ = inner.session_mut_by_index(index);
         }
         let revision = self.commit_session_created_locked(&mut inner, &record).map_err(|err| {
             ApiError::internal(format!("failed to persist forked Codex session: {err:#}"))
