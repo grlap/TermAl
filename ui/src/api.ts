@@ -78,6 +78,14 @@ export type CreateSessionResponse = {
 export type SessionResponse = {
   revision: number;
   session: Session;
+  /**
+   * See `StateResponse.serverInstanceId`. Carried so
+   * `adoptFetchedSession` can detect a server restart mid-hydration
+   * and accept a revision downgrade — otherwise a session click at
+   * the exact moment of a restart would be silently rejected by the
+   * monotonic revision guard until safety-net pollers re-fetch.
+   */
+  serverInstanceId: string;
 };
 
 export type CreateProjectResponse = {

@@ -90,6 +90,7 @@ impl AppState {
         Ok(SessionResponse {
             revision: inner.revision,
             session: inner.sessions[index].session.clone(),
+            server_instance_id: self.server_instance_id.clone(),
         })
     }
 

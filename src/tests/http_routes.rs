@@ -94,6 +94,13 @@ async fn get_session_route_returns_full_session() {
     assert_eq!(response.session.id, session_id);
     assert_eq!(response.session.name, "Route Session Detail");
     assert_eq!(response.revision, state.snapshot().revision);
+    // `serverInstanceId` is carried on `SessionResponse` so
+    // `adoptFetchedSession` can detect a server restart mid-hydration
+    // and accept a revision downgrade. The per-process id must be
+    // non-empty (the frontend treats `""` as "unknown / older server"
+    // and cannot trigger the restart branch on it).
+    assert_eq!(response.server_instance_id, state.server_instance_id);
+    assert!(!response.server_instance_id.is_empty());
     let _ = fs::remove_file(state.persistence_path.as_path());
 }
 

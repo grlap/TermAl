@@ -2166,7 +2166,11 @@ export default function App() {
     return true;
   }
 
-  function adoptFetchedSession(session: Session, revision: number) {
+  function adoptFetchedSession(
+    session: Session,
+    revision: number,
+    serverInstanceId: string,
+  ) {
     const previousRevision = latestStateRevisionRef.current;
     const previousSessions = sessionsRef.current;
     const existingIndex = previousSessions.findIndex(
@@ -2177,10 +2181,23 @@ export default function App() {
     }
 
     const currentSession = previousSessions[existingIndex];
+    // Routing through `shouldAdoptSnapshotRevision` gives us the
+    // `serverInstanceId` restart-detection branch while preserving the
+    // pre-existing nuance: on a genuine first hydration (no local
+    // messages yet) we accept even a lower revision, but once the
+    // session has hydrated messages we refuse to clobber them with an
+    // older snapshot. `force + allowRevisionDowngrade: <messages empty>`
+    // encodes exactly that — force=true enters the downgrade branch,
+    // and `allowRevisionDowngrade` decides whether same-instance
+    // downgrades are permitted. Instance mismatch wins over both, so
+    // a restart mid-hydration is always adopted regardless of revision.
     if (
-      previousRevision !== null &&
-      revision < previousRevision &&
-      currentSession.messages.length > 0
+      !shouldAdoptSnapshotRevision(previousRevision, revision, {
+        lastSeenServerInstanceId: lastSeenServerInstanceIdRef.current,
+        nextServerInstanceId: serverInstanceId,
+        force: true,
+        allowRevisionDowngrade: currentSession.messages.length === 0,
+      })
     ) {
       return false;
     }
@@ -2191,6 +2208,9 @@ export default function App() {
     );
     if (previousRevision === null || revision > previousRevision) {
       latestStateRevisionRef.current = revision;
+    }
+    if (serverInstanceId) {
+      lastSeenServerInstanceIdRef.current = serverInstanceId;
     }
     sessionsRef.current = nextSessions;
     setSessions(nextSessions);
@@ -2224,7 +2244,13 @@ export default function App() {
           requestActionRecoveryResyncRef.current();
           return;
         }
-        if (adoptFetchedSession(response.session, response.revision)) {
+        if (
+          adoptFetchedSession(
+            response.session,
+            response.revision,
+            response.serverInstanceId,
+          )
+        ) {
           hydratedSessionIdsRef.current.add(sessionId);
         }
       } catch (error) {

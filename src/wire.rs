@@ -953,6 +953,16 @@ struct StateResponse {
 struct SessionResponse {
     revision: u64,
     session: Session,
+    /// See `StateResponse::server_instance_id` — same semantics. The
+    /// frontend's `adoptFetchedSession` uses a mismatch against the
+    /// last-seen id to accept a revision downgrade after a server
+    /// restart. Without this field, a session hydration in flight
+    /// across a restart could be silently rejected by the monotonic
+    /// revision guard until the safety-net pollers re-fetch.
+    /// `#[serde(default)]` for forward-compat with older servers that
+    /// do not emit the field.
+    #[serde(default)]
+    server_instance_id: String,
 }
 
 /// Defines the workspace control panel side variants.
