@@ -1,15 +1,27 @@
-// Cursor ACP mode tests — auto-approve / queue / reject permission
-// requests depending on agent/ask/plan mode, cursor mode syncing from ACP
-// config or mode updates, live mode updates on active sessions, ACP model
-// option matching, and model option sync from ACP config.
+// cursor-agent is an ACP-protocol CLI (same JSON-RPC bridge as Claude Code
+// and Gemini CLI) that ships three distinct "cursor modes" which change how
+// TermAl handles incoming tool permission requests:
+//   - agent: auto-approve every tool permission (allow-once)
+//   - ask:   queue each permission as a pending approval card for the user
+//   - plan:  refuse all tool permissions (reject-once) for plan-only runs
 //
-// Extracted from tests.rs — contiguous cluster (previously lines
-// 8977-9487). One earlier `updates_cursor_session_model_settings` test
-// was left in mod.rs because it sits far upstream of the rest.
+// TermAl keeps cursor_mode in sync with the live agent from three directions:
+// ACP config_update messages, standalone mode_update notifications, and
+// user-driven settings changes that must be forwarded into any active ACP
+// session so switching agent->ask does not leave the next tool call silently
+// auto-approved. `matching_acp_config_option_value` resolves ACP option
+// values by both `name` and `label` because config payloads are loosely typed.
+//
+// Production surfaces: `handle_acp_session_permission_request` /
+// `handle_cursor_permission_request`, `sync_cursor_mode_from_acp_config`,
+// `update_live_cursor_mode_on_active_sessions` (src/runtime.rs, src/state.rs).
 
 use super::*;
 
-// Tests that syncs cursor model options from ACP config.
+// pins that `sync_session_model_options` stores the full option list and
+// applies the selected model value onto the Cursor session record.
+// guards against drift where ACP-advertised model choices would be silently
+// dropped or a new selection would fail to update `session.model`.
 #[test]
 fn syncs_cursor_model_options_from_acp_config() {
     let state = test_app_state();
@@ -54,7 +66,10 @@ fn syncs_cursor_model_options_from_acp_config() {
     assert_eq!(session.model_options, model_options);
 }
 
-// Tests that cursor agent mode auto approves ACP permission requests.
+// pins that Cursor in agent mode auto-approves every ACP permission request
+// with `allow-once`, emitting no pending approval card and leaving the
+// session Idle. guards against a regression where agent mode would either
+// prompt the user or stall tool execution waiting for a decision.
 #[test]
 fn cursor_agent_mode_auto_approves_acp_permission_requests() {
     let state = test_app_state();
@@ -112,7 +127,10 @@ fn cursor_agent_mode_auto_approves_acp_permission_requests() {
     assert_eq!(record.session.status, SessionStatus::Idle);
 }
 
-// Tests that cursor ask mode queues ACP permission requests.
+// pins that Cursor in ask mode does NOT auto-respond: the request is queued
+// in `pending_acp_approvals`, surfaced as a Pending approval message, and
+// the session flips to Approval status awaiting the user. guards against
+// ask mode silently approving or rejecting without user interaction.
 #[test]
 fn cursor_ask_mode_queues_acp_permission_requests() {
     let state = test_app_state();
@@ -171,7 +189,10 @@ fn cursor_ask_mode_queues_acp_permission_requests() {
     assert_eq!(record.session.status, SessionStatus::Approval);
 }
 
-// Tests that cursor plan mode rejects ACP permission requests.
+// pins that Cursor in plan mode auto-rejects every ACP permission request
+// with `reject-once`, never posting an approval card, and returns to Idle.
+// guards against plan-only runs being able to execute tools or stall on an
+// approval card the user never meant to see.
 #[test]
 fn cursor_plan_mode_rejects_acp_permission_requests() {
     let state = test_app_state();
@@ -229,7 +250,10 @@ fn cursor_plan_mode_rejects_acp_permission_requests() {
     assert_eq!(record.session.status, SessionStatus::Idle);
 }
 
-// Tests that syncs cursor mode from ACP config updates.
+// pins that an ACP `config_update` carrying a `mode` option with
+// `currentValue: "ask"` flips the session's cursor_mode to Ask.
+// guards against config-driven mode changes (e.g. user toggling in the
+// Cursor UI) failing to propagate into TermAl's session record.
 #[test]
 fn syncs_cursor_mode_from_acp_config_updates() {
     let state = test_app_state();
@@ -289,7 +313,10 @@ fn syncs_cursor_mode_from_acp_config_updates() {
     assert_eq!(record.session.cursor_mode, Some(CursorMode::Ask));
 }
 
-// Tests that syncs cursor mode from mode updates.
+// pins the standalone `mode_update` notification path: a bare `mode: "plan"`
+// update rewrites cursor_mode without a full config_update envelope.
+// guards against the two ACP mode-change shapes diverging and leaving one
+// path unable to transition the session between modes.
 #[test]
 fn syncs_cursor_mode_from_mode_updates() {
     let state = test_app_state();
@@ -334,7 +361,10 @@ fn syncs_cursor_mode_from_mode_updates() {
     assert_eq!(record.session.cursor_mode, Some(CursorMode::Plan));
 }
 
-// Tests that borrowed session recorder uses shared message and request logic.
+// pins that `BorrowedSessionRecorder` routes text, streaming deltas, command
+// lifecycle events, and Codex user-input requests through the same message
+// and pending-queue paths as the owned `SessionRecorder`.
+// guards against the borrowed variant silently skipping recorder side effects.
 #[test]
 fn borrowed_session_recorder_uses_shared_message_and_request_logic() {
     let state = test_app_state();
@@ -411,7 +441,10 @@ fn borrowed_session_recorder_uses_shared_message_and_request_logic() {
     assert_eq!(record.pending_codex_user_inputs.len(), 1);
 }
 
-// Tests that updates live cursor mode on active ACP sessions.
+// pins that a user-driven cursor_mode change on a session with a live ACP
+// runtime forwards a `session/set_config_option` JSON-RPC request to the
+// agent so the next tool call obeys the new mode. guards against the stale
+// in-flight agent continuing to auto-approve after the user flipped to ask.
 #[test]
 fn updates_live_cursor_mode_on_active_acp_sessions() {
     let state = test_app_state();
@@ -486,7 +519,11 @@ fn updates_live_cursor_mode_on_active_acp_sessions() {
     }
 }
 
-// Tests that matches ACP model options by name or label.
+// pins that `matching_acp_config_option_value` resolves an option's `value`
+// from either the `name` field or the `label` field, since ACP config
+// payloads are loosely typed across agents, and returns None on a miss.
+// guards against mode/model lookups silently failing when the agent uses a
+// different display-string key.
 #[test]
 fn matches_acp_model_options_by_name_or_label() {
     let config = json!({

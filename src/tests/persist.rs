@@ -1,15 +1,23 @@
-//! `PersistedState` load/serialize round-trip tests — legacy path
-//! normalization, required-field validation (projects, cursor_mode,
-//! Claude settings, Gemini approval mode, Codex prompt fields, queued
-//! prompt source), and app-state bootstrap normalization.
+//! `PersistedState` load/serialize round-trip tests.
 //!
-//! Extracted from `tests.rs` so each domain lives in its own sibling
-//! module under `tests/`. Covers the `persisted_state_*` tests and
-//! the `persisted_state_load_error_after_mutation` shared helper.
+//! `PersistedState` is the on-disk schema for TermAl's entire backend
+//! state: preferences, projects, remotes, sessions, orchestrators, and
+//! workspace layouts. It is persisted as a JSON file (legacy format)
+//! and/or via the SQLite-backed store in `src/persist.rs`, which owns
+//! both encoding paths and the `load_state` entry point exercised here.
 //!
-//! Review-document persistence tests (`persist_review_document_*`,
-//! `resolve_review_document_path_*`) remain in `mod.rs` for a
-//! follow-up because they interleave with HTTP review route tests.
+//! Schema validation on load is deliberately strict: any missing
+//! required field produces an error rather than a silent default, so a
+//! corrupted or partially-migrated file cannot resurrect sessions with
+//! quietly-broken state. Path normalization additionally folds Windows
+//! `\\?\` extended-length prefixes and legacy backslash forms to a
+//! canonical form, so a file saved on one machine reloads cleanly on
+//! another.
+//!
+//! The `persisted_state_load_error_after_mutation` helper takes a
+//! mutation closure, writes the mutated state to disk, reloads it, and
+//! returns the error string — each required-field test stays focused on
+//! a single missing-field assertion.
 
 use super::*;
 
@@ -35,7 +43,10 @@ where
     format!("{err:#}")
 }
 
-// Tests that persisted state normalizes legacy local verbatim paths.
+// Pins that legacy Windows `\\?\` verbatim prefixes on a project
+// `rootPath` and a session `workdir` are stripped back to their
+// canonical form on load. Guards against stale files from older
+// TermAl builds resurrecting duplicate or mismatched projects.
 #[cfg(windows)]
 #[test]
 fn persisted_state_normalizes_legacy_local_verbatim_paths() {
@@ -78,7 +89,10 @@ fn persisted_state_normalizes_legacy_local_verbatim_paths() {
     let _ = fs::remove_dir_all(project_root);
 }
 
-// Tests that persisted state normalizes legacy workspace layout paths.
+// Pins that legacy `\\?\` verbatim prefixes inside workspace layout
+// tabs (filesystem `rootPath`, git/debug `workdir`, source `path`,
+// diff `filePath`, pane `sourcePath`) are all normalized on load.
+// Guards against tab paths drifting out of sync with canonical roots.
 #[cfg(windows)]
 #[test]
 fn persisted_state_normalizes_legacy_workspace_layout_paths() {
@@ -218,7 +232,10 @@ fn persisted_state_normalizes_legacy_workspace_layout_paths() {
     let _ = fs::remove_dir_all(project_root);
 }
 
-// Tests that app state bootstrap normalizes legacy local verbatim working directory.
+// Pins that `AppState::new_with_paths` normalizes a legacy `\\?\`
+// verbatim workdir passed in at bootstrap, so the default project and
+// the bootstrapped Codex/Claude live sessions all share the canonical
+// root. Guards against bootstrap paths diverging from persisted ones.
 #[test]
 fn app_state_bootstrap_normalizes_legacy_local_verbatim_workdir() {
     let project_root =
@@ -301,7 +318,10 @@ fn persisted_state_preserves_significant_local_path_spaces() {
     let _ = fs::remove_dir_all(project_root);
 }
 
-// Tests that persisted state requires projects.
+// Pins that stripping the top-level `projects` field causes
+// `load_state` to fail with `missing field `projects``. Guards
+// against sessions reloading against an empty project list and
+// silently losing their project associations.
 #[test]
 fn persisted_state_requires_projects() {
     let mut inner = StateInner::new();
@@ -326,7 +346,10 @@ fn persisted_state_requires_projects() {
     );
 }
 
-// Tests that persisted state requires next project number.
+// Pins that stripping `nextProjectNumber` causes `load_state` to
+// fail with `missing field `nextProjectNumber``. Guards against the
+// project-number counter resetting on reload and colliding with
+// existing project names.
 #[test]
 fn persisted_state_requires_next_project_number() {
     let inner = StateInner::new();
@@ -344,7 +367,10 @@ fn persisted_state_requires_next_project_number() {
     );
 }
 
-// Tests that persisted state requires project remote ID.
+// Pins that stripping `remoteId` from a project entry causes
+// `load_state` to fail with `missing field `remoteId``. Guards
+// against projects reloading without a remote binding and being
+// silently re-homed onto the default local remote.
 #[test]
 fn persisted_state_requires_project_remote_id() {
     let mut inner = StateInner::new();
@@ -365,7 +391,10 @@ fn persisted_state_requires_project_remote_id() {
     );
 }
 
-// Tests that persisted state requires valid remotes.
+// Pins that injecting two remotes sharing the same `id` fails load
+// with a `duplicate remote id` validation error. Guards against the
+// remote registry accepting ambiguous ids that would let sessions
+// silently resolve to the wrong transport.
 #[test]
 fn persisted_state_requires_valid_remotes() {
     let inner = StateInner::new();
@@ -406,7 +435,10 @@ fn persisted_state_requires_valid_remotes() {
     );
 }
 
-// Tests that persisted state requires cursor mode.
+// Pins that stripping `cursorMode` from a Cursor session fails load
+// with a `missing cursorMode` validation error. Guards against
+// Cursor sessions reloading with an ambiguous tool mode and
+// executing under the wrong approval posture.
 #[test]
 fn persisted_state_requires_cursor_mode() {
     let mut inner = StateInner::new();
@@ -434,7 +466,10 @@ fn persisted_state_requires_cursor_mode() {
     );
 }
 
-// Tests that persisted state requires Claude settings.
+// Pins that stripping `claudeApprovalMode` and `claudeEffort` from
+// a Claude session fails load with `missing claudeApprovalMode`.
+// Guards against Claude sessions losing their approval posture and
+// silently reloading with default permissiveness.
 #[test]
 fn persisted_state_requires_claude_settings() {
     let mut inner = StateInner::new();
@@ -463,7 +498,10 @@ fn persisted_state_requires_claude_settings() {
     );
 }
 
-// Tests that persisted state requires Gemini approval mode.
+// Pins that stripping `geminiApprovalMode` from a Gemini session
+// fails load with `missing geminiApprovalMode`. Guards against
+// Gemini sessions reloading with an unspecified approval mode and
+// running with a different tool posture than the user configured.
 #[test]
 fn persisted_state_requires_gemini_approval_mode() {
     let mut inner = StateInner::new();
@@ -491,7 +529,10 @@ fn persisted_state_requires_gemini_approval_mode() {
     );
 }
 
-// Tests that persisted state requires Codex prompt fields.
+// Pins that stripping `approvalPolicy`, `reasoningEffort`, and
+// `sandboxMode` from a Codex session fails load with `missing
+// approvalPolicy`. Guards against Codex sessions reloading without
+// the prompt-control triplet that gates each new turn.
 #[test]
 fn persisted_state_requires_codex_prompt_fields() {
     let mut inner = StateInner::new();
@@ -521,7 +562,10 @@ fn persisted_state_requires_codex_prompt_fields() {
     );
 }
 
-// Tests that persisted state requires Codex thread state for live threads.
+// Pins that a Codex session carrying an `externalSessionId` (a live
+// thread) fails load when `codexThreadState` is stripped, with
+// `missing codexThreadState`. Guards against a live thread coming
+// back attached but with no resume state for the orchestrator.
 #[test]
 fn persisted_state_requires_codex_thread_state_for_live_threads() {
     let mut inner = StateInner::new();
@@ -560,7 +604,10 @@ fn persisted_state_requires_codex_thread_state_for_live_threads() {
     );
 }
 
-// Tests that persisted state requires queued prompt source.
+// Pins that stripping `source` from a persisted queued prompt fails
+// load with `missing field `source``. Guards against queued prompts
+// reloading with an unknown origin (user vs orchestrator) and being
+// routed or billed against the wrong caller on resume.
 #[test]
 fn persisted_state_requires_queued_prompt_source() {
     let path = std::env::temp_dir().join(format!(

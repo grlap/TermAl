@@ -1,18 +1,24 @@
-// Review document persistence and HTTP route tests — atomic replace,
-// directory-sync failure handling, Windows-specific replace fallback,
-// change-set-id validation (empty, whitespace, overlong, invalid chars,
-// dots-only), and HTTP handlers validating change-set IDs before remote
-// proxying.
-//
-// Extracted from tests.rs — contiguous cluster (previously lines
-// 3460-3975) covering both the `persist_review_document` /
-// `resolve_review_document_path` validation helpers and the
-// `review_handlers_validate_*` / `review_read_routes_wait_for_*` HTTP
-// integration tests.
+// Review documents are TermAl's per-project record of a code-review
+// session — comments, threads, and anchors attached to specific line
+// ranges — stored under each project's `.termal/reviews/<id>.json` so
+// reviews survive restarts. Persistence is an atomic write-then-rename
+// to prevent torn files on crash: Unix `rename` is already atomic, and
+// on Windows the replace fallback calls `MoveFileEx` with
+// `REPLACE_EXISTING`. Change-set IDs are user-supplied path components,
+// so validation rejects empty, whitespace, overlong, filesystem-illegal,
+// and dots-only values to block path traversal; HTTP handlers run the
+// same check BEFORE any remote proxy hop so malformed IDs never leave
+// the local process. Production surfaces — `persist_review_document`,
+// `replace_review_document_file`, `sync_review_document_directory`,
+// `resolve_review_document_path`, `validate_review_change_set_id`, and
+// the `get_review` / `put_review` routes — live in `src/review.rs`.
 
 use super::*;
 
-// Tests that review persistence replaces the target without leaving temp files behind.
+// Pins the atomic write-then-rename contract: after two successive
+// persists the target is updated and the uuid-suffixed temp file is
+// gone. Guards against regressions where a failed rename could leak
+// `.tmp` files alongside the review document.
 #[test]
 fn persist_review_document_replaces_target_without_leaving_temp_files() {
     let review_root =
@@ -53,7 +59,11 @@ fn persist_review_document_replaces_target_without_leaving_temp_files() {
     let _ = fs::remove_dir_all(&review_root);
 }
 
-// Tests that the Windows replace helper overwrites an existing target in place.
+// Pins the Windows replace fallback: `MoveFileEx` with
+// `REPLACE_EXISTING` overwrites the pre-existing target and consumes
+// the source temp file. Guards against the Windows-only code path
+// silently falling back to plain `rename`, which would fail when the
+// destination already exists.
 #[cfg(windows)]
 #[test]
 fn replace_review_document_file_replaces_existing_target_on_windows() {
@@ -81,7 +91,11 @@ fn replace_review_document_file_replaces_existing_target_on_windows() {
     let _ = fs::remove_dir_all(&review_root);
 }
 
-// Tests that a directory-sync failure after replacement does not surface as a write failure.
+// Pins that a fsync failure on the parent directory after a successful
+// rename is swallowed — the write is already durable, the sync is only
+// a hint. Guards against regressions where a flaky directory fsync
+// (common on network or fuse mounts) would surface as a user-visible
+// persist error.
 #[test]
 fn persist_review_document_succeeds_when_directory_sync_fails_after_replace() {
     let review_root = std::env::temp_dir().join(format!(
@@ -132,7 +146,10 @@ fn persist_review_document_succeeds_when_directory_sync_fails_after_replace() {
     let _ = fs::remove_dir_all(&review_root);
 }
 
-// Tests that review change-set IDs reject empty values.
+// Pins the empty-id rejection branch of `validate_review_change_set_id`:
+// `""` yields a 400 with a specific message rather than resolving to a
+// bare `.json` file. Guards against a silent fallback that would write
+// `.termal/reviews/.json` for any caller that forgets the id.
 #[test]
 fn resolve_review_document_path_rejects_empty_change_set_ids() {
     let review_root =
@@ -150,7 +167,10 @@ fn resolve_review_document_path_rejects_empty_change_set_ids() {
     let _ = fs::remove_dir_all(&review_root);
 }
 
-// Tests that review change-set IDs reject surrounding whitespace.
+// Pins the whitespace-id rejection branch: leading or trailing spaces
+// produce a 400 rather than being trimmed. Guards against "ghost"
+// review files where `" id "` and `"id"` would silently alias to the
+// same underlying path on disk.
 #[test]
 fn resolve_review_document_path_rejects_change_set_ids_with_surrounding_whitespace() {
     let review_root =
@@ -171,7 +191,10 @@ fn resolve_review_document_path_rejects_change_set_ids_with_surrounding_whitespa
     let _ = fs::remove_dir_all(&review_root);
 }
 
-// Tests that review change-set IDs reject overly long values.
+// Pins the length cap enforced by `MAX_REVIEW_CHANGE_SET_ID_LEN`: one
+// byte past the limit yields a 400 that names the cap. Guards against
+// absurdly-long IDs blowing past filesystem `NAME_MAX` limits, which
+// would otherwise surface as an opaque OS error at rename time.
 #[test]
 fn resolve_review_document_path_rejects_overlong_change_set_ids() {
     let review_root =
@@ -193,7 +216,11 @@ fn resolve_review_document_path_rejects_overlong_change_set_ids() {
     let _ = fs::remove_dir_all(&review_root);
 }
 
-// Tests that review handlers validate change-set IDs before remote proxying.
+// Pins that `get_review` runs change-set-id validation BEFORE any
+// remote proxy hop — a whitespace-wrapped id against a remote project
+// errors locally with the same 400 message as the sync helper. Guards
+// against malformed IDs escaping the local process and hitting SSH or
+// other transports where errors are harder to classify.
 #[tokio::test]
 async fn review_handlers_validate_change_set_ids_before_remote_proxying() {
     let state = test_app_state();
@@ -231,7 +258,10 @@ async fn review_handlers_validate_change_set_ids_before_remote_proxying() {
         "changeSetId may not have leading or trailing whitespace"
     );
 }
-// Tests that review change-set IDs reject invalid characters.
+// Pins the character-allowlist branch: `/` (and any non
+// letter/digit/`.`/`-`/`_` byte) produces a 400. Guards against path
+// traversal and cross-directory writes by preventing the id segment
+// from introducing its own path separator.
 #[test]
 fn resolve_review_document_path_rejects_change_set_ids_with_invalid_characters() {
     let review_root =
@@ -252,7 +282,10 @@ fn resolve_review_document_path_rejects_change_set_ids_with_invalid_characters()
     let _ = fs::remove_dir_all(&review_root);
 }
 
-// Tests that review change-set IDs reject pure-dot values.
+// Pins the dots-only rejection branch: `.`, `..`, and similar strings
+// yield a 400. Guards against the classic path-traversal escape where
+// a chain of dot-segments could walk out of `.termal/reviews/` into
+// parent directories.
 #[test]
 fn resolve_review_document_path_rejects_change_set_ids_consisting_entirely_of_dots() {
     let review_root = std::env::temp_dir().join(format!("termal-review-dot-id-{}", Uuid::new_v4()));
@@ -272,7 +305,11 @@ fn resolve_review_document_path_rejects_change_set_ids_consisting_entirely_of_do
     let _ = fs::remove_dir_all(&review_root);
 }
 
-// Tests that review read routes wait for the review document lock.
+// Pins that both `GET /api/reviews/{id}` and
+// `GET /api/reviews/{id}/summary` block on `review_documents_lock`
+// while a holder has it, and succeed cleanly once it drops. Guards
+// against concurrent writes being observed mid-rename — readers must
+// see a coherent on-disk document, not a half-replaced file.
 #[tokio::test]
 async fn review_read_routes_wait_for_review_document_lock() {
     let state = test_app_state();

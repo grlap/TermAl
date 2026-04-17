@@ -1,16 +1,23 @@
-// Project creation and session-project relationship tests — remote
-// validation, SSH session creation for remote projects, project create +
-// session assignment, project delete + session unassign, session workdir
-// sandboxing inside selected project root, empty-root rejection, and
-// project-scoped path resolution for session + project ID based lookups.
+// projects in termal are workdir folders that group related agent sessions,
+// optionally backed by a remote ssh host via a pre-registered `RemoteConfig`.
+// sessions inherit their workdir from the project root, and the backend
+// enforces that a session's workdir stays inside the project tree to prevent
+// path-traversal escapes from the agent sandbox. remote projects proxy their
+// sessions over ssh; local projects resolve against the host filesystem.
 //
-// Extracted from tests.rs — contiguous cluster (previously lines
-// 4549-5000) covering `create_project`, `delete_project`, and the
-// project-scoped path resolution surfaces.
+// the central guards are `resolve_project_scoped_requested_path` and
+// `resolve_session_scoped_requested_path` (in `src/paths.rs`): both validate
+// the project/session id and enforce containment before any fs operation runs.
+// these tests cover the production surfaces `create_project`, `delete_project`,
+// `create_session` (remote + local), `resolve_requested_path`, and the
+// project-scoped path resolver — pinning the sandbox boundary end to end.
 
 use super::*;
 
-// Tests that rejects projects with unknown remote.
+// pins the remote_id validation path in `create_project`: a project that
+// references a remote not registered in `app_settings.remotes` must be
+// rejected with BAD_REQUEST before any session plumbing is attempted.
+// guards against silently accepting projects bound to phantom remotes.
 #[test]
 fn rejects_projects_with_unknown_remote() {
     let state = test_app_state();
@@ -28,7 +35,10 @@ fn rejects_projects_with_unknown_remote() {
     assert!(error.message.contains("unknown remote"));
 }
 
-// Tests that creates sessions for remote projects over SSH.
+// pins the remote-session creation path: sessions created inside an ssh-backed
+// project must be proxied through the `RemoteTransport::Ssh` plumbing and
+// surface BAD_GATEWAY / BAD_REQUEST with a non-empty message when the remote
+// is unreachable. guards against silently falling back to local execution.
 #[test]
 #[ignore = "requires a reachable SSH remote"]
 fn creates_sessions_for_remote_projects_over_ssh() {
@@ -99,7 +109,10 @@ fn creates_sessions_for_remote_projects_over_ssh() {
     assert!(!error.message.trim().is_empty());
 }
 
-// Tests that creates projects and assigns sessions to them.
+// pins the happy-path link between `create_project` and `create_session`:
+// a session created with `project_id` set and `workdir: None` must inherit
+// the project's resolved root as its workdir and record its project_id.
+// guards against broken project-session membership or workdir defaulting.
 #[test]
 fn creates_projects_and_assigns_sessions_to_them() {
     let state = test_app_state();
@@ -142,7 +155,10 @@ fn creates_projects_and_assigns_sessions_to_them() {
     assert_eq!(session.workdir, expected_root);
 }
 
-// Tests that deleting a project keeps its sessions valid and visible globally.
+// pins the `delete_project` cascade: removing a project must drop it from
+// `state.projects` while leaving its sessions and orchestrators visible with
+// their project_id cleared (None / ""), not cascade-deleted along with it.
+// guards against accidental data loss when a user deletes a project folder.
 #[test]
 fn deletes_projects_and_unassigns_existing_sessions() {
     let state = test_app_state();
@@ -209,7 +225,10 @@ fn deletes_projects_and_unassigns_existing_sessions() {
     fs::remove_dir_all(root).unwrap();
 }
 
-// Tests that rejects session workdirs outside the selected project.
+// pins the session-workdir containment check in `create_session`: an explicit
+// workdir outside the project root must fail with BAD_REQUEST and the
+// "must stay inside project" message, never silently widening the sandbox.
+// guards against path-traversal via the session-creation request.
 #[test]
 fn rejects_session_workdirs_outside_the_selected_project() {
     let state = test_app_state();
@@ -244,7 +263,10 @@ fn rejects_session_workdirs_outside_the_selected_project() {
     assert!(error.message.contains("must stay inside project"));
 }
 
-// Tests that rejects empty project roots.
+// pins the input-validation guard in `create_project`: a whitespace-only
+// `root_path` must be rejected with the exact error "project root path
+// cannot be empty", not coerced to cwd or the host root.
+// guards against accidentally creating projects that cover the whole disk.
 #[test]
 fn rejects_empty_project_roots() {
     let state = test_app_state();
@@ -263,7 +285,10 @@ fn rejects_empty_project_roots() {
     assert_eq!(error.message, "project root path cannot be empty");
 }
 
-// Tests that resolves requested paths inside the session project root.
+// pins `resolve_session_scoped_requested_path` in `ExistingFile` mode: a file
+// under the session's project root must canonicalize and normalize, while a
+// sibling outside the root must fail with BAD_REQUEST + "must stay inside
+// project". guards against read-side path-traversal via session-scoped apis.
 #[test]
 fn resolves_requested_paths_inside_the_session_project_root() {
     let state = test_app_state();
@@ -329,7 +354,10 @@ fn resolves_requested_paths_inside_the_session_project_root() {
     fs::remove_dir_all(outside_root).unwrap();
 }
 
-// Tests that allows new file paths inside the session project root.
+// pins `resolve_session_scoped_requested_path` in `AllowMissingLeaf` mode: a
+// yet-to-exist file inside the project root must resolve to its target path
+// (for write/create), while a missing path outside the root still fails.
+// guards against write-side path-traversal when creating new files.
 #[test]
 fn allows_new_file_paths_inside_the_session_project_root() {
     let state = test_app_state();
@@ -390,7 +418,10 @@ fn allows_new_file_paths_inside_the_session_project_root() {
     fs::remove_dir_all(outside_root).unwrap();
 }
 
-// Tests that resolves project scoped paths without a session.
+// pins `resolve_project_scoped_requested_path` when only `project_id` is
+// supplied (no session): paths inside the project root resolve, paths outside
+// fail with "must stay inside project". guards the project-only entry point
+// used by pre-session ui flows (project browser, pre-create file picker).
 #[test]
 fn resolves_project_scoped_paths_without_a_session() {
     let state = test_app_state();
@@ -445,7 +476,10 @@ fn resolves_project_scoped_paths_without_a_session() {
 }
 
 
-// Tests that project scoped paths require a session or project identifier.
+// pins the required-identifier precondition in
+// `resolve_project_scoped_requested_path`: calling with both session_id and
+// project_id as None must fail with the exact "sessionId or projectId is
+// required" error. guards against ungated path resolution via the public api.
 #[test]
 fn project_scoped_paths_require_a_session_or_project_identifier() {
     let state = test_app_state();

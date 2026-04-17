@@ -1,9 +1,33 @@
-//! Terminal output buffer, terminal-workdir validation, and process-tree
-//! streaming tests. Extracted from `tests.rs` so each domain lives in
-//! its own sibling module under `tests/`.
+//! Terminal subsystem tests.
+//!
+//! The terminal subsystem lets the user (or an agent) run shell commands
+//! inside a session's workdir. Commands enter through two HTTP routes:
+//! `POST /api/terminal/run` returns the full buffered response
+//! synchronously, and `POST /api/terminal/run/stream` tails stdout/stderr
+//! as a Server-Sent Events stream with incremental `output` frames and a
+//! terminating `complete` or `error` frame.
+//!
+//! The implementation has two layers. (a) A shared output buffer
+//! (`TerminalOutputBuffer` + `read_capped_*` helpers) accumulates
+//! child-process bytes under a single lock, serving UTF-8-safe
+//! incremental snapshots so multibyte characters never split across
+//! SSE frame boundaries. (b) The HTTP route layer spawns each shell
+//! under a platform-specific container — Windows Job Objects with
+//! `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`, Unix process groups with a
+//! dedicated PGID — so timeout or shell-exit can reap the entire
+//! process tree including grandchildren.
+//!
+//! Local and remote concurrency semaphores cap how many shells can run
+//! at once so a prompt injection cannot fan out unbounded jobs. The
+//! production code for both layers lives in `src/terminal.rs`
+//! (extracted from `api.rs` earlier this session).
 
 use super::*;
 
+// Pins `read_capped_child_stdout_line` returning each newline-delimited
+// record with its trailing `\n`, then the final newline-less tail at EOF.
+// Guards against regressions that drop the terminator or miss the last
+// partial line when the child exits without a closing newline.
 #[test]
 fn read_capped_child_stdout_line_reads_newline_delimited_and_eof_lines() {
     let mut reader = std::io::Cursor::new(
@@ -32,6 +56,10 @@ tail"#
     assert_eq!(String::from_utf8(line_buf).unwrap(), "tail");
 }
 
+// Pins `read_capped_child_stdout_line` silently draining any line that
+// exceeds the cap while staying aligned for the next record. Guards
+// against a regression that errors out or mis-aligns the reader on a
+// runaway log line and tears down the session runtime.
 #[test]
 fn read_capped_child_stdout_line_drains_oversized_lines() {
     // An oversized line should be drained (not cause an error) so the
@@ -54,6 +82,10 @@ fn read_capped_child_stdout_line_drains_oversized_lines() {
     assert_eq!(String::from_utf8(line_buf).unwrap(), "next\n");
 }
 
+// Pins `read_capped_child_stdout_line` draining an oversized line that
+// ends at EOF with no trailing newline, then cleanly reporting EOF on
+// the next call. Guards against an off-by-one that leaves the reader
+// thinking there is still a partial record to return.
 #[test]
 fn read_capped_child_stdout_line_drains_oversized_line_at_eof() {
     // An oversized line that ends at EOF (no trailing newline) should also
@@ -72,6 +104,10 @@ fn read_capped_child_stdout_line_drains_oversized_line_at_eof() {
     assert_eq!(eof_bytes, 0);
 }
 
+// Pins `read_capped_terminal_output` keeping the returned string at or
+// under `TERMINAL_OUTPUT_MAX_BYTES`, flagging truncation once the cap
+// is exceeded, and lossy-decoding invalid UTF-8 with the replacement
+// character. Guards the memory ceiling on every terminal response body.
 #[test]
 fn read_capped_terminal_output_bounds_stored_prefix() {
     let (empty_output, empty_truncated) =
@@ -104,6 +140,10 @@ fn read_capped_terminal_output_bounds_stored_prefix() {
     assert!(!invalid_utf8_truncated);
 }
 
+// Pins `terminal_output_delta_locked` returning only bytes that were
+// appended since the previous emission and advancing `emitted_bytes`
+// past the delivered window. Guards against the SSE stream replaying
+// already-sent text or stalling after a flush.
 #[test]
 fn terminal_output_delta_advances_emitted_bytes() {
     let mut buffer = TerminalOutputBuffer {
@@ -127,6 +167,10 @@ fn terminal_output_delta_advances_emitted_bytes() {
     assert_eq!(buffer.emitted_bytes, b"hello world".len());
 }
 
+// Pins `terminal_streamable_utf8_prefix_len` holding back a trailing
+// partial multibyte sequence during mid-stream emission and releasing
+// the full buffer on final flush. Guards against a split `\xc3` byte
+// reaching the SSE client as a lone invalid UTF-8 fragment.
 #[test]
 fn terminal_streamable_utf8_prefix_len_holds_incomplete_multibyte_until_flush() {
     let complete = "ok \u{00e9}".as_bytes().to_vec();
@@ -144,6 +188,10 @@ fn terminal_streamable_utf8_prefix_len_holds_incomplete_multibyte_until_flush() 
     );
 }
 
+// Pins `validate_terminal_workdir` rejecting workdirs longer than
+// `TERMINAL_WORKDIR_MAX_CHARS` with a 400 naming the cap. Guards against
+// a megabyte-sized path flowing into canonicalization or the remote
+// proxy when the `.chars().count()` check is dropped.
 #[test]
 fn validate_terminal_workdir_rejects_oversized_input() {
     // Pins the contract documented in `docs/architecture.md:131`:
@@ -170,6 +218,10 @@ fn validate_terminal_workdir_rejects_oversized_input() {
     );
 }
 
+// Pins `validate_terminal_workdir` rejecting interior NUL bytes at the
+// validator layer with a 400 that names the NUL problem. Guards against
+// the byte reaching `fs::canonicalize` or the HTTP serializer and
+// surfacing a less-clear OS-level error.
 #[test]
 fn validate_terminal_workdir_rejects_interior_nul_bytes() {
     // Pins the contract documented in `docs/architecture.md:131`:
@@ -242,6 +294,10 @@ fn wait_for_terminal_output_snapshot(
     }
 }
 
+// Pins `join_terminal_output_reader` returning the partial bytes that
+// had accumulated in the shared buffer when the reader timeout fires,
+// with the truncated flag set. Guards against the timeout path
+// discarding in-flight stdout the caller would otherwise surface.
 #[test]
 fn terminal_output_reader_timeout_returns_non_empty_shared_prefix() {
     let (tx, rx) = std::sync::mpsc::channel();
@@ -283,6 +339,10 @@ fn terminal_output_reader_timeout_returns_non_empty_shared_prefix() {
     drop(tx);
 }
 
+// Pins `join_terminal_output_reader` surfacing the bytes read before
+// an `io::Read` error with the truncated flag, rather than returning
+// an empty body. Guards against a stream that fails mid-read hiding
+// the prefix the child process successfully emitted.
 #[test]
 fn terminal_output_reader_error_returns_non_empty_shared_prefix() {
     let buffer = new_terminal_output_buffer();
@@ -313,6 +373,10 @@ fn terminal_output_reader_error_returns_non_empty_shared_prefix() {
     assert!(truncated);
 }
 
+// Pins `join_terminal_output_reader` translating a panicked reader
+// thread into a 500 whose message names the panic. Guards against a
+// reader crash producing either a silent empty body or a deadlock
+// waiting on a completion signal that will never arrive.
 #[test]
 fn terminal_output_reader_disconnected_reports_reader_panic() {
     let buffer = new_terminal_output_buffer();
@@ -340,6 +404,10 @@ fn terminal_output_reader_disconnected_reports_reader_panic() {
     );
 }
 
+// Pins `read_capped_terminal_output_into` writing the capped prefix
+// into the shared buffer and `snapshot_terminal_output_buffer` reading
+// it back with the truncated flag set. Guards the cross-thread contract
+// between the reader worker and the main thread's final snapshot.
 #[test]
 fn terminal_output_shared_buffer_round_trips_from_reader_thread() {
     let buffer = new_terminal_output_buffer();
@@ -387,6 +455,10 @@ impl std::io::Read for SlowChunkedReader {
     }
 }
 
+// Pins the `TerminalOutputBuffer` concurrency contract: every
+// intermediate `snapshot_terminal_output_buffer` is a valid prefix of
+// the final buffer, never a torn chunk. Guards against a regression
+// that splits the length-check and the append into separate locks.
 #[test]
 fn terminal_output_buffer_supports_concurrent_writer_and_snapshotter() {
     // Exercise the shared-buffer concurrency contract: while a reader
@@ -456,6 +528,10 @@ fn terminal_output_buffer_supports_concurrent_writer_and_snapshotter() {
     }
 }
 
+// Pins the `POST /api/terminal/run` validator rejecting blank
+// command, blank workdir, oversized workdir, NUL in workdir, oversized
+// command, and a workdir outside the project root. Guards against any
+// of these slipping past the handler and reaching the shell layer.
 #[tokio::test]
 async fn terminal_run_route_rejects_invalid_requests() {
     let state = test_app_state();
@@ -687,6 +763,10 @@ async fn terminal_run_route_rejects_invalid_requests() {
     fs::remove_dir_all(outside_root).unwrap();
 }
 
+// Pins the `POST /api/terminal/run` handler running the same
+// blank / oversized / NUL validation on remote-scoped projects before
+// contacting the SSH-forwarded backend. Guards against a malformed
+// request leaking onto the wire and wasting a remote round trip.
 #[tokio::test]
 async fn terminal_run_route_validates_remote_scoped_requests_before_proxying() {
     let state = test_app_state();
@@ -843,6 +923,10 @@ fn terminal_exact_stdout_command(text: &str) -> String {
     format!("printf %s {}", shell_single_quote(text))
 }
 
+// Pins `POST /api/terminal/run/stream` emitting at least one `output`
+// SSE frame before the single `complete` frame and never emitting
+// `error` on success. Guards against the SSE pipeline buffering all
+// stdout until completion, defeating the point of the stream route.
 #[tokio::test]
 async fn terminal_run_stream_route_emits_output_before_complete() {
     let state = test_app_state();
@@ -917,6 +1001,10 @@ async fn terminal_run_stream_route_emits_output_before_complete() {
     fs::remove_dir_all(root).unwrap();
 }
 
+// Pins `POST /api/terminal/run/stream` returning a 400 JSON body for
+// a workdir outside the project before opening the SSE stream. Guards
+// against validation errors being smuggled inside a 200 SSE response
+// where the client would have to parse an `error` event to notice.
 #[tokio::test]
 async fn terminal_run_stream_route_returns_http_error_for_bad_workdir() {
     let state = test_app_state();
@@ -966,6 +1054,10 @@ async fn terminal_run_stream_route_returns_http_error_for_bad_workdir() {
     fs::remove_dir_all(root).unwrap();
 }
 
+// Pins `POST /api/terminal/run/stream` returning 429 with the
+// local-vs-remote specific error string when the matching
+// `TERMINAL_*_COMMAND_CONCURRENCY_LIMIT` semaphore is saturated.
+// Guards against a prompt injection fanning out unbounded SSE jobs.
 #[tokio::test]
 async fn terminal_run_stream_route_limits_local_and_remote_concurrent_commands() {
     let state = test_app_state();
@@ -1072,6 +1164,10 @@ async fn terminal_run_stream_route_limits_local_and_remote_concurrent_commands()
     fs::remove_dir_all(root).unwrap();
 }
 
+// Pins `POST /api/terminal/run/stream` emitting exactly one `error`
+// SSE frame (and zero `complete` frames) when the child process fails
+// to spawn because the workdir is a file. Guards against the client
+// seeing both a `complete` and an `error`, or neither, on spawn failure.
 #[tokio::test]
 async fn terminal_run_stream_route_emits_error_without_complete_when_spawn_fails() {
     let state = test_app_state();
@@ -1136,6 +1232,11 @@ async fn terminal_run_stream_route_emits_error_without_complete_when_spawn_fails
 
     fs::remove_dir_all(root).unwrap();
 }
+// Pins `POST /api/terminal/run` returning 429 with an error string
+// that interpolates `TERMINAL_LOCAL_COMMAND_CONCURRENCY_LIMIT`, and
+// releasing its permit once the request completes so a later call
+// succeeds. Also verifies the local and remote semaphores stay
+// independent. Guards the permit accounting and user-facing error.
 #[tokio::test]
 async fn terminal_run_route_limits_concurrent_commands() {
     let state = test_app_state();
@@ -1466,6 +1567,10 @@ async fn terminal_run_route_limits_concurrent_commands() {
     fs::remove_dir_all(root).unwrap();
 }
 
+// Pins `run_terminal_shell_command` executing a trivial `echo` inside
+// the supplied root, returning stdout containing the echoed text with
+// `timed_out == false`, `output_truncated == false`, and a workdir
+// string that preserves the raw input without a Windows `\\?\` prefix.
 #[test]
 fn run_terminal_shell_command_runs_trivial_local_command() {
     let root = std::env::temp_dir().join(format!("termal-terminal-runner-{}", Uuid::new_v4()));
@@ -1500,6 +1605,11 @@ fn run_terminal_shell_command_runs_trivial_local_command() {
     fs::remove_dir_all(root).unwrap();
 }
 
+// Pins `run_terminal_shell_command_with_timeout` tearing down the
+// entire process tree — including a backgrounded grandchild that would
+// otherwise outlive the shell — via the Windows Job Object on kill and
+// the Unix PGID on `killpg`. Guards against a timeout leaving an
+// orphaned writer that eventually creates the marker file.
 #[test]
 fn run_terminal_shell_command_timeout_kills_process_tree() {
     // Margin budget for this test, tuned for Windows CI: the shell has 500ms
@@ -1532,6 +1642,11 @@ fn run_terminal_shell_command_timeout_kills_process_tree() {
     fs::remove_dir_all(root).unwrap();
 }
 
+// Pins `run_terminal_shell_command_with_timeout` succeeding on a
+// normal shell exit and — on Windows — still reaping a backgrounded
+// grandchild via `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`. Unix deliberately
+// skips `killpg` on clean exit (PID-reuse race), so the marker is
+// allowed on Unix; the Windows guarantee is the load-bearing assertion.
 #[test]
 fn run_terminal_shell_command_cleans_up_background_children_after_shell_exit() {
     let root = std::env::temp_dir().join(format!("termal-terminal-background-{}", Uuid::new_v4()));
