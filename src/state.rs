@@ -30,19 +30,13 @@ mutex.
 /// collects the diff itself on each tick — it locks briefly, filters
 /// sessions by `mutation_stamp > watermark`, clones only that subset
 /// plus app metadata, drains `removed_session_ids`, then releases the
-/// lock and writes to SQLite. `PersistRequest` therefore only has to
-/// carry enough information for the thread to know that something
-/// changed; the full `PersistedState` snapshot that earlier versions
-/// cloned under the state mutex is no longer needed.
+/// lock and writes to SQLite. `PersistRequest` therefore carries only
+/// the wake signal; the full `PersistedState` snapshot that earlier
+/// versions cloned under the state mutex is no longer needed.
 ///
-/// `Delta` is the normal case; `Full` is used only by the startup path
-/// (and any future reset flow) to guarantee a complete write even when
-/// the mutation counter has not advanced yet.
+/// Kept as a unit-only enum (rather than `()`) so a future reset /
+/// restore flow can add variants without touching every call site.
 enum PersistRequest {
-    /// Full snapshot write — all sessions, full metadata. Carries the
-    /// pre-cloned payload because the startup-dump caller does not
-    /// block on the persist thread to finish before continuing.
-    Full(Box<PersistedState>),
     /// Incremental persist: the thread looks up the current
     /// `last_mutation_stamp` and writes only the sessions that
     /// advanced past the thread's own watermark.
@@ -612,46 +606,18 @@ impl AppState {
             .spawn(move || {
                 #[cfg(not(test))]
                 let mut cache = SqlitePersistConnectionCache::new();
+                #[cfg_attr(test, allow(unused_mut, unused_variables))]
                 let mut watermark: u64 = 0;
-                while let Ok(mut request) = persist_rx.recv() {
-                    // Coalesce: if multiple signals queued up, take the
-                    // latest. If any was a `Full`, we must honor the
-                    // full snapshot (the caller who sent `Full`
-                    // intentionally ships a consistent payload).
-                    let mut have_full: Option<Box<PersistedState>> = None;
-                    if let PersistRequest::Full(state) = request {
-                        have_full = Some(state);
-                    }
-                    while let Ok(newer) = persist_rx.try_recv() {
-                        match newer {
-                            PersistRequest::Full(state) => have_full = Some(state),
-                            PersistRequest::Delta => {
-                                // A Delta after a pending Full is already
-                                // covered by whatever collect_persist_delta
-                                // sees next — don't overwrite a queued Full.
-                            }
-                        }
-                        // Fall through to keep draining.
-                        request = PersistRequest::Delta;
-                    }
-                    let _ = request;
+                while let Ok(PersistRequest::Delta) = persist_rx.recv() {
+                    // Drain any queued signals — the delta collection
+                    // below captures everything that has changed since
+                    // the last tick regardless of how many Delta
+                    // signals queued up, so extra signals are pure
+                    // duplicates.
+                    while persist_rx.try_recv().is_ok() {}
 
                     #[cfg(not(test))]
                     let result: Result<()> = (|| {
-                        if let Some(full) = have_full {
-                            persist_state_via_cache(
-                                &mut cache,
-                                &persist_path_for_persist,
-                                &full,
-                            )?;
-                            watermark = {
-                                let inner = inner_for_persist
-                                    .lock()
-                                    .expect("state mutex poisoned");
-                                inner.last_mutation_stamp
-                            };
-                            return Ok(());
-                        }
                         let delta = {
                             let mut inner = inner_for_persist
                                 .lock()
@@ -682,9 +648,7 @@ impl AppState {
                         // Tests run the old full-state JSON path so
                         // existing persist-related assertions keep
                         // working without knowing about stamps.
-                        let persisted = if let Some(full) = have_full {
-                            *full
-                        } else {
+                        let persisted = {
                             let inner = inner_for_persist
                                 .lock()
                                 .expect("state mutex poisoned");
@@ -1462,20 +1426,13 @@ impl AppState {
     /// and we fall back to the old synchronous JSON persist so
     /// existing test infrastructure keeps working.
     fn persist_internal_locked(&self, inner: &StateInner) -> Result<()> {
-        if let Err(mpsc::SendError(request)) = self.persist_tx.send(PersistRequest::Delta) {
+        if self.persist_tx.send(PersistRequest::Delta).is_err() {
             // Channel disconnected — synchronous fallback for tests
             // and any shutdown path where the persist thread has
             // already exited. Build the full persist payload here
             // because we have no background worker to do it.
-            match request {
-                PersistRequest::Full(state) => {
-                    persist_state_from_persisted(&self.persistence_path, &state)?;
-                }
-                PersistRequest::Delta => {
-                    let persisted = PersistedState::from_inner(inner);
-                    persist_state_from_persisted(&self.persistence_path, &persisted)?;
-                }
-            }
+            let persisted = PersistedState::from_inner(inner);
+            persist_state_from_persisted(&self.persistence_path, &persisted)?;
         }
         Ok(())
     }

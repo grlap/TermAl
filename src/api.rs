@@ -386,28 +386,6 @@ impl SqlitePersistConnectionCache {
     }
 }
 
-/// Persists one `PersistedState` snapshot via the shared connection cache.
-/// Intended for the background persist thread hot loop; the cache removes
-/// per-request connection open + schema-validate overhead.
-#[cfg(not(test))]
-fn persist_state_via_cache(
-    cache: &mut SqlitePersistConnectionCache,
-    path: &FsPath,
-    persisted: &PersistedState,
-) -> Result<()> {
-    let sqlite_path = sqlite_persistence_path_for_json_path(path);
-    let connection = cache.connection_for(&sqlite_path)?;
-    let mut metadata = persisted.clone();
-    metadata.sessions.clear();
-    persist_state_parts_via_connection(
-        connection,
-        &sqlite_path,
-        &metadata,
-        &persisted.sessions,
-        true,
-    )
-}
-
 /// Applies a `PersistDelta` — metadata upsert plus targeted session
 /// row `INSERT OR UPDATE`s and `DELETE`s — via the shared connection
 /// cache.
