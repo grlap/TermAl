@@ -370,6 +370,7 @@ impl Mode {
 
 include!("remote.rs");
 include!("state.rs");
+include!("persist.rs");
 include!("runtime.rs");
 include!("turns.rs");
 include!("api.rs");
