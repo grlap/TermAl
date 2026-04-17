@@ -453,9 +453,7 @@ fn local_session_id_for_remote_session(
     fallback_local_project_id: Option<&str>,
 ) -> Option<LocalSessionId> {
     if let Some(index) = inner.find_remote_session_index(remote_id, remote_session_id.as_str()) {
-        return Some(LocalSessionId::from(
-            inner.sessions[index].session.id.as_str(),
-        ));
+        return Some(LocalSessionId::from(inner.sessions[index].session.id.clone()));
     }
 
     let remote_session = remote_sessions_by_id?.get(remote_session_id.as_str())?;
@@ -464,15 +462,12 @@ fn local_session_id_for_remote_session(
         remote_session.project_id.as_deref(),
     )
     .or_else(|| fallback_local_project_id.map(LocalProjectId::from));
-    Some(LocalSessionId::from(
-        upsert_remote_proxy_session_record(
-            inner,
-            remote_id,
-            remote_session,
-            local_project_id.map(LocalProjectId::into_inner),
-        )
-        .as_str(),
-    ))
+    Some(LocalSessionId::from(upsert_remote_proxy_session_record(
+        inner,
+        remote_id,
+        remote_session,
+        local_project_id.map(LocalProjectId::into_inner),
+    )))
 }
 
 /// Localizes a remote orchestrator instance. All the `local_*` ids

@@ -278,13 +278,13 @@ impl StateInner {
     /// Stamps the session at `index` with the next mutation stamp.
     ///
     /// Use when the caller already has the index (e.g., from a loop or a
-    /// prior `find_session_index`) and intends to mutate that session
-    /// without rebinding through `session_mut_by_index`. Returns the
-    /// assigned stamp, or `None` if the index is out of bounds.
-    ///
-    /// Only called from tests today — retained for mutation-stamp
-    /// regression coverage without gating the definition on `#[cfg(test)]`.
-    #[cfg_attr(not(test), allow(dead_code))]
+    /// prior `find_session_index`) and needs to re-stamp the slot
+    /// WITHOUT using the resulting `&mut SessionRecord`. The sole
+    /// production caller today is `import_discovered_codex_threads` in
+    /// `state_boot.rs`, which swaps an owned record into the slot via
+    /// `*slot = record` and then re-stamps the slot so the SQLite
+    /// delta persist picks up the row. Returns the assigned stamp,
+    /// or `None` if the index is out of bounds.
     fn stamp_session_at_index(&mut self, index: usize) -> Option<u64> {
         // Bounds check before the stamp so an OOB miss does not burn a
         // mutation stamp with no record to attach it to. Advancing

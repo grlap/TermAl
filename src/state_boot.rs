@@ -120,15 +120,18 @@ impl StateInner {
             // stamp and make the import invisible to the SQLite delta
             // persist (the row's stamp would sit at or below the
             // watermark, so `collect_persist_delta` would skip it).
-            // `session_mut_by_index` restamps the slot in place after
-            // the replace, mirroring the pattern used by
+            // `stamp_session_at_index` is the intent-revealing named
+            // accessor for "re-stamp the slot" — same behavior as
+            // calling `session_mut_by_index` and dropping the result,
+            // but communicates that we do not need the `&mut
+            // SessionRecord`. Mirrors the pattern used by
             // `create_session` + `create_session_from_fork` in
             // `src/session_crud.rs`.
             if let Some(index) = self.find_session_index(&record.session.id) {
                 if let Some(slot) = self.sessions.get_mut(index) {
                     *slot = record;
                 }
-                let _ = self.session_mut_by_index(index);
+                self.stamp_session_at_index(index);
             }
         }
     }
