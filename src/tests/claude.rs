@@ -1,14 +1,36 @@
-// Claude CLI recorder and turn-state tests — task/tool use, subagent
-// tracking, streamed text reconciliation (final suffix append vs replace),
-// tool-use-after-streamed-text, tool-result and approval recorder keys,
-// turn-state reset, and recorder fields clearing.
+// Claude Code CLI recorder and turn-state tests.
 //
-// Extracted from tests.rs — two non-contiguous clusters merged into one
-// cohesive submodule (turn-state clear/reset near the top of the file,
-// plus the main task/tool/streamed_text/result cluster further down).
+// The anthropic/claude-code CLI emits an NDJSON stream on stdout that TermAl
+// parses via `handle_claude_stdout_message` in `src/runtime.rs`. Each line is
+// an `assistant`, `user`, `stream_event`, or `result` envelope.
+// `ClaudeTurnState` accumulates per-turn bookkeeping — pending tool uses
+// keyed by `tool_use_id`, parallel sub-agents spawned via the `task` tool,
+// the streamed assistant text buffer, and approval keys already seen — and
+// is finalized by a `result` event or torn down when the runtime exits.
+//
+// Streamed text reconciliation is the trickiest seam: Claude emits a stream
+// of `text_delta` chunks and then a final full-text payload inside an
+// `assistant` frame after `message_stop`. `handle_claude_streamed_text` must
+// append the missing suffix when the final is longer, skip the duplicate
+// when the final matches, and REPLACE the bubble when the final diverges.
+// Parallel agents (the `task` tool) spawn sub-recorders that fan progress
+// into the parent transcript; their tool-use / tool-result / tool-error
+// frames are folded into `ParallelAgentProgress` entries and recorded as
+// subagent results. Transcript boundary: a `tool_use` arriving after
+// streamed text ends must start a follow-up `Message`, not append to the
+// closed text bubble. Production surfaces under test live in
+// `src/runtime.rs`: `handle_claude_stdout_message`, `handle_claude_tool_use`,
+// `handle_claude_tool_result`, the `handle_claude_task_tool_*` family,
+// `handle_claude_streamed_text`, and `handle_claude_result`.
 
 use super::*;
 
+// Pins `clear_claude_turn_state` zeroing every field of `ClaudeTurnState` —
+// approval keys, parallel agent group key and order, pending tools, the
+// streamed text buffer, the `saw_text_delta` flag, and
+// `permission_denied_this_turn`. Guards against leaking per-turn state
+// (stale pending tools, phantom parallel agents, already-seen approvals)
+// into the next Claude turn, which would corrupt the next transcript.
 #[test]
 fn clear_claude_turn_state_resets_all_fields() {
     let mut state = ClaudeTurnState {
@@ -51,6 +73,12 @@ fn clear_claude_turn_state_resets_all_fields() {
     assert!(!state.saw_text_delta);
 }
 
+// Pins `reset_claude_turn_state` as the softer variant used at end-of-turn:
+// it runs the full `clear_claude_turn_state` field wipe plus finalizes any
+// open streaming text bubble on the recorder and calls `reset_turn_state`.
+// Guards against a result envelope leaving a half-streamed text bubble open
+// or failing to notify the recorder that the turn has ended, which would
+// leak partial text into the next turn's transcript.
 #[test]
 fn reset_claude_turn_state_clears_all_fields_and_finishes_streaming_text() {
     let mut state = ClaudeTurnState {
@@ -102,7 +130,12 @@ fn reset_claude_turn_state_clears_all_fields_and_finishes_streaming_text() {
     assert!(!recorder.streaming_text_active);
 }
 
-// Tests that Claude task tool use updates parallel agent progress.
+// Pins `handle_claude_tool_use` fanning out two concurrent `task` tool_use
+// frames into a pair of `ParallelAgentProgress` entries titled by
+// `description`, both in `Initializing` status with detail "Initializing...".
+// Guards against the `task` fan-out being lost, collapsed into a single
+// agent, or recorded with the wrong status so the UI would show only one
+// sub-agent instead of the full group running in parallel.
 #[test]
 fn claude_task_tool_use_updates_parallel_agent_progress() {
     let mut turn_state = ClaudeTurnState::default();
@@ -153,7 +186,12 @@ fn claude_task_tool_use_updates_parallel_agent_progress() {
     assert_eq!(latest[1].status, ParallelAgentStatus::Initializing);
 }
 
-// Tests that Claude task tool result updates parallel agents and records subagent result.
+// Pins `handle_claude_task_tool_result` advancing an initializing
+// `ParallelAgentProgress` to `Completed` with a single-line detail preview,
+// and emitting a `push_subagent_result` carrying the full multi-line body.
+// Guards against the parent transcript losing the sub-agent's return value
+// or the progress card being stuck in `Initializing` after the task tool
+// returns successfully.
 #[test]
 fn claude_task_tool_result_updates_parallel_agents_and_records_subagent_result() {
     let mut turn_state = ClaudeTurnState::default();
@@ -220,7 +258,12 @@ fn claude_task_tool_result_updates_parallel_agents_and_records_subagent_result()
     );
 }
 
-// Tests that Claude task tool error records full failure detail.
+// Pins `handle_claude_task_tool_error` flipping the progress entry to
+// `Error` with the first failure line as the preview detail, while handing
+// the full multi-line payload (stack trace and all) to the recorder via
+// `push_subagent_result`. Guards against failure diagnostics being
+// truncated to the preview or dropped entirely, which would hide the real
+// cause of the sub-agent failure from the user.
 #[test]
 fn claude_task_tool_error_records_full_failure_detail() {
     let mut turn_state = ClaudeTurnState::default();
@@ -288,7 +331,12 @@ fn claude_task_tool_error_records_full_failure_detail() {
     );
 }
 
-// Tests that Claude task tool error without detail records fallback failure message.
+// Pins `handle_claude_task_tool_error` substituting the literal "Task
+// failed." string when the tool_result has `is_error: true` but an empty
+// content body — used both for the progress detail and for
+// `push_subagent_result`. Guards against empty-detail errors producing an
+// empty subagent result bubble or a parallel agent card that shows no
+// reason for the failure.
 #[test]
 fn claude_task_tool_error_without_detail_records_fallback_failure_message() {
     let mut turn_state = ClaudeTurnState::default();
@@ -351,7 +399,12 @@ fn claude_task_tool_error_without_detail_records_fallback_failure_message() {
     );
 }
 
-// Tests that Claude streamed text appends missing final suffix after message stop.
+// Pins `handle_claude_streamed_text` reconciling a short stream ("Hello")
+// with a longer final assistant text ("Hello there.") arriving after
+// `message_stop`, by appending the missing " there." suffix to the open
+// bubble so the transcript ends up with the full final text in a single
+// `Message::Text`. Guards against lost trailing words when Claude flushes
+// the full payload only in the post-`message_stop` `assistant` envelope.
 #[test]
 fn claude_streamed_text_appends_missing_final_suffix_after_message_stop() {
     let state = test_app_state();
@@ -429,7 +482,12 @@ fn claude_streamed_text_appends_missing_final_suffix_after_message_stop() {
     ));
 }
 
-// Tests that Claude streamed text skips duplicate final text after message stop.
+// Pins `handle_claude_streamed_text` recognizing that the final assistant
+// text exactly matches the already-streamed buffer and skipping the append,
+// so the transcript keeps a single `Message::Text` rather than duplicating
+// the full line. Guards against doubled assistant text in the bubble when
+// Claude's post-`message_stop` payload restates the complete streamed body
+// verbatim.
 #[test]
 fn claude_streamed_text_skips_duplicate_final_text_after_message_stop() {
     let state = test_app_state();
@@ -507,7 +565,12 @@ fn claude_streamed_text_skips_duplicate_final_text_after_message_stop() {
     ));
 }
 
-// Tests that Claude streamed text replaces divergent final text.
+// Pins `handle_claude_streamed_text` calling `replace_streaming_text` when
+// the final assistant body ("Final answer.") is not a prefix-extension of
+// the streamed draft ("Draft answer."), so the bubble is rewritten in
+// place to the authoritative final text. Guards against TermAl keeping a
+// stale early draft (or concatenating draft+final) when Claude rewrites
+// its own in-flight text.
 #[test]
 fn claude_streamed_text_replaces_divergent_final_text() {
     let state = test_app_state();
@@ -575,7 +638,12 @@ fn claude_streamed_text_replaces_divergent_final_text() {
     ));
 }
 
-// Tests that Claude tool use after streamed text starts followup in new message.
+// Pins the transcript boundary: `handle_claude_tool_use` arriving after a
+// streamed text bubble has ended must close the text `Message` and start a
+// fresh `Message::Command`, then a subsequent stream delta opens yet
+// another text bubble — yielding three distinct messages (text, command,
+// text) in order. Guards against follow-up tool calls or post-tool text
+// being appended to an already-closed text bubble.
 #[test]
 fn claude_tool_use_after_streamed_text_starts_followup_in_new_message() {
     let state = test_app_state();
@@ -685,7 +753,12 @@ fn claude_tool_use_after_streamed_text_starts_followup_in_new_message() {
     ));
 }
 
-// Tests that Claude result clears pending tools and ignores late tool results.
+// Pins `handle_claude_result` draining `pending_tools` so that a
+// tool_result envelope arriving after the turn's `result` is silently
+// discarded rather than mutating a recorded command — the Running Bash
+// command keeps its original empty output and `Running` status. Guards
+// against stray late tool-result frames from Claude retroactively
+// rewriting a completed turn's transcript.
 #[test]
 fn claude_result_clears_pending_tools_and_ignores_late_tool_results() {
     let mut turn_state = ClaudeTurnState::default();
@@ -751,7 +824,12 @@ fn claude_result_clears_pending_tools_and_ignores_late_tool_results() {
     );
 }
 
-// Tests that Claude result resets recorder command keys between turns.
+// Pins `handle_claude_result` resetting the recorder's command-id keying
+// between turns so a second turn reusing the same `tool_use_id` ("bash-1")
+// registers a fresh command rather than overwriting the prior turn's
+// completed Bash message — both commands end up persisted with their own
+// output and `Success` status. Guards against cross-turn id collisions
+// merging two independent Bash invocations into one transcript entry.
 #[test]
 fn claude_result_resets_recorder_command_keys_between_turns() {
     let state = test_app_state();

@@ -1,15 +1,30 @@
-// ACP and Codex JSON-RPC request lifecycle tests — pending-request map
-// waiter semantics (timeout-free vs timeout, error preservation), writer
-// loop responsiveness under pending responses, and `fail_pending_*`
-// behavior when the agent process exits mid-request.
-//
-// Extracted from tests.rs — cohesive cluster (previously lines 1154-1516)
-// exercising AcpPendingRequestMap, CodexPendingRequestMap, and their
-// timeout + exit-signal waiters.
+// acp + codex agents speak json-rpc over stdio; TermAl's runtime thread writes
+// each outbound request with a monotonic id and parks a reply channel in the
+// per-agent `PendingRequestMap` keyed by that id. when a response frame
+// arrives on stdout, the reader looks up the id and signals the waiter via
+// the stashed `Sender`, which wakes the caller blocked on `recv`.
+// two wait flavors live side by side: `wait_*_without_timeout` blocks
+// indefinitely and is used for operations that can legitimately take seconds
+// (e.g. claude-code session init), while the timed variant arms a deadline
+// and removes the pending entry on expiry so a late response cannot leak a
+// dangling sender. json-rpc-level failures (method rejected, bad params) are
+// distinct from transport failures: the wait helpers preserve the original
+// `JsonRpc(code, message)` shape so callers can inspect it. when the agent
+// process exits mid-request, `fail_pending_*_requests` drains the map and
+// releases every waiter with a `Transport` error so nobody parks forever.
+// the writer loop must also stay responsive to approvals + notifications
+// while a prompt request is still pending. production surfaces exercised:
+// `AcpPendingRequestMap`, `CodexPendingRequestMap`, `wait_acp_*_response`,
+// `wait_codex_*_response`, `fail_pending_acp_requests`,
+// `fail_pending_codex_requests`.
 
 use super::*;
 
-// Tests that ACP JSON RPC request without timeout waits for late response.
+// pins the untimed ACP waiter: after the request id is written and parked in
+// the pending map, the caller blocks until a late response lands on the
+// stashed sender, then returns the raw result value and drains the entry.
+// guards against regressions that would short-circuit the wait or leak the
+// pending entry after the late reply is delivered.
 #[test]
 fn acp_json_rpc_request_without_timeout_waits_for_late_response() {
     let pending_requests: AcpPendingRequestMap = Arc::new(Mutex::new(HashMap::new()));
@@ -55,7 +70,11 @@ fn acp_json_rpc_request_without_timeout_waits_for_late_response() {
     );
 }
 
-// Tests that Codex JSON RPC request without timeout waits for late response.
+// pins the codex mirror of the untimed waiter: a queued `turn/start` request
+// parks in the codex pending map and only unblocks once a late ok-response
+// arrives, after which the entry is removed.
+// guards against codex-specific drift from the ACP contract — both agents
+// must share the same "wait forever for slow replies" semantics.
 #[test]
 fn codex_json_rpc_request_without_timeout_waits_for_late_response() {
     let pending_requests: CodexPendingRequestMap = Arc::new(Mutex::new(HashMap::new()));
@@ -100,7 +119,11 @@ fn codex_json_rpc_request_without_timeout_waits_for_late_response() {
     );
 }
 
-// Tests that Codex JSON RPC request preserves JSON-RPC errors.
+// pins error-shape preservation: when the response channel delivers a
+// `CodexResponseError::JsonRpc(message)`, the untimed waiter surfaces that
+// same variant rather than flattening it into a transport or string error.
+// guards against callers losing the ability to distinguish a method-level
+// rejection from a dropped connection when inspecting the result.
 #[test]
 fn codex_json_rpc_request_without_timeout_preserves_json_rpc_errors() {
     let pending_requests: CodexPendingRequestMap = Arc::new(Mutex::new(HashMap::new()));
@@ -144,7 +167,11 @@ fn codex_json_rpc_request_without_timeout_preserves_json_rpc_errors() {
     );
 }
 
-// Tests that waiting for a Codex JSON-RPC response times out and clears the pending request.
+// pins the timed waiter's cleanup invariant: when the 10ms deadline elapses
+// with no response, the helper returns `Timeout` AND removes the pending
+// entry so a subsequent late reply cannot hit a dangling sender.
+// guards against a leak where an expired waiter leaves its id + channel in
+// the map, growing the map unbounded across retried calls.
 #[test]
 fn codex_json_rpc_response_wait_timeout_clears_pending_request() {
     let pending_requests: CodexPendingRequestMap = Arc::new(Mutex::new(HashMap::new()));
@@ -180,7 +207,12 @@ fn codex_json_rpc_response_wait_timeout_clears_pending_request() {
     );
 }
 
-// Tests that ACP prompt command keeps writer loop responsive while waiting for response.
+// pins writer-loop responsiveness: while a `session/prompt` request is
+// parked in the pending map, the runtime writer still drains and writes
+// subsequent queued messages (approval responses, notifications) rather
+// than serializing everything behind the in-flight prompt.
+// guards against a regression where the writer would block on the prompt's
+// response and stall approvals the user needs to send to unblock it.
 #[test]
 fn acp_prompt_command_keeps_writer_loop_responsive_while_waiting_for_response() {
     let state = test_app_state();
@@ -316,7 +348,11 @@ fn acp_prompt_command_keeps_writer_loop_responsive_while_waiting_for_response() 
     writer_thread.join().unwrap();
 }
 
-// Tests that fail pending ACP requests releases waiters.
+// pins the ACP exit-path cleanup: `fail_pending_acp_requests` drains every
+// entry in the map and delivers `Transport(detail)` to each sender so no
+// waiter parks forever after the runtime exits.
+// guards against leaking waiters that would hang the UI indefinitely if
+// the cursor/claude agent process dies mid-request.
 #[test]
 fn fail_pending_acp_requests_releases_waiters() {
     let pending_requests = Arc::new(Mutex::new(HashMap::new()));
@@ -343,7 +379,11 @@ fn fail_pending_acp_requests_releases_waiters() {
     );
 }
 
-// Tests that fail pending Codex requests releases waiters.
+// pins the codex mirror: `fail_pending_codex_requests` drains the shared
+// app-server's pending map and releases each waiter with the transport
+// detail when the codex app-server exits mid-request.
+// guards against divergence from the ACP path — codex requests must also
+// be rescued on process exit so the shared app-server never orphans them.
 #[test]
 fn fail_pending_codex_requests_releases_waiters() {
     let pending_requests = Arc::new(Mutex::new(HashMap::new()));

@@ -1,18 +1,29 @@
-// Codex thread discovery and import tests — reading the latest Codex
-// threads database from home, column fallbacks, DB path resolution,
-// source filtering (repl-home vs shared-runtime-home), scope-before-limit
-// filtering, per-home limits, and import flows for adding, normalizing,
-// and preserving prompt settings.
-//
-// Extracted from tests.rs — contiguous cluster (previously lines
-// 3380-3986). Covers `discover_codex_threads_from_home_*`,
-// `discover_codex_threads_from_sources_*`,
-// `resolve_codex_threads_database_path_*`, and
-// `import_discovered_codex_threads_*`.
+// Codex thread discovery and import. The Codex CLI persists each conversation
+// thread in a SQLite database under the user's Codex home (`state.db`, or a
+// versioned `state_<n>.sqlite` fallback after migrations). TermAl's discovery
+// feature scans those databases, filters threads whose `cwd` matches the
+// user's workdir, and imports them as local sessions so first-time users in
+// an existing workdir do not lose prior Codex history. Two home layouts
+// coexist: the legacy REPL install (`repl/`) and the current default
+// app-server install (`shared-app-server/`); TermAl prefers the shared-runtime
+// home and skips `repl/` entirely. Scope filtering runs BEFORE the per-home
+// row limit so a workdir's threads are never crowded out by unrelated rows.
+// Newer Codex schemas add optional columns (model, reasoning_effort) and the
+// query relies on them; legacy schemas surface a clear `no such column`
+// error instead of silently empty results. Import dedups by thread id (no
+// clones on refresh) and normalizes legacy `cwd` forms (Windows `\\?\`
+// verbatim, `~`, mixed separators) to the canonical project workdir.
+// Surfaces: `discover_codex_threads_from_home`,
+// `discover_codex_threads_from_sources`, `resolve_codex_threads_database_path`,
+// `StateInner::import_discovered_codex_threads`.
 
 use super::*;
 
-// Tests that discover Codex threads from home reads latest database.
+// pins that `resolve_codex_threads_database_path` picks the highest-versioned
+// `state_<n>.sqlite` when `state.db` is absent/empty and that every row column
+// (sandbox policy, approval mode, archived flag, model, reasoning effort)
+// round-trips into a `DiscoveredCodexThread`. guards against silently reading
+// a stale database or dropping optional fields during discovery.
 #[test]
 fn discover_codex_threads_from_home_reads_latest_database() {
     let codex_home = std::env::temp_dir().join(format!("termal-codex-home-{}", Uuid::new_v4()));
@@ -52,7 +63,11 @@ fn discover_codex_threads_from_home_reads_latest_database() {
     let _ = fs::remove_dir_all(&codex_home);
 }
 
-// Tests that discover Codex threads from home requires optional columns.
+// pins the error surface when discovery hits a legacy Codex schema that
+// predates the `model` and `reasoning_effort` columns: the query fails with
+// a recognisable "no such column" diagnostic rather than silently returning
+// an empty list. guards against a regression that would mask a corrupted or
+// out-of-date Codex install as "no threads found".
 #[test]
 fn discover_codex_threads_from_home_requires_optional_columns() {
     let codex_home =
@@ -101,7 +116,10 @@ fn discover_codex_threads_from_home_requires_optional_columns() {
     let _ = fs::remove_dir_all(&codex_home);
 }
 
-// Tests that resolve Codex threads database path skips unrelated entries.
+// pins that `resolve_codex_threads_database_path` only matches filenames of
+// the form `state_<numeric>.sqlite`, ignoring non-versioned sqlite files like
+// `state_preview.sqlite`. guards against discovery accidentally opening an
+// unrelated Codex sqlite artifact and failing with a schema error.
 #[test]
 fn resolve_codex_threads_database_path_skips_unrelated_entries() {
     let codex_home =
@@ -122,7 +140,11 @@ fn resolve_codex_threads_database_path_skips_unrelated_entries() {
     let _ = fs::remove_dir_all(&codex_home);
 }
 
-// Tests that discover Codex threads from sources skips REPL home and uses shared runtime home.
+// pins the candidate-home priority: the `shared-app-server` home wins over
+// the legacy Codex `~/.codex` home when both hold the same thread id, and the
+// `repl` home is skipped entirely. guards against TermAl importing stale REPL
+// history or preferring the source home when the shared-runtime install is
+// the active Codex backend.
 #[test]
 fn discover_codex_threads_from_sources_skips_repl_home_and_uses_shared_runtime_home() {
     let root = std::env::temp_dir().join(format!("termal-codex-discovery-{}", Uuid::new_v4()));
@@ -217,7 +239,11 @@ fn discover_codex_threads_from_sources_skips_repl_home_and_uses_shared_runtime_h
     let _ = fs::remove_dir_all(&root);
 }
 
-// Tests that discover Codex threads from home filters scopes before limiting results.
+// pins the scope-before-limit ordering: with 101 unrelated threads plus one
+// in-scope thread at the end of the table, the single in-scope thread is
+// still returned. guards against a SQL regression that limits rows before
+// filtering by `cwd` and would silently drop the user's real history when
+// a Codex DB has accumulated many out-of-scope conversations.
 #[test]
 fn discover_codex_threads_from_home_filters_scopes_before_limiting_results() {
     let codex_home =
@@ -289,7 +315,11 @@ fn discover_codex_threads_from_home_filters_scopes_before_limiting_results() {
     let _ = fs::remove_dir_all(&codex_home);
 }
 
-// Tests that discover Codex threads from home limits in scope results per home.
+// pins the per-home cap at `MAX_DISCOVERED_CODEX_THREADS_PER_HOME` and the
+// `updated_at desc` ordering: with `cap + 25` in-scope rows, discovery
+// returns exactly `cap` items starting at the newest. guards against
+// unbounded memory use when a long-lived Codex install has thousands of
+// threads in a single workdir.
 #[test]
 fn discover_codex_threads_from_home_limits_in_scope_results_per_home() {
     let codex_home =
@@ -354,7 +384,11 @@ fn discover_codex_threads_from_home_limits_in_scope_results_per_home() {
     let _ = fs::remove_dir_all(&codex_home);
 }
 
-// Tests that import discovered Codex threads adds project scoped sessions without duplicates.
+// pins that import creates a Codex session attached to the correct project
+// with model, sandbox, approval, reasoning effort, and archived thread-state
+// all copied from the discovered row, skips threads whose `cwd` is outside
+// the workdir, and is idempotent when called twice with the same input.
+// guards against duplicate sessions on repeated discovery refreshes.
 #[test]
 fn import_discovered_codex_threads_adds_project_scoped_sessions_without_duplicates() {
     let mut inner = StateInner::new();
@@ -445,7 +479,11 @@ fn import_discovered_codex_threads_adds_project_scoped_sessions_without_duplicat
     );
 }
 
-// Tests that import discovered Codex threads normalizes legacy local verbatim paths.
+// pins the Windows path-normalization step: a Codex `cwd` stored as a
+// verbatim `\\?\` prefix is collapsed to the canonical project workdir and
+// attached to the existing project rather than creating a second one.
+// guards against duplicate projects and orphaned sessions when Codex has
+// persisted a legacy verbatim path form.
 #[cfg(windows)]
 #[test]
 fn import_discovered_codex_threads_normalizes_legacy_local_verbatim_paths() {
@@ -495,7 +533,11 @@ fn import_discovered_codex_threads_normalizes_legacy_local_verbatim_paths() {
     let _ = fs::remove_dir_all(project_root);
 }
 
-// Tests that disable_socket_inheritance clears the Windows inherit flag.
+// pins that `disable_socket_inheritance` clears `HANDLE_FLAG_INHERIT` on the
+// listener's raw socket after explicit test setup marks it inheritable, while
+// leaving the handle queryable. guards against the TermAl listener leaking
+// into spawned Codex/Claude child processes, which would hold the port open
+// after shutdown. (Stray from the cluster; not a discovery test.)
 #[cfg(windows)]
 #[tokio::test]
 async fn disable_socket_inheritance_clears_windows_inherit_flag() {
@@ -552,7 +594,11 @@ async fn disable_socket_inheritance_clears_windows_inherit_flag() {
     );
 }
 
-// Tests that import discovered Codex threads preserves existing prompt settings.
+// pins that importing a discovered thread whose id already matches a local
+// session leaves the session's user-chosen model, sandbox mode, approval
+// policy, and reasoning effort untouched while still updating the archived
+// thread-state from the Codex row. guards against discovery clobbering
+// prompt settings the user has deliberately overridden.
 #[test]
 fn import_discovered_codex_threads_preserves_existing_prompt_settings() {
     let mut inner = StateInner::new();

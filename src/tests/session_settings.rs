@@ -1,17 +1,37 @@
-// Session and app-settings update tests — Codex external session ID
-// handling, import of discovered threads pruning stale ignores, global
-// app-settings persistence, Codex session creation with requested prompt
-// defaults, live session model/reasoning/effort updates (Cursor, Codex,
-// Claude) with or without runtime restart, Codex reasoning-effort
-// normalization and rejection for unsupported models, and model options
-// synced into session state.
+// Session and app-settings update flows across three tiers: global app
+// settings (default model per agent, approval mode, effort) persisted and
+// applied to freshly created sessions, project-level defaults inherited by
+// new sessions, and per-session overrides applied via
+// `update_session_settings`.
 //
-// Extracted from tests.rs — contiguous cluster (previously lines
-// 1396-2227) covering session-settings and model-options surfaces.
+// Update semantics diverge by agent. Codex model + reasoning-effort swaps
+// and Cursor mode changes take effect live on the running runtime, so
+// `runtime_reset_required` stays false. Claude model + effort changes flip
+// `runtime_reset_required` because the Claude CLI does not support hot
+// reconfig — the next send restarts the child. Model swaps push a
+// `SetModel` command to the live Claude process, but effort changes and
+// the `default` sentinel never do.
+//
+// Codex reasoning-effort normalization guards a subtle edge: when the
+// model changes, the current effort must be re-validated against the new
+// model's `supported_reasoning_efforts`. Unsupported values fed directly
+// in `update_session_settings` are rejected with a specific
+// "does not support ... reasoning effort; choose ..." error.
+//
+// External session ID is independent of the ignored-thread list — setting
+// a shared thread ID on a non-Codex session must not prune that thread
+// from `ignored_discovered_codex_thread_ids`, and thread import prunes
+// stale entries only.
+//
+// Production surfaces: `update_session_settings`, `update_app_settings`,
+// `set_external_session_id`, `sync_claude_model_options_for_session`.
 
 use super::*;
 
-// Tests that setting non Codex external session ID does not clear ignored Codex thread.
+// pins that attaching a shared thread ID to a non-Codex (Cursor) session
+// leaves the Codex-ignored-thread entry untouched. guards against
+// set_external_session_id cross-contaminating the ignored-threads list
+// when a non-Codex session happens to reuse the same external ID.
 #[test]
 fn setting_non_codex_external_session_id_does_not_clear_ignored_codex_thread() {
     let state = test_app_state();
@@ -37,7 +57,10 @@ fn setting_non_codex_external_session_id_does_not_clear_ignored_codex_thread() {
     let _ = fs::remove_file(state.persistence_path.as_path());
 }
 
-// Tests that import discovered Codex threads prunes stale ignored thread IDs.
+// pins that import_discovered_codex_threads retains ignored IDs that
+// still appear in the discovered list and drops stale ones. guards
+// against ignored-thread entries accumulating forever after the
+// underlying threads have been deleted from disk.
 #[test]
 fn import_discovered_codex_threads_prunes_stale_ignored_thread_ids() {
     let mut inner = StateInner::new();
@@ -77,7 +100,11 @@ fn import_discovered_codex_threads_prunes_stale_ignored_thread_ids() {
     );
 }
 
-// Tests that persists app settings and applies them to new sessions.
+// pins that update_app_settings writes the global preferences to disk
+// and that a freshly loaded AppState inherits those defaults when
+// creating new Codex and Claude sessions. guards against app-settings
+// persistence regressions and newly created sessions ignoring the
+// configured global defaults.
 #[test]
 fn persists_app_settings_and_applies_them_to_new_sessions() {
     let state = test_app_state();
@@ -204,7 +231,11 @@ fn persists_app_settings_and_applies_them_to_new_sessions() {
     let _ = fs::remove_file(state.persistence_path.as_path());
 }
 
-// Tests that creates Codex sessions with requested prompt defaults.
+// pins that a CreateSessionRequest carrying explicit Codex model,
+// approval policy, reasoning effort, and sandbox mode stores those
+// overrides verbatim on both the returned Session and the backing
+// record. guards against create_session silently discarding
+// caller-supplied prompt defaults in favour of global preferences.
 #[test]
 fn creates_codex_sessions_with_requested_prompt_defaults() {
     let state = test_app_state();
@@ -249,7 +280,10 @@ fn creates_codex_sessions_with_requested_prompt_defaults() {
     assert_eq!(record.codex_sandbox_mode, CodexSandboxMode::ReadOnly);
 }
 
-// Tests that updates cursor session model settings.
+// pins that update_session_settings on a Cursor session with a new
+// model string propagates through to the snapshot without touching
+// other fields. guards against Cursor model swaps being silently
+// dropped or mishandled by the shared settings-update path.
 #[test]
 fn updates_cursor_session_model_settings() {
     let state = test_app_state();
@@ -296,7 +330,10 @@ fn updates_cursor_session_model_settings() {
     assert_eq!(session.model, "gpt-5.3-codex");
 }
 
-// Tests that updates Codex session model settings without restarting runtime.
+// pins that changing a Codex session's model via update_session_settings
+// updates the snapshot and leaves runtime_reset_required false — Codex
+// accepts model switches live. guards against Codex model swaps
+// needlessly flagging the runtime for a restart.
 #[test]
 fn updates_codex_session_model_settings_without_restarting_runtime() {
     let state = test_app_state();
@@ -351,7 +388,10 @@ fn updates_codex_session_model_settings_without_restarting_runtime() {
     assert!(!record.runtime_reset_required);
 }
 
-// Tests that updates Codex reasoning effort without restarting runtime.
+// pins that bumping a Codex session's reasoning_effort updates both
+// the snapshot and the backing record while keeping
+// runtime_reset_required false. guards against Codex effort changes
+// being treated as restart-worthy like their Claude counterparts.
 #[test]
 fn updates_codex_reasoning_effort_without_restarting_runtime() {
     let state = test_app_state();
@@ -407,7 +447,11 @@ fn updates_codex_reasoning_effort_without_restarting_runtime() {
     assert!(!record.runtime_reset_required);
 }
 
-// Tests that normalizes Codex reasoning effort when switching models.
+// pins that switching to a model whose supported_reasoning_efforts no
+// longer includes the current effort (e.g. Minimal) falls back to that
+// model's default_reasoning_effort instead of carrying the unsupported
+// value forward. guards against leaving Codex sessions stuck on a
+// reasoning effort the newly selected model would reject at send time.
 #[test]
 fn normalizes_codex_reasoning_effort_when_switching_models() {
     let state = test_app_state();
@@ -500,7 +544,11 @@ fn normalizes_codex_reasoning_effort_when_switching_models() {
     assert_eq!(record.codex_reasoning_effort, CodexReasoningEffort::Medium);
 }
 
-// Tests that rejects unsupported Codex reasoning effort for selected model.
+// pins that supplying a reasoning effort outside the current model's
+// supported_reasoning_efforts returns an error whose message names the
+// rejected level and the allowed alternatives. guards against invalid
+// efforts reaching the Codex runtime and against the error message
+// drifting away from the "choose medium or high" enumeration format.
 #[test]
 fn rejects_unsupported_codex_reasoning_effort_for_selected_model() {
     let state = test_app_state();
@@ -568,7 +616,11 @@ fn rejects_unsupported_codex_reasoning_effort_for_selected_model() {
     );
 }
 
-// Tests that updates Claude session model settings without restarting runtime.
+// pins that changing the model on a running Claude session with a
+// concrete target (e.g. opus) dispatches a SetModel command over the
+// runtime's input channel and leaves runtime_reset_required false.
+// guards against Claude concrete-model swaps incorrectly requiring a
+// restart or skipping the live SetModel notification.
 #[test]
 fn updates_claude_session_model_settings_without_restarting_runtime() {
     let state = test_app_state();
@@ -647,6 +699,11 @@ fn updates_claude_session_model_settings_without_restarting_runtime() {
     }
 }
 
+// pins that switching a running Claude session to the "default"
+// sentinel flips runtime_reset_required to true and sends no live
+// SetModel command — the Claude CLI cannot apply the default sentinel
+// hot. guards against the default sentinel being forwarded as a
+// literal model string or skipping the required restart flag.
 #[test]
 fn updating_running_claude_session_to_default_model_requires_restart() {
     let state = test_app_state();
@@ -724,7 +781,11 @@ fn updating_running_claude_session_to_default_model_requires_restart() {
     }
 }
 
-// Tests that updates Claude effort and marks runtime for restart.
+// pins that changing claude_effort on a running Claude session writes
+// the new level into the snapshot, flips runtime_reset_required to
+// true, and dispatches no live runtime command — Claude effort only
+// takes effect on restart. guards against Claude effort changes
+// silently being treated as a hot update like Codex effort swaps.
 #[test]
 fn updates_claude_effort_and_marks_runtime_for_restart() {
     let state = test_app_state();
@@ -801,7 +862,11 @@ fn updates_claude_effort_and_marks_runtime_for_restart() {
     }
 }
 
-// Tests that syncs Claude model options into session state.
+// pins that sync_session_model_options populates a Claude session's
+// model_options list and promotes the first option's value as the
+// active model when the session was created without one. guards
+// against Claude session snapshots losing their model-option catalog
+// or failing to default to the first discovered entry.
 #[test]
 fn syncs_claude_model_options_into_session_state() {
     let state = test_app_state();

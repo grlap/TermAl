@@ -1,21 +1,29 @@
-// Codex thread action tests — model option refresh from the runtime,
-// shared-Codex model-list pagination (max-pages stop, queue-failure
-// error), forking threads (creating a new local session, history-unavailable
-// note fallback), thread-action live/idle guards, archive + unarchive
-// state transitions and dispatch blocking, shared-Codex archive
-// notification updates, model-rerouted notice recording, and compaction
-// notice ordering relative to visible assistant output.
-//
-// Extracted from tests.rs — contiguous cluster (previously lines
-// 2227-3126) covering `refreshes_codex_model_options_from_runtime`,
-// `shared_codex_model_list_pagination_*`, `fork_codex_thread_*`,
-// `codex_thread_actions_require_a_live_idle_thread`,
-// `codex_archive_and_unarchive_*`, `shared_codex_archive_notifications_*`,
-// `shared_codex_model_rerouted_*`, and `shared_codex_compaction_notice_*`.
+// codex threads are the native unit of Codex CLI sessions: each Codex
+// conversation is a thread identified by an id, and TermAl exposes
+// thread-level actions on top of them — fork (branch a new local
+// session off the thread's history), archive / unarchive (hide from
+// the UI without killing the runtime), rollback, and compact.
+// model options are paginated by the shared Codex app server, so the
+// model picker walks pages with a max-page cap to keep huge model
+// catalogs from running memory away. rerouted-model notifications
+// fire when Codex redirects a request to a different model (rate
+// limits, context overflow, safety) and must surface as a
+// user-visible notice in the transcript. compaction notices, which
+// tell the user their context was compacted, must appear BEFORE the
+// assistant output they summarize so the narrative ordering in the
+// transcript stays coherent. thread actions require a live idle
+// thread — archiving a running session or a non-existent thread is
+// rejected by a 400 guard in the API. production surfaces:
+// `fork_codex_thread`, `archive_codex_thread`,
+// `refresh_codex_model_options`, `shared_codex_model_list_paginated`,
+// handlers in `src/state.rs` + `src/runtime.rs`.
 
 use super::*;
 
-// Tests that refreshes Codex model options from runtime.
+// pins that `refresh_session_model_options` round-trips a
+// `RefreshModelList` command through the Codex runtime and persists
+// the returned options onto the session. guards against regressions
+// where the refresh ignores runtime responses or drops model entries.
 #[test]
 fn refreshes_codex_model_options_from_runtime() {
     let state = test_app_state();
@@ -87,7 +95,10 @@ fn refreshes_codex_model_options_from_runtime() {
     );
 }
 
-// Tests that shared Codex model-list pagination fails after the configured page cap.
+// pins that pagination surfaces an error and stops queueing new
+// pages once `SHARED_CODEX_MODEL_LIST_MAX_PAGES` is reached, even
+// when the server keeps returning `nextCursor`. guards against
+// unbounded memory growth from a misbehaving or hostile app server.
 #[test]
 fn shared_codex_model_list_pagination_stops_after_max_pages() {
     let pending_requests: CodexPendingRequestMap = Arc::new(Mutex::new(HashMap::new()));
@@ -132,7 +143,10 @@ fn shared_codex_model_list_pagination_stops_after_max_pages() {
     }
 }
 
-// Tests that shared Codex model-list pagination reports a continuation queue failure immediately.
+// pins that a closed runtime input channel during continuation is
+// reported immediately as a pagination error rather than leaving the
+// caller waiting forever. guards against silent hangs when the
+// shared Codex runtime has already shut down mid-walk.
 #[test]
 fn shared_codex_model_list_pagination_queue_failure_returns_error() {
     let pending_requests: CodexPendingRequestMap = Arc::new(Mutex::new(HashMap::new()));
@@ -170,7 +184,11 @@ fn shared_codex_model_list_pagination_queue_failure_returns_error() {
     );
 }
 
-// Tests that fork Codex thread creates a new local session.
+// pins that `fork_codex_thread` mints a distinct local session from
+// the `thread/fork` response, replaying turn items into typed
+// messages (user, reasoning, assistant, command, diff) and
+// inheriting model / approval / sandbox / workdir from the reply.
+// guards against fork losing history fidelity or reusing the origin id.
 #[test]
 fn fork_codex_thread_creates_a_new_local_session() {
     let state = test_app_state();
@@ -380,7 +398,10 @@ fn fork_codex_thread_creates_a_new_local_session() {
     ));
 }
 
-// Tests that fork Codex thread falls back to note when history is unavailable.
+// pins that when `thread/fork` omits turn history the forked session
+// still appears with a Markdown note explaining the history gap
+// rather than silently looking empty. guards against users thinking
+// a fork succeeded yet mysteriously lost their prior conversation.
 #[test]
 fn fork_codex_thread_falls_back_to_note_when_history_is_unavailable() {
     let state = test_app_state();
@@ -455,7 +476,11 @@ fn fork_codex_thread_falls_back_to_note_when_history_is_unavailable() {
     ));
 }
 
-// Tests that Codex thread actions require a live idle thread.
+// pins that archive / compact reject when no thread id is set, when
+// the session is actively running, and when prompts are still
+// queued — each with its own diagnostic message. guards the 400
+// API guard against letting destructive actions land on sessions
+// mid-turn or without a real Codex thread to act on.
 #[test]
 fn codex_thread_actions_require_a_live_idle_thread() {
     let state = test_app_state();
@@ -523,7 +548,11 @@ fn codex_thread_actions_require_a_live_idle_thread() {
     );
 }
 
-// Tests that Codex archive and unarchive actions update thread state and block dispatch.
+// pins archive flips `codex_thread_state` to Archived, appends an
+// "Archived Codex thread" notice, and causes `dispatch_turn` to
+// reject new prompts with 409; unarchive restores Active and writes
+// a "Restored" notice. guards against archived threads still
+// accepting turns or state flags drifting out of sync.
 #[test]
 fn codex_archive_and_unarchive_actions_update_thread_state_and_block_dispatch() {
     let state = test_app_state();
@@ -619,7 +648,11 @@ fn codex_archive_and_unarchive_actions_update_thread_state_and_block_dispatch() 
     ));
 }
 
-// Tests that shared Codex archive notifications update thread state.
+// pins that inbound `thread/archived` and `thread/unarchived`
+// notifications from the shared Codex app server resolve the thread
+// id to a local session and update its `codex_thread_state`
+// accordingly. guards against external archive actions (other
+// clients) failing to reflect in TermAl's UI.
 #[test]
 fn shared_codex_archive_notifications_update_thread_state() {
     let state = test_app_state();
@@ -721,7 +754,11 @@ fn shared_codex_archive_notifications_update_thread_state() {
     );
 }
 
-// Tests that shared Codex model rerouted notification records notice.
+// pins that a `model/rerouted` notification records a user-visible
+// transcript message naming both the origin and destination models
+// and a humanised reason (here "high-risk cyber activity"). guards
+// against silent model swaps where users see unexpected behaviour
+// without knowing Codex redirected their turn.
 #[test]
 fn shared_codex_model_rerouted_notification_records_notice() {
     let state = test_app_state();
@@ -801,7 +838,11 @@ fn shared_codex_model_rerouted_notification_records_notice() {
     ));
 }
 
-// Tests that shared Codex compaction notice inserts before visible assistant output.
+// pins that a `thread/compacted` notification inserts its notice
+// ahead of the first visible assistant message for the turn rather
+// than appending at the tail. guards transcript narrative order —
+// users must see "context was compacted" before the assistant reply
+// that reasoned over the compacted context.
 #[test]
 fn shared_codex_compaction_notice_inserts_before_visible_assistant_output() {
     let state = test_app_state();
