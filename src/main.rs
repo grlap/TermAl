@@ -375,6 +375,7 @@ include!("codex_discovery.rs");
 include!("persist.rs");
 include!("runtime.rs");
 include!("acp.rs");
+include!("agent_readiness.rs");
 include!("turns.rs");
 include!("api.rs");
 include!("instructions.rs");
