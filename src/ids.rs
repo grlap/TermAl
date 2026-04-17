@@ -82,6 +82,19 @@ macro_rules! define_typed_id {
             }
         }
 
+        // `Borrow<str>` lets `HashMap<$name, V>::get(key_str)` work
+        // without allocating a temporary `$name` wrapper at the call
+        // site. Safe because `String`'s derived `Hash` / `Eq` route
+        // through its `&str` deref, so a borrowed `str` hashes and
+        // compares identically to the equivalent owned `$name(...)`
+        // key — satisfying the `Borrow` contract that borrow-form
+        // equality agrees with owned-form equality.
+        impl std::borrow::Borrow<str> for $name {
+            fn borrow(&self) -> &str {
+                &self.0
+            }
+        }
+
         impl std::fmt::Display for $name {
             fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
                 self.0.fmt(f)

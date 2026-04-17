@@ -317,9 +317,12 @@ impl StateInner {
         Some(record)
     }
 
-    /// Like [`StateInner::session_mut`] but indexed directly. Panics if
-    /// the index is out of bounds; callers should obtain the index via
-    /// `find_session_index` / `find_visible_session_index` first.
+    /// Like [`StateInner::session_mut`] but indexed directly. Returns
+    /// `None` for out-of-bounds indices without advancing
+    /// `last_mutation_stamp`. Callers should still obtain the index via
+    /// `find_session_index` / `find_visible_session_index` where
+    /// possible — the `None` return exists to keep the helper sound on
+    /// stale indices, not to make "guess the index" patterns ergonomic.
     fn session_mut_by_index(&mut self, index: usize) -> Option<&mut SessionRecord> {
         // Bounds check before the stamp — see `stamp_session_at_index`
         // for the rationale. The by-id `session_mut` is already safe

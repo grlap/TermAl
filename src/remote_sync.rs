@@ -190,7 +190,7 @@ fn sync_remote_state_inner(
                 .as_deref()
                 .and_then(|remote_project_id| {
                     local_project_ids_by_remote_project_id
-                        .get(&RemoteProjectId::from(remote_project_id))
+                        .get(remote_project_id)
                         .cloned()
                 })
                 .or_else(|| record.session.project_id.as_deref().map(LocalProjectId::from));
@@ -426,9 +426,14 @@ fn local_project_id_for_remote_project(
     local_project_ids_by_remote_project_id: &HashMap<RemoteProjectId, LocalProjectId>,
     remote_project_id: Option<&str>,
 ) -> Option<LocalProjectId> {
+    // `Borrow<str>` impl on `RemoteProjectId` (see `src/ids.rs`) lets
+    // `HashMap::get` accept the raw `&str` directly without allocating a
+    // temporary `RemoteProjectId` wrapper. Matters on the hot remote-sync
+    // path where this helper runs under the state mutex for every session
+    // + orchestrator instance + transition reference.
     remote_project_id.and_then(|project_id| {
         local_project_ids_by_remote_project_id
-            .get(&RemoteProjectId::from(project_id))
+            .get(project_id)
             .cloned()
     })
 }
