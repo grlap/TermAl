@@ -792,3 +792,139 @@ describe("MarkdownContent line numbers", () => {
     expect(areMarkdownLineMarkersEqual([marker], [{ line: 4, range: "4-6", top: 21 }])).toBe(false);
   });
 });
+
+// Phase 1 of `docs/features/source-renderers.md`: Markdown content
+// renders inline `$...$` and block `$$...$$` math via `remark-math` +
+// `rehype-katex`, with KaTeX output wrapped so the rendered-Markdown
+// diff editor's serializer treats the presentation layer as skip and
+// preserves the underlying source.
+describe("MarkdownContent math rendering", () => {
+  it("renders inline $...$ math as a KaTeX span with skip-serialization wrapper", () => {
+    const { container } = render(
+      <MarkdownContent markdown="Inline math: $E = mc^2$ stays inline." />,
+    );
+
+    // rehype-katex emits `.math.math-inline` spans with the rendered
+    // KaTeX HTML. Our custom `span` renderer wraps them with
+    // contentEditable=false + data-markdown-serialization="skip".
+    const mathSpans = container.querySelectorAll("span.math.math-inline");
+    expect(mathSpans).toHaveLength(1);
+    const mathSpan = mathSpans[0] as HTMLSpanElement;
+    expect(mathSpan.getAttribute("data-markdown-serialization")).toBe("skip");
+    expect(mathSpan.getAttribute("contenteditable")).toBe("false");
+    // Inside the wrapper is a `.katex` element — the actual rendered
+    // output. Its DOM shape is KaTeX-internal; we only assert that
+    // something was rendered.
+    expect(mathSpan.querySelector(".katex")).not.toBeNull();
+  });
+
+  it("renders $$...$$ block math as a KaTeX div with skip-serialization wrapper", () => {
+    const { container } = render(
+      <MarkdownContent
+        markdown={`Here is a block equation:\n\n$$\n\\int_0^1 x^2 \\, dx = \\frac{1}{3}\n$$\n`}
+      />,
+    );
+
+    // rehype-katex emits `.math.math-display` divs for block math.
+    const blockDivs = container.querySelectorAll("div.math.math-display");
+    expect(blockDivs).toHaveLength(1);
+    const blockDiv = blockDivs[0] as HTMLDivElement;
+    expect(blockDiv.getAttribute("data-markdown-serialization")).toBe("skip");
+    expect(blockDiv.getAttribute("contenteditable")).toBe("false");
+    expect(blockDiv.querySelector(".katex")).not.toBeNull();
+  });
+
+  it("preserves non-math `span` / `div` children unchanged", () => {
+    // Regression guard: the custom span/div renderers intercept only
+    // the rehype-katex-labeled elements. Other span / div content
+    // (from GFM, autolink plugin, etc.) must not receive the
+    // skip-serialization attribute — only the KaTeX output does.
+    const { container } = render(
+      <MarkdownContent markdown="A plain paragraph with `code` and **bold**." />,
+    );
+
+    // No math → no KaTeX wrappers.
+    expect(container.querySelectorAll('[data-markdown-serialization="skip"]')).toHaveLength(0);
+    // Body text is rendered.
+    expect(container.textContent).toContain("A plain paragraph");
+    expect(container.textContent).toContain("code");
+    expect(container.textContent).toContain("bold");
+  });
+
+  it("renders malformed LaTeX without throwing (throwOnError: false)", () => {
+    // A malformed expression like `$\frac{1}$` (missing second arg)
+    // should render as a KaTeX error span (red, with title carrying
+    // the error text), not crash the whole Markdown render. The
+    // `throwOnError: false` option we pass to rehype-katex guarantees
+    // this.
+    expect(() => {
+      render(<MarkdownContent markdown="Bad: $\\frac{1}$ still renders." />);
+    }).not.toThrow();
+    // Document still shows the surrounding prose.
+    expect(screen.getByText(/still renders\./)).toBeInTheDocument();
+  });
+
+  it("renders many equations up to the per-document budget", () => {
+    // Exactly at the threshold: 100 inline expressions should render
+    // as normal KaTeX wrappers (the budget check is strictly
+    // greater-than).
+    const markdown = Array.from({ length: 100 }, (_, index) => `$x_{${index}}$`).join(" ");
+    const { container } = render(<MarkdownContent markdown={markdown} />);
+    const mathSpans = container.querySelectorAll("span.math.math-inline");
+    expect(mathSpans).toHaveLength(100);
+    // All of them have the skip attribute — none fell back to the
+    // budget-exceeded branch.
+    for (const span of mathSpans) {
+      expect(span.getAttribute("data-markdown-serialization")).toBe("skip");
+      expect(span.classList.contains("math-render-skipped")).toBe(false);
+    }
+  });
+
+  it("falls back to budget-skipped rendering when a document exceeds the math count cap", () => {
+    // Over the cap (100). Every math wrapper carries the
+    // `math-render-skipped` marker and the `title` note, matching the
+    // Mermaid-style render-budget fallback pattern.
+    const markdown = Array.from({ length: 101 }, (_, index) => `$y_{${index}}$`).join(" ");
+    const { container } = render(<MarkdownContent markdown={markdown} />);
+    const renderedMath = container.querySelectorAll(".math.math-inline");
+    expect(renderedMath).toHaveLength(101);
+    for (const element of renderedMath) {
+      expect(element.classList.contains("math-render-skipped")).toBe(true);
+      expect(element.getAttribute("data-markdown-serialization")).toBe("skip");
+      expect(element.getAttribute("title")).toMatch(
+        /Math render skipped/i,
+      );
+    }
+  });
+
+  it("does not render `$` in code blocks as math", () => {
+    // `remark-math` must not tokenize `$` inside fenced code blocks.
+    // The budget counter (`countMathExpressions`) mirrors this
+    // behavior — if it's wrong, the budget gate would trip on files
+    // that have literal `$` in shell snippets. This test pins both:
+    // the renderer does not produce math wrappers for code-block
+    // content.
+    const markdown = ["```bash", "echo $HOME $PATH $USER", "```"].join("\n");
+    const { container } = render(<MarkdownContent markdown={markdown} />);
+    expect(container.querySelectorAll("span.math, div.math")).toHaveLength(0);
+    // The code block still renders the literal `$HOME` text.
+    expect(container.textContent).toContain("$HOME");
+  });
+
+  it("stamps the block math div with line attributes for gutter navigation when showLineNumbers is on", () => {
+    const { container } = render(
+      <MarkdownContent
+        markdown={`Intro line.\n\n$$\nx^2 + y^2 = z^2\n$$\n`}
+        showLineNumbers
+      />,
+    );
+
+    const blockDiv = container.querySelector("div.math.math-display") as HTMLDivElement | null;
+    expect(blockDiv).not.toBeNull();
+    // Line attributes land on the wrapper so clicking the equation
+    // can navigate to the source line in the underlying Monaco
+    // editor. The exact line is derived from `remark-math`'s mdast
+    // sourcePosition; we just pin that SOME line marker is present.
+    expect(blockDiv?.hasAttribute("data-markdown-line-start")).toBe(true);
+  });
+});

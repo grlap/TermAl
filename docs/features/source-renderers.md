@@ -2,13 +2,42 @@
 
 ## Status
 
-Planned.
+Phase 1 (math in shared Markdown renderer) shipped. Phases 2-6 planned.
 
 This document defines a shared renderer model for source-backed previews. It
 extends the Markdown document work into a more general capability: render
 recognized diagrams, equations, and other safe visual blocks from the same
 source buffer used by Monaco editing, Git diff edit mode, and rendered Markdown
 views.
+
+### Phase 1 shipped
+
+- `remark-math` + `rehype-katex` + `katex` wired into
+  `MarkdownContent` in `ui/src/message-cards.tsx`. Inline `$...$` and
+  block `$$...$$` math render via KaTeX; rendered spans/divs carry
+  `contentEditable={false}` and `data-markdown-serialization="skip"`
+  so the rendered-Markdown diff editor's serializer (see
+  `shouldSkipMarkdownEditableNode` in `ui/src/panels/DiffPanel.tsx`)
+  preserves the source `$...$` / `$$...$$` literals and never captures
+  KaTeX presentation HTML into the saved buffer.
+- Per-document budget: `MAX_MATH_EXPRESSIONS_PER_DOCUMENT = 100`,
+  pre-render counted by `countMathExpressions` (O(n) lexical scan
+  mirroring `countMermaidMarkdownFences`). Over-budget documents
+  still render the KaTeX output but route every math wrapper through
+  `MathRenderBudgetFallback`, which stamps `math-render-skipped` and a
+  `title` note. KaTeX itself is configured with `throwOnError: false`,
+  `trust: false`, `strict: "ignore"`, `output: "html"` — a malformed
+  expression renders as a red-colored error span instead of halting
+  the whole Markdown render, and no arbitrary HTML can slip through
+  `\href` / `\url`.
+- Source line attributes (`data-markdown-line-start`) are attached to
+  block math wrappers when `showLineNumbers` is on, feeding the
+  existing Markdown line-gutter system.
+- Eight Vitest cases in `ui/src/MarkdownContent.test.tsx` cover:
+  inline-math wrapper shape, block-math wrapper shape, no interception
+  of non-math span/div, malformed-expression resilience, exact-at-cap
+  behavior, over-budget fallback, `$` in fenced code not being
+  tokenized as math, and block-math line-attribute stamping.
 
 ## Problem
 

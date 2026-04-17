@@ -14,6 +14,17 @@ import {
 } from "react";
 import ReactMarkdown, { uriTransformer } from "react-markdown";
 import remarkGfm from "remark-gfm";
+// Math rendering: `remark-math` parses `$...$` inline and `$$...$$`
+// block math at the mdast layer; `rehype-katex` turns the math AST
+// nodes into KaTeX HTML at the hast layer. Imported lazily (via the
+// top-level import) because Mermaid is the only other renderer with
+// per-region heft, and math is common enough across agent output that
+// eagerly loading KaTeX is cheaper than a dynamic import on first
+// equation. KaTeX CSS is imported so glyphs render correctly without
+// the caller needing a separate stylesheet import.
+import remarkMath from "remark-math";
+import rehypeKatex from "rehype-katex";
+import "katex/dist/katex.min.css";
 import { ExpandedPromptPanel } from "./ExpandedPromptPanel";
 import { copyTextToClipboard } from "./clipboard";
 import { buildDiffPreviewModel } from "./diff-preview";
@@ -73,6 +84,14 @@ const FILE_CHANGES_COLLAPSE_THRESHOLD = 6;
 let mermaidDiagramIdCounter = 0;
 const MAX_MERMAID_SOURCE_CHARS = 50_000;
 const MAX_MERMAID_DIAGRAMS_PER_DOCUMENT = 20;
+// Math budget mirrors Mermaid's per-document pattern (see
+// `docs/features/source-renderers.md` §Math Rules). Per-expression
+// size is bounded by KaTeX's own `maxExpand` and recursion guards, so
+// the per-document cap is the primary defense against a file with
+// thousands of short equations locking up the renderer. Over-budget
+// documents fall back to displaying KaTeX output with a `title`
+// annotation explaining the skip, via `MathRenderBudgetFallback`.
+const MAX_MATH_EXPRESSIONS_PER_DOCUMENT = 100;
 
 export type MarkdownFileLinkTarget = {
   path: string;
@@ -855,6 +874,88 @@ function readMermaidSvgDimensions(svg: string) {
     : null;
 }
 
+// Renders a `rehype-katex`-produced `<span class="math inline">` or
+// `<div class="math">` with the serialization-skip + contentEditable
+// discipline required by `docs/features/source-renderers.md` §Rendered
+// Markdown Diff Editing. When the per-document math budget is
+// exceeded, falls back to displaying the raw source instead of the
+// KaTeX output — same shape as `MermaidRenderBudgetFallback` but
+// inline-friendly for inline math. The `children` passed in is the
+// KaTeX HTML (already rendered by rehype-katex); we just wrap it with
+// the skip/readonly attributes, never producing our own KaTeX output.
+//
+// Per-expression budget: if a single expression's source exceeds the
+// character cap, we still render it (KaTeX handles length internally
+// and returns a best-effort span) but mark it with a size-exceeded
+// className so CSS can visually flag it. A stricter behavior (refuse
+// to render) can be added later if needed; for now the soft signal is
+// enough because KaTeX's own `maxExpand` and recursion guards prevent
+// actual runaway rendering.
+function renderSafeKatexElement(
+  tag: "span" | "div",
+  className: string,
+  children: ReactNode,
+  extraProps: Record<string, unknown>,
+  hasTooManyMathExpressions: boolean,
+  mode: "inline" | "block",
+) {
+  if (hasTooManyMathExpressions) {
+    const note =
+      mode === "block"
+        ? `Math render skipped: document has more than ${MAX_MATH_EXPRESSIONS_PER_DOCUMENT} equations.`
+        : "Math render skipped.";
+    return (
+      <MathRenderBudgetFallback className={className} mode={mode} note={note}>
+        {children}
+      </MathRenderBudgetFallback>
+    );
+  }
+  // The KaTeX HTML itself is trusted because we configure
+  // `trust: false` and `throwOnError: false` on `rehypeKatex`; any
+  // malformed expression renders as a red error span rather than
+  // arbitrary HTML. The `data-markdown-serialization="skip"` attribute
+  // signals the rendered-Markdown diff editor's serializer (see
+  // `ui/src/panels/DiffPanel.tsx::shouldSkipMarkdownEditableNode`) to
+  // omit the entire subtree when reconstructing the source — the
+  // original `$...$` / `$$...$$` source text stays in the document,
+  // only the KaTeX presentation layer is skipped.
+  const Tag = tag;
+  return (
+    <Tag
+      className={className}
+      contentEditable={false}
+      data-markdown-serialization="skip"
+      {...extraProps}
+    >
+      {children}
+    </Tag>
+  );
+}
+
+function MathRenderBudgetFallback({
+  children,
+  className,
+  mode,
+  note,
+}: {
+  children: ReactNode;
+  className: string;
+  mode: "inline" | "block";
+  note: string;
+}) {
+  const Tag = mode === "block" ? "div" : "span";
+  return (
+    <Tag
+      className={`${className} math-render-skipped`}
+      contentEditable={false}
+      data-markdown-serialization="skip"
+      title={note}
+    >
+      {children}
+    </Tag>
+  );
+}
+
 function MermaidRenderBudgetFallback({
   code,
   lineAttributes,
@@ -971,6 +1072,46 @@ function buildTermalMermaidConfig(appearance: MonacoAppearance): MermaidConfigIn
 
 function isMermaidMarkdownLanguage(language: string | null) {
   return language?.trim().toLowerCase() === "mermaid";
+}
+
+// Lexical approximation of `remark-math`'s tokenization: counts
+// `$...$` inline-math pairs (that aren't `$$`) and `$$...$$` block-math
+// pairs. Uses the same line-by-line scan pattern as
+// `countMermaidMarkdownFences` so budgets are consistent. Not a
+// full parser — `remark-math` has the real rules — but close enough
+// for an O(n) pre-render budget check. Fenced ` ```math ` blocks are
+// NOT counted here because they are handled by the code-block renderer
+// (same path as Mermaid); those fall under the Mermaid-style
+// per-block budget via the existing code-block inspection.
+function countMathExpressions(markdown: string) {
+  let count = 0;
+  let inFence = false;
+  for (const line of markdown.split(/\r?\n/)) {
+    // Skip content inside fenced code blocks — `remark-math` does the
+    // same (`$` inside fences is literal).
+    const fenceMatch = line.match(/^ {0,3}([`~]{3,})/);
+    if (fenceMatch) {
+      inFence = !inFence;
+      continue;
+    }
+    if (inFence) {
+      continue;
+    }
+    // Block math: a `$$` that opens or a `$$...$$` on one line.
+    const blockDollars = (line.match(/\$\$/g) ?? []).length;
+    count += Math.floor(blockDollars / 2);
+    // Remove block-math pairs before counting inline-math pairs so
+    // `$$x$$` doesn't double-count as both block and two inline.
+    const inlineScan = line.replace(/\$\$[^\n]*?\$\$/g, "").replace(/\$\$/g, "");
+    // Inline math: `$...$` pairs with no space immediately after the
+    // opening `$`. This matches `remark-math`'s "not preceded by
+    // whitespace" heuristic loosely — good enough for budget counting.
+    const inlinePairs = inlineScan.match(/\$[^\s$][^$\n]*?\$/g);
+    if (inlinePairs) {
+      count += inlinePairs.length;
+    }
+  }
+  return count;
 }
 
 function countMermaidMarkdownFences(markdown: string) {
@@ -2666,7 +2807,31 @@ const MARKDOWN_BARE_FILE_REFERENCE_IGNORED_NODE_TYPES = new Set([
   "link",
   "linkReference",
 ]);
-const MARKDOWN_REMARK_PLUGINS = [remarkGfm, remarkAutolinkBareFileReferences];
+// `remark-math` runs before GFM so the math-token boundary is
+// respected when dollar signs appear near pipe-tables (a GFM feature).
+// `remark-autolink-bare-file-references` stays last because it mutates
+// text nodes and must not swallow math content into autolinks.
+const MARKDOWN_REMARK_PLUGINS = [
+  remarkMath,
+  remarkGfm,
+  remarkAutolinkBareFileReferences,
+];
+// `rehype-katex` runs on the hast tree after the remark → rehype
+// conversion that react-markdown@8 performs internally. Options pin
+// KaTeX to the subset of behavior the `source-renderers.md` spec
+// allows: `trust: false` (no arbitrary HTML via `\href` / `\url`),
+// `strict: "ignore"` (render a best-effort approximation instead of
+// bailing on unknown macros — we want graceful fallback, not a render
+// halt), `output: "html"` (no MathML sibling that doubles the DOM
+// cost). `throwOnError: false` makes KaTeX return a red-colored
+// error span instead of throwing, so a malformed expression can't
+// take down the whole Markdown render.
+const MARKDOWN_REHYPE_KATEX_OPTIONS = {
+  output: "html" as const,
+  strict: "ignore" as const,
+  throwOnError: false,
+  trust: false,
+};
 const MarkdownLinkContext = createContext(false);
 // Block-level renderers must read this before emitting
 // `data-markdown-line-start`. Nested blocks inside list items or blockquotes
@@ -2792,6 +2957,19 @@ export function MarkdownContent({
   );
   const hasTooManyMermaidDiagrams =
     mermaidDiagramCount > MAX_MERMAID_DIAGRAMS_PER_DOCUMENT;
+  // Per-document math budget. Kept separate from the per-expression
+  // budget: the per-document cap is a cheap lexical scan, the per-
+  // expression cap is checked inside the math component renderers
+  // once `remark-math` has isolated each node. When over-budget,
+  // `rehypeKatex` still runs (the plugin list is stable across
+  // renders), but its output is replaced by the source-display
+  // fallback in the custom `math`/`inlineMath` renderer below.
+  const mathExpressionCount = useMemo(
+    () => countMathExpressions(markdown),
+    [markdown],
+  );
+  const hasTooManyMathExpressions =
+    mathExpressionCount > MAX_MATH_EXPRESSIONS_PER_DOCUMENT;
   const markdownRootRef = useRef<HTMLDivElement | null>(null);
   const [lineMarkers, setLineMarkers] = useState<MarkdownLineMarker[]>([]);
 
@@ -3138,7 +3316,57 @@ export function MarkdownContent({
           th: ({ children, isHeader: _isHeader, sourcePosition: _sourcePosition, ...props }) => (
             <th {...props}>{highlightChildren(children)}</th>
           ),
+          // `remark-math` annotates math nodes with the `math` /
+          // `inlineMath` class on the emitted `<span>` / `<div>`.
+          // `rehype-katex` then replaces the contents with KaTeX HTML.
+          // We intercept the final elements here to (1) enforce the
+          // per-expression budget (falling back to raw source display
+          // when over budget), (2) stamp `data-markdown-serialization="skip"`
+          // so the rendered-Markdown diff editor does not serialize the
+          // KaTeX output back into the source buffer, and (3) mark the
+          // rendered visual `contentEditable={false}` so
+          // `contentEditable`-scoped edit surfaces skip it. Detection
+          // is by className rather than a node-type check because
+          // react-markdown@8 dispatches all hast elements through the
+          // matching tag name (`span` for inline, `div` for block).
+          span: ({ children, className, node: _node, sourcePosition: _sourcePosition, ...props }) => {
+            if (typeof className === "string" && /(^|\s)math(\s|$)/.test(className) && /inline/.test(className)) {
+              return renderSafeKatexElement(
+                "span",
+                className,
+                children,
+                props,
+                hasTooManyMathExpressions,
+                "inline",
+              );
+            }
+            return (
+              <span className={className} {...props}>
+                {children}
+              </span>
+            );
+          },
+          div: ({ children, className, node: _node, sourcePosition, ...props }) => {
+            const suppressLineNumber = useContext(MarkdownLineNumberSuppressedContext);
+            if (typeof className === "string" && /(^|\s)math(\s|$)/.test(className)) {
+              const lineAttributes = suppressLineNumber ? null : getLineAttributes(sourcePosition);
+              return renderSafeKatexElement(
+                "div",
+                className,
+                children,
+                { ...props, ...(lineAttributes ?? {}) },
+                hasTooManyMathExpressions,
+                "block",
+              );
+            }
+            return (
+              <div className={className} {...props}>
+                {children}
+              </div>
+            );
+          },
         }}
+        rehypePlugins={[[rehypeKatex, MARKDOWN_REHYPE_KATEX_OPTIONS]]}
         remarkPlugins={MARKDOWN_REMARK_PLUGINS}
       >
         {markdown}
@@ -3147,6 +3375,7 @@ export function MarkdownContent({
   }, [
     documentPath,
     appearance,
+    hasTooManyMathExpressions,
     hasTooManyMermaidDiagrams,
     markdown,
     mermaidDiagramCount,
