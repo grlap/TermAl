@@ -103,6 +103,46 @@ Also fixed in the current tree, not re-listed below:
 - Prefer running `cargo check --tests` (not just `cargo test`) in local verification, since the bin-only invocation can miss the ambiguity.
 - If the reappearance was an IDE-side artifact, consider documenting the offending tool so future contributors avoid the same mistake.
 
+## Prompt sent during SSE reconnect window is invisible until safety-net poll (after server restart)
+
+**Severity:** Medium - after a backend restart, a prompt sent from a stale browser tab disappears from the UI for up to 30 seconds even though the server accepted and committed it. The user sees a dead text box, must refresh or send a second prompt to make the first one appear, and in the meantime is likely to double-send.
+
+The symptom is independent of the "last streamed message lost" entry below — nothing in SQLite is missing, the server is strictly consistent, and the safety-net poll eventually recovers the view. The bug is a frontend-only adoption path that rejects an authoritative server response because it looks like a revision downgrade.
+
+**The race.**
+
+1. Backend is running. Browser has `latestStateRevisionRef.current = M` from streamed deltas (say `M = 237`).
+2. Backend is restarted. In-memory revision resets to whatever SQLite has (the last persisted value, e.g. `N = 212`). The delta-only persist design means in-flight streaming deltas never reach SQLite, so `N < M` is the normal case.
+3. Browser's `EventSource` disconnects. Retry / reconnect is in progress but `onopen` has not yet fired, so `forceAdoptNextStateEventRef.current` is still `false`.
+4. User sends a prompt. `sendMessage` at `ui/src/App.tsx:4640` POSTs to `/api/sessions/{id}/messages`.
+5. Backend (`src/api.rs:651-673`) accepts the prompt, dispatches the turn, and returns the full `StateResponse` snapshot — now at revision `N + 1 = 213`, with the user's prompt visible in `session.messages`.
+6. Frontend handler at `ui/src/App.tsx:4650` calls `adoptState(state)` with no options.
+7. `shouldAdoptSnapshotRevision(237, 213, undefined)` at `ui/src/state-revision.ts:16` short-circuits to `shouldAdoptStateRevision(237, 213)` which returns `false` because `213 > 237` is false.
+8. `adoptState` early-returns at `ui/src/App.tsx:2627`. The prompt is not applied. No visible error. The draft field has already been cleared at lines 4618-4636 so the UI looks like a silent drop.
+
+The prompt is not lost — it is committed on the server, persisted to SQLite, and carried in the POST response — but the frontend's revision guard refuses to apply that response. Recovery paths:
+
+- The 30-second `ACTIVE_PROMPT_POLL_INTERVAL_MS` safety-net poll at `ui/src/App.tsx:4709` fetches `/api/state` and calls `adoptState(freshState, { force: true, allowRevisionDowngrade: true })`. Eventually works, but 30 seconds is a long time for a user who just pressed Send.
+- `EventSource.onopen` fires after reconnect and sets `forceAdoptNextStateEventRef.current = true` at `ui/src/App.tsx:3541`. The next SSE `state` event is then adopted with `force + allowRevisionDowngrade` via the handler at `ui/src/App.tsx:3359-3367`, bringing `latestStateRevisionRef` down to the server's current revision and surfacing the prompt. This is what "send another prompt" actually exploits: by the time the user types a second prompt, SSE has usually reconnected and `latestStateRevisionRef` is now ≥ the server's revision, so both prompts become visible at once.
+- Page refresh reloads the client from a clean slate.
+
+**Why the bug matches the reported symptom.**
+
+The user reports "send a prompt, prompt does not show immediately; I have to refresh or send a new prompt". The "send a new prompt" workaround is explained by SSE typically reconnecting in a few seconds — between the first send and the second, `EventSource.onopen` fires, `forceAdoptNextStateEventRef` gets set, the next SSE state event is force-adopted, and the revision counter is rewound. The second send's response is then at a revision > the rewound counter, and adoption succeeds for *both* prompts (the first one was already in the force-adopted state snapshot).
+
+**Current behavior:**
+- POST responses after backend restart are dropped when `nextState.revision < latestStateRevisionRef.current`.
+- Recovery is bounded by the 30-second safety-net poll or by SSE reconnecting and delivering an initial state event.
+- The UI gives no visual feedback that the send was rejected locally; the draft clears anyway (`ui/src/App.tsx:4618-4636` runs before the POST).
+- The counter-concern — `force + allowRevisionDowngrade` unconditionally could roll back a newer SSE delta — is real (see the existing entry "Safety-net poll uses `force + allowRevisionDowngrade` unconditionally"), so the fix is not just "always force".
+
+**Proposal:**
+
+- The POST response to a *mutation* the frontend itself just issued is authoritative for the mutation's data: the server just processed the request, so the returned session shape is guaranteed to include the just-sent prompt. The right fix is to adopt the POST response's *session slice* (messages, pending prompts, status) without gating on revision, even when the overall revision counter would gate it out. The revision counter stays governed by SSE / `/api/state` / safety-net poll; only the mutated session's contents get a free pass.
+- Narrower alternative that preserves the current adoption API: when `adoptState` rejects a snapshot whose revision is lower than the in-memory value *and* the client is currently in `reconnecting` (i.e., SSE is not healthy), treat the response as a restart-rewind candidate and re-adopt with `{ force: true, allowRevisionDowngrade: true }`. This couples the decision to the known reconnect state instead of forcing universally.
+- Defensively, keep the draft text populated until `adoptState` returns `true`. Today lines 4618-4636 clear it unconditionally, so a rejected POST response silently swallows the user's input. Restoring the draft (and a toast) would make the silent drop much less confusing — the catch block at 4742-4765 already restores the draft on thrown errors, but a rejected-by-revision-guard path is not an error and does not trigger the catch.
+- A regression test that (a) seeds `latestStateRevisionRef` at a high value, (b) processes a `sendMessage` response at a lower revision, and (c) asserts the new message IS visible, would pin whichever fix is chosen.
+
 ## Server restart without browser refresh can lose the last streamed message
 
 **Severity:** Medium - restarting the backend process while the browser tab is still open can make the most recent assistant message disappear from the UI, because the persist thread has a small window between "commit fires" and "row is durably in SQLite" during which an un-drained mutation is lost on kill.
