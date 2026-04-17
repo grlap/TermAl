@@ -173,6 +173,8 @@ export function detectRenderableRegions(
       return detectMarkdownRegions(context);
     case "mermaid-file":
       return detectWholeFileMermaidRegion(context);
+    case "rust":
+      return detectRustRegions(context);
     case "unknown":
       return [];
   }
@@ -192,7 +194,7 @@ export function hasRenderableRegions(context: SourceRenderContext): boolean {
 // exported helper over reaching into these.
 // ===================================================================
 
-type ContentKind = "markdown" | "mermaid-file" | "unknown";
+type ContentKind = "markdown" | "mermaid-file" | "rust" | "unknown";
 
 function detectContentKind(context: SourceRenderContext): ContentKind {
   const language = context.language?.trim().toLowerCase();
@@ -208,8 +210,10 @@ function detectContentKind(context: SourceRenderContext): ContentKind {
   ) {
     return "mermaid-file";
   }
-  // Rust (Phase 5), LaTeX (future), other dedicated types land here
-  // as a no-op for now.
+  if (language === "rust" || pathExt === "rs") {
+    return "rust";
+  }
+  // LaTeX (future), other dedicated types land here as a no-op.
   return "unknown";
 }
 
@@ -478,6 +482,284 @@ function detectWholeFileMermaidRegion(
       editable: context.mode === "source" || context.mode === "diff-edit",
     },
   ];
+}
+
+// ===================================================================
+// Rust doc-comment parsing (Phase 5).
+//
+// Rust's doc-comment family has four forms that all carry
+// Markdown-semantic content:
+//
+// - `///` — outer line doc
+// - `//!` — inner line doc (module-level)
+// - `/** ... */` — outer block doc
+// - `/*! ... */` — inner block doc (module-level)
+//
+// The parser walks the source line-by-line, groups consecutive
+// doc-comment lines into BLOCKS, strips the marker prefix from each
+// line (plus at most one leading space, matching rustdoc's own
+// behavior), concatenates the stripped lines into a virtual
+// Markdown document, and runs the existing fence + math detection
+// against it. Each region emitted by the Markdown detector is then
+// remapped back to the ORIGINAL Rust source lines via a per-block
+// line-number table, so source-link navigation from a rendered
+// diagram lands on the actual Rust file line containing the fence.
+//
+// Rules that align with `docs/features/source-renderers.md` §Rust
+// Source Files:
+//
+// - Only doc comments are parsed. Ordinary `//` comments and `/* */`
+//   blocks are skipped entirely (no rendering for arbitrary prose).
+// - String literals are not parsed — diagrams inside a string
+//   literal would never render in rustdoc either.
+// - Rendered regions keep source line anchors back to the Rust file.
+// - v1 renders Mermaid + math fences; ordinary Markdown prose inside
+//   doc comments does not surface as its own region today (the
+//   registry's current region types are `markdown` / `mermaid` /
+//   `math`; only the latter two fire).
+// ===================================================================
+
+interface RustDocBlock {
+  /** 1-based start line in the original Rust source. */
+  startLine: number;
+  /** 1-based end line in the original Rust source (inclusive). */
+  endLine: number;
+  /** Concatenated stripped Markdown content from all the block's
+   *  comment lines. One `\n` per source line. */
+  markdown: string;
+  /** Maps 1-based markdown-line-number (index + 1 into the rebuilt
+   *  markdown) back to the 1-based Rust source line it came from. */
+  markdownLineToSourceLine: number[];
+}
+
+function detectRustRegions(
+  context: SourceRenderContext,
+): SourceRenderableRegion[] {
+  const blocks = parseRustDocBlocks(context.content);
+  if (blocks.length === 0) {
+    return [];
+  }
+  const editable = context.mode === "source" || context.mode === "diff-edit";
+  const regions: SourceRenderableRegion[] = [];
+
+  for (const block of blocks) {
+    // Run the existing Markdown fence + math detection against the
+    // block's stripped content, then remap each detected region's
+    // markdown line numbers back to the original Rust source.
+    const blockContext: SourceRenderContext = {
+      ...context,
+      content: block.markdown,
+    };
+    const innerRegions = detectMarkdownRegions(blockContext);
+    for (const inner of innerRegions) {
+      const mappedStart =
+        block.markdownLineToSourceLine[inner.sourceStartLine - 1] ??
+        block.startLine;
+      const mappedEnd =
+        block.markdownLineToSourceLine[inner.sourceEndLine - 1] ??
+        block.endLine;
+      regions.push({
+        ...inner,
+        id: `rust-doc:${mappedStart}:${mappedEnd}:${inner.id}`,
+        sourceStartLine: mappedStart,
+        sourceEndLine: mappedEnd,
+        editable,
+      });
+    }
+  }
+
+  regions.sort((left, right) => {
+    if (left.sourceStartLine !== right.sourceStartLine) {
+      return left.sourceStartLine - right.sourceStartLine;
+    }
+    return left.sourceEndLine - right.sourceEndLine;
+  });
+  return regions;
+}
+
+function parseRustDocBlocks(source: string): RustDocBlock[] {
+  const lines = source.split(/\r?\n/);
+  const blocks: RustDocBlock[] = [];
+  let current: {
+    startLine: number;
+    endLine: number;
+    markdownLines: string[];
+    sourceLines: number[];
+  } | null = null;
+  let lineIndex = 0;
+
+  const pushCurrent = () => {
+    if (!current) {
+      return;
+    }
+    blocks.push({
+      startLine: current.startLine,
+      endLine: current.endLine,
+      markdown: current.markdownLines.join("\n"),
+      markdownLineToSourceLine: current.sourceLines,
+    });
+    current = null;
+  };
+
+  while (lineIndex < lines.length) {
+    const line = lines[lineIndex] ?? "";
+    const oneBasedLine = lineIndex + 1;
+
+    // Line-style outer/inner doc: `///` or `//!`, possibly with
+    // leading whitespace. Four-slash comments (`////`) are regular
+    // comments in rustdoc's rules, so require EXACTLY three or
+    // exactly-two+! and NOT more slashes beyond them.
+    const lineDocMatch = line.match(/^(\s*)(\/\/[!\/])(\/?)(.*)$/);
+    if (
+      lineDocMatch &&
+      // `//` → not a doc (regular). `///` → outer doc. `//!` →
+      // inner doc. `////` → regular (extra slash → treat as comment).
+      ((lineDocMatch[2] === "///" && lineDocMatch[3] !== "/") ||
+        lineDocMatch[2] === "//!")
+    ) {
+      const body = stripRustDocLinePrefix(lineDocMatch[4] ?? "");
+      if (!current) {
+        current = {
+          startLine: oneBasedLine,
+          endLine: oneBasedLine,
+          markdownLines: [body],
+          sourceLines: [oneBasedLine],
+        };
+      } else {
+        current.endLine = oneBasedLine;
+        current.markdownLines.push(body);
+        current.sourceLines.push(oneBasedLine);
+      }
+      lineIndex += 1;
+      continue;
+    }
+
+    // Block-style outer/inner doc: `/** ... */` or `/*! ... */`.
+    // These can span multiple lines. `/*` alone is a regular
+    // comment and is skipped entirely (don't flush; a regular
+    // comment does not interrupt a preceding line-doc block either
+    // — we flush on non-doc code lines, not comments).
+    const blockDocStart = line.match(/^(\s*)(\/\*[!*])/);
+    if (blockDocStart) {
+      const marker = blockDocStart[2] ?? "";
+      // `/**/` would be an empty block comment — skip.
+      if (marker === "/**" && line.trimStart().startsWith("/**/")) {
+        lineIndex += 1;
+        continue;
+      }
+      pushCurrent();
+      const blockResult = consumeRustBlockDoc(lines, lineIndex);
+      if (blockResult) {
+        blocks.push(blockResult.block);
+        lineIndex = blockResult.nextIndex;
+        continue;
+      }
+    }
+
+    // Any other line interrupts an accumulating line-doc block.
+    // We specifically flush on non-doc lines here; regular
+    // `//` comments also flush because they signal the author
+    // switched away from documenting this item.
+    pushCurrent();
+    lineIndex += 1;
+  }
+
+  pushCurrent();
+  return blocks;
+}
+
+function stripRustDocLinePrefix(rawBody: string): string {
+  // rustdoc convention: strip a SINGLE leading space if present so
+  // `/// Heading` becomes `Heading`, not ` Heading` (the latter
+  // would make every line of a doc block an indented Markdown
+  // block). Everything after the first space is preserved verbatim
+  // so intentional deep indentation (e.g. inside a fenced code
+  // block) stays intact.
+  if (rawBody.length > 0 && rawBody[0] === " ") {
+    return rawBody.slice(1);
+  }
+  return rawBody;
+}
+
+function consumeRustBlockDoc(
+  lines: string[],
+  startIndex: number,
+): { block: RustDocBlock; nextIndex: number } | null {
+  const startLineZero = startIndex;
+  const firstLine = lines[startLineZero] ?? "";
+  const openMatch = firstLine.match(/^(\s*)(\/\*[!*])(.*)$/);
+  if (!openMatch) {
+    return null;
+  }
+
+  const markdownLines: string[] = [];
+  const sourceLines: number[] = [];
+  const firstRemainder = openMatch[3] ?? "";
+
+  // Fast path: single-line block doc `/** text */`.
+  const singleLineEnd = firstRemainder.lastIndexOf("*/");
+  if (singleLineEnd >= 0) {
+    const inner = firstRemainder.slice(0, singleLineEnd);
+    markdownLines.push(stripRustBlockDocLineBody(inner));
+    sourceLines.push(startLineZero + 1);
+    return {
+      block: {
+        startLine: startLineZero + 1,
+        endLine: startLineZero + 1,
+        markdown: markdownLines.join("\n"),
+        markdownLineToSourceLine: sourceLines,
+      },
+      nextIndex: startLineZero + 1,
+    };
+  }
+
+  // Multi-line block doc: first line after the marker, then body
+  // lines until `*/`.
+  markdownLines.push(stripRustBlockDocLineBody(firstRemainder));
+  sourceLines.push(startLineZero + 1);
+  let index = startLineZero + 1;
+  while (index < lines.length) {
+    const line = lines[index] ?? "";
+    const closeIndex = line.indexOf("*/");
+    if (closeIndex >= 0) {
+      const inner = line.slice(0, closeIndex);
+      markdownLines.push(stripRustBlockDocLineBody(inner));
+      sourceLines.push(index + 1);
+      return {
+        block: {
+          startLine: startLineZero + 1,
+          endLine: index + 1,
+          markdown: markdownLines.join("\n"),
+          markdownLineToSourceLine: sourceLines,
+        },
+        nextIndex: index + 1,
+      };
+    }
+    markdownLines.push(stripRustBlockDocLineBody(line));
+    sourceLines.push(index + 1);
+    index += 1;
+  }
+
+  // Unterminated block — rare and probably indicates malformed Rust,
+  // but emit what we have so the user still sees the diagrams they
+  // wrote before the unterminated part.
+  return {
+    block: {
+      startLine: startLineZero + 1,
+      endLine: index,
+      markdown: markdownLines.join("\n"),
+      markdownLineToSourceLine: sourceLines,
+    },
+    nextIndex: index,
+  };
+}
+
+function stripRustBlockDocLineBody(body: string): string {
+  // Common block-doc convention: each line is prefixed with ` * ` or
+  // ` *`. Strip that prefix if present so the content reads as plain
+  // Markdown. Preserve the content after the first space.
+  const withLeadingSpaceStripped = body.replace(/^\s*\* ?/, "");
+  return withLeadingSpaceStripped;
 }
 
 /** Tiny FNV-1a-style hash used for stable region ids across

@@ -331,6 +331,231 @@ describe("detectRenderableRegions: dedicated file types", () => {
   });
 });
 
+describe("detectRenderableRegions: Rust doc comments (Phase 5)", () => {
+  it("returns nothing for Rust files that contain only regular comments", () => {
+    const src = [
+      "// A regular one-line comment.", // 1
+      "fn add(a: i32, b: i32) -> i32 { a + b }", // 2
+      "", // 3
+      "/* A regular block comment.", // 4
+      "   No Mermaid here.", // 5
+      "*/", // 6
+    ].join("\n");
+    expect(
+      detectRenderableRegions({
+        path: "src/lib.rs",
+        language: "rust",
+        content: src,
+        mode: "source",
+      }),
+    ).toEqual([]);
+  });
+
+  it("finds a Mermaid fence inside an outer `///` doc-comment block", () => {
+    // 1-based line numbers in the Rust source:
+    //   1: `/// Architecture:`
+    //   2: `///`
+    //   3: `/// ```mermaid`
+    //   4: `/// sequenceDiagram`
+    //   5: `///   Alice->>Bob: Hi`
+    //   6: `/// ```
+    //   7: `pub fn example() {}`
+    const src = [
+      "/// Architecture:",
+      "///",
+      "/// ```mermaid",
+      "/// sequenceDiagram",
+      "///   Alice->>Bob: Hi",
+      "/// ```",
+      "pub fn example() {}",
+    ].join("\n");
+    const regions = detectRenderableRegions({
+      path: "src/lib.rs",
+      language: "rust",
+      content: src,
+      mode: "source",
+    });
+    expect(regions).toHaveLength(1);
+    const region = regions[0] as SourceRenderableRegion;
+    expect(region.renderer).toBe("mermaid");
+    // The Mermaid fence spans original Rust lines 3-6.
+    expect(region.sourceStartLine).toBe(3);
+    expect(region.sourceEndLine).toBe(6);
+    expect(region.displayText).toBe("sequenceDiagram\n  Alice->>Bob: Hi");
+  });
+
+  it("finds a math block inside a module-level `//!` doc-comment block", () => {
+    const src = [
+      "//! Module invariant:", // 1
+      "//!", // 2
+      "//! ```math", // 3
+      "//! revision_{n+1} = revision_n + 1", // 4
+      "//! ```", // 5
+      "", // 6
+      "pub struct Foo;", // 7
+    ].join("\n");
+    const regions = detectRenderableRegions({
+      path: "src/lib.rs",
+      language: "rust",
+      content: src,
+      mode: "source",
+    });
+    expect(regions).toHaveLength(1);
+    expect(regions[0]?.renderer).toBe("math");
+    expect(regions[0]?.sourceStartLine).toBe(3);
+    expect(regions[0]?.sourceEndLine).toBe(5);
+    expect(regions[0]?.displayText).toBe("revision_{n+1} = revision_n + 1");
+  });
+
+  it("finds a Mermaid fence inside a `/** ... */` block doc comment", () => {
+    const src = [
+      "/**", // 1
+      " * Architecture sketch:", // 2
+      " *", // 3
+      " * ```mermaid", // 4
+      " * flowchart TD", // 5
+      " *   A --> B", // 6
+      " * ```", // 7
+      " */", // 8
+      "pub fn example() {}", // 9
+    ].join("\n");
+    const regions = detectRenderableRegions({
+      path: "src/lib.rs",
+      language: "rust",
+      content: src,
+      mode: "source",
+    });
+    expect(regions).toHaveLength(1);
+    const region = regions[0] as SourceRenderableRegion;
+    expect(region.renderer).toBe("mermaid");
+    // The fence spans Rust lines 4-7 in the original file.
+    expect(region.sourceStartLine).toBe(4);
+    expect(region.sourceEndLine).toBe(7);
+    expect(region.displayText).toBe("flowchart TD\n  A --> B");
+  });
+
+  it("does not treat regular `//` comments or `/* */` blocks as doc comments", () => {
+    // Four-slash `////` is a regular line comment per rustdoc rules;
+    // it must NOT be parsed as a doc block. Same for `/*` without
+    // the `!`/`*` suffix.
+    const src = [
+      "//// ```mermaid", // 1 — regular comment
+      "//// flowchart", // 2 — regular comment
+      "//// ```", // 3 — regular comment
+      "/* ```mermaid", // 4 — regular block comment
+      "   flow", // 5
+      "   ``` */", // 6
+    ].join("\n");
+    expect(
+      detectRenderableRegions({
+        path: "src/lib.rs",
+        language: "rust",
+        content: src,
+        mode: "source",
+      }),
+    ).toEqual([]);
+  });
+
+  it("returns nothing for Rust files whose doc comments are plain prose (no fenced diagrams)", () => {
+    const src = [
+      "/// Adds two integers together.", // 1
+      "///", // 2
+      "/// This is a simple helper; no diagrams needed.", // 3
+      "pub fn add(a: i32, b: i32) -> i32 { a + b }", // 4
+    ].join("\n");
+    // Phase 5 only surfaces Mermaid/math regions inside doc blocks.
+    // Plain prose doc comments do not produce renderable regions
+    // today — they would render as ordinary Markdown in future
+    // phases but are not included in the Phase 5 scope.
+    expect(
+      detectRenderableRegions({
+        path: "src/lib.rs",
+        language: "rust",
+        content: src,
+        mode: "source",
+      }),
+    ).toEqual([]);
+  });
+
+  it("handles multiple doc-comment blocks on separate items in the same file", () => {
+    const src = [
+      "/// Widget one.", // 1
+      "/// ```mermaid", // 2
+      "/// flowchart A", // 3
+      "/// ```", // 4
+      "pub struct One;", // 5
+      "", // 6
+      "/// Widget two.", // 7
+      "/// ```mermaid", // 8
+      "/// flowchart B", // 9
+      "/// ```", // 10
+      "pub struct Two;", // 11
+    ].join("\n");
+    const regions = detectRenderableRegions({
+      path: "src/lib.rs",
+      language: "rust",
+      content: src,
+      mode: "source",
+    });
+    expect(regions).toHaveLength(2);
+    expect(regions[0]?.sourceStartLine).toBe(2);
+    expect(regions[0]?.sourceEndLine).toBe(4);
+    expect(regions[0]?.displayText).toBe("flowchart A");
+    expect(regions[1]?.sourceStartLine).toBe(8);
+    expect(regions[1]?.sourceEndLine).toBe(10);
+    expect(regions[1]?.displayText).toBe("flowchart B");
+  });
+
+  it("recognizes `.rs` extension without requiring a language hint", () => {
+    const src = [
+      "/// ```mermaid",
+      "/// flowchart X",
+      "/// ```",
+      "pub fn x() {}",
+    ].join("\n");
+    const regions = detectRenderableRegions({
+      path: "lib.rs",
+      language: null,
+      content: src,
+      mode: "source",
+    });
+    expect(regions).toHaveLength(1);
+    expect(regions[0]?.renderer).toBe("mermaid");
+  });
+
+  it("handles single-line `/** text */` doc comments", () => {
+    const src = [
+      "/** One-line doc. */", // 1 — plain prose, no diagrams
+      "pub fn a() {}", // 2
+    ].join("\n");
+    // Prose-only block: no renderable region.
+    expect(
+      detectRenderableRegions({
+        path: "src/lib.rs",
+        language: "rust",
+        content: src,
+        mode: "source",
+      }),
+    ).toEqual([]);
+  });
+
+  it("marks Rust-derived regions read-only in diff/markdown-diff mode", () => {
+    const src = [
+      "/// ```mermaid",
+      "/// flow",
+      "/// ```",
+      "pub fn z() {}",
+    ].join("\n");
+    const diffRegions = detectRenderableRegions({
+      path: "src/lib.rs",
+      language: "rust",
+      content: src,
+      mode: "diff",
+    });
+    expect(diffRegions[0]?.editable).toBe(false);
+  });
+});
+
 describe("hasRenderableRegions", () => {
   it("returns true for Markdown with a Mermaid fence", () => {
     expect(

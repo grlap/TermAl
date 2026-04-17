@@ -2,7 +2,7 @@
 
 ## Status
 
-Phase 1 (math in shared Markdown renderer) shipped. Phases 2-6 planned.
+Phases 1-5 shipped. Phase 6 (additional renderers beyond Mermaid/math) planned.
 
 This document defines a shared renderer model for source-backed previews. It
 extends the Markdown document work into a more general capability: render
@@ -38,6 +38,81 @@ views.
   of non-math span/div, malformed-expression resilience, exact-at-cap
   behavior, over-budget fallback, `$` in fenced code not being
   tokenized as math, and block-math line-attribute stamping.
+
+### Phase 2 shipped
+
+- `ui/src/source-renderers.ts` defines `SourceRenderContext`,
+  `SourceRenderableRegion`, `detectRenderableRegions(context)`, and
+  `hasRenderableRegions(context)`, plus the shared budget constants
+  (`MAX_MERMAID_SOURCE_CHARS`, `MAX_MERMAID_DIAGRAMS_PER_DOCUMENT`,
+  `MAX_MATH_EXPRESSIONS_PER_DOCUMENT`) that Source + Diff panels can
+  read without depending on `message-cards.tsx`.
+- Detectors cover Markdown files (Mermaid + math fences + inline
+  `$...$` + same-line and multi-line `$$...$$`) and dedicated
+  Mermaid files (`.mmd`, `.mermaid`). `message-cards.tsx`
+  re-imports the shared helpers — no duplicate logic.
+- 25 Vitest cases in `ui/src/source-renderers.test.ts` pin budget
+  constants, fence predicates, counts, region detection for all
+  four kinds, sort order, stable ids, the editable-mode flag, and
+  dedicated-file-type handling.
+
+### Phase 3 shipped
+
+- `ui/src/panels/SourcePanel.tsx` exposes Preview/Split modes for
+  any file the registry detects as renderable — not just Markdown.
+  Dedicated Mermaid files get the mode switcher with a "Mermaid"
+  chip.
+- `RendererPreviewPane` routes Markdown through
+  `MarkdownDocumentView` (unchanged chrome) and non-Markdown
+  renderable files through `MarkdownContent` with a synthetic
+  Markdown fragment composed from detected regions (per-region
+  `Lines X–Y` headers + appropriate fence wrapping).
+- Detection runs against the CURRENT edit buffer via `useMemo`, so
+  the preview reflects unsaved edits.
+- 3 Vitest cases cover `.mmd` file exposing Preview/Split, plain
+  Rust file NOT exposing them, and edit-buffer re-detection.
+
+### Phase 4 shipped
+
+- `ui/src/panels/DiffPanel.tsx` gains a read-only `"rendered"` view
+  mode for non-Markdown files whose after side has at least one
+  renderable region. Reuses `MarkdownContent` for safe
+  Mermaid/KaTeX rendering.
+- Staged/unstaged side semantics preserved: reads
+  `documentContent.after.content` (authoritative for the selected
+  `GitDiffSection`), fallback to `latestFile.content` only when the
+  backend didn't enrich.
+- Patch-only fallback label when `documentContent.isCompleteDocument`
+  is not set — points reviewers at the Raw patch view for
+  authoritative review.
+- Edits stay in Monaco's Edit mode (Phase 4 is display-only).
+- 2 Vitest cases cover full-document `.mmd` render and patch-only
+  fallback label.
+
+### Phase 5 shipped
+
+- Rust files (`.rs` extension or `language: "rust"`) are a
+  recognized content kind. `detectRustRegions` parses the file into
+  doc-comment blocks, strips the marker prefix, runs the existing
+  Markdown fence + math detector against each block, and remaps the
+  detected regions' line numbers back to the original Rust source
+  via a per-block line-number table.
+- Supported forms: `///`, `//!`, `/** ... */`, `/*! ... */`
+  (single-line and multi-line). Rustdoc conventions honored —
+  a single leading space after the marker is stripped; ` * `
+  prefixes on multi-line block-doc bodies are stripped; `////` and
+  plain `/* */` are NOT parsed.
+- Source-line navigation: regions carry the original Rust line
+  range so `Lines X–Y` labels in the Source/Diff preview cross-
+  reference Monaco lines directly.
+- 10 Vitest cases in `source-renderers.test.ts` cover: no-doc
+  files, `///` with Mermaid, `//!` with math, multi-line `/** */`
+  with Mermaid, rejection of `////`/`/* */`, prose-only doc blocks,
+  multiple doc blocks in one file, `.rs` without explicit language,
+  single-line `/** */`, and `editable: false` in diff mode. One
+  additional SourcePanel integration test exercises the end-to-end
+  Preview/Split exposure for Rust files with doc-comment Mermaid
+  fences.
 
 ## Problem
 

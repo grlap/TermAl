@@ -368,6 +368,43 @@ describe("SourcePanel", () => {
     expect(screen.queryByRole("button", { name: "Split" })).not.toBeInTheDocument();
   });
 
+  // Phase 5 of `docs/features/source-renderers.md`: Rust files with
+  // doc-comment fenced Mermaid/math blocks surface the Preview/Split
+  // toolbar just like `.mmd` files. Plain Rust files (no doc
+  // comments, or doc comments without fenced diagrams) still do NOT
+  // expose the toolbar.
+  it("exposes Preview/Split for Rust files with a Mermaid fence in a doc comment", async () => {
+    render(
+      <SourcePanel
+        editorAppearance={editorAppearance}
+        editorFontSizePx={14}
+        fileState={{
+          ...readyFileState,
+          path: "/repo/src/architecture.rs",
+          content: [
+            "/// Architecture:",
+            "///",
+            "/// ```mermaid",
+            "/// flowchart TD",
+            "///   A --> B",
+            "/// ```",
+            "pub fn example() {}",
+          ].join("\n"),
+          language: "rust",
+        }}
+        sourcePath="/repo/src/architecture.rs"
+        onSaveFile={vi.fn()}
+      />,
+    );
+
+    // Preview + Split surface because the registry detected a
+    // Mermaid region inside the `///` doc-comment block.
+    expect(await screen.findByRole("button", { name: "Preview" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Split" })).toBeInTheDocument();
+    // The chip labels the renderer kind.
+    expect(screen.getByText("Mermaid")).toHaveClass("chip");
+  });
+
   // Edits that ADD renderable content (e.g., user types a Mermaid
   // fence into a previously-empty `.md` file) should expose
   // Preview/Split once the registry picks up the new region. The
