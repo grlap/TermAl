@@ -404,6 +404,7 @@ include!("session_sync.rs");
 include!("state_accessors.rs");
 include!("state_boot.rs");
 include!("state_inner.rs");
+include!("app_boot.rs");
 include!("agent_readiness.rs");
 include!("gemini.rs");
 include!("turns.rs");
