@@ -401,6 +401,8 @@ include!("claude_spares.rs");
 include!("workspace_queries.rs");
 include!("session_identity.rs");
 include!("session_sync.rs");
+include!("state_accessors.rs");
+include!("state_boot.rs");
 include!("agent_readiness.rs");
 include!("gemini.rs");
 include!("turns.rs");
