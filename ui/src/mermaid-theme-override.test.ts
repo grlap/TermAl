@@ -86,6 +86,23 @@ describe("stripMermaidAuthorThemeDirectives", () => {
     expect(next).toContain("A --> B");
   });
 
+  it("strips `look` and `handDrawnSeed` keys from YAML frontmatter", () => {
+    const source = [
+      "---",
+      "title: My diagram",
+      "look: handDrawn",
+      "handDrawnSeed: 7",
+      "---",
+      "flowchart TD",
+      "  A --> B",
+    ].join("\n");
+    const next = stripMermaidAuthorThemeDirectives(source);
+    expect(next).toContain("title: My diagram");
+    expect(next).not.toContain("look:");
+    expect(next).not.toContain("handDrawnSeed");
+    expect(next).toContain("flowchart TD");
+  });
+
   it("leaves non-leading `---` separators alone", () => {
     // A `---` that is not the first line is a Mermaid arrow, not a
     // YAML frontmatter fence. Avoid stripping anything.

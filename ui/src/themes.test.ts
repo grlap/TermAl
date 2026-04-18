@@ -1,5 +1,6 @@
 import {
   DEFAULT_DENSITY_PERCENT,
+  DEFAULT_DIAGRAM_LOOK,
   DEFAULT_DIAGRAM_THEME_OVERRIDE_MODE,
   DEFAULT_EDITOR_FONT_SIZE_PX,
   DEFAULT_FONT_SIZE_PX,
@@ -8,6 +9,8 @@ import {
   DEFAULT_STYLE_ID,
   DEFAULT_THEME_ID,
   DENSITY_STORAGE_KEY,
+  DIAGRAM_LOOKS,
+  DIAGRAM_LOOK_STORAGE_KEY,
   DIAGRAM_THEME_OVERRIDE_STORAGE_KEY,
   EDITOR_FONT_SIZE_STORAGE_KEY,
   FONT_SIZE_STORAGE_KEY,
@@ -26,6 +29,7 @@ import {
   THEME_STORAGE_KEY,
   THEMES,
   applyDensityPreference,
+  applyDiagramLookPreference,
   applyDiagramThemeOverridePreference,
   applyFontSizePreference,
   applyMarkdownStylePreference,
@@ -36,6 +40,7 @@ import {
   clampEditorFontSizePreference,
   clampFontSizePreference,
   getStoredDensityPreference,
+  getStoredDiagramLookPreference,
   getStoredDiagramThemeOverridePreference,
   getStoredEditorFontSizePreference,
   getStoredFontSizePreference,
@@ -43,12 +48,14 @@ import {
   getStoredMarkdownThemePreference,
   getStoredStylePreference,
   getStoredThemePreference,
+  isDiagramLook,
   isDiagramThemeOverrideMode,
   isMarkdownStyleId,
   isMarkdownThemeId,
   isStyleId,
   isThemeId,
   persistDensityPreference,
+  persistDiagramLookPreference,
   persistDiagramThemeOverridePreference,
   persistEditorFontSizePreference,
   persistFontSizePreference,
@@ -66,6 +73,7 @@ describe("theme helpers", () => {
     document.documentElement.removeAttribute("data-markdown-theme");
     document.documentElement.removeAttribute("data-markdown-style");
     document.documentElement.removeAttribute("data-diagram-theme-override");
+    document.documentElement.removeAttribute("data-diagram-look");
     document.documentElement.style.removeProperty("font-size");
     document.documentElement.style.removeProperty("--density-scale");
   });
@@ -271,5 +279,37 @@ describe("theme helpers", () => {
     expect(isDiagramThemeOverrideMode(null)).toBe(false);
     expect(isDiagramThemeOverrideMode(undefined)).toBe(false);
     expect(isDiagramThemeOverrideMode("maybe")).toBe(false);
+  });
+
+  it("returns the default diagram look when storage is empty or invalid", () => {
+    expect(getStoredDiagramLookPreference()).toBe(DEFAULT_DIAGRAM_LOOK);
+    expect(DEFAULT_DIAGRAM_LOOK).toBe("classic");
+
+    window.localStorage.setItem(DIAGRAM_LOOK_STORAGE_KEY, "sketchy");
+    expect(getStoredDiagramLookPreference()).toBe(DEFAULT_DIAGRAM_LOOK);
+  });
+
+  it("reads, persists, and applies the diagram look", () => {
+    persistDiagramLookPreference("handDrawn");
+    expect(window.localStorage.getItem(DIAGRAM_LOOK_STORAGE_KEY)).toBe("handDrawn");
+    expect(getStoredDiagramLookPreference()).toBe("handDrawn");
+
+    applyDiagramLookPreference("handDrawn");
+    expect(document.documentElement.dataset.diagramLook).toBe("handDrawn");
+
+    persistDiagramLookPreference("neo");
+    applyDiagramLookPreference("neo");
+    expect(window.localStorage.getItem(DIAGRAM_LOOK_STORAGE_KEY)).toBe("neo");
+    expect(document.documentElement.dataset.diagramLook).toBe("neo");
+  });
+
+  it("keeps the diagram-look registry aligned with the runtime guard", () => {
+    const ids = DIAGRAM_LOOKS.map((entry) => entry.id);
+    expect(ids).toContain(DEFAULT_DIAGRAM_LOOK);
+    expect(ids.every((id) => isDiagramLook(id))).toBe(true);
+    // Sentinel list — Mermaid 11.x ships classic, handDrawn, neo.
+    expect(ids).toEqual(["classic", "handDrawn", "neo"]);
+    expect(isDiagramLook("sketchy")).toBe(false);
+    expect(isDiagramLook(null)).toBe(false);
   });
 });

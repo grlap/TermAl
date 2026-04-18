@@ -87,6 +87,12 @@ import {
   type ConnectionRetryNotice,
 } from "./app-utils";
 import type { MonacoAppearance } from "./monaco";
+import {
+  DEFAULT_DIAGRAM_LOOK,
+  DIAGRAM_HAND_DRAWN_SEED,
+  isDiagramLook,
+  type DiagramLook,
+} from "./themes";
 
 const DEFERRED_RENDER_ROOT_MARGIN_PX = 960;
 const HEAVY_CODE_CHARACTER_THRESHOLD = 1400;
@@ -1231,10 +1237,19 @@ function renderTermalMermaidDiagram(
 function buildTermalMermaidConfig(appearance: MonacoAppearance): MermaidConfigInput {
   const isDark = appearance === "dark";
   const markdownOverrides = buildMarkdownThemeVariables();
+  const look = readActiveDiagramLook();
   return {
     ...TERMAL_MERMAID_BASE_CONFIG,
     darkMode: isDark,
     theme: isDark ? "dark" : "default",
+    // Render aesthetic. `handDrawn` routes through Mermaid's rough.js
+    // integration; `neo` is Mermaid's newer sharp look; `classic` is
+    // the long-standing default. We also pin `handDrawnSeed` so the
+    // sketch is deterministic across re-renders of the same diagram
+    // (otherwise every keystroke in Source mode re-wobbles the
+    // strokes, which is distracting).
+    look,
+    handDrawnSeed: DIAGRAM_HAND_DRAWN_SEED,
     // Re-apply the theme variables AFTER theme selection. Mermaid's
     // theme presets set their own `fontSize` defaults; spreading our
     // overrides last keeps the tighter 12px in force regardless of
@@ -1247,6 +1262,14 @@ function buildTermalMermaidConfig(appearance: MonacoAppearance): MermaidConfigIn
       ...markdownOverrides,
     },
   };
+}
+
+function readActiveDiagramLook(): DiagramLook {
+  if (typeof document === "undefined") {
+    return DEFAULT_DIAGRAM_LOOK;
+  }
+  const stored = document.documentElement.dataset.diagramLook;
+  return isDiagramLook(stored) ? stored : DEFAULT_DIAGRAM_LOOK;
 }
 
 // Mermaid fence detection, math expression counting, and render-

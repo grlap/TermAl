@@ -3,6 +3,7 @@ export const STYLE_STORAGE_KEY = "termal-ui-style";
 export const MARKDOWN_THEME_STORAGE_KEY = "termal-markdown-theme";
 export const MARKDOWN_STYLE_STORAGE_KEY = "termal-markdown-style";
 export const DIAGRAM_THEME_OVERRIDE_STORAGE_KEY = "termal-diagram-theme-override";
+export const DIAGRAM_LOOK_STORAGE_KEY = "termal-diagram-look";
 export const FONT_SIZE_STORAGE_KEY = "termal-ui-font-size";
 export const EDITOR_FONT_SIZE_STORAGE_KEY = "termal-editor-font-size";
 export const DENSITY_STORAGE_KEY = "termal-ui-density";
@@ -245,6 +246,44 @@ export type DiagramThemeOverrideMode = "on" | "off";
 
 export const DEFAULT_DIAGRAM_THEME_OVERRIDE_MODE: DiagramThemeOverrideMode = "on";
 
+// Mermaid's render aesthetic. `classic` is the default sharp look
+// TermAl has always used; `handDrawn` routes through Mermaid's
+// rough.js integration for a sketched / whiteboard feel;
+// `neo` is Mermaid's newer refreshed sharp look. Configured via
+// the top-level `look` field in `mermaid.initialize`. Set to the
+// user's preference at render time; changing the preference
+// applies to the next Mermaid render.
+export const DIAGRAM_LOOKS = [
+  {
+    id: "classic",
+    name: "Classic",
+    description:
+      "Sharp geometric nodes and edges — Mermaid's default rendering.",
+  },
+  {
+    id: "handDrawn",
+    name: "Hand-drawn",
+    description:
+      "Sketchy rough.js strokes for a whiteboard / notebook feel. Same palette, wobbly lines.",
+  },
+  {
+    id: "neo",
+    name: "Neo",
+    description:
+      "Mermaid's newer sharp look — tighter corners, slightly lighter edges.",
+  },
+] as const;
+
+export type DiagramLook = (typeof DIAGRAM_LOOKS)[number]["id"];
+
+export const DEFAULT_DIAGRAM_LOOK: DiagramLook = "classic";
+
+// Fixed seed for handDrawn renders so the sketch lines don't
+// jitter between re-renders of the same diagram. Arbitrary
+// non-zero value chosen for stability; see `handDrawnSeed` in
+// Mermaid's config.type.d.ts.
+export const DIAGRAM_HAND_DRAWN_SEED = 42;
+
 export function isStyleId(value: string | null | undefined): value is StyleId {
   return STYLES.some((style) => style.id === value);
 }
@@ -269,6 +308,10 @@ export function isDiagramThemeOverrideMode(
   value: string | null | undefined,
 ): value is DiagramThemeOverrideMode {
   return value === "on" || value === "off";
+}
+
+export function isDiagramLook(value: string | null | undefined): value is DiagramLook {
+  return DIAGRAM_LOOKS.some((look) => look.id === value);
 }
 
 export function getStoredThemePreference(): ThemeId {
@@ -396,6 +439,31 @@ export function applyDiagramThemeOverridePreference(mode: DiagramThemeOverrideMo
   }
 
   document.documentElement.dataset.diagramThemeOverride = mode;
+}
+
+export function getStoredDiagramLookPreference(): DiagramLook {
+  if (typeof window === "undefined") {
+    return DEFAULT_DIAGRAM_LOOK;
+  }
+
+  const stored = window.localStorage.getItem(DIAGRAM_LOOK_STORAGE_KEY);
+  return isDiagramLook(stored) ? stored : DEFAULT_DIAGRAM_LOOK;
+}
+
+export function persistDiagramLookPreference(look: DiagramLook) {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  window.localStorage.setItem(DIAGRAM_LOOK_STORAGE_KEY, look);
+}
+
+export function applyDiagramLookPreference(look: DiagramLook) {
+  if (typeof document === "undefined") {
+    return;
+  }
+
+  document.documentElement.dataset.diagramLook = look;
 }
 
 export function clampFontSizePreference(value: number): number {

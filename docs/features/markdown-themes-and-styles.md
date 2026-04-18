@@ -2,20 +2,25 @@
 
 ## Status
 
-Phases 1–4 plus diagram-theme Override mode shipped. The Settings
-panel exposes a "Markdown" tab with three rows: Markdown theme,
-Markdown style, and Diagram theme override (`on` / `off`).
-Selections persist across reloads (localStorage) and follow the
-same layout persistence pipeline as the UI theme preferences.
-Three Markdown themes (`github-light`, `github-dark`, `terminal`)
-and two Markdown styles (`document`, `compact`) ship alongside
-the `match-ui` default. Mermaid's `themeVariables` palette is
-routed through the active Markdown theme; when the Override
-toggle is on (default), author `%%{init: …}%%` directives and
-YAML frontmatter theme keys are stripped at render time so the
-Markdown theme wins uniformly. When the toggle is off, author
-choices pass through unchanged. Complements the existing app-wide
-theme system described in [`../themes.md`](../themes.md).
+Phases 1–4 plus diagram-theme Override mode plus Diagram look
+selection shipped. The Settings panel exposes a "Markdown" tab
+with four rows: Markdown theme, Markdown style, Diagram theme
+override (`on` / `off`), and Diagram look
+(`classic` / `handDrawn` / `neo`). Selections persist across
+reloads (localStorage) and follow the same layout persistence
+pipeline as the UI theme preferences. Three Markdown themes
+(`github-light`, `github-dark`, `terminal`) and two Markdown
+styles (`document`, `compact`) ship alongside the `match-ui`
+default. Mermaid's `themeVariables` palette is routed through
+the active Markdown theme; when the Override toggle is on
+(default), author `%%{init: …}%%` directives and YAML frontmatter
+theme keys are stripped at render time so the Markdown theme
+wins uniformly. When the toggle is off, author choices pass
+through unchanged. The Diagram look preference maps directly to
+Mermaid's top-level `look` config field, with a fixed
+`handDrawnSeed` so the rough.js sketch is deterministic across
+re-renders. Complements the existing app-wide theme system
+described in [`../themes.md`](../themes.md).
 
 ## Problem
 
@@ -286,6 +291,40 @@ YAML frontmatter fence) and is unit-tested in
 scalars) is explicitly out of scope for V1; if someone lands a
 diagram that exercises one of those we can swap in a real YAML
 parser.
+
+### Diagram look
+
+Mermaid exposes three render aesthetics through the top-level
+`look` config field:
+
+- `classic` (default) — Mermaid's long-standing sharp geometric
+  rendering.
+- `handDrawn` — rough.js sketched strokes; the same palette as
+  `classic` but with wobbly lines for a notebook / whiteboard
+  feel.
+- `neo` — Mermaid's newer sharp look with slightly tighter
+  corners.
+
+The user picks one from a fourth row under the Markdown settings
+tab. The preference is keyed on `termal-diagram-look` in
+localStorage and rides the same workspace-layout round-trip as
+the other Markdown preferences. `readActiveDiagramLook` in
+`ui/src/message-cards.tsx` reads the `data-diagram-look`
+attribute from `<html>` at render time and passes it to Mermaid's
+`look` field in `buildTermalMermaidConfig`. A fixed
+`handDrawnSeed` (`DIAGRAM_HAND_DRAWN_SEED = 42` in `themes.ts`)
+pins the sketched strokes so a diagram does not re-wobble on
+every re-render — important because Source-mode edits trigger
+frequent re-renders as the user types inside a fenced Mermaid
+block.
+
+The Diagram look axis is orthogonal to the Markdown theme and
+to the Diagram theme override. Any combination composes: e.g.
+`github-light` Markdown theme + `handDrawn` look produces a
+sketched diagram in GitHub-style blues; Override mode strips
+author `look:` directives the same way it strips author theme
+keys, so the user's preference wins uniformly across the
+document.
 
 ### Implementation notes
 

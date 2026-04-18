@@ -103,6 +103,7 @@ export type WorkspaceLayoutDocument = {
   markdownThemeId?: string;
   markdownStyleId?: string;
   diagramThemeOverrideMode?: "on" | "off";
+  diagramLook?: "classic" | "handDrawn" | "neo";
   fontSizePx?: number;
   editorFontSizePx?: number;
   densityPercent?: number;
@@ -476,6 +477,7 @@ export function saveWorkspaceLayout(
     markdownThemeId?: string;
     markdownStyleId?: string;
     diagramThemeOverrideMode?: "on" | "off";
+    diagramLook?: "classic" | "handDrawn" | "neo";
     fontSizePx?: number;
     editorFontSizePx?: number;
     densityPercent?: number;

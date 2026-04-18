@@ -1,4 +1,5 @@
 import type {
+  DiagramLook,
   DiagramThemeOverrideMode,
   MarkdownStyleId,
   MarkdownThemeId,
@@ -6,6 +7,7 @@ import type {
   ThemeId,
 } from "./themes";
 import {
+  isDiagramLook,
   isDiagramThemeOverrideMode,
   isMarkdownStyleId,
   isMarkdownThemeId,
@@ -38,6 +40,7 @@ export type StoredWorkspaceLayout = {
   markdownThemeId?: MarkdownThemeId;
   markdownStyleId?: MarkdownStyleId;
   diagramThemeOverrideMode?: DiagramThemeOverrideMode;
+  diagramLook?: DiagramLook;
   fontSizePx?: number;
   editorFontSizePx?: number;
   densityPercent?: number;
@@ -153,6 +156,12 @@ function isStoredWorkspaceLayout(value: unknown): value is StoredWorkspaceLayout
   if (
     value.diagramThemeOverrideMode !== undefined &&
     !isDiagramThemeOverrideMode(value.diagramThemeOverrideMode as string)
+  ) {
+    return false;
+  }
+  if (
+    value.diagramLook !== undefined &&
+    !isDiagramLook(value.diagramLook as string)
   ) {
     return false;
   }

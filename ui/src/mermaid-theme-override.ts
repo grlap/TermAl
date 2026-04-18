@@ -71,7 +71,9 @@ function stripThemeKeysFromLeadingYamlFrontmatter(code: string): string {
       skippingBlock = false;
     }
 
-    const topKeyMatch = /^(theme|themeVariables|themeCSS)[ \t]*:(.*)$/.exec(line);
+    const topKeyMatch = /^(theme|themeVariables|themeCSS|look|handDrawnSeed)[ \t]*:(.*)$/.exec(
+      line,
+    );
     if (topKeyMatch) {
       const remainder = topKeyMatch[2].trim();
       if (remainder.length === 0) {
@@ -80,7 +82,8 @@ function stripThemeKeysFromLeadingYamlFrontmatter(code: string): string {
         // non-indented.
         skippingBlock = true;
       }
-      // Inline scalar (`theme: forest`) — just skip the line.
+      // Inline scalar (`theme: forest`, `look: handDrawn`) — just
+      // skip the line.
       continue;
     }
 
