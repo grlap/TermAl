@@ -154,6 +154,113 @@ Markdown styles:
 - `compact` (tighter heading margins, denser tables)
 - `book` (narrow measure, centered, academic)
 
+## Mermaid diagram theming
+
+Mermaid has its own theme and style mechanism, independent from
+TermAl's Markdown theme. A diagram author can pick one of Mermaid's
+built-in theme presets (`default`, `dark`, `forest`, `neutral`,
+`base`) and can further customise individual palette variables,
+either via:
+
+- an inline init directive at the top of the diagram source, e.g.
+  `%%{init: {"theme": "forest"}}%%` or
+  `%%{init: {"themeVariables": {"primaryColor": "#ffcc00"}}}%%`; or
+- YAML frontmatter block at the top of the fenced diagram source
+  (newer Mermaid releases); or
+- Mermaid's automatic `default` / `dark` picks based on the
+  `darkMode` flag TermAl already sets from the Monaco editor
+  appearance.
+
+TermAl's Markdown theme adds a third layer that the user controls
+from Settings. The three inputs have to compose in a predictable
+order.
+
+### Layering model
+
+Precedence from lowest to highest:
+
+1. **Mermaid's built-in theme defaults.** The fallback when no
+   TermAl override and no author override apply. Historically this
+   is `default` in light mode, `dark` in dark mode.
+2. **TermAl's Markdown theme overrides.** When the user has picked
+   a Markdown theme other than `match-ui`, the
+   `TERMAL_MERMAID_THEME_VARIABLES_BY_MARKDOWN_THEME` lookup in
+   `ui/src/message-cards.tsx` contributes palette variables
+   (`primaryColor`, `primaryBorderColor`, `lineColor`, …) that
+   align the diagram with the active prose theme. `match-ui`
+   contributes no palette overrides and is a no-op by design.
+3. **Diagram author overrides** (`%%{init: …}%%` or frontmatter).
+   By convention these win, because the author had a specific
+   intent — e.g. a product screenshot or a deck that must look a
+   certain way regardless of the reader's Markdown theme.
+
+The current implementation respects the author-override-wins rule
+only incidentally: TermAl calls `mermaid.initialize(config)` before
+each render, and Mermaid's init directive is then parsed out of the
+source during `render()` and applied on top of the initial config.
+The behaviour is stable but undocumented.
+
+### User control: Respect vs. Force
+
+V1 defaults to **Respect mode**: author directives win. If a
+diagram says `%%{init: {"theme": "forest"}}%%`, the user's
+Markdown-theme palette overrides are ignored for that diagram.
+This matches the precedence layering above and gives authors
+predictable rendering across readers.
+
+A **Force mode** preference can ship later for users who prefer
+their Markdown theme applied uniformly, even over explicit author
+choices. Proposed surfacing:
+
+- A third row in the Markdown section of Settings, under the theme
+  and style pickers, labelled "Override diagram themes" with a
+  two-state toggle (`Off` / `On`).
+- `Off` (default): keep Respect mode. Author directives pass
+  through.
+- `On`: before handing the diagram source to `mermaid.render`, strip
+  the `%%{init: …}%%` directive and remove any `theme:` /
+  `themeVariables:` entries from a YAML frontmatter block. The
+  resulting source is rendered under the user's selected Markdown-
+  theme palette only.
+- The stripping is purely a render-time transform of the input
+  string; the saved file stays untouched.
+
+Force mode is a per-user preference, not per-document. Document-
+level opt-outs (a fence attribute like ` ```mermaid {respect} `)
+are a follow-up option if Force mode by itself proves too blunt.
+
+### Implementation notes
+
+- The registry entries for each Markdown theme live under the
+  `TERMAL_MERMAID_THEME_VARIABLES_BY_MARKDOWN_THEME` map. Adding
+  a new Markdown theme requires one new entry there; forgetting
+  to add the entry gracefully falls through to the empty object
+  and diagrams render under Mermaid's built-in defaults.
+- `match-ui` is intentionally empty (no overrides). Diagrams
+  rendered under `match-ui` behave exactly as they did before
+  this feature landed — critical for the "no visual change by
+  default" promise from Phase 1.
+- The lookup is read from `document.documentElement.dataset.
+  markdownTheme` at render time, not passed as a prop. This is
+  deliberate: it keeps Mermaid's rendering path out of the React
+  prop graph, so changing the Markdown theme makes the **next**
+  diagram render pick up the new palette without forcing a
+  re-render of the enclosing React tree.
+
+### Non-goals (V1)
+
+- A Mermaid-specific theme picker separate from the Markdown
+  theme picker. Mermaid's palette follows the Markdown theme;
+  users who want Mermaid-specific tuning use the author directive
+  inside their diagram source.
+- Per-diagram UI to flip Respect / Force. That's a Force-mode
+  follow-up if demand surfaces.
+- CSS-level overrides through `themeCSS` per Markdown theme.
+  V1 uses `themeVariables` only, which is enough to re-colour
+  nodes, edges, and labels. `themeCSS` stays at the TermAl-wide
+  level (shared `TERMAL_MERMAID_THEME_CSS` for structural rules
+  like edge-label pill shape).
+
 ## Cross-surface consistency
 
 - Settings panel surfaces the four independent axes as rows: UI theme,
