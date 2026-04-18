@@ -1042,17 +1042,24 @@ const TERMAL_MERMAID_THEME_CSS = `
    default edge-label stroke is very faint (or absent) — calling out
    the pill shape with a 1.5px border helps the yes/no labels read
    as decisions rather than stray text. Applied to both the
-   html-labels labelBkg div and the SVG rect fallback. The extra
-   padding on the labelBkg (inner HTML element) gives the border
-   room to breathe without pushing Mermaid's geometry around —
-   padding on the outer edgeLabel produced narrow-tall ghost shapes,
-   but padding on the actual background element grows the element
-   itself so Mermaid positions everything correctly. */
-.edgeLabel .labelBkg {
+   html-labels labelBkg div and the SVG rect fallback.
+
+   Scoping detail: Mermaid emits the full
+   .edgeLabel > foreignObject > div.labelBkg > span structure for
+   every edge regardless of whether it has a label, and
+   positionEdgeLabel only sets a translate transform when
+   edge.label is truthy — unlabeled edges stack at SVG origin and
+   would render as a ghost pill near the top-left. The inner span
+   is the discriminator: labeled edges get span innerHTML set to
+   the label text (so the span has a text-node child and is NOT
+   :empty); unlabeled edges get span.html("") which leaves a truly
+   empty <span></span>. :has(foreignObject span:not(:empty)) keeps
+   the outline on real labels only. */
+.edgeLabel:has(foreignObject span:not(:empty)) .labelBkg {
   border: 1.5px solid currentColor;
   padding: 2px 4px;
 }
-.edgeLabel rect {
+.edgeLabel:has(foreignObject span:not(:empty)) rect {
   stroke: currentColor;
   stroke-width: 1.5px;
 }
