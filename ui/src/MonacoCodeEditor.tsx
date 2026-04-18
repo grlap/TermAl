@@ -107,10 +107,12 @@ export const MonacoCodeEditor = forwardRef<MonacoCodeEditorHandle, MonacoCodeEdi
   const monacoRef = useRef<MonacoModule | null>(null);
   const modelSubscriptionRef = useRef<IDisposable | null>(null);
   const cursorSubscriptionRef = useRef<IDisposable | null>(null);
+  const keyDownSubscriptionRef = useRef<IDisposable | null>(null);
   const resizeObserverRef = useRef<ResizeObserver | null>(null);
   const changeHandlerRef = useRef(onChange);
   const saveHandlerRef = useRef(onSave);
   const statusHandlerRef = useRef(onStatusChange);
+  const readOnlyRef = useRef(readOnly);
   const isApplyingExternalValueRef = useRef(false);
   const untitledUriRef = useRef(`inmemory://termal/source/${crypto.randomUUID()}`);
   const modelDescriptorRef = useRef("");
@@ -156,6 +158,7 @@ export const MonacoCodeEditor = forwardRef<MonacoCodeEditorHandle, MonacoCodeEdi
   changeHandlerRef.current = onChange;
   saveHandlerRef.current = onSave;
   statusHandlerRef.current = onStatusChange;
+  readOnlyRef.current = readOnly;
 
   useImperativeHandle(ref, () => ({
     getScrollTop: () => editorRef.current?.getScrollTop() ?? 0,
@@ -231,11 +234,60 @@ export const MonacoCodeEditor = forwardRef<MonacoCodeEditorHandle, MonacoCodeEdi
       }
     });
 
+    // Down-arrow at end-of-file appends a new empty line so the
+    // cursor can move past the last content line. Monaco's default
+    // behavior at EOF is a no-op (cursor just collapses to the end
+    // of the last line), which leaves the user stuck when the file
+    // ends mid-content — common when the last line of a document
+    // is inside a fenced code block whose closing `\`\`\`` is below
+    // an inline view zone (rendered Mermaid / KaTeX). Only fires
+    // when the cursor is already sitting at the column-end of the
+    // final line with no selection and no modifier keys, so normal
+    // within-line Down-arrow behavior (collapse selection, jump to
+    // end of line from a shorter line below) is preserved.
+    keyDownSubscriptionRef.current = editor.onKeyDown((event) => {
+      if (event.keyCode !== monaco.KeyCode.DownArrow) {
+        return;
+      }
+      if (event.ctrlKey || event.metaKey || event.altKey || event.shiftKey) {
+        return;
+      }
+      if (readOnlyRef.current) {
+        return;
+      }
+      const model = editor.getModel();
+      if (!model) {
+        return;
+      }
+      const selection = editor.getSelection();
+      if (!selection || !selection.isEmpty()) {
+        return;
+      }
+      const lastLine = model.getLineCount();
+      const endCol = model.getLineMaxColumn(lastLine);
+      if (selection.positionLineNumber !== lastLine || selection.positionColumn !== endCol) {
+        return;
+      }
+      event.preventDefault();
+      event.stopPropagation();
+      editor.executeEdits("termal-down-at-eof", [
+        {
+          range: new monaco.Range(lastLine, endCol, lastLine, endCol),
+          text: "\n",
+          forceMoveMarkers: true,
+        },
+      ]);
+      editor.setPosition({ lineNumber: lastLine + 1, column: 1 });
+      editor.revealPosition({ lineNumber: lastLine + 1, column: 1 });
+    });
+
     return () => {
       resizeObserverRef.current?.disconnect();
       resizeObserverRef.current = null;
       cursorSubscriptionRef.current?.dispose();
       cursorSubscriptionRef.current = null;
+      keyDownSubscriptionRef.current?.dispose();
+      keyDownSubscriptionRef.current = null;
       modelSubscriptionRef.current?.dispose();
       modelSubscriptionRef.current = null;
       inlineZoneResizeObserverRef.current?.disconnect();

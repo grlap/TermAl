@@ -61,6 +61,7 @@ export const MonacoDiffEditor = forwardRef<MonacoDiffEditorHandle, MonacoDiffEdi
   const originalModelRef = useRef<MonacoEditor.ITextModel | null>(null);
   const modifiedModelRef = useRef<MonacoEditor.ITextModel | null>(null);
   const modifiedCursorSubscriptionRef = useRef<IDisposable | null>(null);
+  const modifiedKeyDownSubscriptionRef = useRef<IDisposable | null>(null);
   const diffSubscriptionRef = useRef<IDisposable | null>(null);
   const resizeObserverRef = useRef<ResizeObserver | null>(null);
   const untitledUriRef = useRef(`inmemory://termal-diff/${crypto.randomUUID()}`);
@@ -165,6 +166,52 @@ export const MonacoDiffEditor = forwardRef<MonacoDiffEditorHandle, MonacoDiffEdi
       }
     });
 
+    // Down-arrow at end-of-file appends a new empty line so the
+    // cursor can move past the last content line. Same rationale as
+    // the handler in `MonacoCodeEditor.tsx`: Monaco's default Down
+    // behavior collapses to the end of the final line and then is a
+    // no-op, leaving the user stuck when the document ends inside a
+    // fenced code block whose closing ``` sits below an inline view
+    // zone (rendered Mermaid / KaTeX). We only intercept the keypress
+    // when the caret already sits at the very end of the last line,
+    // no selection, no modifiers — so in-document Down navigation is
+    // untouched.
+    modifiedKeyDownSubscriptionRef.current = modifiedEditor.onKeyDown((event) => {
+      if (event.keyCode !== monaco.KeyCode.DownArrow) {
+        return;
+      }
+      if (event.ctrlKey || event.metaKey || event.altKey || event.shiftKey) {
+        return;
+      }
+      if (readOnlyRef.current) {
+        return;
+      }
+      const model = modifiedEditor.getModel();
+      if (!model) {
+        return;
+      }
+      const selection = modifiedEditor.getSelection();
+      if (!selection || !selection.isEmpty()) {
+        return;
+      }
+      const lastLine = model.getLineCount();
+      const endCol = model.getLineMaxColumn(lastLine);
+      if (selection.positionLineNumber !== lastLine || selection.positionColumn !== endCol) {
+        return;
+      }
+      event.preventDefault();
+      event.stopPropagation();
+      modifiedEditor.executeEdits("termal-down-at-eof", [
+        {
+          range: new monaco.Range(lastLine, endCol, lastLine, endCol),
+          text: "\n",
+          forceMoveMarkers: true,
+        },
+      ]);
+      modifiedEditor.setPosition({ lineNumber: lastLine + 1, column: 1 });
+      modifiedEditor.revealPosition({ lineNumber: lastLine + 1, column: 1 });
+    });
+
     resizeObserverRef.current = new ResizeObserver(() => {
       window.requestAnimationFrame(layoutEditor);
     });
@@ -189,6 +236,8 @@ export const MonacoDiffEditor = forwardRef<MonacoDiffEditorHandle, MonacoDiffEdi
       resizeObserverRef.current = null;
       modifiedCursorSubscriptionRef.current?.dispose();
       modifiedCursorSubscriptionRef.current = null;
+      modifiedKeyDownSubscriptionRef.current?.dispose();
+      modifiedKeyDownSubscriptionRef.current = null;
       modifiedContentSubscriptionRef.current?.dispose();
       modifiedContentSubscriptionRef.current = null;
       diffSubscriptionRef.current?.dispose();

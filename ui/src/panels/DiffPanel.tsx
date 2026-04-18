@@ -3134,6 +3134,46 @@ function EditableRenderedMarkdownSection({
         focusAdjacentEditableMarkdownSection(event.currentTarget, 1, flushDraftsBeforeNavigation)
       ) {
         event.preventDefault();
+        return;
+      }
+
+      // No adjacent editable section below — user is at the end of
+      // the last editable section and native Down has nowhere to go
+      // (common when the section ends with a mermaid fence whose
+      // last editable text node sits inside the preserved source
+      // code-block). Append an empty editable paragraph and drop
+      // the caret inside it.
+      //
+      // Target element subtlety: the contentEditable <section> wraps
+      // a `.markdown-copy-shell-with-line-numbers` div (green/red
+      // diff background + line gutter) whose inner `.markdown-copy`
+      // holds the rendered markdown blocks. The serializer in
+      // `serializeEditableMarkdownSection` reads ONLY from
+      // `.markdown-copy`, and the diff-background styling is scoped
+      // to that shell too. Appending to the section directly puts
+      // the new paragraph as a sibling of the shell — orphaned from
+      // both serialization and styling, which is why the user's
+      // earlier typed text sat outside the green band with no line
+      // number. Targeting `.markdown-copy` keeps the new paragraph
+      // inside the React-rendered tree's wrapper so serialization
+      // picks it up, the green background covers it, and the line
+      // gutter renderer extends to include it on the next re-render.
+      if (canEdit) {
+        event.preventDefault();
+        const section = event.currentTarget;
+        const markdownCopy =
+          section.querySelector<HTMLElement>(".markdown-copy") ?? section;
+        const trailingParagraph = document.createElement("p");
+        trailingParagraph.appendChild(document.createElement("br"));
+        markdownCopy.appendChild(trailingParagraph);
+        const range = document.createRange();
+        range.setStart(trailingParagraph, 0);
+        range.collapse(true);
+        const selection = window.getSelection();
+        if (selection) {
+          selection.removeAllRanges();
+          selection.addRange(range);
+        }
       }
       return;
     }
