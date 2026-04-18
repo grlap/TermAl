@@ -131,6 +131,7 @@ import {
 import { SettingsDialogShell } from "./preferences/SettingsDialogShell";
 import { SettingsTabBar } from "./preferences/SettingsTabBar";
 import type { PreferencesTabId } from "./preferences/preferences-tabs";
+import { SessionFindBar } from "./SessionFindBar";
 import {
   hydrateControlPanelLayout,
   resolveStandaloneControlPanelDockWidthRatio,
@@ -207,7 +208,6 @@ import {
   buildSessionSearchIndex,
   buildSessionSearchMatchesFromIndex,
   type SessionListSearchResult,
-  type SessionSearchMatch,
 } from "./session-find";
 import type {
   AppPreferences,
@@ -12694,100 +12694,6 @@ function OrchestratorRuntimeActionButton({
     />
   );
 }
-function SessionFindBar({
-  inputRef,
-  query,
-  activeIndex,
-  matches,
-  onChange,
-  onNext,
-  onPrevious,
-  onClose,
-}: {
-  inputRef: RefObject<HTMLInputElement>;
-  query: string;
-  activeIndex: number;
-  matches: SessionSearchMatch[];
-  onChange: (nextValue: string) => void;
-  onNext: () => void;
-  onPrevious: () => void;
-  onClose: () => void;
-}) {
-  const hasQuery = query.trim().length > 0;
-  const hasMatches = matches.length > 0;
-  const currentMatch =
-    hasMatches && activeIndex >= 0 ? (matches[activeIndex] ?? null) : null;
-  const countLabel = !hasQuery
-    ? "Type to search"
-    : hasMatches
-      ? `${activeIndex + 1} of ${matches.length}`
-      : "No matches";
-
-  return (
-    <div
-      className="session-find-bar"
-      role="search"
-      aria-label="Find in session"
-    >
-      <input
-        ref={inputRef}
-        className="session-find-input"
-        type="search"
-        value={query}
-        placeholder="Find in session"
-        spellCheck={false}
-        onChange={(event) => onChange(event.currentTarget.value)}
-        onKeyDown={(event) => {
-          if (event.key === "Enter") {
-            event.preventDefault();
-            if (event.shiftKey) {
-              onPrevious();
-            } else {
-              onNext();
-            }
-            return;
-          }
-
-          if (event.key === "Escape") {
-            event.preventDefault();
-            onClose();
-          }
-        }}
-      />
-      <span
-        className="session-find-count"
-        aria-live="polite"
-        title={currentMatch?.snippet ?? undefined}
-      >
-        {countLabel}
-      </span>
-      <button
-        className="session-find-button"
-        type="button"
-        onClick={onPrevious}
-        disabled={!hasMatches}
-      >
-        Prev
-      </button>
-      <button
-        className="session-find-button"
-        type="button"
-        onClick={onNext}
-        disabled={!hasMatches}
-      >
-        Next
-      </button>
-      <button
-        className="session-find-button session-find-close"
-        type="button"
-        onClick={onClose}
-      >
-        Close
-      </button>
-    </div>
-  );
-}
-
 function resolveWorkspaceTabProjectId(
   tab: WorkspaceTab | undefined,
   sessionLookup: Map<string, Session>,
