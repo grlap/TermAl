@@ -1034,9 +1034,27 @@ const TERMAL_MERMAID_THEME_CSS = `
 .edgeLabel div,
 .edgeLabel .labelBkg,
 .edgeLabel rect {
-  border-radius: 6px;
+  border-radius: 12px;
   rx: 6;
   ry: 6;
+}
+/* Visible outline on the background-carrying element. Mermaid's
+   default edge-label stroke is very faint (or absent) — calling out
+   the pill shape with a 1.5px border helps the yes/no labels read
+   as decisions rather than stray text. Applied to both the
+   html-labels labelBkg div and the SVG rect fallback. The extra
+   padding on the labelBkg (inner HTML element) gives the border
+   room to breathe without pushing Mermaid's geometry around —
+   padding on the outer edgeLabel produced narrow-tall ghost shapes,
+   but padding on the actual background element grows the element
+   itself so Mermaid positions everything correctly. */
+.edgeLabel .labelBkg {
+  border: 1.5px solid currentColor;
+  padding: 2px 4px;
+}
+.edgeLabel rect {
+  stroke: currentColor;
+  stroke-width: 1.5px;
 }
 .nodeLabel p,
 .edgeLabel p,
