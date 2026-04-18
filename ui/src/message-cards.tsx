@@ -843,14 +843,20 @@ function getMermaidDiagramFrameStyle(svg: string): CSSProperties {
   }
 
   return {
+    // Minimum iframe dimensions kept just above the Mermaid
+    // "something rendered here" threshold so short diagrams aren't
+    // padded up. Earlier minimums (320 × 120) were tuned for the
+    // fatter pre-12px-font layout; with the smaller theme variables
+    // in `TERMAL_MERMAID_THEME_VARIABLES` a 3-node linear flowchart
+    // now naturally renders well under those sizes.
     height: `${clampMermaidDiagramExtent(
       Math.ceil(dimensions.height) + 2,
-      120,
+      60,
       MERMAID_DIAGRAM_FRAME_MAX_HEIGHT,
     )}px`,
     width: `${clampMermaidDiagramExtent(
       Math.ceil(dimensions.width) + 2,
-      320,
+      180,
       MERMAID_DIAGRAM_FRAME_MAX_WIDTH,
     )}px`,
     maxWidth: "100%",
@@ -991,11 +997,19 @@ type MermaidConfigInput = NonNullable<Parameters<MermaidModule["initialize"]>[0]
 const TERMAL_MERMAID_FLOWCHART_CONFIG = {
   defaultRenderer: "dagre-wrapper",
   diagramPadding: 2,
-  nodeSpacing: 24,
+  // Tight-by-default spacing. Mermaid's own defaults (50 / 50) leave
+  // huge whitespace around short flowcharts, and earlier TermAl
+  // values (24 / 30) were still larger than most diagrams need. The
+  // numbers below are tuned for agent-generated and doc-comment
+  // flowcharts, which tend to be short and wide.
+  nodeSpacing: 16,
   padding: 4,
-  rankSpacing: 30,
+  rankSpacing: 22,
   useMaxWidth: false,
-  wrappingWidth: 140,
+  // Narrower wrap so long node labels (e.g. "Contains Mermaid fence?")
+  // produce shorter-but-taller boxes instead of a single wide line
+  // that forces the diagram's total width up.
+  wrappingWidth: 100,
 } as const;
 
 const TERMAL_MERMAID_THEME_CSS = `
@@ -1026,6 +1040,16 @@ foreignObject {
 }
 `;
 
+// Mermaid's defaults render labels in 16px. For in-document
+// flowcharts that sit inside doc comments, inline Monaco zones, or
+// messages, that's too big — every node becomes a small poster.
+// Dropping to 12px shrinks node dimensions proportionally (Mermaid
+// sizes boxes to fit text), pulling the whole diagram in without
+// losing legibility at normal editor zoom.
+const TERMAL_MERMAID_THEME_VARIABLES = {
+  fontSize: "12px",
+} as const;
+
 const TERMAL_MERMAID_BASE_CONFIG = {
   flowchart: {
     ...TERMAL_MERMAID_FLOWCHART_CONFIG,
@@ -1034,6 +1058,9 @@ const TERMAL_MERMAID_BASE_CONFIG = {
   securityLevel: "strict",
   startOnLoad: false,
   themeCSS: TERMAL_MERMAID_THEME_CSS,
+  themeVariables: {
+    ...TERMAL_MERMAID_THEME_VARIABLES,
+  },
 } satisfies MermaidConfigInput;
 
 let mermaidRenderQueue: Promise<unknown> = Promise.resolve();
@@ -1069,6 +1096,13 @@ function buildTermalMermaidConfig(appearance: MonacoAppearance): MermaidConfigIn
     ...TERMAL_MERMAID_BASE_CONFIG,
     darkMode: isDark,
     theme: isDark ? "dark" : "default",
+    // Re-apply the theme variables AFTER theme selection. Mermaid's
+    // theme presets set their own `fontSize` defaults; spreading our
+    // overrides last keeps the tighter 12px in force regardless of
+    // which theme the diagram ends up in.
+    themeVariables: {
+      ...TERMAL_MERMAID_THEME_VARIABLES,
+    },
   };
 }
 
