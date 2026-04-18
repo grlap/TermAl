@@ -61,7 +61,6 @@ import {
   submitMcpElicitation,
   submitUserInput,
   type CreateSessionResponse,
-  type FileResponse,
   type GitDiffRequestPayload,
   type GitDiffSection,
   type OpenPathOptions,
@@ -156,6 +155,10 @@ import {
   collectGitDiffPreviewRefreshes,
   collectRestoredGitDiffDocumentContentRefreshes,
 } from "./git-diff-refresh";
+import {
+  isSourceFileMissingError,
+  sourceFileStateFromResponse,
+} from "./source-file-state";
 
 import {
   CodexPromptSettingsCard,
@@ -521,29 +524,6 @@ type ProjectListSectionProps = {
   onRemoveProject: (project: Project) => void;
   onStartSession: (paneId: string | null, projectId: string) => void;
 };
-
-function sourceFileStateFromResponse(response: FileResponse): SourceFileState {
-  return {
-    status: "ready",
-    path: response.path,
-    content: response.content,
-    contentHash: response.contentHash ?? null,
-    mtimeMs: response.mtimeMs ?? null,
-    sizeBytes: response.sizeBytes ?? null,
-    staleOnDisk: false,
-    externalChangeKind: null,
-    externalContentHash: null,
-    externalMtimeMs: null,
-    externalSizeBytes: null,
-    error: null,
-    language: response.language ?? null,
-  };
-}
-
-function isSourceFileMissingError(error: unknown) {
-  const message = getErrorMessage(error).toLowerCase();
-  return message.includes("file not found") || message.includes("not found");
-}
 
 const PENDING_KILL_CLOSE_DELAY_MS = 180;
 const PENDING_SESSION_RENAME_CLOSE_DELAY_MS = 300;
