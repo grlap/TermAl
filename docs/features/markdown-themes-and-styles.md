@@ -2,16 +2,22 @@
 
 ## Status
 
-Phases 1–4 shipped. The Settings panel exposes a "Markdown" tab with
-a Markdown-theme picker and a Markdown-style picker; selections
+Phases 1–4 shipped, plus pending work on diagram-theme Override
+mode (see §Mermaid diagram theming → Current implementation
+state). The Settings panel exposes a "Markdown" tab with a
+Markdown-theme picker and a Markdown-style picker; selections
 persist across reloads (localStorage) and follow the same layout
 persistence pipeline as the UI theme preferences. Three Markdown
-themes (`github-light`, `github-dark`, `terminal`) and two Markdown
-styles (`document`, `compact`) ship alongside the `match-ui` default.
-Mermaid's `themeVariables` palette is routed through the active
-Markdown theme so flowcharts follow the reading theme rather than
-the workspace chrome. Complements the existing app-wide theme system
-described in [`../themes.md`](../themes.md).
+themes (`github-light`, `github-dark`, `terminal`) and two
+Markdown styles (`document`, `compact`) ship alongside the
+`match-ui` default. Mermaid's `themeVariables` palette is routed
+through the active Markdown theme so flowcharts follow the reading
+theme rather than the workspace chrome — as long as the diagram
+source contains no author `%%{init: …}%%` directive. The planned
+Override mode (default-on) will strip those directives at render
+time so the Markdown theme wins over author choices; V1 as shipped
+is effectively Respect mode. Complements the existing app-wide
+theme system described in [`../themes.md`](../themes.md).
 
 ## Problem
 
@@ -177,57 +183,108 @@ order.
 
 ### Layering model
 
-Precedence from lowest to highest:
+Precedence from lowest to highest when the user is in the default
+**Override mode** (see below):
 
 1. **Mermaid's built-in theme defaults.** The fallback when no
-   TermAl override and no author override apply. Historically this
-   is `default` in light mode, `dark` in dark mode.
-2. **TermAl's Markdown theme overrides.** When the user has picked
+   TermAl override applies. Historically this is `default` in
+   light mode, `dark` in dark mode.
+2. **Diagram author overrides** (`%%{init: …}%%` or frontmatter).
+   In Override mode these are stripped at render time so they do
+   not reach Mermaid — the author's `theme` / `themeVariables`
+   choices are ignored for the reader's rendering pass. In Respect
+   mode these pass through and sit above the built-in defaults.
+3. **TermAl's Markdown theme overrides.** When the user has picked
    a Markdown theme other than `match-ui`, the
    `TERMAL_MERMAID_THEME_VARIABLES_BY_MARKDOWN_THEME` lookup in
    `ui/src/message-cards.tsx` contributes palette variables
    (`primaryColor`, `primaryBorderColor`, `lineColor`, …) that
    align the diagram with the active prose theme. `match-ui`
    contributes no palette overrides and is a no-op by design.
-3. **Diagram author overrides** (`%%{init: …}%%` or frontmatter).
-   By convention these win, because the author had a specific
-   intent — e.g. a product screenshot or a deck that must look a
-   certain way regardless of the reader's Markdown theme.
 
-The current implementation respects the author-override-wins rule
-only incidentally: TermAl calls `mermaid.initialize(config)` before
-each render, and Mermaid's init directive is then parsed out of the
-source during `render()` and applied on top of the initial config.
-The behaviour is stable but undocumented.
+The ordering is deliberate: the reader's Markdown theme is the
+top layer in Override mode, so a diagram rendered on a dark
+prose background does not suddenly flash a light-theme diagram
+just because the original author wanted it that way in their
+deck. Authors who want their choices honoured can opt readers
+into Respect mode.
 
-### User control: Respect vs. Force
+### User control: Override vs. Respect
 
-V1 defaults to **Respect mode**: author directives win. If a
-diagram says `%%{init: {"theme": "forest"}}%%`, the user's
-Markdown-theme palette overrides are ignored for that diagram.
-This matches the precedence layering above and gives authors
-predictable rendering across readers.
+V1 defaults to **Override mode**: the user's Markdown theme
+wins over author directives in the diagram source. Rationale:
 
-A **Force mode** preference can ship later for users who prefer
-their Markdown theme applied uniformly, even over explicit author
-choices. Proposed surfacing:
+- Consistency across the document. A long Markdown file with
+  multiple diagrams authored at different times can mix
+  `%%{init: {"theme": "forest"}}%%`,
+  `%%{init: {"theme": "dark"}}%%`, and no directive at all.
+  Respecting each author choice produces a jarring rendered
+  document; overriding produces one coherent look.
+- Agreement with the Markdown-theme promise. The whole point
+  of picking a Markdown theme is that the user's reading
+  surface looks the way they picked it. Author-per-diagram
+  overrides undermine that.
+- Safe default for agent-produced content. Agents that emit
+  Mermaid often leave the theme directive out, but occasionally
+  include one copied from an example. Override mode means those
+  incidental inclusions don't leak into the reader's view.
 
-- A third row in the Markdown section of Settings, under the theme
-  and style pickers, labelled "Override diagram themes" with a
-  two-state toggle (`Off` / `On`).
-- `Off` (default): keep Respect mode. Author directives pass
-  through.
-- `On`: before handing the diagram source to `mermaid.render`, strip
-  the `%%{init: …}%%` directive and remove any `theme:` /
-  `themeVariables:` entries from a YAML frontmatter block. The
-  resulting source is rendered under the user's selected Markdown-
-  theme palette only.
-- The stripping is purely a render-time transform of the input
-  string; the saved file stays untouched.
+**Respect mode** is the opt-in preference for users who are
+reviewing / authoring diagrams whose original styling matters —
+screenshots for a deck, diagrams being committed into docs that
+other tools will render, etc. Surfacing:
 
-Force mode is a per-user preference, not per-document. Document-
-level opt-outs (a fence attribute like ` ```mermaid {respect} `)
-are a follow-up option if Force mode by itself proves too blunt.
+- A third row in the Markdown section of Settings, under the
+  theme and style pickers, labelled "Diagram theme override"
+  with a two-state toggle.
+- Default position: **On** (Override mode).
+- `On` (Override mode, default): before handing the diagram
+  source to `mermaid.render`, strip the `%%{init: …}%%`
+  directive and remove any `theme:` / `themeVariables:`
+  entries from a YAML frontmatter block. The resulting source
+  is rendered under TermAl's palette only. The stripping is
+  purely a render-time transform of the input string; the
+  saved file stays untouched.
+- `Off` (Respect mode): pass the source through unchanged.
+  Author directives apply on top of the Mermaid built-in
+  default; the Markdown-theme palette overrides from layer 3
+  still contribute, but the author's choices land on top of
+  them and win for any variable they specify.
+
+The preference is per-user, not per-document. Document-level
+opt-outs (e.g. a fence attribute like ` ```mermaid {respect} `)
+are a follow-up option if the single global switch proves too
+blunt.
+
+### Current implementation state
+
+The shipped code (commits `09f3bf9` and earlier) implements
+layers 1 and 3: Mermaid's built-in defaults plus TermAl's
+Markdown-theme palette overrides. Layer 2 currently passes
+through unchanged, which matches Respect mode — the user does
+not yet have an Override toggle.
+
+This means the **V1 behaviour as shipped is effectively Respect
+mode**, and the next implementation step is to flip the default
+to Override mode:
+
+1. Add a new preference `termal-diagram-theme-override` (default
+   `"on"`), plus `get` / `persist` / `apply` helpers in
+   `themes.ts` mirroring the Markdown theme/style pattern.
+2. Apply to `<html>` as `data-diagram-theme-override="on" | "off"`.
+3. Persist through the workspace-layout save path the same way
+   the Markdown theme and style now do.
+4. Render-time transform in `renderTermalMermaidDiagram`: when
+   override is on, strip `%%{init: …}%%` directives and
+   theme-related keys from a leading YAML frontmatter block
+   before calling `mermaid.render`.
+5. Third row in `MarkdownPreferencesPanel` with the toggle.
+6. `themes.test.ts` assertions for the new helpers and default.
+
+Until that step ships, the V1 palette work already lays most
+of the foundation: the Markdown-theme palette overrides are in
+place and work for any diagram that does not contain an author
+directive, which is the common case.
 
 ### Implementation notes
 
@@ -252,14 +309,19 @@ are a follow-up option if Force mode by itself proves too blunt.
 - A Mermaid-specific theme picker separate from the Markdown
   theme picker. Mermaid's palette follows the Markdown theme;
   users who want Mermaid-specific tuning use the author directive
-  inside their diagram source.
-- Per-diagram UI to flip Respect / Force. That's a Force-mode
-  follow-up if demand surfaces.
+  inside their diagram source (and leave Respect mode on).
+- Per-diagram UI to flip Override / Respect. A single global
+  toggle is enough for V1; fence-attribute opt-outs are a
+  follow-up if the blunt global preference proves too coarse.
 - CSS-level overrides through `themeCSS` per Markdown theme.
   V1 uses `themeVariables` only, which is enough to re-colour
   nodes, edges, and labels. `themeCSS` stays at the TermAl-wide
   level (shared `TERMAL_MERMAID_THEME_CSS` for structural rules
   like edge-label pill shape).
+- Tracking whether an Override-mode render stripped an author
+  directive. A silent transform is fine for V1; a UI hint
+  ("this diagram has an author theme — click to honour it")
+  can land later if users report confusion.
 
 ## Cross-surface consistency
 
