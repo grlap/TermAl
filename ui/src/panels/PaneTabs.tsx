@@ -154,18 +154,40 @@ export function PaneTabs({
 
   function updateActiveStatusTooltipPosition(anchor = activeStatusTooltipAnchorRef.current) {
     if (!anchor || typeof window === "undefined") {
-      setActiveStatusTooltipStyle(null);
+      setActiveStatusTooltipStyle((current) => (current === null ? current : null));
       return;
     }
 
     const position = measurePaneTabStatusTooltipPosition(anchor.getBoundingClientRect(), window.innerWidth);
-    const nextStyle = {
-      left: `${position.left}px`,
-      top: `${position.top}px`,
-      width: `${position.width}px`,
-      ["--pane-tab-status-arrow-left"]: `${position.arrowLeft}px`,
-    } as CSSProperties;
-    setActiveStatusTooltipStyle(nextStyle);
+    const nextLeft = `${position.left}px`;
+    const nextTop = `${position.top}px`;
+    const nextWidth = `${position.width}px`;
+    const nextArrowLeft = `${position.arrowLeft}px`;
+    // Keep the same object reference when the computed position matches
+    // what's already applied. This short-circuits React's re-render: the
+    // layout effect below triggers an update on mount, and the capture-
+    // phase scroll listener it also registers fires on focus-driven
+    // scroll-into-view. Without this guard the two form a setState ->
+    // scroll -> setState feedback loop and blow the update-depth budget
+    // (observed when pressing ESC in the rename dialog returns focus to
+    // a tab that can show a status tooltip).
+    setActiveStatusTooltipStyle((current) => {
+      if (
+        current &&
+        current.left === nextLeft &&
+        current.top === nextTop &&
+        current.width === nextWidth &&
+        (current as Record<string, string | number | undefined>)["--pane-tab-status-arrow-left"] === nextArrowLeft
+      ) {
+        return current;
+      }
+      return {
+        left: nextLeft,
+        top: nextTop,
+        width: nextWidth,
+        ["--pane-tab-status-arrow-left"]: nextArrowLeft,
+      } as CSSProperties;
+    });
   }
 
   function openStatusTooltip(id: string, sessionId: string, anchor: HTMLElement) {
@@ -662,27 +684,44 @@ export function PaneTabs({
       return;
     }
 
-    const updateTooltipPosition = () => {
-      const anchor = activeStatusTooltipAnchorRef.current;
-      if (!anchor || !anchor.isConnected) {
-        closeStatusTooltip();
+    // Coalesce position-update calls into a single requestAnimationFrame
+    // tick so rapid-fire events (focus-driven scroll-into-view fires a
+    // cascade of capture-phase scroll events, one per frame of the
+    // browser's scroll animation; paired with our setState they used to
+    // blow the update-depth budget and crash the whole App tree).
+    // Scheduling through rAF means each frame sees at most one setState
+    // and the position eventually settles.
+    let pendingFrameId: number | null = null;
+    const scheduleUpdateTooltipPosition = () => {
+      if (pendingFrameId !== null) {
         return;
       }
-
-      updateActiveStatusTooltipPosition(anchor);
+      pendingFrameId = window.requestAnimationFrame(() => {
+        pendingFrameId = null;
+        const anchor = activeStatusTooltipAnchorRef.current;
+        if (!anchor || !anchor.isConnected) {
+          closeStatusTooltip();
+          return;
+        }
+        updateActiveStatusTooltipPosition(anchor);
+      });
     };
 
-    updateTooltipPosition();
+    scheduleUpdateTooltipPosition();
 
     const node = paneTabsRef.current;
-    window.addEventListener("resize", updateTooltipPosition);
-    window.addEventListener("scroll", updateTooltipPosition, true);
-    node?.addEventListener("scroll", updateTooltipPosition, { passive: true });
+    window.addEventListener("resize", scheduleUpdateTooltipPosition);
+    window.addEventListener("scroll", scheduleUpdateTooltipPosition, true);
+    node?.addEventListener("scroll", scheduleUpdateTooltipPosition, { passive: true });
 
     return () => {
-      window.removeEventListener("resize", updateTooltipPosition);
-      window.removeEventListener("scroll", updateTooltipPosition, true);
-      node?.removeEventListener("scroll", updateTooltipPosition);
+      if (pendingFrameId !== null) {
+        window.cancelAnimationFrame(pendingFrameId);
+        pendingFrameId = null;
+      }
+      window.removeEventListener("resize", scheduleUpdateTooltipPosition);
+      window.removeEventListener("scroll", scheduleUpdateTooltipPosition, true);
+      node?.removeEventListener("scroll", scheduleUpdateTooltipPosition);
     };
   }, [activeStatusTooltip, activeTabId, tabs.length]);
 
