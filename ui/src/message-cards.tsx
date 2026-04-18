@@ -1025,25 +1025,15 @@ const TERMAL_MERMAID_THEME_CSS = `
 .edgeLabel div {
   border-radius: 24px;
 }
-/* Edge labels ("yes"/"no" pills on decision arrows) use a dedicated
-   type scale so they don't read as tiny afterthoughts next to full-
-   size node text. Node labels stay on the 12px base set via
-   \`themeVariables.fontSize\` — only the edge pills get the 13px bump
-   and slightly heavier weight. Padding is applied to the outer
+/* Edge labels ("yes"/"no" pills on decision arrows) match the node
+   font size (12px from \`themeVariables.fontSize\`) and get a uniform
+   8px square padding so the existing 24px border-radius renders as
+   a proper pill bubble. Padding is applied to the outer
    \`.edgeLabel\` only so it doesn't compound through nested
    elements (Mermaid wraps pill content in label → span → p → div
    depending on the renderer). */
 .edgeLabel {
-  font-size: 13px;
-  font-weight: 500;
-  padding: 4px 12px;
-}
-.edgeLabel .label,
-.edgeLabel span,
-.edgeLabel p,
-.edgeLabel div {
-  font-size: inherit;
-  font-weight: inherit;
+  padding: 8px;
 }
 .nodeLabel p,
 .edgeLabel p,
