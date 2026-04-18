@@ -173,6 +173,7 @@ import {
   resolveAdoptedStateSlices,
   resolveRecoveredWorkspaceLayoutRequestError,
 } from "./state-adoption";
+import { createInitialWorkspaceBootstrap } from "./initial-workspace-bootstrap";
 
 import {
   CodexPromptSettingsCard,
@@ -319,7 +320,6 @@ import {
   createWorkspaceViewId,
   deleteStoredWorkspaceLayout,
   ensureWorkspaceViewId,
-  getStoredWorkspaceLayout,
   parseStoredWorkspaceLayout,
   persistWorkspaceLayout,
   type ControlPanelSide,
@@ -358,16 +358,6 @@ import {
   clampDensityPreference,
   clampEditorFontSizePreference,
   clampFontSizePreference,
-  getStoredDensityPreference,
-  getStoredDiagramLookPreference,
-  getStoredDiagramPalettePreference,
-  getStoredDiagramThemeOverridePreference,
-  getStoredEditorFontSizePreference,
-  getStoredFontSizePreference,
-  getStoredMarkdownStylePreference,
-  getStoredMarkdownThemePreference,
-  getStoredStylePreference,
-  getStoredThemePreference,
   persistDensityPreference,
   persistDiagramLookPreference,
   persistDiagramPalettePreference,
@@ -555,53 +545,6 @@ let appTestHooks: AppTestHooks | null = null;
 // arguments so the production export cannot expose user content if imported.
 export function setAppTestHooksForTests(hooks: AppTestHooks | null) {
   appTestHooks = hooks;
-}
-
-function createInitialWorkspaceBootstrap(workspaceViewId: string) {
-  const storedLayout = getStoredWorkspaceLayout(workspaceViewId);
-  const controlPanelSide: ControlPanelSide =
-    storedLayout?.controlPanelSide ?? "left";
-  const themeId: ThemeId = storedLayout?.themeId ?? getStoredThemePreference();
-  const styleId: StyleId = storedLayout?.styleId ?? getStoredStylePreference();
-  const markdownThemeId: MarkdownThemeId =
-    storedLayout?.markdownThemeId ?? getStoredMarkdownThemePreference();
-  const markdownStyleId: MarkdownStyleId =
-    storedLayout?.markdownStyleId ?? getStoredMarkdownStylePreference();
-  const diagramThemeOverrideMode: DiagramThemeOverrideMode =
-    storedLayout?.diagramThemeOverrideMode ??
-    getStoredDiagramThemeOverridePreference();
-  const diagramLook: DiagramLook =
-    storedLayout?.diagramLook ?? getStoredDiagramLookPreference();
-  const diagramPalette: DiagramPalette =
-    storedLayout?.diagramPalette ?? getStoredDiagramPalettePreference();
-  const fontSizePx = storedLayout?.fontSizePx ?? getStoredFontSizePreference();
-  const editorFontSizePx =
-    storedLayout?.editorFontSizePx ?? getStoredEditorFontSizePreference();
-  const densityPercent =
-    storedLayout?.densityPercent ?? getStoredDensityPreference();
-  const workspace = hydrateControlPanelLayout(
-    storedLayout?.workspace ?? {
-      root: null,
-      panes: [],
-      activePaneId: null,
-    },
-    controlPanelSide,
-  );
-
-  return {
-    controlPanelSide,
-    themeId,
-    styleId,
-    markdownThemeId,
-    markdownStyleId,
-    diagramThemeOverrideMode,
-    diagramLook,
-    diagramPalette,
-    fontSizePx,
-    editorFontSizePx,
-    densityPercent,
-    workspace,
-  };
 }
 
 export default function App() {
