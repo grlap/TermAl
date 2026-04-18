@@ -38,6 +38,7 @@ import {
   isMermaidFenceLanguage,
 } from "./source-renderers";
 import { ExpandedPromptPanel } from "./ExpandedPromptPanel";
+import { applyActiveMermaidThemeOverride } from "./mermaid-theme-override";
 import { copyTextToClipboard } from "./clipboard";
 import { buildDiffPreviewModel } from "./diff-preview";
 import { highlightCode } from "./highlight";
@@ -1202,13 +1203,20 @@ function renderTermalMermaidDiagram(
   appearance: MonacoAppearance,
 ) {
   const config = buildTermalMermaidConfig(appearance);
+  // Strip author `%%{init: ...}%%` directives and YAML frontmatter
+  // theme keys when the user has diagram-theme Override mode enabled
+  // (the default). Applied on the string we hand to mermaid.render,
+  // not the stored source — so the reader's Markdown theme wins
+  // without rewriting anyone's diagram file. Respect mode (user
+  // toggled the Settings preference off) leaves the source alone.
+  const renderSource = applyActiveMermaidThemeOverride(code);
   const renderJob = mermaidRenderQueue.then(async () => {
     // Mermaid keeps config in a module-level singleton. Serialize
     // initialize/render/reset so light and dark diagrams do not leak config
     // into each other or into future Mermaid consumers in this tab.
     mermaid.initialize(config);
     try {
-      return await mermaid.render(diagramId, code);
+      return await mermaid.render(diagramId, renderSource);
     } finally {
       mermaid.initialize(TERMAL_MERMAID_BASE_CONFIG);
     }

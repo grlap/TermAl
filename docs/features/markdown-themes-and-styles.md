@@ -2,21 +2,19 @@
 
 ## Status
 
-Phases 1–4 shipped, plus pending work on diagram-theme Override
-mode (see §Mermaid diagram theming → Current implementation
-state). The Settings panel exposes a "Markdown" tab with a
-Markdown-theme picker and a Markdown-style picker; selections
-persist across reloads (localStorage) and follow the same layout
-persistence pipeline as the UI theme preferences. Three Markdown
-themes (`github-light`, `github-dark`, `terminal`) and two
-Markdown styles (`document`, `compact`) ship alongside the
-`match-ui` default. Mermaid's `themeVariables` palette is routed
-through the active Markdown theme so flowcharts follow the reading
-theme rather than the workspace chrome — as long as the diagram
-source contains no author `%%{init: …}%%` directive. The planned
-Override mode (default-on) will strip those directives at render
-time so the Markdown theme wins over author choices; V1 as shipped
-is effectively Respect mode. Complements the existing app-wide
+Phases 1–4 plus diagram-theme Override mode shipped. The Settings
+panel exposes a "Markdown" tab with three rows: Markdown theme,
+Markdown style, and Diagram theme override (`on` / `off`).
+Selections persist across reloads (localStorage) and follow the
+same layout persistence pipeline as the UI theme preferences.
+Three Markdown themes (`github-light`, `github-dark`, `terminal`)
+and two Markdown styles (`document`, `compact`) ship alongside
+the `match-ui` default. Mermaid's `themeVariables` palette is
+routed through the active Markdown theme; when the Override
+toggle is on (default), author `%%{init: …}%%` directives and
+YAML frontmatter theme keys are stripped at render time so the
+Markdown theme wins uniformly. When the toggle is off, author
+choices pass through unchanged. Complements the existing app-wide
 theme system described in [`../themes.md`](../themes.md).
 
 ## Problem
@@ -258,33 +256,36 @@ blunt.
 
 ### Current implementation state
 
-The shipped code (commits `09f3bf9` and earlier) implements
-layers 1 and 3: Mermaid's built-in defaults plus TermAl's
-Markdown-theme palette overrides. Layer 2 currently passes
-through unchanged, which matches Respect mode — the user does
-not yet have an Override toggle.
+All three layers are active in the shipped code:
 
-This means the **V1 behaviour as shipped is effectively Respect
-mode**, and the next implementation step is to flip the default
-to Override mode:
+1. Mermaid's built-in defaults.
+2. Author directives (`%%{init: …}%%` or YAML frontmatter).
+   Stripped at render time by
+   `applyActiveMermaidThemeOverride` in
+   `ui/src/mermaid-theme-override.ts` when the override toggle
+   is on; passed through when off.
+3. TermAl's Markdown-theme palette overrides via
+   `TERMAL_MERMAID_THEME_VARIABLES_BY_MARKDOWN_THEME` in
+   `ui/src/message-cards.tsx`.
 
-1. Add a new preference `termal-diagram-theme-override` (default
-   `"on"`), plus `get` / `persist` / `apply` helpers in
-   `themes.ts` mirroring the Markdown theme/style pattern.
-2. Apply to `<html>` as `data-diagram-theme-override="on" | "off"`.
-3. Persist through the workspace-layout save path the same way
-   the Markdown theme and style now do.
-4. Render-time transform in `renderTermalMermaidDiagram`: when
-   override is on, strip `%%{init: …}%%` directives and
-   theme-related keys from a leading YAML frontmatter block
-   before calling `mermaid.render`.
-5. Third row in `MarkdownPreferencesPanel` with the toggle.
-6. `themes.test.ts` assertions for the new helpers and default.
+The `termal-diagram-theme-override` preference (default `on`)
+sits alongside the Markdown theme and style preferences in the
+localStorage key set and the workspace-layout save payload. Its
+`<html>` attribute is `data-diagram-theme-override="on" | "off"`,
+read from within the Mermaid render path without any React prop
+plumbing. Toggling the preference causes the next Mermaid render
+to pick up the new mode; existing rendered diagrams are not
+forced to re-render, which keeps the switch cheap.
 
-Until that step ships, the V1 palette work already lays most
-of the foundation: the Markdown-theme palette overrides are in
-place and work for any diagram that does not contain an author
-directive, which is the common case.
+The stripper is regex-based — it handles the common forms
+(`%%{init: {...}}%%` anywhere in the source, `theme:` scalar
+and `themeVariables:` / `themeCSS:` block keys in a leading
+YAML frontmatter fence) and is unit-tested in
+`ui/src/mermaid-theme-override.test.ts`. Complex edge-case YAML
+(anchors, flow-style mappings split across lines, tagged
+scalars) is explicitly out of scope for V1; if someone lands a
+diagram that exercises one of those we can swap in a real YAML
+parser.
 
 ### Implementation notes
 

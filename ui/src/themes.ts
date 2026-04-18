@@ -2,6 +2,7 @@ export const THEME_STORAGE_KEY = "termal-ui-theme";
 export const STYLE_STORAGE_KEY = "termal-ui-style";
 export const MARKDOWN_THEME_STORAGE_KEY = "termal-markdown-theme";
 export const MARKDOWN_STYLE_STORAGE_KEY = "termal-markdown-style";
+export const DIAGRAM_THEME_OVERRIDE_STORAGE_KEY = "termal-diagram-theme-override";
 export const FONT_SIZE_STORAGE_KEY = "termal-ui-font-size";
 export const EDITOR_FONT_SIZE_STORAGE_KEY = "termal-editor-font-size";
 export const DENSITY_STORAGE_KEY = "termal-ui-density";
@@ -230,6 +231,20 @@ export type MarkdownStyleId = (typeof MARKDOWN_STYLES)[number]["id"];
 
 export const DEFAULT_MARKDOWN_STYLE_ID: MarkdownStyleId = "match-ui";
 
+// Diagram theme override is a single orthogonal toggle that decides
+// whether an author-authored `%%{init: ...}%%` directive (or YAML
+// frontmatter `theme:` / `themeVariables:` keys) in a Mermaid
+// diagram source can override the reader's Markdown theme. See
+// `docs/features/markdown-themes-and-styles.md` §Mermaid diagram
+// theming for the full precedence story.
+//
+// "on" (default) = Override mode: strip author directives at render
+//   time so TermAl's Markdown theme always wins.
+// "off" = Respect mode: author directives pass through unchanged.
+export type DiagramThemeOverrideMode = "on" | "off";
+
+export const DEFAULT_DIAGRAM_THEME_OVERRIDE_MODE: DiagramThemeOverrideMode = "on";
+
 export function isStyleId(value: string | null | undefined): value is StyleId {
   return STYLES.some((style) => style.id === value);
 }
@@ -248,6 +263,12 @@ export function isMarkdownStyleId(
   value: string | null | undefined,
 ): value is MarkdownStyleId {
   return MARKDOWN_STYLES.some((style) => style.id === value);
+}
+
+export function isDiagramThemeOverrideMode(
+  value: string | null | undefined,
+): value is DiagramThemeOverrideMode {
+  return value === "on" || value === "off";
 }
 
 export function getStoredThemePreference(): ThemeId {
@@ -348,6 +369,33 @@ export function applyMarkdownStylePreference(markdownStyleId: MarkdownStyleId) {
   }
 
   document.documentElement.dataset.markdownStyle = markdownStyleId;
+}
+
+export function getStoredDiagramThemeOverridePreference(): DiagramThemeOverrideMode {
+  if (typeof window === "undefined") {
+    return DEFAULT_DIAGRAM_THEME_OVERRIDE_MODE;
+  }
+
+  const stored = window.localStorage.getItem(DIAGRAM_THEME_OVERRIDE_STORAGE_KEY);
+  return isDiagramThemeOverrideMode(stored)
+    ? stored
+    : DEFAULT_DIAGRAM_THEME_OVERRIDE_MODE;
+}
+
+export function persistDiagramThemeOverridePreference(mode: DiagramThemeOverrideMode) {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  window.localStorage.setItem(DIAGRAM_THEME_OVERRIDE_STORAGE_KEY, mode);
+}
+
+export function applyDiagramThemeOverridePreference(mode: DiagramThemeOverrideMode) {
+  if (typeof document === "undefined") {
+    return;
+  }
+
+  document.documentElement.dataset.diagramThemeOverride = mode;
 }
 
 export function clampFontSizePreference(value: number): number {

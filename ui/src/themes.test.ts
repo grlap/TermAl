@@ -1,5 +1,6 @@
 import {
   DEFAULT_DENSITY_PERCENT,
+  DEFAULT_DIAGRAM_THEME_OVERRIDE_MODE,
   DEFAULT_EDITOR_FONT_SIZE_PX,
   DEFAULT_FONT_SIZE_PX,
   DEFAULT_MARKDOWN_STYLE_ID,
@@ -7,6 +8,7 @@ import {
   DEFAULT_STYLE_ID,
   DEFAULT_THEME_ID,
   DENSITY_STORAGE_KEY,
+  DIAGRAM_THEME_OVERRIDE_STORAGE_KEY,
   EDITOR_FONT_SIZE_STORAGE_KEY,
   FONT_SIZE_STORAGE_KEY,
   MARKDOWN_STYLES,
@@ -24,6 +26,7 @@ import {
   THEME_STORAGE_KEY,
   THEMES,
   applyDensityPreference,
+  applyDiagramThemeOverridePreference,
   applyFontSizePreference,
   applyMarkdownStylePreference,
   applyMarkdownThemePreference,
@@ -33,17 +36,20 @@ import {
   clampEditorFontSizePreference,
   clampFontSizePreference,
   getStoredDensityPreference,
+  getStoredDiagramThemeOverridePreference,
   getStoredEditorFontSizePreference,
   getStoredFontSizePreference,
   getStoredMarkdownStylePreference,
   getStoredMarkdownThemePreference,
   getStoredStylePreference,
   getStoredThemePreference,
+  isDiagramThemeOverrideMode,
   isMarkdownStyleId,
   isMarkdownThemeId,
   isStyleId,
   isThemeId,
   persistDensityPreference,
+  persistDiagramThemeOverridePreference,
   persistEditorFontSizePreference,
   persistFontSizePreference,
   persistMarkdownStylePreference,
@@ -59,6 +65,7 @@ describe("theme helpers", () => {
     document.documentElement.removeAttribute("data-ui-style");
     document.documentElement.removeAttribute("data-markdown-theme");
     document.documentElement.removeAttribute("data-markdown-style");
+    document.documentElement.removeAttribute("data-diagram-theme-override");
     document.documentElement.style.removeProperty("font-size");
     document.documentElement.style.removeProperty("--density-scale");
   });
@@ -226,5 +233,43 @@ describe("theme helpers", () => {
       "terminal",
     ]);
     expect(markdownStyleIds).toEqual(["match-ui", "document", "compact"]);
+  });
+
+  it("returns the default diagram-theme-override mode when storage is empty or invalid", () => {
+    expect(getStoredDiagramThemeOverridePreference()).toBe(
+      DEFAULT_DIAGRAM_THEME_OVERRIDE_MODE,
+    );
+    expect(DEFAULT_DIAGRAM_THEME_OVERRIDE_MODE).toBe("on");
+
+    window.localStorage.setItem(DIAGRAM_THEME_OVERRIDE_STORAGE_KEY, "maybe");
+    expect(getStoredDiagramThemeOverridePreference()).toBe(
+      DEFAULT_DIAGRAM_THEME_OVERRIDE_MODE,
+    );
+  });
+
+  it("reads, persists, and applies the diagram-theme-override preference", () => {
+    persistDiagramThemeOverridePreference("off");
+    expect(window.localStorage.getItem(DIAGRAM_THEME_OVERRIDE_STORAGE_KEY)).toBe(
+      "off",
+    );
+    expect(getStoredDiagramThemeOverridePreference()).toBe("off");
+
+    applyDiagramThemeOverridePreference("off");
+    expect(document.documentElement.dataset.diagramThemeOverride).toBe("off");
+
+    persistDiagramThemeOverridePreference("on");
+    applyDiagramThemeOverridePreference("on");
+    expect(window.localStorage.getItem(DIAGRAM_THEME_OVERRIDE_STORAGE_KEY)).toBe(
+      "on",
+    );
+    expect(document.documentElement.dataset.diagramThemeOverride).toBe("on");
+  });
+
+  it("runtime-guards the diagram-theme-override mode", () => {
+    expect(isDiagramThemeOverrideMode("on")).toBe(true);
+    expect(isDiagramThemeOverrideMode("off")).toBe(true);
+    expect(isDiagramThemeOverrideMode(null)).toBe(false);
+    expect(isDiagramThemeOverrideMode(undefined)).toBe(false);
+    expect(isDiagramThemeOverrideMode("maybe")).toBe(false);
   });
 });

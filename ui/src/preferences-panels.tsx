@@ -32,6 +32,7 @@ import {
   MIN_FONT_SIZE_PX,
   STYLES,
   THEMES,
+  type DiagramThemeOverrideMode,
   type MarkdownStyleId,
   type MarkdownThemeId,
   type StyleId,
@@ -435,16 +436,38 @@ export function MarkdownPreferencesPanel({
   activeMarkdownStyle,
   markdownThemeId,
   markdownStyleId,
+  diagramThemeOverrideMode,
   onSelectMarkdownTheme,
   onSelectMarkdownStyle,
+  onSelectDiagramThemeOverrideMode,
 }: {
   activeMarkdownTheme: (typeof MARKDOWN_THEMES)[number];
   activeMarkdownStyle: (typeof MARKDOWN_STYLES)[number];
   markdownThemeId: MarkdownThemeId;
   markdownStyleId: MarkdownStyleId;
+  diagramThemeOverrideMode: DiagramThemeOverrideMode;
   onSelectMarkdownTheme: (id: MarkdownThemeId) => void;
   onSelectMarkdownStyle: (id: MarkdownStyleId) => void;
+  onSelectDiagramThemeOverrideMode: (mode: DiagramThemeOverrideMode) => void;
 }) {
+  const diagramOverrideOptions: ReadonlyArray<{
+    id: DiagramThemeOverrideMode;
+    name: string;
+    description: string;
+  }> = [
+    {
+      id: "on",
+      name: "Override",
+      description:
+        "Strip author themes from Mermaid diagrams so the Markdown theme always wins. Coherent across a mixed document.",
+    },
+    {
+      id: "off",
+      name: "Respect",
+      description:
+        "Honor diagram-author `%%{init: ...}%%` directives. Useful when preserving original styling matters.",
+    },
+  ];
   return (
     <section className="settings-panel-stack theme-preferences-layout">
       <section className="theme-panel style-panel style-panel-compact">
@@ -528,6 +551,52 @@ export function MarkdownPreferencesPanel({
                         }
                       />
                     ))}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      </section>
+
+      <section className="theme-panel style-panel style-panel-compact">
+        <div className="theme-panel-header">
+          <div>
+            <p className="session-control-label">Diagram theme override</p>
+            <p className="theme-panel-copy">
+              {
+                (
+                  diagramOverrideOptions.find(
+                    (option) => option.id === diagramThemeOverrideMode,
+                  ) ?? diagramOverrideOptions[0]
+                ).description
+              }
+            </p>
+          </div>
+        </div>
+
+        <div className="theme-option-list-shell">
+          <div
+            className="theme-option-list style-option-list style-option-list-compact"
+            role="radiogroup"
+            aria-label="Diagram theme override"
+          >
+            {diagramOverrideOptions.map((option) => {
+              const isSelected = option.id === diagramThemeOverrideMode;
+              return (
+                <button
+                  key={option.id}
+                  className={`theme-option ${isSelected ? "selected" : ""}`}
+                  type="button"
+                  role="radio"
+                  aria-checked={isSelected}
+                  title={option.description}
+                  onClick={() => onSelectDiagramThemeOverrideMode(option.id)}
+                >
+                  <span className="theme-option-main">
+                    <span className="theme-option-title-row">
+                      <strong className="theme-option-title">{option.name}</strong>
+                    </span>
                   </span>
                 </button>
               );
