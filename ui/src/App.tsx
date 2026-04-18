@@ -159,6 +159,11 @@ import {
   isSourceFileMissingError,
   sourceFileStateFromResponse,
 } from "./source-file-state";
+import {
+  BACKEND_UNAVAILABLE_ISSUE_DETAIL,
+  describeBackendConnectionIssueDetail,
+  type BackendConnectionState,
+} from "./backend-connection";
 
 import {
   CodexPromptSettingsCard,
@@ -442,21 +447,6 @@ const RECONNECT_STATE_RESYNC_MAX_DELAY_MS = 5000;
 const LIVE_SESSION_RESUME_WATCHDOG_INTERVAL_MS = 1000;
 
 const WORKSPACE_LAYOUT_PERSIST_DELAY_MS = 150;
-const BACKEND_UNAVAILABLE_ISSUE_DETAIL =
-  "Could not reach the TermAl backend. Retrying automatically.";
-const BACKEND_SYNC_ISSUE_DETAIL =
-  "A live backend update could not be processed. Waiting for the next successful sync.";
-
-function describeBackendConnectionIssueDetail(error: unknown) {
-  if (isBackendUnavailableError(error)) {
-    // Incompatible backend serving HTML instead of JSON — surface the restart
-    // instruction directly rather than the generic connectivity message.
-    return error.restartRequired
-      ? error.message
-      : BACKEND_UNAVAILABLE_ISSUE_DETAIL;
-  }
-  return BACKEND_SYNC_ISSUE_DETAIL;
-}
 
 export function resolveRecoveredWorkspaceLayoutRequestError(
   currentRequestError: string | null,
@@ -478,11 +468,6 @@ type StateEventPayload = StateResponse & {
   _sseFallback?: boolean;
 };
 type SessionNoticeMap = Record<string, string | undefined>;
-type BackendConnectionState =
-  | "connecting"
-  | "connected"
-  | "reconnecting"
-  | "offline";
 type WorkspaceLayoutPersistencePayload = {
   controlPanelSide: ControlPanelSide;
   densityPercent: number;
