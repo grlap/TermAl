@@ -26,11 +26,9 @@ import App, {
   resolveAdoptedStateSlices,
   resolveControlPanelWorkspaceRoot,
   resolveControlSurfaceSectionIdForWorkspaceTab,
-  resolveSettledScrollMinimumAttempts,
   describeUnknownSessionModelWarning,
   resolveUnknownSessionModelSendAttempt,
   setAppTestHooksForTests,
-  syncMessageStackScrollPosition,
 } from "./App";
 import { resolveStandaloneControlPanelDockWidthRatio } from "./control-panel-layout";
 import {
@@ -38,6 +36,10 @@ import {
   formatSessionOrchestratorGroupName,
 } from "./control-surface-state";
 import { collectRestoredGitDiffDocumentContentRefreshes } from "./git-diff-refresh";
+import {
+  resolveSettledScrollMinimumAttempts,
+  syncMessageStackScrollPosition,
+} from "./scroll-position";
 import { getWorkspaceSplitResizeBounds } from "./workspace-queries";
 import {
   LIVE_SESSION_RESUME_WATCHDOG_DRIFT_MS,

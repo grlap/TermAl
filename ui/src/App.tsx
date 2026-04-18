@@ -164,6 +164,10 @@ import {
   describeBackendConnectionIssueDetail,
   type BackendConnectionState,
 } from "./backend-connection";
+import {
+  resolveSettledScrollMinimumAttempts,
+  syncMessageStackScrollPosition,
+} from "./scroll-position";
 
 import {
   CodexPromptSettingsCard,
@@ -604,34 +608,6 @@ export function resolveAdoptedStateSlices(
         ? nextState.workspaces
         : current.workspaces,
   };
-}
-
-export function syncMessageStackScrollPosition(
-  node: Pick<HTMLElement, "scrollHeight" | "scrollTop" | "clientHeight">,
-  scrollStateKey: string,
-  paneScrollPositions: Record<string, { top: number; shouldStick: boolean }>,
-) {
-  const shouldStick =
-    node.scrollHeight - node.scrollTop - node.clientHeight < 72;
-  paneScrollPositions[scrollStateKey] = {
-    top: node.scrollTop,
-    shouldStick,
-  };
-
-  return {
-    top: node.scrollTop,
-    shouldStick,
-  };
-}
-
-export function resolveSettledScrollMinimumAttempts(
-  maxAttempts: number,
-  minAttempts?: number,
-) {
-  // Long virtualized conversations can keep moving the bottom while cards
-  // measure, even after scrollHeight looks stable for a frame or two.
-  const defaultMinimumAttempts = maxAttempts > 12 ? 8 : 4;
-  return Math.min(minAttempts ?? defaultMinimumAttempts, maxAttempts);
 }
 
 export type AppTestHooks = {
