@@ -128,6 +128,8 @@ import {
   CURSOR_MODE_OPTIONS,
   GEMINI_APPROVAL_OPTIONS,
 } from "./preferences-panels";
+import { SettingsTabBar } from "./preferences/SettingsTabBar";
+import type { PreferencesTabId } from "./preferences/preferences-tabs";
 
 import {
   CodexPromptSettingsCard,
@@ -480,14 +482,6 @@ type PendingWorkspaceLayoutSave = {
   workspaceId: string;
 };
 type OrchestratorRuntimeAction = RuntimeAction;
-type PreferencesTabId =
-  | "themes"
-  | "markdown"
-  | "appearance"
-  | "remotes"
-  | "orchestrators"
-  | "codex-prompts"
-  | "claude-approvals";
 type PendingSessionRename = {
   clientX: number;
   clientY: number;
@@ -643,16 +637,6 @@ const NEW_SESSION_AGENT_OPTIONS_EXHAUSTIVE: ExhaustiveValueCoverage<
   AgentType,
   typeof NEW_SESSION_AGENT_OPTIONS
 > = true;
-const PREFERENCES_TABS: ReadonlyArray<{ id: PreferencesTabId; label: string }> =
-  [
-    { id: "themes", label: "Themes" },
-    { id: "markdown", label: "Markdown" },
-    { id: "appearance", label: "Editor & UI" },
-    { id: "remotes", label: "Remotes" },
-    { id: "orchestrators", label: "Orchestrators" },
-    { id: "codex-prompts", label: "Codex" },
-    { id: "claude-approvals", label: "Claude" },
-  ];
 const ALL_PROJECTS_FILTER_ID = "__all__";
 const CREATE_SESSION_WORKSPACE_ID = "__workspace__";
 type StandaloneControlSurfaceViewState = {
@@ -9045,30 +9029,10 @@ export default function App() {
             </div>
 
             <div className="settings-dialog-body">
-              <div
-                className="settings-tab-list"
-                role="tablist"
-                aria-label="Preferences sections"
-              >
-                {PREFERENCES_TABS.map((tab) => {
-                  const isSelected = settingsTab === tab.id;
-
-                  return (
-                    <button
-                      key={tab.id}
-                      id={`settings-tab-${tab.id}`}
-                      className={`settings-tab ${isSelected ? "selected" : ""}`}
-                      type="button"
-                      role="tab"
-                      aria-selected={isSelected}
-                      aria-controls={`settings-panel-${tab.id}`}
-                      onClick={() => setSettingsTab(tab.id)}
-                    >
-                      {tab.label}
-                    </button>
-                  );
-                })}
-              </div>
+              <SettingsTabBar
+                activeTabId={settingsTab}
+                onSelectTab={setSettingsTab}
+              />
 
               <div
                 id={`settings-panel-${settingsTab}`}
