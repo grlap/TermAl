@@ -18,7 +18,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import * as api from "./api";
 import App, {
-  collectRestoredGitDiffDocumentContentRefreshes,
   MarkdownContent,
   ThemedCombobox,
   describeCodexModelAdjustmentNotice,
@@ -38,6 +37,7 @@ import {
   buildControlSurfaceSessionListEntries,
   formatSessionOrchestratorGroupName,
 } from "./control-surface-state";
+import { collectRestoredGitDiffDocumentContentRefreshes } from "./git-diff-refresh";
 import { getWorkspaceSplitResizeBounds } from "./workspace-queries";
 import {
   LIVE_SESSION_RESUME_WATCHDOG_DRIFT_MS,

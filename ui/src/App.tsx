@@ -152,6 +152,10 @@ import {
   resolveWorkspaceScopedProjectId,
   resolveWorkspaceScopedSessionId,
 } from "./control-surface-state";
+import {
+  collectGitDiffPreviewRefreshes,
+  collectRestoredGitDiffDocumentContentRefreshes,
+} from "./git-diff-refresh";
 
 import {
   CodexPromptSettingsCard,
@@ -429,7 +433,6 @@ import {
 import {
   mergeWorkspaceFilesChangedEvents,
   workspaceFilesChangedEventChangeForPath,
-  workspaceFilesChangedEventTouchesGitDiffTab,
 } from "./workspace-file-events";
 
 const TAB_DRAG_STALE_TIMEOUT_MS = 15000;
@@ -537,79 +540,6 @@ function sourceFileStateFromResponse(response: FileResponse): SourceFileState {
     error: null,
     language: response.language ?? null,
   };
-}
-
-type GitDiffPreviewRefresh = {
-  request: GitDiffRequestPayload;
-  requestKey: string;
-  sectionId: GitDiffSection;
-};
-
-export function collectRestoredGitDiffDocumentContentRefreshes(
-  workspace: WorkspaceState,
-  pendingRequestKeys: ReadonlySet<string>,
-  attemptedRequestKeys: ReadonlySet<string>,
-): GitDiffPreviewRefresh[] {
-  const refreshes = new Map<string, GitDiffPreviewRefresh>();
-
-  for (const pane of workspace.panes) {
-    for (const tab of pane.tabs) {
-      if (tab.kind !== "diffPreview") {
-        continue;
-      }
-      if (
-        tab.documentContent ||
-        !tab.gitDiffRequestKey ||
-        !tab.gitDiffRequest
-      ) {
-        continue;
-      }
-      if (tab.isLoading === true && tab.diff.trim().length === 0) {
-        continue;
-      }
-      if (
-        pendingRequestKeys.has(tab.gitDiffRequestKey) ||
-        attemptedRequestKeys.has(tab.gitDiffRequestKey)
-      ) {
-        continue;
-      }
-      refreshes.set(tab.gitDiffRequestKey, {
-        request: tab.gitDiffRequest,
-        requestKey: tab.gitDiffRequestKey,
-        sectionId: tab.gitSectionId ?? tab.gitDiffRequest.sectionId,
-      });
-    }
-  }
-
-  return Array.from(refreshes.values());
-}
-
-function collectGitDiffPreviewRefreshes(
-  workspace: WorkspaceState,
-  event: WorkspaceFilesChangedEvent,
-): GitDiffPreviewRefresh[] {
-  const refreshes = new Map<string, GitDiffPreviewRefresh>();
-
-  for (const pane of workspace.panes) {
-    for (const tab of pane.tabs) {
-      if (
-        tab.kind !== "diffPreview" ||
-        !tab.gitDiffRequestKey ||
-        !tab.gitDiffRequest ||
-        !workspaceFilesChangedEventTouchesGitDiffTab(event, tab)
-      ) {
-        continue;
-      }
-
-      refreshes.set(tab.gitDiffRequestKey, {
-        request: tab.gitDiffRequest,
-        requestKey: tab.gitDiffRequestKey,
-        sectionId: tab.gitSectionId ?? tab.gitDiffRequest.sectionId,
-      });
-    }
-  }
-
-  return Array.from(refreshes.values());
 }
 
 function isSourceFileMissingError(error: unknown) {
