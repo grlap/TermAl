@@ -30,5 +30,6 @@ design decisions, and future plans.
 
 - [Concurrent Session Link Cards](./concurrent-session-link-cards.md)
 - [Editor Buffer Persistence](./editor-buffer-persistence.md)
+- [Markdown Themes And Styles](./markdown-themes-and-styles.md)
 - [Territory Visualization](./territory-visualization.md)
 - [WhatsApp Integration](./whatsapp-integration.md)

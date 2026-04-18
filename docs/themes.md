@@ -2,6 +2,11 @@
 
 This document describes the theme system that currently ships in TermAl.
 
+> Related: Markdown rendering has its own in-progress theme axes covered in
+> [`features/markdown-themes-and-styles.md`](./features/markdown-themes-and-styles.md).
+> The Markdown preference inherits from the UI theme by default but can be
+> overridden independently.
+
 ## Status
 
 Implemented.

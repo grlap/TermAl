@@ -818,9 +818,26 @@ function buildMermaidDiagramFrameSrcDoc(svg: string) {
     "<!doctype html>",
     '<html><head><meta charset="utf-8">',
     "<style>",
+    // Clip vertical overflow on the iframe's scroll root. The iframe
+    // is sized from the SVG's viewBox but the actual rendered height
+    // can differ by a couple of pixels when Mermaid's
+    // `htmlLabels: true` foreignObject text is re-measured against
+    // the iframe's own font metrics (Mermaid's internal pass uses a
+    // temp-DOM with subtly different rendering). Hiding the vertical
+    // axis keeps the frame tight against the diagram and avoids a
+    // spurious scrollbar on every render. `overflow-x: auto` stays so
+    // diagrams wider than the iframe can still scroll horizontally
+    // inside the frame instead of being silently cropped.
+    "html{overflow-x:auto;overflow-y:hidden;}",
     "html,body{margin:0;padding:0;background:transparent;color:inherit;}",
-    "body{display:inline-block;min-width:100%;}",
-    "svg{display:block;max-width:none;height:auto;margin:0 auto;}",
+    // `display: inline-block` lets the body shrink-wrap wide SVGs so the
+    // iframe can scroll horizontally when needed, but it also carries
+    // an inline-text descender (~4-5px of line-height space below the
+    // SVG) that makes the iframe scroll vertically even when the
+    // diagram fits. Zero the font + line-height + vertical-align so
+    // the body's outer height matches the SVG exactly.
+    "body{display:inline-block;min-width:100%;font-size:0;line-height:0;}",
+    "svg{display:block;max-width:none;height:auto;margin:0 auto;vertical-align:top;}",
     TERMAL_MERMAID_THEME_CSS,
     "</style></head><body>",
     svg,
@@ -849,8 +866,17 @@ function getMermaidDiagramFrameStyle(svg: string): CSSProperties {
     // fatter pre-12px-font layout; with the smaller theme variables
     // in `TERMAL_MERMAID_THEME_VARIABLES` a 3-node linear flowchart
     // now naturally renders well under those sizes.
+    //
+    // Buffer detail: Mermaid's SVG viewBox is measured in a temp-DOM
+    // that doesn't necessarily use the same font metrics as the
+    // iframe, so the html-labels foreignObject text can render a
+    // couple of pixels taller. We add 8 px of vertical slack (rather
+    // than the original 2) so the iframe comfortably contains the
+    // actual rendered diagram. The srcDoc CSS also sets
+    // `html { overflow: hidden }` as a belt-and-suspenders guard in
+    // case the slack is ever insufficient.
     height: `${clampMermaidDiagramExtent(
-      Math.ceil(dimensions.height) + 2,
+      Math.ceil(dimensions.height) + 8,
       60,
       MERMAID_DIAGRAM_FRAME_MAX_HEIGHT,
     )}px`,
