@@ -279,6 +279,38 @@ document when focus is inside the diff editor.
 - Focus should remain visible, but the affordance should be subtle. Do not use a prominent blue frame
 that looks like an unrelated selection rectangle.
 
+#### ArrowDown At The End Of The Last Editable Section
+
+When the caret sits at the end of the last editable section and there is no adjacent editable
+section below (common when the section ends with a Mermaid fence whose last editable text node sits
+inside the preserved source code-block), `ArrowDown` must not leave the user visually stuck. The
+editor behaves like a document editor that lets you extend past the last line:
+
+- Pressing `ArrowDown` appends a single empty editable paragraph to the section and drops the caret
+inside it. The paragraph is rendered inside the `.markdown-copy` root that the serializer and the
+diff background both scope to, so the new line participates in serialization, diff styling (the
+same green/red band as the rest of the segment), and the line gutter.
+- The new paragraph carries a synthesized `data-markdown-line-start` attribute computed as
+`maxExistingLineStart + 2` (Markdown paragraphs are separated by a blank line in source, so the
+next content line is two source lines below the current tail). This lets the line gutter renderer
+surface a number next to the empty line without round-tripping through the Markdown parser.
+- Pressing `ArrowDown` again without typing anything is a no-op — the handler only appends a new
+paragraph when the section's last child is not already an empty paragraph. The user gets exactly
+one trailing blank line at any time.
+- Typing on the empty paragraph makes it non-empty. The next `ArrowDown` at EOF is then free to
+append another empty paragraph.
+- Saving normalises the buffer, which filters out any DOM-only empty paragraphs that never received
+content. After save, a fresh `ArrowDown` can append another empty paragraph — so the "one new line
+at a time, unlocked by save" rhythm falls out naturally.
+
+Do not modify the segment Markdown through the draft pipeline to produce the landing paragraph.
+`normalizeEditedMarkdownSection` in `ui/src/panels/markdown-diff-segments.ts` strips trailing
+newlines when the original segment did not end with one, and Markdown parsers do not emit a
+trailing empty paragraph for `"\n\n"` anyway. Writing the paragraph directly to the DOM sidesteps
+both issues: when the user types, `handleInput` serializes the new paragraph (now non-empty) back
+into segment Markdown; when the user navigates away without typing, the stray paragraph is
+reconciled away on the next re-render.
+
 ### Line Numbers
 
 Rendered Markdown line numbers are document chrome:

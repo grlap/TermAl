@@ -3163,11 +3163,58 @@ function EditableRenderedMarkdownSection({
         const section = event.currentTarget;
         const markdownCopy =
           section.querySelector<HTMLElement>(".markdown-copy") ?? section;
-        const trailingParagraph = document.createElement("p");
-        trailingParagraph.appendChild(document.createElement("br"));
-        markdownCopy.appendChild(trailingParagraph);
+        const lastChild = markdownCopy.lastElementChild;
+        // Cap trailing empty paragraphs at one. Pressing Down repeatedly
+        // without typing anything shouldn't accumulate blank lines — the
+        // user gets a single landing spot. Once they type into it, the
+        // paragraph stops being empty and the next Down-at-EOF can append
+        // another. After a save, any surviving DOM-only empty paragraphs
+        // are reconciled away by the re-render (the serializer filters
+        // empty blocks), so Down-at-EOF-then-Save naturally unlocks
+        // another empty line, matching the intended UX.
+        const isEmptyTrailingParagraph =
+          lastChild instanceof HTMLParagraphElement &&
+          (lastChild.childNodes.length === 0 ||
+            (lastChild.childNodes.length === 1 &&
+              lastChild.firstChild instanceof HTMLBRElement));
+        let targetParagraph: HTMLElement;
+        if (isEmptyTrailingParagraph) {
+          targetParagraph = lastChild;
+        } else {
+          // Compute a line-gutter number for the fresh paragraph by
+          // extending the highest existing `[data-markdown-line-start]`
+          // marker. Markdown paragraphs are separated by a blank line in
+          // source, so the next content line is `maxLine + 2`. Without
+          // this attribute, MarkdownContent's gutter renderer
+          // (`markdown-line-gutter`) wouldn't surface a number for the
+          // new blank — it only collects markers from elements already
+          // stamped with line-start data.
+          let maxLine = 0;
+          markdownCopy
+            .querySelectorAll<HTMLElement>("[data-markdown-line-start]")
+            .forEach((element) => {
+              const rangeAttr =
+                element.dataset.markdownLineRange ??
+                element.dataset.markdownLineStart ??
+                "";
+              const parts = rangeAttr.split("-");
+              const endCandidate = Number(parts[parts.length - 1]);
+              if (Number.isFinite(endCandidate) && endCandidate > maxLine) {
+                maxLine = endCandidate;
+              }
+            });
+          const nextLine = maxLine > 0 ? maxLine + 2 : 0;
+          const trailingParagraph = document.createElement("p");
+          trailingParagraph.appendChild(document.createElement("br"));
+          if (nextLine > 0) {
+            trailingParagraph.dataset.markdownLineStart = String(nextLine);
+            trailingParagraph.dataset.markdownLineRange = String(nextLine);
+          }
+          markdownCopy.appendChild(trailingParagraph);
+          targetParagraph = trailingParagraph;
+        }
         const range = document.createRange();
-        range.setStart(trailingParagraph, 0);
+        range.setStart(targetParagraph, 0);
         range.collapse(true);
         const selection = window.getSelection();
         if (selection) {
